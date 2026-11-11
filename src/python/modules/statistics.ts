@@ -23,7 +23,6 @@ import {
   typeError,
   valueError,
 } from '../types';
-import { UnsupportedFeatureError } from '../unsupported';
 import { DONE, type Kwargs, type PyClass, type PyDict, PyError, PyList, PyTuple, type PyValue } from '../values';
 import { makeNamedTupleClass } from './collections';
 import { decimalClass, PyDecimal } from './decimal';
@@ -661,13 +660,6 @@ function bindPython(
   return bound;
 }
 
-const unsupported = (name: string): [string, PyValue] => [
-  name,
-  nativeFunction(name, () => {
-    throw new UnsupportedFeatureError(`statistics.${name}()`);
-  }),
-];
-
 registerModule('statistics', () => {
   const one = (name: string, run: (data: PyValue) => PyValue): [string, PyValue] => [
     name,
@@ -742,8 +734,7 @@ registerModule('statistics', () => {
       ),
     ],
     ['NormalDist', normalDistClass],
+    ['LinearRegression', linearRegressionClass],
     ['StatisticsError', statisticsErrorClass],
-    unsupported('kde'),
-    unsupported('kde_random'),
   ]);
 });

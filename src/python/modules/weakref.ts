@@ -513,6 +513,10 @@ class WeakSet(MutableSet):
         return repr(self.data)
 
 
+# CPython defines WeakSet in _weakrefset, which weakref imports it from.
+WeakSet.__module__ = '_weakrefset'
+
+
 class finalize:
     """Class for finalization of weakrefable objects
 

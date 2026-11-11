@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 508 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 515 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -412,6 +412,8 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
   }
   if (target instanceof PyModule) {
     target.dict.set(name, value);
+    target.unsupported.delete(name);
+    target.imports.delete(name);
     return;
   }
   if (target instanceof PyDescriptor && target.cls === propertyClass && name === '__doc__') {
@@ -661,11 +663,17 @@ export function deleteAttribute(target: PyValue, name: string): void {
     return;
   }
   if (target instanceof PyFunction || target instanceof PyModule) {
-    if (!target.dict.delete(name)) throw attributeError(target, name);
+    if (!deleteNamespaceEntry(target, name)) throw attributeError(target, name);
     return;
   }
   // Deleting an attribute of a builtin type's object fails as assigning it does.
   throw readOnlyError(target, name);
+}
+
+/** Deletes a function's or module's attribute, including a module's not yet imported or unsupported names. */
+function deleteNamespaceEntry(target: PyFunction | PyModule, name: string): boolean {
+  if (target.dict.delete(name)) return true;
+  return target instanceof PyModule && (target.imports.delete(name) || target.unsupported.delete(name));
 }
 
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */

@@ -1,4 +1,3 @@
-import { registerUnsupportedAttributes } from '../modules';
 import { registerSourceModule } from '../sourceModules';
 
 // CPython's `codecs.py`.
@@ -1131,9 +1130,3 @@ if _false:
 `;
 
 registerSourceModule('codecs', SOURCE);
-
-// The codecs whose stateless functions this grader lacks, as `str.encode` lacks them.
-registerUnsupportedAttributes(
-  'codecs',
-  Object.fromEntries(['escape_encode', 'readbuffer_encode'].map((name) => [name, `codecs.${name}()`]))
-);

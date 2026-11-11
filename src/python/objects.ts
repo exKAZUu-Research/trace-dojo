@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 409 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { classAttribute, specialAttribute } from './attributes';
 import { PyBytes, PyMemoryView } from './bytesValues';
@@ -39,6 +40,7 @@ import {
   wrapperDescriptorClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttribute } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
@@ -178,6 +180,8 @@ export function getAttribute(value: PyValue, name: string): PyValue {
   const getattr = value instanceof PyModule ? value.dict.get('__getattr__') : lookupSpecial(value, '__getattr__');
   if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [name]);
   if (getattr !== undefined) return callValue(bindValue(getattr, value), [name]);
+  const feature = unsupportedClassAttribute(value, name);
+  if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   throw attributeError(value, name);
 }
 
@@ -226,7 +230,24 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   if (name === '__dict__') return namespaceDict(module.dict);
-  return name === '__annotations__' ? moduleAnnotations(module) : module.dict.get(name);
+  return name === '__annotations__'
+    ? moduleAnnotations(module)
+    : (module.dict.get(name) ?? importedModule(module, name));
+}
+
+/**
+ * The module CPython's module holds under `name` because its code imported it, which is the same object here too, or
+ * the object another module defines that this module shares, named `module:attribute`.
+ */
+export function importedModule(module: PyModule, name: string): PyValue | undefined {
+  const target = module.imports.get(name);
+  if (target === undefined) return undefined;
+  const [moduleName, attribute] = target.split(':');
+  const imported = currentRuntime().importModule(moduleName);
+  const value = attribute === undefined ? imported : getAttribute(imported, attribute);
+  module.imports.delete(name);
+  module.dict.set(name, value);
+  return value;
 }
 
 export { deleteAttribute, setAttribute } from './attributes';

@@ -3,9 +3,20 @@ import { method } from './define';
 import { identityHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
 import { callValue, getIterator, setAttribute, toArray } from './objects';
+import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { newGenericAlias } from './typeHints';
-import { builtinClass, newTuple, None, noneClass, objectClass, propertyClass, typeError, typeName } from './types';
+import {
+  builtinClass,
+  newTuple,
+  None,
+  noneClass,
+  NotImplemented,
+  objectClass,
+  propertyClass,
+  typeError,
+  typeName,
+} from './types';
 import {
   type Kwargs,
   PyBuiltinFunction,
@@ -29,12 +40,19 @@ function typingType(name: string, base: PyClass = objectClass): PyClass {
   return cls;
 }
 
-export const typeVarClass = typingType('TypeVar');
-export const typeVarTupleClass = typingType('TypeVarTuple');
-export const paramSpecClass = typingType('ParamSpec');
-const paramSpecArgsClass = typingType('ParamSpecArgs');
-const paramSpecKwargsClass = typingType('ParamSpecKwargs');
-export const typeAliasClass = typingType('TypeAliasType');
+/** A class of typing that CPython writes in C, whose errors name it with its module. */
+function typingCType(name: string): PyClass {
+  const cls = typingType(name);
+  cls.typeName = `typing.${name}`;
+  return cls;
+}
+
+export const typeVarClass = typingCType('TypeVar');
+export const typeVarTupleClass = typingCType('TypeVarTuple');
+export const paramSpecClass = typingCType('ParamSpec');
+export const paramSpecArgsClass = typingCType('ParamSpecArgs');
+export const paramSpecKwargsClass = typingCType('ParamSpecKwargs');
+export const typeAliasClass = typingCType('TypeAliasType');
 const noDefaultClass = typingType('NoDefaultType');
 /** The class of `Generic[T]` and of a subscripted user generic class, such as `Box[int]`. */
 export const aliasClass = typingType('_GenericAlias');
@@ -95,7 +113,8 @@ export class PyTypeParam extends PyInstance {
 class PyParamSpecPart extends PyObject {
   constructor(
     cls: PyClass,
-    readonly origin: PyTypeParam
+    /** The ParamSpec, or whatever `ParamSpecArgs(origin)` was given. */
+    readonly origin: PyValue
   ) {
     super(cls);
   }
@@ -327,8 +346,35 @@ for (const [cls, suffix] of [
   [paramSpecArgsClass, 'args'],
   [paramSpecKwargsClass, 'kwargs'],
 ] as const) {
-  method(cls, '__repr__', 'none', 0, 0, (self) => `${(self as PyParamSpecPart).origin.name}.${suffix}`);
+  method(cls, '__repr__', 'none', 0, 0, (self) => {
+    const { origin } = self as PyParamSpecPart;
+    return `${origin instanceof PyTypeParam && origin.cls === paramSpecClass ? origin.name : pyRepr(origin)}.${suffix}`;
+  });
   property(cls, '__origin__', (self) => (self as PyParamSpecPart).origin);
+  method(cls, '__eq__', 'one', 1, 1, (self, [other]) =>
+    other instanceof PyParamSpecPart && other.cls === (self as PyParamSpecPart).cls
+      ? equals((self as PyParamSpecPart).origin, other.origin)
+      : NotImplemented
+  );
+  cls.dict.set('__hash__', None);
+  const spec = {
+    qualified: `${cls.name.toLowerCase()}`,
+    min: 0,
+    max: 1,
+    style: 'takes',
+    keywords: ['origin'],
+  } as const;
+  cls.construct = (owner, args, kwargs) => {
+    checkArgs(spec, args, kwargs);
+    const origin = argument(args, kwargs, 0, 'origin');
+    if (origin === undefined) throw typeError(`${spec.qualified}() missing required argument 'origin' (pos 1)`);
+    return new PyParamSpecPart(owner, origin);
+  };
+}
+for (const cls of [typeVarClass, paramSpecClass, typeVarTupleClass, paramSpecArgsClass, paramSpecKwargsClass]) {
+  method(cls, '__mro_entries__', 'one', 1, 1, () => {
+    throw typeError(`Cannot subclass an instance of ${cls.name}`);
+  });
 }
 method(typeVarTupleClass, '__iter__', 'none', 0, 0, (self) =>
   getIterator(newTuple([new PyTypingAlias(self, [], true)]))

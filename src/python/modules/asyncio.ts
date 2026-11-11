@@ -1,5 +1,6 @@
 // `asyncio`, transcribed from CPython's Lib/asyncio onto an event loop without I/O whose clock is the run's virtual one,
 // so that tasks run in the order CPython's loop runs them: ready callbacks first in, first out, then timers by time.
+import { registerSharedAttributes } from '../modules';
 import { registerSourceModule } from '../sourceModules';
 import { asyncioNatives } from './asyncioNatives';
 
@@ -11,6 +12,8 @@ import functools
 import heapq
 import itertools
 import math
+import types
+import warnings
 
 _PENDING = 'PENDING'
 _CANCELLED = 'CANCELLED'
@@ -206,22 +209,154 @@ def _set_running_loop(loop):
     _running_loop = None if loop is None else (loop, _core.get_ident())
 
 
+class _AbstractEventLoopPolicy:
+    """Abstract policy for accessing the event loop."""
+
+    def get_event_loop(self):
+        """Get the event loop for the current context.
+
+        Returns an event loop object implementing the AbstractEventLoop interface,
+        or raises an exception in case no event loop has been set for the
+        current context and the current policy does not specify to create one.
+
+        It should never return None."""
+        raise NotImplementedError
+
+    def set_event_loop(self, loop):
+        """Set the event loop for the current context to loop."""
+        raise NotImplementedError
+
+    def new_event_loop(self):
+        """Create and return a new event loop object according to this
+        policy's rules. If there's need to set this loop as the event loop for
+        the current context, set_event_loop must be called explicitly."""
+        raise NotImplementedError
+
+class _BaseDefaultEventLoopPolicy(_AbstractEventLoopPolicy):
+    """Default policy implementation for accessing the event loop.
+
+    In this policy, each thread has its own event loop.  However, we
+    only automatically create an event loop by default for the main
+    thread; other threads by default have no event loop.
+
+    Other policies may have different rules (e.g. a single global
+    event loop, or automatically creating an event loop per thread, or
+    using some other notion of context to which an event loop is
+    associated).
+    """
+
+    _loop_factory = None
+
+    # Each thread's loop, kept by thread ident: importing threading for its local would start the thread
+    # scheduler, which slows every loop of a program.
+    class _Local:
+        def __init__(self):
+            self._loops = {}
+
+        @property
+        def _loop(self):
+            return self._loops.get(_core.get_ident())
+
+        @_loop.setter
+        def _loop(self, loop):
+            self._loops[_core.get_ident()] = loop
+
+    def __init__(self):
+        self._local = self._Local()
+
+    def get_event_loop(self):
+        """Get the event loop for the current context.
+
+        Returns an instance of EventLoop or raises an exception.
+        """
+        if self._local._loop is None:
+            raise RuntimeError('There is no current event loop in thread %r.'
+                               % _core.thread_name())
+
+        return self._local._loop
+
+    def set_event_loop(self, loop):
+        """Set the event loop."""
+        if loop is not None and not isinstance(loop, AbstractEventLoop):
+            raise TypeError(f"loop must be an instance of AbstractEventLoop or None, not '{type(loop).__name__}'")
+        self._local._loop = loop
+
+    def new_event_loop(self):
+        """Create a new event loop.
+
+        You must call set_event_loop() to make this the current event
+        loop.
+        """
+        return self._loop_factory()
+
+_BaseDefaultEventLoopPolicy._Local.__qualname__ = '_BaseDefaultEventLoopPolicy._Local'
+for _cls in (_AbstractEventLoopPolicy, _BaseDefaultEventLoopPolicy, _BaseDefaultEventLoopPolicy._Local):
+    _cls.__module__ = 'asyncio.events'
+
+
+class _UnixDefaultEventLoopPolicy(_BaseDefaultEventLoopPolicy):
+    """UNIX event loop policy"""
+    __module__ = 'asyncio.unix_events'
+
+
+_DefaultEventLoopPolicy = _UnixDefaultEventLoopPolicy
+_event_loop_policy = None
+
+
+def _init_event_loop_policy():
+    global _event_loop_policy
+    if _event_loop_policy is None:
+        _event_loop_policy = _DefaultEventLoopPolicy()
+
+
+def _get_event_loop_policy():
+    """Get the current event loop policy."""
+    if _event_loop_policy is None:
+        _init_event_loop_policy()
+    return _event_loop_policy
+
+def get_event_loop_policy():
+    warnings._deprecated('asyncio.get_event_loop_policy', remove=(3, 16))
+    return _get_event_loop_policy()
+
+def _set_event_loop_policy(policy):
+    """Set the current event loop policy.
+
+    If policy is None, the default policy is restored."""
+    global _event_loop_policy
+    if policy is not None and not isinstance(policy, _AbstractEventLoopPolicy):
+        raise TypeError(f"policy must be an instance of AbstractEventLoopPolicy or None, not '{type(policy).__name__}'")
+    _event_loop_policy = policy
+
+def set_event_loop_policy(policy):
+    warnings._deprecated('asyncio.set_event_loop_policy', remove=(3,16))
+    _set_event_loop_policy(policy)
+
 def get_event_loop():
     current_loop = _get_running_loop()
     if current_loop is not None:
         return current_loop
-    if _event_loop is None or _event_loop[1] != _core.get_ident():
-        raise RuntimeError("There is no current event loop in thread %r." % _core.thread_name())
-    return _event_loop[0]
+    return _get_event_loop_policy().get_event_loop()
 
 
 def set_event_loop(loop):
-    global _event_loop
-    _event_loop = None if loop is None else (loop, _core.get_ident())
+    _get_event_loop_policy().set_event_loop(loop)
 
 
 def new_event_loop():
-    return _UnixSelectorEventLoop()
+    return _get_event_loop_policy().new_event_loop()
+
+
+def __getattr__(name: str):
+    match name:
+        case "AbstractEventLoopPolicy":
+            warnings._deprecated(f"asyncio.{name}", remove=(3, 16))
+            return _AbstractEventLoopPolicy
+        case "DefaultEventLoopPolicy":
+            warnings._deprecated(f"asyncio.{name}", remove=(3, 16))
+            return _DefaultEventLoopPolicy
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _run_until_complete_cb(fut):
@@ -2211,8 +2346,572 @@ async def to_thread(func, /, *args, **kwargs):
     func_call = functools.partial(func, *args, **kwargs)
     return await loop.run_in_executor(None, func_call)
 
+
+
+class BaseProtocol:
+    """Common base class for protocol interfaces.
+
+    Usually user implements protocols that derived from BaseProtocol
+    like Protocol or ProcessProtocol.
+
+    The only case when BaseProtocol should be implemented directly is
+    write-only transport like write pipe
+    """
+
+    __slots__ = ()
+
+    def connection_made(self, transport):
+        """Called when a connection is made.
+
+        The argument is the transport representing the pipe connection.
+        To receive data, wait for data_received() calls.
+        When the connection is closed, connection_lost() is called.
+        """
+
+    def connection_lost(self, exc):
+        """Called when the connection is lost or closed.
+
+        The argument is an exception object or None (the latter
+        meaning a regular EOF is received or the connection was
+        aborted or closed).
+        """
+
+    def pause_writing(self):
+        """Called when the transport's buffer goes over the high-water mark.
+
+        Pause and resume calls are paired -- pause_writing() is called
+        once when the buffer goes strictly over the high-water mark
+        (even if subsequent writes increases the buffer size even
+        more), and eventually resume_writing() is called once when the
+        buffer size reaches the low-water mark.
+
+        Note that if the buffer size equals the high-water mark,
+        pause_writing() is not called -- it must go strictly over.
+        Conversely, resume_writing() is called when the buffer size is
+        equal or lower than the low-water mark.  These end conditions
+        are important to ensure that things go as expected when either
+        mark is zero.
+
+        NOTE: This is the only Protocol callback that is not called
+        through EventLoop.call_soon() -- if it were, it would have no
+        effect when it's most needed (when the app keeps writing
+        without yielding until pause_writing() is called).
+        """
+
+    def resume_writing(self):
+        """Called when the transport's buffer drains below the low-water mark.
+
+        See pause_writing() for details.
+        """
+
+
+class Protocol(BaseProtocol):
+    """Interface for stream protocol.
+
+    The user should implement this interface.  They can inherit from
+    this class but don't need to.  The implementations here do
+    nothing (they don't raise exceptions).
+
+    When the user wants to requests a transport, they pass a protocol
+    factory to a utility function (e.g., EventLoop.create_connection()).
+
+    When the connection is made successfully, connection_made() is
+    called with a suitable transport object.  Then data_received()
+    will be called 0 or more times with data (bytes) received from the
+    transport; finally, connection_lost() will be called exactly once
+    with either an exception object or None as an argument.
+
+    State machine of calls:
+
+      start -> CM [-> DR*] [-> ER?] -> CL -> end
+
+    * CM: connection_made()
+    * DR: data_received()
+    * ER: eof_received()
+    * CL: connection_lost()
+    """
+
+    __slots__ = ()
+
+    def data_received(self, data):
+        """Called when some data is received.
+
+        The argument is a bytes object.
+        """
+
+    def eof_received(self):
+        """Called when the other end calls write_eof() or equivalent.
+
+        If this returns a false value (including None), the transport
+        will close itself.  If it returns a true value, closing the
+        transport is up to the protocol.
+        """
+
+
+class BufferedProtocol(BaseProtocol):
+    """Interface for stream protocol with manual buffer control.
+
+    Event methods, such as ${'`'}create_server${'`'} and ${'`'}create_connection${'`'},
+    accept factories that return protocols that implement this interface.
+
+    The idea of BufferedProtocol is that it allows to manually allocate
+    and control the receive buffer.  Event loops can then use the buffer
+    provided by the protocol to avoid unnecessary data copies.  This
+    can result in noticeable performance improvement for protocols that
+    receive big amounts of data.  Sophisticated protocols can allocate
+    the buffer only once at creation time.
+
+    State machine of calls:
+
+      start -> CM [-> GB [-> BU?]]* [-> ER?] -> CL -> end
+
+    * CM: connection_made()
+    * GB: get_buffer()
+    * BU: buffer_updated()
+    * ER: eof_received()
+    * CL: connection_lost()
+    """
+
+    __slots__ = ()
+
+    def get_buffer(self, sizehint):
+        """Called to allocate a new receive buffer.
+
+        *sizehint* is a recommended minimal size for the returned
+        buffer.  When set to -1, the buffer size can be arbitrary.
+
+        Must return an object that implements the
+        :ref:${'`'}buffer protocol <bufferobjects>${'`'}.
+        It is an error to return a zero-sized buffer.
+        """
+
+    def buffer_updated(self, nbytes):
+        """Called when the buffer was updated with the received data.
+
+        *nbytes* is the total number of bytes that were written to
+        the buffer.
+        """
+
+    def eof_received(self):
+        """Called when the other end calls write_eof() or equivalent.
+
+        If this returns a false value (including None), the transport
+        will close itself.  If it returns a true value, closing the
+        transport is up to the protocol.
+        """
+
+
+class DatagramProtocol(BaseProtocol):
+    """Interface for datagram protocol."""
+
+    __slots__ = ()
+
+    def datagram_received(self, data, addr):
+        """Called when some datagram is received."""
+
+    def error_received(self, exc):
+        """Called when a send or receive operation raises an OSError.
+
+        (Other than BlockingIOError or InterruptedError.)
+        """
+
+
+class SubprocessProtocol(BaseProtocol):
+    """Interface for protocol for subprocess calls."""
+
+    __slots__ = ()
+
+    def pipe_data_received(self, fd, data):
+        """Called when the subprocess writes data into stdout/stderr pipe.
+
+        fd is int file descriptor.
+        data is bytes object.
+        """
+
+    def pipe_connection_lost(self, fd, exc):
+        """Called when a file descriptor associated with the child process is
+        closed.
+
+        fd is the int file descriptor that was closed.
+        """
+
+    def process_exited(self):
+        """Called when subprocess has exited."""
+
+
+for _cls in (BaseProtocol, Protocol, BufferedProtocol, DatagramProtocol, SubprocessProtocol):
+    _cls.__module__ = 'asyncio.protocols'
+
+
+class BaseTransport:
+    """Base class for transports."""
+
+    __slots__ = ('_extra',)
+
+    def __init__(self, extra=None):
+        if extra is None:
+            extra = {}
+        self._extra = extra
+
+    def get_extra_info(self, name, default=None):
+        """Get optional transport information."""
+        return self._extra.get(name, default)
+
+    def is_closing(self):
+        """Return True if the transport is closing or closed."""
+        raise NotImplementedError
+
+    def close(self):
+        """Close the transport.
+
+        Buffered data will be flushed asynchronously.  No more data
+        will be received.  After all buffered data is flushed, the
+        protocol's connection_lost() method will (eventually) be
+        called with None as its argument.
+        """
+        raise NotImplementedError
+
+    def set_protocol(self, protocol):
+        """Set a new protocol."""
+        raise NotImplementedError
+
+    def get_protocol(self):
+        """Return the current protocol."""
+        raise NotImplementedError
+
+
+class ReadTransport(BaseTransport):
+    """Interface for read-only transports."""
+
+    __slots__ = ()
+
+    def is_reading(self):
+        """Return True if the transport is receiving."""
+        raise NotImplementedError
+
+    def pause_reading(self):
+        """Pause the receiving end.
+
+        No data will be passed to the protocol's data_received()
+        method until resume_reading() is called.
+        """
+        raise NotImplementedError
+
+    def resume_reading(self):
+        """Resume the receiving end.
+
+        Data received will once again be passed to the protocol's
+        data_received() method.
+        """
+        raise NotImplementedError
+
+
+class WriteTransport(BaseTransport):
+    """Interface for write-only transports."""
+
+    __slots__ = ()
+
+    def set_write_buffer_limits(self, high=None, low=None):
+        """Set the high- and low-water limits for write flow control.
+
+        These two values control when to call the protocol's
+        pause_writing() and resume_writing() methods.  If specified,
+        the low-water limit must be less than or equal to the
+        high-water limit.  Neither value can be negative.
+
+        The defaults are implementation-specific.  If only the
+        high-water limit is given, the low-water limit defaults to an
+        implementation-specific value less than or equal to the
+        high-water limit.  Setting high to zero forces low to zero as
+        well, and causes pause_writing() to be called whenever the
+        buffer becomes non-empty.  Setting low to zero causes
+        resume_writing() to be called only once the buffer is empty.
+        Use of zero for either limit is generally sub-optimal as it
+        reduces opportunities for doing I/O and computation
+        concurrently.
+        """
+        raise NotImplementedError
+
+    def get_write_buffer_size(self):
+        """Return the current size of the write buffer."""
+        raise NotImplementedError
+
+    def get_write_buffer_limits(self):
+        """Get the high and low watermarks for write flow control.
+        Return a tuple (low, high) where low and high are
+        positive number of bytes."""
+        raise NotImplementedError
+
+    def write(self, data):
+        """Write some data bytes to the transport.
+
+        This does not block; it buffers the data and arranges for it
+        to be sent out asynchronously.
+        """
+        raise NotImplementedError
+
+    def writelines(self, list_of_data):
+        """Write a list (or any iterable) of data bytes to the transport.
+
+        The default implementation concatenates the arguments and
+        calls write() on the result.
+        """
+        data = b''.join(list_of_data)
+        self.write(data)
+
+    def write_eof(self):
+        """Close the write end after flushing buffered data.
+
+        (This is like typing ^D into a UNIX program reading from stdin.)
+
+        Data may still be received.
+        """
+        raise NotImplementedError
+
+    def can_write_eof(self):
+        """Return True if this transport supports write_eof(), False if not."""
+        raise NotImplementedError
+
+    def abort(self):
+        """Close the transport immediately.
+
+        Buffered data will be lost.  No more data will be received.
+        The protocol's connection_lost() method will (eventually) be
+        called with None as its argument.
+        """
+        raise NotImplementedError
+
+
+class Transport(ReadTransport, WriteTransport):
+    """Interface representing a bidirectional transport.
+
+    There may be several implementations, but typically, the user does
+    not implement new transports; rather, the platform provides some
+    useful transports that are implemented using the platform's best
+    practices.
+
+    The user never instantiates a transport directly; they call a
+    utility function, passing it a protocol factory and other
+    information necessary to create the transport and protocol.  (E.g.
+    EventLoop.create_connection() or EventLoop.create_server().)
+
+    The utility function will asynchronously create a transport and a
+    protocol and hook them up by calling the protocol's
+    connection_made() method, passing it the transport.
+
+    The implementation here raises NotImplemented for every method
+    except writelines(), which calls write() in a loop.
+    """
+
+    __slots__ = ()
+
+
+class DatagramTransport(BaseTransport):
+    """Interface for datagram (UDP) transports."""
+
+    __slots__ = ()
+
+    def sendto(self, data, addr=None):
+        """Send data to the transport.
+
+        This does not block; it buffers the data and arranges for it
+        to be sent out asynchronously.
+        addr is target socket address.
+        If addr is None use target address pointed on transport creation.
+        If data is an empty bytes object a zero-length datagram will be
+        sent.
+        """
+        raise NotImplementedError
+
+    def abort(self):
+        """Close the transport immediately.
+
+        Buffered data will be lost.  No more data will be received.
+        The protocol's connection_lost() method will (eventually) be
+        called with None as its argument.
+        """
+        raise NotImplementedError
+
+
+class SubprocessTransport(BaseTransport):
+
+    __slots__ = ()
+
+    def get_pid(self):
+        """Get subprocess id."""
+        raise NotImplementedError
+
+    def get_returncode(self):
+        """Get subprocess returncode.
+
+        See also
+        http://docs.python.org/3/library/subprocess#subprocess.Popen.returncode
+        """
+        raise NotImplementedError
+
+    def get_pipe_transport(self, fd):
+        """Get transport for pipe with number fd."""
+        raise NotImplementedError
+
+    def send_signal(self, signal):
+        """Send signal to subprocess.
+
+        See also:
+        docs.python.org/3/library/subprocess#subprocess.Popen.send_signal
+        """
+        raise NotImplementedError
+
+    def terminate(self):
+        """Stop the subprocess.
+
+        Alias for close() method.
+
+        On Posix OSs the method sends SIGTERM to the subprocess.
+        On Windows the Win32 API function TerminateProcess()
+         is called to stop the subprocess.
+
+        See also:
+        http://docs.python.org/3/library/subprocess#subprocess.Popen.terminate
+        """
+        raise NotImplementedError
+
+    def kill(self):
+        """Kill the subprocess.
+
+        On Posix OSs the function sends SIGKILL to the subprocess.
+        On Windows kill() is an alias for terminate().
+
+        See also:
+        http://docs.python.org/3/library/subprocess#subprocess.Popen.kill
+        """
+        raise NotImplementedError
+
+
+for _cls in (BaseTransport, ReadTransport, WriteTransport, Transport, DatagramTransport, SubprocessTransport):
+    _cls.__module__ = 'asyncio.transports'
+
+
+class AbstractServer:
+    """Abstract server returned by create_server()."""
+
+    def close(self):
+        """Stop serving.  This leaves existing connections open."""
+        raise NotImplementedError
+
+    def close_clients(self):
+        """Close all active connections."""
+        raise NotImplementedError
+
+    def abort_clients(self):
+        """Close all active connections immediately."""
+        raise NotImplementedError
+
+    def get_loop(self):
+        """Get the event loop the Server object is attached to."""
+        raise NotImplementedError
+
+    def is_serving(self):
+        """Return True if the server is accepting connections."""
+        raise NotImplementedError
+
+    async def start_serving(self):
+        """Start accepting connections.
+
+        This method is idempotent, so it can be called when
+        the server is already being serving.
+        """
+        raise NotImplementedError
+
+    async def serve_forever(self):
+        """Start accepting connections until the coroutine is cancelled.
+
+        The server is closed when the coroutine is cancelled.
+        """
+        raise NotImplementedError
+
+    async def wait_closed(self):
+        """Coroutine to wait until service is closed."""
+        raise NotImplementedError
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        self.close()
+        await self.wait_closed()
+
+AbstractServer.__module__ = 'asyncio.events'
+
+
+del _cls
+
+_UnixDefaultEventLoopPolicy._loop_factory = _UnixSelectorEventLoop
+
+__all__ = ('BaseEventLoop', 'Server', 'iscoroutinefunction', 'iscoroutine', 'AbstractEventLoop', 'AbstractServer', 'Handle', 'TimerHandle', 'get_event_loop_policy', 'set_event_loop_policy', 'get_event_loop', 'set_event_loop', 'new_event_loop', '_set_running_loop', 'get_running_loop', '_get_running_loop', 'BrokenBarrierError', 'CancelledError', 'InvalidStateError', 'TimeoutError', 'IncompleteReadError', 'LimitOverrunError', 'SendfileNotAvailableError', 'Future', 'wrap_future', 'isfuture', 'future_add_to_awaited_by', 'future_discard_from_awaited_by', 'capture_call_graph', 'format_call_graph', 'print_call_graph', 'FrameCallGraphEntry', 'FutureCallGraph', 'Lock', 'Event', 'Condition', 'Semaphore', 'BoundedSemaphore', 'Barrier', 'BaseProtocol', 'Protocol', 'DatagramProtocol', 'SubprocessProtocol', 'BufferedProtocol', 'Runner', 'run', 'Queue', 'PriorityQueue', 'LifoQueue', 'QueueFull', 'QueueEmpty', 'QueueShutDown', 'StreamReader', 'StreamWriter', 'StreamReaderProtocol', 'open_connection', 'start_server', 'open_unix_connection', 'start_unix_server', 'create_subprocess_exec', 'create_subprocess_shell', 'Task', 'create_task', 'FIRST_COMPLETED', 'FIRST_EXCEPTION', 'ALL_COMPLETED', 'wait', 'wait_for', 'as_completed', 'sleep', 'gather', 'shield', 'ensure_future', 'run_coroutine_threadsafe', 'current_task', 'all_tasks', 'create_eager_task_factory', 'eager_task_factory', '_register_task', '_unregister_task', '_enter_task', '_leave_task', 'TaskGroup', 'to_thread', 'Timeout', 'timeout', 'timeout_at', 'BaseTransport', 'ReadTransport', 'WriteTransport', 'Transport', 'DatagramTransport', 'SubprocessTransport', 'SelectorEventLoop', 'EventLoop')
+
 _timeout = timeout
 
 `;
 
-registerSourceModule('asyncio', SOURCE, asyncioNatives);
+const NETWORK = 'ネットワーク';
+const PROCESS = '外部プロセス';
+const GRAPH = '非同期の呼び出しのグラフ（コルーチンが待っているものとフレームから作る）';
+
+// CPython's `asyncio.graph`, whose data classes asyncio shares; building them when asyncio loads would slow every
+// program that uses asyncio.
+const GRAPH_SOURCE = String.raw`
+"""Introspection utils for tasks call graphs."""
+
+import dataclasses
+import io
+import sys
+import types
+
+__all__ = (
+    'capture_call_graph',
+    'format_call_graph',
+    'print_call_graph',
+    'FrameCallGraphEntry',
+    'FutureCallGraph',
+)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class FrameCallGraphEntry:
+    frame: types.FrameType
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class FutureCallGraph:
+    future: futures.Future
+    call_stack: tuple["FrameCallGraphEntry", ...]
+    awaited_by: tuple["FutureCallGraph", ...]
+`;
+
+const GRAPH_FUNCTIONS = {
+  capture_call_graph: `${GRAPH}（asyncio.capture_call_graph()）`,
+  format_call_graph: `${GRAPH}（asyncio.format_call_graph()）`,
+  print_call_graph: `${GRAPH}（asyncio.print_call_graph()）`,
+};
+
+registerSourceModule('asyncio.graph', GRAPH_SOURCE, undefined, { unsupported: GRAPH_FUNCTIONS });
+registerSharedAttributes('asyncio', {
+  FrameCallGraphEntry: 'asyncio.graph:FrameCallGraphEntry',
+  FutureCallGraph: 'asyncio.graph:FutureCallGraph',
+});
+
+registerSourceModule('asyncio', SOURCE, asyncioNatives, {
+  unsupported: {
+    Server: `${NETWORK}（asyncio.Server）`,
+    StreamReader: `${NETWORK}のストリーム（asyncio.StreamReader）`,
+    StreamReaderProtocol: `${NETWORK}のストリーム（asyncio.StreamReaderProtocol）`,
+    StreamWriter: `${NETWORK}のストリーム（asyncio.StreamWriter）`,
+    open_connection: `${NETWORK}（asyncio.open_connection()）`,
+    open_unix_connection: `${NETWORK}（asyncio.open_unix_connection()）`,
+    start_server: `${NETWORK}（asyncio.start_server()）`,
+    start_unix_server: `${NETWORK}（asyncio.start_unix_server()）`,
+    create_subprocess_exec: `${PROCESS}（asyncio.create_subprocess_exec()）`,
+    create_subprocess_shell: `${PROCESS}（asyncio.create_subprocess_shell()）`,
+    ...GRAPH_FUNCTIONS,
+  },
+});

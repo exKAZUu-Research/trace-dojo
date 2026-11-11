@@ -1001,6 +1001,76 @@ def shutdown(handlerList=_handlerList):
 
 import atexit
 atexit.register(shutdown)
+
+
+__author__  = "Vinay Sajip <vinay_sajip@red-dove.com>"
+__status__  = "production"
+__version__ = "0.5.1.2"
+__date__    = "07 February 2010"
+
+from string import Template
+from types import GenericAlias
+
+currentframe = lambda: sys._getframe(1)
+
+
+class BufferingFormatter(object):
+    """
+    A formatter suitable for formatting a number of records.
+    """
+    def __init__(self, linefmt=None):
+        """
+        Optionally specify a formatter which will be used to format each
+        individual record.
+        """
+        if linefmt:
+            self.linefmt = linefmt
+        else:
+            self.linefmt = _defaultFormatter
+
+    def formatHeader(self, records):
+        """
+        Return the header string for the specified records.
+        """
+        return ""
+
+    def formatFooter(self, records):
+        """
+        Return the footer string for the specified records.
+        """
+        return ""
+
+    def format(self, records):
+        """
+        Format the specified records and return the result as a string.
+        """
+        rv = ""
+        if len(records) > 0:
+            rv = rv + self.formatHeader(records)
+            for record in records:
+                rv = rv + self.linefmt.format(record)
+            rv = rv + self.formatFooter(records)
+        return rv
+
+
+class PlaceHolder(object):
+    """
+    PlaceHolder instances are used in the Manager logger hierarchy to take
+    the place of nodes for which no loggers have been defined. This class is
+    intended for internal use only and not as part of the public API.
+    """
+    def __init__(self, alogger):
+        """
+        Initialize with the specified logger being a child of this placeholder.
+        """
+        self.loggerMap = { alogger : None }
+
+    def append(self, alogger):
+        """
+        Add the specified logger as a child of this placeholder.
+        """
+        if alogger not in self.loggerMap:
+            self.loggerMap[alogger] = None
 `;
 
 registerSourceModule(

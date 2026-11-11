@@ -6,6 +6,7 @@ import { callValue } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import {
   nativeFunction,
+  newList,
   newTuple,
   None,
   NotImplemented,
@@ -584,6 +585,30 @@ defineSlot(decimalClass, 'to_eng_string', (self, args, kwargs) => {
 
 // The module ---------------------------------------------------------------------------------------------------------
 
+/** `IEEEContext(bits)`: the context of an IEEE 754 decimal interchange format of `bits` bits. */
+function ieeeContext(bits: PyValue): PyValue {
+  if (typeof bits !== 'bigint' && typeof bits !== 'boolean') throw typeError('an integer is required');
+  const size = BigInt(bits);
+  if (size <= 0n || size > 512n || size % 32n !== 0n) {
+    throw valueError('argument must be a multiple of 32, with a maximum of 512');
+  }
+  const emax = 3n * 2n ** (size / 16n + 3n);
+  return callValue(
+    contextClass,
+    [],
+    new Map<string, PyValue>([
+      ['prec', 9n * (size / 32n) - 2n],
+      ['rounding', 'ROUND_HALF_EVEN'],
+      ['Emin', 1n - emax],
+      ['Emax', emax],
+      ['capitals', 1n],
+      ['clamp', 1n],
+      ['flags', newList([])],
+      ['traps', newList([])],
+    ])
+  );
+}
+
 registerModule('decimal', () => {
   const state = moduleState();
   const namespace = new Map<string, PyValue>([
@@ -607,6 +632,7 @@ registerModule('decimal', () => {
     ['MIN_EMIN', MIN_EMIN],
     ['MIN_ETINY', MIN_EMIN - MAX_PREC + 1n],
     ['IEEE_CONTEXT_MAX_BITS', 512n],
+    ['IEEEContext', builtin('IEEEContext', 'one', 1, 1, ([bits]) => ieeeContext(bits))],
     ['HAVE_THREADS', true],
     ['HAVE_CONTEXTVAR', true],
   ]);

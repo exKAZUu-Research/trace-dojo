@@ -1,10 +1,10 @@
 // The deterministic scheduler of Python threads. CPython may switch threads every 5 ms, so the order of their steps
 // differs from run to run; here a thread runs until it waits (for a lock, an event, a queue, a join, or a sleep), ends,
-// or has run SLICE_OPERATIONS operations since it last started running and reaches the next iteration of a loop while
-// another thread can run, which stands in for CPython's switch interval so that a thread that never waits, such as one
-// spinning on a flag, cannot starve the others. The scheduler then runs the first thread, in the order they stopped
-// running, whose wait is over. When no thread can run, the virtual clock jumps to the earliest timeout; when none is
-// pending either, it is a deadlock.
+// or has run SLICE_OPERATIONS operations (scaled by `sys.setswitchinterval`) since it last started running and reaches
+// the next iteration of a loop while another thread can run, which stands in for CPython's switch interval so that a
+// thread that never waits, such as one spinning on a flag, cannot starve the others. The scheduler then runs the first
+// thread, in the order they stopped running, whose wait is over. When no thread can run, the virtual clock jumps to the
+// earliest timeout; when none is pending either, it is a deadlock.
 import { sleepFor, virtualNanoseconds } from './clock';
 import type { Frame } from './frame';
 import { type ArgStyle, checkArgs } from './nativeArgs';
@@ -66,6 +66,8 @@ export class PyThreadState {
 
 /** The operations a thread runs before a loop lets another thread run, about what CPython runs in its 5 ms. */
 const SLICE_OPERATIONS = 100_000;
+/** CPython's default switch interval, 5 ms, in microseconds, which a slice of SLICE_OPERATIONS stands in for. */
+export const DEFAULT_SWITCH_INTERVAL = 5000;
 
 /** What a loop yields to let the other threads run, which the thread is ready to resume from at once. */
 export const PREEMPTION = new WaitRequest(() => true);
@@ -131,8 +133,13 @@ export class Scheduler {
 
   /** Whether the running thread has used its slice and another thread can run, at a loop's next iteration. */
   shouldPreempt(): boolean {
-    if (this.alive.length < 2 || this.runtime.operations - this.sliceStart < SLICE_OPERATIONS) return false;
+    if (this.alive.length < 2 || this.runtime.operations - this.sliceStart < this.sliceOperations()) return false;
     return this.queue.some((thread) => this.isReady(thread));
+  }
+
+  /** The operations of a slice, which `sys.setswitchinterval` scales as it does CPython's switch interval. */
+  private sliceOperations(): number {
+    return Math.max(1, Math.round((SLICE_OPERATIONS * this.runtime.switchInterval) / DEFAULT_SWITCH_INTERVAL));
   }
 
   /** Whether a thread's wait is over. */

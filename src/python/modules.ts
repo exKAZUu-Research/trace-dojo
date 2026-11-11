@@ -1,5 +1,5 @@
+import { addLayoutAttributes } from './modules/moduleLayout';
 import type { Runtime } from './runtime';
-import { UNSUPPORTED_SYS_ATTRIBUTES } from './sysAttributes';
 import { moduleClass } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { PyBuiltinFunction, PyModule, type PyValue } from './values';
@@ -39,16 +39,38 @@ export function trackModules(runtime: Runtime, table: Map<string, PyValue>): voi
   moduleTables.set(runtime, table);
 }
 
-const moduleValues = new Map<string, { package: string; all?: readonly string[] }>();
+const moduleAlls = new Map<string, readonly string[]>();
 
-/** Registers a module's `__package__` and `__all__`, for the modules whose code does not define them. */
-export function registerModuleValues(module: string, packageName: string, all: readonly string[] | undefined): void {
-  moduleValues.set(module, { package: packageName, all });
+/** Registers a module's `__all__`, for the modules whose code does not define it. */
+export function registerModuleAll(module: string, all: readonly string[]): void {
+  moduleAlls.set(module, all);
 }
 
 /** Names attributes of a module that this grader does not support, with the feature to name in their error. */
 export function registerUnsupportedAttributes(name: string, attributes: Record<string, string>): void {
   unsupportedAttributes.set(name, { ...unsupportedAttributes.get(name), ...attributes });
+}
+
+const sharedAttributes = new Map<string, Record<string, string>>();
+
+/**
+ * Makes attributes of a module the objects another module defines, named `module:attribute`, which are read from it
+ * when first used, as `_thread._local` is `threading.local`, which the `threading` module defines here.
+ */
+export function registerSharedAttributes(name: string, attributes: Record<string, string>): void {
+  sharedAttributes.set(name, { ...sharedAttributes.get(name), ...attributes });
+}
+
+type ExtraAttributes = (runtime: Runtime, namespace: Map<string, PyValue>) => [string, PyValue][];
+
+const extraAttributes = new Map<string, ExtraAttributes[]>();
+
+/**
+ * Adds to a module the attributes `create` makes that CPython's module has and its code here does not define;
+ * `create` may also define them in the module's namespace itself, as code written in Python does.
+ */
+export function registerExtraAttributes(name: string, create: ExtraAttributes): void {
+  extraAttributes.set(name, [...(extraAttributes.get(name) ?? []), create]);
 }
 
 /** Sets how a run creates its `__main__` module, whose namespace is the program's globals. */
@@ -76,6 +98,15 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   }
   const factory = factories.get(name);
   if (!factory) throw new UnsupportedFeatureError(`モジュール ${name}`);
+  // As in CPython, a package is imported before its submodule, and its code may import the submodule itself.
+  const dot = name.lastIndexOf('.');
+  const parent = dot === -1 ? undefined : importModule(runtime, name.slice(0, dot));
+  const module = runtime.modules.get(name) ?? createModule(runtime, name, factory);
+  parent?.dict.set(name.slice(dot + 1), module);
+  return module;
+}
+
+function createModule(runtime: Runtime, name: string, factory: ModuleFactory): PyModule {
   // The builtins module's namespace is the one names fall back to, so that changing either changes the other.
   const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new Map());
   runtime.modules.set(name, module);
@@ -83,26 +114,26 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   for (const [key, value] of runFactory(runtime, name, factory, module)) module.dict.set(key, value);
   recordFunctionModules(module);
   addRegisteredAttributes(runtime, module);
+  addLayoutAttributes(module, name);
   moduleTables.get(runtime)?.set(name, module);
-  const dot = name.lastIndexOf('.');
-  if (dot !== -1) importModule(runtime, name.slice(0, dot)).dict.set(name.slice(dot + 1), module);
   return module;
 }
 
-/**
- * Adds to a new module the names this grader does not support, which its code did not define, and the `__package__`
- * and `__all__` registered for it.
- */
+/** Adds to a new module the names this grader does not support, which its code did not define, and its `__all__`. */
 function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
   const { name, dict } = module;
-  const unsupported = name === 'sys' ? UNSUPPORTED_SYS_ATTRIBUTES : unsupportedAttributes.get(name);
-  for (const [key, feature] of Object.entries(unsupported ?? {})) {
-    if (!dict.has(key)) module.unsupported.set(key, feature);
+  const missing = <T>(record: Record<string, T> | undefined): [string, T][] =>
+    Object.entries(record ?? {}).filter(([key]) => !dict.has(key));
+  for (const [key, feature] of missing(unsupportedAttributes.get(name))) module.unsupported.set(key, feature);
+  for (const [key, target] of missing(sharedAttributes.get(name))) module.imports.set(key, target);
+  for (const create of extraAttributes.get(name) ?? []) {
+    for (const [key, value] of create(runtime, dict)) if (!dict.has(key)) dict.set(key, value);
   }
-  const values = moduleValues.get(name);
-  if (!values) return;
-  if (!dict.has('__package__')) dict.set('__package__', values.package);
-  if (values.all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...values.all]));
+  // A name defined after all, or shared from another module, is no longer one this grader lacks.
+  for (const key of module.unsupported.keys())
+    if (dict.has(key) || module.imports.has(key)) module.unsupported.delete(key);
+  const all = moduleAlls.get(name);
+  if (all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...all]));
 }
 
 /** Records the module of the builtin functions a module creates, which their `__module__` names. */

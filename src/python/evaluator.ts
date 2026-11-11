@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 877 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 888 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -29,12 +29,12 @@ import {
   getAttribute,
   getAttributeOrUndefined,
   getItem,
+  importedModule,
   isTruthy,
   iterate,
   lookupSpecial,
   setAttribute,
   setItem,
-  toArray,
 } from './objects';
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
@@ -47,6 +47,7 @@ import {
   classOf,
   exceptionClassNamed,
   isInstanceOf,
+  nativeFunction,
   newDict,
   newException,
   newList,
@@ -261,7 +262,8 @@ export class Evaluator extends AsyncEvaluator {
     if (statement.kind === 'importFrom') {
       this.importFrom(statement, frame);
     } else if (statement.kind === 'importStar') {
-      for (const [name, value] of starImports(runtime.importModule(statement.module))) frame.locals.set(name, value);
+      const module = runtime.importModule(statement.module);
+      for (const [name, value] of starNames(module)) frame.locals.set(name, value);
     } else {
       for (const { module, binding, bindsModule } of statement.names) {
         const imported = runtime.importModule(module);
@@ -279,6 +281,7 @@ export class Evaluator extends AsyncEvaluator {
       const submodule = `${statement.module}.${name}`;
       const value =
         module.dict.get(name) ??
+        importedModule(module, name) ??
         (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, name) : undefined) ??
         (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
       if (value === undefined) {
@@ -1198,6 +1201,26 @@ const SELF_MATCHING = new Set([
  * Runs the statements of a frame that is no generator to their end. Only the waits of blocking operations may suspend
  * them, which the thread then makes on the host's stack.
  */
+/** The names `from module import *` binds: those of the module's `__all__`, or its public names without one. */
+function starNames(module: PyModule): [string, PyValue][] {
+  const all = getAttributeOrUndefined(module, '__all__');
+  if (all === undefined) return [...module.dict].filter(([name]) => !name.startsWith('_'));
+  return toItems(all).map((name) => {
+    if (typeof name !== 'string') {
+      throw typeError(`Item in ${module.name}.__all__ must be str, not ${typeName(name)}`);
+    }
+    // A name this grader does not support is bound all the same, failing when the program uses it.
+    const feature = module.unsupported.get(name);
+    if (feature === undefined) return [name, getAttribute(module, name)];
+    return [
+      name,
+      nativeFunction(name, () => {
+        throw new UnsupportedFeatureError(feature);
+      }),
+    ];
+  });
+}
+
 function runToEnd(execution: Execution): Completion {
   for (;;) {
     const step = execution.next();
@@ -1315,21 +1338,6 @@ function matchArgsOf(cls: PyClass, count: number): readonly PyValue[] {
     );
   }
   return allowed;
-}
-
-/** The names `from module import *` binds: those of its `__all__`, else its public names, as CPython's `import_all_from`. */
-function starImports(module: PyModule): [string, PyValue][] {
-  const all = getAttributeOrUndefined(module, '__all__');
-  if (all === undefined) return [...module.dict].filter(([name]) => !name.startsWith('_'));
-  const moduleName = module.dict.get('__name__');
-  return toArray(all).map((name) => {
-    if (typeof name !== 'string') {
-      throw typeError(
-        `Item in ${typeof moduleName === 'string' ? moduleName : '?'}.__all__ must be str, not ${typeName(name)}`
-      );
-    }
-    return [name, getAttribute(module, name)];
-  });
 }
 
 export type { Completion };

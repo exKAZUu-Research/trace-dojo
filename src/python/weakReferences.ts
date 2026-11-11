@@ -3,7 +3,7 @@ import { method } from './define';
 import { findReachableObjects } from './garbageCollection';
 import { pyHash } from './hashing';
 import { defineNew } from './instances';
-import { defineSlot } from './modules/numberSupport';
+import { defineProperty, defineSlot } from './modules/numberSupport';
 import { callValue } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
@@ -167,6 +167,7 @@ export function weakReferenceOf(object: PyValue): PyOpaque | undefined {
 }
 
 method(weakrefClass, '__call__', 'none', 0, 0, (self) => liveReferent(self) ?? None);
+defineProperty(weakrefClass, '__callback__', (self) => ((self as PyOpaque).data as Reference).callback ?? None);
 method(weakrefClass, '__repr__', 'none', 0, 0, (self) => {
   const referent = liveReferent(self);
   const address = addressOf(self as PyOpaque);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 430 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 438 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
@@ -59,6 +59,7 @@ import {
   NotImplemented,
   objectClass,
   propertyClass,
+  pyError,
   rangeClass,
   setClass,
   sliceClass,
@@ -73,6 +74,7 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttribute } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
@@ -569,6 +571,14 @@ function sorted(args: PyValue[], kwargs: Kwargs): PyValue {
   return list;
 }
 
+function hasAttribute(object: PyValue, name: PyValue): boolean {
+  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  // An attribute this grader lacks exists in CPython, so code may test for it before it uses it.
+  if (object instanceof PyModule && object.unsupported.has(name)) return true;
+  if (unsupportedClassAttribute(object, name) !== undefined) return true;
+  return getAttributeOrUndefined(object, name) !== undefined;
+}
+
 function unsupportedFunction(name: string, feature: string): PyValue {
   return builtin(
     name,
@@ -605,7 +615,14 @@ export function createBuiltins(): Map<string, PyValue> {
     ['any', one('any', ([iterable]) => toArray(iterable).some((item) => isTruthy(item)))],
     ['ascii', one('ascii', ([value]) => pyAscii(value))],
     ['bin', one('bin', radix('0b', 2))],
-    ['breakpoint', unsupportedFunction('breakpoint', 'breakpoint()')],
+    [
+      'breakpoint',
+      nativeFunction('breakpoint', (args, kwargs) => {
+        const hook = currentRuntime().importModule('sys').dict.get('breakpointhook');
+        if (hook === undefined) throw pyError('RuntimeError', 'lost sys.breakpointhook');
+        return callValue(hook, args, kwargs);
+      }),
+    ],
     ['callable', one('callable', ([value]) => isCallable(value))],
     ['chr', one('chr', chr)],
     ['compile', builtin('compile', 'takes', 0, 6, compile, { keywords: COMPILE_KEYWORDS })],
@@ -633,15 +650,7 @@ export function createBuiltins(): Map<string, PyValue> {
     ],
     ['getattr', builtin('getattr', 'expected', 2, 3, getattr)],
     ['globals', builtin('globals', 'none', 0, 0, callerGlobals)],
-    [
-      'hasattr',
-      builtin('hasattr', 'expected', 2, 2, ([object, name]) => {
-        if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-        // A module attribute this grader lacks exists in CPython, so code may test for it before it uses it.
-        if (object instanceof PyModule && object.unsupported.has(name)) return true;
-        return getAttributeOrUndefined(object, name) !== undefined;
-      }),
-    ],
+    ['hasattr', builtin('hasattr', 'expected', 2, 2, ([object, name]) => hasAttribute(object, name))],
     ['hash', one('hash', ([value]) => pyHash(value))],
     ['hex', one('hex', radix('0x', 16))],
     ['id', one('id', ([value]) => currentRuntime().idOf(value))],

@@ -22,7 +22,7 @@ import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } fro
 import type { ProgramSource } from './programSource';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
-import type { Scheduler } from './threads';
+import { DEFAULT_SWITCH_INTERVAL, type Scheduler } from './threads';
 import { noteUnwinding } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
@@ -42,6 +42,7 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttributeNames } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
@@ -370,6 +371,8 @@ export class Runtime {
   readonly none = None;
   /** The limit sys.set_int_max_str_digits sets, 0 for none. */
   intMaxStrDigits = DEFAULT_MAX_STR_DIGITS;
+  /** The switch interval of `sys.setswitchinterval`, in microseconds, which scales the thread scheduler's slice. */
+  switchInterval = DEFAULT_SWITCH_INTERVAL;
   private readonly streams = new Map<string, PyValue>();
 
   exceptionClass(name: string): PyClass {
@@ -484,8 +487,8 @@ export class Runtime {
     // A module lists the names this grader does not support too, as CPython's module has them.
     const names =
       value instanceof PyModule
-        ? new Set([...value.dict.keys(), ...value.unsupported.keys()])
-        : objectAttributeNames(value);
+        ? new Set([...value.dict.keys(), ...value.unsupported.keys(), ...value.imports.keys()])
+        : new Set([...objectAttributeNames(value), ...unsupportedClassAttributeNames(value)]);
     return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 

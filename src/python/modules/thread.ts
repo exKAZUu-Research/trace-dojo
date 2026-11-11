@@ -1,7 +1,7 @@
 // `_thread`: the locks and threads that `threading` builds on, run by the deterministic scheduler of threads.ts.
 import { addressOf } from '../conversions';
 import { builtin, method } from '../define';
-import { registerModule } from '../modules';
+import { registerModule, registerSharedAttributes } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, isTruthy } from '../objects';
@@ -16,9 +16,10 @@ import {
   WaitRequest,
 } from '../threads';
 import { toFloat } from '../typeNumbers';
-import { exceptionClassNamed, newTuple, None, objectClass, pyError, typeError, valueError } from '../types';
+import { exceptionClassNamed, newTuple, None, objectClass, pyError, typeError, typeName, valueError } from '../types';
 import { type Kwargs, PyDict, PyError, PyOpaque, PyTuple, type PyValue } from '../values';
 import { builtinClassWithBase } from './moduleClasses';
+import { systemExitError } from './sys';
 
 /** The largest timeout CPython's locks accept, in seconds. */
 export const TIMEOUT_MAX = 9_223_372_036;
@@ -198,6 +199,23 @@ function stackSize(args: PyValue[]): PyValue {
   return previous;
 }
 
+/** `_thread.start_new_thread(function, args, kwargs)` and its old name `start_new`. */
+function startNewThread(name: string): PyValue {
+  return blockingBuiltin(name, 'expected', [2, 3], function* ([fn, args, kwargs]) {
+    if (!(args instanceof PyTuple)) throw typeError('2nd arg must be a tuple');
+    if (kwargs !== undefined && !(kwargs instanceof PyDict)) throw typeError('optional 3rd arg must be a dictionary');
+    const named = kwargs && new Map([...kwargs.store.ordered()].map((entry) => [entry.key as string, entry.value]));
+    // The threads `start_new_thread` starts are not waited for at the end, like daemon threads.
+    const thread = yield* startThread(fn, [...args.items], named, true);
+    return thread.ident;
+  });
+}
+
+/** `_thread.exit()`, which raises SystemExit, ending a thread quietly. */
+function exitThread(): PyValue {
+  throw systemExitError(undefined);
+}
+
 registerModule('_thread', () => {
   return new Map<string, PyValue>([
     ['stack_size', builtin('stack_size', 'takes', 0, 1, stackSize)],
@@ -210,18 +228,8 @@ registerModule('_thread', () => {
     ['get_native_id', builtin('get_native_id', 'none', 0, 0, () => schedulerOf().current.ident % 100_000n)],
     ['TIMEOUT_MAX', TIMEOUT_MAX],
     ['error', exceptionClassNamed('RuntimeError')],
-    [
-      'start_new_thread',
-      blockingBuiltin('start_new_thread', 'expected', [2, 3], function* ([fn, args, kwargs]) {
-        if (!(args instanceof PyTuple)) throw typeError('2nd arg must be a tuple');
-        if (kwargs !== undefined && !(kwargs instanceof PyDict))
-          throw typeError('optional 3rd arg must be a dictionary');
-        const named = kwargs && new Map([...kwargs.store.ordered()].map((entry) => [entry.key as string, entry.value]));
-        // The threads `start_new_thread` starts are not waited for at the end, like daemon threads.
-        const thread = yield* startThread(fn, [...args.items], named, true);
-        return thread.ident;
-      }),
-    ],
+    ['start_new_thread', startNewThread('start_new_thread')],
+    ['start_new', startNewThread('start_new')],
     [
       '_start_thread',
       blockingBuiltin('_start_thread', 'expected', [2, 2], function* ([fn, daemon]) {
@@ -230,6 +238,36 @@ registerModule('_thread', () => {
       }),
     ],
     ['_count', builtin('_count', 'none', 0, 0, () => BigInt(schedulerOf().alive.length - 1))],
+    ['_NAME_MAXLEN', 63n],
+    ['daemon_threads_allowed', builtin('daemon_threads_allowed', 'none', 0, 0, () => true)],
+    ['_is_main_interpreter', builtin('_is_main_interpreter', 'none', 0, 0, () => true)],
+    ['exit', builtin('exit', 'none', 0, 0, exitThread)],
+    ['exit_thread', builtin('exit_thread', 'none', 0, 0, exitThread)],
+    // A thread's name in the operating system shows nowhere a program here can see.
+    [
+      'set_name',
+      builtin(
+        'set_name',
+        'takes',
+        0,
+        1,
+        (args, kwargs) => {
+          const name = argument(args, kwargs, 0, 'name');
+          if (name === undefined) throw typeError("set_name() missing required argument 'name' (pos 1)");
+          if (typeof name !== 'string') {
+            throw typeError(`set_name() argument 'name' must be str, not ${typeName(name)}`);
+          }
+          return None;
+        },
+        { keywords: ['name'] }
+      ),
+    ],
     ['_monotonic', builtin('_monotonic', 'none', 0, 0, () => Number(schedulerOf().now()) / 1e9)],
   ]);
+});
+
+registerSharedAttributes('_thread', {
+  _local: 'threading:local',
+  _ExceptHookArgs: 'threading:_ExceptHookArgs',
+  _excepthook: 'threading:excepthook',
 });
