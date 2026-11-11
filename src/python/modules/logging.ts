@@ -332,6 +332,45 @@ class Formatter(object):
 _defaultFormatter = Formatter()
 
 
+class BufferingFormatter(object):
+    """
+    A formatter suitable for formatting a number of records.
+    """
+    def __init__(self, linefmt=None):
+        """
+        Optionally specify a formatter which will be used to format each
+        individual record.
+        """
+        if linefmt:
+            self.linefmt = linefmt
+        else:
+            self.linefmt = _defaultFormatter
+
+    def formatHeader(self, records):
+        """
+        Return the header string for the specified records.
+        """
+        return ""
+
+    def formatFooter(self, records):
+        """
+        Return the footer string for the specified records.
+        """
+        return ""
+
+    def format(self, records):
+        """
+        Format the specified records and return the result as a string.
+        """
+        rv = ""
+        if len(records) > 0:
+            rv = rv + self.formatHeader(records)
+            for record in records:
+                rv = rv + self.linefmt.format(record)
+            rv = rv + self.formatFooter(records)
+        return rv
+
+
 class Filter(object):
     def __init__(self, name=''):
         self.name = name
@@ -546,6 +585,26 @@ class NullHandler(Handler):
         self.lock = None
 
 
+class PlaceHolder(object):
+    """
+    PlaceHolder instances are used in the Manager logger hierarchy to take
+    the place of nodes for which no loggers have been defined. This class is
+    intended for internal use only and not as part of the public API.
+    """
+    def __init__(self, alogger):
+        """
+        Initialize with the specified logger being a child of this placeholder.
+        """
+        self.loggerMap = { alogger : None }
+
+    def append(self, alogger):
+        """
+        Add the specified logger as a child of this placeholder.
+        """
+        if alogger not in self.loggerMap:
+            self.loggerMap[alogger] = None
+
+
 class Manager(object):
     def __init__(self, rootnode):
         self.root = rootnode
@@ -556,33 +615,53 @@ class Manager(object):
         self.logRecordFactory = None
 
     def getLogger(self, name):
+        rv = None
         if not isinstance(name, str):
             raise TypeError('A logger name must be a string')
-        if name in self.loggerDict:
-            return self.loggerDict[name]
-        cls = self.loggerClass or _loggerClass
-        rv = cls(name)
-        rv.manager = self
-        self.loggerDict[name] = rv
-        self._fixupParents(rv)
+        with _lock:
+            if name in self.loggerDict:
+                rv = self.loggerDict[name]
+                if isinstance(rv, PlaceHolder):
+                    ph = rv
+                    rv = (self.loggerClass or _loggerClass)(name)
+                    rv.manager = self
+                    self.loggerDict[name] = rv
+                    self._fixupChildren(ph, rv)
+                    self._fixupParents(rv)
+            else:
+                rv = (self.loggerClass or _loggerClass)(name)
+                rv.manager = self
+                self.loggerDict[name] = rv
+                self._fixupParents(rv)
         return rv
 
     def _fixupParents(self, alogger):
         name = alogger.name
-        parent = self.root
         i = name.rfind(".")
-        while i > 0:
-            candidate = name[:i]
-            if candidate in self.loggerDict:
-                parent = self.loggerDict[candidate]
-                break
+        rv = None
+        while (i > 0) and not rv:
+            substr = name[:i]
+            if substr not in self.loggerDict:
+                self.loggerDict[substr] = PlaceHolder(alogger)
+            else:
+                obj = self.loggerDict[substr]
+                if isinstance(obj, Logger):
+                    rv = obj
+                else:
+                    assert isinstance(obj, PlaceHolder)
+                    obj.append(alogger)
             i = name.rfind(".", 0, i - 1)
-        alogger.parent = parent
-        prefix = name + '.'
-        for other in self.loggerDict.values():
-            if other is not alogger and other.name.startswith(prefix):
-                if not other.parent.name.startswith(prefix):
-                    other.parent = alogger
+        if not rv:
+            rv = self.root
+        alogger.parent = rv
+
+    def _fixupChildren(self, ph, alogger):
+        name = alogger.name
+        namelen = len(name)
+        for c in ph.loggerMap.keys():
+            if c.parent.name[:namelen] != name:
+                alogger.parent = c.parent
+                c.parent = alogger
 
 
 class Logger(Filterer):
@@ -746,11 +825,17 @@ class Logger(Filterer):
         return self.manager.getLogger(suffix)
 
     def getChildren(self):
-        prefix = self.name + '.'
-        if self.root is self:
-            return set(self.manager.loggerDict.values())
-        return {item for item in self.manager.loggerDict.values()
-                if item.name.startswith(prefix) and '.' not in item.name[len(prefix):]}
+
+        def _hierlevel(logger):
+            if logger is logger.manager.root:
+                return 0
+            return 1 + logger.name.count('.')
+
+        d = self.manager.loggerDict
+        with _lock:
+            return set(item for item in d.values()
+                       if isinstance(item, Logger) and item.parent is self and
+                       _hierlevel(item) == 1 + _hierlevel(item.parent))
 
     def __repr__(self):
         level = getLevelName(self.getEffectiveLevel())

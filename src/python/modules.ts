@@ -76,6 +76,11 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   }
   const factory = factories.get(name);
   if (!factory) throw new UnsupportedFeatureError(`モジュール ${name}`);
+  // As in CPython, a submodule's package runs first, and may import the submodule itself.
+  const dot = name.lastIndexOf('.');
+  const parent = dot === -1 ? undefined : importModule(runtime, name.slice(0, dot));
+  const imported = runtime.modules.get(name);
+  if (imported) return imported;
   // The builtins module's namespace is the one names fall back to, so that changing either changes the other.
   const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new Map());
   runtime.modules.set(name, module);
@@ -84,8 +89,7 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   recordFunctionModules(module);
   addRegisteredAttributes(runtime, module);
   moduleTables.get(runtime)?.set(name, module);
-  const dot = name.lastIndexOf('.');
-  if (dot !== -1) importModule(runtime, name.slice(0, dot)).dict.set(name.slice(dot + 1), module);
+  parent?.dict.set(name.slice(dot + 1), module);
   return module;
 }
 
@@ -100,9 +104,25 @@ function addRegisteredAttributes(runtime: Runtime, module: PyModule): void {
     if (!dict.has(key)) module.unsupported.set(key, feature);
   }
   const values = moduleValues.get(name);
-  if (!values) return;
-  if (!dict.has('__package__')) dict.set('__package__', values.package);
-  if (values.all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...values.all]));
+  if (!dict.has('__package__')) dict.set('__package__', values?.package ?? defaultPackage(name));
+  if (values?.all && !dict.has('__all__')) dict.set('__all__', runtime.listOf([...values.all]));
+}
+
+/** The packages whose submodules this grader does not implement, which a registered submodule cannot reveal. */
+const CHILDLESS_PACKAGES: ReadonlySet<string> = new Set([
+  'asyncio',
+  'concurrent.futures',
+  'importlib',
+  'json',
+  'pathlib',
+  're',
+]);
+
+/** A module's `__package__` as CPython's import sets it: its own name for a package, else its package's name. */
+function defaultPackage(name: string): string {
+  if (CHILDLESS_PACKAGES.has(name)) return name;
+  for (const other of factories.keys()) if (other.startsWith(`${name}.`)) return name;
+  return name.slice(0, Math.max(name.lastIndexOf('.'), 0));
 }
 
 /** Records the module of the builtin functions a module creates, which their `__module__` names. */

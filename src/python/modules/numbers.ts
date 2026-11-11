@@ -109,14 +109,15 @@ registerVirtual(complexAbstractClass, complexClass);
 registerVirtual(realClass, floatClass);
 registerVirtual(integralClass, intClass);
 
-registerModule(
-  'numbers',
-  () =>
-    new Map<string, PyValue>([
-      ['Number', numberClass],
-      ['Complex', complexAbstractClass],
-      ['Real', realClass],
-      ['Rational', rationalClass],
-      ['Integral', integralClass],
-    ])
-);
+registerModule('numbers', (runtime) => {
+  const abc = runtime.importModule('abc');
+  return new Map<string, PyValue>([
+    ['ABCMeta', abcMetaClass],
+    ['abstractmethod', abc.dict.get('abstractmethod') as PyValue],
+    ['Number', numberClass],
+    ['Complex', complexAbstractClass],
+    ['Real', realClass],
+    ['Rational', rationalClass],
+    ['Integral', integralClass],
+  ]);
+});

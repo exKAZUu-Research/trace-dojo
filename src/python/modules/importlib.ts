@@ -39,6 +39,7 @@ registerModule(
   'importlib',
   () =>
     new Map<string, PyValue>([
+      ['__doc__', 'A pure Python implementation of import.'],
       [
         'import_module',
         nativeFunction('import_module', (args, kwargs) => {
