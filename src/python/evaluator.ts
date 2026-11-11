@@ -13,11 +13,11 @@ import type {
   TypeParam,
 } from './ast';
 import { AsyncEvaluator } from './asyncEvaluator';
-import { createClass } from './classes';
+import { buildClass, createClass } from './classes';
 import { pyRepr } from './conversions';
 import { asyncYield } from './coroutines';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
-import { mappingEntries, storeKey } from './expressionEvaluator';
+import { addArgument, type CallArguments, mappingEntries, storeKey } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import {
@@ -509,6 +509,35 @@ export class Evaluator extends AsyncEvaluator {
     return createClass(this, cls, scopeFrame, decorators);
   }
 
+  /** Creates a class whose decorators or bases suspend the generator or coroutine running it, as `yield` does. */
+  private *defineClassSuspending(cls: ClassDef, frame: Frame): Generator<PyValue, PyValue, PyValue> {
+    const decorators: PyValue[] = [];
+    for (const decorator of cls.decorators) decorators.push(yield* this.evaluateSuspending(decorator, frame));
+    const scopeFrame = cls.typeParams ? this.typeParamFrame(cls.typeParams.scope, frame) : frame;
+    if (cls.typeParams) {
+      const params = this.createTypeParams(cls.typeParams.params, scopeFrame);
+      this.storeName(cls.typeParams.tuple, newTuple(params), scopeFrame);
+      this.storeName(cls.typeParams.genericBase, genericBaseOf(params), scopeFrame);
+    }
+    const collected: CallArguments = { args: [], kwargs: undefined };
+    const length = scopeFrame.temporaries.length;
+    try {
+      for (const argument of cls.bases) {
+        const value = yield* this.evaluateSuspending(argument.value, scopeFrame);
+        addArgument(
+          collected,
+          argument,
+          value,
+          { callee: buildClass, argumentList: cls.bases, leading: 2 },
+          scopeFrame
+        );
+      }
+      return createClass(this, cls, scopeFrame, decorators, collected);
+    } finally {
+      scopeFrame.temporaries.length = length;
+    }
+  }
+
   /** Creates a `type` statement's alias, whose value the scope of its type parameters evaluates when first read. */
   private defineTypeAlias(statement: Extract<Statement, { kind: 'typeAlias' }>, frame: Frame): void {
     const scopeFrame = this.typeParamFrame(statement.typeParams.scope, frame);
@@ -622,8 +651,12 @@ export class Evaluator extends AsyncEvaluator {
         this.storeName(statement.binding, this.defineFunction(statement.fn, frame, decorators, defaults), frame);
         return undefined;
       }
+      case 'classDef': {
+        this.storeName(statement.binding, yield* this.defineClassSuspending(statement.cls, frame), frame);
+        return undefined;
+      }
       default: {
-        throw this.runtime.unsupported('ジェネレータの中で、クラスの基底クラスやデコレータに書いた yield');
+        throw new Error(`Not a suspending statement: ${statement.kind}`);
       }
     }
   }

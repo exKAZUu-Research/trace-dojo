@@ -19,6 +19,7 @@ import {
   lookupSpecial,
   nextOf,
 } from './objects';
+import { objectState, reduce, reduceEx } from './reduction';
 import { currentRuntime } from './runtimeContext';
 import {
   builtinFunctionClass,
@@ -121,14 +122,9 @@ method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
   return None;
 });
 method(objectClass, '__sizeof__', 'none', 0, 0, () => 16n);
-method(objectClass, '__getstate__', 'none', 0, 0, (self) =>
-  self instanceof PyInstance ? currentRuntime().dir(self) : None
-);
-for (const name of ['__reduce__', '__reduce_ex__']) {
-  method(objectClass, name, 'expected', 0, 1, () => {
-    throw currentRuntime().unsupported(`object.${name}()`);
-  });
-}
+method(objectClass, '__getstate__', 'none', 0, 0, (self) => objectState(self));
+method(objectClass, '__reduce__', 'none', 0, 0, (self) => reduce(self));
+method(objectClass, '__reduce_ex__', 'one', 1, 1, (self, [protocol]) => reduceEx(self, protocol));
 objectClass.dict.set(
   '__init_subclass__',
   new PyBuiltinFunction(

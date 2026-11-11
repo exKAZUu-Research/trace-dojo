@@ -3,17 +3,27 @@ import { getDoc } from './modules/inspect';
 import { signature } from './modules/inspectSignature';
 import { callValue } from './objects';
 import { currentRuntime } from './runtimeContext';
-import { classOf, None } from './types';
+import { classOf, None, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { PyBoundMethod, PyClass, PyFunction, type PyValue } from './values';
+import { type Kwargs, PyBoundMethod, PyClass, PyFunction, type PyValue } from './values';
 
 /**
  * `help(obj)` of a function or method the program defines, which prints what pydoc's text renderer does. The help of
  * other objects shows CPython's docstrings and pydoc's layout of classes and modules, which this grader does not have.
  */
-export function help(args: PyValue[]): PyValue {
-  if (args.length === 0) throw new UnsupportedFeatureError('対話型のヘルプ（引数のない help()）');
-  if (args.length > 1) throw new UnsupportedFeatureError('help() に 2 つ以上の引数を渡すこと');
+export function help(args: PyValue[], kwargs?: Kwargs): PyValue {
+  for (const key of kwargs?.keys() ?? []) {
+    if (key !== 'request') throw typeError(`Helper.__call__() got an unexpected keyword argument '${key}'`);
+  }
+  if (kwargs?.has('request') && args.length > 0) {
+    throw typeError("Helper.__call__() got multiple values for argument 'request'");
+  }
+  const all = kwargs?.has('request') ? [kwargs.get('request') as PyValue] : args;
+  if (all.length > 1) {
+    throw typeError(`Helper.__call__() takes from 1 to 2 positional arguments but ${all.length + 1} were given`);
+  }
+  if (all.length === 0) throw new UnsupportedFeatureError('対話型のヘルプ（引数のない help()）');
+  args = all;
   const [value] = args;
   const fn = value instanceof PyBoundMethod ? value.fn : value;
   if (!(fn instanceof PyFunction)) {

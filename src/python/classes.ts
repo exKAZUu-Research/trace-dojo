@@ -3,6 +3,7 @@ import type { ClassDef } from './ast';
 import { method } from './define';
 import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
+import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
 import { bindValue, callValue, deleteItem, getAttributeOrUndefined, getItem, lookupSpecial, setItem } from './objects';
 import { firstRowOf } from './programSource';
@@ -65,9 +66,10 @@ export function createClass(
   evaluator: Evaluator,
   def: ClassDef,
   frame: Frame,
-  decorators: PyValue[] = def.decorators.map((decorator) => evaluator.evaluate(decorator, frame))
+  decorators: PyValue[] = def.decorators.map((decorator) => evaluator.evaluate(decorator, frame)),
+  evaluated?: CallArguments
 ): PyValue {
-  const { args: originalBases, kwargs } = evaluator.arguments(def.bases, frame, buildClass, 2);
+  const { args: originalBases, kwargs } = evaluated ?? evaluator.arguments(def.bases, frame, buildClass, 2);
   const bases = resolveBases(originalBases, def.name);
   const keywords = new Map(kwargs);
   const explicit = keywords.get('metaclass');
@@ -156,8 +158,29 @@ function resolveBases(bases: PyValue[], name: string): PyValue[] {
   return resolved;
 }
 
-/** Stands for `__build_class__` in the errors about unpacking a class statement's arguments. */
-const buildClass = new PyBuiltinFunction(builtinFunctionClass, '__build_class__', () => None);
+/**
+ * `__build_class__(func, name, *bases, metaclass=..., **kwds)`, which class statements call in CPython. A program's
+ * function has no class body's code, so its variables stay its own and the namespace keeps what `__prepare__` gave.
+ */
+export const buildClass = new PyBuiltinFunction(builtinFunctionClass, '__build_class__', (args, kwargs) => {
+  if (args.length < 2) throw typeError('__build_class__: not enough arguments');
+  const [func, name, ...originalBases] = args;
+  if (!(func instanceof PyFunction)) throw typeError('__build_class__: func must be a function');
+  if (typeof name !== 'string') throw typeError('__build_class__: name is not a string');
+  const bases = resolveBases(originalBases, name);
+  const keywords = new Map(kwargs);
+  const explicit = keywords.get('metaclass');
+  keywords.delete('metaclass');
+  const meta =
+    explicit === undefined || explicit instanceof PyClass
+      ? winningMeta(explicit ?? metaOfBases(bases), bases)
+      : explicit;
+  const prepared = meta === typeClass ? undefined : prepare(meta, name, bases, keywords);
+  const namespace = prepared === undefined ? new Map<string, PyValue>() : new MappingNamespace(prepared);
+  if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
+  callValue(func, []);
+  return callMeta(meta, name, bases, prepared ?? namespace, keywords, { classCell: new PyCell(), annotations: [] });
+});
 
 function metaOfBases(bases: PyValue[]): PyClass {
   return bases.length === 0 ? typeClass : classOf(bases[0]);

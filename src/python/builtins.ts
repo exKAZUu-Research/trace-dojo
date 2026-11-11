@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 413 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass } from './bytesValues';
+import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { aiter, anext } from './coroutines';
@@ -567,7 +568,7 @@ function one(name: string, run: (args: PyValue[]) => PyValue): PyValue {
 export function createBuiltins(): Map<string, PyValue> {
   const exceptions = [...exceptionClasses.entries()];
   return new Map<string, PyValue>([
-    ['__build_class__', unsupportedFunction('__build_class__', '__build_class__()')],
+    ['__build_class__', buildClass],
     ['__import__', nativeFunction('__import__', dunderImport)],
     ['abs', one('abs', abs)],
     ['all', one('all', ([iterable]) => toArray(iterable).every((item) => isTruthy(item)))],
