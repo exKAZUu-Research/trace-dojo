@@ -1819,6 +1819,7 @@ def render_doc(thing, title='Python Library Documentation: %s', forceload=0,
     if renderer is None:
         renderer = text
     object, name = resolve(thing, forceload)
+    _check_namespace(object, 'pydoc の説明（help()）')
     desc = describe(object)
     module = inspect.getmodule(object)
     if name and '.' in name:

@@ -384,10 +384,6 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
   'decimal.Decimal':
     '__new__ __repr__ __hash__ __str__ __getattribute__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __add__ __radd__ __sub__ __rsub__ __mul__ __rmul__ __mod__ __rmod__ __divmod__ __rdivmod__ __pow__ __rpow__ __neg__ __pos__ __abs__ __bool__ __int__ __float__ __floordiv__ __rfloordiv__ __truediv__ __rtruediv__ exp ln log10 next_minus next_plus normalize to_integral to_integral_exact to_integral_value sqrt compare compare_signal max max_mag min min_mag next_toward quantize remainder_near fma is_canonical is_finite is_infinite is_nan is_qnan is_snan is_signed is_zero is_normal is_subnormal adjusted canonical conjugate radix copy_abs copy_negate logb logical_invert number_class to_eng_string compare_total compare_total_mag copy_sign same_quantum logical_and logical_or logical_xor rotate scaleb shift from_float from_number as_tuple as_integer_ratio __copy__ __deepcopy__ __format__ __reduce__ __round__ __ceil__ __floor__ __trunc__ __complex__ __sizeof__ real imag __doc__ __module__',
   'decimal.DecimalException': '__module__ __weakref__ __doc__',
-  'decimal.DecimalTuple':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ sign digits exponent __module__',
-  'difflib.Match':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ a b size __module__',
   'enum.Enum':
     '__module__ __firstlineno__ __doc__ __new__ _add_alias_ _add_value_alias_ _generate_next_value_ _missing_ __repr__ __str__ __dir__ __format__ __hash__ __reduce_ex__ __deepcopy__ __copy__ name value __static_attributes__ _new_member_ _use_args_ _member_names_ _member_map_ _value2member_map_ _hashable_values_ _unhashable_values_ _unhashable_values_map_ _member_type_ _value_repr_ __dict__ __weakref__',
   'enum.EnumCheck':
@@ -408,20 +404,10 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new_member__ _new_member_ _use_args_ _generate_next_value_ _member_names_ _member_map_ _value2member_map_ _hashable_values_ _unhashable_values_ _unhashable_values_map_ _member_type_ _value_repr_ __module__ __firstlineno__ __doc__ __new__ __repr__ __static_attributes__ __str__ __format__ CONNECT DELETE GET HEAD OPTIONS PATCH POST PUT TRACE',
   'http.HTTPStatus':
     '__new_member__ _new_member_ _use_args_ _generate_next_value_ _member_names_ _member_map_ _value2member_map_ _hashable_values_ _unhashable_values_ _unhashable_values_map_ _member_type_ _value_repr_ __module__ __firstlineno__ __doc__ __new__ is_informational is_success is_redirection is_client_error is_server_error __static_attributes__ __format__ CONTINUE SWITCHING_PROTOCOLS PROCESSING EARLY_HINTS OK CREATED ACCEPTED NON_AUTHORITATIVE_INFORMATION NO_CONTENT RESET_CONTENT PARTIAL_CONTENT MULTI_STATUS ALREADY_REPORTED IM_USED MULTIPLE_CHOICES MOVED_PERMANENTLY FOUND SEE_OTHER NOT_MODIFIED USE_PROXY TEMPORARY_REDIRECT PERMANENT_REDIRECT BAD_REQUEST UNAUTHORIZED PAYMENT_REQUIRED FORBIDDEN NOT_FOUND METHOD_NOT_ALLOWED NOT_ACCEPTABLE PROXY_AUTHENTICATION_REQUIRED REQUEST_TIMEOUT CONFLICT GONE LENGTH_REQUIRED PRECONDITION_FAILED CONTENT_TOO_LARGE REQUEST_ENTITY_TOO_LARGE URI_TOO_LONG REQUEST_URI_TOO_LONG UNSUPPORTED_MEDIA_TYPE RANGE_NOT_SATISFIABLE REQUESTED_RANGE_NOT_SATISFIABLE EXPECTATION_FAILED IM_A_TEAPOT MISDIRECTED_REQUEST UNPROCESSABLE_CONTENT UNPROCESSABLE_ENTITY LOCKED FAILED_DEPENDENCY TOO_EARLY UPGRADE_REQUIRED PRECONDITION_REQUIRED TOO_MANY_REQUESTS REQUEST_HEADER_FIELDS_TOO_LARGE UNAVAILABLE_FOR_LEGAL_REASONS INTERNAL_SERVER_ERROR NOT_IMPLEMENTED BAD_GATEWAY SERVICE_UNAVAILABLE GATEWAY_TIMEOUT HTTP_VERSION_NOT_SUPPORTED VARIANT_ALSO_NEGOTIATES INSUFFICIENT_STORAGE LOOP_DETECTED NOT_EXTENDED NETWORK_AUTHENTICATION_REQUIRED',
-  'inspect.ArgInfo':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ args varargs keywords locals __module__',
-  'inspect.Arguments':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ args varargs varkw __module__',
-  'inspect.Attribute':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ name kind defining_class object __module__',
   'inspect.BoundArguments':
     '__module__ __firstlineno__ __doc__ __slots__ __init__ signature args kwargs apply_defaults __eq__ __setstate__ __getstate__ __repr__ __static_attributes__ _signature arguments __weakref__ __hash__',
   'inspect.BufferFlags':
     '_generate_next_value_ __module__ __firstlineno__ __static_attributes__ _new_member_ _use_args_ _member_names_ _member_map_ _value2member_map_ _hashable_values_ _unhashable_values_ _unhashable_values_map_ _member_type_ _value_repr_ _boundary_ _flag_mask_ _singles_mask_ _all_bits_ _inverted_ __doc__ SIMPLE WRITABLE FORMAT ND STRIDES C_CONTIGUOUS F_CONTIGUOUS ANY_CONTIGUOUS INDIRECT CONTIG CONTIG_RO STRIDED STRIDED_RO RECORDS RECORDS_RO FULL FULL_RO READ WRITE __format__ __or__ __and__ __xor__ __ror__ __rand__ __rxor__ __invert__ __new__',
-  'inspect.ClosureVars':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ nonlocals globals builtins unbound __module__',
-  'inspect.FullArgSpec':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ args varargs varkw defaults kwonlyargs kwonlydefaults annotations __module__',
   'inspect.Parameter':
     '__module__ __firstlineno__ __doc__ __slots__ POSITIONAL_ONLY POSITIONAL_OR_KEYWORD VAR_POSITIONAL KEYWORD_ONLY VAR_KEYWORD empty __init__ __reduce__ __setstate__ name default annotation kind replace __str__ _format __replace__ __repr__ __hash__ __eq__ __static_attributes__ _annotation _default _kind _name',
   'inspect.Signature':
@@ -522,10 +508,6 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ match fullmatch search sub subn findall split finditer scanner __copy__ __deepcopy__ __class_getitem__ pattern flags groups groupindex __doc__ __module__',
   're.RegexFlag':
     '_new_member_ _use_args_ _generate_next_value_ _member_names_ _member_map_ _value2member_map_ _hashable_values_ _unhashable_values_ _unhashable_values_map_ _member_type_ _value_repr_ _boundary_ _flag_mask_ _all_bits_ _singles_mask_ _inverted_ __or__ __xor__ __and__ __ror__ __rxor__ __rand__ __invert__ __module__ __firstlineno__ __str__ _numeric_repr_ __static_attributes__ __doc__ __format__ NOFLAG ASCII A IGNORECASE I LOCALE L UNICODE U MULTILINE M DOTALL S VERBOSE X DEBUG _iter_member_ __new__ __repr__',
-  'sched.Event':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ time priority sequence action argument kwargs __module__',
-  'statistics.LinearRegression':
-    '__doc__ __slots__ _fields _field_defaults __new__ _make __replace__ _replace __repr__ _asdict __getnewargs__ __match_args__ slope intercept __module__',
   'statistics.NormalDist':
     '__module__ __firstlineno__ __doc__ __slots__ __init__ from_samples samples pdf cdf inv_cdf quantiles overlap zscore mean median mode stdev variance __add__ __sub__ __mul__ __truediv__ __pos__ __neg__ __radd__ __rsub__ __rmul__ __eq__ __hash__ __repr__ __getstate__ __setstate__ __static_attributes__ _mu _sigma',
   'string.templatelib.Interpolation':
@@ -567,10 +549,7 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new__ __repr__ __hash__ __call__ __getattribute__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __or__ __ror__ __getitem__ __mro_entries__ __instancecheck__ __subclasscheck__ __reduce__ __dir__ __origin__ __args__ __unpacked__ __parameters__ __typing_unpacked_tuple_args__ __doc__',
   'types.SimpleNamespace':
     '__new__ __repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __init__ __reduce__ __replace__ __dict__ __doc__ __hash__',
-  'typing.BinaryIO':
-    '__module__ __firstlineno__ __doc__ __slots__ write __enter__ __static_attributes__ __orig_bases__ __parameters__',
-  'typing.IO':
-    '__module__ __firstlineno__ __doc__ __slots__ mode name close closed fileno flush isatty read readable readline readlines seek seekable tell truncate writable write writelines __enter__ __exit__ __static_attributes__ __orig_bases__ __parameters__',
+  'typing.Generic': '__class_getitem__ __init_subclass__ __doc__ __module__',
   'typing.ParamSpec':
     '__new__ __repr__ __or__ __ror__ __typing_subst__ __typing_prepare_subst__ has_default __reduce__ __mro_entries__ __name__ __bound__ __covariant__ __contravariant__ __infer_variance__ args kwargs __default__ evaluate_default __doc__ __module__',
   'typing.ParamSpecArgs':
@@ -581,8 +560,6 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__module__ __firstlineno__ __type_params__ __doc__ __slots__ __abs__ __static_attributes__ __orig_bases__ __parameters__ _is_protocol __subclasshook__ __init__ __abstractmethods__ _abc_impl __annotate_func__ __annotations_cache__ __protocol_attrs__ _is_runtime_protocol __non_callable_proto_members__',
   'typing.SupportsRound':
     '__module__ __firstlineno__ __type_params__ __doc__ __slots__ __round__ __static_attributes__ __orig_bases__ __parameters__ _is_protocol __subclasshook__ __init__ __abstractmethods__ _abc_impl __annotate_func__ __annotations_cache__ __protocol_attrs__ _is_runtime_protocol __non_callable_proto_members__',
-  'typing.TextIO':
-    '__module__ __firstlineno__ __doc__ __slots__ buffer encoding errors line_buffering newlines __enter__ __static_attributes__ __orig_bases__ __parameters__',
   'typing.TypeAliasType':
     '__new__ __repr__ __iter__ __or__ __ror__ __getitem__ __reduce__ __name__ __parameters__ __type_params__ __value__ evaluate_value __module__ __doc__',
   'typing.TypeVar':
@@ -905,6 +882,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_is_unavailable',
         '_getblock',
         '_has_abstract_methods',
+        '_check_namespace',
         '_signature_bind',
         '_ALL_SUFFIXES',
         '_iscoroutinefunction',
@@ -975,7 +953,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ],
     ],
     posixpath: [[], ['SEEK_SET', 'SEEK_CUR', 'SEEK_END', 'SEEK_SET', 'SEEK_CUR', 'SEEK_END']],
-    pydoc: [[], ['_stand_in', '_check_class', '_unsupported', '_Unavailable', '_getmembers']],
+    pydoc: [[], ['_stand_in', '_check_class', '_unsupported', '_check_namespace', '_Unavailable', '_getmembers']],
     statistics: [[], ['_math']],
     string: [[], ['_formatter_parser', '_formatter_field_name_split', '_ChainMap']],
     threading: [
@@ -1516,7 +1494,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     'decimal.ConversionSyntax': [['__module__'], []],
     'decimal.Decimal': [['__getattribute__', '__sizeof__'], []],
     'decimal.DecimalException': [['__module__'], []],
-    'decimal.DecimalTuple': [[], []],
     'decimal.DivisionByZero': [['__module__'], []],
     'decimal.DivisionImpossible': [['__module__'], []],
     'decimal.DivisionUndefined': [['__module__'], []],
@@ -2164,7 +2141,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ['stack', '_has_frames'],
     ],
     'typing.Any': [['__module__', '__doc__', '__dict__'], []],
-    'typing.Generic': [['__class_getitem__', '__init_subclass__', '__module__'], []],
     'typing.NewType': [
       [
         '__module__',

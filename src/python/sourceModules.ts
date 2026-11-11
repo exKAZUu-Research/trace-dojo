@@ -3,6 +3,7 @@ import { allocateInstance, fieldsOf, makeCType } from './cTypes';
 import { builtin } from './define';
 import { Frame } from './frame';
 import { registerModule } from './modules';
+import { checkNamespaceView } from './namespaceDifferences';
 import { parsePython } from './parse';
 import type { Runtime } from './runtime';
 import { markAllSuspending } from './suspension';
@@ -111,6 +112,14 @@ function commonNatives(runtime: Runtime): [string, PyValue][] {
       '_put_slot',
       builtin('_put_slot', 'expected', 3, 3, ([self, index, value]) => {
         fieldsOf(self)[Number(index)] = value;
+        return None;
+      }),
+    ],
+    [
+      '_check_namespace',
+      // Refuses inspect.getmembers() and pydoc of an object whose namespace differs from CPython's.
+      builtin('_check_namespace', 'expected', 2, 2, ([value, listing]) => {
+        checkNamespaceView(value as PyValue, listing as string, true);
         return None;
       }),
     ],

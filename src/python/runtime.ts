@@ -610,7 +610,7 @@ function objectAttributeNames(value: PyValue): Set<string> {
   for (const each of cls.mro) add(each.dict.keys());
   if (value instanceof PyInstance || value instanceof PyFunction) add(value.dict.keys());
   add(['__class__', '__doc__']);
-  if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__dict__', '__module__']);
+  if (!cls.isBuiltin || (value instanceof PyClass && !value.isBuiltin)) add(['__module__']);
   if (value instanceof PyFunction) add(FUNCTION_ATTRIBUTES);
   if (value instanceof PyGenerator) add(GENERATOR_ATTRIBUTES[value.cls.name] ?? []);
   if (value instanceof PyInstance && value.exception) {

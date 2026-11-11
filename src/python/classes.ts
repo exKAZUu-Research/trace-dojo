@@ -100,11 +100,12 @@ export function createClass(
   namespace.set('__qualname__', def.qualifiedName);
   namespace.set('__firstlineno__', BigInt(firstRowOf(def) + 1));
   if (def.doc !== undefined) namespace.set('__doc__', def.doc);
-  if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
   const classCell = new PyCell();
   const body = runClassBody(evaluator, def, frame, namespace, classCell);
   const classDict = addClassAnnotate(def, frame, namespace, body.annotations);
   namespace.set('__static_attributes__', newTuple(def.staticAttributes));
+  // As __build_class__ does once the body has run.
+  if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
   const factory = bases.find(
     (base): base is PyClass => base instanceof PyClass && base.classFactory !== undefined
   )?.classFactory;

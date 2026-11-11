@@ -827,8 +827,32 @@ function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = namedtuple(args, kwargs) as PyClass;
   for (const [name, value] of namedTupleBase.dict) if (!cls.dict.has(name)) cls.dict.set(name, value);
   cls.dict.set('__module__', cls.module);
+  // The order of the namespace collections.namedtuple's code gives its class.
+  const fields = (cls.dict.get('_fields') as PyTuple).items as string[];
+  const entries = new Map(cls.dict);
+  cls.dict.clear();
+  for (const name of [...NAMED_TUPLE_ORDER, ...fields, '__module__', ...entries.keys()]) {
+    const value = entries.get(name);
+    if (value === undefined || cls.dict.has(name)) continue;
+    cls.dict.set(name, value);
+  }
   return cls;
 }
+
+const NAMED_TUPLE_ORDER = [
+  '__doc__',
+  '__slots__',
+  '_fields',
+  '_field_defaults',
+  '__new__',
+  '_make',
+  '__replace__',
+  '_replace',
+  '__repr__',
+  '_asdict',
+  '__getnewargs__',
+  '__match_args__',
+];
 
 /** The namedtuple class that a `typing.NamedTuple` class statement creates. */
 export function namedTupleClass(name: string, fields: string[], defaults: PyValue[]): PyClass {

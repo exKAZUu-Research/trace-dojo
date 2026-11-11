@@ -48,15 +48,25 @@ export function checkNamespaceListing(value: PyValue, listing: string): void {
  * Raises the unsupported error for `dir(value)` or `help(value)` when a namespace they show differs from CPython's:
  * the module's, or the class's and its bases'.
  */
-export function checkNamespaceView(value: PyValue, listing: string): void {
-  if (!enforced || currentRuntime().inLibraryCode()) return;
-  // dir() and help() sort the names, so that only a different set of names shows.
-  const differing =
-    value instanceof PyModule
-      ? moduleDifference(value, true)
-      : (ownDifference(value) ??
-        (value instanceof PyClass ? value : classOf(value)).mro.map((cls) => classDifference(cls, true)).find(Boolean));
+export function checkNamespaceView(value: PyValue, listing: string, fromLibrary = false): void {
+  if (!enforced || (!fromLibrary && currentRuntime().inLibraryCode())) return;
+  const differing = viewDifference(value, fromLibrary);
   if (differing) throw listingError(listing, differing);
+}
+
+// dir() and help() sort the names, so that only a different set of names shows.
+function viewDifference(value: PyValue, documenting: boolean): string | undefined {
+  if (value instanceof PyModule) {
+    const differing = moduleDifference(value, true);
+    if (differing || !documenting) return differing;
+    // A module's documentation shows its classes' namespaces too.
+    const classes = [...value.dict.values()].filter((each) => each instanceof PyClass && each.module === value.name);
+    return classes.map((each) => viewDifference(each, false)).find(Boolean);
+  }
+  return (
+    ownDifference(value) ??
+    (value instanceof PyClass ? value : classOf(value)).mro.map((cls) => classDifference(cls, true)).find(Boolean)
+  );
 }
 
 /** Raises the unsupported error for a program reading a name that only this grader's namespace has. */
