@@ -94,7 +94,11 @@ export class Runtime {
 
   // Budget ----------------------------------------------------------------------------------------------------------
 
+  /** The operations the run has spent, which the thread scheduler measures slices with. */
+  operations = 0;
+
   spend(cost = 1): void {
+    this.operations += cost;
     this.budget.spend(cost);
   }
 

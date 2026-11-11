@@ -3,7 +3,9 @@ import { addressOf } from '../conversions';
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument } from '../nativeArgs';
+import { toIndex } from '../numbers';
 import { callValue, isTruthy } from '../objects';
+import { currentRuntime } from '../runtimeContext';
 import {
   type Blocking,
   blockingBuiltin,
@@ -177,8 +179,28 @@ blockingMethod(handleClass, 'join', 'expected', [0, 1], function* (self, [timeou
   return None;
 });
 
+/** The stack size each run's `stack_size()` last set, which the threads of this interpreter do not use. */
+const stackSizes = new WeakMap<object, bigint>();
+/** The smallest stack and the page size that pthreads accept for one on the machine whose CPython this matches. */
+const THREAD_STACK_MIN = 53_248n;
+const PAGE_SIZE = 16_384n;
+
+/** `_thread.stack_size([size])`: sets the size, 0 when omitted, and returns the previous one. */
+function stackSize(args: PyValue[]): PyValue {
+  const runtime = currentRuntime();
+  const size = args.length === 0 ? 0n : toIndex(args[0]);
+  const previous = stackSizes.get(runtime) ?? 0n;
+  if (size !== 0n) {
+    if (size < THREAD_STACK_MIN) throw valueError(`size must be at least ${THREAD_STACK_MIN} bytes`);
+    if (size % PAGE_SIZE !== 0n) throw valueError(`size not valid: ${size} bytes`);
+  }
+  stackSizes.set(runtime, size);
+  return previous;
+}
+
 registerModule('_thread', () => {
   return new Map<string, PyValue>([
+    ['stack_size', builtin('stack_size', 'takes', 0, 1, stackSize)],
     ['LockType', lockClass],
     ['lock', lockClass],
     ['RLock', rlockClass],

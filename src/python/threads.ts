@@ -1,7 +1,10 @@
 // The deterministic scheduler of Python threads. CPython may switch threads every 5 ms, so the order of their steps
-// differs from run to run; here a thread runs until it waits (for a lock, an event, a queue, a join, or a sleep) or
-// ends, and the scheduler then runs the first thread, in the order they stopped running, whose wait is over. When no
-// thread can run, the virtual clock jumps to the earliest timeout; when none is pending either, it is a deadlock.
+// differs from run to run; here a thread runs until it waits (for a lock, an event, a queue, a join, or a sleep), ends,
+// or has run SLICE_OPERATIONS operations since it last started running and reaches the next iteration of a loop while
+// another thread can run, which stands in for CPython's switch interval so that a thread that never waits, such as one
+// spinning on a flag, cannot starve the others. The scheduler then runs the first thread, in the order they stopped
+// running, whose wait is over. When no thread can run, the virtual clock jumps to the earliest timeout; when none is
+// pending either, it is a deadlock.
 import { sleepFor, virtualNanoseconds } from './clock';
 import type { Frame } from './frame';
 import { type ArgStyle, checkArgs } from './nativeArgs';
@@ -60,6 +63,12 @@ export class PyThreadState {
   ) {}
 }
 
+/** The operations a thread runs before a loop lets another thread run, about what CPython runs in its 5 ms. */
+const SLICE_OPERATIONS = 100_000;
+
+/** What a loop yields to let the other threads run, which the thread is ready to resume from at once. */
+export const PREEMPTION = new WaitRequest(() => true);
+
 const MAIN_IDENT = 8_452_461_312n;
 const IDENT_STEP = 0x5_00_00n;
 
@@ -73,6 +82,8 @@ export class Scheduler {
   /** The threads not running, in the order they stopped. */
   private readonly queue: PyThreadState[] = [];
   private started = 0;
+  /** The operation count of the runtime when the current thread last started running. */
+  private sliceStart = 0;
 
   constructor(private readonly runtime: Runtime) {}
 
@@ -115,6 +126,12 @@ export class Scheduler {
       me.wait = undefined;
       this.restore(me);
     }
+  }
+
+  /** Whether the running thread has used its slice and another thread can run, at a loop's next iteration. */
+  shouldPreempt(): boolean {
+    if (this.alive.length < 2 || this.runtime.operations - this.sliceStart < SLICE_OPERATIONS) return false;
+    return this.queue.some((thread) => this.isReady(thread));
   }
 
   /** Whether a thread's wait is over. */
@@ -197,6 +214,7 @@ export class Scheduler {
   private restore(thread: PyThreadState): void {
     const { runtime } = this;
     this.current = thread;
+    this.sliceStart = runtime.operations;
     runtime.frames.push(...thread.frames);
     thread.frames = [];
     runtime.evaluator.attachHandling(thread.handling);

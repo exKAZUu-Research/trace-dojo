@@ -37,7 +37,7 @@ import {
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
 import { targetSuspends } from './suspension';
-import { isWaitRequest, schedulerOf, suspendingCall } from './threads';
+import { isWaitRequest, PREEMPTION, schedulerOf, suspendingCall } from './threads';
 import { genericBaseOf, newTypeParam, PyTypeAlias } from './typeParams';
 import {
   baseExceptionClass,
@@ -382,6 +382,7 @@ export class Evaluator extends AsyncEvaluator {
         const { test } = statement;
         while (isTruthy(test.suspends ? yield* this.evaluateSuspending(test, frame) : this.evaluate(test, frame))) {
           runtime.spend();
+          if (runtime.threads?.shouldPreempt()) yield PREEMPTION as unknown as PyValue;
           const completion = yield* this.block(statement.body, frame);
           if (completion === 'break') return undefined;
           if (completion && completion !== 'continue') return completion;
@@ -461,6 +462,7 @@ export class Evaluator extends AsyncEvaluator {
       const next = iterate(iterable);
       for (let item = next(); item !== DONE; item = next()) {
         runtime.spend();
+        if (runtime.threads?.shouldPreempt()) yield PREEMPTION as unknown as PyValue;
         runtime.currentRow = statement.row;
         if (suspendingTarget) yield* this.assignSuspending(target, item, frame);
         else this.assign(target, item, frame);
