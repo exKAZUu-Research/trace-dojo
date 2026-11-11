@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 524 -- The builtins module keeps every builtin function together.
+// code-gauge-allow-file fileNcss 531 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { checkShortcuts } from './checkShortcuts';
 import { buildClass } from './classes';
@@ -640,7 +640,14 @@ function getattr(args: PyValue[], kwargs: Kwargs): PyValue {
   const [object, name, fallback] = args;
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
   if (fallback === undefined) return readProgramAttribute(object, name, () => getAttribute(object, name));
-  return readProgramAttribute(object, name, () => getAttributeOrUndefined(object, name) ?? fallback);
+  return readProgramAttribute(object, name, () => {
+    const value = getAttributeOrUndefined(object, name);
+    if (value !== undefined) return value;
+    // A name CPython's namespace has is not one getattr() falls back for.
+    const feature = currentRuntime().inLibraryCode() ? undefined : missingNamespaceName(object, name);
+    if (feature !== undefined) throw new UnsupportedFeatureError(feature);
+    return fallback;
+  });
 }
 
 function sorted(args: PyValue[], kwargs: Kwargs): PyValue {

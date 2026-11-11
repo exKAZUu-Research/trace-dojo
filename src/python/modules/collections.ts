@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 517 -- The collections types and the methods of each belong together.
+// code-gauge-allow-file fileNcss 526 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';

@@ -179,7 +179,7 @@ const typedDicts = new WeakMap<
 
 typedDictBase.classFactory = createTypedDict;
 
-// code-gauge-allow functionNcss 44 -- Follows how typing._TypedDictMeta creates the class and merges the keys of its bases.
+// code-gauge-allow functionNcss 45 -- Follows how typing._TypedDictMeta creates the class and merges the keys of its bases.
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows how typing._TypedDictMeta merges the keys of its bases.
 function createTypedDict(
   def: ClassDef,

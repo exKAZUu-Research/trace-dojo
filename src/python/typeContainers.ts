@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 411 -- The list, tuple, and dict types keep their methods together.
+// code-gauge-allow-file fileNcss 436 -- The list, tuple, and dict types keep their methods together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { type DictEntry, DictStore } from './dictStore';
@@ -460,6 +460,11 @@ dictClass.dict.set('__hash__', None);
 dictKeysClass.dict.set('__hash__', None);
 dictItemsClass.dict.set('__hash__', None);
 
+function viewItem(entry: DictEntry, view: 'keys' | 'values' | 'items'): PyValue {
+  if (view === 'keys') return entry.key;
+  return view === 'values' ? entry.value : newTuple([entry.key, entry.value]);
+}
+
 /**
  * A reverse iterator over a dict, which reads the entries as they are when it reaches them, as CPython's does, and
  * fails once the dict's size changes.
@@ -470,8 +475,7 @@ function reversedDict(dict: PyDict, view: 'keys' | 'values' | 'items'): PyIterat
   let last: DictEntry | undefined;
   let remaining = size;
   let state: 'running' | 'failed' | 'done' = 'running';
-  const itemOf = (entry: DictEntry): PyValue =>
-    view === 'keys' ? entry.key : view === 'values' ? entry.value : newTuple([entry.key, entry.value]);
+  const itemOf = (entry: DictEntry): PyValue => viewItem(entry, view);
   const next = withRemaining(
     () => {
       if (state === 'done') return DONE;
@@ -499,8 +503,7 @@ function reversedDict(dict: PyDict, view: 'keys' | 'values' | 'items'): PyIterat
       return reduction('iter', [newList(items.slice(0, remaining))]);
     },
   });
-  const name = view === 'keys' ? 'key' : view === 'values' ? 'value' : 'item';
-  return new PyIterator(iteratorClass(`dict_reverse${name}iterator`), next, () => [dict]);
+  return new PyIterator(iteratorClass(`dict_reverse${view.slice(0, -1)}iterator`), next, () => [dict]);
 }
 
 for (const [cls, view] of [

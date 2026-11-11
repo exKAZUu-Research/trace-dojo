@@ -1,5 +1,6 @@
 import { NAMESPACE_DIFFERENCES } from './data/namespaceDifferences';
 import { isEnumClass } from './enums';
+import { getAttribute } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { classOf } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -95,6 +96,16 @@ export function readProgramAttribute(value: PyValue, name: string, read: () => P
   }
 }
 
+/** `object.name` in a program's code (see readProgramAttribute). */
+export function programAttribute(value: PyValue, name: string): PyValue {
+  checkExtraName(value, name);
+  try {
+    return getAttribute(value, name);
+  } catch (error) {
+    throw programAttributeError(error, value, name);
+  }
+}
+
 /** The error a program's reading of an attribute raises: the unsupported error for a name only CPython's has. */
 export function programAttributeError(error: unknown, value: PyValue, name: string): unknown {
   if (!enforced || !(error instanceof PyError) || error.exception.cls.name !== 'AttributeError') return error;
@@ -105,6 +116,7 @@ export function programAttributeError(error: unknown, value: PyValue, name: stri
 
 /** The feature to name for a name CPython's namespace of a module or of a class of `value` has and this one lacks. */
 export function missingNamespaceName(value: PyValue, name: string): string | undefined {
+  if (!enforced) return undefined;
   if (value instanceof PyModule) {
     return NAMESPACE_DIFFERENCES.modules[value.name]?.[0].includes(name) ? missingFeature(value.name, name) : undefined;
   }
@@ -174,7 +186,7 @@ function missingFeature(owner: string, name: string): string {
 function internals(name: string): string {
   const rule = machineryInternals(name);
   if (rule !== undefined) return `（${rule}）`;
-  const [missing = [], extra = []] = NAMESPACE_DIFFERENCES.classes[name] ?? NAMESPACE_DIFFERENCES.modules[name] ?? [];
+  const [missing, extra] = NAMESPACE_DIFFERENCES.classes[name] ?? NAMESPACE_DIFFERENCES.modules[name] ?? [[], []];
   const names = [...missing, ...extra];
   if (names.length === 0) return '（その順序）';
   const shown = names.slice(0, 3).join('、');

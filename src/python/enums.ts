@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 443 -- The enum machinery keeps the members, flags, and their boundaries together.
+// code-gauge-allow-file fileNcss 477 -- The enum machinery keeps the members, flags, and their boundaries together.
 import { pyRepr, pyStr } from './conversions';
 import { hashInt, pyHash } from './hashing';
 import { getItem } from './items';
@@ -23,6 +23,7 @@ import {
   typeClass,
   typeError,
 } from './types';
+import { UnsupportedFeatureError } from './unsupported';
 import {
   type Kwargs,
   PyBuiltinFunction,
@@ -655,6 +656,24 @@ export function enumClassData(cls: PyClass, name: string): PyValue | undefined {
     case '_value2member_map_': {
       return newDict([...named.values()].map((member): [PyValue, PyValue] => [member.enumValue as PyValue, member]));
     }
+    case '_member_type_': {
+      return memberTypeOf(cls);
+    }
+    case '_use_args_': {
+      return memberTypeOf(cls) !== objectClass;
+    }
+    case '_new_member_': {
+      return getAttribute(memberTypeOf(cls), '__new__');
+    }
+    case '_value_repr_': {
+      const type = memberTypeOf(cls);
+      return type === objectClass ? None : (type.lookup('__repr__') ?? None);
+    }
+    case '_hashable_values_':
+    case '_unhashable_values_':
+    case '_unhashable_values_map_': {
+      return hashableData(cls, name);
+    }
     case '_flag_mask_':
     case '_singles_mask_': {
       return isFlagClass(cls) ? flagMask(cls) : undefined;
@@ -665,6 +684,37 @@ export function enumClassData(cls: PyClass, name: string): PyValue | undefined {
     default: {
       return undefined;
     }
+  }
+}
+
+/** The data EnumType keeps in a member: its order among the members, and its class. */
+export function enumMemberData(member: PyInstance, name: string): PyValue | undefined {
+  if (name === '__objclass__') return member.cls;
+  if (name === '_sort_order_') return BigInt((member.cls.enumMembers ?? []).indexOf(member));
+  return undefined;
+}
+
+/** The type of the values of an Enum's members, as its first base that is no Enum gives. */
+function memberTypeOf(cls: PyClass): PyClass {
+  return cls.mro.find((base) => base !== objectClass && !isEnumClass(base) && base.isBuiltin) ?? objectClass;
+}
+
+/** The values of an Enum's members by whether they hash, which this grader keeps only for hashable values. */
+function hashableData(cls: PyClass, name: string): PyValue {
+  const values = [...new Set((cls.enumMembers ?? []).map((member) => member.enumValue as PyValue))];
+  if (values.some((value) => !isHashable(value))) {
+    throw new UnsupportedFeatureError(`ハッシュできない値の Enum の ${name}（EnumType の内部）`);
+  }
+  if (name === '_hashable_values_') return newList(values);
+  return name === '_unhashable_values_' ? newList([]) : newDict([]);
+}
+
+function isHashable(value: PyValue): boolean {
+  try {
+    pyHash(value);
+    return true;
+  } catch {
+    return false;
   }
 }
 

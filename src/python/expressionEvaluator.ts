@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 634 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss 635 -- The expression evaluator keeps one method per kind of expression together.
 import type {
   Argument,
   Comprehension,
@@ -15,14 +15,13 @@ import { newBytes } from './bytesValues';
 import { newComplex } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
-import { checkExtraName, programAttributeError } from './namespaceDifferences';
+import { programAttribute } from './namespaceDifferences';
 import { namespaceOf } from './namespaces';
 import {
   bindValue,
   callValue,
   deleteAttribute,
   deleteItem,
-  getAttribute,
   getItem,
   isTruthy,
   iterate,
@@ -98,13 +97,7 @@ export class ExpressionEvaluator {
         return this.dictDisplay(expression, frame);
       }
       case 'attribute': {
-        const object = this.evaluate(expression.object, frame);
-        checkExtraName(object, expression.name);
-        try {
-          return getAttribute(object, expression.name);
-        } catch (error) {
-          throw programAttributeError(error, object, expression.name);
-        }
+        return programAttribute(this.evaluate(expression.object, frame), expression.name);
       }
       case 'subscript': {
         const object = this.evaluate(expression.object, frame);
