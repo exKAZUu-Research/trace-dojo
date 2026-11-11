@@ -1,3 +1,4 @@
+import { bytesLikeData, latin1Text } from './bytesValues';
 import { complexRepr, newComplex } from './complexNumbers';
 import { pyRepr } from './conversions';
 import { method } from './define';
@@ -27,6 +28,7 @@ import {
   pyError,
   typeError,
   typeName,
+  unbox,
   valueError,
 } from './types';
 import { PyComplex, PyInstance, type PyValue } from './values';
@@ -44,20 +46,25 @@ intClass.construct = (cls, args, kwargs) => {
   if (base !== undefined) {
     const radix = Number(toIndex(base));
     if (radix !== 0 && (radix < 2 || radix > 36)) throw valueError('int() base must be >= 2 and <= 36, or 0');
-    if (typeof value !== 'string') throw typeError("int() can't convert non-string with explicit base");
-    return parseIntOrThrow(value, radix);
+    const text = unbox(value);
+    if (typeof text === 'string') return parseIntOrThrow(text, radix);
+    const data = bytesLikeData(value);
+    if (data === undefined) throw typeError("int() can't convert non-string with explicit base");
+    return parseIntOrThrow(latin1Text(data), radix, pyRepr(value));
   }
   void cls;
   return toInt(value);
 };
 
 /** `int(value)` for a value without a base. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows int() for each kind of argument.
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows int() for each kind of argument.
 export function toInt(value: PyValue): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'number') return floatToInt(value);
   if (typeof value === 'string') return parseIntOrThrow(value, 10);
+  const data = bytesLikeData(value);
+  if (data !== undefined) return parseIntOrThrow(latin1Text(data), 10, pyRepr(value));
   for (const name of ['__int__', '__index__', '__trunc__']) {
     const special = lookupSpecial(value, name);
     if (special === undefined) continue;
@@ -68,14 +75,15 @@ export function toInt(value: PyValue): bigint {
   }
   if (value instanceof PyInstance && value.enumValue !== undefined && typeof value.enumValue === 'bigint')
     return value.enumValue;
+  if (value instanceof PyInstance && typeof value.primitive === 'string') return parseIntOrThrow(value.primitive, 10);
   throw typeError(`int() argument must be a string, a bytes-like object or a real number, not '${typeName(value)}'`);
 }
 
-function parseIntOrThrow(text: string, base: number): bigint {
+function parseIntOrThrow(text: string, base: number, shown?: string): bigint {
   const result = parseIntText(text, base);
   if (result === undefined)
     throw valueError(
-      `invalid literal for int() with base ${base}: ${strRepr(text.length > 200 ? `${text.slice(0, 200)}` : text)}`
+      `invalid literal for int() with base ${base}: ${shown ?? strRepr(text.length > 200 ? `${text.slice(0, 200)}` : text)}`
     );
   return result;
 }
@@ -104,9 +112,6 @@ method(intClass, 'as_integer_ratio', 'none', 0, 0, (self) => newTuple([intLike(s
 method(intClass, 'is_integer', 'none', 0, 0, () => true);
 method(intClass, 'conjugate', 'none', 0, 0, (self) => intLike(self));
 method(intClass, '__round__', 'expected', 0, 1, (self, [digits]) => roundInt(intLike(self), digits));
-method(intClass, 'to_bytes', 'expected', 0, 3, () => {
-  throw valueError('int.to_bytes() はこの採点環境では使えません。');
-});
 
 /** `round(n, digits)` for an int, rounding halves to even. */
 export function roundInt(value: bigint, digits: PyValue | undefined): bigint {
@@ -137,7 +142,8 @@ floatClass.construct = (_cls, args, kwargs) => {
 };
 
 /** `float(value)`. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows float() for each kind of argument.
+// code-gauge-allow functionCognitiveComplexity 22 -- Follows float() for each kind of argument.
+// code-gauge-allow functionNcss 31 -- Follows float() for each kind of argument.
 export function toFloat(value: PyValue): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return intToFloat(value);
@@ -145,6 +151,12 @@ export function toFloat(value: PyValue): number {
   if (typeof value === 'string') {
     const result = parseFloatText(value);
     if (result === undefined) throw valueError(`could not convert string to float: ${strRepr(value)}`);
+    return result;
+  }
+  const data = bytesLikeData(value);
+  if (data !== undefined) {
+    const result = parseFloatText(latin1Text(data));
+    if (result === undefined) throw valueError(`could not convert string to float: ${pyRepr(value)}`);
     return result;
   }
   for (const name of ['__float__', '__index__']) {
@@ -155,6 +167,7 @@ export function toFloat(value: PyValue): number {
     if (name === '__index__' && (typeof result === 'bigint' || typeof result === 'boolean')) return toFloat(result);
     throw typeError(`${typeName(value)}.${name} returned non-float (type ${typeName(result)})`);
   }
+  if (value instanceof PyInstance && typeof value.primitive === 'string') return toFloat(value.primitive);
   throw typeError(`float() argument must be a string or a real number, not '${typeName(value)}'`);
 }
 
@@ -230,7 +243,8 @@ complexClass.construct = (_cls, args, kwargs) => {
   if (typeof real === 'string') return parseComplex(real);
   const [a, b] = toParts(real);
   const [c, d] = toParts(imag);
-  return newComplex(a - d, b + c);
+  // As complex_new does, only complex parts add terms, so that the signs of zero parts survive.
+  return newComplex(imag instanceof PyComplex ? a - d : a, real instanceof PyComplex ? b + c : c);
 };
 
 function toParts(value: PyValue): [number, number] {

@@ -4,46 +4,46 @@ import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { exceptionClassNamed, newException, None, typeError, valueError } from '../types';
 import { PyError, type PyValue } from '../values';
+import { sysInformation, sysModules } from './sysInfo';
 
-registerModule(
-  'sys',
-  (runtime) =>
-    new Map<string, PyValue>([
-      [
-        'exit',
-        builtin('exit', 'expected', 0, 1, (args) => {
-          throw runtime.systemExit(args[0]);
-        }),
-      ],
-      ['maxsize', 2n ** 63n - 1n],
-      [
-        'get_int_max_str_digits',
-        builtin('get_int_max_str_digits', 'none', 0, 0, () => BigInt(runtime.intMaxStrDigits)),
-      ],
-      [
+registerModule('sys', (runtime, namespace) => {
+  const entries = new Map<string, PyValue>([
+    [
+      'exit',
+      builtin('exit', 'expected', 0, 1, (args) => {
+        throw runtime.systemExit(args[0]);
+      }),
+    ],
+    ['maxsize', 2n ** 63n - 1n],
+    ['get_int_max_str_digits', builtin('get_int_max_str_digits', 'none', 0, 0, () => BigInt(runtime.intMaxStrDigits))],
+    [
+      'set_int_max_str_digits',
+      builtin(
         'set_int_max_str_digits',
-        builtin(
-          'set_int_max_str_digits',
-          'takes',
-          0,
-          1,
-          (args, kwargs) => {
-            const value = argument(args, kwargs, 0, 'maxdigits');
-            if (value === undefined) {
-              throw typeError("set_int_max_str_digits() missing required argument 'maxdigits' (pos 1)");
-            }
-            const limit = toIndex(value);
-            if (limit !== 0n && limit < 640n) throw valueError('maxdigits must be >= 640 or 0 for unlimited');
-            runtime.intMaxStrDigits = Number(limit);
-            return None;
-          },
-          { keywords: ['maxdigits'] }
-        ),
-      ],
-      ['stdout', runtime.standardStream('stdout')],
-      ['stderr', runtime.standardStream('stderr')],
-    ])
-);
+        'takes',
+        0,
+        1,
+        (args, kwargs) => {
+          const value = argument(args, kwargs, 0, 'maxdigits');
+          if (value === undefined) {
+            throw typeError("set_int_max_str_digits() missing required argument 'maxdigits' (pos 1)");
+          }
+          const limit = toIndex(value);
+          if (limit !== 0n && limit < 640n) throw valueError('maxdigits must be >= 640 or 0 for unlimited');
+          runtime.intMaxStrDigits = Number(limit);
+          return None;
+        },
+        { keywords: ['maxdigits'] }
+      ),
+    ],
+    ['stdout', runtime.standardStream('stdout')],
+    ['stderr', runtime.standardStream('stderr')],
+    ...sysInformation(runtime),
+  ]);
+  for (const [key, value] of entries) namespace.set(key, value);
+  namespace.set('modules', sysModules(runtime));
+  return new Map();
+});
 
 export function systemExitError(code: PyValue | undefined): PyError {
   return new PyError(newException(exceptionClassNamed('SystemExit'), code === undefined ? [] : [code]));

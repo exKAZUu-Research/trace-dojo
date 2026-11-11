@@ -1,8 +1,18 @@
 import { classAttribute, specialAttribute } from './attributes';
-import { isDataDescriptor, isNonDataDescriptor, readDescriptor } from './descriptors';
+import { PyBytes, PyMemoryView } from './bytesValues';
+import {
+  callGetter,
+  customGetattribute,
+  descriptorGetter,
+  getWithCustomGetattribute,
+  isDataDescriptor,
+  ownDict,
+} from './descriptors';
 import { getItem as getItemOf } from './items';
+import { namespaceDict } from './namespaces';
 import { describeIntegerIndex, toIndex } from './numbers';
 import { currentRuntime } from './runtimeContext';
+import { isMember, readMember } from './slots';
 import { iterStr, strLength } from './strings';
 import { superAttribute } from './typeObject';
 import {
@@ -12,8 +22,10 @@ import {
   dictKeysClass,
   exceptionClassNamed,
   frozensetClass,
+  isIteratorGenerator,
   iteratorClass,
   methodClass,
+  methodWrapperClass,
   newList,
   None,
   NotImplemented,
@@ -22,6 +34,8 @@ import {
   staticmethodClass,
   typeError,
   typeName,
+  unbox,
+  wrapperDescriptorClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -30,18 +44,18 @@ import {
   PyBoundMethod,
   PyBuiltinFunction,
   PyClass,
+  PyDeque,
   PyDescriptor,
   PyDict,
   PyDictView,
   PyError,
   PyFunction,
-  PyGenerator,
+  type PyGenerator,
   PyInstance,
   PyIterator,
   PyList,
   PyModule,
-  PyObject,
-  PyOpaque,
+  type PyObject,
   PyRange,
   PySet,
   PySuper,
@@ -56,7 +70,7 @@ export function callValue(fn: PyValue, args: PyValue[], kwargs?: Kwargs): PyValu
   if (fn instanceof PyFunction) return currentRuntime().callFunction(fn, args, kwargs);
   if (fn instanceof PyBuiltinFunction) {
     currentRuntime().spend();
-    return fn.run(fn.self === undefined ? args : [fn.self, ...args], kwargs);
+    return fn.run(fn.self === undefined || fn.binding === 'static' ? args : [fn.self, ...args], kwargs);
   }
   if (fn instanceof PyBoundMethod) return callValue(fn.fn, [fn.self, ...args], kwargs);
   if (fn instanceof PyClass) return currentRuntime().instantiate(fn, args, kwargs);
@@ -90,14 +104,15 @@ export function callSpecial(value: PyValue, name: string, args: PyValue[]): PyVa
 }
 
 /** Binds a class attribute to an instance, as a descriptor's `__get__` would. */
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of descriptor binding.
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of descriptor binding.
 export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass = classOf(instance)): PyValue {
   if (attribute instanceof PyFunction) return new PyBoundMethod(methodClass, instance, attribute);
   if (attribute instanceof PyBuiltinFunction && attribute.self === undefined) {
-    if (attribute.binding === 'static') return attribute;
-    const self = attribute.binding === 'class' ? owner : instance;
+    // A builtin function, such as `time.localtime` stored as a class attribute, is not a descriptor in CPython.
+    if (attribute.binding === 'static' || attribute.cls === builtinFunctionClass) return attribute;
+    const self = attribute.binding === 'class' ? owner : mixinSelf(attribute, instance);
     return new PyBuiltinFunction(
-      builtinFunctionClass,
+      attribute.cls === wrapperDescriptorClass ? methodWrapperClass : builtinFunctionClass,
       attribute.name,
       attribute.run,
       self,
@@ -105,13 +120,6 @@ export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass 
       attribute.ownerName
     );
   }
-  if (attribute instanceof PyInstance && !attribute.cls.isBuiltin) {
-    // Only classes of library code written in Python define __get__.
-    const get = attribute.cls.lookup('__get__');
-    if (get !== undefined) return callValue(bindValue(get, attribute), [instance, owner]);
-  }
-  if (attribute instanceof PyObject && attribute.cls.nativeGet)
-    return attribute.cls.nativeGet(attribute, instance, owner);
   if (attribute instanceof PyDescriptor) {
     if (attribute.cls === staticmethodClass) return attribute.fn;
     if (attribute.cls === classmethodClass) return bindToClass(attribute.fn, owner);
@@ -123,6 +131,15 @@ export function bindValue(attribute: PyValue, instance: PyValue, owner: PyClass 
   return attribute;
 }
 
+/** The str or int that a method of `str` or `int` runs on for a member of an Enum mixing in that type. */
+function mixinSelf(method: PyBuiltinFunction, instance: PyValue): PyValue {
+  if (!(instance instanceof PyInstance) || instance.enumValue === undefined) return instance;
+  const { enumValue } = instance;
+  if (method.ownerName === 'str' && typeof enumValue === 'string') return enumValue;
+  if (method.ownerName === 'int' && typeof enumValue === 'bigint') return enumValue;
+  return instance;
+}
+
 function bindToClass(fn: PyValue, cls: PyClass): PyValue {
   return new PyBoundMethod(methodClass, cls, fn);
 }
@@ -130,7 +147,7 @@ function bindToClass(fn: PyValue, cls: PyClass): PyValue {
 export function attributeError(value: PyValue, name: string): PyError {
   const message =
     value instanceof PyClass
-      ? `type object '${value.name}' has no attribute '${name}'`
+      ? `type object '${value.typeName ?? value.name}' has no attribute '${name}'`
       : value instanceof PyModule
         ? `module '${value.name}' has no attribute '${name}'`
         : `'${typeName(value)}' object has no attribute '${name}'`;
@@ -145,9 +162,11 @@ export function attributeError(value: PyValue, name: string): PyError {
 
 /** Reads `value.name`, raising AttributeError when it is missing. */
 export function getAttribute(value: PyValue, name: string): PyValue {
+  const custom = customGetattribute(value);
+  if (custom !== undefined) return getWithCustomGetattribute(value, name, custom);
   const found = findAttribute(value, name);
   if (found !== undefined) return found;
-  const getattr = value instanceof PyClass ? undefined : lookupSpecial(value, '__getattr__');
+  const getattr = lookupSpecial(value, '__getattr__');
   if (getattr !== undefined) return callValue(bindValue(getattr, value), [name]);
   throw attributeError(value, name);
 }
@@ -162,41 +181,48 @@ export function getAttributeOrUndefined(value: PyValue, name: string): PyValue |
   }
 }
 
-// code-gauge-allow functionNcss 35 -- Follows the order CPython looks up an attribute in.
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows the order CPython looks up an attribute in.
+/** `object.__getattribute__`: reads an attribute without the program's `__getattribute__` and `__getattr__`. */
+export function genericGetAttribute(value: PyValue, name: string): PyValue {
+  const found = findAttribute(value, name);
+  if (found === undefined) throw attributeError(value, name);
+  return found;
+}
+
 function findAttribute(value: PyValue, name: string): PyValue | undefined {
   if (value instanceof PyClass) return classAttribute(value, name);
-  if (value instanceof PyModule) {
-    const feature = value.unsupported.get(name);
-    if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-    return value.attribute(name);
-  }
-  if (value instanceof PySuper) {
-    const found = superAttribute(value, name);
-    if (found !== undefined) return found;
-    const own = value.cls.lookup(name);
-    return isDataDescriptor(own) ? readDescriptor(own, value) : undefined;
-  }
+  if (value instanceof PyModule) return moduleAttribute(value, name);
+  if (value instanceof PySuper) return superAttribute(value, name);
   const cls = classOf(value);
   const special = specialAttribute(value, name);
   if (special !== undefined) return special;
   const attribute = cls.lookup(name);
-  if (isDataDescriptor(attribute)) return readDescriptor(attribute, value);
+  if (attribute === undefined) return ownDict(value)?.get(name);
   if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) return bindValue(attribute, value, cls);
-  if (value instanceof PyInstance || value instanceof PyFunction) {
-    const own = value.dict.get(name);
-    if (own !== undefined) return own;
-  }
-  const opaqueOwn = value instanceof PyOpaque ? value.attributes?.get(name) : undefined;
-  if (opaqueOwn !== undefined) return opaqueOwn;
-  if (isNonDataDescriptor(attribute)) return readDescriptor(attribute, value);
-  if (attribute === undefined) return undefined;
+  if (isMember(attribute)) return readMember(attribute, value as PyObject);
+  const getter = descriptorGetter(attribute);
+  if (getter !== undefined && isDataDescriptor(attribute)) return callGetter(getter, attribute, value, cls);
+  const own = ownDict(value)?.get(name);
+  if (own !== undefined) return own;
+  if (getter !== undefined) return callGetter(getter, attribute, value, cls);
   return bindValue(attribute, value, cls);
+}
+
+function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
+  const feature = module.unsupported.get(name);
+  if (feature !== undefined) throw new UnsupportedFeatureError(feature);
+  return name === '__dict__' ? namespaceDict(module.dict) : module.dict.get(name);
 }
 
 export { deleteAttribute, setAttribute } from './attributes';
 
 // Truth, length, and items ------------------------------------------------------------------------------------------
+
+/** A special method that a program's subclass of a builtin type defines over the builtin type's, or undefined. */
+export function overriding(value: PyValue, name: string): PyValue | undefined {
+  if (typeof value !== 'object' || value.cls.isBuiltin) return undefined;
+  const method = value.cls.lookup(name);
+  return method === undefined || method instanceof PyBuiltinFunction ? undefined : method;
+}
 
 export function isTruthy(value: PyValue): boolean {
   switch (typeof value) {
@@ -214,11 +240,10 @@ export function isTruthy(value: PyValue): boolean {
     }
   }
   if (value === None) return false;
-  if (value instanceof PyList || (value instanceof PyTuple && !(value instanceof PyInstance)))
-    return value.items.length > 0;
-  if (value instanceof PyDict) return value.store.size > 0;
-  if (value instanceof PySet) return value.table.size > 0;
-  if (value instanceof PyRange) return value.length > 0n;
+  if (overriding(value, '__bool__') === undefined && overriding(value, '__len__') === undefined) {
+    const truth = builtinTruth(value);
+    if (truth !== undefined) return truth;
+  }
   const bool = lookupSpecial(value, '__bool__');
   if (bool !== undefined) {
     const result = callValue(bindValue(bool, value), []);
@@ -230,9 +255,33 @@ export function isTruthy(value: PyValue): boolean {
   return true;
 }
 
+function builtinTruth(value: PyValue): boolean | undefined {
+  if (value instanceof PyList || value instanceof PyTuple) return value.items.length > 0;
+  if (value instanceof PyDict) return value.store.size > 0;
+  if (value instanceof PySet) return value.table.size > 0;
+  if (value instanceof PyRange) return value.length > 0n;
+  return undefined;
+}
+
 /** Python's `len()`. */
 export function lengthOf(value: PyValue): number {
   if (typeof value === 'string') return strLength(value);
+  if (overriding(value, '__len__') === undefined) {
+    const length = builtinLength(value);
+    if (length !== undefined) return length;
+  }
+  const len = lookupSpecial(value, '__len__');
+  if (len === undefined) throw typeError(`object of type '${typeName(value)}' has no len()`);
+  const result = unbox(callValue(bindValue(len, value), []));
+  if (typeof result !== 'bigint' && typeof result !== 'boolean') {
+    throw typeError(`'${typeName(result)}' object cannot be interpreted as an integer`);
+  }
+  const length = BigInt(result);
+  if (length < 0n) throw pyError('ValueError', '__len__() should return >= 0');
+  return Number(length);
+}
+
+function builtinLength(value: PyValue): number | undefined {
   if (value instanceof PyList || value instanceof PyTuple) return value.items.length;
   if (value instanceof PyDict) return value.store.size;
   if (value instanceof PySet) return value.table.size;
@@ -244,15 +293,7 @@ export function lengthOf(value: PyValue): number {
       throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
     return Number(length);
   }
-  const len = lookupSpecial(value, '__len__');
-  if (len === undefined) throw typeError(`object of type '${typeName(value)}' has no len()`);
-  const result = callValue(bindValue(len, value), []);
-  if (typeof result !== 'bigint' && typeof result !== 'boolean') {
-    throw typeError(`'${typeName(result)}' object cannot be interpreted as an integer`);
-  }
-  const length = BigInt(result);
-  if (length < 0n) throw pyError('ValueError', '__len__() should return >= 0');
-  return Number(length);
+  return undefined;
 }
 
 export { deleteItem, getItem, setItem } from './items';
@@ -263,16 +304,26 @@ export type NextFunction = () => PyValue | typeof DONE;
 
 /** Starts iterating a value, returning a function that gives the next item or DONE. */
 export function iterate(value: PyValue): NextFunction {
-  if (value instanceof PyList || (value instanceof PyTuple && !hasOwnIter(value))) return iterateItems(value);
+  if (typeof value === 'string') return iterateString(value);
+  if (overriding(value, '__iter__') === undefined) {
+    const next = builtinIterate(value);
+    if (next !== undefined) return next;
+  }
+  return iterateByProtocol(value);
+}
+
+/** Iterates a builtin iterable natively, or returns undefined for any other value. */
+function builtinIterate(value: PyValue): NextFunction | undefined {
+  if (value instanceof PyList || value instanceof PyTuple) return iterateItems(value);
   if (typeof value === 'string') return iterateString(value);
   if (value instanceof PyRange) return iterateRange(value);
-  if (value instanceof PyDict && !hasOwnIter(value)) return iterateDict(value, 'keys');
+  if (value instanceof PyDict) return iterateDict(value, 'keys');
   if (value instanceof PyDictView) return iterateDict(value.dict, value.view);
   if (value instanceof PySet) return iterateSet(value);
   if (value instanceof PyIterator) return value.next;
-  if (value instanceof PyGenerator) return iterateGenerator(value);
+  if (isIteratorGenerator(value)) return iterateGenerator(value);
   if (value instanceof PyClass && value.enumMembers) return iterate(newList([...value.enumMembers]));
-  return iterateByProtocol(value);
+  return undefined;
 }
 
 function iterateItems(sequence: PyList | PyTuple): NextFunction {
@@ -328,17 +379,10 @@ function iterateByProtocol(value: PyValue): NextFunction {
   return nextOf(iterator);
 }
 
-function hasOwnIter(value: PyObject): boolean {
-  return (
-    !value.cls.isBuiltin &&
-    value.cls.lookup('__iter__') !== value.cls.mro.find((cls) => cls.isBuiltin)?.dict.get('__iter__')
-  );
-}
-
 /** The next function of an iterator object, which calls its `__next__` until it raises StopIteration. */
 export function nextOf(iterator: PyValue): NextFunction {
   if (iterator instanceof PyIterator) return iterator.next;
-  if (iterator instanceof PyGenerator) return () => currentRuntime().resumeGenerator(iterator);
+  if (isIteratorGenerator(iterator)) return () => currentRuntime().resumeGenerator(iterator);
   const next = lookupSpecial(iterator, '__next__');
   if (next === undefined) throw typeError(`iter() returned non-iterator of type '${typeName(iterator)}'`);
   const bound = bindValue(next, iterator);
@@ -388,7 +432,9 @@ function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunct
 
 /** All the items an iterable yields. */
 export function toArray(value: PyValue): PyValue[] {
-  if (value instanceof PyList || (value instanceof PyTuple && !hasOwnIter(value))) return [...value.items];
+  if ((value instanceof PyList || value instanceof PyTuple) && overriding(value, '__iter__') === undefined) {
+    return [...value.items];
+  }
   const next = iterate(value);
   const items: PyValue[] = [];
   const runtime = currentRuntime();
@@ -401,33 +447,33 @@ export function toArray(value: PyValue): PyValue[] {
 
 /** The iterator object `iter()` returns. */
 export function getIterator(value: PyValue): PyValue {
-  if (value instanceof PyIterator || value instanceof PyGenerator) return value;
+  if (value instanceof PyIterator || isIteratorGenerator(value)) return value;
   const iter = lookupSpecial(value, '__iter__');
-  if (iter !== undefined && iter !== None && !(classOf(value).isBuiltin && iter instanceof PyBuiltinFunction)) {
+  if (iter !== undefined && iter !== None && !(iter instanceof PyBuiltinFunction)) {
     const iterator = callValue(bindValue(iter, value), []);
     if (lookupSpecial(iterator, '__next__') === undefined) {
       throw typeError(`iter() returned non-iterator of type '${typeName(iterator)}'`);
     }
     return iterator;
   }
-  const base = iterate(value);
-  let consumed = 0;
-  let exhausted = false;
-  const next = (): PyValue | typeof DONE => {
-    const item = base();
-    if (item === DONE) exhausted = true;
-    else consumed++;
-    return item;
-  };
-  const iterator = new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
-  iterator.lengthHint = () => (exhausted ? 0 : Math.max(0, lengthOf(value) - consumed));
-  return iterator;
+  const next = iterate(value);
+  return new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
 }
 
+/** The iterator the `__iter__` of a builtin iterable returns, which iterates it natively whatever its class. */
+export function builtinIterator(value: PyValue): PyValue {
+  const next = builtinIterate(value) ?? iterate(value);
+  return new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per builtin iterable.
 function iteratorNameOf(value: PyValue): string {
   // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
   if (typeof value === 'string') return /^[\u0000-\u007F]*$/.test(value) ? 'str_ascii_iterator' : 'str_iterator';
   if (value instanceof PyList) return 'list_iterator';
+  if (value instanceof PyDeque) return 'collections._deque_iterator';
+  if (value instanceof PyBytes) return value.isMutable ? 'bytearray_iterator' : 'bytes_iterator';
+  if (value instanceof PyMemoryView) return 'memory_iterator';
   if (value instanceof PyTuple) return 'tuple_iterator';
   if (value instanceof PyRange) return 'range_iterator';
   if (value instanceof PySet) return 'set_iterator';

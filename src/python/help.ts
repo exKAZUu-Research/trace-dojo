@@ -1,0 +1,63 @@
+import { pyStr } from './conversions';
+import { getDoc } from './modules/inspect';
+import { signature } from './modules/inspectSignature';
+import { callValue } from './objects';
+import { currentRuntime } from './runtimeContext';
+import { classOf, None } from './types';
+import { UnsupportedFeatureError } from './unsupported';
+import { PyBoundMethod, PyClass, PyFunction, type PyValue } from './values';
+
+/**
+ * `help(obj)` of a function or method the program defines, which prints what pydoc's text renderer does. The help of
+ * other objects shows CPython's docstrings and pydoc's layout of classes and modules, which this grader does not have.
+ */
+export function help(args: PyValue[]): PyValue {
+  if (args.length === 0) throw new UnsupportedFeatureError('対話型のヘルプ（引数のない help()）');
+  if (args.length > 1) throw new UnsupportedFeatureError('help() に 2 つ以上の引数を渡すこと');
+  const [value] = args;
+  const fn = value instanceof PyBoundMethod ? value.fn : value;
+  if (!(fn instanceof PyFunction)) {
+    throw new UnsupportedFeatureError('help() で表示する、組み込みのオブジェクトやクラスやモジュールの説明');
+  }
+  if (fn.module !== '__main__') throw new UnsupportedFeatureError('help() で表示する、exec() で定義した関数の説明');
+  const kind = value instanceof PyBoundMethod ? 'method' : 'function';
+  const text = `Help on ${kind} ${fn.name} in module __main__:\n\n${documentRoutine(value, fn)}\n`;
+  const runtime = currentRuntime();
+  runtime.buildString(text.length);
+  callValue(runtime.builtins.get('print') as PyValue, [text], new Map([['end', '']]));
+  return None;
+}
+
+/** `pydoc.TextDoc.docroutine`: the declaration of a function, then its docstring indented. */
+function documentRoutine(value: PyValue, fn: PyFunction): string {
+  let note = '';
+  if (value instanceof PyBoundMethod) {
+    const { self } = value;
+    note =
+      self instanceof PyClass
+        ? ` class method of ${className(self)}`
+        : ` method of ${className(classOf(self))} instance`;
+  }
+  const argspec = pyStr(signature(value));
+  // pydoc writes `async ` before the name of a coroutine function or an async generator function.
+  const qualifier = fn.def.scope.isAsync === true ? 'async ' : '';
+  const declaration =
+    fn.name === '<lambda>'
+      ? `<lambda> lambda ${argspec.slice(1, -1)}${note}`
+      : `${qualifier}${fn.name}${argspec}${note}`;
+  const doc = getDoc(value);
+  const body = typeof doc === 'string' && doc !== '' ? `${indent(doc)}\n` : '';
+  return `${declaration}\n${body}`;
+}
+
+/** `pydoc.classname` with no module of the document, which qualifies every class with its module. */
+function className(cls: PyClass): string {
+  return `${cls.module}.${cls.name}`;
+}
+
+function indent(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => `    ${line}`.trimEnd())
+    .join('\n');
+}

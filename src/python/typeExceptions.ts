@@ -13,7 +13,7 @@ import {
   typeError,
   typeName,
 } from './types';
-import { type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
+import { type ExceptionState, type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
 
 const instanceOf = (self: PyValue): PyInstance => self as PyInstance;
 
@@ -24,19 +24,68 @@ function rejectKeywords(cls: PyClass, kwargs: Kwargs): void {
 baseExceptionClass.construct = (cls, args, kwargs) => {
   if (cls.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) return constructGroup(cls, args, kwargs);
   if (cls.isBuiltin) rejectKeywords(cls, kwargs);
-  const exception = new PyInstance(cls);
+  const exception = new PyInstance(osErrorSubclass(cls, args));
   exception.exception = { args: newTuple(args), suppressContext: false };
+  if (isOSError(exception)) setOSErrorArgs(exception.exception, args);
   return exception;
 };
 for (const cls of exceptionClasses.values())
-  if (cls !== baseExceptionClass) cls.construct = baseExceptionClass.construct;
+  if (cls !== baseExceptionClass) cls.construct ??= baseExceptionClass.construct;
 
 method(baseExceptionClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args, kwargs) => {
   rejectKeywords(instanceOf(self).cls, kwargs);
   const state = instanceOf(self).exception;
   if (state && !state.exceptions) state.args = newTuple(args);
+  if (state && isOSError(instanceOf(self))) setOSErrorArgs(state, args);
   return None;
 });
+
+/**
+ * The subclass `OSError(errno, strerror)` creates for the error numbers of macOS that one stands for, such as
+ * FileNotFoundError for ENOENT.
+ */
+const OS_ERROR_SUBCLASSES = new Map<number, string>([
+  [1, 'PermissionError'],
+  [2, 'FileNotFoundError'],
+  [3, 'ProcessLookupError'],
+  [4, 'InterruptedError'],
+  [10, 'ChildProcessError'],
+  [13, 'PermissionError'],
+  [17, 'FileExistsError'],
+  [20, 'NotADirectoryError'],
+  [21, 'IsADirectoryError'],
+  [32, 'BrokenPipeError'],
+  [35, 'BlockingIOError'],
+  [36, 'BlockingIOError'],
+  [37, 'BlockingIOError'],
+  [53, 'ConnectionAbortedError'],
+  [54, 'ConnectionResetError'],
+  [58, 'BrokenPipeError'],
+  [60, 'TimeoutError'],
+  [61, 'ConnectionRefusedError'],
+]);
+
+function osErrorSubclass(cls: PyClass, args: readonly PyValue[]): PyClass {
+  if (cls !== exceptionClassNamed('OSError') || args.length < 2 || args.length > 5) return cls;
+  const code = args[0];
+  if (typeof code !== 'bigint' && typeof code !== 'boolean') return cls;
+  const name = OS_ERROR_SUBCLASSES.get(Number(code));
+  return name === undefined ? cls : exceptionClassNamed(name);
+}
+
+function isOSError(exception: PyInstance): boolean {
+  return exception.cls.isSubclassOf(exceptionClassNamed('OSError'));
+}
+
+/** Takes the file names out of an OSError's arguments, as `OSError(errno, strerror, filename)` does. */
+function setOSErrorArgs(state: ExceptionState, args: readonly PyValue[]): void {
+  state.filename = undefined;
+  state.filename2 = undefined;
+  if (args.length < 3 || args.length > 5 || args[2] === None) return;
+  state.filename = args[2];
+  if (args.length === 5) state.filename2 = args[4];
+  state.args = newTuple(args.slice(0, 2));
+}
 method(baseExceptionClass, '__str__', 'none', 0, 0, (self) => exceptionStr(instanceOf(self)));
 method(baseExceptionClass, '__repr__', 'none', 0, 0, (self) => {
   const exception = instanceOf(self);
@@ -69,7 +118,12 @@ export function exceptionStr(exception: PyInstance): string {
   const args = state.args.items;
   const is = (name: string): boolean => exception.cls.mro.some((cls) => cls.isBuiltin && cls.name === name);
   if (is('KeyError') && args.length === 1) return pyRepr(args[0]);
-  if (is('OSError') && args.length >= 2) return `[Errno ${pyStr(args[0])}] ${pyStr(args[1])}`;
+  if (is('OSError') && args.length >= 2 && args.length <= 5) {
+    const message = `[Errno ${pyStr(args[0])}] ${pyStr(args[1])}`;
+    if (state.filename === undefined) return message;
+    if (state.filename2 === undefined) return `${message}: ${pyRepr(state.filename)}`;
+    return `${message}: ${pyRepr(state.filename)} -> ${pyRepr(state.filename2)}`;
+  }
   if (args.length === 0) return '';
   if (args.length === 1) return pyStr(args[0]);
   return pyStr(newTuple(args));

@@ -1,14 +1,29 @@
-// code-gauge-allow-file fileNcss 581 -- The statement evaluator keeps one method per kind of statement together.
-import type { ExceptHandler, Expression, MatchCase, Pattern, Statement, Target } from './ast';
+// code-gauge-allow-file fileNcss 830 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+import type {
+  ClassDef,
+  ExceptHandler,
+  Expression,
+  FunctionDef,
+  MatchCase,
+  Pattern,
+  ScopeInfo,
+  Statement,
+  Target,
+  TypeParam,
+} from './ast';
+import { AsyncEvaluator } from './asyncEvaluator';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
+import { asyncYield } from './coroutines';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
-import { ExpressionEvaluator, mappingEntries } from './expressionEvaluator';
+import { mappingEntries } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import {
   bindValue,
   callValue,
+  deleteAttribute,
+  deleteItem,
   getAttribute,
   getAttributeOrUndefined,
   getItem,
@@ -20,8 +35,12 @@ import {
 } from './objects';
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
+import { targetSuspends } from './suspension';
+import { isWaitRequest, schedulerOf, suspendingCall } from './threads';
+import { genericBaseOf, newTypeParam, PyTypeAlias } from './typeParams';
 import {
   baseExceptionClass,
+  classOf,
   exceptionClassNamed,
   isInstanceOf,
   newDict,
@@ -36,15 +55,17 @@ import {
 import { UnsupportedFeatureError } from './unsupported';
 import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyTuple, type PyValue } from './values';
 
+const NO_EXCEPTIONS: PyInstance[] = [];
+
 type Completion = undefined | 'break' | 'continue' | { value: PyValue };
-type Execution = Generator<PyValue, Completion, unknown>;
+type Execution = Generator<PyValue, Completion, PyValue>;
 /** How a part of a try statement ended: normally with a completion, or with an exception still to raise. */
 interface Outcome {
   pending?: PyError;
   completion?: Completion;
 }
 
-export class Evaluator extends ExpressionEvaluator {
+export class Evaluator extends AsyncEvaluator {
   /** The exceptions being handled, innermost last, which a bare `raise` re-raises and new exceptions chain to. */
   private readonly handling: PyInstance[] = [];
 
@@ -52,24 +73,44 @@ export class Evaluator extends ExpressionEvaluator {
     super(runtime);
   }
 
+  /** The exception being handled innermost, as `sys.exception()` returns it, or undefined outside handlers. */
+  get handledException(): PyInstance | undefined {
+    return this.handling.at(-1);
+  }
+
   runFunction(fn: PyFunction, frame: Frame): PyValue {
     const { body } = fn.def;
     if (!Array.isArray(body)) return this.evaluate(body, frame);
-    const result = this.block(body, frame).next();
-    if (!result.done) throw new Error('A function that is not a generator yielded');
-    const completion = result.value;
+    const completion = runToEnd(this.block(body, frame));
     return typeof completion === 'object' ? completion.value : None;
   }
 
-  *runGenerator(fn: PyFunction, frame: Frame): Generator<PyValue, PyValue, unknown> {
-    const completion = yield* this.block(fn.def.body as Statement[], frame);
+  *runGenerator(fn: PyFunction, frame: Frame): Generator<PyValue, PyValue, PyValue> {
+    const { body } = fn.def;
+    if (!Array.isArray(body)) return yield* this.evaluateSuspending(body, frame);
+    const completion = yield* this.block(body, frame);
     return typeof completion === 'object' ? completion.value : None;
+  }
+
+  /** Puts back the exceptions a generator was handling when it suspended, returning the depth to take them off at. */
+  attachHandling(exceptions: PyInstance[]): number {
+    const depth = this.handling.length;
+    if (exceptions.length > 0) this.handling.push(...exceptions);
+    return depth;
+  }
+
+  get handledExceptions(): readonly PyInstance[] {
+    return this.handling;
+  }
+
+  /** Takes off the exceptions a suspending generator is handling, which its caller does not handle. */
+  detachHandling(depth: number): PyInstance[] {
+    return this.handling.length === depth ? NO_EXCEPTIONS : this.handling.splice(depth);
   }
 
   /** Runs the module body in its frame. */
   runModule(body: Statement[], frame: Frame): void {
-    const result = this.block(body, frame).next();
-    if (!result.done) throw new Error('The module yielded');
+    runToEnd(this.block(body, frame));
   }
 
   // Statements --------------------------------------------------------------------------------------------------------
@@ -85,17 +126,14 @@ export class Evaluator extends ExpressionEvaluator {
   }
 
   // code-gauge-allow functionNcss 60 -- One case per kind of simple statement.
-  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of simple statement.
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of simple statement.
   private simpleStatement(statement: Statement, frame: Frame): Completion {
     const { runtime } = this;
     runtime.spend();
     runtime.currentRow = statement.row;
     switch (statement.kind) {
       case 'expression': {
-        const { expression } = statement;
-        runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
-          this.evaluate(expression, frame)
-        );
+        this.expressionStatement(statement, frame);
         return undefined;
       }
       case 'assign': {
@@ -121,6 +159,10 @@ export class Evaluator extends ExpressionEvaluator {
       case 'nonlocal': {
         return undefined;
       }
+      case 'setupAnnotations': {
+        if (!frame.locals.has('__annotations__')) frame.locals.set('__annotations__', newDict());
+        return undefined;
+      }
       case 'break':
       case 'continue': {
         return statement.kind;
@@ -129,48 +171,46 @@ export class Evaluator extends ExpressionEvaluator {
         return { value: statement.value ? this.evaluate(statement.value, frame) : None };
       }
       case 'raise': {
-        throw this.raise(statement, frame);
+        const exception = statement.exception ? this.evaluate(statement.exception, frame) : undefined;
+        throw this.raise(exception, statement.cause ? this.evaluate(statement.cause, frame) : undefined);
+      }
+      case 'assert': {
+        if (isTruthy(this.evaluate(statement.test, frame))) return undefined;
+        throw assertionError(statement.message ? [this.evaluate(statement.message, frame)] : []);
       }
       case 'functionDef': {
         const decorators = statement.fn.decorators.map((decorator) => this.evaluate(decorator, frame));
-        this.storeName(statement.binding, this.createFunction(statement.fn, frame, decorators), frame);
+        this.storeName(statement.binding, this.defineFunction(statement.fn, frame, decorators), frame);
         return undefined;
       }
       case 'classDef': {
-        this.storeName(statement.binding, createClass(this, statement.cls, frame), frame);
+        this.storeName(statement.binding, this.defineClass(statement.cls, frame), frame);
         return undefined;
       }
-      case 'import': {
-        for (const { module, binding, bindsModule } of statement.names) {
-          const imported = runtime.importModule(module);
-          this.storeName(binding, bindsModule ? imported : runtime.importModule(module.split('.')[0]), frame);
-        }
+      case 'typeAlias': {
+        this.defineTypeAlias(statement, frame);
         return undefined;
       }
-      case 'importFrom': {
-        this.importFrom(statement, frame);
-        return undefined;
-      }
+      case 'import':
+      case 'importFrom':
       case 'importStar': {
-        const module = runtime.importModule(statement.module);
-        const all = module.attribute('__all__');
-        const names =
-          all === undefined
-            ? [...module.dict.keys(), ...module.lazy.keys()].filter(
-                (name) => !name.startsWith('_') && !module.hidden.has(name)
-              )
-            : runtime.toArray(all);
-        for (const name of names) {
-          // An unsupported name stays unbound, as importing it would stop the program.
-          const value = module.attribute(name as string);
-          if (value !== undefined) frame.locals.set(name as string, value);
-        }
+        this.importStatement(statement, frame);
         return undefined;
       }
       default: {
         throw new Error(`Not a simple statement: ${statement.kind}`);
       }
     }
+  }
+
+  private expressionStatement(statement: Extract<Statement, { kind: 'expression' }>, frame: Frame): void {
+    const { runtime } = this;
+    const { expression } = statement;
+    const result = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
+      this.evaluate(expression, frame)
+    );
+    // The statement drops its value, which closes a generator that only the value held.
+    if (runtime.finalizer.pending.size > 0) this.release(result);
   }
 
   private assignStatement(statement: Extract<Statement, { kind: 'assign' }>, frame: Frame): void {
@@ -181,8 +221,14 @@ export class Evaluator extends ExpressionEvaluator {
       () => {
         const [value, isCreation] = this.evaluateCreation(statement.value, frame);
         created = isCreation;
+        const { targets } = statement;
+        // Garbage collection only looks for objects among the values held.
+        if (typeof value !== 'object') {
+          for (const target of targets) this.assign(target, value, frame);
+          return;
+        }
         this.hold(frame, value, () => {
-          for (const target of statement.targets) this.assign(target, value, frame);
+          for (const target of targets) this.assign(target, value, frame);
         });
       }
     );
@@ -197,12 +243,30 @@ export class Evaluator extends ExpressionEvaluator {
     );
   }
 
+  private importStatement(
+    statement: Extract<Statement, { kind: 'import' | 'importFrom' | 'importStar' }>,
+    frame: Frame
+  ): void {
+    const { runtime } = this;
+    if (statement.kind === 'importFrom') {
+      this.importFrom(statement, frame);
+    } else if (statement.kind === 'importStar') {
+      const module = runtime.importModule(statement.module);
+      for (const [name, value] of module.dict) if (!name.startsWith('_')) frame.locals.set(name, value);
+    } else {
+      for (const { module, binding, bindsModule } of statement.names) {
+        const imported = runtime.importModule(module);
+        this.storeName(binding, bindsModule ? imported : runtime.importModule(module.split('.')[0]), frame);
+      }
+    }
+  }
+
   private importFrom(statement: Extract<Statement, { kind: 'importFrom' }>, frame: Frame): void {
     const module = this.runtime.importModule(statement.module);
     for (const { name, binding } of statement.names) {
-      const value = module.attribute(name);
       const feature = module.unsupported.get(name);
-      if (value === undefined && feature !== undefined) throw new UnsupportedFeatureError(feature);
+      if (feature !== undefined) throw new UnsupportedFeatureError(feature);
+      const value = module.dict.get(name);
       if (value === undefined) {
         throw pyError('ImportError', `cannot import name '${name}' from '${statement.module}' (unknown location)`);
       }
@@ -214,17 +278,7 @@ export class Evaluator extends ExpressionEvaluator {
   private evaluateCreation(expression: Expression, frame: Frame): [PyValue, boolean] {
     if (expression.kind === 'call') {
       const callee = this.evaluate(expression.callee, frame);
-      const value = this.hold(frame, callee, () => {
-        const { args, kwargs } = this.arguments(expression.args, frame, callee);
-        const outerRow = this.runtime.currentRow;
-        this.runtime.currentRow = expression.row;
-        try {
-          return callValue(callee, args, kwargs);
-        } finally {
-          this.runtime.currentRow = outerRow;
-        }
-      });
-      return [value, callee instanceof PyClass];
+      return [this.call(expression, frame, callee), callee instanceof PyClass];
     }
     if (
       (expression.kind === 'list' || expression.kind === 'tuple') &&
@@ -290,21 +344,31 @@ export class Evaluator extends ExpressionEvaluator {
   private annotate(statement: Extract<Statement, { kind: 'annotatedAssign' }>, frame: Frame): void {
     if (frame.kind === 'function' || statement.target.kind !== 'name') return;
     const { annotation } = statement;
+    if (statement.storesAnnotation) {
+      const annotations = this.loadName(
+        { kind: 'name', name: '__annotations__', access: 'name', row: statement.row },
+        frame
+      );
+      setItem(annotations, statement.target.name, this.evaluate(annotation, frame));
+    }
     frame.annotations.push([statement.target.name, () => this.evaluate(annotation, frame)]);
   }
 
-  // code-gauge-allow functionNcss 32 -- One case per kind of compound statement.
+  // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of compound statement, each taking the path that can suspend when it must.
+  // code-gauge-allow functionNcss 39 -- One case per kind of compound statement.
   private *compoundStatement(statement: Statement, frame: Frame): Execution {
     const { runtime } = this;
     runtime.spend();
     runtime.currentRow = statement.row;
     switch (statement.kind) {
       case 'if': {
-        if (isTruthy(this.evaluate(statement.test, frame))) return yield* this.block(statement.body, frame);
-        return yield* this.block(statement.orelse, frame);
+        const { test } = statement;
+        const value = test.suspends ? yield* this.evaluateSuspending(test, frame) : this.evaluate(test, frame);
+        return yield* this.block(isTruthy(value) ? statement.body : statement.orelse, frame);
       }
       case 'while': {
-        while (isTruthy(this.evaluate(statement.test, frame))) {
+        const { test } = statement;
+        while (isTruthy(test.suspends ? yield* this.evaluateSuspending(test, frame) : this.evaluate(test, frame))) {
           runtime.spend();
           const completion = yield* this.block(statement.body, frame);
           if (completion === 'break') return undefined;
@@ -313,65 +377,294 @@ export class Evaluator extends ExpressionEvaluator {
         return yield* this.block(statement.orelse, frame);
       }
       case 'for': {
-        return yield* this.forStatement(statement, frame);
+        return yield* statement.isAsync
+          ? this.asyncForStatement(statement, frame)
+          : this.forStatement(statement, frame);
       }
-      case 'try': {
-        return yield* this.tryStatement(statement, frame);
-      }
+      case 'try':
       case 'with': {
-        return yield* this.withStatement(statement, frame, 0);
+        return yield* this.regionStatement(statement, frame);
       }
       case 'match': {
         return yield* this.matchStatement(statement, frame);
       }
-      case 'yield': {
-        const value = statement.value ? this.evaluate(statement.value, frame) : None;
-        yield value;
-        return undefined;
+      case 'expression': {
+        return yield* this.suspendingExpressionStatement(statement, frame);
       }
       default: {
+        if (statement.suspends) return yield* this.suspendingStatement(statement, frame);
         throw new Error(`Not a compound statement: ${statement.kind}`);
       }
     }
   }
 
+  /** Runs a `try` or `with` statement, which closing a generator suspended in it runs code of. */
+  private *regionStatement(statement: Extract<Statement, { kind: 'try' | 'with' }>, frame: Frame): Execution {
+    let run: Execution;
+    if (statement.kind === 'try') run = this.tryStatement(statement, frame);
+    else
+      run = statement.isAsync ? this.asyncWithStatement(statement, frame, 0) : this.withStatement(statement, frame, 0);
+    return yield* isSuspendable(frame) ? this.protectedRegion(run, frame) : run;
+  }
+
+  private *suspendingExpressionStatement(
+    statement: Extract<Statement, { kind: 'expression' }>,
+    frame: Frame
+  ): Execution {
+    const { expression } = statement;
+    // A `yield` statement, the most common one that suspends, needs no generator of its own.
+    if (expression.kind === 'yield' && !expression.value?.suspends) {
+      const value = expression.value ? this.evaluate(expression.value, frame) : None;
+      yield frame.scope.isAsync ? asyncYield(value) : value;
+      return undefined;
+    }
+    return yield* this.suspendingStatement(statement, frame);
+  }
+
+  /** Runs a `try` or `with` statement of a generator, where closing the suspended generator runs code. */
+  private *protectedRegion(run: Execution, frame: Frame): Execution {
+    frame.protectedDepth++;
+    try {
+      return yield* run;
+    } finally {
+      frame.protectedDepth--;
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow duplicateLines 29 -- Mirrors the async for loop, whose items come from an awaited `__anext__`.
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
-    const iterable = this.evaluate(statement.iterable, frame);
+    const { target } = statement;
+    const iterable = statement.iterable.suspends
+      ? yield* this.evaluateSuspending(statement.iterable, frame)
+      : this.evaluate(statement.iterable, frame);
+    const suspendingTarget = targetSuspends(target);
     const length = frame.temporaries.length;
     frame.temporaries.push(iterable);
+    // What leaves the loop along with control, which stays alive when the loop's generator closes.
+    let leaving: unknown;
     try {
       const next = iterate(iterable);
       for (let item = next(); item !== DONE; item = next()) {
         runtime.spend();
         runtime.currentRow = statement.row;
-        this.assign(statement.target, item, frame);
-        runtime.steps.stepBinding(statement.stepRow, !storesReference(statement.target) || storesAnswer(item));
+        if (suspendingTarget) yield* this.assignSuspending(target, item, frame);
+        else this.assign(target, item, frame);
+        runtime.steps.stepBinding(statement.stepRow, !storesReference(target) || storesAnswer(item));
         const completion = yield* this.block(statement.body, frame);
         if (completion === 'break') return undefined;
-        if (completion && completion !== 'continue') return completion;
+        if (completion && completion !== 'continue') {
+          leaving = typeof completion === 'object' ? completion.value : undefined;
+          return completion;
+        }
       }
+    } catch (error) {
+      leaving = error instanceof PyError ? error.exception : undefined;
+      throw error;
     } finally {
       frame.temporaries.length = length;
+      runtime.finalizer.release([iterable], [leaving]);
     }
     return yield* this.block(statement.orelse, frame);
   }
 
+  // Definitions ---------------------------------------------------------------------------------------------------------
+
+  /** Creates a function, inside the scope of its type parameters when it has them. */
+  private defineFunction(fn: FunctionDef, frame: Frame, decorators: PyValue[], defaults?: PyValue[]): PyValue {
+    if (!fn.typeParams) return this.createFunction(fn, frame, decorators, defaults);
+    const defaultValues =
+      defaults ?? fn.params.flatMap((param) => (param.default ? [this.evaluate(param.default, frame)] : []));
+    const scopeFrame = this.typeParamFrame(fn.typeParams.scope, frame);
+    const params = this.createTypeParams(fn.typeParams.params, scopeFrame);
+    return this.createFunction(fn, scopeFrame, decorators, defaultValues, params);
+  }
+
+  /** Creates a class, inside the scope of its type parameters when it has them, which adds `Generic[...]` to its bases. */
+  private defineClass(cls: ClassDef, frame: Frame): PyValue {
+    const { typeParams } = cls;
+    if (!typeParams) return createClass(this, cls, frame);
+    const decorators = cls.decorators.map((decorator) => this.evaluate(decorator, frame));
+    const scopeFrame = this.typeParamFrame(typeParams.scope, frame);
+    const params = this.createTypeParams(typeParams.params, scopeFrame);
+    this.storeName(typeParams.tuple, newTuple(params), scopeFrame);
+    this.storeName(typeParams.genericBase, genericBaseOf(params), scopeFrame);
+    return createClass(this, cls, scopeFrame, decorators);
+  }
+
+  /** Creates a `type` statement's alias, whose value the scope of its type parameters evaluates when first read. */
+  private defineTypeAlias(statement: Extract<Statement, { kind: 'typeAlias' }>, frame: Frame): void {
+    const scopeFrame = this.typeParamFrame(statement.typeParams.scope, frame);
+    const params = this.createTypeParams(statement.typeParams.params, scopeFrame);
+    const { value } = statement;
+    const alias = new PyTypeAlias(statement.name, params, () => this.evaluate(value, scopeFrame), '__main__');
+    this.storeName(statement.binding, alias, frame);
+  }
+
+  /** The frame of a scope of type parameters, which captures the variables of `frame` it reads. */
+  private typeParamFrame(scope: ScopeInfo, frame: Frame): Frame {
+    return this.nestedFrame('function', scope, frame);
+  }
+
+  /** Creates the objects that type parameters stand for, binding them in their scope's frame. */
+  private createTypeParams(params: TypeParam[], frame: Frame): PyValue[] {
+    return params.map((param) => {
+      const { bound, constraints, default: defaultValue } = param;
+      const value = newTypeParam(param.kind, param.name, {
+        bound: bound && (() => this.evaluate(bound, frame)),
+        constraints: constraints && (() => newTuple(constraints.map((each) => this.evaluate(each, frame)))),
+        default: defaultValue && (() => this.evaluate(defaultValue, frame)),
+      });
+      this.storeName(param.binding, value, frame);
+      return value;
+    });
+  }
+
+  // Suspending statements ----------------------------------------------------------------------------------------------
+
+  /**
+   * Runs a simple statement that may suspend the generator in the middle of an expression. When it ends, it records its
+   * step whatever it called, since the code that resumed the generator ran in between.
+   */
+  private *suspendingStatement(statement: Statement, frame: Frame): Execution {
+    if (!isSuspendable(frame) && 'stepRow' in statement) return yield* this.blockingStatement(statement, frame);
+    const completion = yield* this.suspendingStatementBody(statement, frame);
+    if ('stepRow' in statement) this.runtime.steps.step(statement.stepRow);
+    return completion;
+  }
+
+  /**
+   * Runs a simple statement of a program that may run threads, where any call may suspend the running thread. It
+   * records its step as the synchronous path does, unless another thread ran in the middle of it.
+   */
+  private *blockingStatement(statement: Statement & { stepRow?: number }, frame: Frame): Execution {
+    const { runtime } = this;
+    const begun = runtime.steps.stepCount;
+    const switches = runtime.threads?.switches;
+    let onlyCalls = statement.kind === 'expression' && statement.expression.kind === 'call';
+    let completion: Completion;
+    if (statement.kind === 'assign' && statement.value.kind === 'call') {
+      const { value } = statement;
+      const callee = yield* this.evaluateSuspending(value.callee, frame);
+      const result = yield* this.holding(frame, callee, this.callValueSuspending(callee, value.args, value.row, frame));
+      for (const target of statement.targets)
+        yield* this.holding(frame, result, this.assignSuspending(target, result, frame));
+      onlyCalls = callee instanceof PyClass && statement.targets.every(storesReference);
+    } else {
+      completion = yield* this.suspendingStatementBody(statement, frame);
+    }
+    if (runtime.threads?.switches === switches) runtime.steps.finishStatement(statement.stepRow, onlyCalls, begun);
+    else runtime.steps.step(statement.stepRow);
+    return completion;
+  }
+
+  // code-gauge-allow functionNcss 45 -- One case per kind of simple statement that evaluates expressions.
+  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of simple statement that evaluates expressions.
+  private *suspendingStatementBody(statement: Statement, frame: Frame): Execution {
+    switch (statement.kind) {
+      case 'expression': {
+        yield* this.evaluateSuspending(statement.expression, frame);
+        return undefined;
+      }
+      case 'assign': {
+        const value = yield* this.evaluateSuspending(statement.value, frame);
+        for (const target of statement.targets) yield* this.assignSuspending(target, value, frame);
+        return undefined;
+      }
+      case 'augmentedAssign': {
+        yield* this.augmentedAssignSuspending(statement, frame);
+        return undefined;
+      }
+      case 'annotatedAssign': {
+        this.annotate(statement, frame);
+        const { value } = statement;
+        if (value) yield* this.assignSuspending(statement.target, yield* this.evaluateSuspending(value, frame), frame);
+        return undefined;
+      }
+      case 'delete': {
+        for (const target of statement.targets) yield* this.deleteSuspending(target, frame);
+        return undefined;
+      }
+      case 'return': {
+        return { value: statement.value ? yield* this.evaluateSuspending(statement.value, frame) : None };
+      }
+      case 'raise': {
+        const exception = statement.exception ? yield* this.evaluateSuspending(statement.exception, frame) : undefined;
+        const cause = statement.cause ? yield* this.evaluateSuspending(statement.cause, frame) : undefined;
+        throw this.raise(exception, cause);
+      }
+      case 'assert': {
+        if (isTruthy(yield* this.evaluateSuspending(statement.test, frame))) return undefined;
+        throw assertionError(statement.message ? [yield* this.evaluateSuspending(statement.message, frame)] : []);
+      }
+      case 'functionDef': {
+        const decorators: PyValue[] = [];
+        for (const decorator of statement.fn.decorators)
+          decorators.push(yield* this.evaluateSuspending(decorator, frame));
+        const defaults = yield* this.defaultsSuspending(statement.fn.params, frame);
+        this.storeName(statement.binding, this.defineFunction(statement.fn, frame, decorators, defaults), frame);
+        return undefined;
+      }
+      default: {
+        throw this.runtime.unsupported('ジェネレータの中で、クラスの基底クラスやデコレータに書いた yield');
+      }
+    }
+  }
+
+  private *augmentedAssignSuspending(
+    statement: Extract<Statement, { kind: 'augmentedAssign' }>,
+    frame: Frame
+  ): Generator<PyValue, void, PyValue> {
+    const { target, operator } = statement;
+    const operand = (): Generator<PyValue, PyValue, PyValue> => this.evaluateSuspending(statement.value, frame);
+    if (target.kind === 'name') {
+      const current = this.loadName(target, frame);
+      this.storeName(target, inplaceOp(operator, current, yield* this.holding(frame, current, operand())), frame);
+      return;
+    }
+    if (target.kind === 'attribute') {
+      const object = yield* this.evaluateSuspending(target.object, frame);
+      const current = this.hold(frame, object, () => getAttribute(object, target.name));
+      const result = inplaceOp(operator, current, yield* this.holding(frame, object, operand()));
+      setAttribute(object, target.name, result);
+      return;
+    }
+    const subscript = target as Extract<Target, { kind: 'subscript' }>;
+    const object = yield* this.evaluateSuspending(subscript.object, frame);
+    const index = yield* this.holding(frame, object, this.evaluateSuspending(subscript.index, frame));
+    const current = getItem(object, index);
+    const result = inplaceOp(operator, current, yield* this.holding(frame, object, operand()));
+    setItem(object, index, result);
+  }
+
+  private *deleteSuspending(target: Target, frame: Frame): Generator<PyValue, void, PyValue> {
+    if (!targetSuspends(target)) {
+      this.deleteTarget(target, frame);
+      return;
+    }
+    if (target.kind === 'attribute') {
+      deleteAttribute(yield* this.evaluateSuspending(target.object, frame), target.name);
+    } else if (target.kind === 'subscript') {
+      const object = yield* this.evaluateSuspending(target.object, frame);
+      deleteItem(object, yield* this.holding(frame, object, this.evaluateSuspending(target.index, frame)));
+    } else if (target.kind === 'unpack') {
+      for (const element of target.elements) yield* this.deleteSuspending(element, frame);
+    }
+  }
+
   // Exceptions --------------------------------------------------------------------------------------------------------
 
-  private raise(statement: Extract<Statement, { kind: 'raise' }>, frame: Frame): PyError {
-    if (!statement.exception) {
+  /** The error a `raise` statement raises, given the values of its exception and its cause. */
+  private raise(value: PyValue | undefined, cause: PyValue | undefined): PyError {
+    if (value === undefined) {
       const active = this.handling.at(-1);
       if (!active) return pyError('RuntimeError', 'No active exception to reraise');
       return new PyError(active);
     }
-    const exception = toException(
-      this.evaluate(statement.exception, frame),
-      'exceptions must derive from BaseException'
-    );
+    const exception = toException(value, 'exceptions must derive from BaseException');
     const state = exception.exception;
-    if (state && statement.cause) {
-      const cause = this.evaluate(statement.cause, frame);
+    if (state && cause !== undefined) {
       state.cause = cause === None ? None : toException(cause, 'exception causes must derive from BaseException');
       state.suppressContext = true;
     }
@@ -404,11 +697,13 @@ export class Evaluator extends ExpressionEvaluator {
   }
 
   /** Runs a block, catching the Python exception it raises as the pending one. */
-  private *guarded(statements: Statement[], frame: Frame): Generator<PyValue, Outcome, unknown> {
+  private *guarded(statements: Statement[], frame: Frame): Generator<PyValue, Outcome, PyValue> {
     try {
       return { completion: yield* this.block(statements, frame) };
     } catch (error) {
       if (!(error instanceof PyError)) throw error;
+      // An exception raised by an operation while another is handled is chained to it when it reaches a try.
+      this.chain(error.exception);
       return { pending: error };
     }
   }
@@ -417,9 +712,16 @@ export class Evaluator extends ExpressionEvaluator {
     statement: Extract<Statement, { kind: 'try' }>,
     caught: PyError,
     frame: Frame
-  ): Generator<PyValue, Outcome, unknown> {
+  ): Generator<PyValue, Outcome, PyValue> {
     if (statement.isGroup) return yield* this.exceptStar(statement, caught, frame);
-    const handler = this.findHandler(statement.handlers, caught.exception, frame);
+    let handler: ExceptHandler | undefined;
+    for (const each of statement.handlers) {
+      const types = each.types && (yield* this.handlerTypes(each.types, frame));
+      if (types === undefined || matchesExceptionTypes(caught.exception, types)) {
+        handler = each;
+        break;
+      }
+    }
     if (!handler) return { pending: caught };
     try {
       return { completion: yield* this.runHandler(handler, caught.exception, frame) };
@@ -451,22 +753,21 @@ export class Evaluator extends ExpressionEvaluator {
     if (state && exception !== context && state.context === undefined) state.context = context;
   }
 
-  private findHandler(handlers: ExceptHandler[], exception: PyInstance, frame: Frame): ExceptHandler | undefined {
-    for (const handler of handlers) {
-      if (!handler.types) return handler;
-      const types = this.evaluate(handler.types, frame);
-      if (matchesExceptionTypes(exception, types)) return handler;
-    }
-    return undefined;
+  private *handlerTypes(types: Expression, frame: Frame): Generator<PyValue, PyValue, PyValue> {
+    return types.suspends ? yield* this.evaluateSuspending(types, frame) : this.evaluate(types, frame);
   }
 
   private *runHandler(handler: ExceptHandler, exception: PyInstance, frame: Frame): Execution {
     if (handler.name) this.storeName(handler.name, exception, frame);
     this.handling.push(exception);
+    let escaping: PyInstance | undefined;
     try {
       return yield* this.block(handler.body, frame);
     } catch (error) {
-      if (error instanceof PyError) this.chainTo(error.exception, exception);
+      if (error instanceof PyError) {
+        this.chainTo(error.exception, exception);
+        escaping = error.exception;
+      }
       throw error;
     } finally {
       this.handling.pop();
@@ -478,6 +779,9 @@ export class Evaluator extends ExpressionEvaluator {
           // The handler may have deleted the name itself.
         }
       }
+      // The handled exception dies with the handler, and with it the frames its traceback kept.
+      const { finalizer } = this.runtime;
+      if (finalizer.pending.size > 0) finalizer.release([exception], [escaping]);
     }
   }
 
@@ -486,14 +790,14 @@ export class Evaluator extends ExpressionEvaluator {
     statement: Extract<Statement, { kind: 'try' }>,
     caught: PyError,
     frame: Frame
-  ): Generator<PyValue, Outcome, unknown> {
+  ): Generator<PyValue, Outcome, PyValue> {
     const original = caught.exception;
     let remaining: PyInstance | undefined = exceptionGroupOf(original);
     const raised: PyInstance[] = [];
     let completion: Completion;
     for (const handler of statement.handlers) {
       if (!remaining) break;
-      const types = this.evaluate(handler.types as Expression, frame);
+      const types = yield* this.handlerTypes(handler.types as Expression, frame);
       checkExceptStarTypes(types);
       const [match, rest] = splitGroup(remaining, (exception) => matchesExceptionTypes(exception, types));
       remaining = rest;
@@ -524,60 +828,117 @@ export class Evaluator extends ExpressionEvaluator {
 
   // With ----------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 34 -- Follows the protocol of the with statement.
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
-    const { runtime } = this;
     const item = statement.items[index];
-    const manager = this.evaluate(item.context, frame);
+    const manager = item.context.suspends
+      ? yield* this.evaluateSuspending(item.context, frame)
+      : this.evaluate(item.context, frame);
     const enter = lookupSpecial(manager, '__enter__');
     const exit = lookupSpecial(manager, '__exit__');
     if (enter === undefined || exit === undefined) {
-      throw typeError(`'${typeName(manager)}' object does not support the context manager protocol`);
+      const missed = exit === undefined ? '__exit__' : '__enter__';
+      throw typeError(
+        `'${classOf(manager).qualifiedName}' object does not support the context manager protocol (missed ${missed} method)`
+      );
     }
     const length = frame.temporaries.length;
     frame.temporaries.push(manager);
     try {
-      runtime.steps.runStatement(
-        index === 0 ? statement.stepRow : undefined,
-        () => !statement.items.some((each) => each.target),
-        () => {
-          const value = callValue(bindValue(enter, manager), []);
-          if (item.target) this.assign(item.target, value, frame);
-        }
-      );
+      yield* this.enterContext(statement, index, bindValue(enter, manager), frame);
       let completion: Completion;
       try {
         completion = yield* this.withStatement(statement, frame, index + 1);
       } catch (error) {
         if (!(error instanceof PyError)) throw error;
-        const exception = error.exception;
-        this.handling.push(exception);
-        let suppress: boolean;
-        try {
-          suppress = isTruthy(callValue(bindValue(exit, manager), [exception.cls, exception, None]));
-        } finally {
-          this.handling.pop();
-        }
-        if (!suppress) throw error;
+        if (!(yield* this.exitWithException(statement, bindValue(exit, manager), error.exception))) throw error;
         return undefined;
       }
-      callValue(bindValue(exit, manager), [None, None, None]);
+      yield* this.callExit(statement, bindValue(exit, manager), [None, None, None]);
       return completion;
     } finally {
       frame.temporaries.length = length;
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Records the with statement's step as the synchronous and the suspending path each do.
+  /**
+   * Calls a context manager's `__enter__` and stores what it returns into the item's target, recording the with
+   * statement's step after its first item. In a program that may run threads, `__enter__` may suspend the thread.
+   */
+  private *enterContext(
+    statement: Extract<Statement, { kind: 'with' }>,
+    index: number,
+    enter: PyValue,
+    frame: Frame
+  ): Execution {
+    const { runtime } = this;
+    const item = statement.items[index];
+    const target = item.target && targetSuspends(item.target) ? item.target : undefined;
+    const stepRow = index === 0 ? statement.stepRow : undefined;
+    const onlyCalls = (): boolean => !statement.items.some((each) => each.target);
+    const enterCall = statement.suspends ? suspendingCall(enter, [], undefined) : undefined;
+    let entered: PyValue;
+    if (enterCall) {
+      const begun = runtime.steps.stepCount;
+      const switches = runtime.threads?.switches;
+      entered = yield* enterCall;
+      if (item.target && !target) this.assign(item.target, entered, frame);
+      if (runtime.threads?.switches === switches) runtime.steps.finishStatement(stepRow, onlyCalls(), begun);
+      else runtime.steps.step(stepRow);
+    } else {
+      entered = runtime.steps.runStatement(stepRow, onlyCalls, () => {
+        const value = callValue(enter, []);
+        if (item.target && !target) this.assign(item.target, value, frame);
+        return value;
+      });
+    }
+    if (target) yield* this.assignSuspending(target, entered, frame);
+    return undefined;
+  }
+
+  /** Calls `__exit__` with the exception the body raised, returning whether it suppresses the exception. */
+  private *exitWithException(
+    statement: Statement,
+    exit: PyValue,
+    exception: PyInstance
+  ): Generator<PyValue, boolean, PyValue> {
+    this.handling.push(exception);
+    let suppresses: boolean;
+    try {
+      suppresses = isTruthy(yield* this.callExit(statement, exit, [exception.cls, exception, None]));
+    } finally {
+      this.handling.pop();
+    }
+    // A suppressed exception dies here, and with it the frames its traceback kept.
+    const { finalizer } = this.runtime;
+    if (suppresses && finalizer.pending.size > 0) finalizer.release([exception]);
+    return suppresses;
+  }
+
+  /** Calls a context manager's `__exit__`, so that it may suspend the thread in a program that may run threads. */
+  private *callExit(statement: Statement, exit: PyValue, args: PyValue[]): Generator<PyValue, PyValue, PyValue> {
+    const call = statement.suspends ? suspendingCall(exit, args, undefined) : undefined;
+    return call ? yield* call : callValue(exit, args);
+  }
+
   // Match ---------------------------------------------------------------------------------------------------------------
 
   private *matchStatement(statement: Extract<Statement, { kind: 'match' }>, frame: Frame): Execution {
-    const subject = this.evaluate(statement.subject, frame);
+    const subject = statement.subject.suspends
+      ? yield* this.evaluateSuspending(statement.subject, frame)
+      : this.evaluate(statement.subject, frame);
     const length = frame.temporaries.length;
     frame.temporaries.push(subject);
     try {
       for (const matchCase of statement.cases) {
         if (!this.matchCase(matchCase, subject, frame)) continue;
+        const { guard } = matchCase;
+        if (
+          guard &&
+          !isTruthy(guard.suspends ? yield* this.evaluateSuspending(guard, frame) : this.evaluate(guard, frame))
+        )
+          continue;
         return yield* this.block(matchCase.body, frame);
       }
       return undefined;
@@ -590,7 +951,7 @@ export class Evaluator extends ExpressionEvaluator {
     const bindings = new Map<Target, PyValue>();
     if (!this.matchPattern(matchCase.pattern, subject, bindings, frame)) return false;
     for (const [target, value] of bindings) this.assign(target, value, frame);
-    return !matchCase.guard || isTruthy(this.evaluate(matchCase.guard, frame));
+    return true;
   }
 
   private matchPattern(pattern: Pattern, subject: PyValue, bindings: Map<Target, PyValue>, frame: Frame): boolean {
@@ -775,16 +1136,34 @@ const SELF_MATCHING = new Set([
   'tuple',
 ]);
 
+/**
+ * Runs the statements of a frame that is no generator to their end. Only the waits of blocking operations may suspend
+ * them, which the thread then makes on the host's stack.
+ */
+function runToEnd(execution: Execution): Completion {
+  for (;;) {
+    const step = execution.next();
+    if (step.done) return step.value;
+    if (!isWaitRequest(step.value)) throw new Error('A frame that is not a generator yielded');
+    schedulerOf().waitFor(step.value);
+  }
+}
+
+/** Whether a frame runs a generator, a coroutine, or an async generator, which closing it may resume. */
+function isSuspendable(frame: Frame): boolean {
+  return frame.scope.isGenerator || frame.scope.isAsync === true;
+}
+
 /** Statements that never suspend a generator, which run without the cost of a generator of their own. */
 function isSimple(statement: Statement): boolean {
+  if (statement.suspends) return false;
   switch (statement.kind) {
     case 'if':
     case 'while':
     case 'for':
     case 'try':
     case 'with':
-    case 'match':
-    case 'yield': {
+    case 'match': {
       return false;
     }
     default: {
@@ -801,6 +1180,10 @@ function storesReference(target: Target): boolean {
 /** Whether a value is one learners answer in a trace: a number, a string, or a boolean. */
 function storesAnswer(value: PyValue): boolean {
   return typeof value !== 'object';
+}
+
+function assertionError(args: PyValue[]): PyError {
+  return new PyError(newException(exceptionClassNamed('AssertionError'), args));
 }
 
 function toException(value: PyValue, message: string): PyInstance {

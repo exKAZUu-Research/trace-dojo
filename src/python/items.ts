@@ -1,5 +1,5 @@
 import { toIndex } from './numbers';
-import { bindValue, callValue, lookupSpecial, toArray } from './objects';
+import { bindValue, callValue, lookupSpecial, overriding, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { codePointAt, hasSurrogates, iterStr, sliceStr, strLength } from './strings';
 import {
@@ -74,12 +74,17 @@ function normalizeIndex(key: PyValue, length: number, kind: string): number | un
   return Number(resolved);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of subscriptable builtin.
 export function getItem(container: PyValue, key: PyValue): PyValue {
+  const special = overriding(container, '__getitem__');
+  if (special !== undefined) return callValue(bindValue(special, container), [key]);
+  return builtinGetItem(container, key);
+}
+
+/** `container[key]` as the builtin type of `container` defines it, whatever `__getitem__` its class defines. */
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of subscriptable builtin.
+export function builtinGetItem(container: PyValue, key: PyValue): PyValue {
   const runtime = currentRuntime();
   if (container instanceof PyList || container instanceof PyTuple) {
-    const special = classOf(container).isBuiltin ? undefined : userMethod(container, '__getitem__');
-    if (special !== undefined) return callValue(special, [key]);
     const kind = container instanceof PyList ? 'list' : 'tuple';
     if (key instanceof PySlice) {
       const items = sliceItems(container.items, sliceIndices(key, container.items.length));
@@ -97,14 +102,6 @@ export function getItem(container: PyValue, key: PyValue): PyValue {
   const special = lookupSpecial(container, '__getitem__');
   if (special !== undefined) return callValue(bindValue(special, container), [key]);
   throw typeError(`'${typeName(container)}' object is not subscriptable`);
-}
-
-function userMethod(container: PyValue, name: string): PyValue | undefined {
-  const method = lookupSpecial(container, name);
-  const builtin = classOf(container)
-    .mro.find((cls) => cls.isBuiltin)
-    ?.dict.get(name);
-  return method === undefined || method === builtin ? undefined : bindValue(method, container);
 }
 
 function stringItem(text: string, key: PyValue): string {
@@ -126,8 +123,6 @@ function stringItem(text: string, key: PyValue): string {
 }
 
 function dictItem(dict: PyDict, key: PyValue): PyValue {
-  const special = classOf(dict).isBuiltin ? undefined : userMethod(dict, '__getitem__');
-  if (special !== undefined) return callValue(special, [key]);
   const value = dict.store.get(key);
   if (value !== undefined) return value;
   return currentRuntime().missingKey(dict, key);
@@ -155,27 +150,34 @@ function rangeItem(range: PyRange, key: PyValue): PyValue {
 
 export function setItem(container: PyValue, key: PyValue, value: PyValue): void {
   currentRuntime().spend();
-  if (container instanceof PyList && classOf(container).isBuiltin) {
-    if (key instanceof PySlice) {
-      assignSlice(container, key, value);
-      return;
-    }
-    const index = normalizeIndex(key, container.items.length, 'list');
-    if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
-    container.items[index] = value;
+  if (container instanceof PyList && overriding(container, '__setitem__') === undefined) {
+    setListItem(container, key, value);
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {
     container.store.set(key, value);
     return;
   }
-  const special = lookupSpecial(container, '__setitem__');
-  if (special !== undefined) {
-    callValue(bindValue(special, container), [key, value]);
+  const name = container instanceof PyClass ? 'type' : typeName(container);
+  callItemMethod(container, '__setitem__', [key, value], `'${name}' object does not support item assignment`);
+}
+
+/** Calls the item method of a container's class, raising TypeError with `missing` when it has none. */
+function callItemMethod(container: PyValue, name: string, args: PyValue[], missing: string): void {
+  const special = lookupSpecial(container, name);
+  if (special === undefined) throw typeError(missing);
+  callValue(bindValue(special, container), args);
+}
+
+/** `list[key] = value` as list defines it. */
+export function setListItem(list: PyList, key: PyValue, value: PyValue): void {
+  if (key instanceof PySlice) {
+    assignSlice(list, key, value);
     return;
   }
-  if (container instanceof PyClass) throw typeError(`'type' object does not support item assignment`);
-  throw typeError(`'${typeName(container)}' object does not support item assignment`);
+  const index = normalizeIndex(key, list.items.length, 'list');
+  if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
+  list.items[index] = value;
 }
 
 function assignSlice(list: PyList, slice: PySlice, value: PyValue): void {
@@ -195,34 +197,33 @@ function assignSlice(list: PyList, slice: PySlice, value: PyValue): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of builtin that supports item deletion.
 export function deleteItem(container: PyValue, key: PyValue): void {
-  if (container instanceof PyList && classOf(container).isBuiltin) {
-    if (key instanceof PySlice) {
-      const indices = sliceIndices(key, container.items.length);
-      if (indices.step === 1) {
-        container.items.splice(indices.start, Math.max(0, indices.stop - indices.start));
-        return;
-      }
-      const remove = new Set<number>();
-      for (let index = 0, position = indices.start; index < indices.count; index++, position += indices.step)
-        remove.add(position);
-      container.items = container.items.filter((_, index) => !remove.has(index));
-      return;
-    }
-    const index = normalizeIndex(key, container.items.length, 'list');
-    if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
-    container.items.splice(index, 1);
+  if (container instanceof PyList && overriding(container, '__delitem__') === undefined) {
+    deleteListItem(container, key);
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {
     if (!container.store.delete(key)) throw keyError(key);
     return;
   }
-  const special = lookupSpecial(container, '__delitem__');
-  if (special !== undefined) {
-    callValue(bindValue(special, container), [key]);
+  callItemMethod(container, '__delitem__', [key], `'${typeName(container)}' object doesn't support item deletion`);
+}
+
+/** `del list[key]` as list defines it. */
+export function deleteListItem(list: PyList, key: PyValue): void {
+  if (key instanceof PySlice) {
+    const indices = sliceIndices(key, list.items.length);
+    if (indices.step === 1) {
+      list.items.splice(indices.start, Math.max(0, indices.stop - indices.start));
+      return;
+    }
+    const remove = new Set<number>();
+    for (let index = 0, position = indices.start; index < indices.count; index++, position += indices.step)
+      remove.add(position);
+    list.items = list.items.filter((_, index) => !remove.has(index));
     return;
   }
-  throw typeError(`'${typeName(container)}' object doesn't support item deletion`);
+  const index = normalizeIndex(key, list.items.length, 'list');
+  if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
+  list.items.splice(index, 1);
 }

@@ -1,8 +1,8 @@
 import { method } from './define';
 import type { Runtime } from './runtime';
 import { strLength } from './strings';
-import { builtinClass, None, typeError, typeName } from './types';
-import { PyOpaque, type PyValue } from './values';
+import { builtinClass, nativeFunction, None, propertyClass, typeError, typeName } from './types';
+import { PyDescriptor, PyOpaque, type PyValue } from './values';
 
 const textIOClass = builtinClass('TextIOWrapper');
 textIOClass.module = '_io';
@@ -12,6 +12,13 @@ method(textIOClass, 'write', 'one', 1, 1, (self, [text]) => {
   return BigInt(strLength(text));
 });
 method(textIOClass, 'flush', 'none', 0, 0, () => None);
+textIOClass.dict.set(
+  'name',
+  new PyDescriptor(
+    propertyClass,
+    nativeFunction('name', ([self]) => `<${(self as PyOpaque).text}>`)
+  )
+);
 method(
   textIOClass,
   '__repr__',

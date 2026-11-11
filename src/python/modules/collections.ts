@@ -1,31 +1,22 @@
-// code-gauge-allow-file fileNcss 501 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 480 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
-import { defineGetSet } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { mappingEntries } from '../expressionEvaluator';
 import { pyHash } from '../hashing';
+import { defineNew } from '../instances';
 import { keyError } from '../items';
-import { runLibrarySource } from '../librarySource';
-import { registerLazyAttributes, registerModule } from '../modules';
+import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import {
-  callValue,
-  getAttribute,
-  getIterator,
-  isCallable,
-  isTruthy,
-  iterate,
-  lookupSpecial,
-  toArray,
-} from '../objects';
+import { callValue, getIterator, isCallable, isTruthy, iterate, lookupSpecial, toArray } from '../objects';
 import { binaryOp, compareOp, equals, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { runModuleSource } from '../sourceModules';
 import { containerRepr, dictBody, updateDict } from '../typeContainers';
-import { newGenericAlias } from '../typeHints';
 import {
   builtinClass,
+  defineMethod,
   dictClass,
   iteratorClass,
   newDict,
@@ -54,20 +45,19 @@ import {
   PyTuple,
   type PyValue,
 } from '../values';
-import { COLLECTIONS_SOURCE } from './collectionsSource';
 
 // deque -------------------------------------------------------------------------------------------------------------
 
-export const dequeClass = builtinClass('deque');
-dequeClass.tpName = 'collections.deque';
+export const dequeClass = builtinClass('deque', undefined, true);
 dequeClass.module = 'collections';
+dequeClass.typeName = 'collections.deque';
 dequeClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'deque', min: 0, max: 2, style: 'takes', keywords: ['iterable', 'maxlen'] }, args, kwargs);
   const iterable = argument(args, kwargs, 0, 'iterable');
   const maxlenValue = argument(args, kwargs, 1, 'maxlen') ?? None;
   let maxlen: number | undefined;
   if (maxlenValue !== None) {
-    maxlen = Number(toIndex(maxlenValue));
+    maxlen = Number(toIndex(maxlenValue, () => 'an integer is required'));
     if (maxlen < 0) throw valueError('maxlen must be non-negative');
   }
   const deque = new PyDeque(cls, [], maxlen);
@@ -75,6 +65,13 @@ dequeClass.construct = (cls, args, kwargs) => {
   return deque;
 };
 const dequeOf = (self: PyValue): PyDeque => self as PyDeque;
+defineNew(dequeClass, (subtype) => new PyDeque(subtype, [], undefined));
+defineMethod(dequeClass, '__init__', (self, args, kwargs) => {
+  const filled = (dequeClass.construct as NonNullable<PyClass['construct']>)(dequeClass, args, kwargs) as PyDeque;
+  dequeOf(self).items = filled.items;
+  dequeOf(self).maxlen = filled.maxlen;
+  return None;
+});
 
 function push(deque: PyDeque, item: PyValue, left: boolean): void {
   currentRuntime().allocate(1);
@@ -135,7 +132,7 @@ method(dequeClass, 'count', 'one', 1, 1, (self, [item]) =>
 );
 method(dequeClass, 'index', 'expected', 1, 3, (self, [item]) => {
   const index = dequeOf(self).items.findIndex((each) => equals(each, item));
-  if (index === -1) throw valueError(`${pyRepr(item)} is not in deque`);
+  if (index === -1) throw valueError('deque.index(x): x not in deque');
   return BigInt(index);
 });
 method(dequeClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
@@ -150,7 +147,7 @@ method(dequeClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
 method(dequeClass, 'remove', 'one', 1, 1, (self, [item]) => {
   const { items } = dequeOf(self);
   const index = items.findIndex((each) => equals(each, item));
-  if (index === -1) throw valueError(`${pyRepr(item)} is not in deque`);
+  if (index === -1) throw valueError('deque.remove(x): x not in deque');
   items.splice(index, 1);
   return None;
 });
@@ -167,51 +164,7 @@ method(
   (self) => new PyDeque(dequeOf(self).cls, [...dequeOf(self).items], dequeOf(self).maxlen)
 );
 method(dequeClass, '__len__', 'none', 0, 0, (self) => BigInt(dequeOf(self).items.length));
-method(dequeClass, '__add__', 'one', 1, 1, (self, [other]) => {
-  if (!(other instanceof PyDeque)) throw typeError(`can only concatenate deque (not "${typeName(other)}") to deque`);
-  const result = copyDeque(dequeOf(self));
-  // The items are copied first, as `d + d` must not see its own appends.
-  // oxlint-disable-next-line unicorn/prefer-spread -- A copy, not an iteration, is the point.
-  const items = other.items.slice();
-  for (const item of items) push(result, item, false);
-  return result;
-});
-method(dequeClass, '__iadd__', 'one', 1, 1, (self, [other]) => {
-  for (const item of toArray(other)) push(dequeOf(self), item, false);
-  return self;
-});
-for (const name of ['__mul__', '__rmul__']) {
-  method(dequeClass, name, 'one', 1, 1, (self, [count]) => {
-    const result = copyDeque(dequeOf(self));
-    repeatDeque(result, count);
-    return result;
-  });
-}
-method(dequeClass, '__imul__', 'one', 1, 1, (self, [count]) => {
-  repeatDeque(dequeOf(self), count);
-  return self;
-});
-method(dequeClass, '__copy__', 'none', 0, 0, (self) => copyDeque(dequeOf(self)));
-method(dequeClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGenericAlias(owner, key), {
-  binding: 'class',
-});
-dequeClass.dict.set('__module__', 'collections');
-
-function copyDeque(deque: PyDeque): PyDeque {
-  currentRuntime().allocate(deque.items.length);
-  return new PyDeque(deque.cls, [...deque.items], deque.maxlen);
-}
-
-/** Repeats a deque's items in place, keeping only the last `maxlen` as appending them one by one would. */
-function repeatDeque(deque: PyDeque, countValue: PyValue): void {
-  const count = Number(toIndex(countValue));
-  const items = [...deque.items];
-  if (count <= 0) {
-    deque.items.length = 0;
-    return;
-  }
-  for (let round = 1; round < count; round++) for (const item of items) push(deque, item, false);
-}
+method(dequeClass, '__bool__', 'none', 0, 0, (self) => dequeOf(self).items.length > 0);
 method(dequeClass, '__getitem__', 'one', 1, 1, (self, [key]) => dequeOf(self).items[dequeIndex(dequeOf(self), key)]);
 method(dequeClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   dequeOf(self).items[dequeIndex(dequeOf(self), key)] = value;
@@ -229,7 +182,7 @@ method(dequeClass, '__iter__', 'none', 0, 0, (self) => {
   let index = 0;
   const length = deque.items.length;
   return new PyIterator(
-    iteratorClass('_collections._deque_iterator'),
+    iteratorClass('collections._deque_iterator'),
     () => {
       if (deque.items.length !== length) throw pyError('RuntimeError', 'deque mutated during iteration');
       return index < deque.items.length ? deque.items[index++] : DONE;
@@ -241,7 +194,7 @@ method(dequeClass, '__reversed__', 'none', 0, 0, (self) => {
   const items = [...dequeOf(self).items].toReversed();
   let index = 0;
   return new PyIterator(
-    iteratorClass('_collections._deque_reverse_iterator'),
+    iteratorClass('collections._deque_reverse_iterator'),
     () => (index < items.length ? items[index++] : DONE),
     () => items
   );
@@ -250,7 +203,9 @@ method(dequeClass, '__repr__', 'none', 0, 0, (self) => {
   const deque = dequeOf(self);
   return containerRepr(deque, '[...]', () => {
     const body = `[${deque.items.map((item) => pyRepr(item)).join(', ')}]`;
-    return deque.maxlen === undefined ? `deque(${body})` : `deque(${body}, maxlen=${deque.maxlen})`;
+    return deque.maxlen === undefined
+      ? `${deque.cls.name}(${body})`
+      : `${deque.cls.name}(${body}, maxlen=${deque.maxlen})`;
   });
 });
 method(dequeClass, '__eq__', 'one', 1, 1, (self, [other]) => {
@@ -276,6 +231,7 @@ export const counterClass = new PyClass('Counter', [dictClass], typeClass);
 counterClass.mro = [counterClass, ...dictClass.mro];
 counterClass.module = 'collections';
 counterClass.layout = { base: 'native' };
+counterClass.isBaseType = true;
 counterClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'Counter', min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] },
@@ -287,7 +243,17 @@ counterClass.construct = (cls, args, kwargs) => {
   return counter;
 };
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows how Counter counts a mapping, an iterable, and keyword arguments.
+defineMethod(counterClass, '__init__', (self, args, kwargs) => {
+  checkArgs(
+    { qualified: 'Counter', min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] },
+    args,
+    kwargs
+  );
+  countInto(self as PyDict, args[0], kwargs, 1n);
+  return None;
+});
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows Counter.update and subtract for mappings, iterables, and keywords.
 function countInto(counter: PyDict, source: PyValue | undefined, kwargs: Kwargs, sign: bigint): void {
   const add = (key: PyValue, amount: PyValue, hash?: bigint): void => {
     const current = counter.store.lookup(key, hash)?.value ?? 0n;
@@ -511,38 +477,15 @@ for (const [name, compare] of [
     isCounter(other) ? compare(counterOf(self), other) : NotImplemented
   );
 }
-method(counterClass, '__missing__', 'one', 1, 1, () => 0n);
-method(counterClass, '_keep_positive', 'none', 0, 0, (self) => keepPositive(counterOf(self)));
-// Counter is a class written in Python in CPython, whose dictionary has what a class statement gives it.
-counterClass.dict.set('__module__', 'collections');
-counterClass.dict.set('__firstlineno__', 551n);
-counterClass.dict.set('__static_attributes__', newTuple([]));
-defineGetSet(counterClass, '__dict__', () => newDict());
-defineGetSet(counterClass, '__weakref__', () => None);
-method(counterClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
-  counterOf(self).store.delete(key);
-  return None;
-});
-method(counterClass, 'copy', 'none', 0, 0, (self) => callValue(counterOf(self).cls, [self]));
-method(
-  counterClass,
-  'fromkeys',
-  'expected',
-  1,
-  2,
-  () => {
-    throw pyError('NotImplementedError', 'Counter.fromkeys() is undefined.  Use Counter(iterable) instead.');
-  },
-  { binding: 'class' }
-);
 
 // defaultdict -------------------------------------------------------------------------------------------------------
 
 export const defaultdictClass = new PyClass('defaultdict', [dictClass], typeClass);
-defaultdictClass.tpName = 'collections.defaultdict';
 defaultdictClass.mro = [defaultdictClass, ...dictClass.mro];
 defaultdictClass.module = 'collections';
+defaultdictClass.typeName = 'collections.defaultdict';
 defaultdictClass.layout = { base: 'native' };
+defaultdictClass.isBaseType = true;
 defaultdictClass.construct = (cls, args, kwargs) => {
   const factory = args[0] ?? None;
   if (factory !== None && !isCallable(factory)) throw typeError('first argument must be callable or None');
@@ -552,13 +495,23 @@ defaultdictClass.construct = (cls, args, kwargs) => {
   for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
   return dict;
 };
+defineNew(defaultdictClass, (subtype) => new PyDict(subtype, new DictStore()));
+defineMethod(defaultdictClass, '__init__', (self, args, kwargs) => {
+  const filled = (defaultdictClass.construct as NonNullable<PyClass['construct']>)(defaultdictClass, args, kwargs);
+  const dict = self as PyDict;
+  dict.defaultFactory = (filled as PyDict).defaultFactory;
+  for (const entry of (filled as PyDict).store.ordered()) dict.store.set(entry.key, entry.value);
+  return None;
+});
 method(defaultdictClass, '__repr__', 'none', 0, 0, (self) => {
   const dict = self as PyDict;
-  return containerRepr(dict, '...', () => `defaultdict(${pyRepr(dict.defaultFactory ?? None)}, ${dictBody(dict)})`);
+  return containerRepr(
+    dict,
+    '...',
+    () => `${dict.cls.name}(${pyRepr(dict.defaultFactory ?? None)}, ${dictBody(dict)})`
+  );
 });
 method(defaultdictClass, '__missing__', 'one', 1, 1, (self, [key]) => currentRuntime().missingKey(self as PyDict, key));
-method(defaultdictClass, '__copy__', 'none', 0, 0, (self) => callValue(getAttribute(self, 'copy'), []));
-defaultdictClass.dict.set('__module__', 'collections');
 defaultdictClass.dict.set(
   'default_factory',
   new PyDescriptor(
@@ -574,21 +527,28 @@ defaultdictClass.dict.set(
 // OrderedDict -------------------------------------------------------------------------------------------------------
 
 export const orderedDictClass = new PyClass('OrderedDict', [dictClass], typeClass);
-orderedDictClass.tpName = 'collections.OrderedDict';
-defineGetSet(orderedDictClass, '__dict__', () => newDict());
 orderedDictClass.mro = [orderedDictClass, ...dictClass.mro];
 orderedDictClass.module = 'collections';
+orderedDictClass.typeName = 'collections.OrderedDict';
 orderedDictClass.layout = { base: 'native' };
+orderedDictClass.isBaseType = true;
 orderedDictClass.construct = (cls, args, kwargs) => {
   const dict = new PyDict(cls, new DictStore(true));
   if (args.length > 0) updateDict(dict, args[0]);
   for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
   return dict;
 };
+defineNew(orderedDictClass, (subtype) => new PyDict(subtype, new DictStore(true)));
+defineMethod(orderedDictClass, '__init__', (self, args, kwargs) => {
+  if (args.length > 1) throw typeError(`expected at most 1 argument, got ${args.length}`);
+  if (args.length > 0) updateDict(self as PyDict, args[0]);
+  for (const [key, value] of kwargs ?? []) (self as PyDict).store.set(key, value);
+  return None;
+});
 method(orderedDictClass, '__repr__', 'none', 0, 0, (self) => {
   const dict = self as PyDict;
-  if (dict.store.size === 0) return 'OrderedDict()';
-  return containerRepr(dict, '...', () => `OrderedDict(${dictBody(dict)})`);
+  if (dict.store.size === 0) return `${dict.cls.name}()`;
+  return containerRepr(dict, '...', () => `${dict.cls.name}(${dictBody(dict)})`);
 });
 method(
   orderedDictClass,
@@ -637,7 +597,7 @@ method(orderedDictClass, '__eq__', 'one', 1, 1, (self, [other]) => {
 
 // namedtuple --------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 36 -- Follows collections.namedtuple's argument handling.
+// code-gauge-allow functionNcss 35 -- Follows collections.namedtuple's argument handling.
 function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
     {
@@ -675,28 +635,37 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   cls.mro = [cls, ...tupleClass.mro];
   cls.isBuiltin = false;
   cls.layout = { base: 'native' };
+  describeNamedTuple(cls, fields, kwargs);
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
-  const module = kwargs?.get('module');
-  cls.module = typeof module === 'string' ? module : '__main__';
-  cls.dict.set('__doc__', `${typename}(${fields.join(', ')})`);
-  cls.dict.set('__slots__', newTuple([]));
+  cls.slotNames = new Set();
+  defineNew(cls, cls.construct);
   cls.dict.set('_fields', newTuple(fields));
-  cls.dict.set(
-    '_field_defaults',
-    newDict(defaults.map((value, index) => [fields[fields.length - defaults.length + index], value]))
-  );
+  const defaulted = fields.slice(fields.length - defaults.length);
+  cls.dict.set('_field_defaults', newDict(defaulted.map((name, index) => [name, defaults[index]])));
   cls.dict.set('__match_args__', newTuple(fields));
-  cls.dict.set('__module__', cls.module);
   for (const [index, name] of fields.entries()) {
     cls.dict.set(
       name,
       new PyDescriptor(
         propertyClass,
-        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index])
+        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index]),
+        undefined,
+        undefined,
+        `Alias for field number ${index}`
       )
     );
   }
   return cls;
+}
+
+/**
+ * Gives a namedtuple's class its docstring and its module: the `module` argument, else the module of the code creating
+ * it.
+ */
+function describeNamedTuple(cls: PyClass, fields: string[], kwargs: Kwargs): void {
+  const module = kwargs?.get('module') ?? currentRuntime().frame.globals.get('__name__');
+  cls.module = typeof module === 'string' ? module : '__main__';
+  cls.dict.set('__doc__', `${cls.name}(${fields.join(', ')})`);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Follows how a namedtuple binds positional and keyword arguments to its fields.
@@ -790,8 +759,6 @@ function defineNamedTupleMethods(): void {
   method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => callValue(cls, toArray(iterable)), {
     binding: 'class',
   });
-  namedTupleBase.dict.set('__replace__', namedTupleBase.dict.get('_replace') as PyValue);
-  method(namedTupleBase, '__getnewargs__', 'none', 0, 0, (self) => newTuple([...(self as PyTuple).items]));
 }
 defineNamedTupleMethods();
 
@@ -801,38 +768,656 @@ function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
   return cls;
 }
 
+/** The namedtuple class that a `typing.NamedTuple` class statement creates. */
+export function namedTupleClass(name: string, fields: string[], defaults: PyValue[]): PyClass {
+  return namedtupleWithMethods([name, newList(fields)], new Map([['defaults', newTuple(defaults)]])) as PyClass;
+}
+
 /** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */
 export function makeNamedTupleClass(name: string, fields: string[], module: string): PyClass {
   return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
 }
 
-const pythonNamespaces = new WeakMap<object, Map<string, PyValue>>();
-registerLazyAttributes('collections', ['ChainMap', 'UserDict', 'UserList', 'UserString'], (runtime, name) => {
-  let namespace = pythonNamespaces.get(runtime);
-  if (!namespace) {
-    namespace = runLibrarySource('collections', COLLECTIONS_SOURCE);
-    pythonNamespaces.set(runtime, namespace);
-  }
-  return namespace.get(name) as PyValue;
-});
+// ChainMap, UserDict, UserList, and UserString from CPython's `collections/__init__.py`.
+const SOURCE = String.raw`
+import _collections_abc
+import sys as _sys
+from reprlib import recursive_repr as _recursive_repr
 
-registerModule(
-  'collections',
-  () =>
-    new Map<string, PyValue>([
-      ['deque', dequeClass],
-      // CPython imports heapq into collections only when Counter.most_common needs it.
-      ['heapq', None],
-      ['Counter', counterClass],
-      ['defaultdict', defaultdictClass],
-      ['OrderedDict', orderedDictClass],
-      [
-        'namedtuple',
-        builtin('namedtuple', 'takes', 2, 2, namedtupleWithMethods, {
-          keywords: ['typename', 'field_names', 'defaults', 'rename', 'module'],
-        }),
-      ],
-    ])
-);
+########################################################################
+###  ChainMap
+########################################################################
+
+class ChainMap(_collections_abc.MutableMapping):
+    ''' A ChainMap groups multiple dicts (or other mappings) together
+    to create a single, updateable view.
+
+    The underlying mappings are stored in a list.  That list is public and can
+    be accessed or updated using the *maps* attribute.  There is no other
+    state.
+
+    Lookups search the underlying mappings successively until a key is found.
+    In contrast, writes, updates, and deletions only operate on the first
+    mapping.
+
+    '''
+
+    def __init__(self, *maps):
+        '''Initialize a ChainMap by setting *maps* to the given mappings.
+        If no mappings are provided, a single empty dictionary is used.
+
+        '''
+        self.maps = list(maps) or [{}]          # always at least one map
+
+    def __missing__(self, key):
+        raise KeyError(key)
+
+    def __getitem__(self, key):
+        for mapping in self.maps:
+            try:
+                return mapping[key]             # can't use 'key in mapping' with defaultdict
+            except KeyError:
+                pass
+        return self.__missing__(key)            # support subclasses that define __missing__
+
+    def get(self, key, default=None):
+        return self[key] if key in self else default    # needs to make use of __contains__
+
+    def __len__(self):
+        return len(set().union(*self.maps))     # reuses stored hash values if possible
+
+    def __iter__(self):
+        d = {}
+        for mapping in map(dict.fromkeys, reversed(self.maps)):
+            d |= mapping                        # reuses stored hash values if possible
+        return iter(d)
+
+    def __contains__(self, key):
+        for mapping in self.maps:
+            if key in mapping:
+                return True
+        return False
+
+    def __bool__(self):
+        return any(self.maps)
+
+    @_recursive_repr()
+    def __repr__(self):
+        return f'{self.__class__.__name__}({", ".join(map(repr, self.maps))})'
+
+    @classmethod
+    def fromkeys(cls, iterable, value=None, /):
+        'Create a new ChainMap with keys from iterable and values set to value.'
+        return cls(dict.fromkeys(iterable, value))
+
+    def copy(self):
+        'New ChainMap or subclass with a new copy of maps[0] and refs to maps[1:]'
+        return self.__class__(self.maps[0].copy(), *self.maps[1:])
+
+    __copy__ = copy
+
+    def new_child(self, m=None, **kwargs):      # like Django's Context.push()
+        '''New ChainMap with a new map followed by all previous maps.
+        If no map is provided, an empty dict is used.
+        Keyword arguments update the map or new empty dict.
+        '''
+        if m is None:
+            m = kwargs
+        elif kwargs:
+            m.update(kwargs)
+        return self.__class__(m, *self.maps)
+
+    @property
+    def parents(self):                          # like Django's Context.pop()
+        'New ChainMap from maps[1:].'
+        return self.__class__(*self.maps[1:])
+
+    def __setitem__(self, key, value):
+        self.maps[0][key] = value
+
+    def __delitem__(self, key):
+        try:
+            del self.maps[0][key]
+        except KeyError:
+            raise KeyError(f'Key not found in the first mapping: {key!r}')
+
+    def popitem(self):
+        'Remove and return an item pair from maps[0]. Raise KeyError is maps[0] is empty.'
+        try:
+            return self.maps[0].popitem()
+        except KeyError:
+            raise KeyError('No keys found in the first mapping.')
+
+    def pop(self, key, *args):
+        'Remove *key* from maps[0] and return its value. Raise KeyError if *key* not in maps[0].'
+        try:
+            return self.maps[0].pop(key, *args)
+        except KeyError:
+            raise KeyError(f'Key not found in the first mapping: {key!r}')
+
+    def clear(self):
+        'Clear maps[0], leaving maps[1:] intact.'
+        self.maps[0].clear()
+
+    def __ior__(self, other):
+        self.maps[0].update(other)
+        return self
+
+    def __or__(self, other):
+        if not isinstance(other, _collections_abc.Mapping):
+            return NotImplemented
+        m = self.copy()
+        m.maps[0].update(other)
+        return m
+
+    def __ror__(self, other):
+        if not isinstance(other, _collections_abc.Mapping):
+            return NotImplemented
+        m = dict(other)
+        for child in reversed(self.maps):
+            m.update(child)
+        return self.__class__(m)
+
+################################################################################
+### UserDict
+################################################################################
+
+class UserDict(_collections_abc.MutableMapping):
+
+    # Start by filling-out the abstract methods
+    def __init__(self, dict=None, /, **kwargs):
+        self.data = {}
+        if dict is not None:
+            self.update(dict)
+        if kwargs:
+            self.update(kwargs)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, key):
+        if key in self.data:
+            return self.data[key]
+        if hasattr(self.__class__, "__missing__"):
+            return self.__class__.__missing__(self, key)
+        raise KeyError(key)
+
+    def __setitem__(self, key, item):
+        self.data[key] = item
+
+    def __delitem__(self, key):
+        del self.data[key]
+
+    def __iter__(self):
+        return iter(self.data)
+
+    # Modify __contains__ and get() to work like dict
+    # does when __missing__ is present.
+    def __contains__(self, key):
+        return key in self.data
+
+    def get(self, key, default=None):
+        if key in self:
+            return self[key]
+        return default
+
+    # Now, add the methods in dicts but not in MutableMapping
+    def __repr__(self):
+        return repr(self.data)
+
+    def __or__(self, other):
+        if isinstance(other, UserDict):
+            return self.__class__(self.data | other.data)
+        if isinstance(other, dict):
+            return self.__class__(self.data | other)
+        return NotImplemented
+
+    def __ror__(self, other):
+        if isinstance(other, UserDict):
+            return self.__class__(other.data | self.data)
+        if isinstance(other, dict):
+            return self.__class__(other | self.data)
+        return NotImplemented
+
+    def __ior__(self, other):
+        if isinstance(other, UserDict):
+            self.data |= other.data
+        else:
+            self.data |= other
+        return self
+
+    def __copy__(self):
+        inst = self.__class__.__new__(self.__class__)
+        inst.__dict__.update(self.__dict__)
+        # Create a copy and avoid triggering descriptors
+        inst.__dict__["data"] = self.__dict__["data"].copy()
+        return inst
+
+    def copy(self):
+        if self.__class__ is UserDict:
+            return UserDict(self.data.copy())
+        import copy
+        data = self.data
+        try:
+            self.data = {}
+            c = copy.copy(self)
+        finally:
+            self.data = data
+        c.update(self)
+        return c
+
+    @classmethod
+    def fromkeys(cls, iterable, value=None):
+        d = cls()
+        for key in iterable:
+            d[key] = value
+        return d
+
+################################################################################
+### UserList
+################################################################################
+
+class UserList(_collections_abc.MutableSequence):
+    """A more or less complete user-defined wrapper around list objects."""
+
+    def __init__(self, initlist=None):
+        self.data = []
+        if initlist is not None:
+            # XXX should this accept an arbitrary sequence?
+            if type(initlist) == type(self.data):
+                self.data[:] = initlist
+            elif isinstance(initlist, UserList):
+                self.data[:] = initlist.data[:]
+            else:
+                self.data = list(initlist)
+
+    def __repr__(self):
+        return repr(self.data)
+
+    def __lt__(self, other):
+        return self.data < self.__cast(other)
+
+    def __le__(self, other):
+        return self.data <= self.__cast(other)
+
+    def __eq__(self, other):
+        return self.data == self.__cast(other)
+
+    def __gt__(self, other):
+        return self.data > self.__cast(other)
+
+    def __ge__(self, other):
+        return self.data >= self.__cast(other)
+
+    def __cast(self, other):
+        return other.data if isinstance(other, UserList) else other
+
+    def __contains__(self, item):
+        return item in self.data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return self.__class__(self.data[i])
+        else:
+            return self.data[i]
+
+    def __setitem__(self, i, item):
+        self.data[i] = item
+
+    def __delitem__(self, i):
+        del self.data[i]
+
+    def __add__(self, other):
+        if isinstance(other, UserList):
+            return self.__class__(self.data + other.data)
+        elif isinstance(other, type(self.data)):
+            return self.__class__(self.data + other)
+        return self.__class__(self.data + list(other))
+
+    def __radd__(self, other):
+        if isinstance(other, UserList):
+            return self.__class__(other.data + self.data)
+        elif isinstance(other, type(self.data)):
+            return self.__class__(other + self.data)
+        return self.__class__(list(other) + self.data)
+
+    def __iadd__(self, other):
+        if isinstance(other, UserList):
+            self.data += other.data
+        elif isinstance(other, type(self.data)):
+            self.data += other
+        else:
+            self.data += list(other)
+        return self
+
+    def __mul__(self, n):
+        return self.__class__(self.data * n)
+
+    __rmul__ = __mul__
+
+    def __imul__(self, n):
+        self.data *= n
+        return self
+
+    def __copy__(self):
+        inst = self.__class__.__new__(self.__class__)
+        inst.__dict__.update(self.__dict__)
+        # Create a copy and avoid triggering descriptors
+        inst.__dict__["data"] = self.__dict__["data"][:]
+        return inst
+
+    def append(self, item):
+        self.data.append(item)
+
+    def insert(self, i, item):
+        self.data.insert(i, item)
+
+    def pop(self, i=-1):
+        return self.data.pop(i)
+
+    def remove(self, item):
+        self.data.remove(item)
+
+    def clear(self):
+        self.data.clear()
+
+    def copy(self):
+        return self.__class__(self)
+
+    def count(self, item):
+        return self.data.count(item)
+
+    def index(self, item, *args):
+        return self.data.index(item, *args)
+
+    def reverse(self):
+        self.data.reverse()
+
+    def sort(self, /, *args, **kwds):
+        self.data.sort(*args, **kwds)
+
+    def extend(self, other):
+        if isinstance(other, UserList):
+            self.data.extend(other.data)
+        else:
+            self.data.extend(other)
+
+################################################################################
+### UserString
+################################################################################
+
+class UserString(_collections_abc.Sequence):
+
+    def __init__(self, seq):
+        if isinstance(seq, str):
+            self.data = seq
+        elif isinstance(seq, UserString):
+            self.data = seq.data[:]
+        else:
+            self.data = str(seq)
+
+    def __str__(self):
+        return str(self.data)
+
+    def __repr__(self):
+        return repr(self.data)
+
+    def __int__(self):
+        return int(self.data)
+
+    def __float__(self):
+        return float(self.data)
+
+    def __complex__(self):
+        return complex(self.data)
+
+    def __hash__(self):
+        return hash(self.data)
+
+    def __getnewargs__(self):
+        return (self.data[:],)
+
+    def __eq__(self, string):
+        if isinstance(string, UserString):
+            return self.data == string.data
+        return self.data == string
+
+    def __lt__(self, string):
+        if isinstance(string, UserString):
+            return self.data < string.data
+        return self.data < string
+
+    def __le__(self, string):
+        if isinstance(string, UserString):
+            return self.data <= string.data
+        return self.data <= string
+
+    def __gt__(self, string):
+        if isinstance(string, UserString):
+            return self.data > string.data
+        return self.data > string
+
+    def __ge__(self, string):
+        if isinstance(string, UserString):
+            return self.data >= string.data
+        return self.data >= string
+
+    def __contains__(self, char):
+        if isinstance(char, UserString):
+            char = char.data
+        return char in self.data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        return self.__class__(self.data[index])
+
+    def __add__(self, other):
+        if isinstance(other, UserString):
+            return self.__class__(self.data + other.data)
+        elif isinstance(other, str):
+            return self.__class__(self.data + other)
+        return self.__class__(self.data + str(other))
+
+    def __radd__(self, other):
+        if isinstance(other, str):
+            return self.__class__(other + self.data)
+        return self.__class__(str(other) + self.data)
+
+    def __mul__(self, n):
+        return self.__class__(self.data * n)
+
+    __rmul__ = __mul__
+
+    def __mod__(self, args):
+        return self.__class__(self.data % args)
+
+    def __rmod__(self, template):
+        return self.__class__(str(template) % self)
+
+    # the following methods are defined in alphabetical order:
+    def capitalize(self):
+        return self.__class__(self.data.capitalize())
+
+    def casefold(self):
+        return self.__class__(self.data.casefold())
+
+    def center(self, width, *args):
+        return self.__class__(self.data.center(width, *args))
+
+    def count(self, sub, start=0, end=_sys.maxsize):
+        if isinstance(sub, UserString):
+            sub = sub.data
+        return self.data.count(sub, start, end)
+
+    def removeprefix(self, prefix, /):
+        if isinstance(prefix, UserString):
+            prefix = prefix.data
+        return self.__class__(self.data.removeprefix(prefix))
+
+    def removesuffix(self, suffix, /):
+        if isinstance(suffix, UserString):
+            suffix = suffix.data
+        return self.__class__(self.data.removesuffix(suffix))
+
+    def encode(self, encoding='utf-8', errors='strict'):
+        encoding = 'utf-8' if encoding is None else encoding
+        errors = 'strict' if errors is None else errors
+        return self.data.encode(encoding, errors)
+
+    def endswith(self, suffix, start=0, end=_sys.maxsize):
+        return self.data.endswith(suffix, start, end)
+
+    def expandtabs(self, tabsize=8):
+        return self.__class__(self.data.expandtabs(tabsize))
+
+    def find(self, sub, start=0, end=_sys.maxsize):
+        if isinstance(sub, UserString):
+            sub = sub.data
+        return self.data.find(sub, start, end)
+
+    def format(self, /, *args, **kwds):
+        return self.data.format(*args, **kwds)
+
+    def format_map(self, mapping):
+        return self.data.format_map(mapping)
+
+    def index(self, sub, start=0, end=_sys.maxsize):
+        if isinstance(sub, UserString):
+            sub = sub.data
+        return self.data.index(sub, start, end)
+
+    def isalpha(self):
+        return self.data.isalpha()
+
+    def isalnum(self):
+        return self.data.isalnum()
+
+    def isascii(self):
+        return self.data.isascii()
+
+    def isdecimal(self):
+        return self.data.isdecimal()
+
+    def isdigit(self):
+        return self.data.isdigit()
+
+    def isidentifier(self):
+        return self.data.isidentifier()
+
+    def islower(self):
+        return self.data.islower()
+
+    def isnumeric(self):
+        return self.data.isnumeric()
+
+    def isprintable(self):
+        return self.data.isprintable()
+
+    def isspace(self):
+        return self.data.isspace()
+
+    def istitle(self):
+        return self.data.istitle()
+
+    def isupper(self):
+        return self.data.isupper()
+
+    def join(self, seq):
+        return self.data.join(seq)
+
+    def ljust(self, width, *args):
+        return self.__class__(self.data.ljust(width, *args))
+
+    def lower(self):
+        return self.__class__(self.data.lower())
+
+    def lstrip(self, chars=None):
+        return self.__class__(self.data.lstrip(chars))
+
+    maketrans = str.maketrans
+
+    def partition(self, sep):
+        return self.data.partition(sep)
+
+    def replace(self, old, new, maxsplit=-1):
+        if isinstance(old, UserString):
+            old = old.data
+        if isinstance(new, UserString):
+            new = new.data
+        return self.__class__(self.data.replace(old, new, maxsplit))
+
+    def rfind(self, sub, start=0, end=_sys.maxsize):
+        if isinstance(sub, UserString):
+            sub = sub.data
+        return self.data.rfind(sub, start, end)
+
+    def rindex(self, sub, start=0, end=_sys.maxsize):
+        if isinstance(sub, UserString):
+            sub = sub.data
+        return self.data.rindex(sub, start, end)
+
+    def rjust(self, width, *args):
+        return self.__class__(self.data.rjust(width, *args))
+
+    def rpartition(self, sep):
+        return self.data.rpartition(sep)
+
+    def rstrip(self, chars=None):
+        return self.__class__(self.data.rstrip(chars))
+
+    def split(self, sep=None, maxsplit=-1):
+        return self.data.split(sep, maxsplit)
+
+    def rsplit(self, sep=None, maxsplit=-1):
+        return self.data.rsplit(sep, maxsplit)
+
+    def splitlines(self, keepends=False):
+        return self.data.splitlines(keepends)
+
+    def startswith(self, prefix, start=0, end=_sys.maxsize):
+        return self.data.startswith(prefix, start, end)
+
+    def strip(self, chars=None):
+        return self.__class__(self.data.strip(chars))
+
+    def swapcase(self):
+        return self.__class__(self.data.swapcase())
+
+    def title(self):
+        return self.__class__(self.data.title())
+
+    def translate(self, *args):
+        return self.__class__(self.data.translate(*args))
+
+    def upper(self):
+        return self.__class__(self.data.upper())
+
+    def zfill(self, width):
+        return self.__class__(self.data.zfill(width))
+`;
+
+registerModule('collections', (runtime, namespace) => {
+  for (const [key, value] of [
+    ['deque', dequeClass],
+    ['Counter', counterClass],
+    ['defaultdict', defaultdictClass],
+    ['OrderedDict', orderedDictClass],
+    [
+      'namedtuple',
+      builtin('namedtuple', 'takes', 2, 2, namedtupleWithMethods, {
+        keywords: ['typename', 'field_names', 'defaults', 'rename', 'module'],
+      }),
+    ],
+  ] as [string, PyValue][]) {
+    namespace.set(key, value);
+  }
+  runModuleSource(runtime, namespace, SOURCE);
+  return new Map();
+});
 
 export { getIterator, PyObject };

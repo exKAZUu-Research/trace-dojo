@@ -160,22 +160,31 @@ export function isLowerText(text: string): boolean {
 
 /** `str.istitle()`: uppercase and titlecase characters only start words, lowercase ones only follow cased ones. */
 export function isTitleText(text: string): boolean {
-  let cased = false;
+  return isTitleSequence(codesOf(text), (code) => isUpperCode(code) || isTitleCode(code), isLowerCode);
+}
+
+/** Whether a text is titlecased: uppercase only after uncased characters and lowercase only after cased ones. */
+export function isTitleSequence<T>(
+  chars: Iterable<T>,
+  isUpper: (char: T) => boolean,
+  isLower: (char: T) => boolean
+): boolean {
   let previousCased = false;
-  for (const code of codesOf(text)) {
-    if (isUpperCode(code) || isTitleCode(code)) {
+  let sawCased = false;
+  for (const char of chars) {
+    if (isUpper(char)) {
       if (previousCased) return false;
       previousCased = true;
-      cased = true;
-    } else if (isLowerCode(code)) {
+      sawCased = true;
+    } else if (isLower(char)) {
       if (!previousCased) return false;
       previousCased = true;
-      cased = true;
+      sawCased = true;
     } else {
       previousCased = false;
     }
   }
-  return cased;
+  return sawCased;
 }
 
 const CAPITAL_SIGMA = 0x3_a3;

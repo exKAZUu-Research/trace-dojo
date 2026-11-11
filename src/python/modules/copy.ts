@@ -22,6 +22,24 @@ function shallowCopy(value: PyValue): PyValue {
   if (typeof value !== 'object') return value;
   const special = lookupSpecial(value, '__copy__');
   if (special !== undefined) return callValue(bindValue(special, value), []);
+  const copy = shallowCopyContents(value);
+  if (copy !== value && typeof copy === 'object') copyAttributes(value, copy, (item) => item);
+  return copy;
+}
+
+/** Copies the attributes a program's class gives an instance outside the instance's own dict, such as slots. */
+function copyAttributes(source: PyObject, target: PyObject, copyItem: (item: PyValue) => PyValue): void {
+  if (source.instanceDict) target.instanceDict = mapValues(source.instanceDict, copyItem);
+  if (source.slotValues) target.slotValues = mapValues(source.slotValues, copyItem);
+}
+
+function mapValues(map: Map<string, PyValue>, copyItem: (item: PyValue) => PyValue): Map<string, PyValue> {
+  const copy = new Map<string, PyValue>();
+  for (const [key, item] of map) copy.set(key, copyItem(item));
+  return copy;
+}
+
+function shallowCopyContents(value: PyObject): PyValue {
   if (value instanceof PyList) return new PyList(value.cls, [...value.items]);
   if (value instanceof PyDict) {
     const copy = new PyDict(value.cls, new DictStore(value.store.plainWrites), value.defaultFactory);
@@ -34,19 +52,26 @@ function shallowCopy(value: PyValue): PyValue {
     const copy = new PyInstance(value.cls);
     for (const [key, item] of value.dict) copy.dict.set(key, item);
     copy.exception = value.exception && { ...value.exception };
+    copy.primitive = value.primitive;
     return copy;
   }
   return value;
 }
 
 /** `copy.deepcopy`: copies containers and instances recursively, sharing what the original shares. */
-// code-gauge-allow functionNcss 41 -- One case per kind of container copy.deepcopy copies.
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of container copy.deepcopy copies.
 function deepCopy(value: PyValue, memo: Map<PyObject, PyValue>): PyValue {
   if (typeof value !== 'object') return value;
   const known = memo.get(value);
   if (known !== undefined) return known;
   currentRuntime().spend();
+  const copy = deepCopyContents(value, memo);
+  if (copy !== value && typeof copy === 'object') copyAttributes(value, copy, (item) => deepCopy(item, memo));
+  return copy;
+}
+
+// code-gauge-allow functionNcss 41 -- One case per kind of container copy.deepcopy copies.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of container copy.deepcopy copies.
+function deepCopyContents(value: PyObject, memo: Map<PyObject, PyValue>): PyValue {
   if (value instanceof PyList) {
     const copy = new PyList(value.cls, []);
     memo.set(value, copy);
@@ -84,6 +109,7 @@ function deepCopy(value: PyValue, memo: Map<PyObject, PyValue>): PyValue {
     const copy = new PyInstance(value.cls);
     memo.set(value, copy);
     for (const [key, item] of value.dict) copy.dict.set(key, deepCopy(item, memo));
+    copy.primitive = value.primitive;
     return copy;
   }
   return value;

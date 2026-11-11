@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 482 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss 606 -- The expression evaluator keeps one method per kind of expression together.
 import type {
   Argument,
   Comprehension,
@@ -8,9 +8,10 @@ import type {
   FormattedValue,
   FunctionDef,
   NameRef,
+  ScopeInfo,
   Target,
 } from './ast';
-import { moduleNameOf } from './classes';
+import { newBytes } from './bytesValues';
 import { newComplex } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
@@ -30,6 +31,7 @@ import {
   toArray,
 } from './objects';
 import { binaryOp, compareOp, unaryOp } from './operators';
+import { markGeneratorExpression } from './reflection';
 import type { Runtime } from './runtime';
 import {
   Ellipsis,
@@ -65,7 +67,7 @@ import {
 export class ExpressionEvaluator {
   constructor(protected readonly runtime: Runtime) {}
 
-  // code-gauge-allow functionNcss 45 -- One case per kind of expression.
+  // code-gauge-allow functionNcss 49 -- One case per kind of expression.
   evaluate(expression: Expression, frame: Frame): PyValue {
     switch (expression.kind) {
       case 'name': {
@@ -100,6 +102,9 @@ export class ExpressionEvaluator {
       }
       case 'binary': {
         const left = this.evaluate(expression.left, frame);
+        // Garbage collection only looks for objects among the values held.
+        if (typeof left !== 'object')
+          return binaryOp(expression.operator, left, this.evaluate(expression.right, frame));
         return this.hold(frame, left, () =>
           binaryOp(expression.operator, left, this.evaluate(expression.right, frame))
         );
@@ -118,6 +123,12 @@ export class ExpressionEvaluator {
       case 'compare': {
         return this.compare(expression, frame);
       }
+      case 'conditional': {
+        return this.evaluate(
+          isTruthy(this.evaluate(expression.test, frame)) ? expression.body : expression.orelse,
+          frame
+        );
+      }
       case 'lambda': {
         return this.createFunction(expression.fn, frame, []);
       }
@@ -135,18 +146,18 @@ export class ExpressionEvaluator {
 
   private display(expression: Extract<Expression, { kind: 'list' | 'tuple' | 'set' }>, frame: Frame): PyValue {
     if (expression.kind === 'set') {
-      return this.withTemporaries(frame, () => {
-        const items = this.elements(expression.elements, frame);
-        this.runtime.allocate(items.length + 1);
-        return newSet(items);
-      });
+      return this.withTemporaries(frame, () => this.newDisplay('set', this.elements(expression.elements, frame)));
     }
-    const items = this.elements(expression.elements, frame);
-    this.runtime.allocate(items.length + 1);
-    return expression.kind === 'list' ? newList(items) : newTuple(items);
+    return this.newDisplay(expression.kind, this.elements(expression.elements, frame));
   }
 
-  private slice(expression: Extract<Expression, { kind: 'slice' }>, frame: Frame): PyValue {
+  protected newDisplay(kind: 'list' | 'tuple' | 'set', items: PyValue[]): PyValue {
+    this.runtime.allocate(items.length + 1);
+    if (kind === 'set') return newSet(items);
+    return kind === 'list' ? newList(items) : newTuple(items);
+  }
+
+  protected slice(expression: Extract<Expression, { kind: 'slice' }>, frame: Frame): PyValue {
     const lower = expression.lower ? this.evaluate(expression.lower, frame) : None;
     const upper = expression.upper ? this.evaluate(expression.upper, frame) : None;
     const step = expression.step ? this.evaluate(expression.step, frame) : None;
@@ -154,7 +165,7 @@ export class ExpressionEvaluator {
   }
 
   /** Keeps a value reachable for garbage collection while `run` evaluates more of the expression holding it. */
-  protected hold<T>(frame: Frame, value: PyValue, run: () => T): T {
+  hold<T>(frame: Frame, value: PyValue, run: () => T): T {
     const { temporaries } = frame;
     const length = temporaries.length;
     temporaries.push(value);
@@ -213,7 +224,7 @@ export class ExpressionEvaluator {
         return value;
       }
       default: {
-        const value = frame.globals.get(name) ?? this.runtime.builtins.get(name);
+        const value = frame.globals.get(name) ?? this.runtime.builtins.get(name) ?? classCellOf(name, frame);
         if (value === undefined) throw this.nameError(`name '${name}' is not defined`, name, frame);
         return value;
       }
@@ -237,27 +248,41 @@ export class ExpressionEvaluator {
   }
 
   storeName(ref: NameRef, value: PyValue, frame: Frame): void {
-    const { name } = ref;
+    const { finalizer } = this.runtime;
+    if (finalizer.pending.size === 0) {
+      bindName(ref, value, frame);
+      return;
+    }
+    const replaced = this.boundValue(ref, frame);
+    bindName(ref, value, frame);
+    finalizer.release([replaced]);
+  }
+
+  deleteName(ref: NameRef, frame: Frame): void {
+    const { finalizer } = this.runtime;
+    const deleted = finalizer.pending.size > 0 ? this.boundValue(ref, frame) : undefined;
+    this.unbindName(ref, frame);
+    finalizer.release([deleted]);
+  }
+
+  /** The value a name is bound to, without the errors of reading an unbound one. */
+  private boundValue(ref: NameRef, frame: Frame): PyValue | undefined {
     switch (ref.access) {
       case 'local':
       case 'name': {
-        frame.locals.set(name, value);
-        return;
+        return frame.locals.get(ref.name);
       }
       case 'cell':
       case 'classCell': {
-        const cell = frame.cells.get(name);
-        if (cell) cell.value = value;
-        else frame.cells.set(name, new PyCell(value));
-        return;
+        return frame.cells.get(ref.name)?.value;
       }
       default: {
-        frame.globals.set(name, value);
+        return frame.globals.get(ref.name);
       }
     }
   }
 
-  deleteName(ref: NameRef, frame: Frame): void {
+  private unbindName(ref: NameRef, frame: Frame): void {
     const { name } = ref;
     switch (ref.access) {
       case 'local': {
@@ -290,23 +315,61 @@ export class ExpressionEvaluator {
         return;
       }
       case 'attribute': {
-        this.hold(frame, value, () => setAttribute(this.evaluate(target.object, frame), target.name, value));
+        this.hold(frame, value, () => {
+          const object = this.evaluate(target.object, frame);
+          if (this.runtime.finalizer.pending.size === 0) setAttribute(object, target.name, value);
+          else this.replacing(object, target.name, true, () => setAttribute(object, target.name, value));
+        });
         return;
       }
       case 'subscript': {
         this.hold(frame, value, () => {
           const object = this.evaluate(target.object, frame);
-          this.hold(frame, object, () => setItem(object, this.evaluate(target.index, frame), value));
+          this.hold(frame, object, () => {
+            const index = this.evaluate(target.index, frame);
+            if (this.runtime.finalizer.pending.size === 0) setItem(object, index, value);
+            else this.replacing(object, index, false, () => setItem(object, index, value));
+          });
         });
         return;
       }
       case 'unpack': {
-        const items = unpack(value, target.elements.length);
+        const items = this.unpackTarget(target, value);
         this.hold(frame, value, () => {
           for (const [index, element] of target.elements.entries()) this.assign(element, items[index], frame);
         });
       }
     }
+  }
+
+  /** The items a target list unpacks a value into. */
+  protected unpackTarget(target: Extract<Target, { kind: 'unpack' }>, value: PyValue): PyValue[] {
+    return target.starIndex === undefined
+      ? unpack(value, target.elements.length)
+      : this.unpackStarred(value, target.starIndex, target.elements.length - target.starIndex - 1);
+  }
+
+  /** The items a target list with a starred element unpacks a value into, the starred one taking a list of the rest. */
+  private unpackStarred(value: PyValue, before: number, after: number): PyValue[] {
+    const minimum = before + after;
+    const notEnough = (got: number): PyError =>
+      pyError('ValueError', `not enough values to unpack (expected at least ${minimum}, got ${got})`);
+    if (!isIterable(value)) throw typeError(`cannot unpack non-iterable ${typeName(value)} object`);
+    const next = iterate(value);
+    const items: PyValue[] = [];
+    for (let index = 0; index < before; index++) {
+      const item = next();
+      if (item === DONE) throw notEnough(index);
+      items.push(item);
+    }
+    const rest: PyValue[] = [];
+    for (let item = next(); item !== DONE; item = next()) {
+      this.runtime.allocate(1);
+      rest.push(item);
+    }
+    if (rest.length < after) throw notEnough(before + rest.length);
+    this.runtime.allocate(1);
+    return [...items, newList(rest.slice(0, rest.length - after)), ...rest.slice(rest.length - after)];
   }
 
   deleteTarget(target: Target, frame: Frame): void {
@@ -316,18 +379,48 @@ export class ExpressionEvaluator {
         return;
       }
       case 'attribute': {
-        deleteAttribute(this.evaluate(target.object, frame), target.name);
+        const object = this.evaluate(target.object, frame);
+        this.replacing(object, target.name, true, () => deleteAttribute(object, target.name));
         return;
       }
       case 'subscript': {
         const object = this.evaluate(target.object, frame);
-        deleteItem(object, this.evaluate(target.index, frame));
+        const index = this.evaluate(target.index, frame);
+        this.replacing(object, index, false, () => deleteItem(object, index));
         return;
       }
       case 'unpack': {
         for (const element of target.elements) this.deleteTarget(element, frame);
       }
     }
+  }
+
+  /** Stores over or deletes an attribute or an item, closing a generator that only the value it held reached. */
+  private replacing(object: PyValue, key: PyValue, isAttribute: boolean, store: () => void): void {
+    const replaced = this.heldValue(object, key, isAttribute);
+    store();
+    this.release(replaced);
+  }
+
+  /**
+   * The value an attribute or an item of a builtin container holds, read without running the program's code, while a
+   * suspended generator waits to be closed: storing over it or deleting it may leave the generator unreachable.
+   */
+  private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): PyValue | undefined {
+    if (this.runtime.finalizer.pending.size === 0) return undefined;
+    if (isAttribute) return object instanceof PyInstance ? object.dict.get(key as string) : undefined;
+    if (object instanceof PyList && typeof key === 'bigint') {
+      const { items } = object;
+      return items[Number(key < 0n ? key + BigInt(items.length) : key)];
+    }
+    if (object instanceof PyDict && typeof key !== 'object') return object.store.get(key);
+    return undefined;
+  }
+
+  /** Closes the generators that dropping a reference to `value` left unreachable, as reference counting does. */
+  protected release(value: PyValue | undefined): void {
+    const { finalizer } = this.runtime;
+    if (finalizer.pending.size > 0) finalizer.release([value]);
   }
 
   // Displays --------------------------------------------------------------------------------------------------------
@@ -338,17 +431,8 @@ export class ExpressionEvaluator {
     const length = temporaries.length;
     try {
       for (const element of elements) {
-        if (element.kind === 'starred') {
-          const iterable = this.evaluate(element.value, frame);
-          for (const item of starredItems(iterable)) {
-            items.push(item);
-            temporaries.push(item);
-          }
-        } else {
-          const item = this.evaluate(element, frame);
-          items.push(item);
-          temporaries.push(item);
-        }
+        const isStarred = element.kind === 'starred';
+        addElement(items, frame, isStarred, this.evaluate(isStarred ? element.value : element, frame));
       }
     } finally {
       temporaries.length = length;
@@ -356,14 +440,14 @@ export class ExpressionEvaluator {
     return items;
   }
 
+  // code-gauge-allow duplicateLines 15 -- The suspending evaluator mirrors this step by step, sharing how it combines the values.
   private dictDisplay(expression: Extract<Expression, { kind: 'dict' }>, frame: Frame): PyValue {
     return this.withTemporaries(frame, () => {
       const dict = newDict();
       frame.temporaries.push(dict);
       for (const item of expression.items) {
         if (item.kind === 'doubleStar') {
-          const mapping = this.evaluate(item.value, frame);
-          for (const [key, value] of mappingEntries(mapping)) dict.store.set(key, value);
+          mergeMapping(dict, this.evaluate(item.value, frame));
           continue;
         }
         const key = this.evaluate(item.key, frame);
@@ -383,12 +467,8 @@ export class ExpressionEvaluator {
         result += part;
         continue;
       }
-      let value = this.evaluate(part.expression, frame);
-      if (part.conversion === 'r') value = pyRepr(value);
-      else if (part.conversion === 's') value = pyStr(value);
-      else if (part.conversion === 'a') value = pyAscii(value);
-      const spec = part.spec ? (this.evaluate(part.spec, frame) as string) : '';
-      result += (part.debugText ?? '') + pyFormat(value, spec);
+      const value = this.evaluate(part.expression, frame);
+      result += formatPart(part, value, part.spec ? (this.evaluate(part.spec, frame) as string) : '');
       this.runtime.buildString(result.length);
     }
     return result;
@@ -396,75 +476,62 @@ export class ExpressionEvaluator {
 
   // Calls -----------------------------------------------------------------------------------------------------------
 
-  private call(expression: Extract<Expression, { kind: 'call' }>, frame: Frame): PyValue {
-    const { runtime } = this;
-    const callee = this.evaluate(expression.callee, frame);
-    return this.withTemporaries(frame, () => {
-      frame.temporaries.push(callee);
-      const { args, kwargs } = this.arguments(expression.args, frame, callee);
-      const outerRow = runtime.currentRow;
-      runtime.currentRow = expression.row;
-      try {
-        return callValue(callee, args, kwargs);
-      } finally {
-        runtime.currentRow = outerRow;
-      }
-    });
+  /** Evaluates a call, whose callee the caller may have evaluated already. */
+  protected call(
+    expression: Extract<Expression, { kind: 'call' }>,
+    frame: Frame,
+    callee = this.evaluate(expression.callee, frame)
+  ): PyValue {
+    const { temporaries } = frame;
+    const length = temporaries.length;
+    temporaries.push(callee);
+    let args: PyValue[];
+    let result: PyValue;
+    try {
+      const collected = this.arguments(expression.args, frame, callee);
+      args = collected.args;
+      result = this.invoke(callee, args, collected.kwargs, expression.row);
+    } finally {
+      temporaries.length = length;
+    }
+    this.afterCall(args, result);
+    return result;
   }
 
-  /** Evaluates call arguments, holding each for garbage collection until the call returns. */
-  // code-gauge-allow functionNcss 40 -- Evaluates each kind of argument in order, raising CPython's errors for unpacking.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Evaluates each kind of argument in order, raising CPython's errors for unpacking.
-  protected arguments(argumentList: Argument[], frame: Frame, callee: PyValue): { args: PyValue[]; kwargs: Kwargs } {
-    const args: PyValue[] = [];
-    let kwargs: Map<string, PyValue> | undefined;
+  /** Closes a generator that only the arguments of a returned call held, as freeing them does in CPython. */
+  protected afterCall(args: PyValue[], result: PyValue): void {
+    const { finalizer } = this.runtime;
+    if (finalizer.pending.size > 0) finalizer.release(args, [result]);
+  }
+
+  /** Calls a value from the call expression at `row`, which the call's frame and tracebacks report. */
+  protected invoke(callee: PyValue, args: PyValue[], kwargs: Kwargs, row: number): PyValue {
+    const { runtime } = this;
+    const outerRow = runtime.currentRow;
+    runtime.currentRow = row;
+    try {
+      return callValue(callee, args, kwargs);
+    } finally {
+      runtime.currentRow = outerRow;
+    }
+  }
+
+  /**
+   * Evaluates call arguments, holding each for garbage collection until the call returns. `leading` counts the
+   * positional arguments the call passes before these, as a class statement passes its body and name.
+   */
+  arguments(argumentList: Argument[], frame: Frame, callee: PyValue, leading = 0): CallArguments {
+    const collected: CallArguments = { args: [], kwargs: undefined };
     for (const argument of argumentList) {
-      switch (argument.kind) {
-        case 'positional': {
-          const value = this.evaluate(argument.value, frame);
-          args.push(value);
-          frame.temporaries.push(value);
-          break;
-        }
-        case 'star': {
-          const iterable = this.evaluate(argument.value, frame);
-          if (!isIterable(iterable)) {
-            throw typeError(`${calleeName(callee)} argument after * must be an iterable, not ${typeName(iterable)}`);
-          }
-          for (const item of toArray(iterable)) {
-            args.push(item);
-            frame.temporaries.push(item);
-          }
-          break;
-        }
-        case 'keyword': {
-          const value = this.evaluate(argument.value, frame);
-          kwargs ??= new Map();
-          if (kwargs.has(argument.name)) {
-            throw typeError(`${calleeName(callee)} got multiple values for keyword argument '${argument.name}'`);
-          }
-          kwargs.set(argument.name, value);
-          frame.temporaries.push(value);
-          break;
-        }
-        case 'doubleStar': {
-          const mapping = this.evaluate(argument.value, frame);
-          if (lookupSpecial(mapping, 'keys') === undefined) {
-            throw typeError(`${calleeName(callee)} argument after ** must be a mapping, not ${typeName(mapping)}`);
-          }
-          kwargs ??= new Map();
-          for (const [key, value] of mappingEntries(mapping)) {
-            if (typeof key !== 'string') throw typeError('keywords must be strings');
-            if (kwargs.has(key))
-              throw typeError(`${calleeName(callee)} got multiple values for keyword argument '${key}'`);
-            kwargs.set(key, value);
-            frame.temporaries.push(value);
-          }
-          break;
-        }
+      const value = this.evaluate(argument.value, frame);
+      if (argument.kind === 'positional') {
+        collected.args.push(value);
+        frame.temporaries.push(value);
+      } else {
+        addArgument(collected, argument, value, { callee, argumentList, leading }, frame);
       }
     }
-    return { args, kwargs };
+    return collected;
   }
 
   private compare(expression: Extract<Expression, { kind: 'compare' }>, frame: Frame): PyValue {
@@ -481,13 +548,25 @@ export class ExpressionEvaluator {
 
   // Functions -------------------------------------------------------------------------------------------------------
 
-  /** Creates a function object, evaluating its defaults in the defining frame. */
-  createFunction(def: FunctionDef, frame: Frame, decorators: PyValue[]): PyValue {
+  /**
+   * Creates a function object, evaluating its defaults in the defining frame unless `defaultValues` gives the values of
+   * the parameters' defaults in order.
+   */
+  createFunction(
+    def: FunctionDef,
+    frame: Frame,
+    decorators: PyValue[],
+    defaultValues: PyValue[] = def.params.flatMap((param) =>
+      param.default ? [this.evaluate(param.default, frame)] : []
+    ),
+    typeParams?: PyValue[]
+  ): PyValue {
     const defaults: PyValue[] = [];
     const keywordDefaults = new Map<string, PyValue>();
+    let index = 0;
     for (const param of def.params) {
       if (!param.default) continue;
-      const value = this.evaluate(param.default, frame);
+      const value = defaultValues[index++];
       if (param.kind === 'keywordOnly') keywordDefaults.set(param.name, value);
       else defaults.push(value);
     }
@@ -509,7 +588,11 @@ export class ExpressionEvaluator {
       keywordDefaults,
       def.usesClassCell ? frame.classCell : undefined
     );
-    fn.module = moduleNameOf(frame);
+    fn.module = frame.globals.get('__name__') ?? None;
+    if (typeParams) {
+      fn.typeParams = typeParams;
+      fn.annotationFrame = frame;
+    }
     this.runtime.allocate(2);
     let result: PyValue = fn;
     for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
@@ -518,8 +601,11 @@ export class ExpressionEvaluator {
 
   /** The annotations of a function, evaluated when the program reads `__annotations__`. */
   annotationsOf(fn: PyFunction): PyDict {
+    // Annotations the program assigned, or that an assigned `__annotate__` computes, replace those of the def.
+    const assigned = fn.annotations ?? (fn.annotate && fn.annotate !== None ? callValue(fn.annotate, [1n]) : undefined);
+    if (assigned instanceof PyDict) return assigned;
     const dict = newDict();
-    const frame = this.runtime.frame;
+    const frame = (fn.annotationFrame as Frame | undefined) ?? this.runtime.frame;
     for (const param of fn.def.params) {
       if (param.annotation) dict.store.set(param.name, this.evaluate(param.annotation, frame));
     }
@@ -530,21 +616,26 @@ export class ExpressionEvaluator {
   // Comprehensions --------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionNcss 32 -- Follows how CPython runs each kind of comprehension in its own scope.
-  private comprehension(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): PyValue {
+  /** Runs a comprehension, whose first iterable `first` the enclosing frame evaluated. */
+  protected comprehension(
+    expression: Extract<Expression, { kind: 'comprehension' }>,
+    frame: Frame,
+    first = this.evaluate(expression.generators[0].iterable, frame)
+  ): PyValue {
     const { runtime } = this;
-    const first = this.evaluate(expression.generators[0].iterable, frame);
     const next = iterate(first);
     const inner = this.comprehensionFrame(expression, frame);
     if (expression.type === 'generator') {
+      markGeneratorExpression(inner, first);
       const body = this.comprehensionItems(expression, inner, next);
       return new PyGenerator(
         generatorClass,
         '<genexpr>',
         '<genexpr>',
-        () => {
+        (input) => {
           runtime.pushFrame(inner);
           try {
-            return body.next();
+            return input.error ? body.throw(input.error) : body.next();
           } finally {
             runtime.popFrame();
           }
@@ -577,8 +668,13 @@ export class ExpressionEvaluator {
   }
 
   private comprehensionFrame(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): Frame {
+    return this.nestedFrame('comprehension', expression.scope, frame);
+  }
+
+  /** The frame of a scope nested in `frame`'s, which captures the variables of `frame` it reads. */
+  protected nestedFrame(kind: 'comprehension' | 'function', scope: ScopeInfo, frame: Frame): Frame {
     const cells = new Map<string, PyCell>();
-    for (const name of expression.scope.frees) {
+    for (const name of scope.frees) {
       let cell = frame.cells.get(name);
       if (!cell) {
         cell = new PyCell();
@@ -586,18 +682,9 @@ export class ExpressionEvaluator {
       }
       cells.set(name, cell);
     }
-    for (const name of expression.scope.cells) cells.set(name, new PyCell());
-    return new Frame(
-      'comprehension',
-      new Map(),
-      cells,
-      frame.globals,
-      undefined,
-      false,
-      expression.scope,
-      frame.fn,
-      frame.classCell
-    );
+    for (const name of scope.cells) cells.set(name, new PyCell());
+    const callRow = kind === 'function' ? frame.callRow : undefined;
+    return new Frame(kind, new Map(), cells, frame.globals, callRow, false, scope, frame.fn, frame.classCell);
   }
 
   /** Runs the clauses of a comprehension, yielding each element, or storing each pair through `store`. */
@@ -664,6 +751,9 @@ function constantValue(constant: Constant): PyValue {
     case 'imaginary': {
       return newComplex(0, constant.value);
     }
+    case 'bytes': {
+      return newBytes(constant.value);
+    }
   }
 }
 
@@ -675,6 +765,134 @@ function unboundLocal(name: string): PyError {
   const state = error.exception.exception;
   if (state) state.name = name;
   return error;
+}
+
+function bindName(ref: NameRef, value: PyValue, frame: Frame): void {
+  const { name } = ref;
+  switch (ref.access) {
+    case 'local':
+    case 'name': {
+      frame.locals.set(name, value);
+      return;
+    }
+    case 'cell':
+    case 'classCell': {
+      const cell = frame.cells.get(name);
+      if (cell) cell.value = value;
+      else frame.cells.set(name, new PyCell(value));
+      return;
+    }
+    default: {
+      frame.globals.set(name, value);
+    }
+  }
+}
+
+/** The positional and keyword arguments of a call, collected in order. */
+export interface CallArguments {
+  args: PyValue[];
+  kwargs: Map<string, PyValue> | undefined;
+}
+
+/**
+ * The call whose arguments are being collected: the callee, all its argument expressions, and how many positional
+ * arguments it passes before them, which CPython's errors for unpacking depend on.
+ */
+export interface CallSite {
+  callee: PyValue;
+  argumentList: Argument[];
+  leading: number;
+}
+
+/** Adds an argument's value to a call's arguments, raising CPython's errors for unpacking it. */
+// code-gauge-allow functionNcss 32 -- Adds each kind of argument, raising CPython's errors for unpacking.
+// code-gauge-allow functionCognitiveComplexity 22 -- Adds each kind of argument, raising CPython's errors for unpacking.
+export function addArgument(
+  collected: CallArguments,
+  argument: Argument,
+  value: PyValue,
+  call: CallSite,
+  frame: Frame
+): void {
+  const { callee } = call;
+  switch (argument.kind) {
+    case 'positional': {
+      collected.args.push(value);
+      frame.temporaries.push(value);
+      return;
+    }
+    case 'star': {
+      if (!isIterable(value)) throw notIterableError(call.argumentList, callee, call.leading, value);
+      for (const item of toArray(value)) {
+        collected.args.push(item);
+        frame.temporaries.push(item);
+      }
+      return;
+    }
+    case 'keyword': {
+      const kwargs = (collected.kwargs ??= new Map());
+      if (kwargs.has(argument.name)) {
+        throw typeError(`${calleeName(callee)} got multiple values for keyword argument '${argument.name}'`);
+      }
+      kwargs.set(argument.name, value);
+      frame.temporaries.push(value);
+      return;
+    }
+    case 'doubleStar': {
+      if (lookupSpecial(value, 'keys') === undefined) {
+        throw typeError(`${calleeName(callee)} argument after ** must be a mapping, not ${typeName(value)}`);
+      }
+      const kwargs = (collected.kwargs ??= new Map());
+      for (const [key, item] of mappingEntries(value)) {
+        if (typeof key !== 'string') throw typeError('keywords must be strings');
+        if (kwargs.has(key)) throw typeError(`${calleeName(callee)} got multiple values for keyword argument '${key}'`);
+        kwargs.set(key, item);
+        frame.temporaries.push(item);
+      }
+    }
+  }
+}
+
+/** Adds an element's value to the items of a display, spreading it when the element is starred. */
+export function addElement(items: PyValue[], frame: Frame, isStarred: boolean, value: PyValue): void {
+  if (!isStarred) {
+    items.push(value);
+    frame.temporaries.push(value);
+    return;
+  }
+  for (const item of starredItems(value)) {
+    items.push(item);
+    frame.temporaries.push(item);
+  }
+}
+
+/** Adds the items of a mapping that a dict display spreads with `**`. */
+export function mergeMapping(dict: PyDict, mapping: PyValue): void {
+  for (const [key, value] of mappingEntries(mapping)) dict.store.set(key, value);
+}
+
+/** The text of an f-string's replacement field, given its value and the text of its format spec. */
+export function formatPart(part: FormattedValue, value: PyValue, spec: string): string {
+  let converted = value;
+  if (part.conversion === 'r') converted = pyRepr(value);
+  else if (part.conversion === 's') converted = pyStr(value);
+  else if (part.conversion === 'a') converted = pyAscii(value);
+  return (part.debugText ?? '') + pyFormat(converted, spec);
+}
+
+/** The class a method that names `__class__` is defined in, which it reads as `super()` does. */
+function classCellOf(name: string, frame: Frame): PyValue | undefined {
+  return name === '__class__' && frame.kind === 'function' ? frame.classCell?.value : undefined;
+}
+
+/**
+ * The error for `*` before a value that is not iterable, which names the callee only when the value is all the
+ * positional arguments, as CPython then passes it to the call without building a tuple first.
+ */
+function notIterableError(argumentList: Argument[], callee: PyValue, leading: number, iterable: PyValue): Error {
+  const positional = argumentList.filter((each) => each.kind === 'positional' || each.kind === 'star').length;
+  const subject = leading + positional === 1 ? `${calleeName(callee)} argument` : 'Value';
+  return typeError(`${subject} after * must be an iterable, not ${typeName(iterable)}`);
 }
 
 function calleeName(callee: PyValue): string {

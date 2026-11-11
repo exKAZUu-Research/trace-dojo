@@ -2,12 +2,13 @@ import type { ProgramRecording } from '../interpreter/program';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
+import { bytesText, PyBytes, PyMemoryView } from './bytesValues';
 import { complexRepr } from './complexNumbers';
 import type { Frame } from './frame';
 import { parsePython } from './parse';
 import { runModule } from './run';
 import { Runtime } from './runtime';
-import { None } from './types';
+import { None, unbox } from './types';
 import {
   PyBoundMethod,
   PyBuiltinFunction,
@@ -22,7 +23,8 @@ import {
   PyIterator,
   PyList,
   PyModule,
-  type PyObject,
+  PyNumberInstance,
+  PyObject,
   PyOpaque,
   PyRange,
   PySet,
@@ -83,18 +85,42 @@ function isVariableValue(value: PyValue): boolean {
     value instanceof PyBuiltinFunction ||
     value instanceof PyBoundMethod ||
     value instanceof PyDescriptor ||
-    value instanceof PyOpaque
+    value instanceof PyOpaque ||
+    (value instanceof PyInstance && isLibraryClass(value.cls))
   );
 }
 
+/**
+ * Whether a class is one that a standard library module written in Python defines, such as `threading.Thread`, whose
+ * instances the trace hides as it hides those of the builtin classes.
+ */
+function isLibraryClass(cls: PyClass): boolean {
+  return !cls.isBuiltin && cls.module !== '__main__';
+}
+
 /** The instance a method runs on: its first parameter, which plays the role of Java's `this`. */
-function selfOf(frame: Frame): { name: string; value: PyInstance } | undefined {
+function selfOf(frame: Frame): { name: string; value: PyObject } | undefined {
   const fn = frame.fn;
   if (frame.kind !== 'function' || !fn?.def.isMethod) return undefined;
   const first = fn.def.params[0];
   if (!first || first.kind === 'varArgs' || first.kind === 'varKeywords') return undefined;
   const value = frame.locals.get(first.name) ?? frame.cells.get(first.name)?.value;
-  return value instanceof PyInstance && value.enumValue === undefined ? { name: first.name, value } : undefined;
+  if (value instanceof PyInstance) return value.enumValue === undefined ? { name: first.name, value } : undefined;
+  // An instance of a subclass of a builtin type such as list shows the attributes the methods give it too.
+  return value instanceof PyObject && !(value instanceof PyClass) && !value.cls.isBuiltin
+    ? { name: first.name, value }
+    : undefined;
+}
+
+/**
+ * The attributes of an instance: those `__slots__` declares, then those in its `__dict__`. An instance of a program's
+ * subclass of a library class shows only its public attributes, not the private ones the library's code sets.
+ */
+function attributesOf(instance: PyObject): [string, PyValue][] {
+  const own = instance instanceof PyInstance ? instance.dict : instance.instanceDict;
+  const attributes = [...(instance.slotValues ?? []), ...(own ?? [])];
+  if (!instance.cls.mro.some(isLibraryClass)) return attributes;
+  return attributes.filter(([name]) => !name.startsWith('_'));
 }
 
 function addVariable(variables: TraceVariables, name: string, value: PyValue): void {
@@ -106,8 +132,8 @@ function addVariable(variables: TraceVariables, name: string, value: PyValue): v
   if (node) variables.referenceVars[name] = node;
 }
 
-function addSelf(variables: TraceVariables, name: string, self: PyInstance): void {
-  for (const [key, value] of self.dict) {
+function addSelf(variables: TraceVariables, name: string, self: PyObject): void {
+  for (const [key, value] of attributesOf(self)) {
     if (!isVariableValue(value)) continue;
     const scalar = scalarOf(value, new Set());
     if (scalar !== NOT_SCALAR) variables.vars[`${name}.${key}`] = scalar;
@@ -117,7 +143,7 @@ function addSelf(variables: TraceVariables, name: string, self: PyInstance): voi
 /** The class variables of the classes the program defined, as Java shows static fields. */
 function addClassVariables(variables: TraceVariables, globals: Map<string, PyValue>): void {
   for (const value of globals.values()) {
-    if (!(value instanceof PyClass) || value.isBuiltin || value.module !== '__main__' || value.enumMembers) continue;
+    if (!(value instanceof PyClass) || value.isBuiltin || isLibraryClass(value) || value.enumMembers) continue;
     for (const [key, field] of value.dict) {
       if (isDunder(key) || !isVariableValue(field)) continue;
       const scalar = scalarOf(field, new Set());
@@ -130,7 +156,8 @@ const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
 // code-gauge-allow duplicateLines 16 -- Each language converts its own values for the trace.
-function scalarOf(value: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCALAR {
+function scalarOf(item: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCALAR {
+  const value = unbox(item);
   switch (typeof value) {
     case 'bigint': {
       return Number(value);
@@ -162,7 +189,9 @@ function scalarOf(value: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCAL
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
-function displayNodeOf(value: PyValue, seen: Set<PyObject>): DisplayNode | undefined {
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of value the trace shows.
+function displayNodeOf(item: PyValue, seen: Set<PyObject>): DisplayNode | undefined {
+  const value = unbox(item);
   if (typeof value === 'bigint') return { kind: 'value', value: Number(value) };
   if (typeof value !== 'object') return { kind: 'value', value };
   if (value === None) return NULL_NODE;
@@ -175,6 +204,9 @@ function displayNodeOf(value: PyValue, seen: Set<PyObject>): DisplayNode | undef
       value: `range(${value.start}, ${value.stop}${value.step === 1n ? '' : `, ${value.step}`})`,
     };
   if (value instanceof PyComplex) return { kind: 'value', value: complexRepr(value) };
+  if (value instanceof PyBytes) return { kind: 'value', value: bytesText(value) };
+  if (value instanceof PyMemoryView) return undefined;
+  if (value instanceof PyNumberInstance) return { kind: 'value', value: value.reprText() };
   if (value instanceof PyInstance && value.turtle) {
     if (!value.turtle.isAlive) return undefined;
     return {
@@ -210,7 +242,7 @@ function containerNodeOf(value: PyObject, seen: Set<PyObject>): DisplayNode {
 }
 
 function addAttributeNodes(entries: Record<string, DisplayNode>, instance: PyInstance, seen: Set<PyObject>): void {
-  for (const [key, item] of instance.dict) {
+  for (const [key, item] of attributesOf(instance)) {
     if (!isVariableValue(item)) continue;
     const node = displayNodeOf(item, seen);
     if (node) entries[key] = node;
@@ -218,7 +250,8 @@ function addAttributeNodes(entries: Record<string, DisplayNode>, instance: PyIns
 }
 
 /** A dict key as text, without running any of the program's own methods. */
-function keyText(key: PyValue): string {
+function keyText(item: PyValue): string {
+  const key = unbox(item);
   if (typeof key === 'string') return key;
   if (typeof key === 'bigint' || typeof key === 'number' || typeof key === 'boolean') {
     return typeof key === 'boolean' ? (key ? 'True' : 'False') : String(key);

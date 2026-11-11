@@ -11,15 +11,23 @@ export class ScopeBuilder {
   readonly bound = new Map<string, number>();
   readonly parameters = new Set<string>();
   readonly declarations = new Map<string, Declaration>();
+  /** The rows of the `global` and `nonlocal` statements, where errors about them are reported. */
+  readonly declarationRows = new Map<string, number>();
   /** The rows of the first use of each name, to reject a later `global` of it. */
   readonly used = new Map<string, number>();
   readonly refs: NameRef[] = [];
   /** Comprehension iteration variables, which an assignment expression must not rebind. */
   readonly iterationVariables = new Set<string>();
+  /** The type parameters a scope of type parameters binds, which a nested `nonlocal` must not rebind. */
+  readonly typeParameters = new Set<string>();
+  /** Whether this comprehension scope is a generator expression, which an `await` makes an async generator. */
+  isGeneratorExpression = false;
 
   constructor(
     kind: ScopeInfo['kind'],
-    readonly parent: ScopeBuilder | undefined
+    readonly parent: ScopeBuilder | undefined,
+    /** Whether a module's names live in its own namespace, as in code `exec` runs with separate globals and locals. */
+    readonly namesInLocals = false
   ) {
     this.info = { kind, locals: [], cells: [], frees: [], isGenerator: false };
     parent?.children.push(this);
@@ -50,6 +58,7 @@ export class ScopeBuilder {
       fail(row, 'nonlocal 宣言はモジュールの最上位では使えません。');
     }
     this.declarations.set(name, declaration);
+    this.declarationRows.set(name, row);
   }
 
   /** Whether this scope owns `name` as a variable of its own, which nested functions may capture. */
@@ -70,10 +79,11 @@ export function resolveScopes(module: ScopeBuilder): void {
 
 function checkNonlocals(scope: ScopeBuilder): void {
   for (const [name, declaration] of scope.declarations) {
-    if (declaration === 'nonlocal' && !ownerOf(scope.parent, name)) {
-      const row = scope.refs.find((ref) => ref.name === name)?.row ?? 0;
-      fail(row, `nonlocal で宣言した ${name} が、外側の関数に見つかりません。`);
-    }
+    if (declaration !== 'nonlocal') continue;
+    const owner = ownerOf(scope.parent, name);
+    const row = scope.declarationRows.get(name) ?? 0;
+    if (!owner) fail(row, `nonlocal で宣言した ${name} が、外側の関数に見つかりません。`);
+    if (owner.typeParameters.has(name)) fail(row, `型引数 ${name} は、nonlocal 宣言できません。`);
   }
   for (const child of scope.children) checkNonlocals(child);
 }
@@ -96,11 +106,11 @@ function resolve(scope: ScopeBuilder): void {
   for (const child of scope.children) resolve(child);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows CPython's rules for resolving a name to local, cell, free, or global.
+// code-gauge-allow functionCognitiveComplexity 18 -- Follows CPython's rules for resolving a name to local, cell, free, or global.
 function accessOf(scope: ScopeBuilder, name: string): NameRef['access'] {
   const declaration = scope.declarations.get(name);
   if (declaration === 'global') return 'global';
-  if (scope.info.kind === 'module') return 'global';
+  if (scope.info.kind === 'module') return scope.namesInLocals ? 'name' : 'global';
   if (declaration !== 'nonlocal' && scope.owns(name)) {
     if (scope.info.kind === 'class') return 'name';
     return capturedBelow(scope, name) ? markCell(scope, name) : 'local';
@@ -109,7 +119,7 @@ function accessOf(scope: ScopeBuilder, name: string): NameRef['access'] {
   if (!owner) return scope.info.kind === 'class' ? 'name' : 'global';
   markCell(owner, name);
   for (let current: ScopeBuilder | undefined = scope; current && current !== owner; current = current.parent) {
-    if (current.info.kind !== 'class' && !current.info.frees.includes(name)) current.info.frees.push(name);
+    if (!current.info.frees.includes(name)) current.info.frees.push(name);
   }
   return scope.info.kind === 'class' ? 'classCell' : 'cell';
 }

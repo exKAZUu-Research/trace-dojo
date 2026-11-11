@@ -1,25 +1,42 @@
-import { deleteInstanceAttribute, setInstanceAttribute } from './attributes';
+import { deleteInstanceAttribute, isInstanceWithAttributes, setInstanceAttribute } from './attributes';
+import { typeNewFromArguments } from './classes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
-import { defineUnsupportedAttributes } from './descriptors';
-import { isEnumClass } from './enums';
-import { identityHash, NATIVE_HASHES } from './hashing';
+import { callGetter, descriptorGetter } from './descriptors';
+import { isEnumClass, isFlagClass } from './enums';
+import { generatorNext } from './generators';
+import { identityHash } from './hashing';
+import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
 import { argument, checkArgs } from './nativeArgs';
-import { bindValue, callValue, deleteAttribute, getAttribute, isCallable, lookupSpecial, nextOf } from './objects';
+import {
+  bindValue,
+  callValue,
+  deleteAttribute,
+  genericGetAttribute,
+  getAttribute,
+  isCallable,
+  lookupSpecial,
+  nextOf,
+} from './objects';
 import { currentRuntime } from './runtimeContext';
 import { typeOr } from './typeHints';
 import {
   builtinFunctionClass,
   classmethodClass,
+  classmethodDescriptorClass,
   classOf,
+  defineMethod,
+  descriptorOwners,
   ellipsisClass,
   functionClass,
-  generatorClass,
+  isIteratorGenerator,
   iteratorClasses,
   iteratorClassSetup,
   methodClass,
   methodDescriptorClass,
+  methodWrapperClass,
   moduleClass,
+  newDict,
   newTuple,
   None,
   noneClass,
@@ -34,6 +51,7 @@ import {
   typeClass,
   typeError,
   typeName,
+  wrapperDescriptorClass,
 } from './types';
 import {
   DONE,
@@ -42,7 +60,6 @@ import {
   PyClass,
   PyDescriptor,
   PyFunction,
-  type PyGenerator,
   PyInstance,
   type PyIterator,
   type PyModule,
@@ -59,10 +76,16 @@ objectClass.construct = (cls, args, kwargs) => {
     throw typeError('object() takes no arguments');
   return new PyInstance(cls);
 };
-method(objectClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, () => None, { keywords: [] });
 objectClass.dict.set(
   '__init__',
-  new PyBuiltinFunction(methodDescriptorClass, '__init__', () => None, undefined, 'method', 'object')
+  new PyBuiltinFunction(
+    wrapperDescriptorClass,
+    '__init__',
+    ([self, ...args], kwargs) => objectInitImplementation(self, args, kwargs),
+    undefined,
+    'method',
+    'object'
+  )
 );
 method(objectClass, '__repr__', 'none', 0, 0, (self) => defaultRepr(self as PyObject));
 // Calls the class's __repr__ without checking its result, which str() then checks as __str__'s, as CPython does.
@@ -80,7 +103,6 @@ method(objectClass, '__ne__', 'one', 1, 1, (self, [other]) => {
 for (const name of ['__lt__', '__le__', '__gt__', '__ge__'])
   method(objectClass, name, 'one', 1, 1, () => NotImplemented);
 method(objectClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
-NATIVE_HASHES.add(objectClass.dict.get('__hash__') as PyValue);
 method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
   if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${typeName(spec)}`);
   if (spec !== '') throw typeError(`unsupported format string passed to ${typeName(self)}.__format__`);
@@ -88,14 +110,17 @@ method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
 });
 method(objectClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-  if (self instanceof PyInstance) setInstanceAttribute(self, name, value);
+  if (isInstanceWithAttributes(self)) setInstanceAttribute(self as PyObject, name, value);
   else currentRuntime().setAttributeOf(self, name, value);
   return None;
 });
-method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => getAttribute(self, name as string));
+method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
+  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  return genericGetAttribute(self, name);
+});
 method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-  if (self instanceof PyInstance) deleteInstanceAttribute(self, name);
+  if (isInstanceWithAttributes(self)) deleteInstanceAttribute(self as PyObject, name);
   else deleteAttribute(self, name);
   return None;
 });
@@ -108,18 +133,28 @@ for (const name of ['__reduce__', '__reduce_ex__']) {
     throw currentRuntime().unsupported(`object.${name}()`);
   });
 }
-method(objectClass, '__init_subclass__', 'none', 0, 0, () => None, { binding: 'class' });
+objectClass.dict.set(
+  '__init_subclass__',
+  new PyBuiltinFunction(
+    classmethodDescriptorClass,
+    '__init_subclass__',
+    ([cls, ...args], kwargs) => {
+      const name = `${(cls as PyClass).name}.__init_subclass__`;
+      if (kwargs && kwargs.size > 0) throw typeError(`${name}() takes no keyword arguments`);
+      if (args.length > 0) throw typeError(`${name}() takes no arguments (${args.length} given)`);
+      return None;
+    },
+    undefined,
+    'class',
+    'object'
+  )
+);
 method(objectClass, '__subclasshook__', 'expected', 0, Number.POSITIVE_INFINITY, () => NotImplemented, {
   binding: 'class',
 });
-method(
-  objectClass,
+objectClass.dict.set(
   '__new__',
-  'expected',
-  1,
-  Number.POSITIVE_INFINITY,
-  (_self, [cls]) => new PyInstance(cls as PyClass),
-  { binding: 'static', keywords: [] }
+  new PyBuiltinFunction(builtinFunctionClass, '__new__', objectNewImplementation, objectClass, 'static', 'object')
 );
 method(objectClass, '__dir__', 'none', 0, 0, (self) => currentRuntime().dir(self));
 
@@ -127,17 +162,25 @@ method(objectClass, '__dir__', 'none', 0, 0, (self) => currentRuntime().dir(self
 
 typeClass.construct = (_cls, args, kwargs) => {
   if (args.length === 1 && !(kwargs && kwargs.size > 0)) return classOf(args[0]);
-  if (args.length === 3) throw currentRuntime().unsupported('type() による3引数でのクラスの作成');
-  throw typeError('type() takes 1 or 3 arguments');
+  if (args.length !== 3) throw typeError('type() takes 1 or 3 arguments');
+  return typeNewFromArguments(typeClass, args, kwargs);
 };
+defineNew(typeClass, (meta, args, kwargs) => typeNewFromArguments(meta, args, kwargs));
+defineMethod(typeClass, '__init__', (_self, args, kwargs) => {
+  if (args.length === 1 && kwargs && kwargs.size > 0) throw typeError('type.__init__() takes no keyword arguments');
+  if (args.length !== 1 && args.length !== 3) throw typeError('type.__init__() takes 1 or 3 arguments');
+  return None;
+});
+defineMethod(typeClass, '__call__', (self, args, kwargs) => typeCall(self as PyClass, args, kwargs));
+defineMethod(typeClass, '__prepare__', () => newDict(), 'class');
 method(typeClass, '__repr__', 'none', 0, 0, (self) => {
   const cls = self as PyClass;
-  if (isEnumClass(cls) && !cls.isBuiltin) return `<enum '${cls.name}'>`;
+  if (isEnumClass(cls) && !cls.isBuiltin) return `<${isFlagClass(cls) ? 'flag' : 'enum'} '${cls.name}'>`;
   const module = cls.module === 'builtins' ? '' : `${cls.module}.`;
   return `<class '${module}${cls.qualifiedName}'>`;
 });
 method(typeClass, 'mro', 'none', 0, 0, (self) => currentRuntime().listOf([...(self as PyClass).mro]));
-method(typeClass, '__subclasses__', 'none', 0, 0, (self) => currentRuntime().listOf([...(self as PyClass).subclasses]));
+method(typeClass, '__subclasses__', 'none', 0, 0, () => currentRuntime().listOf([]));
 method(typeClass, '__instancecheck__', 'one', 1, 1, (self, [value]) => classOf(value).isSubclassOf(self as PyClass));
 method(
   typeClass,
@@ -189,89 +232,51 @@ method(builtinFunctionClass, '__repr__', 'none', 0, 0, (self) => {
   const fn = self as PyBuiltinFunction;
   if (fn.self === undefined || (fn.self instanceof PyObject && fn.self.cls === moduleClass))
     return `<built-in function ${fn.name}>`;
-  if (fn.self instanceof PyClass) return `<built-in method ${fn.name} of type object at ${addressOf(fn.self)}>`;
-  return `<built-in method ${fn.name} of ${typeName(fn.self)} object at ${fn.self instanceof PyObject ? addressOf(fn.self) : '0x0'}>`;
+  return `<built-in method ${fn.name} of ${boundObjectText(fn.self)}>`;
 });
-method(builtinFunctionClass, '__eq__', 'one', 1, 1, (self, [other]) => {
-  if (!(other instanceof PyBuiltinFunction)) return NotImplemented;
+method(methodWrapperClass, '__repr__', 'none', 0, 0, (self) => {
   const fn = self as PyBuiltinFunction;
-  return fn === other || (fn.run === other.run && fn.self === other.self);
+  return `<method-wrapper '${fn.name}' of ${boundObjectText(fn.self as PyValue)}>`;
 });
-method(builtinFunctionClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
-method(methodDescriptorClass, '__repr__', 'none', 0, 0, (self) => {
-  const fn = self as PyBuiltinFunction;
-  return `<method '${fn.name}' of '${fn.ownerName}' objects>`;
-});
-method(moduleClass, '__repr__', 'none', 0, 0, (self) => {
-  const module = self as PyModule;
-  // The repr of a module written in Python shows the path of its file.
-  if (module.unsupported.has('__file__'))
-    throw currentRuntime().unsupported(`モジュール ${module.name} の repr（ファイルのパス）`);
-  return `<module '${module.name}' (built-in)>`;
-});
+for (const cls of [builtinFunctionClass, methodWrapperClass]) {
+  method(cls, '__eq__', 'one', 1, 1, (self, [other]) => {
+    if (!(other instanceof PyBuiltinFunction)) return NotImplemented;
+    const fn = self as PyBuiltinFunction;
+    return fn === other || (fn.run === other.run && fn.self === other.self);
+  });
+  method(cls, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
+}
+for (const [cls, kind] of [
+  [methodDescriptorClass, 'method'],
+  [classmethodDescriptorClass, 'method'],
+  [wrapperDescriptorClass, 'slot wrapper'],
+] as const) {
+  method(cls, '__repr__', 'none', 0, 0, (self) => {
+    const fn = self as PyBuiltinFunction;
+    const owner = descriptorOwners.get(fn);
+    return `<${kind} '${fn.name}' of '${owner ? (owner.typeName ?? owner.name) : fn.ownerName}' objects>`;
+  });
+}
+method(moduleClass, '__repr__', 'none', 0, 0, (self) => `<module '${(self as PyModule).name}' (built-in)>`);
+
+/** How the repr of a builtin method shows the object it is bound to. */
+function boundObjectText(self: PyValue): string {
+  if (self instanceof PyClass) return `type object at ${addressOf(self)}`;
+  return `${typeName(self)} object at ${self instanceof PyObject ? addressOf(self) : '0x0'}`;
+}
 
 // Generators and iterators ------------------------------------------------------------------------------------------
 
-method(
-  generatorClass,
-  '__repr__',
-  'none',
-  0,
-  0,
-  (self) => `<generator object ${(self as PyGenerator).qualifiedName} at ${addressOf(self as PyObject)}>`
-);
-method(generatorClass, '__iter__', 'none', 0, 0, (self) => self);
-method(generatorClass, '__next__', 'none', 0, 0, (self) => nextValue(self));
-for (const name of ['send', 'throw', 'close']) {
-  method(generatorClass, name, 'expected', 0, 3, () => {
-    throw currentRuntime().unsupported(`ジェネレータの ${name}()`);
-  });
-}
-
-/** `next(iterator)`, raising StopIteration at the end. */
+/** `next(iterator)`, raising StopIteration at the end, with the return value of a generator. */
 export function nextValue(iterator: PyValue): PyValue {
+  if (isIteratorGenerator(iterator)) return generatorNext(iterator, { value: None });
   const value = nextOf(iterator)();
   if (value === DONE) throw pyError('StopIteration');
   return value;
 }
 
 /** Gives every native iterator class the iterator protocol and a repr. */
-/** The iterator types whose `__length_hint__` gives how many items are left, and that can be pickled. */
-const SIZED_ITERATORS = new Set([
-  'list_iterator',
-  'list_reverseiterator',
-  'tuple_iterator',
-  'str_ascii_iterator',
-  'str_iterator',
-  'range_iterator',
-  'set_iterator',
-  'dict_keyiterator',
-  'dict_valueiterator',
-  'dict_itemiterator',
-  'dict_reversekeyiterator',
-  'dict_reversevalueiterator',
-  'dict_reverseitemiterator',
-  'reversed',
-]);
-const PICKLED_ITERATORS = new Set([
-  'list_iterator',
-  'list_reverseiterator',
-  'tuple_iterator',
-  'str_ascii_iterator',
-  'str_iterator',
-  'range_iterator',
-  'reversed',
-  'zip',
-  'map',
-]);
-
 export function defineIteratorClass(cls: PyClass): void {
-  if (SIZED_ITERATORS.has(cls.name)) {
-    method(cls, '__length_hint__', 'none', 0, 0, (self) => BigInt((self as PyIterator).lengthHint?.() ?? 0));
-  }
-  if (PICKLED_ITERATORS.has(cls.name)) {
-    defineUnsupportedAttributes(cls, { __setstate__: `${cls.name}.__setstate__()（pickle で使う状態の復元）` });
-  }
   method(cls, '__iter__', 'none', 0, 0, (self) => self);
   method(cls, '__next__', 'none', 0, 0, (self) => {
     const value = (self as PyIterator).next();
@@ -336,33 +341,55 @@ superClass.construct = (cls, args, kwargs) => {
   if (args.length === 0) return currentRuntime().zeroArgumentSuper();
   const [thisClass, self] = args;
   if (!(thisClass instanceof PyClass)) throw typeError(`super() argument 1 must be a type, not ${typeName(thisClass)}`);
-  if (self === undefined) throw currentRuntime().unsupported('引数が1つの super()');
-  const selfClass = self instanceof PyClass && self.isSubclassOf(thisClass) ? self : classOf(self);
-  if (!selfClass.isSubclassOf(thisClass))
-    throw typeError('super(type, obj): obj must be an instance or subtype of type');
-  return new PySuper(cls, thisClass, self, selfClass);
+  return self === undefined ? new PySuper(cls, thisClass) : boundSuper(cls, thisClass, self);
 };
+
+/** A `super()` bound to `self`, an instance or subclass of `thisClass`. */
+export function boundSuper(cls: PyClass, thisClass: PyClass, self: PyValue): PySuper {
+  const selfClass = self instanceof PyClass && self.isSubclassOf(thisClass) ? self : classOf(self);
+  if (!selfClass.isSubclassOf(thisClass)) {
+    const shown = self instanceof PyClass ? `type ${self.name}` : `instance of ${typeName(self)}`;
+    throw typeError(`super(type, obj): obj (${shown}) is not an instance or subtype of type (${thisClass.name}).`);
+  }
+  return new PySuper(cls, thisClass, self, selfClass);
+}
+
 method(superClass, '__repr__', 'none', 0, 0, (self) => {
   const sup = self as PySuper;
-  return `<super: <class '${sup.thisClass.name}'>, <${sup.selfClass.name} object>>`;
+  const bound = sup.selfClass === undefined ? 'NULL' : `<${sup.selfClass.name} object>`;
+  return `<super: <class '${sup.thisClass.name}'>, ${bound}>`;
+});
+method(superClass, '__get__', 'expected', 1, 2, (self, [instance]) => {
+  const sup = self as PySuper;
+  if (instance === None || sup.self !== undefined) return self;
+  return boundSuper(sup.cls, sup.thisClass, instance);
 });
 
 /** Reads an attribute through `super()`: from the classes after `thisClass` in the MRO of the object's class. */
 export function superAttribute(sup: PySuper, name: string): PyValue | undefined {
-  const { mro } = sup.selfClass;
-  const start = mro.indexOf(sup.thisClass) + 1;
-  for (const cls of mro.slice(start)) {
-    const value = cls.dict.get(name);
-    if (value === undefined) continue;
-    if (sup.self instanceof PyClass) {
-      if (value instanceof PyDescriptor && value.cls === classmethodClass)
-        return new PyBoundMethod(methodClass, sup.self, value.fn);
-      if (value instanceof PyDescriptor && value.cls === staticmethodClass) return value.fn;
-      return value;
+  const { self, selfClass } = sup;
+  if (self !== undefined && selfClass !== undefined && name !== '__class__') {
+    const { mro } = selfClass;
+    const start = mro.indexOf(sup.thisClass) + 1;
+    for (const cls of mro.slice(start)) {
+      const value = cls.dict.get(name);
+      if (value !== undefined) return bindThroughSuper(value, self, selfClass);
     }
-    return bindValue(value, sup.self, sup.selfClass);
   }
-  return undefined;
+  const own = superClass.lookup(name);
+  return own === undefined ? undefined : bindValue(own, sup, superClass);
+}
+
+function bindThroughSuper(value: PyValue, self: PyValue, selfClass: PyClass): PyValue {
+  const getter = descriptorGetter(value);
+  if (self === selfClass) {
+    if (value instanceof PyDescriptor && value.cls === classmethodClass)
+      return new PyBoundMethod(methodClass, self, value.fn);
+    if (value instanceof PyDescriptor && value.cls === staticmethodClass) return value.fn;
+    if (value instanceof PyBuiltinFunction && value.binding === 'class') return bindValue(value, selfClass, selfClass);
+    return getter === undefined ? value : callGetter(getter, value, None, selfClass);
+  }
+  return getter === undefined ? bindValue(value, self, selfClass) : callGetter(getter, value, self, selfClass);
 }
 
 // slice -------------------------------------------------------------------------------------------------------------

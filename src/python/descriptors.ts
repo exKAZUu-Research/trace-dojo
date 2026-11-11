@@ -1,96 +1,83 @@
-import { method } from './define';
-import { builtinClass, pyError } from './types';
-import { UnsupportedFeatureError } from './unsupported';
-import { type PyClass, PyOpaque, type PyValue } from './values';
+// The parts of attribute access that a program's own classes customize: descriptors, instance dictionaries outside
+// PyInstance, and `__getattribute__`.
+import { bindValue, callValue, lookupSpecial } from './objects';
+import { instancesHaveDict } from './slots';
+import { classOf, objectClass, pyError } from './types';
+import { type PyClass, PyError, PyFunction, PyInstance, PyObject, type PyValue } from './values';
 
-/**
- * The data descriptors builtin types keep in their dictionaries, such as `int.real` or `function.__code__`, which
- * `dir()` lists and attribute access reads through.
- */
+/** The builtin classes whose objects bind as methods through their native `__get__`, as `functools.lru_cache`'s do. */
+export const builtinDescriptorClasses = new Set<PyClass>();
 
-export const getsetDescriptorClass = builtinClass('getset_descriptor');
-export const memberDescriptorClass = builtinClass('member_descriptor');
-
-interface DescriptorData {
-  owner: PyClass;
-  name: string;
-  get?: (self: PyValue) => PyValue;
-  set?: (self: PyValue, value: PyValue) => void;
-  /** The feature an unsupported attribute's error names. */
-  unsupported?: string;
-  /** Whether an instance's own attribute of the name takes precedence, as for `__doc__`. */
-  nonData?: boolean;
+/** The `__get__` of an attribute whose class the program defined, or undefined for any other attribute. */
+export function descriptorGetter(attribute: PyValue): PyValue | undefined {
+  if (!(attribute instanceof PyObject)) return undefined;
+  if (attribute.cls.isBuiltin && !builtinDescriptorClasses.has(attribute.cls)) return undefined;
+  return attribute.cls.lookup('__get__');
 }
 
-for (const [cls, kind] of [
-  [getsetDescriptorClass, 'attribute'],
-  [memberDescriptorClass, 'member'],
-] as const) {
-  method(cls, '__repr__', 'none', 0, 0, (self) => {
-    const data = dataOf(self);
-    return `<${kind} '${data.name}' of '${data.owner.name}' objects>`;
-  });
-  method(cls, '__get__', 'expected', 1, 2, (self, [instance]) => readDescriptor(self as PyOpaque, instance));
-  cls.opaqueAttribute = (self, name) => {
-    const data = dataOf(self);
-    if (name === '__name__' || name === '__qualname__')
-      return name === '__name__' ? data.name : `${data.owner.name}.${data.name}`;
-    if (name === '__objclass__') return data.owner;
-    return;
-  };
+/** Whether an attribute of a program's class defines `__set__` or `__delete__`, which takes it over instance dicts. */
+export function isDataDescriptor(attribute: PyValue): boolean {
+  if (!(attribute instanceof PyObject) || attribute.cls.isBuiltin) return false;
+  return attribute.cls.lookup('__set__') !== undefined || attribute.cls.lookup('__delete__') !== undefined;
 }
 
-const dataOf = (self: PyValue): DescriptorData => (self as PyOpaque).data as DescriptorData;
-
-/** Adds a data descriptor to a builtin class, which reads the attribute with `get` and writes it with `set`. */
-export function defineGetSet(
-  cls: PyClass,
-  name: string,
-  get: DescriptorData['get'],
-  options: { set?: DescriptorData['set']; member?: boolean; nonData?: boolean } = {}
-): void {
-  const descriptorClass = options.member ? memberDescriptorClass : getsetDescriptorClass;
-  const data: DescriptorData = { owner: cls, name, get, set: options.set, nonData: options.nonData };
-  cls.dict.set(name, new PyOpaque(descriptorClass, name, data));
+/** Calls a descriptor's `__get__` for an instance, or for a class when `instance` is None. */
+export function callGetter(getter: PyValue, attribute: PyValue, instance: PyValue, owner: PyClass): PyValue {
+  return callValue(bindValue(getter, attribute), [instance, owner]);
 }
 
-/** Adds attributes this grader does not support, which `dir()` lists but reading raises the unsupported error. */
-export function defineUnsupportedAttributes(cls: PyClass, features: Record<string, string>): void {
-  for (const [name, unsupported] of Object.entries(features)) {
-    cls.dict.set(
-      name,
-      new PyOpaque(getsetDescriptorClass, name, { owner: cls, name, unsupported } satisfies DescriptorData)
-    );
+/** Calls a descriptor's `__set__`, or `__delete__` when `value` is undefined, raising AttributeError without it. */
+export function callSetter(attribute: PyValue, instance: PyValue, value: PyValue | undefined): boolean {
+  if (!isDataDescriptor(attribute)) return false;
+  const name = value === undefined ? '__delete__' : '__set__';
+  const method = lookupSpecial(attribute, name);
+  if (method === undefined) throw pyError('AttributeError', name);
+  callValue(bindValue(method, attribute), value === undefined ? [instance] : [instance, value]);
+  return true;
+}
+
+/** The builtin classes whose instances take attributes all the same, as `functools.partial` objects do. */
+export const builtinClassesWithDict = new Set<PyClass>();
+
+/** The dictionary of an object's own attributes, or undefined for an object without one. */
+export function ownDict(value: PyValue): Map<string, PyValue> | undefined {
+  if (value instanceof PyInstance) return value.cls.slotNames === undefined ? value.dict : undefined;
+  if (typeof value !== 'object') return undefined;
+  if (value instanceof PyFunction) return value.dict;
+  if (!(value instanceof PyObject)) return undefined;
+  if (value.cls.isBuiltin ? !builtinClassesWithDict.has(value.cls) : !instancesHaveDict(value.cls)) return undefined;
+  value.instanceDict ??= new Map();
+  return value.instanceDict;
+}
+
+/** Whether a program assigned `__getattribute__` to a class, which class bodies' flags do not record. */
+let getattributeAssigned = false;
+
+export function noteGetattributeAssigned(): void {
+  getattributeAssigned = true;
+}
+
+/** A `__getattribute__` that a program's class defines in place of `object`'s, or undefined. */
+export function customGetattribute(value: PyValue): PyValue | undefined {
+  const cls = classOf(value);
+  if (cls.isBuiltin || !(cls.flags.definesGetattribute || getattributeAssigned)) return undefined;
+  const method = cls.lookup('__getattribute__');
+  return method === objectClass.dict.get('__getattribute__') ? undefined : method;
+}
+
+/** Reads an attribute with a program's `__getattribute__`, falling back to its `__getattr__` on AttributeError. */
+export function getWithCustomGetattribute(value: PyValue, name: string, method: PyValue): PyValue {
+  try {
+    return callValue(bindValue(method, value), [name]);
+  } catch (error) {
+    const getattr = lookupSpecial(value, '__getattr__');
+    if (getattr === undefined || !isAttributeError(error)) throw error;
+    return callValue(bindValue(getattr, value), [name]);
   }
 }
 
-export function isDataDescriptor(value: PyValue | undefined): value is PyOpaque {
-  return isBuiltinDescriptor(value) && !dataOf(value).nonData;
-}
-
-/** Whether a value is a builtin descriptor that an instance's own attribute of the name hides, such as `__doc__`. */
-export function isNonDataDescriptor(value: PyValue | undefined): value is PyOpaque {
-  return isBuiltinDescriptor(value) && dataOf(value).nonData === true;
-}
-
-function isBuiltinDescriptor(value: PyValue | undefined): value is PyOpaque {
-  return value instanceof PyOpaque && (value.cls === getsetDescriptorClass || value.cls === memberDescriptorClass);
-}
-
-/** Reads an attribute through a builtin data descriptor. */
-export function readDescriptor(descriptor: PyOpaque, instance: PyValue): PyValue {
-  const data = dataOf(descriptor);
-  if (data.unsupported !== undefined) throw new UnsupportedFeatureError(data.unsupported);
-  if (!data.get)
-    throw pyError('AttributeError', `attribute '${data.name}' of '${data.owner.name}' objects is not readable`);
-  return data.get(instance);
-}
-
-/** Writes an attribute through a builtin data descriptor, which may be read-only. */
-export function writeDescriptor(descriptor: PyOpaque, instance: PyValue, value: PyValue): void {
-  const data = dataOf(descriptor);
-  if (data.unsupported !== undefined) throw new UnsupportedFeatureError(data.unsupported);
-  if (!data.set)
-    throw pyError('AttributeError', `attribute '${data.name}' of '${data.owner.name}' objects is not writable`);
-  data.set(instance, value);
+function isAttributeError(error: unknown): boolean {
+  return (
+    error instanceof PyError && error.exception.cls.mro.some((cls) => cls.isBuiltin && cls.name === 'AttributeError')
+  );
 }

@@ -1,8 +1,7 @@
-import { createHash, randomBytes } from 'node:crypto';
-
+import { newBytes } from '../bytesValues';
 import { pyStr } from '../conversions';
 import { method } from '../define';
-import { defineUnsupportedAttributes } from '../descriptors';
+import { sha512 } from '../hashAlgorithms';
 import { pyHash } from '../hashing';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { type ArgStyle, argument, checkArgs } from '../nativeArgs';
@@ -34,7 +33,7 @@ const N = 624;
 const M = 397;
 
 /** The Mersenne Twister of CPython's `_random` module, seeded as `random.seed` seeds it. */
-class MersenneTwister {
+export class MersenneTwister {
   private readonly state32 = new Uint32Array(N);
   private index = N + 1;
   gaussNext: number | undefined;
@@ -136,7 +135,7 @@ class MersenneTwister {
 }
 
 /** The 32-bit words of a seed's absolute value, least significant first, as CPython's random_seed splits it. */
-function keyOf(seed: bigint): number[] {
+export function keyOf(seed: bigint): number[] {
   let value = seed < 0n ? -seed : seed;
   if (value === 0n) return [0];
   const key: number[] = [];
@@ -147,16 +146,20 @@ function keyOf(seed: bigint): number[] {
   return key;
 }
 
-function seedOf(value: PyValue | undefined): bigint {
-  if (value === undefined || value === None) return BigInt(`0x${randomBytes(32).toString('hex')}`);
+export function seedOf(value: PyValue | undefined): bigint {
+  if (value === undefined || value === None) return bigintOfBytes(crypto.getRandomValues(new Uint8Array(32)));
   if (typeof value === 'bigint' || typeof value === 'boolean') return BigInt(value);
   if (typeof value === 'string') {
-    const bytes = Buffer.from(value, 'utf8');
-    const digest = createHash('sha512').update(bytes).digest();
-    return BigInt(`0x${Buffer.concat([bytes, digest]).toString('hex')}`);
+    const bytes = new TextEncoder().encode(value);
+    return bigintOfBytes(new Uint8Array([...bytes, ...sha512(bytes)]));
   }
   if (typeof value === 'number') return pyHash(value);
   throw typeError('The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.');
+}
+
+/** The big-endian unsigned integer that bytes encode. */
+function bigintOfBytes(bytes: Uint8Array): bigint {
+  return BigInt(`0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`);
 }
 
 function randrange(generator: MersenneTwister, args: PyValue[]): bigint {
@@ -315,6 +318,7 @@ function gauss(generator: MersenneTwister, mu: number, sigma: number): number {
 
 /** `random.Random`, whose instances each have a generator of their own; the module's functions use a hidden one. */
 const randomClass = builtinClass('Random');
+randomClass.unsupportedBase = 'random.Random を継承したクラス';
 randomClass.module = 'random';
 randomClass.dict.set('__module__', 'random');
 randomClass.dict.set('VERSION', 3n);
@@ -335,6 +339,7 @@ const RANDOM_METHODS: [string, { style: ArgStyle; min: number; max: number; keyw
   ['seed', { style: 'takes', min: 0, max: 2, keywords: ['a', 'version'] }, seedMethod],
   ['random', { style: 'none', min: 0, max: 0 }, (generator) => generator.random()],
   ['getrandbits', { style: 'one', min: 1, max: 1 }, (generator, [bits]) => getrandbits(generator, bits)],
+  ['randbytes', { style: 'one', min: 1, max: 1 }, (generator, [n]) => randbytes(generator, n)],
   ['randrange', { style: 'expected', min: 1, max: 3 }, (generator, args) => randrange(generator, args)],
   ['randint', { style: 'expected', min: 2, max: 2 }, (generator, [a, b]) => randint(generator, a, b)],
   ['choice', { style: 'one', min: 1, max: 1 }, (generator, [sequence]) => choice(generator, sequence)],
@@ -438,7 +443,6 @@ for (const [name, spec, run] of RANDOM_METHODS) {
     }
   );
 }
-defineUnsupportedAttributes(randomClass, { randbytes: 'random.randbytes()（bytes 型）' });
 
 function muSigma(args: PyValue[], kwargs: Kwargs): [number, number] {
   return [realArgument(argument(args, kwargs, 0, 'mu') ?? 0), realArgument(argument(args, kwargs, 1, 'sigma') ?? 1)];
@@ -463,6 +467,19 @@ function versionOneSeed(text: string): bigint {
   for (const code of codes) x = ((1_000_003n * x) ^ code) & 0xff_ff_ff_ff_ff_ff_ff_ffn;
   x ^= BigInt(codes.length);
   return x === -1n ? -2n : x;
+}
+
+/** `Random.randbytes(n)`: the bytes of `getrandbits(n * 8)`, least significant first. */
+function randbytes(generator: MersenneTwister, n: PyValue): PyValue {
+  const count = Number(toIndex(n));
+  if (count < 0) throw valueError('Cannot convert negative int');
+  let value = generator.getrandbits(count * 8);
+  const data = new Uint8Array(count);
+  for (let index = 0; index < count; index++) {
+    data[index] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+  return newBytes(data);
 }
 
 function getrandbits(generator: MersenneTwister, bits: PyValue): bigint {
@@ -527,7 +544,6 @@ function setstate(generator: MersenneTwister, state: PyValue): PyValue {
 
 registerUnsupportedAttributes('random', {
   SystemRandom: 'random.SystemRandom（OS の乱数）',
-  randbytes: 'random.randbytes()（bytes 型）',
   main: 'random.main()（コマンドライン）',
 });
 

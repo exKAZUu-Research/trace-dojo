@@ -61,11 +61,6 @@ test.each([
   ['an invalid color', "Turtle(0, 0, 'Z')", 'RuntimeError: Invalid color: Z'],
   ['unbounded recursion', 'def f(n):\n    return f(n + 1)\nf(0)', 'RecursionError: maximum recursion depth exceeded'],
   ['standard input', 'input()', '標準入力（input()）は、この採点環境では使えません。'],
-  [
-    'a subclass of a builtin type',
-    'class Stack(list):\n    pass',
-    '組み込み型 list を継承するクラスは、この採点環境では使えません。',
-  ],
 ])('%s ends the program as CPython describes it', (_, source, description) => {
   expect(executeProgram('python', source)).toMatchObject({ kind: 'executed', uncaughtException: description });
 });
@@ -86,7 +81,6 @@ test.each([
   ['a capture pattern before another case', 'match 1:\n    case x:\n        pass\n    case 2:\n        pass', 1],
   ['nonlocal at module level', 'nonlocal x', 0],
   ['a Python 2 print statement', "print 'x'", 0],
-  ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],
   ['an import of a file', 'import mymodule', 0],
 ])('%s is a compile error', (_, source, row) => {
   const execution = executeProgram('python', source);
@@ -189,5 +183,27 @@ for name, listed in names:
         raise ValueError(name)
 if dir(1) != sorted(dir(int)) or '__dict__' in dir(object()):
     raise ValueError('dir')`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test('the functional API of Enum and dataclasses with slots give what CPython gives', () => {
+  const program = `from dataclasses import dataclass
+from enum import Enum, Flag, IntEnum
+import typing
+@dataclass(slots=True, frozen=True)
+class S:
+    a: int
+    b: int = 2
+E = Enum('E', 'A B')
+H = Enum('H', [('X', 10)])
+J = IntEnum('J', 'A,B', start=5)
+K = Flag('K', 'R W')
+actual = [repr(S(1)), S.__slots__, hasattr(S(1), '__dict__'), hash(S(1)) == hash((1, 2)), repr(list(E)), repr(H.X),
+          repr(list(J)), repr(K.R | K.W), repr(typing.List[typing.TypeVar('T')][int]), repr(int | None)]
+expected = ['S(a=1, b=2)', ('a', 'b'), False, True, '[<E.A: 1>, <E.B: 2>]', '<H.X: 10>', '[<J.A: 5>, <J.B: 6>]',
+            '<K.R|W: 3>', 'typing.List[int]', 'int | None']
+for a, e in zip(actual, expected):
+    if a != e:
+        raise ValueError(repr(a) + ' != ' + repr(e))`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });

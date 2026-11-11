@@ -3,8 +3,8 @@ import { floatRepr, intToString } from './numbers';
 import { bindValue, callValue, getAttribute, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { asciiEscape, iterStr, strRepr } from './strings';
-import { classOf, None, typeError, typeName, valueError } from './types';
-import { PyBuiltinFunction, type PyObject, type PyValue } from './values';
+import { classOf, isNativeMethod, None, typeError, typeName, valueError } from './types';
+import { PyBuiltinFunction, PyComplex, PyInstance, type PyObject, type PyValue } from './values';
 
 /** `repr()` of a value. */
 export function pyRepr(value: PyValue): string {
@@ -65,13 +65,16 @@ export function defaultRepr(value: PyObject): string {
 
 /** `format(value, spec)`, which calls the value's `__format__`. */
 export function pyFormat(value: PyValue, spec: string): string {
-  if (typeof value === 'object' && value !== None) {
-    const method = lookupSpecial(value, '__format__');
-    if (method !== undefined && !(method instanceof PyBuiltinFunction)) {
-      const result = callValue(bindValue(method, value), [spec]);
-      if (typeof result !== 'string') throw typeError(`__format__ must return a str, not ${typeName(result)}`);
-      return result;
-    }
+  const method = typeof value === 'object' && value !== None ? lookupSpecial(value, '__format__') : undefined;
+  // The builtin types' own __format__ methods are method descriptors, which formatValue implements natively.
+  if (method !== undefined && !isNativeMethod(method)) {
+    const result = callValue(bindValue(method, value), [spec]);
+    if (typeof result !== 'string') throw typeError(`__format__ must return a str, not ${typeName(result)}`);
+    return result;
+  }
+  // An int, float, or str subclass formats its value, or shows its str() for an empty spec, as their __format__ do.
+  if (value instanceof PyInstance && value.primitive !== undefined) {
+    return spec === '' ? pyStr(value) : formatValue(value.primitive, spec, pyStr);
   }
   if (value === None && spec !== '') throw typeError('unsupported format string passed to NoneType.__format__');
   if (typeof value === 'object' && !isNativeFormattable(value) && spec !== '') {
@@ -81,7 +84,7 @@ export function pyFormat(value: PyValue, spec: string): string {
 }
 
 function isNativeFormattable(value: PyObject): boolean {
-  return classOf(value).name === 'complex';
+  return value instanceof PyComplex;
 }
 
 // str.format ---------------------------------------------------------------------------------------------------------

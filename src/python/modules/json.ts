@@ -1,11 +1,11 @@
 import { pyRepr } from '../conversions';
 import { builtin } from '../define';
-import { runLibrarySource } from '../librarySource';
-import { registerHiddenAttributes, registerModule, registerUnsupportedAttributes } from '../modules';
+import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { floatRepr, intToString, toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy, toArray } from '../objects';
 import { intEnumValue } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { runModuleSource } from '../sourceModules';
 import { iterStr } from '../strings';
 import {
   exceptionClassNamed,
@@ -18,6 +18,7 @@ import {
   None,
   typeError,
   typeName,
+  unbox,
   valueError,
 } from '../types';
 import { PyDict, PyError, type PyInstance, PyList, type PyObject, PyTuple, type PyValue } from '../values';
@@ -74,8 +75,9 @@ function floatText(value: number, options: DumpOptions): string {
   return value > 0 ? 'Infinity' : '-Infinity';
 }
 
-function encode(value: PyValue, options: DumpOptions, level: number, stack: Set<PyObject>): string {
+function encode(item: PyValue, options: DumpOptions, level: number, stack: Set<PyObject>): string {
   currentRuntime().spend();
+  const value = unbox(item);
   if (value === None) return 'null';
   if (value === true) return 'true';
   if (value === false) return 'false';
@@ -136,7 +138,8 @@ function newline(options: DumpOptions, depth: number): string {
 }
 
 /** The text of a dict key, or undefined for a key that `skipkeys` skips. */
-function keyText(key: PyValue, options: DumpOptions): string | undefined {
+function keyText(item: PyValue, options: DumpOptions): string | undefined {
+  const key = unbox(item);
   if (typeof key === 'string') return key;
   if (typeof key === 'number') return floatText(key, options);
   if (key === true) return 'true';
@@ -350,17 +353,12 @@ registerUnsupportedAttributes('json', {
   detect_encoding: 'json.detect_encoding()（bytes 型）',
 });
 
-registerHiddenAttributes('json', [
-  'INFINITY',
-  'NaN',
-  'NegInf',
-  'PosInf',
-  'encode_basestring',
-  'encode_basestring_ascii',
-]);
+/** The names the Python part defines for itself, which CPython keeps in json.decoder and json.encoder. */
+const PRIVATE_NAMES = new Set(['INFINITY', 'NaN', 'NegInf', 'PosInf', 'encode_basestring', 'encode_basestring_ascii']);
 
-registerModule('json', (runtime) => {
-  const namespace = new Map<string, PyValue>();
+registerModule('json', (runtime, moduleNamespace) => {
+  // The Python part runs in globals of its own, of which the module shows all but the private names.
+  const namespace = new Map<string, PyValue>([['__name__', 'json']]);
   const encodeAscii = builtin('encode_basestring_ascii', 'one', 1, 1, ([text]) => quote(text as string, true));
   const encodeText = builtin('encode_basestring', 'one', 1, 1, ([text]) => quote(text as string, false));
   for (const [name, value] of [
@@ -377,7 +375,14 @@ registerModule('json', (runtime) => {
   ] as const) {
     namespace.set(name, value);
   }
-  return runLibrarySource('json', JSON_SOURCE, namespace);
+  runModuleSource(runtime, namespace, JSON_SOURCE);
+  for (const [name, value] of namespace) {
+    if (!PRIVATE_NAMES.has(name) && (!name.startsWith('_') || name.startsWith('_default_'))) {
+      moduleNamespace.set(name, value);
+    }
+  }
+  for (const name of ['__version__', '__all__']) moduleNamespace.set(name, namespace.get(name) as PyValue);
+  return new Map();
 });
 
 function unsupportedBuiltin(runtime: { unsupported(feature: string): Error }, name: string, feature: string): PyValue {

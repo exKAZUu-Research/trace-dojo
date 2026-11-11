@@ -1,12 +1,12 @@
 import { BUILTIN_DOC } from '../attributes';
 import { builtin } from '../define';
-import { runLibrarySource } from '../librarySource';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, toArray } from '../objects';
 import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { runModuleSource } from '../sourceModules';
 import { newList, None, pyError, typeError, typeName } from '../types';
 import { type Kwargs, PyList, type PyValue } from '../values';
 
@@ -129,9 +129,26 @@ function nSorted(largest: boolean): (args: PyValue[], kwargs: Kwargs) => PyValue
   };
 }
 
-/** heapq.merge from CPython 3.14's Lib/heapq.py, with `yield from` written as a loop. */
+/** `heapq.merge` from CPython's `heapq.py`. */
 const MERGE_SOURCE = String.raw`
 def merge(*iterables, key=None, reverse=False):
+    '''Merge multiple sorted inputs into a single sorted output.
+
+    Similar to sorted(itertools.chain(*iterables)) but returns a generator,
+    does not pull the data into memory all at once, and assumes that each of
+    the input streams is already sorted (smallest to largest).
+
+    >>> list(merge([1,3,5,7], [0,2,4,8], [5,10,15,20], [], [25]))
+    [0, 1, 2, 3, 4, 5, 5, 7, 8, 10, 15, 20, 25]
+
+    If *key* is not None, applies a key function to each element to determine
+    its sort order.
+
+    >>> list(merge(['dog', 'horse'], ['cat', 'fish', 'kangaroo'], key=len))
+    ['dog', 'cat', 'fish', 'horse', 'kangaroo']
+
+    '''
+
     h = []
     h_append = h.append
 
@@ -159,15 +176,15 @@ def merge(*iterables, key=None, reverse=False):
                 while True:
                     value, order, next = s = h[0]
                     yield value
-                    s[0] = next()
-                    _heapreplace(h, s)
+                    s[0] = next()           # raises StopIteration when exhausted
+                    _heapreplace(h, s)      # restore heap condition
             except StopIteration:
-                _heappop(h)
+                _heappop(h)                 # remove empty iterator
         if h:
+            # fast case when only a single iterator remains
             value, order, next = h[0]
             yield value
-            for value in next.__self__:
-                yield value
+            yield from next.__self__
         return
 
     for order, it in enumerate(map(iter, iterables)):
@@ -192,12 +209,11 @@ def merge(*iterables, key=None, reverse=False):
     if h:
         key_value, order, value, next = h[0]
         yield value
-        for value in next.__self__:
-            yield value
+        yield from next.__self__
 `;
 
-registerModule('heapq', () => {
-  const natives = new Map<string, PyValue>([
+registerModule('heapq', (runtime, namespace) => {
+  for (const [key, value] of [
     ['heappush', builtin('heappush', 'expected', 2, 2, (args) => heappush(args))],
     ['heappop', builtin('heappop', 'one', 1, 1, (args) => heappop(args))],
     ['heapify', builtin('heapify', 'one', 1, 1, (args) => heapify(args))],
@@ -210,8 +226,11 @@ registerModule('heapq', () => {
     ['heapreplace_max', builtin('heapreplace_max', 'expected', 2, 2, (args) => heapreplace(args, maxLess))],
     ['nlargest', builtin('nlargest', 'takes', 2, 2, nSorted(true), { keywords: ['key'] })],
     ['nsmallest', builtin('nsmallest', 'takes', 2, 2, nSorted(false), { keywords: ['key'] })],
-  ]);
-  return runLibrarySource('heapq', MERGE_SOURCE, natives);
+  ] as [string, PyValue][]) {
+    namespace.set(key, value);
+  }
+  runModuleSource(runtime, namespace, MERGE_SOURCE);
+  return new Map();
 });
 
 registerUnsupportedAttributes('heapq', { __about__: BUILTIN_DOC });
