@@ -220,14 +220,36 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'zlib',
 ]);
 
+/** The modules of sys.stdlib_module_names that CPython's macOS build lacks, which a program may import to fail. */
+const ABSENT_MODULES: ReadonlySet<string> = new Set([
+  'nt',
+  '_winapi',
+  '_gdbm',
+  '_overlapped',
+  '_wmi',
+  'msvcrt',
+  'winreg',
+  'winsound',
+]);
+
 /**
  * The modules of other platforms and the C modules that CPython's pure Python modules try to import, whose import
  * fails here as it does where CPython lacks them.
  */
-export const MISSING_PLATFORM_MODULES: ReadonlySet<string> = new Set(['nt', '_winapi', 'fcntl', 'posix', 'pwd', 'grp']);
+export const MISSING_PLATFORM_MODULES: ReadonlySet<string> = new Set([
+  ...ABSENT_MODULES,
+  'fcntl',
+  'posix',
+  'pwd',
+  'grp',
+]);
 
 export function isSupportedModule(module: string): boolean {
-  return SUPPORTED_MODULES.has(module) || (module.startsWith('encodings.') && isRegisteredModule(module));
+  return (
+    SUPPORTED_MODULES.has(module) ||
+    ABSENT_MODULES.has(module) ||
+    (module.startsWith('encodings.') && isRegisteredModule(module))
+  );
 }
 
 /** The codec modules CPython has only for Windows, which this grader does not implement. */

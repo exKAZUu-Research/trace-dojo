@@ -174,6 +174,8 @@ export interface ExceptionState {
   filename?: PyValue;
   filename2?: PyValue;
   message?: string;
+  /** The fields an exception sets from its keyword arguments, such as ImportError's `path`. */
+  fields?: Map<string, PyValue>;
 }
 
 /** An instance of a class written in the program, or of a builtin class with instance attributes. */

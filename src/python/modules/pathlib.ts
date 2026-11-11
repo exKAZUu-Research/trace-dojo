@@ -1418,5 +1418,5 @@ registerModuleAlias('_collections_abc', 'collections.abc');
 
 // CPython's pure Python modules fall back from these as CPython does where the module is missing.
 for (const name of MISSING_PLATFORM_MODULES) {
-  registerSourceModule(name, `raise ModuleNotFoundError("No module named '${name}'")`);
+  registerSourceModule(name, `raise ModuleNotFoundError("No module named '${name}'", name='${name}')`);
 }

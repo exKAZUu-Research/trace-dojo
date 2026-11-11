@@ -377,10 +377,18 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
   if (name === 'value' && is('StopIteration')) return args[0] ?? None;
   if (name === 'code' && is('SystemExit')) return args.length === 0 ? None : args.length === 1 ? args[0] : state.args;
   if ((name === 'name' || name === 'obj') && (is('AttributeError') || is('NameError') || is('ImportError'))) {
-    if (name === 'name') return state.name ?? None;
+    if (name === 'name') return state.name ?? state.fields?.get('name') ?? None;
     return state.object ?? None;
   }
+  if (is('ImportError')) return importErrorField(state, name);
   return is('OSError') ? osErrorField(state, name) : undefined;
+}
+
+/** The fields an ImportError has besides its name: its message, and those its keyword arguments set. */
+function importErrorField(state: ExceptionState, name: string): PyValue | undefined {
+  if (name === 'msg') return state.args.items.length === 1 ? state.args.items[0] : None;
+  if (name === 'path' || name === 'name_from') return state.fields?.get(name) ?? None;
+  return undefined;
 }
 
 /** The fields an OSError derives from the arguments it was created with, as `OSError(errno, strerror, filename)`. */
@@ -640,9 +648,20 @@ function setExceptionField(state: ExceptionState, name: string, value: PyValue):
       return true;
     }
     default: {
-      return false;
+      return setKeywordField(state, name, value);
     }
   }
+}
+
+/** Sets a field an exception's keyword arguments set, such as ImportError's `path`, returning whether it has it. */
+function setKeywordField(state: ExceptionState, name: string, value: PyValue): boolean {
+  const known = state.fields?.has(name) ?? false;
+  if (!known && !(name === 'name' && state.name !== undefined) && !(name === 'obj' && state.object !== undefined))
+    return false;
+  (state.fields ??= new Map()).set(name, value);
+  if (name === 'name') state.name = typeof value === 'string' ? value : undefined;
+  if (name === 'obj') state.object = value;
+  return true;
 }
 
 /** `type.__delattr__`: deletes a class attribute without its metaclass's `__delattr__`. */
