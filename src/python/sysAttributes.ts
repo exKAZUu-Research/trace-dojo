@@ -42,7 +42,5 @@ export const UNSUPPORTED_SYS_ATTRIBUTES: Record<string, string> = {
   _current_exceptions: 'ほかのスレッドの例外（sys._current_exceptions()）',
   excepthook: '捕まえなかった例外の表示（sys.excepthook、既定の表示はスクリプトのパスを含む）',
   __excepthook__: '捕まえなかった例外の表示（sys.__excepthook__、既定の表示はスクリプトのパスを含む）',
-  unraisablehook: '__del__ などで捕まえられなかった例外の報告（sys.unraisablehook）',
-  __unraisablehook__: '__del__ などで捕まえられなかった例外の報告（sys.__unraisablehook__）',
   addaudithook: 'CPython の内部が起こす監査イベントを受け取るフック（sys.addaudithook()）',
 };

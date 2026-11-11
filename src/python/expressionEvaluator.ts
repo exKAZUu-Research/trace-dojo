@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 620 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss 634 -- The expression evaluator keeps one method per kind of expression together.
 import type {
   Argument,
   Comprehension,
@@ -53,6 +53,8 @@ import {
 import {
   DONE,
   type Kwargs,
+  PyBoundMethod,
+  PyBuiltinFunction,
   PyCell,
   PyClass,
   PyDict,
@@ -62,6 +64,7 @@ import {
   PyInstance,
   PyList,
   PyModule,
+  PyObject,
   PySlice,
   PyTuple,
   type PyValue,
@@ -411,6 +414,11 @@ export class ExpressionEvaluator {
 
   /** Stores over or deletes an attribute or an item, closing a generator that only the value it held reached. */
   private replacing(object: PyValue, key: PyValue, isAttribute: boolean, store: () => void): void {
+    // A slice may remove several items of a container, which its change frees.
+    if (!isAttribute && key instanceof PyObject) {
+      this.runtime.finalizer.mutating(object, store);
+      return;
+    }
     const replaced = this.heldValue(object, key, isAttribute);
     store();
     this.release(replaced);
@@ -422,7 +430,9 @@ export class ExpressionEvaluator {
    */
   private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): PyValue | undefined {
     if (this.runtime.finalizer.pending.size === 0) return undefined;
-    if (isAttribute) return object instanceof PyInstance ? object.dict.get(key as string) : undefined;
+    if (isAttribute) {
+      return object instanceof PyInstance || object instanceof PyClass ? object.dict.get(key as string) : undefined;
+    }
     if (object instanceof PyList && typeof key === 'bigint') {
       const { items } = object;
       return items[Number(key < 0n ? key + BigInt(items.length) : key)];
@@ -515,7 +525,16 @@ export class ExpressionEvaluator {
     try {
       const collected = this.arguments(expression.args, frame, callee);
       args = collected.args;
-      result = this.invoke(callee, args, collected.kwargs, expression.row);
+      const { finalizer } = this.runtime;
+      const owner = finalizer.pending.size > 0 ? builtinMethodOwner(callee) : undefined;
+      if (owner !== undefined) {
+        // A method of a list, dict, set, or deque frees the items it removes, such as `clear` does.
+        result = finalizer.mutating(owner, () => this.invoke(callee, args, collected.kwargs, expression.row), args);
+      } else {
+        // CPython's caller hands its references to the arguments to a Python function's frame.
+        if (finalizer.pending.size > 0 && passesArguments(callee)) temporaries.length = length + 1;
+        result = this.invoke(callee, args, collected.kwargs, expression.row);
+      }
     } finally {
       temporaries.length = length;
     }
@@ -984,3 +1003,15 @@ export function unpack(value: PyValue, count: number): PyValue[] {
 }
 
 export { PyError };
+
+/** Whether calling a value runs a Python function, whose frame takes over the references to the arguments. */
+function passesArguments(callee: PyValue): boolean {
+  return callee instanceof PyFunction || (callee instanceof PyBoundMethod && callee.fn instanceof PyFunction);
+}
+
+/** The object a builtin method is bound to, whose items calling it may remove. */
+function builtinMethodOwner(callee: PyValue): PyValue | undefined {
+  if (callee instanceof PyBuiltinFunction) return callee.self;
+  if (callee instanceof PyBoundMethod && !(callee.fn instanceof PyFunction)) return callee.self;
+  return undefined;
+}

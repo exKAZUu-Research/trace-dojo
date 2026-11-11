@@ -8,6 +8,7 @@ import { callValue } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { builtinClass, classOf, defineMethod, None, NotImplemented, typeError } from './types';
+import { reportUnraisable } from './unraisable';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   PyBoundMethod,
@@ -156,12 +157,37 @@ export function runWeakCallbacks(inFlight: unknown[] = [], collectCycles = false
     collected.add(referent);
     // A reference that is itself freed calls nothing.
     if (!reachable.has(reference) || callback === undefined) continue;
-    try {
-      callValue(callback, [reference]);
-    } catch (error) {
-      // CPython reports an exception raised by a callback on stderr and goes on.
-      if (!(error instanceof PyError)) throw error;
-    }
+    callCallback(callback, reference);
+  }
+}
+
+/**
+ * Calls the callbacks of the references to an object that reference counting frees, newest first, as CPython does
+ * right after the object's `__del__`.
+ */
+export function runCallbacksOf(referent: PyObject): void {
+  const runtime = currentRuntime();
+  const list = watched.get(runtime);
+  if (!list || list.length === 0) return;
+  const dead = list.filter((reference) => referenceOf(reference).referent === referent);
+  if (dead.length === 0) return;
+  watched.set(
+    runtime,
+    list.filter((reference) => !dead.includes(reference))
+  );
+  collected.add(referent);
+  for (const reference of dead.toReversed()) {
+    const { callback } = referenceOf(reference);
+    if (callback !== undefined) callCallback(callback, reference);
+  }
+}
+
+function callCallback(callback: PyValue, reference: PyValue): void {
+  try {
+    callValue(callback, [reference]);
+  } catch (error) {
+    if (!(error instanceof PyError)) throw error;
+    reportUnraisable(error, 'Exception ignored while calling weakref callback', callback);
   }
 }
 

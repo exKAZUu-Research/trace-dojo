@@ -77,16 +77,27 @@ function constructSubclass(
 ): PyValue {
   const instance = construct(cls, args, kwargs);
   if (instance instanceof PyObject && instance.cls !== cls && cls.isSubclassOf(instance.cls)) instance.cls = cls;
+  if (cls.flags.definesDel && instance instanceof PyObject) currentRuntime().finalizer.track(instance);
   const init = cls.lookup('__init__');
   if (init !== objectInit()) callInit(init, instance, args, kwargs);
   return instance;
 }
 
 function callInit(init: PyValue | undefined, instance: PyValue, args: PyValue[], kwargs: Kwargs): void {
-  const result =
-    init instanceof PyFunction
-      ? currentRuntime().callFunction(init, [instance, ...args], kwargs)
-      : callValue(bindValue(init ?? None, instance), args, kwargs);
+  const runtime = currentRuntime();
+  // The caller holds the new instance while `__init__` runs, so its `self` going away there frees nothing.
+  const { temporaries } = runtime.frame;
+  const length = temporaries.length;
+  temporaries.push(instance);
+  let result: PyValue;
+  try {
+    result =
+      init instanceof PyFunction
+        ? runtime.callFunction(init, [instance, ...args], kwargs)
+        : callValue(bindValue(init ?? None, instance), args, kwargs);
+  } finally {
+    temporaries.length = length;
+  }
   if (result !== None) throw typeError(`__init__() should return None, not '${typeName(result)}'`);
 }
 
@@ -122,8 +133,11 @@ function objectInit(): PyValue | undefined {
 function newObject(cls: PyClass): PyInstance {
   if (cls.isBuiltin && cls !== objectClass) throw cannotCreate(cls);
   checkNotAbstract(cls);
-  currentRuntime().allocate(1);
-  return new PyInstance(cls);
+  const runtime = currentRuntime();
+  runtime.allocate(1);
+  const instance = new PyInstance(cls);
+  if (cls.flags.definesDel) runtime.finalizer.track(instance);
+  return instance;
 }
 
 function cannotCreate(cls: PyClass): Error {

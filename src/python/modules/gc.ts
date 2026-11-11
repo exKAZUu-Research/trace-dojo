@@ -27,6 +27,7 @@ registerModule(
         'enable',
         builtin('enable', 'none', 0, 0, () => {
           state.enabled = true;
+          updateAutomaticCollection(state);
           return None;
         }),
       ],
@@ -34,6 +35,7 @@ registerModule(
         'disable',
         builtin('disable', 'none', 0, 0, () => {
           state.enabled = false;
+          updateAutomaticCollection(state);
           return None;
         }),
       ],
@@ -48,8 +50,9 @@ registerModule(
           () => {
             // The collector frees the objects in reference cycles that nothing reaches, calling their callbacks.
             const runtime = currentRuntime();
-            runtime.finalizer.collect();
+            // CPython calls the callbacks of the weak references to the garbage before its finalizers.
             runWeakCallbacks([], true);
+            runtime.finalizer.collect();
             // A class nothing reaches is in a cycle with its __mro__, which the collector frees.
             collectSubclasses(runtime, runtime.reachableObjects());
             return unavailableValue('gc.collect() が返す、回収したオブジェクトの数');
@@ -64,6 +67,7 @@ registerModule(
           state.threshold = state.threshold.map((value, index) =>
             args[index] === undefined ? value : toIndex(args[index])
           );
+          updateAutomaticCollection(state);
           return None;
         }),
       ],
@@ -99,3 +103,8 @@ registerModule(
     ].map((name) => [name, `gc.${name}()（CPython のガベージコレクタの内部状態）`])
   )
 );
+
+/** Tells the finalizer whether CPython's automatic collector runs, which a zero first threshold turns off too. */
+function updateAutomaticCollection(state: CollectorState): void {
+  currentRuntime().finalizer.setAutomaticCollection(state.enabled && state.threshold[0] !== 0n);
+}

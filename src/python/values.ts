@@ -89,6 +89,8 @@ export class PyClass extends PyObject {
     isAbstractEnum?: boolean;
     /** Whether the class or a base defined `__getattribute__` in its body. */
     definesGetattribute?: boolean;
+    /** Whether the class or a base defines `__del__`, whose instances the finalizer tracks. */
+    definesDel?: boolean;
   } = {};
   /** The members of an Enum class, in definition order. */
   enumMembers?: PyInstance[];

@@ -139,6 +139,42 @@ function popComponent(stack: object[], onStack: Set<object>, root: object, cycli
   if (component.length > 1) for (const each of component) cyclic.add(each);
 }
 
+/**
+ * The objects and cells a node refers to. With `asCPythonVisits`, the items of a list, tuple, or deque come last
+ * first, as CPython's deallocation and its collector's traversal visit them.
+ */
+export function referencesOf(node: object, asCPythonVisits = false): object[] {
+  const pending: unknown[] = [];
+  if (node instanceof PyObject) {
+    if (node.slotValues) pushAll(pending, node.slotValues.values());
+    if (node.instanceDict) pushAll(pending, node.instanceDict.values());
+  }
+  const sequence = node instanceof PyList || node instanceof PyTuple || node instanceof PyDeque;
+  if (asCPythonVisits && sequence) {
+    for (let index = node.items.length - 1; index >= 0; index--) pending.push(node.items[index]);
+    if (!node.cls.isBuiltin) pending.push(node.cls);
+  } else if (isNode(node)) {
+    pushChildren(pending, node, new Set());
+  }
+  return pending.filter(isNode);
+}
+
+/** The objects `roots` reach, in the order a breadth-first walk visiting as CPython's collector finds them. */
+export function findReachableAsCollector(roots: unknown[]): object[] {
+  const visited = new Set<object>();
+  let level = roots.filter(isNode);
+  while (level.length > 0) {
+    const next: object[] = [];
+    for (const item of level) {
+      if (visited.has(item)) continue;
+      visited.add(item);
+      next.push(...referencesOf(item, true));
+    }
+    level = next;
+  }
+  return [...visited];
+}
+
 function isNode(item: unknown): item is PyObject | PyCell {
   return item instanceof PyObject || item instanceof PyCell;
 }
