@@ -4,7 +4,8 @@ import { pyRepr } from '../conversions';
 import { isSupportedModule, MISSING_PLATFORM_MODULES } from '../moduleNames';
 import { isRegisteredModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
-import { None, typeError, typeName } from '../types';
+import { callValue, importedModule } from '../objects';
+import { newList, None, typeError, typeName } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { type Kwargs, type PyClass, PyModule, type PyValue } from '../values';
 import { MODULE_LAYOUTS } from './moduleLayouts';
@@ -19,6 +20,8 @@ export interface ModuleLayout {
   package?: string | null;
   /** The modules the module's code imported, by the names it holds them under. */
   imports?: Readonly<Record<string, string>>;
+  /** The names of the module's namespace in CPython's order, which follows its creation and its code, by spaces. */
+  names: string;
 }
 
 const LOADER: Record<string, string> = {
@@ -66,6 +69,39 @@ export function addLayoutAttributes(module: PyModule, importName: string): void 
   for (const [key, target] of Object.entries(layout.imports ?? {})) addImportedModule(module, key, target);
 }
 
+/** Orders a new module's namespace as CPython's, whose names follow the module's creation and its code. */
+export function orderNamespace(module: PyModule, importName = module.name): void {
+  const layout = MODULE_LAYOUTS[importName] ?? MODULE_LAYOUTS[module.name];
+  if (!layout) return;
+  const { dict } = module;
+  const entries = new Map(dict);
+  dict.clear();
+  for (const key of layout.names.split(' ')) {
+    const value = entries.get(key);
+    if (value === undefined) continue;
+    dict.set(key, value);
+    entries.delete(key);
+  }
+  for (const [key, value] of entries) dict.set(key, value);
+}
+
+/**
+ * Imports the modules a module holds because CPython's code imported them, which this grader imports when first read,
+ * so that its namespace lists them where CPython's does.
+ */
+export function completeNamespace(module: PyModule): void {
+  if (module.imports.size === 0) return;
+  for (const key of module.imports.keys()) {
+    try {
+      importedModule(module, key);
+    } catch (error) {
+      // A shared object this grader does not support stays one that raises when read.
+      if (!(error instanceof UnsupportedFeatureError)) throw error;
+    }
+  }
+  orderNamespace(module);
+}
+
 /** Makes `module.key` the module `target`, imported when first read, or the unsupported error when this grader lacks it. */
 function addImportedModule(module: PyModule, key: string, target: string): void {
   const supported = isSupportedModule(target) || (isRegisteredModule(target) && !MISSING_PLATFORM_MODULES.has(target));
@@ -86,6 +122,14 @@ const createdModules = new WeakSet<PyModule>();
 
 /** `types.ModuleType(name, doc=None)`, a module with CPython's initial namespace. */
 export function createModule(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyModule {
+  const module = new PyModule(cls, '', new Map<string, PyValue>());
+  initializeModule(module, args, kwargs);
+  createdModules.add(module);
+  return module;
+}
+
+/** `module.__init__(name, doc=None)`, which sets the names CPython's new modules start with. */
+export function initializeModule(module: PyModule, args: PyValue[], kwargs: Kwargs): void {
   checkArgs(
     { qualified: 'module', short: 'module', min: 0, max: 2, style: 'takes', keywords: ['name', 'doc'] },
     args,
@@ -94,19 +138,23 @@ export function createModule(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyM
   const name = argument(args, kwargs, 0, 'name');
   if (name === undefined) throw typeError("module() missing required argument 'name' (pos 1)");
   if (typeof name !== 'string') throw typeError(`module() argument 'name' must be str, not ${typeName(name)}`);
-  const module = new PyModule(
-    cls,
-    name,
-    new Map<string, PyValue>([
-      ['__name__', name],
-      ['__doc__', argument(args, kwargs, 1, 'doc') ?? None],
-      ['__package__', None],
-      ['__loader__', None],
-      ['__spec__', None],
-    ])
-  );
-  createdModules.add(module);
-  return module;
+  for (const [key, value] of [
+    ['__name__', name],
+    ['__doc__', argument(args, kwargs, 1, 'doc') ?? None],
+    ['__package__', None],
+    ['__loader__', None],
+    ['__spec__', None],
+  ] as const) {
+    module.unsupported.delete(key);
+    module.dict.set(key, value);
+  }
+}
+
+/** `module.__dir__()`: the module's own `__dir__()` when its namespace has one, or else the names it has. */
+export function moduleDir(module: PyModule): PyValue {
+  const own = module.dict.get('__dir__');
+  if (own !== undefined) return callValue(own, []);
+  return newList([...new Set([...module.dict.keys(), ...module.unsupported.keys(), ...module.imports.keys()])]);
 }
 
 /**

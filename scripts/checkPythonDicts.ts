@@ -145,7 +145,7 @@ function pythonExecutable(): string {
 
 function runCPython(python: string, program: string): string {
   const result = spawnSync(python, ['-I', '-W', 'ignore', '-c', program], { encoding: 'utf8' });
-  if (result.status !== 0) console.error(result.stderr.trim().split('\n').at(-1));
+  if (result.status !== 0) console.error(`CPython: ${result.stderr.trim().split('\n').at(-1)}`);
   return result.stdout;
 }
 
@@ -155,11 +155,12 @@ function runOurs(program: string, module?: string): { output: string; unsupporte
   const unsupported: string[] = [];
   try {
     const run = runModule(runtime, parsePython(program));
-    if (run.uncaughtException) console.error(run.uncaughtException.split('\n').at(-1));
-    unsupported.push(...(runtime.modules.get(module ?? '')?.unsupported.keys() ?? []));
+    if (run.uncaughtException) console.error(`${module ?? 'types'}: ${run.uncaughtException.split('\n').at(-1)}`);
+    const value = runtime.modules.get(module ?? '');
+    unsupported.push(...(value?.unsupported.keys() ?? []), ...(value?.imports.keys() ?? []));
     return { output: run.output, unsupported };
   } catch (error) {
-    console.error(String(error));
+    console.error(`${module ?? 'types'}: ${String(error)}`);
     return { output: '', unsupported };
   }
 }

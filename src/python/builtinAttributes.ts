@@ -19,6 +19,7 @@ import {
   builtinFunctionClass,
   cellClass,
   classmethodClass,
+  classmethodDescriptorClass,
   classOf,
   complexClass,
   coroutineClass,
@@ -34,6 +35,7 @@ import {
   listClass,
   methodClass,
   methodDescriptorClass,
+  methodWrapperClass,
   newDict,
   newTuple,
   None,
@@ -51,13 +53,14 @@ import {
   typeName,
   unbox,
   valueError,
+  wrapperDescriptorClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   type PyBoundMethod,
   type PyBuiltinFunction,
   type PyCell,
-  type PyClass,
+  PyClass,
   type PyComplex,
   type PyDescriptor,
   PyDict,
@@ -317,6 +320,15 @@ method(methodDescriptorClass, '__get__', 'expected', 1, 2, (self, [instance]) =>
   instance === None ? self : bindValue(self, instance)
 );
 
+method(wrapperDescriptorClass, '__get__', 'expected', 1, 2, (self, [instance]) =>
+  instance === None ? self : bindValue(self, instance)
+);
+method(classmethodDescriptorClass, '__get__', 'expected', 1, 2, (self, [instance, owner]) => {
+  const cls = owner === undefined || owner === None ? classOf(instance as PyValue) : owner;
+  if (!(cls instanceof PyClass)) throw typeError(`descriptor '${(self as PyBuiltinFunction).name}' needs a type`);
+  return bindValue(self, cls, cls);
+});
+
 function objclassOf(fn: PyBuiltinFunction): PyValue {
   const name = fn.ownerName;
   const owner = [intClass, boolClass, floatClass, strClass, listClass, tupleClass, dictClass, setClass].find(
@@ -418,7 +430,15 @@ defineProperty(functionClass, '__globals__', (self) => {
   return namespaceDict(module === undefined ? globals : currentRuntime().importModule(module).dict);
 });
 unsupportedProperty(functionClass, '__builtins__', '関数の __builtins__（組み込みの名前空間そのもの）');
-for (const cls of [functionClass, methodClass, builtinFunctionClass, methodDescriptorClass]) {
+for (const cls of [
+  functionClass,
+  methodClass,
+  builtinFunctionClass,
+  methodDescriptorClass,
+  wrapperDescriptorClass,
+  classmethodDescriptorClass,
+  methodWrapperClass,
+]) {
   method(
     cls,
     '__call__',
@@ -443,6 +463,8 @@ function closureOf(fn: PyFunction): PyValue {
   );
 }
 
+// CPython's cells compare by their contents, which makes them unhashable.
+cellClass.dict.set('__hash__', None);
 method(cellClass, '__repr__', 'none', 0, 0, (self) => {
   const { value } = (self as PyOpaque).data as PyCell;
   const here = addressOf(self as PyOpaque);

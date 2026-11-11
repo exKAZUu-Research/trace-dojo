@@ -587,9 +587,9 @@ const FUNCTION_ATTRIBUTES = [
 
 /** The attributes of each kind of generator object that its class reads natively. */
 const GENERATOR_ATTRIBUTES: Record<string, string[]> = {
-  generator: ['__del__', 'gi_code', 'gi_frame', 'gi_yieldfrom'],
-  coroutine: ['__del__', 'cr_await', 'cr_code', 'cr_frame', 'cr_origin', 'cr_running', 'cr_suspended'],
-  async_generator: ['__del__', 'ag_await', 'ag_code', 'ag_frame', 'ag_running', 'ag_suspended'],
+  generator: ['gi_code', 'gi_frame', 'gi_yieldfrom'],
+  coroutine: ['cr_await', 'cr_code', 'cr_frame', 'cr_origin', 'cr_running', 'cr_suspended'],
+  async_generator: ['ag_await', 'ag_code', 'ag_frame', 'ag_running', 'ag_suspended'],
 };
 
 /** The attribute names `dir()` lists for an object other than a module. */

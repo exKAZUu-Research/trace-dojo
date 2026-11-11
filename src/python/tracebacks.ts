@@ -7,8 +7,9 @@ import {
   moduleCodeNames,
 } from './codeNames';
 import { addressOf } from './conversions';
-import { method } from './define';
+import { method, unsupportedSizeof } from './define';
 import type { Frame } from './frame';
+import { identityHash } from './hashing';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceDict } from './namespaces';
 import { callValue, getAttribute } from './objects';
@@ -259,6 +260,9 @@ function parameterCount(self: PyValue, kinds: string[]): bigint {
   return BigInt(fn ? fn.def.params.filter((param) => kinds.includes(param.kind)).length : 0);
 }
 
+unsupportedSizeof(frameClass);
+unsupportedSizeof(codeClass);
+method(codeClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
 method(codeClass, '__repr__', 'none', 0, 0, (self) => {
   const { name, filename, firstRow } = infoOf(self);
   if (filename === undefined) {

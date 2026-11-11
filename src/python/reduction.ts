@@ -20,6 +20,7 @@ import {
   iteratorClasses,
   methodClass,
   methodDescriptorClass,
+  methodWrapperClass,
   newDict,
   newList,
   newTuple,
@@ -33,6 +34,7 @@ import {
   typeError,
   typeName,
   unbox,
+  wrapperDescriptorClass,
 } from './types';
 import {
   type PyBoundMethod,
@@ -204,7 +206,9 @@ method(sliceClass, '__reduce__', 'none', 0, 0, (self) => {
 });
 
 method(builtinFunctionClass, '__reduce__', 'none', 0, 0, (self) => reduceBuiltin(self as PyBuiltinFunction));
-method(methodDescriptorClass, '__reduce__', 'none', 0, 0, (self) => reduceBuiltin(self as PyBuiltinFunction));
+for (const cls of [methodDescriptorClass, wrapperDescriptorClass, methodWrapperClass]) {
+  method(cls, '__reduce__', 'none', 0, 0, (self) => reduceBuiltin(self as PyBuiltinFunction));
+}
 
 /** A module's builtin function reduces to its name; a method to `getattr` of its object or class. */
 function reduceBuiltin(fn: PyBuiltinFunction): PyValue {

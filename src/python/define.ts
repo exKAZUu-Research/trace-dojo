@@ -1,5 +1,6 @@
 import { type ArgStyle, checkArgs } from './nativeArgs';
 import { defineMethod, nativeFunction, staticmethodClass } from './types';
+import { UnsupportedFeatureError } from './unsupported';
 import {
   type Kwargs,
   type NativeBinding,
@@ -69,4 +70,19 @@ export function builtin(
     },
     options.owner
   );
+}
+
+/** Defines a method without arguments that raises the unsupported error for `feature`. */
+export function unsupportedMethod(cls: PyClass, name: string, feature: string): void {
+  method(cls, name, 'none', 0, 0, () => {
+    throw new UnsupportedFeatureError(feature);
+  });
+}
+
+/** CPython's finalizer, which only its garbage collector should call. */
+export const FINALIZER_FEATURE = 'オブジェクトの後始末（__del__）を直接呼ぶこと（__del__）';
+
+/** Defines `__sizeof__` of a type whose objects' sizes CPython counts by fields this grader's objects lack. */
+export function unsupportedSizeof(cls: PyClass): void {
+  unsupportedMethod(cls, '__sizeof__', `${cls.name} オブジェクトの大きさ（__sizeof__）`);
 }

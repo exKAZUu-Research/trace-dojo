@@ -16,7 +16,7 @@ import { generatorNext } from './generators';
 import { identityHash } from './hashing';
 import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
 import { stateIndex, stateOf } from './iteratorStates';
-import { createModule, moduleRepr } from './modules/moduleLayout';
+import { createModule, initializeModule, moduleDir, moduleRepr } from './modules/moduleLayout';
 import { argument, checkArgs } from './nativeArgs';
 import {
   bindValue,
@@ -373,6 +373,11 @@ for (const [cls, kind] of [
 }
 method(moduleClass, '__repr__', 'none', 0, 0, (self) => moduleRepr(self as PyModule));
 moduleClass.construct = createModule;
+defineMethod(moduleClass, '__init__', (self, args, kwargs) => {
+  initializeModule(self as PyModule, args, kwargs);
+  return None;
+});
+method(moduleClass, '__dir__', 'none', 0, 0, (self) => moduleDir(self as PyModule));
 // A module's attributes are its namespace alone here, so a subclass's methods would not apply to its instances.
 moduleClass.unsupportedBase = 'types.ModuleType を継承したクラス';
 

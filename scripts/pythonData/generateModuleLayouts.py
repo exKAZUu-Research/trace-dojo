@@ -22,6 +22,7 @@ if module.__package__ != derived:
 imports = {key: value.__name__ for key, value in vars(module).items() if isinstance(value, types.ModuleType)}
 if imports:
     layout['imports'] = dict(sorted(imports.items()))
+layout['names'] = ' '.join(vars(module))
 print(json.dumps(layout))
 """
 

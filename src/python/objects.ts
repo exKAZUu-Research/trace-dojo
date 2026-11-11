@@ -13,6 +13,7 @@ import {
 } from './descriptors';
 import { getItem as getItemOf } from './items';
 import { clamp, reduction, withState } from './iteratorStates';
+import { completeNamespace } from './modules/moduleLayout';
 import { namespaceDict } from './namespaces';
 import { describeIntegerIndex, toIndex } from './numbers';
 import { currentRuntime } from './runtimeContext';
@@ -177,7 +178,7 @@ export function attributeError(value: PyValue, name: string): PyError {
 export function getAttribute(value: PyValue, name: string): PyValue {
   const custom = customGetattribute(value);
   if (custom !== undefined) return getWithCustomGetattribute(value, name, custom);
-  const found = findAttribute(value, name);
+  const found = findAttribute(value, name) ?? missingAttribute(value, name);
   if (found !== undefined) return found;
   const getattr = value instanceof PyModule ? value.dict.get('__getattr__') : lookupSpecial(value, '__getattr__');
   if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [name]);
@@ -185,6 +186,12 @@ export function getAttribute(value: PyValue, name: string): PyValue {
   const feature = unsupportedClassAttribute(value, name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   throw attributeError(value, name);
+}
+
+function missingAttribute(value: PyValue, name: string): PyValue | undefined {
+  if (value instanceof PyClass) return undefined;
+  const hook = classOf(value).mro.find((cls) => cls.missingAttribute !== undefined)?.missingAttribute;
+  return hook?.(value, name);
 }
 
 /** Reads `value.name`, or returns undefined when it is missing. */
@@ -235,7 +242,10 @@ function typeDocOf(cls: PyClass, name: string): PyValue | undefined {
 function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-  if (name === '__dict__') return namespaceDict(module.dict);
+  if (name === '__dict__') {
+    completeNamespace(module);
+    return namespaceDict(module.dict);
+  }
   // A module's `__annotate__` is None until its code defines one, which reading it records, as CPython does.
   if (name === '__annotate__' && !module.dict.has(name)) module.dict.set(name, None);
   const value =
