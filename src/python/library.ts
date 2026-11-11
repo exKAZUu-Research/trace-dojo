@@ -125,3 +125,4 @@ import './modules/doctest';
 import './modules/ast';
 import './modules/tokenize';
 import './modules/unittest/unittest';
+import './modules/zipfile/zipfile';

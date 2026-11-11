@@ -98,6 +98,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'tomllib',
   'tomllib._parser',
   'tomllib._re',
+  'tarfile',
   'tomllib._types',
   'traceback',
   'types',
@@ -119,6 +120,9 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'uuid',
   'weakref',
   'warnings',
+  'zipfile',
+  'zipfile._path',
+  'zipfile._path.glob',
   'zlib',
 ]);
 
