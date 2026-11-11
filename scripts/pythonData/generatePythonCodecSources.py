@@ -10,6 +10,8 @@ SOURCES = [
     ('IDNA', 'encodings/idna.py'),
     ('UNDEFINED', 'encodings/undefined.py'),
     ('UU_CODEC', 'encodings/uu_codec.py'),
+    ('QUOPRI_CODEC', 'encodings/quopri_codec.py'),
+    ('QUOPRI', 'quopri.py'),
     ('STRINGPREP', 'stringprep.py'),
 ]
 

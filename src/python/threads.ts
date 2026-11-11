@@ -311,7 +311,11 @@ export function blockingMethod(
  * runs synchronously, such as a class or another builtin.
  */
 export function suspendingCall(callee: PyValue, args: PyValue[], kwargs: Kwargs): Suspension | undefined {
-  if (callee instanceof PyBoundMethod) return suspendingCall(callee.fn, [callee.self, ...args], kwargs);
+  if (callee instanceof PyBoundMethod) {
+    return callee.fastCall
+      ? suspendingCall(callee.fastCall, args, kwargs)
+      : suspendingCall(callee.fn, [callee.self, ...args], kwargs);
+  }
   if (callee instanceof PyBuiltinFunction) {
     const blocking = blockingNatives.get(callee.run);
     if (!blocking) return undefined;

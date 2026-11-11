@@ -81,6 +81,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'posixpath',
   'pprint',
   'queue',
+  'quopri',
   'random',
   're',
   'reprlib',

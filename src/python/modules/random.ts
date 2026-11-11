@@ -11,8 +11,32 @@ import { bindValue, callValue, getItem, isTruthy, lengthOf, setItem, toArray } f
 import { binaryOp, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
-import { builtinClass, newList, newTuple, None, objectClass, pyError, typeError, typeName, valueError } from '../types';
-import { type Kwargs, PyDict, PyInstance, type PyObject, PyOpaque, PySet, PyTuple, type PyValue } from '../values';
+import {
+  builtinClass,
+  classOf,
+  methodClass,
+  nativeFunction,
+  newList,
+  newTuple,
+  None,
+  objectClass,
+  pyError,
+  typeError,
+  typeName,
+  valueError,
+} from '../types';
+import {
+  type Kwargs,
+  PyBoundMethod,
+  PyDict,
+  PyFunction,
+  PyInstance,
+  type PyObject,
+  PyOpaque,
+  PySet,
+  PyTuple,
+  type PyValue,
+} from '../values';
 import { realArgument } from './math';
 import {
   betavariate,
@@ -607,6 +631,30 @@ registerModule('_random', () => new Map<string, PyValue>([['Random', coreClass]]
 
 // random -------------------------------------------------------------------------------------------------------------
 
+/** Whether a method's parameters after `self` take these arguments. */
+function fitsSignature(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): boolean {
+  const params = fn.def.params.slice(1);
+  const positional = params.filter((param) => param.kind === 'positionalOnly' || param.kind === 'positional');
+  const varArgs = params.some((param) => param.kind === 'varArgs');
+  const varKeywords = params.some((param) => param.kind === 'varKeywords');
+  if (args.length > positional.length && !varArgs) return false;
+  const named = new Set(kwargs?.keys());
+  for (const name of named) {
+    const param = params.find((each) => each.name === name && each.kind !== 'positionalOnly');
+    if (param === undefined && !varKeywords) return false;
+    // A keyword for a parameter the positional arguments already gave.
+    if (param !== undefined && positional.includes(param) && positional.indexOf(param) < args.length) return false;
+  }
+  return params.every(
+    (param, index) =>
+      param.default !== undefined ||
+      param.kind === 'varArgs' ||
+      param.kind === 'varKeywords' ||
+      (positional.includes(param) && index < args.length) ||
+      named.has(param.name)
+  );
+}
+
 /**
  * Gives the module the natives of the hidden instance's methods, bound to the generator of random.py's `_inst`, which
  * give what its Python methods give.
@@ -614,7 +662,16 @@ registerModule('_random', () => new Map<string, PyValue>([['Random', coreClass]]
 function bindNatives(globals: PyValue, instance: PyValue): PyValue {
   const fast = new PyOpaque(randomClass, 'Random', coreOf(instance));
   for (const [name] of RANDOM_METHODS) {
-    setItem(globals, name, bindValue(randomClass.dict.get(name) as PyValue, fast));
+    // The function is random.py's method bound to _inst, as CPython's is, which runs the native in its place.
+    const fn = classOf(instance).lookup(name);
+    if (!(fn instanceof PyFunction)) continue;
+    const bound = new PyBoundMethod(methodClass, instance, fn);
+    const native = bindValue(randomClass.dict.get(name) as PyValue, fast);
+    // Arguments the Python method would refuse reach it, which words the TypeError as CPython does.
+    bound.fastCall = nativeFunction(name, (args, kwargs) =>
+      fitsSignature(fn, args, kwargs) ? callValue(native, args, kwargs) : callValue(fn, [instance, ...args], kwargs)
+    );
+    setItem(globals, name, bound);
   }
   return None;
 }

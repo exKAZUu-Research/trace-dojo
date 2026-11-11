@@ -304,6 +304,9 @@ export class PyFunction extends PyObject {
 }
 
 export class PyBoundMethod extends PyObject {
+  /** A native that gives what calling the method gives, which calls run instead, as random's functions have. */
+  fastCall?: PyValue;
+
   constructor(
     cls: PyClass,
     readonly self: PyValue,

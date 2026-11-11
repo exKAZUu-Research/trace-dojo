@@ -73,7 +73,9 @@ export function callValue(fn: PyValue, args: PyValue[], kwargs?: Kwargs): PyValu
     currentRuntime().spend();
     return fn.run(fn.self === undefined || fn.binding === 'static' ? args : [fn.self, ...args], kwargs);
   }
-  if (fn instanceof PyBoundMethod) return callValue(fn.fn, [fn.self, ...args], kwargs);
+  if (fn instanceof PyBoundMethod) {
+    return fn.fastCall ? callValue(fn.fastCall, args, kwargs) : callValue(fn.fn, [fn.self, ...args], kwargs);
+  }
   if (fn instanceof PyClass) return currentRuntime().instantiate(fn, args, kwargs);
   const call = lookupSpecial(fn, '__call__');
   if (call !== undefined) return callValue(bindValue(call, fn), args, kwargs);
