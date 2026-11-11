@@ -89,6 +89,8 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'this',
   'threading',
   'time',
+  'token',
+  'tokenize',
   'tomllib',
   'tomllib._parser',
   'tomllib._re',
