@@ -8,7 +8,7 @@ import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { PyClass, PyInstance, type PyValue } from '../values';
-import { AstBuilder } from './astBuilder';
+import { AstBuilder, isInteractiveStatement } from './astBuilder';
 import { AST_NODES_SOURCE } from './astNodesSource';
 import { AST_SOURCE } from './astSource';
 import { AST_UNPARSE_SOURCE } from './astUnparseSource';
@@ -35,6 +35,9 @@ registerAstSupport({
     return withPythonTree(source, (root) => {
       // Only the grammar decides here: ast.parse accepts what only compiling rejects, such as `return` outside a function.
       if (root.hasError) throw syntaxError('ast.parse() に渡したコードの構文エラー');
+      if (mode === 'single' && !isInteractiveStatement(root)) {
+        throw syntaxError('multiple statements found while compiling a single statement');
+      }
       return new AstBuilder(source, classes, singletonsOf(runtime)).module(root, mode);
     });
   },

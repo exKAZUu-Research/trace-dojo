@@ -1,4 +1,5 @@
 import { builtin } from '../define';
+import type { Frame } from '../frame';
 import { toIndex } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
@@ -410,8 +411,7 @@ registerSourceModule(
       [
         '_caller',
         builtin('_caller', 'one', 1, 1, ([level]) => {
-          const frames = currentRuntime().programFrames();
-          const found = frames[Number(toIndex(level)) - 1] ?? (Number(toIndex(level)) <= 1 ? frames[0] : undefined);
+          const found = callerFrame(Number(toIndex(level)));
           if (!found) return None;
           return newTuple([found.frame.moduleName, BigInt((found.row ?? -1) + 1)]);
         }),
@@ -430,3 +430,14 @@ registerSourceModule(
       ],
     ])
 );
+
+/**
+ * The frame that `warn(..., stacklevel=level)` attributes a warning to, counting the frames of library modules as
+ * CPython does, but taking the program's frame that called into a library module for that module's frame.
+ */
+function callerFrame(level: number): { frame: Frame; row: number | undefined } | undefined {
+  // The innermost frame runs `warn` itself.
+  const frames = currentRuntime().stackFrames().slice(1);
+  const index = Math.max(level, 1) - 1;
+  return index < frames.length ? frames.slice(index).find((each) => !each.library) : undefined;
+}

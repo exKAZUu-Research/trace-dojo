@@ -169,15 +169,20 @@ export class Runtime {
    * modules, as `warnings` and `traceback` report them.
    */
   programFrames(): { frame: Frame; row: number | undefined }[] {
-    const result: { frame: Frame; row: number | undefined }[] = [];
+    return this.stackFrames().filter((each) => !each.library);
+  }
+
+  /**
+   * Every running frame, innermost first, with the program's row each counts as running and whether it runs the code
+   * of a library module, whose frames have no row of their own.
+   */
+  stackFrames(): { frame: Frame; row: number | undefined; library: boolean }[] {
+    const result: { frame: Frame; row: number | undefined; library: boolean }[] = [];
     let row = this.currentRow;
     for (const frame of this.frames.toReversed()) {
-      if (this.libraryEntryRows.has(frame)) {
-        row = this.libraryEntryRows.get(frame);
-        continue;
-      }
-      result.push({ frame, row });
-      row = frame.callRow;
+      const library = this.libraryEntryRows.has(frame);
+      result.push({ frame, row: library ? undefined : row, library });
+      row = library ? this.libraryEntryRows.get(frame) : frame.callRow;
     }
     return result;
   }

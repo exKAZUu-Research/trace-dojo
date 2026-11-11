@@ -374,26 +374,57 @@ export class AstBuilder extends AstPatternBuilder {
   }
 
   private typeParams(node: Node): PyValue {
-    const parameters = node.childForFieldName('type_parameters');
+    return this.typeParamList(node.childForFieldName('type_parameters') ?? undefined);
+  }
+
+  private typeParamList(parameters: Node | undefined): PyValue {
     if (!parameters) return newList([]);
-    return newList(
-      namedChildren(parameters).map((parameter) => {
-        const name = namedChildren(parameter)[0];
-        return this.make(
-          'TypeVar',
-          { name: identifier(namedChildren(name)[0] ?? name), bound: None, default_value: None },
-          this.location(parameter)
-        );
-      })
+    return newList(namedChildren(parameters).map((parameter) => this.typeParam(parameter)));
+  }
+
+  /** A `T`, `T: bound`, `*Ts` or `**P`, each with an optional `= default`. */
+  private typeParam(parameter: Node): PyValue {
+    const at = this.location(parameter);
+    const inner = parameter.type === 'type' ? namedChildren(parameter)[0] : parameter;
+    if (inner.type === 'constrained_type') {
+      const [name, bound] = namedChildren(inner);
+      return this.make('TypeVar', { name: identifier(name), bound: this.expr(bound), default_value: None }, at);
+    }
+    if (inner.type === 'identifier') {
+      return this.make('TypeVar', { name: identifier(inner), bound: None, default_value: None }, at);
+    }
+    const star = children(inner)[0].type;
+    const name = children(inner).find((child) => child.type === 'identifier') as Node;
+    const value = inner.childForFieldName('value');
+    const defaultValue = value ? this.expr(value) : None;
+    if (star === '*') return this.make('TypeVarTuple', { name: identifier(name), default_value: defaultValue }, at);
+    if (star === '**') return this.make('ParamSpec', { name: identifier(name), default_value: defaultValue }, at);
+    const bound = inner.childForFieldName('bound');
+    return this.make(
+      'TypeVar',
+      { name: identifier(name), bound: bound ? this.expr(bound) : None, default_value: defaultValue },
+      at
     );
   }
 
   private typeAlias(node: Node, at: Location): PyValue {
     const left = namedChildren(field(node, 'left'))[0];
-    const nameNode = left.type === 'generic_type' ? namedChildren(left)[0] : left;
+    const isGeneric = left.type === 'generic_type';
+    const nameNode = isGeneric ? namedChildren(left)[0] : left;
     const name = this.expr(nameNode, 'Store' as Context);
-    return this.make('TypeAlias', { name, type_params: newList([]), value: this.expr(field(node, 'right')) }, at);
+    const typeParams = this.typeParamList(isGeneric ? namedChildren(left)[1] : undefined);
+    return this.make('TypeAlias', { name, type_params: typeParams, value: this.expr(field(node, 'right')) }, at);
   }
+}
+
+/** Whether source text is one interactive statement: a compound statement, or simple ones joined on one line. */
+export function isInteractiveStatement(root: Node): boolean {
+  const statements = namedChildren(root).filter((node) => node.type !== 'comment');
+  return (
+    statements.length <= 1 ||
+    (!statements.some(isCompound) &&
+      statements.every((node) => node.startPosition.row === statements[0].startPosition.row))
+  );
 }
 
 function dotted(node: Node): string {

@@ -197,7 +197,7 @@ export class AstExpressionBuilder {
   }
 
   /** The displays, comprehensions, and the other expressions that compose others. */
-  // code-gauge-allow functionNcss 45 -- One case per kind of expression node, each delegating where it grows.
+  // code-gauge-allow functionNcss 46 -- One case per kind of expression node, each delegating where it grows.
   private displayOrOther(node: Node, ctx: Context, at: Location): PyValue {
     switch (node.type) {
       case 'list':
@@ -229,7 +229,8 @@ export class AstExpressionBuilder {
         return this.make('DictComp', { key, value, generators: this.generators(node) }, at);
       }
       case 'list_splat':
-      case 'list_splat_pattern': {
+      case 'list_splat_pattern':
+      case 'splat_type': {
         return this.make('Starred', { value: this.expr(namedChildren(node)[0], ctx), ctx: this.singleton(ctx) }, at);
       }
       case 'conditional_expression': {
