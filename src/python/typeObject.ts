@@ -202,7 +202,13 @@ method(methodDescriptorClass, '__repr__', 'none', 0, 0, (self) => {
   const fn = self as PyBuiltinFunction;
   return `<method '${fn.name}' of '${fn.ownerName}' objects>`;
 });
-method(moduleClass, '__repr__', 'none', 0, 0, (self) => `<module '${(self as PyModule).name}' (built-in)>`);
+method(moduleClass, '__repr__', 'none', 0, 0, (self) => {
+  const module = self as PyModule;
+  // The repr of a module written in Python shows the path of its file.
+  if (module.unsupported.has('__file__'))
+    throw currentRuntime().unsupported(`モジュール ${module.name} の repr（ファイルのパス）`);
+  return `<module '${module.name}' (built-in)>`;
+});
 
 // Generators and iterators ------------------------------------------------------------------------------------------
 
