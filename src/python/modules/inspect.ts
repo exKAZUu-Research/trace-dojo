@@ -56,7 +56,10 @@ registerSourceModule(
       ['Signature', signatureClass],
       ['Parameter', parameterClass],
       ['_empty', emptyClass],
-      ['formatannotation', builtin('formatannotation', 'takes', 1, 2, ([value]) => formatAnnotation(value))],
+      [
+        'formatannotation',
+        builtin('formatannotation', 'takes', 1, 2, ([value, base]) => formatAnnotation(value, base)),
+      ],
       ['getmembers', builtin('getmembers', 'takes', 1, 2, ([value, predicate]) => getMembers(value, predicate))],
       ['getdoc', builtin('getdoc', 'one', 1, 1, ([value]) => getDoc(value))],
       ['cleandoc', builtin('cleandoc', 'one', 1, 1, ([doc]) => cleanDoc(doc))],
@@ -64,18 +67,23 @@ registerSourceModule(
       ...inspectSourceNatives(),
     ]),
   {
-    unsupported: Object.fromEntries(
-      [
-        ['getsourcefile', 'ソースファイルのパス'],
-        ['getfile', 'ソースファイルのパス'],
-        ['stack', 'ソースファイルのパスを含むフレームの情報'],
-        ['trace', 'ソースファイルのパスを含むフレームの情報'],
-        ['getframeinfo', 'ソースファイルのパスを含むフレームの情報'],
-        ['getouterframes', 'ソースファイルのパスを含むフレームの情報'],
-        ['getinnerframes', 'ソースファイルのパスを含むフレームの情報'],
-        ['getclosurevars', 'CPython のバイトコードから集める名前'],
-      ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])
-    ),
+    unsupported: {
+      ...Object.fromEntries(
+        [
+          ['getsourcefile', 'ソースファイルのパス'],
+          ['getfile', 'ソースファイルのパス'],
+          ['stack', 'ソースファイルのパスを含むフレームの情報'],
+          ['trace', 'ソースファイルのパスを含むフレームの情報'],
+          ['getframeinfo', 'ソースファイルのパスを含むフレームの情報'],
+          ['getouterframes', 'ソースファイルのパスを含むフレームの情報'],
+          ['getinnerframes', 'ソースファイルのパスを含むフレームの情報'],
+          ['getclosurevars', 'CPython のバイトコードから集める名前'],
+          ['getabsfile', 'ソースファイルのパス'],
+        ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])
+      ),
+      modulesbyfile: 'inspect.modulesbyfile（ソースファイルのパス）',
+      _filesbymodname: 'inspect._filesbymodname（ソースファイルのパス）',
+    },
   }
 );
 

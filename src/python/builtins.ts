@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 510 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
 import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
@@ -33,7 +34,6 @@ import {
 import { binaryOp, compareOp } from './operators';
 import { callerGlobals, callerLocals, callerNames, vars } from './reflection';
 import { currentRuntime } from './runtimeContext';
-// code-gauge-allow-file fileNcss 430 -- The builtins module keeps every builtin function together.
 import { siteBuiltins } from './siteBuiltins';
 import { iterStr, strLength } from './strings';
 import { registerBuiltinVariants } from './suspendingBuiltins';
@@ -63,6 +63,7 @@ import {
   NotImplemented,
   objectClass,
   propertyClass,
+  pyError,
   rangeClass,
   setClass,
   sliceClass,
@@ -77,6 +78,7 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttribute } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
@@ -115,7 +117,8 @@ enumerateClass.construct = (cls, args, kwargs) => {
 };
 
 export const zipClass = builtinClass('zip');
-// code-gauge-allow duplicateLines 23 -- zip and itertools.zip_longest stop on exhausted iterables differently.
+// code-gauge-allow functionCognitiveComplexity 26 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
+// code-gauge-allow functionNcss 35 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 zipClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'zip', min: 0, max: Number.POSITIVE_INFINITY, style: 'takes', keywords: ['strict'] },
@@ -214,6 +217,7 @@ mapClass.construct = (cls, args, kwargs) => {
 };
 
 export const filterClass = builtinClass('filter');
+// code-gauge-allow functionCognitiveComplexity 18 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 filterClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'filter', min: 2, max: 2, style: 'expected' }, args, kwargs);
   const [fn, iterable] = args;
@@ -239,6 +243,7 @@ filterClass.construct = (cls, args, kwargs) => {
 };
 
 export const reversedClass = builtinClass('reversed');
+// code-gauge-allow functionCognitiveComplexity 20 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
 reversedClass.construct = (_cls, args, kwargs) => {
   checkArgs({ qualified: 'reversed', min: 1, max: 1, style: 'expected' }, args, kwargs);
   const [sequence] = args;
@@ -627,6 +632,14 @@ function sorted(args: PyValue[], kwargs: Kwargs): PyValue {
   return list;
 }
 
+function hasAttribute(object: PyValue, name: PyValue): boolean {
+  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  // An attribute this grader lacks exists in CPython, so code may test for it before it uses it.
+  if (object instanceof PyModule && object.unsupported.has(name)) return true;
+  if (unsupportedClassAttribute(object, name) !== undefined) return true;
+  return getAttributeOrUndefined(object, name) !== undefined;
+}
+
 function unsupportedFunction(name: string, feature: string): PyValue {
   return builtin(
     name,
@@ -683,7 +696,14 @@ function builtinNamespace(): Map<string, PyValue> {
     ['any', one('any', ([iterable]) => someItem(iterable, true))],
     ['ascii', one('ascii', ([value]) => pyAscii(value))],
     ['bin', one('bin', radix('0b', 2))],
-    ['breakpoint', unsupportedFunction('breakpoint', 'breakpoint()')],
+    [
+      'breakpoint',
+      nativeFunction('breakpoint', (args, kwargs) => {
+        const hook = currentRuntime().importModule('sys').dict.get('breakpointhook');
+        if (hook === undefined) throw pyError('RuntimeError', 'lost sys.breakpointhook');
+        return callValue(hook, args, kwargs);
+      }),
+    ],
     ['callable', one('callable', ([value]) => isCallable(value))],
     ['chr', one('chr', chr)],
     ['compile', builtin('compile', 'takes', 0, 6, compile, { keywords: COMPILE_KEYWORDS })],
@@ -708,15 +728,7 @@ function builtinNamespace(): Map<string, PyValue> {
     ],
     ['getattr', builtin('getattr', 'expected', 2, 3, getattr)],
     ['globals', builtin('globals', 'none', 0, 0, callerGlobals)],
-    [
-      'hasattr',
-      builtin('hasattr', 'expected', 2, 2, ([object, name]) => {
-        if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-        // A module attribute this grader lacks exists in CPython, so code may test for it before it uses it.
-        if (object instanceof PyModule && object.unsupported.has(name)) return true;
-        return getAttributeOrUndefined(object, name) !== undefined;
-      }),
-    ],
+    ['hasattr', builtin('hasattr', 'expected', 2, 2, ([object, name]) => hasAttribute(object, name))],
     ['hash', one('hash', ([value]) => pyHash(value))],
     ['hex', one('hex', radix('0x', 16))],
     ['id', one('id', ([value]) => currentRuntime().idOf(value))],

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 624 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 628 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {

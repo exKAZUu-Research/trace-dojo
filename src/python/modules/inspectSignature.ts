@@ -235,9 +235,9 @@ function formatSignature({ parameters, returnAnnotation }: Signature, maxWidth?:
 }
 
 /** `inspect.formatannotation`. */
-export function formatAnnotation(annotation: PyValue): string {
+export function formatAnnotation(annotation: PyValue, baseModule?: PyValue): string {
   if (annotation instanceof PyClass) {
-    return annotation.module === 'builtins'
+    return annotation.module === 'builtins' || annotation.module === baseModule
       ? annotation.qualifiedName
       : `${annotation.module}.${annotation.qualifiedName}`;
   }

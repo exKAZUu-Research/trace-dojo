@@ -586,6 +586,7 @@ const CONSTANTS: [string, PyValue][] = [
   ['Z_TREES', 6n],
 ];
 
+// code-gauge-allow duplicateLines 16 -- zlib and binascii check their checksum arguments alike, each in its own words.
 function checksumData(value: PyValue): Uint8Array {
   const data = bytesLikeData(value);
   if (data === undefined) throw typeError(`a bytes-like object is required, not '${typeName(value)}'`);

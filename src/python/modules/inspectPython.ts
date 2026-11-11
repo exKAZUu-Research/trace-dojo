@@ -754,4 +754,460 @@ def _signature_bind(self, args, kwargs, *, partial=False):
                     arg=next(iter(kwargs))))
 
     return BoundArguments(self, arguments)
+
+
+# The names CPython's inspect.py defines as below.
+from annotationlib import Format, ForwardRef
+from annotationlib import get_annotations
+import token
+import tokenize
+from keyword import iskeyword
+from operator import attrgetter
+from collections import OrderedDict
+from weakref import ref as make_weakref
+import enum
+import os
+
+# importlib.machinery.all_suffixes() of the reference CPython.
+_ALL_SUFFIXES = ['.py', '.pyc', '.cpython-314-darwin.so', '.abi3.so', '.so']
+
+CO_OPTIMIZED = 1
+CO_NEWLOCALS = 2
+CO_VARARGS = 4
+CO_VARKEYWORDS = 8
+CO_NESTED = 16
+CO_GENERATOR = 32
+CO_NOFREE = 64
+CO_COROUTINE = 128
+CO_ITERABLE_COROUTINE = 256
+CO_ASYNC_GENERATOR = 512
+CO_HAS_DOCSTRING = 67108864
+CO_METHOD = 134217728
+
+TPFLAGS_IS_ABSTRACT = 1 << 20
+
+if hasattr(types, 'MemberDescriptorType'):
+    # CPython and equivalent
+    def ismemberdescriptor(object):
+        """Return true if the object is a member descriptor.
+
+        Member descriptors are specialized descriptors defined in extension
+        modules."""
+        return isinstance(object, types.MemberDescriptorType)
+else:
+    # Other implementations
+    def ismemberdescriptor(object):
+        """Return true if the object is a member descriptor.
+
+        Member descriptors are specialized descriptors defined in extension
+        modules."""
+        return False
+
+if hasattr(types, 'GetSetDescriptorType'):
+    # CPython and equivalent
+    def isgetsetdescriptor(object):
+        """Return true if the object is a getset descriptor.
+
+        getset descriptors are specialized descriptors defined in extension
+        modules."""
+        return isinstance(object, types.GetSetDescriptorType)
+else:
+    # Other implementations
+    def isgetsetdescriptor(object):
+        """Return true if the object is a getset descriptor.
+
+        getset descriptors are specialized descriptors defined in extension
+        modules."""
+        return False
+
+def ismethodwrapper(object):
+    """Return true if the object is a method wrapper."""
+    return isinstance(object, types.MethodWrapperType)
+
+def ispackage(object):
+    """Return true if the object is a package."""
+    return ismodule(object) and hasattr(object, "__path__")
+
+_is_coroutine_mark = object()
+
+def _has_coroutine_mark(f):
+    while ismethod(f):
+        f = f.__func__
+    f = functools._unwrap_partial(f)
+    return getattr(f, "_is_coroutine_marker", None) is _is_coroutine_mark
+
+def markcoroutinefunction(func):
+    """
+    Decorator to ensure callable is recognised as a coroutine function.
+    """
+    if hasattr(func, '__func__'):
+        func = func.__func__
+    func._is_coroutine_marker = _is_coroutine_mark
+    return func
+
+Attribute = namedtuple('Attribute', 'name kind defining_class object')
+
+def classify_class_attrs(cls):
+    """Return list of attribute-descriptor tuples.
+
+    For each name in dir(cls), the return list contains a 4-tuple
+    with these elements:
+
+        0. The name (a string).
+
+        1. The kind of attribute this is, one of these strings:
+               'class method'    created via classmethod()
+               'static method'   created via staticmethod()
+               'property'        created via property()
+               'method'          any other flavor of method or descriptor
+               'data'            not a method
+
+        2. The class which defined this attribute (a class).
+
+        3. The object as obtained by calling getattr; if this fails, or if the
+           resulting object does not live anywhere in the class' mro (including
+           metaclasses) then the object is looked up in the defining class's
+           dict (found by walking the mro).
+
+    If one of the items in dir(cls) is stored in the metaclass it will now
+    be discovered and not have None be listed as the class in which it was
+    defined.  Any items whose home class cannot be discovered are skipped.
+    """
+
+    mro = getmro(cls)
+    metamro = getmro(type(cls)) # for attributes stored in the metaclass
+    metamro = tuple(cls for cls in metamro if cls not in (type, object))
+    class_bases = (cls,) + mro
+    all_bases = class_bases + metamro
+    names = dir(cls)
+    # :dd any DynamicClassAttributes to the list of names;
+    # this may result in duplicate entries if, for example, a virtual
+    # attribute with the same name as a DynamicClassAttribute exists.
+    for base in mro:
+        for k, v in base.__dict__.items():
+            if isinstance(v, types.DynamicClassAttribute) and v.fget is not None:
+                names.append(k)
+    result = []
+    processed = set()
+
+    for name in names:
+        # Get the object associated with the name, and where it was defined.
+        # Normal objects will be looked up with both getattr and directly in
+        # its class' dict (in case getattr fails [bug #1785], and also to look
+        # for a docstring).
+        # For DynamicClassAttributes on the second pass we only look in the
+        # class's dict.
+        #
+        # Getting an obj from the __dict__ sometimes reveals more than
+        # using getattr.  Static and class methods are dramatic examples.
+        homecls = None
+        get_obj = None
+        dict_obj = None
+        if name not in processed:
+            try:
+                if name == '__dict__':
+                    raise Exception("__dict__ is special, don't want the proxy")
+                get_obj = getattr(cls, name)
+            except Exception:
+                pass
+            else:
+                homecls = getattr(get_obj, "__objclass__", homecls)
+                if homecls not in class_bases:
+                    # if the resulting object does not live somewhere in the
+                    # mro, drop it and search the mro manually
+                    homecls = None
+                    last_cls = None
+                    # first look in the classes
+                    for srch_cls in class_bases:
+                        srch_obj = getattr(srch_cls, name, None)
+                        if srch_obj is get_obj:
+                            last_cls = srch_cls
+                    # then check the metaclasses
+                    for srch_cls in metamro:
+                        try:
+                            srch_obj = srch_cls.__getattr__(cls, name)
+                        except AttributeError:
+                            continue
+                        if srch_obj is get_obj:
+                            last_cls = srch_cls
+                    if last_cls is not None:
+                        homecls = last_cls
+        for base in all_bases:
+            if name in base.__dict__:
+                dict_obj = base.__dict__[name]
+                if homecls not in metamro:
+                    homecls = base
+                break
+        if homecls is None:
+            # unable to locate the attribute anywhere, most likely due to
+            # buggy custom __dir__; discard and move on
+            continue
+        obj = get_obj if get_obj is not None else dict_obj
+        # Classify the object or its descriptor.
+        if isinstance(dict_obj, (staticmethod, types.BuiltinMethodType)):
+            kind = "static method"
+            obj = dict_obj
+        elif isinstance(dict_obj, (classmethod, types.ClassMethodDescriptorType)):
+            kind = "class method"
+            obj = dict_obj
+        elif isinstance(dict_obj, property):
+            kind = "property"
+            obj = dict_obj
+        elif isroutine(obj):
+            kind = "method"
+        else:
+            kind = "data"
+        result.append(Attribute(name, kind, homecls, obj))
+        processed.add(name)
+    return result
+
+def getmodulename(path):
+    """Return the module name for a given file, or None."""
+    fname = os.path.basename(path)
+    # Check for paths that look like an actual module file
+    suffixes = [(-len(suffix), suffix)
+                    for suffix in _ALL_SUFFIXES]
+    suffixes.sort() # try longest suffixes first, in case they overlap
+    for neglen, suffix in suffixes:
+        if fname.endswith(suffix):
+            return fname[:neglen]
+    return None
+
+class ClassFoundException(Exception):
+    pass
+
+class EndOfBlock(Exception): pass
+
+class BlockFinder:
+    """Provide a tokeneater() method to detect the end of a code block."""
+    def __init__(self):
+        self.indent = 0
+        self.singleline = False
+        self.started = False
+        self.passline = False
+        self.indecorator = False
+        self.last = 1
+        self.body_col0 = None
+
+    def tokeneater(self, type, token, srowcol, erowcol, line):
+        if not self.started and not self.indecorator:
+            if type in (tokenize.INDENT, tokenize.COMMENT, tokenize.NL):
+                pass
+            elif token == "async":
+                pass
+            # skip any decorators
+            elif token == "@":
+                self.indecorator = True
+            else:
+                # For "def" and "class" scan to the end of the block.
+                # For "lambda" and generator expression scan to
+                # the end of the logical line.
+                self.singleline = token not in ("def", "class")
+                self.started = True
+            self.passline = True    # skip to the end of the line
+        elif type == tokenize.NEWLINE:
+            self.passline = False   # stop skipping when a NEWLINE is seen
+            self.last = srowcol[0]
+            if self.singleline:
+                raise EndOfBlock
+            # hitting a NEWLINE when in a decorator without args
+            # ends the decorator
+            if self.indecorator:
+                self.indecorator = False
+        elif self.passline:
+            pass
+        elif type == tokenize.INDENT:
+            if self.body_col0 is None and self.started:
+                self.body_col0 = erowcol[1]
+            self.indent = self.indent + 1
+            self.passline = True
+        elif type == tokenize.DEDENT:
+            self.indent = self.indent - 1
+            # the end of matching indent/dedent pairs end a block
+            # (note that this only works for "def"/"class" blocks,
+            #  not e.g. for "if: else:" or "try: finally:" blocks)
+            if self.indent <= 0:
+                raise EndOfBlock
+        elif type == tokenize.COMMENT:
+            if self.body_col0 is not None and srowcol[1] >= self.body_col0:
+                # Include comments if indented at least as much as the block
+                self.last = srowcol[0]
+        elif self.indent == 0 and type not in (tokenize.COMMENT, tokenize.NL):
+            # any other token on the same indentation level end the previous
+            # block as well, except the pseudo-tokens COMMENT and NL.
+            raise EndOfBlock
+
+def walktree(classes, children, parent):
+    """Recursive helper function for getclasstree()."""
+    results = []
+    classes.sort(key=attrgetter('__module__', '__name__'))
+    for c in classes:
+        results.append((c, c.__bases__))
+        if c in children:
+            results.append(walktree(children[c], children, c))
+    return results
+
+def getclasstree(classes, unique=False):
+    """Arrange the given list of classes into a hierarchy of nested lists.
+
+    Where a nested list appears, it contains classes derived from the class
+    whose entry immediately precedes the list.  Each entry is a 2-tuple
+    containing a class and a tuple of its base classes.  If the 'unique'
+    argument is true, exactly one entry appears in the returned structure
+    for each class in the given list.  Otherwise, classes using multiple
+    inheritance and their descendants will appear multiple times."""
+    children = {}
+    roots = []
+    for c in classes:
+        if c.__bases__:
+            for parent in c.__bases__:
+                if parent not in children:
+                    children[parent] = []
+                if c not in children[parent]:
+                    children[parent].append(c)
+                if unique and parent in classes: break
+        elif c not in roots:
+            roots.append(c)
+    for parent in children:
+        if parent not in classes:
+            roots.append(parent)
+    return walktree(roots, children, None)
+
+Arguments = namedtuple('Arguments', 'args, varargs, varkw')
+
+def getargs(co):
+    """Get information about the arguments accepted by a code object.
+
+    Three things are returned: (args, varargs, varkw), where
+    'args' is the list of argument names. Keyword-only arguments are
+    appended. 'varargs' and 'varkw' are the names of the * and **
+    arguments or None."""
+    if not iscode(co):
+        raise TypeError('{!r} is not a code object'.format(co))
+
+    names = co.co_varnames
+    nargs = co.co_argcount
+    nkwargs = co.co_kwonlyargcount
+    args = list(names[:nargs])
+    kwonlyargs = list(names[nargs:nargs+nkwargs])
+
+    nargs += nkwargs
+    varargs = None
+    if co.co_flags & CO_VARARGS:
+        varargs = co.co_varnames[nargs]
+        nargs = nargs + 1
+    varkw = None
+    if co.co_flags & CO_VARKEYWORDS:
+        varkw = co.co_varnames[nargs]
+    return Arguments(args + kwonlyargs, varargs, varkw)
+
+ArgInfo = namedtuple('ArgInfo', 'args varargs keywords locals')
+
+def getargvalues(frame):
+    """Get information about arguments passed into a particular frame.
+
+    A tuple of four things is returned: (args, varargs, varkw, locals).
+    'args' is a list of the argument names.
+    'varargs' and 'varkw' are the names of the * and ** arguments or None.
+    'locals' is the locals dictionary of the given frame."""
+    args, varargs, varkw = getargs(frame.f_code)
+    return ArgInfo(args, varargs, varkw, frame.f_locals)
+
+def formatannotationrelativeto(object):
+    module = getattr(object, '__module__', None)
+    def _formatannotation(annotation):
+        return formatannotation(annotation, module)
+    return _formatannotation
+
+def formatargvalues(args, varargs, varkw, locals,
+                    formatarg=str,
+                    formatvarargs=lambda name: '*' + name,
+                    formatvarkw=lambda name: '**' + name,
+                    formatvalue=lambda value: '=' + repr(value)):
+    """Format an argument spec from the 4 values returned by getargvalues.
+
+    The first four arguments are (args, varargs, varkw, locals).  The
+    next four arguments are the corresponding optional formatting functions
+    that are called to turn names and values into strings.  The ninth
+    argument is an optional function to format the sequence of arguments."""
+    def convert(name, locals=locals,
+                formatarg=formatarg, formatvalue=formatvalue):
+        return formatarg(name) + formatvalue(locals[name])
+    specs = []
+    for i in range(len(args)):
+        specs.append(convert(args[i]))
+    if varargs:
+        specs.append(formatvarargs(varargs) + formatvalue(locals[varargs]))
+    if varkw:
+        specs.append(formatvarkw(varkw) + formatvalue(locals[varkw]))
+    return '(' + ', '.join(specs) + ')'
+
+ClosureVars = namedtuple('ClosureVars', 'nonlocals globals builtins unbound')
+
+_Traceback = namedtuple('_Traceback', 'filename lineno function code_context index')
+
+class Traceback(_Traceback):
+    def __new__(cls, filename, lineno, function, code_context, index, *, positions=None):
+        instance = super().__new__(cls, filename, lineno, function, code_context, index)
+        instance.positions = positions
+        return instance
+
+    def __repr__(self):
+        return ('Traceback(filename={!r}, lineno={!r}, function={!r}, '
+               'code_context={!r}, index={!r}, positions={!r})'.format(
+                self.filename, self.lineno, self.function, self.code_context,
+                self.index, self.positions))
+
+def getlineno(frame):
+    """Get the line number from a frame object, allowing for optimization."""
+    # FrameType.f_lineno is now a descriptor that grovels co_lnotab
+    return frame.f_lineno
+
+_FrameInfo = namedtuple('_FrameInfo', ('frame',) + Traceback._fields)
+
+class FrameInfo(_FrameInfo):
+    def __new__(cls, frame, filename, lineno, function, code_context, index, *, positions=None):
+        instance = super().__new__(cls, frame, filename, lineno, function, code_context, index)
+        instance.positions = positions
+        return instance
+
+    def __repr__(self):
+        return ('FrameInfo(frame={!r}, filename={!r}, lineno={!r}, function={!r}, '
+               'code_context={!r}, index={!r}, positions={!r})'.format(
+                self.frame, self.filename, self.lineno, self.function,
+                self.code_context, self.index, self.positions))
+
+class BufferFlags(enum.IntFlag):
+    SIMPLE = 0x0
+    WRITABLE = 0x1
+    FORMAT = 0x4
+    ND = 0x8
+    STRIDES = 0x10 | ND
+    C_CONTIGUOUS = 0x20 | STRIDES
+    F_CONTIGUOUS = 0x40 | STRIDES
+    ANY_CONTIGUOUS = 0x80 | STRIDES
+    INDIRECT = 0x100 | STRIDES
+    CONTIG = ND | WRITABLE
+    CONTIG_RO = ND
+    STRIDED = STRIDES | WRITABLE
+    STRIDED_RO = STRIDES
+    RECORDS = STRIDES | WRITABLE | FORMAT
+    RECORDS_RO = STRIDES | FORMAT
+    FULL = INDIRECT | WRITABLE | FORMAT
+    FULL_RO = INDIRECT | FORMAT
+    READ = 0x100
+    WRITE = 0x200
+
+
+
+_iscoroutinefunction = iscoroutinefunction
+
+
+def iscoroutinefunction(obj):
+    """Return true if the object is a coroutine function.
+
+    Coroutine functions are normally defined with "async def" syntax, but may
+    be marked via markcoroutinefunction.
+    """
+    return _iscoroutinefunction(obj) or _has_coroutine_mark(obj)
 `;

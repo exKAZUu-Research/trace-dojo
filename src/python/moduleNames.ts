@@ -20,6 +20,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'ast',
   'array',
   'asyncio',
+  'asyncio.graph',
   'atexit',
   'base64',
   'binascii',
@@ -101,6 +102,9 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'ipaddress',
   'itertools',
   'json',
+  'json.decoder',
+  'json.encoder',
+  'json.scanner',
   'keyword',
   'logging',
   'logging.config',
@@ -166,6 +170,20 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'zipfile._path',
   'zipfile._path.glob',
   'zlib',
+]);
+
+/**
+ * The modules of other platforms and the C modules that CPython's pure Python modules try to import, whose import
+ * fails here as it does where CPython lacks them.
+ */
+export const MISSING_PLATFORM_MODULES: ReadonlySet<string> = new Set([
+  'nt',
+  '_winapi',
+  'fcntl',
+  'posix',
+  'pwd',
+  'grp',
+  '_stat',
 ]);
 
 export function isSupportedModule(module: string): boolean {

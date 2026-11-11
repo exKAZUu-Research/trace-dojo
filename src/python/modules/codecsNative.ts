@@ -1,4 +1,4 @@
-import { bytesLikeData, newBytes } from '../bytesValues';
+import { bytesLikeData, newBytes, PyBytes, requireBytesLike } from '../bytesValues';
 import { charmapNatives } from '../charmapCodecs';
 import {
   callCodec,
@@ -113,11 +113,61 @@ registerModule('_codecs', () => {
     entries.set(`${module}_decode`, unicodeDecoder(module));
   }
   entries.set('escape_decode', escapeDecodeFunction);
+  entries.set(
+    'escape_encode',
+    builtin('escape_encode', 'expected', 1, 2, ([data, errors]) => escapeEncode(data, errors))
+  );
+  entries.set(
+    'readbuffer_encode',
+    builtin('readbuffer_encode', 'expected', 1, 2, ([data, errors]) => readbufferEncode(data, errors))
+  );
   for (const [name, value] of [...charmapNatives(), ...utf7Natives()]) entries.set(name, value);
   entries.set('utf_16_ex_decode', exDecoder(2));
   entries.set('utf_32_ex_decode', exDecoder(4));
   return entries;
 });
+
+/** `escape_encode(data, errors=None)`: the bytes with the escapes of a bytes literal, and the input's length. */
+function escapeEncode(data: PyValue, errors: PyValue | undefined): PyValue {
+  if (!(data instanceof PyBytes) || data.isMutable) {
+    throw typeError(`escape_encode() argument 1 must be bytes, not ${typeName(data)}`);
+  }
+  checkErrorsArgument('escape_encode', errors);
+  const out: number[] = [];
+  for (const byte of data.data) {
+    const escape = BYTE_ESCAPES.get(byte);
+    if (escape !== undefined) out.push(92, escape);
+    else if (byte < 0x20 || byte >= 0x7f) out.push(92, 0x78, ...hexDigits(byte));
+    else out.push(byte);
+  }
+  return newTuple([newBytes(Uint8Array.from(out)), BigInt(data.length)]);
+}
+
+/** The escapes of `escape_encode`: a backslash and this letter for each byte. */
+const BYTE_ESCAPES = new Map<number, number>([
+  [0x27, 0x27],
+  [0x5c, 0x5c],
+  [0x09, 0x74],
+  [0x0a, 0x6e],
+  [0x0d, 0x72],
+]);
+
+function hexDigits(byte: number): number[] {
+  return Array.from(byte.toString(16).padStart(2, '0'), (digit) => digit.codePointAt(0) as number);
+}
+
+/** `readbuffer_encode(data, errors=None)`: the bytes of a buffer, or of a string's UTF-8, and their length. */
+function readbufferEncode(data: PyValue, errors: PyValue | undefined): PyValue {
+  checkErrorsArgument('readbuffer_encode', errors);
+  const bytes = typeof data === 'string' ? encodeString(data, 'utf8', 'strict') : requireBytesLike(data);
+  return newTuple([newBytes(Uint8Array.from(bytes)), BigInt(bytes.length)]);
+}
+
+function checkErrorsArgument(name: string, errors: PyValue | undefined): void {
+  if (errors !== undefined && errors !== None && typeof errors !== 'string') {
+    throw typeError(`${name}() argument 2 must be str or None, not ${typeName(errors)}`);
+  }
+}
 
 // The codec registry -------------------------------------------------------------------------------------------------
 

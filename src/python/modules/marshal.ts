@@ -7,7 +7,7 @@ import { parseFloatText } from '../numbers';
 import { callValue, getAttribute } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { SetTable } from '../setTable';
-// code-gauge-allow-file fileNcss 445 -- Reads and writes every type code of the marshal format, as marshal.c does.
+// code-gauge-allow-file fileNcss 448 -- Reads and writes every type code of the marshal format, as marshal.c does.
 // CPython's marshal module. Loading reads every format exactly. Dumping with versions 3 to 5 marks the objects CPython
 // finds shared by their reference counts, which this interpreter does not keep: it treats the object passed, the
 // immutable values a program writes as literals, and what the data reaches more than once as shared, and str values
@@ -118,6 +118,7 @@ class Writer {
     this.byte((code.codePointAt(0) as number) | flag);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per type marshal writes.
   private complexObject(value: PyValue, flag: number): void {
     const cls = classOf(value);
     if (cls === intClass) return this.integer(value as bigint, flag);

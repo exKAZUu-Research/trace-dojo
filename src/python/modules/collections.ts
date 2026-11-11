@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 483 -- The collections types and the methods of each belong together.
+// code-gauge-allow-file fileNcss 497 -- The collections types and the methods of each belong together.
 import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
@@ -306,11 +306,22 @@ function mostCommon(counter: PyDict): [PyValue, PyValue][] {
     .map(({ entry }) => entry);
 }
 
+/** CPython's `most_common(n)` imports heapq into collections the first time, which `collections.heapq` shows. */
+function importHeapq(): void {
+  const runtime = currentRuntime();
+  const collections = runtime.modules.get('collections');
+  if (collections?.dict.get('heapq') === None) collections.dict.set('heapq', importModule(runtime, 'heapq'));
+}
+
 method(counterClass, 'most_common', 'expected', 0, 1, (self, [count]) => {
   let items = mostCommon(counterOf(self));
-  if (count !== undefined && count !== None) items = items.slice(0, Math.max(0, Number(toIndex(count))));
+  if (count !== undefined && count !== None) {
+    items = items.slice(0, Math.max(0, Number(toIndex(count))));
+    importHeapq();
+  }
   return newList(items.map((item) => newTuple(item)));
 });
+method(counterClass, '__missing__', 'one', 1, 1, () => 0n);
 method(counterClass, 'elements', 'none', 0, 0, (self) => {
   const items: PyValue[] = [];
   for (const entry of counterOf(self).store.ordered()) {
@@ -773,7 +784,8 @@ function defineNamedTupleMethods(): void {
     'NamedTuple'
   );
   namedTupleBase.dict.set('_replace', replace);
-  // As CPython's namedtuple does, `copy.replace` calls the same function.
+  // CPython's namedtuple classes have no instance dict, and copy.replace() calls their `__replace__`, which is `_replace`.
+  namedTupleBase.dict.set('__slots__', newTuple([]));
   namedTupleBase.dict.set('__replace__', replace);
   method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => callValue(cls, toArray(iterable)), {
     binding: 'class',
@@ -784,6 +796,7 @@ defineNamedTupleMethods();
 function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = namedtuple(args, kwargs) as PyClass;
   for (const [name, value] of namedTupleBase.dict) if (!cls.dict.has(name)) cls.dict.set(name, value);
+  cls.dict.set('__module__', cls.module);
   return cls;
 }
 
@@ -800,6 +813,7 @@ export function makeNamedTupleClass(name: string, fields: string[], module: stri
 registerModule('collections', (runtime, namespace) => {
   for (const [name, value] of [
     ['deque', dequeClass],
+    ['heapq', None],
     ['Counter', counterClass],
     ['defaultdict', defaultdictClass],
     ['OrderedDict', orderedDictClass],

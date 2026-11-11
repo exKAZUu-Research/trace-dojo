@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 401 -- The list, tuple, and dict types keep their methods together.
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { DictStore } from './dictStore';

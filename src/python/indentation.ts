@@ -32,7 +32,6 @@ export function findIndentationError(source: string): SourceDiagnostic | undefin
 }
 
 /** The error a line's indentation makes after `previous`, keeping `stack` the indentation levels open. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows the indentation checks of CPython's tokenizer in their order.
 function indentError(
   stack: Indent[],
   line: LogicalLine,
@@ -232,6 +231,7 @@ class Scanner {
   }
 
   // code-gauge-allow functionCognitiveComplexity 27 -- One case per escape and quote rule of string literals.
+  // code-gauge-allow functionNcss 32 -- One case per escape and quote rule of string literals.
   private readStringBody(isFormatted: boolean, isRaw: boolean): void {
     const quote = this.peek() as string;
     const isTriple = this.peek(1) === quote && this.peek(2) === quote;

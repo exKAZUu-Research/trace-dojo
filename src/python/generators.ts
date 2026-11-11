@@ -61,6 +61,7 @@ export function generatorNext(generator: PyGenerator, input: GeneratorInput): Py
  * Resumes a generator with the value its `yield` evaluates to or the exception it raises there, returning what it
  * yields next or, when it ends, what it returns.
  */
+// code-gauge-allow duplicateLines 18 -- The suspending variant passes the waits on where this one waits for them.
 export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): Step {
   const early = startResuming(generator, input);
   if (early) return early;
@@ -86,6 +87,7 @@ export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): 
  * Resumes a generator as {@link resumeGenerator} does, but passes the waits of blocking operations in its frame on to
  * the code resuming it, so that a thread waiting there suspends instead of waiting on the host's stack.
  */
+// code-gauge-allow duplicateLines 19 -- It passes the waits on where resumeGenerator waits for them.
 export function* resumeGeneratorSuspending(generator: PyGenerator, input: GeneratorInput): Suspension<Step> {
   const early = startResuming(generator, input);
   if (early) return early;

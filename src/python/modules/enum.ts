@@ -377,6 +377,82 @@ class verify:
         return enumeration
 
 
+import builtins as bltns
+import sys
+from types import MappingProxyType
+
+
+def bin(num, max_bits=None):
+    """
+    Like built-in bin(), except negative values are represented in
+    twos-complement, and the leading bit always indicates sign
+    (0=positive, 1=negative).
+
+    >>> bin(10)
+    '0b0 1010'
+    >>> bin(~10)   # ~10 is -11
+    '0b1 0101'
+    """
+
+    num = num.__index__()
+    ceiling = 2 ** (num).bit_length()
+    if num >= 0:
+        s = bltns.bin(num + ceiling).replace('1', '0', 1)
+    else:
+        s = bltns.bin(~num ^ (ceiling - 1) + ceiling)
+    sign = s[:3]
+    digits = s[3:]
+    if max_bits is not None:
+        if len(digits) < max_bits:
+            digits = (sign[-1] * max_bits + digits)[-max_bits:]
+    return "%s %s" % (sign, digits)
+
+
+def global_enum_repr(self):
+    """
+    use module.enum_name instead of class.enum_name
+
+    the module is the last module in case of a multi-module name
+    """
+    module = self.__class__.__module__.split('.')[-1]
+    return '%s.%s' % (module, self._name_)
+
+
+def global_flag_repr(self):
+    """
+    use module.flag_name instead of class.flag_name
+
+    the module is the last module in case of a multi-module name
+    """
+    module = self.__class__.__module__.split('.')[-1]
+    cls_name = self.__class__.__name__
+    if self._name_ is None:
+        return "%s.%s(%r)" % (module, cls_name, self._value_)
+    if _is_single_bit(self._value_):
+        return '%s.%s' % (module, self._name_)
+    if self._boundary_ is not FlagBoundary.KEEP:
+        return '|'.join(['%s.%s' % (module, name) for name in self.name.split('|')])
+    else:
+        name = []
+        for n in self._name_.split('|'):
+            if n[0].isdigit():
+                name.append(n)
+            else:
+                name.append('%s.%s' % (module, n))
+        return '|'.join(name)
+
+
+def global_str(self):
+    """
+    use enum_name instead of class.enum_name
+    """
+    if self._name_ is None:
+        cls_name = self.__class__.__name__
+        return "%s(%r)" % (cls_name, self._value_)
+    else:
+        return self._name_
+
+
 del _set_class_attribute, _c_type_name, _handled_exception, _standard_stderr, _unsupported
 `;
 

@@ -113,6 +113,7 @@ function* sortSuspending(list: PyList, kwargs: Kwargs): Suspension<void> {
 
 // Builtins that read an iterable item by item ------------------------------------------------------------------------------
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Checks the arguments in the order CPython's min_max does.
 function minMaxSuspending(name: 'min' | 'max'): SuspendingNative {
   return function* (args, kwargs) {
     const unexpected = [...(kwargs?.keys() ?? [])].find((key) => key !== 'key' && key !== 'default');
@@ -151,6 +152,7 @@ function* anyAllSuspending(iterable: PyValue, isAny: boolean): Suspension {
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Follows CPython's builtin sum, including its float compensation.
+// code-gauge-allow functionNcss 33 -- Follows CPython's builtin sum, including its float compensation.
 function* sumSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
   if (args.length === 0) throw typeError('sum() takes at least 1 positional argument (0 given)');
   checkArgs({ qualified: 'sum', min: 1, max: 2, style: 'takes', keywords: ['start'] }, args, kwargs);

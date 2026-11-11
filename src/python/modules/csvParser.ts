@@ -53,6 +53,7 @@ export function readerNext(self: PyValue): PyValue {
 }
 
 /** Reads the lines of one record into `parser`, counting them in `counter`. */
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows Reader_iternext of CPython's _csv, line by line.
 function readRecord(
   parser: LineParser,
   next: NextFunction,
@@ -136,6 +137,7 @@ class LineParser {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per state of CPython's parse_process_char.
+  // code-gauge-allow functionNcss 40 -- One case per state of CPython's parse_process_char.
   private next(c: Char): number {
     const { dialect } = this;
     const isQuote = c === dialect.quotechar && dialect.quoting !== QUOTE_NONE;

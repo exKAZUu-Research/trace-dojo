@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 508 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 524 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -258,7 +258,7 @@ function moduleOf(fn: PyBuiltinFunction): PyValue {
 /** The prefix of the attributes of each kind of generator object, such as `cr_running` of a coroutine. */
 const GENERATOR_PREFIXES: Record<string, string> = { coroutine: 'cr_', async_generator: 'ag_' };
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per attribute of CPython's generator getset table.
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per attribute of CPython's generator getset table.
 function generatorAttribute(generator: PyGenerator, attribute: string): PyValue | undefined {
   if (attribute === '__name__') return generator.name;
   if (attribute === '__qualname__') return generator.qualifiedName;
@@ -418,6 +418,8 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
   }
   if (target instanceof PyModule) {
     target.dict.set(name, value);
+    target.unsupported.delete(name);
+    target.imports.delete(name);
     return;
   }
   if (target instanceof PyDescriptor && target.cls === propertyClass && name === '__doc__') {
@@ -660,7 +662,7 @@ function noDictError(target: PyValue, name: string, attribute?: PyValue): Error 
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
 export function deleteAttribute(target: PyValue, name: string): void {
   if (target instanceof PyInstance || isSubclassInstance(target)) {
     const custom = userHook(target as PyObject, '__delattr__');
@@ -679,11 +681,17 @@ export function deleteAttribute(target: PyValue, name: string): void {
     return;
   }
   if (target instanceof PyFunction || target instanceof PyModule) {
-    if (!target.dict.delete(name)) throw attributeError(target, name);
+    if (!deleteNamespaceEntry(target, name)) throw attributeError(target, name);
     return;
   }
   // Deleting an attribute of a builtin type's object fails as assigning it does.
   throw readOnlyError(target, name);
+}
+
+/** Deletes a function's or module's attribute, including a module's not yet imported or unsupported names. */
+function deleteNamespaceEntry(target: PyFunction | PyModule, name: string): boolean {
+  if (target.dict.delete(name)) return true;
+  return target instanceof PyModule && (target.imports.delete(name) || target.unsupported.delete(name));
 }
 
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */

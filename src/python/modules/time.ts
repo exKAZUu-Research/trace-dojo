@@ -10,6 +10,7 @@ import { toOrdinal } from './calendarMath';
 import { cInt } from './datetimeArgs';
 import { ctime, EPOCH_ORDINAL, fieldsOfTimestamp, localEpoch, parseStrptime, structTimeOf } from './datetimeDate';
 import { PyStructTime, structTimeClass } from './structTime';
+import { timeClocks } from './timeClocks';
 import { strftime, type TimeFields } from './timeFormat';
 
 const seconds = (nanoseconds: bigint): number =>
@@ -58,6 +59,7 @@ registerModule('time', (runtime) => {
     ['altzone', BigInt(-LOCAL_ZONE.offsetSeconds)],
     ['daylight', 0n],
     ['tzname', newTuple([LOCAL_ZONE.name, LOCAL_ZONE.name])],
+    ...timeClocks(runtime),
   ]);
 });
 

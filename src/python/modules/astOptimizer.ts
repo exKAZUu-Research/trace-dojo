@@ -19,6 +19,7 @@ class Optimizer {
     private readonly classes: Map<string, PyValue>
   ) {}
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of node CPython's AST optimizer changes.
   node(value: PyValue): PyValue {
     if (value instanceof PyList) {
       for (const [index, item] of value.items.entries()) value.items[index] = this.node(item);

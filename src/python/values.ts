@@ -319,6 +319,8 @@ export class PyBoundMethod extends PyObject {
 export class PyModule extends PyObject {
   /** Attributes this grader does not support, by name, with the feature to name in the error. */
   readonly unsupported = new Map<string, string>();
+  /** The modules CPython's module imported under these names, which this grader imports when first read. */
+  readonly imports = new Map<string, string>();
 
   constructor(
     cls: PyClass,

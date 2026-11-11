@@ -1,3 +1,4 @@
+import { MISSING_PLATFORM_MODULES } from '../moduleNames';
 import { registerModuleAlias } from '../modules';
 import { registerSourceModule } from '../sourceModules';
 
@@ -1415,8 +1416,7 @@ registerSourceModule('pathlib', SOURCE);
 // CPython names `collections.abc` `_collections_abc` inside, which pathlib imports.
 registerModuleAlias('_collections_abc', 'collections.abc');
 
-// The modules of other platforms and the C modules that CPython's pure Python modules try to import, which these
-// fall back from as CPython does where the module is missing.
-for (const name of ['nt', '_winapi', 'fcntl', 'posix', 'pwd', 'grp', '_stat']) {
+// CPython's pure Python modules fall back from these as CPython does where the module is missing.
+for (const name of MISSING_PLATFORM_MODULES) {
   registerSourceModule(name, `raise ModuleNotFoundError("No module named '${name}'")`);
 }

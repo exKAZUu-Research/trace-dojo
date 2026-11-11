@@ -268,7 +268,23 @@ defineProperty(codeClass, 'co_filename', (self) => {
 });
 defineProperty(codeClass, 'co_cellvars', (self) => newTuple(cellNames(infoOf(self).fn)));
 defineProperty(codeClass, 'co_freevars', (self) => newTuple(freeNames(infoOf(self).fn)));
-for (const name of ['co_code', 'co_consts', 'co_names', 'co_varnames', 'co_nlocals', 'co_stacksize', 'co_flags']) {
+// The bytecode, its offsets, and the tables over them, which also `replace()` would rebuild.
+for (const name of [
+  'co_code',
+  'co_consts',
+  'co_names',
+  'co_varnames',
+  'co_nlocals',
+  'co_stacksize',
+  'co_flags',
+  'co_lines',
+  'co_positions',
+  'co_linetable',
+  'co_exceptiontable',
+  'co_lnotab',
+  'replace',
+  '__replace__',
+]) {
   defineProperty(codeClass, name, () => {
     throw new UnsupportedFeatureError(`CPython のバイトコードの情報（${name}）`);
   });

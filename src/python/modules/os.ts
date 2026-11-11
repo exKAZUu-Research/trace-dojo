@@ -1,6 +1,6 @@
 import { newBytes, PyBytes } from '../bytesValues';
 import { decodeBytes, encodeString } from '../codecs';
-import { registerModule, registerModuleAlias } from '../modules';
+import { registerModule, registerModuleAlias, registerSharedAttributes } from '../modules';
 import { callValue, lookupSpecial, toArray } from '../objects';
 import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
@@ -178,6 +178,8 @@ registerModule(
       ['SEEK_SET', 0n],
       ['SEEK_CUR', 1n],
       ['SEEK_END', 2n],
+      ['defpath', '/bin:/usr/bin'],
+      ['supports_unicode_filenames', true],
       ['join', nativeFunction('join', (args, kwargs) => onPaths(() => join(args, kwargs)))],
       ['split', pathFunction('split', ['p'], 1, ([p]) => tuple(splitPath(text(p))))],
       ['basename', pathFunction('basename', ['p'], 1, ([p]) => splitPath(text(p))[1])],
@@ -224,6 +226,7 @@ registerModule(
   )
 );
 registerModuleAlias('os.path', 'posixpath');
+registerSharedAttributes('posixpath', { ALLOW_MISSING: 'genericpath:ALLOW_MISSING' });
 
 function pathFunction(
   name: string,

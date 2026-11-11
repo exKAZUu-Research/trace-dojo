@@ -185,6 +185,8 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
    * Runs the clauses of a comprehension, yielding each element (a key and value pair for a dict comprehension) and
    * passing on the waits of the thread reading its iterables or evaluating its parts.
    */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the clauses of a comprehension, as the synchronous one does.
+  // code-gauge-allow functionNcss 33 -- Follows the clauses of a comprehension, as the synchronous one does.
   private *itemsSuspending(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,

@@ -13,6 +13,7 @@ import { stackFrame } from '../tracebacks';
 import {
   builtinClass,
   classOf,
+  defineMethod,
   Ellipsis,
   moduleClass,
   newDict,
@@ -29,7 +30,7 @@ import {
 } from '../types';
 import { unavailableValue } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
-import { PyComplex, PyInstance, PyModule, PyObject, PyRange, PyTuple, type PyValue } from '../values';
+import { type Kwargs, PyComplex, PyInstance, PyModule, PyObject, PyRange, PyTuple, type PyValue } from '../values';
 import { defineProperty } from './numberSupport';
 
 /** What the reference CPython, 3.14.10 built for macOS, reports about itself. */
@@ -156,23 +157,61 @@ registerMainModule((runtime) => new PyModule(mainModuleClass, '__main__', (runti
 
 // Struct sequences --------------------------------------------------------------------------------------------------
 
-/** A named tuple of `sys`, such as `sys.version_info`, which compares and indexes as a tuple. */
-function structSeq(name: string, fields: [string, PyValue][]): PyTuple {
+/**
+ * A named tuple of `sys`, such as `sys.version_info`, which compares and indexes as a tuple. `hidden` are the fields
+ * that only its attributes show, as `sys.flags.gil`.
+ */
+export function structSeq(
+  name: string,
+  fields: [string, PyValue][],
+  { module = 'sys', hidden = [] }: { module?: string; hidden?: [string, PyValue][] } = {}
+): PyTuple {
   const cls = builtinClass(name, tupleClass);
-  cls.module = 'sys';
+  cls.module = module;
+  const all = [...fields, ...hidden];
+  const extra = new WeakMap<PyTuple, PyValue[]>();
   for (const [index, [field]] of fields.entries()) {
     defineProperty(cls, field, (self) => (self as PyTuple).items[index]);
   }
-  cls.dict.set('n_fields', BigInt(fields.length));
+  for (const [index, [field]] of hidden.entries()) {
+    defineProperty(cls, field, (self) => extra.get(self as PyTuple)?.[index] ?? None);
+  }
+  cls.dict.set('n_fields', BigInt(all.length));
   cls.dict.set('n_sequence_fields', BigInt(fields.length));
+  cls.dict.set('n_unnamed_fields', 0n);
+  cls.dict.set('__match_args__', newTuple(fields.map(([field]) => field)));
+  const create = (values: PyValue[]): PyTuple => {
+    const tuple = new PyTuple(cls, values.slice(0, fields.length));
+    extra.set(tuple, values.slice(fields.length));
+    return tuple;
+  };
+  const prefix = module === 'sys' ? 'sys.' : '';
   method(cls, '__repr__', 'none', 0, 0, (self) => {
     const { items } = self as PyTuple;
-    return `sys.${name}(${fields.map(([field], index) => `${field}=${pyRepr(items[index])}`).join(', ')})`;
+    return `${prefix}${name}(${fields.map(([field], index) => `${field}=${pyRepr(items[index])}`).join(', ')})`;
   });
-  return new PyTuple(
-    cls,
-    fields.map(([, value]) => value)
-  );
+  defineMethod(cls, '__replace__', (self, args, kwargs) => {
+    const values = [...(self as PyTuple).items, ...(extra.get(self as PyTuple) ?? [])];
+    return create(
+      replacedFields(
+        all.map(([field]) => field),
+        values,
+        args,
+        kwargs
+      )
+    );
+  });
+  return create(all.map(([, value]) => value));
+}
+
+/** The values of a struct sequence's `__replace__(**changes)`: its values, with the changed fields replaced. */
+function replacedFields(fields: string[], values: PyValue[], args: PyValue[], kwargs: Kwargs): PyValue[] {
+  if (args.length > 0) throw typeError('__replace__() takes no positional arguments');
+  const unexpected = [...(kwargs?.keys() ?? [])].filter((key) => !fields.includes(key));
+  if (unexpected.length > 0) {
+    throw typeError(`Got unexpected field name(s): [${unexpected.map((key) => pyRepr(key)).join(', ')}]`);
+  }
+  return values.map((value, index) => kwargs?.get(fields[index]) ?? value);
 }
 
 const FLOAT_INFO = structSeq('float_info', [
@@ -209,26 +248,36 @@ const HASH_INFO = structSeq('hash_info', [
 ]);
 
 /** The flags the reference CPython runs programs with, `dont_write_bytecode` and `utf8_mode` among them. */
-const FLAGS = structSeq('flags', [
-  ['debug', 0n],
-  ['inspect', 0n],
-  ['interactive', 0n],
-  ['optimize', 0n],
-  ['dont_write_bytecode', 1n],
-  ['no_user_site', 0n],
-  ['no_site', 0n],
-  ['ignore_environment', 0n],
-  ['verbose', 0n],
-  ['bytes_warning', 0n],
-  ['quiet', 0n],
-  ['hash_randomization', 1n],
-  ['isolated', 0n],
-  ['dev_mode', false],
-  ['utf8_mode', 1n],
-  ['warn_default_encoding', 0n],
-  ['safe_path', false],
-  ['int_max_str_digits', 4300n],
-]);
+const FLAGS = structSeq(
+  'flags',
+  [
+    ['debug', 0n],
+    ['inspect', 0n],
+    ['interactive', 0n],
+    ['optimize', 0n],
+    ['dont_write_bytecode', 1n],
+    ['no_user_site', 0n],
+    ['no_site', 0n],
+    ['ignore_environment', 0n],
+    ['verbose', 0n],
+    ['bytes_warning', 0n],
+    ['quiet', 0n],
+    ['hash_randomization', 1n],
+    ['isolated', 0n],
+    ['dev_mode', false],
+    ['utf8_mode', 1n],
+    ['warn_default_encoding', 0n],
+    ['safe_path', false],
+    ['int_max_str_digits', 4300n],
+  ],
+  {
+    hidden: [
+      ['gil', 1n],
+      ['context_aware_warnings', 0n],
+      ['thread_inherit_context', 0n],
+    ],
+  }
+);
 
 /** `sys.implementation`, a `types.SimpleNamespace`. */
 const simpleNamespaceClass = builtinClass('SimpleNamespace');

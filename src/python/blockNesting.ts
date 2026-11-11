@@ -38,7 +38,7 @@ function visitChildren(node: Node, depth: number): void {
   for (const child of namedChildren(node)) visit(child, depth);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per construct that pushes blocks or starts a code object.
+// code-gauge-allow functionNcss 35 -- One case per construct that pushes blocks or starts a code object.
 function visit(node: Node, depth: number): void {
   switch (node.type) {
     // Annotations and type parameters are compiled into their own lazily run scopes.

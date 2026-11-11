@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 438 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { classAttribute, specialAttribute } from './attributes';
 import { PyBytes, PyMemoryView } from './bytesValues';
@@ -42,6 +43,7 @@ import {
   wrapperDescriptorClass,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClassAttribute } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
@@ -181,6 +183,8 @@ export function getAttribute(value: PyValue, name: string): PyValue {
   const getattr = value instanceof PyModule ? value.dict.get('__getattr__') : lookupSpecial(value, '__getattr__');
   if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [name]);
   if (getattr !== undefined) return callValue(bindValue(getattr, value), [name]);
+  const feature = unsupportedClassAttribute(value, name);
+  if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   throw attributeError(value, name);
 }
 
@@ -229,7 +233,24 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   if (name === '__dict__') return namespaceDict(module.dict);
-  return name === '__annotations__' ? moduleAnnotations(module) : module.dict.get(name);
+  return name === '__annotations__'
+    ? moduleAnnotations(module)
+    : (module.dict.get(name) ?? importedModule(module, name));
+}
+
+/**
+ * The module CPython's module holds under `name` because its code imported it, which is the same object here too, or
+ * the object another module defines that this module shares, named `module:attribute`.
+ */
+export function importedModule(module: PyModule, name: string): PyValue | undefined {
+  const target = module.imports.get(name);
+  if (target === undefined) return undefined;
+  const [moduleName, attribute] = target.split(':');
+  const imported = currentRuntime().importModule(moduleName);
+  const value = attribute === undefined ? imported : getAttribute(imported, attribute);
+  module.imports.delete(name);
+  module.dict.set(name, value);
+  return value;
 }
 
 export { deleteAttribute, setAttribute } from './attributes';
@@ -359,6 +380,7 @@ export function remainingOf(next: NextFunction): number | undefined {
   return remainingCounts.get(next)?.();
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- The iterator, its reduction, and its __setstate__ share its position.
 function iterateItems(sequence: PyList | PyTuple): NextFunction {
   let index = 0;
   // As in CPython, an iterator that reached the end stays there, even if the sequence grows.
@@ -507,6 +529,7 @@ function iterateSequence(value: PyValue): NextFunction {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- The iterator, its size check, and its reduction share its position.
 function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunction {
   const { store } = dict;
   const size = store.size;
@@ -574,7 +597,7 @@ export function builtinIterator(value: PyValue): PyValue {
   return new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per builtin iterable.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per builtin iterable.
 function iteratorNameOf(value: PyValue): string {
   // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
   if (typeof value === 'string') return /^[\u0000-\u007F]*$/.test(value) ? 'str_ascii_iterator' : 'str_iterator';

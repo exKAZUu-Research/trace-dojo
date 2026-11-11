@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 893 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -28,6 +29,7 @@ import {
   getAttribute,
   getAttributeOrUndefined,
   getItem,
+  importedModule,
   isTruthy,
   iterate,
   lookupSpecial,
@@ -36,7 +38,7 @@ import {
 } from './objects';
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
-// code-gauge-allow-file fileNcss 877 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 893 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import type { Suspension } from './suspendingEvaluator';
 import { targetSuspends } from './suspension';
 import { iterateSuspending, type SuspendingNext } from './threadIteration';
@@ -48,6 +50,7 @@ import {
   classOf,
   exceptionClassNamed,
   isInstanceOf,
+  nativeFunction,
   newDict,
   newException,
   newList,
@@ -59,7 +62,7 @@ import {
   typeName,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyTuple, type PyValue } from './values';
+import { DONE, PyClass, PyError, type PyFunction, PyInstance, type PyModule, PyTuple, type PyValue } from './values';
 import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
 const NO_EXCEPTIONS: PyInstance[] = [];
@@ -263,7 +266,7 @@ export class Evaluator extends AsyncEvaluator {
       this.importFrom(statement, frame);
     } else if (statement.kind === 'importStar') {
       const module = runtime.importModule(statement.module);
-      for (const [name, value] of module.dict) if (!name.startsWith('_')) frame.locals.set(name, value);
+      for (const [name, value] of starNames(module)) frame.locals.set(name, value);
     } else {
       for (const { module, binding, bindsModule } of statement.names) {
         const imported = runtime.importModule(module);
@@ -281,6 +284,7 @@ export class Evaluator extends AsyncEvaluator {
       const submodule = `${statement.module}.${name}`;
       const value =
         module.dict.get(name) ??
+        importedModule(module, name) ??
         (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, name) : undefined) ??
         (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
       if (value === undefined) {
@@ -452,8 +456,8 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows the protocol of the for loop, closing a generator it leaves.
-  // code-gauge-allow functionNcss 33 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionNcss 35 -- Follows the protocol of the for loop, closing a generator it leaves.
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
     const { target } = statement;
@@ -1205,6 +1209,26 @@ const SELF_MATCHING = new Set([
  * Runs the statements of a frame that is no generator to their end. Only the waits of blocking operations may suspend
  * them, which the thread then makes on the host's stack.
  */
+/** The names `from module import *` binds: those of the module's `__all__`, or its public names without one. */
+function starNames(module: PyModule): [string, PyValue][] {
+  const all = getAttributeOrUndefined(module, '__all__');
+  if (all === undefined) return [...module.dict].filter(([name]) => !name.startsWith('_'));
+  return toItems(all).map((name) => {
+    if (typeof name !== 'string') {
+      throw typeError(`Item in ${module.name}.__all__ must be str, not ${typeName(name)}`);
+    }
+    // A name this grader does not support is bound all the same, failing when the program uses it.
+    const feature = module.unsupported.get(name);
+    if (feature === undefined) return [name, getAttribute(module, name)];
+    return [
+      name,
+      nativeFunction(name, () => {
+        throw new UnsupportedFeatureError(feature);
+      }),
+    ];
+  });
+}
+
 function runToEnd(execution: Execution): Completion {
   for (;;) {
     const step = execution.next();

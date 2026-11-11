@@ -18,6 +18,33 @@ ThreadError = _thread.error
 TIMEOUT_MAX = _thread.TIMEOUT_MAX
 Lock = _thread.lock
 _CRLock = _thread.RLock
+_LockType = _thread.LockType
+_daemon_threads_allowed = _thread.daemon_threads_allowed
+_is_main_interpreter = _thread._is_main_interpreter
+_HAVE_THREAD_NATIVE_ID = True
+_SHUTTING_DOWN = False
+from weakref import WeakSet
+
+__all__ = ['get_ident', 'active_count', 'Condition', 'current_thread',
+           'enumerate', 'main_thread', 'TIMEOUT_MAX',
+           'Event', 'Lock', 'RLock', 'Semaphore', 'BoundedSemaphore', 'Thread',
+           'Barrier', 'BrokenBarrierError', 'Timer', 'ThreadError',
+           'setprofile', 'settrace', 'local', 'stack_size',
+           'excepthook', 'ExceptHookArgs', 'gettrace', 'getprofile',
+           'setprofile_all_threads','settrace_all_threads']
+__all__ += ['get_native_id']
+
+# A program here can install no trace or profile function, so none is ever set.
+_profile_hook = None
+_trace_hook = None
+
+
+def getprofile():
+    return _profile_hook
+
+
+def gettrace():
+    return _trace_hook
 
 
 def RLock(*args, **kwargs):
@@ -44,6 +71,9 @@ class Condition:
         except AttributeError:
             pass
         self._waiters = _deque()
+
+    def locked(self):
+        return self._lock.locked()
 
     def __enter__(self):
         return self._lock.__enter__()
@@ -617,11 +647,15 @@ class local:
         _local_arguments[id(self)] = (args, kw)
         return self
 
-    def __getattr__(self, name):
+    def __getattribute__(self, name):
+        # The running thread's values stand in for the instance dict, between the class's data descriptors and the
+        # rest of its attributes.
         values = _local_values(self)
-        if name in values:
+        if name == '__dict__':
+            return values
+        if name in values and not _is_data_descriptor(type(self), name):
             return values[name]
-        raise AttributeError(f"'{_local_name(self)}' object has no attribute '{name}'")
+        return object.__getattribute__(self, name)
 
     def __setattr__(self, name, value):
         _local_values(self)[name] = value
@@ -637,6 +671,13 @@ local.__qualname__ = '_local'
 
 _local_arguments = {}
 _local_dicts = {}
+
+def _is_data_descriptor(cls, name):
+    for klass in cls.__mro__:
+        if name in klass.__dict__:
+            kind = type(klass.__dict__[name])
+            return hasattr(kind, '__set__') or hasattr(kind, '__delete__')
+    return False
 
 def _local_name(self):
     cls = type(self)

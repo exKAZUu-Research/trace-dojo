@@ -626,7 +626,7 @@ export class ExpressionEvaluator {
   // Comprehensions --------------------------------------------------------------------------------------------------
 
   /** Runs a comprehension, whose first iterable `first` the enclosing frame evaluated. */
-  // code-gauge-allow functionNcss 37 -- Follows how CPython runs each kind of comprehension in its own scope.
+  // code-gauge-allow functionNcss 38 -- Follows how CPython runs each kind of comprehension in its own scope.
   protected comprehension(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
