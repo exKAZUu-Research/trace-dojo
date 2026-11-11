@@ -33,6 +33,12 @@ const ASYNCGEN_HOOKS = structSeq(
   ],
   { module: 'builtins' }
 );
+// The type of what CPython passes sys.unraisablehook, which no program here receives, but which is a subclass of tuple.
+structSeq(
+  'UnraisableHookArgs',
+  ['exc_type', 'exc_value', 'exc_traceback', 'err_msg', 'object'].map((field) => [field, None]),
+  { module: 'builtins' }
+);
 
 /** The attributes of `sys` about hooks, tracing, threads, and the interpreter's state. */
 export function sysHooks(runtime: Runtime): [string, PyValue][] {

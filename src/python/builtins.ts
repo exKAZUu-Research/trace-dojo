@@ -9,6 +9,7 @@ import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
 import { enumMembersOf } from './enums';
 import { pyHash } from './hashing';
 import { help } from './help';
+import { defineConstructingNew } from './instances';
 import { reduction, withState } from './iteratorStates';
 import { dunderImport } from './modules/importlib';
 import { argument, checkArgs } from './nativeArgs';
@@ -136,7 +137,7 @@ zipClass.construct = (cls, args, kwargs) => {
       const item = next();
       if (item === DONE) {
         finished = true;
-        if (strict) checkStrictZip(nexts, index);
+        if (strict) checkStrictLengths('zip', nexts, index);
         return DONE;
       }
       items.push(item);
@@ -150,7 +151,7 @@ zipClass.construct = (cls, args, kwargs) => {
       const item = yield* suspendingNextOf(iterator)();
       if (item === DONE) {
         finished = true;
-        if (strict) checkStrictZip(nexts, index);
+        if (strict) checkStrictLengths('zip', nexts, index);
         return DONE;
       }
       items.push(item);
@@ -166,21 +167,22 @@ zipClass.construct = (cls, args, kwargs) => {
   return new PyIterator(cls, zipped, () => args);
 };
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Words each length mismatch as CPython's strict zip does.
-function checkStrictZip(nexts: (() => PyValue | typeof DONE)[], index: number): void {
+// code-gauge-allow functionCognitiveComplexity 16 -- Words each length mismatch as CPython's strict zip and map do.
+function checkStrictLengths(name: string, nexts: (() => PyValue | typeof DONE)[], index: number): typeof DONE {
   if (index > 0) {
     throw valueError(
-      `zip() argument ${index + 1} is shorter than argument${index === 1 ? '' : 's'} 1${index > 1 ? `-${index}` : ''}`
+      `${name}() argument ${index + 1} is shorter than argument${index === 1 ? '' : 's'} 1${index > 1 ? `-${index}` : ''}`
     );
   }
   for (const [other, next] of nexts.entries()) {
     if (other === 0) continue;
     if (next() !== DONE) {
       throw valueError(
-        `zip() argument ${other + 1} is longer than argument${other === 1 ? '' : 's'} 1${other > 1 ? `-${other}` : ''}`
+        `${name}() argument ${other + 1} is longer than argument${other === 1 ? '' : 's'} 1${other > 1 ? `-${other}` : ''}`
       );
     }
   }
+  return DONE;
 }
 
 export const mapClass = builtinClass('map');
@@ -192,23 +194,29 @@ mapClass.construct = (cls, args, kwargs) => {
   );
   if (args.length < 2) throw typeError('map() must have at least two arguments.');
   const [fn, ...iterables] = args;
+  let strict = isTruthy(kwargs?.get('strict') ?? false);
   const iterators = iterables.map((iterable) => getIterator(iterable));
   const nexts = iterators.map((iterator) => nextOf(iterator));
   const mapped = (): PyValue | typeof DONE => {
     const items: PyValue[] = [];
-    for (const next of nexts) {
+    for (const [index, next] of nexts.entries()) {
       const item = next();
-      if (item === DONE) return DONE;
+      if (item === DONE) return strict ? checkStrictLengths('map', nexts, index) : DONE;
       items.push(item);
     }
     return callValue(fn, items);
   };
-  withState(mapped, { reduce: () => newTuple([cls, newTuple([fn, ...iterators])]) });
+  withState(mapped, {
+    reduce: () => newTuple(strict ? [cls, newTuple([fn, ...iterators]), true] : [cls, newTuple([fn, ...iterators])]),
+    setState: (state) => {
+      strict = state !== 0n;
+    },
+  });
   withSuspendingNext(mapped, function* () {
     const items: PyValue[] = [];
-    for (const iterator of iterators) {
+    for (const [index, iterator] of iterators.entries()) {
       const item = yield* suspendingNextOf(iterator)();
-      if (item === DONE) return DONE;
+      if (item === DONE) return strict ? checkStrictLengths('map', nexts, index) : DONE;
       items.push(item);
     }
     return yield* callSuspending(fn, items);
@@ -272,7 +280,10 @@ reversedClass.construct = (_cls, args, kwargs) => {
   return new PyIterator(reversedClass, next, () => [sequence]);
 };
 
-for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClass]) defineIteratorClass(cls);
+for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClass]) {
+  defineIteratorClass(cls);
+  defineConstructingNew(cls);
+}
 
 // Functions ---------------------------------------------------------------------------------------------------------
 

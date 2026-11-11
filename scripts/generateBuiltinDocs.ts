@@ -91,6 +91,7 @@ function collect(value: PyValue): void {
   seen.add(value);
   addKey(value);
   const key = docKey(value) as string;
+  keys.add(`!${key}`);
   for (const [name, attribute] of value.dict) {
     if (attribute instanceof PyClass) collect(attribute);
     else if (attribute instanceof PyBuiltinFunction || attribute instanceof PyDescriptor) keys.add(`${key}.${name}`);

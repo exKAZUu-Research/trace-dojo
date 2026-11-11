@@ -3,6 +3,7 @@ import type { ClassDef, Expression, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
 import type { SetTable } from './setTable';
+import { recordSubclass } from './subclasses';
 
 /**
  * A Python value. Integers are bigints, so that they have no size limit, and floats are numbers; `bool` stays a JS
@@ -118,6 +119,7 @@ export class PyClass extends PyObject {
   ) {
     super(metaclass);
     this.qualifiedName = name;
+    recordSubclass(this);
   }
 
   /** Looks up an attribute along the method resolution order. */

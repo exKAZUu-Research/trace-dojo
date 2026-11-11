@@ -46,6 +46,11 @@ export function moduleDoc(name: string): string | undefined {
   return entries().get(name)?.[0];
 }
 
+/** The attributes of CPython's builtin class, as sorted `name:kind` words, which pydoc's help shows. */
+export function builtinClassLayout(cls: PyClass): string | undefined {
+  return entries().get(`!${classKey(cls)}`)?.[0];
+}
+
 function entries(): Map<string, [string | undefined, string | undefined]> {
   if (!table) {
     const [keys, strings, pairs] = JSON.parse(BUILTIN_DOCS) as [string[], string[], [number, number][]];

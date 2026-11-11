@@ -158,6 +158,18 @@ export function defineNew(cls: PyClass, create: Create): void {
   );
 }
 
+/**
+ * Gives a builtin class that creates its instances by `construct` the `__new__` CPython's type has in its dictionary,
+ * which creates them the same way.
+ */
+export function defineConstructingNew(cls: PyClass): void {
+  const construct = cls.construct;
+  if (!construct) return;
+  const create = (args: PyValue[], kwargs: Kwargs): PyValue =>
+    construct(checkSubtype(cls, args), args.slice(1), kwargs);
+  cls.dict.set('__new__', new PyBuiltinFunction(builtinFunctionClass, '__new__', create, cls, 'static', cls.name));
+}
+
 /** The classes whose builtin `__new__` stands for one CPython writes in Python, which tp_new_wrapper's check skips. */
 const pythonLevelNews = new WeakSet<PyClass>();
 

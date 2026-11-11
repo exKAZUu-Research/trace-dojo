@@ -1,5 +1,6 @@
 import { DictStore } from './dictStore';
 import { SetTable } from './setTable';
+import { recordSubclass } from './subclasses';
 import {
   type ExceptionState,
   type Kwargs,
@@ -25,6 +26,7 @@ export const objectClass = new PyClass('object', []);
 typeClass.cls = typeClass;
 objectClass.cls = typeClass;
 typeClass.bases = [objectClass];
+recordSubclass(typeClass);
 objectClass.mro = [objectClass];
 typeClass.mro = [typeClass, objectClass];
 typeClass.isBaseType = true;
@@ -61,6 +63,8 @@ export const notImplementedClass = builtinClass('NotImplementedType');
 export const functionClass = builtinClass('function');
 export const methodClass = builtinClass('method');
 export const builtinFunctionClass = builtinClass('builtin_function_or_method');
+// The type of CPython's builtin methods that take their defining class, which none here are, but which pydoc lists.
+builtinClass('builtin_method', builtinFunctionClass);
 export const methodDescriptorClass = builtinClass('method_descriptor');
 /** The class of a builtin type's special method that fills one of CPython's type slots, such as `int.__add__`. */
 export const wrapperDescriptorClass = builtinClass('wrapper_descriptor');

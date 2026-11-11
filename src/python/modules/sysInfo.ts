@@ -1,4 +1,3 @@
-import { PyBytes } from '../bytesValues';
 import { pyRepr } from '../conversions';
 import { SYS_BUILTIN_MODULE_NAMES, SYS_STDLIB_MODULE_NAMES } from '../data/sysModuleNames';
 import { builtin, method } from '../define';
@@ -7,21 +6,19 @@ import { SUPPORTED_MODULES } from '../moduleNames';
 import { registerMainModule, trackModules } from '../modules';
 import { namespaceDict } from '../namespaces';
 import { toIndex } from '../numbers';
+import { sizeOf } from '../objectSizes';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
+import { hideSubclass } from '../subclasses';
 import { stackFrame } from '../tracebacks';
 import {
   builtinClass,
-  classOf,
   defineMethod,
-  Ellipsis,
   moduleClass,
   newDict,
   newSet,
   newTuple,
   None,
-  NotImplemented,
-  objectClass,
   pyError,
   tupleClass,
   typeError,
@@ -30,7 +27,7 @@ import {
 } from '../types';
 import { unavailableValue } from '../unavailableValues';
 import { UnsupportedFeatureError } from '../unsupported';
-import { type Kwargs, PyComplex, PyInstance, PyModule, PyObject, PyRange, PyTuple, type PyValue } from '../values';
+import { type Kwargs, PyInstance, PyModule, PyTuple, type PyValue } from '../values';
 import { defineProperty } from './numberSupport';
 
 /** What the reference CPython, 3.14.10 built for macOS, reports about itself. */
@@ -67,7 +64,10 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['_xoptions', newDict()],
     ['getrecursionlimit', builtin('getrecursionlimit', 'none', 0, 0, () => BigInt(runtime.recursionLimit))],
     ['setrecursionlimit', builtin('setrecursionlimit', 'one', 1, 1, ([limit]) => setRecursionLimit(runtime, limit))],
-    ['getsizeof', builtin('getsizeof', 'takes', 1, 2, ([value]) => sizeOf(value), { keywords: ['object', 'default'] })],
+    [
+      'getsizeof',
+      builtin('getsizeof', 'takes', 1, 2, ([value]) => BigInt(sizeOf(value)), { keywords: ['object', 'default'] }),
+    ],
     ['getdefaultencoding', builtin('getdefaultencoding', 'none', 0, 0, () => ENCODING)],
     ['getfilesystemencoding', builtin('getfilesystemencoding', 'none', 0, 0, () => ENCODING)],
     ['get_int_max_str_digits', builtin('get_int_max_str_digits', 'none', 0, 0, () => 4300n)],
@@ -150,6 +150,7 @@ function moduleTable(runtime: Runtime): Map<string, PyValue> {
 
 /** The `__main__` module, whose repr names the script's file. */
 const mainModuleClass = builtinClass('module', moduleClass);
+hideSubclass(mainModuleClass);
 method(mainModuleClass, '__repr__', 'none', 0, 0, () => {
   throw new UnsupportedFeatureError('__main__ モジュールの repr（スクリプトのファイルのパスを含む）');
 });
@@ -317,39 +318,6 @@ function setRecursionLimit(runtime: Runtime, value: PyValue): PyValue {
   }
   runtime.recursionLimit = Number(limit > 1_000_000_000n ? 1_000_000_000n : limit);
   return None;
-}
-
-/** `sys.getsizeof` of the objects whose size in CPython does not depend on how they grew. */
-function sizeOf(value: PyValue): PyValue {
-  const size = fixedSize(value);
-  if (size === undefined)
-    throw new UnsupportedFeatureError(`sys.getsizeof() での ${typeName(value)} オブジェクトの大きさ`);
-  return BigInt(size);
-}
-
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of object of a fixed layout.
-function fixedSize(value: PyValue): number | undefined {
-  if (typeof value === 'bigint' || typeof value === 'boolean') return intSize(BigInt(value));
-  if (typeof value === 'number') return 24;
-  if (typeof value === 'string') return isAscii(value) ? 41 + value.length : undefined;
-  if (value === None || value === Ellipsis || value === NotImplemented) return 16;
-  if (value instanceof PyComplex) return 32;
-  if (value instanceof PyBytes && !value.isMutable && value.cls.isBuiltin) return 33 + value.length;
-  if (value instanceof PyTuple && value.cls === tupleClass) return 48 + 8 * value.items.length;
-  if (value instanceof PyRange) return 48;
-  return value instanceof PyObject && classOf(value) === objectClass ? 16 : undefined;
-}
-
-/** The size of an int, whose 30-bit digits take 4 bytes each, with at least one digit. */
-function intSize(value: bigint): number {
-  const magnitude = value < 0n ? -value : value;
-  return 24 + 4 * Math.max(1, Math.ceil(magnitude.toString(2).length / 30));
-}
-
-/** Whether a string is ASCII, whose size depends only on its length, unlike others, which may cache their UTF-8. */
-function isAscii(text: string): boolean {
-  for (let index = 0; index < text.length; index++) if ((text.codePointAt(index) ?? 0) > 0x7f) return false;
-  return true;
 }
 
 function intern(value: PyValue): PyValue {

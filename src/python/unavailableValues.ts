@@ -1,3 +1,4 @@
+import { hideSubclass } from './subclasses';
 import { builtinClass, defineMethod, typeClass } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { PyOpaque, type PyValue } from './values';
@@ -9,6 +10,7 @@ import { PyOpaque, type PyValue } from './values';
 const unavailableClass = builtinClass('unavailable');
 /** The metaclass of that class, so that showing the type of such a value stops the program too. */
 const unavailableType = builtinClass('unavailable_type', typeClass);
+hideSubclass(unavailableType);
 unavailableClass.cls = unavailableType;
 defineMethod(unavailableType, '__repr__', () => {
   throw new UnsupportedFeatureError('CPython の内部の値の型');

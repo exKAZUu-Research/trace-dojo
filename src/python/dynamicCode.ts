@@ -16,6 +16,7 @@ import { parseDynamicCode } from './parse';
 import { localVariables, programFrames } from './reflection';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
+import { hideSubclass } from './subclasses';
 import { codeClass, type CodeInfo, functionCode, hasCode, noteUnwinding, registerCode } from './tracebacks';
 import {
   dictClass,
@@ -466,6 +467,8 @@ const unshownIncompleteInputErrorClass = builtinClassWithBase(
   exceptionClassNamed('_IncompleteInputError'),
   'builtins'
 );
+for (const cls of [unshownSyntaxErrorClass, unshownIndentationErrorClass, unshownIncompleteInputErrorClass])
+  hideSubclass(cls);
 
 function syntaxError(cls: PyClass, filename: string, reason: string): PyError {
   const feature = `eval()・exec()・compile() に渡した文字列の構文エラーのメッセージ（${reason}）`;
@@ -499,6 +502,7 @@ function unshownMessage(exception: PyValue): string {
  * builtin with CPython's texts such as `copyright`, stops the program instead.
  */
 const builtinsDictClass = builtinClassWithBase('dict', dictClass, 'builtins');
+hideSubclass(builtinsDictClass);
 method(builtinsDictClass, '__repr__', 'none', 0, 0, () => {
   throw new UnsupportedFeatureError('exec()・eval() が globals に入れる __builtins__ の表示');
 });

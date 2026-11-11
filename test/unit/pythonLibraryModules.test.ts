@@ -132,6 +132,24 @@ assert e.name == 7
 `);
 });
 
+test("help() on a builtin type lists CPython's methods and builtin subclasses", () => {
+  expectSameAsCPython(String.raw`import io, contextlib
+def text(value):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        help(value)
+    return out.getvalue()
+assert ' |  Built-in subclasses:\n |      asyncgen_hooks\n |      UnraisableHookArgs\n' in text(tuple)
+assert ' |  __sizeof__(self, /)\n |      Return the size of the list in memory, in bytes.\n' in text(list)
+assert ' |  Static methods defined here:\n |\n |  __new__(*args, **kwargs)\n' in text(zip)
+assert ' |  maketrans(' in text(str) and '__repr__' not in text(map)
+class A: pass
+class B(A): pass
+assert A.__subclasses__() == [B] and bool in int.__subclasses__()
+assert (5).__format__('x') == '5' and (1.5).__sizeof__() == 24 and 'ab'.__sizeof__() == 43
+`);
+});
+
 test('opcode, nturl2path, genericpath, and pydoc_data hold what CPython has', () => {
   expectSameAsCPython(String.raw`import opcode, nturl2path, genericpath, io, contextlib
 assert opcode.opmap['LOAD_CONST'] == 82 and opcode.hasconst == [82] and opcode.opname[82] == 'LOAD_CONST'

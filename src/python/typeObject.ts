@@ -28,21 +28,30 @@ import {
   nextOf,
   remainingOf,
 } from './objects';
+import { sizeWithoutHeader } from './objectSizes';
 import { currentRuntime } from './runtimeContext';
+import { subclassesOf } from './subclasses';
 import { typeOr } from './typeHints';
 import {
   builtinClass,
   builtinFunctionClass,
+  bytearrayClass,
   classmethodClass,
   classmethodDescriptorClass,
   classOf,
+  complexClass,
   defineMethod,
   descriptorOwners,
+  dictClass,
   ellipsisClass,
+  floatClass,
+  frozensetClass,
   functionClass,
+  intClass,
   isIteratorGenerator,
   iteratorClasses,
   iteratorClassSetup,
+  listClass,
   methodClass,
   methodDescriptorClass,
   methodWrapperClass,
@@ -56,8 +65,10 @@ import {
   objectClass,
   propertyClass,
   pyError,
+  setClass,
   sliceClass,
   staticmethodClass,
+  strClass,
   superClass,
   typeClass,
   typeError,
@@ -113,8 +124,11 @@ method(objectClass, '__ne__', 'one', 1, 1, (self, [other]) => {
   const result = callValue(bindValue(eq, self), [other]);
   return result === NotImplemented ? NotImplemented : !currentRuntime().truthy(result);
 });
-for (const name of ['__lt__', '__le__', '__gt__', '__ge__'])
+// dict compares only for equality, but as CPython's, it has all six comparisons.
+for (const name of ['__lt__', '__le__', '__gt__', '__ge__']) {
   method(objectClass, name, 'one', 1, 1, () => NotImplemented);
+  method(dictClass, name, 'one', 1, 1, () => NotImplemented);
+}
 method(objectClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
 method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
   if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${typeName(spec)}`);
@@ -139,7 +153,20 @@ method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
   else deleteAttribute(self, name);
   return None;
 });
-method(objectClass, '__sizeof__', 'none', 0, 0, () => 16n);
+method(objectClass, '__sizeof__', 'none', 0, 0, (self) => sizeWithoutHeader(self));
+for (const cls of [intClass, strClass]) method(cls, '__sizeof__', 'none', 0, 0, (self) => sizeWithoutHeader(self));
+for (const cls of [intClass, floatClass, complexClass]) {
+  method(cls, '__format__', 'one', 1, 1, (self, [spec]) => {
+    if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${typeName(spec)}`);
+    return spec === '' ? pyStr(self) : pyFormat(self, spec);
+  });
+}
+// CPython's size of these depends on how they grew, which this grader's objects do not follow.
+for (const cls of [listClass, dictClass, setClass, frozensetClass, bytearrayClass]) {
+  method(cls, '__sizeof__', 'none', 0, 0, () => {
+    throw new UnsupportedFeatureError(`${cls.name} オブジェクトの大きさ（__sizeof__）`);
+  });
+}
 objectClass.dict.set(
   '__init_subclass__',
   new PyBuiltinFunction(
@@ -187,7 +214,13 @@ method(typeClass, '__repr__', 'none', 0, 0, (self) => {
   return `<class '${module}${cls.qualifiedName}'>`;
 });
 method(typeClass, 'mro', 'none', 0, 0, (self) => currentRuntime().listOf([...(self as PyClass).mro]));
-method(typeClass, '__subclasses__', 'none', 0, 0, () => currentRuntime().listOf([]));
+method(typeClass, '__subclasses__', 'none', 0, 0, (self) => {
+  // CPython's object has every type it defines inside as a subclass, which this grader's types are not.
+  if (self === objectClass)
+    throw new UnsupportedFeatureError('object のすべてのサブクラスの一覧（object.__subclasses__()）');
+  const runtime = currentRuntime();
+  return runtime.listOf(subclassesOf(self as PyClass, (module) => runtime.modules.has(module)));
+});
 method(typeClass, '__instancecheck__', 'one', 1, 1, (self, [value]) => classOf(value).isSubclassOf(self as PyClass));
 method(
   typeClass,
@@ -368,7 +401,6 @@ export function defineIteratorClass(cls: PyClass): void {
     if (value === DONE) throw pyError('StopIteration');
     return value;
   });
-  method(cls, '__repr__', 'none', 0, 0, (self) => `<${cls.name} object at ${addressOf(self as PyObject)}>`);
   if (HINTED_ITERATORS.has(cls.name)) {
     method(cls, '__length_hint__', 'none', 0, 0, (self) => BigInt(remainingOf((self as PyIterator).next) ?? 0));
   }
@@ -387,7 +419,7 @@ export function defineIteratorClass(cls: PyClass): void {
   }
 }
 
-/** The native iterators whose `__setstate__` moves them to the index they are given. */
+/** The native iterators that have `__setstate__`, which moves them to the index they are given or sets their strictness. */
 const MOVED_ITERATORS = new Set([
   'list_iterator',
   'list_reverseiterator',
@@ -400,6 +432,7 @@ const MOVED_ITERATORS = new Set([
   'bytearray_iterator',
   'reversed',
   'zip',
+  'map',
 ]);
 
 /** The native iterators that reduce to where they are, for pickle and copy. */

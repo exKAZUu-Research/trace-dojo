@@ -101,7 +101,7 @@ method(strClass, '__contains__', 'one', 1, 1, (self, [item]) =>
   asStr(self).includes(expectStr(item, "'in <string>' requires string as left operand, not"))
 );
 method(strClass, '__mod__', 'one', 1, 1, (self, [value]) => formatPercent(asStr(self), value));
-method(strClass, '__format__', 'one', 1, 1, (self, [spec]) => pyFormat(self, expectStr(spec, 'format spec')));
+method(strClass, '__format__', 'one', 1, 1, (self, [spec]) => pyFormat(self, expectStr(spec, '__format__() argument')));
 
 // Case --------------------------------------------------------------------------------------------------------------
 

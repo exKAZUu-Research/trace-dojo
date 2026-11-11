@@ -16,6 +16,7 @@ import warnings
 DESCRIPTORS = (types.BuiltinFunctionType, types.MethodDescriptorType, types.WrapperDescriptorType,
                types.ClassMethodDescriptorType, types.GetSetDescriptorType, types.MemberDescriptorType,
                types.FunctionType, staticmethod, classmethod, property)
+HEAPTYPE = 1 << 9
 
 
 # code-gauge-allow functionCognitiveComplexity 27 -- Walks the modules, their classes, and the classes' attributes in one pass.
@@ -58,6 +59,9 @@ def main():
         for module_name in {cls.__module__, holder}:
             key = f'{module_name}.{cls.__qualname__}'
             add(entries, key, cls.__dict__.get('__doc__'), getattr(cls, '__text_signature__', None))
+            if not cls.__flags__ & HEAPTYPE:
+                # The kinds of a builtin class's attributes, as `!module.qualname`, which pydoc's help shows.
+                entries.setdefault(f'!{key}', [class_layout(cls), None])
             for attribute, value in cls.__dict__.items():
                 if isinstance(value, type):
                     pending.append((value, value.__module__))
@@ -66,6 +70,10 @@ def main():
                     add(entries, f'{key}.{attribute}', getattr(function, '__doc__', None), text_signature(function))
     json.dump(entries, sys.stdout, indent=0, sort_keys=True, ensure_ascii=False)
     print()
+
+
+def class_layout(cls):
+    return ' '.join(sorted(f'{name}:{type(value).__name__}' for name, value in cls.__dict__.items() if name != '__doc__'))
 
 
 def builtin_types():
