@@ -478,9 +478,22 @@ export class Runtime {
 /** `list[int]` and the like, which type hints use. */
 function genericAlias(cls: PyClass, key: PyValue): PyOpaque {
   const args = key instanceof PyTuple ? key.items : [key];
-  const text = `${cls.name}[${args.map((arg) => (arg instanceof PyClass ? arg.qualifiedName : arg instanceof PyOpaque ? arg.text : pyRepr(arg))).join(', ')}]`;
+  const text = `${aliasTypeText(cls)}[${args.map((arg) => (arg instanceof PyClass ? aliasTypeText(arg) : arg instanceof PyOpaque ? arg.text : pyRepr(arg))).join(', ')}]`;
   return new PyOpaque(typingClass, text, cls);
 }
+
+function aliasTypeText(cls: PyClass): string {
+  return cls.module === 'builtins' ? cls.qualifiedName : `${cls.module}.${cls.qualifiedName}`;
+}
+
+// `types.GenericAlias(origin, args)`, which `__class_getitem__ = classmethod(GenericAlias)` calls.
+typingClass.construct = (_cls, args, kwargs) => {
+  if (kwargs?.size) throw typeError('GenericAlias() takes no keyword arguments');
+  if (args.length !== 2) throw typeError(`GenericAlias expected 2 arguments, got ${args.length}`);
+  const [origin, key] = args;
+  if (!(origin instanceof PyClass)) throw new UnsupportedFeatureError('クラス以外を元にした types.GenericAlias');
+  return genericAlias(origin, key);
+};
 
 /** The types a `|` union holds, or the type itself. */
 function unionMembers(value: PyValue): PyValue[] {
