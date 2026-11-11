@@ -3,8 +3,11 @@ import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 /** The standard library modules this grader implements, which programs may import. */
 export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   '__future__',
+  '__main__',
   '_codecs',
+  '_compat_pickle',
   '_csv',
+  '_pickle',
   '_thread',
   'abc',
   'argparse',
@@ -59,6 +62,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'numbers',
   'operator',
   'optparse',
+  'pickle',
   'os',
   'os.path',
   'pathlib',

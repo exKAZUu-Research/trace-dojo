@@ -20,10 +20,10 @@ import { builtinClass, newTuple, None, NotImplemented, typeError } from '../type
 import { DONE, type Kwargs, PyBuiltinFunction, PyClass, PyDict, PyOpaque, PyTuple, type PyValue } from '../values';
 import { makeNamedTupleClass } from './collections';
 
-const partialClass = builtinClass('partial');
+export const partialClass = builtinClass('partial');
 partialClass.module = 'functools';
 builtinClassesWithDict.add(partialClass);
-interface Partial {
+export interface Partial {
   fn: PyValue;
   args: PyValue[];
   kwargs: Map<string, PyValue>;

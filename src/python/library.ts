@@ -1,5 +1,6 @@
 // Defines the builtin types' methods and registers the standard library modules, which run.ts and trace.ts load.
 import './typeObject';
+import './reduction';
 import './typeNumbers';
 import './typeStr';
 import './typeContainers';
@@ -11,6 +12,7 @@ import './byteArray';
 import './memoryview';
 import './unicodeErrors';
 import './unicodeCodecs';
+import './rawUnicodeEscape';
 import './japaneseCodecs';
 import './turtle';
 import './builtinSubclasses';
@@ -110,3 +112,6 @@ import './modules/glob';
 import './modules/ntpath';
 import './modules/genericpath';
 import './modules/stat';
+import './modules/datetimePickle';
+import './modules/stdlibPickle';
+import './modules/pickle';

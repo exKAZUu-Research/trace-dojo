@@ -11,17 +11,20 @@ export interface ClinicSpec {
   positionalOnly: number;
   /** How many leading parameters are required. */
   required: number;
+  /** The names of the keyword-only parameters, which follow the positional ones in the bound arguments. */
+  keywordOnly?: readonly string[];
 }
 
 const plural = (count: number): string => (count === 1 ? '' : 's');
 
 /** Binds the arguments of a call to `spec`'s parameters, raising Argument Clinic's errors. */
 export function clinicArgs(spec: ClinicSpec, args: readonly PyValue[], kwargs: Kwargs): (PyValue | undefined)[] {
-  const { name, params, positionalOnly, required } = spec;
+  const { name, params, positionalOnly, required, keywordOnly = [] } = spec;
   if (args.length > params.length) {
     const exact = required === params.length;
+    const kind = exact || keywordOnly.length > 0 ? 'positional ' : '';
     throw typeError(
-      `${name}() takes ${exact ? 'exactly' : 'at most'} ${params.length} ${exact ? 'positional ' : ''}argument${plural(params.length)} (${args.length} given)`
+      `${name}() takes ${exact ? 'exactly' : 'at most'} ${params.length} ${kind}argument${plural(params.length)} (${args.length} given)`
     );
   }
   const requiredPositional = Math.min(required, positionalOnly);
@@ -31,11 +34,12 @@ export function clinicArgs(spec: ClinicSpec, args: readonly PyValue[], kwargs: K
       `${name}() takes ${exact ? 'exactly' : 'at least'} ${requiredPositional} positional argument${plural(requiredPositional)} (${args.length} given)`
     );
   }
-  const bound: (PyValue | undefined)[] = params.map((_, index) => args[index]);
+  const names = [...params, ...keywordOnly];
+  const bound: (PyValue | undefined)[] = names.map((_, index) => args[index]);
   for (const [key, value] of kwargs ?? []) {
-    const index = params.indexOf(key);
+    const index = names.indexOf(key);
     if (index < positionalOnly) {
-      const suggestion = bestSuggestion(key, params.slice(positionalOnly));
+      const suggestion = bestSuggestion(key, names.slice(positionalOnly));
       throw typeError(
         `${name}() got an unexpected keyword argument '${key}'${suggestion ? `. Did you mean '${suggestion}'?` : ''}`
       );

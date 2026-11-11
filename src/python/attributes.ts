@@ -9,10 +9,13 @@ import {
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
+import { hasPythonLevelNew } from './instances';
+import { builtinFunctionModule } from './modules';
 import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { deleteMember, instancesHaveDict, isMember, writeMember } from './slots';
+import { typeFlags } from './typeFlags';
 import {
   builtinFunctionClass,
   classmethodClass,
@@ -96,6 +99,9 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
     }
     case '__module__': {
       return cls.module;
+    }
+    case '__flags__': {
+      return BigInt(typeFlags(cls));
     }
     case '__doc__': {
       return cls.isBuiltin ? (cls.doc ?? None) : (cls.dict.get('__doc__') ?? None);
@@ -201,10 +207,12 @@ function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue 
   if (name === '__self__') {
     // A static method such as `str.maketrans` shows its type in its repr but has no `__self__`, unlike `__new__`.
     if (fn.binding === 'static' && fn.name !== '__new__') return None;
+    if (fn.self instanceof PyClass && hasPythonLevelNew(fn.self)) return None;
     return fn.self ?? (fn.cls === builtinFunctionClass ? moduleOf(fn) : undefined);
   }
   if (name === '__objclass__') return descriptorOwners.get(fn);
   if (name === '__doc__') return None;
+  if (name === '__module__') return builtinFunctionModule(currentRuntime(), fn) ?? None;
   return undefined;
 }
 
@@ -409,6 +417,14 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue): void 
   if (name === '__getattribute__') noteGetattributeAssigned();
   if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
+  }
+  if (name === '__name__' || name === '__qualname__') {
+    if (typeof value !== 'string') {
+      throw typeError(`can only assign string to ${target.name}.${name}, not '${typeName(value)}'`);
+    }
+    if (name === '__name__') (target as { name: string }).name = value;
+    else target.qualifiedName = value;
+    return;
   }
   if (name === '__module__' && typeof value === 'string') target.module = value;
   target.dict.set(name, value);

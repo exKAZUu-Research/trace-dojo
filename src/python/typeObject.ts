@@ -124,14 +124,6 @@ method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
   return None;
 });
 method(objectClass, '__sizeof__', 'none', 0, 0, () => 16n);
-method(objectClass, '__getstate__', 'none', 0, 0, (self) =>
-  self instanceof PyInstance ? currentRuntime().dir(self) : None
-);
-for (const name of ['__reduce__', '__reduce_ex__']) {
-  method(objectClass, name, 'expected', 0, 1, () => {
-    throw currentRuntime().unsupported(`object.${name}()`);
-  });
-}
 objectClass.dict.set(
   '__init_subclass__',
   new PyBuiltinFunction(

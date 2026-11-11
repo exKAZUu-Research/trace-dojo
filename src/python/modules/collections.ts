@@ -3,7 +3,7 @@ import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { DictStore } from '../dictStore';
 import { mappingEntries, storeKey } from '../expressionEvaluator';
-import { defineNew } from '../instances';
+import { defineNew, definePythonLevelNew } from '../instances';
 import { keyError } from '../items';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -529,7 +529,7 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   describeNamedTuple(cls, fields, kwargs);
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
   cls.slotNames = new Set();
-  defineNew(cls, cls.construct);
+  definePythonLevelNew(cls, cls.construct);
   cls.dict.set('_fields', newTuple(fields));
   const defaulted = fields.slice(fields.length - defaults.length);
   cls.dict.set('_field_defaults', newDict(defaulted.map((name, index) => [name, defaults[index]])));

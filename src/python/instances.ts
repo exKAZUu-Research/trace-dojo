@@ -158,6 +158,23 @@ export function defineNew(cls: PyClass, create: Create): void {
   );
 }
 
+/** The classes whose builtin `__new__` stands for one CPython writes in Python, which tp_new_wrapper's check skips. */
+const pythonLevelNews = new WeakSet<PyClass>();
+
+const builtinNew = (each: PyClass): boolean =>
+  !pythonLevelNews.has(each) && each.lookup('__new__') instanceof PyBuiltinFunction;
+
+/** Gives a class the `__new__` that creates its instances, standing for one CPython writes in Python. */
+export function definePythonLevelNew(cls: PyClass, create: Create): void {
+  defineNew(cls, create);
+  pythonLevelNews.add(cls);
+}
+
+/** Whether a class's `__new__` stands for a function CPython writes in Python, which has no `__self__`. */
+export function hasPythonLevelNew(cls: PyClass): boolean {
+  return pythonLevelNews.has(cls);
+}
+
 /** Checks the class `owner.__new__` receives first, as CPython's tp_new_wrapper does. */
 function checkSubtype(owner: PyClass, args: PyValue[]): PyClass {
   const qualified = `${owner.name}.__new__`;
@@ -166,8 +183,9 @@ function checkSubtype(owner: PyClass, args: PyValue[]): PyClass {
   if (!(cls instanceof PyClass)) throw typeError(`${qualified}(X): X is not a type object (${typeName(cls)})`);
   if (!cls.isSubclassOf(owner))
     throw typeError(`${qualified}(${cls.name}): ${cls.name} is not a subtype of ${owner.name}`);
-  const effective = cls.mro.find((each) => each.lookup('__new__') instanceof PyBuiltinFunction);
-  if (effective !== undefined && effective.lookup('__new__') !== owner.lookup('__new__')) {
+  const effective = cls.mro.find(builtinNew);
+  const ownerNew = owner.mro.find(builtinNew)?.lookup('__new__');
+  if (effective !== undefined && effective.lookup('__new__') !== ownerNew) {
     throw typeError(`${qualified}(${cls.name}) is not safe, use ${effective.name}.__new__()`);
   }
   return cls;
