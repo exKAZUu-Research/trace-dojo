@@ -65,6 +65,14 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['get_int_max_str_digits', builtin('get_int_max_str_digits', 'none', 0, 0, () => 4300n)],
     ['intern', builtin('intern', 'one', 1, 1, ([value]) => intern(value))],
     ['exc_info', builtin('exc_info', 'none', 0, 0, () => excInfo(runtime))],
+    // A program can add no audit hook, so raising an audit event does nothing, as in CPython without hooks.
+    [
+      'audit',
+      builtin('audit', 'expected', 1, Number.POSITIVE_INFINITY, ([event]) => {
+        if (typeof event !== 'string') throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
+        return None;
+      }),
+    ],
     ['exception', builtin('exception', 'none', 0, 0, () => runtime.evaluator.handledExceptions.at(-1) ?? None)],
   ];
 }

@@ -18,6 +18,5 @@ export const UNSUPPORTED_SYS_ATTRIBUTES: Record<string, string> = {
   _getframe: 'フレームオブジェクト（sys._getframe()）',
   displayhook: 'sys.displayhook',
   excepthook: 'sys.excepthook',
-  audit: '監査フック（sys.audit()）',
   addaudithook: '監査フック（sys.addaudithook()）',
 };

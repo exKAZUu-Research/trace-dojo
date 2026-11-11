@@ -53,7 +53,16 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new Map());
   runtime.modules.set(name, module);
   module.dict.set('__name__', name);
-  for (const [key, value] of factory(runtime, module.dict)) module.dict.set(key, value);
+  let attributes: Map<string, PyValue>;
+  try {
+    attributes = factory(runtime, module.dict);
+  } catch (error) {
+    // As in CPython, a module whose code failed leaves sys.modules, so that importing it again runs it again.
+    runtime.modules.delete(name);
+    moduleTables.get(runtime)?.delete(name);
+    throw error;
+  }
+  for (const [key, value] of attributes) module.dict.set(key, value);
   const unsupported = name === 'sys' ? UNSUPPORTED_SYS_ATTRIBUTES : unsupportedAttributes.get(name);
   for (const [key, feature] of Object.entries(unsupported ?? {})) module.unsupported.set(key, feature);
   moduleTables.get(runtime)?.set(name, module);
