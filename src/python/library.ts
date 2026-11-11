@@ -143,6 +143,7 @@ import './modules/stdlibPickle';
 import './modules/pickle';
 import './modules/pickletools';
 import './modules/wave';
+import './modules/plistlib';
 import './modules/xml/pyexpat';
 import './modules/xml/xmlParsers';
 import './modules/xml/xmlEtree';

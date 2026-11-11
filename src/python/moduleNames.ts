@@ -129,6 +129,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'os.path',
   'pathlib',
   'posixpath',
+  'plistlib',
   'pprint',
   'queue',
   'quopri',
