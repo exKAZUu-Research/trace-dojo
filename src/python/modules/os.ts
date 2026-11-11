@@ -87,13 +87,27 @@ registerModule(
   SYSTEM_FUNCTIONS
 );
 
-// CPython's `os.PathLike`, as `Lib/os.py` defines it.
+// CPython's `os.PathLike`, as `Lib/os.py` defines it, with `_collections_abc._check_methods`, since modules that
+// collections.abc imports import os.
 registerSourceModule(
   '_os_pathlike',
   String.raw`
 import abc
-from collections.abc import _check_methods
-from types import GenericAlias
+
+GenericAlias = type(list[int])
+
+
+def _check_methods(C, *methods):
+    mro = C.__mro__
+    for method in methods:
+        for B in mro:
+            if method in B.__dict__:
+                if B.__dict__[method] is None:
+                    return NotImplemented
+                break
+        else:
+            return NotImplemented
+    return True
 
 
 class PathLike(abc.ABC):
