@@ -34,6 +34,7 @@ import {
   lookupSpecial,
   setAttribute,
   setItem,
+  toArray,
 } from './objects';
 import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
@@ -57,7 +58,7 @@ import {
   typeName,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyTuple, type PyValue } from './values';
+import { DONE, PyClass, PyError, type PyFunction, PyInstance, type PyModule, PyTuple, type PyValue } from './values';
 import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
 const NO_EXCEPTIONS: PyInstance[] = [];
@@ -260,8 +261,7 @@ export class Evaluator extends AsyncEvaluator {
     if (statement.kind === 'importFrom') {
       this.importFrom(statement, frame);
     } else if (statement.kind === 'importStar') {
-      const module = runtime.importModule(statement.module);
-      for (const [name, value] of module.dict) if (!name.startsWith('_')) frame.locals.set(name, value);
+      for (const [name, value] of starImports(runtime.importModule(statement.module))) frame.locals.set(name, value);
     } else {
       for (const { module, binding, bindsModule } of statement.names) {
         const imported = runtime.importModule(module);
@@ -1315,6 +1315,21 @@ function matchArgsOf(cls: PyClass, count: number): readonly PyValue[] {
     );
   }
   return allowed;
+}
+
+/** The names `from module import *` binds: those of its `__all__`, else its public names, as CPython's `import_all_from`. */
+function starImports(module: PyModule): [string, PyValue][] {
+  const all = getAttributeOrUndefined(module, '__all__');
+  if (all === undefined) return [...module.dict].filter(([name]) => !name.startsWith('_'));
+  const moduleName = module.dict.get('__name__');
+  return toArray(all).map((name) => {
+    if (typeof name !== 'string') {
+      throw typeError(
+        `Item in ${typeof moduleName === 'string' ? moduleName : '?'}.__all__ must be str, not ${typeName(name)}`
+      );
+    }
+    return [name, getAttribute(module, name)];
+  });
 }
 
 export type { Completion };

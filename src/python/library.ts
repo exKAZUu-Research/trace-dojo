@@ -127,6 +127,7 @@ import './modules/glob';
 import './modules/ntpath';
 import './modules/genericpath';
 import './modules/stat';
+import './modules/statNative';
 import './modules/datetimePickle';
 import './modules/stdlibPickle';
 import './modules/pickle';
