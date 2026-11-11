@@ -63,7 +63,7 @@ genericClass.layout = { base: 'object' };
 genericClass.isBaseType = true;
 
 /** The classes whose subscription declares the type parameters of a class deriving from it: Generic and Protocol. */
-export const parameterDeclaringClasses = new Set<PyClass>([genericClass]);
+export const parameterDeclaringClasses = new WeakSet<PyClass>([genericClass]);
 
 /** `typing.NoDefault`, the default of a type parameter that has none. */
 export const NoDefault = new PyObject(noDefaultClass);
@@ -288,11 +288,14 @@ export const mroEntryHooks: ((base: PyValue, className: string, bases: readonly 
   [];
 
 /** Sets `__parameters__` of a class deriving from Generic, as `Generic.__init_subclass__` does. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows Generic.__init_subclass__, which checks each way bases declare type parameters.
+// code-gauge-allow functionCognitiveComplexity 17 -- Follows Generic.__init_subclass__, which checks each way bases declare type parameters.
 export function initGenericSubclass(cls: PyClass, originalBases: readonly PyValue[] | undefined): void {
   if (!cls.isSubclassOf(genericClass)) return;
   if (originalBases === undefined) {
-    if (cls.bases.includes(genericClass)) throw typeError('Cannot inherit from plain Generic');
+    // typing's Protocol derives from plain Generic, which only it may, as CPython checks by its name.
+    const plainGeneric = cls.bases.includes(genericClass) && cls.name !== 'Protocol';
+    if (plainGeneric) throw typeError('Cannot inherit from plain Generic');
+    cls.dict.set('__parameters__', newTuple([]));
     return;
   }
   if (originalBases.includes(genericClass)) throw typeError('Cannot inherit from plain Generic');

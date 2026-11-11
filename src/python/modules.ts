@@ -41,6 +41,11 @@ export function isRegisteredModule(name: string): boolean {
 }
 
 /** Makes `name` another name of the module `target`, as `os.path` is of `posixpath`. */
+/** Whether a module's code is CPython's Python, which creates its classes in each run that imports it. */
+export function isSourceModule(name: string): boolean {
+  return sourceModules.has(name);
+}
+
 export function registerModuleAlias(name: string, target: string): void {
   aliases.set(name, target);
 }
@@ -203,14 +208,22 @@ const partialAccelerators = new Set<string>();
  */
 type ModuleCreationHook = (runtime: Runtime, name: string) => (() => void) | undefined;
 
-const moduleCreationHooks: ModuleCreationHook[] = [];
+/**
+ * The module creation hooks, kept on a hoisted function rather than in a module constant, since modules imported in a
+ * cycle with this one add theirs while it is still loading.
+ */
+function creationHooks(): ModuleCreationHook[] {
+  const holder = creationHooks as { hooks?: ModuleCreationHook[] };
+  holder.hooks ??= [];
+  return holder.hooks;
+}
 
 export function addModuleCreationHook(hook: ModuleCreationHook): void {
-  moduleCreationHooks.push(hook);
+  creationHooks().push(hook);
 }
 
 function runFactory(runtime: Runtime, name: string, factory: ModuleFactory, module: PyModule): Map<string, PyValue> {
-  const after = moduleCreationHooks.map((hook) => hook(runtime, name));
+  const after = creationHooks().map((hook) => hook(runtime, name));
   try {
     return factory(runtime, module.dict);
   } catch (error) {

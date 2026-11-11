@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 560 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 565 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -12,7 +12,7 @@ import {
 } from './annotations';
 import { attributeDescriptorField, PyAttribute } from './attributeDescriptors';
 import { builtinDoc, builtinTextSignature } from './builtinDocs';
-import { solidBase } from './classes';
+import { setClassBases, solidBase } from './classes';
 import {
   builtinClassesWithDict,
   callGetter,
@@ -535,7 +535,13 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue, callsH
     return;
   }
   if (name === '__module__' && typeof value === 'string') target.module = value;
-  if (name === '__annotations__') setClassAnnotations(target, value);
+  storeClassAttribute(target, name, value);
+}
+
+/** Stores a class attribute: the ones type's getsets keep outside the class's dictionary, or in it. */
+function storeClassAttribute(target: PyClass, name: string, value: PyValue): void {
+  if (name === '__bases__') setClassBases(target, value);
+  else if (name === '__annotations__') setClassAnnotations(target, value);
   else if (name === '__annotate__') setClassAnnotate(target, value);
   else target.dict.set(name, value);
 }

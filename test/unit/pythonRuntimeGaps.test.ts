@@ -134,3 +134,150 @@ except TypeError as e:
     if not str(e).startswith("Can't instantiate abstract class V without an implementation for abstract methods '__abs__', '__add__'"): raise
 `);
 });
+
+test("typing.Protocol is the code of CPython's typing, with its runtime checks and their errors", () => {
+  expectSameAsCPython(`import io as _io, contextlib as _contextlib, re as _re
+_buf = _io.StringIO()
+_ctx = _contextlib.redirect_stdout(_buf)
+_ctx.__enter__()
+import typing, abc, functools, collections.abc as cabc
+from typing import Protocol, runtime_checkable, Generic, TypeVar
+T = TypeVar('T')
+@runtime_checkable
+class P(Protocol):
+    def quack(self): ...
+class Duck:
+    def quack(self): pass
+print(P.__protocol_attrs__, P.__non_callable_proto_members__, P._is_protocol, P._is_runtime_protocol)
+print(isinstance(Duck(), P), isinstance(3, P), issubclass(Duck, P), issubclass(int, P))
+class NR(Protocol):
+    x: int
+for f in (lambda: isinstance(1, NR), lambda: issubclass(int, NR)):
+    try: f()
+    except TypeError as e: print(e)
+@runtime_checkable
+class D(Protocol):
+    x: int
+    def m(self): ...
+print(sorted(D.__protocol_attrs__), D.__non_callable_proto_members__)
+class HasX:
+    x = 1
+    def m(self): pass
+print(isinstance(HasX(), D))
+try: issubclass(HasX, D)
+except TypeError as e: print(e)
+try: issubclass(1, D)
+except TypeError as e: print(e)
+@runtime_checkable
+class G(Protocol[T]):
+    def get(self) -> T: ...
+class GG[T](Protocol):
+    def put(self, x: T): ...
+print(G.__parameters__, G[int], GG.__parameters__, GG.__bases__, G.__mro__)
+class Sub(P, Protocol):
+    def other(self): ...
+print(Sub.__protocol_attrs__ == {'quack', 'other'}, Sub._is_protocol, Sub._is_runtime_protocol)
+class Impl(P):
+    pass
+print(Impl._is_protocol, isinstance(Impl(), P), Impl())
+try: P()
+except TypeError as e: print(e)
+try:
+    class Bad(int, Protocol): pass
+except TypeError as e: print(e)
+try: runtime_checkable(int)
+except TypeError as e: print(e)
+print(typing.is_protocol(P), typing.is_protocol(Impl), typing.get_protocol_members(D) == {'x', 'm'})
+print(isinstance(3, typing.SupportsInt), isinstance('x', typing.SupportsInt), issubclass(float, typing.SupportsIndex))
+print(type(P), type(Protocol), Protocol.__mro__, list(Protocol.__dict__))
+@functools.singledispatch
+def f(x): return 'base'
+@f.register
+def _(x: cabc.Iterable): return 'iter'
+print(f([1]), f(P))
+class MyAbc(abc.ABC): pass
+print(issubclass(Duck, MyAbc))
+print(isinstance(Duck(), typing.SupportsAbs))
+class WithInit(Protocol):
+    def __init__(self): self.a = 1
+class C2(WithInit):
+    pass
+print(C2().a)
+_ctx.__exit__(None, None, None)
+EXPECTED = "{'quack'} set() True True\\nTrue False True False\\nInstance and class checks can only be used with @runtime_checkable protocols\\nInstance and class checks can only be used with @runtime_checkable protocols\\n['m', 'x'] {'x'}\\nTrue\\nProtocols with non-method members don't support issubclass(). Non-method members: 'x'.\\nissubclass() arg 1 must be a class\\n(~T,) __main__.G[int] (T,) (<class 'typing.Protocol'>,) (<class '__main__.G'>, <class 'typing.Protocol'>, <class 'typing.Generic'>, <class 'object'>)\\nTrue True True\\nFalse True <__main__.Impl object>\\nProtocols cannot be instantiated\\nProtocols can only inherit from other protocols, got <class 'int'>\\n@runtime_checkable can be only applied to protocol classes, got <class 'int'>\\nTrue False True\\nTrue False False\\n<class 'typing._ProtocolMeta'> <class 'typing._ProtocolMeta'> (<class 'typing.Protocol'>, <class 'typing.Generic'>, <class 'object'>) ['__module__', '__firstlineno__', '__doc__', '__slots__', '_is_protocol', '_is_runtime_protocol', '__init_subclass__', '__static_attributes__', '__parameters__', '__abstractmethods__', '_abc_impl', '__protocol_attrs__']\\niter base\\nFalse\\nFalse\\n1\\n"
+if _re.sub(' at 0x[0-9a-f]*', '', _buf.getvalue()) != EXPECTED: raise AssertionError(_buf.getvalue())
+`);
+});
+
+test("type.__subclasses__() lists the live subclasses in order, and refuses lists CPython's startup fills", () => {
+  expectSameAsCPython(`import io as _io, contextlib as _contextlib
+_buf = _io.StringIO()
+_ctx = _contextlib.redirect_stdout(_buf)
+_ctx.__enter__()
+import gc, abc, collections.abc, numbers, enum, typing, weakref
+class A: pass
+class B(A): pass
+class C(A): pass
+class D(B, C): pass
+print(A.__subclasses__(), B.__subclasses__(), C.__subclasses__(), D.__subclasses__())
+del D
+gc.collect()
+print(B.__subclasses__(), C.__subclasses__())
+def make():
+    class L(A): pass
+    return L
+x = make()
+r = weakref.ref(x)
+print(A.__subclasses__())
+x = None
+gc.collect()
+print(A.__subclasses__(), r())
+class F(float): pass
+print(float.__subclasses__(), complex.__subclasses__(), int.__subclasses__())
+class E(KeyError): pass
+print(KeyError.__subclasses__())
+T = type('T', (A,), {})
+print(A.__subclasses__())
+class Color(enum.Enum):
+    RED = 1
+print(Color.__subclasses__(), enum.Enum.__subclasses__(), enum.IntFlag.__subclasses__())
+class MyAbc(abc.ABC): pass
+class Impl(MyAbc): pass
+MyAbc.register(int)
+print(MyAbc.__subclasses__(), issubclass(int, MyAbc))
+print(collections.abc.Sequence.__subclasses__(), collections.abc.MutableSequence.__subclasses__())
+class R(numbers.Real): pass
+print(numbers.Real.__subclasses__(), numbers.Rational.__subclasses__())
+class P(typing.Protocol):
+    def f(self): ...
+class Q(P, typing.Protocol): pass
+print(P.__subclasses__())
+A.__bases__
+class Z(A): pass
+Z.__bases__ = (C,)
+print(A.__subclasses__(), C.__subclasses__())
+class A: pass
+class C: pass
+class Z(A): pass
+Z.__bases__ = (C,)
+print(Z.__bases__, Z.__mro__, Z.__dict__.get("__bases__"))
+class Y(Z): pass
+print(Y.__mro__)
+Z.__bases__ = (A, C)
+print(Y.__mro__, A.__subclasses__(), C.__subclasses__())
+for v in ([A], (), (1,), (Y,)):
+    try: Z.__bases__ = v
+    except TypeError as e: print(e)
+class M(A, C): pass
+try: M.__bases__ = (C, A, C)
+except TypeError as e: print(e)
+z = Z()
+print(isinstance(z, C), Z.f if hasattr(Z, 'f') else None)
+_ctx.__exit__(None, None, None)
+EXPECTED = "[<class '__main__.B'>, <class '__main__.C'>] [<class '__main__.D'>] [<class '__main__.D'>] []\\n[] []\\n[<class '__main__.B'>, <class '__main__.C'>, <class '__main__.make.<locals>.L'>]\\n[<class '__main__.B'>, <class '__main__.C'>] None\\n[<class '__main__.F'>] [] [<class 'bool'>, <enum 'IntEnum'>, <flag 'IntFlag'>]\\n[<class '__main__.E'>]\\n[<class '__main__.B'>, <class '__main__.C'>, <class '__main__.T'>]\\n[] [<enum 'ReprEnum'>, <flag 'Flag'>, <enum 'Color'>] []\\n[<class '__main__.Impl'>] True\\n[<class 'collections.abc.ByteString'>, <class 'collections.abc.MutableSequence'>, <class 'collections.UserString'>] [<class 'collections.UserList'>]\\n[<class 'numbers.Rational'>, <class '__main__.R'>] [<class 'numbers.Integral'>]\\n[<class '__main__.Q'>]\\n[<class '__main__.B'>, <class '__main__.C'>, <class '__main__.T'>] [<class '__main__.Z'>]\\n(<class '__main__.C'>,) (<class '__main__.Z'>, <class '__main__.C'>, <class 'object'>) None\\n(<class '__main__.Y'>, <class '__main__.Z'>, <class '__main__.C'>, <class 'object'>)\\n(<class '__main__.Y'>, <class '__main__.Z'>, <class '__main__.A'>, <class '__main__.C'>, <class 'object'>) [<class '__main__.Z'>] [<class '__main__.Z'>]\\ncan only assign tuple to Z.__bases__, not list\\ncan only assign non-empty tuple to Z.__bases__, not ()\\nZ.__bases__ must be tuple of classes, not 'int'\\na __bases__ item causes an inheritance cycle\\nduplicate base class C\\nTrue None\\n"
+if _buf.getvalue() != EXPECTED: raise AssertionError(_buf.getvalue())
+`);
+  const result = executeProgram('python', 'import pydoc\nint.__subclasses__()\n');
+  expect(result).toMatchObject({ kind: 'executed' });
+  expect(result.kind === 'executed' ? result.uncaughtException : '').toContain('使えません');
+});

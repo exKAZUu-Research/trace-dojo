@@ -68,6 +68,8 @@ interface AbcState {
   countLibrary: boolean;
   /** How many modules the run is creating, inside one another. */
   creating: number;
+  /** The index of the running frame when each check of `_abc` running began, innermost last. */
+  checkFrames: number[];
 }
 
 const states = new WeakMap<Runtime, AbcState>();
@@ -82,6 +84,7 @@ function stateOf(runtime: Runtime = currentRuntime()): AbcState {
       counted: new Set(),
       countLibrary: false,
       creating: 0,
+      checkFrames: [],
     };
     states.set(runtime, state);
   }
@@ -189,6 +192,25 @@ function callCheck(cls: PyClass, subclass: PyValue): PyValue {
   const shortcut = check === undefined ? undefined : checkShortcuts.get(check);
   if (shortcut && cls.lookup('__subclasscheck__') === undefined) return shortcut(cls, subclass);
   return callValue(getAttribute(cls, '__subclasscheck__'), [subclass]);
+}
+
+/**
+ * Whether the frame at `index` called the innermost check `_abc` is running, which CPython's ABCMeta runs from its
+ * frame in abc, as typing's `_caller` asks.
+ */
+export function nativeCheckCaller(index: number): boolean {
+  return stateOf().checkFrames.at(-1) === index;
+}
+
+/** Runs a check of `_abc`, noting the frame it runs in. */
+function inCheck<T>(run: () => T): T {
+  const { checkFrames } = stateOf();
+  checkFrames.push(currentRuntime().frames.length - 1);
+  try {
+    return run();
+  } finally {
+    checkFrames.pop();
+  }
 }
 
 function abcInstanceCheck(cls: PyClass, instance: PyValue): PyValue {
@@ -345,10 +367,10 @@ function shareClasses(runtime: Runtime): void {
   adoptNamespace(abcMetaClass, sharedNamespace.get('ABCMeta') as PyClass);
   // ABCMeta's checks only call _abc's, which isinstance() and issubclass() call directly.
   checkShortcuts.set(abcMetaClass.dict.get('__instancecheck__') as PyValue, (cls, value) =>
-    abcInstanceCheck(cls, value)
+    inCheck(() => abcInstanceCheck(cls, value))
   );
   checkShortcuts.set(abcMetaClass.dict.get('__subclasscheck__') as PyValue, (cls, value) =>
-    abcSubclassCheck(cls, value)
+    inCheck(() => abcSubclassCheck(cls, value))
   );
   sharedNamespace.set('ABCMeta', abcMetaClass);
   adoptNamespace(abcClass, sharedNamespace.get('ABC') as PyClass);
