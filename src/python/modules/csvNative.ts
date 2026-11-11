@@ -1,10 +1,11 @@
 import { callValue } from '../objects';
 import { registerSourceModule } from '../sourceModules';
-import { nativeFunction } from '../types';
-import type { PyFunction, PyValue } from '../values';
+import { nativeFunction, wrapperDescriptorClass } from '../types';
+import { PyBuiltinFunction, type PyFunction, type PyValue } from '../values';
+import { readerNext } from './csvParser';
 
-// CPython's `_csv` module, which CPython writes in C (`Modules/_csv.c`), in Python: the same parser states, the same
-// quoting rules of the writer, and the same messages.
+// CPython's `_csv` module, which CPython writes in C (`Modules/_csv.c`), in Python, with the reader's parser native
+// (see csvParser.ts): the same parser states, the same quoting rules of the writer, and the same messages.
 const SOURCE = String.raw`
 QUOTE_MINIMAL, QUOTE_ALL, QUOTE_NONNUMERIC, QUOTE_NONE, QUOTE_STRINGS, QUOTE_NOTNULL = range(6)
 
@@ -182,11 +183,6 @@ def _unpack(name, args, maximum):
     return args[0], (args[1] if len(args) > 1 else None)
 
 
-# The states of the parser of the reader.
-(START_RECORD, START_FIELD, ESCAPED_CHAR, IN_FIELD, IN_QUOTED_FIELD,
- ESCAPE_IN_QUOTED_FIELD, QUOTE_IN_QUOTED_FIELD, EAT_CRNL, AFTER_ESCAPED_CRNL) = range(9)
-# The end of a line, which the parser handles as one more character.
-_EOL = object()
 
 
 class reader:
@@ -196,7 +192,7 @@ Reader objects are responsible for reading and parsing tabular data
 in CSV format.
 """
 
-    __slots__ = ('_input', '_dialect', '_line_num', '_fields', '_field', '_state', '_unquoted')
+    __slots__ = ('_input', '_dialect', '_line_num')
 
     def __new__(cls, *args, **kwargs):
         raise TypeError("cannot create '_csv.reader' instances")
@@ -212,136 +208,7 @@ in CSV format.
     def __iter__(self):
         return self
 
-    def __next__(self):
-        init = object.__setattr__
-        init(self, '_fields', [])
-        init(self, '_field', [])
-        init(self, '_state', START_RECORD)
-        init(self, '_unquoted', True)
-        while True:
-            try:
-                line = next(self._input)
-            except StopIteration:
-                if self._field or self._state == IN_QUOTED_FIELD:
-                    if self._dialect.strict:
-                        raise Error('unexpected end of data') from None
-                    self._save_field()
-                    break
-                raise
-            if not isinstance(line, str):
-                raise Error(f'iterator should return strings, not {type(line).__name__} '
-                            '(the file should be opened in text mode)')
-            init(self, '_line_num', self._line_num + 1)
-            for c in line:
-                self._process_char(c)
-            self._process_char(_EOL)
-            if self._state == START_RECORD:
-                break
-        fields = self._fields
-        init(self, '_fields', None)
-        return fields
-
-    def _save_field(self):
-        quoting = self._dialect.quoting
-        unquoted = self._unquoted
-        if unquoted and not self._field and (quoting == QUOTE_NOTNULL or quoting == QUOTE_STRINGS):
-            field = None
-        else:
-            field = ''.join(self._field)
-            if unquoted and self._field and (quoting == QUOTE_NONNUMERIC or quoting == QUOTE_STRINGS):
-                field = float(field)
-        self._fields.append(field)
-        object.__setattr__(self, '_field', [])
-        object.__setattr__(self, '_unquoted', True)
-
-    def _add_char(self, c):
-        if len(self._field) >= _field_limit:
-            raise Error(f'field larger than field limit ({_field_limit})')
-        self._field.append(c)
-
-    def _process_char(self, c):
-        dialect = self._dialect
-        state = self._state
-        new_state = state
-        if state == START_RECORD:
-            if c is _EOL:
-                return
-            if c == '\n' or c == '\r':
-                new_state = EAT_CRNL
-                object.__setattr__(self, '_state', new_state)
-                return
-            state = START_FIELD
-            new_state = START_FIELD
-        if state == START_FIELD:
-            if c is _EOL or c == '\n' or c == '\r':
-                self._save_field()
-                new_state = START_RECORD if c is _EOL else EAT_CRNL
-            elif c == dialect.quotechar and dialect.quoting != QUOTE_NONE:
-                object.__setattr__(self, '_unquoted', False)
-                new_state = IN_QUOTED_FIELD
-            elif c == dialect.escapechar:
-                new_state = ESCAPED_CHAR
-            elif c == ' ' and dialect.skipinitialspace:
-                pass
-            elif c == dialect.delimiter:
-                self._save_field()
-            else:
-                self._add_char(c)
-                new_state = IN_FIELD
-        elif state == ESCAPED_CHAR:
-            if c == '\n' or c == '\r':
-                self._add_char(c)
-                new_state = AFTER_ESCAPED_CRNL
-            else:
-                self._add_char('\n' if c is _EOL else c)
-                new_state = IN_FIELD
-        elif state == AFTER_ESCAPED_CRNL and c is _EOL:
-            pass
-        elif state == IN_FIELD or state == AFTER_ESCAPED_CRNL:
-            if c is _EOL or c == '\n' or c == '\r':
-                self._save_field()
-                new_state = START_RECORD if c is _EOL else EAT_CRNL
-            elif c == dialect.escapechar:
-                new_state = ESCAPED_CHAR
-            elif c == dialect.delimiter:
-                self._save_field()
-                new_state = START_FIELD
-            else:
-                self._add_char(c)
-        elif state == IN_QUOTED_FIELD:
-            if c is _EOL:
-                pass
-            elif c == dialect.escapechar:
-                new_state = ESCAPE_IN_QUOTED_FIELD
-            elif c == dialect.quotechar and dialect.quoting != QUOTE_NONE:
-                new_state = QUOTE_IN_QUOTED_FIELD if dialect.doublequote else IN_FIELD
-            else:
-                self._add_char(c)
-        elif state == ESCAPE_IN_QUOTED_FIELD:
-            self._add_char('\n' if c is _EOL else c)
-            new_state = IN_QUOTED_FIELD
-        elif state == QUOTE_IN_QUOTED_FIELD:
-            if dialect.quoting != QUOTE_NONE and c == dialect.quotechar:
-                self._add_char(c)
-                new_state = IN_QUOTED_FIELD
-            elif c == dialect.delimiter:
-                self._save_field()
-                new_state = START_FIELD
-            elif c is _EOL or c == '\n' or c == '\r':
-                self._save_field()
-                new_state = START_RECORD if c is _EOL else EAT_CRNL
-            elif not dialect.strict:
-                self._add_char(c)
-                new_state = IN_FIELD
-            else:
-                raise Error(f"'{dialect.delimiter}' expected after '{dialect.quotechar}'")
-        elif state == EAT_CRNL:
-            if c is _EOL:
-                new_state = START_RECORD
-            elif c != '\n' and c != '\r':
-                raise Error("new-line character seen in unquoted field - "
-                            "do you need to open the file with newline=''?")
-        object.__setattr__(self, '_state', new_state)
+    __next__ = _reader_next
 
 
 _c_type_name(reader, '_csv.reader')
@@ -482,10 +349,6 @@ of the CSV file (which can span multiple input lines).
     init(self, '_input', iter(iterable))
     init(self, '_dialect', _call_dialect(dialect, kwargs))
     init(self, '_line_num', 0)
-    init(self, '_fields', None)
-    init(self, '_field', [])
-    init(self, '_state', START_RECORD)
-    init(self, '_unquoted', True)
     return self
 
 
@@ -582,7 +445,7 @@ unregister_dialect = _builtin_function(unregister_dialect)
 get_dialect = _builtin_function(get_dialect)
 list_dialects = _builtin_function(list_dialects)
 field_size_limit = _builtin_function(field_size_limit)
-del _c_type_name, _builtin_function
+del _c_type_name, _builtin_function, _reader_next
 `;
 
 registerSourceModule(
@@ -590,6 +453,17 @@ registerSourceModule(
   SOURCE,
   () =>
     new Map<string, PyValue>([
+      [
+        '_reader_next',
+        new PyBuiltinFunction(
+          wrapperDescriptorClass,
+          '__next__',
+          ([self]) => readerNext(self),
+          undefined,
+          'method',
+          '_csv.reader'
+        ),
+      ],
       [
         '_builtin_function',
         // Makes the module's functions builtin functions, as CPython's C functions are, which their reprs show.
