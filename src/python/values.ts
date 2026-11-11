@@ -161,6 +161,8 @@ export interface ExceptionState {
   selfValue?: PyValue;
   /** The sub-exceptions of an exception group. */
   exceptions?: PyTuple;
+  /** The traceback object of the frames the exception passed through, or None. */
+  traceback?: PyValue;
   message?: string;
 }
 
@@ -360,6 +362,8 @@ export class PyGenerator extends PyObject {
   started = false;
   running = false;
   finished = false;
+  /** The frame the generator runs in, which `gi_frame` gives. */
+  frame?: unknown;
 
   constructor(
     cls: PyClass,

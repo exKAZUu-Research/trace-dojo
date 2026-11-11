@@ -303,4 +303,6 @@ export interface Module {
   doc?: string;
   /** The `__future__` features the module enables, which the code it compiles inherits. */
   futureFeatures: string[];
+  /** The source text the module was parsed from. */
+  source?: string;
 }

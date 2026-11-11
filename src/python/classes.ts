@@ -5,8 +5,10 @@ import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
 import { Frame } from './frame';
 import { bindValue, callValue, deleteItem, getAttributeOrUndefined, getItem, lookupSpecial, setItem } from './objects';
+import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
 import { defineClassSlots, slotNamesOf } from './slots';
+import { noteUnwinding } from './tracebacks';
 import { initGenericSubclass, typingMroEntries } from './typeParams';
 import {
   builtinClass,
@@ -52,6 +54,9 @@ interface ClassBody {
 
 const pendingBodies = new WeakMap<object, ClassBody>();
 
+/** The class statement that created each class, which `inspect.getsource()` finds the source of. */
+export const classDefinitions = new WeakMap<PyClass, ClassDef>();
+
 // The class statement -----------------------------------------------------------------------------------------------
 
 /** Runs a class statement: evaluates the bases, runs the body in a namespace, and calls the metaclass. */
@@ -76,7 +81,7 @@ export function createClass(
   // A class body reads `__module__` from `__name__`, which code `exec` runs in fresh globals finds in builtins.
   namespace.set('__module__', frame.globals.get('__name__') ?? currentRuntime().builtins.get('__name__') ?? None);
   namespace.set('__qualname__', def.qualifiedName);
-  namespace.set('__firstlineno__', BigInt(def.row + 1));
+  namespace.set('__firstlineno__', BigInt(firstRowOf(def) + 1));
   if (def.doc !== undefined) namespace.set('__doc__', def.doc);
   if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
   const classCell = new PyCell();
@@ -103,6 +108,7 @@ export function createClass(
     classCell,
     annotations: body.annotations,
   });
+  if (result instanceof PyClass) classDefinitions.set(result, def);
   for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
   return result;
 }
@@ -202,6 +208,9 @@ function runClassBody(
   runtime.pushFrame(body);
   try {
     evaluator.runModule(def.body, body);
+  } catch (error) {
+    noteUnwinding(error);
+    throw error;
   } finally {
     runtime.popFrame();
   }

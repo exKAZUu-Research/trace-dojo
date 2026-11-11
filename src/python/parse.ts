@@ -44,9 +44,10 @@ function parseModule(
 ): Module {
   const indentationError = findIndentationError(source);
   if (indentationError) throw new CompileError([indentationError]);
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) =>
-    new ProgramConverter(source, trace, namesInLocals, library, futureFeatures).convert(root)
-  );
+  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => ({
+    ...new ProgramConverter(source, trace, namesInLocals, library, futureFeatures).convert(root),
+    source,
+  }));
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

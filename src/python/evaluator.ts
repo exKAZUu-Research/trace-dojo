@@ -38,6 +38,7 @@ import { equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
 import { targetSuspends } from './suspension';
 import { isWaitRequest, PREEMPTION, schedulerOf, suspendingCall } from './threads';
+import { noteCaught, prependTraceback } from './tracebacks';
 import { genericBaseOf, newTypeParam, PyTypeAlias } from './typeParams';
 import {
   baseExceptionClass,
@@ -186,7 +187,7 @@ export class Evaluator extends AsyncEvaluator {
       }
       case 'raise': {
         const exception = statement.exception ? this.evaluate(statement.exception, frame) : undefined;
-        throw this.raise(exception, statement.cause ? this.evaluate(statement.cause, frame) : undefined);
+        throw this.raise(exception, statement.cause ? this.evaluate(statement.cause, frame) : undefined, frame);
       }
       case 'assert': {
         if (isTruthy(this.evaluate(statement.test, frame))) return undefined;
@@ -607,7 +608,7 @@ export class Evaluator extends AsyncEvaluator {
       case 'raise': {
         const exception = statement.exception ? yield* this.evaluateSuspending(statement.exception, frame) : undefined;
         const cause = statement.cause ? yield* this.evaluateSuspending(statement.cause, frame) : undefined;
-        throw this.raise(exception, cause);
+        throw this.raise(exception, cause, frame);
       }
       case 'assert': {
         if (isTruthy(yield* this.evaluateSuspending(statement.test, frame))) return undefined;
@@ -670,8 +671,11 @@ export class Evaluator extends AsyncEvaluator {
 
   // Exceptions --------------------------------------------------------------------------------------------------------
 
-  /** The error a `raise` statement raises, given the values of its exception and its cause. */
-  private raise(value: PyValue | undefined, cause: PyValue | undefined): PyError {
+  /**
+   * The error a `raise` statement in `frame` raises, given the values of its exception and its cause. Raising an
+   * exception adds the frame to its traceback, while a bare `raise` keeps the traceback it has.
+   */
+  private raise(value: PyValue | undefined, cause: PyValue | undefined, frame: Frame): PyError {
     if (value === undefined) {
       const active = this.handling.at(-1);
       if (!active) return pyError('RuntimeError', 'No active exception to reraise');
@@ -684,6 +688,7 @@ export class Evaluator extends AsyncEvaluator {
       state.suppressContext = true;
     }
     this.chain(exception);
+    if (state) prependTraceback(state, frame, this.runtime.currentRow);
     return new PyError(exception);
   }
 
@@ -728,6 +733,7 @@ export class Evaluator extends AsyncEvaluator {
     caught: PyError,
     frame: Frame
   ): Generator<PyValue, Outcome, PyValue> {
+    noteCaught(caught, frame);
     if (statement.isGroup) return yield* this.exceptStar(statement, caught, frame);
     let handler: ExceptHandler | undefined;
     for (const each of statement.handlers) {

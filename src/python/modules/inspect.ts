@@ -6,13 +6,15 @@ import {
   isCoroutineFunction,
 } from '../coroutines';
 import { builtin } from '../define';
-import { registerModule } from '../modules';
 import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
+import { registerSourceModule } from '../sourceModules';
 import { builtinFunctionClass, classOf, generatorClass, None, typeError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyBuiltinFunction, PyClass, PyFunction, PyGenerator, PyModule, type PyValue } from '../values';
+import { INSPECT_SOURCE } from './inspectPython';
 import { emptyClass, formatAnnotation, parameterClass, signature, signatureClass } from './inspectSignature';
+import { inspectSourceNatives } from './inspectSource';
 
 /** The predicates of inspect, which tell what kind of object a value is. */
 const PREDICATES: [string, (value: PyValue) => boolean][] = [
@@ -36,8 +38,9 @@ const PREDICATES: [string, (value: PyValue) => boolean][] = [
   ],
 ];
 
-registerModule(
+registerSourceModule(
   'inspect',
+  INSPECT_SOURCE,
   () =>
     new Map<string, PyValue>([
       ...PREDICATES.map(([name, test]): [string, PyValue] => [
@@ -56,33 +59,22 @@ registerModule(
       ['getdoc', builtin('getdoc', 'one', 1, 1, ([value]) => getDoc(value))],
       ['cleandoc', builtin('cleandoc', 'one', 1, 1, ([doc]) => cleanDoc(doc))],
       ['getmro', builtin('getmro', 'one', 1, 1, ([cls]) => getAttribute(cls, '__mro__'))],
+      ...inspectSourceNatives(),
     ]),
-  Object.fromEntries(
-    [
-      ['getsource', 'ソースコード'],
-      ['getsourcelines', 'ソースコード'],
-      ['getsourcefile', 'ソースファイル'],
-      ['getfile', 'ソースファイル'],
-      ['getmodule', 'オブジェクトを定義したモジュール'],
-      ['getcomments', 'ソースコードのコメント'],
-      ['currentframe', 'フレームオブジェクト'],
-      ['stack', 'フレームオブジェクト'],
-      ['trace', 'フレームオブジェクト'],
-      ['getframeinfo', 'フレームオブジェクト'],
-      ['getouterframes', 'フレームオブジェクト'],
-      ['getinnerframes', 'フレームオブジェクト'],
-      ['getgeneratorstate', 'ジェネレータの内部状態'],
-      ['getgeneratorlocals', 'ジェネレータの内部状態'],
-      ['getclosurevars', '関数の内部状態'],
-      ['getattr_static', 'inspect.getattr_static()'],
-      ['unwrap', 'inspect.unwrap()'],
-      ['getfullargspec', 'inspect.getfullargspec()'],
-      ['getcallargs', 'inspect.getcallargs()'],
-      ['isabstract', 'inspect.isabstract()'],
-      ['isdatadescriptor', 'inspect.isdatadescriptor()'],
-      ['getmembers_static', 'inspect.getmembers_static()'],
-    ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])
-  )
+  {
+    unsupported: Object.fromEntries(
+      [
+        ['getsourcefile', 'ソースファイルのパス'],
+        ['getfile', 'ソースファイルのパス'],
+        ['stack', 'ソースファイルのパスを含むフレームの情報'],
+        ['trace', 'ソースファイルのパスを含むフレームの情報'],
+        ['getframeinfo', 'ソースファイルのパスを含むフレームの情報'],
+        ['getouterframes', 'ソースファイルのパスを含むフレームの情報'],
+        ['getinnerframes', 'ソースファイルのパスを含むフレームの情報'],
+        ['getclosurevars', 'CPython のバイトコードから集める名前'],
+      ].map(([name, feature]) => [name, `inspect.${name}()（${feature}）`])
+    ),
+  }
 );
 
 function isGeneratorFunction(value: PyValue): boolean {

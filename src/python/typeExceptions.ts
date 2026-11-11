@@ -3,6 +3,7 @@ import { method } from './define';
 import { deriveGroup, makeExceptionGroup, splitGroup } from './exceptionGroups';
 import { callValue, isTruthy, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
+import { setTraceback } from './tracebacks';
 import {
   baseExceptionClass,
   exceptionClasses,
@@ -56,7 +57,11 @@ method(baseExceptionClass, 'add_note', 'one', 1, 1, (self, [note]) => {
   state.notes.items.push(note);
   return None;
 });
-method(baseExceptionClass, 'with_traceback', 'one', 1, 1, (self) => self);
+method(baseExceptionClass, 'with_traceback', 'one', 1, 1, (self, [traceback]) => {
+  const state = (self as PyInstance).exception;
+  if (state) setTraceback(state, traceback);
+  return self;
+});
 
 /** `str()` of an exception, as BaseException and the builtin exceptions that override it define it. */
 export function exceptionStr(exception: PyInstance): string {

@@ -3,7 +3,6 @@ import type { Module, Statement } from './ast';
 import { AttributeStore } from './attributeStore';
 import { PyBytes } from './bytesValues';
 import { MappingNamespace } from './classes';
-import { addressOf } from './conversions';
 import { method } from './define';
 import { Frame } from './frame';
 import { findIndentationError } from './indentation';
@@ -17,16 +16,8 @@ import { localVariables, programFrames } from './reflection';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import { blocksOf } from './suspension';
-import {
-  builtinClass,
-  dictClass,
-  exceptionClassNamed,
-  newException,
-  None,
-  typeError,
-  typeName,
-  valueError,
-} from './types';
+import { codeClass, type CodeInfo, hasCode, noteUnwinding, registerCode } from './tracebacks';
+import { dictClass, exceptionClassNamed, newException, None, typeError, typeName, valueError } from './types';
 import { unavailableValue } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Kwargs, type PyClass, PyDict, PyError, PyInstance, PyOpaque, type PyValue } from './values';
@@ -54,19 +45,22 @@ function inheritedFeatures(): readonly string[] {
 
 // Code objects ------------------------------------------------------------------------------------------------------
 
-export const codeClass = builtinClass('code');
+function newCode(code: Code): PyOpaque {
+  const info: CodeInfo = {
+    name: '<module>',
+    qualifiedName: '<module>',
+    firstRow: 0,
+    filename: code.filename,
+    compiled: code,
+  };
+  const object = new PyOpaque(codeClass, '', info);
+  registerCode(code.module.scope, object);
+  return object;
+}
 
-method(codeClass, '__repr__', 'none', 0, 0, (self) => {
-  const code = codeOf(self);
-  return `<code object <module> at ${addressOf(self as PyOpaque)}, file "${code.filename}", line 1>`;
-});
-defineProperty(codeClass, 'co_name', () => '<module>');
-defineProperty(codeClass, 'co_qualname', () => '<module>');
-defineProperty(codeClass, 'co_filename', (self) => codeOf(self).filename);
-defineProperty(codeClass, 'co_firstlineno', () => 1n);
-
-function codeOf(value: PyValue): Code {
-  return (value as PyOpaque).data as Code;
+/** What compile() compiled into a code object, or undefined for the code object of a function or frame. */
+function compiledOf(value: PyOpaque): Code | undefined {
+  return (value.data as CodeInfo).compiled as Code | undefined;
 }
 
 // The builtins ------------------------------------------------------------------------------------------------------
@@ -95,7 +89,7 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   }
   const features = flagFeatures(flags);
   if (dontInherit === undefined || !isTruthy(dontInherit)) features.push(...inheritedFeatures());
-  return new PyOpaque(codeClass, '', compileCode(text, mode, filename, features));
+  return newCode(compileCode(text, mode, filename, features));
 }
 
 /** `eval(source, /, globals=None, locals=None)`. */
@@ -145,7 +139,11 @@ function sourceText(value: PyValue): string | Code | undefined {
   if (typeof value === 'string') return value;
   if (value instanceof PyInstance && typeof value.primitive === 'string') return value.primitive;
   if (value instanceof PyBytes) return new TextDecoder().decode(value.data);
-  if (value instanceof PyOpaque && value.cls === codeClass) return codeOf(value);
+  if (value instanceof PyOpaque && value.cls === codeClass) {
+    const compiled = compiledOf(value);
+    if (!compiled) throw new UnsupportedFeatureError('exec()・eval() に関数やフレームのコードオブジェクトを渡すこと');
+    return compiled;
+  }
   return undefined;
 }
 
@@ -316,9 +314,14 @@ function runCode(code: Code, globalsArg: PyValue, localsArg: PyValue): PyValue {
   checkBuiltins(runtime, globals);
   const row = runtime.currentRow;
   const frame = new Frame('module', locals, new Map(), globals, row, true, code.module.scope);
+  // The frame's code object names the file compile() was given, which a string exec() runs is '<string>'.
+  if (!hasCode(code.module.scope)) newCode(code);
   runtime.pushFrame(frame);
   try {
     return runIn(runtime, code, frame);
+  } catch (error) {
+    noteUnwinding(error);
+    throw error;
   } finally {
     runtime.popFrame();
     runtime.currentRow = row;

@@ -18,10 +18,13 @@ import {
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
+import type { Frame } from './frame';
+import { delegateOf } from './generators';
 import { namespaceDict } from './namespaces';
 import { attributeError, bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { deleteMember, instancesHaveDict, isMember, writeMember } from './slots';
+import { codeObject, frameObject, functionCode, setTraceback } from './tracebacks';
 import {
   classmethodClass,
   classOf,
@@ -215,10 +218,10 @@ function generatorAttribute(generator: PyGenerator, attribute: string): PyValue 
   if (name === 'gi_await' && prefix !== 'gi_') return generatorAttribute(generator, 'gi_yieldfrom');
   if (name === 'gi_running') return generator.running;
   if (name === 'gi_suspended') return generator.started && !generator.running && !generator.finished;
-  if (name === 'gi_frame' && generator.finished) return None;
-  if (name === 'gi_frame' || name === 'gi_code' || name === 'gi_yieldfrom') {
-    throw currentRuntime().unsupported(`ジェネレータの ${attribute}`);
-  }
+  const frame = generator.frame as Frame | undefined;
+  if (name === 'gi_frame') return generator.finished || !frame ? None : frameObject(frame);
+  if (name === 'gi_code' && frame) return codeObject(frame);
+  if (name === 'gi_yieldfrom') return (frame && !generator.finished && delegateOf(frame)) || None;
   return undefined;
 }
 
@@ -235,6 +238,9 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
     }
     case '__module__': {
       return fn.module;
+    }
+    case '__code__': {
+      return functionCode(fn);
     }
     case '__defaults__': {
       return fn.defaults.length > 0 ? newTuple(fn.defaults) : None;
@@ -289,7 +295,7 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
       return state.suppressContext;
     }
     case '__traceback__': {
-      return None;
+      return state.traceback ?? None;
     }
     case 'exceptions': {
       return state.exceptions;
@@ -505,6 +511,10 @@ function setExceptionField(state: ExceptionState, name: string, value: PyValue):
     }
     case '__suppress_context__': {
       state.suppressContext = value === true;
+      return true;
+    }
+    case '__traceback__': {
+      setTraceback(state, value);
       return true;
     }
     case 'args': {

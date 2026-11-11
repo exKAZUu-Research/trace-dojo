@@ -1,9 +1,19 @@
 import { functionAnnotations } from '../annotations';
 import { pyRepr } from '../conversions';
 import { method } from '../define';
-import { callValue, isCallable } from '../objects';
+import { callValue, getAttribute, isCallable } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { builtinClass, defineMethod, intClass, None, typeError, typeName, valueError } from '../types';
+import {
+  builtinClass,
+  defineMethod,
+  intClass,
+  newDict,
+  newTuple,
+  None,
+  typeError,
+  typeName,
+  valueError,
+} from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyBoundMethod, PyClass, PyDescriptor, PyFunction, PyInstance, PyOpaque, type PyValue } from '../values';
 import { bindArguments, defineProperty } from './numberSupport';
@@ -125,9 +135,15 @@ method(
   },
   { keywords: ['parameters', 'return_annotation'] }
 );
-for (const name of ['bind', 'bind_partial']) {
-  defineMethod(signatureClass, name, () => {
-    throw new UnsupportedFeatureError(`inspect.Signature.${name}()`);
+// Signature._bind is written in Python with the rest of inspect.
+for (const [name, partial] of [
+  ['bind', false],
+  ['bind_partial', true],
+] as const) {
+  defineMethod(signatureClass, name, (self, args, kwargs) => {
+    const bind = getAttribute(currentRuntime().importModule('inspect'), '_signature_bind');
+    const named = newDict(kwargs?.entries() ?? []);
+    return callValue(bind, [self, newTuple(args), named], new Map([['partial', partial]]));
   });
 }
 signatureClass.construct = (_cls, args, kwargs) => {

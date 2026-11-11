@@ -7,6 +7,7 @@ import { recordFutureFeatures } from './dynamicCode';
 import { runExitCallbacks } from './modules/atexit';
 import { callValue } from './objects';
 import { parsePython } from './parse';
+import { programSourceOf } from './programSource';
 import { Frame, isHostStackOverflow, Runtime } from './runtime';
 import { withRuntime } from './runtimeContext';
 import { DeadlockError, WaitRequest } from './threads';
@@ -49,6 +50,7 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
   return withRuntime(runtime, () => {
     const globals = mainGlobals(runtime, module);
     recordFutureFeatures(globals, module.futureFeatures);
+    if (module.source !== undefined) runtime.program = programSourceOf(module, module.source);
     const frame = new Frame('module', globals, new Map(), globals, undefined, false, module.scope);
     runtime.pushFrame(frame);
     try {

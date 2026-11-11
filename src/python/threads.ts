@@ -11,6 +11,7 @@ import { type ArgStyle, checkArgs } from './nativeArgs';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
+import { noteUnwinding } from './tracebacks';
 import { methodDescriptorClass, nativeFunction } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -328,6 +329,9 @@ function* callFunctionSuspending(fn: PyFunction, args: PyValue[], kwargs: Kwargs
   runtime.pushFrame(frame);
   try {
     return yield* runtime.evaluator.runGenerator(fn, frame);
+  } catch (error) {
+    noteUnwinding(error);
+    throw error;
   } finally {
     runtime.popFrame();
   }

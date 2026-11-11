@@ -35,6 +35,7 @@ import { binaryOp, compareOp, unaryOp } from './operators';
 import { markGeneratorExpression } from './reflection';
 import type { Runtime } from './runtime';
 import { templateLiteral } from './templateStrings';
+import { noteUnwinding } from './tracebacks';
 import {
   Ellipsis,
   functionClass,
@@ -593,7 +594,7 @@ export class ExpressionEvaluator {
     if (expression.type === 'generator') {
       markGeneratorExpression(inner, first);
       const body = this.comprehensionItems(expression, inner, next);
-      return new PyGenerator(
+      const generator = new PyGenerator(
         generatorClass,
         '<genexpr>',
         '<genexpr>',
@@ -601,12 +602,17 @@ export class ExpressionEvaluator {
           runtime.pushFrame(inner);
           try {
             return input.error ? body.throw(input.error) : body.next();
+          } catch (error) {
+            noteUnwinding(error);
+            throw error;
           } finally {
             runtime.popFrame();
           }
         },
         () => [first, ...inner.locals.values(), ...inner.temporaries]
       );
+      generator.frame = inner;
+      return generator;
     }
     runtime.pushFrame(inner);
     try {

@@ -15,7 +15,6 @@ export const UNSUPPORTED_SYS_ATTRIBUTES: Record<string, string> = {
   getrefcount: '参照カウント（sys.getrefcount()）',
   settrace: 'トレース関数（sys.settrace()）',
   setprofile: 'プロファイル関数（sys.setprofile()）',
-  _getframe: 'フレームオブジェクト（sys._getframe()）',
   excepthook: 'sys.excepthook',
   audit: '監査フック（sys.audit()）',
   addaudithook: '監査フック（sys.addaudithook()）',

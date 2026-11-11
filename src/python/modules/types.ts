@@ -2,6 +2,7 @@ import { makeIterableCoroutine, markIterableCoroutine } from '../coroutines';
 import { builtin } from '../define';
 import { registerUnsupportedAttributes } from '../modules';
 import { registerSourceModule } from '../sourceModules';
+import { codeClass, frameClass, tracebackClass } from '../tracebacks';
 import { asyncGeneratorClass, cellClass, coroutineClass, generatorClass, methodClass, newDict, None } from '../types';
 import { PyFunction, PyGenerator, type PyValue } from '../values';
 
@@ -22,6 +23,9 @@ GeneratorType = _builtin_types['generator']
 CoroutineType = _builtin_types['coroutine']
 AsyncGeneratorType = _builtin_types['async_generator']
 CellType = _builtin_types['cell']
+CodeType = _builtin_types['code']
+FrameType = _builtin_types['frame']
+TracebackType = _builtin_types['traceback']
 EllipsisType = type(Ellipsis)
 NoneType = type(None)
 NotImplementedType = type(NotImplemented)
@@ -337,6 +341,9 @@ registerSourceModule(
           ['coroutine', coroutineClass],
           ['async_generator', asyncGeneratorClass],
           ['cell', cellClass],
+          ['code', codeClass],
+          ['frame', frameClass],
+          ['traceback', tracebackClass],
         ]),
       ],
       [
@@ -359,9 +366,6 @@ registerSourceModule(
 );
 
 registerUnsupportedAttributes('types', {
-  CodeType: 'コードオブジェクト（types.CodeType）',
-  FrameType: 'フレームオブジェクト（types.FrameType）',
-  TracebackType: 'トレースバックオブジェクト（types.TracebackType）',
   WrapperDescriptorType: 'types.WrapperDescriptorType',
   MethodWrapperType: 'types.MethodWrapperType',
   ClassMethodDescriptorType: 'types.ClassMethodDescriptorType',

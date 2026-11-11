@@ -19,9 +19,11 @@ import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
 import { bindValue, callValue, isTruthy, overriding, setAttribute, toArray } from './objects';
 import { equals, isSame } from './operators';
+import type { ProgramSource } from './programSource';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import type { Scheduler } from './threads';
+import { noteUnwinding } from './tracebacks';
 import { boundSuper } from './typeObject';
 import { genericClass, subscriptGeneric } from './typeParams';
 import {
@@ -73,6 +75,8 @@ export class Runtime {
   recursionLimit = 1000;
   /** The row of the call being evaluated, from which calls the interpreter makes implicitly count as called. */
   currentRow: number | undefined;
+  /** The program's source and definitions, which `inspect.getsource()` reads. */
+  program?: ProgramSource;
   /** The scheduler of the program's threads, once it starts one or waits. */
   threads?: Scheduler;
   /** The globals of the standard library modules written in Python. */
@@ -224,6 +228,9 @@ export class Runtime {
     try {
       result = this.guardRecursion(() => this.evaluator.runFunction(fn, frame));
       return result;
+    } catch (error) {
+      noteUnwinding(error);
+      throw error;
     } finally {
       this.popFrame();
       // The function's variables die with its frame, which closes a generator only they held.
@@ -246,7 +253,8 @@ export class Runtime {
       fn.name,
       fn.qualifiedName,
       (input) => {
-        frame.callRow = this.currentRow;
+        const callerRow = this.currentRow;
+        frame.callRow = callerRow;
         this.pushFrame(frame);
         const depth = evaluator.attachHandling(handling);
         let finished = true;
@@ -254,9 +262,14 @@ export class Runtime {
           const step = this.guardRecursion(() => (input.error ? body.throw(input.error) : body.next(input.value)));
           finished = step.done === true;
           return step;
+        } catch (error) {
+          noteUnwinding(error);
+          throw error;
         } finally {
           handling = evaluator.detachHandling(depth);
           this.popFrame();
+          // The caller goes on at the row that resumed the generator, as its later calls and errors report.
+          this.currentRow = callerRow;
           this.finalizer.update(generator, frame, finished);
         }
       },
@@ -267,6 +280,7 @@ export class Runtime {
         ...handling,
       ]
     );
+    generator.frame = frame;
     if (!scope.isAsync) markIterableCoroutine(generator, fn);
     return generator;
   }

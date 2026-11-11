@@ -8,6 +8,7 @@ import { namespaceDict } from '../namespaces';
 import { toIndex } from '../numbers';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
+import { stackFrame } from '../tracebacks';
 import {
   builtinClass,
   classOf,
@@ -65,6 +66,7 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     ['get_int_max_str_digits', builtin('get_int_max_str_digits', 'none', 0, 0, () => 4300n)],
     ['intern', builtin('intern', 'one', 1, 1, ([value]) => intern(value))],
     ['exc_info', builtin('exc_info', 'none', 0, 0, () => excInfo(runtime))],
+    ['_getframe', builtin('_getframe', 'expected', 0, 1, getFrame)],
     ['exception', builtin('exception', 'none', 0, 0, () => runtime.evaluator.handledExceptions.at(-1) ?? None)],
     ['modules', namespaceDict(moduleTable(runtime))],
   ];
@@ -286,5 +288,13 @@ function intern(value: PyValue): PyValue {
 function excInfo(runtime: Runtime): PyValue {
   const exception = runtime.evaluator.handledExceptions.at(-1);
   if (!exception) return newTuple([None, None, None]);
-  return currentRuntime().tuple([exception.cls, exception, unavailableValue('トレースバックオブジェクト')]);
+  return currentRuntime().tuple([exception.cls, exception, exception.exception?.traceback ?? None]);
+}
+
+/** `sys._getframe(depth=0)`: the frame object `depth` calls below the caller's. */
+function getFrame(args: PyValue[]): PyValue {
+  const depth = args.length === 0 ? 0n : toIndex(args[0]);
+  const frame = depth < 0n ? undefined : stackFrame(Number(depth));
+  if (frame === undefined) throw valueError('call stack is not deep enough');
+  return frame;
 }
