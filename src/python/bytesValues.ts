@@ -74,8 +74,13 @@ export class PyBytes extends PyObject {
 /** A `memoryview`: a one-dimensional view of items of `format` over the bytes of a bytes or bytearray object. */
 export class PyMemoryView extends PyObject {
   released = false;
-  /** The dimensions of a C-contiguous view that cast() gave more than one, or undefined for a one-dimensional view. */
+  /** The dimensions of a view that cast() gave more than one, or undefined for a one-dimensional view. */
   shape?: number[];
+  /**
+   * The distance in bytes between the rows of a multi-dimensional view a slice with a step took, whose rows are then
+   * apart; undefined when its rows follow one another, as the items within a row always do.
+   */
+  rowStride?: number;
 
   // code-gauge-allow functionParameterCount 7 -- Each view field is set once at creation, as CPython's buffer struct.
   constructor(
@@ -96,16 +101,24 @@ export class PyMemoryView extends PyObject {
     return this.count * this.itemsize;
   }
 
+  /** The position in the source of the item at `index`, counting the items of all rows in order. */
+  itemOffset(index: number): number {
+    if (this.rowStride === undefined || !this.shape) return this.offset + index * this.stride;
+    const rowItems = this.shape.slice(1).reduce((product, size) => product * size, 1);
+    return this.offset + Math.floor(index / rowItems) * this.rowStride + (index % rowItems) * this.itemsize;
+  }
+
   /** The bytes of the item at `index`, a view into the source. */
   itemBytes(index: number): Uint8Array {
-    const start = this.offset + index * this.stride;
+    const start = this.itemOffset(index);
     return this.source.data.subarray(start, start + this.itemsize);
   }
 
   /** A copy of the viewed bytes, in item order. */
   toBytes(): Uint8Array {
     this.checkReleased();
-    if (this.stride === this.itemsize) return this.source.data.slice(this.offset, this.offset + this.nbytes);
+    if (this.stride === this.itemsize && this.rowStride === undefined)
+      return this.source.data.slice(this.offset, this.offset + this.nbytes);
     const result = new Uint8Array(this.nbytes);
     for (let index = 0; index < this.count; index++) result.set(this.itemBytes(index), index * this.itemsize);
     return result;

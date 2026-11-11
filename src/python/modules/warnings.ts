@@ -2,8 +2,7 @@ import { builtin } from '../define';
 import { toIndex } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
-import { newTuple, None, typeError, typeName } from '../types';
-import { UnsupportedFeatureError } from '../unsupported';
+import { newTuple, None } from '../types';
 import type { PyValue } from '../values';
 
 // CPython's `_py_warnings.py` without threads and contexts. A warning's line number is the row the program runs; its
@@ -79,18 +78,6 @@ def _formatwarnmsg(msg):
     return _formatwarnmsg_impl(msg)
 
 
-class _Pattern:
-    def __init__(self, pattern, ignorecase):
-        self.pattern = pattern
-        self.ignorecase = ignorecase
-
-    def match(self, text):
-        return _regex_match(self.pattern, text, self.ignorecase)
-
-    def __eq__(self, other):
-        return isinstance(other, _Pattern) and (self.pattern, self.ignorecase) == (other.pattern, other.ignorecase)
-
-
 def filterwarnings(action, message="", category=Warning, module="", lineno=0,
                    append=False):
     """Insert an entry into the list of warnings filters (at the front)."""
@@ -107,12 +94,15 @@ def filterwarnings(action, message="", category=Warning, module="", lineno=0,
     if lineno < 0:
         raise ValueError("lineno must be an int >= 0")
 
+    if message or module:
+        import re
+
     if message:
-        message = _Pattern(message, True)
+        message = re.compile(message, re.I)
     else:
         message = None
     if module:
-        module = _Pattern(module, False)
+        module = re.compile(module)
     else:
         module = None
 
@@ -463,18 +453,6 @@ registerSourceModule(
           const found = currentRuntime().allFrames()[Math.max(Number(toIndex(level)), 1)];
           if (!found) return None;
           return newTuple([found.frame.moduleName, BigInt((found.row ?? -1) + 1)]);
-        }),
-      ],
-      [
-        '_regex_match',
-        builtin('_regex_match', 'expected', 3, 3, ([pattern, text, ignorecase]) => {
-          if (typeof text !== 'string')
-            throw typeError(`expected string or bytes-like object, got '${typeName(text)}'`);
-          try {
-            return new RegExp(`^(?:${pattern as string})`, ignorecase === true ? 'iu' : 'u').test(text);
-          } catch {
-            throw new UnsupportedFeatureError('この warnings の正規表現');
-          }
         }),
       ],
     ])

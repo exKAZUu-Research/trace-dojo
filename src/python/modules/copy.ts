@@ -1,14 +1,16 @@
 import { builtin } from '../define';
 import { DictStore } from '../dictStore';
+import { stateOf } from '../iteratorStates';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
-import { bindValue, callValue, lookupSpecial } from '../objects';
+import { bindValue, callValue, getAttribute, lookupSpecial } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { classOf, exceptionClassNamed, nativeFunction, newTuple, typeError } from '../types';
+import { classOf, exceptionClassNamed, nativeFunction, newTuple, None, typeError } from '../types';
 import {
   type Kwargs,
   PyDeque,
   PyDict,
   PyInstance,
+  PyIterator,
   PyList,
   type PyObject,
   PySet,
@@ -48,6 +50,7 @@ function shallowCopyContents(value: PyObject): PyValue {
   }
   if (value instanceof PySet) return new PySet(value.cls, value.table.copy());
   if (value instanceof PyDeque) return new PyDeque(value.cls, [...value.items], value.maxlen);
+  if (value instanceof PyIterator) return copyIterator(value, (item) => item) ?? value;
   if (value instanceof PyInstance && !value.cls.isBuiltin && !value.turtle) {
     const copy = new PyInstance(value.cls);
     for (const [key, item] of value.dict) copy.dict.set(key, item);
@@ -105,6 +108,11 @@ function deepCopyContents(value: PyObject, memo: Map<PyObject, PyValue>): PyValu
     for (const item of value.items) copy.items.push(deepCopy(item, memo));
     return copy;
   }
+  if (value instanceof PyIterator) {
+    const copy = copyIterator(value, (item) => deepCopy(item, memo)) ?? value;
+    memo.set(value, copy);
+    return copy;
+  }
   if (value instanceof PyInstance && !value.cls.isBuiltin && !value.turtle && value.enumValue === undefined) {
     const copy = new PyInstance(value.cls);
     memo.set(value, copy);
@@ -113,6 +121,19 @@ function deepCopyContents(value: PyObject, memo: Map<PyObject, PyValue>): PyValu
     return copy;
   }
   return value;
+}
+
+/**
+ * A copy of a builtin iterator made from what it reduces to, as `copy._reconstruct` makes one: the callable applied to
+ * the arguments, copied by `copyItem`, then moved to the state. Undefined for an iterator that does not reduce.
+ */
+function copyIterator(value: PyIterator, copyItem: (item: PyValue) => PyValue): PyValue | undefined {
+  const state = stateOf(value.next);
+  if (!state) return undefined;
+  const [fn, args, position] = (state.reduce() as PyTuple).items;
+  const copy = callValue(fn, (args as PyTuple).items.map(copyItem));
+  if (position !== undefined && position !== None) callValue(getAttribute(copy, '__setstate__'), [copyItem(position)]);
+  return copy;
 }
 
 const copyErrorClass = builtinClassWithBase('Error', exceptionClassNamed('Exception'), 'copy');

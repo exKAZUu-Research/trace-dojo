@@ -1,8 +1,9 @@
+import { SYS_BUILTIN_MODULE_NAMES } from './data/sysModuleNames';
 import type { Runtime } from './runtime';
 import { UNSUPPORTED_SYS_ATTRIBUTES } from './sysAttributes';
-import { moduleClass } from './types';
+import { exceptionClassNamed, moduleClass, newException } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { PyBuiltinFunction, PyModule, type PyValue } from './values';
+import { PyBuiltinFunction, PyError, PyModule, type PyValue } from './values';
 
 /** Creates a module's attributes; a module written in Python instead runs its code in `namespace` and returns none. */
 type ModuleFactory = (runtime: Runtime, namespace: Map<string, PyValue>) => Map<string, PyValue>;
@@ -19,10 +20,19 @@ const functionModules = new WeakMap<PyBuiltinFunction, string>();
  * Registers a standard library module, whose namespace is created once per run when first imported. `unsupported`
  * names the attributes this grader does not support, with the feature to name in the error.
  */
-export function registerModule(name: string, factory: ModuleFactory, unsupported: Record<string, string> = {}): void {
+export function registerModule(
+  name: string,
+  factory: ModuleFactory,
+  unsupported: Record<string, string> = {},
+  isSource = false
+): void {
   factories.set(name, factory);
+  if (isSource) sourceModules.add(name);
   registerUnsupportedAttributes(name, unsupported);
 }
+
+/** The modules whose code is CPython's Python code, which reloading runs again as CPython does. */
+const sourceModules = new Set<string>();
 
 /** Whether a module of this name is registered, as a submodule a package imports on demand may be. */
 export function isRegisteredModule(name: string): boolean {
@@ -143,6 +153,27 @@ function runFactory(runtime: Runtime, name: string, factory: ModuleFactory, modu
     moduleTables.get(runtime)?.delete(name);
     throw error;
   }
+}
+
+/**
+ * `importlib.reload(module)`: runs the code of a module again in its namespace, as CPython does for a module written
+ * in Python, which keeps the names the code does not set; a module CPython builds into its executable stays as it is.
+ */
+export function reloadModule(runtime: Runtime, module: PyModule): PyModule {
+  const { name } = module;
+  if ((moduleTables.get(runtime) ?? runtime.modules).get(name) !== module) {
+    const error = newException(exceptionClassNamed('ImportError'), [`module ${name} not in sys.modules`]);
+    error.dict.set('name', name);
+    throw new PyError(error);
+  }
+  if (name === '__main__') throw new UnsupportedFeatureError('プログラムのモジュール（__main__）の再読み込み');
+  const factory = factories.get(name);
+  if (!factory || SYS_BUILTIN_MODULE_NAMES.includes(name)) return module;
+  // A module this grader writes natively would create its objects anew where CPython's code imports them.
+  if (!sourceModules.has(name))
+    throw new UnsupportedFeatureError(`モジュール ${name} の再読み込み（importlib.reload）`);
+  factory(runtime, module.dict);
+  return module;
 }
 
 /** Makes a builtin function created in one module's namespace say it belongs to another, as `_pickle.dumps` does. */

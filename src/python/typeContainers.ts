@@ -4,6 +4,7 @@ import { DictStore } from './dictStore';
 import { mappingEntries } from './expressionEvaluator';
 import { pyHash } from './hashing';
 import { builtinGetItem, keyError, sliceIndices } from './items';
+import { clamp, reduction, withState } from './iteratorStates';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
 import {
@@ -243,6 +244,15 @@ function reversedIterator(sequence: PyList | PyTuple, name: string): PyIterator 
     },
     () => (index >= 0 && index < sequence.items.length ? index + 1 : 0)
   );
+  withState(next, {
+    reduce: () =>
+      index >= 0 && index < sequence.items.length
+        ? reduction('reversed', [sequence], BigInt(index))
+        : reduction('reversed', [sequence instanceof PyList ? newList([]) : newTuple([])]),
+    setState: (state) => {
+      if (index >= 0) index = clamp(state, -1, sequence.items.length - 1);
+    },
+  });
   return new PyIterator(iteratorClass(name), next, () => [sequence]);
 }
 

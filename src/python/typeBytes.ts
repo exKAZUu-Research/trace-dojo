@@ -16,6 +16,7 @@ import { method } from './define';
 import { pyHash } from './hashing';
 import { defineNew } from './instances';
 import { sliceIndices } from './items';
+import { clamp, reduction, withState } from './iteratorStates';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
 import { bindValue, callValue, isTruthy, iterate, lookupSpecial } from './objects';
@@ -26,6 +27,7 @@ import {
   defineMethod,
   intClass,
   iteratorClass,
+  newTuple,
   None,
   NotImplemented,
   pyError,
@@ -221,11 +223,19 @@ function bytesItem(self: PyBytes, key: PyValue): PyValue {
 
 function bytesIterator(self: PyBytes): PyIterator {
   let index = 0;
-  return new PyIterator(
-    iteratorClass(self.isMutable ? 'bytearray_iterator' : 'bytes_iterator'),
-    () => (index < self.length ? BigInt(self.data[index++]) : DONE),
-    () => [self]
-  );
+  let exhausted = false;
+  const next = (): PyValue | typeof DONE => {
+    if (!exhausted && index < self.length) return BigInt(self.data[index++]);
+    exhausted = true;
+    return DONE;
+  };
+  withState(next, {
+    reduce: () => (exhausted ? reduction('iter', [newTuple([])]) : reduction('iter', [self], BigInt(index))),
+    setState: (state) => {
+      if (!exhausted) index = clamp(state, 0, self.length);
+    },
+  });
+  return new PyIterator(iteratorClass(self.isMutable ? 'bytearray_iterator' : 'bytes_iterator'), next, () => [self]);
 }
 
 /** `item in data`, for an int byte value or a bytes-like subsequence. */

@@ -14,6 +14,7 @@ import { isEnumClass, isFlagClass } from './enums';
 import { generatorNext } from './generators';
 import { identityHash } from './hashing';
 import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
+import { stateIndex, stateOf } from './iteratorStates';
 import { argument, checkArgs } from './nativeArgs';
 import {
   bindValue,
@@ -367,7 +368,48 @@ export function defineIteratorClass(cls: PyClass): void {
   if (HINTED_ITERATORS.has(cls.name)) {
     method(cls, '__length_hint__', 'none', 0, 0, (self) => BigInt(remainingOf((self as PyIterator).next) ?? 0));
   }
+  if (REDUCED_ITERATORS.has(cls.name)) {
+    method(cls, '__reduce__', 'none', 0, 0, (self) => {
+      const state = stateOf((self as PyIterator).next);
+      if (!state) throw new UnsupportedFeatureError('イテレータの pickle');
+      return state.reduce();
+    });
+  }
+  if (MOVED_ITERATORS.has(cls.name)) {
+    method(cls, '__setstate__', 'one', 1, 1, (self, [state]) => {
+      stateOf((self as PyIterator).next)?.setState?.(stateIndex(state));
+      return None;
+    });
+  }
 }
+
+/** The native iterators whose `__setstate__` moves them to the index they are given. */
+const MOVED_ITERATORS = new Set([
+  'list_iterator',
+  'list_reverseiterator',
+  'tuple_iterator',
+  'range_iterator',
+  'longrange_iterator',
+  'str_ascii_iterator',
+  'str_iterator',
+  'bytes_iterator',
+  'bytearray_iterator',
+  'reversed',
+  'zip',
+]);
+
+/** The native iterators that reduce to where they are, for pickle and copy. */
+const REDUCED_ITERATORS = new Set([
+  ...MOVED_ITERATORS,
+  'dict_keyiterator',
+  'dict_valueiterator',
+  'dict_itemiterator',
+  'set_iterator',
+  'enumerate',
+  'zip',
+  'map',
+  'filter',
+]);
 
 /** The native iterators that know how many items they have left, as their `__length_hint__` tells. */
 const HINTED_ITERATORS = new Set([

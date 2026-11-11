@@ -8,6 +8,7 @@ import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
 import { enumMembersOf } from './enums';
 import { pyHash } from './hashing';
 import { help } from './help';
+import { reduction, withState } from './iteratorStates';
 import { dunderImport } from './modules/importlib';
 import { argument, checkArgs } from './nativeArgs';
 import { asFloat, divmodFloat, floorDivInt, modInt, toIndex } from './numbers';
@@ -95,16 +96,15 @@ enumerateClass.construct = (cls, args, kwargs) => {
   if (iterable === undefined) throw typeError("enumerate() missing required argument 'iterable'");
   checkArgs({ qualified: 'enumerate', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'start'] }, args, kwargs);
   let index = toIndex(argument(args, kwargs, 1, 'start') ?? 0n);
-  const next = iterate(iterable);
-  return new PyIterator(
-    cls,
-    () => {
-      const item = next();
-      if (item === DONE) return DONE;
-      return currentRuntime().tuple([index++, item]);
-    },
-    () => [iterable]
-  );
+  const iterator = getIterator(iterable);
+  const next = nextOf(iterator);
+  const enumerated = (): PyValue | typeof DONE => {
+    const item = next();
+    if (item === DONE) return DONE;
+    return currentRuntime().tuple([index++, item]);
+  };
+  withState(enumerated, { reduce: () => newTuple([cls, newTuple([iterator, index])]) });
+  return new PyIterator(cls, enumerated, () => [iterable]);
 };
 
 export const zipClass = builtinClass('zip');
@@ -115,27 +115,31 @@ zipClass.construct = (cls, args, kwargs) => {
     args,
     kwargs
   );
-  const strict = isTruthy(kwargs?.get('strict') ?? false);
-  const nexts = args.map((iterable) => iterate(iterable));
+  let strict = isTruthy(kwargs?.get('strict') ?? false);
+  const iterators = args.map((iterable) => getIterator(iterable));
+  const nexts = iterators.map((iterator) => nextOf(iterator));
   let finished = false;
-  return new PyIterator(
-    cls,
-    () => {
-      if (finished || nexts.length === 0) return DONE;
-      const items: PyValue[] = [];
-      for (const [index, next] of nexts.entries()) {
-        const item = next();
-        if (item === DONE) {
-          finished = true;
-          if (strict) checkStrictZip(nexts, index);
-          return DONE;
-        }
-        items.push(item);
+  const zipped = (): PyValue | typeof DONE => {
+    if (finished || nexts.length === 0) return DONE;
+    const items: PyValue[] = [];
+    for (const [index, next] of nexts.entries()) {
+      const item = next();
+      if (item === DONE) {
+        finished = true;
+        if (strict) checkStrictZip(nexts, index);
+        return DONE;
       }
-      return currentRuntime().tuple(items);
+      items.push(item);
+    }
+    return currentRuntime().tuple(items);
+  };
+  withState(zipped, {
+    reduce: () => newTuple(strict ? [cls, newTuple(iterators), true] : [cls, newTuple(iterators)]),
+    setState: (state) => {
+      strict = state !== 0n;
     },
-    () => args
-  );
+  });
+  return new PyIterator(cls, zipped, () => args);
 };
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Words each length mismatch as CPython's strict zip does.
@@ -164,38 +168,36 @@ mapClass.construct = (cls, args, kwargs) => {
   );
   if (args.length < 2) throw typeError('map() must have at least two arguments.');
   const [fn, ...iterables] = args;
-  const nexts = iterables.map((iterable) => iterate(iterable));
-  return new PyIterator(
-    cls,
-    () => {
-      const items: PyValue[] = [];
-      for (const next of nexts) {
-        const item = next();
-        if (item === DONE) return DONE;
-        items.push(item);
-      }
-      return callValue(fn, items);
-    },
-    () => args
-  );
+  const iterators = iterables.map((iterable) => getIterator(iterable));
+  const nexts = iterators.map((iterator) => nextOf(iterator));
+  const mapped = (): PyValue | typeof DONE => {
+    const items: PyValue[] = [];
+    for (const next of nexts) {
+      const item = next();
+      if (item === DONE) return DONE;
+      items.push(item);
+    }
+    return callValue(fn, items);
+  };
+  withState(mapped, { reduce: () => newTuple([cls, newTuple([fn, ...iterators])]) });
+  return new PyIterator(cls, mapped, () => args);
 };
 
 export const filterClass = builtinClass('filter');
 filterClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'filter', min: 2, max: 2, style: 'expected' }, args, kwargs);
   const [fn, iterable] = args;
-  const next = iterate(iterable);
-  return new PyIterator(
-    cls,
-    () => {
-      for (let item = next(); item !== DONE; item = next()) {
-        currentRuntime().spend();
-        if (isTruthy(fn === None ? item : callValue(fn, [item]))) return item;
-      }
-      return DONE;
-    },
-    () => args
-  );
+  const iterator = getIterator(iterable);
+  const next = nextOf(iterator);
+  const filtered = (): PyValue | typeof DONE => {
+    for (let item = next(); item !== DONE; item = next()) {
+      currentRuntime().spend();
+      if (isTruthy(fn === None ? item : callValue(fn, [item]))) return item;
+    }
+    return DONE;
+  };
+  withState(filtered, { reduce: () => newTuple([cls, newTuple([fn, iterator])]) });
+  return new PyIterator(cls, filtered, () => args);
 };
 
 export const reversedClass = builtinClass('reversed');
@@ -217,6 +219,13 @@ reversedClass.construct = (_cls, args, kwargs) => {
     () => (index >= 0n ? getItem(sequence, index--) : DONE),
     () => (index >= 0n && BigInt(lengthOf(sequence)) > index ? Number(index) + 1 : 0)
   );
+  withState(next, {
+    reduce: () => (index >= 0n ? reduction('reversed', [sequence], index) : reduction('reversed', [newTuple([])])),
+    setState: (state) => {
+      const last = BigInt(lengthOf(sequence)) - 1n;
+      if (index >= 0n) index = state < -1n ? -1n : state > last ? last : state;
+    },
+  });
   return new PyIterator(reversedClass, next, () => [sequence]);
 };
 
