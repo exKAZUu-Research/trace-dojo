@@ -58,6 +58,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'json',
   'keyword',
   'logging',
+  'marshal',
   'math',
   'numbers',
   'operator',

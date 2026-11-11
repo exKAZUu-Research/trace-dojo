@@ -115,3 +115,4 @@ import './modules/stat';
 import './modules/datetimePickle';
 import './modules/stdlibPickle';
 import './modules/pickle';
+import './modules/marshal';

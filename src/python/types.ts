@@ -248,6 +248,7 @@ export type ExceptionName =
   | 'SystemError'
   | 'LookupError'
   | 'UnicodeEncodeError'
+  | 'EOFError'
   | 'SystemExit';
 
 /** Creates an exception instance whose `args` are `args`. */
