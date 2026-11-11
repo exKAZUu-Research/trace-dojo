@@ -3,6 +3,7 @@ import { getAttributeOrUndefined } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 import { iterStr } from './strings';
+import { fullyQualifiedName } from './types';
 import { PyError, type PyInstance, PyList, type PyValue } from './values';
 
 const MOVE_COST = 2;
@@ -13,8 +14,7 @@ const MAX_STRING_SIZE = 40;
 /** The last line of the traceback CPython prints for an uncaught exception, followed by the exception's notes. */
 export function describeException(exception: PyInstance): string {
   const cls = exception.cls;
-  const name =
-    cls.module === '__main__' || cls.module === 'builtins' ? cls.qualifiedName : `${cls.module}.${cls.qualifiedName}`;
+  const name = fullyQualifiedName(cls);
   let text: string;
   try {
     text = pyStr(exception);

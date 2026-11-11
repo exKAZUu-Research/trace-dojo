@@ -5,7 +5,7 @@ import { argument, checkArgs } from './nativeArgs';
 import { callValue, getIterator, setAttribute, toArray } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
-import { newGenericAlias } from './typeHints';
+import { newGenericAlias, typeConvert } from './typeHints';
 import {
   builtinClass,
   newTuple,
@@ -182,7 +182,7 @@ export function typeText(value: PyValue): string {
 
 /** `cls[key]` for a class that derives from Generic, as `Generic.__class_getitem__` checks it. */
 export function subscriptGeneric(cls: PyClass, key: PyValue): PyValue {
-  const args = key instanceof PyTuple ? [...key.items] : [key];
+  const args = (key instanceof PyTuple ? [...key.items] : [key]).map(typeConvert);
   if (parameterDeclaringClasses.has(cls)) {
     const { name } = cls;
     if (args.length === 0) throw typeError(`Parameter list to ${name}[...] cannot be empty`);
@@ -410,6 +410,10 @@ typeAliasClass.construct = (_cls, args, kwargs) => {
 };
 
 method(aliasClass, '__repr__', 'none', 0, 0, (self) => aliasText(self as PyTypingAlias));
+method(aliasClass, 'copy_with', 'one', 1, 1, (self, [params]) => {
+  const alias = self as PyTypingAlias;
+  return new PyTypingAlias(alias.origin, toArray(params), alias.isUnpack);
+});
 method(aliasClass, '__call__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args, kwargs) =>
   callAlias(self as PyTypingAlias, args, kwargs)
 );
