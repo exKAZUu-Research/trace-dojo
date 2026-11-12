@@ -106,6 +106,20 @@ function floorOrCeil(name: string, round: (x: number) => number, special: string
   });
 }
 
+/** `math.trunc`: an int as it is, a float truncated, and anything else by its own `__trunc__`, as math_trunc does. */
+function trunc(value: PyValue): PyValue {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'boolean') return value ? 1n : 0n;
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) throw valueError('cannot convert float NaN to integer');
+    if (!Number.isFinite(value)) throw pyError('OverflowError', 'cannot convert float infinity to integer');
+    return BigInt(Math.trunc(value));
+  }
+  const method = lookupSpecial(value, '__trunc__');
+  if (method === undefined) throw typeError(`type ${typeName(value)} doesn't define __trunc__ method`);
+  return callValue(bindValue(method, value), []);
+}
+
 function factorial(value: PyValue): bigint {
   const n = integerArgument(value);
   if (n < 0n) throw valueError('factorial() not defined for negative values');
@@ -382,7 +396,7 @@ registerModule('math', () => {
     ['radians', floatFunction('radians', (x) => x * (Math.PI / 180))],
     ['floor', floorOrCeil('floor', Math.floor, '__floor__')],
     ['ceil', floorOrCeil('ceil', Math.ceil, '__ceil__')],
-    ['trunc', floorOrCeil('trunc', Math.trunc, '__trunc__')],
+    ['trunc', builtin('trunc', 'one', 1, 1, ([value]) => trunc(value))],
     ['fabs', floatFunction('fabs', Math.abs)],
     ['gamma', gammaFunction('gamma', tgamma)],
     ['lgamma', gammaFunction('lgamma', lgamma)],
