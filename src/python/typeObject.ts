@@ -14,6 +14,7 @@ import {
   classOf,
   defineMethod,
   ellipsisClass,
+  exceptionClassNamed,
   functionClass,
   generatorClass,
   iteratorClasses,
@@ -21,6 +22,7 @@ import {
   methodClass,
   methodDescriptorClass,
   moduleClass,
+  newException,
   newTuple,
   None,
   noneClass,
@@ -42,8 +44,9 @@ import {
   PyBuiltinFunction,
   PyClass,
   PyDescriptor,
+  PyError,
   PyFunction,
-  type PyGenerator,
+  PyGenerator,
   PyInstance,
   type PyIterator,
   type PyModule,
@@ -233,8 +236,16 @@ for (const name of ['send', 'throw', 'close']) {
 /** `next(iterator)`, raising StopIteration at the end. */
 export function nextValue(iterator: PyValue): PyValue {
   const value = nextOf(iterator)();
-  if (value === DONE) throw pyError('StopIteration');
+  if (value === DONE) throw stopIteration(iterator);
   return value;
+}
+
+/** The StopIteration that ends an iterator, carrying a generator's return value the first time it is reported. */
+function stopIteration(iterator: PyValue): PyError {
+  if (!(iterator instanceof PyGenerator) || iterator.returned === undefined) return pyError('StopIteration');
+  const value = iterator.returned;
+  iterator.returned = undefined;
+  return new PyError(newException(exceptionClassNamed('StopIteration'), [value]));
 }
 
 /** Gives every native iterator class the iterator protocol and a repr. */

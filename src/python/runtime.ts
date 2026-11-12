@@ -237,6 +237,7 @@ export class Runtime {
       const result = generator.resume();
       if (result.done) {
         generator.finished = true;
+        if (result.value !== None) generator.returned = result.value;
         return DONE;
       }
       return result.value;

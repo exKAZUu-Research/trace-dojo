@@ -143,9 +143,9 @@ function rangeItem(range: PyRange, key: PyValue): PyValue {
   if (key instanceof PySlice) {
     const indices = sliceIndices(key, Number(length));
     const start = range.start + BigInt(indices.start) * range.step;
-    const step = range.step * BigInt(indices.step);
-    const stop = start + BigInt(indices.count) * step;
-    return new PyRange(rangeClass, start, stop, step);
+    // CPython's compute_slice maps the slice's adjusted stop as it maps its start, not the stop after the last item.
+    const stop = range.start + BigInt(indices.stop) * range.step;
+    return new PyRange(rangeClass, start, stop, range.step * BigInt(indices.step));
   }
   const index = toIndex(key, (value) => `range indices must be integers or slices, not ${typeName(value)}`);
   const resolved = index < 0n ? index + length : index;

@@ -447,6 +447,8 @@ export class PyGenerator extends PyObject {
   started = false;
   running = false;
   finished = false;
+  /** The value the body returned, which the StopIteration that reports its end carries once. */
+  returned?: PyValue;
 
   constructor(
     cls: PyClass,
