@@ -340,6 +340,12 @@ method(propertyClass, '__get__', 'expected', 1, 2, (self, [instance]) => {
 });
 method(propertyClass, '__repr__', 'none', 0, 0, (self) => `<property object at ${addressOf(self as PyObject)}>`);
 
+/** A staticmethod or classmethod wrapping `fn`, which no longer runs on an instance. */
+export function newMethodDescriptor(cls: PyClass, fn: PyValue): PyDescriptor {
+  if (fn instanceof PyFunction) fn.isStaticOrClassMethod = true;
+  return new PyDescriptor(cls, fn);
+}
+
 function copyProperty(self: PyValue, change: { fn?: PyValue; setter?: PyValue; deleter?: PyValue }): PyValue {
   const property = self as PyDescriptor;
   return new PyDescriptor(
@@ -354,7 +360,7 @@ function copyProperty(self: PyValue, change: { fn?: PyValue; setter?: PyValue; d
 for (const cls of [staticmethodClass, classmethodClass]) {
   cls.construct = (descriptorClass, args, kwargs) => {
     checkArgs({ qualified: cls.name, min: 1, max: 1, style: 'expected' }, args, kwargs);
-    return new PyDescriptor(descriptorClass, args[0]);
+    return newMethodDescriptor(descriptorClass, args[0]);
   };
   method(cls, '__repr__', 'none', 0, 0, (self) => `<${cls.name}(${pyRepr((self as PyDescriptor).fn)})>`);
   method(cls, '__get__', 'expected', 1, 2, (self, [instance, owner]) => {

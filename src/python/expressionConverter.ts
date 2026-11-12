@@ -558,6 +558,7 @@ export abstract class ExpressionConverter {
       scope: new ScopeBuilder('function', this.context.scope).info,
       decorators: [],
       isAtomic: false,
+      isMethod: false,
       className: this.context.className,
       usesClassCell: false,
       row: rowOf(node),

@@ -128,6 +128,8 @@ export interface FunctionDef extends Span {
   returns?: Expression;
   doc?: string;
   isAtomic: boolean;
+  /** Whether a class body defines this function, whose first parameter the trace shows like `this` unless it is static. */
+  isMethod: boolean;
   /** The class whose body defines this function, for `super()` and name mangling. */
   className?: string;
   /** Whether the body uses `super` or `__class__`, which then needs the class it is defined in. */

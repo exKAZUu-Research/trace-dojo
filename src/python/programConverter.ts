@@ -507,6 +507,7 @@ export class ProgramConverter extends ExpressionConverter {
     const name = this.mangle(field(node, 'name').text);
     const fn = this.newFunction(node, name, `${this.context.qualifiedPrefix}${name}`);
     fn.decorators = decorators;
+    fn.isMethod = this.context.scope.info.kind === 'class';
     fn.params = this.parameters(field(node, 'parameters'));
     const returnsNode = node.childForFieldName('return_type');
     fn.returns = returnsNode ? this.annotation(returnsNode) : undefined;

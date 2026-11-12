@@ -92,7 +92,7 @@ function isVariableValue(value: PyValue): boolean {
 /** The instance a method runs on: its first parameter, which plays the role of Java's `this`. */
 function selfOf(frame: Frame): { name: string; value: PyInstance } | undefined {
   const fn = frame.fn;
-  if (frame.kind !== 'function' || !(frame.receiver instanceof PyInstance) || !fn) return undefined;
+  if (frame.kind !== 'function' || !fn?.def.isMethod || fn.isStaticOrClassMethod) return undefined;
   const first = fn.def.params[0];
   if (!first || first.kind === 'varArgs' || first.kind === 'varKeywords') return undefined;
   const value = frame.locals.get(first.name) ?? frame.cells.get(first.name)?.value;

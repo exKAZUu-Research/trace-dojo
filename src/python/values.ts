@@ -368,6 +368,8 @@ export class PyFunction extends PyObject {
   /** The `__annotate__` and `__type_params__` a program assigned. */
   annotate?: PyValue;
   typeParams?: PyValue;
+  /** Whether staticmethod or classmethod wrapped this function, whose first parameter is then no instance it runs on. */
+  isStaticOrClassMethod = false;
 
   // code-gauge-allow functionParameterCount 7 -- Each function field is set once at creation.
   constructor(

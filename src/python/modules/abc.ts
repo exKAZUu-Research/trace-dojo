@@ -3,6 +3,7 @@ import { setAttribute } from '../attributes';
 import { createDynamicClass } from '../classes';
 import { builtin, pythonFunction } from '../define';
 import { registerModule, registerModuleValues, registerUnsupportedAttributes } from '../modules';
+import { newMethodDescriptor } from '../typeObject';
 import { classmethodClass, None, propertyClass, staticmethodClass } from '../types';
 import { PyClass, PyDescriptor, PyFunction, type PyValue } from '../values';
 
@@ -15,11 +16,11 @@ registerModule('abc', () => {
     ['abstractmethod', pythonFunction('abstractmethod', 'funcobj', ([fn]) => markAbstract(fn))],
     [
       'abstractclassmethod',
-      builtin('abstractclassmethod', 'one', 1, 1, ([fn]) => new PyDescriptor(classmethodClass, markAbstract(fn))),
+      builtin('abstractclassmethod', 'one', 1, 1, ([fn]) => newMethodDescriptor(classmethodClass, markAbstract(fn))),
     ],
     [
       'abstractstaticmethod',
-      builtin('abstractstaticmethod', 'one', 1, 1, ([fn]) => new PyDescriptor(staticmethodClass, markAbstract(fn))),
+      builtin('abstractstaticmethod', 'one', 1, 1, ([fn]) => newMethodDescriptor(staticmethodClass, markAbstract(fn))),
     ],
     [
       'abstractproperty',

@@ -311,6 +311,24 @@ test.each([
 });
 
 test.each([
+  ['a property getter', '@property\n    def m(self):\n        y = self.x + 1', 'z = Box().m'],
+  [
+    'a property setter',
+    '@property\n    def m(self):\n        pass\n    @m.setter\n    def m(self, w):\n        y = self.x + 1',
+    'Box().m = 0',
+  ],
+  [
+    'a method a decorator calls',
+    'def deco(f):\n        return lambda self: f(self)\n    @deco\n    def m(self):\n        y = self.x + 1',
+    'Box().m()',
+  ],
+])("%s shows the instance's fields as a method called directly does", (_name, methods, use) => {
+  const program = `class Box:\n    def __init__(self):\n        self.x = 3\n    ${methods}\n${use}`;
+  const vars = traceProgram('python', program, program).traceItems.map((item) => item.vars);
+  expect(vars).toContainEqual(expect.objectContaining({ y: 4, 'self.x': 3 }));
+});
+
+test.each([
   ['decorators', '@staticmethod\n    def show(p):\n        y = 1\n    @classmethod\n    def make(cls):\n        z = 2'],
   [
     'calls of staticmethod and classmethod',
