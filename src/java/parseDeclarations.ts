@@ -14,7 +14,7 @@ import type {
   Statement,
   TypeSyntax,
 } from './ast';
-import { convertArguments } from './parseExpression';
+import { convertArguments, convertExpression } from './parseExpression';
 import {
   convertModifiers,
   convertType,
@@ -22,6 +22,7 @@ import {
   convertVariableType,
   field,
   identifierOf,
+  isAnnotation,
   modifiersOf,
   namedChildren,
   span,
@@ -35,6 +36,7 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
     class_declaration: 'class',
     interface_declaration: 'interface',
     record_declaration: 'class',
+    annotation_type_declaration: 'interface',
   } as const;
   const kind = kinds[node.type as keyof typeof kinds] ?? ('enum' as const);
   const superclassNode = node.childForFieldName('superclass');
@@ -47,6 +49,7 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
     if (member.type === 'enum_constant') enumConstants.push(convertEnumConstant(member));
     else if (member.type === 'enum_body_declarations') members.push(...namedChildren(member).map(convertMember));
     else if (member.type === 'compact_constructor_declaration') members.push(convertCompactConstructor(member));
+    else if (member.type === 'annotation_type_element_declaration') members.push(convertAnnotationElement(member));
     else members.push(convertMember(member));
   }
   const header = node.type === 'record_declaration' ? field(node, 'parameters') : undefined;
@@ -64,6 +67,21 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
     permits: permitsNode
       ? namedChildren(namedChildren(permitsNode)[0] ?? permitsNode).map((type) => convertType(type))
       : undefined,
+    ...span(node),
+  };
+}
+
+/** An element of an annotation interface, which these programs never read, as an abstract method. */
+function convertAnnotationElement(node: Node): MethodDeclaration {
+  return {
+    kind: 'method',
+    name: field(node, 'name').text,
+    typeParameters: [],
+    modifiers: convertModifiers(modifiersOf(node)),
+    returnType: convertVariableType(node),
+    parameters: [],
+    throwsTypes: [],
+    body: undefined,
     ...span(node),
   };
 }
@@ -89,13 +107,17 @@ function convertCompactConstructor(node: Node): ConstructorDeclaration {
  */
 function desugarRecord(node: Node, header: Node, members: MemberDeclaration[]): void {
   const where = span(header);
-  const components = namedChildren(header).map((component) => {
-    if (component.type !== 'record_component') unsupported(component, 'レコードの可変長引数');
+  const componentNodes = namedChildren(header);
+  const components = componentNodes.map((component, index) => {
+    const typeNode = field(component, 'type');
+    const isVarargs = component.children.some((child) => child?.type === '...');
+    if (isVarargs && index !== componentNodes.length - 1) throw varargsNotLastError(component);
+    const type = convertType(typeNode);
     return {
       name: field(component, 'name').text,
-      type: convertType(field(component, 'type')),
+      type: isVarargs ? ({ kind: 'array', element: type, ...span(typeNode) } as const) : type,
       isFinal: false,
-      isVarargs: false,
+      isVarargs,
       ...span(component),
     };
   });
@@ -196,7 +218,6 @@ function withoutSpans(type: TypeSyntax): string {
 }
 
 function convertEnumConstant(node: Node): EnumConstant {
-  if (modifiersOf(node)) unsupported(node, '列挙定数へのアノテーション');
   const args = node.childForFieldName('arguments');
   const body = node.childForFieldName('body');
   return {
@@ -232,10 +253,9 @@ export function convertMember(member: Node): MemberDeclaration {
     }
     case 'class_declaration':
     case 'interface_declaration':
-    case 'enum_declaration': {
-      return convertTypeDeclaration(member);
-    }
-    case 'record_declaration': {
+    case 'enum_declaration':
+    case 'record_declaration':
+    case 'annotation_type_declaration': {
       return convertTypeDeclaration(member);
     }
     default: {
@@ -255,14 +275,27 @@ function convertField(node: Node): FieldDeclaration {
   };
 }
 
+/** The type a receiver parameter such as `Main this` writes, which `convertParameters` leaves out. */
+function convertReceiverType(node: Node): TypeSyntax | undefined {
+  const receiver = namedChildren(node).find((parameter) => parameter.type === 'receiver_parameter');
+  const typeNode = receiver && namedChildren(receiver).find((child) => !isAnnotation(child));
+  return typeNode && convertType(typeNode);
+}
+
+/** Converts the parameters but a receiver parameter such as `Main this`, which only documents the receiver's type. */
 function convertParameters(node: Node): Parameter[] {
-  const parameters = namedChildren(node);
+  const parameters = namedChildren(node).filter((parameter, index) => {
+    if (parameter.type !== 'receiver_parameter') return true;
+    if (index !== 0) {
+      throw new CompileError([{ row: parameter.startPosition.row, message: 'this は最初の引数にしか書けません。' }]);
+    }
+    return false;
+  });
   return parameters.map((parameter, index) => {
     if (parameter.type === 'spread_parameter') {
-      if (index !== parameters.length - 1) unsupported(parameter, '最後以外の可変長引数');
+      if (index !== parameters.length - 1) throw varargsNotLastError(parameter);
       return convertVarargsParameter(parameter);
     }
-    if (parameter.type !== 'formal_parameter') unsupported(parameter, '受け取りパラメータ');
     const modifiers = convertModifiers(modifiersOf(parameter));
     const type = convertVariableType(parameter);
     const name = identifierOf(parameter, '名前のない引数');
@@ -270,10 +303,26 @@ function convertParameters(node: Node): Parameter[] {
   });
 }
 
+function withReceiverType(node: Node): { receiverType?: TypeSyntax; receiverQualifier?: string } {
+  const receiverType = convertReceiverType(node);
+  if (!receiverType) return {};
+  const receiver = namedChildren(node).find((parameter) => parameter.type === 'receiver_parameter') as Node;
+  const typeNode = namedChildren(receiver).find((child) => !isAnnotation(child)) as Node;
+  // What follows the type is `this` or `Name.this`, whose name is the identifier after the type.
+  const receiverQualifier = namedChildren(receiver).findLast(
+    (child) => child.type === 'identifier' && child.startIndex >= typeNode.endIndex
+  )?.text;
+  return receiverQualifier ? { receiverType, receiverQualifier } : { receiverType };
+}
+
+export function varargsNotLastError(node: Node): CompileError {
+  return new CompileError([{ row: node.startPosition.row, message: '可変長引数は最後の引数にしか使えません。' }]);
+}
+
 /** Converts `int... values`, whose variable holds the arguments as an array. */
-function convertVarargsParameter(parameter: Node): Parameter {
+export function convertVarargsParameter(parameter: Node): Parameter {
   const modifiers = convertModifiers(modifiersOf(parameter));
-  const parts = namedChildren(parameter).filter((child) => child.type !== 'modifiers');
+  const parts = namedChildren(parameter).filter((child) => child.type !== 'modifiers' && !isAnnotation(child));
   const [typeNode, nameNode] = parts;
   const declarator = nameNode.type === 'variable_declarator' ? field(nameNode, 'name') : nameNode;
   const element = convertType(typeNode);
@@ -292,7 +341,6 @@ function convertThrows(node: Node): TypeSyntax[] {
 }
 
 function convertMethod(node: Node): MethodDeclaration {
-  if (node.childForFieldName('dimensions')) unsupported(node, 'メソッド名の後ろの []');
   const typeNode = field(node, 'type');
   const body = node.childForFieldName('body');
   return {
@@ -300,8 +348,9 @@ function convertMethod(node: Node): MethodDeclaration {
     name: field(node, 'name').text,
     typeParameters: convertTypeParameters(node.childForFieldName('type_parameters')),
     modifiers: convertModifiers(modifiersOf(node)),
-    returnType: typeNode.type === 'void_type' ? undefined : convertType(typeNode),
+    returnType: typeNode.type === 'void_type' ? undefined : convertVariableType(node),
     parameters: convertParameters(field(node, 'parameters')),
+    ...withReceiverType(field(node, 'parameters')),
     throwsTypes: convertThrows(node),
     body: body ? convertBlock(body) : undefined,
     ...span(node),
@@ -309,7 +358,7 @@ function convertMethod(node: Node): MethodDeclaration {
 }
 
 function convertConstructor(node: Node): ConstructorDeclaration {
-  if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
+  const typeParameters = node.childForFieldName('type_parameters');
   const bodyNode = field(node, 'body');
   let statements: Statement[] = [];
   let prologue: Statement[] | undefined;
@@ -327,8 +376,10 @@ function convertConstructor(node: Node): ConstructorDeclaration {
   return {
     kind: 'constructor',
     name: field(node, 'name').text,
+    ...(typeParameters && { typeParameters: convertTypeParameters(typeParameters) }),
     modifiers: convertModifiers(modifiersOf(node)),
     parameters: convertParameters(field(node, 'parameters')),
+    ...withReceiverType(field(node, 'parameters')),
     throwsTypes: convertThrows(node),
     explicitCall,
     prologue,
@@ -338,10 +389,13 @@ function convertConstructor(node: Node): ConstructorDeclaration {
 }
 
 function convertExplicitConstructorCall(node: Node): ExplicitConstructorCall {
-  if (node.childForFieldName('object')) unsupported(node, '修飾された super(...)');
+  const outer = node.childForFieldName('object');
+  const typeArgs = node.childForFieldName('type_arguments');
   return {
     kind: 'explicitConstructorCall',
     target: field(node, 'constructor').type === 'this' ? 'this' : 'super',
+    ...(outer && { outer: convertExpression(outer) }),
+    ...(typeArgs && { typeArgs: namedChildren(typeArgs).map((type) => convertType(type)) }),
     args: convertArguments(field(node, 'arguments')),
     ...span(node),
   };

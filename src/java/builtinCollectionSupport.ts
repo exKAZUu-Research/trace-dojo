@@ -61,6 +61,8 @@ function removeThroughIterator(frame: Frame, receiver: Value): Value {
   if (defaultRemoveClasses.has(owner.cls) && !unmodifiableWrappers.has(owner)) {
     throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
   }
+  // A sublist's iterator is its list's ListItr, which checks its own state before the list rejects the removal.
+  if (subListChecks.has(owner) && state.removed) throwBuiltin(frame, 'IllegalStateException');
   checkModifiable(frame, owner, true);
   // Only the element the last next() returned may be removed, once.
   if (state.removed) throwBuiltin(frame, 'IllegalStateException');
@@ -106,6 +108,8 @@ export function createIterator(
   remove: (frame: Frame, index: number) => void,
   isFixed = false
 ): JavaObject {
+  // A sublist, or a wrapper of one, checks its list when it creates an iterator, as its listIterator does.
+  subListChecks.get(source)?.();
   const iterator = frame.runtime.allocateObject(frame, itrClass);
   const fixed = isFixed ? items() : undefined;
   iteratorStates.set(iterator, {
@@ -225,6 +229,21 @@ export const bulkRemovalRepairs = new WeakMap<ClassInfo, (frame: Frame, receiver
 export const unmodifiableWrappers = new WeakSet<JavaObject>();
 
 /**
+ * Makes `view` an unmodifiable wrapper of `source`, whose elements it shares: it follows the changes made to
+ * `source`, so that its iterators fail fast on them, and keeps `source` alive.
+ */
+export function wrapUnmodifiable(view: JavaObject, source: JavaObject): JavaObject {
+  Object.defineProperty(view, 'modCount', { get: () => source.modCount, set: () => {} });
+  if (source.elements) Object.defineProperty(view, 'elements', { get: () => source.elements, set: () => {} });
+  view.retained = [source];
+  // A wrapper reads through its source, so a wrapped sublist's reads fail as the sublist's do.
+  const check = subListChecks.get(source);
+  if (check) subListChecks.set(view, check);
+  unmodifiableWrappers.add(view);
+  return view;
+}
+
+/**
  * Throws `UnsupportedOperationException` for a change to a collection that rejects it, as every method that changes
  * a collection checks, defaults and `Collections` utilities included.
  *
@@ -238,8 +257,12 @@ export function checkModifiable(frame: Frame, collection: Value, changesSize: bo
 }
 
 export function elementsOf(receiver: Value): Value[] {
+  subListChecks.get(receiver as JavaObject)?.();
   return (receiver as JavaObject).elements as Value[];
 }
+
+/** The checks of sublists, which fail once their list changed in size other than through them, as the JDK's do. */
+export const subListChecks = new WeakMap<JavaObject, () => void>();
 
 export function touch(receiver: Value): void {
   const object = receiver as JavaObject;
@@ -271,7 +294,8 @@ export function defineReadMethods(
       frame,
       itrClass,
       receiver as JavaObject,
-      () => elementsOf(receiver),
+      // As the JDK's, hasNext reads the size without a sublist's check, which next makes through the modCount.
+      () => (receiver as JavaObject).elements as Value[],
       (removeFrame, index) => remove(removeFrame, receiver, index)
     );
   });
@@ -350,6 +374,7 @@ export function removeElements(
 /** The items of any builtin collection or array-backed view, in iteration order. */
 export function itemsOf(frame: Frame, source: Value): Value[] {
   if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+  subListChecks.get(source)?.();
   if (source.elements) return source.elements;
   if (source.store) return source.store.ordered().map((entry) => entry.key);
   return throwBuiltin(frame, 'UnsupportedOperationException');
@@ -410,6 +435,79 @@ export function compareNatural(frame: Frame, a: Value, b: Value): number {
     return a.value.length - b.value.length;
   }
   return frame.runtime.invokeVirtual(frame, comparable, 'compareTo', a, [b]) as number;
+}
+
+/** How a list class reports an index outside it, as the JDK implementation it stands for checks the index. */
+export const indexFailures = new Map<ClassInfo, (frame: Frame, index: number, length: number) => never>();
+
+/** The classes of `List.of`, whose position checks write their messages without a comma. */
+export const immutableCollectionsLists = new WeakSet<ClassInfo>();
+
+/** Checks the index of an element of `list`, which an unmodifiable wrapper leaves to the list it wraps. */
+export function checkListIndex(frame: Frame, list: Value, index: number, length: number): void {
+  if (index >= 0 && index < length) return;
+  indexFailures.get(checkingClassOf(list))?.(frame, index, length);
+  checkIndex(frame, index, length);
+}
+
+/** Checks the position `listIterator` starts at, which may be the size of the list. */
+export function checkListPosition(frame: Frame, list: Value, index: number, length: number): void {
+  if (index >= 0 && index <= length) return;
+  const separator = immutableCollectionsLists.has(checkingClassOf(list)) ? '' : ',';
+  throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}${separator} Size: ${length}`);
+}
+
+/** The class whose checks a list's methods make, which is that of the list an unmodifiable wrapper wraps. */
+function checkingClassOf(list: Value): ClassInfo {
+  const object = list as JavaObject;
+  // A program's subclass of a list inherits its builtin superclass's checks.
+  let backing = object;
+  while (unmodifiableWrappers.has(backing)) backing = backing.retained?.[0] as JavaObject;
+  let { cls } = backing;
+  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
+  return cls;
+}
+
+/**
+ * Whether sorting `list` counts as a structural change, as `ArrayList.sort` and `Vector.sort` count it, unlike
+ * `List.sort`'s default, which sublists, `LinkedList`, and `Arrays.asList` use.
+ */
+export function countsSortAsChange(list: Value): boolean {
+  if (subListChecks.has(list as JavaObject)) return false;
+  const cls = checkingClassOf(list);
+  return (cls.name === 'ArrayList' && !fixedSizeClasses.has(cls)) || cls.name === 'Stack';
+}
+
+/**
+ * Reports an index outside a list as its JDK class does: an array access for `List.of`, `Arrays.asList`, and `Stack`, and
+ * messages of their own for the other lists that do not call `Objects.checkIndex`.
+ */
+export function defineIndexFailures(lists: Record<string, ClassInfo>, registry: Context['registry']): void {
+  indexFailures.set(lists.immutableList, arrayAccessFailure);
+  indexFailures.set(lists.fixedSizeList, arrayAccessFailure);
+  indexFailures.set(lists.pairList, (frame, index, length) =>
+    throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index} Size: ${length}`)
+  );
+  indexFailures.set(lists.emptyList, (frame, index) =>
+    throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}`)
+  );
+  indexFailures.set(lists.singletonList, sizedIndexFailure);
+  indexFailures.set(registry.classes.get('LinkedList') as ClassInfo, sizedIndexFailure);
+  // A Vector checks only the upper bound and reads its array, whose capacity starts at 10 and doubles.
+  indexFailures.set(registry.classes.get('Stack') as ClassInfo, (frame, index, length) => {
+    if (index >= length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${index}`);
+    let capacity = 10;
+    while (capacity < length) capacity *= 2;
+    return arrayAccessFailure(frame, index, capacity);
+  });
+}
+
+function arrayAccessFailure(frame: Frame, index: number, length: number): never {
+  return throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Index ${index} out of bounds for length ${length}`);
+}
+
+function sizedIndexFailure(frame: Frame, index: number, length: number): never {
+  return throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${length}`);
 }
 
 export function checkIndex(frame: Frame, index: number, length: number): void {

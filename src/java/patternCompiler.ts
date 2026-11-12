@@ -1,13 +1,14 @@
 import type { Expression, Pattern, PatternBinding, PatternLabel, Statement, SwitchGroup } from './ast';
 import { boxedTypeOf } from './builtinWrappers';
 import type { Compiled, Exec, MethodContext, Scope } from './compilerBase';
-import { memberBindings, memberType } from './conversions';
+import { infer, memberBindings, memberType } from './conversions';
 import { declarationKey } from './definiteAssignment';
 import { bindingsOfPattern } from './patternBindings';
 import { canCompleteNormally, exhaustiveSwitches } from './reachability';
 import { type Frame, JavaThrow, throwBuiltin } from './runtime';
 import { TryCompiler } from './tryCompiler';
 import {
+  asSuper,
   BOOLEAN,
   type ClassInfo,
   erasure,
@@ -18,7 +19,9 @@ import {
   type JavaType,
   type MethodInfo,
   sameType,
+  thisTypeOf,
   typeName,
+  type TypeVariable,
   upperBound,
 } from './types';
 import { JavaArray, JavaObject, JavaString, type Value } from './values';
@@ -77,8 +80,9 @@ export abstract class PatternCompiler extends TryCompiler {
     isComponent = false
   ): CompiledPattern {
     if (pattern.kind === 'typePattern') return this.compileTypePattern(context, pattern, inputType, isComponent);
-    const type = this.resolveType(pattern.type);
-    const cls = type.kind === 'class' ? type.cls : undefined;
+    const written = this.resolveType(pattern.type);
+    const cls = written.kind === 'class' ? written.cls : undefined;
+    const type = cls ? this.inferRecordPatternType(cls, written, inputType) : written;
     const components = cls?.recordComponents;
     if (!cls || !components)
       return this.error(pattern, `${typeName(type)} はレコードではないので、レコードのパターンには使えません。`);
@@ -116,6 +120,22 @@ export abstract class PatternCompiler extends TryCompiler {
         parts.every((part, index) => part.isTotalFor(memberType(components[index].type, bindings))),
       record: { cls, parts, componentTypes: components.map((field) => memberType(field.type, bindings)) },
     };
+  }
+
+  /**
+   * The type of a record pattern that names a generic record without type arguments, which the matched type decides
+   * (JLS 18.5.5); the record stays raw when it decides only some of them.
+   */
+  protected inferRecordPatternType(cls: ClassInfo, written: JavaType, inputType: JavaType): JavaType {
+    const variables = cls.typeParameters;
+    const input = upperBound(inputType);
+    if (variables.length === 0 || written.kind !== 'class' || written.args || input.kind !== 'class') return written;
+    const supertype = asSuper(thisTypeOf(cls), input.cls);
+    if (!supertype) return written;
+    const bindings = new Map<TypeVariable, JavaType>();
+    infer(this.builtins, supertype, input, variables, bindings);
+    if (variables.some((variable) => !bindings.has(variable))) return written;
+    return { kind: 'class', cls, args: variables.map((variable) => bindings.get(variable) as JavaType) };
   }
 
   /**

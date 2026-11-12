@@ -9,7 +9,15 @@ import {
   javaHash,
   putEntry,
 } from './builtinCollections';
-import { checkModifiable, mapViewSources, sortedValues, unmodifiableWrappers } from './builtinCollectionSupport';
+import {
+  checkModifiable,
+  countsSortAsChange,
+  mapViewSources,
+  sortedValues,
+  subListChecks,
+  unmodifiableWrappers,
+  wrapUnmodifiable,
+} from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
@@ -78,7 +86,7 @@ export function defineUtilities(
     (frame, _, [array]) => {
       const values = arrayOf(frame, array).values;
       if (values.includes(undefined)) throwBuiltin(frame, 'NullPointerException');
-      return createList(frame, collections.immutableList, [...values]);
+      return createList(frame, immutableListClass(collections, values.length), [...values]);
     }
   );
   addGenericStatic(
@@ -99,7 +107,7 @@ export function defineUtilities(
     (frame, _, [collection]) => {
       const values = itemsOf(frame, collection);
       if (values.includes(undefined)) throwBuiltin(frame, 'NullPointerException');
-      return createList(frame, collections.immutableList, [...values]);
+      return createList(frame, immutableListClass(collections, values.length), [...values]);
     }
   );
   defineMapOf(collections, objectType);
@@ -158,6 +166,17 @@ function createImmutableSet(frame: Frame, cls: ClassInfo, values: Value[]): Java
     }
   }
   return set;
+}
+
+/**
+ * An empty or one-element set (`[element]`) or map (`[key, value]`), as `Collections.emptySet`, `singleton`,
+ * `emptyMap`, and `singletonMap` make it, which may hold null.
+ */
+function createFixedStore(frame: Frame, cls: ClassInfo, entry?: [key: Value, value?: Value]): JavaObject {
+  const object = frame.runtime.allocateObject(frame, cls);
+  createStore(object);
+  if (entry) putEntry(frame, object, entry[0], false, entry[1]);
+  return object;
 }
 
 /** A map of the keys and values that alternate in `args`, as `Map.of` makes it. */
@@ -278,18 +297,45 @@ function defineCollectionViews(
   };
   generic(['T'], (t) =>
     addMethod(cls, 'emptyList', [], classOf(listClass, t), true, (frame) =>
-      createList(frame, collections.immutableList, [])
+      createList(frame, collections.emptyList, [])
     )
   );
   generic(['T'], (t) =>
     addMethod(cls, 'singletonList', [t], classOf(listClass, t), true, (frame, _, [value]) =>
-      createList(frame, collections.immutableList, [value])
+      createList(frame, collections.singletonList, [value])
     )
   );
   generic(['T'], (t) =>
-    addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) =>
-      wrap(createList(frame, collections.immutableList, itemsOf(frame, list)), list as JavaObject)
+    addMethod(cls, 'emptySet', [], classOf(setClass, t), true, (frame) => createFixedStore(frame, collections.emptySet))
+  );
+  generic(['T'], (t) =>
+    addMethod(cls, 'singleton', [t], classOf(setClass, t), true, (frame, _, [value]) =>
+      createFixedStore(frame, collections.singletonSet, [value])
     )
+  );
+  generic(['K', 'V'], (k, v) =>
+    addMethod(cls, 'emptyMap', [], classOf(mapClass, k, v), true, (frame) =>
+      createFixedStore(frame, collections.emptyMap)
+    )
+  );
+  generic(['K', 'V'], (k, v) =>
+    addMethod(cls, 'singletonMap', [k, v], classOf(mapClass, k, v), true, (frame, _, [key, value]) =>
+      createFixedStore(frame, collections.singletonMap, [key, value])
+    )
+  );
+  generic(['T'], (t) =>
+    addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) => {
+      if (!(list instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+      // As the JDK's, an unmodifiable list is returned as it is rather than wrapped again.
+      const { unmodifiableList: plain, unmodifiableRandomAccessList: randomAccess } = collections;
+      if (list.cls === plain || list.cls === randomAccess) return list;
+      // Wrapping reads nothing, so a sublist whose list changed fails only when the wrapper is read.
+      const items = list.elements ?? itemsOf(frame, list);
+      return wrapUnmodifiable(
+        createList(frame, unmodifiableListClass(collections, list as JavaObject), items),
+        list as JavaObject
+      );
+    })
   );
   for (const [owner, immutable, names] of [
     [setClass, collections.immutableSet, ['T']],
@@ -304,13 +350,15 @@ function defineCollectionViews(
         true,
         (frame, _, [source]) => {
           if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+          // As the JDK's, an unmodifiable set or map is returned as it is rather than wrapped again.
+          if (unmodifiableWrappers.has(source) && frame.runtime.isInstance(source, owner)) return source;
           // A set without a store of its own, such as a map's key set, shares its elements, which it reads afresh.
           const view = frame.runtime.allocateObject(frame, source.store ? immutable : collections.unmodifiableViewSet);
           view.store = source.store;
           // A map's view keeps its map's iterators, which traverse the entries they started with.
           const mapSource = mapViewSources.get(source);
           if (mapSource) mapViewSources.set(view, mapSource);
-          return wrap(view, source);
+          return wrapUnmodifiable(view, source);
         }
       )
     );
@@ -328,15 +376,20 @@ function defineCollectionViews(
 }
 
 /**
- * Makes `view` an unmodifiable wrapper of `source`, whose elements it shares: it follows the changes made to
- * `source`, so that its iterators fail fast on them, and keeps `source` alive.
+ * The class of `Collections.unmodifiableList` of `list`, which tells the lists that implement `RandomAccess`, as every
+ * list of the JDK's here but `LinkedList` and its views do, from the others.
  */
-function wrap(view: JavaObject, source: JavaObject): JavaObject {
-  Object.defineProperty(view, 'modCount', { get: () => source.modCount, set: () => {} });
-  if (source.elements) Object.defineProperty(view, 'elements', { get: () => source.elements, set: () => {} });
-  view.retained = [source];
-  unmodifiableWrappers.add(view);
-  return view;
+function unmodifiableListClass(collections: Collections, list: JavaObject): ClassInfo {
+  let cls = list.cls;
+  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
+  return cls.name === 'LinkedList' || cls.name === 'Object' || cls === collections.sequentialSubList
+    ? collections.unmodifiableList
+    : collections.unmodifiableRandomAccessList;
+}
+
+/** The class of the list `List.of` and `List.copyOf` return, which the JDK picks by the number of elements. */
+function immutableListClass(collections: Collections, length: number): ClassInfo {
+  return length === 1 || length === 2 ? collections.pairList : collections.immutableList;
 }
 
 function createList(frame: Frame, cls: ClassInfo, elements: Value[]): JavaObject {
@@ -507,6 +560,7 @@ function copyRange(frame: Frame, array: JavaArray, from: number, to: number): Ja
 
 function elementsOf(frame: Frame, value: Value): Value[] {
   if (!(value instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+  subListChecks.get(value)?.();
   return value.elements ?? itemsOf(frame, value);
 }
 
@@ -539,6 +593,7 @@ function defineListUtilities(cls: ClassInfo, collections: Collections): void {
     }
   );
   fill.typeParameters = [t];
+  defineCopy(cls, collections, t.bounds);
   addMethod(cls, 'rotate', [anyOf(collections.listClass), INT], VOID, true, (frame, _, [list, distance]) => {
     const values = elementsOf(frame, list);
     const size = values.length;
@@ -561,6 +616,34 @@ function defineListUtilities(cls: ClassInfo, collections: Collections): void {
       );
     }
   );
+}
+
+/** `Collections.copy`, which sets the first elements of a list to another's, as many as fit. */
+function defineCopy(cls: ClassInfo, collections: Collections, bounds: JavaType[]): void {
+  const copied: TypeVariable = { name: 'T', bounds };
+  const copy = addMethod(
+    cls,
+    'copy',
+    [
+      {
+        kind: 'class',
+        cls: collections.listClass,
+        args: [{ kind: 'wildcard', bound: { kind: 'typeVar', variable: copied }, isSuper: true }],
+      },
+      readOnly(collections.listClass, { kind: 'typeVar', variable: copied }),
+    ],
+    VOID,
+    true,
+    (frame, _, [dest, src]) => {
+      const values = itemsOf(frame, src);
+      const size = frame.runtime.invokeVirtual(frame, collections.collectionClass, 'size', dest, []) as number;
+      if (values.length > size) throwBuiltin(frame, 'IndexOutOfBoundsException', 'Source does not fit in dest');
+      for (const [index, value] of values.entries()) {
+        frame.runtime.invokeVirtual(frame, collections.listClass, 'set', dest, [index, value]);
+      }
+    }
+  );
+  copy.typeParameters = [copied];
 }
 
 function anyOf(owner: ClassInfo): ClassType {
@@ -604,7 +687,7 @@ function defineCollectionsClass(
       frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
       const sorted = sortedValues(values, (a, b) => compareNatural(frame, a, b));
       values.splice(0, values.length, ...sorted);
-      touch(list);
+      if (countsSortAsChange(list)) touch(list);
     }
   );
   comparableBound((sort.typeParameters as TypeVariable[])[0]);
@@ -717,7 +800,7 @@ function defineCollectionsClass(
       if ((count as number) < 0) throwBuiltin(frame, 'IllegalArgumentException', `List length = ${count as number}`);
       return createList(
         frame,
-        collections.immutableList,
+        collections.copiesList,
         Array.from({ length: count as number }, () => value)
       );
     }
