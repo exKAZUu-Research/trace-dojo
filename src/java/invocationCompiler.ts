@@ -79,8 +79,8 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     const bindings = memberBindings(type, cls);
     const constructor = this.selectMethod(
       expression,
-      this.withExplicitTypeArguments(
-        expression,
+      this.withConstructorTypeArguments(
+        expression.typeArgs,
         cls.constructors.map((candidate) => methodView(candidate, bindings))
       ),
       argTypes,
@@ -145,8 +145,8 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       const bindings = memberBindings(base, baseClass);
       superConstructor = this.selectMethod(
         expression,
-        this.withExplicitTypeArguments(
-          expression,
+        this.withConstructorTypeArguments(
+          expression.typeArgs,
           baseClass.constructors.map((candidate) => methodView(candidate, bindings))
         ),
         args.map((arg) => arg.type),
@@ -162,13 +162,13 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     return this.compileCreation(context, expression, cls, cls.type, constructor, convertedArgs);
   }
 
-  /** The constructors instantiated with the type arguments written after `new`, as in `new <String>Box(s)`. */
-  protected withExplicitTypeArguments(
-    expression: Extract<Expression, { kind: 'new' }>,
-    constructors: MethodInfo[]
-  ): MethodInfo[] {
-    const typeArgs = expression.typeArgs?.map((typeArg) => this.resolveTypeArgument(typeArg));
-    return typeArgs ? this.withTypeArguments(constructors, typeArgs) : constructors;
+  /** The constructors instantiated with explicit type arguments, as `new <String>Box(s)` and `<String>this(s)` write. */
+  protected withConstructorTypeArguments(typeArgs: TypeSyntax[] | undefined, constructors: MethodInfo[]): MethodInfo[] {
+    if (!typeArgs) return constructors;
+    return this.withTypeArguments(
+      constructors,
+      typeArgs.map((typeArg) => this.resolveTypeArgument(typeArg))
+    );
   }
 
   /**

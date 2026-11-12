@@ -150,6 +150,8 @@ export interface ExplicitConstructorCall extends Span {
   target: 'this' | 'super';
   /** The enclosing instance written before `.super`, as in `outer.super()`, for a superclass that is an inner class. */
   outer?: Expression;
+  /** Type arguments of a generic constructor, as in `<String>this(s)`. */
+  typeArgs?: TypeSyntax[];
   args: Expression[];
 }
 

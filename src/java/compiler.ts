@@ -341,11 +341,12 @@ class Compiler extends DeclarationCompiler {
       callsThis ? thisTypeOf(cls) : asSuper(thisTypeOf(cls), targetClass),
       targetClass
     );
+    const candidates = targetClass.constructors
+      .filter((candidate) => candidate !== constructor || !callsThis)
+      .map((candidate) => methodView(candidate, targetBindings));
     const target = this.selectMethod(
       span,
-      targetClass.constructors
-        .filter((candidate) => candidate !== constructor || !callsThis)
-        .map((candidate) => methodView(candidate, targetBindings)),
+      this.withConstructorTypeArguments(explicitCall?.typeArgs, candidates),
       args.map((arg) => arg.type),
       `コンストラクタ ${targetClass.name}`
     );

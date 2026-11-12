@@ -368,10 +368,12 @@ function convertConstructor(node: Node): ConstructorDeclaration {
 
 function convertExplicitConstructorCall(node: Node): ExplicitConstructorCall {
   const outer = node.childForFieldName('object');
+  const typeArgs = node.childForFieldName('type_arguments');
   return {
     kind: 'explicitConstructorCall',
     target: field(node, 'constructor').type === 'this' ? 'this' : 'super',
     ...(outer && { outer: convertExpression(outer) }),
+    ...(typeArgs && { typeArgs: namedChildren(typeArgs).map((type) => convertType(type)) }),
     args: convertArguments(field(node, 'arguments')),
     ...span(node),
   };
