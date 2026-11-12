@@ -1,5 +1,5 @@
 import { pushAll } from '../arrays';
-// code-gauge-allow-file fileNcss 403 -- The iterators of itertools and their shared helpers belong together.
+// code-gauge-allow-file fileNcss 406 -- The iterators of itertools and their shared helpers belong together.
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -317,6 +317,7 @@ function* productOf(pools: PyValue[][]): Generator<PyValue[]> {
   }
 }
 
+// code-gauge-allow functionNcss 33 -- Follows itertools.groupby, whose groups share one underlying iterator.
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows itertools.groupby, whose groups share one underlying iterator.
 function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
@@ -334,6 +335,8 @@ function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
     if (pending !== DONE) pendingKey = keyFn === None ? pending : callValue(keyFn, [pending]);
   };
   let currentKey: PyValue | undefined;
+  // The group that may still read items, compared by identity as CPython's groupby compares its current grouper.
+  let currentGroup: object | undefined;
   return iteratorOf(
     'groupby',
     () => {
@@ -342,11 +345,13 @@ function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
       if (pending === DONE) return DONE;
       currentKey = pendingKey as PyValue;
       const groupKey = currentKey;
+      const token = {};
+      currentGroup = token;
       const group = iteratorOf(
         '_grouper',
         () => {
           if (pending === undefined) advance();
-          if (pending === DONE || !equals(pendingKey as PyValue, groupKey) || currentKey !== groupKey) return DONE;
+          if (pending === DONE || currentGroup !== token || !equals(pendingKey as PyValue, groupKey)) return DONE;
           const item = pending as PyValue;
           advance();
           return item;
