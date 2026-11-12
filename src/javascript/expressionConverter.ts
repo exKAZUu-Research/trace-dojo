@@ -116,9 +116,8 @@ export abstract class ExpressionConverter extends ConverterBase {
     const argumentNode = namedChildren(node).at(0);
     const argument = argumentNode ? this.expression(argumentNode) : undefined;
     const delegate = node.children.some((child) => child?.type === '*');
-    if (delegate && this.context.isAsync) unsupported(node, 'async ジェネレータの yield* ');
     this.context.suspensionCount++;
-    return { kind: 'yield', argument, delegate, row: rowOf(node) };
+    return { kind: 'yield', argument, delegate, isAsync: this.context.isAsync, row: rowOf(node) };
   }
 
   private metaProperty(node: Node): Expression {

@@ -152,6 +152,7 @@ export class ProgramConverter extends ExpressionConverter {
     return {
       kind: 'return',
       value: valueNode ? this.expression(valueNode) : undefined,
+      awaitsValue: this.context.isAsyncGenerator,
       row: rowOf(node),
     };
   }
@@ -341,6 +342,7 @@ export class ProgramConverter extends ExpressionConverter {
       context.canUseNewTarget = outer.canUseNewTarget;
     }
     context.isAsync = isAsync;
+    context.isAsyncGenerator = isAsync && isGenerator;
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {

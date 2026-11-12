@@ -12,7 +12,7 @@ import type {
 import { asyncIteratorOf, AwaitingIterator, createAsyncGeneratorObject, type LoopIterator } from './asyncGenerators';
 import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor } from './expressionEvaluator';
-import { createGeneratorObject, GeneratorReturn, runToEnd, type Steps } from './generators';
+import { Awaiting, createGeneratorObject, GeneratorReturn, resumedValue, runToEnd, type Steps } from './generators';
 import { DONE, ValueIterator } from './iteration';
 import {
   defineFunctionProperties,
@@ -112,7 +112,8 @@ export class Evaluator extends StepEvaluator {
         return undefined;
       }
       case 'return': {
-        return { kind: 'return', value: statement.value ? yield* this.value(statement.value) : undefined };
+        const value = statement.value ? yield* this.value(statement.value) : undefined;
+        return { kind: 'return', value: statement.awaitsValue ? resumedValue(yield new Awaiting(value)) : value };
       }
       case 'if': {
         if (toBoolean(yield* this.value(statement.test))) return yield* this.statement(statement.consequent, []);

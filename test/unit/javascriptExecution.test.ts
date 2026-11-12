@@ -61,12 +61,6 @@ test.each([
   ],
   ['a declaration as the body of if', 'if (true) let a = 1;', 0, '宣言を書くには { } で囲んでください。'],
   [
-    'yield* in an async generator',
-    'async function* f() {\n  yield* [1];\n}',
-    1,
-    'async ジェネレータの yield* は、この採点環境では使えません。',
-  ],
-  [
     'a yield in a destructuring default',
     'function* f() {\n  const [a = yield] = [];\n}',
     1,
@@ -583,6 +577,18 @@ async function* countdown(n) { try { while (n > 0) { await sleep(10); yield n--;
     `const o = { __proto__: { inherited: 1 }, own: 2, m() { return super.inherited; } };
 console.log(o.inherited, o.m(), Object.getPrototypeOf(o).inherited);
 let count = 0; const id = setInterval(() => { count++; console.log('tick', count); if (count === 3) clearInterval(id); }, 100);`,
+  ],
+  [
+    'yield* in async generators',
+    `async function* inner() { yield 1; yield 2; }
+async function* outer() { yield* inner(); yield* [3, Promise.resolve(4)]; }
+(async () => { for await (const v of outer()) console.log(v); })();
+async function* src() { try { const got = yield 'a'; console.log('src got', got); yield 'b'; } finally { console.log('src fin'); } }
+async function* wrap() { const r = yield* src(); console.log('r', r); }
+(async () => {
+  const w = wrap(); console.log(await w.next(), await w.next('hello'), await w.return('bye'), await w.next());
+  const w2 = wrap(); await w2.next(); try { await w2.throw(new Error('t')); } catch (e) { console.log('thrown', e.message); }
+})();`,
   ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({

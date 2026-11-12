@@ -107,29 +107,18 @@ function advance(runtime: Runtime, state: AsyncGeneratorState, resume: Resume): 
   }
   const roots = [frame.scope, ...frame.temporaries, ...state.queue.map((request) => request.promise)];
   if (result.done) {
-    // A `return` awaits its value before the generator answers with it.
-    const returned = result.value?.kind === 'return' ? result.value.value : undefined;
-    awaitValue(runtime, returned, roots, (settled) => {
-      state.status = 'completed';
-      answer(runtime, state, settled.value, settled.kind === 'throw', true, settled.value);
-      resumeNext(runtime, state);
-    });
+    state.status = 'completed';
+    answer(runtime, state, result.value?.kind === 'return' ? result.value.value : undefined, false, true);
+    resumeNext(runtime, state);
     return;
   }
   if (result.value instanceof Awaiting) {
     awaitValue(runtime, result.value.value, roots, (next) => advance(runtime, state, next));
     return;
   }
-  // A `yield` awaits its value too, and an awaited rejection throws at the `yield`.
-  awaitValue(runtime, result.value, roots, (settled) => {
-    if (settled.kind === 'throw') {
-      advance(runtime, state, settled);
-      return;
-    }
-    state.status = 'suspendedYield';
-    answer(runtime, state, settled.value, false, false);
-    resumeNext(runtime, state);
-  });
+  state.status = 'suspendedYield';
+  answer(runtime, state, result.value, false, false);
+  resumeNext(runtime, state);
 }
 
 /** Settles the first request's promise with an iterator result, or rejects it with `reason`. */
@@ -157,25 +146,33 @@ export interface LoopIterator {
 
 /** An async iterator's methods, each returning what `for await` awaits. */
 interface AsyncIteration {
-  next: () => Value;
-  close: () => Value;
+  next: (value?: Value) => Value;
+  /** Calls the iterator's `return`, giving undefined when it has none. */
+  close: (value?: Value) => Value;
+  /** Calls the iterator's `throw`, which `yield*` forwards an exception to, or is undefined when it has none. */
+  throw: ((value: Value) => Value) | undefined;
 }
 
 /** The iteration `for await` runs: the async iterator of the value, or its sync iterator with each value awaited. */
 export function asyncIteratorOf(runtime: Runtime, iterable: Value): AsyncIteration {
-  const method =
+  const factory =
     iterable === undefined || iterable === null ? undefined : runtime.get(iterable, WELL_KNOWN_SYMBOLS.asyncIterator);
-  if (method === undefined || method === null) return fromSyncIterator(runtime, runtime.iterator(iterable));
-  const iterator = runtime.call(method, iterable, [], runtime.currentRow);
+  if (factory === undefined || factory === null) return fromSyncIterator(runtime, runtime.iterator(iterable));
+  const iterator = runtime.call(factory, iterable, [], runtime.currentRow);
   if (!isObject(iterator)) {
     return runtime.throwError('TypeError', 'Result of the Symbol.asyncIterator method is not an object');
   }
   const next = runtime.get(iterator, 'next');
+  const method = (name: string): ((value?: Value) => Value) | undefined => {
+    const fn = runtime.get(iterator, name);
+    if (fn === undefined || fn === null) return undefined;
+    return (value) => runtime.call(fn, iterator, [value], runtime.currentRow);
+  };
   return {
-    next: () => runtime.call(next, iterator, [], runtime.currentRow),
-    close: () => {
-      const close = runtime.get(iterator, 'return');
-      return close === undefined || close === null ? undefined : runtime.call(close, iterator, [], runtime.currentRow);
+    next: (value) => runtime.call(next, iterator, value === undefined ? [] : [value], runtime.currentRow),
+    close: (value) => method('return')?.(value),
+    get throw() {
+      return method('throw');
     },
   };
 }
@@ -200,7 +197,44 @@ function fromSyncIterator(runtime: Runtime, iterator: ValueIterator): AsyncItera
       iterator.close();
       return;
     },
+    throw: undefined,
   };
+}
+
+/**
+ * Runs `yield*` in an async generator: each result of the async iterator is awaited and its value yielded, and each
+ * resumption is forwarded to the iterator's `next`, `throw`, or `return`.
+ */
+export function* delegateAsync(runtime: Runtime, iterable: Value): Steps<Value> {
+  const iteration = asyncIteratorOf(runtime, iterable);
+  let resume: Resume = { kind: 'next', value: undefined };
+  for (;;) {
+    let request: Value;
+    if (resume.kind === 'next') {
+      request = iteration.next(resume.value);
+    } else if (resume.kind === 'throw') {
+      const throwMethod = iteration.throw;
+      if (!throwMethod) {
+        const closed = iteration.close();
+        if (closed !== undefined) resumedValue(yield new Awaiting(closed));
+        return runtime.throwError('TypeError', "The iterator does not provide a 'throw' method");
+      }
+      request = throwMethod(resume.value);
+    } else {
+      request = iteration.close(resume.value);
+      if (request === undefined) throw new GeneratorReturn(resumedValue(yield new Awaiting(resume.value)));
+    }
+    const result = resumedValue(yield new Awaiting(request));
+    if (!isObject(result)) {
+      return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
+    }
+    const value = runtime.get(result, 'value');
+    if (toBoolean(runtime.get(result, 'done'))) {
+      if (resume.kind === 'return') throw new GeneratorReturn(value);
+      return value;
+    }
+    resume = yield value;
+  }
 }
 
 /** Awaits each result of an async iteration, as `for await` reads them. */

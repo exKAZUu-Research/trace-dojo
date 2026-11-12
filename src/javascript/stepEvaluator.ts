@@ -1,4 +1,5 @@
 import type { Argument, Expression } from './ast';
+import { delegateAsync } from './asyncGenerators';
 import { referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import { ExpressionEvaluator, isLogicalOperator, shortCircuits } from './expressionEvaluator';
 import { Awaiting, GeneratorReturn, type Resume, resumedValue, resumeGenerator, type Steps } from './generators';
@@ -18,8 +19,14 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     switch (expression.kind) {
       case 'yield': {
         const value = expression.argument ? yield* this.evaluateSteps(expression.argument) : undefined;
-        if (expression.delegate) return yield* this.delegate(value);
-        return resumedValue(yield value);
+        if (expression.delegate) {
+          return expression.isAsync ? yield* delegateAsync(this.runtime, value) : yield* this.delegate(value);
+        }
+        if (!expression.isAsync) return resumedValue(yield value);
+        // An async generator awaits the value it yields, and the value `return()` resumes it with.
+        const resume = yield resumedValue(yield new Awaiting(value));
+        if (resume.kind === 'return') throw new GeneratorReturn(resumedValue(yield new Awaiting(resume.value)));
+        return resumedValue(resume);
       }
       case 'await': {
         return resumedValue(yield new Awaiting(yield* this.evaluateSteps(expression.argument)));

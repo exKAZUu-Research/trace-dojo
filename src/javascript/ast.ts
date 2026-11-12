@@ -26,7 +26,8 @@ export type Statement = Span &
     | VariableDeclaration
     | { kind: 'function' }
     | { kind: 'class'; cls: ClassNode }
-    | { kind: 'return'; value?: Expression }
+    /** A `return`, which awaits its value in an async generator. */
+    | { kind: 'return'; value?: Expression; awaitsValue: boolean }
     | { kind: 'if'; test: Expression; consequent: Statement; alternate?: Statement }
     | Block
     | {
@@ -190,7 +191,8 @@ export type Expression = Span & {
     | { kind: 'sequence'; expressions: Expression[] }
     /** Ends an optional chain, as parentheses do. */
     | { kind: 'parenthesized'; expression: Expression }
-    | { kind: 'yield'; argument?: Expression; delegate: boolean }
+    /** A `yield`, which in an async generator awaits its value, or with `yield*`, delegates to an async iterator. */
+    | { kind: 'yield'; argument?: Expression; delegate: boolean; isAsync: boolean }
     | { kind: 'await'; argument: Expression }
   );
 

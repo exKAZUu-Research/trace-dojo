@@ -16,8 +16,10 @@ export interface FunctionContext {
   canReturn: boolean;
   canCallSuper: boolean;
   canReferenceSuper: boolean;
-  /** Whether the function is async, where the grammar lets `await` appear and `yield*` is unsupported. */
+  /** Whether the function is async, where the grammar lets `await` appear. */
   isAsync: boolean;
+  /** Whether the function is an async generator, whose `yield` and `return` await their values. */
+  isAsyncGenerator: boolean;
   /** The `yield` and `await` expressions converted so far in this function, which mark the expressions around them. */
   suspensionCount: number;
   /** Whether `new.target` may appear: anywhere but outside every function, which arrow functions inherit. */
@@ -45,6 +47,7 @@ export function newContext(canReturn: boolean, canCallSuper: boolean, canReferen
     canReferenceSuper,
     canUseNewTarget: true,
     isAsync: false,
+    isAsyncGenerator: false,
     suspensionCount: 0,
     labels: new Map(),
     breakableDepth: 0,
