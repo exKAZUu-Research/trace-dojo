@@ -3,10 +3,11 @@ import { formatFloat } from './floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from './literals';
 import { compareMapKeys } from './mapOrder';
 import { dynamicMethod } from './methods';
+import { addMethod, fn, namedType } from './native';
 import { canBackquote, isPrint, quote, quoteRune } from './quote';
 import { GoPanic } from './runtime';
-import { ERROR_TYPE, isExported, missingMethod, type Type, typeString, underlying } from './types';
-import { type Complex, type GoArray, GoFunc, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from './values';
+import { ERROR_TYPE, isExported, missingMethod, pointerTo, RUNE, type Type, typeString, underlying } from './types';
+import { Cell, type Complex, type GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
 
 const STRINGER = {
   kind: 'interface',
@@ -22,6 +23,109 @@ const STRINGER = {
     },
   ],
 } as const;
+
+const INT_TYPE: Type = { kind: 'basic', basic: 'int', name: 'int' };
+const BOOL_TYPE: Type = { kind: 'basic', basic: 'bool', name: 'bool' };
+const BYTES_TYPE: Type = { kind: 'slice', element: { kind: 'basic', basic: 'uint8', name: 'uint8' } };
+
+/** `fmt.State`, which a Formatter's Format method receives: the printer, with its flags and its output. */
+export const STATE = namedType('fmt', 'State', {
+  kind: 'interface',
+  methods: [
+    { name: 'Flag', type: fn([INT_TYPE], [BOOL_TYPE]) },
+    { name: 'Precision', type: fn([], [INT_TYPE, BOOL_TYPE]) },
+    { name: 'Width', type: fn([], [INT_TYPE, BOOL_TYPE]) },
+    { name: 'Write', type: fn([BYTES_TYPE], [INT_TYPE, ERROR_TYPE]) },
+  ],
+});
+
+/** `fmt.Formatter`: a value that prints itself, given the printer's state and the verb. */
+export const FORMATTER = namedType('fmt', 'Formatter', {
+  kind: 'interface',
+  methods: [{ name: 'Format', type: fn([STATE, RUNE], []) }],
+});
+
+/** `fmt.GoStringer`: a value that gives its Go syntax for `%#v`. */
+export const GO_STRINGER = namedType('fmt', 'GoStringer', {
+  kind: 'interface',
+  methods: [{ name: 'GoString', type: fn([], [{ kind: 'basic', basic: 'string', name: 'string' }]) }],
+});
+
+/** The printer as a Go value, which a Format method writes to and asks for the flags, as Go's *pp. */
+const PRINTER_STATE = namedType('fmt', 'pp', { kind: 'struct', fields: [] });
+const printerOf = (receiver: Value): Printer => ((receiver as Pointer).load() as GoStruct).native?.printer as Printer;
+addMethod(
+  PRINTER_STATE,
+  'Write',
+  fn([BYTES_TYPE], [INT_TYPE, ERROR_TYPE]),
+  (receiver, [bytes]) => {
+    const text = ((bytes as Slice | undefined)?.values() ?? [])
+      .map((byte) => String.fromCharCode(Number(byte)))
+      .join('');
+    printerOf(receiver).buffer += text;
+    return [BigInt(text.length), undefined];
+  },
+  true
+);
+addMethod(
+  PRINTER_STATE,
+  'WriteString',
+  fn([{ kind: 'basic', basic: 'string', name: 'string' }], [INT_TYPE, ERROR_TYPE]),
+  (receiver, [text]) => {
+    printerOf(receiver).buffer += text as string;
+    return [BigInt((text as string).length), undefined];
+  },
+  true
+);
+addMethod(
+  PRINTER_STATE,
+  'Width',
+  fn([], [INT_TYPE, BOOL_TYPE]),
+  (receiver) => {
+    const { width } = printerOf(receiver).flags;
+    return [BigInt(width ?? 0), width !== undefined];
+  },
+  true
+);
+addMethod(
+  PRINTER_STATE,
+  'Precision',
+  fn([], [INT_TYPE, BOOL_TYPE]),
+  (receiver) => {
+    const { precision } = printerOf(receiver).flags;
+    return [BigInt(precision ?? 0), precision !== undefined];
+  },
+  true
+);
+addMethod(
+  PRINTER_STATE,
+  'Flag',
+  fn([INT_TYPE], [BOOL_TYPE]),
+  (receiver, [flag]) => {
+    const { flags } = printerOf(receiver);
+    switch (String.fromCharCode(Number(flag as bigint))) {
+      case '-': {
+        return flags.minus;
+      }
+      case '+': {
+        return flags.plus || flags.plusV;
+      }
+      case '#': {
+        return flags.sharp || flags.sharpV;
+      }
+      case ' ': {
+        return flags.space;
+      }
+      case '0': {
+        return flags.zero;
+      }
+      default: {
+        return false;
+      }
+    }
+  },
+  true
+);
 
 const LOWER_DIGITS = '0123456789abcdefx';
 const UPPER_DIGITS = '0123456789ABCDEFX';
@@ -81,8 +185,10 @@ function noFlags(): Flags {
 export class Printer {
   /** The errors that %w verbs referred to, which only Errorf, constructed with `wrapErrors`, accepts. */
   readonly wrapped: Value[] = [];
-  private buffer = '';
-  private flags = noFlags();
+  /** The output so far, which a Formatter writes to through fmt.State. */
+  buffer = '';
+  /** The flags of the verb being printed, which a Formatter reads through fmt.State. */
+  flags = noFlags();
   /** The value being printed by its methods, to detect a String method that prints its own receiver forever. */
   private readonly depthLimit = 1000;
   private depth = 0;
@@ -322,8 +428,26 @@ export class Printer {
   }
 
   /** Prints with the value's Error or String method, for the verbs that use them. */
+  /** Whether a bad verb's value is being printed, which prints without calling its methods, as Go's erroring. */
+  private erroring = false;
+
+  // code-gauge-allow functionCognitiveComplexity 20 -- Go's handleMethods: Format, GoString, Error, and String.
   private handleMethods(iface: Iface, verb: string): boolean {
-    if (this.flags.sharpV) return false;
+    if (this.erroring) return false;
+    if (!missingMethod(iface.type, FORMATTER.underlying as never)) {
+      this.callMethod(iface, verb, 'Format', (call) => {
+        call(iface.value, [this.stateValue(), BigInt(verb.codePointAt(0) ?? 0)]);
+      });
+      return true;
+    }
+    if (this.flags.sharpV) {
+      if (missingMethod(iface.type, GO_STRINGER.underlying as never)) return false;
+      this.callMethod(iface, verb, 'GoString', (call) => {
+        const text = call(iface.value, []) as string;
+        this.fmtString(text, 's');
+      });
+      return true;
+    }
     if (!['v', 's', 'x', 'X', 'q'].includes(verb)) return false;
     const errorMethod = !missingMethod(iface.type, ERROR_TYPE.underlying as never) ? 'Error' : undefined;
     const method = errorMethod ?? (!missingMethod(iface.type, STRINGER as never) ? 'String' : undefined);
@@ -346,6 +470,34 @@ export class Printer {
     }
     this.fmtString(text, verb);
     return true;
+  }
+
+  /** Calls a method of the value being printed, catching a panic in it as Go's catchPanic does. */
+  private callMethod(
+    iface: Iface,
+    verb: string,
+    name: string,
+    run: (call: NonNullable<ReturnType<typeof dynamicMethod>>) => void
+  ): void {
+    const call = dynamicMethod(iface.type, name);
+    if (!call) return;
+    this.depth++;
+    const saved = this.flags;
+    try {
+      if (this.depth > this.depthLimit) throw new RangeError('Maximum call stack size exceeded');
+      run(call);
+    } catch (error) {
+      if (!(error instanceof GoPanic)) throw error;
+      this.flags = saved;
+      this.catchPanic(iface, verb, name, error);
+    } finally {
+      this.flags = saved;
+      this.depth--;
+    }
+  }
+
+  private stateValue(): Iface {
+    return new Iface(pointerTo(PRINTER_STATE), new Pointer(new Cell(new GoStruct([], { printer: this })), 'v'));
   }
 
   private catchPanic(iface: Iface, verb: string, method: string, panic: GoPanic): void {
@@ -551,7 +703,13 @@ export class Printer {
     } else {
       // Go keeps the width and precision for the value, as its badVerb prints with the flags it parsed.
       this.buffer += `${typeString(type)}=`;
-      this.printValue(value, type, 'v', 0);
+      const wasErroring = this.erroring;
+      this.erroring = true;
+      try {
+        this.printValue(value, type, 'v', 0);
+      } finally {
+        this.erroring = wasErroring;
+      }
     }
     this.buffer += ')';
   }

@@ -1,6 +1,6 @@
 import type { Entity } from '../entities';
 import { newError } from '../errorValues';
-import { Printer } from '../fmt';
+import { FORMATTER, GO_STRINGER, Printer, STATE } from '../fmt';
 import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { ERROR_TYPE, pointerTo, sliceOf, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
@@ -97,6 +97,9 @@ const members: Record<string, Entity> = {
     ([writer, format, args]) => writeTo(writer, new Printer().printf(format as string, sliceValues(args)))
   ),
   Stringer: typeEntity(STRINGER),
+  State: typeEntity(STATE),
+  Formatter: typeEntity(FORMATTER),
+  GoStringer: typeEntity(GO_STRINGER),
   Sscan: nativeFunction('Sscan', fn([STRING, ANY_SLICE], [INT, ERROR_TYPE], true), ([input, args]) =>
     sscan(input as string, sliceValues(args), false)
   ),
@@ -115,9 +118,6 @@ export const FMT_PACKAGE = definePackage('fmt', members, [
   'Fscan',
   'Fscanln',
   'Fscanf',
-  'Formatter',
-  'State',
-  'GoStringer',
   'Append',
   'Appendf',
   'Appendln',
