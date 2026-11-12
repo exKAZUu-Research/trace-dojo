@@ -5,6 +5,7 @@ import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } f
 import { ERROR_TYPE, pointerTo, sliceOf, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { IO_WRITER } from './io';
+import { sscan, sscanf } from './scan';
 import { ANY_SLICE, byteSlice, callMethod, INT, sliceValues, STRING, writeStdout } from './support';
 
 const ERROR_RESULTS: Type[] = [INT, ERROR_TYPE];
@@ -96,6 +97,15 @@ const members: Record<string, Entity> = {
     ([writer, format, args]) => writeTo(writer, new Printer().printf(format as string, sliceValues(args)))
   ),
   Stringer: typeEntity(STRINGER),
+  Sscan: nativeFunction('Sscan', fn([STRING, ANY_SLICE], [INT, ERROR_TYPE], true), ([input, args]) =>
+    sscan(input as string, sliceValues(args), false)
+  ),
+  Sscanln: nativeFunction('Sscanln', fn([STRING, ANY_SLICE], [INT, ERROR_TYPE], true), ([input, args]) =>
+    sscan(input as string, sliceValues(args), true)
+  ),
+  Sscanf: nativeFunction('Sscanf', fn([STRING, STRING, ANY_SLICE], [INT, ERROR_TYPE], true), ([input, format, args]) =>
+    sscanf(input as string, format as string, sliceValues(args))
+  ),
 };
 
 export const FMT_PACKAGE = definePackage('fmt', members, [
@@ -105,9 +115,6 @@ export const FMT_PACKAGE = definePackage('fmt', members, [
   'Fscan',
   'Fscanln',
   'Fscanf',
-  'Sscan',
-  'Sscanln',
-  'Sscanf',
   'Formatter',
   'State',
   'GoStringer',
