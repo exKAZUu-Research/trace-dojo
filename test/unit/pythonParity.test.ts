@@ -367,6 +367,14 @@ test.each(['s[::-1]', 's[::2]', 's[1:]'])(
   }
 );
 
+test.each(["s.find('a')", "s.rfind('a')", "'a' in s", "s.split('a', 0)", "s.rsplit('a', 0)"])(
+  'a search of a long text that stops at once, %s, is charged for what it reads',
+  (search) => {
+    const program = `s = 'a' * 500000\nfor i in range(10000):\n    v = ${search}`;
+    expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  }
+);
+
 test('str.splitlines over a long text over and over ends at the operation limit', () => {
   const program = `s = 'x' * 1000000\nfor i in range(70):\n    s.splitlines()`;
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });

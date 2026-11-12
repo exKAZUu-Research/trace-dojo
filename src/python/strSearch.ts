@@ -19,13 +19,26 @@ export function occurrences(
   { from = 0, to = text.length, fromEnd = false, limit = Number.POSITIVE_INFINITY } = {}
 ): number[] {
   const region = from === 0 && to === text.length ? text : text.slice(from, to);
-  currentRuntime().scan(region.length + needle.length);
-  if (needle.length > region.length || limit <= 0) return [];
+  if (needle.length > region.length || limit <= 0) {
+    currentRuntime().scan(needle.length);
+    return [];
+  }
   const found =
     needle.length <= SHORT_NEEDLE
       ? hostOccurrences(region, needle, fromEnd, limit)
       : kmpOccurrences(region, needle, fromEnd, limit);
+  currentRuntime().scan(examined(region.length, needle.length, found, fromEnd, limit) + needle.length);
   return from === 0 ? found : found.map((offset) => offset + from);
+}
+
+/**
+ * How much of a region a search read: all of it, unless it stopped at its `limit`-th match, when it read up to the end
+ * of that match from the end it started at.
+ */
+function examined(length: number, needleLength: number, found: number[], fromEnd: boolean, limit: number): number {
+  if (found.length < limit) return length;
+  const last = found.at(-1) as number;
+  return fromEnd ? length - last : last + needleLength;
 }
 
 /** Whether `text` contains `needle` as a sequence of whole code points. */
