@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 652 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 654 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
 import { floatPower } from './floatPower';
@@ -798,19 +798,16 @@ function setLikeSize(value: PyDictView | PySet): number {
 
 function allContainedIn(items: PyDictView | PySet, container: PyDictView | PySet): boolean {
   const runtime = currentRuntime();
-  return iterateAll(items).every((item) => {
+  const next = iterate(items);
+  for (let item = next(); item !== DONE; item = next()) {
     runtime.spend();
-    return container instanceof PySet
-      ? lookupSetKey(item, (key) => container.table.has(key))
-      : viewContains(container, item);
-  });
-}
-
-function iterateAll(value: PyValue): PyValue[] {
-  const next = iterate(value);
-  const items: PyValue[] = [];
-  for (let item = next(); item !== DONE; item = next()) items.push(item);
-  return items;
+    const isContained =
+      container instanceof PySet
+        ? lookupSetKey(item, (key) => container.table.has(key))
+        : viewContains(container, item);
+    if (!isContained) return false;
+  }
+  return true;
 }
 
 function isSetLike(value: PyValue): value is PyDictView | PySet {
@@ -958,13 +955,20 @@ export function contains(container: PyValue, item: PyValue): boolean {
     return isIntLike(item) ? rangeContains(container, asInt(item)) : countEqual(iterate(container), item, 1) > 0;
   }
   if ((container instanceof PyList || container instanceof PyTuple) && classOf(container).isBuiltin) {
-    currentRuntime().scan(container.items.length);
-    return container.items.some((element) => equals(element, item));
+    return sequenceContains(container, item);
   }
   const special = lookupSpecial(container, '__contains__');
   if (special !== undefined) return isTruthyValue(callValue(bindValue(special, container), [item]));
   const next = iterateOr(container, `argument of type '${typeName(container)}' is not a container or iterable`);
   return countEqual(next, item, 1) > 0;
+}
+
+function sequenceContains(sequence: PyList | PyTuple, item: PyValue): boolean {
+  // As list_contains does, the length is read again after each comparison, which may change the list.
+  for (let index = 0; index < sequence.items.length; index++) {
+    if (equals(sequence.items[index], item)) return true;
+  }
+  return false;
 }
 
 /** The number of items an iterator yields that equal a value, stopping at `limit` of them. */

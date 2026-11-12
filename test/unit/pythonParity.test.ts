@@ -386,6 +386,20 @@ test.each([
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test.each([
+  ['a list', 'a = list(range(100000))', '0 in a'],
+  ['a tuple', 'a = tuple(range(100000))', '0 in a'],
+  ['a keys view under a set', 'd = dict.fromkeys(range(100000))\ns = set(range(1, 100001))', 'd.keys() <= s'],
+  [
+    'a keys view under a keys view',
+    'd = dict.fromkeys(range(100000))\ne = dict.fromkeys(range(1, 100001))',
+    'd.keys() <= e.keys()',
+  ],
+])('a test of %s decided by its first item is charged for that item', (_name, setup, test) => {
+  const program = `${setup}\nfor i in range(5000):\n    x = ${test}`;
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test.each(['startswith', 'endswith'])('str.%s of a long candidate that differs at once compares no more', (method) => {
   const program = `s = 'b' + 'a' * 499999\nt = 'a' * 500000\nfor i in range(10000):\n    v = s.${method}(t)`;
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
