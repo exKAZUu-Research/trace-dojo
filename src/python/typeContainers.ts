@@ -4,7 +4,7 @@ import { method } from './define';
 import { reversedDictIterator } from './dictReversal';
 import { DictStore } from './dictStore';
 import { NATIVE_HASHES, pyHash } from './hashing';
-import { keyError, sliceIndices } from './items';
+import { keyError } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
 import { callValue, getItem, getIterator, isTruthy, iterate, lookupSpecial, toArray } from './objects';
@@ -45,7 +45,6 @@ import {
   pyError,
   rangeClass,
   setClass,
-  sliceClass,
   tupleClass,
   valueError,
 } from './types';
@@ -60,7 +59,6 @@ import {
   type PyObject,
   PyRange,
   PySet,
-  PySlice,
   PyTuple,
   type PyValue,
 } from './values';
@@ -184,15 +182,27 @@ export function sequenceIndex(
   start: PyValue | undefined,
   stop: PyValue | undefined
 ): number {
-  const { start: from, stop: to } = sliceIndices(
-    new PySlice(sliceClass, start ?? None, stop ?? None, None),
-    items.length
-  );
-  for (let index = from; index < to; index++) {
+  const from = indexBound(start, 0, items.length);
+  const to = indexBound(stop, items.length, items.length);
+  for (let index = from; index < to && index < items.length; index++) {
     currentRuntime().spend();
     if (equals(items[index], item)) return index;
   }
   return -1;
+}
+
+/**
+ * A bound of list, tuple, or deque `index`, converted as _PyEval_SliceIndexNotNone converts it (no None, clamped to the
+ * size) and counted from the end when negative.
+ */
+function indexBound(value: PyValue | undefined, fallback: number, length: number): number {
+  if (value === undefined) return fallback;
+  const index = toIndex(value, () => 'slice indices must be integers or have an __index__ method');
+  const bound =
+    index < 0n
+      ? Number(index < BigInt(-length) ? BigInt(-length) : index) + length
+      : Number(index > BigInt(length) ? BigInt(length) : index);
+  return Math.max(0, bound);
 }
 
 /** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
