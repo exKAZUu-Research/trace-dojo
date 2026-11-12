@@ -309,6 +309,9 @@ test.each([
   ['a star pattern as a whole case pattern', "match 5:\n    case *a:\n        print('x')", 1],
   ['a star pattern in a group', "match 5:\n    case (*a):\n        print('x')", 1],
   ['a star pattern in an or-pattern', "match [5]:\n    case [*a | 1]:\n        print('x')", 1],
+  ['mapping pattern keys quoted differently', 'match {}:\n    case {\'k\': a, "k": b}:\n        pass', 1],
+  ['mapping pattern keys 1 and True', 'match {}:\n    case {1: a, True: b}:\n        pass', 1],
+  ['mapping pattern keys 0 and -0.0', 'match {}:\n    case {0: a, -0.0: b}:\n        pass', 1],
   ['a match without case clauses in a function', 'def f(x):\n    match x:\n        y = 1\n    return 2', 1],
 ])('%s is a compile error', (_, source, row) => {
   const execution = executeProgram('python', source);

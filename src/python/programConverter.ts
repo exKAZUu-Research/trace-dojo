@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 683 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 686 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -29,6 +29,7 @@ import {
 } from './convertNodes';
 import { ExpressionConverter } from './expressionConverter';
 import { isSupportedModule, unsupportedModuleFeature } from './moduleNames';
+import { literalKeyId } from './patternKeys';
 import { fail, resolveScopes, ScopeBuilder } from './scopes';
 
 export const misplacedPythonAtomicMessage =
@@ -742,7 +743,7 @@ export class ProgramConverter extends ExpressionConverter {
   private mappingPattern(node: Node, names: Set<string>): Pattern {
     const keys: Expression[] = [];
     const patterns: Pattern[] = [];
-    const keyTexts = new Set<string>();
+    const keyIds = new Set<string>();
     const valueNodes = fieldNodes(node, 'value');
     let sign: Node | undefined;
     // The sign of a negative number is a key node of its own, before the number's.
@@ -751,11 +752,16 @@ export class ProgramConverter extends ExpressionConverter {
         sign = keyNode;
         continue;
       }
-      const text = `${sign ? '-' : ''}${this.textOf(keyNode)}`;
-      if (keyNode.type !== 'dotted_name' && keyTexts.has(text))
-        fail(rowOf(keyNode), `マッピングのパターンで、キー ${text} が重複しています。`);
-      keyTexts.add(text);
-      keys.push(sign ? this.negativeNumber(keyNode, rowOf(sign)) : this.mappingKey(keyNode, names));
+      const key = sign ? this.negativeNumber(keyNode, rowOf(sign)) : this.mappingKey(keyNode, names);
+      const id = literalKeyId(key);
+      if (id !== undefined && keyIds.has(id)) {
+        fail(
+          rowOf(keyNode),
+          `マッピングのパターンで、キー ${sign ? '-' : ''}${this.textOf(keyNode)} が重複しています。`
+        );
+      }
+      if (id !== undefined) keyIds.add(id);
+      keys.push(key);
       patterns.push(this.pattern(valueNodes[patterns.length], names));
       sign = undefined;
     }
