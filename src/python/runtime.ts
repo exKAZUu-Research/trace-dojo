@@ -478,9 +478,26 @@ export class Runtime {
 
   // Garbage collection ----------------------------------------------------------------------------------------------
 
-  /** Removes the turtles that no variable, object, or pending value can reach any more. */
-  collectGarbage(): void {
-    if (!this.world.hasTurtles) return;
+  /** How many calls of native code are running, which may hold values in places the collector cannot see. */
+  private nativeCalls = 0;
+
+  /** Runs native code, during which no turtle is collected. */
+  runNative<T>(run: () => T): T {
+    this.nativeCalls++;
+    try {
+      return run();
+    } finally {
+      this.nativeCalls--;
+    }
+  }
+
+  /**
+   * Removes the turtles that no variable, object, or pending value can reach any more. Native code may hold values
+   * where the collector cannot see them (a list's items while it sorts, the items a constructor has taken from an
+   * iterator), so nothing is collected while it runs, apart from the native calls `ownCalls` the caller is inside of.
+   */
+  collectGarbage(ownCalls = 0): void {
+    if (!this.world.hasTurtles || this.nativeCalls > ownCalls) return;
     const roots: unknown[] = [];
     for (const frame of this.frames) {
       for (const value of frame.locals.values()) roots.push(value);

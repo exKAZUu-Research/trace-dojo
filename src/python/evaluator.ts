@@ -14,16 +14,15 @@ import {
   getAttributeOrUndefined,
   getItem,
   isTruthy,
-  iterate,
   iterateHeld,
   lengthOf,
   lookupSpecial,
   setAttribute,
   setItem,
+  toArray,
 } from './objects';
 import { compareOp, equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
-import { currentRuntime } from './runtimeContext';
 import {
   baseExceptionClass,
   exceptionClassNamed,
@@ -702,7 +701,7 @@ export class Evaluator extends ExpressionEvaluator {
     }
     const star = patterns[starIndex];
     if (star.kind === 'star' && star.name) {
-      bindings.set(star.name, newList(toItems(subject).slice(starIndex, length - after)));
+      bindings.set(star.name, newList(toArray(subject).slice(starIndex, length - after)));
     }
     return true;
   }
@@ -860,17 +859,6 @@ function checkExceptStarTypes(types: PyValue): void {
       throw typeError('catching ExceptionGroup with except* is not allowed. Use except instead.');
     }
   }
-}
-
-function toItems(subject: PyValue): PyValue[] {
-  const next = iterate(subject);
-  const items: PyValue[] = [];
-  const runtime = currentRuntime();
-  for (let item = next(); item !== DONE; item = next()) {
-    runtime.spend();
-    items.push(item);
-  }
-  return items;
 }
 
 function mappingGet(mapping: PyValue, key: PyValue): PyValue | undefined {

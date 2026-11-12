@@ -261,19 +261,21 @@ function checkLayout(bases: PyClass[]): void {
   if (layouts.size > 1) throw typeError('multiple bases have instance lay-out conflict');
 }
 
+type Construct = NonNullable<PyClass['construct']>;
+
 /** Calls a class: creates an instance and runs its `__init__`. */
 // code-gauge-allow functionCognitiveComplexity 21 -- Follows how calling a class creates and initializes an instance.
 export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
   if (cls === typeClass && args.length === 1 && !kwargs) return classOf(args[0]);
   if (isEnumClass(cls)) return enumLookup(cls, args, kwargs);
-  if (cls.construct) return cls.construct(cls, args, kwargs);
+  if (cls.construct) return currentRuntime().runNative(() => (cls.construct as Construct)(cls, args, kwargs));
   const builtinBase = cls.mro.find((base) => base.isBuiltin && base.construct);
   if (cls.isBuiltin && !builtinBase) throw typeError(`cannot create '${cls.qualifiedName}' instances`);
   const abstract = abstractInstantiationError(cls);
   if (abstract) throw abstract;
   const instance =
     builtinBase && builtinBase !== objectClass && builtinBase.construct && !cls.isBuiltin
-      ? builtinBase.construct(cls, args, kwargs)
+      ? currentRuntime().runNative(() => (builtinBase.construct as Construct)(cls, args, kwargs))
       : new PyInstance(cls);
   const init = cls.lookup('__init__');
   const hasArguments = args.length > 0 || (kwargs !== undefined && kwargs.size > 0);

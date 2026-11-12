@@ -55,8 +55,9 @@ import {
 export function callValue(fn: PyValue, args: PyValue[], kwargs?: Kwargs): PyValue {
   if (fn instanceof PyFunction) return currentRuntime().callFunction(fn, args, kwargs);
   if (fn instanceof PyBuiltinFunction) {
-    currentRuntime().spend();
-    return fn.run(fn.self === undefined ? args : [fn.self, ...args], kwargs);
+    const runtime = currentRuntime();
+    runtime.spend();
+    return runtime.runNative(() => fn.run(fn.self === undefined ? args : [fn.self, ...args], kwargs));
   }
   if (fn instanceof PyBoundMethod) return callValue(fn.fn, [fn.self, ...args], kwargs);
   if (fn instanceof PyClass) return currentRuntime().instantiate(fn, args, kwargs);
@@ -439,11 +440,14 @@ export function toArray(value: PyValue, notIterable?: string): PyValue[] {
   const next = notIterable === undefined ? iterate(value) : iterateOr(value, notIterable);
   const items: PyValue[] = [];
   const runtime = currentRuntime();
-  for (let item = next(); item !== DONE; item = next()) {
-    runtime.spend();
-    items.push(item);
-  }
-  return items;
+  // The items taken so far are only here while the iterator runs Python code.
+  return runtime.runNative(() => {
+    for (let item = next(); item !== DONE; item = next()) {
+      runtime.spend();
+      items.push(item);
+    }
+    return items;
+  });
 }
 
 /** The iterator object `iter()` returns. */

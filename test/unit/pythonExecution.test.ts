@@ -443,3 +443,32 @@ test.each([
     expect(trace.finalTurtles).toHaveLength(1);
   }
 );
+
+test.each([
+  ['sorting by a key', 'ws = [W(1), W(0)]\nws.sort(key=key)', 2],
+  ['building a list from a generator', 'ws = list(gen())', 3],
+  ['building a set from a generator', 'ws = set(gen())', 3],
+  ['sorting a generator by a key', 'ws = sorted(gen(), key=key)', 3],
+  ['unpacking a generator', 'a, b, c = gen()', 3],
+  ['building a deque from a generator', 'from collections import deque\nws = deque(gen())', 3],
+  ['taking a product of a generator', 'import itertools\nws = list(itertools.product(gen(), [1]))', 3],
+])('turtles of objects that %s holds stay on every step while it runs Python code', (_name, body, count) => {
+  const program = `class W:
+    def __init__(self, n):
+        self.t = Turtle(n, 0)
+        self.n = n
+    def __hash__(self):
+        return self.n
+def key(w):
+    n = w.n
+    return n
+def gen():
+    for i in range(3):
+        w = W(i)
+        yield w
+${body}`;
+  const trace = traceProgram('python', program, program);
+  const counts = trace.traceItems.map(({ turtles }) => turtles.length);
+  expect(counts.slice(counts.indexOf(1)).every((each, index, all) => index === 0 || each >= all[index - 1])).toBe(true);
+  expect(trace.finalTurtles).toHaveLength(count);
+});

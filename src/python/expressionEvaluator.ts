@@ -23,7 +23,7 @@ import {
 } from './objects';
 import { binaryOp, compareOp, unaryOp } from './operators';
 import type { Runtime } from './runtime';
-import { withoutCharge } from './runtimeContext';
+import { currentRuntime, withoutCharge } from './runtimeContext';
 import { addToTable, updateTable } from './setOperations';
 import {
   dictClass,
@@ -724,7 +724,6 @@ function inlinedNames(frame: Frame): string[] {
  * The items a target list unpacks a value into, raising the errors CPython raises for a count mismatch: it reports how
  * many values there were only for an exact list, tuple, or dict, and asks no other iterable for its length.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows CPython's unpacking, whose errors differ for exact lists, tuples, and dicts.
 export function unpack(value: PyValue, count: number): PyValue[] {
   if ((value instanceof PyList && value.cls === listClass) || (value instanceof PyTuple && value.cls === tupleClass)) {
     const { items } = value;
@@ -733,6 +732,11 @@ export function unpack(value: PyValue, count: number): PyValue[] {
     return [...items];
   }
   if (!isIterable(value)) throw typeError(`cannot unpack non-iterable ${typeName(value)} object`);
+  // The items taken so far are only here while the iterator runs Python code.
+  return currentRuntime().runNative(() => unpackIterated(value, count));
+}
+
+function unpackIterated(value: PyValue, count: number): PyValue[] {
   const next = iterate(value);
   const items: PyValue[] = [];
   for (let index = 0; index < count; index++) {
