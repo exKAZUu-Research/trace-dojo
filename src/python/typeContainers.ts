@@ -479,7 +479,7 @@ for (const [cls, view] of [
   [dictItemsClass, 'items'],
 ] as const) {
   method(cls, '__repr__', 'none', 0, 0, (self) =>
-    containerRepr(self as PyObject, '...', () => `${cls.name}([${joinReprs(toArray(self))}])`)
+    containerRepr(self as PyObject, '...', () => `${(self as PyObject).cls.name}([${joinReprs(toArray(self))}])`)
   );
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt((self as PyDictView).dict.store.size));
   method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));

@@ -9,7 +9,6 @@ import {
   builtinFunctionClass,
   classmethodClass,
   classOf,
-  dictKeysClass,
   exceptionClassNamed,
   frozensetClass,
   iteratorClass,
@@ -495,15 +494,16 @@ function iteratorNameOf(value: PyValue): string {
   if (value instanceof PyTuple) return 'tuple_iterator';
   if (value instanceof PyRange) return 'range_iterator';
   if (value instanceof PySet) return 'set_iterator';
-  if (value instanceof PyDict) return 'dict_keyiterator';
-  if (value instanceof PyDictView) {
-    return value.cls === dictKeysClass
-      ? 'dict_keyiterator'
-      : value.view === 'values'
-        ? 'dict_valueiterator'
-        : 'dict_itemiterator';
-  }
+  if (value instanceof PyDict) return dictIteratorName(value, 'keys');
+  if (value instanceof PyDictView) return dictIteratorName(value.dict, value.view);
   return 'iterator';
+}
+
+/** The iterator type of a dict or its view, which an OrderedDict shares among all of them as CPython's does. */
+function dictIteratorName(dict: PyDict, view: 'keys' | 'values' | 'items'): string {
+  if (dict.cls.flags.isOrderedDict) return 'odict_iterator';
+  if (view === 'keys') return 'dict_keyiterator';
+  return view === 'values' ? 'dict_valueiterator' : 'dict_itemiterator';
 }
 
 /** Interprets a value as an index, as `__index__` does. */

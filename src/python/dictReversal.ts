@@ -15,7 +15,7 @@ export function reversedDictIterator(dict: PyDict, view: DictView): PyIterator {
   let left = size;
   let isExhausted = false;
   const iterator = new PyIterator(
-    iteratorClass(`dict_reverse${ITERATOR_NAMES[view]}iterator`),
+    iteratorClass(dict.cls.flags.isOrderedDict ? 'odict_iterator' : `dict_reverse${ITERATOR_NAMES[view]}iterator`),
     () => {
       if (isExhausted) return DONE;
       if (store.size !== size) throw pyError('RuntimeError', 'dictionary changed size during iteration');

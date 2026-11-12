@@ -110,7 +110,7 @@ export class PyClass extends PyObject {
   annotationNames: string[] = [];
   /** The `__annotations__` a program read or assigned, which later reads return as it is. */
   annotations?: PyValue;
-  readonly flags: { isEnum?: boolean; isAbstractEnum?: boolean } = {};
+  readonly flags: { isEnum?: boolean; isAbstractEnum?: boolean; isOrderedDict?: boolean } = {};
   /** The members of an Enum class, in definition order. */
   enumMembers?: PyInstance[];
   /** The names `dir()` lists for an instance of this class, when its `__dir__` differs from object's. */

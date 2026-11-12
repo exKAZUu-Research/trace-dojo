@@ -1,5 +1,5 @@
 import { mappingEntries } from '../callArguments';
-// code-gauge-allow-file fileNcss 497 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 501 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -31,6 +31,9 @@ import {
   classOf,
   defineMethod,
   dictClass,
+  dictItemsClass,
+  dictKeysClass,
+  dictValuesClass,
   iteratorClass,
   newDict,
   newList,
@@ -52,6 +55,7 @@ import {
   PyDeque,
   PyDescriptor,
   PyDict,
+  PyDictView,
   PyIterator,
   PyObject,
   type PyValue,
@@ -687,16 +691,17 @@ orderedDictClass.construct = (cls, args, kwargs) => {
   updateOrderedDict(dict, args, kwargs);
   return dict;
 };
-redeclareMethods(orderedDictClass, dictClass, [
-  'clear',
-  'copy',
-  'items',
-  'keys',
-  'pop',
-  'setdefault',
-  'values',
-  '__reversed__',
-]);
+orderedDictClass.flags.isOrderedDict = true;
+redeclareMethods(orderedDictClass, dictClass, ['clear', 'copy', 'pop', 'setdefault', '__reversed__']);
+for (const [name, base] of [
+  ['keys', dictKeysClass],
+  ['values', dictValuesClass],
+  ['items', dictItemsClass],
+] as const) {
+  // CPython's OrderedDict views are their own subclasses of the dict views, which name them in their reprs.
+  const viewClass = builtinClass(`odict_${name}`, base);
+  method(orderedDictClass, name, 'none', 0, 0, (self) => new PyDictView(viewClass, self as PyDict, name));
+}
 defineMethod(orderedDictClass, 'update', (self, args, kwargs) => {
   updateOrderedDict(self, args, kwargs);
   return None;
