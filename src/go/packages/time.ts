@@ -10,6 +10,7 @@ import {
   nativeFunction,
   typeEntity,
 } from '../native';
+import { quote } from '../quote';
 import { GoPanic } from '../runtime';
 import { type Goroutine, makeChannel, scheduler } from '../scheduler';
 import { BASIC, type NamedType, pointerTo, type Type } from '../types';
@@ -631,6 +632,389 @@ function timeString(instant: Instant): string {
   return `${text} m=${sign}${absolute / SECOND}.${pad(Number(absolute % SECOND), 9)}`;
 }
 
+// Parsing -------------------------------------------------------------------------------------------------------------
+
+/** Go's quote for parse errors, which escapes like strconv.Quote. */
+function quoteText(text: string): string {
+  return quote(text);
+}
+
+class ParseFailure {
+  constructor(readonly message: string) {}
+}
+
+function parseError(
+  layout: string,
+  value: string,
+  layoutElement: string,
+  valueElement: string,
+  message: string
+): never {
+  throw new ParseFailure(
+    message === ''
+      ? `parsing time ${quoteText(value)} as ${quoteText(layout)}: cannot parse ${quoteText(valueElement)} as ${quoteText(layoutElement)}`
+      : `parsing time ${quoteText(value)}${message}`
+  );
+}
+
+const isDigitAt = (text: string, index: number): boolean =>
+  index < text.length && text[index] >= '0' && text[index] <= '9';
+
+/** Go's getnum: one or two digits, exactly two when `fixed`. */
+function getNumber(text: string, fixed: boolean): [number, string] | undefined {
+  if (!isDigitAt(text, 0)) return undefined;
+  if (!isDigitAt(text, 1)) return fixed ? undefined : [Number(text[0]), text.slice(1)];
+  return [Number(text.slice(0, 2)), text.slice(2)];
+}
+
+/** Go's getnum3: one to three digits, exactly three when `fixed`. */
+function getNumber3(text: string, fixed: boolean): [number, string] | undefined {
+  let count = 0;
+  while (count < 3 && isDigitAt(text, count)) count++;
+  if (count === 0 || (fixed && count !== 3)) return undefined;
+  return [Number(text.slice(0, count)), text.slice(count)];
+}
+
+/** Go's lookup: the name at the start of the text, ignoring ASCII case. */
+function lookupName(names: string[], text: string): [number, string] | undefined {
+  for (const [index, name] of names.entries()) {
+    if (text.length >= name.length && text.slice(0, name.length).toLowerCase() === name.toLowerCase())
+      return [index, text.slice(name.length)];
+  }
+  return undefined;
+}
+
+function skipPrefix(value: string, prefix: string): string | undefined {
+  let rest = value;
+  let wanted = prefix;
+  while (wanted.length > 0) {
+    if (wanted[0] === ' ') {
+      if (rest.length > 0 && rest[0] !== ' ') return undefined;
+      wanted = wanted.replace(/^ +/, '');
+      rest = rest.replace(/^ +/, '');
+      continue;
+    }
+    if (rest.length === 0 || rest[0] !== wanted[0]) return undefined;
+    wanted = wanted.slice(1);
+    rest = rest.slice(1);
+  }
+  return rest;
+}
+
+function parseNanoseconds(value: string, count: number): { nanos: number; range?: string } | undefined {
+  if (value[0] !== '.' && value[0] !== ',') return undefined;
+  const digits = value.slice(1, Math.min(count, 10));
+  if (!/^\d*$/.test(digits) || digits === '') return undefined;
+  return { nanos: Number(digits.padEnd(9, '0').slice(0, 9)) };
+}
+
+/** Go's parseTimeZone: the length of a zone abbreviation at the start of the value, if it looks like one. */
+function timeZoneLength(value: string): number {
+  if (value.length < 3) return 0;
+  if (value.startsWith('ChST') || value.startsWith('MeST')) return 4;
+  if (value.startsWith('GMT')) {
+    const offset = /^GMT[+-]\d{1,2}/.exec(value);
+    return offset ? offset[0].length : 3;
+  }
+  if (value[0] === '+' || value[0] === '-') return /^[+-]\d{2}/.test(value) ? 3 : 0;
+  let upper = 0;
+  while (upper < 6 && upper < value.length && value[upper] >= 'A' && value[upper] <= 'Z') upper++;
+  if (upper === 3) return 3;
+  if (upper === 4 && (value[3] === 'T' || value.startsWith('WITA'))) return 4;
+  if (upper === 5 && value[4] === 'T') return 5;
+  return 0;
+}
+
+function daysIn(month: number, year: number): number {
+  return new Date(Date.UTC(2000, month, 0)).getUTCDate() === 29 && month === 2
+    ? year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+      ? 29
+      : 28
+    : new Date(Date.UTC(2001, month, 0)).getUTCDate();
+}
+
+const SHORT_DAY_NAMES = WEEKDAY_NAMES.map((name) => name.slice(0, 3));
+const SHORT_MONTH_NAMES = MONTH_NAMES.map((name) => name.slice(0, 3));
+
+/** time.Parse and ParseInLocation: Go's parse, element by element of the layout. */
+// code-gauge-allow functionCognitiveComplexity 120 -- Transcribes Go's parse, one case per layout element.
+// code-gauge-allow functionNcss 200 -- Transcribes Go's parse, one case per layout element.
+function parseTime(layout: string, value: string, defaultLocation: Location, local: Location): [Instant, Value] {
+  try {
+    return [parseInstant(layout, value, defaultLocation, local), undefined];
+  } catch (error) {
+    if (error instanceof ParseFailure) return [ZERO_INSTANT, newError(error.message)];
+    throw error;
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 120 -- Transcribes Go's parse, one case per layout element.
+function parseInstant(fullLayout: string, fullValue: string, defaultLocation: Location, local: Location): Instant {
+  let layout = fullLayout;
+  let value = fullValue;
+  let amSet = false;
+  let pmSet = false;
+  let year = 0;
+  let month = -1;
+  let day = -1;
+  let yday = -1;
+  let hour = 0;
+  let minute = 0;
+  let second = 0;
+  let nanos = 0;
+  let utc = false;
+  let zoneOffset: number | undefined;
+  let zoneName = '';
+  for (;;) {
+    const [prefix, chunk, suffix] = nextChunk(layout);
+    const element = layout.slice(prefix.length, layout.length - suffix.length);
+    const skipped = skipPrefix(value, prefix);
+    if (skipped === undefined) parseError(fullLayout, fullValue, prefix, value, '');
+    value = skipped;
+    if (chunk === undefined) {
+      if (value.length > 0) parseError(fullLayout, fullValue, '', value, `: extra text: ${quoteText(value)}`);
+      break;
+    }
+    layout = suffix;
+    const hold = value;
+    let bad = false;
+    let range = '';
+    const take = (result: [number, string] | undefined): number => {
+      if (!result) {
+        bad = true;
+        return 0;
+      }
+      value = result[1];
+      return result[0];
+    };
+    if (typeof chunk === 'object') {
+      if (chunk.fraction === '0') {
+        const count = 1 + chunk.digits;
+        const parsed = value.length < count ? undefined : parseNanoseconds(value, count);
+        if (parsed) {
+          nanos = parsed.nanos;
+          value = value.slice(count);
+        } else bad = true;
+      } else if (value.length >= 2 && (value[0] === '.' || value[0] === ',') && isDigitAt(value, 1)) {
+        let count = 1;
+        while (isDigitAt(value, count)) count++;
+        nanos = (parseNanoseconds(value, count) as { nanos: number }).nanos;
+        value = value.slice(count);
+      }
+    } else {
+      switch (chunk) {
+        case 'year': {
+          if (value.length < 2 || !/^\d\d/.test(value)) bad = true;
+          else {
+            year = Number(value.slice(0, 2));
+            year += year >= 69 ? 1900 : 2000;
+            value = value.slice(2);
+          }
+          break;
+        }
+        case 'longYear': {
+          if (value.length < 4 || !/^\d{4}/.test(value)) bad = true;
+          else {
+            year = Number(value.slice(0, 4));
+            value = value.slice(4);
+          }
+          break;
+        }
+        case 'month':
+        case 'longMonth': {
+          month = take(lookupName(chunk === 'month' ? SHORT_MONTH_NAMES : MONTH_NAMES, value)) + 1;
+          break;
+        }
+        case 'numMonth':
+        case 'zeroMonth': {
+          month = take(getNumber(value, chunk === 'zeroMonth'));
+          if (!bad && (month <= 0 || month > 12)) range = 'month';
+          break;
+        }
+        case 'weekDay':
+        case 'longWeekDay': {
+          take(lookupName(chunk === 'weekDay' ? SHORT_DAY_NAMES : WEEKDAY_NAMES, value));
+          break;
+        }
+        case 'day':
+        case 'underDay':
+        case 'zeroDay': {
+          if (chunk === 'underDay' && value.startsWith(' ')) value = value.slice(1);
+          day = take(getNumber(value, chunk === 'zeroDay'));
+          break;
+        }
+        case 'underYearDay':
+        case 'zeroYearDay': {
+          for (let index = 0; index < 2; index++)
+            if (chunk === 'underYearDay' && value.startsWith(' ')) value = value.slice(1);
+          yday = take(getNumber3(value, chunk === 'zeroYearDay'));
+          break;
+        }
+        case 'hour': {
+          hour = take(getNumber(value, false));
+          if (hour < 0 || hour >= 24) range = 'hour';
+          break;
+        }
+        case 'hour12':
+        case 'zeroHour12': {
+          hour = take(getNumber(value, chunk === 'zeroHour12'));
+          if (hour < 0 || hour > 12) range = 'hour';
+          break;
+        }
+        case 'minute':
+        case 'zeroMinute': {
+          minute = take(getNumber(value, chunk === 'zeroMinute'));
+          if (minute < 0 || minute >= 60) range = 'minute';
+          break;
+        }
+        case 'second':
+        case 'zeroSecond': {
+          second = take(getNumber(value, chunk === 'zeroSecond'));
+          if (bad) break;
+          if (second < 0 || second >= 60) {
+            range = 'second';
+            break;
+          }
+          if (value.length >= 2 && (value[0] === '.' || value[0] === ',') && isDigitAt(value, 1)) {
+            const next = nextChunk(layout)[1];
+            if (typeof next === 'object') break;
+            let count = 2;
+            while (isDigitAt(value, count)) count++;
+            nanos = (parseNanoseconds(value, count) as { nanos: number }).nanos;
+            value = value.slice(count);
+          }
+          break;
+        }
+        case 'PM':
+        case 'pm': {
+          const text = value.slice(0, 2);
+          const [am, pm] = chunk === 'PM' ? ['AM', 'PM'] : ['am', 'pm'];
+          if (value.length < 2 || (text !== am && text !== pm)) bad = true;
+          else {
+            if (text === pm) pmSet = true;
+            else amSet = true;
+            value = value.slice(2);
+          }
+          break;
+        }
+        case 'TZ': {
+          if (value.startsWith('UTC')) {
+            utc = true;
+            value = value.slice(3);
+            break;
+          }
+          const length = timeZoneLength(value);
+          if (length === 0) bad = true;
+          else {
+            zoneName = value.slice(0, length);
+            value = value.slice(length);
+          }
+          break;
+        }
+        default: {
+          if (chunk.startsWith('ISO8601') && value.startsWith('Z')) {
+            value = value.slice(1);
+            utc = true;
+            break;
+          }
+          const parsed = parseOffset(chunk, value);
+          if (!parsed) {
+            bad = true;
+            break;
+          }
+          [zoneOffset, value, range] = parsed;
+        }
+      }
+    }
+    if (range !== '') parseError(fullLayout, fullValue, element, value, `: ${range} out of range`);
+    if (bad) parseError(fullLayout, fullValue, element, hold, '');
+  }
+  if (pmSet && hour < 12) hour += 12;
+  else if (amSet && hour === 12) hour = 0;
+  if (yday >= 0) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    if (yday < 1 || yday > (leap ? 366 : 365))
+      parseError(fullLayout, fullValue, '', value, ': day-of-year out of range');
+    const date = new Date(Date.UTC(2000, 0, 1));
+    date.setUTCFullYear(year, 0, yday);
+    if (month >= 0 && month !== date.getUTCMonth() + 1)
+      parseError(fullLayout, fullValue, '', value, ': day-of-year does not match month');
+    if (day >= 0 && day !== date.getUTCDate())
+      parseError(fullLayout, fullValue, '', value, ': day-of-year does not match day');
+    month = date.getUTCMonth() + 1;
+    day = date.getUTCDate();
+  } else {
+    if (month < 0) month = 1;
+    if (day < 0) day = 1;
+  }
+  if (day < 1 || day > daysIn(month, year)) parseError(fullLayout, fullValue, '', value, ': day out of range');
+  const fields = [year, month, day, hour, minute, second, nanos];
+  if (utc) return dateInstant(fields, UTC_LOCATION);
+  if (zoneOffset !== undefined) {
+    const instant = dateInstant(fields, UTC_LOCATION);
+    instant.wall -= BigInt(zoneOffset) * SECOND;
+    const zone = zoneAt(local, Number(floorDivide(instant.wall, SECOND)));
+    if (zone.offset === zoneOffset && (zoneName === '' || zone.name === zoneName))
+      return { ...instant, location: local };
+    return { ...instant, location: { name: zoneName, offset: zoneOffset } };
+  }
+  if (zoneName !== '') {
+    const instant = dateInstant(fields, UTC_LOCATION);
+    const seconds = Number(floorDivide(instant.wall, SECOND));
+    const zone = zoneAt(local, seconds);
+    if (zone.name === zoneName) {
+      instant.wall -= BigInt(zone.offset) * SECOND;
+      return { ...instant, location: local };
+    }
+    const offset = zoneName.length > 3 && zoneName.startsWith('GMT') ? Number(zoneName.slice(3)) * 3600 : 0;
+    return { ...instant, location: { name: zoneName, offset } };
+  }
+  return dateInstant(fields, defaultLocation);
+}
+
+/** A numeric zone offset of a layout's element, with the rest of the value and a range error, if any. */
+function parseOffset(chunk: Chunk & string, value: string): [number, string, string] | undefined {
+  let parts: [string, string, string, string, string];
+  if (chunk === 'ISO8601ColonTZ' || chunk === 'numColonTZ') {
+    if (value.length < 6 || value[3] !== ':') return undefined;
+    parts = [value[0], value.slice(1, 3), value.slice(4, 6), '00', value.slice(6)];
+  } else if (chunk === 'numShortTZ' || chunk === 'ISO8601ShortTZ') {
+    if (value.length < 3) return undefined;
+    parts = [value[0], value.slice(1, 3), '00', '00', value.slice(3)];
+  } else if (chunk === 'ISO8601ColonSecondsTZ' || chunk === 'numColonSecondsTZ') {
+    if (value.length < 9 || value[3] !== ':' || value[6] !== ':') return undefined;
+    parts = [value[0], value.slice(1, 3), value.slice(4, 6), value.slice(7, 9), value.slice(9)];
+  } else if (chunk === 'ISO8601SecondsTZ' || chunk === 'numSecondsTz') {
+    if (value.length < 7) return undefined;
+    parts = [value[0], value.slice(1, 3), value.slice(3, 5), value.slice(5, 7), value.slice(7)];
+  } else {
+    if (value.length < 5) return undefined;
+    parts = [value[0], value.slice(1, 3), value.slice(3, 5), '00', value.slice(5)];
+  }
+  const [sign, hourText, minuteText, secondText, rest] = parts;
+  if (![hourText, minuteText, secondText].every((text) => /^\d\d$/.test(text))) return undefined;
+  const [hours, minutes, seconds] = [hourText, minuteText, secondText].map(Number);
+  let range = '';
+  if (hours > 24) range = 'time zone offset hour';
+  if (minutes > 60) range = 'time zone offset minute';
+  if (seconds > 60) range = 'time zone offset second';
+  const offset = (hours * 60 + minutes) * 60 + seconds;
+  if (sign !== '+' && sign !== '-') return undefined;
+  return [sign === '-' ? -offset : offset, rest, range];
+}
+
+/** Time.ISOWeek: the year and week of the ISO 8601 week, which starts on Monday, holding the year's first Thursday. */
+function isoWeek(instant: Instant): [number, number] {
+  const fields = fieldsOf(instant);
+  const shift = fields.weekday === 0 ? -3 : 4 - fields.weekday;
+  const date = new Date(Date.UTC(2000, 0, 1));
+  date.setUTCFullYear(fields.year, fields.month - 1, fields.day + shift);
+  const start = new Date(Date.UTC(2000, 0, 1));
+  start.setUTCFullYear(date.getUTCFullYear(), 0, 1);
+  const yearDay = Math.round((date.getTime() - start.getTime()) / 86_400_000) + 1;
+  return [date.getUTCFullYear(), Math.floor((yearDay - 1) / 7) + 1];
+}
+
 // Time methods ---------------------------------------------------------------------------------------------------------
 
 const WEEKDAY = namedType('time', 'Weekday', BASIC.int);
@@ -648,6 +1032,7 @@ for (const [type, names, offset] of [
 const timeMethods: [string, Type[], Type[], (instant: Instant, args: Value[]) => Value | Value[]][] = [
   ['String', [], [STRING], (instant) => timeString(instant)],
   ['Format', [STRING], [STRING], (instant, [layout]) => format(instant, layout as string)],
+  ['ISOWeek', [], [INT, INT], (instant) => isoWeek(instant).map(BigInt)],
   ['Year', [], [INT], (instant) => BigInt(fieldsOf(instant).year)],
   ['Month', [], [MONTH], (instant) => BigInt(fieldsOf(instant).month)],
   ['Day', [], [INT], (instant) => BigInt(fieldsOf(instant).day)],
@@ -982,6 +1367,18 @@ const members: Record<string, Entity> = {
   FixedZone: nativeFunction('FixedZone', fn([STRING, INT], [pointerTo(LOCATION)]), ([name, offset]) =>
     locationPointer({ name: name as string, offset: Number(offset as bigint) })
   ),
+  Parse: nativeFunction('Parse', fn([STRING, STRING], [TIME, ERROR_TYPE]), ([layout, value]) => {
+    const [instant, error] = parseTime(layout as string, value as string, UTC_LOCATION, LOCAL_LOCATION);
+    return [timeValue(instant), error];
+  }),
+  ParseInLocation: nativeFunction(
+    'ParseInLocation',
+    fn([STRING, STRING, pointerTo(LOCATION)], [TIME, ERROR_TYPE]),
+    ([layout, value, location]) => {
+      const [instant, error] = parseTime(layout as string, value as string, locationOf(location), locationOf(location));
+      return [timeValue(instant), error];
+    }
+  ),
   ParseDuration: nativeFunction('ParseDuration', fn([STRING], [DURATION, ERROR_TYPE]), ([text]) =>
     parseDuration(text as string)
   ),
@@ -1008,10 +1405,4 @@ const members: Record<string, Entity> = {
   ),
 };
 
-export const TIME_PACKAGE = definePackage('time', members, [
-  'UnixMicro',
-  'Parse',
-  'ParseInLocation',
-  'LoadLocation',
-  'ParseError',
-]);
+export const TIME_PACKAGE = definePackage('time', members, ['UnixMicro', 'LoadLocation', 'ParseError']);
