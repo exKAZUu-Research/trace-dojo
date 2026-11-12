@@ -635,6 +635,12 @@ console.log(typeof Symbol.dispose, String(Symbol.asyncDispose), typeof Suppresse
   console.log(new (await v(K))(await v(7)));
 })();`,
   ],
+  [
+    'private members of other objects',
+    `class T { #f = 1; get #g() { return 1; } #m() {} static rf(o) { return o.#f; } static rg(o) { return o.#g; } static rm(o) { return o.#m(); } static wf(o) { o.#f = 1; } static wg(o) { o.#g = 1; } static wm(o) { o.#m = 1; } static sm(o) { return o.#m; } }
+for (const k of ['rf', 'rg', 'rm', 'wf', 'wg', 'wm', 'sm']) try { T[k]({}); } catch (e) { console.log(k, e.message); }
+class S { static #s = 1; static #sm() {} static r(o) { return o.#s; } static m(o) { return o.#sm(); } } for (const k of ['r', 'm']) try { S[k]({}); } catch (e) { console.log(k, e.message); }`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

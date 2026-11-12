@@ -27,6 +27,8 @@ import {
   JsThrow,
   type Key,
   type NativeFunction,
+  privateBrandOf,
+  privateClassOf,
   privateNameOf,
   type Property,
   type Scope,
@@ -353,14 +355,14 @@ export class Runtime {
   // Private members -------------------------------------------------------------------------------------------------
 
   getPrivate(target: Value, name: string): Value {
-    const property = this.privateProperty(target, name);
+    const property = this.privateProperty(target, name, 'read');
     if (!isAccessor(property)) return property.value;
     if (!property.get) this.throwError('TypeError', `'${privateNameOf(name)}' was defined without a getter`);
     return this.call(property.get, target, [], this.currentRow);
   }
 
   setPrivate(target: Value, name: string, value: Value): void {
-    const property = this.privateProperty(target, name);
+    const property = this.privateProperty(target, name, 'write');
     if (isAccessor(property)) {
       if (!property.set) this.throwError('TypeError', `'${privateNameOf(name)}' was defined without a setter`);
       this.call(property.set, target, [value], this.currentRow);
@@ -379,15 +381,23 @@ export class Runtime {
     target.privateMembers.set(name, property);
   }
 
-  private privateProperty(target: Value, name: string): DataProperty | AccessorProperty {
+  private privateProperty(target: Value, name: string, access: 'read' | 'write'): DataProperty | AccessorProperty {
     const property = target instanceof JsObject ? target.privateMembers?.get(name) : undefined;
-    if (!property) {
-      this.throwError(
+    if (property) return property;
+    const brand = privateBrandOf(name);
+    if (brand === 'field') {
+      const direction = access === 'read' ? 'read private member' : 'write private member';
+      const preposition = access === 'read' ? 'from' : 'to';
+      return this.throwError(
         'TypeError',
-        `Cannot read private member ${privateNameOf(name)} from an object whose class did not declare it`
+        `Cannot ${direction} ${privateNameOf(name)} ${preposition} an object whose class did not declare it`
       );
     }
-    return property;
+    const className = privateClassOf(name);
+    return this.throwError(
+      'TypeError',
+      brand === 'static' ? `Receiver must be class ${className}` : `Receiver must be an instance of class ${className}`
+    );
   }
 
   // Calls -------------------------------------------------------------------------------------------------------------

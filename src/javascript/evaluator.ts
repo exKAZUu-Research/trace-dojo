@@ -585,7 +585,8 @@ export class Evaluator extends StepEvaluator {
       const { key } = member;
       // Private names live in the class scope, where `#` keeps them apart from variables.
       if (key.kind === 'private' && !classScope.bindings.has(key.name)) {
-        const identity = `${key.name}\0${cls.name}\0${nextPrivateId++}`;
+        const brand = member.kind === 'field' ? 'field' : member.isStatic ? 'static' : 'instance';
+        const identity = `${key.name}\0${cls.name}\0${nextPrivateId++}\0${brand}`;
         classScope.bindings.set(key.name, { value: identity, isMutable: false });
       }
     }

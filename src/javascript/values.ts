@@ -232,6 +232,14 @@ export function privateClassOf(key: string): string {
   return key.split('\0')[1];
 }
 
+/**
+ * What a private key names: a field, or a method or accessor of the instances or of the class itself, whose absence
+ * JavaScript reports differently.
+ */
+export function privateBrandOf(key: string): 'field' | 'instance' | 'static' {
+  return key.split('\0')[3] as 'field' | 'instance' | 'static';
+}
+
 /** Whether a property key is an array index. */
 export function arrayIndexOf(key: Key): number | undefined {
   if (typeof key !== 'string') return undefined;
