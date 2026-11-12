@@ -234,6 +234,9 @@ export function wrapUnmodifiable(view: JavaObject, source: JavaObject): JavaObje
   Object.defineProperty(view, 'modCount', { get: () => source.modCount, set: () => {} });
   if (source.elements) Object.defineProperty(view, 'elements', { get: () => source.elements, set: () => {} });
   view.retained = [source];
+  // A wrapper reads through its source, so a wrapped sublist's reads fail as the sublist's do.
+  const check = subListChecks.get(source);
+  if (check) subListChecks.set(view, check);
   unmodifiableWrappers.add(view);
   return view;
 }

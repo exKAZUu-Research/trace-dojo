@@ -1164,6 +1164,36 @@ class Main {
   }
 });
 
+test('Java checks receiver type arguments, skips annotations on varargs and wildcards, and checks sublists through unmodifiable wrappers, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.lang.annotation.*;
+import java.util.*;
+@Target(ElementType.TYPE_USE) @interface Mark {}
+class Main<T> {
+  int v = 1;
+  int get(Main<T> this) { return v; }
+  class Inner { int sum(Main<T>.Inner this) { return v + 1; } }
+  static int len(String @Mark ... xs) { return xs.length; }
+  public static void main(String[] args) {
+    List<@Mark ? extends String> values = List.of("ok");
+    List<@Mark ?> any = values;
+    String first = values.get(0); System.out.println(first + any.size() + len("a", "b") + new Main<String>().get() + new Main<String>().new Inner().sum());
+    List<Integer> root = new ArrayList<>(List.of(1, 2, 3));
+    List<Integer> wrap = Collections.unmodifiableList(root.subList(0, 2));
+    root.add(4);
+    try { System.out.println(wrap.size()); } catch (ConcurrentModificationException e) { System.out.println("CME size"); }
+    try { System.out.println(wrap.get(0)); } catch (ConcurrentModificationException e) { System.out.println("CME get"); }
+    try { for (int x : wrap) System.out.println(x); } catch (ConcurrentModificationException e) { System.out.println("CME iter"); }
+  }
+}`,
+      'ok1212\nCME size\nCME get\nCME iter\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

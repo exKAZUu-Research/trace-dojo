@@ -1449,6 +1449,11 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  Main(Main this) {}\n  public static void main(String[] args) {}\n}',
   ],
   [
+    'receiver-parameter-with-other-type-arguments',
+    false,
+    'class Main<T> {\n  void f(Main<String> this) {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
     'annotation-without-targets-on-a-type-use',
     false,
     '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',

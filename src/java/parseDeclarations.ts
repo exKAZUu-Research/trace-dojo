@@ -315,7 +315,7 @@ export function varargsNotLastError(node: Node): CompileError {
 /** Converts `int... values`, whose variable holds the arguments as an array. */
 export function convertVarargsParameter(parameter: Node): Parameter {
   const modifiers = convertModifiers(modifiersOf(parameter));
-  const parts = namedChildren(parameter).filter((child) => child.type !== 'modifiers');
+  const parts = namedChildren(parameter).filter((child) => child.type !== 'modifiers' && !isAnnotation(child));
   const [typeNode, nameNode] = parts;
   const declarator = nameNode.type === 'variable_declarator' ? field(nameNode, 'name') : nameNode;
   const element = convertType(typeNode);

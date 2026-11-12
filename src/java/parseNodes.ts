@@ -154,7 +154,9 @@ export function convertType(node: Node): TypeSyntax {
 
 function convertTypeArgument(node: Node): TypeSyntax {
   if (node.type !== 'wildcard') return convertType(node);
-  const bound = namedChildren(node).find((child) => child.type !== 'super' && child.type !== 'extends');
+  const bound = namedChildren(node).find(
+    (child) => child.type !== 'super' && child.type !== 'extends' && !isAnnotation(child)
+  );
   return {
     kind: 'wildcard',
     bound: bound ? convertType(bound) : undefined,

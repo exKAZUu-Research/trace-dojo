@@ -524,9 +524,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     if (!member.receiverType) return;
     const type = this.withInstanceTypeVariables(cls, true, () => this.resolveType(member.receiverType as TypeSyntax));
     if (!expected) this.error(member, 'ここでは this を引数に書けません。');
-    if (type.kind !== 'class' || type.cls !== expected) {
-      this.error(member, `this の型は ${expected.name} にしてください。`);
-    }
+    if (!sameType(type, thisTypeOf(expected))) this.error(member, `this の型は ${expected.name} にしてください。`);
   }
 
   /** Rejects `@SafeVarargs` on a method or constructor that is not of variable arity or may be overridden. */
