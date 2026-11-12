@@ -84,6 +84,13 @@ function expectStrArgument(value: PyValue, what: string): string {
   return value;
 }
 
+/** The text of a str receiver whose characters a native loop is about to visit, charged for all of them. */
+function scanned(self: PyValue): string {
+  const text = asStr(self);
+  currentRuntime().scan(text.length);
+  return text;
+}
+
 function every(text: string, test: (char: string) => boolean): boolean {
   const chars = iterStr(text);
   currentRuntime().scan(chars.length);
@@ -124,12 +131,12 @@ method(strClass, 'isalnum', 'none', 0, 0, (self) =>
 );
 method(strClass, 'isspace', 'none', 0, 0, (self) => every(asStr(self), isSpace));
 // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
-method(strClass, 'isascii', 'none', 0, 0, (self) => /^[\u0000-\u007F]*$/.test(asStr(self)));
-method(strClass, 'isprintable', 'none', 0, 0, (self) => iterStr(asStr(self)).every(isPrintable));
-method(strClass, 'isidentifier', 'none', 0, 0, (self) => /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(asStr(self)));
-method(strClass, 'isupper', 'none', 0, 0, (self) => isUpperText(asStr(self)));
-method(strClass, 'islower', 'none', 0, 0, (self) => isLowerText(asStr(self)));
-method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleText(asStr(self)));
+method(strClass, 'isascii', 'none', 0, 0, (self) => /^[\u0000-\u007F]*$/.test(scanned(self)));
+method(strClass, 'isprintable', 'none', 0, 0, (self) => iterStr(scanned(self)).every(isPrintable));
+method(strClass, 'isidentifier', 'none', 0, 0, (self) => /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(scanned(self)));
+method(strClass, 'isupper', 'none', 0, 0, (self) => isUpperText(scanned(self)));
+method(strClass, 'islower', 'none', 0, 0, (self) => isLowerText(scanned(self)));
+method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleText(scanned(self)));
 
 // Searching ---------------------------------------------------------------------------------------------------------
 
@@ -284,7 +291,7 @@ method(
   1,
   (self, args, kwargs) => {
     const keepends = currentRuntime().truthy(argument(args, kwargs, 0, 'keepends') ?? false);
-    const points = iterStr(asStr(self));
+    const points = iterStr(scanned(self));
     const lines: string[] = [];
     let start = 0;
     for (let index = 0; index < points.length; index++) {
