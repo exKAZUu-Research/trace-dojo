@@ -83,7 +83,6 @@ export const unsupportedFeatures: Record<string, string> = {
   export_statement: 'import や export ',
   with_statement: 'with 文',
   using_declaration: 'using 宣言',
-  await_expression: 'await ',
   jsx_element: 'JSX ',
   jsx_self_closing_element: 'JSX ',
 };

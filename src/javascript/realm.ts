@@ -1,5 +1,6 @@
 import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
+import { definePromiseBuiltins } from './promises';
 import { defineArrayBuiltins } from './realmArrays';
 import { defineGlobalBuiltins } from './realmGlobals';
 import { defineIteratorBuiltins } from './realmIterators';
@@ -9,7 +10,7 @@ import { defineStringBuiltins } from './realmStrings';
 import type { Runtime } from './runtime';
 import { JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
 
-export type ErrorName = 'Error' | 'TypeError' | 'RangeError' | 'ReferenceError' | 'SyntaxError';
+export type ErrorName = 'Error' | 'TypeError' | 'RangeError' | 'ReferenceError' | 'SyntaxError' | 'AggregateError';
 
 /** The builtin objects of one run, which programs may modify. */
 export interface Realm {
@@ -20,6 +21,7 @@ export interface Realm {
   numberPrototype: JsObject;
   booleanPrototype: JsObject;
   symbolPrototype: JsObject;
+  promisePrototype: JsObject;
   regExpPrototype: JsObject;
   /** `%IteratorPrototype%`, the parent of the builtin iterators' prototypes. */
   iteratorPrototype: JsObject;
@@ -47,6 +49,7 @@ export class RealmBuilder {
       numberPrototype: new JsObject(objectPrototype),
       booleanPrototype: new JsObject(objectPrototype),
       symbolPrototype: new JsObject(objectPrototype),
+      promisePrototype: new JsObject(objectPrototype),
       regExpPrototype: new JsObject(objectPrototype),
       iteratorPrototype,
       generatorPrototype: new JsObject(iteratorPrototype),
@@ -56,6 +59,7 @@ export class RealmBuilder {
         RangeError: new JsObject(errorPrototype),
         ReferenceError: new JsObject(errorPrototype),
         SyntaxError: new JsObject(errorPrototype),
+        AggregateError: new JsObject(errorPrototype),
       },
       globals: new Scope(undefined),
     };
@@ -142,5 +146,6 @@ export function createRealm(runtime: Runtime): Realm {
   defineIteratorBuiltins(builder);
   defineRegExpBuiltins(builder);
   defineGeneratorBuiltins(builder);
+  definePromiseBuiltins(builder);
   return builder.realm;
 }

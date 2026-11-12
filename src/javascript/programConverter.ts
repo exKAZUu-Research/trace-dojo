@@ -325,8 +325,9 @@ export class ProgramConverter extends ExpressionConverter {
   // Functions and classes -------------------------------------------------------------------------------------------
 
   functionNode(node: Node, kind: FunctionKind, name = node.childForFieldName('name')?.text ?? ''): FunctionNode {
-    if (hasChild(node, 'async')) unsupported(node, 'async 関数');
     const isGenerator = hasChild(node, '*');
+    const isAsync = hasChild(node, 'async');
+    if (isGenerator && isAsync) unsupported(node, 'async ジェネレータ');
     const bodyNode = field(node, 'body');
     const outer = this.context;
     const isArrow = kind === 'arrow';
@@ -340,6 +341,7 @@ export class ProgramConverter extends ExpressionConverter {
       context.canUseNewTarget = outer.canUseNewTarget;
     }
     context.isGenerator = isGenerator;
+    context.isAsync = isAsync;
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {
@@ -356,6 +358,7 @@ export class ProgramConverter extends ExpressionConverter {
           rest,
           bindsOwnName,
           isGenerator,
+          isAsync,
           usesArguments,
           body,
           scope,

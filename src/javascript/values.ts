@@ -2,6 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassNode, FunctionNode } from './ast';
 import type { GeneratorState } from './generators';
 import type { HostIterator } from './iteration';
+import type { PromiseState } from './promises';
 import type { Runtime } from './runtime';
 
 /** A JavaScript value: primitives are the host's own, symbols included, while objects are interpreter objects. */
@@ -55,6 +56,8 @@ export class JsObject {
   hostIterator?: HostIterator;
   /** Set on a generator object. */
   generator?: GeneratorState;
+  /** Set on a promise. */
+  promise?: PromiseState;
 
   constructor(public proto: JsObject | null) {}
 }
@@ -138,7 +141,7 @@ export class JsFunction extends JsObject {
     const { behavior } = this;
     if (behavior.kind === 'native') return behavior.isConstructor;
     if (behavior.kind === 'class') return true;
-    return behavior.node.kind === 'normal' && !behavior.node.isGenerator;
+    return behavior.node.kind === 'normal' && !behavior.node.isGenerator && !behavior.node.isAsync;
   }
 }
 

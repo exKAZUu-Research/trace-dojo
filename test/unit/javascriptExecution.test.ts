@@ -60,12 +60,12 @@ test.each([
     'super(...) は継承したクラスのコンストラクタの中にしか書けません。',
   ],
   ['a declaration as the body of if', 'if (true) let a = 1;', 0, '宣言を書くには { } で囲んでください。'],
-  ['an async function', 'async function f() {}', 0, 'async 関数は、この採点環境では使えません。'],
+  ['an async generator', 'async function* f() {}', 0, 'async ジェネレータは、この採点環境では使えません。'],
   [
     'a yield in a destructuring default',
     'function* f() {\n  const [a = yield] = [];\n}',
     1,
-    '分割代入の初期値の yield は、この採点環境では使えません。',
+    '分割代入の初期値の yield や await は、この採点環境では使えません。',
   ],
   ['an invalid regular expression', 'const r = /(/;', 0, '正規表現の書き方に誤りがあります。'],
   ['invalid regular expression flags', 'const r = /a/gg;', 0, '正規表現の書き方に誤りがあります。'],
@@ -107,6 +107,12 @@ test.each([
   ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Error: bad'],
   ['infinite recursion', 'function f() { return f(); }\nf();', 'RangeError: Maximum call stack size exceeded'],
   ['constructing a generator', 'function* f() {}\nnew f();', 'TypeError: f is not a constructor'],
+  [
+    'a rejected promise without a handler',
+    "async function f() {\n  await null;\n  throw new Error('boom');\n}\nf();",
+    'Error: boom',
+  ],
+  ['an exception in a timer', "setTimeout(() => {\n  throw new Error('late');\n}, 0);", 'Error: late'],
   [
     'resuming a running generator',
     'const g = (function* () { g.next(); yield 1; })();\ng.next();',
@@ -488,6 +494,48 @@ class Tagged { get [Symbol.toStringTag]() { return 'T'; } } console.log(Object.p
 const fns = { [s]() {}, [Symbol()]: function () {} }; console.log(fns[s].name);
 try { for (const q of {}) {} } catch (e) { console.log(e.constructor.name); }
 console.log(arr[Symbol.iterator] === arr.values, typeof Symbol.asyncIterator);`,
+  ],
+  [
+    'async functions, promises, and timers',
+    `const log = (...a) => console.log(...a);
+async function a1() { log('a1 start'); await a2(); log('a1 end'); }
+async function a2() { log('a2'); }
+log('script start');
+setTimeout(() => log('timeout 0'), 0);
+setTimeout(() => log('timeout 10'), 10);
+setTimeout(() => log('timeout 5'), 5);
+a1();
+new Promise((resolve) => { log('p1'); resolve(); }).then(() => log('then1')).then(() => log('then2'));
+queueMicrotask(() => log('micro'));
+Promise.resolve().then(() => log('r1')).then(() => log('r2')).then(() => log('r3'));
+(async () => { return Promise.resolve('x'); })().then((v) => log('return promise', v));
+Promise.resolve(1).finally(() => log('fin')).then((v) => log('after fin', v));
+Promise.reject(new Error('boom')).catch((e) => log('caught', e.message));
+log('script end');
+const sleep = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
+(async () => {
+  const [x, y] = await Promise.all([sleep(30, 'x'), sleep(20, 'y'), 3]);
+  log('all', x, y);
+  log('race', await Promise.race([sleep(50, 'slow'), sleep(40, 'fast')]));
+  log(await Promise.allSettled([Promise.reject(1), 2]));
+  try { await Promise.any([Promise.reject(1)]); } catch (e) { log(e.constructor.name, e.message, e.errors); }
+  for (const t of [3, 1, 2]) { await sleep(t * 10); log('loop', t); }
+  try { await (async () => { throw new TypeError('inner'); })(); } catch (e) { log('caught', e.name); }
+  const thenable = { then(res) { log('thenable then'); res(42); } };
+  log('thenable', await thenable);
+  const o = { async m(n) { await null; return n * 2; } };
+  log('method', await o.m(4));
+  class K { static async s() { return 'static'; } }
+  log(await K.s(), typeof K.s, Object.prototype.toString.call(K.s()));
+  log(Promise.resolve(5), new Promise(() => {}), (async () => {})(), async function named() {}, async () => {});
+  const rejected = Promise.reject('r'); rejected.catch(() => {}); log(rejected, [Promise.resolve({ a: [1] })]);
+})();`,
+  ],
+  [
+    'timers that queue microtasks',
+    `setTimeout(() => { console.log('t1'); Promise.resolve().then(() => console.log('m in t1')); }, 0);
+setTimeout(() => console.log('t2'), 0);
+const id = setTimeout(() => console.log('never'), 1); clearTimeout(id);`,
   ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({

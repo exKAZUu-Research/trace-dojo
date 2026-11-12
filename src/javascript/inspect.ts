@@ -1,4 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import type { PromiseState } from './promises';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Key, type Value } from './values';
@@ -128,7 +129,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
   const keys = enumerableKeys(runtime, value);
-  const frame = frameOf(runtime, value, constructor, keys.length > 0);
+  const frame = frameOf(runtime, value, constructor, keys.length > 0 || value.promise !== undefined);
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
     const name = prefixOf(constructor, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
@@ -138,6 +139,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   ctx.seen.add(value);
   ctx.currentDepth = recurseTimes;
   const output = value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : [];
+  if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
   for (const key of keys) output.push(formatProperty(ctx, value, recurseTimes, key));
   runtime.scan(output.length);
   const reference = ctx.circular.get(value);
@@ -221,7 +223,8 @@ function enumerableKeys(runtime: Runtime, object: JsObject): Key[] {
 function functionBase(runtime: Runtime, fn: JsFunction): string {
   const name = runtime.functionName(fn);
   if (fn.behavior.kind !== 'class') {
-    const kind = fn.behavior.kind === 'user' && fn.behavior.node.isGenerator ? 'GeneratorFunction' : 'Function';
+    const node = fn.behavior.kind === 'user' ? fn.behavior.node : undefined;
+    const kind = node?.isGenerator ? 'GeneratorFunction' : node?.isAsync ? 'AsyncFunction' : 'Function';
     return name ? `[${kind}: ${name}]` : `[${kind} (anonymous)]`;
   }
   const superName = fn.proto instanceof JsFunction ? runtime.functionName(fn.proto) : '';
@@ -261,6 +264,13 @@ function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string
   const remaining = elements.length - index;
   if (remaining > 0) output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
   return output;
+}
+
+/** What a promise shows before its properties: `<pending>`, its value, or `<rejected>` and its reason. */
+function promiseEntry(ctx: Context, state: PromiseState, recurseTimes: number): string {
+  if (state.status === 'pending') return '<pending>';
+  const result = formatIndented(ctx, state.result, recurseTimes);
+  return state.status === 'rejected' ? `<rejected> ${result}` : result;
 }
 
 function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key): string {

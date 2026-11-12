@@ -8,6 +8,7 @@ import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { DONE, type HostIterator, ValueIterator } from './iteration';
 import { defineFunctionProperties } from './memberProperties';
+import { EventLoop } from './promises';
 import { createRealm, type ErrorName, type Realm } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import {
@@ -53,6 +54,7 @@ export class Runtime {
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
+  readonly eventLoop = new EventLoop(this);
   readonly realm: Realm;
   /**
    * The row of the expression being evaluated, from which getters, setters, and conversions that run the program's
@@ -607,6 +609,7 @@ export class Runtime {
       roots.push(frame.scope);
       appendAll(roots, frame.temporaries);
     }
+    appendAll(roots, this.eventLoop.roots());
     const { reached, scanned } = findReachableTurtles(roots);
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));

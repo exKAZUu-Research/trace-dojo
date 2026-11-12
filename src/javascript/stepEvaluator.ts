@@ -13,13 +13,16 @@ import { appendAll, isCallable, JsFunction, JsObject, toBoolean, type Value } fr
 export abstract class StepEvaluator extends ExpressionEvaluator {
   // code-gauge-allow functionNcss 50 -- One case per kind of expression that a `yield` may sit in.
   *evaluateSteps(expression: Expression): Steps<Value> {
-    if (!expression.hasYield) return this.evaluate(expression);
+    if (!expression.suspends) return this.evaluate(expression);
     const { runtime } = this;
     switch (expression.kind) {
       case 'yield': {
         const value = expression.argument ? yield* this.evaluateSteps(expression.argument) : undefined;
         if (expression.delegate) return yield* this.delegate(value);
         return resumedValue(yield value);
+      }
+      case 'await': {
+        return resumedValue(yield yield* this.evaluateSteps(expression.argument));
       }
       case 'parenthesized': {
         return yield* this.evaluateSteps(expression.expression);

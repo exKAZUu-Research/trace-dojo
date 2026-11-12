@@ -39,6 +39,10 @@ function pushObjectReferences(pending: unknown[], object: JsObject): number {
     pending.push(frame.scope);
     for (const value of frame.temporaries) pending.push(value);
   }
+  if (object.promise) {
+    pending.push(object.promise.result);
+    for (const reaction of object.promise.reactions) for (const root of reaction.roots) pending.push(root);
+  }
   if (object instanceof JsFunction) {
     if (object.behavior.kind !== 'native') pending.push(object.behavior.scope, object.behavior.homeObject);
     for (const value of object.captured) pending.push(value);

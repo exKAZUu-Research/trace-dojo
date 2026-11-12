@@ -19,6 +19,7 @@ import {
   mergePrivate,
   privateMethodProperty,
 } from './memberProperties';
+import { startAsyncFunction } from './promises';
 import { StepEvaluator } from './stepEvaluator';
 import { isObjectCreation, onlyCalls, onlyCreates, storesReference } from './stepRules';
 import {
@@ -49,6 +50,7 @@ export class Evaluator extends StepEvaluator {
   runProgram(program: Program): void {
     this.instantiate(this.runtime.frame.scope, program.scope);
     runToEnd(this.statements(program.body));
+    this.runtime.eventLoop.run();
   }
 
   // Statements --------------------------------------------------------------------------------------------------------
@@ -65,7 +67,7 @@ export class Evaluator extends StepEvaluator {
 
   /** Evaluates an expression, step by step when it contains a `yield`. */
   private *value(expression: Expression): Steps<Value> {
-    return expression.hasYield ? yield* this.evaluateSteps(expression) : this.evaluate(expression);
+    return expression.suspends ? yield* this.evaluateSteps(expression) : this.evaluate(expression);
   }
 
   /** Records the step of binding a loop's target, whose destructuring stores the values it reads out of an object. */
@@ -81,7 +83,7 @@ export class Evaluator extends StepEvaluator {
     switch (statement.kind) {
       case 'expression': {
         const { expression } = statement;
-        if (!expression.hasYield) {
+        if (!expression.suspends) {
           runtime.steps.runStatement(statement.stepRow, onlyCalls(expression), () => this.evaluate(expression));
           return undefined;
         }
@@ -90,7 +92,7 @@ export class Evaluator extends StepEvaluator {
         return undefined;
       }
       case 'declaration': {
-        if (!statement.declarators.some(({ init }) => init?.hasYield)) {
+        if (!statement.declarators.some(({ init }) => init?.suspends)) {
           runtime.steps.runStatement(statement.stepRow, onlyCreates(statement), () =>
             runToEnd(this.declaration(statement))
           );
@@ -408,7 +410,7 @@ export class Evaluator extends StepEvaluator {
     if (node.isGenerator) {
       const prototype = runtime.newObject(runtime.realm.generatorPrototype);
       fn.properties.set('prototype', { value: prototype, writable: true, enumerable: false, configurable: false });
-    } else if (node.kind === 'normal') {
+    } else if (node.kind === 'normal' && !node.isAsync) {
       const prototype = runtime.newObject();
       prototype.properties.set('constructor', {
         value: fn,
@@ -445,6 +447,7 @@ export class Evaluator extends StepEvaluator {
     );
     runtime.pushFrame(scope, callRow, node.isAtomic);
     try {
+      if (node.isAsync) return startAsyncFunction(runtime, runtime.frame, this.asyncBody(node, args));
       this.bindParameters(node, args);
       if (!Array.isArray(node.body)) return this.evaluate(node.body);
       this.instantiate(scope, node.scope);
@@ -456,6 +459,14 @@ export class Evaluator extends StepEvaluator {
     } finally {
       runtime.popFrame();
     }
+  }
+
+  /** Runs an async function's body, whose parameters' errors reject its promise as the body's own errors do. */
+  private *asyncBody(node: FunctionNode, args: Value[]): Steps<Completion> {
+    this.bindParameters(node, args);
+    if (!Array.isArray(node.body)) return { kind: 'return', value: yield* this.value(node.body) };
+    this.instantiate(this.runtime.frame.scope, node.scope);
+    return yield* this.statements(node.body);
   }
 
   /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */

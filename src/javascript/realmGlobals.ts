@@ -176,14 +176,16 @@ function defineFunction(builder: RealmBuilder): void {
   });
 }
 
-const errorNames: ErrorName[] = ['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError'];
+const errorNames: ErrorName[] = ['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AggregateError'];
 
 function defineErrors(builder: RealmBuilder): void {
   const { errorPrototypes } = builder.realm;
   let errorConstructor: JsFunction | undefined;
   for (const name of errorNames) {
     const prototype = errorPrototypes[name];
-    const fn = builder.defineClass(name, 1, prototype, (call) => createError(call, prototype));
+    const fn = builder.defineClass(name, name === 'AggregateError' ? 2 : 1, prototype, (call) =>
+      name === 'AggregateError' ? createAggregateError(call, prototype) : createError(call, prototype)
+    );
     if (errorConstructor) fn.proto = errorConstructor;
     else errorConstructor = fn;
     defineHidden(prototype, 'name', name);
@@ -207,6 +209,14 @@ function createError({ runtime, args, newTarget }: NativeCall, prototype: JsObje
   if (message !== undefined) defineHidden(error, 'message', runtime.toString(message));
   if (isObject(options) && runtime.hasProperty(options, 'cause'))
     defineHidden(error, 'cause', runtime.get(options, 'cause'));
+  return error;
+}
+
+/** Creates an AggregateError, whose first argument is the iterable of errors it gathers. */
+function createAggregateError(call: NativeCall, prototype: JsObject): JsObject {
+  const { runtime, args } = call;
+  const error = createError({ ...call, args: args.slice(1) }, prototype);
+  defineHidden(error, 'errors', runtime.newArray(runtime.iterate(args[0])));
   return error;
 }
 

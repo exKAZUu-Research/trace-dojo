@@ -99,6 +99,8 @@ export interface FunctionNode extends Span {
   bindsOwnName: boolean;
   /** Whether calling the function creates a generator, which runs the body as its `next()` asks. */
   isGenerator: boolean;
+  /** Whether calling the function returns a promise, which the body settles, suspending at each `await`. */
+  isAsync: boolean;
   /** Whether the body (or an arrow function in it) reads `arguments`, which the call then creates. */
   usesArguments: boolean;
   body: Statement[] | Expression;
@@ -143,8 +145,11 @@ export type ObjectMember =
 export type Argument = Expression | { kind: 'spread'; argument: Expression };
 
 export type Expression = Span & {
-  /** Whether a `yield` runs while evaluating this expression, which a generator then evaluates step by step. */
-  hasYield?: boolean;
+  /**
+   * Whether a `yield` or an `await` runs while evaluating this expression, which a generator or an async function then
+   * evaluates step by step.
+   */
+  suspends?: boolean;
 } & (
     | { kind: 'literal'; value: undefined | null | boolean | number | string }
     | { kind: 'template'; strings: string[]; expressions: Expression[] }
@@ -182,6 +187,7 @@ export type Expression = Span & {
     /** Ends an optional chain, as parentheses do. */
     | { kind: 'parenthesized'; expression: Expression }
     | { kind: 'yield'; argument?: Expression; delegate: boolean }
+    | { kind: 'await'; argument: Expression }
   );
 
 export interface SuperReference extends Span {

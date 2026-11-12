@@ -53,6 +53,7 @@ export abstract class ExpressionConverter extends ConverterBase {
       row: rowOf(node),
     }),
     yield_expression: (node) => this.yieldExpression(node),
+    await_expression: (node) => this.awaitExpression(node),
     arrow_function: (node) => ({
       kind: 'functionExpression',
       fn: this.functionNode(node, 'arrow'),
@@ -96,20 +97,27 @@ export abstract class ExpressionConverter extends ConverterBase {
     const convert = this.expressionConverters[node.type] as ExpressionConverterFunction | undefined;
     if (!convert) return unsupported(node, unsupportedFeatures[node.type] ?? `式「${node.type}」`);
     const { context } = this;
-    const yieldsBefore = context.yieldCount;
+    const suspensionsBefore = context.suspensionCount;
     const expression = convert(node);
-    if (context.yieldCount !== yieldsBefore) {
-      expression.hasYield = true;
-      if (!canYieldIn(expression)) unsupported(node, 'この位置の yield ');
+    if (context.suspensionCount !== suspensionsBefore) {
+      expression.suspends = true;
+      if (!canSuspendIn(expression)) unsupported(node, 'この位置の yield や await ');
     }
     return expression;
+  }
+
+  private awaitExpression(node: Node): Expression {
+    if (!this.context.isAsync) fail(node, 'await は async 関数の中にしか書けません。');
+    const argument = this.expression(namedChildren(node)[0]);
+    this.context.suspensionCount++;
+    return { kind: 'await', argument, row: rowOf(node) };
   }
 
   private yieldExpression(node: Node): Expression {
     if (!this.context.isGenerator) fail(node, 'yield はジェネレータ関数の中にしか書けません。');
     const argumentNode = namedChildren(node).at(0);
     const argument = argumentNode ? this.expression(argumentNode) : undefined;
-    this.context.yieldCount++;
+    this.context.suspensionCount++;
     return { kind: 'yield', argument, delegate: node.children.some((child) => child?.type === '*'), row: rowOf(node) };
   }
 
@@ -418,7 +426,7 @@ export abstract class ExpressionConverter extends ConverterBase {
       case 'assignment_expression': {
         const target = this.pattern(field(node, 'left'), leaf);
         const value = this.expression(field(node, 'right'));
-        if (value.hasYield) unsupported(node, '分割代入の初期値の yield ');
+        if (value.suspends) unsupported(node, '分割代入の初期値の yield や await ');
         return {
           kind: 'default',
           target,
@@ -494,9 +502,10 @@ export abstract class ExpressionConverter extends ConverterBase {
  * hold the `yield` must be evaluated in order without a callback, as operands and arguments are, but destructuring
  * defaults and object literal members are not.
  */
-function canYieldIn(expression: Expression): boolean {
+function canSuspendIn(expression: Expression): boolean {
   switch (expression.kind) {
     case 'yield':
+    case 'await':
     case 'parenthesized':
     case 'sequence':
     case 'binary':
@@ -511,10 +520,10 @@ function canYieldIn(expression: Expression): boolean {
       return !patternHasYield(expression.target);
     }
     case 'call': {
-      return !expression.optional && expression.callee.kind !== 'super' && !expression.callee.hasYield;
+      return !expression.optional && expression.callee.kind !== 'super' && !expression.callee.suspends;
     }
     case 'new': {
-      return !expression.callee.hasYield;
+      return !expression.callee.suspends;
     }
     case 'member': {
       return !expression.optional;
@@ -529,8 +538,8 @@ function canYieldIn(expression: Expression): boolean {
 function patternHasYield(pattern: Pattern): boolean {
   if (pattern.kind !== 'member') return false;
   return (
-    (pattern.object.kind !== 'super' && pattern.object.hasYield === true) ||
-    (pattern.property.kind === 'computed' && pattern.property.expression.hasYield === true)
+    (pattern.object.kind !== 'super' && pattern.object.suspends === true) ||
+    (pattern.property.kind === 'computed' && pattern.property.expression.suspends === true)
   );
 }
 
