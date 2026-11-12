@@ -492,13 +492,22 @@ method(strClass, 'translate', 'one', 1, 1, (self, [table]) => {
       }
       throw error;
     }
-    if (mapped === None) continue;
-    if (typeof mapped === 'bigint') result.append(String.fromCodePoint(Number(mapped)));
-    else if (typeof mapped === 'string') result.append(mapped);
-    else throw typeError('character mapping must return integer, None or str');
+    result.append(translation(mapped));
   }
   return result.build();
 });
+
+/** The text a translation table maps a character to: an integer as its character, None as nothing, or a string. */
+function translation(mapped: PyValue): string {
+  if (mapped === None) return '';
+  if (typeof mapped === 'string') return mapped;
+  if (typeof mapped !== 'bigint' && typeof mapped !== 'boolean') {
+    throw typeError('character mapping must return integer, None or str');
+  }
+  const code = BigInt(mapped);
+  if (code < 0n || code > 0x10_ff_ffn) throw valueError('character mapping must be in range(0x110000)');
+  return String.fromCodePoint(Number(code));
+}
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Follows str.maketrans for its one-, two-, and three-argument forms.
 function makeTranslation(args: PyValue[]): PyDict {
