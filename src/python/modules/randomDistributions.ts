@@ -64,8 +64,7 @@ export function lognormvariate(source: RandomSource, mu: number, sigma: number):
 }
 
 export function expovariate(source: RandomSource, lambd: number): number {
-  if (lambd === 0) throw pyError('ZeroDivisionError', 'float division by zero');
-  return -Math.log(1 - source.random()) / lambd;
+  return divide(-Math.log(1 - source.random()), lambd);
 }
 
 export function vonmisesvariate(source: RandomSource, mu: number, kappa: number): number {
@@ -140,12 +139,12 @@ export function betavariate(source: RandomSource, alpha: number, beta: number): 
 
 export function paretovariate(source: RandomSource, alpha: number): number {
   const u = 1 - source.random();
-  return floatPower(u, -1 / alpha);
+  return floatPower(u, divide(-1, alpha));
 }
 
 export function weibullvariate(source: RandomSource, alpha: number, beta: number): number {
   const u = 1 - source.random();
-  return alpha * floatPower(-Math.log(u), 1 / beta);
+  return alpha * floatPower(-Math.log(u), divide(1, beta));
 }
 
 export function binomialvariate(source: RandomSource, nValue: PyValue, pValue: PyValue): bigint {
@@ -177,4 +176,10 @@ function geometricBinomial(source: RandomSource, n: bigint, p: number): bigint {
     if (y > n) return x;
     x++;
   }
+}
+
+/** Python's float division, which raises where the divisor is zero, after the operands are computed as random.py does. */
+function divide(dividend: number, divisor: number): number {
+  if (divisor === 0) throw pyError('ZeroDivisionError', 'division by zero');
+  return dividend / divisor;
 }
