@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 687 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 692 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -770,6 +770,8 @@ export class ProgramConverter extends ExpressionConverter {
     const named = namedChildren(node);
     const splat = node.type === 'case_pattern' && named.length === 1 ? named[0] : node;
     if (splat.type !== 'splat_pattern') return this.pattern(node, names);
+    if (children(splat)[0].text !== '*')
+      fail(rowOf(splat), 'シーケンスのパターンには、** ではなく * を書いてください。');
     const nameNode = namedChildren(splat)[0];
     if (!nameNode || nameNode.text === '_') return { kind: 'star', row: rowOf(splat) };
     return { kind: 'star', name: this.patternName(nameNode, names), row: rowOf(splat) };
@@ -777,12 +779,16 @@ export class ProgramConverter extends ExpressionConverter {
 
   /** The name a mapping pattern's `**rest` binds, which may appear once, as the last subpattern. */
   private mappingRest(node: Node, names: Set<string>): NameRef | undefined {
-    const children = namedChildren(node);
-    const splats = children.filter((child) => child.type === 'splat_pattern');
+    const subpatterns = namedChildren(node);
+    const splats = subpatterns.filter((child) => child.type === 'splat_pattern');
     if (splats.length === 0) return undefined;
+    for (const splat of splats) {
+      if (children(splat)[0].text !== '**')
+        fail(rowOf(splat), 'マッピングのパターンには、* ではなく ** を書いてください。');
+    }
     if (splats.length > 1) fail(rowOf(splats[1]), 'マッピングのパターンには、** を1つしか書けません。');
     const [splat] = splats;
-    if (children.at(-1) !== splat) {
+    if (subpatterns.at(-1) !== splat) {
       fail(rowOf(splat), 'マッピングのパターンでは、** を付けたパターンを最後に書いてください。');
     }
     const nameNode = namedChildren(splat)[0];

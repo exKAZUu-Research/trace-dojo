@@ -57,6 +57,9 @@ interface ParameterOrder {
 
 /** Converts expressions, targets, and parameters, registering the names they use and bind in their scopes. */
 
+/** The string prefixes CPython 3.14 accepts, in lowercase. */
+const STRING_PREFIXES = new Set(['', 'r', 'u', 'b', 'f', 't', 'br', 'rb', 'fr', 'rf', 'tr', 'rt']);
+
 export abstract class ExpressionConverter {
   protected context: Context;
 
@@ -405,6 +408,7 @@ export abstract class ExpressionConverter {
         fail(rowOf(string), 'バッククォート（`...`）は Python 3 では使えません。repr(...) を使ってください。');
       }
       const prefix = startNode.text.replace(/['"]+$/, '').toLowerCase();
+      if (!STRING_PREFIXES.has(prefix)) fail(rowOf(string), `文字列の接頭辞「${prefix}」は使えません。`);
       if (prefix.includes('b')) unsupported(string, "bytes のリテラル（b'...'）");
       if (prefix.includes('u')) unsupported(string, '接頭辞 u の付いた文字列');
       if (prefix.includes('t')) fail(rowOf(string), "テンプレート文字列（t'...'）は、この版の Python では使えません。");
