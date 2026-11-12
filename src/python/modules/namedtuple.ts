@@ -1,3 +1,4 @@
+import { missingPositionalError, tooManyPositionalError } from '../calls';
 import { pyRepr, pyStr } from '../conversions';
 import { pythonFunction, pythonMethod } from '../define';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
@@ -102,7 +103,6 @@ function isIdentifier(name: string): boolean {
   return /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(name);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows how a namedtuple binds positional and keyword arguments to its fields.
 function newNamedTuple(
   cls: PyClass,
   fields: string[],
@@ -112,9 +112,8 @@ function newNamedTuple(
 ): PyTuple {
   const qualified = `${cls.name}.__new__`;
   if (values.length > fields.length) {
-    throw typeError(
-      `${qualified}() takes ${fields.length + 1} positional arguments but ${values.length + 1} were given`
-    );
+    // The count includes `cls`, as CPython's generated `__new__` takes it first.
+    throw tooManyPositionalError(qualified, fields.length + 1, defaults.length, values.length + 1);
   }
   const items: (PyValue | undefined)[] = [...values];
   for (const [key, value] of kwargs ?? []) {
@@ -130,18 +129,7 @@ function newNamedTuple(
     if (index >= defaultsStart) items[index] = defaults[index - defaultsStart];
     else missing.push(fields[index]);
   }
-  if (missing.length > 0) {
-    const quoted = missing.map((name) => `'${name}'`);
-    const names =
-      quoted.length === 1
-        ? quoted[0]
-        : quoted.length === 2
-          ? `${quoted[0]} and ${quoted[1]}`
-          : `${quoted.slice(0, -1).join(', ')}, and ${quoted.at(-1)}`;
-    throw typeError(
-      `${qualified}() missing ${missing.length} required positional argument${missing.length === 1 ? '' : 's'}: ${names}`
-    );
-  }
+  if (missing.length > 0) throw missingPositionalError(qualified, missing);
   return new PyTuple(cls, items as PyValue[]);
 }
 
