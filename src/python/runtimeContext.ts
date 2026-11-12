@@ -19,6 +19,11 @@ export function chargeCollision(): void {
   current?.spend();
 }
 
+/** Charges the running program for a new dict entry, wherever the entry comes from; see {@link chargeCollision}. */
+export function chargeEntry(): void {
+  current?.allocate(1);
+}
+
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   const outer = current;
   current = runtime;

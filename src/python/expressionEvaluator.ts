@@ -402,7 +402,7 @@ export class ExpressionEvaluator {
         const value = this.evaluate(item.value, frame);
         dict.store.set(key, value);
       }
-      this.runtime.allocate(dict.store.size + 1);
+      this.runtime.allocate(1);
       return dict;
     });
   }

@@ -697,7 +697,6 @@ function unionLike(like: PyDict, first: PyDict, second: PyDict): PyDict {
   for (const dict of [first, second]) {
     for (const entry of dict.store.ordered()) result.store.set(entry.key, entry.value);
   }
-  currentRuntime().allocate(result.store.size);
   return result;
 }
 

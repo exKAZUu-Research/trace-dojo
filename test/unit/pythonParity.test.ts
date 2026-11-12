@@ -62,6 +62,14 @@ test.each([
   ['a huge random.choices result', 'import random\nx = random.choices([1], k=1000001)'],
   ['a huge random integer', 'import random\nx = random.getrandbits(9000000)'],
   ['a huge format width', 'format(1, "01000000000000,")'],
+  [
+    'a dict comprehension and a list beyond the slot limit together',
+    'd = {i: i for i in range(300000)}\na = [0] * 800000',
+  ],
+  [
+    'a dict filled by assignment and a list beyond the slot limit together',
+    'd = {}\nfor i in range(200000):\n    d[i] = i\na = [0] * 900000',
+  ],
   ['a list repeated in place beyond memory', 'x = [1]\nx *= 100000000'],
   ['a deque repeated in place beyond memory', 'from collections import deque\nd = deque([1])\nd *= 1000000000'],
   ['a product with a huge repeat', 'import itertools\nitertools.product([1], repeat=10**12)'],
