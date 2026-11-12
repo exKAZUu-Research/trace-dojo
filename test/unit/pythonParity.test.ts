@@ -88,6 +88,10 @@ test.each([
   ['a prefix test of many long candidates', "s = 'x' * 500000\np = ('x' * 499999 + 'y',) * 5000\ns.startswith(p)"],
   ['a suffix test of many long candidates', "s = 'x' * 500000\np = ('y' + 'x' * 499999,) * 5000\ns.endswith(p)"],
   ['a binomial coefficient of a huge size', 'import math\nmath.comb(10**6, 5 * 10**5)'],
+  [
+    'the most common item of a large counter over and over',
+    'from collections import Counter\nc = Counter(range(10000))\nfor i in range(120):\n    c.most_common(1)',
+  ],
 ])('%s ends at the execution limit', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded' });
 });

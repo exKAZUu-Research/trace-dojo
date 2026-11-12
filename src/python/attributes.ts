@@ -1,5 +1,6 @@
 import { registerVirtualSubclass } from './abstractClasses';
 import { isSubclassOfClass } from './builtins';
+import { pyRepr } from './conversions';
 import { deleteDescriptor, isDataDescriptor, readDescriptor, writeDescriptor } from './descriptors';
 import { newMappingProxy } from './mappingProxy';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
@@ -25,6 +26,7 @@ import {
   PyBuiltinFunction,
   PyClass,
   PyDescriptor,
+  PyDict,
   PyFunction,
   PyInstance,
   PyModule,
@@ -180,9 +182,7 @@ export function setAttributeDirectly(target: PyValue, name: string, value: PyVal
   }
   if (target instanceof PyClass) {
     if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
-    if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
-      throw pyError('AttributeError', `cannot reassign member '${name}'`);
-    }
+    if (isEnumMemberName(target, name)) throw pyError('AttributeError', `cannot reassign member '${name}'`);
     setClassAttribute(target, name, value);
     return;
   }
@@ -308,18 +308,13 @@ export function deleteAttribute(target: PyValue, name: string): void {
 }
 
 /** `object.__delattr__`: deletes an attribute without the hook a program's class may define. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows the rules of attribute deletion for each kind of object.
 export function deleteAttributeDirectly(target: PyValue, name: string): void {
   if (target instanceof PyInstance) {
     deleteInstanceAttribute(target, name);
     return;
   }
   if (target instanceof PyClass) {
-    if (target.isBuiltin) throw typeError(`cannot delete '${name}' attribute of immutable type '${target.name}'`);
-    if (name === '__annotations__') {
-      if (target.annotations === undefined) throw pyError('AttributeError', name);
-      replaceClassAnnotations(target, undefined);
-    } else if (!target.dict.delete(name)) throw attributeError(target, name);
+    deleteClassAttribute(target, name);
     return;
   }
   if (target instanceof PyFunction && name === '__annotations__') {
@@ -364,7 +359,25 @@ export function deleteInstanceAttribute(target: PyInstance, name: string): void 
   if (!target.dict.delete(name)) throw attributeError(target, name);
 }
 
+/** Deletes a class attribute, refusing a builtin type's and an Enum's members, as `type.__delattr__` and EnumType do. */
+function deleteClassAttribute(cls: PyClass, name: string): void {
+  if (cls.isBuiltin) throw typeError(`cannot delete '${name}' attribute of immutable type '${cls.name}'`);
+  if (isEnumMemberName(cls, name)) {
+    throw pyError('AttributeError', `${pyRepr(cls.name)} cannot delete member ${pyRepr(name)}.`);
+  }
+  if (name === '__annotations__') {
+    if (cls.annotations === undefined) throw pyError('AttributeError', name);
+    replaceClassAnnotations(cls, undefined);
+  } else if (!cls.dict.delete(name)) throw attributeError(cls, name);
+}
+
 const isEnumMemberProperty = (name: string): boolean => name === 'name' || name === 'value';
+
+/** Whether a name is a member of an Enum class, as EnumType's `__setattr__` and `__delattr__` find it in `_member_map_`. */
+function isEnumMemberName(cls: PyClass, name: string): boolean {
+  const memberMap = cls.enumMembers ? cls.dict.get('_member_map_') : undefined;
+  return memberMap instanceof PyDict && memberMap.store.has(name);
+}
 
 /** Sets a class attribute, of which `__module__`, `__name__`, and `__qualname__` are the class's own data. */
 function setClassAttribute(cls: PyClass, name: string, value: PyValue): void {

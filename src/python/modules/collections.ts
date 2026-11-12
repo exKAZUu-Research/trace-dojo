@@ -1,5 +1,5 @@
 import { mappingEntries } from '../callArguments';
-// code-gauge-allow-file fileNcss 480 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 493 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -377,22 +377,40 @@ function countInto(counter: PyDict, source: PyValue | undefined, kwargs: Kwargs,
   for (const [key, value] of kwargs ?? []) add(key, value);
 }
 
-/** The items of a Counter from the most common, ties in insertion order. */
-function mostCommon(counter: PyDict): [PyValue, PyValue][] {
-  const entries: [PyValue, PyValue][] = counter.store.ordered().map((entry) => [entry.key, entry.value]);
-  return entries
-    .map((entry, index) => ({ entry, index }))
+/**
+ * The `limit` most common items of a Counter, ties in insertion order, chosen as most_common does: none without
+ * reading the counter for a limit below one, the maximum for one, else a sort; each visit and comparison is charged.
+ */
+function mostCommon(counter: PyDict, limit?: number): [PyValue, PyValue][] {
+  if (limit !== undefined && limit <= 0) return [];
+  const runtime = currentRuntime();
+  const entries = counter.store.ordered();
+  runtime.allocate(entries.length);
+  const items = entries.map((entry): [PyValue, PyValue] => [entry.key, entry.value]);
+  if (limit === 1) {
+    let best = items[0];
+    for (const item of items) {
+      runtime.spend();
+      // max() keeps the first of equal counts, taking a later one only when it compares greater.
+      if (isTruthy(compareOp('>', item[1], best[1]))) best = item;
+    }
+    return best === undefined ? [] : [best];
+  }
+  const sorted = items
+    .map((item, index) => ({ item, index }))
     .toSorted((a, b) => {
-      if (lessThan(b.entry[1], a.entry[1])) return -1;
-      if (lessThan(a.entry[1], b.entry[1])) return 1;
+      runtime.spend();
+      if (lessThan(b.item[1], a.item[1])) return -1;
+      if (lessThan(a.item[1], b.item[1])) return 1;
       return a.index - b.index;
     })
-    .map(({ entry }) => entry);
+    .map(({ item }) => item);
+  return limit === undefined ? sorted : sorted.slice(0, limit);
 }
 
 pythonMethod(counterClass, 'most_common', 'n=None', (self, [count]) => {
-  let items = mostCommon(counterReceiver(self, 'most_common'));
-  if (count !== undefined && count !== None) items = items.slice(0, Math.max(0, Number(toIndex(count))));
+  const limit = count === undefined || count === None ? undefined : Number(toIndex(count));
+  const items = mostCommon(counterReceiver(self, 'most_common'), limit);
   return newList(items.map((item) => newTuple(item)));
 });
 pythonMethod(counterClass, 'elements', '', (self) => {
