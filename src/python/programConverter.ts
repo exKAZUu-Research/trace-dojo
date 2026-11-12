@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 686 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 687 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -205,6 +205,9 @@ export class ProgramConverter extends ExpressionConverter {
   private raiseStatement(node: Node): Statement {
     const causeNode = node.childForFieldName('cause');
     const exceptionNode = namedChildren(node).find((child) => child.id !== causeNode?.id);
+    if (exceptionNode?.type === 'expression_list') {
+      fail(rowOf(node), 'raise 例外, 値 の書き方は Python 3 では使えません。raise 例外(値) と書いてください。');
+    }
     return {
       kind: 'raise',
       exception: exceptionNode ? this.valueExpression(exceptionNode) : undefined,

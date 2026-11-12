@@ -401,6 +401,9 @@ export abstract class ExpressionConverter {
     let isFormatted = false;
     for (const string of strings) {
       const startNode = children(string)[0];
+      if (startNode.text.endsWith('`')) {
+        fail(rowOf(string), 'バッククォート（`...`）は Python 3 では使えません。repr(...) を使ってください。');
+      }
       const prefix = startNode.text.replace(/['"]+$/, '').toLowerCase();
       if (prefix.includes('b')) unsupported(string, "bytes のリテラル（b'...'）");
       if (prefix.includes('u')) unsupported(string, '接頭辞 u の付いた文字列');
