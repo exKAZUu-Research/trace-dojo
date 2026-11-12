@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 405 -- The builtin functions and their namespace belong together.
 import { abstractSubclassCheck } from './abstractClasses';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
@@ -215,6 +216,25 @@ for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClas
 // Functions ---------------------------------------------------------------------------------------------------------
 
 function print(args: PyValue[], kwargs: Kwargs): PyValue {
+  const { separator, end } = printTexts(kwargs);
+  const file = kwargs?.get('file') ?? None;
+  const runtime = currentRuntime();
+  const isStdout = file === None || file === runtime.standardStream('stdout');
+  // Each piece is written on its own, as CPython writes them, so that the output limit ends a huge print early.
+  const write = (text: string): void => {
+    if (isStdout) runtime.budget.print(text);
+    else callValue(getAttribute(file, 'write'), [text]);
+  };
+  for (const [index, value] of args.entries()) {
+    if (index > 0) write(separator);
+    write(pyStr(value));
+  }
+  write(end);
+  return None;
+}
+
+/** The separator and the end of a print call, after the checks CPython makes on its keywords. */
+function printTexts(kwargs: Kwargs): { separator: string; end: string } {
   for (const key of kwargs?.keys() ?? []) {
     if (!['sep', 'end', 'file', 'flush'].includes(key))
       throw typeError(`print() got an unexpected keyword argument '${key}'`);
@@ -224,15 +244,7 @@ function print(args: PyValue[], kwargs: Kwargs): PyValue {
   if (separator !== None && typeof separator !== 'string')
     throw typeError(`sep must be None or a string, not ${typeName(separator)}`);
   if (end !== None && typeof end !== 'string') throw typeError(`end must be None or a string, not ${typeName(end)}`);
-  const text =
-    args.map((value) => pyStr(value)).join(typeof separator === 'string' ? separator : ' ') +
-    (typeof end === 'string' ? end : '\n');
-  const file = kwargs?.get('file') ?? None;
-  const runtime = currentRuntime();
-  runtime.buildString(text.length);
-  if (file === None || file === runtime.standardStream('stdout')) runtime.budget.print(text);
-  else callValue(getAttribute(file, 'write'), [text]);
-  return None;
+  return { separator: typeof separator === 'string' ? separator : ' ', end: typeof end === 'string' ? end : '\n' };
 }
 
 // code-gauge-allow functionNcss 33 -- Follows CPython's builtin sum, including its float compensation.
@@ -364,8 +376,9 @@ function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
   const m = modulus < 0n ? -modulus : modulus;
   let result = 1n % m;
   b = ((b % m) + m) % m;
+  const cost = stepCost(m);
   while (e > 0n) {
-    currentRuntime().spend();
+    currentRuntime().spend(cost);
     if (e & 1n) result = (result * b) % m;
     b = (b * b) % m;
     e >>= 1n;
@@ -378,13 +391,20 @@ function modInverse(value: bigint, modulus: bigint): bigint {
   const m = modulus < 0n ? -modulus : modulus;
   let [oldR, r] = [((value % m) + m) % m, m];
   let [oldS, s] = [1n, 0n];
+  const cost = stepCost(m);
   while (r !== 0n) {
+    currentRuntime().spend(cost);
     const quotient = oldR / r;
     [oldR, r] = [r, oldR - quotient * r];
     [oldS, s] = [s, oldS - quotient * s];
   }
   if (oldR !== 1n) throw valueError('base is not invertible for the given modulus');
   return ((oldS % m) + m) % m;
+}
+
+/** The budget one step of modular arithmetic costs, which grows with the size of the modulus. */
+function stepCost(modulus: bigint): number {
+  return 1 + Math.floor((modulus.toString(16).length * 4) / 8192);
 }
 
 function round(args: PyValue[], kwargs: Kwargs): PyValue {

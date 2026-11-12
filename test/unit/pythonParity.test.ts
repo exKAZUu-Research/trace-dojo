@@ -17,6 +17,11 @@ test.each([
   ['a set updated from an endless iterator', 'import itertools\nset().update(itertools.repeat(0))'],
   ['a set difference with an endless iterator', 'import itertools\nset().difference_update(itertools.repeat(0))'],
   ['a rejection loop that never accepts', 'import random\nrandom.gammavariate(float("nan"), 1)'],
+  ['a print of many long strings', 'print(*(["x" * 1000000] * 1000))'],
+  [
+    'a modular inverse of huge integers',
+    'import random\nrandom.seed(1)\na = random.getrandbits(1000000)\nb = random.getrandbits(1000000)\npow(a, -1, b)',
+  ],
   ['a dict built from endless pairs', 'import itertools\ndict(itertools.repeat([1, 2]))'],
   ['a dict updated from endless pairs', 'import itertools\n{}.update(itertools.repeat((1, 2)))'],
   [
