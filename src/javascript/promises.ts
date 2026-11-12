@@ -97,9 +97,13 @@ export class EventLoop {
     }
   }
 
-  /** Everything the pending and running jobs keep reachable, which garbage collection must see. */
+  /**
+   * Everything the pending and running jobs keep reachable, and the unhandled rejections the loop will report, which
+   * garbage collection must see.
+   */
   roots(): unknown[] {
     return [
+      ...this.rejections,
       ...this.running.flatMap((job) => job.roots),
       ...[...this.microtasks, ...this.timers].flatMap((job) => [...(job.queuedRoots ?? []), ...job.roots]),
     ];
