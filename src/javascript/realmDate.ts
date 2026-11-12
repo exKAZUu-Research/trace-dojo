@@ -182,7 +182,10 @@ function defineConversions(builder: RealmBuilder, prototype: JsObject): void {
   });
   for (const name of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'] as const) {
     builder.method(prototype, name, 0, ({ runtime, thisValue, args }) => {
-      const date = new Date(thisTime(runtime, thisValue));
+      const time = thisTime(runtime, thisValue);
+      // As in Node.js, an invalid date formats before its locales and options are looked at.
+      if (Number.isNaN(time)) return 'Invalid Date';
+      const date = new Date(time);
       const locales = hostLocales(runtime, args[0]) as Intl.LocalesArgument;
       const options = hostOptions(runtime, args[1]) as Intl.DateTimeFormatOptions;
       return throwingHostErrors(runtime, () => date[name](locales, options));

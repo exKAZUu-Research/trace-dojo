@@ -1188,6 +1188,14 @@ console.dir({ s: 'x'.repeat(30), t: [1, 2, 3] }, { breakLength: Infinity });
 console.dir(Array.from({ length: 10 }, (_, i) => i), { compact: false });
 console.dir([[1, 2, [3, 4]], { k: 'v' }], { compact: true, breakLength: 10 });`,
   ],
+  [
+    'locale formatting of invalid dates',
+    `for (const m of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString']) {
+  try { console.log(m, new Date(NaN)[m](null)); } catch (e) { console.log(m, e.name, e.message); }
+  try { console.log(m, new Date(NaN)[m]('en-US', { get timeZone() { console.log('read'); return 'UTC'; } })); } catch (e) { console.log(m, e.name, e.message); }
+  try { console.log(m, new Date(0)[m](null)); } catch (e) { console.log(m, e.name, e.message); }
+}`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
