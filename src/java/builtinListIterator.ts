@@ -82,7 +82,8 @@ function createListIterator(frame: Frame, cls: ClassInfo, list: Value, index: nu
 function defineMovements(cls: ClassInfo, element: JavaType): void {
   addMethod(cls, 'hasNext', [], BOOLEAN, false, (_, receiver) => {
     const state = stateOf(receiver);
-    return state.cursor < elementsOf(state.list).length;
+    // As the JDK's, hasNext compares with the size it knows, without the fail-fast checks next makes.
+    return state.cursor < (state.list.elements as Value[]).length;
   });
   addMethod(cls, 'hasPrevious', [], BOOLEAN, false, (_, receiver) => stateOf(receiver).cursor > 0);
   addMethod(cls, 'nextIndex', [], INT, false, (_, receiver) => stateOf(receiver).cursor);

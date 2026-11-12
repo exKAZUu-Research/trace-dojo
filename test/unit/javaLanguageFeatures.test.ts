@@ -1248,6 +1248,30 @@ class Main {
   }
 });
 
+test("Java iterators of sublists and their wrappers answer hasNext without their lists' checks, as the JDK's do", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  public static void main(String[] args) {
+    List<Integer> root = new ArrayList<>(List.of(1, 2, 3));
+    List<Integer> view = root.subList(0, 2);
+    List<Integer> w = Collections.unmodifiableList(view);
+    Iterator<Integer> a = w.iterator(); Iterator<Integer> b = view.iterator();
+    ListIterator<Integer> c = w.listIterator(); ListIterator<Integer> d = view.listIterator();
+    root.add(4);
+    for (Iterator<Integer> it : List.of(a, b, c, d)) {
+      try { System.out.println(it.hasNext()); it.next(); } catch (Exception e) { System.out.println(e); }
+    }
+  }
+}`,
+      'true\njava.util.ConcurrentModificationException\ntrue\njava.util.ConcurrentModificationException\ntrue\njava.util.ConcurrentModificationException\ntrue\njava.util.ConcurrentModificationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

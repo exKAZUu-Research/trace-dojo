@@ -294,7 +294,8 @@ export function defineReadMethods(
       frame,
       itrClass,
       receiver as JavaObject,
-      () => elementsOf(receiver),
+      // As the JDK's, hasNext reads the size without a sublist's check, which next makes through the modCount.
+      () => (receiver as JavaObject).elements as Value[],
       (removeFrame, index) => remove(removeFrame, receiver, index)
     );
   });
