@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
@@ -339,6 +339,25 @@ test.each([
   ['reversing a long list in place', 'a.reverse()'],
   ['deleting an extended slice of a long list', 'del a[::100000]\n    a.append(i)'],
 ])('%s over and over ends at the operation limit', (_name, body) => {
-  const program = `a = list(range(100000))\nfor i in range(700):\n    ${body}`;
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  // The clock stands still, so that only the operations the work is charged decide the outcome however loaded the host.
+  const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+  try {
+    const program = `a = list(range(100000))\nfor i in range(700):\n    ${body}`;
+    expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    clock.mockRestore();
+  }
 });
+
+test.each(['del a[:0]', 'del a[5:2]', 'del a[0:0:2]', 'a[3:3] = []'])(
+  'an empty change of a long list, %s, over and over costs no scan of it',
+  (statement) => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    try {
+      const program = `a = [0] * 100000\nfor i in range(700):\n    ${statement}`;
+      expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+    } finally {
+      clock.mockRestore();
+    }
+  }
+);

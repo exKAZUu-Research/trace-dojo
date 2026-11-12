@@ -229,18 +229,19 @@ abstract class PyGrowableSequence extends PyObject {
     for (const item of items) this.storage.push(item);
   }
 
-  /** Puts `items` in place of the `deleteCount` items from `start`, charging the items the sequence gains. */
   /** Replaces `deleteCount` items from `start` with `items`, charging the new slots and the items moved past them. */
   splice(start: number, deleteCount: number, items: readonly PyValue[]): void {
     const storage = this.editableItems;
     chargeSlots(Math.max(items.length - deleteCount, 0));
-    chargeScan(storage.length - start);
+    // Only a change of length moves the items after the replaced ones.
+    chargeScan(items.length === deleteCount ? items.length : storage.length - start);
     if (items.length === 1) storage.splice(start, deleteCount, items[0]);
     else this.storage = [...storage.slice(0, start), ...items, ...storage.slice(start + deleteCount)];
   }
 
   /** Removes `count` items from `start`, charging the items moved into their place, and returns them. */
   removeRange(start: number, count: number): PyValue[] {
+    if (count === 0) return [];
     const storage = this.editableItems;
     chargeScan(storage.length - start);
     return storage.splice(start, count);
