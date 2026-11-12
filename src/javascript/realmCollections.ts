@@ -1,4 +1,4 @@
-import { closingOnThrow, DONE, type HostIterator, ValueIterator } from './iteration';
+import { closingOnThrow, DONE, type HostIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineHostIteratorPrototype, newHostIterator, registeredKeyOf, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
@@ -465,7 +465,7 @@ function forEachKey(
 ): void {
   const keys = runtime.call(record.keys, record.set, [], callRow);
   if (!isObject(keys)) runtime.throwError('TypeError', 'Result of the keys method is not an object');
-  const iterator = new ValueIterator(runtime.protocolIteration(keys));
+  const iterator = runtime.iteratorRecord(keys);
   for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
     if (!visit(Object.is(value, -0) ? 0 : value)) {
       iterator.close();
