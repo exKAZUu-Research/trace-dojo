@@ -4,8 +4,8 @@ import { newError } from '../errorValues';
 import { decodeRune, encodeRune, RUNE_ERROR } from '../literals';
 import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { GoPanic } from '../runtime';
-import { BASIC, ERROR_TYPE, funcType, pointerTo, RUNE, sliceOf } from '../types';
-import { Cell, GoStruct, Pointer, type Value } from '../values';
+import { BASIC, ERROR_TYPE, funcType, pointerTo, RUNE, sliceOf, type Type } from '../types';
+import { Cell, GoStruct, Pointer, type Slice, type Value } from '../values';
 import { EOF, IO_READER, IO_WRITER } from './io';
 import { BOOL, byteSlice, bytesOf, callMethod, INT, STRING } from './support';
 import { isSpace } from './unicodeSupport';
@@ -241,6 +241,201 @@ function splitFunction(name: string): Entity {
   return entity;
 }
 
+// Reader: a buffer filled from the underlying reader in chunks of its size ---------------------------------------
+
+const READER = namedType('bufio', 'Reader', { kind: 'struct', fields: [] });
+const ERR_INVALID_UNREAD_BYTE = newError('bufio: invalid use of UnreadByte');
+const ERR_INVALID_UNREAD_RUNE = newError('bufio: invalid use of UnreadRune');
+const ERR_NEGATIVE_COUNT = newError('bufio: negative count');
+const ERR_BUFFER_FULL = newError('bufio: buffer full');
+
+interface ReaderState {
+  reader: Value;
+  size: number;
+  data: string;
+  error: Value;
+  /** The size of the last rune read, for UnreadRune, or -1 when the last read was not ReadRune. */
+  lastRuneSize: number;
+  /** Whether the last read can be unread by UnreadByte. */
+  canUnreadByte: boolean;
+  consumed: string;
+}
+
+const readerStateOf = (receiver: Value): ReaderState =>
+  ((receiver as Pointer).load() as GoStruct).native?.bufferedReader as ReaderState;
+
+/** Reads one chunk from the underlying reader, keeping its error for when the buffer runs out. */
+function fill(state: ReaderState): boolean {
+  if (state.error !== undefined) return false;
+  const chunk = byteSlice('\0'.repeat(state.size));
+  const [count, error] = callMethod(state.reader, 'Read', [chunk]) as [bigint, Value];
+  state.data += bytesOf(chunk).slice(0, Number(count));
+  if (error !== undefined) state.error = error;
+  return count > 0n || error === undefined;
+}
+
+function take(state: ReaderState, count: number): string {
+  const taken = state.data.slice(0, count);
+  state.data = state.data.slice(count);
+  // An empty read leaves the last byte read, which UnreadByte may still put back, as Go's ReadSlice does.
+  if (taken.length > 0) {
+    state.consumed = taken;
+    state.canUnreadByte = true;
+    state.lastRuneSize = -1;
+  }
+  return taken;
+}
+
+function readError(state: ReaderState): Value {
+  const { error } = state;
+  state.error = undefined;
+  return error;
+}
+
+function readUntil(state: ReaderState, delimiter: string): [string, Value] {
+  for (;;) {
+    const at = state.data.indexOf(delimiter);
+    if (at !== -1) return [take(state, at + 1), undefined];
+    if (!fill(state) && state.error !== undefined) return [take(state, state.data.length), readError(state)];
+  }
+}
+
+const readerMethods: [string, Type[], Type[], (state: ReaderState, args: Value[]) => Value | Value[]][] = [
+  [
+    'ReadString',
+    [BASIC.uint8],
+    [STRING, ERROR_TYPE],
+    (state, [delimiter]) => readUntil(state, String.fromCharCode(Number(delimiter as bigint))),
+  ],
+  [
+    'ReadBytes',
+    [BASIC.uint8],
+    [sliceOf(BASIC.uint8), ERROR_TYPE],
+    (state, [delimiter]) => {
+      const [text, error] = readUntil(state, String.fromCharCode(Number(delimiter as bigint)));
+      return [byteSlice(text), error];
+    },
+  ],
+  [
+    'ReadLine',
+    [],
+    [sliceOf(BASIC.uint8), BOOL, ERROR_TYPE],
+    (state) => {
+      const [text, error] = readUntil(state, '\n');
+      if (text === '') return [undefined, false, error];
+      const line = text.replace(/\r?\n$/, '');
+      return [byteSlice(line), false, undefined];
+    },
+  ],
+  [
+    'ReadByte',
+    [],
+    [BASIC.uint8, ERROR_TYPE],
+    (state) => {
+      while (state.data.length === 0) if (!fill(state) && state.error !== undefined) return [0n, readError(state)];
+      return [BigInt(take(state, 1).charCodeAt(0)), undefined];
+    },
+  ],
+  [
+    'ReadRune',
+    [],
+    [RUNE, INT, ERROR_TYPE],
+    (state) => {
+      while (state.data.length < 4 && state.error === undefined && fill(state));
+      if (state.data.length === 0) return [0n, 0n, readError(state)];
+      const { rune, size } = decodeRune(state.data, 0);
+      take(state, size);
+      state.lastRuneSize = size;
+      return [BigInt(rune), BigInt(size), undefined];
+    },
+  ],
+  [
+    'UnreadByte',
+    [],
+    [ERROR_TYPE],
+    (state) => {
+      if (!state.canUnreadByte) return ERR_INVALID_UNREAD_BYTE;
+      state.data = state.consumed.slice(-1) + state.data;
+      state.consumed = state.consumed.slice(0, -1);
+      state.canUnreadByte = false;
+      state.lastRuneSize = -1;
+      return;
+    },
+  ],
+  [
+    'UnreadRune',
+    [],
+    [ERROR_TYPE],
+    (state) => {
+      if (state.lastRuneSize < 0) return ERR_INVALID_UNREAD_RUNE;
+      state.data = state.consumed + state.data;
+      state.consumed = '';
+      state.lastRuneSize = -1;
+      state.canUnreadByte = false;
+      return;
+    },
+  ],
+  [
+    'Peek',
+    [INT],
+    [sliceOf(BASIC.uint8), ERROR_TYPE],
+    (state, [count]) => {
+      const n = Number(count as bigint);
+      if (n < 0) return [undefined, ERR_NEGATIVE_COUNT];
+      state.canUnreadByte = false;
+      state.lastRuneSize = -1;
+      while (state.data.length < n && state.data.length < state.size && state.error === undefined && fill(state));
+      if (n > state.size) return [byteSlice(state.data), ERR_BUFFER_FULL];
+      if (state.data.length < n) return [byteSlice(state.data), readError(state)];
+      return [byteSlice(state.data.slice(0, n)), undefined];
+    },
+  ],
+  [
+    'Read',
+    [sliceOf(BASIC.uint8)],
+    [INT, ERROR_TYPE],
+    (state, [target]) => {
+      const slice = target as Slice | undefined;
+      const room = slice?.length ?? 0;
+      if (room === 0) return [0n, state.data.length > 0 ? undefined : readError(state)];
+      if (state.data.length === 0 && !fill(state) && state.data.length === 0) return [0n, readError(state)];
+      const taken = take(state, Math.min(room, state.data.length));
+      for (let index = 0; index < taken.length; index++) (slice as Slice).set(index, BigInt(taken.charCodeAt(index)));
+      return [BigInt(taken.length), undefined];
+    },
+  ],
+  ['Buffered', [], [INT], (state) => BigInt(state.data.length)],
+  ['Size', [], [INT], (state) => BigInt(state.size)],
+  [
+    'Discard',
+    [INT],
+    [INT, ERROR_TYPE],
+    (state, [count]) => {
+      const n = Number(count as bigint);
+      if (n < 0) return [0n, ERR_NEGATIVE_COUNT];
+      while (state.data.length < n && state.error === undefined && fill(state));
+      const discarded = take(state, n).length;
+      return [BigInt(discarded), discarded < n ? readError(state) : undefined];
+    },
+  ],
+];
+for (const [name, params, results, impl] of readerMethods) {
+  addMethod(READER, name, fn(params, results), (receiver, args) => impl(readerStateOf(receiver), args), true);
+}
+
+function newReader(reader: Value, size: number): Pointer {
+  const state: ReaderState = {
+    reader,
+    size: Math.max(size, 16),
+    data: '',
+    error: undefined,
+    lastRuneSize: -1,
+    canUnreadByte: false,
+    consumed: '',
+  };
+  return new Pointer(new Cell(new GoStruct([], { bufferedReader: state })), 'v');
+}
+
 const members: Record<string, Entity> = {
   Writer: typeEntity(WRITER),
   Scanner: typeEntity(SCANNER),
@@ -248,6 +443,11 @@ const members: Record<string, Entity> = {
   NewWriter: nativeFunction('NewWriter', fn([IO_WRITER], [pointerTo(WRITER)]), ([writer]) => newWriter(writer, 4096)),
   NewWriterSize: nativeFunction('NewWriterSize', fn([IO_WRITER, INT], [pointerTo(WRITER)]), ([writer, size]) =>
     newWriter(writer, Number(size as bigint))
+  ),
+  Reader: typeEntity(READER),
+  NewReader: nativeFunction('NewReader', fn([IO_READER], [pointerTo(READER)]), ([reader]) => newReader(reader, 4096)),
+  NewReaderSize: nativeFunction('NewReaderSize', fn([IO_READER, INT], [pointerTo(READER)]), ([reader, size]) =>
+    newReader(reader, Number(size as bigint))
   ),
   NewScanner: nativeFunction('NewScanner', fn([IO_READER], [pointerTo(SCANNER)]), ([reader]) => {
     const state: ScannerState = {
@@ -276,11 +476,4 @@ const members: Record<string, Entity> = {
   },
 };
 
-export const BUFIO_PACKAGE = definePackage('bufio', members, [
-  'Reader',
-  'NewReader',
-  'NewReaderSize',
-  'ReadWriter',
-  'NewReadWriter',
-  'ErrTooLong',
-]);
+export const BUFIO_PACKAGE = definePackage('bufio', members, ['ReadWriter', 'NewReadWriter', 'ErrTooLong']);
