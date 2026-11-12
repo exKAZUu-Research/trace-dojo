@@ -108,7 +108,6 @@ function iteratorObject(
   return iterator;
 }
 
-/** Calls an iterator object's methods, passing each result through `adapt`. */
 /** Calls an iterator object's methods, each step through `adapt`, which may turn its result into a promise of it. */
 function iterationOf(
   runtime: Runtime,
