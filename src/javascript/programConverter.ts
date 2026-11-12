@@ -15,7 +15,7 @@ import type {
   Statement,
   VariableDeclaration,
 } from './ast';
-import { newContext } from './converterBase';
+import { initializerContext, newContext } from './converterBase';
 import {
   accessorOf,
   fail,
@@ -92,9 +92,14 @@ export class ProgramConverter extends ExpressionConverter {
     continue_statement: (node) => this.jump(node, 'continue'),
     labeled_statement: (node) => this.labeled(node),
     switch_statement: (node) => this.switchStatement(node),
-    throw_statement: (node) => ({ kind: 'throw', argument: this.expression(namedChildren(node)[0]), row: rowOf(node) }),
+    throw_statement: (node) => ({
+      kind: 'throw',
+      argument: this.expression(namedChildren(node)[0]),
+      row: rowOf(node),
+    }),
     try_statement: (node) => this.tryStatement(node),
     empty_statement: (node) => ({ kind: 'empty', row: rowOf(node) }),
+    debugger_statement: (node) => ({ kind: 'empty', row: rowOf(node) }),
   };
 
   convert(root: Node): Program {
@@ -141,7 +146,11 @@ export class ProgramConverter extends ExpressionConverter {
   private returnStatement(node: Node): Statement {
     if (!this.context.canReturn) fail(node, 'return 文は関数の中にしか書けません。');
     const valueNode = namedChildren(node).at(0);
-    return { kind: 'return', value: valueNode ? this.expression(valueNode) : undefined, row: rowOf(node) };
+    return {
+      kind: 'return',
+      value: valueNode ? this.expression(valueNode) : undefined,
+      row: rowOf(node),
+    };
   }
 
   private declaration(node: Node, recordsStep: boolean): VariableDeclaration {
@@ -156,7 +165,12 @@ export class ProgramConverter extends ExpressionConverter {
       if (!valueNode && target.kind !== 'identifier') fail(declarator, '分割代入には初期値が必要です。');
       return { target, init: valueNode ? this.namedValue(valueNode, target) : undefined };
     });
-    const declaration: VariableDeclaration = { kind: 'declaration', declarationKind, declarators, row: rowOf(node) };
+    const declaration: VariableDeclaration = {
+      kind: 'declaration',
+      declarationKind,
+      declarators,
+      row: rowOf(node),
+    };
     // A declaration without an initializer assigns nothing that learners could answer, so it records no step.
     if (recordsStep && declarators.some((declarator) => declarator.init)) this.steppable(node, declaration);
     return declaration;
@@ -318,7 +332,10 @@ export class ProgramConverter extends ExpressionConverter {
       isArrow ? outer.canCallSuper : kind === 'classConstructor' && this.derivedConstructor,
       isArrow ? outer.canReferenceSuper : kind !== 'normal'
     );
-    if (isArrow) context.argumentsUse = outer.argumentsUse;
+    if (isArrow) {
+      context.argumentsUse = outer.argumentsUse;
+      context.canUseNewTarget = outer.canUseNewTarget;
+    }
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {
@@ -402,16 +419,27 @@ export class ProgramConverter extends ExpressionConverter {
       checkMemberName(member, key, isStatic, true);
       const valueNode = member.childForFieldName('value');
       // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
-      const value = valueNode
-        ? this.withContext(newContext(false, false, true), () => this.expression(valueNode))
-        : undefined;
+      const value = valueNode ? this.withContext(initializerContext(), () => this.expression(valueNode)) : undefined;
       const fieldMember: ClassMember = { kind: 'field', isStatic, key, value, row: rowOf(member) };
       // As in Java, a static field's constant initializer records no step: it changes nothing learners see.
       const recordsStep = value !== undefined && !(isStatic && isConstantExpression(value));
       return recordsStep ? this.steppable(member, fieldMember) : fieldMember;
     }
-    if (member.type === 'class_static_block') return unsupported(member, 'static ブロック');
+    if (member.type === 'class_static_block') return this.staticBlock(member);
     return unsupported(member, `クラスの中の「${member.type}」`);
+  }
+
+  /** Converts a static block, whose body runs like a method's with the class as `this` and keeps its `var`s. */
+  private staticBlock(member: Node): ClassMember {
+    return this.withContext(initializerContext(), () => {
+      const scope = this.pushScope(true);
+      try {
+        const body = this.statementList(namedChildren(field(member, 'body')));
+        return { kind: 'staticBlock', body, scope, row: rowOf(member) };
+      } finally {
+        this.popScope();
+      }
+    });
   }
 }
 

@@ -3,7 +3,7 @@ import { inspect, OutputBudget } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
 import { defineHidden, type Runtime } from './runtime';
 import {
-  isAccessor,
+  freeze,
   isCallable,
   isObject,
   JsArray,
@@ -91,13 +91,7 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
   });
   builder.method(objectConstructor, 'freeze', 1, ({ args }) => {
     const object = args[0];
-    if (!isObject(object)) return object;
-    if (object instanceof JsArray) object.frozen = true;
-    object.extensible = false;
-    for (const property of object.properties.values()) {
-      property.configurable = false;
-      if (!isAccessor(property)) property.writable = false;
-    }
+    if (isObject(object)) freeze(object);
     return object;
   });
 }

@@ -25,8 +25,13 @@ const assignableTypes = new Set(['identifier', 'member_expression', 'subscript_e
 export abstract class ExpressionConverter extends ConverterBase {
   private readonly expressionConverters: Record<string, ExpressionConverterFunction> = {
     number: (node) => ({ kind: 'literal', value: this.number(node), row: rowOf(node) }),
-    string: (node) => ({ kind: 'literal', value: decodeStringLiteral(node.text), row: rowOf(node) }),
+    string: (node) => ({
+      kind: 'literal',
+      value: decodeStringLiteral(node.text),
+      row: rowOf(node),
+    }),
     template_string: (node) => this.template(node),
+    regex: (node) => regexLiteral(node),
     true: (node) => ({ kind: 'literal', value: true, row: rowOf(node) }),
     false: (node) => ({ kind: 'literal', value: false, row: rowOf(node) }),
     // oxlint-disable-next-line unicorn/no-null -- JavaScript null is a value of the interpreted language.
@@ -42,7 +47,11 @@ export abstract class ExpressionConverter extends ConverterBase {
       fn: this.functionNode(node, 'normal'),
       row: rowOf(node),
     }),
-    arrow_function: (node) => ({ kind: 'functionExpression', fn: this.functionNode(node, 'arrow'), row: rowOf(node) }),
+    arrow_function: (node) => ({
+      kind: 'functionExpression',
+      fn: this.functionNode(node, 'arrow'),
+      row: rowOf(node),
+    }),
     class: (node) => ({
       kind: 'classExpression',
       cls: this.classNode(node, node.childForFieldName('name')?.text ?? ''),
@@ -74,7 +83,7 @@ export abstract class ExpressionConverter extends ConverterBase {
       expression: this.expression(namedChildren(node)[0]),
       row: rowOf(node),
     }),
-    meta_property: (node) => unsupported(node, `${node.text} `),
+    meta_property: (node) => this.metaProperty(node),
   };
 
   expression(node: Node): Expression {
@@ -83,9 +92,19 @@ export abstract class ExpressionConverter extends ConverterBase {
     return unsupported(node, unsupportedFeatures[node.type] ?? `式「${node.type}」`);
   }
 
+  private metaProperty(node: Node): Expression {
+    if (node.text !== 'new.target') return unsupported(node, `${node.text} `);
+    if (!this.context.canUseNewTarget) fail(node, 'new.target は関数の中にしか書けません。');
+    return { kind: 'newTarget', row: rowOf(node) };
+  }
+
   /** Reads a variable by name, noting a read of `arguments`, which the enclosing function then creates. */
   private identifierRead(node: Node): Expression {
-    if (node.text === 'arguments') this.context.argumentsUse.isUsed = true;
+    if (node.text === 'arguments') {
+      if (this.context.argumentsUse.isForbidden)
+        fail(node, 'フィールドの初期値や static ブロックの中では arguments を使えません。');
+      this.context.argumentsUse.isUsed = true;
+    }
     return { kind: 'identifier', name: node.text, row: rowOf(node) };
   }
 
@@ -107,17 +126,46 @@ export abstract class ExpressionConverter extends ConverterBase {
   }
 
   private template(node: Node): Expression {
-    const strings: string[] = [''];
+    const { raw, expressions } = this.templateParts(node);
+    return {
+      kind: 'template',
+      strings: raw.map((text) => decodeTemplateFragment(text)),
+      expressions,
+      row: rowOf(node),
+    };
+  }
+
+  /** The source texts between a template's substitutions, with line breaks normalized to `\n`, and the substitutions. */
+  private templateParts(node: Node): { raw: string[]; expressions: Expression[] } {
+    const raw: string[] = [''];
     const expressions: Expression[] = [];
     for (const child of node.children) {
       if (child?.type === 'template_substitution') {
         expressions.push(this.expression(namedChildren(child)[0]));
-        strings.push('');
+        raw.push('');
       } else if (child?.type === 'string_fragment' || child?.type === 'escape_sequence') {
-        strings[strings.length - 1] += decodeTemplateFragment(child.text);
+        raw[raw.length - 1] += child.text.replaceAll(/\r\n?/g, '\n');
       }
     }
-    return { kind: 'template', strings, expressions, row: rowOf(node) };
+    return { raw, expressions };
+  }
+
+  /** Converts a tagged template to a call of its tag with the template's strings and substitutions. */
+  private taggedTemplate(node: Node, functionNode: Node, template: Node): Expression {
+    const row = rowOf(node);
+    const { raw, expressions } = this.templateParts(template);
+    const cooked = raw.map((text) => (hasInvalidEscape(text) ? undefined : decodeTemplateFragment(text)));
+    const strings: Expression = { kind: 'templateObject', cooked, raw, row: rowOf(template) };
+    const callee = this.expression(functionNode);
+    if (callee.kind === 'member' && callee.optional) fail(node, '?. の後ろにはタグ付きテンプレートを書けません。');
+    return {
+      kind: 'call',
+      callee,
+      args: [strings, ...expressions],
+      optional: false,
+      calleeText: calleeText(functionNode),
+      row,
+    };
   }
 
   private assignment(node: Node, operator: string): Expression {
@@ -125,7 +173,13 @@ export abstract class ExpressionConverter extends ConverterBase {
     if (operator !== '=' && !assignableTypes.has(unwrapParentheses(left).type))
       fail(left, 'この式には代入できません。');
     const target = this.assignmentTarget(left);
-    return { kind: 'assign', operator, target, value: this.namedValue(field(node, 'right'), target), row: rowOf(node) };
+    return {
+      kind: 'assign',
+      operator,
+      target,
+      value: this.namedValue(field(node, 'right'), target),
+      row: rowOf(node),
+    };
   }
 
   private update(node: Node): Expression {
@@ -152,7 +206,15 @@ export abstract class ExpressionConverter extends ConverterBase {
   private binary(node: Node): Expression {
     const operator = field(node, 'operator').text;
     const leftNode = field(node, 'left');
-    if (leftNode.type === 'private_property_identifier') unsupported(leftNode, '#name in 式');
+    if (leftNode.type === 'private_property_identifier') {
+      if (operator !== 'in') fail(leftNode, '# で始まる名前は、in の左か「.」の後ろにしか書けません。');
+      return {
+        kind: 'privateIn',
+        name: leftNode.text,
+        right: this.expression(field(node, 'right')),
+        row: rowOf(node),
+      };
+    }
     const left = this.expression(leftNode);
     const right = this.expression(field(node, 'right'));
     if (operator === '&&' || operator === '||' || operator === '??') {
@@ -176,7 +238,11 @@ export abstract class ExpressionConverter extends ConverterBase {
           return { kind: 'property', key, value };
         }
         case 'shorthand_property_identifier': {
-          return { kind: 'property', key: { kind: 'key', key: member.text }, value: this.identifierRead(member) };
+          return {
+            kind: 'property',
+            key: { kind: 'key', key: member.text },
+            value: this.identifierRead(member),
+          };
         }
         case 'method_definition': {
           return this.objectMethod(member);
@@ -227,13 +293,20 @@ export abstract class ExpressionConverter extends ConverterBase {
   private call(node: Node): Expression {
     const functionNode = field(node, 'function');
     const argumentsNode = field(node, 'arguments');
-    if (argumentsNode.type === 'template_string') unsupported(node, 'タグ付きテンプレート');
     if (functionNode.type === 'import') unsupported(node, 'import() ');
+    if (argumentsNode.type === 'template_string') return this.taggedTemplate(node, functionNode, argumentsNode);
     const args = this.arguments(argumentsNode);
     const row = rowOf(node);
     if (functionNode.type === 'super') {
       if (!this.context.canCallSuper) fail(node, 'super(...) は継承したクラスのコンストラクタの中にしか書けません。');
-      return { kind: 'call', callee: { kind: 'super', row }, args, optional: false, calleeText: 'super', row };
+      return {
+        kind: 'call',
+        callee: { kind: 'super', row },
+        args,
+        optional: false,
+        calleeText: 'super',
+        row,
+      };
     }
     const optional = node.childForFieldName('optional_chain') !== null;
     const callee = this.expression(functionNode);
@@ -323,7 +396,12 @@ export abstract class ExpressionConverter extends ConverterBase {
       // An object or array literal used as a pattern spells defaults as assignments.
       case 'assignment_expression': {
         const target = this.pattern(field(node, 'left'), leaf);
-        return { kind: 'default', target, value: this.expression(field(node, 'right')), row: rowOf(node) };
+        return {
+          kind: 'default',
+          target,
+          value: this.expression(field(node, 'right')),
+          row: rowOf(node),
+        };
       }
       case 'array_pattern':
       case 'array': {
@@ -362,7 +440,10 @@ export abstract class ExpressionConverter extends ConverterBase {
           break;
         }
         case 'object_assignment_pattern': {
-          properties.push({ key: { kind: 'key', key: field(child, 'left').text }, value: this.pattern(child, leaf) });
+          properties.push({
+            key: { kind: 'key', key: field(child, 'left').text },
+            value: this.pattern(child, leaf),
+          });
           break;
         }
         case 'pair_pattern':
@@ -383,6 +464,26 @@ export abstract class ExpressionConverter extends ConverterBase {
     }
     return { kind: 'objectPattern', properties, rest, row: rowOf(node) };
   }
+}
+
+/** Converts a regular expression literal, rejecting a pattern or flags that JavaScript rejects. */
+function regexLiteral(node: Node): Expression {
+  const pattern = field(node, 'pattern').text;
+  const flags = node.childForFieldName('flags')?.text ?? '';
+  try {
+    new RegExp(pattern, flags);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    fail(node, '正規表現の書き方に誤りがあります。');
+  }
+  return { kind: 'regex', pattern, flags, row: rowOf(node) };
+}
+
+/** Whether a template's source text has an escape that a tagged template leaves without a cooked string. */
+function hasInvalidEscape(raw: string): boolean {
+  return /\\(?:u(?!\{[\dA-Fa-f]+\}|[\dA-Fa-f]{4})|x(?![\dA-Fa-f]{2})|0\d|[1-9])/.test(
+    raw.replaceAll(String.raw`\\`, '')
+  );
 }
 
 /** Converts the elements between brackets, where a comma without an element leaves a hole. */

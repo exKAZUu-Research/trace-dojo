@@ -117,7 +117,15 @@ export interface ClassNode extends Span {
 
 export type ClassMember =
   | { kind: 'method' | 'getter' | 'setter'; isStatic: boolean; key: PropertyName; fn: FunctionNode }
-  | { kind: 'field'; isStatic: boolean; key: PropertyName; value?: Expression; stepRow?: number; row: number };
+  | {
+      kind: 'field';
+      isStatic: boolean;
+      key: PropertyName;
+      value?: Expression;
+      stepRow?: number;
+      row: number;
+    }
+  | { kind: 'staticBlock'; body: Statement[]; scope: ScopeDeclarations; row: number };
 
 /** A property name: a fixed key, a computed one, or a private one written as `#name`. */
 export type PropertyName =
@@ -136,19 +144,34 @@ export type Expression = Span &
   (
     | { kind: 'literal'; value: undefined | null | boolean | number | string }
     | { kind: 'template'; strings: string[]; expressions: Expression[] }
+    /**
+     * The strings of a tagged template, which its tag receives as a frozen array with a frozen `raw` array; a string
+     * with an invalid escape is `undefined`. Each evaluation of one site returns the same array.
+     */
+    | { kind: 'templateObject'; cooked: (string | undefined)[]; raw: string[] }
+    | { kind: 'regex'; pattern: string; flags: string }
     | { kind: 'identifier'; name: string }
     | { kind: 'this' }
+    | { kind: 'newTarget' }
     | { kind: 'array'; elements: (Argument | undefined)[] }
     | { kind: 'object'; members: ObjectMember[] }
     | { kind: 'functionExpression'; fn: FunctionNode }
     | { kind: 'classExpression'; cls: ClassNode }
     | MemberExpression
-    | { kind: 'call'; callee: Expression | SuperReference; args: Argument[]; optional: boolean; calleeText: string }
+    | {
+        kind: 'call';
+        callee: Expression | SuperReference;
+        args: Argument[];
+        optional: boolean;
+        calleeText: string;
+      }
     | { kind: 'new'; callee: Expression; args: Argument[]; calleeText: string }
     | { kind: 'assign'; operator: string; target: Pattern; value: Expression }
     | { kind: 'update'; operator: '++' | '--'; prefix: boolean; target: Pattern }
     | { kind: 'unary'; operator: string; argument: Expression }
     | { kind: 'binary'; operator: string; left: Expression; right: Expression }
+    /** `#name in object`, which tests whether the object has the private member. */
+    | { kind: 'privateIn'; name: string; right: Expression }
     | { kind: 'logical'; operator: '&&' | '||' | '??'; left: Expression; right: Expression }
     | { kind: 'conditional'; test: Expression; consequent: Expression; alternate: Expression }
     | { kind: 'sequence'; expressions: Expression[] }

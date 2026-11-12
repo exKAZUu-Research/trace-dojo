@@ -133,7 +133,12 @@ export class Runtime {
   getOwnProperty(object: JsObject, key: string): Property | undefined {
     if (object instanceof JsArray) {
       if (key === 'length')
-        return { value: object.elements.length, writable: true, enumerable: false, configurable: false };
+        return {
+          value: object.elements.length,
+          writable: true,
+          enumerable: false,
+          configurable: false,
+        };
       const index = arrayIndexOf(key);
       if (index !== undefined) {
         const element = index < object.elements.length ? object.elements[index] : HOLE;
@@ -266,7 +271,12 @@ export class Runtime {
   }
 
   createDataProperty(object: JsObject, key: string, value: Value): void {
-    this.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true });
+    this.defineProperty(object, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
 
   deleteProperty(target: Value, key: string): boolean {
@@ -379,11 +389,17 @@ export class Runtime {
     const target = newTarget as JsFunction;
     const { behavior } = fn;
     if (behavior.kind === 'native') {
-      return behavior.run({ runtime: this, thisValue: undefined, args, newTarget: target, callRow }) as JsObject;
+      return behavior.run({
+        runtime: this,
+        thisValue: undefined,
+        args,
+        newTarget: target,
+        callRow,
+      }) as JsObject;
     }
     if (behavior.kind === 'class') return this.evaluator.constructClass(fn, behavior, args, target, callRow);
     const thisValue = this.newObject(this.prototypeFor(target, this.realm.objectPrototype));
-    const result = this.evaluator.callFunction(behavior, thisValue, args, callRow);
+    const result = this.evaluator.callFunction(behavior, thisValue, args, callRow, target);
     return isObject(result) ? result : thisValue;
   }
 
@@ -493,6 +509,7 @@ export class Runtime {
       // oxlint-disable-next-line typescript/no-misused-spread -- JavaScript iterates strings by code point.
       return new ValueIterator([...value]);
     }
+    if (value instanceof JsObject && value.hostIterator) return new ValueIterator(value.hostIterator);
     return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
   }
 

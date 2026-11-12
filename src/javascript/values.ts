@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassNode, FunctionNode } from './ast';
+import type { DONE } from './iteration';
 import type { Runtime } from './runtime';
 
 /** A JavaScript value: primitives are the host's own, objects are interpreter objects. */
@@ -25,6 +26,16 @@ export function isAccessor(property: Property): property is AccessorProperty {
   return !('value' in property);
 }
 
+/** Makes an object's properties read-only and stops it from gaining new ones, as `Object.freeze` does. */
+export function freeze(object: JsObject): void {
+  if (object instanceof JsArray) object.frozen = true;
+  object.extensible = false;
+  for (const property of object.properties.values()) {
+    property.configurable = false;
+    if (!isAccessor(property)) property.writable = false;
+  }
+}
+
 export class JsObject {
   readonly properties = new Map<string, Property>();
   /** `#name` fields, methods, and accessors, keyed by the identity of the class's private name. */
@@ -34,6 +45,10 @@ export class JsObject {
   turtle?: TurtleState;
   /** Set by the builtin Error constructors, which `Error.prototype.toString` and stack traces rely on. */
   isError = false;
+  /** Set by the RegExp constructor and regular expression literals; never run itself, since it keeps no lastIndex. */
+  regexp?: RegExp;
+  /** Set on a builtin iterator, such as the one `matchAll` returns, whose `next()` and loops step through it. */
+  hostIterator?: () => Value | typeof DONE;
 
   constructor(public proto: JsObject | null) {}
 }

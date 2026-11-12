@@ -2,6 +2,7 @@ import { defineFunctionProperties } from './memberProperties';
 import { defineArrayBuiltins } from './realmArrays';
 import { defineGlobalBuiltins } from './realmGlobals';
 import { defineNodeBuiltins } from './realmNode';
+import { defineRegExpBuiltins } from './realmRegExp';
 import { defineStringBuiltins } from './realmStrings';
 import type { Runtime } from './runtime';
 import { JsFunction, JsObject, type NativeFunction, Scope, type Value } from './values';
@@ -16,6 +17,9 @@ export interface Realm {
   stringPrototype: JsObject;
   numberPrototype: JsObject;
   booleanPrototype: JsObject;
+  regExpPrototype: JsObject;
+  /** `%IteratorPrototype%`, the parent of the builtin iterators' prototypes. */
+  iteratorPrototype: JsObject;
   errorPrototypes: Record<ErrorName, JsObject>;
   /** The scope of the builtin globals, which encloses the program's own scope. */
   globals: Scope;
@@ -36,6 +40,8 @@ export class RealmBuilder {
       stringPrototype: new JsObject(objectPrototype),
       numberPrototype: new JsObject(objectPrototype),
       booleanPrototype: new JsObject(objectPrototype),
+      regExpPrototype: new JsObject(objectPrototype),
+      iteratorPrototype: new JsObject(objectPrototype),
       errorPrototypes: {
         Error: errorPrototype,
         TypeError: new JsObject(errorPrototype),
@@ -56,7 +62,12 @@ export class RealmBuilder {
   /** Defines a builtin method, which is non-enumerable. */
   method(object: JsObject, name: string, length: number, run: NativeFunction): JsFunction {
     const fn = this.function(name, length, run);
-    object.properties.set(name, { value: fn, writable: true, enumerable: false, configurable: true });
+    object.properties.set(name, {
+      value: fn,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
     return fn;
   }
 
@@ -82,8 +93,18 @@ export class RealmBuilder {
     isConstructor = true
   ): JsFunction {
     const fn = this.function(name, length, run, isConstructor);
-    fn.properties.set('prototype', { value: prototype, writable: false, enumerable: false, configurable: false });
-    prototype.properties.set('constructor', { value: fn, writable: true, enumerable: false, configurable: true });
+    fn.properties.set('prototype', {
+      value: prototype,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    prototype.properties.set('constructor', {
+      value: fn,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
     this.global(name, fn);
     return fn;
   }
@@ -105,5 +126,6 @@ export function createRealm(runtime: Runtime): Realm {
   defineNodeBuiltins(builder);
   defineArrayBuiltins(builder);
   defineStringBuiltins(builder);
+  defineRegExpBuiltins(builder);
   return builder.realm;
 }

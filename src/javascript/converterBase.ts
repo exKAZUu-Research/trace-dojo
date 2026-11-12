@@ -16,12 +16,22 @@ export interface FunctionContext {
   canReturn: boolean;
   canCallSuper: boolean;
   canReferenceSuper: boolean;
+  /** Whether `new.target` may appear: anywhere but outside every function, which arrow functions inherit. */
+  canUseNewTarget: boolean;
   /** Labels in scope, each with whether it labels a loop. */
   labels: Map<string, boolean>;
   breakableDepth: number;
   loopDepth: number;
-  /** Shared by a function and the arrow functions inside it, which read its `arguments`. */
-  argumentsUse: { isUsed: boolean };
+  /**
+   * Shared by a function and the arrow functions inside it, which read its `arguments`; a field initializer or a
+   * static block forbids reading it.
+   */
+  argumentsUse: { isUsed: boolean; isForbidden?: boolean };
+}
+
+/** The context of a class field initializer or a static block, where `this` is the instance or the class. */
+export function initializerContext(): FunctionContext {
+  return { ...newContext(false, false, true), argumentsUse: { isUsed: false, isForbidden: true } };
 }
 
 export function newContext(canReturn: boolean, canCallSuper: boolean, canReferenceSuper: boolean): FunctionContext {
@@ -29,6 +39,7 @@ export function newContext(canReturn: boolean, canCallSuper: boolean, canReferen
     canReturn,
     canCallSuper,
     canReferenceSuper,
+    canUseNewTarget: true,
     labels: new Map(),
     breakableDepth: 0,
     loopDepth: 0,
@@ -48,7 +59,10 @@ interface ConvertedFunction {
 
 /** The scopes, steps, and contexts that converting a program tracks, which its early errors depend on. */
 export abstract class ConverterBase {
-  protected context: FunctionContext = newContext(false, false, false);
+  protected context: FunctionContext = {
+    ...newContext(false, false, false),
+    canUseNewTarget: false,
+  };
   private readonly scopes: ScopeBuilder[] = [];
   /** The functions converted so far, among which the annotations find their owners once the program is converted. */
   private readonly functions: ConvertedFunction[] = [];

@@ -5,19 +5,29 @@ import type { Value } from './values';
 export const DONE = Symbol('done');
 
 /**
- * JavaScript's iterator over an array or a string. An array is read at each step, so changes the loop body makes are
- * seen, and once the iterator has passed the end it stays done even if the array grows, as an array iterator does.
+ * JavaScript's iterator over an array, a string, or a builtin iterator. An array is read at each step, so changes the
+ * loop body makes are seen, and once the iterator has passed the end it stays done even if the array grows, as an
+ * array iterator does.
  */
 export class ValueIterator {
   private index = 0;
   private isDone = false;
 
-  /** @param source An array, read by the spec's Get, or values that cannot change, such as a string's code points. */
-  constructor(private readonly source: ArrayOps | readonly Value[]) {}
+  /**
+   * @param source An array, read by the spec's Get, values that cannot change, such as a string's code points, or the
+   * step of a builtin iterator.
+   */
+  constructor(private readonly source: ArrayOps | readonly Value[] | (() => Value | typeof DONE)) {}
 
   next(): Value | typeof DONE {
     const { source } = this;
-    if (this.isDone || this.index >= source.length) {
+    if (this.isDone) return DONE;
+    if (typeof source === 'function') {
+      const value = source();
+      if (value === DONE) this.isDone = true;
+      return value;
+    }
+    if (this.index >= source.length) {
       this.isDone = true;
       return DONE;
     }

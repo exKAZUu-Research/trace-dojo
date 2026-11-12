@@ -78,7 +78,10 @@ export class Evaluator extends ExpressionEvaluator {
         return undefined;
       }
       case 'return': {
-        return { kind: 'return', value: statement.value ? this.evaluate(statement.value) : undefined };
+        return {
+          kind: 'return',
+          value: statement.value ? this.evaluate(statement.value) : undefined,
+        };
       }
       case 'if': {
         if (toBoolean(this.evaluate(statement.test))) return this.statement(statement.consequent, []);
@@ -314,25 +317,46 @@ export class Evaluator extends ExpressionEvaluator {
     runtime.allocate(3);
     let closure = scope;
     if (node.bindsOwnName) closure = new Scope(scope);
-    const fn = new JsFunction(runtime.realm.functionPrototype, { kind: 'user', node, scope: closure, homeObject });
+    const fn = new JsFunction(runtime.realm.functionPrototype, {
+      kind: 'user',
+      node,
+      scope: closure,
+      homeObject,
+    });
     if (node.bindsOwnName) closure.bindings.set(node.name, { value: fn, isMutable: false });
     defineFunctionProperties(fn, node.name, expectedArgumentCount(node));
     if (node.kind === 'normal') {
       const prototype = runtime.newObject();
-      prototype.properties.set('constructor', { value: fn, writable: true, enumerable: false, configurable: true });
-      fn.properties.set('prototype', { value: prototype, writable: true, enumerable: false, configurable: false });
+      prototype.properties.set('constructor', {
+        value: fn,
+        writable: true,
+        enumerable: false,
+        configurable: true,
+      });
+      fn.properties.set('prototype', {
+        value: prototype,
+        writable: true,
+        enumerable: false,
+        configurable: false,
+      });
     }
     return fn;
   }
 
-  callFunction(behavior: UserBehavior, thisValue: Value, args: Value[], callRow: number | undefined): Value {
+  callFunction(
+    behavior: UserBehavior,
+    thisValue: Value,
+    args: Value[],
+    callRow: number | undefined,
+    newTarget?: JsFunction
+  ): Value {
     const { runtime } = this;
     const { node } = behavior;
     const scope = new Scope(
       behavior.scope,
       node.kind === 'arrow'
         ? undefined
-        : { thisValue, homeObject: behavior.homeObject, constructing: undefined, newTarget: undefined },
+        : { thisValue, homeObject: behavior.homeObject, constructing: undefined, newTarget },
       true
     );
     runtime.pushFrame(scope, callRow, node.isAtomic);
@@ -351,7 +375,10 @@ export class Evaluator extends ExpressionEvaluator {
   private bindParameters(node: FunctionNode, args: Value[]): void {
     const { runtime } = this;
     if (node.usesArguments) {
-      runtime.frame.scope.bindings.set('arguments', { value: runtime.newArray([...args]), isMutable: false });
+      runtime.frame.scope.bindings.set('arguments', {
+        value: runtime.newArray([...args]),
+        isMutable: false,
+      });
     }
     const params = node.rest ? [...node.params, node.rest] : node.params;
     const { bindings } = runtime.frame.scope;
@@ -370,6 +397,7 @@ export class Evaluator extends ExpressionEvaluator {
     const classScope = new Scope(runtime.frame.scope);
     if (cls.name) classScope.bindings.set(cls.name, { value: UNINITIALIZED, isMutable: false });
     for (const member of cls.members) {
+      if (member.kind === 'staticBlock') continue;
       const { key } = member;
       // Private names live in the class scope, where `#` keeps them apart from variables.
       if (key.kind === 'private' && !classScope.bindings.has(key.name)) {
@@ -390,18 +418,31 @@ export class Evaluator extends ExpressionEvaluator {
     const fn = new JsFunction(constructorParent, behavior);
     runtime.allocate(3);
     defineFunctionProperties(fn, cls.name, cls.ctor ? expectedArgumentCount(cls.ctor) : 0);
-    fn.properties.set('prototype', { value: prototype, writable: false, enumerable: false, configurable: false });
-    prototype.properties.set('constructor', { value: fn, writable: true, enumerable: false, configurable: true });
-    const staticFields = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior.fields));
+    fn.properties.set('prototype', {
+      value: prototype,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    prototype.properties.set('constructor', {
+      value: fn,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+    const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior.fields));
     if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
     this.inScope(classScope, () => {
-      for (const field of staticFields) this.initializeField(fn, field);
+      for (const initialize of staticInitializers) initialize();
     });
     return fn;
   }
 
   /** The prototypes of a class's prototype object and of the class itself, which `extends` decides. */
-  private classParents(cls: ClassNode): { prototypeParent: JsObject | null; constructorParent: JsObject } {
+  private classParents(cls: ClassNode): {
+    prototypeParent: JsObject | null;
+    constructorParent: JsObject;
+  } {
     const { runtime } = this;
     const { realm } = runtime;
     if (!cls.superClass) return { prototypeParent: realm.objectPrototype, constructorParent: realm.functionPrototype };
@@ -421,17 +462,24 @@ export class Evaluator extends ExpressionEvaluator {
     return { prototypeParent: parentPrototype, constructorParent: superClass };
   }
 
-  /** Defines the methods and accessors, collecting the fields, which return the static ones to initialize. */
+  /**
+   * Defines the methods and accessors and collects the instance fields, returning what initializes the class itself:
+   * its static fields and static blocks in source order.
+   */
   private defineMembers(
     cls: ClassNode,
     fn: JsFunction,
     prototype: JsObject,
     instanceFields: ClassField[]
-  ): ClassField[] {
+  ): (() => void)[] {
     const { runtime } = this;
-    const staticFields: ClassField[] = [];
+    const staticInitializers: (() => void)[] = [];
     const classScope = runtime.frame.scope;
     for (const member of cls.members) {
+      if (member.kind === 'staticBlock') {
+        staticInitializers.push(() => this.runStaticBlock(member, this.methodScope(classScope, fn, fn)));
+        continue;
+      }
       const target = member.isStatic ? fn : prototype;
       const isPrivate = member.key.kind === 'private';
       const key = this.propertyKey(member.key);
@@ -441,18 +489,27 @@ export class Evaluator extends ExpressionEvaluator {
           ? (thisValue: JsObject): Value =>
               this.inScope(this.methodScope(classScope, thisValue, target), () => this.evaluate(value))
           : undefined;
-        (member.isStatic ? staticFields : instanceFields).push({
+        const field: ClassField = {
           key,
           isPrivate,
           initialize,
           stepRow: member.stepRow,
           onlyCalls: value !== undefined && isObjectCreation(value),
-        });
+        };
+        if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field));
+        else instanceFields.push(field);
         continue;
       }
       this.defineMethod(member, key, target, classScope, instanceFields);
     }
-    return staticFields;
+    return staticInitializers;
+  }
+
+  private runStaticBlock(block: Extract<ClassMember, { kind: 'staticBlock' }>, scope: Scope): void {
+    this.inScope(scope, () => {
+      this.instantiate(scope, block.scope);
+      this.statements(block.body);
+    });
   }
 
   /** Defines a method or accessor, which instances get as private members when its name is private. */
@@ -479,14 +536,24 @@ export class Evaluator extends ExpressionEvaluator {
           property,
         });
     } else if (member.kind === 'method') {
-      runtime.defineProperty(target, key, { value: method, writable: true, enumerable: false, configurable: true });
+      runtime.defineProperty(target, key, {
+        value: method,
+        writable: true,
+        enumerable: false,
+        configurable: true,
+      });
     } else {
       defineAccessor(runtime, target, key, member.kind, method, false);
     }
   }
 
   private methodScope(scope: Scope, thisValue: JsObject, homeObject: JsObject): Scope {
-    return new Scope(scope, { thisValue, homeObject, constructing: undefined, newTarget: undefined });
+    return new Scope(scope, {
+      thisValue,
+      homeObject,
+      constructing: undefined,
+      newTarget: undefined,
+    });
   }
 
   private initializeField(target: JsObject, field: ClassField): void {
@@ -498,7 +565,12 @@ export class Evaluator extends ExpressionEvaluator {
     this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
       const value = field.initialize ? field.initialize(target) : undefined;
       if (field.isPrivate)
-        runtime.definePrivate(target, field.key, { value, writable: true, enumerable: false, configurable: false });
+        runtime.definePrivate(target, field.key, {
+          value,
+          writable: true,
+          enumerable: false,
+          configurable: false,
+        });
       else runtime.createDataProperty(target, field.key, value);
     });
   }
@@ -514,7 +586,12 @@ export class Evaluator extends ExpressionEvaluator {
     const thisValue = behavior.isDerived
       ? UNINITIALIZED
       : runtime.newObject(runtime.prototypeFor(newTarget, runtime.realm.objectPrototype));
-    const functionFrame: FunctionFrame = { thisValue, homeObject: behavior.homeObject, constructing: fn, newTarget };
+    const functionFrame: FunctionFrame = {
+      thisValue,
+      homeObject: behavior.homeObject,
+      constructing: fn,
+      newTarget,
+    };
     const scope = new Scope(behavior.scope, functionFrame);
     runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false);
     try {

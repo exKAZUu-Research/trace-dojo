@@ -1,9 +1,11 @@
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
+import { newRegExp } from './realmRegExp';
 import {
   type AccessorProperty,
   appendAll,
   type Element,
+  freeze,
   HOLE,
   isAccessor,
   isCallable,
@@ -18,6 +20,9 @@ import {
 type ChainValue = Value | typeof SHORT_CIRCUIT;
 
 export abstract class ExpressionEvaluator extends EvaluatorBase {
+  /** The strings array of each tagged template site, which every evaluation of the site passes to its tag. */
+  private readonly templateObjects = new WeakMap<Expression, JsArray>();
+
   abstract evaluateClass(cls: ClassNode): JsFunction;
 
   abstract superCall(args: Value[], callRow: number): JsObject;
@@ -48,11 +53,20 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case 'template': {
         return this.template(expression.strings, expression.expressions);
       }
+      case 'regex': {
+        return newRegExp(runtime, expression.pattern, expression.flags);
+      }
+      case 'templateObject': {
+        return this.templateObject(expression);
+      }
       case 'identifier': {
         return this.readVariable(expression.name);
       }
       case 'this': {
         return this.thisValue();
+      }
+      case 'newTarget': {
+        return this.functionFrame()?.newTarget;
       }
       case 'array': {
         return this.arrayLiteral(expression.elements);
@@ -96,6 +110,16 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
           return runtime.hold(right, () => this.binary(expression.operator, left, right));
         });
       }
+      case 'privateIn': {
+        const right = this.evaluate(expression.right);
+        if (!isObject(right)) {
+          return runtime.throwError(
+            'TypeError',
+            `Cannot use 'in' operator to search for '${expression.name}' in ${runtime.describe(right)}`
+          );
+        }
+        return right.privateMembers?.has(this.privateKey(expression.name)) ?? false;
+      }
       case 'logical': {
         const left = this.evaluate(expression.left);
         return shortCircuits(expression.operator, left) ? left : this.evaluate(expression.right);
@@ -125,6 +149,24 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       text += part;
     }
     return text;
+  }
+
+  private templateObject(expression: Extract<Expression, { kind: 'templateObject' }>): JsArray {
+    const { runtime } = this;
+    let strings = this.templateObjects.get(expression);
+    if (strings) return strings;
+    const raw = runtime.newArray([...expression.raw]);
+    freeze(raw);
+    strings = runtime.newArray([...expression.cooked]);
+    runtime.defineProperty(strings, 'raw', {
+      value: raw,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    freeze(strings);
+    this.templateObjects.set(expression, strings);
+    return strings;
   }
 
   evaluateArguments(args: Argument[]): Value[] {
