@@ -55,3 +55,35 @@ next(it)
 del d['c']
 d['d'] = 4
 check(list(it), ['b', 'd'])
+
+
+def run_after_first(mutate, make):
+    o = O(a=1, b=2, c=3)
+    it = make(o)
+    try:
+        first = next(it)
+        mutate(o)
+        return (first, list(it))
+    except RuntimeError as e:
+        return 'RuntimeError: ' + str(e)
+
+
+check(run_after_first(lambda o: o.move_to_end('a', last=False), lambda o: iter(o)), ('a', ['b', 'c']))
+check(run_after_first(lambda o: o.move_to_end('c'), lambda o: iter(o)), ('a', ['b', 'c']))
+check(run_after_first(lambda o: (o.move_to_end('c'), o.move_to_end('c')), lambda o: iter(o)), ('a', ['b', 'c']))
+check(run_after_first(lambda o: o.move_to_end('b'), lambda o: iter(o)), 'RuntimeError: OrderedDict mutated during iteration')
+check(run_after_first(lambda o: o.move_to_end('a', last=False), lambda o: iter(o.values())), (1, [2, 3]))
+check(run_after_first(lambda o: o.move_to_end('c'), lambda o: iter(o.values())), (1, [2, 3]))
+check(run_after_first(lambda o: (o.move_to_end('c'), o.move_to_end('c')), lambda o: iter(o.values())), (1, [2, 3]))
+check(run_after_first(lambda o: o.move_to_end('b'), lambda o: iter(o.values())), 'RuntimeError: OrderedDict mutated during iteration')
+check(run_after_first(lambda o: o.move_to_end('a', last=False), lambda o: reversed(o)), ('c', ['b', 'a']))
+check(run_after_first(lambda o: o.move_to_end('c'), lambda o: reversed(o)), ('c', ['b', 'a']))
+check(run_after_first(lambda o: (o.move_to_end('c'), o.move_to_end('c')), lambda o: reversed(o)), ('c', ['b', 'a']))
+check(run_after_first(lambda o: o.move_to_end('b'), lambda o: reversed(o)), 'RuntimeError: OrderedDict mutated during iteration')
+o = O(a=1, b=2)
+seen = []
+for k in o:
+    o['b'] = 2
+    o.move_to_end('b')
+    seen.append(k)
+check([seen, list(o)], [['a', 'b'], ['a', 'b']])

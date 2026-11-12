@@ -122,6 +122,8 @@ export class DictStore {
 
   /** Moves an entry to the end (or the start), as `OrderedDict.move_to_end` does. */
   moveToEnd(entry: DictEntry, last: boolean): void {
+    // As od_move_to_end does, an entry already at that end stays, and the dict's iterators see no change.
+    if ((last ? this.last() : this.first()) === entry) return;
     this.entries = this.entries.filter((candidate) => candidate !== entry && candidate.alive);
     this.deleted = 0;
     if (last) this.entries.push(entry);
