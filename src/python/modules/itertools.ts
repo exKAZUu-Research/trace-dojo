@@ -1,5 +1,5 @@
 import { pushAll } from '../arrays';
-// code-gauge-allow-file fileNcss 407 -- The iterators of itertools and their shared helpers belong together.
+// code-gauge-allow-file fileNcss 419 -- The iterators of itertools and their shared helpers belong together.
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -10,7 +10,7 @@ import { currentRuntime } from '../runtimeContext';
 import { newGenericAlias } from '../typeHints';
 import { defineIteratorClass } from '../typeObject';
 import { builtinClass, nativeFunction, newTuple, None, typeError, valueError } from '../types';
-import { DONE, type Kwargs, type PyBuiltinFunction, type PyClass, PyIterator, type PyValue } from '../values';
+import { DONE, type Kwargs, type PyBuiltinFunction, type PyClass, PyError, PyIterator, type PyValue } from '../values';
 
 const classes = new Map<string, PyClass>();
 
@@ -366,14 +366,6 @@ function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
   );
 }
 
-function toBound(value: PyValue | undefined, name: string): number | undefined {
-  if (value === undefined || value === None) return undefined;
-  const message = `${name} argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.`;
-  const bound = Number(toIndex(value, () => message));
-  if (bound < 0) throw valueError(message);
-  return bound;
-}
-
 function sizeOf(value: PyValue | undefined, fallback: number): number {
   if (value === undefined || value === None) return fallback;
   const result = Number(toIndex(value));
@@ -383,12 +375,8 @@ function sizeOf(value: PyValue | undefined, fallback: number): number {
 
 function islice(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'islice', min: 2, max: 4, style: 'expected' }, args, kwargs);
+  const { start, stop, step } = isliceBounds(args.length === 2 ? [undefined, args[1]] : args.slice(1));
   const { next, held } = iterateHeld(args[0]);
-  const [start, stop, step] =
-    args.length === 2
-      ? [0, toBound(args[1], 'Stop'), 1]
-      : [toBound(args[1], 'Indices') ?? 0, toBound(args[2], 'Stop'), toBound(args[3], 'Step') ?? 1];
-  if (step === 0) throw valueError('Step for islice() must be a positive integer or None.');
   let position = 0;
   let nextIndex = start;
   // Transcribes islice_next: the items before the next index are consumed even when the stop ends the slice there.
@@ -408,6 +396,41 @@ function islice(args: PyValue[], kwargs: Kwargs): PyValue {
     },
     () => [held]
   );
+}
+
+const MAX_SSIZE = (1n << 63n) - 1n;
+
+/** Transcribes islice_new's checks, in which a bound that is no index or exceeds sys.maxsize counts as -1. */
+function isliceBounds([startArg, stopArg, stepArg]: (PyValue | undefined)[]): {
+  start: number;
+  stop: number | undefined;
+  step: number;
+} {
+  const start = isNone(startArg) ? 0 : ssizeOrMinusOne(startArg);
+  const stop = isNone(stopArg) ? undefined : ssizeOrMinusOne(stopArg);
+  if (stop === -1) throw valueError('Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.');
+  if (start < 0 || (stop !== undefined && stop < 0)) {
+    throw valueError('Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.');
+  }
+  const step = isNone(stepArg) ? 1 : ssizeOrMinusOne(stepArg);
+  if (step < 1) throw valueError('Step for islice() must be a positive integer or None.');
+  return { start, stop, step };
+}
+
+function isNone(value: PyValue | undefined): value is undefined {
+  return value === undefined || value === None;
+}
+
+/** PyNumber_AsSsize_t with its error cleared, as islice_new does: -1 for a value that is no index or out of range. */
+function ssizeOrMinusOne(value: PyValue): number {
+  let index: bigint;
+  try {
+    index = toIndex(value);
+  } catch (error) {
+    if (error instanceof PyError) return -1;
+    throw error;
+  }
+  return index > MAX_SSIZE || index < -MAX_SSIZE - 1n ? -1 : Number(index);
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Follows itertools.zip_longest, which stops when every iterable is exhausted.
