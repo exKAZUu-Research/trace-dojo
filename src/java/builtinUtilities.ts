@@ -15,6 +15,7 @@ import {
   mapViewSources,
   sortedValues,
   subListChecks,
+  unmodifiableWrappers,
   wrapUnmodifiable,
 } from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
@@ -349,6 +350,8 @@ function defineCollectionViews(
         true,
         (frame, _, [source]) => {
           if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+          // As the JDK's, an unmodifiable set or map is returned as it is rather than wrapped again.
+          if (unmodifiableWrappers.has(source) && frame.runtime.isInstance(source, owner)) return source;
           // A set without a store of its own, such as a map's key set, shares its elements, which it reads afresh.
           const view = frame.runtime.allocateObject(frame, source.store ? immutable : collections.unmodifiableViewSet);
           view.store = source.store;

@@ -1624,6 +1624,28 @@ class Main {
   }
 });
 
+test('Java returns an unmodifiable set or map as it is when wrapped again, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  public static void main(String[] args) {
+    Map<Integer, Integer> a = new LinkedHashMap<>(16, .75f, true); a.put(1, 1); a.put(2, 2);
+    Map<Integer, Integer> w = Collections.unmodifiableMap(a);
+    Map<Integer, Integer> v = Collections.unmodifiableMap(w);
+    System.out.println((w == v) + " " + v.equals(w) + " " + w.equals(v) + " " + Collections.unmodifiableMap(v).equals(w) + " " + a);
+    Set<Integer> s = Collections.unmodifiableSet(new HashSet<>(Set.of(1)));
+    Set<Integer> k = Collections.unmodifiableSet(a.keySet());
+    System.out.println((s == Collections.unmodifiableSet(s)) + " " + (k == Collections.unmodifiableSet(k)));
+  }
+}`,
+      'true true true true {1=1, 2=2}\ntrue true\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
