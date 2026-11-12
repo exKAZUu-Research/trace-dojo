@@ -106,6 +106,12 @@ test.each([
   ['a huge random.choices result', 'import random\nx = random.choices([1], k=1000001)'],
   ['a huge random integer', 'import random\nx = random.getrandbits(9000000)'],
   ['a huge format width', 'format(1, "01000000000000,")'],
+  ['ranges kept beside a list beyond the slot limit', 'a = list(map(range, range(200000)))\nb = [0] * 700000'],
+  ['slices kept beside a list beyond the slot limit', 'a = [slice(i) for i in range(200000)]\nb = [0] * 700000'],
+  [
+    'complex numbers kept beside a list beyond the slot limit',
+    'a = [complex(i, 1) for i in range(200000)]\nb = [0] * 700000',
+  ],
   [
     'a dict comprehension and a list beyond the slot limit together',
     'd = {i: i for i in range(300000)}\na = [0] * 800000',

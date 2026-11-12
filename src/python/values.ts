@@ -24,6 +24,9 @@ export class PyObject {
 
   constructor(cls: PyClass | undefined) {
     if (cls) this.cls = cls;
+    // Every object a program makes costs a slot here, and what it holds is charged where the storage grows, so that
+    // no kind of object can be retained outside the slot limit.
+    chargeSlots(1);
   }
 
   get identity(): number {
@@ -182,7 +185,6 @@ export class PyInstance extends PyObject {
 
   constructor(cls: PyClass | undefined) {
     super(cls);
-    chargeSlots(1);
   }
 }
 
@@ -204,7 +206,7 @@ abstract class PyGrowableSequence extends PyObject {
 
   constructor(cls: PyClass, items: PyValue[]) {
     super(cls);
-    chargeSlots(items.length + 1);
+    chargeSlots(items.length);
     this.storage = items;
   }
 
@@ -253,7 +255,7 @@ export class PyTuple extends PyObject {
     readonly items: readonly PyValue[]
   ) {
     super(cls);
-    chargeSlots(items.length + 1);
+    chargeSlots(items.length);
   }
 }
 
@@ -265,7 +267,6 @@ export class PyDict extends PyObject {
     public defaultFactory?: PyValue
   ) {
     super(cls);
-    chargeSlots(1);
   }
 }
 
@@ -275,7 +276,6 @@ export class PySet extends PyObject {
     public table: SetTable
   ) {
     super(cls);
-    chargeSlots(1);
   }
 }
 
