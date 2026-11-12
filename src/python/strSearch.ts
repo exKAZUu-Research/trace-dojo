@@ -19,10 +19,8 @@ export function occurrences(
   { from = 0, to = text.length, fromEnd = false, limit = Number.POSITIVE_INFINITY } = {}
 ): number[] {
   const region = from === 0 && to === text.length ? text : text.slice(from, to);
-  if (needle.length > region.length || limit <= 0) {
-    currentRuntime().scan(needle.length);
-    return [];
-  }
+  // Comparing the lengths settles these without reading either string.
+  if (needle.length > region.length || limit <= 0) return [];
   const found =
     needle.length <= SHORT_NEEDLE
       ? hostOccurrences(region, needle, fromEnd, limit)
