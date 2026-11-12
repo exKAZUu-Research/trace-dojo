@@ -19,7 +19,7 @@ export interface ProtocolIteration {
 
 /** The iteration a sync `yield*` runs: the object the value's `Symbol.iterator` method returns. */
 export function syncIteratorOf(runtime: Runtime, iterable: Value): ProtocolIteration {
-  return iterationOf(runtime, iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator), (result) => result);
+  return iterationOf(runtime, iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator));
 }
 
 /**
@@ -30,27 +30,10 @@ export function asyncIteratorOf(runtime: Runtime, iterable: Value): ProtocolIter
   const factory =
     iterable === undefined || iterable === null ? undefined : runtime.get(iterable, WELL_KNOWN_SYMBOLS.asyncIterator);
   if (factory !== undefined && factory !== null) {
-    return iterationOf(
-      runtime,
-      iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.asyncIterator, factory),
-      (result) => result
-    );
+    return iterationOf(runtime, iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.asyncIterator, factory));
   }
   const iterator = iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator);
-  const iteration = iterationOf(runtime, iterator, (result, method) =>
-    awaitedResult(runtime, iterator, result, method)
-  );
-  // A sync `next` that throws closes the iterator before the error rejects, as V8's async-from-sync iterator does.
-  const { next } = iteration;
-  iteration.next = (...args) => {
-    try {
-      return next(...args);
-    } catch (error) {
-      if (error instanceof JsThrow) closeQuietly(runtime, iterator);
-      throw error;
-    }
-  };
-  return iteration;
+  return iterationOf(runtime, iterator, (step, method) => asyncFromSyncStep(runtime, iterator, step, method));
 }
 
 /**
@@ -126,22 +109,23 @@ function iteratorObject(
 }
 
 /** Calls an iterator object's methods, passing each result through `adapt`. */
+/** Calls an iterator object's methods, each step through `adapt`, which may turn its result into a promise of it. */
 function iterationOf(
   runtime: Runtime,
   iterator: JsObject,
-  adapt: (result: Value, method: 'next' | 'return' | 'throw') => Value
+  adapt: (step: () => Value, method: 'next' | 'return' | 'throw') => Value = (step) => step()
 ): ProtocolIteration {
   const next = runtime.get(iterator, 'next');
   const method = (name: 'return' | 'throw'): ((...args: Value[]) => Value) | undefined => {
     const fn = runtime.get(iterator, name);
     if (fn === undefined || fn === null) return undefined;
     // The arguments go as given: none for an implicit close, one for a forwarded `return(value)` or `throw(error)`.
-    return (...args) => adapt(runtime.call(fn, iterator, args, runtime.currentRow), name);
+    return (...args) => adapt(() => runtime.call(fn, iterator, args, runtime.currentRow), name);
   };
   return {
     iterator,
     nextMethod: next,
-    next: (...args) => adapt(runtime.call(next, iterator, args, runtime.currentRow), 'next'),
+    next: (...args) => adapt(() => runtime.call(next, iterator, args, runtime.currentRow), 'next'),
     get return() {
       return method('return');
     },
@@ -151,24 +135,36 @@ function iterationOf(
   };
 }
 
-/** A promise of a sync iterator's result with its value awaited, keeping whether the iterator is done. */
-function awaitedResult(
+/**
+ * Runs one step of a sync iterator used as an async one, as `CreateAsyncFromSyncIterator` does: the promise of the
+ * step's result with its value awaited. A `next` or `throw` step that fails anywhere, by throwing, by giving no result
+ * object, or by a rejected value of an unfinished result, closes the sync iterator first, as V8 does.
+ */
+function asyncFromSyncStep(
   runtime: Runtime,
   iterator: JsObject,
-  result: Value,
+  step: () => Value,
   method: 'next' | 'return' | 'throw'
 ): JsObject {
-  const checked = checkResult(runtime, result);
-  const done = toBoolean(runtime.get(checked, 'done'));
   const promise = newPromise(runtime);
-  awaitValue(runtime, runtime.get(checked, 'value'), [promise, iterator], (settled) => {
-    if (settled.kind !== 'throw') {
-      resolvePromise(runtime, promise, iteratorResult(runtime, settled.value, done));
-      return;
-    }
-    // A rejected value from `next` or `throw` closes the unfinished sync iterator, keeping the rejection.
-    if (!done && method !== 'return') closeQuietly(runtime, iterator);
-    rejectPromise(runtime, promise, settled.value);
+  const fail = (reason: Value, closes: boolean): void => {
+    if (closes && method !== 'return') closeQuietly(runtime, iterator);
+    rejectPromise(runtime, promise, reason);
+  };
+  let done: boolean;
+  let value: Value;
+  try {
+    const result = checkResult(runtime, step());
+    done = toBoolean(runtime.get(result, 'done'));
+    value = runtime.get(result, 'value');
+  } catch (error) {
+    if (!(error instanceof JsThrow)) throw error;
+    fail(error.value, true);
+    return promise;
+  }
+  awaitValue(runtime, value, [promise, iterator], (settled) => {
+    if (settled.kind === 'throw') fail(settled.value, !done);
+    else resolvePromise(runtime, promise, iteratorResult(runtime, settled.value, done));
   });
   return promise;
 }

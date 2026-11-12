@@ -1025,6 +1025,13 @@ async function* f() { yield* x(); }
     'sync iterators whose next throws under for await',
     `const x={[Symbol.iterator](){return{next(){throw "x"},return(){console.log("closed");return {}}}}};(async()=>{try{for await(const v of x){}}catch(e){console.log(e)}})()`,
   ],
+  [
+    'failing throw steps and value getters of sync iterators under await',
+    `const x = { [Symbol.iterator]() { return { next() { return { done: false, value: 1 }; }, throw() { throw 'x'; }, return() { console.log('closed'); return {}; } }; } };
+async function* g() { yield* x; }
+const y = { [Symbol.iterator]() { return { next() { return { done: false, get value() { throw 'v'; } }; }, return() { console.log('closed y'); return {}; } }; } };
+(async () => { let i = g(); await i.next(); try { await i.throw('z'); } catch (e) { console.log(e); } try { for await (const v of y) {} } catch (e) { console.log(e); } })();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
