@@ -28,6 +28,7 @@ import {
 import {
   capitalize,
   casefold,
+  everyCode,
   isLowerText,
   isTitleText,
   isUpperText,
@@ -131,12 +132,26 @@ method(strClass, 'isalnum', 'none', 0, 0, (self) =>
 );
 method(strClass, 'isspace', 'none', 0, 0, (self) => every(asStr(self), isSpace));
 // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
-method(strClass, 'isascii', 'none', 0, 0, (self) => /^[\u0000-\u007F]*$/.test(scanned(self)));
-method(strClass, 'isprintable', 'none', 0, 0, (self) => iterStr(scanned(self)).every(isPrintable));
-method(strClass, 'isidentifier', 'none', 0, 0, (self) => /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(scanned(self)));
-method(strClass, 'isupper', 'none', 0, 0, (self) => isUpperText(scanned(self)));
-method(strClass, 'islower', 'none', 0, 0, (self) => isLowerText(scanned(self)));
-method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleText(scanned(self)));
+method(strClass, 'isascii', 'none', 0, 0, (self) => everyCode(asStr(self), (code) => code < 0x80));
+method(strClass, 'isprintable', 'none', 0, 0, (self) =>
+  everyCode(asStr(self), (code) => isPrintable(String.fromCodePoint(code)))
+);
+method(strClass, 'isidentifier', 'none', 0, 0, (self) => {
+  const text = asStr(self);
+  let first = true;
+  return (
+    text !== '' &&
+    everyCode(text, (code) => {
+      const char = String.fromCodePoint(code);
+      const isValid = first ? /[\p{XID_Start}_]/u.test(char) : /\p{XID_Continue}/u.test(char);
+      first = false;
+      return isValid;
+    })
+  );
+});
+method(strClass, 'isupper', 'none', 0, 0, (self) => isUpperText(asStr(self)));
+method(strClass, 'islower', 'none', 0, 0, (self) => isLowerText(asStr(self)));
+method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleText(asStr(self)));
 
 // Searching ---------------------------------------------------------------------------------------------------------
 

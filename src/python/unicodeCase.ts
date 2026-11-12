@@ -1,3 +1,4 @@
+import { chargeScan } from './runtimeContext';
 import { CASE_DATA } from './unicodeCaseData';
 
 /**
@@ -141,41 +142,56 @@ export function title(text: string): string {
 /** `str.isupper()`: a cased character and no lowercase or titlecase one. */
 export function isUpperText(text: string): boolean {
   let cased = false;
-  for (const code of codesOf(text)) {
-    if (isLowerCode(code) || isTitleCode(code)) return false;
+  const complete = everyCode(text, (code) => {
     cased ||= isUpperCode(code);
-  }
-  return cased;
+    return !isLowerCode(code) && !isTitleCode(code);
+  });
+  return complete && cased;
 }
 
 /** `str.islower()`: a cased character and no uppercase or titlecase one. */
 export function isLowerText(text: string): boolean {
   let cased = false;
-  for (const code of codesOf(text)) {
-    if (isUpperCode(code) || isTitleCode(code)) return false;
+  const complete = everyCode(text, (code) => {
     cased ||= isLowerCode(code);
-  }
-  return cased;
+    return !isUpperCode(code) && !isTitleCode(code);
+  });
+  return complete && cased;
 }
 
 /** `str.istitle()`: uppercase and titlecase characters only start words, lowercase ones only follow cased ones. */
 export function isTitleText(text: string): boolean {
   let cased = false;
   let previousCased = false;
-  for (const code of codesOf(text)) {
-    if (isUpperCode(code) || isTitleCode(code)) {
-      if (previousCased) return false;
-      previousCased = true;
-      cased = true;
-    } else if (isLowerCode(code)) {
-      if (!previousCased) return false;
+  const complete = everyCode(text, (code) => {
+    const isCapital = isUpperCode(code) || isTitleCode(code);
+    if (isCapital || isLowerCode(code)) {
+      if (isCapital === previousCased) return false;
       previousCased = true;
       cased = true;
     } else {
       previousCased = false;
     }
+    return true;
+  });
+  return complete && cased;
+}
+
+/**
+ * Whether every code point of a text passes a test, reading them in order up to the first that fails, as CPython's
+ * predicates do, and charging the running program for the code points read.
+ */
+export function everyCode(text: string, test: (code: number) => boolean): boolean {
+  let read = 0;
+  try {
+    for (const char of text) {
+      read++;
+      if (!test(char.codePointAt(0) as number)) return false;
+    }
+    return true;
+  } finally {
+    chargeScan(read);
   }
-  return cased;
 }
 
 const CAPITAL_SIGMA = 0x3_a3;

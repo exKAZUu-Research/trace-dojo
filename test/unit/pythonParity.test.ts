@@ -335,13 +335,24 @@ test.each([
   expect(trace.traceItems.map(({ line, callLines }) => `${line}:${callLines.join(',')}`)).toEqual(steps);
 });
 
-test.each(['isascii', 'isprintable', 'isidentifier', 'isupper', 'islower', 'istitle', 'splitlines'])(
-  'str.%s over a long text over and over ends at the operation limit',
-  (method) => {
-    const program = `s = 'x' * 1000000\nfor i in range(70):\n    s.${method}()`;
-    expect(executeOnStillClock(program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
-  }
-);
+// Each text passes the predicate, so it reads every character; one failing at the first character reads one.
+test.each([
+  ['isascii', "'x' * 1000000", "'é' + 'x' * 999999"],
+  ['isprintable', "'x' * 1000000", String.raw`'\0' + 'x' * 999999`],
+  ['isidentifier', "'x' * 1000000", "'!' + 'x' * 999999"],
+  ['isupper', "'X' * 1000000", "'x' + 'X' * 999999"],
+  ['islower', "'x' * 1000000", "'X' + 'x' * 999999"],
+  ['istitle', "'X' + 'x' * 999999", "'x' * 1000000"],
+])('str.%s is charged for the characters it reads', (method, passing, failing) => {
+  const program = (text: string): string => `s = ${text}\nfor i in range(70):\n    s.${method}()`;
+  expect(executeOnStillClock(program(passing))).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(executeOnStillClock(program(failing))).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test('str.splitlines over a long text over and over ends at the operation limit', () => {
+  const program = `s = 'x' * 1000000\nfor i in range(70):\n    s.splitlines()`;
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
 
 test.each([
   ['reversing a long list in place', 'a.reverse()'],
