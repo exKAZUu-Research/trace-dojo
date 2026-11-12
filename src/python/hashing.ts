@@ -1,8 +1,8 @@
 import { pyStr } from './conversions';
-import { callSpecial, lookupSpecial } from './objects';
+import { callSpecial, lookupSpecial, overridesBuiltin } from './objects';
 import { chargeStep } from './runtimeContext';
 import { exceptionClassNamed, None, typeError, typeName } from './types';
-import { PyComplex, PyError, PyInstance, type PyObject, PySet, PyTuple, type PyValue } from './values';
+import { PyComplex, PyError, type PyObject, PySet, PyTuple, type PyValue } from './values';
 
 const MASK64 = (1n << 64n) - 1n;
 const MODULUS = (1n << 61n) - 1n;
@@ -155,7 +155,7 @@ export function pyHash(value: PyValue): bigint {
     }
   }
   if (value === None) return NONE_HASH;
-  if (value instanceof PyTuple && !(value instanceof PyInstance)) return hashTuple(value.items);
+  if (value instanceof PyTuple && !overridesBuiltin(value, '__hash__')) return hashTuple(value.items);
   if (value instanceof PyComplex) {
     const hash = signed(hashFloat(value.real) + 1_000_003n * hashFloat(value.imag));
     return hash === -1n ? -2n : hash;

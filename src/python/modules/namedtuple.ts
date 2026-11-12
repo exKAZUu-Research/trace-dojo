@@ -151,7 +151,13 @@ function defineNamedTupleMethods(cls: PyClass): void {
   });
   pythonMethod(cls, '_asdict', '', (self) => {
     const tuple = libraryReceiver(self, isNamedTuple, '_fields', 'NamedTuple._asdict');
-    return newDict(fieldsOf(tuple).map((field, index) => [field, tuple.items[index]]));
+    // CPython zips the fields with the tuple's iteration, which a subclass may override.
+    const values = toArray(tuple);
+    return newDict(
+      fieldsOf(tuple)
+        .slice(0, values.length)
+        .map((field, index) => [field, values[index]])
+    );
   });
   pythonMethod(cls, '_replace', '**kwds', (self, _args, kwargs) => replaceFields(self, kwargs));
   pythonMethod(cls, '_make', 'iterable', (owner, [iterable]) => makeNamedTuple(owner as PyClass, iterable), 'class');

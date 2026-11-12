@@ -225,8 +225,12 @@ export function isTruthy(value: PyValue): boolean {
     }
   }
   if (value === None) return false;
-  if (value instanceof PyList || (value instanceof PyTuple && !(value instanceof PyInstance)))
+  if (
+    value instanceof PyList ||
+    (value instanceof PyTuple && !overridesBuiltin(value, '__bool__') && !overridesBuiltin(value, '__len__'))
+  ) {
     return value.items.length > 0;
+  }
   if (value instanceof PyDict) return value.store.size > 0;
   if (value instanceof PySet) return value.table.size > 0;
   if (value instanceof PyRange) return value.length > 0n;
@@ -251,7 +255,9 @@ const MAX_SSIZE = (1n << 63n) - 1n;
 /** Python's `len()`, exact up to CPython's Py_ssize_t limit. */
 export function exactLength(value: PyValue): bigint {
   if (typeof value === 'string') return BigInt(strLength(value));
-  if (value instanceof PyList || value instanceof PyTuple) return BigInt(value.items.length);
+  if (value instanceof PyList || (value instanceof PyTuple && !overridesBuiltin(value, '__len__'))) {
+    return BigInt(value.items.length);
+  }
   if (value instanceof PyDict) return BigInt(value.store.size);
   if (value instanceof PySet) return BigInt(value.table.size);
   if (value instanceof PyDictView) return BigInt(value.dict.store.size);
@@ -299,10 +305,11 @@ export function iterateHeld(value: PyValue): { next: NextFunction; held: PyValue
 }
 
 function iterateBuiltin(value: PyValue): NextFunction | undefined {
-  if (value instanceof PyList || (value instanceof PyTuple && !hasOwnIter(value))) return iterateItems(value);
+  if (value instanceof PyList || (value instanceof PyTuple && !overridesBuiltin(value, '__iter__')))
+    return iterateItems(value);
   if (typeof value === 'string') return iterateString(value);
   if (value instanceof PyRange) return iterateRange(value);
-  if (value instanceof PyDict && !hasOwnIter(value)) return iterateDict(value, 'keys');
+  if (value instanceof PyDict && !overridesBuiltin(value, '__iter__')) return iterateDict(value, 'keys');
   if (value instanceof PyDictView) return iterateDict(value.dict, value.view);
   if (value instanceof PySet) return iterateSet(value);
   if (value instanceof PyIterator) {
@@ -380,11 +387,12 @@ function iterateByProtocol(value: PyValue): NextFunction {
   return nextOf(iterator);
 }
 
-function hasOwnIter(value: PyObject): boolean {
-  return (
-    !value.cls.isBuiltin &&
-    value.cls.lookup('__iter__') !== value.cls.mro.find((cls) => cls.isBuiltin)?.dict.get('__iter__')
-  );
+/**
+ * Whether the class of a value, a subclass of a builtin type, overrides one of that type's methods, which the native
+ * fast paths for the type must then leave to the method.
+ */
+export function overridesBuiltin(value: PyObject, name: string): boolean {
+  return !value.cls.isBuiltin && value.cls.lookup(name) !== value.cls.mro.find((cls) => cls.isBuiltin)?.lookup(name);
 }
 
 /** The next function of an iterator object, which calls its `__next__` until it raises StopIteration. */
@@ -440,7 +448,8 @@ function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunct
 
 /** All the items an iterable yields, with `notIterable` as the message for a value that gives no iterator. */
 export function toArray(value: PyValue, notIterable?: string): PyValue[] {
-  if (value instanceof PyList || (value instanceof PyTuple && !hasOwnIter(value))) return [...value.items];
+  if (value instanceof PyList || (value instanceof PyTuple && !overridesBuiltin(value, '__iter__')))
+    return [...value.items];
   const next = notIterable === undefined ? iterate(value) : iterateOr(value, notIterable);
   const items: PyValue[] = [];
   const runtime = currentRuntime();
