@@ -376,6 +376,19 @@ test('writes to a file deleted while open count toward the storage limit', () =>
   ).toEqual({ kind: 'limitExceeded', limit: 'storage' });
 });
 
+test.each([
+  ['FileWriter', String.raw`FileWriter w = new FileWriter("a.txt"); for (int i = 0; i < 200; i++) w.write("line\n");`],
+  [
+    'PrintWriter of a FileWriter',
+    'PrintWriter p = new PrintWriter(new FileWriter("a.txt")); for (int i = 0; i < 200; i++) p.println("line");',
+  ],
+])('an unclosed %s of small writes passes on its first 512-byte buffer', (_, body) => {
+  expect(executeProgram('java', main(body))).toMatchObject({
+    kind: 'executed',
+    finalFiles: { 'a.txt': 'line\n'.repeat(103).slice(0, 512) },
+  });
+});
+
 test('the storage limit counts the files that exist, not the files deleted or replaced', () => {
   expect(
     runJava(

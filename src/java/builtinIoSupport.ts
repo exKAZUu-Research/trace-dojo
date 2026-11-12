@@ -307,14 +307,23 @@ export class BufferedWriterSink extends DirectSink {
 
 /**
  * OpenJDK's `StreamEncoder`, which an `OutputStreamWriter` writes through, whose byte buffer passes on its bytes only
- * when it overflows; these count chars, equal to the bytes of ASCII text, since files hold text.
+ * when it overflows. The buffer starts at 512 bytes and grows, after passing on what it holds, when one write may
+ * encode to more, up to 8192: three bytes per char in UTF-8. These count chars, equal to the bytes of ASCII text,
+ * since files hold text.
  */
 export class EncoderSink extends DirectSink {
+  private capacity = 512;
+
   override write(frame: Frame, text: string): void {
     this.ensureOpen(frame);
+    const wanted = Math.min(text.length * 3, BUFFER_SIZE);
+    if (wanted > this.capacity) {
+      this.passOn(frame);
+      this.capacity = wanted;
+    }
     for (let offset = 0; offset < text.length;) {
-      if (this.pending.length >= BUFFER_SIZE) this.passOn(frame);
-      const end = offset + BUFFER_SIZE - this.pending.length;
+      if (this.pending.length >= this.capacity) this.passOn(frame);
+      const end = offset + this.capacity - this.pending.length;
       this.buffer(frame, text.slice(offset, end));
       offset = end;
     }
