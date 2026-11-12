@@ -1,10 +1,10 @@
 import { Awaiting, type BodyResult, GeneratorReturn, type Resume, resumedValue, type Steps } from './generators';
-import { DONE, type ValueIterator } from './iteration';
+import { DONE } from './iteration';
 import { awaitValue, newPromise, rejectPromise, resolvePromise } from './promises';
 import type { RealmBuilder } from './realm';
 import { iteratorResult, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
-import { isObject, JsObject, JsThrow, toBoolean, type Value } from './values';
+import { isCallable, isObject, JsObject, JsThrow, toBoolean, type Value } from './values';
 
 /** A call of an async generator's `next`, `throw`, or `return`, whose promise settles once the body answers it. */
 interface Request {
@@ -153,23 +153,41 @@ interface AsyncIteration {
   throw: ((value: Value) => Value) | undefined;
 }
 
-/** The iteration `for await` runs: the async iterator of the value, or its sync iterator with each value awaited. */
+/**
+ * The iteration `for await` and an async `yield*` run: the async iterator of the value, or its sync iterator, whose
+ * results become promises of the same results with their values awaited, as `CreateAsyncFromSyncIterator` does.
+ */
 export function asyncIteratorOf(runtime: Runtime, iterable: Value): AsyncIteration {
   const factory =
     iterable === undefined || iterable === null ? undefined : runtime.get(iterable, WELL_KNOWN_SYMBOLS.asyncIterator);
-  if (factory === undefined || factory === null) return fromSyncIterator(runtime, runtime.iterator(iterable));
-  const iterator = runtime.call(factory, iterable, [], runtime.currentRow);
-  if (!isObject(iterator)) {
-    return runtime.throwError('TypeError', 'Result of the Symbol.asyncIterator method is not an object');
+  if (factory !== undefined && factory !== null) {
+    const iterator = runtime.call(factory, iterable, [], runtime.currentRow);
+    if (!isObject(iterator)) {
+      return runtime.throwError('TypeError', 'Result of the Symbol.asyncIterator method is not an object');
+    }
+    return iterationOf(runtime, iterator, (result) => result);
   }
+  const syncFactory =
+    iterable === undefined || iterable === null ? undefined : runtime.get(iterable, WELL_KNOWN_SYMBOLS.iterator);
+  if (!isCallable(syncFactory))
+    return runtime.throwError('TypeError', `${runtime.describe(iterable)} is not async iterable`);
+  const iterator = runtime.call(syncFactory, iterable, [], runtime.currentRow);
+  if (!isObject(iterator)) {
+    return runtime.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
+  }
+  return iterationOf(runtime, iterator, (result) => awaitedResult(runtime, result));
+}
+
+/** Calls an iterator object's methods, passing each result through `adapt`. */
+function iterationOf(runtime: Runtime, iterator: JsObject, adapt: (result: Value) => Value): AsyncIteration {
   const next = runtime.get(iterator, 'next');
   const method = (name: string): ((value?: Value) => Value) | undefined => {
     const fn = runtime.get(iterator, name);
     if (fn === undefined || fn === null) return undefined;
-    return (value) => runtime.call(fn, iterator, [value], runtime.currentRow);
+    return (value) => adapt(runtime.call(fn, iterator, [value], runtime.currentRow));
   };
   return {
-    next: (value) => runtime.call(next, iterator, value === undefined ? [] : [value], runtime.currentRow),
+    next: (value) => adapt(runtime.call(next, iterator, value === undefined ? [] : [value], runtime.currentRow)),
     close: (value) => method('return')?.(value),
     get throw() {
       return method('throw');
@@ -177,28 +195,18 @@ export function asyncIteratorOf(runtime: Runtime, iterable: Value): AsyncIterati
   };
 }
 
-/** Steps through a sync iterator for `for await`, which awaits each of its values as an async iterator's result. */
-function fromSyncIterator(runtime: Runtime, iterator: ValueIterator): AsyncIteration {
-  return {
-    next: () => {
-      const value = iterator.next();
-      const result = newPromise(runtime);
-      if (value === DONE) {
-        resolvePromise(runtime, result, iteratorResult(runtime, undefined, true));
-        return result;
-      }
-      awaitValue(runtime, value, [result], (settled) => {
-        if (settled.kind === 'throw') rejectPromise(runtime, result, settled.value);
-        else resolvePromise(runtime, result, iteratorResult(runtime, settled.value, false));
-      });
-      return result;
-    },
-    close: () => {
-      iterator.close();
-      return;
-    },
-    throw: undefined,
-  };
+/** A promise of a sync iterator's result with its value awaited, keeping whether the iterator is done. */
+function awaitedResult(runtime: Runtime, result: Value): JsObject {
+  if (!isObject(result)) {
+    return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
+  }
+  const done = toBoolean(runtime.get(result, 'done'));
+  const promise = newPromise(runtime);
+  awaitValue(runtime, runtime.get(result, 'value'), [promise], (settled) => {
+    if (settled.kind === 'throw') rejectPromise(runtime, promise, settled.value);
+    else resolvePromise(runtime, promise, iteratorResult(runtime, settled.value, done));
+  });
+  return promise;
 }
 
 /**

@@ -650,6 +650,17 @@ console.assert(1 === 2, 'assert msg'); console.assert(true, 'no');
 console.group('Outer', 1); console.log({ a: [1, 2, 3, 4, 5, 6, 7], b: 'x'.repeat(70) }); console.error('err\\nline'); console.groupEnd(); console.groupEnd(); console.log('after');
 console.dir('str'); console.dir({ deep: { a: { b: { c: {} } } } }, { depth: null });`,
   ],
+  [
+    'async delegation to sync iterators',
+    `async function* f() { const r = yield* (function* () { const got = yield 1; console.log('got', got); return 42; })(); console.log('r', r); return r; }
+(async () => {
+  const g = f(); console.log(await g.next(), await g.next('sent'), await g.next());
+  for await (const x of 'ab') console.log(x);
+  try { for await (const x of 5) {} } catch (e) { console.log(e.constructor.name); }
+  async function* h() { yield* (function* () { try { yield 1; } finally { console.log('inner fin'); } })(); }
+  const k = h(); await k.next(); console.log(await k.return('R'));
+})();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
