@@ -1175,6 +1175,19 @@ for (const v of ['abc', undefined, NaN, -1, -0.5, Symbol()]) { try { g().take(v)
     'null locales of toLocaleString',
     `try{console.log((123n).toLocaleString(null))}catch(e){console.log(e.name,e.message)} console.log((123n).toLocaleString(undefined)); try{console.log(new Date(0).toLocaleString(null))}catch(e){console.log(e.name,e.message)}`,
   ],
+  [
+    'console.dir layout options',
+    `console.dir([1, 2, 3], { maxArrayLength: 1 });
+console.dir({ a: 1, b: 2 }, { compact: false });
+console.dir({ a: { b: { c: { d: 1 } } }, e: [1, 2] }, { compact: true });
+console.dir({ a: { b: { c: { d: 1 } } } }, { depth: null, compact: 1 });
+console.dir(Array.from({ length: 30 }, (_, i) => i * 7), { breakLength: 40 });
+console.dir(new Map([[1, 'a'], [2, 'b'], [3, 'c']]), { maxArrayLength: 2 });
+console.dir(new Set([1, 2, 3]), { maxArrayLength: 0 });
+console.dir({ s: 'x'.repeat(30), t: [1, 2, 3] }, { breakLength: Infinity });
+console.dir(Array.from({ length: 10 }, (_, i) => i), { compact: false });
+console.dir([[1, 2, [3, 4]], { k: 'v' }], { compact: true, breakLength: 10 });`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

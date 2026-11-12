@@ -442,10 +442,22 @@ function defineConsole(builder: RealmBuilder): void {
   }
   builder.method(console, 'dir', 0, ({ runtime, args }) => {
     const [value, options] = args;
-    const depth = isObject(options) ? runtime.get(options, 'depth') : undefined;
-    const levels =
-      depth === undefined ? undefined : depth === null ? Number.POSITIVE_INFINITY : runtime.toNumber(depth);
-    write(runtime, 'stdout', inspectValue(runtime, value, undefined, levels));
+    // null means no limit for depth and maxArrayLength, as util.inspect takes them.
+    const limit = (name: string): number | undefined => {
+      const option = isObject(options) ? runtime.get(options, name) : undefined;
+      if (option === undefined) return undefined;
+      return option === null ? Number.POSITIVE_INFINITY : Math.max(0, runtime.toNumber(option));
+    };
+    const compact = isObject(options) ? runtime.get(options, 'compact') : undefined;
+    write(
+      runtime,
+      'stdout',
+      inspectValue(runtime, value, undefined, limit('depth'), {
+        breakLength: limit('breakLength'),
+        compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
+        maxArrayLength: limit('maxArrayLength'),
+      })
+    );
     return;
   });
   for (const name of ['group', 'groupCollapsed']) {

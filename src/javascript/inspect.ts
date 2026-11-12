@@ -47,6 +47,18 @@ interface Context {
   seen: Set<JsObject>;
   /** The reference numbers of the objects printed as `[Circular *n]`. */
   circular: Map<JsObject, number>;
+  breakLength: number;
+  /** As `util.inspect`'s option: how many inner levels may share a line, or `false` for one entry per line. */
+  compact: number | boolean;
+  maxArrayLength: number;
+}
+
+/** The `util.inspect` options `console.dir` takes. */
+export interface InspectOptions {
+  depth?: number;
+  breakLength?: number;
+  compact?: number | boolean;
+  maxArrayLength?: number;
 }
 
 /**
@@ -66,7 +78,8 @@ export function inspectValue(
   runtime: Runtime,
   value: Value,
   budget = new OutputBudget(),
-  depth = DEFAULT_DEPTH
+  depth = DEFAULT_DEPTH,
+  options: Omit<InspectOptions, 'depth'> = {}
 ): string {
   const ctx: Context = {
     runtime,
@@ -76,6 +89,9 @@ export function inspectValue(
     currentDepth: 0,
     seen: new Set(),
     circular: new Map(),
+    breakLength: options.breakLength ?? BREAK_LENGTH,
+    compact: options.compact ?? COMPACT,
+    maxArrayLength: options.maxArrayLength ?? MAX_ARRAY_LENGTH,
   };
   return formatCharged(ctx, value, 0);
 }
@@ -110,7 +126,7 @@ export function formatNumber(value: number): string {
 }
 
 function formatString(ctx: Context, value: string): string {
-  if (value.length > MIN_LINE_LENGTH && value.length > BREAK_LENGTH - ctx.indentationLvl - 4) {
+  if (value.length > MIN_LINE_LENGTH && value.length > ctx.breakLength - ctx.indentationLvl - 4) {
     return value
       .split(/(?<=\n)/)
       .map((line) => quote(line))
@@ -273,7 +289,7 @@ function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string
   const { elements } = array;
   const output: string[] = [];
   let index = 0;
-  while (index < elements.length && output.length < MAX_ARRAY_LENGTH) {
+  while (index < elements.length && output.length < ctx.maxArrayLength) {
     if (elements[index] === HOLE) {
       const start = index;
       while (index < elements.length && elements[index] === HOLE) index++;
@@ -335,7 +351,7 @@ function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): 
     return reduceToSingleString(ctx, pair, '', ['[', ']'], recurseTimes, value);
   };
   ctx.indentationLvl += 2;
-  const output = entries.slice(0, MAX_ARRAY_LENGTH).map((entry) => formatEntry(entry));
+  const output = entries.slice(0, ctx.maxArrayLength).map((entry) => formatEntry(entry));
   ctx.indentationLvl -= 2;
   const remaining = entries.length - output.length;
   if (remaining > 0) output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
@@ -375,27 +391,37 @@ function reduceToSingleString(
   recurseTimes: number,
   value: JsObject
 ): string {
-  const entries = output.length;
-  if (value instanceof JsArray && entries > 6) output = groupArrayElements(ctx, output, value);
   const basePrefix = base ? `${base} ` : '';
-  if (ctx.currentDepth - recurseTimes < COMPACT && entries === output.length) {
-    // Node.js adds 10 to leave room for what may shorten the line in other places.
-    const start = output.length + ctx.indentationLvl + braces[0].length + base.length + 10;
-    if (isBelowBreakLength(output, start, base)) {
-      const joined = output.join(', ');
-      if (!joined.includes('\n')) return `${basePrefix}${braces[0]} ${joined} ${braces[1]}`;
-    }
-  }
   const indentation = `\n${' '.repeat(ctx.indentationLvl)}`;
-  return `${basePrefix}${braces[0]}${indentation}  ${output.join(`,${indentation}  `)}${indentation}${braces[1]}`;
+  if (ctx.compact !== true) {
+    if (typeof ctx.compact === 'number' && ctx.compact >= 1) {
+      const entries = output.length;
+      if (value instanceof JsArray && entries > 6) output = groupArrayElements(ctx, output, value);
+      if (ctx.currentDepth - recurseTimes < ctx.compact && entries === output.length) {
+        // Node.js adds 10 to leave room for what may shorten the line in other places.
+        const start = output.length + ctx.indentationLvl + braces[0].length + base.length + 10;
+        if (isBelowBreakLength(ctx, output, start, base)) {
+          const joined = output.join(', ');
+          if (!joined.includes('\n')) return `${basePrefix}${braces[0]} ${joined} ${braces[1]}`;
+        }
+      }
+    }
+    return `${basePrefix}${braces[0]}${indentation}  ${output.join(`,${indentation}  `)}${indentation}${braces[1]}`;
+  }
+  // `compact: true` puts as much as fits after the opening brace, as Node.js's older layout does.
+  if (isBelowBreakLength(ctx, output, 0, base)) {
+    return `${braces[0]}${base ? ` ${base}` : ''} ${output.join(', ')} ${braces[1]}`;
+  }
+  const lead = base === '' && braces[0].length === 1 ? ' ' : `${base ? ` ${base}` : ''}${indentation}  `;
+  return `${braces[0]}${lead}${output.join(`,${indentation}  `)} ${braces[1]}`;
 }
 
-function isBelowBreakLength(output: string[], start: number, base: string): boolean {
+function isBelowBreakLength(ctx: Context, output: string[], start: number, base: string): boolean {
   let totalLength = output.length + start;
-  if (totalLength + output.length > BREAK_LENGTH) return false;
+  if (totalLength + output.length > ctx.breakLength) return false;
   for (const entry of output) {
     totalLength += entry.length;
-    if (totalLength > BREAK_LENGTH) return false;
+    if (totalLength > ctx.breakLength) return false;
   }
   return !base.includes('\n');
 }
@@ -406,7 +432,7 @@ function isBelowBreakLength(output: string[], start: number, base: string): bool
 function groupArrayElements(ctx: Context, output: string[], array: JsArray): string[] {
   let totalLength = 0;
   let maxLength = 0;
-  const outputLength = output.length > MAX_ARRAY_LENGTH ? output.length - 1 : output.length;
+  const outputLength = output.length > ctx.maxArrayLength ? output.length - 1 : output.length;
   const separatorSpace = 2;
   const dataLength: number[] = [];
   for (let i = 0; i < outputLength; i++) {
@@ -416,7 +442,7 @@ function groupArrayElements(ctx: Context, output: string[], array: JsArray): str
     if (maxLength < length) maxLength = length;
   }
   const actualMax = maxLength + separatorSpace;
-  if (actualMax * 3 + ctx.indentationLvl >= BREAK_LENGTH || (totalLength / actualMax <= 5 && maxLength > 6)) {
+  if (actualMax * 3 + ctx.indentationLvl >= ctx.breakLength || (totalLength / actualMax <= 5 && maxLength > 6)) {
     return output;
   }
   const approxCharHeights = 2.5;
@@ -424,8 +450,8 @@ function groupArrayElements(ctx: Context, output: string[], array: JsArray): str
   const biasedMax = Math.max(actualMax - 3 - averageBias, 1);
   const columns = Math.min(
     Math.round(Math.sqrt(approxCharHeights * biasedMax * outputLength) / biasedMax),
-    Math.floor((BREAK_LENGTH - ctx.indentationLvl) / actualMax),
-    COMPACT * 4,
+    Math.floor((ctx.breakLength - ctx.indentationLvl) / actualMax),
+    (ctx.compact as number) * 4,
     15
   );
   if (columns <= 1) return output;
@@ -452,7 +478,7 @@ function groupArrayElements(ctx: Context, output: string[], array: JsArray): str
       : output[j];
     grouped.push(line);
   }
-  if (output.length > MAX_ARRAY_LENGTH) grouped.push(output[outputLength]);
+  if (output.length > ctx.maxArrayLength) grouped.push(output[outputLength]);
   return grouped;
 }
 
