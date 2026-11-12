@@ -118,13 +118,23 @@ function defineSymbol(builder: RealmBuilder): void {
     false
   );
   for (const [name, symbol] of Object.entries(WELL_KNOWN_SYMBOLS)) builder.constant(symbolConstructor, name, symbol);
-  // The host's registry, so that the weak collections' check of registered symbols sees the same ones.
-  builder.method(symbolConstructor, 'for', 1, ({ runtime, args }) => Symbol.for(runtime.toString(args[0])));
+  // A registry of the run's own, which the host's Symbol.for would keep for the life of the server.
+  const { symbolRegistry } = builder.realm;
+  builder.method(symbolConstructor, 'for', 1, ({ runtime, args }) => {
+    const key = runtime.toString(args[0]);
+    let symbol = symbolRegistry.get(key);
+    if (!symbol) {
+      runtime.allocate(1);
+      symbol = Symbol(key);
+      symbolRegistry.set(key, symbol);
+    }
+    return symbol;
+  });
   builder.method(symbolConstructor, 'keyFor', 1, ({ runtime, args }) => {
     const [symbol] = args;
     if (typeof symbol !== 'symbol')
       return runtime.throwError('TypeError', `${runtime.describe(symbol)} is not a symbol`);
-    return Symbol.keyFor(symbol);
+    return registeredKeyOf(runtime, symbol);
   });
   builder.method(symbolPrototype, 'toString', 0, ({ runtime, thisValue }) => thisSymbol(runtime, thisValue).toString());
   builder.method(symbolPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisSymbol(runtime, thisValue));
@@ -139,4 +149,10 @@ function defineSymbol(builder: RealmBuilder): void {
 function thisSymbol(runtime: Runtime, value: Value): symbol {
   if (typeof value === 'symbol') return value;
   return runtime.throwError('TypeError', `${runtime.describe(value)} is not a symbol`);
+}
+
+/** The key `Symbol.for` registered a symbol under in this run, or undefined for a symbol it did not register. */
+export function registeredKeyOf(runtime: Runtime, symbol: symbol): string | undefined {
+  const key = symbol.description;
+  return key !== undefined && runtime.realm.symbolRegistry.get(key) === symbol ? key : undefined;
 }

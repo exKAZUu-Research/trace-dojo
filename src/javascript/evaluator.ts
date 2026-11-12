@@ -164,7 +164,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
     const disposables = scope.disposables ?? [];
     // The value the scope returns or throws stays reachable while the disposers run, as do the disposers not run yet.
-    runtime.hold(pendingValue(result, thrown), () => {
+    const { temporaries } = runtime.frame;
+    const held = temporaries.length;
+    temporaries.push(pendingValue(result, thrown));
+    try {
       for (let disposable = disposables.pop(); disposable; disposable = disposables.pop()) {
         const { value, method } = disposable;
         try {
@@ -172,9 +175,12 @@ export class Evaluator extends SuspendableStatementEvaluator {
         } catch (error) {
           if (!(error instanceof JsThrow)) throw error;
           thrown = thrown ? new JsThrow(suppressedError(runtime, error.value, thrown.value)) : error;
+          temporaries[held] = thrown.value;
         }
       }
-    });
+    } finally {
+      temporaries.length = held;
+    }
     scope.disposables = undefined;
     if (thrown) throw thrown;
     return result as T;

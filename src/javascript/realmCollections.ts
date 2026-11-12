@@ -1,6 +1,6 @@
 import { closingOnThrow, DONE, type HostIterator, ValueIterator } from './iteration';
 import type { RealmBuilder } from './realm';
-import { defineHostIteratorPrototype, newHostIterator, WELL_KNOWN_SYMBOLS } from './realmIterators';
+import { defineHostIteratorPrototype, newHostIterator, registeredKeyOf, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import {
   isAccessor,
@@ -598,7 +598,7 @@ function defineWeakCollection(builder: RealmBuilder, kind: 'WeakMap' | 'WeakSet'
   const isMap = kind === 'WeakMap';
   const { prototype } = defineCollectionClass(builder, kind, isMap ? 'set' : 'add');
   const requireKey = (runtime: Runtime, key: Value): void => {
-    if (isObject(key) || (typeof key === 'symbol' && Symbol.keyFor(key) === undefined)) return;
+    if (isObject(key) || (typeof key === 'symbol' && registeredKeyOf(runtime, key) === undefined)) return;
     runtime.throwError('TypeError', isMap ? 'Invalid value used as weak map key' : 'Invalid value used in weak set');
   };
   if (isMap) {

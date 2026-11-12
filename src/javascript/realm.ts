@@ -49,6 +49,8 @@ export interface Realm {
    * step through directly; an iterator whose methods the program replaced is stepped through its methods instead.
    */
   hostIteratorMethods: Set<JsFunction>;
+  /** The symbols `Symbol.for` registered in this run, by key, which end with the run. */
+  symbolRegistry: Map<string, symbol>;
   /** `%GeneratorPrototype%`, with the methods every generator object has. */
   generatorPrototype: JsObject;
   /** `%AsyncIteratorPrototype%`, the parent of `%AsyncGeneratorPrototype%`. */
@@ -86,6 +88,7 @@ export class RealmBuilder {
       setPrototype: new JsObject(objectPrototype),
       iteratorPrototype,
       hostIteratorMethods: new Set(),
+      symbolRegistry: new Map(),
       generatorPrototype: new JsObject(iteratorPrototype),
       asyncIteratorPrototype,
       asyncGeneratorPrototype: new JsObject(asyncIteratorPrototype),

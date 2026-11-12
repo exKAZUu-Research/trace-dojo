@@ -182,6 +182,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         if (!(error instanceof JsThrow)) throw error;
         completion =
           completion instanceof JsThrow ? new JsThrow(suppressedError(runtime, error.value, completion.value)) : error;
+        temporaries[held] = completion.value;
       }
     }
     temporaries.length = held;

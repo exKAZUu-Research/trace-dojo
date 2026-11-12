@@ -23,6 +23,8 @@ interface Request {
 }
 
 export interface AsyncGeneratorState {
+  /** The generator object, which an awaiting body keeps reachable with the calls it has yet to answer. */
+  object: JsObject;
   /** The frame of the body, which every resumption pushes again. */
   frame: Frame;
   body: Steps<BodyResult>;
@@ -39,7 +41,7 @@ export function createAsyncGeneratorObject(
   body: Steps<BodyResult>
 ): JsObject {
   const object = runtime.newObject(prototype instanceof JsObject ? prototype : runtime.realm.asyncGeneratorPrototype);
-  object.asyncGenerator = { frame, body, status: 'suspendedStart', queue: [] };
+  object.asyncGenerator = { object, frame, body, status: 'suspendedStart', queue: [] };
   return object;
 }
 
@@ -115,7 +117,7 @@ function advance(runtime: Runtime, state: AsyncGeneratorState, resume: Resume): 
   } finally {
     runtime.popFrame();
   }
-  const roots = [frame.scope, ...frame.temporaries, ...state.queue.map((request) => request.promise)];
+  const roots = [state.object, frame.scope, ...frame.temporaries];
   if (result.done) {
     state.status = 'completed';
     answer(runtime, state, result.value?.kind === 'return' ? result.value.value : undefined, false, true);
