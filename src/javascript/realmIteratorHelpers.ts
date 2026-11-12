@@ -300,7 +300,19 @@ function flatMap(call: NativeCall, helperPrototype: JsObject): JsObject {
   const iteration = flatMapped.hostIterator as HostIterator;
   const closeOuter = iteration.close;
   iteration.close = () => {
-    if (inner) closeIterator(runtime, inner);
+    try {
+      if (inner) closeIterator(runtime, inner);
+    } catch (error) {
+      // A failing inner close still closes the outer iterator, whose own failure gives way to the inner one's.
+      if (error instanceof JsThrow) {
+        try {
+          closeOuter?.();
+        } catch (outerError) {
+          if (!(outerError instanceof JsThrow)) throw outerError;
+        }
+      }
+      throw error;
+    }
     closeOuter?.();
   };
   return flatMapped;

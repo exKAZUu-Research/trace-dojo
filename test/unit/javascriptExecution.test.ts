@@ -1045,6 +1045,10 @@ console.log(Function.prototype[Symbol.hasInstance].call(Array, []), typeof Symbo
 async function g() { const it = { [Symbol.asyncIterator]() { return this; }, next() { return Promise.resolve({ get done() { throw Error('next'); } }); }, return() { console.log('closed'); return Promise.resolve({}); } }; try { for await (const x of it) {} } catch (e) { console.log(e.message); } }
 f().then(g);`,
   ],
+  [
+    'closing flatMap helpers whose inner iterator fails to close',
+    `function* outer(){try {yield 1;} finally {console.log("outer close")}} function* inner(){try {yield 2;} finally {throw Error("inner close")}} const it=outer().flatMap(()=>inner()); console.log(it.next().value); try {it.return()} catch(e){console.log(e.message)}`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
