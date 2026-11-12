@@ -1455,6 +1455,33 @@ test('Java checks an annotation-valued element default as an element value, as t
   }
 });
 
+test("Java's empty and singleton collections of Collections reject removeAll and retainAll only when they would remove, as the JDK's do", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    t("esRemoveAll", () -> System.out.println(Collections.emptySet().removeAll(List.of(1))));
+    t("elRetainAll", () -> System.out.println(Collections.emptyList().retainAll(List.of(1))));
+    t("slRemoveAll", () -> System.out.println(Collections.singletonList(1).removeAll(List.of(2))));
+    t("slRemoveAll1", () -> System.out.println(Collections.singletonList(1).removeAll(List.of(1))));
+    t("sRetainAll", () -> System.out.println(Collections.singleton(1).retainAll(List.of(1))));
+    t("sRetainAll0", () -> System.out.println(Collections.singleton(1).retainAll(List.of())));
+    t("ncRemoveAll", () -> System.out.println(Collections.nCopies(2, 1).removeAll(List.of(3))));
+    t("ofRemoveAll", () -> System.out.println(List.of(1).removeAll(List.of(3))));
+    t("wrapRemoveAll", () -> System.out.println(Collections.unmodifiableList(new ArrayList<Integer>()).removeAll(List.of(3))));
+    t("arrayNull", () -> new ArrayList<Integer>().removeAll(null));
+    t("ofNull", () -> List.of(1).removeAll(null));
+  }
+}`,
+      'false\nesRemoveAll ok\nfalse\nelRetainAll ok\nfalse\nslRemoveAll ok\nslRemoveAll1 java.lang.UnsupportedOperationException\nfalse\nsRetainAll ok\nsRetainAll0 java.lang.UnsupportedOperationException\nfalse\nncRemoveAll ok\nofRemoveAll java.lang.UnsupportedOperationException\nwrapRemoveAll java.lang.UnsupportedOperationException\narrayNull java.lang.NullPointerException\nofNull java.lang.UnsupportedOperationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

@@ -651,11 +651,21 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
       );
     }
   );
-  defineBulkOperations(collectionClass);
+  defineBulkOperations(collections);
 }
 
 /** `containsAll`, `removeAll`, and `retainAll`, which ask the other collection whether it contains each element. */
-function defineBulkOperations(collectionClass: ClassInfo): void {
+function defineBulkOperations(collections: Collections): void {
+  const { collectionClass } = collections;
+  // Collections' empty and singleton collections and nCopies reject a bulk removal only when it removes anything, as
+  // AbstractCollection's removeAll and retainAll do.
+  const removesOnlyChanges = new Set([
+    collections.emptyList,
+    collections.singletonList,
+    collections.copiesList,
+    collections.emptySet,
+    collections.singletonSet,
+  ]);
   const otherType = classType(collectionClass, { kind: 'wildcard', bound: undefined, isSuper: false });
   const contains = (frame: Frame, collection: Value, item: Value): boolean => {
     if (collection === undefined) return throwBuiltin(frame, 'NullPointerException');
@@ -669,8 +679,11 @@ function defineBulkOperations(collectionClass: ClassInfo): void {
     ['retainAll', true],
   ] as const) {
     addMethod(collectionClass, name, [otherType], BOOLEAN, false, (frame, receiver, [other]) => {
-      checkModifiable(frame, receiver, false);
+      const checksFirst = !removesOnlyChanges.has((receiver as JavaObject).cls);
+      if (checksFirst) checkModifiable(frame, receiver, false);
+      if (other === undefined) throwBuiltin(frame, 'NullPointerException');
       const removed = [...itemsOf(frame, receiver)].filter((item) => contains(frame, other, item) !== keepsContained);
+      if (!checksFirst && removed.length > 0) checkModifiable(frame, receiver, false);
       return removeAllOf(frame, receiver, removed);
     });
   }
