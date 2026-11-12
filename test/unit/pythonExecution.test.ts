@@ -87,6 +87,12 @@ test.each([
     'class Stack(list):\n    pass',
     '組み込み型 list を継承するクラスは、この採点環境では使えません。',
   ],
+  [
+    'a subclass of a library type, even inside try',
+    'import collections\ntry:\n    class C(collections.Counter):\n        pass\nexcept TypeError:\n    pass',
+    '組み込み型 Counter を継承するクラスは、この採点環境では使えません。',
+  ],
+  ['a subclass of bool', 'class B(bool):\n    pass', "TypeError: type 'bool' is not an acceptable base type"],
 ])('%s ends the program as CPython describes it', (_, source, description) => {
   expect(executeProgram('python', source)).toMatchObject({ kind: 'executed', uncaughtException: description });
 });

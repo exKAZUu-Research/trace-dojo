@@ -181,6 +181,72 @@ function isAbcMetaclass(evaluator: Evaluator, argument: Argument, frame: Frame):
   );
 }
 
+/** The builtin classes CPython 3.14 refuses as bases; it lets programs extend every other one. */
+const FINAL_TYPE_NAMES = new Set([
+  '_PlaceholderType',
+  '_deque_iterator',
+  '_deque_reverse_iterator',
+  '_grouper',
+  '_lru_cache_wrapper',
+  '_tee',
+  '_tee_dataobject',
+  '_tuplegetter',
+  'NoneType',
+  'NotImplementedType',
+  'ParamSpec',
+  'ParamSpecArgs',
+  'ParamSpecKwargs',
+  'TypeAliasType',
+  'TypeVar',
+  'TypeVarTuple',
+  'Union',
+  'async_generator',
+  'attrgetter',
+  'bool',
+  'builtin_function_or_method',
+  'bytearray_iterator',
+  'callable_iterator',
+  'cell',
+  'classmethod_descriptor',
+  'code',
+  'coroutine',
+  'dict_itemiterator',
+  'dict_items',
+  'dict_keyiterator',
+  'dict_keys',
+  'dict_reverseitemiterator',
+  'dict_reversekeyiterator',
+  'dict_reversevalueiterator',
+  'dict_valueiterator',
+  'dict_values',
+  'ellipsis',
+  'frame',
+  'function',
+  'generator',
+  'getset_descriptor',
+  'itemgetter',
+  'list_iterator',
+  'list_reverseiterator',
+  'mappingproxy',
+  'member_descriptor',
+  'memoryview',
+  'method',
+  'method-wrapper',
+  'method_descriptor',
+  'methodcaller',
+  'odict_iterator',
+  'odict_keys',
+  'range',
+  'range_iterator',
+  'set_iterator',
+  'slice',
+  'str_ascii_iterator',
+  'str_iterator',
+  'traceback',
+  'tuple_iterator',
+  'wrapper_descriptor',
+]);
+
 function evaluateBase(evaluator: Evaluator, def: ClassDef, argument: Argument, frame: Frame): PyClass {
   if (argument.kind === 'keyword') {
     if (argument.name === 'metaclass') throw new UnsupportedFeatureError('メタクラス（metaclass=）');
@@ -189,7 +255,10 @@ function evaluateBase(evaluator: Evaluator, def: ClassDef, argument: Argument, f
   if (argument.kind !== 'positional') throw new UnsupportedFeatureError('クラスの基底クラスの * や **');
   const base = evaluator.evaluate(argument.value, frame);
   if (!(base instanceof PyClass)) throw typeError(`bases must be types`);
-  if (base.isBuiltin && !base.isBaseType) throw typeError(`type '${base.name}' is not an acceptable base type`);
+  if (base.isBuiltin && !base.isBaseType) {
+    if (FINAL_TYPE_NAMES.has(base.name)) throw typeError(`type '${base.name}' is not an acceptable base type`);
+    throw new UnsupportedFeatureError(`組み込み型 ${base.name} を継承するクラス`);
+  }
   if (base.flags.isEnum && base.enumMembers && base.enumMembers.length > 0) {
     throw typeError(`<enum '${def.name}'> cannot extend ${pyRepr(base)}`);
   }
