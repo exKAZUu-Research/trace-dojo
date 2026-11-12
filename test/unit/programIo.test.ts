@@ -430,8 +430,8 @@ test.each([
   ],
   [
     'writes files',
-    "const fs = require('node:fs'); console.log(fs.mkdirSync('a/b', { recursive: true })); fs.writeFileSync('a/b/c.txt', 'x'); fs.writeFileSync('a/b/c.txt', 'y', { flag: 'a' }); fs.appendFileSync('a/b/c.txt', 'z'); fs.renameSync('in.txt', 'a/b/../in.txt'); fs.mkdirSync('a/b/../c/../e', { recursive: true }); fs.rmdirSync('a/e'); fs.rmdirSync('a/c'); console.log(fs.readdirSync('a'), fs.existsSync('in.txt')); fs.unlinkSync('a/in.txt');",
-    { stdout: "a\n[ 'b', 'in.txt' ] false\n", stderr: '', finalFiles: { 'a/b/c.txt': 'xyz' } },
+    "const fs = require('node:fs'); console.log(fs.mkdirSync('a/b', { recursive: true }), fs.mkdirSync('./x/y', { recursive: true }), fs.mkdirSync('a/../z/w', { recursive: true }), fs.mkdirSync('/q/r', { recursive: true })); fs.rmdirSync('x/y'); fs.rmdirSync('x'); fs.rmdirSync('z/w'); fs.rmdirSync('z'); fs.rmdirSync('q/r'); fs.rmdirSync('q'); fs.writeFileSync('a/b/c.txt', 'x'); fs.writeFileSync('a/b/c.txt', 'y', { flag: 'a' }); fs.appendFileSync('a/b/c.txt', 'z'); fs.renameSync('in.txt', 'a/b/../in.txt'); fs.mkdirSync('a/b/../c/../e', { recursive: true }); fs.rmdirSync('a/e'); fs.rmdirSync('a/c'); console.log(fs.readdirSync('a'), fs.existsSync('in.txt')); fs.unlinkSync('a/in.txt');",
+    { stdout: "a ./x a/../z /q\n[ 'b', 'in.txt' ] false\n", stderr: '', finalFiles: { 'a/b/c.txt': 'xyz' } },
   ],
   [
     'writes to the standard streams',

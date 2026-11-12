@@ -1,4 +1,4 @@
-import { FileSystemError, type FileSystemErrorCode, type OpenMode, WORKING_DIRECTORY } from '../interpreter/programIo';
+import { FileSystemError, type FileSystemErrorCode, type OpenMode } from '../interpreter/programIo';
 import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
@@ -72,9 +72,8 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     const options = args[1];
     const recursive = isObject(options) && runtime.get(options, 'recursive') === true;
     const created = withErrors(runtime, 'mkdir', path, () => runtime.io.files.createDirectory(path, recursive));
-    // A recursive call returns the first directory it created, relative when the path given is.
-    if (!recursive || created === undefined) return;
-    return path.startsWith('/') ? created : created.slice(WORKING_DIRECTORY.length);
+    // A recursive call returns the first directory it created, spelled as the path given spells it.
+    return recursive && created !== undefined ? spelledPrefixOf(runtime, path, created) : undefined;
   });
   builder.method(fs, 'readdirSync', 2, ({ runtime, args }) => {
     const path = requirePath(runtime, args[0]);
@@ -95,6 +94,23 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     withErrors(runtime, 'rename', from, () => runtime.io.files.rename(from, to), to);
     return;
   });
+}
+
+/** The shortest prefix of a path, as the program spelled it, that names a directory given by its absolute path. */
+function spelledPrefixOf(runtime: Runtime, path: string, directory: string): string {
+  const target = directory.split('/').filter((name) => name !== '');
+  const parts = path.split('/');
+  const names: string[] = [];
+  for (const [index, part] of parts.entries()) {
+    runtime.scan(names.length + 1);
+    if (part === '' || part === '.') continue;
+    if (part === '..') names.pop();
+    else names.push(part);
+    if (names.length === target.length && names.every((name, depth) => name === target[depth])) {
+      return parts.slice(0, index + 1).join('/');
+    }
+  }
+  return path;
 }
 
 /** `writeFileSync` and `appendFileSync`, which open the file with the flag of their options or else `defaultFlag`. */
