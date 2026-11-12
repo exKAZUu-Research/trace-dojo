@@ -16,10 +16,17 @@ export interface TraceOptions {
 export const misplacedAtomicMessage =
   '// atomic は、メソッド・コンストラクタ・関数を宣言する行（本体の { がある行まで）に付けてください。';
 
-/** The annotations that the given line comments end with. */
-export function traceAnnotationsIn(lineComments: Iterable<TraceAnnotation>): TraceAnnotation[] {
+/**
+ * The annotations that the given line comments end with.
+ *
+ * @param pattern Matches the annotation at the end of a comment, for languages whose line comments differ from `//`.
+ */
+export function traceAnnotationsIn(
+  lineComments: Iterable<TraceAnnotation>,
+  pattern = traceAnnotationPattern
+): TraceAnnotation[] {
   return [...lineComments].flatMap(({ index, text }) => {
-    const annotation = traceAnnotationPattern.exec(text);
+    const annotation = pattern.exec(text);
     return annotation ? [{ index: index + annotation.index, text: annotation[0] }] : [];
   });
 }

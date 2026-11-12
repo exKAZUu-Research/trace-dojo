@@ -5,6 +5,9 @@ import { executeJavaScriptProgram } from '../javascript/run';
 import { traceJavaScriptProgram } from '../javascript/trace';
 import { findJavaTraceAnnotations } from '../problems/fillInBlank/javaSource';
 import type { TraceItem, TraceItemVariable, TurtleTrace } from '../problems/trace';
+import { findPythonTraceAnnotations } from '../python/parse';
+import { executePythonProgram } from '../python/run';
+import { tracePythonProgram } from '../python/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
 import type { ProgramInput, ProgramOutput } from './programIo';
@@ -33,7 +36,7 @@ export interface ProgramRecording extends ProgramRun {
 }
 
 export interface ProgramTrace extends ProgramRecording {
-  /** The program without its `// atomic` annotations, whose rows match the lines that trace items refer to. */
+  /** The program without its atomic annotations (`// atomic`, or `# atomic` in Python), whose rows match the lines that trace items refer to. */
   displayProgram: string;
 }
 
@@ -53,10 +56,15 @@ const interpreters = {
     record: traceJavaScriptProgram,
     execute: executeJavaScriptProgram,
   },
+  python: {
+    findTraceAnnotations: findPythonTraceAnnotations,
+    record: tracePythonProgram,
+    execute: executePythonProgram,
+  },
 } satisfies Record<string, Interpreter>;
 
 /**
- * Runs a model program and records its steps outside the methods marked `// atomic`.
+ * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python).
  *
  * @param program The program to run, with every blank filled in.
  * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.
