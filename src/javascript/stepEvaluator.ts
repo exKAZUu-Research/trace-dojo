@@ -1,10 +1,9 @@
 import type { Argument, Expression, MemberExpression, ObjectMember } from './ast';
-import { delegateAsync } from './asyncGenerators';
 import { type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import { defineAccessor, ExpressionEvaluator, isLogicalOperator, shortCircuits } from './expressionEvaluator';
-import { Awaiting, GeneratorReturn, type Resume, resumedValue, resumeGenerator, type Steps } from './generators';
-import { DONE } from './iteration';
-import { appendAll, isCallable, isObject, JsFunction, JsObject, toBoolean, type Value } from './values';
+import { Awaiting, GeneratorReturn, resumedValue, type Steps } from './generators';
+import { delegateYield } from './iteratorProtocol';
+import { appendAll, isCallable, isObject, JsFunction, type JsObject, toBoolean, type Value } from './values';
 
 /**
  * Evaluates the expressions of a generator body that contain a `yield`, suspending at each `yield` with the value it
@@ -19,9 +18,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     switch (expression.kind) {
       case 'yield': {
         const value = expression.argument ? yield* this.evaluateSteps(expression.argument) : undefined;
-        if (expression.delegate) {
-          return expression.isAsync ? yield* delegateAsync(this.runtime, value) : yield* this.delegate(value);
-        }
+        if (expression.delegate) return yield* delegateYield(this.runtime, value, expression.isAsync);
         if (!expression.isAsync) return resumedValue(yield value);
         // An async generator awaits the value it yields, and the value `return()` resumes it with.
         const resume = yield resumedValue(yield new Awaiting(value));
@@ -54,6 +51,11 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
           : yield* this.evaluateSteps(expression.alternate);
       }
       case 'unary': {
+        let target = expression.argument;
+        while (target.kind === 'parenthesized') target = target.expression;
+        if (expression.operator === 'delete' && target.kind === 'member') {
+          return this.deleteReference(yield* this.referenceSteps(target));
+        }
         return this.unaryValue(expression.operator, yield* this.evaluateSteps(expression.argument));
       }
       case 'template': {
@@ -96,34 +98,6 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         throw new Error(`A yield in an unsupported expression: ${expression.kind}`);
       }
     }
-  }
-
-  /** Runs `yield*`, which passes each value of the iterable out and each resumption in until the iterable is done. */
-  private *delegate(iterable: Value): Steps<Value> {
-    const { runtime } = this;
-    if (iterable instanceof JsObject && iterable.generator) {
-      let resume: Resume = { kind: 'next', value: undefined };
-      for (;;) {
-        const result = resumeGenerator(runtime, iterable, resume);
-        if (result.done) {
-          if (resume.kind === 'return') throw new GeneratorReturn(result.value);
-          return result.value;
-        }
-        resume = yield result.value;
-      }
-    }
-    const iterator = runtime.iterator(iterable);
-    for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
-      const resume = yield value;
-      if (resume.kind !== 'next') {
-        iterator.close();
-        if (resume.kind === 'throw') {
-          return runtime.throwError('TypeError', "The iterator does not provide a 'throw' method");
-        }
-        throw new GeneratorReturn(resume.value);
-      }
-    }
-    return undefined;
   }
 
   /** Evaluates elements or arguments in order, holding the values so far for garbage collection. */
@@ -176,39 +150,35 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   }
 
   /** Reads a member whose object or key suspends, which short-circuits the rest of its optional chain on nullish. */
-  private *memberSteps(expression: Extract<Expression, { kind: 'member' }>): Steps<Value | typeof SHORT_CIRCUIT> {
-    const { runtime } = this;
-    const { object } = expression;
-    const base =
-      object.kind === 'super'
-        ? this.thisValue()
-        : object.kind === 'member' && object.suspends
-          ? yield* this.memberSteps(object)
-          : yield* this.evaluateSteps(object);
-    if (base === SHORT_CIRCUIT || (expression.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
-    const { property } = expression;
-    if (property.kind === 'private') return runtime.getPrivate(base, this.privateKey(property.name));
-    const key =
-      property.kind === 'computed'
-        ? runtime.toPropertyKey(yield* this.holdingSteps([base], () => this.evaluateSteps(property.expression)))
-        : property.key;
-    return runtime.get(base, key);
+  private *memberSteps(expression: MemberExpression): Steps<Value | typeof SHORT_CIRCUIT> {
+    const reference = yield* this.referenceSteps(expression);
+    return reference === SHORT_CIRCUIT ? SHORT_CIRCUIT : this.getReference(reference);
   }
 
-  /** Evaluates the object and the key of an assignment's member target step by step, as `memberReference` does. */
-  private *memberReferenceSteps(target: MemberExpression): Steps<Reference> {
-    if (
-      target.object.kind === 'super' ||
-      !(target.object.suspends || (target.property.kind === 'computed' && target.property.expression.suspends))
-    ) {
-      return this.memberReference(target);
+  /**
+   * Resolves a member whose object or key suspends, evaluating them step by step in the order `memberReference`
+   * does; a `super` member keeps its lookup in the parent with `this` as the receiver.
+   */
+  private *referenceSteps(target: MemberExpression): Steps<Reference | typeof SHORT_CIRCUIT> {
+    const { runtime } = this;
+    const { object, property } = target;
+    const computedKey = (base: Value, key: Expression): Steps<Value> =>
+      this.holdingSteps([base], () => this.evaluateSteps(key));
+    if (object.kind === 'super') {
+      const thisValue = this.thisValue();
+      const key =
+        property.kind === 'computed'
+          ? runtime.toPropertyKey(yield* computedKey(thisValue, property.expression))
+          : this.propertyKey(property);
+      return { kind: 'super', key, thisValue };
     }
-    const base = yield* this.evaluateSteps(target.object);
-    const { property } = target;
+    const base =
+      object.kind === 'member' && object.suspends ? yield* this.memberSteps(object) : yield* this.evaluateSteps(object);
+    if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
     if (property.kind === 'private') return { kind: 'private', base, name: this.privateKey(property.name) };
     const key =
       property.kind === 'computed'
-        ? this.runtime.toPropertyKey(yield* this.holdingSteps([base], () => this.evaluateSteps(property.expression)))
+        ? runtime.toPropertyKey(yield* computedKey(base, property.expression))
         : property.key;
     return { kind: 'property', base, key };
   }
@@ -244,6 +214,12 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     }
   }
 
+  /** The reference an assignment writes to, whose member target cannot be an optional chain. */
+  private *assignmentReferenceSteps(target: MemberExpression): Steps<Reference> {
+    if (!memberPartsSuspend(target)) return this.reference(target);
+    return (yield* this.referenceSteps(target)) as Reference;
+  }
+
   private *assignSteps(expression: Extract<Expression, { kind: 'assign' }>): Steps<Value> {
     const { runtime } = this;
     const { operator, target } = expression;
@@ -252,7 +228,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
       this.bindPattern(target, value, 'assign');
       return value;
     }
-    const reference = target.kind === 'member' ? yield* this.memberReferenceSteps(target) : this.reference(target);
+    const reference = target.kind === 'member' ? yield* this.assignmentReferenceSteps(target) : this.reference(target);
     return yield* this.holdingSteps(
       [referenceBase(reference)],
       function* (this: StepEvaluator): Steps<Value> {
@@ -279,25 +255,13 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
 
   /** Evaluates a callee that suspends with the `this` its call passes, as {@link ExpressionEvaluator.callee} does. */
   private *calleeSteps(callee: Expression): Steps<{ fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT> {
-    const { runtime } = this;
     let target = callee;
     while (target.kind === 'parenthesized') target = target.expression;
-    if (target.kind !== 'member' || target.object.kind === 'super') {
-      return { fn: yield* this.evaluateSteps(callee), thisValue: undefined };
-    }
-    const { object, property } = target;
-    const base =
-      object.kind === 'member' && object.suspends ? yield* this.memberSteps(object) : yield* this.evaluateSteps(object);
-    if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) {
-      return target === callee ? SHORT_CIRCUIT : { fn: undefined, thisValue: undefined };
-    }
-    if (property.kind === 'private')
-      return { fn: runtime.getPrivate(base, this.privateKey(property.name)), thisValue: base };
-    const key =
-      property.kind === 'computed'
-        ? runtime.toPropertyKey(yield* this.holdingSteps([base], () => this.evaluateSteps(property.expression)))
-        : property.key;
-    return { fn: runtime.get(base, key), thisValue: base };
+    if (target.kind !== 'member') return { fn: yield* this.evaluateSteps(callee), thisValue: undefined };
+    const reference = yield* this.referenceSteps(target);
+    if (reference === SHORT_CIRCUIT) return target === callee ? SHORT_CIRCUIT : { fn: undefined, thisValue: undefined };
+    const thisValue = referenceBase(reference);
+    return { fn: this.runtime.hold(thisValue, () => this.getReference(reference)), thisValue };
   }
 
   private *callSteps(expression: Extract<Expression, { kind: 'call' }>): Steps<Value> {
@@ -319,4 +283,11 @@ function memberSuspends(member: ObjectMember): boolean {
   if (member.kind === 'prototype') return member.value.suspends === true;
   if (member.key.kind === 'computed' && member.key.expression.suspends) return true;
   return member.kind === 'property' && member.value.suspends === true;
+}
+
+function memberPartsSuspend(target: MemberExpression): boolean {
+  return (
+    (target.object.kind !== 'super' && target.object.suspends === true) ||
+    (target.property.kind === 'computed' && target.property.expression.suspends === true)
+  );
 }

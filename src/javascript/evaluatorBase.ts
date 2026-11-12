@@ -6,6 +6,7 @@ import {
   isObject,
   JsFunction,
   type JsObject,
+  JsThrow,
   type Key,
   Scope,
   UNINITIALIZED,
@@ -267,11 +268,18 @@ export abstract class EvaluatorBase {
     const { runtime } = this;
     // Each binding reads the next value just before it runs, since an earlier default or target may change the array.
     const iterator = runtime.iterator(value);
-    for (const element of pattern.elements) {
-      const next = iterator.next();
-      if (element) this.bindPattern(element, next === DONE ? undefined : next, mode);
+    try {
+      for (const element of pattern.elements) {
+        const next = iterator.next();
+        if (element) this.bindPattern(element, next === DONE ? undefined : next, mode);
+      }
+      if (pattern.rest) this.bindPattern(pattern.rest, runtime.newArray(iterator.rest()), mode);
+    } catch (error) {
+      if (error instanceof JsThrow) iterator.close('throw');
+      throw error;
     }
-    if (pattern.rest) this.bindPattern(pattern.rest, runtime.newArray(iterator.rest()), mode);
+    // A destructuring that needs fewer values than the iterator has closes it, as a loop left early does.
+    iterator.close();
   }
 
   private bindObjectPattern(
@@ -296,7 +304,7 @@ export abstract class EvaluatorBase {
     if (!isObject(source)) return rest;
     // Held while getters run, so the turtles copied so far stay reachable.
     return runtime.hold(rest, () => {
-      for (const key of runtime.ownEnumerableKeys(source)) {
+      for (const key of runtime.ownEnumerablePropertyKeys(source)) {
         if (!used.has(key)) runtime.createDataProperty(rest, key, runtime.get(source, key));
       }
       return rest;

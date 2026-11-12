@@ -11,11 +11,12 @@ import type {
   Statement,
   VariableDeclaration,
 } from './ast';
-import { asyncIteratorOf, AwaitingIterator, createAsyncGeneratorObject, type LoopIterator } from './asyncGenerators';
+import { AwaitingIterator, createAsyncGeneratorObject, type LoopIterator } from './asyncGenerators';
 import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor } from './expressionEvaluator';
 import { Awaiting, createGeneratorObject, GeneratorReturn, resumedValue, runToEnd, type Steps } from './generators';
 import { DONE, ValueIterator } from './iteration';
+import { asyncIteratorOf } from './iteratorProtocol';
 import {
   defineFunctionProperties,
   expectedArgumentCount,
@@ -357,6 +358,7 @@ export class Evaluator extends StepEvaluator {
     const { runtime } = this;
     const frame = runtime.frame;
     let isExhausted = false;
+    let completion: 'normal' | 'throw' = 'normal';
     try {
       for (;;) {
         const value = yield* iterator.next();
@@ -384,9 +386,12 @@ export class Evaluator extends StepEvaluator {
           frame.scope = outer;
         }
       }
+    } catch (error) {
+      if (error instanceof JsThrow) completion = 'throw';
+      throw error;
     } finally {
       // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks.
-      if (!isExhausted) yield* iterator.close();
+      if (!isExhausted) yield* iterator.close(completion);
     }
   }
 
@@ -858,8 +863,8 @@ function syncLoopIterator(iterator: ValueIterator): LoopIterator {
       return iterator.next();
     },
     // oxlint-disable-next-line require-yield -- A sync iterator closes without suspending the loop.
-    *close() {
-      iterator.close();
+    *close(completion) {
+      iterator.close(completion);
     },
   };
 }

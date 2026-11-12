@@ -454,38 +454,44 @@ function combine(
   rejectsWhenEmpty = false
 ): JsObject {
   const result = newPromise(runtime);
-  const values = runtime.iterate(iterable);
-  const items: Value[] = Array.from({ length: values.length });
-  const remaining = { count: values.length };
-  for (const [index, value] of values.entries()) {
-    const promise = promiseResolve(runtime, value);
-    const thenMethod = runtime.get(promise, 'then');
-    const { onFulfilled, onRejected } = reactionFor(result, items, index, remaining);
-    const fulfill = runtime.newNativeFunction('', 1, ({ args }) => {
-      onFulfilled(args[0]);
-      return;
-    });
-    const reject = runtime.newNativeFunction('', 1, ({ args }) => {
-      onRejected(args[0]);
-      return;
-    });
-    fulfill.captured.push(result);
-    reject.captured.push(result);
-    runtime.call(thenMethod, promise, [fulfill, reject]);
-  }
-  if (values.length === 0 && settlesWhenEmpty) {
-    if (rejectsWhenEmpty) {
-      const error = runtime.newError('AggregateError', 'All promises were rejected');
-      runtime.defineProperty(error, 'errors', {
-        value: runtime.newArray([]),
-        writable: true,
-        enumerable: false,
-        configurable: true,
+  // An iterable or a `then` that throws rejects the returned promise instead of throwing, as JavaScript does.
+  try {
+    const values = runtime.iterate(iterable);
+    const items: Value[] = Array.from({ length: values.length });
+    const remaining = { count: values.length };
+    for (const [index, value] of values.entries()) {
+      const promise = promiseResolve(runtime, value);
+      const thenMethod = runtime.get(promise, 'then');
+      const { onFulfilled, onRejected } = reactionFor(result, items, index, remaining);
+      const fulfill = runtime.newNativeFunction('', 1, ({ args }) => {
+        onFulfilled(args[0]);
+        return;
       });
-      rejectPromise(runtime, result, error);
-    } else {
-      resolvePromise(runtime, result, runtime.newArray([]));
+      const reject = runtime.newNativeFunction('', 1, ({ args }) => {
+        onRejected(args[0]);
+        return;
+      });
+      fulfill.captured.push(result);
+      reject.captured.push(result);
+      runtime.call(thenMethod, promise, [fulfill, reject]);
     }
+    if (values.length === 0 && settlesWhenEmpty) {
+      if (rejectsWhenEmpty) {
+        const error = runtime.newError('AggregateError', 'All promises were rejected');
+        runtime.defineProperty(error, 'errors', {
+          value: runtime.newArray([]),
+          writable: true,
+          enumerable: false,
+          configurable: true,
+        });
+        rejectPromise(runtime, result, error);
+      } else {
+        resolvePromise(runtime, result, runtime.newArray([]));
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof JsThrow)) throw error;
+    rejectPromise(runtime, result, error.value);
   }
   return result;
 }

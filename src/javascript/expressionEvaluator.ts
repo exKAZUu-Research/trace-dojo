@@ -265,7 +265,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       return;
     }
     if (!isObject(source)) return;
-    for (const key of runtime.ownEnumerableKeys(source))
+    for (const key of runtime.ownEnumerablePropertyKeys(source))
       runtime.createDataProperty(target, key, runtime.get(source, key));
   }
 
@@ -385,7 +385,6 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   private deleteExpression(argument: Expression): boolean {
-    const { runtime } = this;
     // Parentheses around the whole operand do not end an optional chain inside it.
     let target = argument;
     while (target.kind === 'parenthesized') target = target.expression;
@@ -393,8 +392,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       this.evaluate(argument);
       return true;
     }
-    // An optional chain that meets null or undefined deletes nothing, which succeeds.
-    const reference = this.calleeReference(target);
+    return this.deleteReference(this.calleeReference(target));
+  }
+
+  /** Deletes what a member refers to; an optional chain that met null or undefined deletes nothing, which succeeds. */
+  protected deleteReference(reference: Reference | typeof SHORT_CIRCUIT): boolean {
+    const { runtime } = this;
     if (reference === SHORT_CIRCUIT) return true;
     if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
     if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');

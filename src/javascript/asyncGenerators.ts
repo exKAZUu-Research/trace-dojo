@@ -1,10 +1,11 @@
 import { Awaiting, type BodyResult, GeneratorReturn, type Resume, resumedValue, type Steps } from './generators';
 import { DONE } from './iteration';
+import type { ProtocolIteration } from './iteratorProtocol';
 import { awaitValue, newPromise, rejectPromise, resolvePromise } from './promises';
 import type { RealmBuilder } from './realm';
 import { iteratorResult, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
-import { isCallable, isObject, JsObject, JsThrow, toBoolean, type Value } from './values';
+import { isObject, JsObject, JsThrow, toBoolean, type Value } from './values';
 
 /** A call of an async generator's `next`, `throw`, or `return`, whose promise settles once the body answers it. */
 interface Request {
@@ -141,128 +142,54 @@ function answer(
 /** How a `for...of` or `for await` loop steps through its iterable, suspending its body while it awaits. */
 export interface LoopIterator {
   next: () => Steps<Value | typeof DONE>;
-  close: () => Steps<void>;
-}
-
-/** An async iterator's methods, each returning what `for await` awaits. */
-interface AsyncIteration {
-  next: (value?: Value) => Value;
-  /** Calls the iterator's `return`, giving undefined when it has none. */
-  close: (value?: Value) => Value;
-  /** Calls the iterator's `throw`, which `yield*` forwards an exception to, or is undefined when it has none. */
-  throw: ((value: Value) => Value) | undefined;
+  /** Closes the iterator when the loop ends before it is done, by a `break` or `return`, or by an exception. */
+  close: (completion: 'normal' | 'throw') => Steps<void>;
 }
 
 /**
- * The iteration `for await` and an async `yield*` run: the async iterator of the value, or its sync iterator, whose
- * results become promises of the same results with their values awaited, as `CreateAsyncFromSyncIterator` does.
+ * Awaits each result of an async iteration, as `for await` reads them. An iteration whose `next` failed is done and
+ * not closed; closing after the loop body threw keeps the body's error over the iterator's.
  */
-export function asyncIteratorOf(runtime: Runtime, iterable: Value): AsyncIteration {
-  const factory =
-    iterable === undefined || iterable === null ? undefined : runtime.get(iterable, WELL_KNOWN_SYMBOLS.asyncIterator);
-  if (factory !== undefined && factory !== null) {
-    const iterator = runtime.call(factory, iterable, [], runtime.currentRow);
-    if (!isObject(iterator)) {
-      return runtime.throwError('TypeError', 'Result of the Symbol.asyncIterator method is not an object');
-    }
-    return iterationOf(runtime, iterator, (result) => result);
-  }
-  const syncFactory =
-    iterable === undefined || iterable === null ? undefined : runtime.get(iterable, WELL_KNOWN_SYMBOLS.iterator);
-  if (!isCallable(syncFactory))
-    return runtime.throwError('TypeError', `${runtime.describe(iterable)} is not async iterable`);
-  const iterator = runtime.call(syncFactory, iterable, [], runtime.currentRow);
-  if (!isObject(iterator)) {
-    return runtime.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
-  }
-  return iterationOf(runtime, iterator, (result) => awaitedResult(runtime, result));
-}
-
-/** Calls an iterator object's methods, passing each result through `adapt`. */
-function iterationOf(runtime: Runtime, iterator: JsObject, adapt: (result: Value) => Value): AsyncIteration {
-  const next = runtime.get(iterator, 'next');
-  const method = (name: string): ((value?: Value) => Value) | undefined => {
-    const fn = runtime.get(iterator, name);
-    if (fn === undefined || fn === null) return undefined;
-    return (value) => adapt(runtime.call(fn, iterator, [value], runtime.currentRow));
-  };
-  return {
-    next: (value) => adapt(runtime.call(next, iterator, value === undefined ? [] : [value], runtime.currentRow)),
-    close: (value) => method('return')?.(value),
-    get throw() {
-      return method('throw');
-    },
-  };
-}
-
-/** A promise of a sync iterator's result with its value awaited, keeping whether the iterator is done. */
-function awaitedResult(runtime: Runtime, result: Value): JsObject {
-  if (!isObject(result)) {
-    return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
-  }
-  const done = toBoolean(runtime.get(result, 'done'));
-  const promise = newPromise(runtime);
-  awaitValue(runtime, runtime.get(result, 'value'), [promise], (settled) => {
-    if (settled.kind === 'throw') rejectPromise(runtime, promise, settled.value);
-    else resolvePromise(runtime, promise, iteratorResult(runtime, settled.value, done));
-  });
-  return promise;
-}
-
-/**
- * Runs `yield*` in an async generator: each result of the async iterator is awaited and its value yielded, and each
- * resumption is forwarded to the iterator's `next`, `throw`, or `return`.
- */
-export function* delegateAsync(runtime: Runtime, iterable: Value): Steps<Value> {
-  const iteration = asyncIteratorOf(runtime, iterable);
-  let resume: Resume = { kind: 'next', value: undefined };
-  for (;;) {
-    let request: Value;
-    if (resume.kind === 'next') {
-      request = iteration.next(resume.value);
-    } else if (resume.kind === 'throw') {
-      const throwMethod = iteration.throw;
-      if (!throwMethod) {
-        const closed = iteration.close();
-        if (closed !== undefined) resumedValue(yield new Awaiting(closed));
-        return runtime.throwError('TypeError', "The iterator does not provide a 'throw' method");
-      }
-      request = throwMethod(resume.value);
-    } else {
-      request = iteration.close(resume.value);
-      if (request === undefined) throw new GeneratorReturn(resumedValue(yield new Awaiting(resume.value)));
-    }
-    const result = resumedValue(yield new Awaiting(request));
-    if (!isObject(result)) {
-      return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
-    }
-    const value = runtime.get(result, 'value');
-    if (toBoolean(runtime.get(result, 'done'))) {
-      if (resume.kind === 'return') throw new GeneratorReturn(value);
-      return value;
-    }
-    resume = yield value;
-  }
-}
-
-/** Awaits each result of an async iteration, as `for await` reads them. */
 export class AwaitingIterator implements LoopIterator {
+  private isDone = false;
+
   constructor(
     private readonly runtime: Runtime,
-    private readonly iteration: AsyncIteration
+    private readonly iteration: ProtocolIteration
   ) {}
 
   *next(): Steps<Value | typeof DONE> {
     const { runtime } = this;
-    const result = resumedValue(yield new Awaiting(this.iteration.next()));
+    if (this.isDone) return DONE;
+    let result: Value;
+    try {
+      result = resumedValue(yield new Awaiting(this.iteration.next()));
+    } catch (error) {
+      this.isDone = true;
+      throw error;
+    }
     if (!isObject(result)) {
+      this.isDone = true;
       return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
     }
-    return toBoolean(runtime.get(result, 'done')) ? DONE : runtime.get(result, 'value');
+    if (!toBoolean(runtime.get(result, 'done'))) return runtime.get(result, 'value');
+    this.isDone = true;
+    return DONE;
   }
 
-  *close(): Steps<void> {
-    const result = this.iteration.close();
-    if (result !== undefined) resumedValue(yield new Awaiting(result));
+  *close(completion: 'normal' | 'throw'): Steps<void> {
+    const { runtime } = this;
+    if (this.isDone) return;
+    this.isDone = true;
+    const close = this.iteration.return;
+    if (!close) return;
+    try {
+      const result = resumedValue(yield new Awaiting(close()));
+      if (!isObject(result))
+        runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
+    } catch (error) {
+      if (completion === 'throw' && error instanceof JsThrow) return;
+      throw error;
+    }
   }
 }

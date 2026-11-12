@@ -661,6 +661,56 @@ console.dir('str'); console.dir({ deep: { a: { b: { c: {} } } } }, { depth: null
   const k = h(); await k.next(); console.log(await k.return('R'));
 })();`,
   ],
+  [
+    'iterator closing and delegation',
+    `function* g() { try { yield 1; yield 2; } finally { console.log('cleanup'); } }
+const [a] = g(); console.log(a); let b; [b] = g(); console.log(b);
+const [c, d, e] = g(); console.log(c, d, e);
+const it = { [Symbol.iterator]() { return { next() { return { value: 1, done: false }; }, return() { console.log('ret'); return {}; } }; } };
+const [p] = it; console.log(p);
+const iter = (nt, rt) => ({ [Symbol.iterator]() { return { next() { if (nt) throw new Error('next'); return { value: 1, done: false }; }, return() { console.log('return called'); if (rt) throw new Error('ret'); return {}; } }; } });
+try { for (const x of iter(true, false)) {} } catch (e) { console.log(e.message); }
+try { for (const x of iter(false, true)) { throw new Error('body'); } } catch (e) { console.log(e.message); }
+try { for (const x of iter(false, true)) { break; } } catch (e) { console.log(e.message); }
+const bad = { [Symbol.iterator]() { return { next() { return { value: 1, done: false }; }, return() { return 1; } }; } };
+try { for (const x of bad) break; } catch (e) { console.log(e.constructor.name); }
+try { const [z = (() => { throw new Error('default'); })()] = [undefined]; } catch (e) { console.log(e.message); }
+function* outer() { const r = yield* { [Symbol.iterator]() { let n = 0; return { next(v) { n++; console.log('next got', v); return n > 2 ? { value: 42, done: true } : { value: n, done: false }; } }; } }; console.log('r', r); }
+const o = outer(); console.log(o.next('a'), o.next('b'), o.next('c'));
+function* noThrow() { yield* { [Symbol.iterator]() { return { next() { return { value: 1, done: false }; }, return() { console.log('closing'); return {}; } }; } }; }
+const nt = noThrow(); nt.next(); try { nt.throw(new Error('x')); } catch (e) { console.log(e.constructor.name, e.message); }
+(async () => {
+  const x = { [Symbol.asyncIterator]() { return { next() { return Promise.resolve({ value: 1, done: false }); }, return() { return 1; } }; } };
+  try { for await (const v of x) break; console.log('ok'); } catch (e) { console.log(e.name); }
+  const y = { [Symbol.asyncIterator]() { return { next() { return Promise.reject(new Error('anext')); }, return() { console.log('should not'); return {}; } }; } };
+  try { for await (const v of y) {} } catch (e) { console.log(e.message); }
+})();`,
+  ],
+  [
+    'promise combinators over failing iterables',
+    `try { Promise.all(null).catch((e) => console.log('rejected', e.constructor.name)); console.log('after'); } catch (e) { console.log('thrown'); }
+const it = { [Symbol.iterator]() { return { next() { throw new Error('boom'); } }; } };
+Promise.race(it).catch((e) => console.log('race', e.message));
+Promise.allSettled(5).catch((e) => console.log('settled', e.constructor.name));`,
+  ],
+  [
+    'super, delete, and symbol copies with await',
+    `class A { m() { return 1; } get n() { return 2; } }
+class B extends A {
+  m() { return 20; }
+  get n() { return 30; }
+  async f() {
+    console.log(super[await Promise.resolve('m')](), super[await Promise.resolve('n')]);
+    super[await Promise.resolve('x')] = 5; console.log(this.x);
+  }
+}
+new B().f().then(async () => {
+  const o = { x: 1, y: { z: 2 } };
+  console.log(delete o[await Promise.resolve('x')], o, delete (await Promise.resolve(o)).y.z, o, delete (await Promise.resolve(null))?.q);
+  const s = Symbol('s'); const src = { a: 1, [s]: 2 };
+  const copy = { ...src }; const { a, ...rest } = src; console.log(copy[s], rest[s], Object.assign({}, src)[s]);
+});`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

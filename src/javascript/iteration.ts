@@ -1,5 +1,5 @@
 import { ArrayOps } from './arrayOps';
-import type { Value } from './values';
+import { JsThrow, type Value } from './values';
 
 /** What {@link ValueIterator.next} returns once the iteration has ended. */
 export const DONE = Symbol('done');
@@ -29,7 +29,14 @@ export class ValueIterator {
     const { source } = this;
     if (this.isDone) return DONE;
     if (!Array.isArray(source) && !(source instanceof ArrayOps)) {
-      const value = (source as HostIterator).next();
+      let value: Value | typeof DONE;
+      try {
+        value = (source as HostIterator).next();
+      } catch (error) {
+        // An iterator whose step failed is done, and closing it calls nothing.
+        this.isDone = true;
+        throw error;
+      }
       if (value === DONE) this.isDone = true;
       return value;
     }
@@ -41,12 +48,20 @@ export class ValueIterator {
     return Array.isArray(source) ? (source as readonly Value[])[index] : (source as ArrayOps).get(index);
   }
 
-  /** Ends the iteration before it is done, as leaving a loop early does. */
-  close(): void {
+  /**
+   * Ends the iteration before it is done, as leaving a loop or a destructuring early does. After an exception, an
+   * error from closing is discarded, so the exception that ended the iteration propagates.
+   */
+  close(completion: 'normal' | 'throw' = 'normal'): void {
     if (this.isDone) return;
     this.isDone = true;
     const { source } = this;
-    if (!Array.isArray(source) && !(source instanceof ArrayOps)) (source as HostIterator).close?.();
+    if (Array.isArray(source) || source instanceof ArrayOps) return;
+    try {
+      (source as HostIterator).close?.();
+    } catch (error) {
+      if (completion === 'normal' || !(error instanceof JsThrow)) throw error;
+    }
   }
 
   /** The values not read yet, which ends the iteration. */
