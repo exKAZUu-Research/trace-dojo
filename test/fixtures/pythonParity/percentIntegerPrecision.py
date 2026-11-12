@@ -6,6 +6,15 @@ check('%010.3d|%+05.3x|%#5.3d|%#10.0d|%+010.3d' % (-42, 65, 0.000123, 42, -42), 
 check('%05.2d|%-05.2d|% 05.2i|%+.3u|%.0d|%.0x|%#.0o' % (7, 7, 7, 7, 0, 0, 0), '00007|07   | 0007|+007|0|0|0o0')
 check('%#x|%#X|%#o|%#d|%#08x|%#-8X|%#8.4o' % (255, 255, 8, 5, 255, 255, 8), '0xff|0XFF|0o10|5|0x0000ff|0XFF    |  0o0010')
 check('%*.*d|%-*.*x|%0*d' % (8, 3, -5, 8, 3, 255, 6, -5), '    -005|0ff     |-00005')
+# A negative * width left-aligns by its magnitude, and a negative * precision counts as zero.
+check('%*d|%0*d|%*.*f|%.*s|%*c|%*s' % (-5, 12, -5, 12, -8, -3, 2.5, -2, 'abc', -3, 'a', -4, 'x'), '12   |12   |2       ||a  |x   ')
+for template, count in [('%*d', 2 ** 63), ('%*d', -2 ** 63 - 1), ('%.*d', 2 ** 31), ('%.*d', -2 ** 31 - 1)]:
+    try:
+        template % (count, 1)
+    except OverflowError as error:
+        check(str(error).startswith('Python int too large to convert to C '), True)
+    else:
+        raise AssertionError(template)
 check('%.3d|%5.3d|%05d|%x' % (True, -3.9, 2 ** 70, -(2 ** 70)), '001| -003|1180591620717411303424|-400000000000000000')
 FLAGS = ['', '-', '+', ' ', '#', '0', '-0', '+0', '#0', ' #', '-#', '+#0', '- #0']
 EXPECTED = [

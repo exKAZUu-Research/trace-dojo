@@ -8,6 +8,9 @@ import { iterStr, strLength } from './strings';
 import { exceptionClassNamed, floatClass, intClass, None, pyError, typeError, typeName, valueError } from './types';
 import { PyComplex, PyError, PyInstance, PyTuple, type PyValue } from './values';
 
+const MAX_SSIZE = (1n << 63n) - 1n;
+const MAX_INT = (1n << 31n) - 1n;
+
 /** The `%` operator on a string. */
 export function formatPercent(template: string, argument: PyValue): string {
   const args = argument instanceof PyTuple && !(argument instanceof PyInstance) ? [...argument.items] : [argument];
@@ -60,12 +63,17 @@ class TemplateReader {
     let value = this.peek() === '(' ? this.mappingValue() : undefined;
     let flags = '';
     while ('-+ #0'.includes(this.peek() ?? 'x')) flags += this.read();
-    const width = this.readCount('width', (1n << 63n) - 1n);
+    let width = this.readCount('width', MAX_SSIZE, 'ssize_t');
+    // A negative `*` width left-aligns by its magnitude, and a negative `*` precision means zero.
+    if (width < 0n) {
+      flags += '-';
+      width = -width;
+    }
     let precision: number | undefined;
     if (this.peek() === '.') {
       this.index++;
-      const digits = this.readCount('precision', (1n << 31n) - 1n);
-      precision = digits ? Number(digits) : 0;
+      const count = this.readCount('precision', MAX_INT, 'int');
+      precision = count < 0n ? 0 : Number(count);
     }
     while ('hlL'.includes(this.peek() ?? 'x')) this.index++;
     const type = this.peek();
@@ -73,7 +81,7 @@ class TemplateReader {
     if (type === undefined) throw valueError('incomplete format');
     if (type === '%') return '%';
     value ??= this.take();
-    return convertOne(type, value, flags, width, precision, this.index - 1);
+    return convertOne(type, value, flags, width === 0n ? '' : String(width), precision, this.index - 1);
   }
 
   private peek(): string | undefined {
@@ -101,16 +109,20 @@ class TemplateReader {
     return getItem(this.mapping, key);
   }
 
-  /** Reads a width or a precision: digits, or `*` taking it from the arguments. */
-  private readCount(name: string, max: bigint): string {
+  /** Reads a width or a precision: digits, or `*` taking it from the arguments as the C type CPython stores it in. */
+  private readCount(name: string, max: bigint, cType: string): bigint {
     if (this.peek() === '*') {
       this.index++;
-      return String(intArgument(this.take(), '* wants int'));
+      const count = intArgument(this.take(), '* wants int');
+      if (count > max || count < -max - 1n)
+        throw pyError('OverflowError', `Python int too large to convert to C ${cType}`);
+      return count;
     }
     let digits = '';
     while (/\d/.test(this.peek() ?? '')) digits += this.read();
-    if (digits.length > 9 && BigInt(digits) > max) throw valueError(`${name} too big`);
-    return digits;
+    const count = BigInt(digits || '0');
+    if (count > max) throw valueError(`${name} too big`);
+    return count;
   }
 }
 
