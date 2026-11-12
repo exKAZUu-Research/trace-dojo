@@ -715,6 +715,13 @@ function defineStringStreams(context: Context, streams: StreamTypes): void {
       () => BigInt(text.length)
     );
   });
+  addMethod(stringClass, 'codePoints', [], streams.intStream.type, false, (frame, receiver) => {
+    const text = (receiver as JavaString).value;
+    return createStream(frame, streams.intStreamImpl, function* () {
+      // Iterating a string yields its code points, and an unpaired surrogate as itself, as Java's does.
+      for (const character of text) yield character.codePointAt(0) as number;
+    });
+  });
   addMethod(stringClass, 'lines', [], classType(streams.stream, stringClass.type), false, (frame, receiver) => {
     const text = (receiver as JavaString).value;
     frame.runtime.scanString(text.length);

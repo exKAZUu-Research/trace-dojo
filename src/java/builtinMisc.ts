@@ -96,6 +96,20 @@ function defineObjects(registry: Registry, objectClass: ClassInfo, stringType: J
     });
     method.typeParameters = [variable];
   }
+  const fallbackVariable: TypeVariable = { name: 'T', bounds: [objectType] };
+  const fallbackType: JavaType = { kind: 'typeVar', variable: fallbackVariable };
+  addMethod(
+    cls,
+    'requireNonNullElse',
+    [fallbackType, fallbackType],
+    fallbackType,
+    true,
+    (frame, _, [value, fallback]) => {
+      if (value !== undefined) return value;
+      if (fallback === undefined) throwBuiltin(frame, 'NullPointerException', 'defaultObj');
+      return fallback;
+    }
+  ).typeParameters = [fallbackVariable];
 }
 
 const MULTIPLIER = 0x5_de_ec_e6_6dn;

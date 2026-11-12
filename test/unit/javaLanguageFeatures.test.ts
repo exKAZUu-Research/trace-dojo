@@ -615,6 +615,21 @@ public class Main {
   });
 });
 
+test("Java's String.codePoints pairs surrogates, and Objects.requireNonNullElse falls back as the JDK does", () => {
+  const program = `import java.util.*;
+public class Main {
+  public static void main(String[] args) {
+    System.out.println("h😀\\uD83Dx".codePoints().count() + " " + Arrays.toString("a😀".codePoints().toArray()) + " " + "ab".codePoints().map(c -> c + 1).sum());
+    System.out.println(Objects.requireNonNullElse(null, "fallback") + " " + Objects.requireNonNullElse("value", "fallback"));
+    try { Objects.requireNonNullElse(null, null); } catch (NullPointerException e) { System.out.println(e.getMessage()); }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4 [97, 128512] 197\nfallback value\ndefaultObj\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
