@@ -1,6 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Value } from './values';
+import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Key, type Value } from './values';
 
 // The defaults of Node.js's `util.inspect`, which this module ports from `lib/internal/util/inspect.js`.
 const DEFAULT_DEPTH = 2;
@@ -158,11 +159,27 @@ function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefi
   if (value instanceof JsFunction) base = functionBase(runtime, value);
   else if (value.regexp) base = String(value.regexp);
   else if (value.isError && constructor !== 'Object') base = errorText(value);
-  else if (value.hostIterator)
-    open = `${prefixOf(constructor, 'Object')}[${value.generator ? 'Generator' : 'RegExp String Iterator'}] {`;
-  else if (constructor !== 'Object') open = `${prefixOf(constructor, 'Object')}{`;
+  else {
+    const tag = toStringTagOf(value);
+    if (tag && tag !== constructor) open = `${prefixOf(constructor, 'Object')}[${tag}] {`;
+    else if (constructor !== 'Object') open = `${prefixOf(constructor, 'Object')}{`;
+  }
   if (!hasKeys) return base || `${open}}`;
   return { base, braces: [open, '}'] };
+}
+
+/**
+ * The `Symbol.toStringTag` an object inherits as a data property, such as a generator's `Generator`, which Node.js
+ * shows in brackets; an own enumerable one is listed as a key instead.
+ */
+function toStringTagOf(object: JsObject): string | undefined {
+  const own = object.properties.get(WELL_KNOWN_SYMBOLS.toStringTag);
+  if (own?.enumerable) return undefined;
+  for (let current: JsObject | null = object; current; current = current.proto) {
+    const property = current.properties.get(WELL_KNOWN_SYMBOLS.toStringTag);
+    if (property) return !isAccessor(property) && typeof property.value === 'string' ? property.value : undefined;
+  }
+  return undefined;
 }
 
 /** The name of the nearest constructor whose prototype the object inherits, or undefined for a null prototype. */
@@ -187,9 +204,14 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
   return constructor === undefined ? `[${fallback}${size}: null prototype] ` : `${constructor}${size} `;
 }
 
-function enumerableKeys(runtime: Runtime, object: JsObject): string[] {
+/** The keys an object lists, its strings and then its symbols, as `Object.keys` and then its symbols order them. */
+function enumerableKeys(runtime: Runtime, object: JsObject): Key[] {
   // An array keeps its elements apart from its other properties.
-  const keys = object instanceof JsArray ? [...object.properties.keys()] : runtime.ownKeys(object);
+  const strings =
+    object instanceof JsArray
+      ? [...object.properties.keys()].filter((key) => typeof key === 'string')
+      : runtime.ownKeys(object);
+  const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
   return keys.filter((key) => {
     if (object.isError && (key === 'message' || key === 'name' || key === 'stack')) return false;
     return object.properties.get(key)?.enumerable;
@@ -241,12 +263,13 @@ function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string
   return output;
 }
 
-function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: string): string {
+function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key): string {
   const property = object.properties.get(key);
   let text = 'undefined';
   if (property && !isAccessor(property)) text = formatIndented(ctx, property.value, recurseTimes);
   else if (property?.get) text = property.set ? '[Getter/Setter]' : '[Getter]';
   else if (property?.set) text = '[Setter]';
+  if (typeof key === 'symbol') return `${key.toString()}: ${text}`;
   if (KEY_PATTERN.test(key)) return `${key === '__proto__' ? "['__proto__']" : key}: ${text}`;
   return `${quote(key)}: ${text}`;
 }

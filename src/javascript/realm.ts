@@ -2,11 +2,12 @@ import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
 import { defineArrayBuiltins } from './realmArrays';
 import { defineGlobalBuiltins } from './realmGlobals';
+import { defineIteratorBuiltins } from './realmIterators';
 import { defineNodeBuiltins } from './realmNode';
 import { defineRegExpBuiltins } from './realmRegExp';
 import { defineStringBuiltins } from './realmStrings';
 import type { Runtime } from './runtime';
-import { JsFunction, JsObject, type NativeFunction, Scope, type Value } from './values';
+import { JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
 
 export type ErrorName = 'Error' | 'TypeError' | 'RangeError' | 'ReferenceError' | 'SyntaxError';
 
@@ -18,6 +19,7 @@ export interface Realm {
   stringPrototype: JsObject;
   numberPrototype: JsObject;
   booleanPrototype: JsObject;
+  symbolPrototype: JsObject;
   regExpPrototype: JsObject;
   /** `%IteratorPrototype%`, the parent of the builtin iterators' prototypes. */
   iteratorPrototype: JsObject;
@@ -44,6 +46,7 @@ export class RealmBuilder {
       stringPrototype: new JsObject(objectPrototype),
       numberPrototype: new JsObject(objectPrototype),
       booleanPrototype: new JsObject(objectPrototype),
+      symbolPrototype: new JsObject(objectPrototype),
       regExpPrototype: new JsObject(objectPrototype),
       iteratorPrototype,
       generatorPrototype: new JsObject(iteratorPrototype),
@@ -65,8 +68,8 @@ export class RealmBuilder {
   }
 
   /** Defines a builtin method, which is non-enumerable. */
-  method(object: JsObject, name: string, length: number, run: NativeFunction): JsFunction {
-    const fn = this.function(name, length, run);
+  method(object: JsObject, name: Key, length: number, run: NativeFunction): JsFunction {
+    const fn = this.function(functionNameOf(name), length, run);
     object.properties.set(name, {
       value: fn,
       writable: true,
@@ -76,16 +79,16 @@ export class RealmBuilder {
     return fn;
   }
 
-  getter(object: JsObject, name: string, run: NativeFunction): void {
+  getter(object: JsObject, name: Key, run: NativeFunction): void {
     object.properties.set(name, {
-      get: this.function(`get ${name}`, 0, run),
+      get: this.function(`get ${functionNameOf(name)}`, 0, run),
       set: undefined,
       enumerable: false,
       configurable: true,
     });
   }
 
-  constant(object: JsObject, name: string, value: Value): void {
+  constant(object: JsObject, name: Key, value: Value): void {
     object.properties.set(name, { value, writable: false, enumerable: false, configurable: false });
   }
 
@@ -125,12 +128,18 @@ export class RealmBuilder {
   }
 }
 
+/** The name of a function stored under a key, which for a symbol is its description in brackets. */
+function functionNameOf(key: Key): string {
+  return typeof key === 'string' ? key : `[${key.description ?? ''}]`;
+}
+
 export function createRealm(runtime: Runtime): Realm {
   const builder = new RealmBuilder(runtime);
   defineGlobalBuiltins(builder);
   defineNodeBuiltins(builder);
   defineArrayBuiltins(builder);
   defineStringBuiltins(builder);
+  defineIteratorBuiltins(builder);
   defineRegExpBuiltins(builder);
   defineGeneratorBuiltins(builder);
   return builder.realm;

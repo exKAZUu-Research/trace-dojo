@@ -12,7 +12,11 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
     'String',
     1,
     stringPrototype,
-    ({ runtime, args }) => (args.length === 0 ? '' : runtime.toString(args[0])),
+    ({ runtime, args }) => {
+      if (args.length === 0) return '';
+      // Called as a function, String describes a symbol instead of rejecting it.
+      return typeof args[0] === 'symbol' ? args[0].toString() : runtime.toString(args[0]);
+    },
     false
   );
   builder.method(stringConstructor, 'fromCharCode', 1, ({ runtime, args }) => {

@@ -465,6 +465,30 @@ console.log(g(), [g()], 'a'.matchAll(/a/g));
 console.log('2024-03'.match(/(?<y>\\d+)-(?<m>\\d+)/));
 console.log(String.raw, g);`,
   ],
+  [
+    'symbols and the iteration protocol',
+    `const s = Symbol('id'), t = Symbol();
+const o = { a: 1, [s]: 2, [Symbol.for('k')]: 3 };
+console.log(o, Object.keys(o), o[s], typeof t, t.toString(), t.description, s.description, Symbol.for('k') === Symbol.for('k'), Symbol.keyFor(Symbol.for('k')));
+console.log(String(s), [s], { [s]: { x: 1 } }, Symbol.iterator, Object.prototype.toString.call(s));
+try { \`\${s}\`; } catch (e) { console.log(e.message); }
+try { s + 1; } catch (e) { console.log(e.message); }
+try { new Symbol(); } catch (e) { console.log(e.message); }
+class Range { constructor(a, b) { this.a = a; this.b = b; } *[Symbol.iterator]() { for (let i = this.a; i < this.b; i++) yield i; } }
+console.log([...new Range(1, 4)], Array.from(new Range(0, 2)), Math.max(...new Range(0, 5)));
+const [x, , z] = new Range(5, 9); console.log(x, z);
+const manual = { [Symbol.iterator]() { let n = 0; return { next() { n++; return n <= 3 ? { value: n * 10, done: false } : { value: undefined, done: true }; }, return() { console.log('closed'); return {}; } }; } };
+for (const v of manual) { console.log(v); if (v === 20) break; }
+console.log([...manual]);
+const arr = ['a', 'b']; const it = arr[Symbol.iterator](); console.log(it.next(), it.next(), it.next(), it);
+console.log([...arr.entries()], [...arr.keys()], [...'hé'[Symbol.iterator]()], 'x'[Symbol.iterator]());
+function* g() { yield* manual; } console.log([...g()]);
+const m = { [Symbol.toStringTag]: 'Custom' }; console.log(Object.prototype.toString.call(m), String(m));
+class Tagged { get [Symbol.toStringTag]() { return 'T'; } } console.log(Object.prototype.toString.call(new Tagged()));
+const fns = { [s]() {}, [Symbol()]: function () {} }; console.log(fns[s].name);
+try { for (const q of {}) {} } catch (e) { console.log(e.constructor.name); }
+console.log(arr[Symbol.iterator] === arr.values, typeof Symbol.asyncIterator);`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

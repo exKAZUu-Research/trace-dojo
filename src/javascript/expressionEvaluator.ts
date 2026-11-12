@@ -13,6 +13,7 @@ import {
   type JsArray,
   JsFunction,
   type JsObject,
+  type Key,
   toBoolean,
   type Value,
 } from './values';
@@ -441,11 +442,11 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         const leftPrimitive = runtime.toPrimitive(left, 'default');
         const rightPrimitive = runtime.toPrimitive(right, 'default');
         if (typeof leftPrimitive === 'string' || typeof rightPrimitive === 'string') {
-          const text = String(leftPrimitive) + String(rightPrimitive);
+          const text = runtime.toString(leftPrimitive) + runtime.toString(rightPrimitive);
           runtime.buildString(text.length);
           return text;
         }
-        return Number(leftPrimitive) + Number(rightPrimitive);
+        return runtime.toNumber(leftPrimitive) + runtime.toNumber(rightPrimitive);
       }
       case '===': {
         return left === right;
@@ -463,7 +464,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case '>':
       case '<=':
       case '>=': {
-        return compare(operator, runtime.toPrimitive(left, 'number'), runtime.toPrimitive(right, 'number'));
+        const leftPrimitive = runtime.toPrimitive(left, 'number');
+        const rightPrimitive = runtime.toPrimitive(right, 'number');
+        // Comparing a symbol converts it to a number, which throws.
+        for (const primitive of [leftPrimitive, rightPrimitive])
+          if (typeof primitive === 'symbol') runtime.toNumber(primitive);
+        return compare(operator, leftPrimitive, rightPrimitive);
       }
       case 'instanceof': {
         return runtime.instanceOf(left, right);
@@ -472,7 +478,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         if (!isObject(right)) {
           return runtime.throwError(
             'TypeError',
-            `Cannot use 'in' operator to search for '${runtime.toPropertyKey(left)}' in ${runtime.describe(right)}`
+            `Cannot use 'in' operator to search for '${String(runtime.toPropertyKey(left))}' in ${runtime.describe(right)}`
           );
         }
         return runtime.hasProperty(right, runtime.toPropertyKey(left));
@@ -497,7 +503,7 @@ export function shortCircuits(operator: LogicalOperator, left: Value): boolean {
   return left !== undefined && left !== null;
 }
 
-type Primitive = undefined | null | boolean | number | string;
+type Primitive = undefined | null | boolean | number | string | symbol;
 
 /** Compares primitives with the host's operators, which follow JavaScript's rules for them. */
 function compare(operator: '<' | '>' | '<=' | '>=', left: Primitive, right: Primitive): boolean {
@@ -564,7 +570,7 @@ function arithmetic(operator: string, left: number, right: number): number {
 export function defineAccessor(
   runtime: EvaluatorBase['runtime'],
   object: JsObject,
-  key: string,
+  key: Key,
   kind: 'getter' | 'setter',
   fn: JsFunction,
   enumerable: boolean

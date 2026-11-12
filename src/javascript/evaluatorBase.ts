@@ -1,7 +1,16 @@
 import type { Expression, FunctionNode, MemberExpression, Pattern, PropertyName, ScopeDeclarations } from './ast';
 import { DONE } from './iteration';
 import type { Runtime } from './runtime';
-import { type FunctionFrame, isObject, JsFunction, type JsObject, Scope, UNINITIALIZED, type Value } from './values';
+import {
+  type FunctionFrame,
+  isObject,
+  JsFunction,
+  type JsObject,
+  type Key,
+  Scope,
+  UNINITIALIZED,
+  type Value,
+} from './values';
 
 /** How a pattern stores the values it destructures. */
 export type BindingMode =
@@ -12,9 +21,9 @@ export type BindingMode =
 
 export type Reference =
   | { kind: 'binding'; name: string }
-  | { kind: 'property'; base: Value; key: string }
+  | { kind: 'property'; base: Value; key: Key }
   | { kind: 'private'; base: Value; name: string }
-  | { kind: 'super'; key: string; thisValue: Value };
+  | { kind: 'super'; key: Key; thisValue: Value };
 
 /** Ends an optional chain whose object was null or undefined. */
 export const SHORT_CIRCUIT = Symbol('shortCircuit');
@@ -156,7 +165,7 @@ export abstract class EvaluatorBase {
     });
   }
 
-  propertyKey(name: PropertyName): string {
+  propertyKey(name: PropertyName): Key {
     if (name.kind === 'key') return name.key;
     if (name.kind === 'private') return this.privateKey(name.name);
     return this.runtime.toPropertyKey(this.evaluate(name.expression));
@@ -270,7 +279,7 @@ export abstract class EvaluatorBase {
     value: Value,
     mode: BindingMode
   ): void {
-    const used = new Set<string>();
+    const used = new Set<Key>();
     for (const property of pattern.properties) {
       const key = this.propertyKey(property.key);
       used.add(key);
@@ -279,7 +288,7 @@ export abstract class EvaluatorBase {
     if (pattern.rest) this.bindPattern(pattern.rest, this.restObject(value, used), mode);
   }
 
-  private restObject(value: Value, used: Set<string>): JsObject {
+  private restObject(value: Value, used: Set<Key>): JsObject {
     const { runtime } = this;
     const rest = runtime.newObject();
     // A string's characters are its own properties.
@@ -296,9 +305,11 @@ export abstract class EvaluatorBase {
 }
 
 /** Names a function by the variable or parameter default it was assigned to when it has no name yet. */
-export function nameFunction(runtime: Runtime, fn: JsFunction, name: string): void {
+export function nameFunction(runtime: Runtime, fn: JsFunction, name: Key): void {
   if (runtime.functionName(fn) !== '' || fn.behavior.kind === 'native') return;
-  fn.properties.set('name', { value: name, writable: false, enumerable: false, configurable: true });
+  // A function named by a symbol key takes the symbol's description in brackets.
+  const text = typeof name === 'string' ? name : name.description === undefined ? '' : `[${name.description}]`;
+  fn.properties.set('name', { value: text, writable: false, enumerable: false, configurable: true });
 }
 
 /** The variables a pattern declares, in order. */

@@ -4,8 +4,11 @@ import type { GeneratorState } from './generators';
 import type { HostIterator } from './iteration';
 import type { Runtime } from './runtime';
 
-/** A JavaScript value: primitives are the host's own, objects are interpreter objects. */
-export type Value = undefined | null | boolean | number | string | JsObject;
+/** A JavaScript value: primitives are the host's own, symbols included, while objects are interpreter objects. */
+export type Value = undefined | null | boolean | number | string | symbol | JsObject;
+
+/** A property key, which JavaScript converts every other value to a string to make. */
+export type Key = string | symbol;
 
 export interface DataProperty {
   value: Value;
@@ -38,7 +41,7 @@ export function freeze(object: JsObject): void {
 }
 
 export class JsObject {
-  readonly properties = new Map<string, Property>();
+  readonly properties = new Map<Key, Property>();
   /** `#name` fields, methods, and accessors, keyed by the identity of the class's private name. */
   privateMembers?: Map<string, Property>;
   extensible = true;
@@ -110,7 +113,7 @@ export type FunctionBehavior =
     };
 
 export interface ClassField {
-  key: string;
+  key: Key;
   isPrivate: boolean;
   initialize: ((thisValue: JsObject) => Value) | undefined;
   stepRow: number | undefined;
@@ -215,7 +218,8 @@ export function privateClassOf(key: string): string {
 }
 
 /** Whether a property key is an array index. */
-export function arrayIndexOf(key: string): number | undefined {
+export function arrayIndexOf(key: Key): number | undefined {
+  if (typeof key !== 'string') return undefined;
   if (!/^(?:0|[1-9]\d*)$/.test(key)) return undefined;
   const index = Number(key);
   return index < 2 ** 32 - 1 ? index : undefined;

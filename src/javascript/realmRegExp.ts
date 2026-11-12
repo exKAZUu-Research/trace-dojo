@@ -1,5 +1,6 @@
 import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
+import { defineHostIteratorPrototype, newHostIterator } from './realmIterators';
 import type { Runtime } from './runtime';
 import { isCallable, JsObject, type NativeCall, type Value } from './values';
 
@@ -152,7 +153,7 @@ function groupsObject(runtime: Runtime, groups: Record<string, Value> | undefine
 // String methods --------------------------------------------------------------------------------------------------
 
 function defineStringMethods(builder: RealmBuilder): void {
-  const { stringPrototype, iteratorPrototype } = builder.realm;
+  const { stringPrototype } = builder.realm;
   const method = (name: string, run: (call: NativeCall, text: string) => Value): void => {
     builder.method(stringPrototype, name, 1, (call) => {
       const { runtime, thisValue } = call;
@@ -175,17 +176,7 @@ function defineStringMethods(builder: RealmBuilder): void {
     const object = regExpArgument(runtime, args[0], '');
     return text.search(new RegExp(object.regexp.source, object.regexp.flags));
   });
-  const regExpStringIteratorPrototype = new JsObject(iteratorPrototype);
-  builder.method(regExpStringIteratorPrototype, 'next', 0, ({ runtime, thisValue }) => {
-    const iterator = thisValue instanceof JsObject ? thisValue.hostIterator : undefined;
-    if (!iterator)
-      return runtime.throwError(
-        'TypeError',
-        `next method called on incompatible receiver ${runtime.describe(thisValue)}`
-      );
-    const value = iterator.next();
-    return iteratorResult(runtime, value === DONE ? undefined : value, value === DONE);
-  });
+  const regExpStringIteratorPrototype = defineHostIteratorPrototype(builder, 'RegExp String Iterator');
   method('matchAll', ({ runtime, args }, text) => {
     const pattern = args[0];
     if (pattern instanceof JsObject && pattern.regexp && !pattern.regexp.global) {
@@ -195,14 +186,12 @@ function defineStringMethods(builder: RealmBuilder): void {
     const regexp = new RegExp(object.regexp.source, object.regexp.flags);
     regexp.lastIndex = runtime.toNumber(runtime.get(object, 'lastIndex'));
     const matches = text.matchAll(regexp);
-    const iterator = runtime.newObject(regExpStringIteratorPrototype);
-    iterator.hostIterator = {
+    return newHostIterator(runtime, regExpStringIteratorPrototype, {
       next: () => {
         const next = matches.next();
         return next.done ? DONE : matchArray(runtime, next.value);
       },
-    };
-    return iterator;
+    });
   });
 }
 
@@ -210,13 +199,6 @@ function defineStringMethods(builder: RealmBuilder): void {
 function regExpArgument(runtime: Runtime, value: Value, flags: string): RegExpObject {
   if (value instanceof JsObject && value.regexp) return value as RegExpObject;
   return newRegExp(runtime, value === undefined ? '(?:)' : runtime.toString(value), flags) as RegExpObject;
-}
-
-export function iteratorResult(runtime: Runtime, value: Value, done: boolean): JsObject {
-  const result = runtime.newObject();
-  runtime.createDataProperty(result, 'value', value);
-  runtime.createDataProperty(result, 'done', done);
-  return result;
 }
 
 /** Replaces the matches of a regular expression, calling `replacement` for each when it is a function. */

@@ -129,6 +129,7 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
     return { kind: 'value', value };
+  if (typeof value === 'symbol') return { kind: 'value', value: value.toString() };
   if (value instanceof JsFunction || seen.has(value)) return undefined;
   if (value.turtle) {
     if (!value.turtle.isAlive) return undefined;
@@ -176,7 +177,12 @@ function displayedEntries(object: JsObject): [string, Value][] {
   const message = object.isError ? object.properties.get('message') : undefined;
   if (message && !isAccessor(message)) entries.push(['message', message.value]);
   for (const [key, property] of object.properties) {
-    if (property.enumerable && !isAccessor(property) && !(property.value instanceof JsFunction))
+    if (
+      typeof key === 'string' &&
+      property.enumerable &&
+      !isAccessor(property) &&
+      !(property.value instanceof JsFunction)
+    )
       entries.push([key, property.value]);
   }
   const fields = [...(object.privateMembers ?? [])].filter(

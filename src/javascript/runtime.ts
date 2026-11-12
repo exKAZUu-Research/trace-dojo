@@ -6,9 +6,10 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import { ArrayOps } from './arrayOps';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
-import { ValueIterator } from './iteration';
+import { DONE, type HostIterator, ValueIterator } from './iteration';
 import { defineFunctionProperties } from './memberProperties';
 import { createRealm, type ErrorName, type Realm } from './realm';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import {
   type AccessorProperty,
   appendAll,
@@ -23,10 +24,12 @@ import {
   JsFunction,
   JsObject,
   JsThrow,
+  type Key,
   type NativeFunction,
   privateNameOf,
   type Property,
   type Scope,
+  toBoolean,
   type Value,
 } from './values';
 
@@ -43,7 +46,7 @@ export class Frame {
   ) {}
 }
 
-type Primitive = undefined | null | boolean | number | string;
+type Primitive = undefined | null | boolean | number | string | symbol;
 
 export class Runtime {
   readonly world = new TurtleWorld();
@@ -130,7 +133,7 @@ export class Runtime {
     return error;
   }
 
-  getOwnProperty(object: JsObject, key: string): Property | undefined {
+  getOwnProperty(object: JsObject, key: Key): Property | undefined {
     if (object instanceof JsArray) {
       if (key === 'length')
         return {
@@ -151,7 +154,7 @@ export class Runtime {
     return object.properties.get(key);
   }
 
-  get(value: Value, key: string, receiver: Value = value): Value {
+  get(value: Value, key: Key, receiver: Value = value): Value {
     const element = ownElement(value, key);
     if (element !== MISSING) return element;
     for (let current: JsObject | null = this.objectFor(value, key); current; current = current.proto) {
@@ -164,12 +167,13 @@ export class Runtime {
   }
 
   /** The object whose properties `value` has: itself, or the prototype of its primitive type. */
-  private objectFor(value: Value, key: string): JsObject {
+  private objectFor(value: Value, key: Key): JsObject {
     if (value instanceof JsObject) return value;
     if (typeof value === 'string') return this.realm.stringPrototype;
     if (typeof value === 'number') return this.realm.numberPrototype;
     if (typeof value === 'boolean') return this.realm.booleanPrototype;
-    return this.throwError('TypeError', `Cannot read properties of ${String(value)} (reading '${key}')`);
+    if (typeof value === 'symbol') return this.realm.symbolPrototype;
+    return this.throwError('TypeError', `Cannot read properties of ${String(value)} (reading '${String(key)}')`);
   }
 
   /**
@@ -178,45 +182,55 @@ export class Runtime {
    * @param lookupStart Where the property is looked up instead of `target`, as `super[key] = value` starts at the
    * parent's prototype while acting on `this`.
    */
-  set(target: Value, key: string, value: Value, lookupStart?: JsObject): void {
+  set(target: Value, key: Key, value: Value, lookupStart?: JsObject): void {
     if (!(target instanceof JsObject)) {
       if (target === undefined || target === null) {
-        this.throwError('TypeError', `Cannot set properties of ${String(target)} (setting '${key}')`);
+        this.throwError('TypeError', `Cannot set properties of ${String(target)} (setting '${String(key)}')`);
       }
-      return this.throwError('TypeError', `Cannot create property '${key}' on ${typeof target} '${String(target)}'`);
+      return this.throwError(
+        'TypeError',
+        `Cannot create property '${String(key)}' on ${typeof target} '${String(target)}'`
+      );
     }
     if (!lookupStart && target instanceof JsArray && this.setArrayProperty(target, key, value)) return;
     const property = this.findProperty(lookupStart ?? target, key);
     if (property && isAccessor(property)) {
       if (!property.set) {
-        this.throwError('TypeError', `Cannot set property ${key} of ${this.describe(target)} which has only a getter`);
+        this.throwError(
+          'TypeError',
+          `Cannot set property ${String(key)} of ${this.describe(target)} which has only a getter`
+        );
       }
       this.call(property.set, target, [value], this.currentRow);
       return;
     }
     if (property && !property.writable) {
-      this.throwError('TypeError', `Cannot assign to read only property '${key}' of ${this.describe(target)}`);
+      this.throwError('TypeError', `Cannot assign to read only property '${String(key)}' of ${this.describe(target)}`);
     }
     this.writeOwnData(target, key, value);
   }
 
   /** Stores a data property of the object assigned to, which an own accessor or a read-only property refuses. */
-  private writeOwnData(target: JsObject, key: string, value: Value): void {
+  private writeOwnData(target: JsObject, key: Key, value: Value): void {
     const own = target.properties.get(key);
-    if (own && isAccessor(own)) this.throwError('TypeError', `Cannot redefine property: ${key}`);
+    if (own && isAccessor(own)) this.throwError('TypeError', `Cannot redefine property: ${String(key)}`);
     if (own) {
       if (!own.writable)
-        this.throwError('TypeError', `Cannot assign to read only property '${key}' of ${this.describe(target)}`);
+        this.throwError(
+          'TypeError',
+          `Cannot assign to read only property '${String(key)}' of ${this.describe(target)}`
+        );
       own.value = value;
       return;
     }
-    if (!target.extensible) this.throwError('TypeError', `Cannot add property ${key}, object is not extensible`);
+    if (!target.extensible)
+      this.throwError('TypeError', `Cannot add property ${String(key)}, object is not extensible`);
     this.allocate(1);
     target.properties.set(key, { value, writable: true, enumerable: true, configurable: true });
   }
 
   /** Sets an element or the length of an array, returning false for any other property. */
-  private setArrayProperty(array: JsArray, key: string, value: Value): boolean {
+  private setArrayProperty(array: JsArray, key: Key, value: Value): boolean {
     const index = arrayIndexOf(key);
     if (index !== undefined) this.setElement(array, index, value);
     else if (key === 'length') this.setLength(array, value);
@@ -225,7 +239,7 @@ export class Runtime {
   }
 
   /** The property `key` of an object or of the nearest prototype that has it. */
-  private findProperty(object: JsObject, key: string): Property | undefined {
+  private findProperty(object: JsObject, key: Key): Property | undefined {
     for (let current: JsObject | null = object; current; current = current.proto) {
       const property = this.getOwnProperty(current, key);
       if (property) return property;
@@ -260,7 +274,7 @@ export class Runtime {
     while (elements.length < length) elements.push(HOLE);
   }
 
-  defineProperty(object: JsObject, key: string, property: Property): void {
+  defineProperty(object: JsObject, key: Key, property: Property): void {
     if (object instanceof JsArray && (arrayIndexOf(key) !== undefined || key === 'length')) {
       if (isAccessor(property)) this.throwError('TypeError', 'Accessors on array elements are not supported');
       this.set(object, key, property.value);
@@ -270,7 +284,7 @@ export class Runtime {
     object.properties.set(key, property);
   }
 
-  createDataProperty(object: JsObject, key: string, value: Value): void {
+  createDataProperty(object: JsObject, key: Key, value: Value): void {
     this.defineProperty(object, key, {
       value,
       writable: true,
@@ -279,7 +293,7 @@ export class Runtime {
     });
   }
 
-  deleteProperty(target: Value, key: string): boolean {
+  deleteProperty(target: Value, key: Key): boolean {
     if (target === undefined || target === null)
       this.throwError('TypeError', 'Cannot convert undefined or null to object');
     if (!(target instanceof JsObject)) return true;
@@ -293,14 +307,19 @@ export class Runtime {
     }
     const property = this.getOwnProperty(target, key);
     if (property && !property.configurable) {
-      this.throwError('TypeError', `Cannot delete property '${key}' of ${this.describe(target)}`);
+      this.throwError('TypeError', `Cannot delete property '${String(key)}' of ${this.describe(target)}`);
     }
     target.properties.delete(key);
     return true;
   }
 
-  hasProperty(object: JsObject, key: string): boolean {
+  hasProperty(object: JsObject, key: Key): boolean {
     return this.findProperty(object, key) !== undefined;
+  }
+
+  /** Own symbol keys in the order they were added, which follow the string keys. */
+  ownSymbols(object: JsObject): symbol[] {
+    return [...object.properties.keys()].filter((key) => typeof key === 'symbol');
   }
 
   /** Own string keys in property order: array indices and integer keys ascending, then the rest as added. */
@@ -313,6 +332,7 @@ export class Runtime {
     const integers: number[] = [];
     const others: string[] = [];
     for (const key of object.properties.keys()) {
+      if (typeof key === 'symbol') continue;
       const index = arrayIndexOf(key);
       if (index === undefined) others.push(key);
       else integers.push(index);
@@ -456,16 +476,20 @@ export class Runtime {
   toNumber(value: Value): number {
     const primitive = this.toPrimitive(value, 'number');
     if (typeof primitive === 'string') this.scan(primitive.length);
+    if (typeof primitive === 'symbol') this.throwError('TypeError', 'Cannot convert a Symbol value to a number');
     return Number(primitive);
   }
 
   toString(value: Value): string {
-    return String(this.toPrimitive(value, 'string'));
+    const primitive = this.toPrimitive(value, 'string');
+    if (typeof primitive === 'symbol') this.throwError('TypeError', 'Cannot convert a Symbol value to a string');
+    return String(primitive);
   }
 
-  toPropertyKey(value: Value): string {
-    if (typeof value === 'string') return value;
-    return this.toString(value);
+  toPropertyKey(value: Value): Key {
+    if (typeof value === 'string' || typeof value === 'symbol') return value;
+    const primitive = this.toPrimitive(value, 'string');
+    return typeof primitive === 'symbol' ? primitive : String(primitive);
   }
 
   toObject(value: Value): JsObject {
@@ -516,7 +540,41 @@ export class Runtime {
       return new ValueIterator([...value]);
     }
     if (value instanceof JsObject && value.hostIterator) return new ValueIterator(value.hostIterator);
-    return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
+    const method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator);
+    if (!isCallable(method)) return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
+    const iterator = this.call(method, value, [], this.currentRow);
+    if (!isObject(iterator))
+      return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
+    if (iterator.hostIterator) return new ValueIterator(iterator.hostIterator);
+    return new ValueIterator(this.protocolIteration(iterator));
+  }
+
+  /** Steps through an iterator object by calling its `next()`, and its `return()` when a loop leaves it early. */
+  private protocolIteration(iterator: JsObject): HostIterator {
+    const next = this.get(iterator, 'next');
+    return {
+      next: () => {
+        const result = this.call(next, iterator, [], this.currentRow);
+        if (!isObject(result))
+          this.throwError('TypeError', `Iterator result ${this.describe(result)} is not an object`);
+        return toBoolean(this.get(result, 'done')) ? DONE : this.get(result, 'value');
+      },
+      close: () => {
+        const close = this.get(iterator, 'return');
+        if (close === undefined || close === null) return;
+        const result = this.call(close, iterator, [], this.currentRow);
+        if (!isObject(result))
+          this.throwError('TypeError', `Iterator result ${this.describe(result)} is not an object`);
+      },
+    };
+  }
+
+  /** Whether a value has a `Symbol.iterator` method, which iterating it calls. */
+  isIterable(value: Value): boolean {
+    if (value === undefined || value === null) return false;
+    return (
+      value instanceof JsArray || typeof value === 'string' || isCallable(this.get(value, WELL_KNOWN_SYMBOLS.iterator))
+    );
   }
 
   /** All the values an iterable yields, as spread reads them. */
@@ -558,7 +616,7 @@ export class Runtime {
 const MISSING = Symbol('missing');
 
 /** Reads an array element, an array's length, a string's character, or a string's length without a lookup. */
-function ownElement(value: Value, key: string): Value | typeof MISSING {
+function ownElement(value: Value, key: Key): Value | typeof MISSING {
   if (typeof value === 'string') {
     if (key === 'length') return value.length;
     const index = arrayIndexOf(key);
@@ -574,6 +632,6 @@ function ownElement(value: Value, key: string): Value | typeof MISSING {
 }
 
 /** Defines a non-enumerable data property, as builtin methods and `name` are. */
-export function defineHidden(object: JsObject, key: string, value: Value, writable = true): void {
+export function defineHidden(object: JsObject, key: Key, value: Value, writable = true): void {
   object.properties.set(key, { value, writable, enumerable: false, configurable: true });
 }

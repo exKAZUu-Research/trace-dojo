@@ -31,6 +31,7 @@ import {
   JsFunction,
   type JsObject,
   JsThrow,
+  type Key,
   Scope,
   toBoolean,
   UNINITIALIZED,
@@ -601,7 +602,7 @@ export class Evaluator extends StepEvaluator {
   /** Defines a method or accessor, which instances get as private members when its name is private. */
   private defineMethod(
     member: Extract<ClassMember, { fn: FunctionNode }>,
-    key: string,
+    key: Key,
     target: JsObject,
     classScope: Scope,
     instanceFields: ClassField[]
@@ -611,7 +612,7 @@ export class Evaluator extends StepEvaluator {
     if (member.key.kind === 'computed') nameFunction(runtime, method, key);
     if (member.key.kind === 'private') {
       const property = privateMethodProperty(member.kind, method);
-      if (member.isStatic) mergePrivate(runtime, target, key, property);
+      if (member.isStatic) mergePrivate(runtime, target, privateIdentity(key), property);
       else
         instanceFields.unshift({
           key,
@@ -645,13 +646,13 @@ export class Evaluator extends StepEvaluator {
   private initializeField(target: JsObject, field: ClassField): void {
     const { runtime } = this;
     if (field.property) {
-      mergePrivate(runtime, target, field.key, field.property);
+      mergePrivate(runtime, target, privateIdentity(field.key), field.property);
       return;
     }
     this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
       const value = field.initialize ? field.initialize(target) : undefined;
       if (field.isPrivate)
-        runtime.definePrivate(target, field.key, {
+        runtime.definePrivate(target, privateIdentity(field.key), {
           value,
           writable: true,
           enumerable: false,
@@ -744,4 +745,10 @@ export class Evaluator extends StepEvaluator {
     }
     return constructed;
   }
+}
+
+/** The key of a private member, which is the string identity of its private name rather than a property key. */
+function privateIdentity(key: Key): string {
+  if (typeof key !== 'string') throw new TypeError('A private name has a string identity');
+  return key;
 }

@@ -1,6 +1,6 @@
 import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
-import { iteratorResult } from './realmRegExp';
+import { iteratorResult, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
 import { JsObject, JsThrow, type Value } from './values';
 
@@ -97,6 +97,7 @@ export function resumeGenerator(runtime: Runtime, object: JsObject, resume: Resu
 /** Defines `%GeneratorPrototype%`, the parent of every generator function's `prototype`. */
 export function defineGeneratorBuiltins(builder: RealmBuilder): void {
   const { generatorPrototype } = builder.realm;
+  builder.constant(generatorPrototype, WELL_KNOWN_SYMBOLS.toStringTag, 'Generator');
   for (const kind of ['next', 'return', 'throw'] as const) {
     builder.method(generatorPrototype, kind, 1, ({ runtime, thisValue, args }) => {
       if (!(thisValue instanceof JsObject) || !thisValue.generator) {

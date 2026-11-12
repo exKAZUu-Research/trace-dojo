@@ -2,6 +2,7 @@ import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { formatLogArguments } from './consoleFormat';
 import { inspect } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { defineHidden, type Runtime } from './runtime';
 import {
   freeze,
@@ -47,7 +48,13 @@ function defineObject(builder: RealmBuilder): void {
     ({ runtime, thisValue, args }) =>
       runtime.getOwnProperty(runtime.toObject(thisValue), runtime.toPropertyKey(args[0])) !== undefined
   );
-  builder.method(objectPrototype, 'toString', 0, ({ thisValue }) => `[object ${tagOf(thisValue)}]`);
+  builder.method(objectPrototype, 'toString', 0, ({ runtime, thisValue }) => {
+    const tag =
+      thisValue === undefined || thisValue === null
+        ? undefined
+        : runtime.get(thisValue, WELL_KNOWN_SYMBOLS.toStringTag);
+    return `[object ${typeof tag === 'string' ? tag : tagOf(thisValue)}]`;
+  });
   builder.method(objectPrototype, 'valueOf', 0, ({ runtime, thisValue }) => runtime.toObject(thisValue));
 }
 
@@ -57,7 +64,6 @@ function tagOf(value: Value): string {
   if (value instanceof JsArray) return 'Array';
   if (value instanceof JsFunction) return 'Function';
   if (value instanceof JsObject) {
-    if (value.generator) return 'Generator';
     if (value.regexp) return 'RegExp';
     return value.isError ? 'Error' : 'Object';
   }
