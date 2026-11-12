@@ -1008,6 +1008,13 @@ let x = {}; for (let i = 0; i < 10000; i++) x = { x }; try { structuredClone(x);
     `const k="x", s=Symbol("y"); const o={get [k](){return 1}, set [s](v){}}; console.log(Object.getOwnPropertyDescriptor(o,"x").get.name, Object.getOwnPropertyDescriptor(o,s).set.name); class C { get [k]() {} static set [s](v) {} } console.log(Object.getOwnPropertyDescriptor(C.prototype,"x").get.name, Object.getOwnPropertyDescriptor(C,s).set.name); (async()=>{ const p={get [await "x"](){return 1}, set [await s](v){}}; console.log(Object.getOwnPropertyDescriptor(p,"x").get.name, Object.getOwnPropertyDescriptor(p,s).set.name); })()
 JSON.parse('{"b":0,"a":1,"a":{}}',function(k,v,c){if(k==='b')this.a=1;if(k==='a')console.log(c.source);return v});`,
   ],
+  [
+    'implicit iterator closing passes no arguments',
+    `const it = () => ({ [Symbol.iterator]() { return { next() { return { value: 1, done: false }; }, return(...a) { console.log('return args', a.length); return {}; } }; } });
+function* g() { yield* it(); } const x = g(); x.next(); try { x.throw(new Error('t')); } catch (e) { console.log(e.constructor.name); }
+const y = g(); y.next(); console.log(y.return(5));
+(async () => { for await (const v of it()) break; })();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

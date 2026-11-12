@@ -12,9 +12,9 @@ export interface ProtocolIteration {
   /** Calls the iterator's `next` with the given arguments: one for `yield*`, none for a loop. */
   next: (...args: Value[]) => Value;
   /** Calls the iterator's `return`, or is undefined when it has none. */
-  return: ((value?: Value) => Value) | undefined;
+  return: ((...args: Value[]) => Value) | undefined;
   /** Calls the iterator's `throw`, or is undefined when it has none. */
-  throw: ((value: Value) => Value) | undefined;
+  throw: ((...args: Value[]) => Value) | undefined;
 }
 
 /** The iteration a sync `yield*` runs: the object the value's `Symbol.iterator` method returns. */
@@ -115,10 +115,11 @@ function iteratorObject(
 /** Calls an iterator object's methods, passing each result through `adapt`. */
 function iterationOf(runtime: Runtime, iterator: JsObject, adapt: (result: Value) => Value): ProtocolIteration {
   const next = runtime.get(iterator, 'next');
-  const method = (name: string): ((value?: Value) => Value) | undefined => {
+  const method = (name: string): ((...args: Value[]) => Value) | undefined => {
     const fn = runtime.get(iterator, name);
     if (fn === undefined || fn === null) return undefined;
-    return (value) => adapt(runtime.call(fn, iterator, [value], runtime.currentRow));
+    // The arguments go as given: none for an implicit close, one for a forwarded `return(value)` or `throw(error)`.
+    return (...args) => adapt(runtime.call(fn, iterator, args, runtime.currentRow));
   };
   return {
     iterator,
