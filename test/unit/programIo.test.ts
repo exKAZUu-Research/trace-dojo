@@ -46,6 +46,18 @@ test.each([
     'a\nfalse\nScanner closed\n',
   ],
   [
+    'whitespace before a token that does not match, which a failed call consumes',
+    'Scanner sc = new Scanner(System.in); try { sc.nextInt(); } catch (InputMismatchException e) { System.out.println("[" + sc.nextLine() + "]"); }',
+    '  bad rest',
+    '[bad rest]\n',
+  ],
+  [
+    'full-width and other Unicode digits',
+    'Scanner sc = new Scanner(System.in); System.out.println(sc.hasNextInt() + " " + sc.nextInt() + " " + sc.nextLong() + " " + sc.nextDouble());',
+    '１２３ ١٢٣ ３.５',
+    'true 123 123 3.5\n',
+  ],
+  [
     'lines from a BufferedReader',
     'BufferedReader br = new BufferedReader(new InputStreamReader(System.in)); String line; while ((line = br.readLine()) != null) System.out.println("[" + line + "]");',
     'x\r\ny\n\nz',
@@ -222,6 +234,18 @@ test.each([
     'BufferedReader r = Files.newBufferedReader(Path.of("x")); Files.writeString(Path.of("x"), "new"); System.out.println(r.readLine());',
     { x: 'old' },
     'new\n',
+  ],
+  [
+    'a stream of lines consumed after the file is rewritten',
+    'java.util.stream.Stream<String> s = Files.lines(Path.of("x")); Files.writeString(Path.of("x"), "new"); System.out.println(s.findFirst().get());',
+    { x: 'old' },
+    'new\n',
+  ],
+  [
+    'a copy to a missing directory',
+    'Files.createDirectory(Path.of("d")); for (String from : new String[] { "x", "d" }) { try { Files.copy(Path.of(from), Path.of("missing/y")); } catch (IOException e) { System.out.println(e); } }',
+    { x: 'old' },
+    'java.nio.file.NoSuchFileException: missing/y\njava.nio.file.NoSuchFileException: missing/y\n',
   ],
   [
     'directories made again',

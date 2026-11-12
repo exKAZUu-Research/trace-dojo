@@ -89,7 +89,7 @@ export function readSourceOf(frame: Frame, value: Value): ReadSource {
   return readSources.get(value as JavaObject) as ReadSource;
 }
 
-/** Reads a text such as a file's contents as they were when it was opened, until it is closed. */
+/** Reads a text, such as a string or an open file's contents as they are when read, until it is closed. */
 export class TextSource implements ReadSource {
   private isClosed = false;
 

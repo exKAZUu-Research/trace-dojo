@@ -12,7 +12,7 @@ import {
   withNioErrors,
 } from './builtinIoSupport';
 import { addConstructor, addMethod, newString } from './builtinSupport';
-import { JAVA_WHITESPACE } from './builtinWrappers';
+import { decimalDigitValue, JAVA_WHITESPACE } from './builtinWrappers';
 import { type Frame, JavaThrow, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, DOUBLE, INT, type JavaType, LONG, VOID } from './types';
 import { type JavaObject, JavaString, type Value } from './values';
@@ -20,9 +20,13 @@ import { type JavaObject, JavaString, type Value } from './values';
 const WHITESPACE = new RegExp(JAVA_WHITESPACE, 'u');
 /** The line terminators of `Scanner.nextLine`. */
 const LINE_TERMINATOR = /\r\n|[\n\r\u2028\u2029\u0085]/g;
-/** An integer as `Scanner` reads one in an English locale, with an optional sign and optional thousands groups. */
-const INTEGER = /^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)$/;
-const DECIMAL = /^[+-]?(?:(?:(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|NaN|Infinity)$/;
+/**
+ * An integer as `Scanner` reads one in an English locale, with an optional sign and optional thousands groups, whose
+ * digits may be any Unicode decimal digits, such as the full-width digits of Japanese text.
+ */
+const INTEGER = /^[+-]?(?:\p{Nd}+|\p{Nd}{1,3}(?:,\p{Nd}{3})+)$/u;
+const DECIMAL =
+  /^[+-]?(?:(?:(?:\p{Nd}+|\p{Nd}{1,3}(?:,\p{Nd}{3})+)(?:\.\p{Nd}*)?|\.\p{Nd}+)(?:[eE][+-]?\p{Nd}+)?|NaN|Infinity)$/u;
 const BOOLEAN_TOKEN = /^(?:true|false)$/i;
 
 interface ScannerState {
@@ -93,7 +97,7 @@ function defineTokenMethods(context: IOContext, scanner: ClassInfo): void {
   addMethod(scanner, 'hasNext', [], BOOLEAN, false, (frame, receiver) => peekToken(frame, receiver) !== undefined);
   defineIntegerTokens(scanner, 'Int', INT, 32);
   defineIntegerTokens(scanner, 'Long', LONG, 64);
-  definePatternTokens(scanner, 'Double', DOUBLE, DECIMAL, (token) => Number(token.replaceAll(',', '')));
+  definePatternTokens(scanner, 'Double', DOUBLE, DECIMAL, (token) => Number(asciiDigitsOf(token)));
   definePatternTokens(scanner, 'Boolean', BOOLEAN, BOOLEAN_TOKEN, (token) => token.toLowerCase() === 'true');
 }
 
@@ -143,10 +147,19 @@ function definePatternTokens(
  */
 function integerOf(token: string, bits: number): { digits: string; value: bigint | undefined } | undefined {
   if (!INTEGER.test(token)) return undefined;
-  const digits = token.replaceAll(',', '');
+  const digits = asciiDigitsOf(token);
   const value = BigInt(digits);
   const bound = 1n << BigInt(bits - 1);
   return { digits, value: value < -bound || value >= bound ? undefined : value };
+}
+
+/** A numeric token without thousands separators, with its digits in ASCII, as `Character.digit` reads them. */
+function asciiDigitsOf(token: string): string {
+  return token
+    .replaceAll(',', '')
+    .replaceAll(/\p{Nd}/gu, (digit) =>
+      digit.length === 1 ? String(decimalDigitValue(digit.codePointAt(0) as number)) : digit
+    );
 }
 
 /**
@@ -163,15 +176,11 @@ function textOf(frame: Frame, receiver: Value): TextReader | undefined {
   }
 }
 
-/** Where the next token starts and ends, or `undefined` when only whitespace remains. */
-function tokenBounds(frame: Frame, text: TextReader): { start: number; end: number } | undefined {
+/** Where the next token starts and ends, which is an empty token when only whitespace remains. */
+function tokenBounds(frame: Frame, text: TextReader): { start: number; end: number } {
   const { text: source, position } = text;
   let start = position;
   while (start < source.length && WHITESPACE.test(source[start])) start++;
-  if (start >= source.length) {
-    frame.runtime.scanString(start - position);
-    return undefined;
-  }
   let end = start;
   while (end < source.length && !WHITESPACE.test(source[end])) end++;
   frame.runtime.scanString(end - position);
@@ -181,14 +190,19 @@ function tokenBounds(frame: Frame, text: TextReader): { start: number; end: numb
 function peekToken(frame: Frame, receiver: Value): string | undefined {
   const text = textOf(frame, receiver);
   const bounds = text && tokenBounds(frame, text);
-  return bounds && text.text.slice(bounds.start, bounds.end);
+  return bounds && bounds.start < bounds.end ? text.text.slice(bounds.start, bounds.end) : undefined;
 }
 
-/** Reads the next token as `parse` reads it, which leaves the token unread for the next call when it throws. */
+/**
+ * Reads the next token as `parse` reads it, skipping the whitespace before it in any case, as Java's scanner does,
+ * though a token `parse` throws for stays unread for the next call.
+ */
 function takeToken(frame: Frame, receiver: Value, parse: (token: string) => Value): Value {
   const text = textOf(frame, receiver);
-  const bounds = text && tokenBounds(frame, text);
-  if (!text || !bounds) return throwBuiltin(frame, 'NoSuchElementException');
+  if (!text) return throwBuiltin(frame, 'NoSuchElementException');
+  const bounds = tokenBounds(frame, text);
+  text.position = bounds.start;
+  if (bounds.start === bounds.end) return throwBuiltin(frame, 'NoSuchElementException');
   const value = parse(text.text.slice(bounds.start, bounds.end));
   text.position = bounds.end;
   return value;

@@ -401,8 +401,11 @@ function defineFileReads(context: IOContext, files: ClassInfo, { path }: FileTyp
     newList(frame, linesOf(frame, readText(frame, file)))
   );
   addStatic(context, files, 'lines', [path.type], classType(stream, stringType), (frame, _, [file]) => {
-    const lines = linesOf(frame, readText(frame, file));
-    return createStream(frame, streamImpl, () => lines[Symbol.iterator](), lines);
+    // The file opens now, and its lines are read as the stream consumes them.
+    const reader = openText(frame, file);
+    return createStream(frame, streamImpl, function* () {
+      for (let line = reader.readLine(); line !== undefined; line = reader.readLine()) yield newString(frame, line);
+    });
   });
   const bufferedReader = classOf(context, 'BufferedReader');
   addStatic(context, files, 'newBufferedReader', [path.type], bufferedReader.type, (frame, _, [file]) => {
@@ -602,14 +605,13 @@ function copyOrMove(frame: Frame, isMove: boolean, from: string, to: string, giv
     // The target is deleted, not overwritten, so that a handle still open on it writes to the old file.
     withNioErrors(frame, to, () => system.remove(to));
   }
-  withNioErrors(
-    frame,
-    from,
-    () => {
-      if (isMove) system.rename(from, to);
-      else if (kind === 'directory') system.createDirectory(to, false);
-      else system.open(to, { create: 'exclusive', truncate: false, append: false }).write(system.readFile(from));
-    },
-    to
-  );
+  // A move fails as a rename of both paths, and a copy as the creation of its target.
+  if (isMove) withNioErrors(frame, from, () => system.rename(from, to), to);
+  else if (kind === 'directory') withNioErrors(frame, to, () => system.createDirectory(to, false));
+  else {
+    const content = withNioErrors(frame, from, () => system.readFile(from));
+    withNioErrors(frame, to, () =>
+      system.open(to, { create: 'exclusive', truncate: false, append: false }).write(content)
+    );
+  }
 }
