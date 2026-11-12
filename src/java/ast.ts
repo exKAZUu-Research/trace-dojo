@@ -125,6 +125,8 @@ export interface MethodDeclaration extends Span {
   parameters: Parameter[];
   /** The type of a receiver parameter such as `Main this`, which only names the type of `this`. */
   receiverType?: TypeSyntax;
+  /** The class name before `.this` in a receiver parameter such as `Outer Outer.this`. */
+  receiverQualifier?: string;
   throwsTypes: TypeSyntax[];
   body: Block | undefined;
 }
@@ -138,6 +140,8 @@ export interface ConstructorDeclaration extends Span {
   parameters: Parameter[];
   /** The type of a receiver parameter such as `Outer Outer.this`, which an inner class's constructor may write. */
   receiverType?: TypeSyntax;
+  /** The class name before `.this` in a receiver parameter such as `Outer Outer.this`. */
+  receiverQualifier?: string;
   throwsTypes: TypeSyntax[];
   explicitCall: ExplicitConstructorCall | undefined;
   /** The statements before the explicit constructor call, which may not use the object under construction (JEP 513). */

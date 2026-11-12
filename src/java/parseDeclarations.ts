@@ -303,9 +303,15 @@ function convertParameters(node: Node): Parameter[] {
   });
 }
 
-function withReceiverType(node: Node): { receiverType?: TypeSyntax } {
+function withReceiverType(node: Node): { receiverType?: TypeSyntax; receiverQualifier?: string } {
   const receiverType = convertReceiverType(node);
-  return receiverType ? { receiverType } : {};
+  if (!receiverType) return {};
+  const receiver = namedChildren(node).find((parameter) => parameter.type === 'receiver_parameter') as Node;
+  const typeNode = namedChildren(receiver).find((child) => !isAnnotation(child)) as Node;
+  // What follows the type is `this` or `Name.this`.
+  const name = receiver.text.slice(typeNode.endIndex - receiver.startIndex).replaceAll(/\s/g, '');
+  const receiverQualifier = name.includes('.') ? name.split('.').at(-2) : undefined;
+  return receiverQualifier ? { receiverType, receiverQualifier } : { receiverType };
 }
 
 export function varargsNotLastError(node: Node): CompileError {

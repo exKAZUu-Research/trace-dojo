@@ -640,9 +640,10 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     BOOLEAN,
     false,
     (frame, receiver, [filter]) => {
-      if (filter === undefined) throwBuiltin(frame, 'NullPointerException');
-      // Collections' empty lists and sets and nCopies reject only a removal, as Collection.removeIf's default does.
+      // Collections' empty lists and sets and nCopies reject only a removal, as Collection.removeIf's default does;
+      // the other unmodifiable collections reject every call before looking at the predicate.
       if (!removesOnlyMatches.has((receiver as JavaObject).cls)) checkModifiable(frame, receiver, false);
+      if (filter === undefined) throwBuiltin(frame, 'NullPointerException');
       return removeMatching(
         frame,
         receiver,

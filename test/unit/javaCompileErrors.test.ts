@@ -1454,6 +1454,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main<T> {\n  void f(Main<String> this) {}\n  public static void main(String[] args) {}\n}',
   ],
   [
+    'receiver-of-an-inner-constructor-without-its-qualifier',
+    false,
+    'class Outer {\n  class Inner {\n    Inner(Outer this) {}\n  }\n}\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-of-an-inner-constructor-named-by-its-own-class',
+    false,
+    'class Outer {\n  class Inner {\n    Inner(Outer Inner.this) {}\n  }\n}\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-of-a-method-named-by-another-class',
+    false,
+    'class Main {\n  int f(Main Other.this) { return 1; }\n  public static void main(String[] args) {}\n}',
+  ],
+  [
     'annotation-without-targets-on-a-type-use',
     false,
     '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',

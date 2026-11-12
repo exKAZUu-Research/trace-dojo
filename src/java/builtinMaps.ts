@@ -389,10 +389,14 @@ function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo
     if (other === receiver) return true;
     if (!(other instanceof JavaObject) || !other.store || !frame.runtime.isInstance(other, mapClass)) return false;
     const { entries } = storeOf(receiver);
+    const map = receiver as JavaObject;
+    const expectedModCount = map.modCount;
     return (
       entries.length === other.store.entries.length &&
-      // AbstractMap.equals reads each key through the other map's get, which an access-ordered map records.
-      entries.every((entry) => {
+      // AbstractMap.equals reads each key through the other map's get, which an access-ordered map records, while
+      // its entry iterator fails once a read through a view of the same map reorders it.
+      [...entries].every((entry) => {
+        if (map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
         const found = accessedEntry(frame, other, entry.key);
         return found !== undefined && javaEquals(frame, entry.value, found.value);
       })

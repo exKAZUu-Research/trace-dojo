@@ -525,6 +525,15 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     const type = this.withInstanceTypeVariables(cls, true, () => this.resolveType(member.receiverType as TypeSyntax));
     if (!expected) this.error(member, 'ここでは this を引数に書けません。');
     if (!sameType(type, thisTypeOf(expected))) this.error(member, `this の型は ${expected.name} にしてください。`);
+    // A constructor names its enclosing instance as `Outer.this`; a method may write `this` or its own `Name.this`.
+    const qualifier = member.receiverQualifier;
+    if (
+      member.kind === 'constructor'
+        ? qualifier !== simpleNameOf(expected)
+        : qualifier !== undefined && qualifier !== simpleNameOf(cls)
+    ) {
+      this.error(member, `this の名前は ${simpleNameOf(expected)}.this にしてください。`);
+    }
   }
 
   /** Rejects `@SafeVarargs` on a method or constructor that is not of variable arity or may be overridden. */
@@ -754,4 +763,8 @@ function leavesMethodsToConstants(declaration: ClassDeclaration): boolean {
     constants.some((constant) => constant.body) &&
     declaration.members.some((member) => member.kind === 'method' && member.modifiers.isAbstract)
   );
+}
+
+function simpleNameOf(cls: ClassInfo): string {
+  return cls.name.split(/[.$]/).at(-1) as string;
 }

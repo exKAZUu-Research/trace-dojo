@@ -1408,6 +1408,38 @@ class Main {
   }
 });
 
+test('Java accepts qualified receiver names, rejects removeIf on immutable collections first, and fails map equality that reorders its own entries, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  int v = 2;
+  int f(Main Main.this) { return v; }
+  class Inner { Inner(Main Main.this) {} int g(Main.Inner Inner.this) { return v; } }
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    Main m = new Main();
+    System.out.println(m.f() + m.new Inner().g());
+    t("of", () -> List.of(1).removeIf(null));
+    t("single", () -> Collections.singleton(1).removeIf(null));
+    t("wrap", () -> Collections.unmodifiableList(new ArrayList<Integer>()).removeIf(null));
+    t("empty", () -> Collections.<Integer>emptyList().removeIf(null));
+    Map<Integer, Integer> a = new LinkedHashMap<>(16, .75f, true); a.put(1, 1); a.put(2, 2);
+    t("eq2", () -> System.out.println(a.equals(Collections.unmodifiableMap(a))));
+    a.put(3, 3);
+    t("eq3", () -> System.out.println(a.equals(Collections.unmodifiableMap(a))));
+    System.out.println(a);
+    Map<Integer, Integer> b = new LinkedHashMap<>(16, .75f, true); b.put(1, 1);
+    System.out.println(b.equals(Collections.unmodifiableMap(b)) + " " + b.equals(b));
+  }
+}`,
+      '4\nof java.lang.UnsupportedOperationException\nsingle java.lang.UnsupportedOperationException\nwrap java.lang.UnsupportedOperationException\nempty java.lang.NullPointerException\neq2 java.util.ConcurrentModificationException\neq3 java.util.ConcurrentModificationException\n{1=1, 3=3, 2=2}\ntrue true\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
