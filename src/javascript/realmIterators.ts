@@ -68,6 +68,8 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
       );
     }
     const value = iterator.next();
+    // A builtin iterator stays done, so what it read is no longer reachable through it.
+    if (value === DONE) iterator.source = undefined;
     return iteratorResult(runtime, value === DONE ? undefined : value, value === DONE);
   });
   builder.realm.hostIteratorMethods.add(next);

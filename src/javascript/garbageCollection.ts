@@ -66,7 +66,8 @@ function pushObjectReferences(
   // An async generator's queued calls keep what they resume it with until it answers them.
   for (const { resume, promise } of object.asyncGenerator?.queue ?? []) pending.push(resume.value, promise);
   const suspended = object.generator ?? object.asyncGenerator;
-  if (suspended) {
+  // A completed generator never resumes its frame.
+  if (suspended && suspended.status !== 'completed') {
     const { frame } = suspended;
     pending.push(frame.scope);
     for (const value of frame.temporaries) pending.push(value);
