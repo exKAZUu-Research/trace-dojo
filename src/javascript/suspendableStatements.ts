@@ -176,7 +176,14 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     for (let disposable = disposables.pop(); disposable; disposable = disposables.pop()) {
       const { value, method, isAsync, awaitsResult } = disposable;
       try {
-        const disposed = method ? runtime.call(method, value, []) : undefined;
+        let disposed: Value;
+        try {
+          disposed = method ? runtime.call(method, value, []) : undefined;
+        } catch (error) {
+          // A Symbol.dispose fallback of `await using` runs wrapped in an async function, so its throw is awaited too.
+          if (isAsync && !awaitsResult && error instanceof JsThrow) yield new Awaiting(undefined);
+          throw error;
+        }
         if (isAsync) resumedValue(yield new Awaiting(awaitsResult ? disposed : undefined));
       } catch (error) {
         if (!(error instanceof JsThrow)) throw error;

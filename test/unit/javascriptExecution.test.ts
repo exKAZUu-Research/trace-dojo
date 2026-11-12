@@ -1049,6 +1049,12 @@ f().then(g);`,
     'closing flatMap helpers whose inner iterator fails to close',
     `function* outer(){try {yield 1;} finally {console.log("outer close")}} function* inner(){try {yield 2;} finally {throw Error("inner close")}} const it=outer().flatMap(()=>inner()); console.log(it.next().value); try {it.return()} catch(e){console.log(e.message)}`,
   ],
+  [
+    'throwing disposers of await using',
+    `async function f() { try { { await using x = { [Symbol.dispose]() { console.log('dispose'); throw 'err'; } }; } } catch (e) { console.log('caught', e); } }
+async function g() { try { { await using x = { [Symbol.asyncDispose]() { console.log('adispose'); throw 'aerr'; } }; } } catch (e) { console.log('caught', e); } }
+f(); g(); queueMicrotask(() => console.log('micro')); console.log('end');`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
