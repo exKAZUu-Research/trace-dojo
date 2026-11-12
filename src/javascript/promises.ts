@@ -295,7 +295,8 @@ export function startAsyncFunction(runtime: Runtime, frame: Frame, body: Steps<B
     // An async function's body suspends only at an `await`.
     if (!(result.value instanceof Awaiting)) throw new Error('An async function body suspended without an await');
     const awaited = result.value.value;
-    awaitValue(runtime, awaited, [promise, frame.scope, ...frame.temporaries], (next) =>
+    // The frame's live temporaries, not a copy, so values the body has since let go of are not kept.
+    awaitValue(runtime, awaited, [promise, frame.scope, frame.temporaries], (next) =>
       inFrame(runtime, frame, () => advance(next))
     );
   };

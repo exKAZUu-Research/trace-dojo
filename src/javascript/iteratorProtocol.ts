@@ -37,7 +37,20 @@ export function asyncIteratorOf(runtime: Runtime, iterable: Value): ProtocolIter
     );
   }
   const iterator = iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator);
-  return iterationOf(runtime, iterator, (result, method) => awaitedResult(runtime, iterator, result, method));
+  const iteration = iterationOf(runtime, iterator, (result, method) =>
+    awaitedResult(runtime, iterator, result, method)
+  );
+  // A sync `next` that throws closes the iterator before the error rejects, as V8's async-from-sync iterator does.
+  const { next } = iteration;
+  iteration.next = (...args) => {
+    try {
+      return next(...args);
+    } catch (error) {
+      if (error instanceof JsThrow) closeQuietly(runtime, iterator);
+      throw error;
+    }
+  };
+  return iteration;
 }
 
 /**

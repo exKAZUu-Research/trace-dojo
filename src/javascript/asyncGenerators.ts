@@ -117,7 +117,8 @@ function advance(runtime: Runtime, state: AsyncGeneratorState, resume: Resume): 
   } finally {
     runtime.popFrame();
   }
-  const roots = [state.object, frame.scope, ...frame.temporaries];
+  // The frame's live temporaries, not a copy, so values the body has since let go of are not kept.
+  const roots = [state.object, frame.scope, frame.temporaries];
   if (result.done) {
     state.status = 'completed';
     answer(runtime, state, result.value?.kind === 'return' ? result.value.value : undefined, false, true);

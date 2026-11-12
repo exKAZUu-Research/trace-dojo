@@ -1021,6 +1021,10 @@ const y = g(); y.next(); console.log(y.return(5));
 async function* f() { yield* x(); }
 (async () => { try { await f().next(); } catch (e) { console.log(e); } try { for await (const v of x()) {} } catch (e) { console.log('loop', e); } })();`,
   ],
+  [
+    'sync iterators whose next throws under for await',
+    `const x={[Symbol.iterator](){return{next(){throw "x"},return(){console.log("closed");return {}}}}};(async()=>{try{for await(const v of x){}}catch(e){console.log(e)}})()`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
