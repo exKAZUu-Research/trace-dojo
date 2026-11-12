@@ -140,15 +140,14 @@ method(dequeClass, 'popleft', 'none', 0, 0, (self) => {
   if (dequeOf(self).length === 0) throw pyError('IndexError', 'pop from an empty deque');
   return dequeOf(self).popLeft();
 });
+const MAX_SSIZE = (1n << 63n) - 1n;
 method(dequeClass, 'rotate', 'expected', 0, 1, (self, [steps]) => {
-  const items = dequeOf(self).editableItems;
-  if (items.length === 0) return None;
-  const count = Number(toIndex(steps ?? 1n)) % items.length;
-  const shift = (count + items.length) % items.length;
-  if (shift) {
-    currentRuntime().spend(Math.ceil(items.length / 64));
-    dequeOf(self).replaceItems([...items.slice(items.length - shift), ...items.slice(0, items.length - shift)]);
+  const deque = dequeOf(self);
+  const count = toIndex(steps ?? 1n);
+  if (count > MAX_SSIZE || count < -MAX_SSIZE - 1n) {
+    throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
   }
+  if (deque.length > 0) deque.rotate(Number(count % BigInt(deque.length)));
   return None;
 });
 method(dequeClass, 'clear', 'none', 0, 0, (self) => {

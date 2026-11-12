@@ -2,7 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
-import { asPythonError, chargeSlots, refuseOversizedString } from './runtimeContext';
+import { asPythonError, chargeSlots, chargeStep, refuseOversizedString } from './runtimeContext';
 import type { SetTable } from './setTable';
 
 /**
@@ -541,6 +541,31 @@ export class PyDeque extends PyGrowableSequence {
     if (this.front === 0) this.reserveFront();
     this.front--;
     this.storage[this.front] = item;
+  }
+
+  /**
+   * Rotates the items `steps` places to the right (left when negative), moving the items of the shorter side across one
+   * at a time, as CPython's deque does.
+   */
+  rotate(steps: number): void {
+    const { length } = this;
+    let shift = steps;
+    if (shift > length / 2) shift -= length;
+    else if (shift < -length / 2) shift += length;
+    for (; shift > 0; shift--) {
+      chargeStep();
+      const item = this.storage.pop() as PyValue;
+      if (this.front === 0) this.reserveFront();
+      this.front--;
+      this.storage[this.front] = item;
+    }
+    for (; shift < 0; shift++) {
+      chargeStep();
+      this.storage.push(this.storage[this.front] as PyValue);
+      this.storage[this.front] = undefined as unknown as PyValue;
+      this.front++;
+    }
+    if (this.front >= this.length) this.pack();
   }
 
   private reserveFront(): void {

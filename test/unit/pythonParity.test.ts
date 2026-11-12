@@ -273,6 +273,10 @@ test.each([
     'peeking and draining a deque',
     'from collections import deque\nq = deque(range(50000))\ns = 0\nwhile q:\n    s += q[0]\n    q.popleft()',
   ],
+  [
+    'rotating a large deque one place at a time both ways',
+    'from collections import deque\nd = deque(range(100000))\nfor i in range(10000):\n    d.rotate(1)\n    d.rotate(-1)\nif d[0] != 0:\n    raise ValueError(d[0])',
+  ],
 ])('%s runs within the limits', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
