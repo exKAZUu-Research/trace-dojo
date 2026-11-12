@@ -34,7 +34,7 @@ export function defineBigIntBuiltins(builder: RealmBuilder): void {
   });
   builder.method(bigintPrototype, 'toLocaleString', 0, ({ runtime, thisValue, args }) => {
     const value = thisBigInt(runtime, thisValue, 'toLocaleString');
-    const locales = (hostLocales(runtime, args[0]) ?? 'en-US') as Intl.LocalesArgument;
+    const locales = (args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as Intl.LocalesArgument;
     const options = hostOptions(runtime, args[1]) as BigIntToLocaleStringOptions;
     return throwingHostErrors(runtime, () => value.toLocaleString(locales, options));
   });

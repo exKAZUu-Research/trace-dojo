@@ -1171,6 +1171,10 @@ try { d.toLocaleString('en-US', { get timeZone() { throw new Error('tz'); } }); 
 for (const v of [Symbol.iterator, null, 1n, 123, undefined, {}, [1], 'has', true]) { try { g().map(v); } catch (e) { console.log(e.message); } }
 for (const v of ['abc', undefined, NaN, -1, -0.5, Symbol()]) { try { g().take(v); } catch (e) { console.log(e.message); } try { g().drop(v); } catch (e) { console.log(e.message); } }`,
   ],
+  [
+    'null locales of toLocaleString',
+    `try{console.log((123n).toLocaleString(null))}catch(e){console.log(e.name,e.message)} console.log((123n).toLocaleString(undefined)); try{console.log(new Date(0).toLocaleString(null))}catch(e){console.log(e.name,e.message)}`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

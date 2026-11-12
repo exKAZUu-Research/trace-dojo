@@ -136,6 +136,8 @@ function defineSetters(builder: RealmBuilder, prototype: JsObject): void {
 
 /** A host value for the locales argument of a `toLocale...String` method: a tag, or a list of them. */
 export function hostLocales(runtime: Runtime, value: Value): unknown {
+  // CanonicalizeLocaleList converts a null locale list to an object, which the host reports in its own words.
+  if (value === null) runtime.throwError('TypeError', 'Cannot convert undefined or null to object');
   if (!(value instanceof JsObject)) return value;
   const length = Math.trunc(runtime.toNumber(runtime.get(value, 'length'))) || 0;
   runtime.scan(length);
