@@ -82,7 +82,7 @@ function resumeNext(runtime: Runtime, state: AsyncGeneratorState): void {
     if (resume.kind === 'return') {
       // Returning from a completed generator awaits the value first.
       state.status = 'awaitingReturn';
-      awaitValue(runtime, resume.value, [request.promise], (settled) => {
+      awaitValue(runtime, resume.value, [state.object, request.promise], (settled) => {
         state.status = 'completed';
         answer(
           runtime,

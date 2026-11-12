@@ -7,29 +7,36 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
   const reached = new Set<TurtleState>();
   const visited = new Set<JsObject | Scope>();
   const pending = [...roots];
-  // A WeakMap's value is reachable only once its key is, which may happen after the map itself is scanned.
-  const ephemerons: [unknown, unknown][] = [];
+  // A WeakMap's value is reachable only once its key is, which may be found after the map: values wait by key.
+  const waiting = new Map<unknown, unknown[]>();
+  const ephemeron = (key: unknown, value: unknown): void => {
+    if (!(key instanceof JsObject) || visited.has(key)) {
+      pending.push(value);
+      return;
+    }
+    const values = waiting.get(key);
+    if (values) values.push(value);
+    else waiting.set(key, [value]);
+  };
   let scanned = 0;
-  for (;;) {
-    while (pending.length > 0) {
-      const item = pending.pop();
-      if (!(item instanceof JsObject || item instanceof Scope) || visited.has(item)) continue;
-      visited.add(item);
-      scanned++;
-      if (item instanceof Scope) {
-        pushScopeReferences(pending, item);
-        continue;
-      }
-      if (item.turtle) reached.add(item.turtle);
-      scanned += pushObjectReferences(pending, ephemerons, item);
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (!(item instanceof JsObject || item instanceof Scope) || visited.has(item)) continue;
+    visited.add(item);
+    scanned++;
+    if (item instanceof Scope) {
+      pushScopeReferences(pending, item);
+      continue;
     }
-    const ready = ephemerons.filter(([key]) => !(key instanceof JsObject) || visited.has(key));
-    if (ready.length === 0) return { reached, scanned };
-    for (const entry of ready) {
-      ephemerons.splice(ephemerons.indexOf(entry), 1);
-      pending.push(entry[1]);
+    const released = waiting.get(item);
+    if (released) {
+      waiting.delete(item);
+      for (const value of released) pending.push(value);
     }
+    if (item.turtle) reached.add(item.turtle);
+    scanned += pushObjectReferences(pending, ephemeron, item);
   }
+  return { reached, scanned };
 }
 
 function pushScopeReferences(pending: unknown[], scope: Scope): void {
@@ -43,7 +50,11 @@ function pushScopeReferences(pending: unknown[], scope: Scope): void {
 
 /** Pushes what an object refers to, returning the number of array elements among them. */
 // code-gauge-allow functionCognitiveComplexity 19 -- Lists what each kind of builtin state refers to, one branch per kind.
-function pushObjectReferences(pending: unknown[], ephemerons: [unknown, unknown][], object: JsObject): number {
+function pushObjectReferences(
+  pending: unknown[],
+  ephemeron: (key: unknown, value: unknown) => void,
+  object: JsObject
+): number {
   pending.push(object.proto);
   for (const property of object.properties.values()) pushProperty(pending, property);
   for (const property of object.privateMembers?.values() ?? []) pushProperty(pending, property);
@@ -60,7 +71,7 @@ function pushObjectReferences(pending: unknown[], ephemerons: [unknown, unknown]
     for (const reaction of object.promise.reactions) for (const root of reaction.roots) pending.push(root);
   }
   pending.push(object.hostIterator?.source);
-  if (object.collection) pushCollectionReferences(pending, ephemerons, object.collection);
+  if (object.collection) pushCollectionReferences(pending, ephemeron, object.collection);
   if (object instanceof JsFunction) {
     if (object.behavior.kind !== 'native') pending.push(object.behavior.scope, object.behavior.homeObject);
     for (const value of object.captured) pending.push(value);
@@ -74,12 +85,12 @@ function pushObjectReferences(pending: unknown[], ephemerons: [unknown, unknown]
 /** Pushes the keys and values of a Map or Set, leaving out the keys of a WeakMap or WeakSet, which hold them weakly. */
 function pushCollectionReferences(
   pending: unknown[],
-  ephemerons: [unknown, unknown][],
+  ephemeron: (key: unknown, value: unknown) => void,
   collection: CollectionState
 ): void {
   for (const entry of collection.entries) {
     if (!entry) continue;
-    if (collection.isWeak) ephemerons.push([entry.key, entry.value]);
+    if (collection.isWeak) ephemeron(entry.key, entry.value);
     else pending.push(entry.key, entry.value);
   }
 }
