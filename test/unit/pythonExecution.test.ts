@@ -296,6 +296,7 @@ test.each([
   ['a type hint on a name declared global', 'def f():\n    global x\n    x: int = 1', 2],
   ['a Python 2 print statement', "print 'x'", 0],
   ['a Python 2 long literal', 'x = 1\ny = 1_0L', 1],
+  ['a raise with a cause but no exception', 'try:\n    x = 1\nexcept ValueError as e:\n    raise from e', 3],
   ['a Python 2 raise with a comma', "try:\n    raise ValueError, 'x'\nexcept TypeError:\n    pass", 1],
   ['a Python 2 backtick repr', 'x = 1\ny = `x` + "b"', 1],
   ['a * splat in a mapping pattern', "match {}:\n    case {'k': 1, *a}:\n        pass", 1],
