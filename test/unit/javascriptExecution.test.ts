@@ -354,7 +354,7 @@ test.each([
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: execFileSync('node', ['-e', source], { encoding: 'utf8' }),
+    stdout: runOnNode(source),
   });
 });
 
@@ -665,6 +665,12 @@ console.dir('str'); console.dir({ deep: { a: { b: { c: {} } } } }, { depth: null
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: execFileSync('node', ['-e', source], { encoding: 'utf8' }),
+    stdout: runOnNode(source),
   });
 });
+
+/** What Node.js prints for a script, without the colors that a FORCE_COLOR in the environment (as on CI) adds. */
+function runOnNode(source: string): string {
+  const { FORCE_COLOR: _, ...env } = process.env;
+  return execFileSync('node', ['-e', source], { encoding: 'utf8', env: { ...env, NO_COLOR: '1' } });
+}
