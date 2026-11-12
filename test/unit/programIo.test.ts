@@ -308,6 +308,18 @@ test.each([
     'java.io.IOException: Stream closed java.io.IOException: Stream closed\n',
   ],
   [
+    'a buffered reader that keeps what it read ahead, and an unbuffered stream that reads the file as it is',
+    String.raw`BufferedReader r = new BufferedReader(new FileReader("x")); System.out.println(r.readLine()); FileInputStream in = new FileInputStream("y"); Files.writeString(Path.of("x"), "one\nNEW\n"); Files.writeString(Path.of("y"), "NEW"); System.out.println(r.readLine() + " " + (char) in.read());`,
+    { x: 'one\nold\n', y: 'old' },
+    'one\nold N\n',
+  ],
+  [
+    'a reader wrapped by a buffered reader that read ahead',
+    'StringReader s = new StringReader("ab"); BufferedReader b = new BufferedReader(s); b.read(); System.out.println(s.read() + " " + (char) b.read() + " " + b.skip(5));',
+    {},
+    '-1 b 0\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},

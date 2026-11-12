@@ -119,6 +119,66 @@ export class TextSource implements ReadSource {
   }
 }
 
+/**
+ * A reader's buffer, which reads ahead from its source when it first needs text and whenever it has read all it
+ * holds, as `BufferedReader` and the decoder of `InputStreamReader` do: a chunk of `chunkSize` chars at a time, or a
+ * line at a time from standard input, as from a console where each line arrives when it is entered. What it has read
+ * ahead is its own, so that another reader of the source does not read it and a later write to a file does not change
+ * it.
+ */
+export class ReadAheadSource implements ReadSource {
+  private readonly text: TextReader;
+  private isClosed = false;
+  private buffered = '';
+
+  constructor(
+    frame: Frame,
+    private readonly inner: ReadSource,
+    chunkSize = BUFFER_SIZE
+  ) {
+    this.text = frame.runtime.io.partReader(
+      () => this.buffered,
+      () => this.readAhead(frame, chunkSize)
+    );
+  }
+
+  reader(frame: Frame): TextReader {
+    if (this.isClosed) throwBuiltin(frame, 'IOException', 'Stream closed');
+    return this.text;
+  }
+
+  isReady(frame: Frame): boolean {
+    const { position } = this.reader(frame);
+    return position < this.buffered.length || this.inner.isReady(frame);
+  }
+
+  close(frame: Frame): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
+    this.inner.close(frame);
+  }
+
+  private readAhead(frame: Frame, chunkSize: number): boolean {
+    const source = this.inner.reader(frame);
+    if (source.isAtEnd) return false;
+    const { text, position } = source;
+    let end = Math.min(position + chunkSize, text.length);
+    if (this.inner === STANDARD_INPUT) {
+      const terminator = /\r\n|[\n\r]/g;
+      terminator.lastIndex = position;
+      end = terminator.test(text) ? terminator.lastIndex : text.length;
+    }
+    source.position = end;
+    const part = text.slice(position, end);
+    // Read text no reader will read again is dropped, keeping the buffer within one string.
+    const kept = this.buffered.slice(this.text.position);
+    frame.runtime.allocateString(frame, kept.length + part.length, part.length);
+    this.buffered = `${kept}${part}`;
+    this.text.position = 0;
+    return true;
+  }
+}
+
 /** Standard input, which every reader of `System.in` shares, so that closing one closes it for all. */
 export const STANDARD_INPUT: ReadSource = {
   reader: (frame) => {

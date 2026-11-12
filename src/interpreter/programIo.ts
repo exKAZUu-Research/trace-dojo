@@ -60,6 +60,11 @@ export class ProgramIO {
     return new TextReader(() => text, this.budget);
   }
 
+  /** A reader of a text that arrives in parts, which `refill` adds when the reader has read the text so far. */
+  partReader(source: () => string, refill: () => boolean): TextReader {
+    return new TextReader(source, this.budget, refill);
+  }
+
   output(): ProgramOutput {
     return { stdout: this.stdout.text, stderr: this.stderr.text, finalFiles: this.files.snapshot() };
   }
@@ -91,18 +96,27 @@ export class OutputChannel {
 export class TextReader {
   position = 0;
 
-  /** @param source The text as it is now, which a file's writes may change while it is read. */
+  /**
+   * @param source The text as it is now, which a file's writes may change while it is read.
+   * @param refill Adds more text to the source when the reader has read all of it, telling whether it added any, for
+   * a reader that reads ahead from another one in parts.
+   */
   constructor(
     private readonly source: () => string,
-    private readonly budget: ExecutionBudget
+    private readonly budget: ExecutionBudget,
+    private readonly refill?: () => boolean
   ) {}
 
   get text(): string {
     return this.source();
   }
 
+  /** Whether no text remains, after refilling the source when it can. */
   get isAtEnd(): boolean {
-    return this.position >= this.text.length;
+    while (this.position >= this.text.length) {
+      if (!this.refill?.()) return true;
+    }
+    return false;
   }
 
   /** The next code unit, or `undefined` at the end. */
@@ -115,18 +129,27 @@ export class TextReader {
   /** The text up to the next line terminator (`\n`, `\r\n`, or `\r`), consuming the terminator too. */
   readLine(): string | undefined {
     if (this.isAtEnd) return undefined;
-    const { text } = this;
-    const match = /\r\n?|\n/g;
-    match.lastIndex = this.position;
-    const terminator = match.exec(text);
-    const end = terminator ? terminator.index : text.length;
-    const line = text.slice(this.position, end);
-    this.position = terminator ? end + terminator[0].length : end;
-    this.budget.spend(Math.ceil((line.length + 1) / 64));
-    return line;
+    for (;;) {
+      const { text } = this;
+      const match = /\r\n?|\n/g;
+      match.lastIndex = this.position;
+      const terminator = match.exec(text);
+      // A line, or a `\r` that a `\n` may follow, that reaches the end of the text may continue in the next part.
+      const isComplete = terminator && (terminator[0] !== '\r' || terminator.index + 1 < text.length);
+      if (isComplete || !this.refill?.()) {
+        const end = terminator ? terminator.index : text.length;
+        const line = text.slice(this.position, end);
+        this.position = terminator ? end + terminator[0].length : end;
+        this.budget.spend(Math.ceil((line.length + 1) / 64));
+        return line;
+      }
+    }
   }
 
   readRest(): string {
+    while (this.refill?.()) {
+      // Each refill adds a part until none remains.
+    }
     const { text } = this;
     const rest = text.slice(this.position);
     this.position = text.length;

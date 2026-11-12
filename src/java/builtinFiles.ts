@@ -16,6 +16,7 @@ import {
   parentPathOf,
   pathTextOf,
   pathTexts,
+  ReadAheadSource,
   readSources,
   type Sink,
   TextSource,
@@ -400,8 +401,8 @@ function defineFileReads(context: IOContext, files: ClassInfo, { path }: FileTyp
     newList(frame, linesOf(frame, readText(frame, file)))
   );
   addStatic(context, files, 'lines', [path.type], classType(stream, stringType), (frame, _, [file]) => {
-    // The file opens now, and its lines are read as the stream consumes them.
-    const reader = openText(frame, file);
+    // The file opens now, and a buffered reader reads it as the stream consumes its lines.
+    const reader = new ReadAheadSource(frame, new TextSource(openText(frame, file))).reader(frame);
     return createStream(frame, streamImpl, function* () {
       for (let line = reader.readLine(); line !== undefined; line = reader.readLine()) yield newString(frame, line);
     });
@@ -409,7 +410,7 @@ function defineFileReads(context: IOContext, files: ClassInfo, { path }: FileTyp
   const bufferedReader = classOf(context, 'BufferedReader');
   addStatic(context, files, 'newBufferedReader', [path.type], bufferedReader.type, (frame, _, [file]) => {
     const reader = frame.runtime.allocateObject(frame, bufferedReader);
-    readSources.set(reader, new TextSource(openText(frame, file)));
+    readSources.set(reader, new ReadAheadSource(frame, new TextSource(openText(frame, file))));
     return reader;
   });
 }

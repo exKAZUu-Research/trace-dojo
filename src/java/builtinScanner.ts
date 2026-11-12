@@ -6,6 +6,7 @@ import {
   type IOContext,
   openFileReader,
   pathTextOf,
+  ReadAheadSource,
   type ReadSource,
   readSourceOf,
   TextSource,
@@ -74,7 +75,11 @@ export function defineScanner(context: IOContext, closeable: ClassInfo): void {
 function defineScannerConstructors(context: IOContext, scanner: ClassInfo): void {
   for (const name of ['InputStream', 'Readable']) {
     addConstructor(scanner, [classOf(context, name).type], (frame, receiver, [input]) => {
-      create(receiver, readSourceOf(frame, input));
+      // A scanner reads a stream through a reader, as Java's wraps it in an InputStreamReader.
+      create(
+        receiver,
+        name === 'InputStream' ? new ReadAheadSource(frame, readSourceOf(frame, input)) : readSourceOf(frame, input)
+      );
     });
   }
   addConstructor(scanner, [context.stringType], (frame, receiver, [text]) => {
@@ -82,12 +87,13 @@ function defineScannerConstructors(context: IOContext, scanner: ClassInfo): void
     create(receiver, new TextSource(frame.runtime.io.textReader(text.value)));
   });
   const fromFile = addConstructor(scanner, [classOf(context, 'File').type], (frame, receiver, [file]) => {
-    create(receiver, new TextSource(openFileReader(frame, filePathOf(frame, file))));
+    create(receiver, new ReadAheadSource(frame, new TextSource(openFileReader(frame, filePathOf(frame, file)))));
   });
   fromFile.thrownTypes = [classOf(context, 'FileNotFoundException')];
   const fromPath = addConstructor(scanner, [classOf(context, 'Path').type], (frame, receiver, [path]) => {
     const text = pathTextOf(frame, path);
-    create(receiver, new TextSource(withNioErrors(frame, text, () => frame.runtime.io.openReader(text))));
+    const reader = withNioErrors(frame, text, () => frame.runtime.io.openReader(text));
+    create(receiver, new ReadAheadSource(frame, new TextSource(reader)));
   });
   fromPath.thrownTypes = [context.ioException];
 }
@@ -188,11 +194,11 @@ function readAhead(frame: Frame, state: ScannerState): boolean {
   let reader: TextReader;
   try {
     reader = state.source.reader(frame);
+    if (reader.isAtEnd) return false;
   } catch (error) {
     if (error instanceof JavaThrow) return false;
     throw error;
   }
-  if (reader.isAtEnd) return false;
   const { text, position } = reader;
   const terminator = /\r\n|[\n\r]/g;
   terminator.lastIndex = position;

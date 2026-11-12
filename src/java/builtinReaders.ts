@@ -1,11 +1,13 @@
 import type { TextReader } from '../interpreter/programIo';
 import {
+  BUFFER_SIZE,
   classOf,
   classType,
   defineIOInterface,
   filePathOf,
   type IOContext,
   openFileReader,
+  ReadAheadSource,
   readSourceOf,
   readSources,
   STANDARD_INPUT,
@@ -36,12 +38,12 @@ export function defineReaders(context: IOContext, closeable: ClassInfo): void {
   defineReaderMethods(context, reader);
   const inputStreamReader = context.registry.define('InputStreamReader', reader, 'java.io');
   addConstructor(inputStreamReader, [inputStream.type], (frame, receiver, [stream]) => {
-    readSources.set(receiver as JavaObject, readSourceOf(frame, stream));
+    readSources.set(receiver as JavaObject, new ReadAheadSource(frame, readSourceOf(frame, stream)));
   });
   const fileReader = context.registry.define('FileReader', inputStreamReader, 'java.io');
   const notFound = { takesAppend: false, thrown: classOf(context, 'FileNotFoundException') };
   defineFileOpeners(context, fileReader, notFound, (frame, receiver, path) => {
-    readSources.set(receiver as JavaObject, new TextSource(openFileReader(frame, path)));
+    readSources.set(receiver as JavaObject, new ReadAheadSource(frame, new TextSource(openFileReader(frame, path))));
   });
   defineStringReader(context, reader);
   defineBufferedReader(context, reader);
@@ -133,8 +135,13 @@ function defineReaderMethods(context: IOContext, reader: ClassInfo): void {
     addMethod(reader, 'skip', [LONG], LONG, false, (frame, receiver, [count]) => {
       if ((count as bigint) < 0n) throwBuiltin(frame, 'IllegalArgumentException', 'skip value is negative');
       const text = textOf(frame, receiver);
-      const skipped = Math.min(Number(count as bigint), text.text.length - text.position);
-      text.position += skipped;
+      let skipped = 0;
+      // A buffered reader refills as it skips past what it holds.
+      while (skipped < Number(count as bigint) && !text.isAtEnd) {
+        const step = Math.min(Number(count as bigint) - skipped, text.text.length - text.position);
+        text.position += step;
+        skipped += step;
+      }
       frame.runtime.scanString(skipped);
       return BigInt(skipped);
     })
@@ -203,8 +210,12 @@ function defineBufferedReader(context: IOContext, reader: ClassInfo): void {
     addConstructor(bufferedReader, parameterTypes, (frame, receiver, [inner, size]) => {
       if (size !== undefined && (size as number) <= 0)
         throwBuiltin(frame, 'IllegalArgumentException', 'Buffer size <= 0');
-      // Closing either reader closes the other's source, as closing a BufferedReader closes the reader it wraps.
-      readSources.set(receiver as JavaObject, readSourceOf(frame, inner));
+      const source = new ReadAheadSource(
+        frame,
+        readSourceOf(frame, inner),
+        (size as number | undefined) ?? BUFFER_SIZE
+      );
+      readSources.set(receiver as JavaObject, source);
     });
   }
   throwsIO(
