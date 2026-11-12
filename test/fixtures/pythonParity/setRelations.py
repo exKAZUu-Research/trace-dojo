@@ -11,3 +11,7 @@ check([b.issuperset(a), a.issuperset(b), a.issuperset([1, 1]), a.issuperset(iter
 check([a.isdisjoint(f), f.isdisjoint({9}), a.isdisjoint({7, 8, 9, 10}), set().isdisjoint(set()), a.isdisjoint([5, 6])], [False, False, True, True, True])
 check([set().issubset(set()), set() <= a, a.isdisjoint(a), set().isdisjoint(set())], [True, True, False, True])
 check([{1.0, 2} <= {1, 2}, {True} <= {1}, frozenset({0}).isdisjoint({0.0, -0.0})], [True, True, False])
+d = {-1: 0, 2: 1}
+e = dict.fromkeys(range(5))
+check([d.keys().isdisjoint(set(range(100))), d.items().isdisjoint({(2, 1)}), d.keys().isdisjoint(e.keys()), d.items().isdisjoint(e.items())], [False, False, False, True])
+check([{}.keys().isdisjoint(set()), d.keys().isdisjoint(d.keys()), d.keys().isdisjoint([3, 4]), d.items().isdisjoint({(-1, 0), 1, 2, 3})], [True, False, True, False])

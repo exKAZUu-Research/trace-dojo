@@ -389,6 +389,7 @@ test.each([
   ['issubset of a larger set', 'a = set(range(100000))\nb = set()', 'a.issubset(b)'],
   ['issuperset of a larger set', 'a = set(range(50000))\nb = set(range(100000))', 'a.issuperset(b)'],
   ['isdisjoint of a small set and a large one', 'a = {-1}\nb = set(range(100000))', 'a.isdisjoint(b)'],
+  ['isdisjoint of a small keys view and a large set', 'd = {-1: 0}\nb = set(range(100000))', 'd.keys().isdisjoint(b)'],
   ['a keys view under a set', 'd = dict.fromkeys(range(100000))\ns = set(range(1, 100001))', 'd.keys() <= s'],
   [
     'a keys view under a keys view',

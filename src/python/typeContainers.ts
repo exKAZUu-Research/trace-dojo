@@ -14,6 +14,7 @@ import {
   addToTable,
   areDisjoint,
   differenceUpdate,
+  isSetLikeView,
   isSubset,
   lookupSetKey,
   setDifferenceAll,
@@ -460,7 +461,12 @@ for (const [cls, view] of [
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
   method(cls, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator((self as PyDictView).dict, view));
   if (view !== 'values') {
-    method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => !someItem(other, (item) => contains(self, item)));
+    method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => {
+      // As dictviews_isdisjoint does, a larger set or set-like view is probed while the view is iterated.
+      const otherSize = other instanceof PySet ? other.table.size : isSetLikeView(other) ? other.dict.store.size : 0;
+      if (otherSize > (self as PyDictView).dict.store.size) return !someItem(self, (item) => contains(other, item));
+      return !someItem(other, (item) => contains(self, item));
+    });
   }
 }
 
