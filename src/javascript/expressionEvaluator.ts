@@ -145,6 +145,11 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case 'parenthesized': {
         return this.evaluate(expression.expression);
       }
+      case 'yield':
+      case 'await': {
+        // The converter lets these appear only where evaluateSteps evaluates them.
+        throw new Error(`A ${expression.kind} reached the synchronous evaluator`);
+      }
     }
   }
 

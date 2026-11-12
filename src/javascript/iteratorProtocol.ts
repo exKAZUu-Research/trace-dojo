@@ -6,6 +6,8 @@ import { isCallable, isObject, type JsObject, toBoolean, type Value } from './va
 
 /** An iterator object's methods, each returning the iterator's result, or for an async iterator, a promise of it. */
 export interface ProtocolIteration {
+  /** The iterator object, which garbage collection must keep alive while the iteration lasts. */
+  iterator: JsObject;
   next: (value?: Value) => Value;
   /** Calls the iterator's `return`, or is undefined when it has none. */
   return: ((value?: Value) => Value) | undefined;
@@ -42,6 +44,18 @@ export function asyncIteratorOf(runtime: Runtime, iterable: Value): ProtocolIter
  */
 export function* delegateYield(runtime: Runtime, iterable: Value, isAsync: boolean): Steps<Value> {
   const iteration = isAsync ? asyncIteratorOf(runtime, iterable) : syncIteratorOf(runtime, iterable);
+  // The suspended body's frame keeps the delegate alive, with the values it has yet to yield.
+  const { temporaries } = runtime.frame;
+  const held = temporaries.length;
+  temporaries.push(iteration.iterator);
+  try {
+    return yield* delegateTo(runtime, iteration, isAsync);
+  } finally {
+    temporaries.length = held;
+  }
+}
+
+function* delegateTo(runtime: Runtime, iteration: ProtocolIteration, isAsync: boolean): Steps<Value> {
   function* settle(result: Value): Steps<Value> {
     return isAsync ? resumedValue(yield new Awaiting(result)) : result;
   }
@@ -105,6 +119,7 @@ function iterationOf(runtime: Runtime, iterator: JsObject, adapt: (result: Value
     return (value) => adapt(runtime.call(fn, iterator, [value], runtime.currentRow));
   };
   return {
+    iterator,
     next: (value) => adapt(runtime.call(next, iterator, value === undefined ? [] : [value], runtime.currentRow)),
     get return() {
       return method('return');

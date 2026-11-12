@@ -62,7 +62,11 @@ export class ProgramConverter extends ExpressionConverter {
     class_declaration: (node) => {
       const name = field(node, 'name').text;
       this.declareLexical(node, name, false);
-      return { kind: 'class', cls: this.classNode(node, name), row: rowOf(node) };
+      const suspensionsBefore = this.context.suspensionCount;
+      const cls = this.classNode(node, name);
+      // A class evaluates its heritage and keys in one go, as a class expression does.
+      if (this.context.suspensionCount !== suspensionsBefore) unsupported(node, 'この位置の yield や await ');
+      return { kind: 'class', cls, row: rowOf(node) };
     },
     return_statement: (node) => this.returnStatement(node),
     if_statement: (node) => {
@@ -355,6 +359,7 @@ export class ProgramConverter extends ExpressionConverter {
     }
     context.isAsync = isAsync;
     context.isAsyncGenerator = isAsync && isGenerator;
+    context.isGenerator = isGenerator;
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {

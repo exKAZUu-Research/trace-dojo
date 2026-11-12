@@ -107,12 +107,15 @@ export abstract class ExpressionConverter extends ConverterBase {
   }
 
   private awaitExpression(node: Node): Expression {
+    // The grammar also parses `await` in a static block or a field initializer, where JavaScript reserves it.
+    if (!this.context.isAsync) fail(node, 'await は async 関数の中にしか書けません。');
     const argument = this.expression(namedChildren(node)[0]);
     this.context.suspensionCount++;
     return { kind: 'await', argument, row: rowOf(node) };
   }
 
   private yieldExpression(node: Node): Expression {
+    if (!this.context.isGenerator) fail(node, 'yield はジェネレータ関数の中にしか書けません。');
     const argumentNode = namedChildren(node).at(0);
     const argument = argumentNode ? this.expression(argumentNode) : undefined;
     const delegate = node.children.some((child) => child?.type === '*');
@@ -584,9 +587,10 @@ function regexLiteral(node: Node): Expression {
 
 /** Whether a template's source text has an escape that a tagged template leaves without a cooked string. */
 function hasInvalidEscape(raw: string): boolean {
-  return /\\(?:u(?!\{[\dA-Fa-f]+\}|[\dA-Fa-f]{4})|x(?![\dA-Fa-f]{2})|0\d|[1-9])/.test(
-    raw.replaceAll(String.raw`\\`, '')
-  );
+  const escapes = raw.replaceAll(String.raw`\\`, '');
+  if (/\\(?:u(?!\{[\dA-Fa-f]+\}|[\dA-Fa-f]{4})|x(?![\dA-Fa-f]{2})|0\d|[1-9])/.test(escapes)) return true;
+  // A code point escape must name a code point, at most U+10FFFF.
+  return [...escapes.matchAll(/\\u\{([\dA-Fa-f]+)\}/g)].some(([, digits]) => Number.parseInt(digits, 16) > 0x10_ff_ff);
 }
 
 /** Converts the elements between brackets, where a comma without an element leaves a hole. */

@@ -1,5 +1,5 @@
 import type { Argument, Expression, MemberExpression, ObjectMember } from './ast';
-import { type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
+import { nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import { defineAccessor, ExpressionEvaluator, isLogicalOperator, shortCircuits } from './expressionEvaluator';
 import { Awaiting, GeneratorReturn, resumedValue, type Steps } from './generators';
 import { delegateYield } from './iteratorProtocol';
@@ -227,7 +227,14 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
             ? runtime.toPropertyKey(yield* this.evaluateSteps(member.key.expression))
             : this.propertyKey(member.key);
         if (member.kind === 'property') {
-          runtime.createDataProperty(object, key, yield* this.evaluateSteps(member.value));
+          // A method keeps the object as its home, and a function takes a computed key as its name, as when defined at once.
+          const { value: valueExpression } = member;
+          const value =
+            valueExpression.kind === 'functionExpression' && valueExpression.fn.kind === 'method'
+              ? this.createFunction(valueExpression.fn, runtime.frame.scope, object)
+              : yield* this.evaluateSteps(valueExpression);
+          if (member.key.kind === 'computed' && value instanceof JsFunction) nameFunction(runtime, value, key);
+          runtime.createDataProperty(object, key, value);
         } else {
           const accessor = this.createFunction(member.fn, runtime.frame.scope, object);
           defineAccessor(runtime, object, key, member.kind, accessor, true);

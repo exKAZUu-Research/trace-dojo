@@ -16,7 +16,9 @@ export interface FunctionContext {
   canReturn: boolean;
   canCallSuper: boolean;
   canReferenceSuper: boolean;
-  /** Whether the function is async, where the grammar lets `await` appear. */
+  /** Whether `yield` may appear: in a generator, but not in a static block or a field initializer inside one. */
+  isGenerator: boolean;
+  /** Whether `await` may appear: in an async function, but not in a static block or a field initializer inside one. */
   isAsync: boolean;
   /** Whether the function is an async generator, whose `yield` and `return` await their values. */
   isAsyncGenerator: boolean;
@@ -46,6 +48,7 @@ export function newContext(canReturn: boolean, canCallSuper: boolean, canReferen
     canCallSuper,
     canReferenceSuper,
     canUseNewTarget: true,
+    isGenerator: false,
     isAsync: false,
     isAsyncGenerator: false,
     suspensionCount: 0,

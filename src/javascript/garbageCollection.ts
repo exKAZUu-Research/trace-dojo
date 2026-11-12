@@ -26,6 +26,8 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
 function pushScopeReferences(pending: unknown[], scope: Scope): void {
   for (const binding of scope.bindings.values()) if (binding.value !== UNINITIALIZED) pending.push(binding.value);
   pending.push(scope.parent);
+  // A `using` declaration's value and disposal method stay reachable until its scope ends.
+  for (const { value, method } of scope.disposables ?? []) pending.push(value, method);
   const frame = scope.functionFrame;
   if (frame) pending.push(frame.thisValue, frame.homeObject, frame.constructing, frame.newTarget);
 }

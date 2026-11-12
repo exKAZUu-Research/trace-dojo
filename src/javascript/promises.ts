@@ -3,7 +3,7 @@ import { DONE, type ValueIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
-import { isCallable, isObject, type JsFunction, JsObject, JsThrow, type Value } from './values';
+import { isCallable, isObject, type JsArray, type JsFunction, JsObject, JsThrow, type Value } from './values';
 
 /** What a settled promise runs for each of its handlers, with the values that must stay reachable until then. */
 interface Reaction {
@@ -390,7 +390,7 @@ function defineCombinators(builder: RealmBuilder, promiseConstructor: JsFunction
   builder.method(promiseConstructor, 'all', 1, ({ runtime, args }) =>
     combine(runtime, args[0], {
       onFulfilled: (state, index, value, settled) => {
-        state.items[index] = value;
+        state.items.elements[index] = value;
         settled();
       },
       onRejected: (state, _, reason) => rejectPromise(runtime, state.result, reason),
@@ -414,13 +414,13 @@ function defineCombinators(builder: RealmBuilder, promiseConstructor: JsFunction
     combine(runtime, args[0], {
       onFulfilled: (state, _, value) => resolvePromise(runtime, state.result, value),
       onRejected: (state, index, reason, settled) => {
-        state.items[index] = reason;
+        state.items.elements[index] = reason;
         settled();
       },
       onComplete: (state) => {
         const error = runtime.newError('AggregateError', 'All promises were rejected');
         runtime.defineProperty(error, 'errors', {
-          value: runtime.newArray(state.items),
+          value: runtime.newArray([...state.items.elements]),
           writable: true,
           enumerable: false,
           configurable: true,
@@ -432,7 +432,7 @@ function defineCombinators(builder: RealmBuilder, promiseConstructor: JsFunction
 }
 
 function resolveWithItems(runtime: Runtime): (state: Combination) => void {
-  return (state) => resolvePromise(runtime, state.result, runtime.newArray(state.items));
+  return (state) => resolvePromise(runtime, state.result, runtime.newArray([...state.items.elements]));
 }
 
 /** Records an input of `allSettled` as `{ status, value }` or `{ status, reason }`. */
@@ -445,7 +445,7 @@ function settledEntry(
     const entry = runtime.newObject();
     runtime.createDataProperty(entry, 'status', status);
     runtime.createDataProperty(entry, key, value);
-    state.items[index] = entry;
+    state.items.elements[index] = entry;
     settled();
   };
 }
@@ -453,7 +453,8 @@ function settledEntry(
 /** The promise a combinator returns and what its inputs settled with so far. */
 interface Combination {
   result: JsObject;
-  items: Value[];
+  /** An interpreter array, which the element functions keep reachable for garbage collection until the end. */
+  items: JsArray;
 }
 
 /** What a combinator does as each input settles: `settled` counts the input down toward `onComplete`. */
@@ -469,7 +470,7 @@ interface CombinatorHandlers {
  * each value's `then` runs before the next value is requested, as in JavaScript.
  */
 function combine(runtime: Runtime, iterable: Value, handlers: CombinatorHandlers): JsObject {
-  const state: Combination = { result: newPromise(runtime), items: [] };
+  const state: Combination = { result: newPromise(runtime), items: runtime.newArray([]) };
   // One count stands for the iteration itself, so the result settles only after it ends.
   let remaining = 1;
   const settled = (): void => {
@@ -479,7 +480,7 @@ function combine(runtime: Runtime, iterable: Value, handlers: CombinatorHandlers
   try {
     iterator = runtime.iterator(iterable);
     for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) {
-      state.items.push(undefined);
+      state.items.elements.push(undefined);
       remaining++;
       subscribe(runtime, state, index, promiseResolve(runtime, value), handlers, settled);
     }
@@ -513,7 +514,7 @@ function subscribe(
       }
       return;
     });
-    fn.captured.push(state.result);
+    fn.captured.push(state.result, state.items);
     return fn;
   };
   runtime.call(thenMethod, promise, [element(handlers.onFulfilled), element(handlers.onRejected)]);

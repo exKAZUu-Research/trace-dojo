@@ -76,6 +76,18 @@ test.each([
   ],
   ['new.target outside functions', 'console.log(new.target);', 0, 'new.target は関数の中にしか書けません。'],
   ['a legacy octal number', 'const n = 017;', 0, '数値「017」は、この採点環境では使えません。'],
+  [
+    'await in a static block of an async function',
+    'async function f() {\n  class C {\n    static {\n      await 1;\n    }\n  }\n}',
+    3,
+    'await は async 関数の中にしか書けません。',
+  ],
+  [
+    'yield in the key of a class declaration',
+    'function* g() {\n  class C {\n    [yield 1]() {}\n  }\n}',
+    1,
+    'この位置の yield や await は、この採点環境では使えません。',
+  ],
   ['a using declaration at the top level', 'using x = null;', 0, 'using 宣言はプログラムの一番外側には書けません。'],
   [
     'a using declaration directly in a case',
@@ -878,6 +890,15 @@ Promise.race([]).then(() => console.log('never'));`,
   [
     'await using with a sync disposer',
     `async function f(){ { await using x = { [Symbol.dispose](){ console.log("dispose"); return new Promise(()=>{}); } }; } console.log("after"); } f();`,
+  ],
+  [
+    'methods with awaited keys and out-of-range template escapes',
+    `(async () => {
+  const proto = { greet() { return 'proto'; } };
+  const o = { __proto__: proto, [await 'greet']() { return super.greet() + '!'; }, [await 'f']: function () {}, [await 'g']: () => {} };
+  console.log(o.greet(), o.f.name, o.g.name);
+})();
+const t = (s) => [s[0] === undefined, s.raw[0]]; console.log(t\`\\u{FFFFFFFF}\`, t\`\\u{10FFFF}\`);`,
   ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
