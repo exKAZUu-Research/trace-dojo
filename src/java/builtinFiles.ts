@@ -529,9 +529,14 @@ const FILE_CALLS: readonly FileCall[] = [
     'deleteIfExists',
     BOOLEAN,
     (system, text) => {
-      if (system.kindOf(text) === undefined) return false;
-      system.remove(text);
-      return true;
+      // Only a missing file returns false; a file where a directory should be still fails.
+      try {
+        system.remove(text);
+        return true;
+      } catch (error) {
+        if (error instanceof FileSystemError && error.code === 'ENOENT') return false;
+        throw error;
+      }
     },
   ],
   ['size', LONG, (system, text) => BigInt(utf8Length(system.readFile(text)))],

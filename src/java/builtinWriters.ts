@@ -85,10 +85,11 @@ function defineWriterMethods(
   stringType: JavaType,
   declare: (method: MethodInfo) => MethodInfo,
   write: WriteText,
-  withFlushAndClose: boolean
+  withFlushAndClose: boolean,
+  overrides: (name: string, parameterTypes: JavaType[]) => boolean = () => true
 ): void {
   const add = (name: string, parameterTypes: JavaType[], returnType: JavaType, native: NativeMethod): void => {
-    declare(addMethod(cls, name, parameterTypes, returnType, false, native));
+    if (overrides(name, parameterTypes)) declare(addMethod(cls, name, parameterTypes, returnType, false, native));
   };
   add('write', [INT], VOID, (frame, receiver, [code]) => {
     write(frame, receiver, charToString((code as number) & 0xff_ff));
@@ -207,8 +208,15 @@ function defineStringWriter(context: IOContext, writer: ClassInfo): void {
   addConstructor(stringWriter, [], (_, receiver) => {
     writeSinks.set(receiver as JavaObject, new StringSink());
   });
-  // StringWriter's writes and flush throw no IOException, though its close still declares one.
-  defineWriterMethods(stringWriter, context.stringType, (method) => method, sinkWrite, false);
+  // StringWriter overrides its writes and flush without IOException, though not write(char[]) or close.
+  defineWriterMethods(
+    stringWriter,
+    context.stringType,
+    (method) => method,
+    sinkWrite,
+    false,
+    (name, parameterTypes) => name !== 'write' || parameterTypes.length !== 1 || parameterTypes[0].kind !== 'array'
+  );
   addMethod(stringWriter, 'flush', [], VOID, false, () => {});
   addMethod(stringWriter, 'toString', [], context.stringType, false, (frame, receiver) =>
     newString(frame, (writeSinks.get(receiver as JavaObject) as StringSink).text)

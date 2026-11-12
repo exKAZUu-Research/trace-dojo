@@ -206,6 +206,18 @@ test.each([
     'false\n',
   ],
   [
+    'a deletion through a path whose parent is a file',
+    'System.out.println(Files.deleteIfExists(Path.of("none"))); try { Files.deleteIfExists(Path.of("x/child")); } catch (IOException e) { System.out.println(e); }',
+    { x: 'old' },
+    'false\njava.nio.file.FileSystemException: x/child: Not a directory\n',
+  ],
+  [
+    'a pipeline consumed after the stream of a file that starts it closes',
+    'java.util.stream.Stream<String> lines = Files.lines(Path.of("x")); java.util.stream.Stream<String> mapped = lines.map(s -> s); java.util.stream.Stream<String> sorted = Files.lines(Path.of("x")).sorted(); lines.close(); try { mapped.count(); } catch (IllegalStateException e) { System.out.println("closed"); } try { mapped.forEach(System.out::println); } catch (IllegalStateException e) { System.out.println("used"); } sorted.close(); System.out.println(Files.lines(Path.of("x")).filter(s -> true).count());',
+    { x: 'old' },
+    'closed\nused\n1\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},
@@ -242,8 +254,13 @@ test('a deeply nested path is charged to the run, which ends with a result', () 
 });
 
 test('Java lets programs use StringWriter and close a StringReader without handling IOException', () => {
-  const source = `import java.io.*;\nclass Main {\n  public static void main(String[] args) {\n    StringWriter s = new StringWriter();\n    s.write("a");\n    s.append('b').flush();\n    new StringReader("c").close();\n    System.out.println(s);\n  }\n}`;
-  expect(executeProgram('java', source)).toMatchObject({ kind: 'executed', stdout: 'ab\n' });
+  const source = `import java.io.*;\nclass Main {\n  public static void main(String[] args) {\n    StringWriter s = new StringWriter();\n    s.write("a");\n    s.append('b').flush();\n    new StringReader("c").close();
+    try {
+      s.write(new char[] { 'd' });
+    } catch (IOException e) {
+      System.out.println(e);
+    }\n    System.out.println(s);\n  }\n}`;
+  expect(executeProgram('java', source)).toMatchObject({ kind: 'executed', stdout: 'abd\n' });
 });
 
 test.each([
