@@ -10,6 +10,7 @@ export const WELL_KNOWN_SYMBOLS = {
   iterator: Symbol('Symbol.iterator'),
   asyncIterator: Symbol('Symbol.asyncIterator'),
   toStringTag: Symbol('Symbol.toStringTag'),
+  hasInstance: Symbol('Symbol.hasInstance'),
   dispose: Symbol('Symbol.dispose'),
   asyncDispose: Symbol('Symbol.asyncDispose'),
   toPrimitive: Symbol('Symbol.toPrimitive'),

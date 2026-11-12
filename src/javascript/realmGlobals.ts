@@ -169,6 +169,13 @@ function defineFunction(builder: RealmBuilder): void {
     bound.captured = [target, boundThis, ...boundArgs];
     return bound;
   });
+  builder.constant(
+    functionPrototype,
+    WELL_KNOWN_SYMBOLS.hasInstance,
+    builder.function('[Symbol.hasInstance]', 1, ({ runtime, thisValue, args }) =>
+      runtime.ordinaryHasInstance(thisValue, args[0])
+    )
+  );
   builder.method(functionPrototype, 'toString', 0, ({ runtime, thisValue }) => {
     if (!(thisValue instanceof JsFunction))
       return runtime.throwError('TypeError', 'Function.prototype.toString requires a function');

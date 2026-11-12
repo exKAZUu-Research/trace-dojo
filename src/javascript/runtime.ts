@@ -584,9 +584,19 @@ export class Runtime {
     return left == right;
   }
 
+  /** Evaluates `value instanceof constructor`, which a `Symbol.hasInstance` method of the right side decides. */
   instanceOf(value: Value, constructor: Value): boolean {
+    if (!isObject(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not an object");
+    const method = this.get(constructor, WELL_KNOWN_SYMBOLS.hasInstance);
+    if (method !== undefined && method !== null)
+      return toBoolean(this.call(method, constructor, [value], this.currentRow));
     if (!isCallable(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not callable");
-    if (!isObject(value)) return false;
+    return this.ordinaryHasInstance(constructor, value);
+  }
+
+  /** Whether `value` inherits the prototype of `constructor`, as `Function.prototype[Symbol.hasInstance]` checks. */
+  ordinaryHasInstance(constructor: Value, value: Value): boolean {
+    if (!isCallable(constructor) || !isObject(value)) return false;
     const prototype = this.get(constructor, 'prototype');
     if (!isObject(prototype)) this.throwError('TypeError', 'Function has non-object prototype in instanceof check');
     for (let current = value.proto; current; current = current.proto) {
@@ -596,7 +606,6 @@ export class Runtime {
     return false;
   }
 
-  /** The iterator that `for...of`, spread, and array destructuring use: over an array, or a string's code points. */
   /**
    * The iterator of a value, from its `Symbol.iterator` method, which a caller that has already read it passes. A
    * builtin iterator whose `next` is still the builtin one is stepped through directly, reading an array at each step as

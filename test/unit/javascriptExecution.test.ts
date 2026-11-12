@@ -1032,6 +1032,13 @@ async function* g() { yield* x; }
 const y = { [Symbol.iterator]() { return { next() { return { done: false, get value() { throw 'v'; } }; }, return() { console.log('closed y'); return {}; } }; } };
 (async () => { let i = g(); await i.next(); try { await i.throw('z'); } catch (e) { console.log(e); } try { for await (const v of y) {} } catch (e) { console.log(e); } })();`,
   ],
+  [
+    'Symbol.hasInstance',
+    `console.log(1 instanceof { [Symbol.hasInstance]: () => true });
+class A { static [Symbol.hasInstance](x) { return x === 5; } } console.log(5 instanceof A, 4 instanceof A, [] instanceof Array, new A() instanceof Object);
+for (const r of [2, {}, null]) { try { 1 instanceof r; } catch (e) { console.log(e.message); } }
+console.log(Function.prototype[Symbol.hasInstance].call(Array, []), typeof Symbol.hasInstance);`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
