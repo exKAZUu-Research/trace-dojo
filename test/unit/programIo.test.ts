@@ -344,6 +344,12 @@ test.each([
     'a -1 b\n',
   ],
   [
+    'an array read of a file, which reads while the file has more',
+    'char[] a = new char[100000]; System.out.println(new FileReader("x").read(a) + " " + new BufferedReader(new FileReader("x")).read(a) + " " + new InputStreamReader(new FileInputStream("x")).read(a));',
+    { x: 'x'.repeat(10_000) },
+    '10000 10000 10000\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},

@@ -173,9 +173,15 @@ function readInto(frame: Frame, receiver: Value, array: Value, offset: number, l
   const text = textOf(frame, receiver);
   if (length === 0) return 0;
   if (text.isAtEnd) return -1;
-  // A read takes what one fill made available, as Java's does, rather than waiting for more input.
-  const count = Math.min(length, text.text.length - text.position);
-  for (let index = 0; index < count; index++) array.values[offset + index] = readChar(text);
+  // A read waits for some input, then takes more only while more is ready, as Java's readers do, so that it reads a
+  // file to the array's length but a console only to the end of the line entered.
+  const source = readSourceOf(frame, receiver);
+  let count = 0;
+  do {
+    const step = Math.min(length - count, text.text.length - text.position);
+    for (let index = 0; index < step; index++) array.values[offset + count + index] = readChar(text);
+    count += step;
+  } while (count < length && source.isReady(frame) && !text.isAtEnd);
   return count;
 }
 

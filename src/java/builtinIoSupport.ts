@@ -193,7 +193,11 @@ export const STANDARD_INPUT: ReadSource = {
     if (stdin.isClosed) throwBuiltin(frame, 'IOException', 'Stream closed');
     return stdin.reader;
   },
-  isReady: (frame) => !STANDARD_INPUT.reader(frame).isAtEnd,
+  // A console has the rest of the line entered ready, but the next line only once the program waits for it.
+  isReady: (frame) => {
+    const { text, position } = STANDARD_INPUT.reader(frame);
+    return position > 0 && position < text.length && !/[\n\r]/.test(text[position - 1]);
+  },
   close: (frame) => {
     frame.runtime.io.stdin.isClosed = true;
   },
