@@ -396,7 +396,8 @@ pythonMethod(counterClass, 'elements', '', (self) => {
         if (position === entries.length) return DONE;
         const entry = entries[position++];
         key = entry.key;
-        remaining = typeof entry.value === 'bigint' ? entry.value : 0n;
+        // CPython repeats each element with itertools.repeat, which converts its count as an index.
+        remaining = toIndex(entry.value);
       }
       remaining--;
       return key;
