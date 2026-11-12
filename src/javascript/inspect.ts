@@ -1,3 +1,5 @@
+import { eastAsianWidthType } from 'get-east-asian-width';
+
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { PromiseState } from './promises';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
@@ -506,50 +508,24 @@ function groupArrayElements(ctx: Context, output: string[], array: JsArray): str
   return grouped;
 }
 
-/** The columns a terminal shows the text in, counting East Asian wide characters twice. */
+/**
+ * The columns a terminal shows the text in, as Node.js counts them with ICU, code point by code point: nothing for
+ * control characters and marks, two for East Asian wide and fullwidth characters and emoji shown as emoji, and one
+ * otherwise.
+ */
 function stringWidth(text: string): number {
   let width = 0;
-  for (const character of text.normalize('NFC')) {
-    const code = character.codePointAt(0) ?? 0;
-    if (isFullWidthCodePoint(code)) width += 2;
-    else if (!isZeroWidthCodePoint(code)) width++;
-  }
+  for (const character of text.normalize('NFC')) width += columnWidth(character.codePointAt(0) ?? 0, character);
   return width;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Lists the ranges of Node.js's table of wide code points.
-function isFullWidthCodePoint(code: number): boolean {
-  return (
-    code >= 0x11_00 &&
-    (code <= 0x11_5f ||
-      code === 0x23_29 ||
-      code === 0x23_2a ||
-      (code >= 0x2e_80 && code <= 0x32_47 && code !== 0x30_3f) ||
-      (code >= 0x32_50 && code <= 0x4d_bf) ||
-      (code >= 0x4e_00 && code <= 0xa4_c6) ||
-      (code >= 0xa9_60 && code <= 0xa9_7c) ||
-      (code >= 0xac_00 && code <= 0xd7_a3) ||
-      (code >= 0xf9_00 && code <= 0xfa_ff) ||
-      (code >= 0xfe_10 && code <= 0xfe_19) ||
-      (code >= 0xfe_30 && code <= 0xfe_6b) ||
-      (code >= 0xff_01 && code <= 0xff_60) ||
-      (code >= 0xff_e0 && code <= 0xff_e6) ||
-      (code >= 0x1_b0_00 && code <= 0x1_b0_01) ||
-      (code >= 0x1_f2_00 && code <= 0x1_f2_51) ||
-      (code >= 0x1_f3_00 && code <= 0x1_f6_4f) ||
-      (code >= 0x2_00_00 && code <= 0x3_ff_fd))
-  );
-}
+const ZERO_WIDTH = /^[\p{Cc}\p{Cf}\p{Me}\p{Mn}]$/u;
+const EMOJI_PRESENTATION = /^\p{Emoji_Presentation}$/u;
 
-function isZeroWidthCodePoint(code: number): boolean {
-  return (
-    code <= 0x1f ||
-    (code >= 0x7f && code <= 0x9f) ||
-    (code >= 0x3_00 && code <= 0x3_6f) ||
-    (code >= 0x20_0b && code <= 0x20_0f) ||
-    (code >= 0x20_d0 && code <= 0x20_ff) ||
-    (code >= 0xfe_00 && code <= 0xfe_0f) ||
-    (code >= 0xfe_20 && code <= 0xfe_2f) ||
-    (code >= 0xe_01_00 && code <= 0xe_01_ef)
-  );
+function columnWidth(code: number, character: string): number {
+  if (code !== 0xad && ZERO_WIDTH.test(character)) return 0;
+  const type = eastAsianWidthType(code);
+  if (type === 'fullwidth' || type === 'wide') return 2;
+  if ((type === 'ambiguous' || type === 'neutral') && EMOJI_PRESENTATION.test(character)) return 2;
+  return 1;
 }

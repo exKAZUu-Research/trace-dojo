@@ -1204,6 +1204,14 @@ console.dir({ text: "abcdefghijklmnop\\nnext" }, { breakLength: 10 });`,
   try { console.log(m, new Date(0)[m](null)); } catch (e) { console.log(m, e.name, e.message); }
 }`,
   ],
+  [
+    'arrays of wide and emoji strings',
+    `console.log(Array(7).fill('🦊'));
+console.log(Array(10).fill('🇯🇵'));
+console.log(['日本語', 'abc', 'ｱｲｳ', '한국어', '👨‍👩‍👧', '👍🏽', 'é', 'é', 'x', 'yy', 'zzz']);
+console.log(Array.from({ length: 12 }, (_, i) => '★'.repeat(i % 3 + 1)));
+console.log({ [Symbol()]: 1, [Symbol('k')]: [1], a: 2 }, [Object.assign([1], { [Symbol.iterator]: 0 })]);`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
