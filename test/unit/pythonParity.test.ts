@@ -21,7 +21,6 @@ test.each([
     'counting copies equal to a long string',
     's = "a" * 999999\nl = [s] * 200000\nt = "a" * 999998 + "a"\nx = l.count(t)',
   ],
-  ['hashing a deeply shared tuple', 't = (0,)\nfor i in range(28):\n    t = (t, t)\nhash(t)'],
   [
     'comparing deeply shared dicts',
     "a = {'v': 0}\nb = {'v': 0}\nfor i in range(27):\n    a = {'x': a, 'y': a}\n    b = {'x': b, 'y': b}\na == b",
@@ -389,6 +388,24 @@ test.each([
 
 test.each(['startswith', 'endswith'])('str.%s of a long candidate that differs at once compares no more', (method) => {
   const program = `s = 'b' + 'a' * 499999\nt = 'a' * 500000\nfor i in range(10000):\n    v = s.${method}(t)`;
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each(['upper', 'lower', 'casefold', 'swapcase', 'capitalize', 'title'])(
+  'str.%s of a long text over and over ends at the operation limit',
+  (method) => {
+    const program = `s = 'x' * 100000\nfor i in range(700):\n    s.${method}()`;
+    expect(executeOnStillClock(program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test.each([
+  [
+    'a long tuple looked up as a key over and over',
+    't = tuple(range(10000))\nd = {t: 1}\nfor i in range(3000):\n    x = d[t]',
+  ],
+  ['a deeply shared tuple', 't = (0,)\nfor i in range(28):\n    t = (t, t)\nx = hash(t)'],
+])('%s is hashed once', (_name, program) => {
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 

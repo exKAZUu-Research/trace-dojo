@@ -272,6 +272,8 @@ export class PyList extends PyGrowableSequence {}
 export class PyTuple extends PyObject {
   /** The `__dict__` of an instance of a namedtuple's subclass that does not define `__slots__`. */
   attributes?: AttributeMap;
+  /** The hash of the items, which cannot change, once something hashed them, as CPython 3.14 keeps it. */
+  hash?: bigint;
 
   constructor(
     cls: PyClass,

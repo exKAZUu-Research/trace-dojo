@@ -73,7 +73,12 @@ export function frexp(value: number): { mantissa: number; exponent: number } {
   return { mantissa, exponent: isSubnormal ? exponent - 54 : exponent };
 }
 
-function hashTuple(items: readonly PyValue[]): bigint {
+function hashTuple(tuple: PyTuple): bigint {
+  tuple.hash ??= computeTupleHash(tuple.items);
+  return tuple.hash;
+}
+
+function computeTupleHash(items: readonly PyValue[]): bigint {
   let acc = XXPRIME_5;
   for (const item of items) {
     chargeStep();
@@ -167,7 +172,7 @@ export function pyHash(value: PyValue): bigint {
     }
   }
   if (value === None) return NONE_HASH;
-  if (value instanceof PyTuple && !overridesBuiltin(value, '__hash__')) return hashTuple(value.items);
+  if (value instanceof PyTuple && !overridesBuiltin(value, '__hash__')) return hashTuple(value);
   if (value instanceof PyComplex) {
     const hash = signed(hashFloat(value.real) + 1_000_003n * hashFloat(value.imag));
     return hash === -1n ? -2n : hash;

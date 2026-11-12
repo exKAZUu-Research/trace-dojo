@@ -1,4 +1,4 @@
-import { chargeScan } from './runtimeContext';
+import { chargeScan, currentRuntime } from './runtimeContext';
 import { CASE_DATA } from './unicodeCaseData';
 
 /**
@@ -91,51 +91,61 @@ export function isCasedCode(code: number): boolean {
 }
 
 export function upper(text: string): string {
-  const { upper: mapping } = loadTables();
-  return codesOf(text)
-    .map((code) => map(mapping, code))
-    .join('');
+  return converted(text, (codes) => {
+    const { upper: mapping } = loadTables();
+    return codes.map((code) => map(mapping, code)).join('');
+  });
 }
 
 export function lower(text: string): string {
-  const codes = codesOf(text);
-  return codes.map((_, index) => lowerAt(codes, index)).join('');
+  return converted(text, (codes) => codes.map((_, index) => lowerAt(codes, index)).join(''));
 }
 
 export function casefold(text: string): string {
-  const { fold } = loadTables();
-  return codesOf(text)
-    .map((code) => map(fold, code))
-    .join('');
+  return converted(text, (codes) => {
+    const { fold } = loadTables();
+    return codes.map((code) => map(fold, code)).join('');
+  });
 }
 
 export function swapcase(text: string): string {
-  const codes = codesOf(text);
-  const { upper: mapping } = loadTables();
-  return codes
-    .map((code, index) => {
-      if (isUpperCode(code)) return lowerAt(codes, index);
-      if (isLowerCode(code)) return map(mapping, code);
-      return String.fromCodePoint(code);
-    })
-    .join('');
+  return converted(text, (codes) => {
+    const { upper: mapping } = loadTables();
+    return codes
+      .map((code, index) => {
+        if (isUpperCode(code)) return lowerAt(codes, index);
+        if (isLowerCode(code)) return map(mapping, code);
+        return String.fromCodePoint(code);
+      })
+      .join('');
+  });
 }
 
 export function capitalize(text: string): string {
-  const codes = codesOf(text);
-  const { title: mapping } = loadTables();
-  return codes.map((code, index) => (index === 0 ? map(mapping, code) : lowerAt(codes, index))).join('');
+  return converted(text, (codes) => {
+    const { title: mapping } = loadTables();
+    return codes.map((code, index) => (index === 0 ? map(mapping, code) : lowerAt(codes, index))).join('');
+  });
 }
 
 export function title(text: string): string {
-  const codes = codesOf(text);
-  const { title: mapping } = loadTables();
-  let previousCased = false;
-  let result = '';
-  for (const [index, code] of codes.entries()) {
-    result += previousCased ? lowerAt(codes, index) : map(mapping, code);
-    previousCased = isCasedCode(code);
-  }
+  return converted(text, (codes) => {
+    const { title: mapping } = loadTables();
+    let previousCased = false;
+    let result = '';
+    for (const [index, code] of codes.entries()) {
+      result += previousCased ? lowerAt(codes, index) : map(mapping, code);
+      previousCased = isCasedCode(code);
+    }
+    return result;
+  });
+}
+
+/** Converts the code points of a text, charging the running program for the text it reads before and builds after. */
+function converted(text: string, convert: (codes: number[]) => string): string {
+  chargeScan(text.length);
+  const result = convert(codesOf(text));
+  currentRuntime().buildString(result.length);
   return result;
 }
 
