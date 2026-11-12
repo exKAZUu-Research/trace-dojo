@@ -3,7 +3,7 @@ import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { defineUnsupportedAttributes } from './descriptors';
 import { isEnumClass } from './enums';
-import { identityHash, NATIVE_HASHES } from './hashing';
+import { identityHash, NATIVE_HASHES, pyHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
 import { bindValue, callValue, deleteAttribute, getAttribute, isCallable, lookupSpecial, nextOf } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -202,7 +202,11 @@ method(builtinFunctionClass, '__eq__', 'one', 1, 1, (self, [other]) => {
   const fn = self as PyBuiltinFunction;
   return fn === other || (fn.run === other.run && fn.self === other.self);
 });
-method(builtinFunctionClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
+// Hashes what equality compares, the native function and the receiver, as CPython hashes m_self and ml_meth.
+method(builtinFunctionClass, '__hash__', 'none', 0, 0, (self) => {
+  const fn = self as PyBuiltinFunction;
+  return receiverHash(fn.self) ^ nativeIdentity(fn.run);
+});
 method(methodDescriptorClass, '__repr__', 'none', 0, 0, (self) => {
   const fn = self as PyBuiltinFunction;
   return `<method '${fn.name}' of '${fn.ownerName}' objects>`;
@@ -231,6 +235,25 @@ for (const name of ['send', 'throw', 'close']) {
   method(generatorClass, name, 'expected', 0, 3, () => {
     throw currentRuntime().unsupported(`ジェネレータの ${name}()`);
   });
+}
+
+/** The hash of a builtin method's receiver: its identity, which for an unboxed value is the value itself. */
+function receiverHash(receiver: PyValue | undefined): bigint {
+  if (receiver === undefined) return 0n;
+  return receiver instanceof PyObject ? identityHash(receiver) : pyHash(receiver);
+}
+
+const nativeIdentities = new WeakMap<object, bigint>();
+let nextNativeIdentity = 1n;
+
+/** A stable number for a native function, which equal builtin methods share. */
+function nativeIdentity(run: object): bigint {
+  let identity = nativeIdentities.get(run);
+  if (identity === undefined) {
+    identity = nextNativeIdentity++;
+    nativeIdentities.set(run, identity);
+  }
+  return identity;
 }
 
 /** `next(iterator)`, raising StopIteration at the end. */
