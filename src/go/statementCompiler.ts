@@ -14,7 +14,7 @@ import type {
 } from './ast';
 import { CallCompiler } from './callCompiler';
 import type { Hoist, Part } from './compilerBase';
-import type { FunctionContext, VarEntity } from './entities';
+import type { FunctionContext, LabelState, VarEntity } from './entities';
 import { equalityOf } from './equality';
 import { runesOf } from './literals';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor, resumeDynamicMethod, resumeMethod } from './methods';
@@ -22,9 +22,11 @@ import type { Operand } from './operand';
 import { arithmetic } from './operators';
 import {
   BREAK,
+  breaks,
   clearHoists,
   type Completion,
   CONTINUE,
+  continues,
   type Eval,
   evaluateAll,
   evaluatePart,
@@ -40,7 +42,7 @@ import {
   type Suspending,
   UNASSIGNED,
 } from './runtime';
-import { nilPointerPanic, panicNilValue, plainPanic } from './runtimeErrors';
+import { nilPointerPanic, panicNilValue, plainPanic, runtimeErrorPanic } from './runtimeErrors';
 import { closeChannel, receive, scheduler, select, type SelectOp, send } from './scheduler';
 import {
   ANY,
@@ -111,15 +113,159 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   protected statements(statements: Statement[]): Exec {
-    const compiled = statements.map((statement) => this.statement(statement));
-    if (compiled.length === 1) return compiled[0];
+    const labels = this.labelState();
+    const list = labels.nextList++;
+    labels.path.push(list);
+    labels.positions.push(0);
+    const targets = new Map<string, number>();
+    const declarations: number[] = [];
+    labels.declarations.set(list, declarations);
+    let compiled: Exec[];
+    try {
+      compiled = statements.map((statement, index) => {
+        labels.positions[labels.positions.length - 1] = index;
+        if (statement.kind === 'labeled') {
+          this.declareLabel(statement, labels, index);
+          targets.set(statement.label, index);
+        }
+        if (declaresVariables(statement)) declarations.push(index);
+        return this.statement(statement);
+      });
+    } finally {
+      labels.path.pop();
+      labels.positions.pop();
+    }
+    if (compiled.length === 1 && targets.size === 0) return compiled[0];
+    if (targets.size === 0) {
+      return function* (frame) {
+        for (const exec of compiled) {
+          const completion = yield* exec(frame);
+          if (completion) return completion;
+        }
+        return;
+      };
+    }
     return function* (frame) {
-      for (const exec of compiled) {
-        const completion = yield* exec(frame);
+      for (let index = 0; index < compiled.length;) {
+        const completion = yield* compiled[index](frame);
+        if (completion?.kind === 'goto' && targets.has(completion.label)) {
+          frame.runtime.spend();
+          index = targets.get(completion.label) as number;
+          continue;
+        }
         if (completion) return completion;
+        index++;
       }
       return;
     };
+  }
+
+  // Labels --------------------------------------------------------------------------------------------------------
+
+  private labelState(): LabelState {
+    const fn = this.fn as FunctionContext;
+    fn.labels ??= {
+      declared: new Map(),
+      gotos: [],
+      enclosing: [],
+      path: [],
+      positions: [],
+      declarations: new Map(),
+      nextList: 0,
+    };
+    return fn.labels;
+  }
+
+  private declareLabel(statement: Extract<Statement, { kind: 'labeled' }>, labels: LabelState, index: number): void {
+    if (labels.declared.has(statement.label)) {
+      this.error(statement, `ラベル ${statement.label} が2回宣言されています。`);
+      return;
+    }
+    labels.declared.set(statement.label, { span: statement, used: false, path: [...labels.path], index });
+  }
+
+  /** The label of the statement being compiled, which only a loop, switch, or select takes. */
+  private takeLabel(): string | undefined {
+    const labels = this.labelState();
+    const label = labels.pending;
+    labels.pending = undefined;
+    return label;
+  }
+
+  /** Compiles a loop, switch, or select, which `break` (and for a loop, `continue`) with its label refers to. */
+  private breakable<T>(label: string | undefined, kind: 'for' | 'switch' | 'select', compile: () => T): T {
+    const labels = this.labelState();
+    labels.enclosing.push({ label, kind });
+    try {
+      return compile();
+    } finally {
+      labels.enclosing.pop();
+    }
+  }
+
+  private branch(statement: Extract<Statement, { kind: 'break' | 'continue' }>): Exec {
+    const fn = this.fn as FunctionContext;
+    const { label } = statement;
+    if (label === undefined) {
+      if (statement.kind === 'break' && fn.breakDepth === 0)
+        this.error(statement, 'break 文はループや switch 文の中にしか書けません。');
+      if (statement.kind === 'continue' && fn.loopDepth === 0)
+        this.error(statement, 'continue 文はループの中にしか書けません。');
+      return completing(statement.kind === 'break' ? BREAK : CONTINUE);
+    }
+    const labels = this.labelState();
+    const declared = labels.declared.get(label);
+    if (declared) declared.used = true;
+    const target = labels.enclosing.findLast((entry) => entry.label === label);
+    if (!declared) this.error(statement, `ラベル ${label} は宣言されていません。`);
+    else if (!target || (statement.kind === 'continue' && target.kind !== 'for')) {
+      this.error(
+        statement,
+        statement.kind === 'break'
+          ? `break のラベル ${label} は、この文を囲む for・switch・select 文のラベルではありません。`
+          : `continue のラベル ${label} は、この文を囲む for 文のラベルではありません。`
+      );
+    }
+    const completion: Completion = { kind: statement.kind, label };
+    return completing(completion);
+  }
+
+  private gotoStatement(statement: Extract<Statement, { kind: 'goto' }>): Exec {
+    const labels = this.labelState();
+    labels.gotos.push({
+      label: statement.label,
+      span: statement,
+      path: [...labels.path],
+      positions: [...labels.positions],
+    });
+    return completing({ kind: 'goto', label: statement.label });
+  }
+
+  /** Checks the labels of a function once its body compiled: every label used, every goto to a label it may reach. */
+  protected checkLabels(fn: FunctionContext): void {
+    const labels = fn.labels;
+    if (!labels) return;
+    for (const jump of labels.gotos) {
+      const target = labels.declared.get(jump.label);
+      if (!target) {
+        this.error(jump.span, `ラベル ${jump.label} は宣言されていません。`);
+        continue;
+      }
+      target.used = true;
+      const depth = target.path.length - 1;
+      if (!target.path.every((list, index) => jump.path[index] === list)) {
+        this.error(jump.span, `goto ${jump.label} はブロックの中へ飛び込んでいます。`);
+        continue;
+      }
+      const from = jump.positions[depth];
+      const declarations = labels.declarations.get(target.path[depth]) ?? [];
+      if (target.index > from && declarations.some((index) => index > from && index < target.index)) {
+        this.error(jump.span, `goto ${jump.label} は変数の宣言を飛び越えています。`);
+      }
+    }
+    for (const [label, { span, used }] of labels.declared) {
+      if (!used) this.error(span, `ラベル ${label} を宣言していますが、使っていません。`);
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per statement kind.
@@ -173,15 +319,18 @@ export abstract class StatementCompiler extends CallCompiler {
       case 'return': {
         return this.returnStatement(statement);
       }
-      case 'break': {
-        if ((this.fn as FunctionContext).breakDepth === 0)
-          this.error(statement, 'break 文はループや switch 文の中にしか書けません。');
-        return completing(BREAK);
-      }
+      case 'break':
       case 'continue': {
-        if ((this.fn as FunctionContext).loopDepth === 0)
-          this.error(statement, 'continue 文はループの中にしか書けません。');
-        return completing(CONTINUE);
+        return this.branch(statement);
+      }
+      case 'labeled': {
+        const inner = statement.statement;
+        if (['for', 'range', 'switch', 'typeSwitch', 'select'].includes(inner.kind))
+          this.labelState().pending = statement.label;
+        return this.statementBody(inner);
+      }
+      case 'goto': {
+        return this.gotoStatement(statement);
       }
       case 'fallthrough': {
         this.error(statement, 'fallthrough は switch 文の case の最後にしか書けません。');
@@ -655,6 +804,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 20 -- The three-clause loop with Go 1.22's per-iteration variables.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>): Exec {
+    const label = this.takeLabel();
     const row = this.stepRow(statement);
     const fn = this.fn as FunctionContext;
     const firstLocal = fn.info.locals.length;
@@ -667,7 +817,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const condition = this.part(() =>
       statement.condition ? this.condition(statement.condition, 'for 文') : (): Value => true
     );
-    const body = this.loopBody(statement.body);
+    const body = this.breakable(label, 'for', () => this.loopBody(statement.body));
     const post =
       statement.post && statement.post.kind !== 'empty' ? this.simpleStatementWithoutStep(statement.post) : undefined;
     return function* (frame) {
@@ -678,8 +828,8 @@ export abstract class StatementCompiler extends CallCompiler {
       while (condition.hoists ? yield* evaluatePart(frame, condition) : condition.value(frame)) {
         frame.runtime.spend();
         const completion = yield* body(frame);
-        if (completion === BREAK) return;
-        if (completion && completion !== CONTINUE) return completion;
+        if (breaks(completion, label)) return;
+        if (completion && !continues(completion, label)) return completion;
         // Each iteration has its own copy of the loop's variables, which closures may have captured.
         for (const variable of loopVariables) {
           if (variable.boxed) frame.locals[variable.slot] = new Cell(readLocal(frame, variable.slot));
@@ -706,26 +856,31 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private rangeStatement(statement: Extract<Statement, { kind: 'range' }>): Exec {
+    const label = this.takeLabel();
     const { value: range, hoists } = this.part(() => this.value(statement.range));
     const rangeType = this.isInvalid(range) ? undefined : coreType(range.type);
     if (rangeType?.kind === 'chan') {
       if (rangeType.dir === 'send') {
         this.error(statement.range, '送信専用のチャネルは range で回せません。');
       } else {
-        return this.rangeChannel(statement, { value: range.eval, hoists }, rangeType.element);
+        return this.rangeChannel(statement, { value: range.eval, hoists }, rangeType.element, label);
       }
+    }
+    if (rangeType?.kind === 'func') {
+      const yieldType = iteratorYield(rangeType);
+      if (yieldType) return this.rangeFunction(statement, { value: range.eval, hoists }, yieldType, label);
     }
     const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range);
     if (!source) {
       this.declareRangeTargets(statement, BASIC.invalid, BASIC.invalid);
-      this.loopBody(statement.body);
+      this.breakable(label, 'for', () => this.loopBody(statement.body));
       return NOOP;
     }
     const { read, keyType, valueType, iterate } = source;
     const bind = this.rangeTargets(statement, keyType, valueType);
     const row = this.stepRow(statement);
     const storesAnswer = bind.answered;
-    const body = this.loopBody(statement.body);
+    const body = this.breakable(label, 'for', () => this.loopBody(statement.body));
     const collectionPart: Part = { value: read, hoists };
     return function* (frame) {
       const collection = hoists ? yield* evaluatePart(frame, collectionPart) : read(frame);
@@ -736,13 +891,82 @@ export abstract class StatementCompiler extends CallCompiler {
           bind.assign(frame, key, value);
           frame.runtime.steps.stepBinding(row, storesAnswer);
           const completion = yield* body(frame);
-          if (completion === BREAK) return;
-          if (completion && completion !== CONTINUE) return completion;
+          if (breaks(completion, label)) return;
+          if (completion && !continues(completion, label)) return completion;
         }
         return;
       } finally {
         frame.temporaries.pop();
       }
+    };
+  }
+
+  /**
+   * `for k, v := range f`: calls the iterator f with a yield function that runs the loop's body once per call, and
+   * returns false to stop f when the body leaves the loop by break, return, or goto, which the loop then completes.
+   */
+  // code-gauge-allow functionCognitiveComplexity 20 -- The protocol of range over functions, with Go's runtime checks.
+  private rangeFunction(
+    statement: Extract<Statement, { kind: 'range' }>,
+    iterator: Part,
+    yieldType: FuncType,
+    label: string | undefined
+  ): Exec {
+    const count = statement.value ? 2 : statement.key ? 1 : 0;
+    if (count > yieldType.params.length) {
+      this.error(
+        statement.value ?? statement.key ?? statement,
+        `この関数の range で受け取れる値は ${yieldType.params.length} 個です。`
+      );
+    }
+    const [keyType = BASIC.invalid, valueType = BASIC.invalid] = yieldType.params;
+    const bind = this.rangeTargets(statement, keyType, valueType);
+    const row = this.stepRow(statement);
+    const body = this.breakable(label, 'for', () => this.loopBody(statement.body));
+    return function* (frame) {
+      const fn = iterator.hoists ? yield* evaluatePart(frame, iterator) : iterator.value(frame);
+      if (!(fn instanceof GoFunc)) nilPointerPanic();
+      let state: 'running' | 'stopped' | 'exited' = 'running';
+      let exit: Completion | undefined;
+      const runBody = function* (args: Value[]): Suspending<Value> {
+        if (state === 'stopped')
+          runtimeErrorPanic('range function continued iteration after function for loop body returned false');
+        if (state === 'exited') runtimeErrorPanic('range function continued iteration after whole loop exit');
+        frame.runtime.spend();
+        bind.assign(frame, args[0], args[1]);
+        frame.runtime.steps.stepBinding(row, bind.answered);
+        let completion: Completion | void;
+        try {
+          completion = yield* body(frame);
+        } catch (error) {
+          state = 'stopped';
+          throw error;
+        }
+        if (breaks(completion, label)) {
+          state = 'stopped';
+          return false;
+        }
+        if (completion && !continues(completion, label)) {
+          state = 'stopped';
+          exit = completion;
+          return false;
+        }
+        return true;
+      };
+      const yieldFunction = new GoFunc(
+        (args) => runToEnd(runBody(args)),
+        [],
+        (args) => runBody(args)
+      );
+      frame.temporaries.push(yieldFunction);
+      try {
+        if (fn.resume) yield* fn.resume([yieldFunction], statement.row);
+        else fn.call([yieldFunction], statement.row);
+      } finally {
+        frame.temporaries.pop();
+        state = 'exited';
+      }
+      return exit;
     };
   }
 
@@ -767,9 +991,17 @@ export abstract class StatementCompiler extends CallCompiler {
     if (type.kind === 'slice') return { read, keyType: BASIC.int, valueType: type.element, iterate: iterateSlice };
     if (type.kind === 'map') return { read, keyType: type.key, valueType: type.value, iterate: iterateMap };
     if (isInteger(type) || (range.mode === 'constant' && isUntyped(range.type))) {
-      this.unsupported(statement.range, '整数の range（for i := range 10）');
-    } else if (type.kind === 'func') {
-      this.unsupported(statement.range, '関数の range（イテレータ）');
+      // An untyped constant gives the loop variable type int.
+      const keyType = isUntyped(range.type) ? BASIC.int : range.type;
+      const count = isUntyped(range.type) ? this.assign(range, BASIC.int, 'range の値') : read;
+      if (statement.value) this.error(statement.value, '整数の range で受け取れる値は1つだけです。');
+      return { read: count, keyType, valueType: BASIC.invalid, iterate: iterateInteger };
+    }
+    if (type.kind === 'func') {
+      this.error(
+        statement.range,
+        `${describeType(range.type)} 型の関数は range で回せません（func(yield func(...) bool) の形の関数だけを回せます）。`
+      );
     } else {
       this.error(statement.range, `${describeType(range.type)} 型の値は range で回せません。`);
     }
@@ -839,6 +1071,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Expression switches with Go's rules for duplicates and fallthrough.
   private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Exec {
+    const label = this.takeLabel();
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
     const tagPart = this.part(() => {
       const value = statement.tag ? this.value(statement.tag) : undefined;
@@ -862,7 +1095,9 @@ export abstract class StatementCompiler extends CallCompiler {
       fn.breakDepth++;
       let body: Exec;
       try {
-        body = this.scoped(() => this.statements(fallsThrough ? switchCase.body.slice(0, -1) : switchCase.body));
+        body = this.breakable(label, 'switch', () =>
+          this.scoped(() => this.statements(fallsThrough ? switchCase.body.slice(0, -1) : switchCase.body))
+        );
       } finally {
         fn.breakDepth--;
       }
@@ -892,7 +1127,7 @@ export abstract class StatementCompiler extends CallCompiler {
       if (start < 0) return;
       for (let index = start; index < cases.length; index++) {
         const completion = yield* cases[index].body(frame);
-        if (completion === BREAK) return;
+        if (breaks(completion, label)) return;
         if (completion) return completion;
         if (!cases[index].fallsThrough) return;
       }
@@ -958,6 +1193,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Type switches with their bound variable per clause.
   private typeSwitchStatement(statement: Extract<Statement, { kind: 'typeSwitch' }>): Exec {
+    const label = this.takeLabel();
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
     const operandPart = this.part(() => this.value(statement.operand));
     const operand = operandPart.value;
@@ -971,7 +1207,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const defaults = statement.cases.filter((typeCase) => !typeCase.types);
     if (defaults.length > 1) this.error(defaults[1], 'switch 文に default が2つあります。');
     const bindings: VarEntity[] = [];
-    const cases = statement.cases.map((typeCase) => this.typeSwitchCase(statement, typeCase, operand.type, bindings));
+    const cases = this.breakable(label, 'switch', () =>
+      statement.cases.map((typeCase) => this.typeSwitchCase(statement, typeCase, operand.type, bindings))
+    );
     if (statement.binding && bindings.length > 0 && bindings.every((binding) => !binding.used)) {
       this.error(statement.binding, `宣言した変数 ${statement.binding.name} を使っていません。`);
     }
@@ -986,7 +1224,7 @@ export abstract class StatementCompiler extends CallCompiler {
       if (!chosen) return;
       if (chosen.binding) declareValue(frame, chosen.binding, copyValue(chosen.extract(value)));
       const completion = yield* chosen.body(frame);
-      return completion === BREAK ? undefined : completion;
+      return breaks(completion, label) ? undefined : completion;
     };
   }
 
@@ -1304,6 +1542,7 @@ export abstract class StatementCompiler extends CallCompiler {
    * that case's receive assignment and runs its statements.
    */
   private selectStatement(statement: Extract<Statement, { kind: 'select' }>): Exec {
+    const label = this.takeLabel();
     const defaults = statement.cases.filter((selectCase) => !selectCase.comm);
     if (defaults.length > 1) this.error(defaults[1], 'select 文に default が2つあります。');
     const fn = this.fn as FunctionContext;
@@ -1325,7 +1564,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const bodies = statement.cases.map((selectCase) => {
       fn.breakDepth++;
       try {
-        return this.scoped(() => this.selectCaseBody(selectCase));
+        return this.breakable(label, 'select', () => this.scoped(() => this.selectCaseBody(selectCase)));
       } finally {
         fn.breakDepth--;
       }
@@ -1357,7 +1596,7 @@ export abstract class StatementCompiler extends CallCompiler {
         frame.temporaries.pop();
       }
       void row;
-      return completion === BREAK ? undefined : completion;
+      return breaks(completion, label) ? undefined : completion;
     };
   }
 
@@ -1429,11 +1668,16 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** `for v := range ch`: receives until the channel is closed and empty. */
-  private rangeChannel(statement: Extract<Statement, { kind: 'range' }>, channel: Part, element: Type): Exec {
+  private rangeChannel(
+    statement: Extract<Statement, { kind: 'range' }>,
+    channel: Part,
+    element: Type,
+    label: string | undefined
+  ): Exec {
     if (statement.value) this.error(statement.value, 'チャネルの range で受け取れる値は1つだけです。');
     const bind = this.rangeTargets({ ...statement, value: undefined }, element, BASIC.invalid);
     const row = this.stepRow(statement);
-    const body = this.loopBody(statement.body);
+    const body = this.breakable(label, 'for', () => this.loopBody(statement.body));
     return function* (frame) {
       const value = channel.hoists ? yield* evaluatePart(frame, channel) : channel.value(frame);
       frame.temporaries.push(value);
@@ -1445,8 +1689,8 @@ export abstract class StatementCompiler extends CallCompiler {
           bind.assign(frame, received, undefined);
           frame.runtime.steps.stepBinding(row, bind.answered);
           const completion = yield* body(frame);
-          if (completion === BREAK) return;
-          if (completion && completion !== CONTINUE) return completion;
+          if (breaks(completion, label)) return;
+          if (completion && !continues(completion, label)) return completion;
         }
       } finally {
         frame.temporaries.pop();
@@ -1512,6 +1756,7 @@ export abstract class StatementCompiler extends CallCompiler {
           }
           return yield* statements(frame);
         };
+        this.checkLabels(fn);
         if (type.results.length > 0 && !isTerminatingList(body.statements)) {
           this.error(
             { row: body.endRow, column: 0 },
@@ -1560,6 +1805,27 @@ export abstract class StatementCompiler extends CallCompiler {
 }
 
 type RangeIterator = (collection: Value) => Iterable<[Value, Value]>;
+
+/** Visits the integers from 0 up to the count, in the count's type. */
+function* iterateInteger(collection: Value): Iterable<[Value, Value]> {
+  const count = collection as bigint;
+  for (let index = 0n; index < count; index++) yield [index, undefined];
+}
+
+/** The yield function's type of an iterator, `func(yield func(K, V) bool)`, or undefined for other functions. */
+function iteratorYield(type: FuncType): FuncType | undefined {
+  if (type.params.length !== 1 || type.results.length > 0 || type.variadic) return undefined;
+  const yieldType = coreType(type.params[0]);
+  if (yieldType?.kind !== 'func' || yieldType.params.length > 2 || yieldType.variadic) return undefined;
+  if (yieldType.results.length !== 1 || !isBoolean(yieldType.results[0])) return undefined;
+  return yieldType;
+}
+
+/** Whether a statement declares variables, which a goto must not jump over. */
+function declaresVariables(statement: Statement): boolean {
+  if (statement.kind === 'var' || statement.kind === 'define') return true;
+  return statement.kind === 'labeled' && declaresVariables(statement.statement);
+}
 
 /** Visits the runes of a string with their byte offsets. */
 function* iterateString(collection: Value): Iterable<[Value, Value]> {

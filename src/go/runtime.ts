@@ -8,7 +8,22 @@ import type { Type } from './types';
 import { Cell, Channel, GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
 
 /** What a statement does next, when it does not simply complete. */
-export type Completion = { kind: 'break' } | { kind: 'continue' } | { kind: 'return' } | { kind: 'fallthrough' };
+export type Completion =
+  | { kind: 'break'; label?: string }
+  | { kind: 'continue'; label?: string }
+  | { kind: 'return' }
+  | { kind: 'fallthrough' }
+  | { kind: 'goto'; label: string };
+
+/** Whether a completion breaks out of the statement with the label, or the innermost one when it has none. */
+export function breaks(completion: Completion | void, label: string | undefined): boolean {
+  return completion?.kind === 'break' && (completion.label === undefined || completion.label === label);
+}
+
+/** Whether a completion continues the loop with the label, or the innermost one when it has none. */
+export function continues(completion: Completion | void, label: string | undefined): boolean {
+  return completion?.kind === 'continue' && (completion.label === undefined || completion.label === label);
+}
 
 export const BREAK: Completion = { kind: 'break' };
 export const CONTINUE: Completion = { kind: 'continue' };

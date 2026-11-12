@@ -23,6 +23,7 @@ import type {
   Statement,
   SwitchCase,
   TopLevelDeclaration,
+  TypeElementSyntax,
   TypeExpression,
   TypeParameter,
   TypeSpec,
@@ -78,13 +79,13 @@ export class Converter {
     return specs.map((spec) => {
       if (!spec) throw new Error('missing import spec');
       const nameNode = spec.childForFieldName('name');
-      if (nameNode?.type === 'dot') unsupported(nameNode, 'import の . （パッケージの名前を省いて使う書き方）');
+
       const pathNode = required(spec.childForFieldName('path'));
       const path =
         pathNode.type === 'raw_string_literal'
           ? decodeRawStringLiteral(pathNode.text)
           : decodeStringLiteral(pathNode.text, (message) => syntaxError(pathNode, message));
-      return { ...spanOf(spec), path, alias: nameNode?.text };
+      return { ...spanOf(spec), path, alias: nameNode?.type === 'dot' ? '.' : nameNode?.text };
     });
   }
 
@@ -92,7 +93,6 @@ export class Converter {
     const nameNode = required(node.childForFieldName('name'));
     const receiverNode = node.childForFieldName('receiver');
     const typeParametersNode = node.childForFieldName('type_parameters');
-    if (receiverNode && typeParametersNode) unsupported(typeParametersNode, '型引数を持つメソッド');
     const body = node.childForFieldName('body');
     return {
       kind: 'func',
@@ -153,12 +153,22 @@ export class Converter {
     });
   }
 
+  /** A constraint: an interface, a single type, or a union of terms, which stands for an interface of that union. */
   private convertConstraint(node: Node): TypeExpression {
-    const parts = named(node);
-    if (parts.length !== 1) unsupported(node, '型の集合（~ や | を使った制約）');
-    const part = parts[0];
-    if (part.type === 'negated_type') unsupported(part, '型の集合（~ や | を使った制約）');
-    return this.convertType(part);
+    const parts = node.type === 'type_constraint' ? named(node).filter((part) => part.type !== 'comment') : [node];
+    if (parts.length === 1 && parts[0].type !== 'negated_type') return this.convertType(parts[0]);
+    return { kind: 'interface', ...spanOf(node), methods: [], elements: [this.convertTypeElement(node, parts)] };
+  }
+
+  private convertTypeElement(node: Node, parts: Node[]): TypeElementSyntax {
+    return {
+      ...spanOf(node),
+      terms: parts.map((part) =>
+        part.type === 'negated_type'
+          ? { tilde: true, type: this.convertType(named(part)[0]) }
+          : { tilde: false, type: this.convertType(part) }
+      ),
+    };
   }
 
   private convertSignature(node: Node): SignatureSyntax {
@@ -179,13 +189,11 @@ export class Converter {
     const declarations = named(node).filter((child) => child.type !== 'comment');
     const result: Parameter[] = [];
     for (const declaration of declarations) {
-      if (declaration.type === 'variadic_parameter_declaration') {
-        unsupported(declaration, '可変個の引数（...）');
-      }
+      const variadic = declaration.type === 'variadic_parameter_declaration' ? true : undefined;
       const type = this.convertType(required(declaration.childForFieldName('type')));
-      const names = declaration.childrenForFieldName('name').filter((name) => name !== null);
-      if (names.length === 0) result.push({ ...spanOf(declaration), type });
-      for (const name of names) result.push({ ...spanOf(name), name: name.text, type });
+      const names = declaration.childrenForFieldName('name').filter((name) => name?.isNamed === true);
+      if (names.length === 0) result.push({ ...spanOf(declaration), type, variadic });
+      for (const name of names) result.push({ ...spanOf(name), name: name.text, type, variadic });
     }
     const namedCount = result.filter((parameter) => parameter.name !== undefined).length;
     if (namedCount > 0 && namedCount < result.length) {
@@ -212,8 +220,7 @@ export class Converter {
       case 'type_declaration': {
         const specs: TypeSpec[] = [];
         for (const child of named(node)) {
-          if (child.type === 'type_alias') unsupported(child, '型の別名（type A = B）');
-          if (child.type === 'type_spec') specs.push(this.convertTypeSpec(child));
+          if (child.type === 'type_spec' || child.type === 'type_alias') specs.push(this.convertTypeSpec(child));
         }
         return { kind: 'type', ...spanOf(node), specs };
       }
@@ -263,6 +270,7 @@ export class Converter {
       name: required(node.childForFieldName('name')).text,
       typeParameters: typeParametersNode ? this.convertTypeParameters(typeParametersNode) : [],
       type: this.convertType(required(node.childForFieldName('type'))),
+      alias: node.type === 'type_alias' ? true : undefined,
     };
   }
 
@@ -335,7 +343,19 @@ export class Converter {
         return { kind: 'struct', ...span, fields: this.convertFields(named(node)[0]) };
       }
       case 'interface_type': {
-        return { kind: 'interface', ...span, methods: this.convertMethods(node) };
+        return {
+          kind: 'interface',
+          ...span,
+          methods: this.convertMethods(node),
+          elements: named(node)
+            .filter((child) => child.type === 'type_elem')
+            .map((child) =>
+              this.convertTypeElement(
+                child,
+                named(child).filter((part) => part.type !== 'comment')
+              )
+            ),
+        };
       }
       case 'parenthesized_type': {
         return this.convertType(named(node)[0]);
@@ -373,10 +393,14 @@ export class Converter {
     const fields: FieldSyntax[] = [];
     for (const declaration of named(list)) {
       if (declaration.type !== 'field_declaration') continue;
-      const tag = declaration.childForFieldName('tag');
-      if (tag) unsupported(tag, '構造体のタグ');
+      const tagNode = declaration.childForFieldName('tag');
+      const tag = tagNode
+        ? tagNode.type === 'raw_string_literal'
+          ? decodeRawStringLiteral(tagNode.text)
+          : decodeStringLiteral(tagNode.text, (message) => syntaxError(tagNode, message))
+        : undefined;
       const typeNode = required(declaration.childForFieldName('type'));
-      const names = declaration.childrenForFieldName('name').filter((name) => name !== null);
+      const names = declaration.childrenForFieldName('name').filter((name) => name?.isNamed === true);
       if (names.length === 0) {
         // An embedded field: `T`, `*T`, or `pkg.T`, whose name is the type's.
         const pointer = declaration.children.some((child) => child?.type === '*');
@@ -384,11 +408,12 @@ export class Converter {
         fields.push({
           ...spanOf(declaration),
           type: pointer ? { kind: 'pointer', ...spanOf(declaration), element: base } : base,
+          tag,
         });
         continue;
       }
       const type = this.convertType(typeNode);
-      for (const name of names) fields.push({ ...spanOf(name), name: name.text, type });
+      for (const name of names) fields.push({ ...spanOf(name), name: name.text, type, tag });
     }
     return fields;
   }
@@ -396,8 +421,7 @@ export class Converter {
   private convertMethods(node: Node): MethodSyntax[] {
     const methods: MethodSyntax[] = [];
     for (const child of named(node)) {
-      if (child.type === 'comment') continue;
-      if (child.type !== 'method_elem') unsupported(child, 'インターフェースの埋め込みや型の集合');
+      if (child.type !== 'method_elem') continue;
       methods.push({
         ...spanOf(child),
         name: required(child.childForFieldName('name')).text,
@@ -462,8 +486,7 @@ export class Converter {
       case 'break_statement':
       case 'continue_statement': {
         const label = named(node).find((child) => child.type === 'label_name');
-        if (label) unsupported(label, 'ラベル');
-        return { kind: node.type === 'break_statement' ? 'break' : 'continue', ...span };
+        return { kind: node.type === 'break_statement' ? 'break' : 'continue', ...span, label: label?.text };
       }
       case 'fallthrough_statement': {
         return { kind: 'fallthrough', ...span };
@@ -473,10 +496,21 @@ export class Converter {
         return { kind: 'defer', ...span, call: this.convertExpression(required(call)) };
       }
       case 'labeled_statement': {
-        return unsupported(node, 'ラベル');
+        const label = required(node.childForFieldName('label')).text;
+        const inner = named(node).find((child) => child.type !== 'label_name' && child.type !== 'comment');
+        return {
+          kind: 'labeled',
+          ...span,
+          label,
+          statement: inner ? this.convertStatement(inner) : { kind: 'empty', ...span },
+        };
       }
       case 'goto_statement': {
-        return unsupported(node, 'goto 文');
+        return {
+          kind: 'goto',
+          ...span,
+          label: required(named(node).find((child) => child.type === 'label_name')).text,
+        };
       }
       case 'go_statement': {
         const call = named(node).find((child) => child.type !== 'comment');
@@ -767,13 +801,13 @@ export class Converter {
         const start = node.childForFieldName('start');
         const end = node.childForFieldName('end');
         const capacity = node.childForFieldName('capacity');
-        if (capacity) unsupported(capacity, '3つ目の添字（容量）を書いたスライス式');
         return {
           kind: 'slice',
           ...span,
           operand: this.convertExpression(required(node.childForFieldName('operand'))),
           low: start ? this.convertExpression(start) : undefined,
           high: end ? this.convertExpression(end) : undefined,
+          max: capacity ? this.convertExpression(capacity) : undefined,
         };
       }
       case 'type_assertion_expression': {
@@ -795,7 +829,13 @@ export class Converter {
         };
       }
       case 'type_instantiation_expression': {
-        return unsupported(node, '型引数を明示する書き方（f[int] など）');
+        const [operand, ...args] = named(node).filter((child) => child.type !== 'comment');
+        return {
+          kind: 'index',
+          ...span,
+          operand: this.convertExpression(operand),
+          indices: args.map((argument) => this.typeArgumentExpression(argument)),
+        };
       }
       case 'call_expression': {
         return this.convertCall(node);
@@ -843,9 +883,14 @@ export class Converter {
     const argumentsNode = required(node.childForFieldName('arguments'));
     const typeArgumentsNode = node.childForFieldName('type_arguments');
     const args: Expression[] = [];
+    let spread: boolean | undefined;
     for (const argument of named(argumentsNode)) {
       if (argument.type === 'comment') continue;
-      if (argument.type === 'variadic_argument') unsupported(argument, '可変個の引数に ... で渡す書き方');
+      if (argument.type === 'variadic_argument') {
+        spread = true;
+        args.push(this.convertExpression(named(argument)[0]));
+        continue;
+      }
       args.push(this.convertExpression(argument));
     }
     let callee = this.convertExpression(required(node.childForFieldName('function')));
@@ -854,7 +899,7 @@ export class Converter {
       const indices = named(typeArgumentsNode).map((argument) => this.typeArgumentExpression(argument));
       callee = { kind: 'index', ...spanOf(node), operand: callee, indices };
     }
-    return { kind: 'call', ...spanOf(node), callee, typeArguments: [], args };
+    return { kind: 'call', ...spanOf(node), callee, typeArguments: [], args, spread };
   }
 
   /** A type argument of a call, as the index expression it may also be. */

@@ -136,4 +136,22 @@ export interface FunctionContext {
   loopDepth: number;
   breakDepth: number;
   recordsSteps: boolean;
+  /** The labels of the function and the statements that refer to them, which the checks at its end use. */
+  labels?: LabelState;
+}
+
+/** What the labels of a function need while it compiles: where each is, and the jumps to them. */
+export interface LabelState {
+  declared: Map<string, { span: { row: number; column: number }; used: boolean; path: number[]; index: number }>;
+  gotos: { label: string; span: { row: number; column: number }; path: number[]; positions: number[] }[];
+  /** The statements that `break` and `continue` with a label may refer to, innermost last. */
+  enclosing: { label?: string; kind: 'for' | 'switch' | 'select' }[];
+  /** The statement lists being compiled, outermost first, with the position in each. */
+  path: number[];
+  positions: number[];
+  /** The positions of the declarations of each statement list, which a goto must not jump over. */
+  declarations: Map<number, number[]>;
+  nextList: number;
+  /** The label of the statement about to compile, which a loop, switch, or select takes. */
+  pending?: string;
 }

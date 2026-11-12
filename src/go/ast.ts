@@ -47,6 +47,8 @@ export interface TypeParameter extends Span {
 export interface Parameter extends Span {
   name?: string;
   type: TypeExpression;
+  /** Whether the parameter is the final `...T`, which takes any number of arguments as a []T. */
+  variadic?: boolean;
 }
 
 export interface SignatureSyntax {
@@ -89,6 +91,8 @@ export interface TypeSpec extends Span {
   name: string;
   typeParameters: TypeParameter[];
   type: TypeExpression;
+  /** Whether the spec is an alias, `type A = B`, which names B instead of a new type. */
+  alias?: boolean;
 }
 
 export interface TypeDeclaration extends Span {
@@ -107,12 +111,19 @@ export type TypeExpression =
   | ({ kind: 'chan'; dir: 'both' | 'send' | 'receive'; element: TypeExpression } & Span)
   | ({ kind: 'func'; signature: SignatureSyntax } & Span)
   | ({ kind: 'struct'; fields: FieldSyntax[] } & Span)
-  | ({ kind: 'interface'; methods: MethodSyntax[] } & Span);
+  | ({ kind: 'interface'; methods: MethodSyntax[]; elements: TypeElementSyntax[] } & Span);
+
+/** An element of an interface that is not a method: an embedded interface, or a union of type terms. */
+export interface TypeElementSyntax extends Span {
+  terms: { tilde: boolean; type: TypeExpression }[];
+}
 
 export interface FieldSyntax extends Span {
   /** Undefined for an embedded field, which takes its type's name. */
   name?: string;
   type: TypeExpression;
+  /** The field's tag, which only reflection reads, but which is part of the struct type. */
+  tag?: string;
 }
 
 export interface MethodSyntax extends Span {
@@ -142,6 +153,8 @@ export type Expression =
       callee: Expression;
       typeArguments: TypeExpression[];
       args: Expression[];
+      /** Whether the last argument ends with `...`, passing a slice as the variadic arguments. */
+      spread?: boolean;
     } & Span)
   | ({ kind: 'unary'; operator: string; operand: Expression } & Span)
   | ({ kind: 'binary'; operator: string; left: Expression; right: Expression } & Span)
@@ -234,8 +247,10 @@ export type Statement =
       cases: TypeSwitchCase[];
     } & Span)
   | ({ kind: 'return'; results: Expression[] } & Span)
-  | ({ kind: 'break' } & Span)
-  | ({ kind: 'continue' } & Span)
+  | ({ kind: 'break'; label?: string } & Span)
+  | ({ kind: 'continue'; label?: string } & Span)
+  | ({ kind: 'labeled'; label: string; statement: Statement } & Span)
+  | ({ kind: 'goto'; label: string } & Span)
   | ({ kind: 'fallthrough' } & Span)
   | ({ kind: 'defer'; call: Expression } & Span)
   | ({ kind: 'go'; call: Expression } & Span)
