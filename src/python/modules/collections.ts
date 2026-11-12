@@ -92,15 +92,15 @@ function push(deque: PyDeque, item: PyValue, left: boolean): void {
   if (left) deque.appendLeft(item);
   else deque.append(item);
   if (deque.maxlen !== undefined && deque.length > deque.maxlen) {
-    if (left) deque.editableItems.pop();
+    if (left) deque.popRight();
     else deque.popLeft();
   }
 }
 
 function dequeIndex(deque: PyDeque, key: PyValue): number {
   const index = toIndex(key, (value) => `sequence index must be integer, not '${typeName(value)}'`);
-  const resolved = index < 0n ? index + BigInt(deque.items.length) : index;
-  if (resolved < 0n || resolved >= BigInt(deque.items.length)) throw pyError('IndexError', 'deque index out of range');
+  const resolved = index < 0n ? index + BigInt(deque.length) : index;
+  if (resolved < 0n || resolved >= BigInt(deque.length)) throw pyError('IndexError', 'deque index out of range');
   return Number(resolved);
 }
 
@@ -134,7 +134,7 @@ function extendDeque(deque: PyDeque, iterable: PyValue, left: boolean): void {
 }
 method(dequeClass, 'pop', 'none', 0, 0, (self) => {
   if (dequeOf(self).length === 0) throw pyError('IndexError', 'pop from an empty deque');
-  return dequeOf(self).editableItems.pop() as PyValue;
+  return dequeOf(self).popRight();
 });
 method(dequeClass, 'popleft', 'none', 0, 0, (self) => {
   if (dequeOf(self).length === 0) throw pyError('IndexError', 'pop from an empty deque');
@@ -252,7 +252,7 @@ function repeatDeque(deque: PyDeque, countValue: PyValue): void {
   for (let index = 0n; index < kept; index++) repeated.push(items[Number((skipped + index) % size)]);
   deque.splice(0, items.length, repeated);
 }
-method(dequeClass, '__getitem__', 'one', 1, 1, (self, [key]) => dequeOf(self).items[dequeIndex(dequeOf(self), key)]);
+method(dequeClass, '__getitem__', 'one', 1, 1, (self, [key]) => dequeOf(self).at(dequeIndex(dequeOf(self), key)));
 method(dequeClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   dequeOf(self).editableItems[dequeIndex(dequeOf(self), key)] = value;
   return None;
@@ -267,29 +267,29 @@ method(dequeClass, '__contains__', 'one', 1, 1, (self, [item]) =>
 method(dequeClass, '__iter__', 'none', 0, 0, (self) => {
   const deque = dequeOf(self);
   let index = 0;
-  const length = deque.items.length;
+  const length = deque.length;
   return new PyIterator(
     iteratorClass('_collections._deque_iterator'),
     () => {
-      if (deque.items.length !== length) throw pyError('RuntimeError', 'deque mutated during iteration');
-      return index < deque.items.length ? deque.items[index++] : DONE;
+      if (deque.length !== length) throw pyError('RuntimeError', 'deque mutated during iteration');
+      return index < deque.length ? deque.at(index++) : DONE;
     },
     () => [deque]
   );
 });
 method(dequeClass, '__reversed__', 'none', 0, 0, (self) => {
   const deque = dequeOf(self);
-  const length = deque.items.length;
+  const length = deque.length;
   let remaining = length;
   return new PyIterator(
     iteratorClass('_collections._deque_reverse_iterator'),
     () => {
       if (remaining === 0) return DONE;
-      if (deque.items.length !== length) {
+      if (deque.length !== length) {
         remaining = 0;
         throw pyError('RuntimeError', 'deque mutated during iteration');
       }
-      return deque.items[--remaining];
+      return deque.at(--remaining);
     },
     () => [deque]
   );

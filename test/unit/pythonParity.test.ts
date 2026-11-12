@@ -256,6 +256,14 @@ test.each([
     'filling a deque from the left',
     'from collections import deque\nr = deque()\nfor i in range(100000):\n    r.appendleft(i)',
   ],
+  [
+    'alternating both ends of a deque',
+    'from collections import deque\nq = deque(range(1000))\nfor i in range(100000):\n    q.appendleft(i)\n    q.pop()',
+  ],
+  [
+    'peeking and draining a deque',
+    'from collections import deque\nq = deque(range(50000))\ns = 0\nwhile q:\n    s += q[0]\n    q.popleft()',
+  ],
 ])('%s runs within the limits', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });

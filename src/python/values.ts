@@ -488,9 +488,9 @@ export class PyOpaque extends PyObject {
 
 /** A `collections.deque`. */
 /**
- * A `collections.deque`. Its items start `front` places into the storage, so that taking and adding items at the left
- * end costs no move of the others; reading `items` packs them first, which a left-end operation pays for only once
- * the free places are as many as the items.
+ * A `collections.deque`. Its items start `front` places into the storage, so that taking and adding items at either
+ * end, and reading one by index, costs no move of the others; reading `items` packs them first, which an operation at
+ * the ends pays for only once the free places are as many as the items.
  */
 export class PyDeque extends PyGrowableSequence {
   private front = 0;
@@ -515,6 +515,17 @@ export class PyDeque extends PyGrowableSequence {
 
   get length(): number {
     return this.storage.length - this.front;
+  }
+
+  /** The item at an index already checked to be within the deque, read without packing. */
+  at(index: number): PyValue {
+    return this.storage[this.front + index] as PyValue;
+  }
+
+  popRight(): PyValue {
+    const item = this.storage.pop() as PyValue;
+    if (this.length === 0) this.pack();
+    return item;
   }
 
   popLeft(): PyValue {
