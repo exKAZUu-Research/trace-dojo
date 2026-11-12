@@ -1523,6 +1523,30 @@ class Main {
   }
 });
 
+test("Java's Collections empty and singleton collections accept an empty addAll, as the JDK's do", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    t("es", () -> System.out.println(Collections.emptySet().addAll(List.of())));
+    t("s", () -> System.out.println(Collections.singleton(1).addAll(List.of())));
+    t("s1", () -> System.out.println(Collections.singleton(1).addAll(List.of(2))));
+    t("el", () -> System.out.println(Collections.emptyList().addAll(List.of())));
+    t("sl", () -> System.out.println(Collections.singletonList(1).addAll(List.of(2))));
+    t("nc", () -> System.out.println(Collections.nCopies(1, 1).addAll(List.of())));
+    t("of", () -> System.out.println(Set.of().addAll(List.of())));
+    t("ofl", () -> System.out.println(List.of().addAll(List.of())));
+  }
+}`,
+      'false\nes ok\nfalse\ns ok\ns1 java.lang.UnsupportedOperationException\nfalse\nel ok\nsl java.lang.UnsupportedOperationException\nfalse\nnc ok\nof java.lang.UnsupportedOperationException\nofl java.lang.UnsupportedOperationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

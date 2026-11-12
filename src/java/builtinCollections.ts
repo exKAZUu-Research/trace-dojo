@@ -205,7 +205,7 @@ function defineRestrictedLists(
   );
   immutableCollectionsLists.add(immutableList);
   immutableCollectionsLists.add(pairList);
-  for (const cls of [emptyList, singletonList, copiesList]) removeOnlyIfPresent(cls);
+  for (const cls of [emptyList, singletonList, copiesList]) rejectOnlyChanges(cls);
   for (const cls of [
     immutableList,
     pairList,
@@ -467,12 +467,18 @@ function defineRestrictedList(
 const MUTATORS = new Set(['add', 'addAll', 'set', 'remove', 'clear']);
 
 /**
- * Makes `remove(Object)` and `clear` of a list of `Collections` reject only a removal that would change it, as
- * `AbstractCollection`'s do; removing at an index still always fails, as `AbstractList`'s does.
+ * Makes `remove(Object)`, `clear`, and `addAll` of a list of `Collections` reject only a call that would change it, as
+ * `AbstractCollection`'s do; adding or removing at an index still always fails, as `AbstractList`'s does.
  */
-function removeOnlyIfPresent(cls: ClassInfo): void {
+function rejectOnlyChanges(cls: ClassInfo): void {
   for (const method of cls.methods) {
     const removesValue = method.name === 'remove' && method.parameterTypes[0] !== INT;
+    if (method.name === 'addAll') {
+      method.native = (frame, _, args) => {
+        if (itemsOf(frame, args.at(-1)).length > 0) throwBuiltin(frame, 'UnsupportedOperationException');
+        return false;
+      };
+    }
     if (method.name !== 'clear' && !removesValue) continue;
     method.native = (frame, receiver, [value]) => {
       const items = elementsOf(receiver);

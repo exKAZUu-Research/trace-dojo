@@ -440,23 +440,26 @@ export function restrictToImmutable(
   registry: Registry,
   cls: ClassInfo,
   name: string,
-  removesIfPresent = false
+  changesOnlyOnUse = false
 ): ClassInfo {
   registry.classes.delete(cls.name);
   unmodifiableClasses.add(cls);
   // The iterators of Collections' sets inherit no remove, so they reject it as their sets do, without a message.
-  if (!removesIfPresent) defaultRemoveClasses.add(cls);
+  if (!changesOnlyOnUse) defaultRemoveClasses.add(cls);
   cls.name = name;
   cls.constructors = [];
   for (const method of cls.methods) {
     if (!MUTATORS.has(method.name)) continue;
-    const isRemoval = method.name === 'clear' || (method.name === 'remove' && method.parameterTypes[0] !== INT);
-    // A removal that finds nothing changes nothing, not even the modCount its iterators check.
+    const mayBeNoOp =
+      method.name === 'clear' ||
+      method.name === 'addAll' ||
+      (method.name === 'remove' && method.parameterTypes[0] !== INT);
+    // A call that changes nothing leaves even the modCount its iterators check.
     const unchanged = method.returnType === BOOLEAN ? false : undefined;
     method.native =
-      removesIfPresent && isRemoval
+      changesOnlyOnUse && mayBeNoOp
         ? (frame, receiver, args) =>
-            removesAny(frame, receiver, method.name, args)
+            changesAny(frame, receiver, method.name, args)
               ? throwBuiltin(frame, 'UnsupportedOperationException')
               : unchanged
         : (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
@@ -465,11 +468,21 @@ export function restrictToImmutable(
 }
 
 /**
- * Whether `clear` or `remove` would remove anything from a set or map of `Collections`, which, as `AbstractCollection`
- * and `AbstractMap` do, reject only a removal that would change them.
+ * Whether `clear`, `remove`, or `addAll` would change a set or map of `Collections`, which, as
+ * `AbstractCollection` and `AbstractMap` do, reject only a call that would change them.
  */
-function removesAny(frame: Frame, receiver: Value, name: string, [key]: Value[]): boolean {
-  return name === 'clear' ? storeOf(receiver).entries.length > 0 : findEntry(frame, receiver, key) !== undefined;
+function changesAny(frame: Frame, receiver: Value, name: string, [argument]: Value[]): boolean {
+  switch (name) {
+    case 'clear': {
+      return storeOf(receiver).entries.length > 0;
+    }
+    case 'addAll': {
+      return itemsOf(frame, argument).length > 0;
+    }
+    default: {
+      return findEntry(frame, receiver, argument) !== undefined;
+    }
+  }
 }
 
 const MUTATORS = new Set(['put', 'remove', 'putIfAbsent', 'clear', 'putAll', 'add', 'addAll']);
