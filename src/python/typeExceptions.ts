@@ -5,6 +5,7 @@ import { callValue, isTruthy, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import {
   baseExceptionClass,
+  defineMethod,
   exceptionClasses,
   exceptionClassNamed,
   newList,
@@ -13,28 +14,47 @@ import {
   typeError,
   typeName,
 } from './types';
-import { type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
+import { type ExceptionState, type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
 
 const instanceOf = (self: PyValue): PyInstance => self as PyInstance;
+
+const IMPORT_ERROR_KEYWORDS = ['name', 'path', 'name_from'];
 
 function rejectKeywords(cls: PyClass, kwargs: Kwargs): void {
   if (kwargs && kwargs.size > 0) throw typeError(`${cls.name}() takes no keyword arguments`);
 }
 
+/** Takes the keyword arguments of a builtin exception's `__init__`, which only ImportError accepts, as its fields. */
+function initKeywords(cls: PyClass, state: ExceptionState, kwargs: Kwargs): void {
+  if (!cls.isSubclassOf(exceptionClassNamed('ImportError'))) {
+    rejectKeywords(cls, kwargs);
+    return;
+  }
+  for (const key of kwargs?.keys() ?? []) {
+    if (!IMPORT_ERROR_KEYWORDS.includes(key)) {
+      throw typeError(`ImportError() got an unexpected keyword argument '${key}'`);
+    }
+  }
+  state.fields ??= new Map();
+  for (const name of IMPORT_ERROR_KEYWORDS) state.fields.set(name, kwargs?.get(name) ?? None);
+  state.fields.delete('msg');
+}
+
 baseExceptionClass.construct = (cls, args, kwargs) => {
   if (cls.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) return constructGroup(cls, args, kwargs);
-  if (cls.isBuiltin) rejectKeywords(cls, kwargs);
   const exception = new PyInstance(cls);
   exception.exception = { args: newTuple(args), suppressContext: false };
+  if (cls.isBuiltin) initKeywords(cls, exception.exception, kwargs);
   return exception;
 };
 for (const cls of exceptionClasses.values())
   if (cls !== baseExceptionClass) cls.construct = baseExceptionClass.construct;
 
-method(baseExceptionClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, (self, args, kwargs) => {
-  rejectKeywords(instanceOf(self).cls, kwargs);
-  const state = instanceOf(self).exception;
-  if (state && !state.exceptions) state.args = newTuple(args);
+defineMethod(baseExceptionClass, '__init__', (self, args, kwargs) => {
+  const { cls, exception: state } = instanceOf(self);
+  if (!state) return None;
+  initKeywords(cls, state, kwargs);
+  if (!state.exceptions) state.args = newTuple(args);
   return None;
 });
 method(baseExceptionClass, '__str__', 'none', 0, 0, (self) => exceptionStr(instanceOf(self)));

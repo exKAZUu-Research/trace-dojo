@@ -77,6 +77,7 @@ function nativeHelpers(): Map<string, PyValue> {
           return [entry.key as string, () => value];
         });
         (cls as PyClass).annotationNames = entries.map(([name]) => name);
+        (cls as PyClass).annotations = undefined;
         currentRuntime().classAnnotationThunks.set(cls as PyClass, entries);
         return None;
       }),

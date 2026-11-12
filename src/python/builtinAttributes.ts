@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 451 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 469 -- The methods and attributes of the builtin types it defines belong together.
 import type { BinaryOperator } from './ast';
 import { BUILTIN_DOC } from './attributes';
 import { enumerateClass, isSubclassOfClass } from './builtins';
@@ -431,7 +431,23 @@ defineGetSet(
   }
 );
 defineGetSet(functionClass, '__closure__', (self) => closureOf(asFunction(self)));
-defineGetSet(functionClass, '__annotations__', (self) => currentRuntime().evaluator.annotationsOf(asFunction(self)));
+defineGetSet(
+  functionClass,
+  '__annotations__',
+  (self) => {
+    const fn = asFunction(self);
+    fn.annotations ??= evaluateAnnotations(fn);
+    return fn.annotations;
+  },
+  {
+    set: (self, value) => {
+      if (value !== None && !(value instanceof PyDict)) throw typeError('__annotations__ must be set to a dict object');
+      const fn = asFunction(self);
+      fn.annotations = value instanceof PyDict ? value : undefined;
+      fn.annotate = None;
+    },
+  }
+);
 defineGetSet(
   functionClass,
   '__annotate__',
@@ -439,7 +455,9 @@ defineGetSet(
   {
     set: (self, value) => {
       if (value !== None && !isCallable(value)) throw typeError('__annotate__ must be callable or None');
-      asFunction(self).annotate = value;
+      const fn = asFunction(self);
+      fn.annotate = value;
+      if (value !== None) fn.annotations = undefined;
     },
   }
 );
@@ -504,6 +522,18 @@ defineGetSet(
     },
   }
 );
+
+/** What the first read of a function's `__annotations__` gives: the result of its `__annotate__`. */
+function evaluateAnnotations(fn: PyFunction): PyDict {
+  const { annotate } = fn;
+  if (annotate === undefined) return currentRuntime().evaluator.annotationsOf(fn);
+  if (annotate === None) return newDict();
+  const annotations = callValue(annotate, [1n]);
+  if (!(annotations instanceof PyDict)) {
+    throw typeError(`__annotate__ returned non-dict of type '${typeName(annotations)}'`);
+  }
+  return annotations;
+}
 
 /** A function's `__annotate__`: None without annotations, else a function giving them for the VALUE format. */
 function annotateFunctionOf(fn: PyFunction): PyValue {
@@ -810,10 +840,10 @@ defineGetSet(typeClass, '__type_params__', () => newTuple([]));
 defineGetSet(typeClass, '__annotate__', (self) => {
   if (asClass(self).isBuiltin)
     throw pyError('AttributeError', `type object '${asClass(self).name}' has no attribute '__annotate__'`);
-  if (currentRuntime().classAnnotations(asClass(self)).length === 0) return None;
+  if ((currentRuntime().classAnnotationThunks.get(asClass(self)) ?? []).length === 0) return None;
   return new PyBuiltinFunction(builtinFunctionClass, '__annotate__', ([format]) => {
     if (format !== 1n && format !== 2n) throw pyError('NotImplementedError', pyRepr(format));
-    return newDict(currentRuntime().classAnnotations(asClass(self)));
+    return newDict(currentRuntime().evaluateClassAnnotations(asClass(self)));
   });
 });
 defineUnsupportedAttributes(typeClass, {

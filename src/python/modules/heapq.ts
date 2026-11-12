@@ -1,14 +1,14 @@
 import { BUILTIN_DOC } from '../attributes';
-import { builtin } from '../define';
+import { builtin, pythonFunction } from '../define';
 import { runLibrarySource } from '../librarySource';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
-import { argument, checkArgs } from '../nativeArgs';
+import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, toArray } from '../objects';
 import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newList, None, pyError, typeError, typeName } from '../types';
-import { type Kwargs, PyList, type PyValue } from '../values';
+import { PyList, type PyValue } from '../values';
 
 /** The items of a heap argument, which argument clinic checks is a list, naming the function. */
 function heapOf(value: PyValue, name: string, onlyArgument: boolean): PyValue[] {
@@ -103,16 +103,10 @@ function heapreplace([heap, item]: PyValue[], less: Less = minLess): PyValue {
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows heapq.nsmallest and heapq.nlargest's shortcuts.
-function nSorted(largest: boolean): (args: PyValue[], kwargs: Kwargs) => PyValue {
-  return (args, kwargs) => {
-    checkArgs(
-      { qualified: largest ? 'nlargest' : 'nsmallest', min: 2, max: 2, style: 'takes', keywords: ['key'] },
-      args,
-      kwargs
-    );
+function nSorted(largest: boolean): (args: PyValue[]) => PyValue {
+  return (args) => {
     const count = Number(toIndex(args[0]));
-    const key = kwargs?.get('key') ?? None;
+    const key = args[2] ?? None;
     const items = toArray(args[1]).map((item, index) => ({
       item,
       index,
@@ -208,8 +202,8 @@ registerModule('heapq', () => {
     ['heapify_max', builtin('heapify_max', 'one', 1, 1, (args) => heapify(args, maxLess))],
     ['heappushpop_max', builtin('heappushpop_max', 'expected', 2, 2, (args) => heappushpop(args, maxLess))],
     ['heapreplace_max', builtin('heapreplace_max', 'expected', 2, 2, (args) => heapreplace(args, maxLess))],
-    ['nlargest', builtin('nlargest', 'takes', 2, 2, nSorted(true), { keywords: ['key'] })],
-    ['nsmallest', builtin('nsmallest', 'takes', 2, 2, nSorted(false), { keywords: ['key'] })],
+    ['nlargest', pythonFunction('nlargest', 'n, iterable, key=None', nSorted(true))],
+    ['nsmallest', pythonFunction('nsmallest', 'n, iterable, key=None', nSorted(false))],
   ]);
   return runLibrarySource('heapq', MERGE_SOURCE, natives);
 });

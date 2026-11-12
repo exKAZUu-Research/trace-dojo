@@ -10,8 +10,14 @@ function quoteNames(names: string[]): string {
   return `${quoted.slice(0, -1).join(', ')}, and ${quoted.at(-1)}`;
 }
 
+/** What binding needs of a function, which a native function that CPython's library writes in Python also gives. */
+export type Signature = Pick<PyFunction, 'qualifiedName' | 'defaults' | 'keywordDefaults'> & {
+  def: { params: Pick<Parameter, 'name' | 'kind'>[] };
+};
+type SignatureParameter = Signature['def']['params'][number];
+
 /** Binds call arguments to a function's parameters, raising the TypeError CPython raises for a mismatch. */
-export function bindArguments(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): Map<string, PyValue> {
+export function bindArguments(fn: Signature, args: readonly PyValue[], kwargs: Kwargs): Map<string, PyValue> {
   const { params } = fn.def;
   const bound = new Map<string, PyValue>();
   const positional = params.filter((param) => param.kind === 'positionalOnly' || param.kind === 'positional');
@@ -31,7 +37,7 @@ export function bindArguments(fn: PyFunction, args: readonly PyValue[], kwargs: 
   return bound;
 }
 
-function bindKeywords(fn: PyFunction, kwargs: Kwargs, bound: Map<string, PyValue>, extra: PyDict | undefined): void {
+function bindKeywords(fn: Signature, kwargs: Kwargs, bound: Map<string, PyValue>, extra: PyDict | undefined): void {
   const { params } = fn.def;
   const positionalOnlyAsKeyword: string[] = [];
   for (const [key, value] of kwargs ?? []) {
@@ -54,7 +60,7 @@ function bindKeywords(fn: PyFunction, kwargs: Kwargs, bound: Map<string, PyValue
   }
 }
 
-function unexpectedKeyword(fn: PyFunction, key: string): Error {
+function unexpectedKeyword(fn: Signature, key: string): Error {
   const names = fn.def.params.filter(
     (each) => each.kind !== 'varArgs' && each.kind !== 'varKeywords' && each.kind !== 'positionalOnly'
   );
@@ -68,9 +74,9 @@ function unexpectedKeyword(fn: PyFunction, key: string): Error {
 }
 
 function tooManyPositional(
-  fn: PyFunction,
-  positional: Parameter[],
-  keywordOnly: Parameter[],
+  fn: Signature,
+  positional: SignatureParameter[],
+  keywordOnly: SignatureParameter[],
   given: number,
   kwargs: Kwargs
 ): Error {
@@ -89,7 +95,7 @@ function tooManyPositional(
   );
 }
 
-function bindPositionalDefaults(fn: PyFunction, positional: Parameter[], bound: Map<string, PyValue>): void {
+function bindPositionalDefaults(fn: Signature, positional: SignatureParameter[], bound: Map<string, PyValue>): void {
   const defaultsStart = positional.length - fn.defaults.length;
   const missing: string[] = [];
   for (const [index, param] of positional.entries()) {
@@ -104,7 +110,7 @@ function bindPositionalDefaults(fn: PyFunction, positional: Parameter[], bound: 
   }
 }
 
-function bindKeywordDefaults(fn: PyFunction, keywordOnly: Parameter[], bound: Map<string, PyValue>): void {
+function bindKeywordDefaults(fn: Signature, keywordOnly: SignatureParameter[], bound: Map<string, PyValue>): void {
   const missing: string[] = [];
   for (const param of keywordOnly) {
     if (bound.has(param.name)) continue;

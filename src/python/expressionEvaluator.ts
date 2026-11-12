@@ -1,17 +1,7 @@
-// code-gauge-allow-file fileNcss 482 -- The expression evaluator keeps one method per kind of expression together.
-import type {
-  Argument,
-  Comprehension,
-  Constant,
-  Element,
-  Expression,
-  FormattedValue,
-  FunctionDef,
-  NameRef,
-  Target,
-} from './ast';
+// code-gauge-allow-file fileNcss 490 -- The expression evaluator keeps one method per kind of expression together.
+import type { Argument, Comprehension, Element, Expression, FormattedValue, FunctionDef, NameRef, Target } from './ast';
 import { moduleNameOf } from './classes';
-import { newComplex } from './complexNumbers';
+import { constantValue, foldConstants } from './constantFolding';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
 import {
@@ -31,10 +21,12 @@ import {
 } from './objects';
 import { binaryOp, compareOp, unaryOp } from './operators';
 import type { Runtime } from './runtime';
+import { addToTable, updateTable } from './setOperations';
 import {
-  Ellipsis,
+  dictClass,
   functionClass,
   generatorClass,
+  listClass,
   newDict,
   newList,
   newSet,
@@ -42,6 +34,7 @@ import {
   None,
   pyError,
   sliceClass,
+  tupleClass,
   typeError,
   typeName,
 } from './types';
@@ -56,10 +49,15 @@ import {
   PyGenerator,
   PyInstance,
   PyList,
+  type PySet,
   PySlice,
   PyTuple,
   type PyValue,
 } from './values';
+
+// CPython's compiler pushes at most this many elements of a display before building the collection.
+const MAX_STACKED_ELEMENTS = 30;
+const MIN_FOLDED_ELEMENTS = 3;
 
 /** Evaluates expressions in a frame, synchronously: only statements may suspend a generator. */
 export class ExpressionEvaluator {
@@ -133,17 +131,50 @@ export class ExpressionEvaluator {
     throw new Error('Unknown expression');
   }
 
+  /** Evaluates the iterable of a `for` clause, which CPython compiles differently when it is a set display. */
+  protected evaluateIterable(expression: Expression, frame: Frame): PyValue {
+    return expression.kind === 'set'
+      ? this.setDisplay(expression.elements, frame, true)
+      : this.evaluate(expression, frame);
+  }
+
   private display(expression: Extract<Expression, { kind: 'list' | 'tuple' | 'set' }>, frame: Frame): PyValue {
-    if (expression.kind === 'set') {
-      return this.withTemporaries(frame, () => {
-        const items = this.elements(expression.elements, frame);
-        this.runtime.allocate(items.length + 1);
-        return newSet(items);
-      });
-    }
+    if (expression.kind === 'set') return this.setDisplay(expression.elements, frame, false);
     const items = this.elements(expression.elements, frame);
     this.runtime.allocate(items.length + 1);
     return expression.kind === 'list' ? newList(items) : newTuple(items);
+  }
+
+  /**
+   * Builds a set in the steps CPython's bytecode takes, which decide the order of its elements: the elements before
+   * the first starred one are added together, as a folded frozenset merged into the set when they are three or more
+   * constants, and each later element is added as it is evaluated. A display of more than 30 elements adds one by
+   * one, and so does a display of constants that a `for` clause iterates, where the frozenset itself is iterated.
+   */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Follows the steps in which CPython's compiler builds a set display.
+  private setDisplay(elements: Element[], frame: Frame, iterated: boolean): PySet {
+    return this.withTemporaries(frame, () => {
+      const starIndex = elements.findIndex((element) => element.kind === 'starred');
+      const leadingCount = elements.length > MAX_STACKED_ELEMENTS ? 0 : starIndex === -1 ? elements.length : starIndex;
+      const leading = elements.slice(0, leadingCount) as Expression[];
+      const isFolded = leadingCount >= MIN_FOLDED_ELEMENTS && !(iterated && starIndex === -1);
+      const constants = isFolded ? foldConstants(leading) : undefined;
+      const set = newSet();
+      this.runtime.allocate(1);
+      if (constants) {
+        updateTable(set.table, newSet(constants, true));
+      } else {
+        const items = this.elements(leading, frame);
+        frame.temporaries.push(...items);
+        for (const item of items) addToTable(set.table, item);
+      }
+      frame.temporaries.push(set);
+      for (const element of elements.slice(leadingCount)) {
+        if (element.kind === 'starred') updateTable(set.table, this.evaluate(element.value, frame));
+        else addToTable(set.table, this.evaluate(element, frame));
+      }
+      return set;
+    });
   }
 
   private slice(expression: Extract<Expression, { kind: 'slice' }>, frame: Frame): PyValue {
@@ -533,7 +564,7 @@ export class ExpressionEvaluator {
   // code-gauge-allow functionNcss 32 -- Follows how CPython runs each kind of comprehension in its own scope.
   private comprehension(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): PyValue {
     const { runtime } = this;
-    const first = this.evaluate(expression.generators[0].iterable, frame);
+    const first = this.evaluateIterable(expression.generators[0].iterable, frame);
     const next = iterate(first);
     const inner = this.comprehensionFrame(expression, frame);
     if (expression.type === 'generator') {
@@ -621,7 +652,7 @@ export class ExpressionEvaluator {
         this.assign(generator.target, item, frame);
         if (!generator.conditions.every((condition) => isTruthy(this.evaluate(condition, frame)))) continue;
         if (index + 1 < generators.length) {
-          const iterable = this.evaluate(generators[index + 1].iterable, frame);
+          const iterable = this.evaluateIterable(generators[index + 1].iterable, frame);
           const length = frame.temporaries.length;
           frame.temporaries.push(iterable);
           try {
@@ -645,26 +676,6 @@ export class ExpressionEvaluator {
     };
     yield* level.call(this, 0, firstNext);
     return None;
-  }
-}
-
-function constantValue(constant: Constant): PyValue {
-  switch (constant.kind) {
-    case 'int':
-    case 'float':
-    case 'str':
-    case 'bool': {
-      return constant.value;
-    }
-    case 'none': {
-      return None;
-    }
-    case 'ellipsis': {
-      return Ellipsis;
-    }
-    case 'imaginary': {
-      return newComplex(0, constant.value);
-    }
   }
 }
 
@@ -705,16 +716,16 @@ export function mappingEntries(mapping: PyValue): [PyValue, PyValue][] {
   return toArray(callValue(bindValue(keys, mapping), [])).map((key) => [key, getItem(mapping, key)]);
 }
 
-/** The items a target list unpacks a value into, raising the errors CPython raises for a count mismatch. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Matches CPython's messages for each way unpacking fails.
+/**
+ * The items a target list unpacks a value into, raising the errors CPython raises for a count mismatch: it reports how
+ * many values there were only for an exact list, tuple, or dict, and asks no other iterable for its length.
+ */
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows CPython's unpacking, whose errors differ for exact lists, tuples, and dicts.
 export function unpack(value: PyValue, count: number): PyValue[] {
-  if (value instanceof PyList || value instanceof PyTuple || typeof value === 'string') {
-    const items = value instanceof PyList || value instanceof PyTuple ? value.items : toArray(value);
-    if (items.length > count)
-      throw pyError('ValueError', `too many values to unpack (expected ${count}, got ${items.length})`);
-    if (items.length < count) {
-      throw pyError('ValueError', `not enough values to unpack (expected ${count}, got ${items.length})`);
-    }
+  if ((value instanceof PyList && value.cls === listClass) || (value instanceof PyTuple && value.cls === tupleClass)) {
+    const { items } = value;
+    if (items.length > count) throw tooManyValues(count, items.length);
+    if (items.length < count) throw notEnoughValues(count, items.length);
     return [...items];
   }
   if (!isIterable(value)) throw typeError(`cannot unpack non-iterable ${typeName(value)} object`);
@@ -722,23 +733,24 @@ export function unpack(value: PyValue, count: number): PyValue[] {
   const items: PyValue[] = [];
   for (let index = 0; index < count; index++) {
     const item = next();
-    if (item === DONE)
-      throw pyError('ValueError', `not enough values to unpack (expected ${count}, got ${items.length})`);
+    if (item === DONE) throw notEnoughValues(count, items.length);
     items.push(item);
   }
   if (next() !== DONE) {
-    let length: number | undefined;
-    try {
-      length = lengthOf(value);
-    } catch {
-      length = undefined;
-    }
-    throw pyError(
-      'ValueError',
-      `too many values to unpack (expected ${count}${length === undefined ? '' : `, got ${length}`})`
-    );
+    throw tooManyValues(count, value instanceof PyDict && value.cls === dictClass ? lengthOf(value) : undefined);
   }
   return items;
+}
+
+function tooManyValues(expected: number, actual: number | undefined): PyError {
+  return pyError(
+    'ValueError',
+    `too many values to unpack (expected ${expected}${actual === undefined ? '' : `, got ${actual}`})`
+  );
+}
+
+function notEnoughValues(expected: number, actual: number): PyError {
+  return pyError('ValueError', `not enough values to unpack (expected ${expected}, got ${actual})`);
 }
 
 export { PyError };

@@ -1,10 +1,10 @@
-import { builtin } from '../define';
+import { pythonFunction } from '../define';
 import { DictStore } from '../dictStore';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { bindValue, callValue, lookupSpecial } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { SetTable } from '../setTable';
-import { classOf, exceptionClassNamed, nativeFunction, newDict, newTuple, typeError } from '../types';
+import { classOf, exceptionClassNamed, newDict, newTuple, typeError } from '../types';
 import { type Kwargs, PyDeque, PyDict, PyInstance, PyList, PySet, PyTuple, type PyValue } from '../values';
 import { builtinClassWithBase } from './moduleClasses';
 
@@ -100,9 +100,7 @@ function deepCopyTuple(value: PyTuple, id: bigint, memo: PyDict): PyValue {
 const copyErrorClass = builtinClassWithBase('Error', exceptionClassNamed('Exception'), 'copy');
 
 /** `copy.replace(obj, /, **changes)`, which calls the `__replace__` of the object's class. */
-function replace(args: PyValue[], kwargs: Kwargs): PyValue {
-  if (args.length !== 1) throw typeError(`replace() takes 1 positional argument but ${args.length} were given`);
-  const [value] = args;
+function replace([value]: PyValue[], kwargs: Kwargs): PyValue {
   const cls = classOf(value);
   const method = cls.lookup('__replace__');
   if (method === undefined) throw typeError(`replace() does not support ${cls.name} objects`);
@@ -115,14 +113,14 @@ registerModule(
   'copy',
   () =>
     new Map<string, PyValue>([
-      ['copy', builtin('copy', 'one', 1, 1, ([value]) => shallowCopy(value))],
+      ['copy', pythonFunction('copy', 'x', ([value]) => shallowCopy(value))],
       [
         'deepcopy',
-        builtin('deepcopy', 'expected', 1, 2, ([value, memo]) =>
+        pythonFunction('deepcopy', 'x, memo=None, _nil=[]', ([value, memo]) =>
           deepCopy(value, memo instanceof PyDict ? memo : newDict())
         ),
       ],
-      ['replace', nativeFunction('replace', replace)],
+      ['replace', pythonFunction('replace', 'obj, /, **changes', replace)],
       ['Error', copyErrorClass],
       ['error', copyErrorClass],
     ])

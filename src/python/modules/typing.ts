@@ -1,6 +1,6 @@
 import { abcMetaClass, initAbstractClass } from '../abstractClasses';
 import { pyRepr } from '../conversions';
-import { builtin, method } from '../define';
+import { builtin, method, pythonFunction } from '../define';
 import { runLibrarySource } from '../librarySource';
 import { importModule, registerHiddenAttributes, registerModule, registerUnsupportedAttributes } from '../modules';
 import { getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
@@ -213,13 +213,15 @@ function natives(runtime: Runtime): [string, PyValue][] {
     ['EXCLUDED_ATTRIBUTES', newSet(EXCLUDED_ATTRIBUTES, true)],
     ['functools', importModule(runtime, 'functools')],
     ['sys', importModule(runtime, 'sys')],
-    ['get_origin', builtin('get_origin', 'one', 1, 1, ([tp]) => getOrigin(tp))],
-    ['get_args', builtin('get_args', 'one', 1, 1, ([tp]) => typingArgs(tp))],
+    ['get_origin', pythonFunction('get_origin', 'tp', ([tp]) => getOrigin(tp))],
+    ['get_args', pythonFunction('get_args', 'tp', ([tp]) => typingArgs(tp))],
     [
       'get_type_hints',
-      builtin('get_type_hints', 'expected', 1, 4, (args, kwargs) => getTypeHints(args, kwargs), {
-        keywords: ['obj', 'globalns', 'localns', 'include_extras', 'format'],
-      }),
+      pythonFunction(
+        'get_type_hints',
+        'obj, globalns=None, localns=None, include_extras=False, *, format=None',
+        getTypeHints
+      ),
     ],
     [
       '_firstlineno',

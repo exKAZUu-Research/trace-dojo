@@ -1,4 +1,5 @@
 import type { BinaryOperator } from './ast';
+import { floatPower } from './floatPower';
 import { asFloat, floatRepr } from './numbers';
 import { complexClass, NotImplemented, pyError } from './types';
 import { PyComplex, type PyValue } from './values';
@@ -66,7 +67,7 @@ function power(a: Parts, b: Parts): Parts {
     return { real: 0, imag: 0 };
   }
   const magnitude = Math.hypot(a.real, a.imag);
-  let length = magnitude ** b.real;
+  let length = floatPower(magnitude, b.real);
   const angle = Math.atan2(a.imag, a.real);
   let phase = angle * b.real;
   if (b.imag !== 0) {

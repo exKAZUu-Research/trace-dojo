@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 588 -- The statement evaluator keeps one method per kind of statement together.
+// code-gauge-allow-file fileNcss 595 -- The statement evaluator keeps one method per kind of statement together.
 import type { ExceptHandler, Expression, MatchCase, Pattern, Statement, Target } from './ast';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
@@ -213,7 +213,13 @@ export class Evaluator extends ExpressionEvaluator {
       const feature = module.unsupported.get(name);
       if (value === undefined && feature !== undefined) throw new UnsupportedFeatureError(feature);
       if (value === undefined) {
-        throw pyError('ImportError', `cannot import name '${name}' from '${statement.module}' (unknown location)`);
+        const error = pyError(
+          'ImportError',
+          `cannot import name '${name}' from '${statement.module}' (unknown location)`
+        );
+        const state = error.exception.exception;
+        if (state) state.fields = new Map([...(state.fields ?? []), ['name', statement.module], ['name_from', name]]);
+        throw error;
       }
       this.storeName(binding, value, frame);
     }
@@ -302,7 +308,7 @@ export class Evaluator extends ExpressionEvaluator {
     frame.annotations.push([statement.target.name, () => this.evaluate(annotation, frame)]);
   }
 
-  // code-gauge-allow functionNcss 32 -- One case per kind of compound statement.
+  // code-gauge-allow functionNcss 33 -- One case per kind of compound statement.
   private *compoundStatement(statement: Statement, frame: Frame): Execution {
     const { runtime } = this;
     runtime.spend();
@@ -318,6 +324,7 @@ export class Evaluator extends ExpressionEvaluator {
           const completion = yield* this.block(statement.body, frame);
           if (completion === 'break') return undefined;
           if (completion && completion !== 'continue') return completion;
+          runtime.currentRow = statement.row;
         }
         return yield* this.block(statement.orelse, frame);
       }
@@ -346,19 +353,19 @@ export class Evaluator extends ExpressionEvaluator {
 
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
-    const iterable = this.evaluate(statement.iterable, frame);
+    const iterable = this.evaluateIterable(statement.iterable, frame);
     const length = frame.temporaries.length;
     frame.temporaries.push(iterable);
     try {
       const next = iterate(iterable);
       for (let item = next(); item !== DONE; item = next()) {
         runtime.spend();
-        runtime.currentRow = statement.row;
         this.assign(statement.target, item, frame);
         runtime.steps.stepBinding(statement.stepRow, !storesReference(statement.target) || storesAnswer(item));
         const completion = yield* this.block(statement.body, frame);
         if (completion === 'break') return undefined;
         if (completion && completion !== 'continue') return completion;
+        runtime.currentRow = statement.row;
       }
     } finally {
       frame.temporaries.length = length;
@@ -534,7 +541,7 @@ export class Evaluator extends ExpressionEvaluator {
 
   // With ----------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 36 -- Follows the protocol of the with statement.
+  // code-gauge-allow functionNcss 38 -- Follows the protocol of the with statement.
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
     const { runtime } = this;
@@ -565,6 +572,7 @@ export class Evaluator extends ExpressionEvaluator {
         if (!(error instanceof PyError) || !entered) throw error;
         const exception = error.exception;
         this.handling.push(exception);
+        runtime.currentRow = statement.row;
         let suppress: boolean;
         try {
           suppress = isTruthy(callValue(bindValue(exit, manager), [exception.cls, exception, None]));
@@ -574,6 +582,7 @@ export class Evaluator extends ExpressionEvaluator {
         if (!suppress) throw error;
         return undefined;
       }
+      runtime.currentRow = statement.row;
       callValue(bindValue(exit, manager), [None, None, None]);
       return completion;
     } finally {

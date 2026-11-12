@@ -56,11 +56,11 @@ class TemplateReader {
     let value = this.peek() === '(' ? this.mappingValue() : undefined;
     let flags = '';
     while ('-+ #0'.includes(this.peek() ?? 'x')) flags += this.read();
-    const width = this.readCount();
+    const width = this.readCount('width', (1n << 63n) - 1n);
     let precision: number | undefined;
     if (this.peek() === '.') {
       this.index++;
-      const digits = this.readCount();
+      const digits = this.readCount('precision', (1n << 31n) - 1n);
       precision = digits ? Number(digits) : 0;
     }
     while ('hlL'.includes(this.peek() ?? 'x')) this.index++;
@@ -98,13 +98,14 @@ class TemplateReader {
   }
 
   /** Reads a width or a precision: digits, or `*` taking it from the arguments. */
-  private readCount(): string {
+  private readCount(name: string, max: bigint): string {
     if (this.peek() === '*') {
       this.index++;
       return String(intArgument(this.take(), '* wants int'));
     }
     let digits = '';
     while (/\d/.test(this.peek() ?? '')) digits += this.read();
+    if (digits.length > 9 && BigInt(digits) > max) throw valueError(`${name} too big`);
     return digits;
   }
 }
@@ -180,6 +181,7 @@ function formatInteger(type: string, integer: bigint, conversion: Conversion): s
     return pyFormat(integer, `${zero ? '0=' : align}${sign}${alternate}${width}${formatType}`);
   }
   const digits = (integer < 0n ? -integer : integer).toString(formatType === 'd' ? 10 : formatType === 'o' ? 8 : 16);
+  currentRuntime().buildString(precision);
   const padded = digits.padStart(precision, '0');
   const shown = type === 'X' ? padded.toUpperCase() : padded;
   const prefix = alternate ? `0${formatType === 'X' ? 'X' : formatType}` : '';

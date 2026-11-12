@@ -1,4 +1,4 @@
-import { type ArgStyle, checkArgs } from './nativeArgs';
+import { type ArgStyle, bindPythonArgs, checkArgs, pythonSignature } from './nativeArgs';
 import { defineMethod, nativeFunction } from './types';
 import type { Kwargs, NativeBinding, PyBuiltinFunction, PyClass, PyValue } from './values';
 
@@ -70,4 +70,37 @@ export function builtin(
     },
     options.owner
   );
+}
+
+/**
+ * Defines a method that CPython's library writes in Python, with the parameters after `self` as its `def` declares
+ * them: it reports a wrong call as that `def` does, and `run` receives the arguments `bindPythonArgs` returns.
+ */
+export function pythonMethod(
+  cls: PyClass,
+  name: string,
+  parameters: string,
+  run: (self: PyValue, args: PyValue[], kwargs: Kwargs) => PyValue,
+  binding?: NativeBinding
+): void {
+  const signature = pythonSignature(`${cls.name}.${name}`, `${binding === 'class' ? 'cls' : 'self'}, ${parameters}`);
+  defineMethod(
+    cls,
+    name,
+    // Called through the class without an instance, the method lacks `self` as the `def` would.
+    (self, args, kwargs) =>
+      run(self, bindPythonArgs(signature, self === undefined ? [] : [self, ...args], kwargs).slice(1), kwargs),
+    binding
+  );
+}
+
+/** Creates a function that CPython's library writes in Python, as `pythonMethod` defines a method. */
+export function pythonFunction(
+  name: string,
+  parameters: string,
+  run: (args: PyValue[], kwargs: Kwargs) => PyValue,
+  owner?: string
+): PyBuiltinFunction {
+  const signature = pythonSignature(name, parameters);
+  return nativeFunction(name, (args, kwargs) => run(bindPythonArgs(signature, args, kwargs), kwargs), owner);
 }

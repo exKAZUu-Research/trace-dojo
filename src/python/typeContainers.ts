@@ -7,12 +7,15 @@ import { keyError, sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
 import { callValue, getItem, getIterator, isTruthy, iterate, lookupSpecial, toArray } from './objects';
-import { contains, equals, lessThan } from './operators';
+import { contains, equals, extendList, lessThan } from './operators';
 import { currentRuntime } from './runtimeContext';
 import {
+  addToTable,
   differenceUpdate,
-  setDifference,
+  setDifferenceAll,
   setIntersection,
+  setIntersectionAll,
+  setSymmetricDifference,
   setUnion,
   symmetricDifferenceUpdate,
   updateTable,
@@ -103,9 +106,7 @@ method(listClass, 'append', 'one', 1, 1, (self, [item]) => {
   return None;
 });
 method(listClass, 'extend', 'one', 1, 1, (self, [iterable]) => {
-  const items = toArray(iterable);
-  currentRuntime().allocate(items.length);
-  for (const item of items) listOf(self).items.push(item);
+  extendList(listOf(self), iterable);
   return None;
 });
 method(listClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
@@ -156,8 +157,7 @@ method(
   'takes',
   0,
   0,
-  (self, args, kwargs) => {
-    if (args.length > 0) throw typeError('sort() takes no positional arguments');
+  (self, _args, kwargs) => {
     sortList(listOf(self), kwargs?.get('key') ?? None, isTruthy(kwargs?.get('reverse') ?? false));
     return None;
   },
@@ -468,14 +468,20 @@ for (const [cls, view] of [
 for (const cls of [setClass, frozensetClass]) {
   cls.construct = (setType, args, kwargs) => {
     checkArgs({ qualified: cls.name, min: 0, max: 1, style: 'expected' }, args, kwargs);
+    if (isExactFrozenset(args[0]) && setType === frozensetClass) return args[0];
     const table = new SetTable();
     if (args.length > 0) updateTable(table, args[0]);
-    currentRuntime().allocate(table.size + 1);
+    currentRuntime().allocate(1);
     return new PySet(setType, table);
   };
 }
 
 const setOf = (self: PyValue): PySet => self as PySet;
+
+/** An exact frozenset, which CPython returns itself for where it would copy a set: `frozenset(f)` and `f.copy()`. */
+function isExactFrozenset(value: PyValue | undefined): value is PySet {
+  return value instanceof PySet && value.cls === frozensetClass;
+}
 
 function setRepr(self: PyValue): string {
   const set = setOf(self);
@@ -498,22 +504,16 @@ for (const cls of [setClass, frozensetClass]) {
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt(setOf(self).table.size));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => setOf(self).table.has(item));
   method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
-  method(cls, 'copy', 'none', 0, 0, (self) => new PySet(setOf(self).cls, setOf(self).table.copy()));
+  method(cls, 'copy', 'none', 0, 0, (self) => (isExactFrozenset(self) ? self : setUnion(setOf(self), [])));
   method(cls, 'union', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => setUnion(setOf(self), others));
   method(cls, 'intersection', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) =>
-    foldSets(setOf(self), others, setIntersection)
+    setIntersectionAll(setOf(self), others)
   );
   method(cls, 'difference', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) =>
-    foldSets(setOf(self), others, setDifference)
+    setDifferenceAll(setOf(self), others)
   );
-  method(cls, 'symmetric_difference', 'one', 1, 1, (self, [other]) => {
-    const table = (other instanceof PySet ? other.table : tableFrom(other)).copy();
-    symmetricDifferenceUpdate(table, self);
-    return new PySet(setOf(self).cls, table);
-  });
-  method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) =>
-    toArray(other).every((item) => !setOf(self).table.has(item))
-  );
+  method(cls, 'symmetric_difference', 'one', 1, 1, (self, [other]) => setSymmetricDifference(setOf(self), other));
+  method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => !someItem(other, (item) => setOf(self).table.has(item)));
   method(cls, 'issubset', 'one', 1, 1, (self, [other]) => {
     // CPython compares the size of the intersection unless the other operand is a set.
     if (!(other instanceof PySet)) return setIntersection(setOf(self), other).table.size === setOf(self).table.size;
@@ -521,31 +521,26 @@ for (const cls of [setClass, frozensetClass]) {
       .table.keys()
       .every((key) => other.table.has(key));
   });
-  method(cls, 'issuperset', 'one', 1, 1, (self, [other]) =>
-    toArray(other).every((item) => setOf(self).table.has(item))
-  );
+  method(cls, 'issuperset', 'one', 1, 1, (self, [other]) => !someItem(other, (item) => !setOf(self).table.has(item)));
   void otherSet;
 }
 
-/** Applies a set operation with each of `others` in turn, starting from a copy of `set`. */
-function foldSets(set: PySet, others: PyValue[], operation: (set: PySet, other: PyValue) => PySet): PySet {
-  let result = new PySet(set.cls, set.table.copy());
-  for (const other of others) result = operation(result, other);
-  return result;
-}
-
-function tableFrom(value: PyValue): SetTable {
-  const table = new SetTable();
-  updateTable(table, value);
-  return table;
+/** Whether an iterable has an item passing the test, reading no further than the first one as CPython does. */
+function someItem(iterable: PyValue, test: (item: PyValue) => boolean): boolean {
+  const runtime = currentRuntime();
+  const next = iterate(iterable);
+  for (let item = next(); item !== DONE; item = next()) {
+    runtime.spend();
+    if (test(item)) return true;
+  }
+  return false;
 }
 
 method(frozensetClass, '__hash__', 'none', 0, 0, (self) => pyHash(self));
 NATIVE_HASHES.add(frozensetClass.dict.get('__hash__') as PyValue);
 setClass.dict.set('__hash__', None);
 method(setClass, 'add', 'one', 1, 1, (self, [item]) => {
-  setOf(self).table.add(item);
-  currentRuntime().allocate(1);
+  addToTable(setOf(self).table, item);
   return None;
 });
 method(setClass, 'remove', 'one', 1, 1, (self, [item]) => {
@@ -570,8 +565,7 @@ method(setClass, 'update', 'expected', 0, Number.POSITIVE_INFINITY, (self, other
   return None;
 });
 method(setClass, 'intersection_update', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => {
-  const set = setOf(self);
-  set.table = foldSets(set, others, setIntersection).table;
+  setOf(self).table.adopt(setIntersectionAll(setOf(self), others).table);
   return None;
 });
 method(setClass, 'difference_update', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => {

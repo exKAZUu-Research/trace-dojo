@@ -75,6 +75,8 @@ export class PyClass extends PyObject {
   isBaseType = false;
   /** The ordered annotations of the class body, which `@dataclass` reads. */
   annotationNames: string[] = [];
+  /** The `__annotations__` a program read or assigned, which later reads return as it is. */
+  annotations?: PyValue;
   readonly flags: { isEnum?: boolean; isAbstractEnum?: boolean } = {};
   /** The members of an Enum class, in definition order. */
   enumMembers?: PyInstance[];
@@ -238,6 +240,8 @@ export class PyFunction extends PyObject {
   module = '__main__';
   /** The frame of the `def`, whose variables the annotations are evaluated with when a program reads them. */
   definingFrame?: Frame;
+  /** The `__annotations__` a program read or assigned, which later reads return as it is. */
+  annotations?: PyDict;
   /** The `__annotate__` and `__type_params__` a program assigned. */
   annotate?: PyValue;
   typeParams?: PyValue;

@@ -9,7 +9,6 @@ import {
   classOf,
   namespaceDict,
   nativeFunction,
-  newDict,
   newTuple,
   None,
   propertyClass,
@@ -99,7 +98,8 @@ function typeData(cls: PyClass, name: string): PyValue | undefined {
       return newMappingProxy(namespaceDict(cls.dict));
     }
     case '__annotations__': {
-      return newDict(currentRuntime().classAnnotations(cls));
+      if (cls.isBuiltin) throw attributeError(cls, name);
+      return currentRuntime().classAnnotationsValue(cls);
     }
     default: {
       return undefined;
@@ -118,12 +118,18 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   return undefined;
 }
 
+const FUNCTION_ATTRIBUTES_OF_METHODS = new Set([
+  '__name__',
+  '__qualname__',
+  '__doc__',
+  '__module__',
+  '__annotations__',
+  '__annotate__',
+]);
+
 /** A bound method reads the attributes it does not have from its function. */
 function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | undefined {
-  if (name === '__name__' || name === '__qualname__' || name === '__doc__' || name === '__module__') {
-    return getAttribute(method.fn, name);
-  }
-  return undefined;
+  return FUNCTION_ATTRIBUTES_OF_METHODS.has(name) ? getAttribute(method.fn, name) : undefined;
 }
 
 function instanceAttribute(instance: PyInstance, name: string): PyValue | undefined {
@@ -242,7 +248,15 @@ export function deleteAttribute(target: PyValue, name: string): void {
   }
   if (target instanceof PyClass) {
     if (target.isBuiltin) throw typeError(`cannot delete '${name}' attribute of immutable type '${target.name}'`);
-    if (!target.dict.delete(name)) throw attributeError(target, name);
+    if (name === '__annotations__') {
+      if (target.annotations === undefined) throw pyError('AttributeError', name);
+      replaceClassAnnotations(target, undefined);
+    } else if (!target.dict.delete(name)) throw attributeError(target, name);
+    return;
+  }
+  if (target instanceof PyFunction && name === '__annotations__') {
+    // CPython's setter of a function's annotations takes a deletion as an assignment of None.
+    setAttribute(target, name, None);
     return;
   }
   if (target instanceof PyFunction || target instanceof PyModule) {
@@ -281,6 +295,16 @@ function setClassAttribute(cls: PyClass, name: string, value: PyValue): void {
     else cls.qualifiedName = value;
     return;
   }
+  if (name === '__annotations__') {
+    replaceClassAnnotations(cls, value);
+    return;
+  }
   if (name === '__module__' && typeof value === 'string') cls.module = value;
   cls.dict.set(name, value);
+}
+
+/** Assigns or deletes a class's `__annotations__`, after which the annotations of its body are no longer evaluated. */
+function replaceClassAnnotations(cls: PyClass, value: PyValue | undefined): void {
+  cls.annotations = value;
+  currentRuntime().classAnnotationThunks.delete(cls);
 }

@@ -485,6 +485,9 @@ MutableSet.register(set)
 
 
 class Mapping(Collection):
+    # Tell ABCMeta.__new__ that this class should have TPFLAGS_MAPPING set.
+    __abc_tpflags__ = 1 << 6 # Py_TPFLAGS_MAPPING
+
     @abstractmethod
     def __getitem__(self, key):
         raise KeyError
@@ -652,6 +655,9 @@ MutableMapping.register(dict)
 
 
 class Sequence(Reversible, Collection):
+    # Tell ABCMeta.__new__ that this class should have TPFLAGS_SEQUENCE set.
+    __abc_tpflags__ = 1 << 5 # Py_TPFLAGS_SEQUENCE
+
     @abstractmethod
     def __getitem__(self, index):
         raise IndexError

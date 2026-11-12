@@ -2,7 +2,7 @@ import { pyRepr } from '../conversions';
 import { builtin } from '../define';
 import { runLibrarySource } from '../librarySource';
 import { registerHiddenAttributes, registerModule, registerUnsupportedAttributes } from '../modules';
-import { floatRepr, intToString, toIndex } from '../numbers';
+import { floatRepr, intToString, parseIntText, toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy, toArray } from '../objects';
 import { intEnumValue } from '../operators';
 import { currentRuntime } from '../runtimeContext';
@@ -61,7 +61,8 @@ const JSON_ESCAPES: Record<string, string> = {
 function unicodeEscape(char: string): string {
   let result = '';
   for (let unit = 0; unit < char.length; unit++)
-    result += `\\u${((char.codePointAt(unit) as number) & 0xff_ff).toString(16).padStart(4, '0')}`;
+    // oxlint-disable-next-line unicorn/prefer-code-point -- JSON escapes the two surrogates of an astral character separately.
+    result += `\\u${char.charCodeAt(unit).toString(16).padStart(4, '0')}`;
   return result;
 }
 
@@ -203,6 +204,7 @@ class Decoder {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of JSON value.
   value(): PyValue {
     currentRuntime().spend();
     const char = this.chars[this.index];
@@ -225,13 +227,16 @@ class Decoder {
         return callValue(this.hooks.parseConstant, [word]);
       }
     }
-    const match = /^-?(?:0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?/.exec(
-      this.chars.slice(this.index, this.index + 400).join('')
-    );
+    let end = this.index;
+    while (end < this.chars.length && '+-.0123456789Ee'.includes(this.chars[end])) end++;
+    currentRuntime().scan(end - this.index);
+    const match = /^-?(?:0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?/.exec(this.chars.slice(this.index, end).join(''));
     if (!match) throw this.error('Expecting value');
     this.index += match[0].length;
     if (match[1] === undefined && match[2] === undefined) {
-      return this.hooks.parseInt === intClass ? BigInt(match[0]) : callValue(this.hooks.parseInt, [match[0]]);
+      return this.hooks.parseInt === intClass
+        ? (parseIntText(match[0], 10) as bigint)
+        : callValue(this.hooks.parseInt, [match[0]]);
     }
     return this.hooks.parseFloat === floatClass ? Number(match[0]) : callValue(this.hooks.parseFloat, [match[0]]);
   }

@@ -1,3 +1,4 @@
+import { applyCollectionFlags, registerCollectionKind } from './matching';
 import { bindValue, callValue, getAttributeOrUndefined, isTruthy } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { builtinClass, newSet, None, NotImplemented, pyError, typeClass, typeError } from './types';
@@ -15,6 +16,7 @@ abcMetaClass.module = 'abc';
 /** Makes a class an abstract base class, as `metaclass=ABCMeta` (or a subclass of it) does. */
 export function initAbstractClass(cls: PyClass, metaclass?: PyClass): void {
   cls.abc = { registry: [] };
+  applyCollectionFlags(cls);
   cls.cls = metaclass ?? cls.bases.find((base) => base.abc)?.cls ?? abcMetaClass;
   const abstracts = new Set<string>();
   for (const [name, value] of cls.dict) if (isAbstractMethod(value)) abstracts.add(name);
@@ -87,6 +89,7 @@ export function registerVirtualSubclass(
   if (isSubclass(abc, subclass)) throw pyError('RuntimeError', 'Refusing to create an inheritance cycle');
   abc.abc?.registry.push(subclass);
   invalidationCount++;
+  registerCollectionKind(abc, subclass, (cls) => currentRuntime().subclassesOf(cls));
   return subclass;
 }
 

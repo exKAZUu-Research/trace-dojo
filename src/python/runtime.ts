@@ -39,7 +39,7 @@ import {
   PyCell,
   PyClass,
   PyDescriptor,
-  type PyDict,
+  PyDict,
   PyError,
   PyFunction,
   PyGenerator,
@@ -63,6 +63,8 @@ export class Runtime {
   readonly modules = new Map<string, PyModule>();
   readonly evaluator: Evaluator;
   private row: number | undefined;
+  /** The row each running frame was entered from, which its own statements replace while it runs. */
+  private readonly entryRows: (number | undefined)[] = [];
   /** The classes this run defined, by base class: builtin classes outlive a run, so they cannot hold them. */
   private readonly subclasses = new Map<PyClass, PyClass[]>();
   private allocatedSlots = 0;
@@ -124,10 +126,12 @@ export class Runtime {
   pushFrame(frame: Frame): void {
     if (this.frames.length >= LIMITS.maxCallDepth) throw pyError('RecursionError', 'maximum recursion depth exceeded');
     this.frames.push(frame);
+    this.entryRows.push(this.row);
   }
 
   popFrame(): void {
     const frame = this.frames.pop();
+    this.row = this.entryRows.pop();
     if (frame?.isAtomic) this.steps.completeAtomicCall();
   }
 
@@ -289,7 +293,19 @@ export class Runtime {
   readonly classAnnotationThunks = new Map<PyClass, [string, () => PyValue][]>();
   private readonly streams = new Map<string, PyValue>();
 
+  /** The entries of a class's `__annotations__`, which `@dataclass` and `get_type_hints()` read as a program does. */
   classAnnotations(cls: PyClass): [PyValue, PyValue][] {
+    const annotations = this.classAnnotationsValue(cls);
+    return annotations instanceof PyDict ? annotations.store.ordered().map((entry) => [entry.key, entry.value]) : [];
+  }
+
+  /** A class's `__annotations__`: what the first read evaluated or the program assigned, as CPython keeps it. */
+  classAnnotationsValue(cls: PyClass): PyValue {
+    cls.annotations ??= newDict(this.evaluateClassAnnotations(cls));
+    return cls.annotations;
+  }
+
+  evaluateClassAnnotations(cls: PyClass): [PyValue, PyValue][] {
     return (this.classAnnotationThunks.get(cls) ?? []).map(([name, thunk]) => [name, thunk()]);
   }
 

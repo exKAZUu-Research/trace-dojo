@@ -1,12 +1,12 @@
 import { abcInvalidationCount } from '../abstractClasses';
 import { addressOf, pyRepr } from '../conversions';
-import { builtin, method } from '../define';
+import { builtin, method, pythonFunction } from '../define';
 import { defineGetSet, defineUnsupportedAttributes } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { runLibrarySource } from '../librarySource';
 import { mappingProxyClass } from '../mappingProxy';
 import { importModule, registerModule, registerUnsupportedAttributes } from '../modules';
-import { checkArgs } from '../nativeArgs';
+import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { bindValue, callValue, isCallable, isTruthy, iterate, lookupSpecial } from '../objects';
 import { compareOp } from '../operators';
@@ -145,7 +145,6 @@ method(partialClass, '__repr__', 'none', 0, 0, (self) => {
 });
 
 function reduce(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'reduce', min: 2, max: 3, style: 'expected', keywords: ['initial'] }, args, kwargs);
   const [fn, iterable] = args;
   const next = iterate(iterable);
   let accumulator: PyValue | typeof DONE = args.length > 2 ? args[2] : (kwargs?.get('initial') ?? next());
@@ -300,7 +299,8 @@ for (const [name, operator] of [
   });
 }
 
-function cmpToKey([compare]: PyValue[]): PyValue {
+function cmpToKey(args: PyValue[], kwargs: Kwargs): PyValue {
+  const compare = argument(args, kwargs, 0, 'mycmp') as PyValue;
   return builtin(
     'K',
     'one',
@@ -380,13 +380,13 @@ registerModule('functools', (runtime) =>
     'functools',
     FUNCTOOLS_SOURCE,
     new Map<string, PyValue>([
-      ['reduce', builtin('reduce', 'expected', 2, 3, reduce)],
+      ['reduce', builtin('reduce', 'takes', 2, 3, reduce, { keywords: ['initial'] })],
       ['partial', partialClass],
       ['Placeholder', Placeholder],
       ['_lru_cache_wrapper', builtin('_lru_cache_wrapper', 'expected', 4, 4, lruCacheWrapper)],
       ['_CacheInfo', makeNamedTupleClass('CacheInfo', ['hits', 'misses', 'maxsize', 'currsize'], 'functools')],
-      ['cmp_to_key', builtin('cmp_to_key', 'one', 1, 1, cmpToKey)],
-      ['total_ordering', builtin('total_ordering', 'one', 1, 1, totalOrdering)],
+      ['cmp_to_key', builtin('cmp_to_key', 'takes', 1, 1, cmpToKey, { keywords: ['mycmp'], named: 1 })],
+      ['total_ordering', pythonFunction('total_ordering', 'cls', totalOrdering)],
       ['get_cache_token', builtin('get_cache_token', 'none', 0, 0, () => BigInt(abcInvalidationCount()))],
       ['GenericAlias', genericAliasClass],
       ['MappingProxyType', mappingProxyClass],

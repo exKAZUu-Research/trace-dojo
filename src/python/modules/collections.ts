@@ -1,6 +1,6 @@
-// code-gauge-allow-file fileNcss 501 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 533 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
-import { builtin, method } from '../define';
+import { method, pythonFunction, pythonMethod } from '../define';
 import { defineGetSet } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { mappingEntries } from '../expressionEvaluator';
@@ -8,11 +8,12 @@ import { pyHash } from '../hashing';
 import { keyError } from '../items';
 import { runLibrarySource } from '../librarySource';
 import { registerLazyAttributes, registerModule } from '../modules';
-import { argument, checkArgs } from '../nativeArgs';
+import { argument, bindPythonArgs, checkArgs, pythonSignature } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import {
   callValue,
   getAttribute,
+  getItem,
   getIterator,
   isCallable,
   isTruthy,
@@ -103,13 +104,25 @@ method(dequeClass, 'appendleft', 'one', 1, 1, (self, [item]) => {
   return None;
 });
 method(dequeClass, 'extend', 'one', 1, 1, (self, [iterable]) => {
-  for (const item of toArray(iterable)) push(dequeOf(self), item, false);
+  extendDeque(dequeOf(self), iterable, false);
   return None;
 });
 method(dequeClass, 'extendleft', 'one', 1, 1, (self, [iterable]) => {
-  for (const item of toArray(iterable)) push(dequeOf(self), item, true);
+  extendDeque(dequeOf(self), iterable, true);
   return None;
 });
+
+/** Adds each item as the iterable yields it; a deque extended with itself reads its items first, as CPython does. */
+function extendDeque(deque: PyDeque, iterable: PyValue, left: boolean): void {
+  if (iterable === deque) {
+    // oxlint-disable-next-line unicorn/prefer-spread -- A copy, not an iteration, is the point.
+    const items = deque.items.slice();
+    for (const item of items) push(deque, item, left);
+    return;
+  }
+  const next = iterate(iterable);
+  for (let item = next(); item !== DONE; item = next()) push(deque, item, left);
+}
 method(dequeClass, 'pop', 'none', 0, 0, (self) => {
   if (dequeOf(self).items.length === 0) throw pyError('IndexError', 'pop from an empty deque');
   return dequeOf(self).items.pop() as PyValue;
@@ -177,20 +190,26 @@ method(dequeClass, '__add__', 'one', 1, 1, (self, [other]) => {
   return result;
 });
 method(dequeClass, '__iadd__', 'one', 1, 1, (self, [other]) => {
-  for (const item of toArray(other)) push(dequeOf(self), item, false);
+  extendDeque(dequeOf(self), other, false);
   return self;
 });
 for (const name of ['__mul__', '__rmul__']) {
   method(dequeClass, name, 'one', 1, 1, (self, [count]) => {
+    if (!isIndex(count)) return NotImplemented;
     const result = copyDeque(dequeOf(self));
     repeatDeque(result, count);
     return result;
   });
 }
 method(dequeClass, '__imul__', 'one', 1, 1, (self, [count]) => {
+  if (!isIndex(count)) return NotImplemented;
   repeatDeque(dequeOf(self), count);
   return self;
 });
+
+function isIndex(value: PyValue): boolean {
+  return typeof value === 'bigint' || typeof value === 'boolean' || lookupSpecial(value, '__index__') !== undefined;
+}
 method(dequeClass, '__copy__', 'none', 0, 0, (self) => copyDeque(dequeOf(self)));
 method(dequeClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGenericAlias(owner, key), {
   binding: 'class',
@@ -253,11 +272,30 @@ method(dequeClass, '__repr__', 'none', 0, 0, (self) => {
     return deque.maxlen === undefined ? `deque(${body})` : `deque(${body}, maxlen=${deque.maxlen})`;
   });
 });
-method(dequeClass, '__eq__', 'one', 1, 1, (self, [other]) => {
-  if (!(other instanceof PyDeque)) return NotImplemented;
-  const a = dequeOf(self).items;
-  return a.length === other.items.length && a.every((item, index) => equals(item, other.items[index]));
-});
+for (const [name, operator] of [
+  ['__eq__', '=='],
+  ['__ne__', '!='],
+  ['__lt__', '<'],
+  ['__le__', '<='],
+  ['__gt__', '>'],
+  ['__ge__', '>='],
+] as const) {
+  method(dequeClass, name, 'one', 1, 1, (self, [other]) =>
+    other instanceof PyDeque ? compareDeques(operator, dequeOf(self).items, other.items) : NotImplemented
+  );
+}
+
+/** Compares as CPython's deque_richcompare does: by the first pair of unequal items, then by length. */
+function compareDeques(operator: '==' | '!=' | '<' | '<=' | '>' | '>=', a: PyValue[], b: PyValue[]): boolean {
+  if (a === b) return operator === '==' || operator === '<=' || operator === '>=';
+  if (a.length !== b.length && (operator === '==' || operator === '!=')) return operator === '!=';
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    currentRuntime().spend();
+    if (!equals(a[index], b[index])) return isTruthy(compareOp(operator, a[index], b[index]));
+  }
+  return isTruthy(compareOp(operator, BigInt(a.length), BigInt(b.length)));
+}
 dequeClass.dict.set(
   'maxlen',
   new PyDescriptor(
@@ -276,14 +314,12 @@ export const counterClass = new PyClass('Counter', [dictClass], typeClass);
 counterClass.mro = [counterClass, ...dictClass.mro];
 counterClass.module = 'collections';
 counterClass.layout = { base: 'native' };
+const COUNTING_PARAMETERS = 'iterable=None, /, **kwds';
+const COUNTER_INIT = pythonSignature('Counter.__init__', `self, ${COUNTING_PARAMETERS}`);
+
 counterClass.construct = (cls, args, kwargs) => {
-  checkArgs(
-    { qualified: 'Counter', min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] },
-    args,
-    kwargs
-  );
   const counter = new PyDict(cls, new DictStore());
-  countInto(counter, args[0], kwargs, 1n);
+  countInto(counter, bindPythonArgs(COUNTER_INIT, [counter, ...args], kwargs)[1], kwargs, 1n);
   return counter;
 };
 
@@ -323,12 +359,12 @@ function mostCommon(counter: PyDict): [PyValue, PyValue][] {
     .map(({ entry }) => entry);
 }
 
-method(counterClass, 'most_common', 'expected', 0, 1, (self, [count]) => {
+pythonMethod(counterClass, 'most_common', 'n=None', (self, [count]) => {
   let items = mostCommon(counterOf(self));
   if (count !== undefined && count !== None) items = items.slice(0, Math.max(0, Number(toIndex(count))));
   return newList(items.map((item) => newTuple(item)));
 });
-method(counterClass, 'elements', 'none', 0, 0, (self) => {
+pythonMethod(counterClass, 'elements', '', (self) => {
   const items: PyValue[] = [];
   for (const entry of counterOf(self).store.ordered()) {
     const count = typeof entry.value === 'bigint' ? entry.value : 0n;
@@ -341,35 +377,16 @@ method(counterClass, 'elements', 'none', 0, 0, (self) => {
     () => items
   );
 });
-counterClass.dict.set(
-  'update',
-  new PyBuiltinFunction(
-    builtinClass('method_descriptor'),
-    'update',
-    (args, kwargs) => {
-      countInto(counterOf(args[0]), args[1], kwargs, 1n);
-      return None;
-    },
-    undefined,
-    'method',
-    'Counter'
-  )
-);
-counterClass.dict.set(
-  'subtract',
-  new PyBuiltinFunction(
-    builtinClass('method_descriptor'),
-    'subtract',
-    (args, kwargs) => {
-      countInto(counterOf(args[0]), args[1], kwargs, -1n);
-      return None;
-    },
-    undefined,
-    'method',
-    'Counter'
-  )
-);
-method(counterClass, 'total', 'none', 0, 0, (self) => {
+for (const [name, sign] of [
+  ['update', 1n],
+  ['subtract', -1n],
+] as const) {
+  pythonMethod(counterClass, name, COUNTING_PARAMETERS, (self, [iterable], kwargs) => {
+    countInto(counterOf(self), iterable, kwargs, sign);
+    return None;
+  });
+}
+pythonMethod(counterClass, 'total', '', (self) => {
   let total: PyValue = 0n;
   for (const entry of counterOf(self).store.ordered()) total = binaryOp('+', total, entry.value);
   return total;
@@ -468,26 +485,38 @@ function keepPositive(counter: PyDict): PyDict {
 }
 
 for (const [name, update] of [
-  ['__iadd__', (self: PyDict, key: PyValue, count: PyValue) => binaryOp('+', countOf(self, key), count)],
-  ['__isub__', (self: PyDict, key: PyValue, count: PyValue) => binaryOp('-', countOf(self, key), count)],
-  ['__ior__', (self: PyDict, key: PyValue, count: PyValue) => pickLarger(countOf(self, key), count)],
+  ['__iadd__', (count: PyValue, otherCount: PyValue) => binaryOp('+', count, otherCount)],
+  ['__isub__', (count: PyValue, otherCount: PyValue) => binaryOp('-', count, otherCount)],
+  ['__ior__', (count: PyValue, otherCount: PyValue) => (lessThan(count, otherCount) ? otherCount : undefined)],
 ] as const) {
   method(counterClass, name, 'one', 1, 1, (self, [other]) => {
-    if (!isCounter(other)) return NotImplemented;
     const counter = counterOf(self);
-    for (const { key, value } of other.store.ordered()) counter.store.set(key, update(counter, key, value));
+    for (const [key, otherCount] of itemsOf(other)) {
+      const count = update(countOf(counter, key), otherCount);
+      if (count !== undefined) counter.store.set(key, count);
+    }
     return keepPositive(counter);
   });
 }
 method(counterClass, '__iand__', 'one', 1, 1, (self, [other]) => {
-  if (!isCounter(other)) return NotImplemented;
   const counter = counterOf(self);
   for (const entry of counter.store.ordered()) {
-    const otherCount = countOf(other, entry.key);
-    if (isTruthy(compareOp('<', otherCount, entry.value))) entry.value = otherCount;
+    const otherCount = getItem(other, entry.key);
+    if (lessThan(otherCount, entry.value)) entry.value = otherCount;
   }
   return keepPositive(counter);
 });
+
+/** The pairs of `other.items()`: the in-place operators of Counter take any object that has the method. */
+function itemsOf(other: PyValue): [PyValue, PyValue][] {
+  if (other instanceof PyDict && other.cls.lookup('items') === dictClass.dict.get('items')) {
+    return other.store.ordered().map((entry) => [entry.key, entry.value]);
+  }
+  return toArray(callValue(getAttribute(other, 'items'), [])).map((item) => {
+    const [key, value] = toArray(item);
+    return [key, value];
+  });
+}
 
 /** Whether a comparison holds for the count of every element either Counter has. */
 function everyCount(self: PyDict, other: PyDict, operator: '==' | '<=' | '>='): boolean {
@@ -511,8 +540,8 @@ for (const [name, compare] of [
     isCounter(other) ? compare(counterOf(self), other) : NotImplemented
   );
 }
-method(counterClass, '__missing__', 'one', 1, 1, () => 0n);
-method(counterClass, '_keep_positive', 'none', 0, 0, (self) => keepPositive(counterOf(self)));
+pythonMethod(counterClass, '__missing__', 'key', () => 0n);
+pythonMethod(counterClass, '_keep_positive', '', (self) => keepPositive(counterOf(self)));
 // Counter is a class written in Python in CPython, whose dictionary has what a class statement gives it.
 counterClass.dict.set('__module__', 'collections');
 counterClass.dict.set('__firstlineno__', 551n);
@@ -523,17 +552,15 @@ method(counterClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
   counterOf(self).store.delete(key);
   return None;
 });
-method(counterClass, 'copy', 'none', 0, 0, (self) => callValue(counterOf(self).cls, [self]));
-method(
+pythonMethod(counterClass, 'copy', '', (self) => callValue(counterOf(self).cls, [self]));
+pythonMethod(
   counterClass,
   'fromkeys',
-  'expected',
-  1,
-  2,
+  'iterable, v=None',
   () => {
     throw pyError('NotImplementedError', 'Counter.fromkeys() is undefined.  Use Counter(iterable) instead.');
   },
-  { binding: 'class' }
+  'class'
 );
 
 // defaultdict -------------------------------------------------------------------------------------------------------
@@ -635,21 +662,30 @@ method(orderedDictClass, '__eq__', 'one', 1, 1, (self, [other]) => {
   });
 });
 
+// CPython's defaultdict and OrderedDict define `|` themselves, which keeps their type where dict gives a plain dict.
+for (const cls of [defaultdictClass, orderedDictClass]) {
+  method(cls, '__or__', 'one', 1, 1, (self, [other]) =>
+    other instanceof PyDict ? unionLike(self as PyDict, self as PyDict, other) : NotImplemented
+  );
+  method(cls, '__ror__', 'one', 1, 1, (self, [other]) =>
+    other instanceof PyDict ? unionLike(self as PyDict, other, self as PyDict) : NotImplemented
+  );
+}
+
+/** A new dict of the type (and default factory) of `like` holding the items of `first`, then those of `second`. */
+function unionLike(like: PyDict, first: PyDict, second: PyDict): PyDict {
+  const result = new PyDict(like.cls, new DictStore(like.store.plainWrites), like.defaultFactory);
+  for (const dict of [first, second]) {
+    for (const entry of dict.store.ordered()) result.store.set(entry.key, entry.value);
+  }
+  currentRuntime().allocate(result.store.size);
+  return result;
+}
+
 // namedtuple --------------------------------------------------------------------------------------------------------
 
 // code-gauge-allow functionNcss 36 -- Follows collections.namedtuple's argument handling.
 function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs(
-    {
-      qualified: 'namedtuple',
-      min: 2,
-      max: 2,
-      style: 'takes',
-      keywords: ['typename', 'field_names', 'defaults', 'rename', 'module'],
-    },
-    args,
-    kwargs
-  );
   const typename = argument(args, kwargs, 0, 'typename');
   const fieldNames = argument(args, kwargs, 1, 'field_names');
   if (typeof typename !== 'string') throw typeError('namedtuple() typename must be a string');
@@ -828,9 +864,11 @@ registerModule(
       ['OrderedDict', orderedDictClass],
       [
         'namedtuple',
-        builtin('namedtuple', 'takes', 2, 2, namedtupleWithMethods, {
-          keywords: ['typename', 'field_names', 'defaults', 'rename', 'module'],
-        }),
+        pythonFunction(
+          'namedtuple',
+          'typename, field_names, *, rename=False, defaults=None, module=None',
+          namedtupleWithMethods
+        ),
       ],
     ])
 );

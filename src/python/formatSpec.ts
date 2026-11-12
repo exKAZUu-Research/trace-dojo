@@ -9,6 +9,7 @@ import {
   roundDecimal,
   shortestDecimal,
 } from './numbers';
+import { currentRuntime } from './runtimeContext';
 import { iterStr, strLength } from './strings';
 import { typeName, valueError } from './types';
 import { PyComplex, type PyValue } from './values';
@@ -26,7 +27,10 @@ interface Spec {
   type?: string;
 }
 
-// code-gauge-allow functionNcss 47 -- Follows the grammar of the format specification mini-language.
+const MAX_SSIZE = (1n << 63n) - 1n;
+const MAX_C_INT = 2 ** 31 - 1;
+
+// code-gauge-allow functionNcss 48 -- Follows the grammar of the format specification mini-language.
 // code-gauge-allow functionCognitiveComplexity 24 -- Follows the grammar of the format specification mini-language.
 function parseSpec(text: string, value: PyValue): Spec {
   const spec: Spec = { fill: ' ', coerceZero: false, alternate: false, zeroPad: false, width: 0 };
@@ -55,7 +59,8 @@ function parseSpec(text: string, value: PyValue): Spec {
   }
   let width = '';
   while (/\d/.test(chars[index] ?? '')) width += chars[index++];
-  spec.width = width ? Number(width) : 0;
+  spec.width = countOf(width);
+  currentRuntime().buildString(spec.width);
   if (chars[index] === ',' || chars[index] === '_') {
     spec.grouping = chars[index++] as ',' | '_';
     if (chars[index] === ',' || chars[index] === '_') throw valueError(`Cannot specify both ',' and '_'.`);
@@ -65,7 +70,7 @@ function parseSpec(text: string, value: PyValue): Spec {
     let precision = '';
     while (/\d/.test(chars[index] ?? '')) precision += chars[index++];
     if (!precision) throw valueError('Format specifier missing precision');
-    spec.precision = Number(precision);
+    spec.precision = countOf(precision);
   }
   if (chars.length - index > 1) {
     throw valueError(`Invalid format specifier '${text}' for object of type '${typeName(value)}'`);
@@ -76,6 +81,12 @@ function parseSpec(text: string, value: PyValue): Spec {
     spec.align = '=';
   }
   return spec;
+}
+
+/** A width or precision, which CPython reads into a Py_ssize_t. */
+function countOf(digits: string): number {
+  if (digits.length > 18 && BigInt(digits) > MAX_SSIZE) throw valueError('Too many decimal digits in format string');
+  return Number(digits);
 }
 
 /** Formats a builtin value with a format specification, as its `__format__` does. */
@@ -124,7 +135,7 @@ function formatInt(value: bigint, spec: Spec): string {
   return finishNumber(value < 0n, prefix, digits, '', spec, radix === 10 ? 3 : 4);
 }
 
-// code-gauge-allow functionNcss 33 -- One case per float presentation type.
+// code-gauge-allow functionNcss 34 -- One case per float presentation type.
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per float presentation type.
 function formatFloat(value: number, spec: Spec): string {
   const type = spec.type;
@@ -132,6 +143,7 @@ function formatFloat(value: number, spec: Spec): string {
     throw valueError(`Unknown format code '${type}' for object of type 'float'`);
   }
   if (type === 'n' && spec.grouping) throw valueError(`Cannot specify '${spec.grouping}' with 'n'.`);
+  chargePrecision(spec.precision);
   let negative = value < 0 || Object.is(value, -0);
   const upper = type !== undefined && 'EFG'.includes(type);
   if (!Number.isFinite(value)) {
@@ -156,6 +168,12 @@ function formatFloat(value: number, spec: Spec): string {
   if (spec.coerceZero && negative && /^[0.]*(?:e[+-]\d+)?$/i.test(body.replace(/e.*$/i, ''))) negative = false;
   const [integer, fraction] = splitNumber(body);
   return finishNumber(negative, '', integer, fraction + (type === '%' ? '%' : ''), spec, 3);
+}
+
+function chargePrecision(precision: number | undefined): void {
+  if (precision === undefined) return;
+  if (precision > MAX_C_INT) throw valueError('precision too big');
+  currentRuntime().buildString(precision);
 }
 
 /** The 'g' presentation, and the default one with a precision, which keeps at least one fractional digit. */

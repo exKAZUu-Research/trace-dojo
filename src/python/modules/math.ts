@@ -1,4 +1,5 @@
 import { builtin } from '../define';
+import { floatPower } from '../floatPower';
 import { frexp } from '../hashing';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -102,19 +103,24 @@ function gcdOf(a: bigint, b: bigint): bigint {
   return x;
 }
 
+/**
+ * CPython's adaptive-precision integer square root (Modules/mathmodule.c): each step doubles the number of correct
+ * bits of `a`, so the whole costs about one division of full size.
+ */
 export function isqrt(n: bigint): bigint {
   if (n < 0n) throw valueError('isqrt() argument must be nonnegative');
-  if (n < 2n) return n;
-  let x = BigInt(Math.floor(Math.sqrt(Number(n))));
-  if (n > 1n << 100n) x = 1n << BigInt(Math.ceil(n.toString(2).length / 2));
-  for (;;) {
-    const y = (x + n / x) >> 1n;
-    if (y >= x) break;
-    x = y;
+  if (n === 0n) return 0n;
+  const bits = n.toString(2).length;
+  currentRuntime().chargeBits(BigInt(bits));
+  const c = (bits - 1) >> 1;
+  let a = 1n;
+  let d = 0;
+  for (let s = 31 - Math.clz32(c); s >= 0; s--) {
+    const e = d;
+    d = c >> s;
+    a = (a << BigInt(d - e - 1)) + (n >> BigInt(2 * c - e - d + 1)) / a;
   }
-  while (x * x > n) x--;
-  while ((x + 1n) * (x + 1n) <= n) x++;
-  return x;
+  return a * a > n ? a - 1n : a;
 }
 
 function comb(nValue: PyValue, kValue: PyValue): bigint {
@@ -171,8 +177,52 @@ function fsum(iterable: PyValue): number {
 }
 
 function hypot(values: number[]): number {
-  if (values.some((value) => !Number.isFinite(value) && !Number.isNaN(value))) return Number.POSITIVE_INFINITY;
-  return Math.hypot(...values);
+  const magnitudes = values.map(Math.abs);
+  let max = 0;
+  for (const magnitude of magnitudes) if (magnitude > max) max = magnitude;
+  return vectorNorm(magnitudes, max);
+}
+
+const DBL_MIN = 2 ** -1022;
+
+/**
+ * CPython's vector_norm (Modules/mathmodule.c): the square root of the sum of the squares of non-negative `values`,
+ * the largest of which is `max`. The values are scaled by a power of two so that the largest is in [0.5, 1), their
+ * squares are summed without loss into `csum` (which starts at 1 so that every addition is of a smaller term) plus
+ * the two error sums, and one differential correction is applied to the square root.
+ */
+function vectorNorm(values: number[], max: number): number {
+  if (max === Number.POSITIVE_INFINITY) return max;
+  if (values.some((value) => Number.isNaN(value))) return Number.NaN;
+  if (max === 0 || values.length <= 1) return max;
+  const maxExponent = frexp(max).exponent;
+  if (maxExponent < -1023) {
+    // The scale below would overflow, so subnormals are made normal first.
+    return (
+      DBL_MIN *
+      vectorNorm(
+        values.map((value) => value / DBL_MIN),
+        max / DBL_MIN
+      )
+    );
+  }
+  const scale = 2 ** -maxExponent;
+  let csum = 1;
+  let frac1 = 0;
+  let frac2 = 0;
+  const addProduct = (x: number, y: number): void => {
+    const high = x * y;
+    const low = fma(x, y, -high);
+    const sum = csum + high;
+    frac2 += csum - sum + high;
+    csum = sum;
+    frac1 += low;
+  };
+  for (const value of values) addProduct(value * scale, value * scale);
+  let h = Math.sqrt(csum - 1 + (frac1 + frac2));
+  addProduct(-h, h);
+  h += (csum - 1 + (frac1 + frac2)) / (2 * h);
+  return h / scale;
 }
 
 function remainder(x: number, y: number): number {
@@ -227,7 +277,7 @@ function pow(x: number, y: number): number {
   if (x === 0 && y < 0 && Number.isFinite(y)) throw domainError();
   if (x < 0 && Number.isFinite(x) && Number.isFinite(y) && !Number.isInteger(y)) throw domainError();
   if (x === 1 || y === 0) return 1;
-  const result = x ** y;
+  const result = floatPower(x, y);
   if (!Number.isFinite(result) && Number.isFinite(x) && Number.isFinite(y)) throw rangeError();
   return result;
 }

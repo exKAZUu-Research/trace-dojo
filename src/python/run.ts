@@ -40,7 +40,7 @@ export interface PythonRun extends ProgramRun {
  *
  * @param onEnd Called when the module ends, while its frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 20 -- Each language's runner wraps its own parser and runtime.
+// code-gauge-allow duplicateLines 21 -- Each language's runner wraps its own parser and runtime.
 export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): PythonRun {
   return withRuntime(runtime, () => {
     const globals = new Map<string, PyValue>([

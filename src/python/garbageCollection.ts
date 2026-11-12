@@ -47,7 +47,7 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionNcss 44 -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss 45 -- One case per kind of object that refers to others.
 // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
@@ -72,6 +72,7 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
     pushAll(pending, object.defaults);
     pushAll(pending, object.keywordDefaults.values());
     pushAll(pending, object.dict.values());
+    pending.push(object.annotations, object.annotate);
     return object.defaults.length;
   }
   if (object instanceof PyClass || object instanceof PyModule) return pushNamespaceReferences(pending, object);
@@ -99,6 +100,7 @@ function pushNamespaceReferences(pending: unknown[], object: PyClass | PyModule)
   if (object instanceof PyClass) {
     pushAll(pending, object.enumMembers ?? []);
     pushAll(pending, object.bases);
+    pending.push(object.annotations);
   }
   return object.dict.size;
 }

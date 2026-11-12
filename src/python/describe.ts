@@ -3,7 +3,7 @@ import { getAttributeOrUndefined } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 import { iterStr } from './strings';
-import { PyError, type PyInstance, PyList, type PyValue } from './values';
+import { type ExceptionState, PyError, type PyInstance, PyList, type PyValue } from './values';
 
 const MOVE_COST = 2;
 const CASE_COST = 1;
@@ -40,11 +40,13 @@ function safeStr(value: PyValue): string {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows traceback._compute_suggestion_error.
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows traceback._compute_suggestion_error.
 function suggestionFor(exception: PyInstance): string | undefined {
   const state = exception.exception;
-  if (!state?.name) return undefined;
+  if (!state) return undefined;
   const is = (className: string): boolean => exception.cls.mro.some((cls) => cls.isBuiltin && cls.name === className);
+  if (is('ImportError')) return importSuggestion(state);
+  if (!state.name) return undefined;
   const wrongName = state.name;
   if (is('AttributeError') && state.object !== undefined) {
     let candidates = currentRuntime().dirNames(state.object);
@@ -66,6 +68,23 @@ function suggestionFor(exception: PyInstance): string | undefined {
   return undefined;
 }
 
+/** The name of the module `name` that is most similar to the `name_from` an ImportError could not import from it. */
+function importSuggestion(state: ExceptionState): string | undefined {
+  const moduleName = state.fields?.get('name');
+  const wrongName = state.fields?.get('name_from');
+  if (typeof moduleName !== 'string' || typeof wrongName !== 'string') return undefined;
+  const runtime = currentRuntime();
+  let candidates: string[];
+  try {
+    candidates = runtime.dirNames(runtime.importModule(moduleName));
+  } catch {
+    return undefined;
+  }
+  if (!wrongName.startsWith('_')) candidates = candidates.filter((candidate) => !candidate.startsWith('_'));
+  const suggestion = bestSuggestion(wrongName, candidates);
+  return suggestion ? `. Did you mean: '${suggestion}'?` : undefined;
+}
+
 function getAttributeOrUndefinedSafe(value: PyValue, name: string): boolean {
   try {
     return getAttributeOrUndefined(value, name) !== undefined;
@@ -74,11 +93,11 @@ function getAttributeOrUndefinedSafe(value: PyValue, name: string): boolean {
   }
 }
 
+/** The candidate CPython suggests for a wrong name, as `_Py_CalculateSuggestions` of its suggestions.c chooses it. */
 export function bestSuggestion(wrongName: string, candidates: string[]): string | undefined {
-  if (candidates.length > MAX_CANDIDATE_ITEMS) return undefined;
+  if (candidates.length >= MAX_CANDIDATE_ITEMS) return undefined;
   const wrongLength = wrongName.length;
-  if (wrongLength > MAX_STRING_SIZE) return undefined;
-  let bestDistance = wrongLength;
+  let bestDistance = Number.POSITIVE_INFINITY;
   let suggestion: string | undefined;
   for (const candidate of candidates) {
     if (candidate === wrongName) continue;

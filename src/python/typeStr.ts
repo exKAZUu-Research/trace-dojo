@@ -138,15 +138,23 @@ method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleText(asStr(self)));
 
 // Searching ---------------------------------------------------------------------------------------------------------
 
-/** The code points of a string and the bounds a `start`/`end` pair gives, as slice indices clamp them. */
+/**
+ * The code points of a string and the bounds a `start`/`end` pair gives, adjusted as CPython's ADJUST_INDICES does:
+ * unlike the bounds of a slice, `from` may exceed the length and `to` may precede `from`, and such a range holds no
+ * match, not even of an empty string.
+ */
 function bounds(
   text: string,
   start: PyValue | undefined,
   end: PyValue | undefined
 ): { points: string[]; from: number; to: number } {
   const points = iterStr(text);
-  const { start: from, stop } = sliceIndices(new PySlice(sliceClass, start ?? None, end ?? None, None), points.length);
-  return { points, from, to: Math.max(from, stop) };
+  const { start: from, stop: to } = sliceIndices(
+    new PySlice(sliceClass, start ?? None, end ?? None, None),
+    points.length
+  );
+  const isBeyond = start !== undefined && start !== None && toIndex(start) > BigInt(points.length);
+  return { points, from: isBeyond ? points.length + 1 : from, to };
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Follows str.find's slice arguments and empty-substring cases.
@@ -201,7 +209,7 @@ method(strClass, 'count', 'expected', 1, 3, (self, [sub, start, end]) => {
   const needle = expectStr(sub, mustBeStr('count() argument 1'));
   const { points, from, to } = bounds(asStr(self), start, end);
   currentRuntime().scan(points.length);
-  if (needle === '') return BigInt(to - from + 1);
+  if (needle === '') return BigInt(Math.max(to - from + 1, 0));
   const region = points.slice(from, to).join('');
   let count = 0n;
   for (let index = region.indexOf(needle); index !== -1; index = region.indexOf(needle, index + needle.length)) count++;
@@ -224,7 +232,7 @@ for (const [name, atEnd] of [
             : `${name} first arg must be str or a tuple of str, not ${typeName(candidate)}`
         );
       }
-      if (from > points.length) return false;
+      if (to - iterStr(candidate).length < from) return false;
       return atEnd ? region.endsWith(candidate) : region.startsWith(candidate);
     });
   });

@@ -1,4 +1,4 @@
-import { builtin } from '../define';
+import { pythonFunction } from '../define';
 import { type DictEntry, DictStore } from '../dictStore';
 import { pyHash } from '../hashing';
 import { registerModule } from '../modules';
@@ -94,9 +94,9 @@ registerModule(
   'statistics',
   () =>
     new Map<string, PyValue>([
-      ['mean', builtin('mean', 'one', 1, 1, mean)],
-      ['median', builtin('median', 'one', 1, 1, median)],
-      ['mode', builtin('mode', 'one', 1, 1, mode)],
+      ['mean', pythonFunction('mean', 'data', mean)],
+      ['median', pythonFunction('median', 'data', median)],
+      ['mode', pythonFunction('mode', 'data', mode)],
       ['StatisticsError', statisticsErrorClass],
     ])
 );
