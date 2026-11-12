@@ -39,6 +39,16 @@ for a, e in zip(actual, expected):
 test.each([
   ['a misspelled name', "pritn('x')", "NameError: name 'pritn' is not defined. Did you mean: 'print'?"],
   [
+    'a misspelled class variable in a class-body comprehension',
+    'class A:\n    alpha = 1\n    beta = 2\n    gamma = [alpah for beta in [1]]',
+    "NameError: name 'alpah' is not defined. Did you mean: 'alpha'?",
+  ],
+  [
+    'a misspelled class variable in a class-body generator expression',
+    'class D:\n    alpha = 1\n    g = list(alpah for _ in [1])',
+    "NameError: name 'alpah' is not defined",
+  ],
+  [
     'a misspelled method',
     't = Turtle()\nt.foward()',
     "AttributeError: 'Turtle' object has no attribute 'foward'. Did you mean: 'forward'?",

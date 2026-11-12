@@ -7,6 +7,8 @@ export class Frame implements TracedFrame {
   readonly temporaries: PyValue[] = [];
   /** The names a class body annotates, in order, which `@dataclass` reads. */
   readonly annotations: [string, () => PyValue][] = [];
+  /** The frame an inlined (list, set, or dict) comprehension runs within, whose names CPython's frame shares. */
+  inlinedIn?: Frame;
 
   // code-gauge-allow functionParameterCount 9 -- Each frame field is set once at creation and read on every name access.
   constructor(

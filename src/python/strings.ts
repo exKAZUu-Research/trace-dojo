@@ -50,8 +50,8 @@ export function compareStr(a: string, b: string): number {
     chargeStep();
     return 0;
   }
+  if (!hasSurrogates(a) && !hasSurrogates(b)) return compareUnits(a, b);
   chargeScan(Math.min(a.length, b.length));
-  if (!hasSurrogates(a) && !hasSurrogates(b)) return a < b ? -1 : 1;
   const left = iterStr(a);
   const right = iterStr(b);
   for (let index = 0; index < Math.min(left.length, right.length); index++) {
@@ -59,6 +59,19 @@ export function compareStr(a: string, b: string): number {
     if (difference !== 0) return difference;
   }
   return left.length - right.length;
+}
+
+/** Compares strings without surrogates, where code points are code units, charging the units it examines. */
+function compareUnits(a: string, b: string): number {
+  const length = Math.min(a.length, b.length);
+  let index = 0;
+  while (index < length && a.codePointAt(index) === b.codePointAt(index)) {
+    if ((index & 63) === 0) chargeStep();
+    index++;
+  }
+  chargeStep();
+  if (index < length) return (a.codePointAt(index) as number) - (b.codePointAt(index) as number);
+  return a.length - b.length;
 }
 
 const NON_PRINTABLE = /[\p{C}\p{Z}]/u;

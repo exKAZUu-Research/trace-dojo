@@ -259,6 +259,7 @@ export class ExpressionEvaluator {
     if (state) {
       state.name = name;
       state.candidates = [
+        ...inlinedNames(frame),
         ...frame.locals.keys(),
         ...[...frame.cells.entries()].filter(([, cell]) => cell.value !== undefined).map(([key]) => key),
         ...(frame.globals === frame.locals ? [] : frame.globals.keys()),
@@ -603,7 +604,7 @@ export class ExpressionEvaluator {
       cells.set(name, cell);
     }
     for (const name of expression.scope.cells) cells.set(name, new PyCell());
-    return new Frame(
+    const inner = new Frame(
       'comprehension',
       new Map(),
       cells,
@@ -614,6 +615,8 @@ export class ExpressionEvaluator {
       frame.fn,
       frame.classCell
     );
+    if (expression.type !== 'generator') inner.inlinedIn = frame;
+    return inner;
   }
 
   /** Runs the clauses of a comprehension, yielding each element, or storing each pair through `store`. */
@@ -684,6 +687,13 @@ function isIterable(value: PyValue): boolean {
 function starredItems(value: PyValue): PyValue[] {
   if (!isIterable(value)) throw typeError(`Value after * must be an iterable, not ${typeName(value)}`);
   return toArray(value);
+}
+
+/** The names of the frames an inlined comprehension runs within, which CPython's frame for it holds as its own. */
+function inlinedNames(frame: Frame): string[] {
+  const names: string[] = [];
+  for (let outer = frame.inlinedIn; outer; outer = outer.inlinedIn) names.unshift(...outer.locals.keys());
+  return names;
 }
 
 /**

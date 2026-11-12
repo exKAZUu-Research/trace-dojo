@@ -261,6 +261,10 @@ test.each([
     'from collections import deque\nq = deque(range(1000))\nfor i in range(100000):\n    q.appendleft(i)\n    q.pop()',
   ],
   [
+    'sorting long strings that differ at their first character',
+    'a = "a" + "x" * 9999\nb = "b" + "x" * 9999\nx = sorted([a, b] * 5000)',
+  ],
+  [
     'peeking and draining a deque',
     'from collections import deque\nq = deque(range(50000))\ns = 0\nwhile q:\n    s += q[0]\n    q.popleft()',
   ],
