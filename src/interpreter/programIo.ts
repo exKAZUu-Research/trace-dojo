@@ -35,7 +35,8 @@ export class ProgramIO {
     private readonly budget: ExecutionBudget,
     input: ProgramInput = {}
   ) {
-    this.stdin = new StandardInput(new TextReader(input.stdin ?? '', budget));
+    const stdin = input.stdin ?? '';
+    this.stdin = new StandardInput(new TextReader(() => stdin, budget));
     const written = { length: 0 };
     this.stdout = new OutputChannel(written);
     this.stderr = new OutputChannel(written);
@@ -46,14 +47,17 @@ export class ProgramIO {
     }
   }
 
-  /** Opens a file to read the text it holds now, where `/dev/stdin` reads what remains of standard input. */
+  /**
+   * Opens a file to read, which reads what the file holds as it reads, as a POSIX file descriptor does, and where
+   * `/dev/stdin` reads what remains of standard input.
+   */
   openReader(path: string): TextReader {
     if (resolvePath(path) === STDIN_PATH) return this.stdin.reader;
-    return this.textReader(this.files.readFile(path));
+    return new TextReader(this.files.openForReading(path), this.budget);
   }
 
   textReader(text: string): TextReader {
-    return new TextReader(text, this.budget);
+    return new TextReader(() => text, this.budget);
   }
 
   output(): ProgramOutput {
@@ -87,10 +91,15 @@ export class OutputChannel {
 export class TextReader {
   position = 0;
 
+  /** @param source The text as it is now, which a file's writes may change while it is read. */
   constructor(
-    readonly text: string,
+    private readonly source: () => string,
     private readonly budget: ExecutionBudget
   ) {}
+
+  get text(): string {
+    return this.source();
+  }
 
   get isAtEnd(): boolean {
     return this.position >= this.text.length;
@@ -106,19 +115,21 @@ export class TextReader {
   /** The text up to the next line terminator (`\n`, `\r\n`, or `\r`), consuming the terminator too. */
   readLine(): string | undefined {
     if (this.isAtEnd) return undefined;
+    const { text } = this;
     const match = /\r\n?|\n/g;
     match.lastIndex = this.position;
-    const terminator = match.exec(this.text);
-    const end = terminator ? terminator.index : this.text.length;
-    const line = this.text.slice(this.position, end);
+    const terminator = match.exec(text);
+    const end = terminator ? terminator.index : text.length;
+    const line = text.slice(this.position, end);
     this.position = terminator ? end + terminator[0].length : end;
     this.budget.spend(Math.ceil((line.length + 1) / 64));
     return line;
   }
 
   readRest(): string {
-    const rest = this.text.slice(this.position);
-    this.position = this.text.length;
+    const { text } = this;
+    const rest = text.slice(this.position);
+    this.position = text.length;
     this.budget.spend(Math.ceil((rest.length + 1) / 64));
     return rest;
   }
@@ -177,30 +188,50 @@ export class FileHandle {
   }
 }
 
-/** An in-memory file system holding text files, whose total length is bounded by {@link LIMITS}. */
+type FileSystemNode = FileNode | DirectoryNode;
+
+/** Where a path leads: the directory holding its entry, the entry's name (empty for the root), and the entry. */
+interface Location {
+  parent: DirectoryNode;
+  name: string;
+  node: FileSystemNode | undefined;
+}
+
+/**
+ * An in-memory file system holding text files, whose total length is bounded by {@link LIMITS}. Each call charges
+ * the run for the names of its paths, which a program can make as long as its strings.
+ */
 export class VirtualFileSystem {
   private readonly root = new DirectoryNode();
-  /** The total length of the files' contents, including files deleted while still open. */
+  /** The total length of the files' contents and of what the program writes to files it deleted while open. */
   private storedLength = 0;
 
   constructor(private readonly budget: ExecutionBudget) {}
 
   kindOf(path: string): 'file' | 'directory' | undefined {
-    return this.lookup(path)?.kind;
+    try {
+      return this.locate(path).node?.kind;
+    } catch (error) {
+      if (error instanceof FileSystemError) return undefined;
+      throw error;
+    }
   }
 
   readFile(path: string): string {
-    const node = this.lookup(path);
-    if (!node) throw new FileSystemError(this.missingCode(path), path);
-    if (node.kind === 'directory') throw new FileSystemError('EISDIR', path);
-    this.budget.spend(Math.ceil((node.content.length + 1) / 64));
-    return node.content;
+    const content = this.fileNodeOf(path).content;
+    this.budget.spend(Math.ceil((content.length + 1) / 64));
+    return content;
+  }
+
+  /** The text of a file as it is whenever it is called, which follows the file after a rename or a deletion. */
+  openForReading(path: string): () => string {
+    const node = this.fileNodeOf(path);
+    return () => node.content;
   }
 
   open(path: string, mode: OpenMode): FileHandle {
-    const { parent, name } = this.parentOf(path);
-    const existing = parent.children.get(name);
-    if (existing?.kind === 'directory' || (!existing && name === '')) throw new FileSystemError('EISDIR', path);
+    const { parent, name, node: existing } = this.locate(path);
+    if (existing?.kind === 'directory' || name === '') throw new FileSystemError('EISDIR', path);
     if (existing && mode.create === 'exclusive') throw new FileSystemError('EEXIST', path);
     if (!existing && mode.create === 'never') throw new FileSystemError('ENOENT', path);
     const node = existing ?? new FileNode();
@@ -221,46 +252,49 @@ export class VirtualFileSystem {
     node.content = updated;
   }
 
-  /** Creates a directory, with its missing ancestors when `recursive`, returning whether it created any. */
-  createDirectory(path: string, recursive: boolean): boolean {
+  /**
+   * Creates a directory, with its missing ancestors when `recursive`, returning the absolute path of the first
+   * directory it created, or `undefined` when all of them existed.
+   */
+  createDirectory(path: string, recursive: boolean): string | undefined {
     if (!recursive) {
-      const { parent, name } = this.parentOf(path);
-      if (name === '' || parent.children.has(name)) throw new FileSystemError('EEXIST', path);
+      const { parent, name, node } = this.locate(path);
+      if (name === '' || node) throw new FileSystemError('EEXIST', path);
       parent.children.set(name, new DirectoryNode());
-      return true;
+      return resolvePath(path);
     }
-    const segments = segmentsOf(path);
+    const segments = this.segmentsOf(path);
     let current = this.root;
-    let created = false;
+    let firstCreated: string | undefined;
     for (const [index, segment] of segments.entries()) {
       let child = current.children.get(segment);
       if (child?.kind === 'file') throw new FileSystemError(index === segments.length - 1 ? 'EEXIST' : 'ENOTDIR', path);
       if (!child) {
         child = new DirectoryNode();
         current.children.set(segment, child);
-        created = true;
+        firstCreated ??= `/${segments.slice(0, index + 1).join('/')}`;
       }
       current = child;
     }
-    return created;
+    return firstCreated;
   }
 
   /** Removes a file or an empty directory, or only one of `kind` when it is given. */
   remove(path: string, kind?: 'file' | 'directory'): void {
-    const { parent, name } = this.parentOf(path);
-    const node = parent.children.get(name);
+    const { parent, name, node } = this.locate(path);
     if (name === '') throw new FileSystemError(kind === 'file' ? 'EISDIR' : 'EINVAL', path);
     if (!node) throw new FileSystemError('ENOENT', path);
     if (kind === 'file' && node.kind === 'directory') throw new FileSystemError('EISDIR', path);
     if (kind === 'directory' && node.kind === 'file') throw new FileSystemError('ENOTDIR', path);
     if (node.kind === 'directory' && node.children.size > 0) throw new FileSystemError('ENOTEMPTY', path);
     parent.children.delete(name);
+    this.release(node);
   }
 
   /** The names in a directory, in code unit order. */
   list(path: string): string[] {
-    const node = this.lookup(path);
-    if (!node) throw new FileSystemError(this.missingCode(path), path);
+    const { node } = this.locate(path);
+    if (!node) throw new FileSystemError('ENOENT', path);
     if (node.kind === 'file') throw new FileSystemError('ENOTDIR', path);
     this.budget.spend(Math.ceil((node.children.size + 1) / 16));
     return [...node.children.keys()].toSorted();
@@ -268,65 +302,75 @@ export class VirtualFileSystem {
 
   /** Moves a file or a directory, replacing a file at the target, or an empty directory with a directory. */
   rename(from: string, to: string): void {
-    const source = this.parentOf(from);
-    const node = source.parent.children.get(source.name);
-    if (!node || source.name === '') throw new FileSystemError(node ? 'EINVAL' : 'ENOENT', from);
-    const target = this.parentOf(to);
-    if (isInside(to, from) || target.name === '') throw new FileSystemError('EINVAL', to);
-    const existing = target.parent.children.get(target.name);
-    const conflict = existing && existing !== node ? replacementConflictOf(node, existing) : undefined;
+    const source = this.locate(from);
+    if (!source.node || source.name === '') throw new FileSystemError(source.node ? 'EINVAL' : 'ENOENT', from);
+    const target = this.locate(to);
+    if (isInside(this.segmentsOf(to), this.segmentsOf(from)) || target.name === '') {
+      throw new FileSystemError('EINVAL', to);
+    }
+    const { node } = source;
+    const existing = target.node;
+    if (existing === node) return;
+    const conflict = existing ? replacementConflictOf(node, existing) : undefined;
     if (conflict) throw new FileSystemError(conflict, to);
     source.parent.children.delete(source.name);
     target.parent.children.set(target.name, node);
+    if (existing) this.release(existing);
   }
 
   /** The files by path relative to the working directory, in path order. */
   snapshot(): Record<string, string> {
     const files: [string, string][] = [];
-    const visit = (directory: DirectoryNode, prefix: string): void => {
+    // An explicit stack, since a program may nest directories deeper than the host's call stack.
+    const pending: [DirectoryNode, string][] = [[this.root, '']];
+    for (let entry = pending.pop(); entry; entry = pending.pop()) {
+      const [directory, prefix] = entry;
       for (const [name, node] of directory.children) {
         if (node.kind === 'file') files.push([`${prefix}${name}`, node.content]);
-        else visit(node, `${prefix}${name}/`);
+        else pending.push([node, `${prefix}${name}/`]);
       }
-    };
-    visit(this.root, '');
+    }
     return Object.fromEntries(files.toSorted(([a], [b]) => (a < b ? -1 : 1)));
   }
 
-  private lookup(path: string): FileNode | DirectoryNode | undefined {
-    let current: FileNode | DirectoryNode = this.root;
-    for (const segment of segmentsOf(path)) {
-      if (current.kind === 'file') return undefined;
-      const child: FileNode | DirectoryNode | undefined = current.children.get(segment);
-      if (!child) return undefined;
-      current = child;
-    }
-    return current;
+  /** Stops counting the contents of a file that no path names, though a handle may still write to it. */
+  private release(node: FileSystemNode): void {
+    if (node.kind === 'file') this.storedLength -= node.content.length;
   }
 
-  /** Why a path names nothing: a missing entry, or a file where a directory should be. */
-  private missingCode(path: string): FileSystemErrorCode {
-    const segments = segmentsOf(path);
-    for (let length = 1; length < segments.length; length++) {
-      if (this.lookup(`/${segments.slice(0, length).join('/')}`)?.kind === 'file') return 'ENOTDIR';
-    }
-    return 'ENOENT';
+  private fileNodeOf(path: string): FileNode {
+    const { node } = this.locate(path);
+    if (!node) throw new FileSystemError('ENOENT', path);
+    if (node.kind === 'directory') throw new FileSystemError('EISDIR', path);
+    return node;
   }
 
-  /** The directory that holds the entry a path names, where the root's name is empty. */
-  private parentOf(path: string): { parent: DirectoryNode; name: string } {
+  /** Walks a path once, failing when a directory on the way is missing or is a file. */
+  private locate(path: string): Location {
+    const segments = this.segmentsOf(path);
+    const name = segments.pop();
+    let parent = this.root;
+    for (const segment of segments) {
+      const child = parent.children.get(segment);
+      if (!child) throw new FileSystemError('ENOENT', path);
+      if (child.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+      parent = child;
+    }
+    if (name === undefined) return { parent, name: '', node: this.root };
+    return { parent, name, node: parent.children.get(name) };
+  }
+
+  /** The names of an absolute path, charging the run for reading the path and walking its names. */
+  private segmentsOf(path: string): string[] {
+    this.budget.spend(Math.ceil((path.length + 1) / 16));
     const segments = segmentsOf(path);
-    const name = segments.pop() ?? '';
-    const parent = segments.length === 0 ? this.root : this.lookup(`/${segments.join('/')}`);
-    if (!parent) throw new FileSystemError(this.missingCode(path), path);
-    if (parent.kind === 'file') throw new FileSystemError('ENOTDIR', path);
-    return { parent, name };
+    this.budget.spend(segments.length);
+    return segments;
   }
 }
 
-/** Whether a path lies inside a directory, which a directory cannot move into. */
-function isInside(path: string, directory: string): boolean {
-  const [pathSegments, directorySegments] = [segmentsOf(path), segmentsOf(directory)];
+/** Whether a path lies inside a directory, which a directory cannot move into, both given by their names. */
+function isInside(pathSegments: readonly string[], directorySegments: readonly string[]): boolean {
   return (
     pathSegments.length > directorySegments.length &&
     directorySegments.every((segment, index) => pathSegments[index] === segment)
@@ -334,10 +378,7 @@ function isInside(path: string, directory: string): boolean {
 }
 
 /** Why an entry cannot replace another, as POSIX `rename` allows only a file over a file or a directory over an empty one. */
-function replacementConflictOf(
-  node: FileNode | DirectoryNode,
-  existing: FileNode | DirectoryNode
-): FileSystemErrorCode | undefined {
+function replacementConflictOf(node: FileSystemNode, existing: FileSystemNode): FileSystemErrorCode | undefined {
   if (existing.kind === 'file') return node.kind === 'file' ? undefined : 'ENOTDIR';
   if (node.kind === 'file') return 'EISDIR';
   return existing.children.size > 0 ? 'ENOTEMPTY' : undefined;

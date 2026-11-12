@@ -150,6 +150,61 @@ test.each([
   expect(runJava(body, { files: { 'd/f.txt': '', 'd/g.txt': '' } })).toMatchObject({ uncaughtException });
 });
 
+test.each([
+  [
+    'a buffered writer, which passes on full buffers only',
+    'StringWriter s = new StringWriter(); BufferedWriter w = new BufferedWriter(s, 4); w.write("abc"); w.write("de"); System.out.println(s); w.write("fghijk"); System.out.println(s);',
+    {},
+    'abcd\nabcdefgh\n',
+  ],
+  [
+    'a file that a reader reads after the program rewrites it',
+    'FileInputStream in = new FileInputStream("x"); Files.writeString(Path.of("x"), "new"); System.out.println((char) in.read());',
+    { x: 'old' },
+    'n\n',
+  ],
+  [
+    'a copy or a move of a file to itself',
+    'Files.copy(Path.of("x"), Path.of("./x"), StandardCopyOption.REPLACE_EXISTING); Files.move(Path.of("x"), Path.of("x")); System.out.println(Files.readString(Path.of("x")));',
+    { x: 'old' },
+    'old\n',
+  ],
+  [
+    'directories made again',
+    'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
+    {},
+    'true false\n',
+  ],
+])('Java handles %s', (_, body, files, stdout) => {
+  expect(runJava(body, { files })).toMatchObject({ stdout, uncaughtException: undefined });
+});
+
+test('an unclosed FileWriter keeps only the full buffers it passed on', () => {
+  const execution = executeProgram('java', main('FileWriter w = new FileWriter("a.txt"); w.write("x".repeat(8193));'));
+  expect(execution).toMatchObject({ kind: 'executed', finalFiles: { 'a.txt': 'x'.repeat(8192) } });
+});
+
+test('the storage limit counts the files that exist, not the files deleted or replaced', () => {
+  expect(
+    runJava(
+      'String big = "x".repeat(10000); for (int i = 0; i < 200; i++) { try (FileWriter w = new FileWriter("tmp.txt")) { w.write(big); } new File("tmp.txt").delete(); Files.writeString(Path.of("a"), big); Files.move(Path.of("a"), Path.of("b"), StandardCopyOption.REPLACE_EXISTING); }'
+    )
+  ).toMatchObject({ finalFiles: { b: 'x'.repeat(10_000) }, uncaughtException: undefined });
+});
+
+test('a deeply nested path is charged to the run, which ends with a result', () => {
+  const deep = `${'a/'.repeat(30_000)}f`;
+  expect(
+    executeProgram(
+      'javascript',
+      `require('fs').mkdirSync('a/'.repeat(30000), { recursive: true }); require('fs').writeFileSync('${deep}', 'x');`
+    )
+  ).toMatchObject({ kind: 'executed', finalFiles: { [deep]: 'x' } });
+  expect(
+    executeProgram('javascript', `for (;;) require('fs').mkdirSync('a/'.repeat(30000), { recursive: true });`)
+  ).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('Java requires programs to catch or declare the IOException of opening a file', () => {
   const source = `import java.io.*;\nclass Main {\n  public static void main(String[] args) {\n    new FileReader("a.txt");\n  }\n}`;
   expect(executeProgram('java', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 3 }] });

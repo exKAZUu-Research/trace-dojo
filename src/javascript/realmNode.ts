@@ -1,4 +1,4 @@
-import { FileSystemError, type FileSystemErrorCode, resolvePath } from '../interpreter/programIo';
+import { FileSystemError, type FileSystemErrorCode } from '../interpreter/programIo';
 import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
@@ -71,10 +71,9 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     const path = requirePath(runtime, args[0]);
     const options = args[1];
     const recursive = isObject(options) && runtime.get(options, 'recursive') === true;
-    const firstMissing = firstMissingDirectory(runtime, path);
     const created = withErrors(runtime, 'mkdir', path, () => runtime.io.files.createDirectory(path, recursive));
     // A recursive call returns the first directory it created.
-    return recursive && created ? firstMissing : undefined;
+    return recursive ? created : undefined;
   });
   builder.method(fs, 'readdirSync', 2, ({ runtime, args }) => {
     const path = requirePath(runtime, args[0]);
@@ -95,17 +94,6 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     withErrors(runtime, 'rename', from, () => runtime.io.files.rename(from, to), to);
     return;
   });
-}
-
-function firstMissingDirectory(runtime: Runtime, path: string): string | undefined {
-  let missing: string | undefined;
-  for (let current = resolvePath(path); runtime.io.files.kindOf(current) === undefined;) {
-    missing = current;
-    const parent = resolvePath(`${current}/..`);
-    if (parent === current) break;
-    current = parent;
-  }
-  return missing;
 }
 
 /** Runs a file system call, throwing the error Node.js throws for its failure. */

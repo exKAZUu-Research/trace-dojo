@@ -1,4 +1,4 @@
-import { FileSystemError, type VirtualFileSystem } from '../interpreter/programIo';
+import { FileSystemError, resolvePath, type VirtualFileSystem } from '../interpreter/programIo';
 import { itemsOf, javaHash } from './builtinCollectionSupport';
 import { newList } from './builtinCollectors';
 import {
@@ -109,11 +109,7 @@ function defineFile(context: IOContext, { file, path, newFile, newPath }: FileTy
     ['length', LONG, (frame, text) => BigInt(sizeOf(frame, text))],
     ['delete', BOOLEAN, (frame, text) => succeeds(() => fileSystemOf(frame).remove(text))],
     ['mkdir', BOOLEAN, (frame, text) => succeeds(() => fileSystemOf(frame).createDirectory(text, false))],
-    [
-      'mkdirs',
-      BOOLEAN,
-      (frame, text) => text !== '' && succeeds(() => fileSystemOf(frame).createDirectory(text, true)),
-    ],
+    ['mkdirs', BOOLEAN, (frame, text) => createsDirectories(frame, text)],
     [
       'list',
       { kind: 'array', element: stringType },
@@ -208,6 +204,17 @@ function listOf(frame: Frame, text: string, elementType: JavaType, entry: (name:
   if (text === '' || !succeeds(() => (names = fileSystemOf(frame).list(text)))) return undefined;
   frame.runtime.allocateArray(frame, names.length);
   return new JavaArray(elementType, names.map(entry));
+}
+
+/** `File.mkdirs`, which tells whether it created the directory, so it fails for one that exists. */
+function createsDirectories(frame: Frame, text: string): boolean {
+  if (text === '') return false;
+  try {
+    return fileSystemOf(frame).createDirectory(text, true) !== undefined;
+  } catch (error) {
+    if (error instanceof FileSystemError) return false;
+    throw error;
+  }
 }
 
 function createNewFile(frame: Frame, text: string): boolean {
@@ -580,6 +587,8 @@ function copyOrMove(frame: Frame, isMove: boolean, from: string, to: string, giv
   const system = fileSystemOf(frame);
   const kind = system.kindOf(from);
   if (kind === undefined) throwBuiltin(frame, 'NoSuchFileException', from);
+  // Copying or moving a file to itself does nothing, as the paths name one file.
+  if (resolvePath(from) === resolvePath(to)) return;
   if (system.kindOf(to) !== undefined && !optionNamesOf(frame, given).includes('REPLACE_EXISTING')) {
     throwBuiltin(frame, 'FileAlreadyExistsException', to);
   }
@@ -589,7 +598,10 @@ function copyOrMove(frame: Frame, isMove: boolean, from: string, to: string, giv
     () => {
       if (isMove) return system.rename(from, to);
       if (system.kindOf(to) === 'directory') system.remove(to);
-      if (kind === 'directory') return system.createDirectory(to, false);
+      if (kind === 'directory') {
+        system.createDirectory(to, false);
+        return;
+      }
       return system.open(to, { create: 'always', truncate: true, append: false }).write(system.readFile(from));
     },
     to

@@ -135,11 +135,11 @@ export function sinkOf(frame: Frame, value: Value): Sink {
 /**
  * The size of the buffers of `BufferedWriter` and of the encoder of `OutputStreamWriter`. Their text reaches its
  * destination only when they fill up, flush, or close, so a program that never closes its writer loses its output,
- * as in Java.
+ * as in Java. The encoder's buffer counts bytes, which these buffers count as characters, alike for ASCII text.
  */
 export const BUFFER_SIZE = 8192;
 
-/** Holds what is written until it reaches `capacity` characters or is flushed; a capacity of 0 holds nothing. */
+/** Holds what is written in a buffer of `capacity` characters until it fills or is flushed; a capacity of 0 holds nothing. */
 export class BufferedSink implements Sink {
   private pending = '';
   private isClosed = false;
@@ -149,10 +149,19 @@ export class BufferedSink implements Sink {
     private readonly capacity: number
   ) {}
 
+  /** Fills the buffer, passing on each full buffer and keeping the rest, as `BufferedWriter.write(String)` does. */
   write(frame: Frame, text: string): void {
     this.ensureOpen(frame);
-    this.pending += text;
-    if (this.pending.length >= this.capacity) this.drain(frame);
+    if (this.capacity === 0) {
+      this.target.write(frame, text);
+      return;
+    }
+    for (let rest = text; rest !== '';) {
+      const room = this.capacity - this.pending.length;
+      this.pending += rest.slice(0, room);
+      rest = rest.slice(room);
+      if (this.pending.length >= this.capacity) this.drain(frame);
+    }
   }
 
   flush(frame: Frame): void {
