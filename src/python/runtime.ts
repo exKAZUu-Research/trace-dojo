@@ -37,6 +37,7 @@ import { UnsupportedFeatureError } from './unsupported';
 import {
   DONE,
   type Kwargs,
+  ownAttributesOf,
   PyCell,
   PyClass,
   PyDescriptor,
@@ -48,7 +49,6 @@ import {
   type PyList,
   PyModule,
   PyObject,
-  PyOpaque,
   type PySet,
   PySuper,
   type PyTuple,
@@ -575,6 +575,6 @@ function objectAttributeNames(value: PyValue): Set<string> {
   const cls = value instanceof PyClass ? value : classOf(value);
   for (const each of cls.mro) for (const name of each.dict.keys()) names.add(name);
   if (value instanceof PyInstance || value instanceof PyFunction) for (const name of value.dict.keys()) names.add(name);
-  if (value instanceof PyOpaque) for (const name of value.attributes?.keys() ?? []) names.add(name);
+  for (const name of ownAttributesOf(value)?.keys() ?? []) names.add(name);
   return names;
 }

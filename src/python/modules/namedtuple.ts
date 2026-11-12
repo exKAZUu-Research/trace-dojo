@@ -42,7 +42,8 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   cls.mro = [cls, ...tupleClass.mro];
   cls.isBuiltin = false;
   cls.layout = { base: 'native' };
-  cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
+  cls.construct = (tupleType, values, keywords) =>
+    newNamedTuple(typename, tupleType, fields, defaults, values, keywords);
   const module = kwargs?.get('module');
   cls.module = typeof module === 'string' ? module : '__main__';
   cls.dict.set('__doc__', `${typename}(${fields.join(', ')}${fields.length === 1 ? ',' : ''})`);
@@ -105,6 +106,7 @@ function isIdentifier(name: string): boolean {
 
 /** Binds the arguments as CPython's generated `__new__(_cls, field, ...)` does, with the shared binding's checks. */
 function newNamedTuple(
+  typename: string,
   cls: PyClass,
   fields: string[],
   defaults: PyValue[],
@@ -112,7 +114,7 @@ function newNamedTuple(
   kwargs: Kwargs
 ): PyTuple {
   const signature: Signature = {
-    qualifiedName: `${cls.name}.__new__`,
+    qualifiedName: `${typename}.__new__`,
     def: { params: ['_cls', ...fields].map((name) => ({ name, kind: 'positional' })) },
     defaults,
     keywordDefaults: new Map(),

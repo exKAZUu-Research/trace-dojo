@@ -250,6 +250,9 @@ abstract class PyGrowableSequence extends PyObject {
 export class PyList extends PyGrowableSequence {}
 
 export class PyTuple extends PyObject {
+  /** The `__dict__` of an instance of a namedtuple's subclass that does not define `__slots__`. */
+  attributes?: AttributeMap;
+
   constructor(
     cls: PyClass,
     readonly items: readonly PyValue[]
@@ -257,6 +260,11 @@ export class PyTuple extends PyObject {
     super(cls);
     chargeSlots(items.length);
   }
+}
+
+/** The attributes an opaque value or a namedtuple subclass's instance keeps outside any class dictionary. */
+export function ownAttributesOf(value: unknown): AttributeMap | undefined {
+  return value instanceof PyOpaque || value instanceof PyTuple ? value.attributes : undefined;
 }
 
 export class PyDict extends PyObject {

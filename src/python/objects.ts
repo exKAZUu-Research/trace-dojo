@@ -27,6 +27,7 @@ import { UnsupportedFeatureError } from './unsupported';
 import {
   DONE,
   type Kwargs,
+  ownAttributesOf,
   PyBoundMethod,
   PyBuiltinFunction,
   PyClass,
@@ -41,7 +42,6 @@ import {
   PyList,
   PyModule,
   PyObject,
-  PyOpaque,
   PyRange,
   PySet,
   PySuper,
@@ -198,7 +198,7 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
     const own = value.dict.get(name);
     if (own !== undefined) return own;
   }
-  const opaqueOwn = value instanceof PyOpaque ? value.attributes?.get(name) : undefined;
+  const opaqueOwn = ownAttributesOf(value)?.get(name);
   if (opaqueOwn !== undefined) return opaqueOwn;
   if (isNonDataDescriptor(attribute)) return readDescriptor(attribute, value);
   if (attribute === undefined) return undefined;

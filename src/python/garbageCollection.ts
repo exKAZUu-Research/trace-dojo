@@ -2,6 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import { pushAll } from './arrays';
 import { DictStore } from './dictStore';
 import {
+  ownAttributesOf,
   PyBoundMethod,
   PyBuiltinFunction,
   PyCell,
@@ -48,11 +49,12 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionNcss 45 -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss 46 -- One case per kind of object that refers to others.
 // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);
+    pending.push(ownAttributesOf(object));
     if (!object.cls.isBuiltin) pending.push(object.cls);
     return object.items.length;
   }
