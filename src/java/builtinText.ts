@@ -18,7 +18,7 @@ import { JAVA_WHITESPACE } from './builtinWrappers';
 import { formatText } from './javaFormatter';
 import { translateJavaRegex, UnsupportedRegexError } from './javaRegex';
 import { javaReplacer, ReplacementError } from './javaReplacement';
-import { encodable, type Frame, throwBuiltin } from './runtime';
+import { encodable, type Frame, JavaThrow, throwBuiltin } from './runtime';
 import { defineStringIdentity } from './stringIdentity';
 import {
   BOOLEAN,
@@ -57,6 +57,7 @@ export function defineText(
     ...['StringBuilder', 'StringBuffer'].map((name) => registry.classes.get(name) as ClassInfo),
   ]);
   defineStringJoiner(registry, objectClass, stringClass.type);
+  definePatternSyntaxAccessors(registry, stringType);
   defineStringExtras(stringClass, collections);
   defineStringVariants(stringClass, objectClass);
   defineStringIdentity(
@@ -584,9 +585,41 @@ function compileRegex(frame: Frame, pattern: string, flags: string, isWhole = fa
     return new RegExp(translated.source, translated.flags + flags);
   } catch (error) {
     if (!(error instanceof SyntaxError || error instanceof UnsupportedRegexError)) throw error;
-    const reason = error instanceof UnsupportedRegexError ? error.message : 'Invalid regular expression';
-    return throwBuiltin(frame, 'PatternSyntaxException', `${reason}\n${pattern}`);
+    const { description, index } =
+      error instanceof UnsupportedRegexError ? error : { description: 'Invalid regular expression', index: -1 };
+    try {
+      return throwBuiltin(frame, 'PatternSyntaxException', patternSyntaxMessage(description, index, pattern));
+    } catch (error_) {
+      if (error_ instanceof JavaThrow) patternSyntaxErrors.set(error_.value, { description, index, pattern });
+      throw error_;
+    }
   }
+}
+
+/** What a `PatternSyntaxException` the interpreter threw reports through its accessors. */
+const patternSyntaxErrors = new WeakMap<JavaObject, { description: string; index: number; pattern: string }>();
+
+/** `getDescription`, `getIndex`, and `getPattern` of `PatternSyntaxException`. */
+function definePatternSyntaxAccessors(registry: Registry, stringType: JavaType): void {
+  const cls = registry.classes.get('PatternSyntaxException') as ClassInfo;
+  addMethod(cls, 'getDescription', [], stringType, false, (frame, receiver) =>
+    newString(frame, patternSyntaxErrorOf(receiver)?.description ?? '')
+  );
+  addMethod(cls, 'getIndex', [], INT, false, (_, receiver) => patternSyntaxErrorOf(receiver)?.index ?? -1);
+  addMethod(cls, 'getPattern', [], stringType, false, (frame, receiver) =>
+    newString(frame, patternSyntaxErrorOf(receiver)?.pattern ?? '')
+  );
+}
+
+function patternSyntaxErrorOf(receiver: Value): { description: string; index: number; pattern: string } | undefined {
+  return patternSyntaxErrors.get(receiver as JavaObject);
+}
+
+/** The message of a `PatternSyntaxException`, which points at its index with a caret under the pattern. */
+function patternSyntaxMessage(description: string, index: number, pattern: string): string {
+  if (index < 0) return `${description}\n${pattern}`;
+  const caret = index < pattern.length ? `\n${' '.repeat(index)}^` : '';
+  return `${description} near index ${index}\n${pattern}${caret}`;
 }
 
 /** Splits as `String.split` does: trailing empty strings go when `limit` is 0, and at most `limit` parts remain when positive. */

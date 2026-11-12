@@ -703,6 +703,42 @@ public class Main {
   }
 });
 
+test('Java reports regular expression syntax errors with the description, index, and caret of PatternSyntaxException', () => {
+  const program = `import java.util.regex.*;
+public class Main {
+  public static void main(String[] args) {
+    for (String p : new String[] {"+", "*", "?", "a|*", "(+)", "[a", "(a", "a)", "a{3,2}", "{", "a{", "x**", "\\\\", "[z-a]", "a(?<n>b)\\\\k<m>", "(?<1a>x)", "\\\\p{Foo}", ")"}) {
+      try { "1+2*3".split(p); System.out.println(p + " ok"); }
+      catch (PatternSyntaxException e) { System.out.println("[" + e.getMessage() + "]"); }
+    }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "[Dangling meta character '+' near index 0\n+\n^]\n[Dangling meta character '*' near index 0\n*\n^]\n[Dangling meta character '?' near index 0\n?\n^]\n[Dangling meta character '*' near index 2\na|*\n  ^]\n[Dangling meta character '+' near index 1\n(+)\n ^]\n[Unclosed character class near index 1\n[a\n ^]\n[Unclosed group near index 2\n(a]\n[Unmatched closing ')' near index 0\na)\n^]\n[Illegal repetition range near index 5\na{3,2}\n     ^]\n[Illegal repetition near index 1\n{]\n[Illegal repetition near index 2\na{]\n[Dangling meta character '*' near index 2\nx**\n  ^]\n[Unescaped trailing backslash near index 1\n\\]\n[Illegal character range near index 3\n[z-a]\n   ^]\n[named capturing group <m> does not exist near index 12\na(?<n>b)\\k<m>\n            ^]\n[capturing group name does not start with a Latin letter near index 3\n(?<1a>x)\n   ^]\n[Unknown character property name {Foo} near index 6\n\\p{Foo}\n      ^]\n[Unmatched closing ')'\n)]\n",
+  });
+});
+
+test('Java reads quantified anchors and back references to missing groups in regular expressions as Pattern does', () => {
+  const program = `import java.util.regex.*;
+public class Main {
+  public static void main(String[] args) {
+    String[] patterns = {"a|b", "(a|b)+", "(?:x)*", "[a]+", "\\\\d+", ".*", "^\\\\s*$", "(?i)a+", "a{2}", "x*?", "(?<n>a)+", "\\\\Q+\\\\E+", "(?x) a + ", "a(?i)b*", "\\\\bx+", "(?=a)a+", "a{2,}?", "[+*?]+", "\\\\++", "^*", "$?", "a|", "|a", "()+", "\\\\101", "(a)\\\\1+"};
+    for (String p : patterns) {
+      try { System.out.println(p + " " + "AAaa+bx".replaceAll(p, "_")); }
+      catch (PatternSyntaxException e) { System.out.println("[" + e.getMessage() + "]"); }
+    }
+    try { "1+2".split("+"); } catch (PatternSyntaxException e) { System.out.println(e.getDescription() + "|" + e.getIndex() + "|" + e.getPattern()); }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "a|b AA__+_x\n(a|b)+ AA_+_x\n(?:x)* _A_A_a_a_+_b__\n[a]+ AA_+bx\n\\d+ AAaa+bx\n.* __\n^\\s*$ AAaa+bx\n(?i)a+ _+bx\na{2} AA_+bx\nx*? _A_A_a_a_+_b_x_\n(?<n>a)+ AA_+bx\n\\Q+\\E+ AAaa_bx\n(?x) a +  AA_+bx\na(?i)b* AA__+bx\n\\bx+ AAaa+bx\n(?=a)a+ AA_+bx\na{2,}? AA_+bx\n[+*?]+ AAaa_bx\n\\++ AAaa_bx\n^* _A_A_a_a_+_b_x_\n$? _A_A_a_a_+_b_x_\na| _A_A___+_b_x_\n|a _A_A_a_a_+_b_x_\n()+ _A_A_a_a_+_b_x_\n\\101 AAaa+bx\n(a)\\1+ AA_+bx\nDangling meta character '+'|0|+\n",
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

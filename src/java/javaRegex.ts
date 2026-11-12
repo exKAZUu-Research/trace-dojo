@@ -5,7 +5,16 @@ export interface TranslatedRegex {
 }
 
 /** Thrown for a pattern that Java rejects or that JavaScript cannot express, with what makes it so. */
-export class UnsupportedRegexError extends Error {}
+/** A pattern that Java rejects, or that uses what JavaScript cannot express, with where `Pattern` reports it. */
+export class UnsupportedRegexError extends Error {
+  constructor(
+    readonly description: string,
+    /** The index `PatternSyntaxException` reports, or -1 for none. */
+    readonly index: number
+  ) {
+    super(description);
+  }
+}
 
 /** The POSIX classes of `java.util.regex.Pattern`, which match ASCII characters only, as `v`-mode classes. */
 const POSIX_CLASSES: Record<string, string> = {
@@ -136,6 +145,11 @@ class Translator {
     },
   ];
   private readonly parts: string[] = [];
+  /** Whether the last token is one a quantifier may follow, which the start of the pattern is not. */
+  private canRepeat = false;
+  /** The capturing groups opened so far, which back references may refer to. */
+  private capturingGroups = 0;
+  private readonly groupNames = new Set<string>();
 
   constructor(private readonly pattern: string) {}
 
@@ -166,8 +180,8 @@ class Translator {
     return this.groups.at(-1) as Group;
   }
 
-  private fail(reason: string): never {
-    throw new UnsupportedRegexError(`${reason} near index ${this.index}`);
+  private fail(reason: string, index = this.index): never {
+    throw new UnsupportedRegexError(reason, index);
   }
 
   /** Translates the next token outside a class. */
@@ -176,6 +190,10 @@ class Translator {
     const char = String.fromCodePoint(point);
     this.index += char.length;
     if (this.current().isComments && this.skipsComment(char)) return '';
+    const canRepeat = this.canRepeat;
+    // Only a quantifier, `|`, and a group's opening leave nothing for a quantifier to repeat.
+    this.canRepeat = !'*+?{|('.includes(char);
+    if ('*+?'.includes(char) && !canRepeat) this.fail(`Dangling meta character '${char}'`, this.index - 1);
     switch (char) {
       case '\\': {
         return this.escape();
@@ -215,8 +233,9 @@ class Translator {
 
   /** Where `^` or `$` matches, at the input's bounds or, with MULTILINE, at its lines'. */
   private lineAnchor(char: '^' | '$'): string {
-    if (!this.current().isMultiline) return char === '^' ? String.raw`(?<![\s\S])` : this.inputEnd();
-    return char === '^' ? this.lineStart() : this.lineEnd();
+    // A group lets a quantifier follow, as Java allows and JavaScript does not for a bare assertion.
+    if (!this.current().isMultiline) return `(?:${char === '^' ? String.raw`(?<![\s\S])` : this.inputEnd()})`;
+    return `(?:${char === '^' ? this.lineStart() : this.lineEnd()})`;
   }
 
   /** What `.` matches: any character but a line terminator, unless DOTALL. */
@@ -282,6 +301,7 @@ class Translator {
     const match = /^(\d+)(,(\d*))?\}/.exec(this.rest());
     if (!match) this.fail('Illegal repetition');
     this.index += match[0].length;
+    if (match[3] && Number(match[3]) < Number(match[1])) this.fail('Illegal repetition range', this.index - 1);
     return `{${match[0]}${this.quantifierSuffix()}`;
   }
 
@@ -289,11 +309,18 @@ class Translator {
     const rest = this.rest();
     const group: Group = { ...this.current(), extraCloses: 0 };
     if (!rest.startsWith('?')) {
+      this.capturingGroups++;
       this.groups.push(group);
       return '(';
     }
-    const plain = /^\?(?::|=|!|<=|<!|<[a-zA-Z][a-zA-Z0-9]*>)/.exec(rest);
+    if (/^\?<[^a-zA-Z=!]/.test(rest))
+      this.fail('capturing group name does not start with a Latin letter', this.index + 2);
+    const plain = /^\?(?::|=|!|<=|<!|<([a-zA-Z][a-zA-Z0-9]*)>)/.exec(rest);
     if (plain) {
+      if (plain[1] !== undefined) {
+        this.capturingGroups++;
+        this.groupNames.add(plain[1]);
+      }
       this.index += plain[0].length;
       this.groups.push(group);
       return `(${plain[0]}`;
@@ -328,9 +355,26 @@ class Translator {
   }
 
   private closeGroup(): string {
-    if (this.groups.length === 1) this.fail('Unmatched closing )');
+    // Pattern reports an unmatched `)` one character before it, and with no index at the start.
+    if (this.groups.length === 1) this.fail("Unmatched closing ')'", this.index - 2);
     const { extraCloses } = this.groups.pop() as Group;
     return `${')'.repeat(extraCloses)})`;
+  }
+
+  /**
+   * Translates `\\1` and on, a reference to a group opened before it: Java takes further digits only while the number
+   * stays within the groups opened so far, and a reference to a group that does not exist never matches.
+   */
+  private backReference(): string {
+    let group = Number(this.pattern[this.index]);
+    this.index++;
+    for (let next = this.pattern[this.index]; next !== undefined && /\d/.test(next); next = this.pattern[this.index]) {
+      const longer = group * 10 + Number(next);
+      if (longer > this.capturingGroups) break;
+      group = longer;
+      this.index++;
+    }
+    return group > this.capturingGroups ? '(?!)' : `(?:\\${group})`;
   }
 
   /** Translates the escape after a backslash outside a class. */
@@ -363,14 +407,13 @@ class Translator {
         const name = /^k<([a-zA-Z][a-zA-Z0-9]*)>/.exec(this.rest());
         if (!name) this.fail('Illegal named-group reference');
         this.index += name[0].length;
+        if (!this.groupNames.has(name[1] as string)) {
+          this.fail(`named capturing group <${name[1]}> does not exist`, this.index - 1);
+        }
         return `\\${name[0]}`;
       }
       default: {
-        if (char !== undefined && /[1-9]/.test(char)) {
-          const digits = /^\d+/.exec(this.rest())?.[0] as string;
-          this.index += digits.length;
-          return `\\${digits}`;
-        }
+        if (char !== undefined && /[1-9]/.test(char)) return this.backReference();
         return this.classEscape();
       }
     }
@@ -382,7 +425,7 @@ class Translator {
    */
   private classEscape(): string {
     const char = this.pattern[this.index];
-    if (char === undefined) this.fail('Unexpected end of pattern');
+    if (char === undefined) this.fail('Unescaped trailing backslash');
     this.index++;
     if (char === 'Q') return this.quoted();
     if (char === 'p' || char === 'P') return this.property(char === 'P');
@@ -465,7 +508,7 @@ class Translator {
     if (binary !== undefined) return binary;
     const script = /^(?:Is|script=|sc=)(\w+)$/.exec(name)?.[1];
     if (script !== undefined) return `Script=${script}`;
-    return this.fail(`Unsupported character family ${name}`);
+    return this.fail(`Unknown character property name {${name}}`, this.index - 1);
   }
 
   /**
@@ -478,7 +521,7 @@ class Translator {
     const operands: string[][] = [[]];
     for (;;) {
       const char = this.pattern[this.index];
-      if (char === undefined) this.fail('Unclosed character class');
+      if (char === undefined) this.fail('Unclosed character class', this.pattern.length - 1);
       if (char === ']') {
         this.index++;
         break;
@@ -511,7 +554,7 @@ class Translator {
     // A range that the pattern ends before its end character is illegal, as `[a-` is.
     if (this.index >= this.pattern.length) this.fail('Illegal character range');
     const end = this.classCharacter();
-    if (typeof end === 'string' || end < start) this.fail('Illegal character range');
+    if (typeof end === 'string' || end < start) this.fail('Illegal character range', this.index - 1);
     return this.classRange(start, end);
   }
 
