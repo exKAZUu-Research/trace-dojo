@@ -133,11 +133,11 @@ function definePatternTokens(
 ): void {
   addMethod(scanner, `next${suffix}`, [], type, false, (frame, receiver) =>
     takeToken(frame, receiver, (token) =>
-      pattern.test(token) ? parse(token) : throwBuiltin(frame, 'InputMismatchException')
+      matches(pattern, token) ? parse(token) : throwBuiltin(frame, 'InputMismatchException')
     )
   );
   addMethod(scanner, `hasNext${suffix}`, [], BOOLEAN, false, (frame, receiver) =>
-    pattern.test(peekToken(frame, receiver) ?? '')
+    matches(pattern, peekToken(frame, receiver) ?? '')
   );
 }
 
@@ -146,20 +146,26 @@ function definePatternTokens(
  * `bits` bits, or `undefined` for a token that is no integer.
  */
 function integerOf(token: string, bits: number): { digits: string; value: bigint | undefined } | undefined {
-  if (!INTEGER.test(token)) return undefined;
+  if (!matches(INTEGER, token)) return undefined;
   const digits = asciiDigitsOf(token);
   const value = BigInt(digits);
   const bound = 1n << BigInt(bits - 1);
   return { digits, value: value < -bound || value >= bound ? undefined : value };
 }
 
+/**
+ * Whether a token matches a pattern of numbers or booleans, whose digits must each be one char: Java converts a
+ * number by its chars, so a digit outside the BMP, two chars that are no digits, makes the token no number.
+ */
+function matches(pattern: RegExp, token: string): boolean {
+  return pattern.test(token) && !/[\u{10000}-\u{10FFFF}]/u.test(token);
+}
+
 /** A numeric token without thousands separators, with its digits in ASCII, as `Character.digit` reads them. */
 function asciiDigitsOf(token: string): string {
   return token
     .replaceAll(',', '')
-    .replaceAll(/\p{Nd}/gu, (digit) =>
-      digit.length === 1 ? String(decimalDigitValue(digit.codePointAt(0) as number)) : digit
-    );
+    .replaceAll(/\p{Nd}/gu, (digit) => String(decimalDigitValue(digit.codePointAt(0) as number)));
 }
 
 /**

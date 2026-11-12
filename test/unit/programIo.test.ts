@@ -58,6 +58,12 @@ test.each([
     'true 123 123 3.5\n',
   ],
   [
+    'a digit outside the BMP, which is no digit to Java',
+    'Scanner sc = new Scanner(System.in); System.out.println(sc.hasNextInt() + " " + sc.hasNextLong() + " " + sc.hasNextDouble()); try { sc.nextInt(); } catch (InputMismatchException e) { System.out.println(sc.next()); }',
+    '\u{1D7D9}',
+    'false false false\n\u{1D7D9}\n',
+  ],
+  [
     'lines from a BufferedReader',
     'BufferedReader br = new BufferedReader(new InputStreamReader(System.in)); String line; while ((line = br.readLine()) != null) System.out.println("[" + line + "]");',
     'x\r\ny\n\nz',
@@ -254,6 +260,12 @@ test.each([
     'true true false\n',
   ],
   [
+    'a move to a missing directory',
+    'try { Files.move(Path.of("x"), Path.of("missing/y")); } catch (IOException e) { System.out.println(e); }',
+    { x: 'old' },
+    'java.nio.file.NoSuchFileException: x -> missing/y\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},
@@ -347,7 +359,7 @@ test.each([
   [
     'writes files',
     "const fs = require('node:fs'); console.log(fs.mkdirSync('a/b', { recursive: true })); fs.writeFileSync('a/b/c.txt', 'x'); fs.writeFileSync('a/b/c.txt', 'y', { flag: 'a' }); fs.appendFileSync('a/b/c.txt', 'z'); fs.renameSync('in.txt', 'a/b/../in.txt'); fs.mkdirSync('a/b/../c/../e', { recursive: true }); fs.rmdirSync('a/e'); fs.rmdirSync('a/c'); console.log(fs.readdirSync('a'), fs.existsSync('in.txt')); fs.unlinkSync('a/in.txt');",
-    { stdout: "/a\n[ 'b', 'in.txt' ] false\n", stderr: '', finalFiles: { 'a/b/c.txt': 'xyz' } },
+    { stdout: "a\n[ 'b', 'in.txt' ] false\n", stderr: '', finalFiles: { 'a/b/c.txt': 'xyz' } },
   ],
   [
     'writes to the standard streams',

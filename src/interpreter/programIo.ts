@@ -293,10 +293,15 @@ export class VirtualFileSystem {
     return firstCreated;
   }
 
-  /** Whether two paths name one file or directory, failing as a lookup does when a directory on the way is missing. */
+  /** Whether two paths name one file or directory, where a path that names nothing names no file. */
   isSameFile(path: string, other: string): boolean {
-    const { node } = this.locate(path);
-    return node !== undefined && node === this.locate(other).node;
+    try {
+      const { node } = this.locate(path);
+      return node !== undefined && node === this.locate(other).node;
+    } catch (error) {
+      if (error instanceof FileSystemError) return false;
+      throw error;
+    }
   }
 
   /** Removes a file or an empty directory, or only one of `kind` when it is given. */

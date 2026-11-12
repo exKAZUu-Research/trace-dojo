@@ -598,7 +598,7 @@ function copyOrMove(frame: Frame, isMove: boolean, from: string, to: string, giv
   const kind = system.kindOf(from);
   if (kind === undefined) throwBuiltin(frame, 'NoSuchFileException', from);
   // Copying or moving a file to itself does nothing.
-  if (withNioErrors(frame, to, () => system.isSameFile(from, to))) return;
+  if (system.isSameFile(from, to)) return;
   if (system.kindOf(to) !== undefined) {
     if (!optionNamesOf(frame, given).includes('REPLACE_EXISTING'))
       throwBuiltin(frame, 'FileAlreadyExistsException', to);

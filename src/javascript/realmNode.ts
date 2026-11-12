@@ -1,4 +1,4 @@
-import { FileSystemError, type FileSystemErrorCode, type OpenMode } from '../interpreter/programIo';
+import { FileSystemError, type FileSystemErrorCode, type OpenMode, WORKING_DIRECTORY } from '../interpreter/programIo';
 import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
@@ -68,8 +68,9 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     const options = args[1];
     const recursive = isObject(options) && runtime.get(options, 'recursive') === true;
     const created = withErrors(runtime, 'mkdir', path, () => runtime.io.files.createDirectory(path, recursive));
-    // A recursive call returns the first directory it created.
-    return recursive ? created : undefined;
+    // A recursive call returns the first directory it created, relative when the path given is.
+    if (!recursive || created === undefined) return;
+    return path.startsWith('/') ? created : created.slice(WORKING_DIRECTORY.length);
   });
   builder.method(fs, 'readdirSync', 2, ({ runtime, args }) => {
     const path = requirePath(runtime, args[0]);
