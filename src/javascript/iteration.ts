@@ -41,11 +41,18 @@ export class ValueIterator {
    * the iteration ends.
    * @param onEnd Called once when the iteration ends, by running out, failing, or closing.
    */
+  /** The values {@link rest} has taken so far, which stay reachable with the roots while it takes the others. */
+  private collected: Value[] = [];
+
   constructor(
     private readonly source: readonly Value[] | HostIterator,
-    readonly roots: readonly Value[] = [],
+    private readonly iterationRoots: readonly Value[] = [],
     private readonly onEnd?: () => void
   ) {}
+
+  get roots(): readonly Value[] {
+    return this.collected.length === 0 ? this.iterationRoots : [...this.iterationRoots, ...this.collected];
+  }
 
   private get isDone(): boolean {
     return this.done;
@@ -96,8 +103,9 @@ export class ValueIterator {
 
   /** The values not read yet, which ends the iteration. */
   rest(): Value[] {
-    const values: Value[] = [];
+    const values = this.collected;
     for (let value = this.next(); value !== DONE; value = this.next()) values.push(value);
+    this.collected = [];
     return values;
   }
 }
