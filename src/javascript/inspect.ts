@@ -156,7 +156,10 @@ function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefi
   let base = '';
   let open = '{';
   if (value instanceof JsFunction) base = functionBase(runtime, value);
+  else if (value.regexp) base = String(value.regexp);
   else if (value.isError && constructor !== 'Object') base = errorText(value);
+  else if (value.hostIterator)
+    open = `${prefixOf(constructor, 'Object')}[${value.generator ? 'Generator' : 'RegExp String Iterator'}] {`;
   else if (constructor !== 'Object') open = `${prefixOf(constructor, 'Object')}{`;
   if (!hasKeys) return base || `${open}}`;
   return { base, braces: [open, '}'] };
@@ -195,7 +198,10 @@ function enumerableKeys(runtime: Runtime, object: JsObject): string[] {
 
 function functionBase(runtime: Runtime, fn: JsFunction): string {
   const name = runtime.functionName(fn);
-  if (fn.behavior.kind !== 'class') return name ? `[Function: ${name}]` : '[Function (anonymous)]';
+  if (fn.behavior.kind !== 'class') {
+    const kind = fn.behavior.kind === 'user' && fn.behavior.node.isGenerator ? 'GeneratorFunction' : 'Function';
+    return name ? `[${kind}: ${name}]` : `[${kind} (anonymous)]`;
+  }
   const superName = fn.proto instanceof JsFunction ? runtime.functionName(fn.proto) : '';
   return `[class ${name || '(anonymous)'}${superName ? ` extends ${superName}` : ''}]`;
 }

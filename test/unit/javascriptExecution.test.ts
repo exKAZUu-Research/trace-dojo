@@ -352,3 +352,123 @@ test.each([
     stdout: execFileSync('node', ['-e', source], { encoding: 'utf8' }),
   });
 });
+
+test.each([
+  [
+    'regular expressions',
+    `const re = /(\\w)(\\d)?/g;
+let m;
+while ((m = re.exec('a1b c3')) !== null) console.log(m[0], m[1], m[2], m.index, re.lastIndex);
+console.log('x-y_z'.replace(/[-_](\\w)/g, (_, c, off, s) => c.toUpperCase() + off + s.length));
+console.log('John Smith'.replace(/(?<first>\\w+)\\s(?<last>\\w+)/, '$<last>, $<first> $$ $&'));
+console.log('aaa'.replace(/a/gy, 'b'), 'baaa'.replace(/a/y, 'b'));
+console.log('a,b;c d'.split(/[,; ]/), 'a1b2c3'.split(/(\\d)/), 'abc'.split(/(?:)/u, 2));
+console.log('Hello'.match(/l/g), 'Hello'.match(/z/), 'Hello'.match(/z/g), 'x'.search(/y/));
+const sticky = /foo/y; sticky.lastIndex = 3; console.log(sticky.test('barfoo'), sticky.lastIndex, sticky.test('barfoo'), sticky.lastIndex);
+console.log(/a/.source, /\\//.source, new RegExp('').source, new RegExp('a/b').toString(), RegExp(/x/g, 'i').flags);
+console.log(/a/gimsuyd.flags, /x/.global, /x/g.global, typeof /x/, /x/ instanceof RegExp);
+try { new RegExp('('); } catch (e) { console.log(e.name); }
+try { 'a'.matchAll(/a/); } catch (e) { console.log(e.message); }
+try { 'a'.replaceAll(/a/, 'b'); } catch (e) { console.log(e.message); }
+console.log([...'a1b2'.matchAll(/\\d/g)].map((x) => x[0] + x.index));
+const r2 = /b/g; r2.lastIndex = 2; console.log([...'abab'.matchAll(r2)].length, r2.lastIndex);
+console.log('2020-01-02'.replace(/(\\d+)-(\\d+)-(\\d+)/, '$3/$2/$1'), 'abc'.replace(/(?<x>b)/, (...a) => typeof a.at(-1)));
+console.log('CamelCaseString'.split(/(?=[A-Z])/).join(' '), /^\\d{3}-\\d{4}$/.test('123-4567'), 'ab'.match(/(?<n>a)|(?<m>z)/).groups.m);
+const d = /(?<w>b)/d.exec('abc'); console.log(d.indices[0], d.indices.groups.w);
+console.log(String(/a/g), \`\${/b/}\`, /a/ + '', /[/]/.source);
+{
+const m = /(?<y>\\d{4})-(?<m>\\d\\d)/.exec('on 2024-03!');
+console.log(m.index, m[0], m.groups.y, m.groups.m);
+console.log('abc'.replace(/b/, (s) => s.toUpperCase()));
+console.log('a-b-c'.replaceAll('-', '+'));
+console.log('xyz'.search(/z/));
+for (const x of 'a1b2'.matchAll(/[a-z](\\d)/g)) console.log(x[1], x.index);
+console.log(new RegExp('h.l', 'i').test('HAL'));
+}`,
+  ],
+  [
+    'tagged templates',
+    `function tag(s, ...v) { return [s, s.raw, v, (() => { try { s.push(1); } catch (e) { return e.constructor.name; } })(), 0, s.length]; }
+console.log(tag\`a\\n\${1}\\u{41}\${'x'}\\unicode\`);
+const same = () => ((s) => s)\`x\`;
+console.log(same() === same());
+const o = { name: 'o', t(s, x) { return this.name + s[0] + x; } };
+console.log(o.t\`[\${5}]\`, o['t']\`<\${6}>\`);
+console.log(String.raw\`C:\\new\\table\${1 + 1}\\x\`, String.raw({ raw: ['a', 'b', 'c'] }, 1, 2, 3, 4));
+console.log(\`plain \${[1, 2]}\`);
+const nested = (s, ...v) => s.join('_') + v.join('+');
+console.log(nested\`a\${nested\`b\${1}\`}c\`);`,
+  ],
+  [
+    'static blocks, new.target, and #name in',
+    `class Base { static greet() { return 'hi'; } }
+class A extends Base {
+  static a = 1;
+  static { var v = this.a + 1; this.b = v; console.log(super.greet(), this === A); }
+  static c = A.b * 10;
+  static #p = 5;
+  static { const f = () => this.#p; console.log(f(), new.target); }
+}
+console.log(A.a, A.b, A.c);
+class B { #v = 3; static isB(o) { return #v in o; } static { console.log(B.isB(new B()), B.isB([])); } }
+try { class C { #q; static t(o) { return #q in o; } } C.t(1); } catch (e) { console.log(e.message); }
+function G() { if (!new.target) return new G(); this.ok = true; }
+console.log(G().ok);
+const arrow = function () { return (() => new.target)(); };
+console.log(new arrow() instanceof Object, arrow());
+debugger;`,
+  ],
+  [
+    'generators',
+    `function* fib() { let [a, b] = [0, 1]; for (;;) { yield a; [a, b] = [b, a + b]; } }
+const out = []; for (const v of fib()) { if (v > 50) break; out.push(v); } console.log(out.join(' '));
+function* take(it, n) { let i = 0; for (const v of it) { if (i++ >= n) return; yield v; } }
+console.log([...take(fib(), 5)]);
+const obj = { *items() { yield* [1, 2]; yield* 'ab'; const r = yield* (function* () { yield 'x'; return 'ret'; })(); yield r; } };
+console.log([...obj.items()]);
+class Tree { constructor(v, l, r) { this.v = v; this.l = l; this.r = r; } *walk() { if (this.l) yield* this.l.walk(); yield this.v; if (this.r) yield* this.r.walk(); } }
+console.log([...new Tree(2, new Tree(1), new Tree(3)).walk()]);
+function* g() { try { const x = yield 1; console.log('got', x); yield x * 2; } catch (e) { console.log('caught', e); yield 'after'; } finally { console.log('fin'); } }
+let it = g(); console.log(it.next('ignored'), it.next(21), it.throw('boom'), it.next(), it.next());
+it = g(); it.next(); console.log(it.return(7), it.next());
+it = g(); console.log(it.return(8), it.next());
+function* h() { try { yield 1; } finally { yield 'cleanup'; } }
+it = h(); it.next(); console.log(it.return(3), it.next(), it.next());
+try { it = g(); it.throw(new Error('early')); } catch (e) { console.log(e.message); }
+const gen = function* (a, b = a + 1) { yield a + b; yield arguments.length; }; console.log([...gen(1)]);
+console.log(typeof gen().next, Object.prototype.toString.call(gen()), gen().constructor === undefined);
+function* nested() { const a = (yield 'q1') + (yield 'q2'); return a; }
+it = nested(); console.log(it.next().value, it.next(10).value, it.next(5));
+function* cond(x) { const v = x ? yield 'yes' : yield 'no'; console.log(\`v=\${v}\`); yield [yield 'arr', 0]; }
+console.log([...cond(true)]);
+const ys = function* () { let i = 0; while (i < 3) { const cmd = yield i++; if (cmd) i = 0; } }();
+console.log(ys.next().value, ys.next().value, ys.next(true).value, ys.next().value);
+function* deleg() { try { yield* inner(); } finally { console.log('outer fin'); } } function* inner() { try { yield 1; yield 2; } finally { console.log('inner fin'); } }
+for (const v of deleg()) { console.log(v); break; }
+const d = deleg(); d.next(); console.log(d.return(9));
+console.log(Array.from(take(fib(), 3)), Math.max(...take(fib(), 6)));
+const [p, q] = fib(); console.log(p, q);
+{
+function* counter() { let x = 0; while (true) { const cmd = yield x; if (cmd === 'reset') x = 0; else x++; } }
+const c = counter();
+console.log(c.next().value, c.next().value, c.next().value, c.next('reset').value, c.next().value);
+function* t() { try { yield 1; yield 2; } finally { console.log('cleanup'); } }
+for (const v of t()) { console.log(v); break; }
+const it = t(); it.next(); console.log(it.return(5));
+}`,
+  ],
+  [
+    'regular expressions and generators in console.log',
+    `console.log(/a+b/gi, [/x/], { r: /y/m });
+function* g() { yield 1; }
+console.log(g(), [g()], 'a'.matchAll(/a/g));
+console.log('2024-03'.match(/(?<y>\\d+)-(?<m>\\d+)/));
+console.log(String.raw, g);`,
+  ],
+])('a program using %s runs as Node.js runs it', (_, source) => {
+  expect(executeProgram('javascript', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: execFileSync('node', ['-e', source], { encoding: 'utf8' }),
+  });
+});
