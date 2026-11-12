@@ -1,8 +1,9 @@
 import { bitLength, chargeBigInt } from './expressionEvaluator';
 import type { RealmBuilder } from './realm';
+import { hostLocales, hostOptions } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import type { Value } from './values';
+import { throwingHostErrors, type Value } from './values';
 
 /** Defines BigInt and BigInt.prototype, which convert as JavaScript's BigInt does and print without the `n`. */
 export function defineBigIntBuiltins(builder: RealmBuilder): void {
@@ -31,9 +32,12 @@ export function defineBigIntBuiltins(builder: RealmBuilder): void {
     if (!(radix >= 2 && radix <= 36)) runtime.throwError('RangeError', 'toString() radix must be between 2 and 36');
     return thisBigInt(runtime, thisValue, 'toString').toString(radix);
   });
-  builder.method(bigintPrototype, 'toLocaleString', 0, ({ runtime, thisValue }) =>
-    thisBigInt(runtime, thisValue, 'toLocaleString').toLocaleString('en-US')
-  );
+  builder.method(bigintPrototype, 'toLocaleString', 0, ({ runtime, thisValue, args }) => {
+    const value = thisBigInt(runtime, thisValue, 'toLocaleString');
+    const locales = (hostLocales(runtime, args[0]) ?? 'en-US') as Intl.LocalesArgument;
+    const options = hostOptions(runtime, args[1]) as BigIntToLocaleStringOptions;
+    return throwingHostErrors(runtime, () => value.toLocaleString(locales, options));
+  });
   builder.method(bigintPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisBigInt(runtime, thisValue, 'valueOf'));
   builder.constant(bigintPrototype, WELL_KNOWN_SYMBOLS.toStringTag, 'BigInt');
 }

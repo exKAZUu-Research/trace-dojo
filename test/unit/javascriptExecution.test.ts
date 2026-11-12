@@ -1161,6 +1161,10 @@ console.log(d.toLocaleDateString('en-US', new Opts()));
 console.log(d.toLocaleString('en-US', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' }));
 try { d.toLocaleString('en-US', { get timeZone() { throw new Error('tz'); } }); } catch (e) { console.log(e.message); }`,
   ],
+  [
+    'BigInt toLocaleString with locales and options',
+    `console.log((1234n).toLocaleString("de-DE"), (1234n).toLocaleString("en-US", { useGrouping: false }), (1234567n).toLocaleString(), (12n).toLocaleString("en-US", { style: "currency", currency: "JPY" }));`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

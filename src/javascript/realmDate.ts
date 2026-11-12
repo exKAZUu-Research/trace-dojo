@@ -135,7 +135,7 @@ function defineSetters(builder: RealmBuilder, prototype: JsObject): void {
 }
 
 /** A host value for the locales argument of a `toLocale...String` method: a tag, or a list of them. */
-function hostLocales(runtime: Runtime, value: Value): unknown {
+export function hostLocales(runtime: Runtime, value: Value): unknown {
   if (!(value instanceof JsObject)) return value;
   const length = Math.trunc(runtime.toNumber(runtime.get(value, 'length'))) || 0;
   runtime.scan(length);
@@ -153,7 +153,7 @@ function hostLocales(runtime: Runtime, value: Value): unknown {
  * A host value for the options argument of a `toLocale...String` method, whose every option the host formatter reads
  * through the program's own property lookup, inherited options and getters included, in the formatter's order.
  */
-function hostOptions(runtime: Runtime, value: Value): unknown {
+export function hostOptions(runtime: Runtime, value: Value): unknown {
   if (!(value instanceof JsObject)) return value;
   return new Proxy(
     {},
