@@ -17,6 +17,10 @@ test.each([
   ['a set updated from an endless iterator', 'import itertools\nset().update(itertools.repeat(0))'],
   ['a set difference with an endless iterator', 'import itertools\nset().difference_update(itertools.repeat(0))'],
   ['a rejection loop that never accepts', 'import random\nrandom.gammavariate(float("nan"), 1)'],
+  [
+    'counting copies equal to a long string',
+    's = "a" * 999999\nl = [s] * 200000\nt = "a" * 999998 + "a"\nx = l.count(t)',
+  ],
   ['hashing a deeply shared tuple', 't = (0,)\nfor i in range(28):\n    t = (t, t)\nhash(t)'],
   [
     'comparing deeply shared dicts',

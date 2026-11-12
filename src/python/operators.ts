@@ -5,7 +5,7 @@ import { floatPower } from './floatPower';
 import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, toIndex, trueDivideInt } from './numbers';
 import { bindValue, callValue, iterate, iterateOr, lookupSpecial, type NextFunction } from './objects';
 import { formatPercent } from './percentFormat';
-import { currentRuntime } from './runtimeContext';
+import { chargeStep, currentRuntime } from './runtimeContext';
 import {
   dictViewBinary,
   differenceUpdate,
@@ -850,6 +850,9 @@ function compareSets(operator: keyof typeof COMPARE_NAMES, left: PySet, right: P
  * NaNs, which CPython keeps apart.
  */
 export function equals(left: PyValue, right: PyValue): boolean {
+  // Every equality test costs a step, the identity shortcut included, which compares equal host strings by scanning
+  // them, so that the clock check stops any native loop of them.
+  chargeStep();
   if (isSame(left, right)) return true;
   return isTruthyValue(compareOp('==', left, right));
 }
