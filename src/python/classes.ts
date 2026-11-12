@@ -28,8 +28,10 @@ export function computeMro(cls: PyClass): PyClass[] {
       .map((sequence) => sequence[0])
       .find((candidate) => nonEmpty.every((sequence) => !sequence.slice(1).includes(candidate)));
     if (!head) {
+      // As set_mro_error does, the message names the heads that could not be placed, once each in merge order.
+      const heads = [...new Set(nonEmpty.map((sequence) => sequence[0]))];
       throw typeError(
-        `Cannot create a consistent method resolution order (MRO) for bases ${cls.bases.map((base) => base.name).join(', ')}`
+        `Cannot create a consistent method resolution order (MRO) for bases ${heads.map((base) => base.name).join(', ')}`
       );
     }
     result.push(head);
