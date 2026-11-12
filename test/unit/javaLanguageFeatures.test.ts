@@ -1482,6 +1482,28 @@ class Main {
   }
 });
 
+test("Java wraps a LinkedList's sublist in the sequential unmodifiable list class, as the JDK does", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  public static void main(String[] args) {
+    List<Integer> x = new LinkedList<>(List.of(1, 2, 3));
+    List<Integer> v = x.subList(0, 2);
+    System.out.println(Collections.unmodifiableList(v).getClass().getName() + " " + Collections.unmodifiableList(v.subList(0, 1)).getClass().getName());
+    x.add(4);
+    System.out.println(Collections.unmodifiableList(v).getClass().getName());
+    List<Integer> y = new ArrayList<>(List.of(1, 2));
+    System.out.println(Collections.unmodifiableList(y.subList(0, 1)).getClass().getName() + " " + Collections.unmodifiableList(Arrays.asList(1, 2).subList(0, 1)).getClass().getName());
+  }
+}`,
+      'java.util.Collections$UnmodifiableList java.util.Collections$UnmodifiableList\njava.util.Collections$UnmodifiableList\njava.util.Collections$UnmodifiableRandomAccessList java.util.Collections$UnmodifiableRandomAccessList\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

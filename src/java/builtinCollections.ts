@@ -76,6 +76,8 @@ export interface Collections {
   immutableSet: ClassInfo;
   emptySet: ClassInfo;
   singletonSet: ClassInfo;
+  /** `AbstractList$SubList`, the class of views of `LinkedList`, which does not implement `RandomAccess`. */
+  sequentialSubList: ClassInfo;
   emptyMap: ClassInfo;
   singletonMap: ClassInfo;
   /** The class of `Collections.unmodifiableSet` of a set without a store of its own, such as a map's key set. */
@@ -162,6 +164,7 @@ export function defineCollections(
     ...sets,
     unmodifiableViewSet,
     ...restrictedLists,
+    sequentialSubList: subListClasses.other,
     sortedClasses: [
       ...['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
       priorityQueue,

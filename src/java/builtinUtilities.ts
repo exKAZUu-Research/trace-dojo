@@ -374,12 +374,12 @@ function defineCollectionViews(
 
 /**
  * The class of `Collections.unmodifiableList` of `list`, which tells the lists that implement `RandomAccess`, as every
- * list of the JDK's here but `LinkedList` does, from the others.
+ * list of the JDK's here but `LinkedList` and its views do, from the others.
  */
 function unmodifiableListClass(collections: Collections, list: JavaObject): ClassInfo {
   let cls = list.cls;
   while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
-  return cls.name === 'LinkedList' || cls.name === 'Object'
+  return cls.name === 'LinkedList' || cls.name === 'Object' || cls === collections.sequentialSubList
     ? collections.unmodifiableList
     : collections.unmodifiableRandomAccessList;
 }
