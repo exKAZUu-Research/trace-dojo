@@ -1384,6 +1384,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Main {\n  @SafeVarargs static <T> void f(T... xs) {}\n  @SafeVarargs final <T> void g(T... xs) {}\n  @SafeVarargs private <T> void h(T... xs) {}\n  @SafeVarargs <T> Main(T... xs) {}\n  public static void main(String[] args) {}\n}',
   ],
   [
+    'annotation-without-a-required-element',
+    false,
+    '@interface Info { String value(); int n() default 0; }\nclass Main {\n  @Info(n = 2) void f() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'annotation-with-an-undeclared-element',
+    false,
+    'class Main {\n  @Deprecated(foo = 1) void f() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'annotations-with-their-elements',
+    true,
+    '@interface Info { String value(); int n() default 0; }\nclass Main {\n  @Info("x") void f() {}\n  @Info(value = "y", n = 3) @Deprecated(since = "1") @SuppressWarnings({"a"}) void g() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
     'annotation-without-targets-on-a-type-use',
     false,
     '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',

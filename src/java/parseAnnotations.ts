@@ -31,36 +31,46 @@ const DECLARATION_CONTEXTS: readonly ElementType[] = [
 
 const ELEMENT_TYPES: ReadonlySet<string> = new Set([...DECLARATION_CONTEXTS, 'TYPE_USE']);
 
-/** The targets of the annotation interfaces of java.lang, which need no import. */
-const LANG_TARGETS: Readonly<Record<string, readonly ElementType[]>> = {
-  Override: ['METHOD'],
-  Deprecated: ['TYPE', 'FIELD', 'METHOD', 'PARAMETER', 'CONSTRUCTOR', 'LOCAL_VARIABLE'],
-  SuppressWarnings: ['TYPE', 'FIELD', 'METHOD', 'PARAMETER', 'CONSTRUCTOR', 'LOCAL_VARIABLE'],
-  FunctionalInterface: ['TYPE'],
-  SafeVarargs: ['CONSTRUCTOR', 'METHOD'],
+/** What javac checks of an annotation: where it may be written, and its elements by whether each has a default. */
+interface AnnotationInterface {
+  targets: readonly ElementType[];
+  elements: Readonly<Record<string, boolean>>;
+}
+
+const LANG_ANNOTATIONS: Readonly<Record<string, AnnotationInterface>> = {
+  Override: { targets: ['METHOD'], elements: {} },
+  Deprecated: {
+    targets: ['TYPE', 'FIELD', 'METHOD', 'PARAMETER', 'CONSTRUCTOR', 'LOCAL_VARIABLE'],
+    elements: { since: true, forRemoval: true },
+  },
+  SuppressWarnings: {
+    targets: ['TYPE', 'FIELD', 'METHOD', 'PARAMETER', 'CONSTRUCTOR', 'LOCAL_VARIABLE'],
+    elements: { value: false },
+  },
+  FunctionalInterface: { targets: ['TYPE'], elements: {} },
+  SafeVarargs: { targets: ['CONSTRUCTOR', 'METHOD'], elements: {} },
 };
 
-/** The targets of the annotation interfaces of java.lang.annotation. */
-const META_TARGETS: Readonly<Record<string, readonly ElementType[]>> = {
-  Retention: ['ANNOTATION_TYPE'],
-  Target: ['ANNOTATION_TYPE'],
-  Documented: ['ANNOTATION_TYPE'],
-  Inherited: ['ANNOTATION_TYPE'],
-  Repeatable: ['ANNOTATION_TYPE'],
-  Native: ['FIELD'],
+const META_ANNOTATIONS: Readonly<Record<string, AnnotationInterface>> = {
+  Retention: { targets: ['ANNOTATION_TYPE'], elements: { value: false } },
+  Target: { targets: ['ANNOTATION_TYPE'], elements: { value: false } },
+  Documented: { targets: ['ANNOTATION_TYPE'], elements: {} },
+  Inherited: { targets: ['ANNOTATION_TYPE'], elements: {} },
+  Repeatable: { targets: ['ANNOTATION_TYPE'], elements: { value: false } },
+  Native: { targets: ['FIELD'], elements: {} },
 };
 
 /**
- * Rejects an annotation that names no annotation interface or one not applicable where it is written. These programs
- * ignore annotations otherwise, so the interfaces are those the program declares, java.lang's, and java.lang.annotation's
- * that are imported or written with their package.
+ * Rejects an annotation that names no annotation interface, one not applicable where it is written, or one whose
+ * elements are not those its interface declares. These programs ignore annotations otherwise, so the interfaces are
+ * those the program declares, java.lang's, and java.lang.annotation's that are imported or written with their package.
  */
 export function checkAnnotations(root: Node, imports: readonly ImportDeclaration[]): void {
-  const targets = new Map<string, readonly ElementType[]>();
+  const declared = new Map<string, AnnotationInterface>();
   const uses: Node[] = [];
   const visit = (node: Node): void => {
     if (node.type === 'annotation_type_declaration') {
-      targets.set(node.childForFieldName('name')?.text ?? '', declaredTargets(node));
+      declared.set(node.childForFieldName('name')?.text ?? '', declaredInterface(node));
     }
     if (isAnnotation(node)) uses.push(node);
     for (const child of namedChildren(node)) visit(child);
@@ -69,45 +79,70 @@ export function checkAnnotations(root: Node, imports: readonly ImportDeclaration
   const imported = new Set(
     imports
       .filter((declaration) => !declaration.isStatic && declaration.names.join('.').startsWith('java.lang.annotation'))
-      .flatMap((declaration) => (declaration.isWildcard ? Object.keys(META_TARGETS) : declaration.names.slice(-1)))
+      .flatMap((declaration) => (declaration.isWildcard ? Object.keys(META_ANNOTATIONS) : declaration.names.slice(-1)))
   );
   for (const use of uses) {
     const name = (use.childForFieldName('name')?.text ?? '').replaceAll(/\s/g, '');
-    const applicable = targetsOf(name, targets, imported);
-    if (!applicable) throw annotationError(use, `この採点環境には、アノテーション ${name} がありません。`);
-    if (!contextsOf(use).some((context) => applicable.includes(context))) {
+    const annotation = annotationInterfaceOf(name, declared, imported);
+    if (!annotation) throw annotationError(use, `この採点環境には、アノテーション ${name} がありません。`);
+    if (!contextsOf(use).some((context) => annotation.targets.includes(context))) {
       throw annotationError(use, `アノテーション @${name} はここには付けられません。`);
     }
+    checkElements(use, name, annotation.elements);
   }
 }
 
-/** The contexts a declared annotation interface lists in its `@Target`, or every declaration context without one. */
-function declaredTargets(declaration: Node): readonly ElementType[] {
+/** A declared annotation interface: the contexts its `@Target` lists, or every declaration context, and its elements. */
+function declaredInterface(declaration: Node): AnnotationInterface {
   const target = namedChildren(modifiersOf(declaration) ?? declaration).find(
     (child) =>
       isAnnotation(child) && /^(java\.lang\.annotation\.)?Target$/.test(child.childForFieldName('name')?.text ?? '')
   );
-  if (!target) return DECLARATION_CONTEXTS;
-  const listed: string[] = target.childForFieldName('arguments')?.text.match(/\b[A-Z_]+\b/g) ?? [];
-  return listed.filter((name): name is ElementType => ELEMENT_TYPES.has(name));
+  const listed: string[] = target?.childForFieldName('arguments')?.text.match(/\b[A-Z_]+\b/g) ?? [];
+  const elements = namedChildren(declaration.childForFieldName('body') ?? declaration)
+    .filter((member) => member.type === 'annotation_type_element_declaration')
+    .map((member) => [member.childForFieldName('name')?.text ?? '', member.childForFieldName('value') !== null]);
+  return {
+    targets: target ? listed.filter((name): name is ElementType => ELEMENT_TYPES.has(name)) : DECLARATION_CONTEXTS,
+    elements: Object.fromEntries(elements),
+  };
 }
 
-function targetsOf(
+function annotationInterfaceOf(
   name: string,
-  declared: ReadonlyMap<string, readonly ElementType[]>,
+  declared: ReadonlyMap<string, AnnotationInterface>,
   imported: ReadonlySet<string>
-): readonly ElementType[] | undefined {
+): AnnotationInterface | undefined {
   const simpleName = name.split('.').at(-1) as string;
-  const declaredTargets = declared.get(simpleName);
-  if (declaredTargets) return declaredTargets;
-  if (Object.hasOwn(LANG_TARGETS, simpleName) && (name === simpleName || name === `java.lang.${simpleName}`)) {
-    return LANG_TARGETS[simpleName];
+  const declaredInterface = declared.get(simpleName);
+  if (declaredInterface) return declaredInterface;
+  if (Object.hasOwn(LANG_ANNOTATIONS, simpleName) && (name === simpleName || name === `java.lang.${simpleName}`)) {
+    return LANG_ANNOTATIONS[simpleName];
   }
   if (
-    Object.hasOwn(META_TARGETS, simpleName) &&
+    Object.hasOwn(META_ANNOTATIONS, simpleName) &&
     (imported.has(name) || name === `java.lang.annotation.${simpleName}`)
   ) {
-    return META_TARGETS[simpleName];
+    return META_ANNOTATIONS[simpleName];
+  }
+}
+
+/** Rejects an element the interface does not declare, one given twice, and a missing one without a default. */
+function checkElements(use: Node, name: string, elements: Readonly<Record<string, boolean>>): void {
+  const argumentList = use.childForFieldName('arguments');
+  const given = (argumentList ? namedChildren(argumentList) : []).map((argument) =>
+    argument.type === 'element_value_pair' ? (argument.childForFieldName('key')?.text ?? '') : 'value'
+  );
+  for (const [index, element] of given.entries()) {
+    if (!Object.hasOwn(elements, element))
+      throw annotationError(use, `アノテーション @${name} には要素 ${element} がありません。`);
+    if (given.indexOf(element) !== index)
+      throw annotationError(use, `アノテーション @${name} の要素 ${element} が重複しています。`);
+  }
+  for (const [element, hasDefault] of Object.entries(elements)) {
+    if (!hasDefault && !given.includes(element)) {
+      throw annotationError(use, `アノテーション @${name} には要素 ${element} の値が必要です。`);
+    }
   }
 }
 
