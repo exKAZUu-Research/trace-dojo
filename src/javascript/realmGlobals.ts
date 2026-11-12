@@ -2,6 +2,7 @@ import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { formatLogArguments } from './consoleFormat';
 import { inspect } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
+import { dateValueOf } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { defineHidden, type Runtime } from './runtime';
 import {
@@ -65,6 +66,7 @@ function tagOf(value: Value): string {
   if (value instanceof JsFunction) return 'Function';
   if (value instanceof JsObject) {
     if (value.regexp) return 'RegExp';
+    if (dateValueOf(value) !== undefined) return 'Date';
     return value.isError ? 'Error' : 'Object';
   }
   if (typeof value === 'string') return 'String';

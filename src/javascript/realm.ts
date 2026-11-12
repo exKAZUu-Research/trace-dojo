@@ -4,6 +4,7 @@ import { definePromiseBuiltins } from './promises';
 import { defineArrayBuiltins } from './realmArrays';
 import { defineAsyncBuiltins } from './realmAsyncBuiltins';
 import { defineCollectionBuiltins } from './realmCollections';
+import { defineDateBuiltins } from './realmDate';
 import { defineGlobalBuiltins } from './realmGlobals';
 import { defineIteratorHelpers } from './realmIteratorHelpers';
 import { defineIteratorBuiltins } from './realmIterators';
@@ -157,5 +158,6 @@ export function createRealm(runtime: Runtime): Realm {
   defineJsonBuiltins(builder);
   defineIteratorHelpers(builder);
   defineAsyncBuiltins(builder);
+  defineDateBuiltins(builder);
   return builder.realm;
 }

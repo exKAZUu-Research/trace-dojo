@@ -1,6 +1,7 @@
 import { LIMITS } from '../interpreter/limits';
 import type { RealmBuilder } from './realm';
 import { CollectionState, constructorNameOf } from './realmCollections';
+import { dateValueOf, newDate } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import {
@@ -463,8 +464,8 @@ function internalize(
 // structuredClone -----------------------------------------------------------------------------------------------------
 
 /** The structured clone of plain data: primitives, arrays, plain objects, Maps, Sets, and errors. */
-// code-gauge-allow functionCognitiveComplexity 27 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 35 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss 38 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function structuredClone(runtime: Runtime, value: Value, memory: Map<JsObject, JsObject>): Value {
   runtime.spend();
   if (typeof value === 'symbol') return cloneError(runtime, value.toString());
@@ -479,6 +480,8 @@ function structuredClone(runtime: Runtime, value: Value, memory: Map<JsObject, J
   }
   if (value.collection?.isWeak) return cloneError(runtime, `#<${value.collection.kind}>`);
   if (value instanceof JsArray) return cloneArray(runtime, value, memory);
+  const time = dateValueOf(value);
+  if (time !== undefined) return newDate(runtime, time, value.proto ?? runtime.realm.objectPrototype);
   const { collection } = value;
   const copy = runtime.newObject(collection || value.isError ? value.proto : runtime.realm.objectPrototype);
   memory.set(value, copy);

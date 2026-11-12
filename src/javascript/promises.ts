@@ -43,6 +43,11 @@ export class EventLoop {
 
   constructor(private readonly runtime: Runtime) {}
 
+  /** The milliseconds the simulated clock has advanced since the program started. */
+  get time(): number {
+    return this.now;
+  }
+
   enqueue(job: Job): void {
     this.microtasks.push(job);
   }

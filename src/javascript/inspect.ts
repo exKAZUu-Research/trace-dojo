@@ -1,6 +1,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { PromiseState } from './promises';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
+import { dateValueOf, inspectDate } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Key, type Value } from './values';
@@ -152,7 +153,8 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionNcss 31 -- Ports Node.js's util.inspect, so the two stay comparable.
 function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
   if (value instanceof JsArray) {
     const prefix = constructor === 'Array' ? '' : prefixOf(constructor, 'Array', `(${value.elements.length})`);
@@ -166,6 +168,7 @@ function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefi
   let open = '{';
   if (value instanceof JsFunction) base = functionBase(runtime, value);
   else if (value.regexp) base = String(value.regexp);
+  else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
   else if (value.isError && constructor !== 'Object') base = errorText(value);
   else {
     const tag = toStringTagOf(value);
@@ -270,6 +273,13 @@ function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string
   const remaining = elements.length - index;
   if (remaining > 0) output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
   return output;
+}
+
+/** A Date's ISO string, after the name of its constructor when that is not Date. */
+function dateBase(value: JsObject, constructor: string | undefined): string {
+  const text = inspectDate(dateValueOf(value) as number);
+  const prefix = prefixOf(constructor, 'Date');
+  return prefix === 'Date ' ? text : `${prefix}${text}`;
 }
 
 /** What surrounds the entries of a Map, Set, WeakMap, WeakSet, or an iterator over a Map or Set. */

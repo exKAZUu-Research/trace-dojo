@@ -597,6 +597,21 @@ ticks(6);
 console.log(Array.fromAsync([]));`,
   ],
   [
+    'Date with explicit times',
+    `const d = new Date(Date.UTC(2024, 0, 31, 12, 30, 45, 678));
+console.log(d, [d], { d }, d.getTime(), +d, d.toISOString(), JSON.stringify({ d }), d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCDay(), d.getUTCHours(), d.toUTCString());
+console.log(new Date(0), new Date(NaN), new Date('2024-02-29T10:00:00Z'), new Date('2024-02-29'), new Date('x'), String(new Date(NaN)), new Date(8.64e15), new Date(-1e14));
+try { new Date(NaN).toISOString(); } catch (e) { console.log(e.name, e.message); }
+console.log(new Date(NaN).toJSON(), Date.UTC(2024, 1), Date.UTC(99, 0), Date.parse('2024-01-01T00:00:00+09:00'), Date.parse('bad'));
+const e = new Date(Date.UTC(2020, 0, 1)); e.setUTCMonth(13); e.setUTCDate(0); e.setUTCHours(25, 61, 61, 1001);
+console.log(e, e.setUTCFullYear(2000, 1, 29), e.setTime(5), e.setUTCMilliseconds(), e.getTime());
+class MyDate extends Date {} const k = new Date(0); k.note = 'x';
+console.log(new MyDate(0), k, new Date(5) - new Date(3), [new Date(0), new Date(1)].sort((a, b) => b - a), Object.prototype.toString.call(d), structuredClone(new Date(0)));
+console.log(new Date(2024, 0, 31, 12).getHours(), new Date(2024, 1, 30).getDate(), new Date(99, 0).getFullYear(), typeof (d + 1), typeof Date());
+const o = { [Symbol.toPrimitive](hint) { return hint === 'number' ? 42 : 'str:' + hint; } }; console.log(+o, \`\${o}\`, o + '');
+try { Date.prototype.getTime.call({}); } catch (e) { console.log(e.message); }`,
+  ],
+  [
     'everyday Array, Object, Number, String, and Math members',
     `const a = [3, 1, 2];
 console.log(a.toSorted(), a.toReversed(), a.toSpliced(1, 1, 'x', 'y'), a.with(-1, 9), a, [1, 2, 3, 4, 5].copyWithin(0, 3));

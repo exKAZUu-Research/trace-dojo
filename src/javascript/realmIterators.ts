@@ -10,6 +10,7 @@ export const WELL_KNOWN_SYMBOLS = {
   iterator: Symbol('Symbol.iterator'),
   asyncIterator: Symbol('Symbol.asyncIterator'),
   toStringTag: Symbol('Symbol.toStringTag'),
+  toPrimitive: Symbol('Symbol.toPrimitive'),
 } as const;
 
 /** Defines Symbol and the iterators of arrays and strings, which `%IteratorPrototype%` makes iterable themselves. */
