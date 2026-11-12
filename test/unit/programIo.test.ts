@@ -246,12 +246,21 @@ test('Java lets programs use StringWriter and close a StringReader without handl
   expect(executeProgram('java', source)).toMatchObject({ kind: 'executed', stdout: 'ab\n' });
 });
 
-test('a StringWriter grows only within the length of one string', () => {
+test.each([
+  ['a StringWriter', 'StringWriter w = new StringWriter();'],
+  ['the buffer of a BufferedWriter', 'BufferedWriter w = new BufferedWriter(new StringWriter(), 3000000);'],
+])('%s grows only within the length of one string', (_, declaration) => {
+  expect(
+    runJava(`${declaration} String x = "x".repeat(100000); for (int i = 0; i < 100; i++) w.write(x);`)
+  ).toMatchObject({ uncaughtException: 'java.lang.OutOfMemoryError: Java heap space' });
+});
+
+test('a program may open many buffered writers', () => {
   expect(
     runJava(
-      'StringWriter w = new StringWriter(); String x = "x".repeat(100000); for (int i = 0; i < 100; i++) w.write(x);'
+      'for (int i = 0; i < 300; i++) { try (PrintWriter p = new PrintWriter(new BufferedWriter(new FileWriter("f" + i)))) { p.print(i); } }'
     )
-  ).toMatchObject({ uncaughtException: 'java.lang.OutOfMemoryError: Java heap space' });
+  ).toMatchObject({ uncaughtException: undefined, finalFiles: expect.objectContaining({ f299: '299' }) });
 });
 
 test('Java requires programs to catch or declare the IOException of opening a file', () => {

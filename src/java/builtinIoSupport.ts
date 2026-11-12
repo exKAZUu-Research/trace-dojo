@@ -156,10 +156,12 @@ export class BufferedSink implements Sink {
       this.target.write(frame, text);
       return;
     }
-    for (let rest = text; rest !== '';) {
-      const room = this.capacity - this.pending.length;
-      this.pending += rest.slice(0, room);
-      rest = rest.slice(room);
+    // The buffered text is a string the run builds, whatever capacity the program chose.
+    frame.runtime.allocateString(frame, Math.min(this.pending.length + text.length, this.capacity), text.length);
+    for (let offset = 0; offset < text.length;) {
+      const end = offset + this.capacity - this.pending.length;
+      this.pending += text.slice(offset, end);
+      offset = end;
       if (this.pending.length >= this.capacity) this.drain(frame);
     }
   }
