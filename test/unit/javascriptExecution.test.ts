@@ -1123,6 +1123,14 @@ async function* h() { yield* s; }
   console.log(await Array.fromAsync({ async *[Symbol.asyncIterator]() { yield 1; } }));
 })();`,
   ],
+  [
+    'failing cleanup of Array.fromAsync',
+    `async function* f() { try { yield 1; } finally { console.log('close'); throw Error('close'); } }
+function* g() { try { yield 1; } finally { console.log('sclose'); throw Error('sclose'); } }
+(async () => {
+  for (const it of [f(), g()]) await Array.fromAsync(it, () => { throw Error('mapper'); }).then(() => console.log('ok'), (e) => console.log(e.message));
+})();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

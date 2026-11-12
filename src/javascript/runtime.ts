@@ -5,7 +5,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
-import { DONE, type HostIterator, ValueIterator } from './iteration';
+import { DONE, type HostIterator, stepHostIterator, ValueIterator } from './iteration';
 import { defineFunctionProperties } from './memberProperties';
 import { EventLoop } from './promises';
 import { createRealm, type ErrorName, type Realm } from './realm';
@@ -643,7 +643,7 @@ export class Runtime {
     }
     return this.tracked(
       {
-        next: () => hostIterator.next(),
+        next: () => stepHostIterator(hostIterator),
         close: () => {
           const close = this.get(iterator, 'return');
           if (close instanceof JsFunction && this.realm.hostIteratorMethods.has(close)) hostIterator.close?.();

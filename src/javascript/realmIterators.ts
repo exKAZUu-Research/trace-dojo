@@ -1,5 +1,5 @@
 import { ArrayOps } from './arrayOps';
-import { DONE, type HostIterator } from './iteration';
+import { DONE, type HostIterator, stepHostIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { receiverText } from './realmCollections';
 import type { Runtime } from './runtime';
@@ -67,9 +67,7 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
         `Method ${tag}.prototype.next called on incompatible receiver ${receiverText(runtime, thisValue)}`
       );
     }
-    const value = iterator.next();
-    // A builtin iterator stays done, so what it read is no longer reachable through it.
-    if (value === DONE) iterator.source = undefined;
+    const value = stepHostIterator(iterator);
     return iteratorResult(runtime, value === DONE ? undefined : value, value === DONE);
   });
   builder.realm.hostIteratorMethods.add(next);

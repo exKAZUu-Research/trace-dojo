@@ -21,6 +21,13 @@ export interface HostIterator {
   source?: Value;
 }
 
+/** Steps a builtin iterator, which stays done once it is, so what it read is then no longer reachable through it. */
+export function stepHostIterator(iteration: HostIterator): Value | typeof DONE {
+  const value = iteration.next();
+  if (value === DONE) iteration.source = undefined;
+  return value;
+}
+
 /**
  * An iteration a loop, a spread, or a destructuring steps through: a builtin iterator, or fixed values such as the
  * keys `for...in` visits. Once it has ended, it stays done.

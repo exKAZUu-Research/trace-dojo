@@ -138,23 +138,16 @@ function iterationStep(
 ): Step {
   const { runtime, promise } = context;
   const reject: Failure = (reason) => rejectPromise(runtime, promise, reason);
-  // AsyncIteratorClose awaits what `return` returns, and the failure that closed the iterator wins over its own.
-  const closeAndReject: Failure = (reason) => {
-    const rejectWithReason = (): void => reject(reason);
-    let closed: Value;
-    try {
+  // Unlike AsyncIteratorClose, V8's Array.fromAsync reports a failure of `return`, or of what it returns, over the
+  // failure that closed the iterator.
+  const closeAndReject: Failure = (reason) =>
+    settleWith(runtime, promise, reject, () => {
       const close = iteration.return;
-      if (!close) return reject(reason);
-      closed = close();
-    } catch (error) {
-      if (!(error instanceof JsThrow)) throw error;
-      return reject(reason);
-    }
-    awaitValue(context, closed, rejectWithReason, () => {
-      rejectWithReason();
-      return PENDING;
+      if (!close) throw new JsThrow(reason);
+      return awaitValue(context, close(), reject, () => {
+        throw new JsThrow(reason);
+      });
     });
-  };
   return guarded(closeAndReject, () =>
     awaitValue(context, iteration.next(), closeAndReject, (result) =>
       guarded(closeAndReject, () => {
