@@ -103,6 +103,12 @@ export class DictStore {
     return this.entries.filter((entry) => entry.alive);
   }
 
+  /** The live entries from the last inserted, read lazily as {@link liveEntries} reads them. */
+  *reversedLiveEntries(): Generator<DictEntry> {
+    const { entries } = this;
+    for (let index = entries.length - 1; index >= 0; index--) if (entries[index].alive) yield entries[index];
+  }
+
   last(): DictEntry | undefined {
     for (let index = this.entries.length - 1; index >= 0; index--) {
       if (this.entries[index].alive) return this.entries[index];
@@ -172,6 +178,11 @@ export class NamespaceDictStore extends DictStore {
   override *liveEntries(): Generator<DictEntry> {
     this.sync();
     yield* super.liveEntries();
+  }
+
+  override *reversedLiveEntries(): Generator<DictEntry> {
+    this.sync();
+    yield* super.reversedLiveEntries();
   }
 
   /** Brings the dict up to date with the attributes set or deleted since, as every read does first. */

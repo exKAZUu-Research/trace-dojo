@@ -210,10 +210,6 @@ test.each([
     'the pool of combinations and a list beyond the slot limit together',
     'import itertools\np = itertools.combinations(range(300000), 1)\na = [0] * 800000',
   ],
-  [
-    'a reverse iterator over a dict and a list beyond the slot limit together',
-    'd = dict.fromkeys(range(300000))\nr = reversed(d)\na = [0] * 500000',
-  ],
 ])('%s raises MemoryError', (_name, program) => {
   expect(executeOnStillClock(program)).toMatchObject({ uncaughtException: 'MemoryError' });
 });

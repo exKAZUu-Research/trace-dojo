@@ -1,6 +1,7 @@
 import { mappingEntries } from './callArguments';
 import { pyRepr } from './conversions';
 import { method } from './define';
+import { reversedDictIterator } from './dictReversal';
 import { DictStore } from './dictStore';
 import { NATIVE_HASHES, pyHash } from './hashing';
 import { keyError, sliceIndices } from './items';
@@ -394,15 +395,7 @@ method(dictClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
   return None;
 });
 method(dictClass, '__iter__', 'none', 0, 0, (self) => getIterator(new PyDictView(dictKeysClass, dictOf(self), 'keys')));
-method(dictClass, '__reversed__', 'none', 0, 0, (self) =>
-  listIterator(
-    dictOf(self)
-      .store.ordered()
-      .toReversed()
-      .map((entry) => entry.key),
-    'dict_reversekeyiterator'
-  )
-);
+method(dictClass, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator(dictOf(self), 'keys'));
 method(dictClass, 'keys', 'none', 0, 0, (self) => new PyDictView(dictKeysClass, dictOf(self), 'keys'));
 method(dictClass, 'values', 'none', 0, 0, (self) => new PyDictView(dictValuesClass, dictOf(self), 'values'));
 method(dictClass, 'items', 'none', 0, 0, (self) => new PyDictView(dictItemsClass, dictOf(self), 'items'));
@@ -454,19 +447,6 @@ method(
 );
 dictClass.dict.set('__hash__', None);
 
-/** An iterator over a snapshot of a container's items, which it keeps and so charges as storage. */
-function listIterator(items: PyValue[], name: string): PyIterator {
-  currentRuntime().allocate(items.length);
-  let index = 0;
-  const iterator = new PyIterator(
-    iteratorClass(name),
-    () => (index < items.length ? items[index++] : DONE),
-    () => items
-  );
-  iterator.lengthHint = () => items.length - index;
-  return iterator;
-}
-
 for (const [cls, view] of [
   [dictKeysClass, 'keys'],
   [dictValuesClass, 'values'],
@@ -478,12 +458,7 @@ for (const [cls, view] of [
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt((self as PyDictView).dict.store.size));
   method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
-  method(cls, '__reversed__', 'none', 0, 0, (self) =>
-    listIterator(
-      toArray(self).toReversed(),
-      `dict_reverse${view === 'keys' ? 'key' : view === 'values' ? 'value' : 'item'}iterator`
-    )
-  );
+  method(cls, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator((self as PyDictView).dict, view));
   if (view !== 'values') {
     method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => !someItem(other, (item) => contains(self, item)));
   }
