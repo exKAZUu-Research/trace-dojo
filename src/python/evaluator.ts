@@ -16,6 +16,7 @@ import {
   isTruthy,
   iterate,
   iterateHeld,
+  lengthOf,
   lookupSpecial,
   setAttribute,
   setItem,
@@ -681,24 +682,28 @@ export class Evaluator extends ExpressionEvaluator {
     frame: Frame
   ): boolean {
     if (!isSequenceForMatch(subject)) return false;
-    const items = toItems(subject);
+    // As CPython does, the length decides first and only the items the pattern names are read by index; a starred
+    // capture alone takes the items between.
+    const length = Number(lengthOf(subject));
+    const item = (index: number): PyValue => getItem(subject, BigInt(index));
     const { patterns, starIndex } = pattern;
     if (starIndex === undefined) {
-      if (items.length !== patterns.length) return false;
-      return patterns.every((each, index) => this.matchPattern(each, items[index], bindings, frame));
+      if (length !== patterns.length) return false;
+      return patterns.every((each, index) => this.matchPattern(each, item(index), bindings, frame));
     }
     const after = patterns.length - starIndex - 1;
-    if (items.length < patterns.length - 1) return false;
+    if (length < patterns.length - 1) return false;
     for (let index = 0; index < starIndex; index++) {
-      if (!this.matchPattern(patterns[index], items[index], bindings, frame)) return false;
+      if (!this.matchPattern(patterns[index], item(index), bindings, frame)) return false;
     }
     for (let index = 0; index < after; index++) {
-      const item = items[items.length - after + index];
-      if (!this.matchPattern(patterns[starIndex + 1 + index], item, bindings, frame)) return false;
+      if (!this.matchPattern(patterns[starIndex + 1 + index], item(length - after + index), bindings, frame)) {
+        return false;
+      }
     }
     const star = patterns[starIndex];
     if (star.kind === 'star' && star.name) {
-      bindings.set(star.name, newList(items.slice(starIndex, items.length - after)));
+      bindings.set(star.name, newList(toItems(subject).slice(starIndex, length - after)));
     }
     return true;
   }
