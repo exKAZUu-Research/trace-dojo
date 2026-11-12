@@ -30,16 +30,32 @@ const DECIMAL =
   /^[+-]?(?:(?:(?:\p{Nd}+|\p{Nd}{1,3}(?:,\p{Nd}{3})+)(?:\.\p{Nd}*)?|\.\p{Nd}+)(?:[eE][+-]?\p{Nd}+)?|NaN|Infinity)$/u;
 const BOOLEAN_TOKEN = /^(?:true|false)$/i;
 
-/**
- * A scanner's source and the input it has read from it, as Java's scanner reads ahead into a buffer of its own. It
- * reads a line at a time, as from a console where each line arrives when it is entered, so that a line one scanner
- * has read is gone for another scanner of the same input.
- */
-interface ScannerState {
-  source: ReadSource;
-  isClosed: boolean;
-  buffer: string;
-  position: number;
+/** The size of a scanner's buffer, which it fills from its source as it needs input. */
+const SCANNER_BUFFER_SIZE = 1024;
+
+/** A scanner's buffer, whose text and position are those of the reader of its read-ahead source. */
+class ScannerState {
+  isClosed = false;
+  private readonly text: TextReader;
+
+  constructor(
+    frame: Frame,
+    readonly source: ReadAheadSource
+  ) {
+    this.text = source.reader(frame);
+  }
+
+  get buffer(): string {
+    return this.text.text;
+  }
+
+  get position(): number {
+    return this.text.position;
+  }
+
+  set position(position: number) {
+    this.text.position = position;
+  }
 }
 
 const scannerStates = new WeakMap<JavaObject, ScannerState>();
@@ -77,6 +93,7 @@ function defineScannerConstructors(context: IOContext, scanner: ClassInfo): void
     addConstructor(scanner, [classOf(context, name).type], (frame, receiver, [input]) => {
       // A scanner reads a stream through a reader, as Java's wraps it in an InputStreamReader.
       create(
+        frame,
         receiver,
         name === 'InputStream' ? new ReadAheadSource(frame, readSourceOf(frame, input)) : readSourceOf(frame, input)
       );
@@ -84,22 +101,25 @@ function defineScannerConstructors(context: IOContext, scanner: ClassInfo): void
   }
   addConstructor(scanner, [context.stringType], (frame, receiver, [text]) => {
     if (!(text instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
-    create(receiver, new TextSource(frame.runtime.io.textReader(text.value)));
+    create(frame, receiver, new TextSource(frame.runtime.io.textReader(text.value)));
   });
   const fromFile = addConstructor(scanner, [classOf(context, 'File').type], (frame, receiver, [file]) => {
-    create(receiver, new ReadAheadSource(frame, new TextSource(openFileReader(frame, filePathOf(frame, file)))));
+    create(frame, receiver, new ReadAheadSource(frame, new TextSource(openFileReader(frame, filePathOf(frame, file)))));
   });
   fromFile.thrownTypes = [classOf(context, 'FileNotFoundException')];
   const fromPath = addConstructor(scanner, [classOf(context, 'Path').type], (frame, receiver, [path]) => {
     const text = pathTextOf(frame, path);
     const reader = withNioErrors(frame, text, () => frame.runtime.io.openReader(text));
-    create(receiver, new ReadAheadSource(frame, new TextSource(reader)));
+    create(frame, receiver, new ReadAheadSource(frame, new TextSource(reader)));
   });
   fromPath.thrownTypes = [context.ioException];
 }
 
-function create(receiver: Value, source: ReadSource): void {
-  scannerStates.set(receiver as JavaObject, { source, isClosed: false, buffer: '', position: 0 });
+function create(frame: Frame, receiver: Value, source: ReadSource): void {
+  scannerStates.set(
+    receiver as JavaObject,
+    new ScannerState(frame, new ReadAheadSource(frame, source, SCANNER_BUFFER_SIZE))
+  );
 }
 
 function defineTokenMethods(context: IOContext, scanner: ClassInfo): void {
@@ -187,28 +207,16 @@ function stateOf(frame: Frame, receiver: Value): ScannerState {
 }
 
 /**
- * Reads the next line of the source, with its terminator, into the scanner's buffer, telling whether any input
- * remained; a closed source has none, as Java's scanner takes it for the end of input.
+ * Reads the next part of the source into the scanner's buffer, telling whether any input remained; a closed source
+ * has none, as Java's scanner takes it for the end of input.
  */
 function readAhead(frame: Frame, state: ScannerState): boolean {
-  let reader: TextReader;
   try {
-    reader = state.source.reader(frame);
-    if (reader.isAtEnd) return false;
+    return state.source.readMore(frame);
   } catch (error) {
     if (error instanceof JavaThrow) return false;
     throw error;
   }
-  const { text, position } = reader;
-  const terminator = /\r\n|[\n\r]/g;
-  terminator.lastIndex = position;
-  const end = terminator.test(text) ? terminator.lastIndex : text.length;
-  reader.position = end;
-  const line = text.slice(position, end);
-  state.buffer = `${state.buffer.slice(state.position)}${line}`;
-  state.position = 0;
-  frame.runtime.allocateString(frame, state.buffer.length, line.length);
-  return true;
 }
 
 /**

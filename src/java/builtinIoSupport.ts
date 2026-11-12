@@ -80,6 +80,8 @@ export interface ReadSource {
   reader(frame: Frame): TextReader;
   /** Whether a read would not block, which `Reader.ready` tells. */
   isReady(frame: Frame): boolean;
+  /** Whether the source is standard input, which a console delivers a line at a time. */
+  readonly isConsole?: boolean;
   close(frame: Frame): void;
 }
 
@@ -131,14 +133,17 @@ export class ReadAheadSource implements ReadSource {
   private isClosed = false;
   private buffered = '';
 
+  readonly isConsole: boolean;
+
   constructor(
     frame: Frame,
     private readonly inner: ReadSource,
-    chunkSize = BUFFER_SIZE
+    private readonly chunkSize = BUFFER_SIZE
   ) {
+    this.isConsole = inner.isConsole === true;
     this.text = frame.runtime.io.partReader(
       () => this.buffered,
-      () => this.readAhead(frame, chunkSize)
+      () => this.readMore(frame)
     );
   }
 
@@ -158,12 +163,13 @@ export class ReadAheadSource implements ReadSource {
     this.inner.close(frame);
   }
 
-  private readAhead(frame: Frame, chunkSize: number): boolean {
+  /** Reads the next part of the source into the buffer, keeping what remains unread, telling whether any came. */
+  readMore(frame: Frame): boolean {
     const source = this.inner.reader(frame);
     if (source.isAtEnd) return false;
     const { text, position } = source;
-    let end = Math.min(position + chunkSize, text.length);
-    if (this.inner === STANDARD_INPUT) {
+    let end = Math.min(position + this.chunkSize, text.length);
+    if (this.isConsole) {
       const terminator = /\r\n|[\n\r]/g;
       terminator.lastIndex = position;
       end = terminator.test(text) ? terminator.lastIndex : text.length;
@@ -190,6 +196,7 @@ export const STANDARD_INPUT: ReadSource = {
   close: (frame) => {
     frame.runtime.io.stdin.isClosed = true;
   },
+  isConsole: true,
 };
 
 /** Which `write` overload wrote a text: one taking a string, an array of chars, or one char. */

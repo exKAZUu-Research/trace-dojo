@@ -320,6 +320,12 @@ test.each([
     '-1 b 0\n',
   ],
   [
+    'a scanner that reads ahead from a reader',
+    String.raw`StringReader r = new StringReader("a\nb\n"); Scanner s = new Scanner(r); System.out.println(s.nextLine() + " " + r.read() + " " + s.nextLine());`,
+    {},
+    'a -1 b\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},
