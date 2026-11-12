@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 675 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 677 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -430,6 +430,8 @@ export class ProgramConverter extends ExpressionConverter {
       const elseNode = clauses.find((clause) => clause.type === 'else_clause');
       const finallyNode = clauses.find((clause) => clause.type === 'finally_clause');
       if (handlers.length === 0 && !finallyNode) fail(rowOf(node), 'try には except か finally が必要です。');
+      if (handlers.length === 0 && elseNode)
+        fail(rowOf(elseNode), 'try に else を書くときは、except も書いてください。');
       const orelse = elseNode ? this.body(field(elseNode, 'body')) : [];
       const finalbody = finallyNode
         ? this.body(namedChildren(finallyNode).find((child) => child.type === 'block') as Node)
