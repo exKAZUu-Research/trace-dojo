@@ -1,5 +1,6 @@
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
-import { inspect, OutputBudget } from './inspect';
+import { formatLogArguments } from './consoleFormat';
+import { inspect } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
 import { defineHidden, type Runtime } from './runtime';
 import {
@@ -344,8 +345,7 @@ function defineConsole(builder: RealmBuilder): void {
     ['error', 'stderr'],
   ] as const) {
     builder.method(console, name, 0, ({ runtime, args }) => {
-      const budget = new OutputBudget();
-      runtime.io[stream].write(`${args.map((value) => inspect(runtime, value, budget)).join(' ')}\n`);
+      runtime.io[stream].write(`${formatLogArguments(runtime, args)}\n`);
       return;
     });
   }

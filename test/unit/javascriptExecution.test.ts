@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
@@ -307,4 +309,27 @@ test.each([
     `const result = ${expression};\nif (result !== '${expected}') throw result;`
   );
   expect(execution).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each([
+  ['grouped arrays', "console.log([1, 22, 333, 4444, 5, 6, 7], ['a', 'bb', 'ccc', 'dddd', 'e', 'f', 'g', 'h']);"],
+  ['long arrays', 'console.log(Array.from({ length: 150 }, (_, i) => i * i), [1, , , 4]);'],
+  [
+    'objects that do not fit on a line',
+    "console.log({ name: 'Taro Yamada', age: 20, hobbies: ['reading', 'swimming'], address: { city: 'Tokyo', zip: '100-0001' } });",
+  ],
+  ['nested objects beyond the depth limit', 'console.log({ a: { b: { c: { d: 1 }, e: [] } } }, [[[[1]]]]);'],
+  [
+    'class instances and functions',
+    'class A { x = 1; } class B extends A {} console.log(new B(), B, Object.create(null), () => 1);',
+  ],
+  ['quoted strings and keys', String.raw`console.log(["it's", 'say "hi"\n', '\x01'], { 'a-b': 1, 2: 'two', $c: 3 });`],
+  ['circular references', 'const a = { b: {} }; a.b.a = a; a.self = a; console.log(a);'],
+  ['format specifiers', "console.log('%s is %d%% %j', 'x', 50, { a: [1] }, 'rest', { b: 2 });"],
+])('console.log prints %s as Node.js does', (_, source) => {
+  expect(executeProgram('javascript', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: execFileSync('node', ['-e', source], { encoding: 'utf8' }),
+  });
 });
