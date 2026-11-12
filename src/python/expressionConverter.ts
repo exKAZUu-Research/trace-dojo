@@ -27,6 +27,7 @@ import {
   rowOf,
   unsupported,
 } from './convertNodes';
+import { parseNumber } from './numberLiterals';
 import { fail, ScopeBuilder } from './scopes';
 
 /** What a function body being converted allows, which its early errors depend on. */
@@ -808,24 +809,4 @@ function constantOf(node: Node): Constant {
       return parseNumber(node);
     }
   }
-}
-
-/** Parses a number literal, rejecting the forms CPython rejects and the forms this grader does not support. */
-function parseNumber(node: Node): Constant {
-  const text = node.text;
-  const row = rowOf(node);
-  const isImaginary = /[jJ]$/.test(text);
-  const body = isImaginary ? text.slice(0, -1) : text;
-  if (/^0[xXoObB]/.test(body)) unsupported(node, `数値「${text}」（16進数・8進数・2進数のリテラル）`);
-  if (/[eE]/.test(body)) unsupported(node, `数値「${text}」（指数表記のリテラル）`);
-  if (/_(?:_|$|\.)|\._/.test(body) || body.endsWith('_')) fail(row, `数値「${text}」の _ の位置に誤りがあります。`);
-  const digits = body.replaceAll('_', '');
-  if (!isImaginary && !digits.includes('.')) {
-    if (/^0+[1-9]/.test(digits)) {
-      fail(row, '0 で始まる整数は書けません（8進数は 0o を付けて書きます）。');
-    }
-    return { kind: 'int', value: BigInt(digits) };
-  }
-  const value = Number(digits);
-  return isImaginary ? { kind: 'imaginary', value } : { kind: 'float', value };
 }

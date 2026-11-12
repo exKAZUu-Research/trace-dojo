@@ -295,6 +295,7 @@ test.each([
   ],
   ['a type hint on a name declared global', 'def f():\n    global x\n    x: int = 1', 2],
   ['a Python 2 print statement', "print 'x'", 0],
+  ['a Python 2 long literal', 'x = 1\ny = 1_0L', 1],
   ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],
   ['an import of a file', 'import mymodule', 0],
   ['a missing indented block at the end', 'x = 1\nif x:\n', 1],

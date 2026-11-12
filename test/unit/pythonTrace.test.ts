@@ -306,6 +306,7 @@ test.each([
   ['an atomic annotation outside a function header', 'i = 0  # atomic', '# atomic は'],
   ['an atomic annotation in a function body', 'def f():\n    x = 1  # atomic', '# atomic は'],
   ['invalid syntax', 't = Turtle(', '書き方に誤りがあります'],
+  ['a Python 2 long literal', 'x = 1L', '末尾の L は'],
 ])('a model program with %s is rejected', (_, program, message) => {
   expect(() => traceProgram('python', program, program)).toThrow(message);
 });
