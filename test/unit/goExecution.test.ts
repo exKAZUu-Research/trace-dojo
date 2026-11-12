@@ -159,6 +159,12 @@ test('a declaration may declare several names at once', () => {
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test('formatting with a bit size of 32 rounds the value to a float32 first', () => {
+  const program =
+    'package main\n\nimport "strconv"\n\nfunc main() {\n\tif s := strconv.FormatFloat(3.14159265358979, \'g\', -1, 32); s != "3.1415927" {\n\t\tpanic(s)\n\t}\n}';
+  expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('a value method called through a nil pointer panics', () => {
   const program =
     'package main\n\nimport "fmt"\n\ntype T float64\n\nfunc (t T) String() string { return "t" }\n\nfunc main() {\n\tvar p *T\n\tif s := fmt.Sprint(p); s != "<nil>" {\n\t\tpanic(s)\n\t}\n\tp.String()\n}';

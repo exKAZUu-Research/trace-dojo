@@ -292,7 +292,8 @@ const members: Record<string, Entity> = {
     fn([FLOAT64, BASIC.uint8, INT, INT], [STRING]),
     ([value, format, precision, bits]) =>
       formatFloat(
-        value as number,
+        // A bit size of 32 formats the value rounded to a float32, as Go converts it first.
+        Number(bits as bigint) === 32 ? Math.fround(value as number) : (value as number),
         String.fromCharCode(Number(format as bigint)),
         Number(precision as bigint),
         Number(bits as bigint) === 32 ? 32 : 64
