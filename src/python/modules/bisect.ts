@@ -31,7 +31,7 @@ function search(args: PyValue[], kwargs: Kwargs, name: string, right: boolean): 
   let { lo, hi } = bounds(args, kwargs, name);
   while (lo < hi) {
     currentRuntime().spend();
-    const middle = (lo + hi) >> 1;
+    const middle = Math.floor((lo + hi) / 2);
     const item = getItem(a, BigInt(middle));
     const itemKey = key === None ? item : callValue(key, [item]);
     if (right ? lessThan(x, itemKey) : lessThan(itemKey, x)) {

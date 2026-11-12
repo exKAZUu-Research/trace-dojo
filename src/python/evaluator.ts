@@ -545,7 +545,7 @@ export class Evaluator extends ExpressionEvaluator {
 
   // With ----------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 38 -- Follows the protocol of the with statement.
+  // code-gauge-allow functionNcss 39 -- Follows the protocol of the with statement.
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
     const { runtime } = this;
@@ -554,7 +554,11 @@ export class Evaluator extends ExpressionEvaluator {
     const enter = lookupSpecial(manager, '__enter__');
     const exit = lookupSpecial(manager, '__exit__');
     if (enter === undefined || exit === undefined) {
-      throw typeError(`'${typeName(manager)}' object does not support the context manager protocol`);
+      // CPython looks up __exit__ first, so an object with neither method reports __exit__.
+      const missed = exit === undefined ? '__exit__' : '__enter__';
+      throw typeError(
+        `'${typeName(manager)}' object does not support the context manager protocol (missed ${missed} method)`
+      );
     }
     const length = frame.temporaries.length;
     frame.temporaries.push(manager);

@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 470 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 471 -- The methods and attributes of the builtin types it defines belong together.
 import type { BinaryOperator } from './ast';
 import { BUILTIN_DOC } from './attributes';
 import { enumerateClass, isSubclassOfClass } from './builtins';
+import './builtinComparisons';
 import { pyRepr } from './conversions';
 import { method, redeclareMethods } from './define';
 import { defineGetSet, defineUnsupportedAttributes } from './descriptors';

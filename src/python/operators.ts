@@ -672,7 +672,7 @@ function isTruthyValue(value: PyValue): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of builtin value.
-function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right: PyValue): PyValue {
+export function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) {
     const a = typeof left === 'boolean' ? Number(left) : left;
     const b = typeof right === 'boolean' ? Number(right) : right;
