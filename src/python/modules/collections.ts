@@ -23,7 +23,7 @@ import {
 } from '../objects';
 import { binaryOp, compareOp, equals, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { containerRepr, dictBody, joinReprs, updateDict } from '../typeContainers';
+import { containerRepr, dictBody, joinReprs, sequenceIndex, updateDict } from '../typeContainers';
 import { newGenericAlias } from '../typeHints';
 import {
   builtinClass,
@@ -153,9 +153,9 @@ method(dequeClass, 'clear', 'none', 0, 0, (self) => {
 method(dequeClass, 'count', 'one', 1, 1, (self, [item]) =>
   BigInt(dequeOf(self).items.filter((each) => equals(each, item)).length)
 );
-method(dequeClass, 'index', 'expected', 1, 3, (self, [item]) => {
-  const index = dequeOf(self).items.findIndex((each) => equals(each, item));
-  if (index === -1) throw valueError(`${pyRepr(item)} is not in deque`);
+method(dequeClass, 'index', 'expected', 1, 3, (self, [item, start, stop]) => {
+  const index = sequenceIndex(dequeOf(self).items, item, start, stop);
+  if (index === -1) throw valueError('deque.index(x): x not in deque');
   return BigInt(index);
 });
 method(dequeClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
@@ -170,7 +170,7 @@ method(dequeClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
 method(dequeClass, 'remove', 'one', 1, 1, (self, [item]) => {
   const items = dequeOf(self).editableItems;
   const index = items.findIndex((each) => equals(each, item));
-  if (index === -1) throw valueError(`${pyRepr(item)} is not in deque`);
+  if (index === -1) throw valueError('deque.remove(x): x not in deque');
   items.splice(index, 1);
   return None;
 });

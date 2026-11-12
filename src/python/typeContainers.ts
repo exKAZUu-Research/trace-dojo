@@ -163,7 +163,7 @@ method(
 listClass.dict.set('__hash__', None);
 
 /** The index of the first item equal to `item` between the slice bounds, or -1. */
-function sequenceIndex(
+export function sequenceIndex(
   items: readonly PyValue[],
   item: PyValue,
   start: PyValue | undefined,
