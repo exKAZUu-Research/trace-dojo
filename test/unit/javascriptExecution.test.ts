@@ -1151,6 +1151,16 @@ function h() { const z = 1; z = 2; }
 for (const fn of [f, h]) { try { fn(); } catch (e) { console.log(e.name, e.message); } }
 g().catch((e) => console.log(e.name, e.message));`,
   ],
+  [
+    'inherited and getter options of Date locale methods',
+    `const d = new Date(Date.UTC(2020, 0, 15, 12));
+const base = { year: 'numeric', month: 'long', timeZone: 'UTC' };
+console.log(d.toLocaleDateString('en-US', Object.create(base)));
+class Opts { get year() { return 'numeric'; } get month() { return 'long'; } get timeZone() { return 'UTC'; } }
+console.log(d.toLocaleDateString('en-US', new Opts()));
+console.log(d.toLocaleString('en-US', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' }));
+try { d.toLocaleString('en-US', { get timeZone() { throw new Error('tz'); } }); } catch (e) { console.log(e.message); }`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

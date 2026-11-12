@@ -149,15 +149,22 @@ function hostLocales(runtime: Runtime, value: Value): unknown {
   return locales;
 }
 
-/** A host value for the options argument of a `toLocale...String` method. */
+/**
+ * A host value for the options argument of a `toLocale...String` method, whose every option the host formatter reads
+ * through the program's own property lookup, inherited options and getters included, in the formatter's order.
+ */
 function hostOptions(runtime: Runtime, value: Value): unknown {
   if (!(value instanceof JsObject)) return value;
-  const options: Record<string, unknown> = {};
-  for (const key of runtime.ownEnumerableKeys(value)) {
-    const option = runtime.get(value, key);
-    options[key] = isObject(option) ? runtime.toString(option) : option;
-  }
-  return options;
+  return new Proxy(
+    {},
+    {
+      get: (_, key) => {
+        if (typeof key !== 'string') return;
+        const option = runtime.get(value, key);
+        return isObject(option) ? runtime.toString(option) : option;
+      },
+    }
+  );
 }
 
 function defineConversions(builder: RealmBuilder, prototype: JsObject): void {
