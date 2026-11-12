@@ -187,24 +187,65 @@ function renderField(
   state: FieldState,
   depth: number
 ): string {
-  const match = /^([^!:[.]*)((?:\.[^![.:]+|\[[^\]]*\])*)(?:!(.))?(?::(.*))?$/s.exec(field);
-  if (!match) {
-    if (/![^:]{2,}/.test(field)) throw valueError("expected ':' after conversion specifier");
-    throw valueError(`unmatched '{' in format spec`);
-  }
-  const [, name, accessors, conversion, spec = ''] = match;
-  let value = fieldValue(name, args, kwargs, state);
-  for (const accessor of accessors.match(/\.[^![.:]+|\[[^\]]*\]/g) ?? []) {
-    if (accessor.startsWith('.')) {
-      value = getAttribute(value, accessor.slice(1));
-    } else {
-      const key = accessor.slice(1, -1);
-      value = getItem(value, decimalValue(key) ?? key);
-    }
-  }
-  if (conversion !== undefined) value = convertField(value, conversion);
+  const { name, conversion, spec } = splitField(field);
+  const value = fieldObject(name, args, kwargs, state);
+  const converted = conversion === undefined ? value : convertField(value, conversion);
   const renderedSpec = spec.includes('{') ? renderTemplate(spec, args, kwargs, state, depth - 1) : spec;
-  return pyFormat(value, renderedSpec);
+  return pyFormat(converted, renderedSpec);
+}
+
+/** A closed field's name, conversion, and format spec, split as parse_field splits them. */
+function splitField(field: string): { name: string; conversion: string | undefined; spec: string } {
+  const chars = [...field];
+  let index = 0;
+  while (index < chars.length && chars[index] !== ':' && chars[index] !== '!') {
+    if (chars[index++] === '[') while (index < chars.length && chars[index] !== ']') index++;
+  }
+  const name = chars.slice(0, index).join('');
+  if (chars[index] !== '!') return { name, conversion: undefined, spec: chars.slice(index + 1).join('') };
+  return { name, conversion: chars[index + 1], spec: chars.slice(index + 3).join('') };
+}
+
+/**
+ * The object a field name refers to, as get_field_object finds it: the argument the part before the first `.` or `[`
+ * names, then each accessor applied as soon as FieldNameIterator_next reads it.
+ */
+function fieldObject(
+  name: string,
+  args: readonly PyValue[],
+  kwargs: (name: string) => PyValue,
+  state: FieldState
+): PyValue {
+  const chars = [...name];
+  let index = 0;
+  while (index < chars.length && chars[index] !== '.' && chars[index] !== '[') index++;
+  let value = fieldValue(chars.slice(0, index).join(''), args, kwargs, state);
+  while (index < chars.length) {
+    const accessor = nextAccessor(chars, index);
+    index = accessor.end;
+    value = accessor.isAttribute
+      ? getAttribute(value, accessor.key)
+      : getItem(value, fieldIndex(accessor.key) ?? accessor.key);
+  }
+  return value;
+}
+
+/** FieldNameIterator_next: the `.attribute` or `[key]` at `start`, and where the next one starts. */
+function nextAccessor(chars: readonly string[], start: number): { isAttribute: boolean; key: string; end: number } {
+  const isAttribute = chars[start] === '.';
+  if (!isAttribute && chars[start] !== '[') {
+    throw valueError("Only '.' or '[' may follow ']' in format field specifier");
+  }
+  let end = start + 1;
+  if (isAttribute) {
+    while (end < chars.length && chars[end] !== '.' && chars[end] !== '[') end++;
+  } else {
+    while (end < chars.length && chars[end] !== ']') end++;
+    if (end >= chars.length) throw valueError("Missing ']' in format string");
+  }
+  const key = chars.slice(start + 1, end).join('');
+  if (key === '') throw valueError('Empty attribute in format string');
+  return { isAttribute, key, end: isAttribute ? end : end + 1 };
 }
 
 function fieldValue(
@@ -220,7 +261,7 @@ function fieldValue(
     state.mode = 'auto';
     return positional(args, state.auto++);
   }
-  const index = decimalValue(name);
+  const index = fieldIndex(name);
   if (index !== undefined) {
     if (state.mode === 'auto') {
       throw valueError('cannot switch from automatic field numbering to manual field specification');
@@ -229,6 +270,15 @@ function fieldValue(
     return positional(args, Number(index));
   }
   return kwargs(name);
+}
+
+const MAX_SSIZE = (1n << 63n) - 1n;
+
+/** get_integer: the value of a text of decimal digits, refusing one beyond sys.maxsize, or undefined for another. */
+function fieldIndex(text: string): bigint | undefined {
+  const index = decimalValue(text);
+  if (index !== undefined && index > MAX_SSIZE) throw valueError('Too many decimal digits in format string');
+  return index;
 }
 
 function convertField(value: PyValue, conversion: string): PyValue {
