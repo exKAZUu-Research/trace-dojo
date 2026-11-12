@@ -895,6 +895,77 @@ public class Main {
   });
 });
 
+test('Java appends a CharSequence by its characters, bounds generic constructors by class parameters, and rejects null compositions as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.io.*;
+class Main {
+  static class C implements CharSequence {
+    public int length() { return 3; }
+    public char charAt(int i) { return (char) ('a' + i); }
+    public CharSequence subSequence(int a, int b) { return "abc".subSequence(a, b); }
+    public String toString() { return "wrong"; }
+  }
+  public static void main(String[] args) throws IOException {
+    CharSequence c = new C();
+    StringBuilder sb = new StringBuilder().append(c).append(c, 1, 3).append((CharSequence) null).append((CharSequence) null, 1, 3).append(new StringBuilder("x"), 0, 1);
+    System.out.println(sb);
+    try { sb.append(c, 2, 5); } catch (IndexOutOfBoundsException e) { System.out.println(e); }
+    StringWriter w = new StringWriter(); w.append(c); w.append(c, 0, 2); System.out.println(w);
+    StringBuffer buf = new StringBuffer(); buf.append(c); System.out.println(buf);
+  }
+}`,
+      'abcbcnullulx\njava.lang.IndexOutOfBoundsException: Range [2, 5) out of bounds for length 3\nwrongab\nabc\n',
+    ],
+    [
+      `import java.util.*;
+class Box<T> {
+  final T value;
+  <U extends T> Box(U value) { this.value = value; }
+  <U extends Comparable<T>> Box(U key, T value) { this.value = value; System.out.println("key " + key); }
+}
+class Main {
+  public static void main(String[] args) {
+    Box<Number> b = new Box<Number>(1);
+    System.out.println(b.value);
+    Box<String> c = new Box<>("k", "v");
+    System.out.println(c.value);
+  }
+}`,
+      '1\nkey k\nv\n',
+    ],
+    [
+      `import java.util.function.*;
+class Main {
+  static void t(Runnable r) { try { r.run(); System.out.println("no exception"); } catch (NullPointerException e) { System.out.println("NPE"); } }
+  public static void main(String[] args) {
+    IntPredicate p = x -> false;
+    LongPredicate l = x -> true;
+    Predicate<String> s = x -> true;
+    t(() -> p.and(null));
+    t(() -> l.or(null));
+    t(() -> s.and(null));
+    t(() -> s.or(null));
+    System.out.println(p.or(x -> x > 1).test(2) + " " + l.and(x -> x > 1).test(0) + " " + s.negate().test("a"));
+  }
+}`,
+      'NPE\nNPE\nNPE\nNPE\ntrue false false\n',
+    ],
+    [
+      `import java.util.*;
+class Main {
+  public static void main(String[] args) {
+    try { Collections.unmodifiableList(null); } catch (NullPointerException e) { System.out.println("NPE"); }
+    System.out.println(Collections.unmodifiableList(new LinkedList<>(List.of(1))).getClass().getName());
+  }
+}`,
+      'NPE\njava.util.Collections$UnmodifiableList\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

@@ -324,12 +324,10 @@ function defineCollectionViews(
     )
   );
   generic(['T'], (t) =>
-    addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) =>
-      wrap(
-        createList(frame, unmodifiableListClass(collections, list as JavaObject), itemsOf(frame, list)),
-        list as JavaObject
-      )
-    )
+    addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) => {
+      const items = itemsOf(frame, list);
+      return wrap(createList(frame, unmodifiableListClass(collections, list as JavaObject), items), list as JavaObject);
+    })
   );
   for (const [owner, immutable, names] of [
     [setClass, collections.immutableSet, ['T']],

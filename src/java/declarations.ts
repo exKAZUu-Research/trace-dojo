@@ -472,12 +472,17 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
         this.error(member.explicitCall, '列挙型のコンストラクタでは super(...) を呼び出せません。');
       access = 'private';
     }
-    const typeParameters = this.declareTypeParameters(member.typeParameters ?? []);
+    // A constructor's type parameters may be bounded by its class's, as `<U extends T> Box(U value)` is.
+    const { typeParameters, signature } = this.withInstanceTypeVariables(cls, true, () => {
+      const declared = this.declareTypeParameters(member.typeParameters ?? []);
+      return {
+        typeParameters: declared,
+        signature: this.withTypeVariables(declared, () => this.declaredSignature(cls, member)),
+      };
+    });
     const constructor: MethodInfo = {
       name: cls.name,
-      ...this.withInstanceTypeVariables(cls, true, () =>
-        this.withTypeVariables(typeParameters, () => this.declaredSignature(cls, member))
-      ),
+      ...signature,
       typeParameters,
       access,
       returnType: VOID,

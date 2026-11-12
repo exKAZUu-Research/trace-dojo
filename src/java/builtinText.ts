@@ -160,7 +160,8 @@ function defineAppendable(registry: Registry, charSequence: ClassInfo, builders:
   }
   for (const builder of builders) {
     addMethod(builder, 'append', [charSequence.type], builder.type, false, (frame, receiver, [value]) => {
-      const appended = charSequenceText(frame, value);
+      const sequence = value ?? new JavaString('null');
+      const appended = charactersOf(frame, charSequence, sequence, 0, sequenceLength(frame, charSequence, sequence));
       return setBuilder(frame, receiver, builderOf(receiver) + appended, appended.length);
     });
     addMethod(
@@ -170,22 +171,49 @@ function defineAppendable(registry: Registry, charSequence: ClassInfo, builders:
       builder.type,
       false,
       (frame, receiver, [value, start, end]) => {
-        const text = charSequenceText(frame, value);
+        const sequence = value ?? new JavaString('null');
+        const length = sequenceLength(frame, charSequence, sequence);
         const [begin, finish] = [start as number, end as number];
-        if (begin < 0 || begin > finish || finish > text.length) {
+        if (begin < 0 || begin > finish || finish > length) {
           throwBuiltin(
             frame,
             'IndexOutOfBoundsException',
-            `Range [${begin}, ${finish}) out of bounds for length ${text.length}`
+            `Range [${begin}, ${finish}) out of bounds for length ${length}`
           );
         }
-        const appended = text.slice(begin, finish);
+        const appended = charactersOf(frame, charSequence, sequence, begin, finish);
         return setBuilder(frame, receiver, builderOf(receiver) + appended, appended.length);
       }
     );
     addInterface(builder, { kind: 'class', cls });
     linkOverrides(builder);
   }
+}
+
+/** The length of a non-null `CharSequence`, which a program's own implementation gives through `length()`. */
+function sequenceLength(frame: Frame, charSequence: ClassInfo, sequence: Value): number {
+  const text = textOfBuiltinSequence(sequence);
+  return text === undefined
+    ? (frame.runtime.invokeVirtual(frame, charSequence, 'length', sequence, []) as number)
+    : text.length;
+}
+
+/**
+ * The characters from `start` to `end` of a non-null `CharSequence`, which a string builder appends by `charAt` from
+ * a program's own implementation, as the JDK's does, rather than by its `toString()`.
+ */
+function charactersOf(frame: Frame, charSequence: ClassInfo, sequence: Value, start: number, end: number): string {
+  const text = textOfBuiltinSequence(sequence);
+  if (text !== undefined) return text.slice(start, end);
+  let characters = '';
+  for (let index = start; index < end; index++) {
+    characters += charToString(frame.runtime.invokeVirtual(frame, charSequence, 'charAt', sequence, [index]) as number);
+  }
+  return characters;
+}
+
+function textOfBuiltinSequence(sequence: Value): string | undefined {
+  return sequence instanceof JavaString ? sequence.value : (sequence as JavaObject).builder;
 }
 
 /** The characters of a `CharSequence` argument, which `append` writes as `null` for null. */

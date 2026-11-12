@@ -414,20 +414,20 @@ function definePredicateDefaults(cls: ClassInfo, t?: JavaType): void {
   addMethod(cls, 'negate', [], predicateOf, false, (frame, receiver) =>
     functionObject(frame, cls, (callFrame, [value]) => !test(callFrame, receiver, value))
   );
-  addMethod(cls, 'and', [otherType], predicateOf, false, (frame, receiver, [other]) =>
-    functionObject(
-      frame,
-      cls,
-      (callFrame, [value]) => test(callFrame, receiver, value) && test(callFrame, other, value)
-    )
-  );
-  addMethod(cls, 'or', [otherType], predicateOf, false, (frame, receiver, [other]) =>
-    functionObject(
-      frame,
-      cls,
-      (callFrame, [value]) => test(callFrame, receiver, value) || test(callFrame, other, value)
-    )
-  );
+  for (const [name, isAnd] of [
+    ['and', true],
+    ['or', false],
+  ] as const) {
+    addMethod(cls, name, [otherType], predicateOf, false, (frame, receiver, [other]) => {
+      // Both compositions require their argument at once, as `Objects.requireNonNull` in the JDK does.
+      if (other === undefined) throwBuiltin(frame, 'NullPointerException');
+      return functionObject(frame, cls, (callFrame, [value]) =>
+        isAnd
+          ? test(callFrame, receiver, value) && test(callFrame, other, value)
+          : test(callFrame, receiver, value) || test(callFrame, other, value)
+      );
+    });
+  }
 }
 
 /** `Predicate.isEqual` and `Predicate.not`. */
