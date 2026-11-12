@@ -1504,6 +1504,25 @@ class Main {
   }
 });
 
+test('Java ignores comments inside receiver parameters, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `class Outer { class Inner { Inner(Outer /* owner */ Outer.this) {} Inner(Outer Outer /* owner */ .this, int x) {} } }
+class Main {
+  int f(Main /* owner */ Main.this) { return 1; }
+  int g(Main /* plain */ this) { return 2; }
+  public static void main(String[] args) {
+    new Outer().new Inner(); new Outer().new Inner(1);
+    System.out.println(new Main().f() + new Main().g());
+  }
+}`,
+      '3\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

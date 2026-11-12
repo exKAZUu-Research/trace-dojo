@@ -308,9 +308,10 @@ function withReceiverType(node: Node): { receiverType?: TypeSyntax; receiverQual
   if (!receiverType) return {};
   const receiver = namedChildren(node).find((parameter) => parameter.type === 'receiver_parameter') as Node;
   const typeNode = namedChildren(receiver).find((child) => !isAnnotation(child)) as Node;
-  // What follows the type is `this` or `Name.this`.
-  const name = receiver.text.slice(typeNode.endIndex - receiver.startIndex).replaceAll(/\s/g, '');
-  const receiverQualifier = name.includes('.') ? name.split('.').at(-2) : undefined;
+  // What follows the type is `this` or `Name.this`, whose name is the identifier after the type.
+  const receiverQualifier = namedChildren(receiver).findLast(
+    (child) => child.type === 'identifier' && child.startIndex >= typeNode.endIndex
+  )?.text;
   return receiverQualifier ? { receiverType, receiverQualifier } : { receiverType };
 }
 
