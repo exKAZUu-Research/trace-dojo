@@ -11,13 +11,16 @@ export interface Program {
 /** The names a function body or block declares, which its scope creates before running its statements. */
 export interface ScopeDeclarations {
   /** `let`, `const`, and `class` names, which stay uninitialized until their declaration runs. */
-  lexical: { name: string; isConst: boolean }[];
+  /** `kind` names an immutable binding in the TypeError an assignment to it throws: `constant`, `using`, and so on. */
+  lexical: { name: string; kind?: 'constant' | 'using' | 'await using' }[];
   /** Function declarations, which are initialized before anything runs. */
   functions: FunctionNode[];
   /** `var` names of a function body or the program, which start as `undefined`. */
   vars: string[];
   /** Every name above in the order of its first declaration, which traces list variables in. */
   order: string[];
+  /** Whether a `using` declaration is directly in the scope, whose end then disposes of what it declared. */
+  disposes: boolean;
 }
 
 export type Statement = Span &
@@ -26,7 +29,8 @@ export type Statement = Span &
     | VariableDeclaration
     | { kind: 'function' }
     | { kind: 'class'; cls: ClassNode }
-    | { kind: 'return'; value?: Expression }
+    /** A `return`, which awaits its value in an async generator. */
+    | { kind: 'return'; value?: Expression; awaitsValue: boolean }
     | { kind: 'if'; test: Expression; consequent: Statement; alternate?: Statement }
     | Block
     | {
@@ -43,6 +47,8 @@ export type Statement = Span &
       }
     | {
         kind: 'forOf' | 'forIn';
+        /** Whether it is `for await`, which awaits each result of the iterator. */
+        isAwait: boolean;
         declarationKind?: DeclarationKind;
         target: Pattern;
         iterable: Expression;
@@ -61,7 +67,8 @@ export type Statement = Span &
     | { kind: 'empty' }
   );
 
-export type DeclarationKind = 'let' | 'const' | 'var';
+/** How a declaration declares its variables; a `using` one also disposes of their values when its scope ends. */
+export type DeclarationKind = 'let' | 'const' | 'var' | 'using' | 'await using';
 
 export interface VariableDeclaration extends Span {
   kind: 'declaration';
@@ -97,6 +104,10 @@ export interface FunctionNode extends Span {
   rest?: Pattern;
   /** Whether a named function expression sees its own name, which is then a binding of its own. */
   bindsOwnName: boolean;
+  /** Whether calling the function creates a generator, which runs the body as its `next()` asks. */
+  isGenerator: boolean;
+  /** Whether calling the function returns a promise, which the body settles, suspending at each `await`. */
+  isAsync: boolean;
   /** Whether the body (or an arrow function in it) reads `arguments`, which the call then creates. */
   usesArguments: boolean;
   body: Statement[] | Expression;
@@ -117,7 +128,15 @@ export interface ClassNode extends Span {
 
 export type ClassMember =
   | { kind: 'method' | 'getter' | 'setter'; isStatic: boolean; key: PropertyName; fn: FunctionNode }
-  | { kind: 'field'; isStatic: boolean; key: PropertyName; value?: Expression; stepRow?: number; row: number };
+  | {
+      kind: 'field';
+      isStatic: boolean;
+      key: PropertyName;
+      value?: Expression;
+      stepRow?: number;
+      row: number;
+    }
+  | { kind: 'staticBlock'; body: Statement[]; scope: ScopeDeclarations; row: number };
 
 /** A property name: a fixed key, a computed one, or a private one written as `#name`. */
 export type PropertyName =
@@ -128,32 +147,57 @@ export type PropertyName =
 export type ObjectMember =
   | { kind: 'property'; key: PropertyName; value: Expression }
   | { kind: 'getter' | 'setter'; key: PropertyName; fn: FunctionNode }
-  | { kind: 'spread'; argument: Expression };
+  | { kind: 'spread'; argument: Expression }
+  /** `__proto__: value`, which sets the prototype of the object to the value when it is an object or null. */
+  | { kind: 'prototype'; value: Expression };
 
 export type Argument = Expression | { kind: 'spread'; argument: Expression };
 
-export type Expression = Span &
-  (
-    | { kind: 'literal'; value: undefined | null | boolean | number | string }
+export type Expression = Span & {
+  /**
+   * Whether a `yield` or an `await` runs while evaluating this expression, which a generator or an async function then
+   * evaluates step by step.
+   */
+  suspends?: boolean;
+} & (
+    | { kind: 'literal'; value: undefined | null | boolean | number | bigint | string }
     | { kind: 'template'; strings: string[]; expressions: Expression[] }
+    /**
+     * The strings of a tagged template, which its tag receives as a frozen array with a frozen `raw` array; a string
+     * with an invalid escape is `undefined`. Each evaluation of one site returns the same array.
+     */
+    | { kind: 'templateObject'; cooked: (string | undefined)[]; raw: string[] }
+    | { kind: 'regex'; pattern: string; flags: string }
     | { kind: 'identifier'; name: string }
     | { kind: 'this' }
+    | { kind: 'newTarget' }
     | { kind: 'array'; elements: (Argument | undefined)[] }
     | { kind: 'object'; members: ObjectMember[] }
     | { kind: 'functionExpression'; fn: FunctionNode }
     | { kind: 'classExpression'; cls: ClassNode }
     | MemberExpression
-    | { kind: 'call'; callee: Expression | SuperReference; args: Argument[]; optional: boolean; calleeText: string }
+    | {
+        kind: 'call';
+        callee: Expression | SuperReference;
+        args: Argument[];
+        optional: boolean;
+        calleeText: string;
+      }
     | { kind: 'new'; callee: Expression; args: Argument[]; calleeText: string }
     | { kind: 'assign'; operator: string; target: Pattern; value: Expression }
     | { kind: 'update'; operator: '++' | '--'; prefix: boolean; target: Pattern }
     | { kind: 'unary'; operator: string; argument: Expression }
     | { kind: 'binary'; operator: string; left: Expression; right: Expression }
+    /** `#name in object`, which tests whether the object has the private member. */
+    | { kind: 'privateIn'; name: string; right: Expression }
     | { kind: 'logical'; operator: '&&' | '||' | '??'; left: Expression; right: Expression }
     | { kind: 'conditional'; test: Expression; consequent: Expression; alternate: Expression }
     | { kind: 'sequence'; expressions: Expression[] }
     /** Ends an optional chain, as parentheses do. */
     | { kind: 'parenthesized'; expression: Expression }
+    /** A `yield`, which in an async generator awaits its value, or with `yield*`, delegates to an async iterator. */
+    | { kind: 'yield'; argument?: Expression; delegate: boolean; isAsync: boolean }
+    | { kind: 'await'; argument: Expression }
   );
 
 export interface SuperReference extends Span {
