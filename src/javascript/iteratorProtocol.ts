@@ -157,11 +157,11 @@ function checkResult(runtime: Runtime, result: Value): JsObject {
   return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
 }
 
-/** Calls the method under `key` to get an iterator, reading the method unless the caller has already read it. */
 function methodOf(runtime: Runtime, iterable: Value, key: symbol): Value {
   return iterable === undefined || iterable === null ? undefined : runtime.get(iterable, key);
 }
 
+/** Calls `factory`, the method under `key` that the caller read from `iterable`, to get an iterator. */
 function iteratorObject(runtime: Runtime, iterable: Value, key: symbol, factory: Value): JsObject {
   if (!isCallable(factory)) {
     const what = key === WELL_KNOWN_SYMBOLS.iterator ? 'iterable' : 'async iterable';

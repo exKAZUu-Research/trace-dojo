@@ -206,20 +206,25 @@ function newHelper(
   roots: JsArray,
   next: () => Value | typeof DONE
 ): JsObject {
-  return newHostIterator(runtime, prototype, {
+  // A helper is a generator, which an exception or a close completes for good, releasing what it read.
+  const helper: HostIterator = {
     source: roots,
     next: () => {
       if (record.done) return DONE;
       try {
         return next();
       } catch (error) {
-        // A helper is a generator, which an exception completes.
         record.done = true;
+        helper.source = undefined;
         throw error;
       }
     },
-    close: () => closeIterator(runtime, record),
-  } satisfies HostIterator);
+    close: () => {
+      helper.source = undefined;
+      closeIterator(runtime, record);
+    },
+  };
+  return newHostIterator(runtime, prototype, helper);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
