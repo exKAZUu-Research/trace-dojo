@@ -597,7 +597,7 @@ export class Runtime {
     const next = this.get(iterator, 'next');
     const { hostIterator } = iterator;
     if (!hostIterator || !(next instanceof JsFunction) || !this.realm.hostIteratorMethods.has(next)) {
-      return new ValueIterator(this.protocolIteration(iterator, next), iterator);
+      return new ValueIterator(this.protocolIteration(iterator, next), [iterator, next]);
     }
     return new ValueIterator(
       {
@@ -608,7 +608,7 @@ export class Runtime {
           else if (close !== undefined && close !== null) this.callReturn(iterator, close);
         },
       },
-      iterator
+      [iterator, next]
     );
   }
 

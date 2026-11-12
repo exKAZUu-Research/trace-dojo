@@ -6,8 +6,9 @@ import { isCallable, isObject, type JsObject, toBoolean, type Value } from './va
 
 /** An iterator object's methods, each returning the iterator's result, or for an async iterator, a promise of it. */
 export interface ProtocolIteration {
-  /** The iterator object, which garbage collection must keep alive while the iteration lasts. */
+  /** The iterator object and the `next` method read from it, which must stay reachable while the iteration lasts. */
   iterator: JsObject;
+  nextMethod: Value;
   /** Calls the iterator's `next` with the given arguments: one for `yield*`, none for a loop. */
   next: (...args: Value[]) => Value;
   /** Calls the iterator's `return`, or is undefined when it has none. */
@@ -48,7 +49,7 @@ export function* delegateYield(runtime: Runtime, iterable: Value, isAsync: boole
   // The suspended body's frame keeps the delegate alive, with the values it has yet to yield.
   const { temporaries } = runtime.frame;
   const held = temporaries.length;
-  temporaries.push(iteration.iterator);
+  temporaries.push(iteration.iterator, iteration.nextMethod);
   try {
     return yield* delegateTo(runtime, iteration, isAsync);
   } finally {
@@ -121,6 +122,7 @@ function iterationOf(runtime: Runtime, iterator: JsObject, adapt: (result: Value
   };
   return {
     iterator,
+    nextMethod: next,
     next: (...args) => adapt(runtime.call(next, iterator, args, runtime.currentRow)),
     get return() {
       return method('return');

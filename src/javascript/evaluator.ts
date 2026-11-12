@@ -261,7 +261,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     // The iterable and the iterator it gave stay reachable while the loop runs.
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
-    temporaries.push(iterable, iterator.object);
+    temporaries.push(iterable, ...iterator.roots);
     try {
       return this.forEachIterations(statement, labels, iterator);
     } finally {

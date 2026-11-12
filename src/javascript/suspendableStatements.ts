@@ -325,7 +325,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     // The iterable and the iterator it gave stay reachable while the loop runs.
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
-    temporaries.push(iterable, iterator.object);
+    temporaries.push(iterable, ...iterator.roots);
     try {
       return yield* this.forEachIterationsSteps(statement, labels, iterator);
     } finally {
@@ -474,7 +474,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
 
 function syncLoopIterator(iterator: ValueIterator): LoopIterator {
   return {
-    object: iterator.object,
+    roots: iterator.roots,
     // oxlint-disable-next-line require-yield -- A sync iterator steps without suspending the loop.
     *next() {
       return iterator.next();
