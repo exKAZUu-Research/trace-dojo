@@ -1406,7 +1406,7 @@ test.each([
 
 test.each([
   ['double r = Math.fma(1.0, 2.0, 3.0);', 'この採点環境の Math には、メソッド fma がありません。'],
-  ['Scanner sc = null;', 'この採点環境には、型 Scanner がありません。'],
+  ['Socket socket = null;', 'この採点環境には、型 Socket がありません。'],
   [
     'String s = String.valueOf(1, 2);',
     'この採点環境では、メソッド valueOf に (int, int) を渡して呼び出すことはできません。',

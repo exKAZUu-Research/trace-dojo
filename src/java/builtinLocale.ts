@@ -71,7 +71,7 @@ function nativeOf(cls: ClassInfo, name: string, parameterTypes: readonly JavaTyp
 }
 
 /** Adds an overload of the varargs formatting method `name` that takes a locale first and formats as it does. */
-function withLocaleFirst(cls: ClassInfo, name: string, localeType: JavaType, isStatic: boolean): void {
+export function withLocaleFirst(cls: ClassInfo, name: string, localeType: JavaType, isStatic: boolean): void {
   const base = cls.methods.find(
     (method) => method.name === name && method.isVarargs && method.parameterTypes.length === 2
   ) as MethodInfo;

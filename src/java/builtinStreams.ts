@@ -6,6 +6,7 @@ import { callFunction, type Functions } from './builtinFunctions';
 import { createOptional, defineOptionals, type Optionals, stateOf as optionalState } from './builtinOptionals';
 import {
   classType,
+  closeStream,
   type Context,
   countOf,
   createStream,
@@ -31,7 +32,7 @@ export function defineStreams(
   collections: Collections,
   wrappers: Wrappers,
   _functions: Functions
-): void {
+): { stream: ClassInfo; streamImpl: ClassInfo } {
   const context: Context = {
     registry,
     objectClass,
@@ -47,6 +48,7 @@ export function defineStreams(
   defineSources(context, streams);
   defineStringStreams(context, streams);
   defineGeneratedStreams(context, streams);
+  return { stream: streams.stream, streamImpl: streams.streamImpl };
 }
 
 interface StreamTypes {
@@ -54,6 +56,21 @@ interface StreamTypes {
   intStream: ClassInfo;
   streamImpl: ClassInfo;
   intStreamImpl: ClassInfo;
+}
+
+/**
+ * Makes streams `AutoCloseable`, as `BaseStream` is, so that streams of files close in try-with-resources. Closing
+ * one ends its use, as Java's does, though its sources hold no resources.
+ */
+function defineClosing(context: Context, streams: ClassInfo[]): void {
+  const autoCloseable = context.fn('AutoCloseable');
+  for (const stream of streams) {
+    stream.interfaces.push(autoCloseable);
+    stream.supertypes.push(autoCloseable.type as ClassType);
+    addMethod(stream, 'close', [], VOID, false, (_, receiver) => {
+      closeStream(receiver);
+    });
+  }
 }
 
 function defineStreamTypes(context: Context, optionals: Optionals, collector: ClassInfo): StreamTypes {
@@ -70,6 +87,7 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
   intStreamImpl.interfaces = [intStream];
   intStreamImpl.supertypes.push(intStream.type as ClassType);
   const types = { stream, intStream, streamImpl, intStreamImpl };
+  defineClosing(context, [stream, intStream]);
   const tType = variableType(t);
   for (const kind of [
     streamKind(context, optionals, { cls: stream, impl: streamImpl, element: tType, self: classType(stream, tType) }),

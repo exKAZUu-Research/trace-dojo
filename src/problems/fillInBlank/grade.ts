@@ -1,3 +1,4 @@
+import type { ExecutionLimitError } from '../../interpreter/limits';
 import { executeProgram } from '../../interpreter/program';
 import type { JavaChallengeTarget } from '../javaChallenges/types';
 import type { JavaDiagnostic } from './javaDiagnostics';
@@ -14,6 +15,10 @@ export type FillInBlankVerdict =
 
 export type FillInBlankGradingResult = Exclude<FillInBlankVerdict, { status: 'ungradable' }>;
 
+const LIMIT_DETAILS: Partial<Record<ExecutionLimitError['limit'], string>> = {
+  output: 'The program printed too much output.',
+  storage: 'The program wrote too much to files.',
+};
 const MAX_DIAGNOSTICS = 20;
 const MAX_DIAGNOSTIC_LENGTH = 240;
 
@@ -33,7 +38,7 @@ export function gradeFillInBlankCode(problem: JavaChallengeTarget, userProgram: 
     case 'limitExceeded': {
       return {
         status: 'incorrect',
-        detail: execution.limit === 'output' ? 'The program printed too much output.' : 'Time limit exceeded.',
+        detail: LIMIT_DETAILS[execution.limit] ?? 'Time limit exceeded.',
       };
     }
     case 'executed': {
