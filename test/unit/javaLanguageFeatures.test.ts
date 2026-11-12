@@ -1385,6 +1385,29 @@ class Main {
   }
 });
 
+test('Java wraps a sublist whose list changed without reading it and returns an unmodifiable list as it is, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    List<Integer> r = new ArrayList<>(List.of(1, 2));
+    List<Integer> v = r.subList(0, 1);
+    List<Integer> w = Collections.unmodifiableList(v);
+    r.add(3);
+    t("rewrap", () -> System.out.println(w == Collections.unmodifiableList(w)));
+    t("wrapView", () -> Collections.unmodifiableList(v));
+    t("readView", () -> Collections.unmodifiableList(v).size());
+  }
+}`,
+      'true\nrewrap ok\nwrapView ok\nreadView java.util.ConcurrentModificationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

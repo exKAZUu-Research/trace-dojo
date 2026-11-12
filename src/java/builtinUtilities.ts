@@ -324,10 +324,12 @@ function defineCollectionViews(
   );
   generic(['T'], (t) =>
     addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) => {
-      const items = itemsOf(frame, list);
+      if (!(list instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
       // As the JDK's, an unmodifiable list is returned as it is rather than wrapped again.
       const { unmodifiableList: plain, unmodifiableRandomAccessList: randomAccess } = collections;
-      if ((list as JavaObject).cls === plain || (list as JavaObject).cls === randomAccess) return list;
+      if (list.cls === plain || list.cls === randomAccess) return list;
+      // Wrapping reads nothing, so a sublist whose list changed fails only when the wrapper is read.
+      const items = list.elements ?? itemsOf(frame, list);
       return wrapUnmodifiable(
         createList(frame, unmodifiableListClass(collections, list as JavaObject), items),
         list as JavaObject
