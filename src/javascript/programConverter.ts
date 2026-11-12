@@ -228,6 +228,8 @@ export class ProgramConverter extends ExpressionConverter {
   private forInStatement(node: Node): Statement {
     const header = field(node, 'header');
     const isAwait = hasChild(node, 'await');
+    const isOf = field(header, 'operator').text === 'of';
+    if (isAwait && !isOf) fail(field(header, 'operator'), 'for await には in ではなく of を書きます。');
     if (header.childForFieldName('value')) fail(node, 'for-in 文の変数には初期値を書けません。');
     const declarationKind = header.childForFieldName('kind') ? declarationKindOf(header) : undefined;
     return this.withScope((scope) => {
@@ -238,7 +240,7 @@ export class ProgramConverter extends ExpressionConverter {
       // A loop binds its target in one go, as a destructuring assignment does.
       if (patternSuspends(target)) unsupported(leftNode, 'この位置の yield や await ');
       return {
-        kind: field(header, 'operator').text === 'of' ? 'forOf' : 'forIn',
+        kind: isOf ? 'forOf' : 'forIn',
         isAwait,
         declarationKind,
         target,
