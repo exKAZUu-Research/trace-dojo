@@ -91,6 +91,13 @@ if list(d) != [2, 1, 2] or list(deque([1, 2, 3], maxlen=2) * 1000000001) != [2, 
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test('JSON output up to the string limit is allowed', () => {
+  const program = `import json
+if len(json.dumps(['a' * 999995])) != 999999 or len(json.dumps({'k': 'a' * 999990})) != 999999:
+    raise ValueError('length')`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('a misspelled name in from-import gets the suggestion CPython gives', () => {
   expect(executeProgram('python', 'from sys import maxsiz')).toMatchObject({
     uncaughtException:

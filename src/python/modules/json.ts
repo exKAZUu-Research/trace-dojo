@@ -129,8 +129,8 @@ function quoteCharged(text: string, ensureAscii: boolean, state: EncodeState): s
 function encodeArray(value: PyList | PyTuple, options: DumpOptions, level: number, state: EncodeState): string {
   enterContainer(value, state, options);
   if (value.items.length === 0) return leaveContainer(value, state, '[]');
-  const items = value.items.map((item) => {
-    charge(state, options.itemSeparator.length);
+  const items = value.items.map((item, index) => {
+    if (index > 0) charge(state, options.itemSeparator.length);
     return newline(options, level + 1, state) + encode(item, options, level + 1, state);
   });
   state.containers.delete(value);
@@ -153,7 +153,7 @@ function encodeObject(value: PyDict, options: DumpOptions, level: number, state:
   for (const [key, item] of entries) {
     const text = keyText(key, options);
     if (text === undefined) continue;
-    charge(state, options.itemSeparator.length + options.keySeparator.length);
+    charge(state, (parts.length > 0 ? options.itemSeparator.length : 0) + options.keySeparator.length);
     parts.push(
       `${newline(options, level + 1, state)}${quoteCharged(text, options.ensureAscii, state)}${options.keySeparator}${encode(item, options, level + 1, state)}`
     );
