@@ -83,7 +83,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         return yield* this.callSteps(expression);
       }
       case 'new': {
-        const constructor = this.evaluate(expression.callee);
+        const constructor = yield* this.evaluateSteps(expression.callee);
         if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
           return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
         }
@@ -277,11 +277,36 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     );
   }
 
+  /** Evaluates a callee that suspends with the `this` its call passes, as {@link ExpressionEvaluator.callee} does. */
+  private *calleeSteps(callee: Expression): Steps<{ fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT> {
+    const { runtime } = this;
+    let target = callee;
+    while (target.kind === 'parenthesized') target = target.expression;
+    if (target.kind !== 'member' || target.object.kind === 'super') {
+      return { fn: yield* this.evaluateSteps(callee), thisValue: undefined };
+    }
+    const { object, property } = target;
+    const base =
+      object.kind === 'member' && object.suspends ? yield* this.memberSteps(object) : yield* this.evaluateSteps(object);
+    if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) {
+      return target === callee ? SHORT_CIRCUIT : { fn: undefined, thisValue: undefined };
+    }
+    if (property.kind === 'private')
+      return { fn: runtime.getPrivate(base, this.privateKey(property.name)), thisValue: base };
+    const key =
+      property.kind === 'computed'
+        ? runtime.toPropertyKey(yield* this.holdingSteps([base], () => this.evaluateSteps(property.expression)))
+        : property.key;
+    return { fn: runtime.get(base, key), thisValue: base };
+  }
+
   private *callSteps(expression: Extract<Expression, { kind: 'call' }>): Steps<Value> {
     const { runtime } = this;
-    const resolved = this.callee(expression.callee as Expression);
+    const callee = expression.callee as Expression;
+    const resolved = callee.suspends ? yield* this.calleeSteps(callee) : this.callee(callee);
     if (resolved === SHORT_CIRCUIT) return undefined;
     const { fn, thisValue } = resolved;
+    if (expression.optional && (fn === undefined || fn === null)) return undefined;
     if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
     const args = yield* this.holdingSteps([fn, thisValue], () => this.elementSteps(expression.args));
     return this.holdWhile([fn, thisValue, ...args], () => runtime.call(fn, thisValue, args, expression.row));

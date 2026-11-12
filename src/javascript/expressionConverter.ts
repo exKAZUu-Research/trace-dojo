@@ -521,7 +521,8 @@ function canSuspendIn(expression: Expression): boolean {
     case 'template':
     case 'array':
     case 'object':
-    case 'member': {
+    case 'member':
+    case 'new': {
       return true;
     }
     case 'assign': {
@@ -529,10 +530,7 @@ function canSuspendIn(expression: Expression): boolean {
       return expression.target.kind === 'member' || !patternSuspends(expression.target);
     }
     case 'call': {
-      return !expression.optional && expression.callee.kind !== 'super' && !expression.callee.suspends;
-    }
-    case 'new': {
-      return !expression.callee.suspends;
+      return expression.callee.kind !== 'super';
     }
     default: {
       return false;

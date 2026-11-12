@@ -626,6 +626,13 @@ console.log(typeof Symbol.dispose, String(Symbol.asyncDispose), typeof Suppresse
   console.log(await f(), await (async function () { return await v('ret'); })());
   function* g() { const o = { a: yield 1, b: yield 2 }; return o; }
   const it = g(); it.next(); it.next('A'); console.log(it.next('B'));
+})();
+(async () => {
+  const api = { name: 'api', hello(x) { return this.name + x; } };
+  const v = (x) => Promise.resolve(x);
+  console.log((await v(api)).hello('!'), (await v(api))['hello']('?'), (await v((x) => x * 2))(4), (await v(null))?.hello(1), api.missing?.(await v(1)));
+  class K { constructor(a) { this.a = a; } }
+  console.log(new (await v(K))(await v(7)));
 })();`,
   ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
