@@ -180,7 +180,8 @@ function convertMethodReference(node: Node): Expression {
 
 function convertMethodReferenceTarget(targetNode: Node, parts: Node[]): MethodReference['target'] {
   if (targetNode.type === 'super') return { super: undefined };
-  if (parts[1]?.type === 'super') return { super: expressionAsTypeSyntax(targetNode) ?? unsupported(targetNode, '式') };
+  if (parts[1]?.type === 'super')
+    return { super: expressionAsTypeSyntax(targetNode) ?? unsupported(targetNode, '修飾された super') };
   return TYPE_NODES.has(targetNode.type)
     ? { type: convertType(targetNode) }
     : { expression: convertExpression(targetNode) };

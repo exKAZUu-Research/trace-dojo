@@ -446,13 +446,14 @@ export abstract class StatementCompiler extends InvocationCompiler {
     labels: string[]
   ): Exec {
     const { init: initSyntax } = statement;
-    const init = Array.isArray(initSyntax)
-      ? this.compileForHeaderPart(statement, initSyntax.length === 0, () => this.compileStatements(context, initSyntax))
-      : this.compileForHeaderPart(
-          statement,
-          initSyntax.declarators.every((declarator) => !declarator.initializer),
-          () => this.compileLocal(context, initSyntax)
-        );
+    const init = this.compileForHeaderPart(
+      statement,
+      Array.isArray(initSyntax)
+        ? initSyntax.length > 0
+        : initSyntax.declarators.some((declarator) => declarator.initializer),
+      () =>
+        Array.isArray(initSyntax) ? this.compileStatements(context, initSyntax) : this.compileLocal(context, initSyntax)
+    );
     const { condition: conditionSyntax } = statement;
     const condition = conditionSyntax ? this.compileCondition(context, conditionSyntax) : () => true;
     if (conditionSyntax) this.checkLoopBodyReachable(conditionSyntax, statement.body);
@@ -461,7 +462,7 @@ export abstract class StatementCompiler extends InvocationCompiler {
       context,
       conditionSyntax ? bindingsWhen(conditionSyntax, true) : [],
       () => ({
-        update: this.compileForHeaderPart(statement, statement.update.length === 0, () =>
+        update: this.compileForHeaderPart(statement, statement.update.length > 0, () =>
           this.compileStatements(context, statement.update)
         ),
         body: this.compileLoopBody(context, statement.body, labels),
@@ -481,17 +482,17 @@ export abstract class StatementCompiler extends InvocationCompiler {
     };
   }
 
-  /** Compiles the init or the update so that, unless it is empty, it records one step after it runs as a whole. */
+  /** Compiles the init or the update so that, when `recordsStep`, it records one step after it runs as a whole. */
   protected compileForHeaderPart(
     statement: Extract<Statement, { kind: 'for' }>,
-    isEmpty: boolean,
+    recordsStep: boolean,
     compile: () => Exec
   ): Exec {
     const stepRow = this.stepRowOf(statement);
     this.compilesForHeader = true;
     try {
       const exec = compile();
-      if (stepRow === undefined || isEmpty) return exec;
+      if (stepRow === undefined || !recordsStep) return exec;
       return (frame) => {
         exec(frame);
         frame.runtime.steps.step(stepRow);

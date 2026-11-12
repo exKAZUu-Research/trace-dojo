@@ -582,11 +582,7 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
     if (expression.additionalBounds)
       return this.compileIntersectionCast(context, expression, expression.additionalBounds);
     const type = this.resolveType(expression.type);
-    // A lambda, a method reference, or a conditional of them takes its type from the cast (JLS 15.16).
-    const operand = ['lambda', 'methodRef', 'conditional', 'switchExpression'].includes(expression.value.kind)
-      ? this.compileValueFor(context, expression.value, type)
-      : this.compileValue(context, expression.value, false, true);
-    const value = this.checkErased(operand, type);
+    const value = this.checkErased(this.compileCastOperand(context, expression.value, type), type);
     if (value.type.kind !== 'null' && isPrimitive(value.type) !== isPrimitive(type)) {
       return this.compileBoxingCast(value, type, expression);
     }
@@ -618,13 +614,12 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
       return bound;
     });
     const interfaces = first.cls.kind === 'interface' ? [first, ...rest] : rest;
-    const notInterface = rest.find((bound) => bound.cls.kind !== 'interface');
-    if (notInterface) this.error(expression, `交差型の & の後ろには、インターフェースしか書けません。`);
+    if (rest.some((bound) => bound.cls.kind !== 'interface')) {
+      this.error(expression, '交差型の & の後ろには、インターフェースしか書けません。');
+    }
     const superclass = first.cls.kind === 'interface' ? (this.builtins.objectClass.type as ClassType) : first;
     const type = intersectionOf(superclass, interfaces, this.builtins.objectClass);
-    const operand = ['lambda', 'methodRef', 'conditional', 'switchExpression'].includes(expression.value.kind)
-      ? this.compileValueFor(context, expression.value, type)
-      : this.compileValue(context, expression.value, false, true);
+    const operand = this.compileCastOperand(context, expression.value, type);
     const casts = [first, ...rest].map((bound) => {
       if (!isCastable(operand.type, bound, this.builtins.objectClass)) {
         this.error(expression, `${typeName(operand.type)} 型の値を ${typeName(bound)} 型にキャストできません。`);
@@ -641,6 +636,13 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
       },
       source: operand.source,
     };
+  }
+
+  /** A cast's operand, which a lambda, a method reference, or a conditional of them takes its type from (JLS 15.16). */
+  protected compileCastOperand(context: MethodContext, value: Expression, type: JavaType): CompiledValue {
+    return ['lambda', 'methodRef', 'conditional', 'switchExpression'].includes(value.kind)
+      ? this.compileValueFor(context, value, type)
+      : this.compileValue(context, value, false, true);
   }
 
   /**
