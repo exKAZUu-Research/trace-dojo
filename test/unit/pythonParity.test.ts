@@ -89,6 +89,18 @@ test.each([
   ['a suffix test of many long candidates', "s = 'x' * 500000\np = ('y' + 'x' * 499999,) * 5000\ns.endswith(p)"],
   ['a binomial coefficient of a huge size', 'import math\nmath.comb(10**6, 5 * 10**5)'],
   [
+    'inserting and popping at the front of a long list over and over',
+    'a = list(range(100000))\nfor i in range(400):\n    a.insert(0, i)\n    a.pop(0)',
+  ],
+  [
+    'deleting and inserting at the front of a long list over and over',
+    'a = list(range(100000))\nfor i in range(400):\n    del a[0]\n    a.insert(0, 1)',
+  ],
+  [
+    'reversing a long deque over and over',
+    'from collections import deque\na = deque(range(100000))\nfor i in range(700):\n    a.reverse()',
+  ],
+  [
     'the most common item of a large counter over and over',
     'from collections import Counter\nc = Counter(range(10000))\nfor i in range(120):\n    c.most_common(1)',
   ],
@@ -131,19 +143,20 @@ test.each([
     'arguments bound by functools.partial beside a list beyond the slot limit',
     'from functools import partial\ndef f(*args):\n    pass\np = partial(f, *([0] * 400000))\na = [0] * 500000',
   ],
-  ['ranges kept beside a list beyond the slot limit', 'a = list(map(range, range(200000)))\nb = [0] * 700000'],
-  ['slices kept beside a list beyond the slot limit', 'a = [slice(i) for i in range(200000)]\nb = [0] * 700000'],
+  // A list of 960000 items leaves room for 25000 more items, or 45000 dict entries, only when what they hold is free.
+  ['ranges kept beside a list beyond the slot limit', 'b = [0] * 960000\na = list(map(range, range(25000)))'],
+  ['slices kept beside a list beyond the slot limit', 'b = [0] * 960000\na = [slice(i) for i in range(25000)]'],
   [
     'complex numbers kept beside a list beyond the slot limit',
-    'a = [complex(i, 1) for i in range(200000)]\nb = [0] * 700000',
+    'b = [0] * 960000\na = [complex(i, 1) for i in range(25000)]',
   ],
   [
     'a dict comprehension and a list beyond the slot limit together',
-    'd = {i: i for i in range(300000)}\na = [0] * 800000',
+    'a = [0] * 960000\nd = {i: i for i in range(45000)}',
   ],
   [
     'a dict filled by assignment and a list beyond the slot limit together',
-    'd = {}\nfor i in range(200000):\n    d[i] = i\na = [0] * 900000',
+    'a = [0] * 960000\nd = {}\nfor i in range(45000):\n    d[i] = i',
   ],
   ['a copy of a list beyond the slot limit together', 'a = [0] * 800000\nb = a.copy()'],
   ['a copy.copy of a list beyond the slot limit together', 'import copy\na = [0] * 800000\nb = copy.copy(a)'],

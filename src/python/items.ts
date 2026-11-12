@@ -206,7 +206,7 @@ export function deleteItem(container: PyValue, key: PyValue): void {
     if (key instanceof PySlice) {
       const indices = sliceIndices(key, container.items.length);
       if (indices.step === 1) {
-        container.editableItems.splice(indices.start, Math.max(0, indices.stop - indices.start));
+        container.removeRange(indices.start, Math.max(0, indices.stop - indices.start));
         return;
       }
       const remove = new Set<number>();
@@ -217,7 +217,7 @@ export function deleteItem(container: PyValue, key: PyValue): void {
     }
     const index = normalizeIndex(key, container.items.length, 'list');
     if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
-    container.editableItems.splice(index, 1);
+    container.removeRange(index, 1);
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {

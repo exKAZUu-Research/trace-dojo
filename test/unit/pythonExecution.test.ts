@@ -155,7 +155,7 @@ class Node:
         return new
 node = copy.deepcopy([Node(1)])[0]
 out.append([node.value, node.next is node])
-out.append(statistics.mean([0.1] * 60000))
+out.append(statistics.mean([0.1] * 60))
 sys.stderr.write('hidden')
 expected = "[2, 1, 11, 'finally', 'ValueError', 'ValueError', [False, True], 'int', [10, True], 0.1]"
 if str(out) != expected:

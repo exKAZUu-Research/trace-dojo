@@ -1,5 +1,5 @@
 import { mappingEntries } from '../callArguments';
-// code-gauge-allow-file fileNcss 493 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 496 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -172,14 +172,17 @@ method(dequeClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
   return None;
 });
 method(dequeClass, 'remove', 'one', 1, 1, (self, [item]) => {
-  const items = dequeOf(self).editableItems;
+  const items = dequeOf(self).items;
   const index = items.findIndex((each) => equals(each, item));
+  currentRuntime().scan(index === -1 ? items.length : index + 1);
   if (index === -1) throw valueError('deque.remove(x): x not in deque');
-  items.splice(index, 1);
+  dequeOf(self).removeRange(index, 1);
   return None;
 });
 method(dequeClass, 'reverse', 'none', 0, 0, (self) => {
-  dequeOf(self).editableItems.reverse();
+  const items = dequeOf(self).editableItems;
+  currentRuntime().scan(items.length);
+  items.reverse();
   return None;
 });
 method(
@@ -257,7 +260,7 @@ method(dequeClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   return None;
 });
 method(dequeClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
-  dequeOf(self).editableItems.splice(dequeIndex(dequeOf(self), key), 1);
+  dequeOf(self).removeRange(dequeIndex(dequeOf(self), key), 1);
   return None;
 });
 method(dequeClass, '__contains__', 'one', 1, 1, (self, [item]) =>

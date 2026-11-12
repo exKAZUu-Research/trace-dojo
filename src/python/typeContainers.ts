@@ -118,10 +118,11 @@ method(listClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
   return None;
 });
 method(listClass, 'remove', 'one', 1, 1, (self, [item]) => {
-  const items = listOf(self).editableItems;
+  const items = listOf(self).items;
   const index = items.findIndex((element) => equals(element, item));
+  currentRuntime().scan(index === -1 ? items.length : index + 1);
   if (index === -1) throw valueError('list.remove(x): x not in list');
-  items.splice(index, 1);
+  listOf(self).removeRange(index, 1);
   return None;
 });
 const MAX_SSIZE = (1n << 63n) - 1n;
@@ -135,7 +136,7 @@ method(listClass, 'pop', 'expected', 0, 1, (self, [index]) => {
   if (items.length === 0) throw pyError('IndexError', 'pop from empty list');
   if (position < 0n) position += BigInt(items.length);
   if (position < 0n || position >= BigInt(items.length)) throw pyError('IndexError', 'pop index out of range');
-  return items.splice(Number(position), 1)[0];
+  return listOf(self).removeRange(Number(position), 1)[0];
 });
 method(listClass, 'clear', 'none', 0, 0, (self) => {
   listOf(self).editableItems.length = 0;

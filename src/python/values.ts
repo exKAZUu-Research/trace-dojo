@@ -2,7 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
-import { asPythonError, chargeSlots, chargeStep, refuseOversizedString } from './runtimeContext';
+import { asPythonError, chargeScan, chargeSlots, chargeStep, refuseOversizedString } from './runtimeContext';
 import type { SetTable } from './setTable';
 
 /**
@@ -230,10 +230,20 @@ abstract class PyGrowableSequence extends PyObject {
   }
 
   /** Puts `items` in place of the `deleteCount` items from `start`, charging the items the sequence gains. */
+  /** Replaces `deleteCount` items from `start` with `items`, charging the new slots and the items moved past them. */
   splice(start: number, deleteCount: number, items: readonly PyValue[]): void {
+    const storage = this.editableItems;
     chargeSlots(Math.max(items.length - deleteCount, 0));
-    if (items.length === 1) this.storage.splice(start, deleteCount, items[0]);
-    else this.storage = [...this.storage.slice(0, start), ...items, ...this.storage.slice(start + deleteCount)];
+    chargeScan(storage.length - start);
+    if (items.length === 1) storage.splice(start, deleteCount, items[0]);
+    else this.storage = [...storage.slice(0, start), ...items, ...storage.slice(start + deleteCount)];
+  }
+
+  /** Removes `count` items from `start`, charging the items moved into their place, and returns them. */
+  removeRange(start: number, count: number): PyValue[] {
+    const storage = this.editableItems;
+    chargeScan(storage.length - start);
+    return storage.splice(start, count);
   }
 
   /**
