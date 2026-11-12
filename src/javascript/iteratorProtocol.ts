@@ -2,7 +2,7 @@ import { Awaiting, DelegatedResult, GeneratorReturn, type Resume, resumedValue, 
 import { awaitValue, newPromise, rejectPromise, resolvePromise } from './promises';
 import { iteratorResult, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { isCallable, isObject, type JsObject, toBoolean, type Value } from './values';
+import { isCallable, isObject, type JsObject, JsThrow, toBoolean, type Value } from './values';
 
 /** An iterator object's methods, each returning the iterator's result, or for an async iterator, a promise of it. */
 export interface ProtocolIteration {
@@ -37,7 +37,7 @@ export function asyncIteratorOf(runtime: Runtime, iterable: Value): ProtocolIter
     );
   }
   const iterator = iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator);
-  return iterationOf(runtime, iterator, (result) => awaitedResult(runtime, result));
+  return iterationOf(runtime, iterator, (result, method) => awaitedResult(runtime, iterator, result, method));
 }
 
 /**
@@ -113,18 +113,22 @@ function iteratorObject(
 }
 
 /** Calls an iterator object's methods, passing each result through `adapt`. */
-function iterationOf(runtime: Runtime, iterator: JsObject, adapt: (result: Value) => Value): ProtocolIteration {
+function iterationOf(
+  runtime: Runtime,
+  iterator: JsObject,
+  adapt: (result: Value, method: 'next' | 'return' | 'throw') => Value
+): ProtocolIteration {
   const next = runtime.get(iterator, 'next');
-  const method = (name: string): ((...args: Value[]) => Value) | undefined => {
+  const method = (name: 'return' | 'throw'): ((...args: Value[]) => Value) | undefined => {
     const fn = runtime.get(iterator, name);
     if (fn === undefined || fn === null) return undefined;
     // The arguments go as given: none for an implicit close, one for a forwarded `return(value)` or `throw(error)`.
-    return (...args) => adapt(runtime.call(fn, iterator, args, runtime.currentRow));
+    return (...args) => adapt(runtime.call(fn, iterator, args, runtime.currentRow), name);
   };
   return {
     iterator,
     nextMethod: next,
-    next: (...args) => adapt(runtime.call(next, iterator, args, runtime.currentRow)),
+    next: (...args) => adapt(runtime.call(next, iterator, args, runtime.currentRow), 'next'),
     get return() {
       return method('return');
     },
@@ -135,13 +139,33 @@ function iterationOf(runtime: Runtime, iterator: JsObject, adapt: (result: Value
 }
 
 /** A promise of a sync iterator's result with its value awaited, keeping whether the iterator is done. */
-function awaitedResult(runtime: Runtime, result: Value): JsObject {
+function awaitedResult(
+  runtime: Runtime,
+  iterator: JsObject,
+  result: Value,
+  method: 'next' | 'return' | 'throw'
+): JsObject {
   const checked = checkResult(runtime, result);
   const done = toBoolean(runtime.get(checked, 'done'));
   const promise = newPromise(runtime);
-  awaitValue(runtime, runtime.get(checked, 'value'), [promise], (settled) => {
-    if (settled.kind === 'throw') rejectPromise(runtime, promise, settled.value);
-    else resolvePromise(runtime, promise, iteratorResult(runtime, settled.value, done));
+  awaitValue(runtime, runtime.get(checked, 'value'), [promise, iterator], (settled) => {
+    if (settled.kind !== 'throw') {
+      resolvePromise(runtime, promise, iteratorResult(runtime, settled.value, done));
+      return;
+    }
+    // A rejected value from `next` or `throw` closes the unfinished sync iterator, keeping the rejection.
+    if (!done && method !== 'return') closeQuietly(runtime, iterator);
+    rejectPromise(runtime, promise, settled.value);
   });
   return promise;
+}
+
+/** Calls an iterator's `return` after an error, discarding whatever it throws. */
+function closeQuietly(runtime: Runtime, iterator: JsObject): void {
+  try {
+    const close = runtime.get(iterator, 'return');
+    if (close !== undefined && close !== null) runtime.call(close, iterator, [], runtime.currentRow);
+  } catch (error) {
+    if (!(error instanceof JsThrow)) throw error;
+  }
 }

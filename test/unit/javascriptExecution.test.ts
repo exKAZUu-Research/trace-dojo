@@ -1015,6 +1015,12 @@ function* g() { yield* it(); } const x = g(); x.next(); try { x.throw(new Error(
 const y = g(); y.next(); console.log(y.return(5));
 (async () => { for await (const v of it()) break; })();`,
   ],
+  [
+    'rejected values from sync iterators under await',
+    `const x = () => ({ [Symbol.iterator]() { return { next() { return { value: Promise.reject('x'), done: false }; }, return() { console.log('closed'); return { done: true }; } }; } });
+async function* f() { yield* x(); }
+(async () => { try { await f().next(); } catch (e) { console.log(e); } try { for await (const v of x()) {} } catch (e) { console.log('loop', e); } })();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
