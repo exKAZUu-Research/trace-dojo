@@ -119,6 +119,17 @@ c.add()`;
   expect(trace.traceItems.at(-1)?.vars).toEqual({ 'Counter.count': 1 });
 });
 
+test('an assignment whose value only creates objects records no step of its own, with or without a type hint', () => {
+  const program = `class W:
+    def __init__(self, n):
+        self.n = n
+a = W(1)
+b: W = W(2)
+c: list = [W(3), W(4)]
+d: int = 5`;
+  expect(traceProgram('python', program, program).traceItems.map(({ line }) => line)).toEqual([0, 3, 3, 3, 3, 7]);
+});
+
 test('standard library code written in Python records no steps, and the code it calls back is called from the program line', () => {
   const program = `from dataclasses import dataclass
 import heapq

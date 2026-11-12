@@ -21,9 +21,8 @@ method(
   (self) => `<_io.TextIOWrapper name='<${(self as PyOpaque).text}>' mode='w' encoding='utf-8'>`
 );
 
-/** `sys.stdout` or `sys.stderr`, whose writes go to the program's output or to the hidden error output. */
+/** `sys.stdout` or `sys.stderr`, whose writes go to the program's output or, for stderr, nowhere. */
 export function createStream(runtime: Runtime, name: 'stdout' | 'stderr'): PyValue {
-  const write =
-    name === 'stdout' ? (text: string) => runtime.budget.print(text) : (text: string) => (runtime.errorOutput += text);
+  const write = name === 'stdout' ? (text: string) => runtime.budget.print(text) : () => {};
   return new PyOpaque(textIOClass, name, write);
 }

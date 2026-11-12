@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 518 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 519 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -287,11 +287,12 @@ export abstract class ExpressionConverter {
     return { kind: 'call', callee, args: this.argumentList(argumentsNode), row: rowOf(node) };
   }
 
-  // code-gauge-allow functionNcss 33 -- Checks the order rules CPython applies to call arguments.
+  // code-gauge-allow functionNcss 34 -- Checks the order rules CPython applies to call arguments.
   // code-gauge-allow functionCognitiveComplexity 21 -- Checks the order rules CPython applies to call arguments.
   protected argumentList(node: Node): Argument[] {
     const nodes = namedChildren(node);
-    const args: Argument[] = [];
+    const positionals: Argument[] = [];
+    const named: Argument[] = [];
     const keywords = new Set<string>();
     let seenKeyword = false;
     let seenDoubleStar = false;
@@ -305,20 +306,21 @@ export abstract class ExpressionConverter {
         if (keywords.has(name)) fail(row, `キーワード引数 ${name} を2回書いています。`);
         keywords.add(name);
         seenKeyword = true;
-        args.push({ kind: 'keyword', name, value: this.expression(field(argument, 'value')) });
+        named.push({ kind: 'keyword', name, value: this.expression(field(argument, 'value')) });
       } else if (argument.type === 'dictionary_splat') {
         seenDoubleStar = true;
-        args.push({ kind: 'doubleStar', value: this.expression(namedChildren(argument)[0]) });
+        named.push({ kind: 'doubleStar', value: this.expression(namedChildren(argument)[0]) });
       } else if (argument.type === 'list_splat') {
         if (seenDoubleStar) fail(row, '* を付けた引数は、** を付けた引数より前に書いてください。');
-        args.push({ kind: 'star', value: this.expression(namedChildren(argument)[0]) });
+        positionals.push({ kind: 'star', value: this.expression(namedChildren(argument)[0]) });
       } else {
         if (seenDoubleStar) fail(row, '位置引数は、** を付けた引数より前に書いてください。');
         if (seenKeyword) fail(row, '位置引数は、キーワード引数より前に書いてください。');
-        args.push({ kind: 'positional', value: this.expression(argument) });
+        positionals.push({ kind: 'positional', value: this.expression(argument) });
       }
     }
-    return args;
+    // CPython evaluates a * argument written after a keyword argument before that keyword's value.
+    return [...positionals, ...named];
   }
 
   private namedExpression(node: Node): Expression {

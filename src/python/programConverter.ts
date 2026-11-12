@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 631 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 645 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -257,6 +257,7 @@ export class ProgramConverter extends ExpressionConverter {
         fail(row, '型ヒントを付けて代入できるのは、1つの変数・属性・要素だけです。');
       }
       if (rightNode?.type === 'assignment') fail(row, '型ヒントを付けた代入は、連続して書けません。');
+      this.checkAnnotatedName(leftNode);
       const value = rightNode ? this.valueExpression(rightNode) : undefined;
       const annotation = this.annotation(typeNode);
       const target =
@@ -288,6 +289,15 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   /** `x: int` in a function declares x as a local variable without assigning it. */
+  private checkAnnotatedName(node: Node): void {
+    const { scope } = this.context;
+    if (node.type !== 'identifier' || scope.info.kind === 'module') return;
+    const declaration = scope.declarations.get(this.mangle(node.text));
+    if (declaration) {
+      fail(rowOf(node), `${node.text} は ${declaration} 宣言されているので、型ヒントを付けられません。`);
+    }
+  }
+
   private declareAnnotated(node: Node): Target {
     return this.bindName(node);
   }
@@ -407,6 +417,7 @@ export class ProgramConverter extends ExpressionConverter {
       );
       const elseNode = clauses.find((clause) => clause.type === 'else_clause');
       const finallyNode = clauses.find((clause) => clause.type === 'finally_clause');
+      if (handlers.length === 0 && !finallyNode) fail(rowOf(node), 'try には except か finally が必要です。');
       const orelse = elseNode ? this.body(field(elseNode, 'body')) : [];
       const finalbody = finallyNode
         ? this.body(namedChildren(finallyNode).find((child) => child.type === 'block') as Node)
@@ -709,14 +720,11 @@ export class ProgramConverter extends ExpressionConverter {
     const keyNodes = fieldNodes(node, 'key');
     const valueNodes = fieldNodes(node, 'value');
     for (const [index, keyNode] of keyNodes.entries()) {
-      const key =
-        keyNode.type === 'dotted_name' ? this.dottedValue(namedChildren(keyNode)) : this.pattern(keyNode, names);
-      const keyExpression = 'kind' in key && key.kind === 'value' ? key.value : (key as Expression);
       const text = this.textOf(keyNode);
       if (keyNode.type !== 'dotted_name' && keyTexts.has(text))
         fail(rowOf(keyNode), `マッピングのパターンで、キー ${text} が重複しています。`);
       keyTexts.add(text);
-      keys.push(keyExpression);
+      keys.push(this.mappingKey(keyNode, names));
       patterns.push(this.pattern(valueNodes[index], names));
     }
     const splat = namedChildren(node).find((child) => child.type === 'splat_pattern');
@@ -726,6 +734,12 @@ export class ProgramConverter extends ExpressionConverter {
       rest = this.patternName(nameNode, names);
     }
     return { kind: 'mapping', keys, patterns, rest, row: rowOf(node) };
+  }
+
+  private mappingKey(node: Node, names: Set<string>): Expression {
+    if (node.type === 'dotted_name') return this.dottedValue(namedChildren(node));
+    const pattern = this.pattern(node, names);
+    return pattern.kind === 'value' ? pattern.value : this.expression(node);
   }
 
   private classPattern(node: Node, names: Set<string>): Pattern {

@@ -222,13 +222,6 @@ function natives(runtime: Runtime): [string, PyValue][] {
       }),
     ],
     [
-      '_write_stderr',
-      builtin('_write_stderr', 'one', 1, 1, ([text]) => {
-        currentRuntime().errorOutput += text as string;
-        return None;
-      }),
-    ],
-    [
       '_firstlineno',
       builtin('_firstlineno', 'one', 1, 1, ([fn]) => {
         if (!(fn instanceof PyFunction)) throw getAttributeError(fn);

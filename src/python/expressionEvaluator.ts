@@ -509,6 +509,7 @@ export class ExpressionEvaluator {
       keywordDefaults,
       def.usesClassCell ? frame.classCell : undefined
     );
+    if (def.returns || def.params.some((param) => param.annotation)) fn.definingFrame = frame;
     fn.module = moduleNameOf(frame);
     this.runtime.allocate(2);
     let result: PyValue = fn;
@@ -519,7 +520,7 @@ export class ExpressionEvaluator {
   /** The annotations of a function, evaluated when the program reads `__annotations__`. */
   annotationsOf(fn: PyFunction): PyDict {
     const dict = newDict();
-    const frame = this.runtime.frame;
+    const frame = fn.definingFrame ?? this.runtime.frame;
     for (const param of fn.def.params) {
       if (param.annotation) dict.store.set(param.name, this.evaluate(param.annotation, frame));
     }

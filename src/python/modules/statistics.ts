@@ -47,14 +47,19 @@ function fractionToFloat({ numerator, denominator }: Fraction): number {
 function mean([data]: PyValue[]): PyValue {
   const items = toArray(data);
   if (items.length === 0) throw statisticsError('mean requires at least one data point');
-  let numerator = 0n;
-  let denominator = 1n;
+  // Summing per denominator keeps the integers small: the floats of a data set share few denominators.
+  const numerators = new Map<bigint, bigint>();
   let isFloat = false;
   for (const item of items) {
     if (typeof item === 'number') isFloat = true;
     const fraction = toFraction(item);
-    numerator = numerator * fraction.denominator + fraction.numerator * denominator;
-    denominator *= fraction.denominator;
+    numerators.set(fraction.denominator, (numerators.get(fraction.denominator) ?? 0n) + fraction.numerator);
+  }
+  let numerator = 0n;
+  let denominator = 1n;
+  for (const [each, sum] of numerators) {
+    numerator = numerator * each + sum * denominator;
+    denominator *= each;
   }
   denominator *= BigInt(items.length);
   if (!isFloat && numerator % denominator === 0n) return numerator / denominator;

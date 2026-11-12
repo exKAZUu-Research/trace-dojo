@@ -92,6 +92,67 @@ if actual != '[7, 2, [14, 14], 8, 8, 8]':
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+// CPython 3.14.10 runs this program without raising.
+test('evaluation order, cleanup, and library protocols follow CPython', () => {
+  const program = `import copy
+import statistics
+import sys
+out = []
+def mark(x):
+    out.append(x)
+    return []
+def f(*args, **kwargs):
+    pass
+f(a=mark(1), *mark(2))
+match {None: 5, True: 6}:
+    case {None: x, True: y}:
+        out.append(x + y)
+try:
+    try:
+        raise ValueError()
+    except Missing:
+        pass
+    finally:
+        out.append('finally')
+except NameError as e:
+    out.append(type(e.__context__).__name__)
+class Manager:
+    def __enter__(self):
+        return [1]
+    def __exit__(self, kind, value, traceback):
+        out.append(kind.__name__)
+        return True
+with Manager() as (a, b):
+    pass
+def once(value):
+    yield value
+    out.append('overconsumed')
+out.append([all(once(False)), any(once(True))])
+def outer():
+    X = int
+    def inner(a: X):
+        pass
+    return inner
+out.append(outer().__annotations__['a'].__name__)
+class Node:
+    def __init__(self, value):
+        self.value = value
+        self.next = self
+    def __deepcopy__(self, memo):
+        new = Node(self.value * 10)
+        memo[id(self)] = new
+        new.next = copy.deepcopy(self.next, memo)
+        return new
+node = copy.deepcopy([Node(1)])[0]
+out.append([node.value, node.next is node])
+out.append(statistics.mean([0.1] * 60000))
+sys.stderr.write('hidden')
+expected = "[2, 1, 11, 'finally', 'ValueError', 'ValueError', [False, True], 'int', [10, True], 0.1]"
+if str(out) != expected:
+    raise ValueError(str(out))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('sys.exit ends the program without an uncaught exception', () => {
   expect(executeProgram('python', 'import sys\nsys.exit(3)\nraise ValueError')).toMatchObject({
     kind: 'executed',
@@ -107,6 +168,8 @@ test.each([
   ['a positional argument after a keyword argument', 'f(a=1, 2)', 0],
   ['a capture pattern before another case', 'match 1:\n    case x:\n        pass\n    case 2:\n        pass', 1],
   ['nonlocal at module level', 'nonlocal x', 0],
+  ['a try without except or finally', 'try:\n    pass\nelse:\n    pass', 0],
+  ['a type hint on a name declared global', 'def f():\n    global x\n    x: int = 1', 2],
   ['a Python 2 print statement', "print 'x'", 0],
   ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],
   ['an import of a file', 'import mymodule', 0],

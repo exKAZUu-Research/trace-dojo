@@ -63,8 +63,6 @@ export class Runtime {
   readonly modules = new Map<string, PyModule>();
   readonly evaluator: Evaluator;
   private row: number | undefined;
-  /** What `print` wrote to stderr, which learners do not see, as Java's `System.err` output. */
-  errorOutput = '';
   private allocatedSlots = 0;
   private reprDepth = 0;
 

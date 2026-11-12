@@ -1,6 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
+import type { Frame } from './frame';
 import type { SetTable } from './setTable';
 
 /**
@@ -237,6 +238,8 @@ export class PyFunction extends PyObject {
   /** The docstring, undefined when the function has none. */
   doc: PyValue | undefined;
   module = '__main__';
+  /** The frame of the `def`, whose variables the annotations are evaluated with when a program reads them. */
+  definingFrame?: Frame;
   /** The `__annotate__` and `__type_params__` a program assigned. */
   annotate?: PyValue;
   typeParams?: PyValue;

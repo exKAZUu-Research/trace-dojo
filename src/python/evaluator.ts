@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 581 -- The statement evaluator keeps one method per kind of statement together.
+// code-gauge-allow-file fileNcss 582 -- The statement evaluator keeps one method per kind of statement together.
 import type { ExceptHandler, Expression, MatchCase, Pattern, Statement, Target } from './ast';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
@@ -99,7 +99,7 @@ export class Evaluator extends ExpressionEvaluator {
         return undefined;
       }
       case 'assign': {
-        this.assignStatement(statement, frame);
+        this.assignValue(statement.stepRow, statement.targets, statement.value, frame);
         return undefined;
       }
       case 'augmentedAssign': {
@@ -173,27 +173,24 @@ export class Evaluator extends ExpressionEvaluator {
     }
   }
 
-  private assignStatement(statement: Extract<Statement, { kind: 'assign' }>, frame: Frame): void {
-    let created = false;
-    this.runtime.steps.runStatement(
-      statement.stepRow,
-      () => created && statement.targets.every(storesReference),
-      () => {
-        const [value, isCreation] = this.evaluateCreation(statement.value, frame);
-        created = isCreation;
-        this.hold(frame, value, () => {
-          for (const target of statement.targets) this.assign(target, value, frame);
-        });
-      }
-    );
-  }
-
   private annotatedAssign(statement: Extract<Statement, { kind: 'annotatedAssign' }>, frame: Frame): void {
     this.annotate(statement, frame);
-    const valueExpression = statement.value;
-    if (!valueExpression) return;
-    this.runtime.steps.runStatement(statement.stepRow, false, () =>
-      this.assign(statement.target, this.evaluate(valueExpression, frame), frame)
+    if (statement.value) this.assignValue(statement.stepRow, [statement.target], statement.value, frame);
+  }
+
+  /** Assigns a value to the targets as one step, which is left out when the value only created objects. */
+  private assignValue(stepRow: number | undefined, targets: Target[], expression: Expression, frame: Frame): void {
+    let created = false;
+    this.runtime.steps.runStatement(
+      stepRow,
+      () => created && targets.every(storesReference),
+      () => {
+        const [value, isCreation] = this.evaluateCreation(expression, frame);
+        created = isCreation;
+        this.hold(frame, value, () => {
+          for (const target of targets) this.assign(target, value, frame);
+        });
+      }
     );
   }
 
@@ -418,13 +415,14 @@ export class Evaluator extends ExpressionEvaluator {
     caught: PyError,
     frame: Frame
   ): Generator<PyValue, Outcome, unknown> {
-    if (statement.isGroup) return yield* this.exceptStar(statement, caught, frame);
-    const handler = this.findHandler(statement.handlers, caught.exception, frame);
-    if (!handler) return { pending: caught };
     try {
+      if (statement.isGroup) return yield* this.exceptStar(statement, caught, frame);
+      const handler = this.findHandler(statement.handlers, caught.exception, frame);
+      if (!handler) return { pending: caught };
       return { completion: yield* this.runHandler(handler, caught.exception, frame) };
     } catch (error) {
       if (!(error instanceof PyError)) throw error;
+      this.chainTo(error.exception, caught.exception);
       return { pending: error };
     }
   }
@@ -524,7 +522,7 @@ export class Evaluator extends ExpressionEvaluator {
 
   // With ----------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 34 -- Follows the protocol of the with statement.
+  // code-gauge-allow functionNcss 36 -- Follows the protocol of the with statement.
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
     const { runtime } = this;
@@ -538,19 +536,21 @@ export class Evaluator extends ExpressionEvaluator {
     const length = frame.temporaries.length;
     frame.temporaries.push(manager);
     try {
-      runtime.steps.runStatement(
-        index === 0 ? statement.stepRow : undefined,
-        () => !statement.items.some((each) => each.target),
-        () => {
-          const value = callValue(bindValue(enter, manager), []);
-          if (item.target) this.assign(item.target, value, frame);
-        }
-      );
+      let entered = false;
       let completion: Completion;
       try {
+        runtime.steps.runStatement(
+          index === 0 ? statement.stepRow : undefined,
+          () => !statement.items.some((each) => each.target),
+          () => {
+            const value = callValue(bindValue(enter, manager), []);
+            entered = true;
+            if (item.target) this.assign(item.target, value, frame);
+          }
+        );
         completion = yield* this.withStatement(statement, frame, index + 1);
       } catch (error) {
-        if (!(error instanceof PyError)) throw error;
+        if (!(error instanceof PyError) || !entered) throw error;
         const exception = error.exception;
         this.handling.push(exception);
         let suppress: boolean;

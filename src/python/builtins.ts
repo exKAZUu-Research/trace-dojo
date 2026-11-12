@@ -221,7 +221,6 @@ function print(args: PyValue[], kwargs: Kwargs): PyValue {
   const runtime = currentRuntime();
   runtime.buildString(text.length);
   if (file === None || file === runtime.standardStream('stdout')) runtime.budget.print(text);
-  else if (file === runtime.standardStream('stderr')) runtime.errorOutput += text;
   else callValue(getAttribute(file, 'write'), [text]);
   return None;
 }
@@ -514,6 +513,17 @@ function exitFunction(name: string): PyValue {
   });
 }
 
+/** Whether an item passes the test, taking no item after the first that does, as `all` and `any` stop. */
+function someItem(iterable: PyValue, test: (item: PyValue) => boolean): boolean {
+  const next = iterate(iterable);
+  const runtime = currentRuntime();
+  for (let item = next(); item !== DONE; item = next()) {
+    runtime.spend();
+    if (test(item)) return true;
+  }
+  return false;
+}
+
 // The namespace -----------------------------------------------------------------------------------------------------
 
 /** The builtins module's namespace, in CPython's order, which NameError suggestions depend on. */
@@ -525,8 +535,8 @@ export function createBuiltins(): Map<string, PyValue> {
   const exceptions = [...exceptionClasses.entries()];
   return new Map<string, PyValue>([
     ['abs', one('abs', abs)],
-    ['all', one('all', ([iterable]) => toArray(iterable).every((item) => isTruthy(item)))],
-    ['any', one('any', ([iterable]) => toArray(iterable).some((item) => isTruthy(item)))],
+    ['all', one('all', ([iterable]) => !someItem(iterable, (item) => !isTruthy(item)))],
+    ['any', one('any', ([iterable]) => someItem(iterable, isTruthy))],
     ['ascii', one('ascii', ([value]) => pyAscii(value))],
     ['bin', one('bin', radix('0b', 2))],
     ['breakpoint', unsupportedFunction('breakpoint', 'breakpoint()')],

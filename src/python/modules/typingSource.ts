@@ -26,7 +26,6 @@ def assert_never(arg, /):
 
 
 def reveal_type(obj, /):
-    _write_stderr(f"Runtime type is {type(obj).__name__!r}\n")
     return obj
 
 
