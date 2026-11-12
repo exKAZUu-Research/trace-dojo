@@ -454,7 +454,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (method.pointerReceiver) readReceiver = this.pointerReceiver(span, receiver, path);
     else {
       const read = receiver.eval;
-      readReceiver = (frame) => receiverFor(read(frame), path, method);
+      readReceiver = (frame) => receiverFor(read(frame), path, method, underlying(receiver.type).kind === 'pointer');
     }
     if (!readReceiver) return this.invalid(span);
     const bound = readReceiver;
@@ -498,7 +498,7 @@ export abstract class CallCompiler extends CompositeCompiler {
         ? (args: Value[], row?: number, deferredFor?: unknown): Value | Value[] =>
             invokeMethod(
               selection.method,
-              receiverFor(args[0], selection.path, selection.method),
+              receiverFor(args[0], selection.path, selection.method, underlying(type).kind === 'pointer'),
               args.slice(1),
               row,
               deferredFor
@@ -511,7 +511,12 @@ export abstract class CallCompiler extends CompositeCompiler {
     const resume =
       selection.kind === 'method'
         ? (args: Value[], row?: number) =>
-            resumeMethod(selection.method, receiverFor(args[0], selection.path, selection.method), args.slice(1), row)
+            resumeMethod(
+              selection.method,
+              receiverFor(args[0], selection.path, selection.method, underlying(type).kind === 'pointer'),
+              args.slice(1),
+              row
+            )
         : (args: Value[], row?: number) => {
             const iface = args[0] as Iface | undefined;
             if (!iface) nilPointerPanic();
@@ -547,7 +552,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (method.pointerReceiver) readReceiver = this.pointerReceiver(expression, receiver, path);
     else {
       const read = receiver.eval;
-      readReceiver = (frame) => receiverFor(read(frame), path, method);
+      readReceiver = (frame) => receiverFor(read(frame), path, method, underlying(receiver.type).kind === 'pointer');
     }
     if (!readReceiver || !method.instantiate || typeArgs.some((arg) => containsTypeParam(arg))) {
       return this.resultOperand(expression, signature.results, () => {});

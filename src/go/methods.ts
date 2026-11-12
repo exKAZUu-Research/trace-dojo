@@ -57,7 +57,12 @@ export function* resumeDynamicMethod(
   const selection = lookupFieldOrMethod(type, name);
   if (selection.kind === 'method') {
     const { method, path } = selection;
-    return yield* resumeMethod(method, receiverFor(receiver, path, method), args, callRow);
+    return yield* resumeMethod(
+      method,
+      receiverFor(receiver, path, method, underlying(type).kind === 'pointer'),
+      args,
+      callRow
+    );
   }
   if (selection.kind !== 'interfaceMethod') throw new Error(`Missing method ${name}`);
   const inner = walk(receiver, selection.path) as Iface | undefined;
