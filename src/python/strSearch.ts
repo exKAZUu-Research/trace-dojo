@@ -66,13 +66,16 @@ function hostOccurrences(region: string, needle: string, fromEnd: boolean, limit
 /** Searches with the Knuth-Morris-Pratt algorithm, from the end by searching the reversed strings. */
 // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the Knuth-Morris-Pratt search, whose failure links make the loop.
 function kmpOccurrences(region: string, needle: string, fromEnd: boolean, limit: number): number[] {
-  const text = fromEnd ? reverseUnits(region) : region;
+  // A backward search reads the region from its end in place, so that an early match reads no more of it.
+  const unitAt = fromEnd
+    ? (index: number): number => region.charCodeAt(region.length - 1 - index)
+    : (index: number): number => region.charCodeAt(index);
   const pattern = fromEnd ? reverseUnits(needle) : needle;
   const fail = failureTable(pattern);
   const found: number[] = [];
   let matched = 0;
-  for (let index = 0; index < text.length && found.length < limit; index++) {
-    const unit = text.charCodeAt(index);
+  for (let index = 0; index < region.length && found.length < limit; index++) {
+    const unit = unitAt(index);
     while (matched > 0 && pattern.charCodeAt(matched) !== unit) matched = fail[matched - 1];
     if (pattern.charCodeAt(matched) === unit) matched++;
     if (matched < pattern.length) continue;

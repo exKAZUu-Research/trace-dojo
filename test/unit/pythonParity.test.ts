@@ -413,6 +413,12 @@ test.each([
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test('a backward search for a long needle that matches at the end does not copy the text', () => {
+  // Copying the text for each search would take far longer than the time limit; the search takes milliseconds.
+  const program = `s = 'a' * 500000\nfor i in range(500):\n    v = s.rfind('aaaaaaaaa')`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test.each([
   'del a[:0]',
   'del a[5:2]',
