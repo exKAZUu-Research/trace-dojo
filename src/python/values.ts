@@ -233,8 +233,13 @@ abstract class PyGrowableSequence extends PyObject {
   splice(start: number, deleteCount: number, items: readonly PyValue[]): void {
     const storage = this.editableItems;
     chargeSlots(Math.max(items.length - deleteCount, 0));
-    // Only a change of length moves the items after the replaced ones.
-    chargeScan(items.length === deleteCount ? items.length : storage.length - start);
+    if (items.length === deleteCount) {
+      // A replacement of the same length moves nothing else, so it writes the new items in place.
+      chargeScan(items.length);
+      for (const [index, item] of items.entries()) storage[start + index] = item;
+      return;
+    }
+    chargeScan(storage.length - start);
     if (items.length === 1) storage.splice(start, deleteCount, items[0]);
     else this.storage = [...storage.slice(0, start), ...items, ...storage.slice(start + deleteCount)];
   }
