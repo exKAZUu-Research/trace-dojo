@@ -1086,6 +1086,13 @@ const amk = (next) => ({ [Symbol.asyncIterator]() { return { next, return() { co
   }
 })();`,
   ],
+  [
+    'returning from async iteration of sync iterators without return',
+    `const arr = { [Symbol.iterator]() { let i = 0; return { next() { return { done: i > 3, value: i++ }; } }; } };
+async function* g() { const r = yield* arr; console.log('r', r); }
+const tick = (n) => n > 0 && Promise.resolve().then(() => { console.log('tick'); tick(n - 1); });
+(async () => { const it = g(); await it.next(); tick(5); console.log(await it.return(7)); for await (const x of arr) { if (x === 1) break; } console.log('after break'); })();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

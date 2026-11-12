@@ -43,7 +43,25 @@ export function asyncIteratorOf(
     WELL_KNOWN_SYMBOLS.iterator,
     syncFactory ?? runtime.get(iterable, WELL_KNOWN_SYMBOLS.iterator)
   );
-  return iterationOf(runtime, iterator, (step, method) => asyncFromSyncStep(runtime, iterator, step, method));
+  const iteration = iterationOf(runtime, iterator, (step, method) =>
+    asyncFromSyncStep(runtime, iterator, step, method)
+  );
+  return {
+    iterator,
+    nextMethod: iteration.nextMethod,
+    next: iteration.next,
+    // The async-from-sync iterator always has `return`, which ends at once when the sync iterator has none.
+    get return() {
+      return (
+        iteration.return ??
+        ((...args: Value[]) =>
+          asyncFromSyncStep(runtime, iterator, () => iteratorResult(runtime, args[0], true), 'return'))
+      );
+    },
+    get throw() {
+      return iteration.throw;
+    },
+  };
 }
 
 /**
