@@ -45,3 +45,16 @@ except TypeError as error:
     got.append(str(error))
 if got != [Iterating(7, 20), 'Expected 2 arguments, got 1']:
     raise AssertionError(got)
+
+# _asdict and _replace read no more of the iteration than there are fields.
+import itertools
+
+
+class Counting(Base):
+    def __iter__(self):
+        return itertools.count()
+
+
+got = [Counting(1, 2)._asdict(), Counting(1, 2)._replace(ok=7)]
+if got != [{'ok': 0, 'value': 1}, Counting(7, 1)]:
+    raise AssertionError(got)

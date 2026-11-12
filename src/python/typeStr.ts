@@ -509,18 +509,12 @@ function translation(mapped: PyValue): string {
   return String.fromCodePoint(Number(code));
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows str.maketrans for its one-, two-, and three-argument forms.
 function makeTranslation(args: PyValue[]): PyDict {
   const table = newDict();
   if (args.length === 1) {
     const [mapping] = args;
     if (!(mapping instanceof PyDict)) throw typeError('if you give only one argument to maketrans it must be a dict');
-    for (const entry of mapping.store.ordered()) {
-      const key = typeof entry.key === 'string' ? BigInt(entry.key.codePointAt(0) as number) : entry.key;
-      if (typeof entry.key === 'string' && strLength(entry.key) !== 1)
-        throw valueError('string keys in translate table must be of length 1');
-      table.store.set(key, entry.value);
-    }
+    for (const entry of mapping.store.ordered()) table.store.set(translationKey(entry.key), entry.value);
     return table;
   }
   const from = iterStr(
@@ -534,6 +528,14 @@ function makeTranslation(args: PyValue[]): PyDict {
     for (const char of iterStr(expectStrArgument(args[2], 'maketrans() argument 3')))
       table.store.set(BigInt(char.codePointAt(0) as number), None);
   return table;
+}
+
+/** A key of the dict str.maketrans takes, whose characters it turns into code points, with CPython's errors. */
+function translationKey(key: PyValue): PyValue {
+  if (typeof key === 'bigint' || typeof key === 'boolean') return key;
+  if (typeof key !== 'string') throw typeError('keys in translate table mustbe strings or integers');
+  if (strLength(key) !== 1) throw valueError('string keys in translatetable must be of length 1');
+  return BigInt(key.codePointAt(0) as number);
 }
 
 method(

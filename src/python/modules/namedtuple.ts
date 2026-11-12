@@ -3,7 +3,7 @@ import { pyRepr, pyStr } from '../conversions';
 import { pythonFunction, pythonMethod } from '../define';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { argument } from '../nativeArgs';
-import { callValue, getAttribute, isTruthy, toArray } from '../objects';
+import { callValue, getAttribute, isTruthy, iterate, toArray } from '../objects';
 import { PYTHON_WHITESPACE } from '../strings';
 import { containerRepr } from '../typeContainers';
 import {
@@ -18,7 +18,16 @@ import {
   typeError,
   valueError,
 } from '../types';
-import { AttributeMap, type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyTuple, type PyValue } from '../values';
+import {
+  AttributeMap,
+  DONE,
+  type Kwargs,
+  PyBuiltinFunction,
+  PyClass,
+  PyDescriptor,
+  PyTuple,
+  type PyValue,
+} from '../values';
 import { PYTHON_KEYWORDS } from './keywords';
 
 /** `collections.namedtuple`. */
@@ -152,12 +161,8 @@ function defineNamedTupleMethods(cls: PyClass): void {
   pythonMethod(cls, '_asdict', '', (self) => {
     const tuple = libraryReceiver(self, isNamedTuple, '_fields', 'NamedTuple._asdict');
     // CPython zips the fields with the tuple's iteration, which a subclass may override.
-    const values = toArray(tuple);
-    return newDict(
-      fieldsOf(tuple)
-        .slice(0, values.length)
-        .map((field, index) => [field, values[index]])
-    );
+    const fields = fieldsOf(tuple);
+    return newDict(leadingItems(tuple, fields.length).map((value, index) => [fields[index], value]));
   });
   pythonMethod(cls, '_replace', '**kwds', (self, _args, kwargs) => replaceFields(self, kwargs));
   pythonMethod(cls, '_make', 'iterable', (owner, [iterable]) => makeNamedTuple(owner as PyClass, iterable), 'class');
@@ -170,17 +175,27 @@ function replaceFields(self: PyValue, kwargs: Kwargs): PyValue {
   const tuple = libraryReceiver(self, isNamedTuple, '_make', 'NamedTuple._replace');
   const remaining = new Map(kwargs);
   // map() stops at the shorter of the fields and the tuple's iteration, which a subclass may override.
-  const values = toArray(tuple);
-  const items = fieldsOf(tuple)
-    .slice(0, values.length)
-    .map((field, index) => {
-      const value = remaining.get(field as string) ?? values[index];
-      remaining.delete(field as string);
-      return value;
-    });
+  const fields = fieldsOf(tuple);
+  const items = leadingItems(tuple, fields.length).map((current, index) => {
+    const value = remaining.get(fields[index] as string) ?? current;
+    remaining.delete(fields[index] as string);
+    return value;
+  });
   const result = callValue(getAttribute(tuple.cls, '_make'), [newList(items)]);
   if (remaining.size > 0) throw typeError(`Got unexpected field names: ${pyRepr(newList([...remaining.keys()]))}`);
   return result;
+}
+
+/** At most `count` items of a tuple's iteration, read no further, as zip() and map() read them beside the fields. */
+function leadingItems(tuple: PyTuple, count: number): PyValue[] {
+  const next = iterate(tuple);
+  const items: PyValue[] = [];
+  while (items.length < count) {
+    const item = next();
+    if (item === DONE) break;
+    items.push(item);
+  }
+  return items;
 }
 
 /** Transcribes `_make` of collections.namedtuple, which builds the tuple without calling the class. */
