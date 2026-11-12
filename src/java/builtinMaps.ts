@@ -16,6 +16,7 @@ import {
   touch,
   uncountedMapClasses,
   unmodifiableClasses,
+  unmodifiableWrappers,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
 import { accessedEntry, defineLinkedHashMapOrder, evictionOf, recordAccess } from './builtinLinkedHashMap';
@@ -387,15 +388,18 @@ function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass:
 function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo): void {
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
     if (other === receiver) return true;
+    // An unmodifiable wrapper compares as its backing map does.
+    let map = receiver as JavaObject;
+    while (unmodifiableWrappers.has(map)) map = map.retained?.[0] as JavaObject;
+    if (other === map) return true;
     if (!(other instanceof JavaObject) || !other.store || !frame.runtime.isInstance(other, mapClass)) return false;
-    const { entries } = storeOf(receiver);
-    const map = receiver as JavaObject;
+    const entries = storeOf(map).ordered();
     const expectedModCount = map.modCount;
     return (
       entries.length === other.store.entries.length &&
-      // AbstractMap.equals reads each key through the other map's get, which an access-ordered map records, while
-      // its entry iterator fails once a read through a view of the same map reorders it.
-      [...entries].every((entry) => {
+      // AbstractMap.equals reads each key, in iteration order, through the other map's get, which an access-ordered
+      // map records, while its entry iterator fails once a read through a view of the same map reorders it.
+      entries.every((entry) => {
         if (map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
         const found = accessedEntry(frame, other, entry.key);
         return found !== undefined && javaEquals(frame, entry.value, found.value);

@@ -1596,6 +1596,34 @@ class Main {
   }
 });
 
+test('Java compares an unmodifiable map as its backing map and walks a map in iteration order for equality, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    Map<Integer, Integer> a = new LinkedHashMap<>(16, .75f, true); a.put(1, 1); a.put(2, 2);
+    System.out.println(Collections.unmodifiableMap(a).equals(a) + " " + a);
+    System.out.println(Collections.unmodifiableMap(Collections.unmodifiableMap(a)).equals(a) + " " + a);
+    t("self", () -> System.out.println(a.equals(Collections.unmodifiableMap(a))));
+    Map<Integer, Integer> h = new HashMap<>(); h.put(2, 2); h.put(1, 1);
+    Map<Integer, Integer> b = new LinkedHashMap<>(16, .75f, true); b.put(2, 2); b.put(1, 1);
+    System.out.println(h.equals(b) + " " + b);
+    Map<String, Integer> hs = new HashMap<>(); hs.put("b", 2); hs.put("a", 1);
+    Map<String, Integer> bs = new LinkedHashMap<>(16, .75f, true); bs.put("b", 2); bs.put("a", 1);
+    System.out.println(hs.equals(bs) + " " + bs);
+    Map<Integer, Integer> c = new LinkedHashMap<>(16, .75f, true); c.put(2, 2); c.put(1, 1);
+    System.out.println(Collections.unmodifiableMap(h).equals(c) + " " + c);
+  }
+}`,
+      'true {1=1, 2=2}\ntrue {1=1, 2=2}\nself java.util.ConcurrentModificationException\ntrue {1=1, 2=2}\ntrue {a=1, b=2}\ntrue {1=1, 2=2}\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
