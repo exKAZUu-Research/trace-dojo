@@ -314,6 +314,19 @@ test('a compound assignment of a creation records its step after the constructor
 const turtleCounts = (language: 'java' | 'javascript', program: string): number[] =>
   traceProgram(language, program, program).traceItems.map(({ turtles }) => turtles.length);
 
+test('a turtle that only a Map, a Set, or an iterator over one refers to stays', () => {
+  for (const collection of [
+    "const m = new Map(); { m.set('a', new Turtle()); }",
+    'const s = new Set(); { s.add(new Turtle()); }',
+    'let i; { i = new Map([[1, new Turtle()]]).values(); }',
+  ]) {
+    expect(turtleCounts('javascript', `${collection}\nconst x = 1;`).at(-1)).toBe(1);
+  }
+  expect(
+    turtleCounts('javascript', "let m = new Map(); { m.set('a', new Turtle()); }\nm = undefined;\nconst x = 1;").at(-1)
+  ).toBe(0);
+});
+
 test('a value a finally block delays keeps its turtle in both languages', () => {
   const java = javaMain(
     '    Turtle t = make();\n    t.forward();',

@@ -537,6 +537,52 @@ const sleep = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
 setTimeout(() => console.log('t2'), 0);
 const id = setTimeout(() => console.log('never'), 1); clearTimeout(id);`,
   ],
+  [
+    'Map and Set',
+    `const m = new Map([[1, 'a'], ['k', 2]]);
+m.set(NaN, { deep: { er: [1] } }).set(-0, 'zero');
+console.log(m, m.get(NaN), m.get(0), m.size, m.keys(), m.entries(), new Map(), [m.values()]);
+const s = new Set([3, 1, 3, 2]);
+for (const v of s) { if (v === 3) { s.delete(1); s.add(4); } console.log(v); }
+const it = s.values(); it.next(); console.log(it, s, [...s], new Set('hello'));
+m.forEach((v, k) => { if (k === 1) m.delete('k'); console.log(k, v); });
+const long = new Map(); for (let i = 0; i < 4; i++) long.set('a fairly long key number ' + i, { value: i });
+console.log(long, new WeakMap(), new WeakSet(), Map.groupBy([1, 2, 3], (x) => x % 2));
+const a = new Set([1, 2, 3]), b = new Set([2, 3, 4]);
+console.log(a.union(b), a.intersection(b), a.difference(b), a.symmetricDifference(b), a.isSubsetOf(b), a.isDisjointFrom(new Set([9])));
+const c = new Map(); c.set('self', c); console.log(c, Object.prototype.toString.call(c));
+try { Map(); } catch (e) { console.log(e.message); }
+try { new Map([1]); } catch (e) { console.log(e.message); }
+try { Set.prototype.add.call({}, 1); } catch (e) { console.log(e.message); }`,
+  ],
+  [
+    'JSON',
+    `const value = { a: [1, 'x', null, undefined, () => 1], b: undefined, c: NaN, n: { toJSON(k) { return 'K' + k; } } };
+console.log(JSON.stringify(value), JSON.stringify(value, null, 2), JSON.stringify(value, ['a', 'c'], '--'));
+console.log(JSON.stringify({ a: 1, b: [2] }, (k, v) => (typeof v === 'number' ? v * 10 : v)), JSON.stringify(undefined));
+const cycle = { list: [1, { inner: {} }] }; cycle.list[1].inner.back = cycle;
+try { JSON.stringify(cycle); } catch (e) { console.log(e.message); }
+console.log('%j %j', { a: [1] }, cycle);
+console.log(JSON.parse('{"a":[1,{"b":2}],"c":"d"}', (k, v) => (typeof v === 'number' ? v + 1 : v)), JSON.parse(' -1.5e2 '));
+for (const text of ['x', '', '{', '[1,]', '{"a":1,}', '{a:1}', '"abc', '1 2', 'undefined', '[1, 2, 3, 4, 5, 6, 7, x, 9, 10, 11, 12]', '01', '-']) {
+  try { JSON.parse(text); } catch (e) { console.log(e.name, e.message); }
+}
+const copy = structuredClone({ m: new Map([[1, [2]]]), s: new Set([1]) }); console.log(copy);`,
+  ],
+  [
+    'everyday Array, Object, Number, String, and Math members',
+    `const a = [3, 1, 2];
+console.log(a.toSorted(), a.toReversed(), a.toSpliced(1, 1, 'x', 'y'), a.with(-1, 9), a, [1, 2, 3, 4, 5].copyWithin(0, 3));
+try { a.with(5, 0); } catch (e) { console.log(e.message); }
+const o = Object.defineProperty({ shown: 1 }, 'hidden', { value: 2 });
+Object.defineProperties(o, { twice: { get() { return this.shown * 2; }, enumerable: true } });
+console.log(o, o.hidden, o.twice, Object.getOwnPropertyNames(o), Object.getOwnPropertyDescriptor(o, 'hidden'), Object.getOwnPropertyNames([1]));
+try { Object.defineProperty(o, 'hidden', { value: 3 }); } catch (e) { console.log(e.message); }
+console.log(Object.fromEntries([['a', 1], ['b', 2]]), Object.groupBy([1, 2, 3], (x) => (x > 1 ? 'big' : 'small')), Object.is(-0, 0), Object.isFrozen(Object.freeze({})));
+console.log(Object.setPrototypeOf({ n: 'x' }, { hi() { return 'hi ' + this.n; } }).hi(), Object.isSealed(Object.seal({ a: 1 })));
+console.log((123.456).toPrecision(4), (0.00012).toPrecision(1), (12345).toExponential(2), 'Å'.normalize('NFD').length);
+console.log(Math.fround(5.5), Math.clz32(1), Math.imul(3, 4), Math.expm1(0), Math.log1p(0), Math.sinh(0), Math.cosh(0), Math.tanh(0));`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

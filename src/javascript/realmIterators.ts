@@ -87,6 +87,7 @@ function arrayIteration(runtime: Runtime, object: JsObject, kind: 'keys' | 'valu
   let index = 0;
   const ops = object instanceof JsArray ? new ArrayOps(runtime, object) : undefined;
   return {
+    source: object,
     next: () => {
       const length = ops ? ops.length : Math.trunc(runtime.toNumber(runtime.get(object, 'length'))) || 0;
       if (index >= length) {

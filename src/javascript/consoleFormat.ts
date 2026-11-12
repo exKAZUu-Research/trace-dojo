@@ -1,6 +1,7 @@
 import { formatNumber, inspect, OutputBudget } from './inspect';
+import { jsonStringify } from './realmJson';
 import type { Runtime } from './runtime';
-import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Value } from './values';
+import { isAccessor, JsFunction, JsObject, JsThrow, type Value } from './values';
 
 /** Formats the arguments of a `console` call as Node.js's `util.format` does, including its `%` placeholders. */
 export function formatLogArguments(runtime: Runtime, args: Value[]): string {
@@ -112,40 +113,20 @@ function hasBuiltinToString(object: JsObject): boolean {
 /** `JSON.stringify` of the value, or `[Circular]` for a cyclic one, as `%j` prints them. */
 function jsonOrCircular(runtime: Runtime, value: Value): string {
   try {
-    return jsonText(runtime, value, new Set()) ?? 'undefined';
+    return jsonStringify(runtime, value, undefined, undefined, runtime.currentRow) ?? 'undefined';
   } catch (error) {
-    if (error instanceof CircularError) return '[Circular]';
+    if (error instanceof JsThrow && isCircularError(error.value)) return '[Circular]';
     throw error;
   }
 }
 
-function jsonText(runtime: Runtime, value: Value, ancestors: Set<JsObject>): string | undefined {
-  if (value === null || typeof value === 'boolean') return String(value);
-  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'null';
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (value === undefined || typeof value === 'symbol' || value instanceof JsFunction) return undefined;
-  if (ancestors.has(value)) throw new CircularError();
-  ancestors.add(value);
-  const text = value instanceof JsArray ? jsonArray(runtime, value, ancestors) : jsonObject(runtime, value, ancestors);
-  ancestors.delete(value);
-  return text;
-}
-
-function jsonArray(runtime: Runtime, array: JsArray, ancestors: Set<JsObject>): string {
-  runtime.scan(array.elements.length);
-  const items = array.elements.map(
-    (element) => (element === HOLE ? undefined : jsonText(runtime, element, ancestors)) ?? 'null'
+function isCircularError(error: Value): boolean {
+  if (!(error instanceof JsObject) || !error.isError) return false;
+  const message = error.properties.get('message');
+  return (
+    message !== undefined &&
+    !isAccessor(message) &&
+    typeof message.value === 'string' &&
+    message.value.startsWith('Converting circular structure to JSON\n')
   );
-  return `[${items.join(',')}]`;
 }
-
-function jsonObject(runtime: Runtime, object: JsObject, ancestors: Set<JsObject>): string {
-  const entries: string[] = [];
-  for (const key of runtime.ownEnumerableKeys(object)) {
-    const entry = jsonText(runtime, runtime.get(object, key), ancestors);
-    if (entry !== undefined) entries.push(`${JSON.stringify(key)}:${entry}`);
-  }
-  return `{${entries.join(',')}}`;
-}
-
-class CircularError extends Error {}

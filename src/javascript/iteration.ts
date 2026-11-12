@@ -8,6 +8,8 @@ export const DONE = Symbol('done');
 export interface HostIterator {
   next: () => Value | typeof DONE;
   close?: () => void;
+  /** The object the iteration reads, which garbage collection must keep alive with the iterator. */
+  source?: Value;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { PromiseState } from './promises';
+import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Key, type Value } from './values';
@@ -138,7 +139,8 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   recurseTimes++;
   ctx.seen.add(value);
   ctx.currentDepth = recurseTimes;
-  const output = value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : [];
+  const output =
+    value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : formatCollection(ctx, value, recurseTimes);
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
   for (const key of keys) output.push(formatProperty(ctx, value, recurseTimes, key));
   runtime.scan(output.length);
@@ -150,10 +152,14 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
+// code-gauge-allow functionCognitiveComplexity 20 -- Ports Node.js's util.inspect, so the two stay comparable.
 function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
   if (value instanceof JsArray) {
     const prefix = constructor === 'Array' ? '' : prefixOf(constructor, 'Array', `(${value.elements.length})`);
     return value.elements.length === 0 && !hasKeys ? `${prefix}[]` : { base: '', braces: [`${prefix}[`, ']'] };
+  }
+  if (value.collection || value.hostIterator instanceof CollectionIterator) {
+    return collectionFrameOf(value, constructor, hasKeys);
   }
   if (value.turtle) return `Turtle { x: ${value.turtle.x}, y: ${value.turtle.y} }`;
   let base = '';
@@ -262,6 +268,54 @@ function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string
     }
   }
   const remaining = elements.length - index;
+  if (remaining > 0) output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
+  return output;
+}
+
+/** What surrounds the entries of a Map, Set, WeakMap, WeakSet, or an iterator over a Map or Set. */
+function collectionFrameOf(value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
+  const tag = toStringTagOf(value) ?? '';
+  const iterator = value.hostIterator;
+  if (iterator instanceof CollectionIterator) {
+    const type = `${iterator.state.kind} Iterator`;
+    const open = tag === type ? `[${tag}] {` : `[${tag ? `${tag}] [` : ''}${type}] {`;
+    return {
+      base: '',
+      braces: [iterator.kind === 'entries' ? open.replace(/ Iterator] \{$/, ' Entries] {') : open, '}'],
+    };
+  }
+  const state = value.collection as NonNullable<JsObject['collection']>;
+  let prefix = prefixOf(constructor, state.kind, state.isWeak ? '' : `(${state.size})`);
+  if (tag && tag !== (constructor ?? state.kind)) prefix += `[${tag}] `;
+  if (!state.isWeak && state.size === 0 && !hasKeys) return `${prefix}{}`;
+  return { base: '', braces: [`${prefix}{`, '}'] };
+}
+
+/** The entries of a Map, Set, or an iterator over one, which an iterator shows from where it has reached on. */
+// code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's util.inspect, so the two stay comparable.
+function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): string[] {
+  const iterator = value.hostIterator instanceof CollectionIterator ? value.hostIterator : undefined;
+  const state = iterator ? iterator.state : value.collection;
+  if (!state) return [];
+  if (state.isWeak) return ['<items unknown>'];
+  let entries: CollectionEntry[] = [];
+  if (!iterator) entries = state.liveEntries(ctx.runtime);
+  else if (iterator.position !== Number.POSITIVE_INFINITY) entries = state.liveEntries(ctx.runtime, iterator.position);
+  const formatEntry = (entry: CollectionEntry): string => {
+    if (!iterator) {
+      const key = formatCharged(ctx, entry.key, recurseTimes);
+      return state.kind === 'Map' ? `${key} => ${formatCharged(ctx, entry.value, recurseTimes)}` : key;
+    }
+    if (iterator.kind !== 'entries') {
+      return formatCharged(ctx, iterator.kind === 'keys' ? entry.key : entry.value, recurseTimes);
+    }
+    const pair = [formatCharged(ctx, entry.key, recurseTimes), formatCharged(ctx, entry.value, recurseTimes)];
+    return reduceToSingleString(ctx, pair, '', ['[', ']'], recurseTimes, value);
+  };
+  ctx.indentationLvl += 2;
+  const output = entries.slice(0, MAX_ARRAY_LENGTH).map((entry) => formatEntry(entry));
+  ctx.indentationLvl -= 2;
+  const remaining = entries.length - output.length;
   if (remaining > 0) output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
   return output;
 }

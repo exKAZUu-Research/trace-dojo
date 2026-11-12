@@ -111,6 +111,13 @@ function defineExtractions(method: StringMethod): void {
   method('trimEnd', 0, (_, text) => text.trimEnd());
   method('toUpperCase', 0, (_, text) => text.toUpperCase());
   method('toLowerCase', 0, (_, text) => text.toLowerCase());
+  method('normalize', 0, ({ runtime, args }, text) => {
+    const form = args[0] === undefined ? 'NFC' : runtime.toString(args[0]);
+    if (!['NFC', 'NFD', 'NFKC', 'NFKD'].includes(form)) {
+      runtime.throwError('RangeError', 'The normalization form should be one of NFC, NFD, NFKC, NFKD.');
+    }
+    return text.normalize(form);
+  });
   method('split', 2, ({ runtime, args }, text) => {
     const limit = args[1] === undefined ? 2 ** 32 - 1 : runtime.toNumber(args[1]) >>> 0;
     const regexp = asRegExp(args[0]);
