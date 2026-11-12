@@ -3,7 +3,7 @@ import { method } from './define';
 import { pyHash } from './hashing';
 import { getItem } from './items';
 import { argument, checkArgs } from './nativeArgs';
-import { callValue, getAttribute, getIterator, lengthOf, lookupSpecial } from './objects';
+import { callValue, exactLength, getAttribute, getIterator, lookupSpecial } from './objects';
 import { binaryOp, compareOp, contains } from './operators';
 import { builtinClass, typeError, typeName } from './types';
 import { PyDict, PyOpaque, type PyValue } from './values';
@@ -35,7 +35,7 @@ method(mappingProxyClass, '__repr__', 'none', 0, 0, (self) => `mappingproxy(${py
 method(mappingProxyClass, '__str__', 'none', 0, 0, (self) => pyStr(mappingOf(self)));
 method(mappingProxyClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(mappingOf(self), key));
 method(mappingProxyClass, '__contains__', 'one', 1, 1, (self, [key]) => contains(mappingOf(self), key));
-method(mappingProxyClass, '__len__', 'none', 0, 0, (self) => BigInt(lengthOf(mappingOf(self))));
+method(mappingProxyClass, '__len__', 'none', 0, 0, (self) => exactLength(mappingOf(self)));
 method(mappingProxyClass, '__iter__', 'none', 0, 0, (self) => getIterator(mappingOf(self)));
 method(mappingProxyClass, '__reversed__', 'none', 0, 0, (self) => callOnMapping(self, '__reversed__', []));
 method(mappingProxyClass, 'get', 'expected', 1, 2, (self, args) => callOnMapping(self, 'get', args));

@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 405 -- The builtin functions and their namespace belong together.
 import { abstractSubclassCheck } from './abstractClasses';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
@@ -12,6 +11,7 @@ import {
   bindValue,
   callValue,
   deleteAttribute,
+  exactLength,
   getAttribute,
   getAttributeOrUndefined,
   getItem,
@@ -21,7 +21,6 @@ import {
   iterate,
   iterateEach,
   iterateHeld,
-  lengthOf,
   lookupSpecial,
   nextOf,
   setAttribute,
@@ -204,7 +203,7 @@ reversedClass.construct = (_cls, args, kwargs) => {
   ) {
     throw typeError(`'${typeName(sequence)}' object is not reversible`);
   }
-  let index = BigInt(lengthOf(sequence)) - 1n;
+  let index = exactLength(sequence) - 1n;
   const iterator = new PyIterator(
     reversedClass,
     () => (index >= 0n ? getItem(sequence, index--) : DONE),
@@ -616,7 +615,7 @@ export function createBuiltins(): Map<string, PyValue> {
     ['issubclass', builtin('issubclass', 'expected', 2, 2, ([cls, classInfo]) => isSubclass(cls, classInfo))],
     ['iter', builtin('iter', 'expected', 1, 2, iter)],
     ['aiter', unsupportedFunction('aiter', 'aiter()')],
-    ['len', one('len', ([value]) => BigInt(lengthOf(value)))],
+    ['len', one('len', ([value]) => exactLength(value))],
     ['locals', unsupportedFunction('locals', 'locals()')],
     ['max', builtin('max', 'expected', 1, Number.POSITIVE_INFINITY, minMax('max'), { keywords: ['key', 'default'] })],
     ['min', builtin('min', 'expected', 1, Number.POSITIVE_INFINITY, minMax('min'), { keywords: ['key', 'default'] })],

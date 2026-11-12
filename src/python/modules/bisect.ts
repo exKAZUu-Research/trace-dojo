@@ -2,11 +2,11 @@ import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { callValue, getAttribute, getItem, lengthOf } from '../objects';
+import { callValue, exactLength, getAttribute, getItem } from '../objects';
 import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { None, pyError, valueError } from '../types';
-import { type Kwargs, PyList, PyRange, type PyValue } from '../values';
+import { type Kwargs, PyList, type PyValue } from '../values';
 
 const KEYWORDS = ['a', 'x', 'lo', 'hi', 'key'];
 
@@ -24,7 +24,7 @@ function bounds(
   if (lo < 0n) throw valueError('lo must be non-negative');
   const hiValue = argument(args, kwargs, 3, 'hi') ?? None;
   // Argument clinic converts `lo` as a Py_ssize_t and the optional `hi` with PyNumber_AsSsize_t, whose messages differ.
-  const hi = hiValue === None ? lengthOfSequence(a) : ssize(hiValue, "cannot fit 'int' into an index-sized integer");
+  const hi = hiValue === None ? exactLength(a) : ssize(hiValue, "cannot fit 'int' into an index-sized integer");
   return { a, x, lo, hi, key: kwargs?.get('key') ?? None };
 }
 
@@ -33,13 +33,6 @@ function ssize(value: PyValue, message: string): bigint {
   const index = toIndex(value);
   if (index > MAX_SSIZE || index < -MAX_SSIZE - 1n) throw pyError('OverflowError', message);
   return index;
-}
-
-/** The length of the searched sequence, read exactly for a range, which a search need not materialize. */
-function lengthOfSequence(a: PyValue): bigint {
-  if (!(a instanceof PyRange)) return BigInt(lengthOf(a));
-  if (a.length > MAX_SSIZE) throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
-  return a.length;
 }
 
 // Transcribes bisect.py, so that it compares items in CPython's order; the bounds stay exact integers.

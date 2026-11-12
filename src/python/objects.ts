@@ -236,33 +236,35 @@ export function isTruthy(value: PyValue): boolean {
     return result;
   }
   const len = lookupSpecial(value, '__len__');
-  if (len !== undefined) return lengthOf(value) > 0;
+  if (len !== undefined) return exactLength(value) > 0n;
   return true;
 }
 
-/** Python's `len()`. */
+/** The length of a value as a host number, for code that sizes or indexes a host array by it. */
 export function lengthOf(value: PyValue): number {
-  if (typeof value === 'string') return strLength(value);
-  if (value instanceof PyList || value instanceof PyTuple) return value.items.length;
-  if (value instanceof PyDict) return value.store.size;
-  if (value instanceof PySet) return value.table.size;
-  if (value instanceof PyDictView) return value.dict.store.size;
-  if (value instanceof PyClass && value.enumMembers) return value.enumMembers.length;
+  return Number(exactLength(value));
+}
+
+const MAX_SSIZE = (1n << 63n) - 1n;
+
+/** Python's `len()`, exact up to CPython's Py_ssize_t limit. */
+export function exactLength(value: PyValue): bigint {
+  if (typeof value === 'string') return BigInt(strLength(value));
+  if (value instanceof PyList || value instanceof PyTuple) return BigInt(value.items.length);
+  if (value instanceof PyDict) return BigInt(value.store.size);
+  if (value instanceof PySet) return BigInt(value.table.size);
+  if (value instanceof PyDictView) return BigInt(value.dict.store.size);
+  if (value instanceof PyClass && value.enumMembers) return BigInt(value.enumMembers.length);
   if (value instanceof PyRange) {
-    const { length } = value;
-    if (length > BigInt(Number.MAX_SAFE_INTEGER))
-      throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
-    return Number(length);
+    if (value.length > MAX_SSIZE) throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
+    return value.length;
   }
   const len = lookupSpecial(value, '__len__');
   if (len === undefined) throw typeError(`object of type '${typeName(value)}' has no len()`);
-  const result = callValue(bindValue(len, value), []);
-  if (typeof result !== 'bigint' && typeof result !== 'boolean') {
-    throw typeError(`'${typeName(result)}' object cannot be interpreted as an integer`);
-  }
-  const length = BigInt(result);
+  const length = toIndex(callValue(bindValue(len, value), []));
   if (length < 0n) throw pyError('ValueError', '__len__() should return >= 0');
-  return Number(length);
+  if (length > MAX_SSIZE) throw pyError('OverflowError', "cannot fit 'int' into an index-sized integer");
+  return length;
 }
 
 export { deleteItem, getItem, setItem } from './items';

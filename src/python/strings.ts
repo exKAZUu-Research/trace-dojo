@@ -46,8 +46,8 @@ export function sliceStr(text: string, start: number, stop: number, step: number
  * The characters `str.isspace()`, `split()`, and `strip()` treat as whitespace: Python's set, which, unlike JavaScript's
  * `\s`, includes U+001C to U+001F and U+0085 and excludes U+FEFF.
  */
-// oxlint-disable-next-line eslint/no-control-regex -- Python counts these separators as whitespace.
 export const PYTHON_WHITESPACE =
+  // oxlint-disable-next-line eslint/no-control-regex -- Python counts these separators as whitespace.
   /[\t\n\v\f\r\u001C-\u001F \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/u;
 
 const NUMBER_SPACE = String.raw`[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]`;

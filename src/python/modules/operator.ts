@@ -4,12 +4,12 @@ import { toIndex } from '../numbers';
 import {
   callValue,
   deleteItem,
+  exactLength,
   getAttribute,
   getAttributeOrUndefined,
   getItem,
   isTruthy,
   iterateOr,
-  lengthOf,
   lookupSpecial,
   type NextFunction,
   setItem,
@@ -230,7 +230,7 @@ function iterateArgument(container: PyValue): NextFunction {
 function lengthHint(value: PyValue, fallback: PyValue): PyValue {
   const defaultLength = toIndex(fallback);
   try {
-    return BigInt(lengthOf(value));
+    return exactLength(value);
   } catch (error) {
     if (!(error instanceof PyError) || !error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError'))) throw error;
   }

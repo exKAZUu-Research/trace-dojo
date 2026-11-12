@@ -9,7 +9,17 @@ import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { type ArgStyle, argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { bindValue, callValue, getAttribute, getItem, isTruthy, lengthOf, setItem, toArray } from '../objects';
+import {
+  bindValue,
+  callValue,
+  exactLength,
+  getAttribute,
+  getItem,
+  isTruthy,
+  lengthOf,
+  setItem,
+  toArray,
+} from '../objects';
 import { binaryOp, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { builtinClass, newList, newTuple, None, pyError, typeError, typeName, valueError } from '../types';
@@ -204,28 +214,29 @@ function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): Py
   if (!isSequence(population) && typeof population !== 'string') {
     throw typeError('Population must be a sequence.  For dicts or sets, use sorted(d).');
   }
-  const n = lengthOf(population);
+  const n = exactLength(population);
   if (counts !== None) return sampleWithCounts(generator, population, n, kValue, counts);
   const k = Number(toIndex(kValue));
-  if (k < 0 || k > n) throw valueError('Sample larger than population or is negative');
+  if (k < 0 || BigInt(k) > n) throw valueError('Sample larger than population or is negative');
   currentRuntime().ensureRoom(k);
   const result: PyValue[] = [];
   let setSize = 21;
   if (k > 5) setSize += 4 ** Math.ceil(Math.log(k * 3) / Math.log(4));
-  if (n <= setSize) {
+  if (n <= BigInt(setSize)) {
     const pool = toArray(population);
+    const size = Number(n);
     for (let index = 0; index < k; index++) {
-      const j = Number(generator.randbelow(BigInt(n - index)));
+      const j = Number(generator.randbelow(BigInt(size - index)));
       result.push(pool[j]);
-      pool[j] = pool[n - index - 1];
+      pool[j] = pool[size - index - 1];
     }
   } else {
-    const selected = new Set<number>();
+    const selected = new Set<bigint>();
     for (let index = 0; index < k; index++) {
-      let j = Number(generator.randbelow(BigInt(n)));
-      while (selected.has(j)) j = Number(generator.randbelow(BigInt(n)));
+      let j = generator.randbelow(n);
+      while (selected.has(j)) j = generator.randbelow(n);
       selected.add(j);
-      result.push(getItem(population, BigInt(j)));
+      result.push(getItem(population, j));
     }
   }
   return newList(result);
@@ -235,7 +246,7 @@ function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): Py
 function sampleWithCounts(
   generator: MersenneTwister,
   population: PyValue,
-  n: number,
+  n: bigint,
   k: PyValue,
   counts: PyValue
 ): PyValue {
@@ -245,7 +256,7 @@ function sampleWithCounts(
     running = running === undefined ? count : binaryOp('+', running, count);
     cumulative.push(running);
   }
-  if (cumulative.length !== n) throw valueError('The number of counts does not match the population');
+  if (BigInt(cumulative.length) !== n) throw valueError('The number of counts does not match the population');
   const total = cumulative.pop() ?? 0n;
   if (typeof total !== 'bigint' && typeof total !== 'boolean') throw typeError('Counts must be integers');
   if (BigInt(total) < 0n) throw valueError('Counts must be non-negative');
@@ -519,9 +530,9 @@ function randint(generator: MersenneTwister, a: PyValue, b: PyValue): bigint {
 }
 
 function choice(generator: MersenneTwister, sequence: PyValue): PyValue {
-  const length = lengthOf(sequence);
-  if (length === 0) throw pyError('IndexError', 'Cannot choose from an empty sequence');
-  return getItem(sequence, generator.randbelow(BigInt(length)));
+  const length = exactLength(sequence);
+  if (length === 0n) throw pyError('IndexError', 'Cannot choose from an empty sequence');
+  return getItem(sequence, generator.randbelow(length));
 }
 
 function shuffle(generator: MersenneTwister, list: PyValue): PyValue {
