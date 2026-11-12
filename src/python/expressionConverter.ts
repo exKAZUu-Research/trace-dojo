@@ -28,6 +28,7 @@ import {
   rowOf,
   unsupported,
 } from './convertNodes';
+import { hasUnbracketedLambda } from './fStringLambdas';
 import { parseNumber } from './numberLiterals';
 import { fail, ScopeBuilder } from './scopes';
 
@@ -450,7 +451,7 @@ export abstract class ExpressionConverter {
     const expressionNode = field(node, 'expression');
     const row = rowOf(node);
     if (expressionNode.type === 'yield') unsupported(node, '値を受け取る yield');
-    if (expressionNode.type === 'lambda') fail(row, 'f-string の { } の中の lambda は、( ) で囲んでください。');
+    if (hasUnbracketedLambda(expressionNode)) fail(row, 'f-string の { } の中の lambda は、( ) で囲んでください。');
     const expression =
       expressionNode.type === 'expression_list' || expressionNode.type === 'pattern_list'
         ? { kind: 'tuple' as const, elements: namedChildren(expressionNode).map((child) => this.element(child)), row }

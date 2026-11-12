@@ -309,6 +309,7 @@ test.each([
   ['async as a name', 'x = 1\nasync = 2', 1],
   ['await as an attribute name', 'import math\nx = math.await', 1],
   ['a bare lambda in an f-string', "x = 1\ny = f'{lambda: 1}'", 1],
+  ['a bare lambda among an f-string tuple', "x = 1\ny = f'{1, lambda: 2}'", 1],
   ['two as in one pattern', 'match 1:\n    case 1 as a as b:\n        pass', 1],
   ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],
   ['an import of a file', 'import mymodule', 0],
