@@ -41,6 +41,8 @@ export interface Field {
   name: string;
   type: Type;
   embedded: boolean;
+  /** The field's tag, which encoding/json reads and which is part of the struct type's identity. */
+  tag?: string;
 }
 
 export interface StructType {
@@ -416,6 +418,7 @@ export function identical(a: Type, b: Type): boolean {
           return (
             field.name === otherField.name &&
             field.embedded === otherField.embedded &&
+            (field.tag ?? '') === (otherField.tag ?? '') &&
             identical(field.type, otherField.type)
           );
         })

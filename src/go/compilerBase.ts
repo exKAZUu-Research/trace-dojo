@@ -398,7 +398,7 @@ export abstract class CompilerBase {
       }
       if (name !== '_' && names.has(name)) this.error(field, `フィールド ${name} が2回宣言されています。`);
       names.add(name);
-      fields.push({ name, type, embedded: field.name === undefined });
+      fields.push({ name, type, embedded: field.name === undefined, tag: field.tag });
     }
     return { kind: 'struct', fields };
   }
@@ -578,7 +578,10 @@ function describeConstraint(constraint: InterfaceType): string {
   return describeType(constraint);
 }
 
-interface TypeTerm { tilde: boolean; type: Type }
+interface TypeTerm {
+  tilde: boolean;
+  type: Type;
+}
 
 /** Whether a term's types all belong to another term's. */
 function termIncludes(outer: TypeTerm, inner: TypeTerm): boolean {

@@ -9,6 +9,7 @@ import { ERRORS_PACKAGE } from './errors';
 import { FMT_PACKAGE } from './fmt';
 import { IO_PACKAGE } from './io';
 import { ITER_PACKAGE } from './iter';
+import { JSON_PACKAGE } from './json';
 import { MATH_PACKAGE } from './math';
 import { COLOR_PACKAGE, IMAGE_PACKAGE, RUNTIME_PACKAGE } from './misc';
 import { OS_PACKAGE } from './os';
@@ -41,6 +42,7 @@ const PACKAGES = new Map<string, GoPackage>(
     FMT_PACKAGE,
     IO_PACKAGE,
     ITER_PACKAGE,
+    JSON_PACKAGE,
     MAPS_PACKAGE,
     MATH_PACKAGE,
     OS_PACKAGE,
