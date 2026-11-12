@@ -337,24 +337,26 @@ function defineConsumers(builder: RealmBuilder): void {
   builder.method(iteratorPrototype, 'reduce', 1, (call) => {
     const { runtime, args } = call;
     const { record, callback } = startHelper(call, 'reduce');
-    let accumulator: Value;
-    let counter = 0;
-    if (args.length < 2) {
-      accumulator = step(runtime, record) as Value;
-      if ((accumulator as Value | typeof DONE) === DONE) {
-        runtime.throwError('TypeError', 'Reduce of a done iterator with no initial value');
-      }
-      counter = 1;
-    } else accumulator = args[1];
-    for (let value = step(runtime, record); value !== DONE; value = step(runtime, record)) {
-      const previous = accumulator;
-      accumulator = closingOnThrow(runtime, record, () =>
-        runtime.hold(previous, () =>
+    return runtime.holdingSlot((keep) => {
+      let accumulator: Value;
+      let counter = 0;
+      if (args.length < 2) {
+        accumulator = step(runtime, record) as Value;
+        if ((accumulator as Value | typeof DONE) === DONE) {
+          runtime.throwError('TypeError', 'Reduce of a done iterator with no initial value');
+        }
+        counter = 1;
+      } else accumulator = args[1];
+      keep(accumulator);
+      for (let value = step(runtime, record); value !== DONE; value = step(runtime, record)) {
+        const previous = accumulator;
+        accumulator = closingOnThrow(runtime, record, () =>
           runtime.call(callback, undefined, [previous, value, counter++], runtime.currentRow)
-        )
-      );
-    }
-    return accumulator;
+        );
+        keep(accumulator);
+      }
+      return accumulator;
+    });
   });
   builder.method(iteratorPrototype, 'forEach', 1, (call) => {
     const { runtime } = call;
@@ -383,7 +385,7 @@ function defineConsumers(builder: RealmBuilder): void {
           runtime.call(callback, undefined, [current, counter++], runtime.currentRow)
         );
         if (toBoolean(result) !== stopsOn) continue;
-        closeIterator(runtime, record);
+        runtime.hold(current, () => closeIterator(runtime, record));
         return name === 'find' ? current : found;
       }
       return notFound;

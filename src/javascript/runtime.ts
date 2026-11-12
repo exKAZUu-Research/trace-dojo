@@ -511,6 +511,23 @@ export class Runtime {
     }
   }
 
+  /**
+   * Keeps whichever value a builtin last passed to `keep` reachable while `run` computes, for a value it carries across
+   * calls of the program's code, such as an accumulator.
+   */
+  holdingSlot<T>(run: (keep: (value: Value) => void) => T): T {
+    const { temporaries } = this.frame;
+    const slot = temporaries.length;
+    temporaries.push(undefined);
+    try {
+      return run((value) => {
+        temporaries[slot] = value;
+      });
+    } finally {
+      temporaries.length = slot;
+    }
+  }
+
   // Conversions -------------------------------------------------------------------------------------------------------
 
   toPrimitive(value: Value, hint: 'number' | 'string' | 'default'): Primitive {
