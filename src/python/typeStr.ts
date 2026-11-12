@@ -35,6 +35,7 @@ import {
   title,
   upper,
 } from './unicodeCase';
+import { isDecimalChar, isDigitChar, isNumericChar } from './unicodeNumeric';
 import { type DONE, PyDict, PySlice, PyTuple, type PyValue } from './values';
 
 strClass.construct = (_cls, args, kwargs) => {
@@ -59,23 +60,9 @@ strClass.construct = (_cls, args, kwargs) => {
 };
 
 const LINE_BREAKS = '\n\r\v\f\u001C\u001D\u001E\u0085  ';
-const CJK_NUMERALS = new Set('〇一二三四五六七八九十百千万億兆零壱弐参拾廿卅貳參陸伍捌玖');
-const DIGIT_LIKE = /[²³¹⁰⁴-⁹₀-₉①-⑨⑴-⑼⒈-⒐⓪⓵-⓽⓿❶-❾➀-➈➊-➒]/u;
 
 function isSpace(char: string): boolean {
   return char.length === 1 && PYTHON_WHITESPACE.test(char);
-}
-
-function isDecimal(char: string): boolean {
-  return /\p{Nd}/u.test(char);
-}
-
-function isDigit(char: string): boolean {
-  return isDecimal(char) || DIGIT_LIKE.test(char);
-}
-
-function isNumeric(char: string): boolean {
-  return /\p{N}/u.test(char) || CJK_NUMERALS.has(char);
 }
 
 function isAlpha(char: string): boolean {
@@ -127,11 +114,11 @@ method(strClass, 'title', 'none', 0, 0, (self) => title(asStr(self)));
 // Predicates --------------------------------------------------------------------------------------------------------
 
 method(strClass, 'isalpha', 'none', 0, 0, (self) => every(asStr(self), isAlpha));
-method(strClass, 'isdecimal', 'none', 0, 0, (self) => every(asStr(self), isDecimal));
-method(strClass, 'isdigit', 'none', 0, 0, (self) => every(asStr(self), isDigit));
-method(strClass, 'isnumeric', 'none', 0, 0, (self) => every(asStr(self), isNumeric));
+method(strClass, 'isdecimal', 'none', 0, 0, (self) => every(asStr(self), isDecimalChar));
+method(strClass, 'isdigit', 'none', 0, 0, (self) => every(asStr(self), isDigitChar));
+method(strClass, 'isnumeric', 'none', 0, 0, (self) => every(asStr(self), isNumericChar));
 method(strClass, 'isalnum', 'none', 0, 0, (self) =>
-  every(asStr(self), (char) => isAlpha(char) || isNumeric(char) || isDigit(char))
+  every(asStr(self), (char) => isAlpha(char) || isNumericChar(char) || isDigitChar(char))
 );
 method(strClass, 'isspace', 'none', 0, 0, (self) => every(asStr(self), isSpace));
 // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
