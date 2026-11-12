@@ -100,10 +100,9 @@ function scanned(self: PyValue): string {
   return text;
 }
 
+/** Whether a text is nonempty and every character passes a test, read lazily and charged as everyCode charges. */
 function every(text: string, test: (char: string) => boolean): boolean {
-  const chars = iterStr(text);
-  currentRuntime().scan(chars.length);
-  return chars.length > 0 && chars.every(test);
+  return text !== '' && everyCode(text, (code) => test(String.fromCodePoint(code)));
 }
 
 // Basic protocol ----------------------------------------------------------------------------------------------------

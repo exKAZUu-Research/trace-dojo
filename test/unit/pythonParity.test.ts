@@ -343,6 +343,12 @@ test.each([
   ['isupper', "'X' * 1000000", "'x' + 'X' * 999999"],
   ['islower', "'x' * 1000000", "'X' + 'x' * 999999"],
   ['istitle', "'X' + 'x' * 999999", "'x' * 1000000"],
+  ['isalpha', "'x' * 1000000", "'1' + 'x' * 999999"],
+  ['isdecimal', "'1' * 1000000", "'x' + '1' * 999999"],
+  ['isdigit', "'1' * 1000000", "'x' + '1' * 999999"],
+  ['isnumeric', "'1' * 1000000", "'x' + '1' * 999999"],
+  ['isalnum', "'x' * 1000000", "'!' + 'x' * 999999"],
+  ['isspace', "' ' * 1000000", "'x' + ' ' * 999999"],
 ])('str.%s is charged for the characters it reads', (method, passing, failing) => {
   const program = (text: string): string => `s = ${text}\nfor i in range(70):\n    s.${method}()`;
   expect(executeOnStillClock(program(passing))).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
