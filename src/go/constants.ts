@@ -52,7 +52,17 @@ function bitLength(value: bigint): bigint {
 }
 
 /** Reads a decimal float literal such as `1.5e-3` or `.5` exactly. */
-export function parseFloatLiteral(text: string): Rational {
+export function parseFloatLiteral(literal: string): Rational {
+  const text = literal.replaceAll('_', '');
+  const hex = /^0[xX]([\da-fA-F]*)(?:\.([\da-fA-F]*))?[pP]([+-]?\d+)$/.exec(text);
+  if (hex) {
+    const [, whole = '', fraction = '', exponentText] = hex;
+    const mantissa = BigInt(`0x${whole}${fraction}` === '0x' ? '0' : `0x${whole}${fraction}`);
+    const exponent = Number(exponentText) - 4 * fraction.length;
+    if (Math.abs(exponent) > 400_000) throw new ConstantOverflow();
+    return exponent >= 0 ? rational(mantissa * 2n ** BigInt(exponent)) : rational(mantissa, 2n ** BigInt(-exponent));
+  }
+  if (/^(?:0[xXbBoO]|0\d*$)/.test(text) && !/[.eE]/.test(text)) return rational(parseIntegerText(text));
   const match = /^(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text);
   if (!match) throw new Error(`Invalid float literal ${text}`);
   const [, whole = '', fraction = '', exponentText = '0'] = match;
@@ -60,6 +70,14 @@ export function parseFloatLiteral(text: string): Rational {
   const exponent = Number(exponentText) - fraction.length;
   if (Math.abs(exponent) > 100_000) throw new ConstantOverflow();
   return exponent >= 0 ? rational(digits * 10n ** BigInt(exponent)) : rational(digits, 10n ** BigInt(-exponent));
+}
+
+/** The value of an integer literal: decimal, `0x` hexadecimal, `0b` binary, or `0o` and `0` octal, with `_` removed. */
+export function parseIntegerText(literal: string): bigint {
+  const text = literal.replaceAll('_', '');
+  if (/^0\d+$/.test(text)) return BigInt(`0o${text.slice(1)}`);
+  if (/^0[oO]/.test(text)) return BigInt(`0o${text.slice(2)}`);
+  return BigInt(text);
 }
 
 export function toRational(constant: Constant): Rational {

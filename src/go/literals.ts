@@ -101,6 +101,11 @@ export function decodeStringLiteral(text: string, fail: Fail): string {
 }
 
 /** The rune of a rune literal, including its quotes. */
+/** The bytes of a raw string literal: its text between the backquotes, without carriage returns, in UTF-8. */
+export function decodeRawStringLiteral(text: string): string {
+  return utf8Encode(text.slice(1, -1).replaceAll('\r', ''));
+}
+
 export function decodeRuneLiteral(text: string, fail: Fail): number {
   const body = text.slice(1, -1);
   if (body.length === 0) throw fail("空のルーンのリテラル（''）は書けません。");

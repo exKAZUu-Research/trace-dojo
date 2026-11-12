@@ -847,6 +847,16 @@ export class ProgramCompiler extends StatementCompiler {
 
   /** Computes the values of a constant spec, checking them against its type. */
   private constantSpec(spec: ConstDeclaration['specs'][number], entities: ConstEntity[]): void {
+    const outerIota = this.iota;
+    this.iota = spec.iota;
+    try {
+      this.constantValues(spec, entities);
+    } finally {
+      this.iota = outerIota;
+    }
+  }
+
+  private constantValues(spec: ConstDeclaration['specs'][number], entities: ConstEntity[]): void {
     if (spec.values.length !== spec.names.length) {
       this.error(spec, spec.values.length < spec.names.length ? '定数の値が足りません。' : '定数の値が多すぎます。');
       for (const value of spec.values) this.expression(value);

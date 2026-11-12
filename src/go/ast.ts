@@ -74,7 +74,10 @@ export interface VarDeclaration extends Span {
 export interface ConstSpec extends Span {
   names: NameSpan[];
   type?: TypeExpression;
+  /** The values, or those of the spec before when this one omits them, as Go repeats them. */
   values: Expression[];
+  /** The value of `iota`: the spec's position in its declaration. */
+  iota: number;
 }
 
 export interface ConstDeclaration extends Span {

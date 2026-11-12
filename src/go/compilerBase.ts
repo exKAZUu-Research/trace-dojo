@@ -56,6 +56,8 @@ export abstract class CompilerBase {
   protected fn: FunctionContext | undefined;
   /** Whether errors are being reported; instances of generic code were checked once already. */
   protected reporting = true;
+  /** The value of `iota` in the constant spec being compiled, which is undefined elsewhere. */
+  protected iota: number | undefined;
   /** Whether the program uses goroutines, channels, locks, or sleeps, whose statements may block. */
   protected concurrent = false;
   /** Where the computations that may block of the expression being compiled go, when it may block. */
@@ -253,7 +255,8 @@ export abstract class CompilerBase {
       }
       case 'array': {
         const element = this.resolveType(syntax.element, direct);
-        if (syntax.length === undefined) return BASIC.invalid;
+        if (syntax.length === undefined)
+          return this.error(syntax, '[...] で長さを省けるのは、配列の複合リテラルの型だけです。');
         const { value, type } = this.constantExpression(syntax.length);
         if (type === BASIC.invalid) return BASIC.invalid;
         if (value === undefined) return this.error(syntax.length, '配列の長さには、整数の定数を書いてください。');

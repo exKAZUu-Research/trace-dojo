@@ -29,7 +29,8 @@ import type {
   TypeSwitchCase,
   VarSpec,
 } from './ast';
-import { decodeRuneLiteral, decodeStringLiteral } from './literals';
+import { parseIntegerText } from './constants';
+import { decodeRawStringLiteral, decodeRuneLiteral, decodeStringLiteral } from './literals';
 
 /** Converts tree-sitter's tree into the AST, rejecting syntax this environment does not run. */
 export class Converter {
@@ -79,8 +80,10 @@ export class Converter {
       const nameNode = spec.childForFieldName('name');
       if (nameNode?.type === 'dot') unsupported(nameNode, 'import の . （パッケージの名前を省いて使う書き方）');
       const pathNode = required(spec.childForFieldName('path'));
-      if (pathNode.type === 'raw_string_literal') unsupported(pathNode, '` で囲んだ文字列');
-      const path = decodeStringLiteral(pathNode.text, (message) => syntaxError(pathNode, message));
+      const path =
+        pathNode.type === 'raw_string_literal'
+          ? decodeRawStringLiteral(pathNode.text)
+          : decodeStringLiteral(pathNode.text, (message) => syntaxError(pathNode, message));
       return { ...spanOf(spec), path, alias: nameNode?.text };
     });
   }
@@ -233,18 +236,22 @@ export class Converter {
 
   private convertConstSpecs(node: Node): ConstSpec[] {
     const specs: ConstSpec[] = [];
+    let previous: { type?: TypeExpression; values: Expression[] } | undefined;
     for (const child of named(node)) {
       if (child.type !== 'const_spec') continue;
       const typeNode = child.childForFieldName('type');
       const valueNode = child.childForFieldName('value');
-      if (!valueNode) unsupported(child, '値を省いた定数の宣言（前の行の式をくり返す書き方）');
-      const values = this.convertExpressionList(valueNode);
-      specs.push({
-        ...spanOf(child),
-        names: this.namesOf(child),
-        type: typeNode ? this.convertType(typeNode) : undefined,
-        values,
-      });
+      // A spec without values repeats the type and values of the one before, which `iota` makes differ.
+      if (!valueNode) {
+        if (!previous || typeNode) throw syntaxError(child, '定数の宣言に値がありません。');
+      } else {
+        previous = {
+          type: typeNode ? this.convertType(typeNode) : undefined,
+          values: this.convertExpressionList(valueNode),
+        };
+      }
+      const { type, values } = previous as { type?: TypeExpression; values: Expression[] };
+      specs.push({ ...spanOf(child), names: this.namesOf(child), type, values, iota: specs.length });
     }
     return specs;
   }
@@ -306,7 +313,12 @@ export class Converter {
         };
       }
       case 'implicit_length_array_type': {
-        return unsupported(node, '要素の数を [...] で省いた配列');
+        return {
+          kind: 'array',
+          ...span,
+          length: undefined,
+          element: this.convertType(required(node.childForFieldName('element'))),
+        };
       }
       case 'map_type': {
         return {
@@ -326,7 +338,7 @@ export class Converter {
         return { kind: 'interface', ...span, methods: this.convertMethods(node) };
       }
       case 'parenthesized_type': {
-        return unsupported(node, '( ) で囲んだ型');
+        return this.convertType(named(node)[0]);
       }
       case 'channel_type': {
         // `chan<- T` has the arrow after `chan`, `<-chan T` before it.
@@ -692,21 +704,16 @@ export class Converter {
         return { kind: 'name', ...span, name: node.type };
       }
       case 'iota': {
-        return unsupported(node, 'iota');
+        return { kind: 'name', ...span, name: 'iota' };
       }
       case 'int_literal': {
-        if (!/^(?:0|[1-9]\d*)$/.test(node.text)) {
-          unsupported(node, '10進数の書き方以外の整数（0x・0o・0b・0 で始まる数、_ で区切った数）');
-        }
-        return { kind: 'int', ...span, value: BigInt(node.text), text: node.text };
+        checkNumberLiteral(node);
+        return { kind: 'int', ...span, value: parseIntegerText(node.text), text: node.text };
       }
-      case 'float_literal': {
-        if (/^0[xX]|_/.test(node.text)) unsupported(node, '16進数の浮動小数点数や _ で区切った数');
-        return { kind: 'float', ...span, text: node.text };
-      }
+      case 'float_literal':
       case 'imaginary_literal': {
-        if (/^0[xXoObB]|_|^0\d/.test(node.text)) unsupported(node, '10進数の書き方以外の数');
-        return { kind: 'imaginary', ...span, text: node.text };
+        checkNumberLiteral(node);
+        return { kind: node.type === 'float_literal' ? 'float' : 'imaginary', ...span, text: node.text };
       }
       case 'rune_literal': {
         return { kind: 'rune', ...span, value: decodeRuneLiteral(node.text, (message) => syntaxError(node, message)) };
@@ -719,7 +726,7 @@ export class Converter {
         };
       }
       case 'raw_string_literal': {
-        return unsupported(node, '` で囲んだ文字列（raw string）');
+        return { kind: 'string', ...span, value: decodeRawStringLiteral(node.text) };
       }
       case 'composite_literal': {
         return this.convertComposite(node, this.convertType(required(node.childForFieldName('type'))));
@@ -911,6 +918,27 @@ export function spanOf(node: Node): Span {
 
 function syntaxError(node: Node, message: string): CompileError {
   return new CompileError([{ row: node.startPosition.row, message }]);
+}
+
+/**
+ * Checks the digits of a number literal as Go's scanner does: `_` only between digits or after a base prefix, octal
+ * digits in an octal literal, and digits after a prefix.
+ */
+function checkNumberLiteral(node: Node): void {
+  const text = node.type === 'imaginary_literal' ? node.text.slice(0, -1) : node.text;
+  const body = text.replace(/^0[xXbBoO]_?/, '');
+  if (/(^|[^\da-fA-F])_|_($|[^\da-fA-F])/.test(body)) {
+    throw syntaxError(node, '数の書き方に誤りがあります（_ は数字と数字の間にだけ書けます）。');
+  }
+  const digits = text.replaceAll('_', '');
+  if (/^0[xXbBoO]$/.test(digits))
+    throw syntaxError(node, '数の書き方に誤りがあります（0x などの後に数字がありません）。');
+  if (node.type !== 'int_literal') return;
+  const invalid = /^0[bB].*?([2-9])/.exec(digits) ?? /^0[oO]?\d*?([89])/.exec(digits);
+  if (invalid && !/^0[xX]/.test(digits)) {
+    const base = /^0[bB]/.test(digits) ? '2進数' : '8進数';
+    throw syntaxError(node, `${base}の数に使えない数字 ${invalid[1]} があります。`);
+  }
 }
 
 function unsupported(node: Node, what: string): never {

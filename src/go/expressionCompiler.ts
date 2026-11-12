@@ -9,6 +9,7 @@ import {
   ConstantOverflow,
   exactInteger,
   parseFloatLiteral,
+  type Rational,
   shiftConstant,
   unaryConstant,
 } from './constants';
@@ -107,7 +108,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'imaginary': {
         return this.literalConstant(
           expression,
-          () => ({ kind: 'complex', re: { num: 0n, den: 1n }, im: parseFloatLiteral(expression.text.slice(0, -1)) }),
+          () => ({ kind: 'complex', re: { num: 0n, den: 1n }, im: imaginaryPart(expression.text.slice(0, -1)) }),
           BASIC.untypedComplex
         );
       }
@@ -233,6 +234,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     const entity = this.lookup(name);
+    if (!entity && name === 'iota') {
+      if (this.iota !== undefined)
+        return this.constant({ kind: 'int', value: BigInt(this.iota) }, BASIC.untypedInt, expression);
+      this.error(expression, 'iota は定数の宣言の中でしか使えません。');
+      return this.invalid(expression);
+    }
     if (!entity) {
       this.error(expression, `${name} は宣言されていません。`);
       return this.invalid(expression);
@@ -1720,3 +1727,9 @@ export function describeConstant(constant: Constant): string {
 
 export type { FuncType };
 export { RUNE };
+
+/** The value of an imaginary literal's number, whose digits alone are decimal even after a leading 0, as Go keeps. */
+function imaginaryPart(text: string): Rational {
+  if (/^[\d_]+$/.test(text)) return { num: BigInt(text.replaceAll('_', '')), den: 1n };
+  return parseFloatLiteral(text);
+}

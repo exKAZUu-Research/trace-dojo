@@ -11,7 +11,9 @@ import { Cell, GoArray, GoMap, GoStruct, Pointer, Slice, type Value } from './va
 export abstract class CompositeCompiler extends ExpressionCompiler {
   protected composite(expression: CompositeLiteral, elided: Type | undefined): Operand {
     let type = elided;
-    if (expression.type) type = this.resolveType(expression.type);
+    if (expression.type?.kind === 'array' && expression.type.length === undefined) {
+      type = this.implicitLengthArray(expression, expression.type.element);
+    } else if (expression.type) type = this.resolveType(expression.type);
     if (!type) {
       this.error(expression, '複合リテラルには型を書いてください。');
       return this.invalid(expression);
@@ -54,6 +56,24 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
       createsObject: true,
       eval: (frame) => new Pointer(new Cell(read(frame)), 'v'),
     };
+  }
+
+  /** `[...]T{...}`: an array as long as the highest index of its elements plus one. */
+  private implicitLengthArray(expression: CompositeLiteral, elementSyntax: CompositeLiteral['type'] & object): Type {
+    const element = this.resolveType(elementSyntax);
+    let length = 0;
+    let next = 0;
+    for (const item of expression.elements) {
+      if (item.key) {
+        const { value } = this.constantExpression(item.key);
+        if (value === undefined) return BASIC.invalid;
+        next = Number(value);
+      }
+      next++;
+      length = Math.max(length, next);
+    }
+    if (element === BASIC.invalid) return BASIC.invalid;
+    return { kind: 'array', element, length };
   }
 
   /** An element of a composite literal, whose own literal may elide its type. */
