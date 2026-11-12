@@ -159,6 +159,12 @@ test('a declaration may declare several names at once', () => {
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test('the phase of a complex number rounds as Go computes it', () => {
+  const program =
+    'package main\n\nimport (\n\t"fmt"\n\t"math/cmplx"\n)\n\nfunc main() {\n\tif s := fmt.Sprint(cmplx.Phase(0.1 + 0.7i)); s != "1.4288992721907325" {\n\t\tpanic(s)\n\t}\n}';
+  expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('formatting with a bit size of 32 rounds the value to a float32 first', () => {
   const program =
     'package main\n\nimport "strconv"\n\nfunc main() {\n\tif s := strconv.FormatFloat(3.14159265358979, \'g\', -1, 32); s != "3.1415927" {\n\t\tpanic(s)\n\t}\n}';

@@ -3,6 +3,7 @@ import { fma } from '../fma';
 import { definePackage, fn, nativeFunction } from '../native';
 import { BASIC } from '../types';
 import { Complex } from '../values';
+import * as goMath from './goMath';
 import { hypot } from './math';
 import { BOOL, FLOAT64 } from './support';
 
@@ -61,7 +62,7 @@ const members: Record<string, Entity> = {
   Sqrt: nativeFunction('Sqrt', fn([C], [C]), ([value]) => sqrt(value as Complex)),
   Abs: nativeFunction('Abs', fn([C], [FLOAT64]), ([value]) => abs(value as Complex)),
   Phase: nativeFunction('Phase', fn([C], [FLOAT64]), ([value]) =>
-    Math.atan2((value as Complex).im, (value as Complex).re)
+    goMath.atan2((value as Complex).im, (value as Complex).re)
   ),
   Conj: nativeFunction('Conj', fn([C], [C]), ([value]) => new Complex((value as Complex).re, -(value as Complex).im)),
   IsNaN: nativeFunction('IsNaN', fn([C], [BOOL]), ([value]) => {
