@@ -1,7 +1,7 @@
 import { bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { pyError, typeError, typeName, valueError } from './types';
-import { PyInstance, type PyValue } from './values';
+import { type PyError, PyInstance, type PyValue } from './values';
 
 /** The limit of decimal digits an int may convert to or from, which sys.set_int_max_str_digits changes (0: none). */
 export const DEFAULT_MAX_STR_DIGITS = 4300;
@@ -52,15 +52,28 @@ export function toIndex(value: PyValue, describe: (value: PyValue) => string = d
 }
 
 export function intToString(value: bigint): string {
+  const limit = maxStrDigits();
+  const magnitude = value < 0n ? -value : value;
+  // The digits a number of this many bits has at least, which refuses an oversized number before the slow conversion,
+  // as CPython does from the size of the number before converting it.
+  const bits = magnitude.toString(16).length * 4;
+  const leastDigits = Math.floor((bits - 4) * Math.log10(2)) + 1;
+  if (limit > 0 && leastDigits > limit) throw digitLimitError(limit);
+  if (bits > 64) {
+    const runtime = currentRuntime();
+    runtime.ensureStringFits(leastDigits);
+    runtime.spend(Math.ceil(bits / 16));
+  }
   const text = value.toString();
   const digits = value < 0n ? text.length - 1 : text.length;
-  const limit = maxStrDigits();
-  if (limit > 0 && digits > limit) {
-    throw valueError(
-      `Exceeds the limit (${limit} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`
-    );
-  }
+  if (limit > 0 && digits > limit) throw digitLimitError(limit);
   return text;
+}
+
+function digitLimitError(limit: number): PyError {
+  return valueError(
+    `Exceeds the limit (${limit} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`
+  );
 }
 
 /** Parses a string as `int(text, base)` does, returning undefined when it is not a valid literal. */

@@ -17,6 +17,10 @@ test.each([
   ['a set updated from an endless iterator', 'import itertools\nset().update(itertools.repeat(0))'],
   ['a set difference with an endless iterator', 'import itertools\nset().difference_update(itertools.repeat(0))'],
   ['a rejection loop that never accepts', 'import random\nrandom.gammavariate(float("nan"), 1)'],
+  [
+    'repeated decimal conversions of a huge int with the digit limit off',
+    'import sys\nsys.set_int_max_str_digits(0)\nn = 1 << 3000000\nfor i in range(100):\n    x = str(n)',
+  ],
   ['a print of many long strings', 'print(*(["x" * 1000000] * 1000))'],
   [
     'a modular inverse of huge integers',
@@ -211,6 +215,16 @@ d = deque([1, 2], maxlen=3)
 d *= 1000000000
 if list(d) != [2, 1, 2] or list(deque([1, 2, 3], maxlen=2) * 1000000001) != [2, 3]:
     raise AssertionError(str(d))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test('a huge int is refused before its decimal conversion', () => {
+  const program = `n = 1 << 7999999
+for i in range(100):
+    try:
+        x = str(n)
+    except ValueError:
+        pass`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
