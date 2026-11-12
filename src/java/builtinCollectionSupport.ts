@@ -108,6 +108,8 @@ export function createIterator(
   remove: (frame: Frame, index: number) => void,
   isFixed = false
 ): JavaObject {
+  // A sublist, or a wrapper of one, checks its list when it creates an iterator, as its listIterator does.
+  subListChecks.get(source)?.();
   const iterator = frame.runtime.allocateObject(frame, itrClass);
   const fixed = isFixed ? items() : undefined;
   iteratorStates.set(iterator, {

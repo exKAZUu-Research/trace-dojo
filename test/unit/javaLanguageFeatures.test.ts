@@ -1221,6 +1221,33 @@ class Main {
   }
 });
 
+test('Java accepts TYPE_USE annotations on enum constants and checks a sublist when it creates an iterator, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.lang.annotation.*;
+import java.util.*;
+@Target(ElementType.TYPE_USE) @interface Mark {}
+enum E { @Mark A, @Mark B { public String toString() { return "b"; } } }
+class Main {
+  public static void main(String[] args) {
+    System.out.println(E.A + " " + E.B);
+    List<Integer> root = new ArrayList<>(List.of(1, 2, 3));
+    List<Integer> view = root.subList(0, 2);
+    List<Integer> w = Collections.unmodifiableList(view);
+    List<Integer> nested = root.subList(0, 3).subList(0, 1);
+    root.add(4);
+    try { w.iterator(); System.out.println("iterator ok"); } catch (Exception e) { System.out.println(e); }
+    try { view.iterator(); System.out.println("iterator ok"); } catch (Exception e) { System.out.println(e); }
+    try { nested.iterator(); System.out.println("iterator ok"); } catch (Exception e) { System.out.println(e); }
+  }
+}`,
+      'A b\njava.util.ConcurrentModificationException\njava.util.ConcurrentModificationException\njava.util.ConcurrentModificationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

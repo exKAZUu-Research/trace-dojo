@@ -75,7 +75,7 @@ const DECLARATION_OWNERS: Readonly<Record<string, readonly ElementType[]>> = {
   annotation_type_element_declaration: ['METHOD', 'TYPE_USE'],
   constructor_declaration: ['CONSTRUCTOR', 'TYPE_USE'],
   compact_constructor_declaration: ['CONSTRUCTOR', 'TYPE_USE'],
-  enum_constant: ['FIELD'],
+  enum_constant: ['FIELD', 'TYPE_USE'],
   field_declaration: ['FIELD', 'TYPE_USE'],
   constant_declaration: ['FIELD', 'TYPE_USE'],
   formal_parameter: ['PARAMETER', 'TYPE_USE'],
