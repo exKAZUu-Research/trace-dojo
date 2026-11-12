@@ -315,6 +315,11 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
   });
   const linkage = defineThrowable('LinkageError', errorClass);
   defineThrowable('AbstractMethodError', defineThrowable('IncompatibleClassChangeError', linkage));
+  defineThrowable('NoClassDefFoundError', linkage);
+  const initializerError = defineThrowable('ExceptionInInitializerError', linkage);
+  addConstructor(initializerError, [throwableClass.type], (_, receiver, [thrown]) => {
+    (receiver as JavaObject).cause = thrown as JavaObject | undefined;
+  });
   return throwableClass;
 }
 

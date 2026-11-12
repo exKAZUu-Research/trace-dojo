@@ -328,6 +328,29 @@ public class Main {
   expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'xy!\nNPE\n' });
 });
 
+test('Java wraps an exception from a static initializer and rejects later uses of the class, as the JVM does', () => {
+  const program = `class Bad { static int v; static { System.out.println("init"); if (true) throw new IllegalStateException("bad init"); } static void f() {} }
+class Deep { static { recurse(0); } static int recurse(int n) { return recurse(n + 1) + 1; } static int x = 1; }
+class Nested { static class Inner { static int v = Integer.parseInt("x"); } }
+public class Main {
+  public static void main(String[] a) {
+    try { Bad.f(); } catch (ExceptionInInitializerError e) { System.out.println("1 " + e + " / " + e.getCause() + " / " + e.getMessage()); }
+    try { System.out.println(Bad.v); } catch (NoClassDefFoundError e) { System.out.println("2 " + e + " / " + e.getCause()); }
+    try { new Bad(); } catch (Throwable e) { System.out.println("3 " + e); }
+    try { System.out.println(Deep.x); } catch (StackOverflowError e) { System.out.println("4 SOE"); }
+    try { System.out.println(Deep.x); } catch (Throwable e) { System.out.println("5 " + e); }
+    try { System.out.println(Nested.Inner.v); } catch (Throwable e) { System.out.println("6 " + e + " / " + e.getCause()); }
+    ExceptionInInitializerError made = new ExceptionInInitializerError(new RuntimeException("r"));
+    System.out.println(made + " " + made.getCause() + " " + new ExceptionInInitializerError("m").getMessage());
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'init\n1 java.lang.ExceptionInInitializerError / java.lang.IllegalStateException: bad init / null\n2 java.lang.NoClassDefFoundError: Could not initialize class Bad / java.lang.ExceptionInInitializerError: Exception java.lang.IllegalStateException: bad init [in thread "main"]\n3 java.lang.NoClassDefFoundError: Could not initialize class Bad\n4 SOE\n5 java.lang.NoClassDefFoundError: Could not initialize class Deep\n6 java.lang.ExceptionInInitializerError / java.lang.NumberFormatException: For input string: "x"\njava.lang.ExceptionInInitializerError java.lang.RuntimeException: r m\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

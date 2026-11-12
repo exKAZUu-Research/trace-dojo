@@ -71,6 +71,8 @@ export class Runtime {
   }
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
+  /** The classes whose initialization failed, with the exception that failed it, which later uses report. */
+  private readonly erroneousClasses = new Map<ClassInfo, JavaObject>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
   /** The strings by text that the program's literals and constants are, which `String.intern()` returns and extends. */
   internedStrings = new Map<string, JavaString>();
@@ -128,8 +130,15 @@ export class Runtime {
 
   /** Initializes a class on its first active use, superclass first, as the JVM does. */
   initializeClass(frame: Frame, cls: ClassInfo): void {
+    const failure = this.erroneousClasses.get(cls);
+    if (failure) this.throwUninitialized(frame, cls, failure);
     if (this.staticValues.has(cls) || this.initializingClasses.has(cls)) return;
-    if (cls.superclass) this.initializeClass(frame, cls.superclass);
+    try {
+      if (cls.superclass) this.initializeClass(frame, cls.superclass);
+    } catch (error) {
+      if (error instanceof JavaThrow) this.erroneousClasses.set(cls, error.value);
+      throw error;
+    }
     this.initializingClasses.add(cls);
     const values: Value[] = Array.from({ length: cls.staticFieldCount });
     for (const field of cls.staticFields) values[field.slot] = field.constant ?? defaultValue(field.type);
@@ -143,9 +152,24 @@ export class Runtime {
           this.popFrame();
         }
       }
+    } catch (error) {
+      if (!(error instanceof JavaThrow)) throw error;
+      this.erroneousClasses.set(cls, error.value);
+      this.staticValues.delete(cls);
+      // An Error propagates as it is; another exception is wrapped (JLS 12.4.2).
+      if (this.isInstance(error.value, this.builtins.classes.get('Error') as ClassInfo)) throw error;
+      throwBuiltin(frame, 'ExceptionInInitializerError', undefined, error.value);
     } finally {
       this.initializingClasses.delete(cls);
     }
+  }
+
+  /** Reports a use of a class whose initialization failed, with the cause that the JDK records. */
+  private throwUninitialized(frame: Frame, cls: ClassInfo, failure: JavaObject): never {
+    const description = this.invokeToString(frame, failure)?.value ?? 'null';
+    const cause = new JavaObject(this.builtins.classes.get('ExceptionInInitializerError') as ClassInfo);
+    cause.message = new JavaString(`Exception ${description} [in thread "main"]`);
+    return throwBuiltin(frame, 'NoClassDefFoundError', `Could not initialize class ${cls.binaryName}`, cause);
   }
 
   pushFrame(
