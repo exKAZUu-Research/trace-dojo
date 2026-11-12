@@ -132,7 +132,7 @@ test.each([
     "s = 'x' * 500000\nr = [len(('{0:.1}' * 5000).format(s)), len('%.1s' * 5000 % ((s,) * 5000))]\nif r != [5000, 5000]:\n    raise AssertionError(r)",
   ],
 ])('%s finishes within the limits', (_name, program) => {
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test.each([
@@ -229,7 +229,7 @@ test('a long text built from many pieces is charged for its length, not for each
 ]
 if lengths != [688890, 257780, 800000, 400000, 800000]:
     raise AssertionError(str(lengths))`;
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test('containers built in different ways are each charged once', () => {
@@ -295,7 +295,7 @@ test.each([
     'from collections import deque\nd = deque(range(100000))\nfor i in range(10000):\n    d.rotate(1)\n    d.rotate(-1)\nif d[0] != 0:\n    raise ValueError(d[0])',
   ],
 ])('%s runs within the limits', (_name, program) => {
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test('JSON output up to the string limit is allowed', () => {
@@ -339,14 +339,8 @@ test.each([
   ['reversing a long list in place', 'a.reverse()'],
   ['deleting an extended slice of a long list', 'del a[::100000]\n    a.append(i)'],
 ])('%s over and over ends at the operation limit', (_name, body) => {
-  // The clock stands still, so that only the operations the work is charged decide the outcome however loaded the host.
-  const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
-  try {
-    const program = `a = list(range(100000))\nfor i in range(700):\n    ${body}`;
-    expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
-  } finally {
-    clock.mockRestore();
-  }
+  const program = `a = list(range(100000))\nfor i in range(700):\n    ${body}`;
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
 test.each([
@@ -362,3 +356,16 @@ test.each([
   const program = `a = [0] * 100000\nfor i in range(10000):\n    ${statement}`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
+
+/**
+ * Runs a program with the clock standing still, so that only the operations it is charged, not the load of the host,
+ * decide whether it stays within the limits.
+ */
+function executeOnStillClock(program: string): ReturnType<typeof executeProgram> {
+  const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+  try {
+    return executeProgram('python', program);
+  } finally {
+    clock.mockRestore();
+  }
+}
