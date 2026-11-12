@@ -2,6 +2,7 @@ import { STDLIB_MODULE_NAMES } from './stdlibModuleNames';
 
 /** The standard library modules this grader implements, which programs may import. */
 export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
+  'abc',
   'bisect',
   'collections',
   'collections.abc',
@@ -13,6 +14,7 @@ export const SUPPORTED_MODULES: ReadonlySet<string> = new Set([
   'itertools',
   'json',
   'math',
+  'operator',
   'random',
   'statistics',
   'string',

@@ -313,7 +313,7 @@ method(
 );
 
 method(strClass, 'join', 'one', 1, 1, (self, [iterable]) => {
-  const items = toArray(iterable);
+  const items = toArray(iterable, 'can only join an iterable');
   const separator = asStr(self);
   let length = 0;
   for (const [index, item] of items.entries()) {

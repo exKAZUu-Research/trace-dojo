@@ -1,4 +1,4 @@
-import { checkMethods, initAbstractClass } from '../abstractClasses';
+import { abcMetaClass, checkMethods, initAbstractClass } from '../abstractClasses';
 import { builtin } from '../define';
 import { runLibrarySource } from '../librarySource';
 import { importModule, registerLazyAttributes, registerModule } from '../modules';
@@ -37,6 +37,7 @@ function nativeHelpers(): [string, PyValue][] {
         return checkMethods(cls, methods as string[]);
       }),
     ],
+    ['ABCMeta', abcMetaClass],
     ['_CallableGenericAlias', callableGenericAliasClass],
     ['_maxsize', 2n ** 63n - 1n],
     ['_deque', dequeClass],

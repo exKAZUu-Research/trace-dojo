@@ -1,7 +1,8 @@
-import { abstractInstantiationError, initAbstractClass } from './abstractClasses';
+import { abcMetaClass, abstractInstantiationError, initAbstractClass } from './abstractClasses';
 import type { Argument, ClassDef } from './ast';
+import { pyRepr } from './conversions';
 import { method } from './define';
-import { createEnumMembers, enumLookup, isEnumClass } from './enums';
+import { createEnumMembers, enumLookup, EnumNamespace, isEnumClass, newEnumNamespace } from './enums';
 import type { Evaluator } from './evaluator';
 import { Frame } from './frame';
 import { bindValue, callValue } from './objects';
@@ -47,34 +48,37 @@ const FORBIDDEN_CLASS_ATTRIBUTES = [
 ];
 
 /** Runs a class statement: evaluates the bases, runs the body in a namespace, and creates the class. */
+// code-gauge-allow functionNcss 35 -- Follows the steps of a class statement.
 export function createClass(evaluator: Evaluator, def: ClassDef, frame: Frame): PyValue {
   const runtime = currentRuntime();
   const decorators = def.decorators.map((decorator) => evaluator.evaluate(decorator, frame));
-  const bases = def.bases.map((argument) => evaluateBase(evaluator, def, argument, frame));
+  const { bases, hasAbcMetaclass, boundary } = evaluateClassArguments(evaluator, def, frame);
   const effectiveBases = bases.length > 0 ? bases : [objectClass];
   checkLayout(effectiveBases);
-  const namespace = new Map<string, PyValue>([
-    ['__module__', moduleNameOf(frame)],
-    ['__qualname__', def.qualifiedName],
-    ['__firstlineno__', BigInt(def.row + 1)],
-  ]);
+  const isLibrary = moduleNameOf(frame) !== '__main__';
+  const namespace = bases.some((base) => base.flags.isEnum)
+    ? newEnumNamespace(def.name, bases, isLibrary)
+    : new Map<string, PyValue>();
+  namespace.set('__module__', moduleNameOf(frame));
+  namespace.set('__qualname__', def.qualifiedName);
+  namespace.set('__firstlineno__', BigInt(def.row + 1));
   if (def.doc !== undefined) namespace.set('__doc__', def.doc);
   const classCell = new PyCell();
   const body = runClassBody(evaluator, def, frame, namespace, classCell);
   namespace.delete('__qualname__');
-  const isLibrary = moduleNameOf(frame) !== '__main__';
   for (const forbidden of FORBIDDEN_CLASS_ATTRIBUTES) {
     if (namespace.has(forbidden) && !(isLibrary && LIBRARY_CLASS_ATTRIBUTES.has(forbidden))) {
       throw new UnsupportedFeatureError(`クラスの ${forbidden} の定義`);
     }
   }
   const cls = newClass(def, effectiveBases, namespace, moduleNameOf(frame));
-  if (effectiveBases.some((base) => base.abc)) initAbstractClass(cls);
+  if (hasAbcMetaclass) initAbstractClass(cls, abcMetaClass);
+  else if (effectiveBases.some((base) => base.abc)) initAbstractClass(cls);
   cls.annotationNames = body.annotations.map(([name]) => name);
   runtime.classAnnotationThunks.set(cls, body.annotations);
   classCell.value = cls;
   setNames(cls);
-  if (bases.some((base) => base.flags.isEnum)) createEnumMembers(cls);
+  if (namespace instanceof EnumNamespace) createEnumMembers(cls, namespace, boundary);
   let result: PyValue = cls;
   for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
   return result;
@@ -123,6 +127,36 @@ function runClassBody(
   return body;
 }
 
+/**
+ * Evaluates the arguments of a class statement: the bases, and the two keywords this grader runs, which are
+ * `metaclass=ABCMeta` and the `boundary=` of a Flag class.
+ */
+function evaluateClassArguments(
+  evaluator: Evaluator,
+  def: ClassDef,
+  frame: Frame
+): { bases: PyClass[]; hasAbcMetaclass: boolean; boundary?: PyValue } {
+  const bases: PyClass[] = [];
+  let hasAbcMetaclass = false;
+  let boundary: PyValue | undefined;
+  for (const argument of def.bases) {
+    if (isAbcMetaclass(evaluator, argument, frame)) hasAbcMetaclass = true;
+    else if (argument.kind === 'keyword' && argument.name === 'boundary' && bases.some((base) => base.flags.isEnum)) {
+      boundary = evaluator.evaluate(argument.value, frame);
+    } else bases.push(evaluateBase(evaluator, def, argument, frame));
+  }
+  return { bases, hasAbcMetaclass, boundary };
+}
+
+/** Whether an argument of a class statement is `metaclass=ABCMeta`, the one metaclass this grader runs. */
+function isAbcMetaclass(evaluator: Evaluator, argument: Argument, frame: Frame): boolean {
+  return (
+    argument.kind === 'keyword' &&
+    argument.name === 'metaclass' &&
+    evaluator.evaluate(argument.value, frame) === abcMetaClass
+  );
+}
+
 function evaluateBase(evaluator: Evaluator, def: ClassDef, argument: Argument, frame: Frame): PyClass {
   if (argument.kind === 'keyword') {
     if (argument.name === 'metaclass') throw new UnsupportedFeatureError('メタクラス（metaclass=）');
@@ -133,7 +167,7 @@ function evaluateBase(evaluator: Evaluator, def: ClassDef, argument: Argument, f
   if (!(base instanceof PyClass)) throw typeError(`bases must be types`);
   if (base.isBuiltin && !base.isBaseType) throw typeError(`type '${base.name}' is not an acceptable base type`);
   if (base.flags.isEnum && base.enumMembers && base.enumMembers.length > 0) {
-    throw typeError(`${def.name}: cannot extend ${base.qualifiedName}`);
+    throw typeError(`<enum '${def.name}'> cannot extend ${pyRepr(base)}`);
   }
   return base;
 }

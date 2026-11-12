@@ -326,6 +326,18 @@ function iterateSet(set: PySet): NextFunction {
   };
 }
 
+/** Iterates for a caller that words the TypeError of getting the iterator itself, as `str.join` does in CPython. */
+export function iterateOr(value: PyValue, notIterable: string): NextFunction {
+  try {
+    return iterate(value);
+  } catch (error) {
+    if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError'))) {
+      throw typeError(notIterable);
+    }
+    throw error;
+  }
+}
+
 /** Iterates with `__iter__`, or with `__getitem__` as the old sequence protocol does. */
 function iterateByProtocol(value: PyValue): NextFunction {
   const iter = lookupSpecial(value, '__iter__');
@@ -396,10 +408,10 @@ function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunct
   };
 }
 
-/** All the items an iterable yields. */
-export function toArray(value: PyValue): PyValue[] {
+/** All the items an iterable yields, with `notIterable` as the message for a value that gives no iterator. */
+export function toArray(value: PyValue, notIterable?: string): PyValue[] {
   if (value instanceof PyList || (value instanceof PyTuple && !hasOwnIter(value))) return [...value.items];
-  const next = iterate(value);
+  const next = notIterable === undefined ? iterate(value) : iterateOr(value, notIterable);
   const items: PyValue[] = [];
   const runtime = currentRuntime();
   for (let item = next(); item !== DONE; item = next()) {

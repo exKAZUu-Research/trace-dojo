@@ -8,7 +8,7 @@ import { mappingProxyClass } from '../mappingProxy';
 import { importModule, registerModule, registerUnsupportedAttributes } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { bindValue, callValue, isCallable, isTruthy, iterate, lookupSpecial } from '../objects';
+import { bindValue, callValue, isCallable, isTruthy, iterateOr, lookupSpecial } from '../objects';
 import { compareOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { forwardRefClass, genericAliasClass, newGenericAlias, unionClass } from '../typeHints';
@@ -39,6 +39,7 @@ import {
 } from '../values';
 import { makeNamedTupleClass } from './collections';
 import { FUNCTOOLS_SOURCE } from './functoolsSource';
+import { itemgetterClass } from './operatorCallables';
 
 /** Binds a callable read from a class through an instance, as the `__get__` of partial and of the lru_cache wrapper. */
 function bindAsMethod(self: PyObject, instance: PyValue): PyValue {
@@ -146,7 +147,7 @@ method(partialClass, '__repr__', 'none', 0, 0, (self) => {
 
 function reduce(args: PyValue[], kwargs: Kwargs): PyValue {
   const [fn, iterable] = args;
-  const next = iterate(iterable);
+  const next = iterateOr(iterable, 'reduce() arg 2 must support iteration');
   let accumulator: PyValue | typeof DONE = args.length > 2 ? args[2] : (kwargs?.get('initial') ?? next());
   if (accumulator === DONE) throw typeError('reduce() of empty iterable with no initial value');
   for (let item = next(); item !== DONE; item = next()) {
@@ -372,7 +373,6 @@ function wrapNot(result: PyValue, convert: (value: PyValue) => boolean): PyValue
 
 registerUnsupportedAttributes('functools', {
   RLock: 'functools.RLock（スレッド）',
-  itemgetter: 'functools.itemgetter（operator モジュール）',
 });
 
 registerModule('functools', (runtime) =>
@@ -382,6 +382,7 @@ registerModule('functools', (runtime) =>
     new Map<string, PyValue>([
       ['reduce', builtin('reduce', 'takes', 2, 3, reduce, { keywords: ['initial'] })],
       ['partial', partialClass],
+      ['itemgetter', itemgetterClass],
       ['Placeholder', Placeholder],
       ['_lru_cache_wrapper', builtin('_lru_cache_wrapper', 'expected', 4, 4, lruCacheWrapper)],
       ['_CacheInfo', makeNamedTupleClass('CacheInfo', ['hits', 'misses', 'maxsize', 'currsize'], 'functools')],

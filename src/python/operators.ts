@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 588 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 592 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
 import { floatPower } from './floatPower';
 import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, toIndex, trueDivideInt } from './numbers';
-import { bindValue, callValue, iterate, lookupSpecial } from './objects';
+import { bindValue, callValue, iterate, iterateOr, lookupSpecial } from './objects';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import {
@@ -145,10 +145,9 @@ function nativeInplace(operator: BinaryOperator, left: PyValue, right: PyValue):
       return left;
     }
     if (operator === '*') {
-      const times = repeatCount(right, left);
-      const items = [...left.items];
-      currentRuntime().allocate(items.length * Math.max(times - 1, 0));
-      left.items = times <= 0 ? [] : Array.from({ length: times }, () => items).flat();
+      const times = repeatCount(right);
+      if (times <= 0) left.items = [];
+      else appendRepeats(left.items, [...left.items], times - 1);
       return left;
     }
   }
@@ -362,28 +361,33 @@ function isIntLike(value: PyValue): value is bigint | boolean {
   return typeof value === 'bigint' || typeof value === 'boolean';
 }
 
-function repeatCount(count: PyValue, sequence: PyValue): number {
+function repeatCount(count: PyValue): number {
   if (!isIntLike(count)) throw typeError(`can't multiply sequence by non-int of type '${typeName(count)}'`);
   const times = asInt(count);
-  if (times > BigInt(Number.MAX_SAFE_INTEGER))
+  if (times >= 1n << 63n || times < -(1n << 63n)) {
     throw pyError('OverflowError', `cannot fit 'int' into an index-sized integer`);
-  void sequence;
+  }
   return Number(times);
 }
 
 function repeatString(text: string, count: bigint | boolean): string {
-  const times = repeatCount(count, text);
+  const times = repeatCount(count);
   if (times <= 0 || text === '') return '';
   currentRuntime().buildString(text.length * times);
   return text.repeat(times);
 }
 
 function repeatSequence(sequence: PyList | PyTuple, count: bigint | boolean): PyValue {
-  const times = sequence.items.length === 0 ? 0 : Math.max(repeatCount(count, sequence), 0);
-  currentRuntime().allocate(sequence.items.length * times);
   const items: PyValue[] = [];
-  for (let index = 0; index < times; index++) items.push(...sequence.items);
+  appendRepeats(items, sequence.items, repeatCount(count));
   return sequence instanceof PyList ? newList(items) : newTuple(items);
+}
+
+/** Appends `rounds` copies of the items, refusing through the budget before any copy is made. */
+function appendRepeats(target: PyValue[], items: readonly PyValue[], rounds: number): void {
+  if (items.length === 0 || rounds <= 0) return;
+  currentRuntime().allocate(items.length * rounds);
+  for (let round = 0; round < rounds; round++) for (const item of items) target.push(item);
 }
 
 function setBinary(operator: BinaryOperator, left: PySet, right: PySet): PyValue {
@@ -799,9 +803,13 @@ function compareSets(operator: keyof typeof COMPARE_NAMES, left: PySet, right: P
   }
 }
 
-/** Python's `==` as a boolean, which identity short-circuits as containers do. */
+/**
+ * Python's `==` as a boolean, which identity short-circuits as containers do. Floats are unboxed, so every NaN counts
+ * as one object: `x in [x]` and `math.nan in [math.nan]` hold as in CPython, at the cost of two separately computed
+ * NaNs, which CPython keeps apart.
+ */
 export function equals(left: PyValue, right: PyValue): boolean {
-  if (left === right && !(typeof left === 'number' && Number.isNaN(left))) return true;
+  if (isSame(left, right)) return true;
   return isTruthyValue(compareOp('==', left, right));
 }
 
@@ -819,7 +827,7 @@ export function intEnumValue(value: PyValue): PyValue {
 
 /** Whether two dict keys or set elements are the same key: identical, or equal by `==`. */
 export function keysEqual(left: PyValue, right: PyValue): boolean {
-  if (left === right) return true;
+  if (isSame(left, right)) return true;
   const leftType = typeof left;
   if (leftType !== 'object' && typeof right !== 'object') {
     if (leftType === 'string' || typeof right === 'string') return false;
@@ -859,7 +867,7 @@ export function contains(container: PyValue, item: PyValue): boolean {
   }
   const special = lookupSpecial(container, '__contains__');
   if (special !== undefined) return isTruthyValue(callValue(bindValue(special, container), [item]));
-  const next = iterate(container);
+  const next = iterateOr(container, `argument of type '${typeName(container)}' is not a container or iterable`);
   for (let element = next(); element !== DONE; element = next()) {
     currentRuntime().spend();
     if (equals(element, item)) return true;

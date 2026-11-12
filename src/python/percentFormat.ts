@@ -1,6 +1,6 @@
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { floatToInt } from './numbers';
-import { getAttribute, getItem, lookupSpecial } from './objects';
+import { callValue, getAttribute, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { iterStr } from './strings';
 import { pyError, typeError, typeName, valueError } from './types';
@@ -174,19 +174,22 @@ function charOf(value: PyValue): string {
   throw typeError(`%c requires an int or a unicode character, not ${typeName(value)}`);
 }
 
+/** Lays an integer out as CPython's `_PyUnicode_FormatLong` and `unicode_format_arg_output` do. */
 function formatInteger(type: string, integer: bigint, conversion: Conversion): string {
-  const { align, zero, sign, alternate, width, precision } = conversion;
+  const { sign, alternate, precision = 0 } = conversion;
   const formatType = 'diu'.includes(type) ? 'd' : type;
-  if (precision === undefined) {
-    return pyFormat(integer, `${zero ? '0=' : align}${sign}${alternate}${width}${formatType}`);
-  }
-  const digits = (integer < 0n ? -integer : integer).toString(formatType === 'd' ? 10 : formatType === 'o' ? 8 : 16);
+  const magnitude = pyFormat(integer < 0n ? -integer : integer, formatType);
   currentRuntime().buildString(precision);
-  const padded = digits.padStart(precision, '0');
-  const shown = type === 'X' ? padded.toUpperCase() : padded;
-  const prefix = alternate ? `0${formatType === 'X' ? 'X' : formatType}` : '';
-  const body = `${integer < 0n ? '-' : sign}${prefix}${shown}`;
-  return pyFormat(body, `${zero ? '0' : ''}${align}${width}`);
+  const prefix = alternate && formatType !== 'd' ? `0${formatType}` : '';
+  return padNumber(`${integer < 0n ? '-' : sign}${prefix}`, magnitude.padStart(precision, '0'), conversion);
+}
+
+/** Pads a number to the width: with zeros between its sign and prefix and its digits, or with spaces outside. */
+function padNumber(signAndPrefix: string, digits: string, { align, zero, width }: Conversion): string {
+  const padding = Math.max(0, Number(width) - signAndPrefix.length - digits.length);
+  currentRuntime().buildString(padding);
+  if (align === '<') return signAndPrefix + digits + ' '.repeat(padding);
+  return zero ? signAndPrefix + '0'.repeat(padding) + digits : ' '.repeat(padding) + signAndPrefix + digits;
 }
 
 function toInteger(type: string, value: PyValue): bigint {
@@ -195,7 +198,7 @@ function toInteger(type: string, value: PyValue): bigint {
   if (typeof value === 'number' && 'diu'.includes(type)) return floatToInt(value);
   if ('diu'.includes(type)) {
     if (value instanceof PyInstance && lookupSpecial(value, '__int__') !== undefined) {
-      return toInteger(type, getAttribute(value, '__int__'));
+      return toInteger(type, callValue(getAttribute(value, '__int__'), []));
     }
     throw typeError(`%${type} format: a real number is required, not ${typeName(value)}`);
   }

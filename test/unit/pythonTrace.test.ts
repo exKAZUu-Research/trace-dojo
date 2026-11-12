@@ -7,6 +7,12 @@ import type { TraceItem } from '../../src/problems/trace';
 const withoutLines = (items: TraceItem[]): unknown[] =>
   items.map(({ line, callLines, ...item }) => ({ ...item, callDepth: callLines.length }));
 
+/** The names of each step's variables in the order learners see them, with Python's `self` named as Java's `this`. */
+const variableNamesOf = (language: 'java' | 'python', program: string): string[][] =>
+  traceProgram(language, program, program).traceItems.map(({ vars }) =>
+    Object.keys(vars).map((name) => name.replace(/^self\./, 'this.'))
+  );
+
 /** Programs that behave alike in both languages, so Python must reproduce the Java interpreter's trace. */
 test.each([
   {
@@ -82,6 +88,37 @@ walk(w.t, 2)`,
   const actual = withoutLines(traceProgram('python', python, python).traceItems);
   // Java names the instance `this`, which Python names `self`.
   expect(JSON.parse(JSON.stringify(actual).replaceAll('"self', '"this'))).toEqual(expected);
+});
+
+test('the variables follow the order of the Java trace: locals, class variables, then the fields of the instance', () => {
+  const java = `public class Main {
+  public static void main(String[] args) {
+    Counter c = new Counter();
+    c.add(2);
+  }
+}
+class Counter {
+  static int count = 0;
+  int value;
+  Counter() {
+    this.value = 1;
+  }
+  void add(int n) {
+    this.value += n;
+    Counter.count++;
+  }
+}`;
+  const python = `class Counter:
+    count = 0
+    def __init__(self):
+        self.value = 1
+    def add(self, n):
+        self.value += n
+        Counter.count += 1
+c = Counter()
+c.add(2)`;
+  expect(variableNamesOf('python', python)).toEqual(variableNamesOf('java', java));
+  expect(variableNamesOf('python', python).at(-1)).toEqual(['n', 'Counter.count', 'this.value']);
 });
 
 test('a for loop over a range records a step for each value it binds', () => {

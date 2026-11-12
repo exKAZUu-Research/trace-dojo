@@ -179,7 +179,7 @@ export function setItem(container: PyValue, key: PyValue, value: PyValue): void 
 }
 
 function assignSlice(list: PyList, slice: PySlice, value: PyValue): void {
-  const items = value === list ? [...list.items] : toArray(value);
+  const items = value === list ? [...list.items] : toArray(value, 'must assign iterable to extended slice');
   const indices = sliceIndices(slice, list.items.length);
   currentRuntime().allocate(items.length);
   if (indices.step === 1) {

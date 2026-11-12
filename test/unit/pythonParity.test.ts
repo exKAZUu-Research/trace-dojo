@@ -25,8 +25,19 @@ test.each([
   ['a huge random.choices result', 'import random\nx = random.choices([1], k=1000001)'],
   ['a huge random integer', 'import random\nx = random.getrandbits(9000000)'],
   ['a huge format width', 'format(1, "01000000000000,")'],
+  ['a list repeated in place beyond memory', 'x = [1]\nx *= 100000000'],
+  ['a deque repeated in place beyond memory', 'from collections import deque\nd = deque([1])\nd *= 1000000000'],
 ])('%s raises MemoryError', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ uncaughtException: 'MemoryError' });
+});
+
+test('a bounded deque repeated a billion times keeps its last items without running the rounds', () => {
+  const program = `from collections import deque
+d = deque([1, 2], maxlen=3)
+d *= 1000000000
+if list(d) != [2, 1, 2] or list(deque([1, 2, 3], maxlen=2) * 1000000001) != [2, 3]:
+    raise AssertionError(str(d))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test('a misspelled name in from-import gets the suggestion CPython gives', () => {

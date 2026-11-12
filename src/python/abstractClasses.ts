@@ -18,14 +18,20 @@ export function initAbstractClass(cls: PyClass, metaclass?: PyClass): void {
   cls.abc = { registry: [] };
   applyCollectionFlags(cls);
   cls.cls = metaclass ?? cls.bases.find((base) => base.abc)?.cls ?? abcMetaClass;
+  updateAbstractMethods(cls);
+}
+
+/** `abc.update_abstractmethods`: recomputes the abstract methods of an abstract base class. */
+export function updateAbstractMethods(cls: PyClass): void {
+  if (!cls.abc) return;
   const abstracts = new Set<string>();
-  for (const [name, value] of cls.dict) if (isAbstractMethod(value)) abstracts.add(name);
   for (const base of cls.bases) {
     for (const name of abstractMethodsOf(base)) {
       const value = cls.lookup(name);
       if (value !== undefined && isAbstractMethod(value)) abstracts.add(name);
     }
   }
+  for (const [name, value] of cls.dict) if (isAbstractMethod(value)) abstracts.add(name);
   cls.dict.set('__abstractmethods__', newSet([...abstracts], true));
 }
 

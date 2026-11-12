@@ -235,8 +235,8 @@ function isNumberLike(value: PyValue): boolean {
 }
 
 defineNumberDunders(complexClass, isComplexOperand, ['+', '-', '*', '/']);
-defineGetSet(complexClass, 'real', (self) => (self as PyComplex).real);
-defineGetSet(complexClass, 'imag', (self) => (self as PyComplex).imag);
+defineGetSet(complexClass, 'real', (self) => (self as PyComplex).real, { member: true });
+defineGetSet(complexClass, 'imag', (self) => (self as PyComplex).imag, { member: true });
 method(complexClass, '__abs__', 'none', 0, 0, (self) => callBuiltin('abs', [self]));
 method(complexClass, '__complex__', 'none', 0, 0, (self) => self);
 method(complexClass, '__getnewargs__', 'none', 0, 0, (self) =>

@@ -4,7 +4,7 @@ import { bindValue, callValue, getAttribute, getItem, lookupSpecial } from './ob
 import { currentRuntime } from './runtimeContext';
 import { asciiEscape, iterStr, strRepr } from './strings';
 import { classOf, None, typeError, typeName, valueError } from './types';
-import { PyBuiltinFunction, type PyObject, type PyValue } from './values';
+import { PyBuiltinFunction, PyInstance, type PyObject, type PyValue } from './values';
 
 /** `repr()` of a value. */
 export function pyRepr(value: PyValue): string {
@@ -67,7 +67,7 @@ export function defaultRepr(value: PyObject): string {
 export function pyFormat(value: PyValue, spec: string): string {
   if (typeof value === 'object' && value !== None) {
     const method = lookupSpecial(value, '__format__');
-    if (method !== undefined && !(method instanceof PyBuiltinFunction)) {
+    if (method !== undefined && (!(method instanceof PyBuiltinFunction) || isEnumMember(value))) {
       const result = callValue(bindValue(method, value), [spec]);
       if (typeof result !== 'string') throw typeError(`__format__ must return a str, not ${typeName(result)}`);
       return result;
@@ -78,6 +78,11 @@ export function pyFormat(value: PyValue, spec: string): string {
     throw typeError(`unsupported format string passed to ${typeName(value)}.__format__`);
   }
   return formatValue(value, spec, pyStr);
+}
+
+/** An Enum member, whose builtin `__format__` formats its `str()` or, for an IntEnum, its value. */
+function isEnumMember(value: PyObject): boolean {
+  return value instanceof PyInstance && value.enumValue !== undefined;
 }
 
 function isNativeFormattable(value: PyObject): boolean {

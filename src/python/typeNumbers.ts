@@ -225,21 +225,53 @@ export function roundFloat(value: number, digits: PyValue | undefined): PyValue 
 
 complexClass.construct = (_cls, args, kwargs) => {
   checkArgs({ qualified: 'complex', min: 0, max: 2, style: 'takes', keywords: ['real', 'imag'] }, args, kwargs);
-  const real = argument(args, kwargs, 0, 'real') ?? 0n;
-  const imag = argument(args, kwargs, 1, 'imag') ?? 0n;
-  if (typeof real === 'string') return parseComplex(real);
-  const [a, b] = toParts(real);
-  const [c, d] = toParts(imag);
-  return newComplex(a - d, b + c);
+  const real = argument(args, kwargs, 0, 'real') ?? false;
+  const imag = argument(args, kwargs, 1, 'imag');
+  if (imag === undefined) return complexOf(real);
+  const a = namedPart(real, 'real');
+  const b = namedPart(imag, 'imag');
+  // A part combines with the other argument only when that one is complex: adding a zero would drop the sign of -0.0.
+  return newComplex(b.isComplex ? a.real - b.imag : a.real, a.isComplex ? b.real + a.imag : b.real);
 };
 
-function toParts(value: PyValue): [number, number] {
-  return value instanceof PyComplex ? [value.real, value.imag] : [toFloatStrict(value), 0];
+interface ComplexPart {
+  real: number;
+  imag: number;
+  isComplex: boolean;
 }
 
-function toFloatStrict(value: PyValue): number {
-  if (typeof value === 'string') throw typeError("complex() second arg can't be a string");
-  return toFloat(value);
+/** `complex(value)`: a string is parsed, and any other value converts as a number. */
+function complexOf(value: PyValue): PyComplex {
+  if (typeof value === 'string') return parseComplex(value);
+  const part = complexPartOf(value, true);
+  if (!part) throw typeError(`complex() argument must be a string or a number, not ${typeName(value)}`);
+  return newComplex(part.real, part.imag);
+}
+
+function namedPart(value: PyValue, name: 'real' | 'imag'): ComplexPart {
+  const part = typeof value === 'string' ? undefined : complexPartOf(value, name === 'real');
+  if (!part) throw typeError(`complex() argument '${name}' must be a real number, not ${typeName(value)}`);
+  return part;
+}
+
+/** The number an argument of `complex()` stands for, or undefined for no number; only `real` is asked `__complex__`. */
+function complexPartOf(value: PyValue, asksComplexMethod: boolean): ComplexPart | undefined {
+  if (value instanceof PyComplex) return { real: value.real, imag: value.imag, isComplex: true };
+  const special = asksComplexMethod ? lookupSpecial(value, '__complex__') : undefined;
+  if (special !== undefined) {
+    const result = callValue(bindValue(special, value), []);
+    if (!(result instanceof PyComplex)) {
+      throw typeError(`__complex__ returned non-complex (type ${typeName(result)})`);
+    }
+    return { real: result.real, imag: result.imag, isComplex: true };
+  }
+  const isReal =
+    typeof value === 'number' ||
+    typeof value === 'bigint' ||
+    typeof value === 'boolean' ||
+    lookupSpecial(value, '__float__') !== undefined ||
+    lookupSpecial(value, '__index__') !== undefined;
+  return isReal ? { real: toFloat(value), imag: 0, isComplex: false } : undefined;
 }
 
 function parseComplex(text: string): PyComplex {

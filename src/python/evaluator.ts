@@ -18,7 +18,7 @@ import {
   setAttribute,
   setItem,
 } from './objects';
-import { equals, inplaceOp, isSame } from './operators';
+import { compareOp, equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
 import {
   baseExceptionClass,
@@ -618,7 +618,7 @@ export class Evaluator extends ExpressionEvaluator {
     this.runtime.spend();
     switch (pattern.kind) {
       case 'value': {
-        return equals(subject, this.evaluate(pattern.value, frame));
+        return isTruthy(compareOp('==', subject, this.evaluate(pattern.value, frame)));
       }
       case 'singleton': {
         return isSame(subject, pattern.value ?? None);

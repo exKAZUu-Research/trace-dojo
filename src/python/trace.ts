@@ -46,14 +46,14 @@ export function tracePythonProgram(program: string, trace: TraceOptions): Progra
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
-/** The variables a frame shows: its own, then the fields of `self` and the class variables when `withContext`. */
+/** The variables a frame shows: its own, then the class variables and the fields of `self` when `withContext`. */
 function variablesOf(frame: Frame, withContext: boolean): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, value] of namedValues(frame)) addVariable(variables, name, value);
   if (!withContext) return variables;
+  addClassVariables(variables, frame.globals);
   const self = selfOf(frame);
   if (self) addSelf(variables, self.name, self.value);
-  addClassVariables(variables, frame.globals);
   return variables;
 }
 
@@ -106,14 +106,6 @@ function addVariable(variables: TraceVariables, name: string, value: PyValue): v
   if (node) variables.referenceVars[name] = node;
 }
 
-function addSelf(variables: TraceVariables, name: string, self: PyInstance): void {
-  for (const [key, value] of self.dict) {
-    if (!isVariableValue(value)) continue;
-    const scalar = scalarOf(value, new Set());
-    if (scalar !== NOT_SCALAR) variables.vars[`${name}.${key}`] = scalar;
-  }
-}
-
 /** The class variables of the classes the program defined, as Java shows static fields. */
 function addClassVariables(variables: TraceVariables, globals: Map<string, PyValue>): void {
   for (const value of globals.values()) {
@@ -123,6 +115,14 @@ function addClassVariables(variables: TraceVariables, globals: Map<string, PyVal
       const scalar = scalarOf(field, new Set());
       if (scalar !== NOT_SCALAR) variables.vars[`${value.name}.${key}`] = scalar;
     }
+  }
+}
+
+function addSelf(variables: TraceVariables, name: string, self: PyInstance): void {
+  for (const [key, value] of self.dict) {
+    if (!isVariableValue(value)) continue;
+    const scalar = scalarOf(value, new Set());
+    if (scalar !== NOT_SCALAR) variables.vars[`${name}.${key}`] = scalar;
   }
 }
 
@@ -167,6 +167,7 @@ function traceIntOf(value: bigint): number | bigint {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of value the trace shows.
 function displayNodeOf(value: PyValue, seen: Set<PyObject>): DisplayNode | undefined {
   if (typeof value === 'bigint') return { kind: 'value', value: traceIntOf(value) };
   if (typeof value !== 'object') return { kind: 'value', value };
@@ -188,7 +189,9 @@ function displayNodeOf(value: PyValue, seen: Set<PyObject>): DisplayNode | undef
     };
   }
   if (value instanceof PyInstance && value.enumValue !== undefined) {
-    return { kind: 'value', value: value.dict.get('_name_') as string };
+    const name = value.dict.get('_name_');
+    // A Flag value that no member names, such as `Perm(0)`, is shown as its value.
+    return typeof name === 'string' ? { kind: 'value', value: name } : displayNodeOf(value.enumValue, seen);
   }
   seen.add(value);
   try {

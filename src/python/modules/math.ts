@@ -10,6 +10,7 @@ import { currentRuntime } from '../runtimeContext';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
 import type { Kwargs, PyValue } from '../values';
 import { fma } from './mathFma';
+import { sumprod } from './mathSumprod';
 
 /** A real number argument as a float, as math functions convert theirs. */
 export function realArgument(value: PyValue): number {
@@ -303,13 +304,6 @@ function lcm(values: bigint[]): bigint {
   return result;
 }
 
-function sumOfProducts(a: PyValue[], b: PyValue[]): PyValue {
-  if (a.length !== b.length) throw valueError('Inputs are not the same length');
-  let total: PyValue = 0n;
-  for (const [index, value] of a.entries()) total = binaryOp('+', total, binaryOp('*', value, b[index]));
-  return total;
-}
-
 // CPython 3.14 takes these from the platform's C library (macOS's on the reference machine), whose results to the
 // last digit no published algorithm reproduces.
 registerUnsupportedAttributes('math', {
@@ -380,7 +374,7 @@ registerModule('math', () => {
     ['dist', builtin('dist', 'expected', 2, 2, ([p, q]) => dist(p, q))],
     ['fsum', builtin('fsum', 'one', 1, 1, ([iterable]) => fsum(iterable))],
     ['prod', builtin('prod', 'takes', 1, 1, product, { keywords: ['start'] })],
-    ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumOfProducts(toArray(p), toArray(q)))],
+    ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumprod(p, q))],
     ['isclose', builtin('isclose', 'takes', 2, 2, isclose, { keywords: ['rel_tol', 'abs_tol'] })],
     ['isfinite', builtin('isfinite', 'one', 1, 1, ([value]) => Number.isFinite(realArgument(value)))],
     ['isinf', builtin('isinf', 'one', 1, 1, ([value]) => isInfinite(realArgument(value)))],

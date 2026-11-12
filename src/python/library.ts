@@ -25,3 +25,5 @@ import './modules/string';
 import './modules/typing';
 import './modules/unsupportedNames';
 import './modules/statistics';
+import './modules/abc';
+import './modules/operator';

@@ -90,7 +90,17 @@ export function readDescriptor(descriptor: PyOpaque, instance: PyValue): PyValue
 export function writeDescriptor(descriptor: PyOpaque, instance: PyValue, value: PyValue): void {
   const data = dataOf(descriptor);
   if (data.unsupported !== undefined) throw new UnsupportedFeatureError(data.unsupported);
-  if (!data.set)
-    throw pyError('AttributeError', `attribute '${data.name}' of '${data.owner.name}' objects is not writable`);
+  if (!data.set) throw unwritableError(descriptor);
   data.set(instance, value);
+}
+
+/** The error of assigning to or deleting an attribute whose builtin data descriptor has no setter. */
+export function unwritableError(descriptor: PyOpaque): Error {
+  const data = dataOf(descriptor);
+  return pyError(
+    'AttributeError',
+    descriptor.cls === memberDescriptorClass
+      ? 'readonly attribute'
+      : `attribute '${data.name}' of '${data.owner.name}' objects is not writable`
+  );
 }

@@ -1,6 +1,6 @@
 import { registerVirtualSubclass } from './abstractClasses';
 import { isSubclassOfClass } from './builtins';
-import { isDataDescriptor, readDescriptor, writeDescriptor } from './descriptors';
+import { isDataDescriptor, readDescriptor, unwritableError, writeDescriptor } from './descriptors';
 import { newMappingProxy } from './mappingProxy';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -144,7 +144,7 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
   return undefined;
 }
 
-// code-gauge-allow functionNcss 33 -- Follows the rules of attribute assignment for each kind of object.
+// code-gauge-allow functionNcss 35 -- Follows the rules of attribute assignment for each kind of object.
 // code-gauge-allow functionCognitiveComplexity 21 -- Follows the rules of attribute assignment for each kind of object.
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
@@ -183,10 +183,16 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     target.dict.set(name, value);
     return;
   }
-  if (classOf(target).lookup(name) !== undefined || specialAttribute(target, name) !== undefined) {
+  if (isNamedTupleField(descriptor)) throw pyError('AttributeError', "can't set attribute");
+  if (descriptor !== undefined || specialAttribute(target, name) !== undefined) {
     throw pyError('AttributeError', `'${typeName(target)}' object attribute '${name}' is read-only`);
   }
   throw noDictError(target, name);
+}
+
+/** Whether a class attribute of a builtin value is a namedtuple field, the only property such a value has. */
+function isNamedTupleField(attribute: PyValue | undefined): boolean {
+  return attribute instanceof PyDescriptor && attribute.cls === propertyClass;
 }
 
 /** Stores an instance attribute, honoring properties and the special attributes of exceptions. */
@@ -235,7 +241,8 @@ function noDictError(target: PyValue, name: string): Error {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Follows the rules of attribute deletion for each kind of object.
+// code-gauge-allow functionCognitiveComplexity 24 -- Follows the rules of attribute deletion for each kind of object.
+// code-gauge-allow functionNcss 34 -- Follows the rules of attribute deletion for each kind of object.
 export function deleteAttribute(target: PyValue, name: string): void {
   if (target instanceof PyInstance) {
     const custom = target.cls.isBuiltin ? undefined : lookupSpecial(target, '__delattr__');
@@ -263,10 +270,13 @@ export function deleteAttribute(target: PyValue, name: string): void {
     if (!target.dict.delete(name)) throw attributeError(target, name);
     return;
   }
-  if (classOf(target).lookup(name) !== undefined) {
+  const descriptor = classOf(target).lookup(name);
+  if (isDataDescriptor(descriptor)) throw unwritableError(descriptor);
+  if (isNamedTupleField(descriptor)) throw pyError('AttributeError', "can't delete attribute");
+  if (descriptor !== undefined) {
     throw pyError('AttributeError', `'${typeName(target)}' object attribute '${name}' is read-only`);
   }
-  throw attributeError(target, name);
+  throw noDictError(target, name);
 }
 
 /** Deletes an instance attribute, honoring properties, as `object.__delattr__` does. */

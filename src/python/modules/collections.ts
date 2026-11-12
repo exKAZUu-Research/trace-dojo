@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 533 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 539 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonFunction, pythonMethod } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -222,14 +222,21 @@ function copyDeque(deque: PyDeque): PyDeque {
 }
 
 /** Repeats a deque's items in place, keeping only the last `maxlen` as appending them one by one would. */
+/** Repeats a deque in place, computing what a bounded one keeps instead of appending every round. */
 function repeatDeque(deque: PyDeque, countValue: PyValue): void {
-  const count = Number(toIndex(countValue));
-  const items = [...deque.items];
-  if (count <= 0) {
-    deque.items.length = 0;
-    return;
+  const count = toIndex(countValue);
+  if (count >= 1n << 63n || count < -(1n << 63n)) {
+    throw pyError('OverflowError', "cannot fit 'int' into an index-sized integer");
   }
-  for (let round = 1; round < count; round++) for (const item of items) push(deque, item, false);
+  const items = [...deque.items];
+  const size = BigInt(items.length);
+  deque.items.length = 0;
+  if (count <= 0n || size === 0n) return;
+  const total = size * count;
+  const kept = deque.maxlen !== undefined && BigInt(deque.maxlen) < total ? BigInt(deque.maxlen) : total;
+  currentRuntime().allocate(Number(kept - (kept < size ? kept : size)));
+  const skipped = total - kept;
+  for (let index = 0n; index < kept; index++) deque.items.push(items[Number((skipped + index) % size)]);
 }
 method(dequeClass, '__getitem__', 'one', 1, 1, (self, [key]) => dequeOf(self).items[dequeIndex(dequeOf(self), key)]);
 method(dequeClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {

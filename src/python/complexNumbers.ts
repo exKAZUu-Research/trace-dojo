@@ -28,12 +28,12 @@ function product(a: Parts, b: Parts): Parts {
   return { real: a.real * b.real - a.imag * b.imag, imag: a.real * b.imag + a.imag * b.real };
 }
 
-/** Divides as CPython's _Py_c_quot does. */
-function quotient(a: Parts, b: Parts): Parts {
+/** Divides as CPython's _Py_c_quot does, with the message of the operator that divides for a zero divisor. */
+function quotient(a: Parts, b: Parts, zeroDivisor = 'division by zero'): Parts {
   const absReal = Math.abs(b.real);
   const absImag = Math.abs(b.imag);
   if (absReal >= absImag) {
-    if (absReal === 0) throw pyError('ZeroDivisionError', 'division by zero');
+    if (absReal === 0) throw pyError('ZeroDivisionError', zeroDivisor);
     const ratio = b.imag / b.real;
     const denominator = b.real + b.imag * ratio;
     return { real: (a.real + a.imag * ratio) / denominator, imag: (a.imag - a.real * ratio) / denominator };
@@ -56,14 +56,16 @@ function powerUnsigned(x: Parts, n: number): Parts {
   return result;
 }
 
+const ZERO_TO_NEGATIVE_POWER = 'zero to a negative or complex power';
+
 function power(a: Parts, b: Parts): Parts {
   if (b.imag === 0 && b.real === Math.floor(b.real) && Math.abs(b.real) <= 100) {
     const n = b.real;
-    return n > 0 ? powerUnsigned(a, n) : quotient({ real: 1, imag: 0 }, powerUnsigned(a, -n));
+    return n > 0 ? powerUnsigned(a, n) : quotient({ real: 1, imag: 0 }, powerUnsigned(a, -n), ZERO_TO_NEGATIVE_POWER);
   }
   if (b.real === 0 && b.imag === 0) return { real: 1, imag: 0 };
   if (a.real === 0 && a.imag === 0) {
-    if (b.imag !== 0 || b.real < 0) throw pyError('ZeroDivisionError', 'zero to a negative or complex power');
+    if (b.imag !== 0 || b.real < 0) throw pyError('ZeroDivisionError', ZERO_TO_NEGATIVE_POWER);
     return { real: 0, imag: 0 };
   }
   const magnitude = Math.hypot(a.real, a.imag);
