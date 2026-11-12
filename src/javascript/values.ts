@@ -168,8 +168,17 @@ export interface FunctionFrame {
   newTarget: JsFunction | undefined;
 }
 
+/** A value a `using` declaration declared, with the method that disposes of it when its scope ends. */
+export interface Disposable {
+  value: Value;
+  method: JsFunction | undefined;
+  isAsync: boolean;
+}
+
 export class Scope {
   readonly bindings = new Map<string, Binding>();
+  /** The values `using` declarations in this scope declared, in order. */
+  disposables?: Disposable[];
 
   constructor(
     readonly parent: Scope | undefined,

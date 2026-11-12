@@ -50,6 +50,7 @@ export class ProgramConverter extends ExpressionConverter {
         row: rowOf(node),
       }),
     lexical_declaration: (node) => this.declaration(node, true),
+    using_declaration: (node) => this.declaration(node, true),
     variable_declaration: (node) => this.declaration(node, true),
     function_declaration: (node) => this.functionDeclaration(node),
     generator_function_declaration: (node) => this.functionDeclaration(node),
@@ -158,8 +159,7 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   private declaration(node: Node, recordsStep: boolean): VariableDeclaration {
-    const declarationKind: DeclarationKind =
-      node.type === 'variable_declaration' ? 'var' : (field(node, 'kind').text as DeclarationKind);
+    const declarationKind = declarationKindOf(node);
     const declarators = namedChildren(node).map((declarator) => {
       const valueNode = declarator.childForFieldName('value');
       const target = this.bindingPattern(field(declarator, 'name'), (identifier, name) =>
@@ -217,7 +217,7 @@ export class ProgramConverter extends ExpressionConverter {
     const header = field(node, 'header');
     const isAwait = hasChild(node, 'await');
     if (header.childForFieldName('value')) fail(node, 'for-in 文の変数には初期値を書けません。');
-    const declarationKind = header.childForFieldName('kind')?.text as DeclarationKind | undefined;
+    const declarationKind = header.childForFieldName('kind') ? declarationKindOf(header) : undefined;
     return this.withScope((scope) => {
       const leftNode = field(header, 'left');
       const target = declarationKind
@@ -450,6 +450,13 @@ export class ProgramConverter extends ExpressionConverter {
       }
     });
   }
+}
+
+/** The kind of a declaration, or of the declaration in a `for...of` header. */
+function declarationKindOf(node: Node): DeclarationKind {
+  if (node.type === 'variable_declaration') return 'var';
+  if (hasChild(node, 'using')) return hasChild(node, 'await') ? 'await using' : 'using';
+  return field(node, 'kind').text as DeclarationKind;
 }
 
 /** Whether a `for` header assigns something, which its step shows: an init with a value or an update. */

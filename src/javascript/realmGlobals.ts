@@ -176,15 +176,30 @@ function defineFunction(builder: RealmBuilder): void {
   });
 }
 
-const errorNames: ErrorName[] = ['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'AggregateError'];
+const errorNames: ErrorName[] = [
+  'Error',
+  'TypeError',
+  'RangeError',
+  'ReferenceError',
+  'SyntaxError',
+  'AggregateError',
+  'SuppressedError',
+];
+
+/** The `length` of the error constructors that take more than a message. */
+const errorArgumentCounts: Partial<Record<ErrorName, number>> = { AggregateError: 2, SuppressedError: 3 };
 
 function defineErrors(builder: RealmBuilder): void {
   const { errorPrototypes } = builder.realm;
   let errorConstructor: JsFunction | undefined;
   for (const name of errorNames) {
     const prototype = errorPrototypes[name];
-    const fn = builder.defineClass(name, name === 'AggregateError' ? 2 : 1, prototype, (call) =>
-      name === 'AggregateError' ? createAggregateError(call, prototype) : createError(call, prototype)
+    const fn = builder.defineClass(name, errorArgumentCounts[name] ?? 1, prototype, (call) =>
+      name === 'AggregateError'
+        ? createAggregateError(call, prototype)
+        : name === 'SuppressedError'
+          ? createSuppressedError(call, prototype)
+          : createError(call, prototype)
     );
     if (errorConstructor) fn.proto = errorConstructor;
     else errorConstructor = fn;
@@ -210,6 +225,15 @@ function createError({ runtime, args, newTarget }: NativeCall, prototype: JsObje
   if (isObject(options) && runtime.hasProperty(options, 'cause'))
     defineHidden(error, 'cause', runtime.get(options, 'cause'));
   return error;
+}
+
+/** Creates a SuppressedError, whose first two arguments are the error and the error it suppressed. */
+function createSuppressedError(call: NativeCall, prototype: JsObject): JsObject {
+  const [error, suppressed] = call.args;
+  const object = createError({ ...call, args: call.args.slice(2) }, prototype);
+  defineHidden(object, 'error', error);
+  defineHidden(object, 'suppressed', suppressed);
+  return object;
 }
 
 /** Creates an AggregateError, whose first argument is the iterable of errors it gathers. */

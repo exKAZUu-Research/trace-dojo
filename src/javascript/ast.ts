@@ -18,6 +18,8 @@ export interface ScopeDeclarations {
   vars: string[];
   /** Every name above in the order of its first declaration, which traces list variables in. */
   order: string[];
+  /** Whether a `using` declaration is directly in the scope, whose end then disposes of what it declared. */
+  disposes: boolean;
 }
 
 export type Statement = Span &
@@ -64,7 +66,8 @@ export type Statement = Span &
     | { kind: 'empty' }
   );
 
-export type DeclarationKind = 'let' | 'const' | 'var';
+/** How a declaration declares its variables; a `using` one also disposes of their values when its scope ends. */
+export type DeclarationKind = 'let' | 'const' | 'var' | 'using' | 'await using';
 
 export interface VariableDeclaration extends Span {
   kind: 'declaration';

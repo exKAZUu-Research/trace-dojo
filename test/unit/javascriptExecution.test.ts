@@ -590,6 +590,22 @@ async function* wrap() { const r = yield* src(); console.log('r', r); }
   const w2 = wrap(); await w2.next(); try { await w2.throw(new Error('t')); } catch (e) { console.log('thrown', e.message); }
 })();`,
   ],
+  [
+    'using declarations',
+    `try { { using a = 1; } } catch (e) { console.log(e.constructor.name, e.message); }
+try { { using a = {}; } } catch (e) { console.log(e.constructor.name, e.message); }
+const r = (n, fail) => ({ [Symbol.dispose]() { console.log('dispose', n); if (fail) throw new Error('d' + n); } });
+try { { using a = r(1, true), b = r(2, true); throw new Error('body'); } } catch (e) { console.log(e.constructor.name, e.message, e.error?.message, e.suppressed?.message, e.suppressed?.error?.message, e.suppressed?.suppressed?.message); }
+function f() { using x = r('f'); return 'ret'; } console.log(f());
+for (using q of [r('q1'), r('q2')]) console.log('iter');
+{ using n = null; console.log('null ok'); }
+console.log(typeof Symbol.dispose, String(Symbol.asyncDispose), typeof SuppressedError);
+(async () => {
+  const ar = (n) => ({ async [Symbol.asyncDispose]() { console.log('async dispose', n); } });
+  { await using a = ar(1), b = r(2); console.log('in async'); }
+  for (await using c of [ar(3)]) console.log('iter async');
+})();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

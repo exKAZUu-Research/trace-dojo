@@ -2,8 +2,10 @@ import type {
   Block,
   ClassMember,
   ClassNode,
+  DeclarationKind,
   Expression,
   FunctionNode,
+  Pattern,
   Program,
   ScopeDeclarations,
   Statement,
@@ -21,6 +23,8 @@ import {
   privateMethodProperty,
 } from './memberProperties';
 import { startAsyncFunction } from './promises';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
+import type { Runtime } from './runtime';
 import { StepEvaluator } from './stepEvaluator';
 import { isObjectCreation, onlyCalls, onlyCreates, storesReference } from './stepRules';
 import {
@@ -29,6 +33,7 @@ import {
   type ClassField,
   type FunctionBehavior,
   type FunctionFrame,
+  isCallable,
   isObject,
   JsFunction,
   type JsObject,
@@ -50,7 +55,7 @@ export class Evaluator extends StepEvaluator {
   /** Runs a program in the frame the caller pushed, whose scope becomes the program's own. */
   runProgram(program: Program): void {
     this.instantiate(this.runtime.frame.scope, program.scope);
-    runToEnd(this.statements(program.body));
+    runToEnd(this.body(program.body, program.scope));
     this.runtime.eventLoop.run();
   }
 
@@ -169,10 +174,67 @@ export class Evaluator extends StepEvaluator {
     frame.scope = new Scope(outer);
     try {
       this.instantiate(frame.scope, declarations);
-      return yield* run();
+      return yield* declarations.disposes ? this.disposing(run) : run();
     } finally {
       frame.scope = outer;
     }
+  }
+
+  /** Runs the statements of a function body or the program, disposing of what their `using` declarations declared. */
+  private body(statements: Statement[], declarations: ScopeDeclarations): Steps<Completion> {
+    return declarations.disposes ? this.disposing(() => this.statements(statements)) : this.statements(statements);
+  }
+
+  /**
+   * Runs `run`, then disposes of the values the `using` declarations in the current scope declared, the last first. An
+   * error a disposal throws suppresses the error before it, which a SuppressedError then holds.
+   */
+  private *disposing<T>(run: () => Steps<T>): Steps<T> {
+    const { runtime } = this;
+    const scope = runtime.frame.scope;
+    let result: T | undefined;
+    let completion: JsThrow | GeneratorReturn | undefined;
+    try {
+      result = yield* run();
+    } catch (error) {
+      if (!(error instanceof JsThrow) && !(error instanceof GeneratorReturn)) throw error;
+      completion = error;
+    }
+    const disposables = scope.disposables ?? [];
+    scope.disposables = undefined;
+    for (const { value, method, isAsync } of disposables.toReversed()) {
+      try {
+        const disposed = method ? runtime.call(method, value, []) : undefined;
+        if (isAsync) resumedValue(yield new Awaiting(disposed));
+      } catch (error) {
+        if (!(error instanceof JsThrow)) throw error;
+        completion =
+          completion instanceof JsThrow ? new JsThrow(suppressedError(runtime, error.value, completion.value)) : error;
+      }
+    }
+    if (completion) throw completion;
+    return result as T;
+  }
+
+  /** Records a value a `using` declaration declares in the current scope, which disposes of it when it ends. */
+  private addDisposable(value: Value, kind: DeclarationKind): void {
+    const { runtime } = this;
+    const isAsync = kind === 'await using';
+    const scope = runtime.frame.scope;
+    scope.disposables ??= [];
+    // An `await using` of null or undefined still awaits when its scope ends.
+    if (value === null || value === undefined) {
+      if (isAsync) scope.disposables.push({ value, method: undefined, isAsync });
+      return;
+    }
+    if (!isObject(value)) runtime.throwError('TypeError', 'An object is expected with `using` declarations');
+    const asyncMethod = isAsync ? runtime.get(value, WELL_KNOWN_SYMBOLS.asyncDispose) : undefined;
+    const method = asyncMethod ?? runtime.get(value, WELL_KNOWN_SYMBOLS.dispose);
+    if (!isCallable(method)) {
+      const key = isAsync ? WELL_KNOWN_SYMBOLS.asyncDispose : WELL_KNOWN_SYMBOLS.dispose;
+      return runtime.throwError('TypeError', `${key.toString()} is not a function`);
+    }
+    scope.disposables.push({ value, method, isAsync });
   }
 
   /** Keeps `value` reachable for garbage collection while `run` computes with it. */
@@ -198,8 +260,14 @@ export class Evaluator extends StepEvaluator {
         else if (target.kind === 'identifier') this.revealVar(target.name);
         continue;
       }
-      this.bindPattern(target, yield* this.value(init), 'initialize');
+      this.bindDeclared(target, yield* this.value(init), declaration.declarationKind);
     }
+  }
+
+  /** Initializes the variables a declaration declares, recording the value of a `using` one for disposal. */
+  private bindDeclared(target: Pattern, value: Value, kind: DeclarationKind): void {
+    this.bindPattern(target, value, 'initialize');
+    if (kind === 'using' || kind === 'await using') this.addDisposable(value, kind);
   }
 
   /** Runs a loop body, returning `'next'` to continue the loop or the completion that ends it. */
@@ -299,13 +367,18 @@ export class Evaluator extends StepEvaluator {
         runtime.spend();
         const outer = frame.scope;
         try {
-          if (statement.declarationKind && statement.declarationKind !== 'var') {
+          const { declarationKind } = statement;
+          if (declarationKind && declarationKind !== 'var') {
             frame.scope = new Scope(outer);
             this.instantiate(frame.scope, statement.scope);
           }
-          this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
-          this.stepBinding(statement, value);
-          const result = yield* this.loopBody(statement.body, labels);
+          const iteration = (): Steps<'next' | Completion> => {
+            if (declarationKind) this.bindDeclared(statement.target, value, declarationKind);
+            else this.bindPattern(statement.target, value, 'assign');
+            this.stepBinding(statement, value);
+            return this.loopBody(statement.body, labels);
+          };
+          const result = yield* statement.scope.disposes ? this.disposing(iteration) : iteration();
           if (result !== 'next') return result;
         } finally {
           frame.scope = outer;
@@ -465,9 +538,9 @@ export class Evaluator extends StepEvaluator {
       this.instantiate(scope, node.scope);
       if (node.isGenerator) {
         const create = node.isAsync ? createAsyncGeneratorObject : createGeneratorObject;
-        return create(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.statements(node.body));
+        return create(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.body(node.body, node.scope));
       }
-      const completion = runToEnd(this.statements(node.body));
+      const completion = runToEnd(this.body(node.body, node.scope));
       return completion?.kind === 'return' ? completion.value : undefined;
     } finally {
       runtime.popFrame();
@@ -479,7 +552,7 @@ export class Evaluator extends StepEvaluator {
     this.bindParameters(node, args);
     if (!Array.isArray(node.body)) return { kind: 'return', value: yield* this.value(node.body) };
     this.instantiate(this.runtime.frame.scope, node.scope);
-    return yield* this.statements(node.body);
+    return yield* this.body(node.body, node.scope);
   }
 
   /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */
@@ -619,7 +692,7 @@ export class Evaluator extends StepEvaluator {
   private runStaticBlock(block: Extract<ClassMember, { kind: 'staticBlock' }>, scope: Scope): void {
     this.inScope(scope, () => {
       this.instantiate(scope, block.scope);
-      runToEnd(this.statements(block.body));
+      runToEnd(this.body(block.body, block.scope));
     });
   }
 
@@ -714,7 +787,7 @@ export class Evaluator extends StepEvaluator {
       if (ctor) {
         this.bindParameters(ctor, args);
         this.instantiate(scope, ctor.scope);
-        const completion = runToEnd(this.statements(ctor.body as Statement[]));
+        const completion = runToEnd(this.body(ctor.body as Statement[], ctor.scope));
         if (completion?.kind === 'return') result = completion.value;
       } else if (behavior.isDerived) {
         this.superCall(args, undefined);
@@ -788,4 +861,15 @@ function syncLoopIterator(iterator: ValueIterator): LoopIterator {
       iterator.close();
     },
   };
+}
+
+function suppressedError(runtime: Runtime, error: Value, suppressed: Value): JsObject {
+  const object = runtime.newError('SuppressedError', 'An error was suppressed during disposal');
+  for (const [key, value] of [
+    ['error', error],
+    ['suppressed', suppressed],
+  ] as const) {
+    runtime.defineProperty(object, key, { value, writable: true, enumerable: false, configurable: true });
+  }
+  return object;
 }

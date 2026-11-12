@@ -12,7 +12,14 @@ import { defineStringBuiltins } from './realmStrings';
 import type { Runtime } from './runtime';
 import { JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
 
-export type ErrorName = 'Error' | 'TypeError' | 'RangeError' | 'ReferenceError' | 'SyntaxError' | 'AggregateError';
+export type ErrorName =
+  | 'Error'
+  | 'TypeError'
+  | 'RangeError'
+  | 'ReferenceError'
+  | 'SyntaxError'
+  | 'AggregateError'
+  | 'SuppressedError';
 
 /** The builtin objects of one run, which programs may modify. */
 export interface Realm {
@@ -71,6 +78,7 @@ export class RealmBuilder {
         ReferenceError: new JsObject(errorPrototype),
         SyntaxError: new JsObject(errorPrototype),
         AggregateError: new JsObject(errorPrototype),
+        SuppressedError: new JsObject(errorPrototype),
       },
       globals: new Scope(undefined),
     };

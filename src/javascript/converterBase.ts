@@ -2,7 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
-import type { ClassNode, Expression, FunctionKind, FunctionNode, ScopeDeclarations } from './ast';
+import type { ClassNode, DeclarationKind, Expression, FunctionKind, FunctionNode, ScopeDeclarations } from './ast';
 import { fail, rowOf } from './convertNodes';
 
 interface ScopeBuilder {
@@ -151,7 +151,7 @@ export abstract class ConverterBase {
   // Scopes ----------------------------------------------------------------------------------------------------------
 
   protected pushScope(isFunction: boolean): ScopeDeclarations {
-    const declarations: ScopeDeclarations = { lexical: [], functions: [], vars: [], order: [] };
+    const declarations: ScopeDeclarations = { lexical: [], functions: [], vars: [], order: [], disposes: false };
     this.scopes.push({ declarations, names: new Map(), isFunction });
     return declarations;
   }
@@ -225,10 +225,14 @@ export abstract class ConverterBase {
     scope.names.set(name, 'parameter');
   }
 
-  /** Declares a name of a `var`, `let`, or `const` declaration. */
-  protected declareVariable(node: Node, name: string, kind: 'var' | 'let' | 'const'): void {
-    if (kind === 'var') this.declareVar(node, name);
-    else this.declareLexical(node, name, kind === 'const');
+  /** Declares a name of a `var`, `let`, `const`, or `using` declaration. */
+  protected declareVariable(node: Node, name: string, kind: DeclarationKind): void {
+    if (kind === 'var') {
+      this.declareVar(node, name);
+      return;
+    }
+    this.declareLexical(node, name, kind !== 'let');
+    if (kind === 'using' || kind === 'await using') this.currentScope.declarations.disposes = true;
   }
 }
 
