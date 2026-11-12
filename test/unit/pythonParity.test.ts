@@ -241,6 +241,13 @@ for i in range(100):
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test.each([
+  ['sorting many references to one long string', 's = "x" * 100000\nx = sorted([s] * 10000)'],
+  ['counting equal copies of a long string', 'a = "a" * 100000\nl = [a] * 30000\nx = l.count("a" * 99999 + "a")'],
+])('%s runs within the limits', (_name, program) => {
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('JSON output up to the string limit is allowed', () => {
   const program = `import json
 class Wrapped:

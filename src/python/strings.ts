@@ -1,4 +1,4 @@
-import { chargeScan } from './runtimeContext';
+import { chargeScan, chargeStep } from './runtimeContext';
 
 /** Python strings are sequences of code points, while JavaScript strings are UTF-16; these helpers bridge the two. */
 
@@ -44,8 +44,13 @@ export function sliceStr(text: string, start: number, stop: number, step: number
 
 /** Compares strings by code point, as Python does, rather than by UTF-16 code unit. */
 export function compareStr(a: string, b: string): number {
+  // Equal strings are often the same host string, which compares at once; one step still lets the clock check catch
+  // equal copies, whose comparison scans them. Unequal strings are charged for the scan.
+  if (a === b) {
+    chargeStep();
+    return 0;
+  }
   chargeScan(Math.min(a.length, b.length));
-  if (a === b) return 0;
   if (!hasSurrogates(a) && !hasSurrogates(b)) return a < b ? -1 : 1;
   const left = iterStr(a);
   const right = iterStr(b);
