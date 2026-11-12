@@ -3,20 +3,6 @@ import { bestSuggestion } from './describe';
 import { newDict, newTuple, typeError } from './types';
 import type { Kwargs, PyDict, PyFunction, PyValue } from './values';
 
-/** The TypeError CPython raises when a call leaves required positional parameters unbound. */
-export function missingPositionalError(qualifiedName: string, missing: string[]): Error {
-  return typeError(
-    `${qualifiedName}() missing ${missing.length} required positional argument${missing.length === 1 ? '' : 's'}: ${quoteNames(missing)}`
-  );
-}
-
-function quoteNames(names: string[]): string {
-  const quoted = names.map((name) => `'${name}'`);
-  if (quoted.length === 1) return quoted[0];
-  if (quoted.length === 2) return `${quoted[0]} and ${quoted[1]}`;
-  return `${quoted.slice(0, -1).join(', ')}, and ${quoted.at(-1)}`;
-}
-
 /** What binding needs of a function, which a native function that CPython's library writes in Python also gives. */
 export type Signature = Pick<PyFunction, 'qualifiedName' | 'defaults' | 'keywordDefaults'> & {
   def: { params: Pick<Parameter, 'name' | 'kind'>[] };
@@ -92,7 +78,7 @@ function tooManyPositional(
 }
 
 /** The TypeError CPython raises when a call passes more positional arguments than a function takes. */
-export function tooManyPositionalError(
+function tooManyPositionalError(
   qualifiedName: string,
   total: number,
   defaults: number,
@@ -122,6 +108,13 @@ function bindPositionalDefaults(fn: Signature, positional: SignatureParameter[],
   if (missing.length > 0) throw missingPositionalError(fn.qualifiedName, missing);
 }
 
+/** The TypeError CPython raises when a call leaves required positional parameters unbound. */
+function missingPositionalError(qualifiedName: string, missing: string[]): Error {
+  return typeError(
+    `${qualifiedName}() missing ${missing.length} required positional argument${missing.length === 1 ? '' : 's'}: ${quoteNames(missing)}`
+  );
+}
+
 function bindKeywordDefaults(fn: Signature, keywordOnly: SignatureParameter[], bound: Map<string, PyValue>): void {
   const missing: string[] = [];
   for (const param of keywordOnly) {
@@ -135,4 +128,11 @@ function bindKeywordDefaults(fn: Signature, keywordOnly: SignatureParameter[], b
       `${fn.qualifiedName}() missing ${missing.length} required keyword-only argument${missing.length === 1 ? '' : 's'}: ${quoteNames(missing)}`
     );
   }
+}
+
+function quoteNames(names: string[]): string {
+  const quoted = names.map((name) => `'${name}'`);
+  if (quoted.length === 1) return quoted[0];
+  if (quoted.length === 2) return `${quoted[0]} and ${quoted[1]}`;
+  return `${quoted.slice(0, -1).join(', ')}, and ${quoted.at(-1)}`;
 }

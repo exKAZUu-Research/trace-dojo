@@ -1,4 +1,4 @@
-import { missingPositionalError, tooManyPositionalError } from '../calls';
+import { bindArguments, type Signature } from '../calls';
 import { pyRepr, pyStr } from '../conversions';
 import { pythonFunction, pythonMethod } from '../define';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
@@ -103,6 +103,7 @@ function isIdentifier(name: string): boolean {
   return /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(name);
 }
 
+/** Binds the arguments as CPython's generated `__new__(_cls, field, ...)` does, with the shared binding's checks. */
 function newNamedTuple(
   cls: PyClass,
   fields: string[],
@@ -110,27 +111,17 @@ function newNamedTuple(
   values: PyValue[],
   kwargs: Kwargs
 ): PyTuple {
-  const qualified = `${cls.name}.__new__`;
-  if (values.length > fields.length) {
-    // The count includes `cls`, as CPython's generated `__new__` takes it first.
-    throw tooManyPositionalError(qualified, fields.length + 1, defaults.length, values.length + 1);
-  }
-  const items: (PyValue | undefined)[] = [...values];
-  for (const [key, value] of kwargs ?? []) {
-    const index = fields.indexOf(key);
-    if (index === -1) throw typeError(`${qualified}() got an unexpected keyword argument '${key}'`);
-    if (items[index] !== undefined) throw typeError(`${qualified}() got multiple values for argument '${key}'`);
-    items[index] = value;
-  }
-  const defaultsStart = fields.length - defaults.length;
-  const missing: string[] = [];
-  for (let index = 0; index < fields.length; index++) {
-    if (items[index] !== undefined) continue;
-    if (index >= defaultsStart) items[index] = defaults[index - defaultsStart];
-    else missing.push(fields[index]);
-  }
-  if (missing.length > 0) throw missingPositionalError(qualified, missing);
-  return new PyTuple(cls, items as PyValue[]);
+  const signature: Signature = {
+    qualifiedName: `${cls.name}.__new__`,
+    def: { params: ['_cls', ...fields].map((name) => ({ name, kind: 'positional' })) },
+    defaults,
+    keywordDefaults: new Map(),
+  };
+  const bound = bindArguments(signature, [cls, ...values], kwargs);
+  return new PyTuple(
+    cls,
+    fields.map((field) => bound.get(field) as PyValue)
+  );
 }
 
 const isNamedTuple = (value: PyValue): value is PyTuple =>
