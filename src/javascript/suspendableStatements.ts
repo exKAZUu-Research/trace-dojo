@@ -186,10 +186,10 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     // As DisposeResources does, a run of null `await using` resources awaits once, before the next sync disposer or
     // at the end, and not at all after an awaited disposer.
     let needsAwait = false;
-    let hasAwaited = false;
+    const awaits = { hasAwaited: false };
     for (let disposable = disposables.pop(); disposable; disposable = disposables.pop()) {
       const { method, isAsync } = disposable;
-      if (!isAsync && needsAwait && !hasAwaited) {
+      if (!isAsync && needsAwait && !awaits.hasAwaited) {
         yield new Awaiting(undefined);
         needsAwait = false;
       }
@@ -198,7 +198,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         continue;
       }
       try {
-        if (yield* this.disposeSteps(disposable, method)) hasAwaited = true;
+        yield* this.disposeSteps(disposable, method, awaits);
       } catch (error) {
         if (!(error instanceof JsThrow)) throw error;
         completion =
@@ -206,7 +206,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         temporaries[held] = completion.value;
       }
     }
-    if (needsAwait && !hasAwaited) yield new Awaiting(undefined);
+    if (needsAwait && !awaits.hasAwaited) yield new Awaiting(undefined);
     temporaries.length = held;
     scope.disposables = undefined;
     if (completion) throw completion;
@@ -214,10 +214,11 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
   }
 
   /**
-   * Calls one disposer, awaiting its result under `await using`, and returns whether it awaited. A `Symbol.dispose`
-   * fallback of `await using` runs wrapped in an async function, so its throw is awaited too before it propagates.
+   * Calls one disposer, awaiting its result under `await using` and noting in `awaits` that it awaited, whether the
+   * disposal then succeeds or fails. A `Symbol.dispose` fallback of `await using` runs wrapped in an async function,
+   * so its throw is awaited too before it propagates.
    */
-  private *disposeSteps(disposable: DisposableRecord, method: Value): Steps<boolean> {
+  private *disposeSteps(disposable: DisposableRecord, method: Value, awaits: { hasAwaited: boolean }): Steps<void> {
     const { runtime } = this;
     const { value, isAsync, awaitsResult } = disposable;
     let disposed: Value;
@@ -225,14 +226,15 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       disposed = runtime.call(method, value, []);
     } catch (error) {
       if (!isAsync || awaitsResult || !(error instanceof JsThrow)) throw error;
+      awaits.hasAwaited = true;
       yield* this.holdingSteps([error.value], function* () {
         yield new Awaiting(undefined);
       });
       throw error;
     }
-    if (!isAsync) return false;
+    if (!isAsync) return;
+    awaits.hasAwaited = true;
     resumedValue(yield new Awaiting(awaitsResult ? disposed : undefined));
-    return true;
   }
 
   /** Records a value a `using` declaration declares in the current scope, which disposes of it when it ends. */

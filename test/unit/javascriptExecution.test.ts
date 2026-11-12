@@ -1243,6 +1243,13 @@ const values = function* recur(n) { if (n > 0) yield* recur(n - 1); yield n; }; 
 const g = function* inner() { yield inner === g; }; console.log(g().next());
 const a = async function* ai() { yield typeof ai; }; a().next().then(console.log);`,
   ],
+  [
+    'failing disposers after null await using resources',
+    `async function f() { try { { await using a = null; await using b = { async [Symbol.asyncDispose]() { console.log('dispose'); throw 'err'; } }; } } catch (e) { console.log('caught', e); } }
+async function g() { try { { await using a = null; await using b = { [Symbol.dispose]() { console.log('sdispose'); throw 'serr'; } }; } } catch (e) { console.log('caught', e); } }
+f(); queueMicrotask(() => console.log('micro'));
+setTimeout(() => { g(); queueMicrotask(() => console.log('micro2')); }, 0);`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
