@@ -14,8 +14,8 @@ import {
 } from './builtinIoSupport';
 import { createStream } from './builtinStreamSupport';
 import { addConstructor, addMethod, newString } from './builtinSupport';
-import { type Frame, throwBuiltin } from './runtime';
-import { BOOLEAN, CHAR, type ClassInfo, INT, type JavaType, LONG, VOID } from './types';
+import { type Frame, JavaThrow, throwBuiltin } from './runtime';
+import { BOOLEAN, CHAR, type ClassInfo, INT, isSubclass, type JavaType, LONG, VOID } from './types';
 import { charCodeOf, JavaArray, type JavaObject, JavaString, type Value } from './values';
 
 const CHAR_ARRAY: JavaType = { kind: 'array', element: CHAR };
@@ -48,6 +48,18 @@ export function defineReaders(context: IOContext, closeable: ClassInfo): void {
     if (!(text instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
     readSources.set(receiver as JavaObject, new TextSource(frame.runtime.io.textReader(text.value), true));
   });
+  // StringReader skips backward for a negative count, within the text, and skips nothing at its end.
+  throwsIO(
+    context,
+    addMethod(stringReader, 'skip', [LONG], LONG, false, (frame, receiver, [count]) => {
+      const text = textOf(frame, receiver);
+      if (text.isAtEnd) return 0n;
+      const skipped = Math.max(Math.min(Number(count as bigint), text.text.length - text.position), -text.position);
+      text.position += skipped;
+      frame.runtime.scanString(Math.abs(skipped));
+      return BigInt(skipped);
+    })
+  );
   // StringReader's close throws no IOException, though its reads still declare one.
   addMethod(stringReader, 'close', [], VOID, false, (frame, receiver) => {
     readSourceOf(frame, receiver).close(frame);
@@ -204,12 +216,27 @@ function defineBufferedReader(context: IOContext, reader: ClassInfo): void {
       frame,
       streamImpl,
       function* () {
-        const source = readSourceOf(frame, receiver);
-        for (let line = source.reader(frame).readLine(); line !== undefined; line = source.reader(frame).readLine()) {
+        for (
+          let line = readLineUnchecked(frame, receiver);
+          line !== undefined;
+          line = readLineUnchecked(frame, receiver)
+        ) {
           yield newString(frame, line);
         }
       },
       [receiver]
     )
   );
+}
+
+/** Reads a line for a stream of lines, which wraps an `IOException` in an `UncheckedIOException`, as Java's does. */
+function readLineUnchecked(frame: Frame, receiver: Value): string | undefined {
+  try {
+    return readSourceOf(frame, receiver).reader(frame).readLine();
+  } catch (error) {
+    const ioException = frame.runtime.builtins.classes.get('IOException') as ClassInfo;
+    if (!(error instanceof JavaThrow) || !isSubclass(error.value.cls, ioException)) throw error;
+    const message = frame.runtime.invokeToString(frame, error.value)?.value;
+    return throwBuiltin(frame, 'UncheckedIOException', message, error.value);
+  }
 }

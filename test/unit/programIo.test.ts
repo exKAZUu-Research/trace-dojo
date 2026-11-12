@@ -266,6 +266,18 @@ test.each([
     'java.nio.file.NoSuchFileException: x -> missing/y\n',
   ],
   [
+    'the size of a directory and a reader that skips backward',
+    'Files.createDirectory(Path.of("d")); StringReader r = new StringReader("abc"); r.read(); r.read(); System.out.println(Files.size(Path.of("d")) + " " + r.skip(-5) + " " + (char) r.read() + " " + new File("d/.").delete());',
+    {},
+    '4096 -2 a false\n',
+  ],
+  [
+    'a stream of lines of a closed reader',
+    'BufferedReader r = new BufferedReader(new StringReader("a")); java.util.stream.Stream<String> s = r.lines(); r.close(); try { s.count(); } catch (UncheckedIOException e) { System.out.println(e.getMessage() + " " + e.getCause()); }',
+    {},
+    'java.io.IOException: Stream closed java.io.IOException: Stream closed\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},
@@ -392,6 +404,10 @@ test.each([
   ["require('fs').writeFileSync('d/f.txt/', 'x')", "Error: ENOTDIR: not a directory, open 'd/f.txt/'"],
   ["require('fs').writeFileSync('new/', 'x')", "Error: EISDIR: illegal operation on a directory, open 'new/'"],
   ["require('fs').renameSync('d/f.txt', 'g/')", "Error: ENOTDIR: not a directory, rename 'd/f.txt' -> 'g/'"],
+  ["require('fs').readFileSync('')", "Error: ENOENT: no such file or directory, open ''"],
+  ["require('fs').rmdirSync('d/.')", "Error: EINVAL: invalid argument, rmdir 'd/.'"],
+  ["require('fs').renameSync('d/.', 'e')", "Error: EINVAL: invalid argument, rename 'd/.' -> 'e'"],
+  ["if (require('fs').existsSync('')) throw new Error('exists');", undefined],
   ["require('fs').readFileSync('d/f.txt/../f.txt')", "Error: ENOTDIR: not a directory, open 'd/f.txt/../f.txt'"],
   ["require('fs').writeFileSync('d/f.txt', 'x', { flag: 'wx' })", "Error: EEXIST: file already exists, open 'd/f.txt'"],
   [

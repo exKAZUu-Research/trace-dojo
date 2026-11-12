@@ -48,7 +48,7 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     if (args[0] === 0) return runtime.io.openReader('/dev/stdin').readRest();
     const path = requirePath(runtime, args[0]);
     // Node.js names no path when reading a directory fails, since it reads from a file descriptor it opened.
-    if (runtime.io.files.kindOf(path) === 'directory') throwNodeError(runtime, 'EISDIR', 'read');
+    if (path !== '' && runtime.io.files.kindOf(path) === 'directory') throwNodeError(runtime, 'EISDIR', 'read');
     return withErrors(runtime, 'open', path, () => runtime.io.openReader(path).readRest());
   });
   for (const [name, defaultFlag] of [
@@ -60,8 +60,12 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
       return;
     });
   }
-  builder.method(fs, 'existsSync', 1, ({ runtime, args }) =>
-    typeof args[0] === 'string' ? runtime.io.files.kindOf(args[0]) !== undefined : false
+  builder.method(
+    fs,
+    'existsSync',
+    1,
+    ({ runtime, args }) =>
+      typeof args[0] === 'string' && args[0] !== '' && runtime.io.files.kindOf(args[0]) !== undefined
   );
   builder.method(fs, 'mkdirSync', 2, ({ runtime, args }) => {
     const path = requirePath(runtime, args[0]);
@@ -104,6 +108,8 @@ function writeFile(runtime: Runtime, [file, content, options]: Value[], defaultF
 
 /** Runs a file system call, throwing the error Node.js throws for its failure. */
 function withErrors<T>(runtime: Runtime, syscall: string, path: string, run: () => T, destination?: string): T {
+  // Node.js names no file by the empty path, though the file system takes it for the working directory.
+  if (path === '' || destination === '') return throwNodeError(runtime, 'ENOENT', syscall, path, destination);
   try {
     return run();
   } catch (error) {

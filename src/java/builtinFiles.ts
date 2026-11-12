@@ -547,7 +547,12 @@ const FILE_CALLS: readonly FileCall[] = [
       }
     },
   ],
-  ['size', LONG, (system, text) => BigInt(utf8Length(system.readFile(text)))],
+  // Linux gives a directory the size of a block.
+  [
+    'size',
+    LONG,
+    (system, text) => (system.kindOf(text) === 'directory' ? 4096n : BigInt(utf8Length(system.readFile(text)))),
+  ],
 ];
 
 /** The methods of `FILE_CALLS` that return the path they create. */
