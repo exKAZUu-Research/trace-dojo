@@ -443,6 +443,48 @@ public class Main {
   });
 });
 
+test('Java runs method references to array types and generic members of generic classes', () => {
+  const program = `import java.util.*;
+import java.util.function.*;
+public class Main {
+  static class Outer<T> { T v; Outer(T v) { this.v = v; } class Inner { T get() { return v; } } }
+  static class Pair<K, V> implements Map.Entry<K, V> { K k; V v; Pair(K k, V v) { this.k = k; this.v = v; } public K getKey() { return k; } public V getValue() { return v; } public V setValue(V nv) { V o = v; v = nv; return o; } }
+  static abstract class Shape<T extends Number> { abstract T size(); String describe() { return "size " + size(); } }
+  <T> T pick(T a) { return a; }
+  static void swapFirst(List<?> list) { swapHelper(list); }
+  static <T> void swapHelper(List<T> list) { T t = list.get(0); list.set(0, list.get(1)); list.set(1, t); }
+  public static void main(String[] args) {
+    Outer<String> o = new Outer<>("ov");
+    Outer<String>.Inner in = o.new Inner();
+    System.out.println(in.get().length());
+    Map.Entry<String, Integer> e = new Pair<>("k", 1); e.setValue(5); System.out.println(e.getKey() + e.getValue());
+    Shape<Integer> sq = new Shape<>() { int side = 3; { side++; } Integer size() { return side * side; } };
+    System.out.println(sq.describe());
+    Main m = new Main();
+    Function<String, String> f = m::<String>pick; System.out.println(f.apply("p"));
+    Function<List<String>, Integer> size = List<String>::size; System.out.println(size.apply(List.of("a", "b")));
+    UnaryOperator<int[]> cl = int[]::clone; int[] src = {1}; int[] cp = cl.apply(src); cp[0] = 2; System.out.println(src[0] + "" + cp[0]);
+    IntFunction<String[]> mk = String[]::new; System.out.println(mk.apply(3).length);
+    List<Runnable> rs = new ArrayList<>();
+    for (int i = 0; i < 3; i++) { int j = i; rs.add(() -> System.out.print(j)); }
+    for (String s : List.of("a", "b")) rs.add(() -> System.out.print(s));
+    rs.forEach(Runnable::run); System.out.println();
+    List<Object> mixed = new ArrayList<>(List.of(1, 2)); swapFirst(mixed); System.out.println(mixed);
+    Integer boxed = 3; switch (boxed) { case 3 -> System.out.println("three"); default -> System.out.println("no"); }
+    Character ch = 'x'; switch (ch) { case 'x': System.out.println("ex"); break; default: break; }
+    var list = new ArrayList<>(); list.add(1); list.add("s"); System.out.println(list);
+    for (var x : new int[] {4, 5}) System.out.print(x); System.out.println();
+    Integer nul = null;
+    try { int y = args.length == 0 ? nul : 0; } catch (NullPointerException ex) { System.out.println("NPE"); }
+    switch ("Aa") { case "BB" -> System.out.println("BB"); case "Aa" -> System.out.println("Aa"); default -> System.out.println("none"); }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2\nk5\nsize 16\np\n2\n12\n3\n012ab\n[2, 1]\nthree\nex\n[1, s]\n45\nNPE\nAa\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

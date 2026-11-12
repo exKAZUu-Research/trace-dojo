@@ -497,6 +497,10 @@ export abstract class LambdaCompiler extends PatternCompiler {
       }
       return lambdaOf({ kind: 'new', type: targetType, args, ...span });
     }
+    // An array type names no static methods, so `int[]::clone` calls the method on the first argument.
+    if (targetType?.kind === 'array' && args.length > 0) {
+      return lambdaOf({ kind: 'call', object: args[0], name: reference.name, args: args.slice(1), ...span });
+    }
     const receiver = referenceReceiver(reference, span, receiverLocal);
     const isTypeName = targetType !== undefined || this.namesType(context, receiver);
     const staticForm = lambdaOf({
