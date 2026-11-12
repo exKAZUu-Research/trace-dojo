@@ -474,7 +474,8 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
 
 function syncLoopIterator(iterator: ValueIterator): LoopIterator {
   return {
-    roots: iterator.roots,
+    // The runtime keeps a sync iteration reachable until it ends.
+    roots: [],
     // oxlint-disable-next-line require-yield -- A sync iterator steps without suspending the loop.
     *next() {
       return iterator.next();

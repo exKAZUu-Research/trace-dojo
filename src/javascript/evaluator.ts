@@ -258,15 +258,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         : this.evaluate(statement.iterable);
     const iterator =
       statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
-    // The iterable and the iterator it gave stay reachable while the loop runs.
-    const { temporaries } = runtime.frame;
-    const held = temporaries.length;
-    temporaries.push(iterable, ...iterator.roots);
-    try {
-      return this.forEachIterations(statement, labels, iterator);
-    } finally {
-      temporaries.length = held;
-    }
+    return runtime.hold(iterable, () => this.forEachIterations(statement, labels, iterator));
   }
 
   private forEachIterations(

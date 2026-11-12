@@ -27,16 +27,27 @@ export interface HostIterator {
  */
 export class ValueIterator {
   private index = 0;
-  private isDone = false;
+  private done = false;
 
   /**
-   * @param roots The iterator object and the `next` method read from it, which consumers that run code while iterating
-   * keep reachable.
+   * @param roots The iterator object and the `next` method read from it, which garbage collection keeps reachable until
+   * the iteration ends.
+   * @param onEnd Called once when the iteration ends, by running out, failing, or closing.
    */
   constructor(
     private readonly source: readonly Value[] | HostIterator,
-    readonly roots: readonly Value[] = []
+    readonly roots: readonly Value[] = [],
+    private readonly onEnd?: () => void
   ) {}
+
+  private get isDone(): boolean {
+    return this.done;
+  }
+
+  private set isDone(done: boolean) {
+    if (done && !this.done) this.onEnd?.();
+    this.done = done;
+  }
 
   next(): Value | typeof DONE {
     const { source } = this;

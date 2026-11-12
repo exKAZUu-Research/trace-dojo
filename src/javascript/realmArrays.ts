@@ -63,10 +63,6 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
     if (method !== undefined && method !== null) {
       // Each value is read just before its mapper runs, as JavaScript's iteration does.
       const iterator = runtime.iterator(source, method);
-      // The iterator stays reachable while the mapper runs.
-      const { temporaries } = runtime.frame;
-      const held = temporaries.length;
-      temporaries.push(...iterator.roots);
       try {
         for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
           add(value, index);
@@ -74,8 +70,6 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
         // A mapper that throws closes the iterator; a failed `next()` has already ended it.
         if (error instanceof JsThrow) iterator.close('throw');
         throw error;
-      } finally {
-        temporaries.length = held;
       }
       return;
     }

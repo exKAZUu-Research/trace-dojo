@@ -56,6 +56,8 @@ export class Runtime {
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   readonly eventLoop = new EventLoop(this);
+  /** The iterations not ended yet, whose iterators may hold values the program reaches again when they resume. */
+  private readonly activeIterations = new Set<ValueIterator>();
   readonly realm: Realm;
   /**
    * The row of the expression being evaluated, from which getters, setters, and conversions that run the program's
@@ -597,9 +599,9 @@ export class Runtime {
     const next = this.get(iterator, 'next');
     const { hostIterator } = iterator;
     if (!hostIterator || !(next instanceof JsFunction) || !this.realm.hostIteratorMethods.has(next)) {
-      return new ValueIterator(this.protocolIteration(iterator, next), [iterator, next]);
+      return this.tracked(this.protocolIteration(iterator, next), [iterator, next]);
     }
-    return new ValueIterator(
+    return this.tracked(
       {
         next: () => hostIterator.next(),
         close: () => {
@@ -610,6 +612,13 @@ export class Runtime {
       },
       [iterator, next]
     );
+  }
+
+  /** An iteration that stays a garbage-collection root, with its iterator object and `next` method, until it ends. */
+  private tracked(source: HostIterator, roots: Value[]): ValueIterator {
+    const iteration: ValueIterator = new ValueIterator(source, roots, () => this.activeIterations.delete(iteration));
+    this.activeIterations.add(iteration);
+    return iteration;
   }
 
   /** Steps through an iterator object by calling its `next()`, and its `return()` when a loop leaves it early. */
@@ -664,6 +673,7 @@ export class Runtime {
       appendAll(roots, frame.temporaries);
     }
     appendAll(roots, this.eventLoop.roots());
+    for (const iteration of this.activeIterations) appendAll(roots, iteration.roots);
     const { reached, scanned } = findReachableTurtles(roots);
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
