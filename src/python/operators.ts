@@ -778,6 +778,7 @@ function sameSequenceKind(left: PyList | PyTuple, right: PyList | PyTuple): bool
 function complexEqualsReal(complex: PyComplex, real: PyValue): boolean {
   if (complex.imag !== 0 || Number.isNaN(complex.real)) return false;
   const other = typeof real === 'boolean' ? Number(real) : (real as bigint | number);
+  if (typeof other === 'number') return complex.real === other;
   // JavaScript compares a bigint with a number by their exact values.
   return !(complex.real < other) && !(complex.real > other);
 }
