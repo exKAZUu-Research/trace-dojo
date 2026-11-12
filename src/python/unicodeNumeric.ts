@@ -17,6 +17,16 @@ export function isNumericChar(char: string): boolean {
   return inRuns(tables().numeric, char);
 }
 
+/**
+ * The value of a decimal character, or undefined for another one. Decimal digits come in blocks from 0 to 9, which
+ * adjacent blocks extend into one longer run, so a digit's value is its offset from the run's start modulo ten.
+ */
+export function decimalDigitValue(char: string): number | undefined {
+  const bounds = tables().decimal;
+  const index = runIndex(bounds, char.codePointAt(0) as number);
+  return index % 2 === 1 ? ((char.codePointAt(0) as number) - bounds[index - 1]) % 10 : undefined;
+}
+
 let decoded: { decimal: number[]; digit: number[]; numeric: number[] } | undefined;
 
 function tables(): { decimal: number[]; digit: number[]; numeric: number[] } {
@@ -42,7 +52,12 @@ function decodeRuns(text: string): number[] {
 }
 
 function inRuns(bounds: number[], char: string): boolean {
-  const code = char.codePointAt(0) as number;
+  // An odd count of bounds at or below the code point places it inside a run.
+  return runIndex(bounds, char.codePointAt(0) as number) % 2 === 1;
+}
+
+/** The count of bounds at or below a code point. */
+function runIndex(bounds: number[], code: number): number {
   let low = 0;
   let high = bounds.length;
   while (low < high) {
@@ -50,6 +65,5 @@ function inRuns(bounds: number[], char: string): boolean {
     if (bounds[middle] <= code) low = middle + 1;
     else high = middle;
   }
-  // An odd count of bounds at or below the code point places it inside a run.
-  return low % 2 === 1;
+  return low;
 }
