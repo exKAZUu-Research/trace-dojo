@@ -3,6 +3,7 @@ import { fma } from '../fma';
 import { definePackage, fn, nativeFunction } from '../native';
 import { BASIC, type Type } from '../types';
 import { Complex, type Value } from '../values';
+import * as goMath from './goMath';
 import { BOOL, FLOAT64, INT } from './support';
 
 type Unary = (x: number) => number;
@@ -137,35 +138,6 @@ function float32frombits(bits: bigint): number {
   return view.getFloat32(0);
 }
 
-/** `math.Frexp`: a fraction in [0.5, 1) and a power of two. */
-function frexp(value: number): [number, bigint] {
-  if (value === 0 || !Number.isFinite(value)) return [value, 0n];
-  let exponent = Math.max(-1023, Math.floor(Math.log2(Math.abs(value))) + 1);
-  let fraction = value * 2 ** -exponent;
-  while (Math.abs(fraction) < 0.5) {
-    fraction *= 2;
-    exponent--;
-  }
-  while (Math.abs(fraction) >= 1) {
-    fraction /= 2;
-    exponent++;
-  }
-  return [fraction, BigInt(exponent)];
-}
-
-function ldexp(fraction: number, exponent: number): number {
-  if (exponent > 1023) return fraction * 2 ** 1023 * 2 ** (exponent - 1023);
-  if (exponent < -1022) return fraction * 2 ** -1022 * 2 ** (exponent + 1022);
-  return fraction * 2 ** exponent;
-}
-
-function pow(x: number, y: number): number {
-  // Go defines Pow(1, y) = 1 and Pow(x, 0) = 1 even for NaN, and Pow(-1, ±Inf) = 1, where JavaScript gives NaN.
-  if (x === 1 || y === 0) return 1;
-  if (x === -1 && !Number.isFinite(y) && !Number.isNaN(y)) return 1;
-  return x ** y;
-}
-
 /** `math.Hypot`, transcribed from Go's hypot.go with the fused `1+q*q` that its arm64 build computes. */
 export function hypot(x: number, y: number): number {
   let p = Math.abs(x);
@@ -214,34 +186,34 @@ const members: Record<string, Entity> = {
   SmallestNonzeroFloat64: exactFloat('SmallestNonzeroFloat64', 1n, 1n << 1074n),
   Abs: unary('Abs', Math.abs),
   Sqrt: unary('Sqrt', Math.sqrt),
-  Cbrt: unary('Cbrt', Math.cbrt),
+  Cbrt: unary('Cbrt', goMath.cbrt),
   Floor: unary('Floor', Math.floor),
   Ceil: unary('Ceil', Math.ceil),
   Trunc: unary('Trunc', trunc),
   Round: unary('Round', round),
   RoundToEven: unary('RoundToEven', roundToEven),
-  Exp: unary('Exp', Math.exp),
-  Exp2: unary('Exp2', (x) => 2 ** x),
-  Expm1: unary('Expm1', Math.expm1),
-  Log: unary('Log', Math.log),
-  Log2: unary('Log2', Math.log2),
-  Log10: unary('Log10', Math.log10),
-  Log1p: unary('Log1p', Math.log1p),
-  Sin: unary('Sin', Math.sin),
-  Cos: unary('Cos', Math.cos),
-  Tan: unary('Tan', Math.tan),
-  Asin: unary('Asin', Math.asin),
-  Acos: unary('Acos', Math.acos),
-  Atan: unary('Atan', Math.atan),
-  Sinh: unary('Sinh', Math.sinh),
-  Cosh: unary('Cosh', Math.cosh),
-  Tanh: unary('Tanh', Math.tanh),
-  Asinh: unary('Asinh', Math.asinh),
-  Acosh: unary('Acosh', Math.acosh),
-  Atanh: unary('Atanh', Math.atanh),
-  Atan2: binary('Atan2', Math.atan2),
+  Exp: unary('Exp', goMath.exp),
+  Exp2: unary('Exp2', goMath.exp2),
+  Expm1: unary('Expm1', goMath.expm1),
+  Log: unary('Log', goMath.log),
+  Log2: unary('Log2', goMath.log2),
+  Log10: unary('Log10', goMath.log10),
+  Log1p: unary('Log1p', goMath.log1p),
+  Sin: unary('Sin', goMath.sin),
+  Cos: unary('Cos', goMath.cos),
+  Tan: unary('Tan', goMath.tan),
+  Asin: unary('Asin', goMath.asin),
+  Acos: unary('Acos', goMath.acos),
+  Atan: unary('Atan', goMath.atan),
+  Sinh: unary('Sinh', goMath.sinh),
+  Cosh: unary('Cosh', goMath.cosh),
+  Tanh: unary('Tanh', goMath.tanh),
+  Asinh: unary('Asinh', goMath.asinh),
+  Acosh: unary('Acosh', goMath.acosh),
+  Atanh: unary('Atanh', goMath.atanh),
+  Atan2: binary('Atan2', goMath.atan2),
   Hypot: binary('Hypot', hypot),
-  Pow: binary('Pow', pow),
+  Pow: binary('Pow', goMath.pow),
   Mod: binary('Mod', mod),
   Remainder: binary('Remainder', remainder),
   Max: binary('Max', max),
@@ -259,16 +231,13 @@ const members: Record<string, Entity> = {
     return (s >= 0n && x === Infinity) || (s <= 0n && x === -Infinity);
   }),
   Signbit: nativeFunction('Signbit', fn([FLOAT64], [BOOL]), ([x]) => signbit(x as number)),
-  Modf: nativeFunction('Modf', fn([FLOAT64], [FLOAT64, FLOAT64]), ([x]) => {
-    const value = x as number;
-    if (!Number.isFinite(value)) return Number.isNaN(value) ? [value, value] : [value, Number.NaN];
-    const integer = Math.trunc(value);
-    const fraction = value - integer;
-    return [integer === 0 && signbit(value) ? -0 : integer, fraction === 0 && signbit(value) ? -0 : fraction];
+  Modf: nativeFunction('Modf', fn([FLOAT64], [FLOAT64, FLOAT64]), ([x]) => goMath.modf(x as number)),
+  Frexp: nativeFunction('Frexp', fn([FLOAT64], [FLOAT64, INT]), ([x]) => {
+    const [fraction, exponent] = goMath.frexp(x as number);
+    return [fraction, BigInt(exponent)];
   }),
-  Frexp: nativeFunction('Frexp', fn([FLOAT64], [FLOAT64, INT]), ([x]) => frexp(x as number)),
   Ldexp: nativeFunction('Ldexp', fn([FLOAT64, INT], [FLOAT64]), ([x, exponent]) =>
-    ldexp(x as number, Number(exponent as bigint))
+    goMath.ldexp(x as number, Number(exponent as bigint))
   ),
   Float64bits: nativeFunction('Float64bits', fn([FLOAT64], [BASIC.uint64]), ([x]) => float64bits(x as number)),
   Float64frombits: nativeFunction('Float64frombits', fn([BASIC.uint64], [FLOAT64]), ([bits]) =>

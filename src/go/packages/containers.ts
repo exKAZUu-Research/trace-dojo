@@ -257,6 +257,29 @@ listMethod('MoveAfter', [ELEMENT_POINTER, ELEMENT_POINTER], [], (list, [item, ma
   return;
 });
 
+listMethod('PushBackList', [LIST_POINTER], [], (list, [other]) => {
+  lazyInit(list);
+  const values = listValues(other as Pointer);
+  for (const value of values) insertValue(list, value, element(rootOf(list)).fields[PREV] as Pointer);
+  return;
+});
+listMethod('PushFrontList', [LIST_POINTER], [], (list, [other]) => {
+  lazyInit(list);
+  for (const value of listValues(other as Pointer).toReversed()) insertValue(list, value, rootOf(list));
+  return;
+});
+
+/** The values of a list, read before inserting them, since a list may be inserted into itself. */
+function listValues(list: Pointer): Value[] {
+  const values: Value[] = [];
+  let item = lengthOf(list) === 0n ? undefined : element(rootOf(list)).fields[NEXT];
+  for (let count = lengthOf(list); count > 0n; count--) {
+    values.push(element(item).fields[VALUE]);
+    item = element(item).fields[NEXT];
+  }
+  return values;
+}
+
 function newList(): Pointer {
   const root = new GoStruct([undefined, undefined, undefined, undefined]);
   return init(new Pointer(new Cell(new GoStruct([root, 0n])), 'v'));

@@ -1,5 +1,6 @@
 import type { Entity } from '../entities';
 import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { divideByZeroPanic } from '../runtimeErrors';
 import { BASIC, type NamedType } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
 import { INT, STRING } from './support';
@@ -80,6 +81,17 @@ addMethod(GRAY, 'RGBA', fn([], [UINT32, UINT32, UINT32, UINT32]), (receiver) => 
   return [value, value, value, 0xff_ffn];
 });
 
+const GRAY16 = namedType('color', 'Gray16', {
+  kind: 'struct',
+  fields: [{ name: 'Y', type: BASIC.uint16, embedded: false }],
+});
+addMethod(GRAY16, 'RGBA', fn([], [UINT32, UINT32, UINT32, UINT32]), (receiver) => {
+  const [y] = (receiver as GoStruct).fields as bigint[];
+  return [y, y, y, 0xff_ffn];
+});
+const WHITE = new GoStruct([0xff_ffn]);
+const BLACK = new GoStruct([0n]);
+
 /** `color.RGBAModel`, which converts any color to RGBA as Go's rgbaModel does. */
 const RGBA_MODEL_TYPE = namedType('color', 'modelFunc', { kind: 'struct', fields: [] });
 addMethod(RGBA_MODEL_TYPE, 'Convert', fn([COLOR], [COLOR]), (_receiver, [color]) => toRGBA(color), true);
@@ -106,6 +118,29 @@ const colorMembers: Record<string, Entity> = {
   Model: typeEntity(MODEL),
   RGBA: typeEntity(RGBA),
   Gray: typeEntity(GRAY),
+  Gray16: typeEntity(GRAY16),
+  White: {
+    kind: 'var',
+    name: 'White',
+    type: GRAY16,
+    span: { row: 0, column: 0 },
+    used: true,
+    boxed: false,
+    owner: undefined,
+    slot: -1,
+    library: () => WHITE,
+  },
+  Black: {
+    kind: 'var',
+    name: 'Black',
+    type: GRAY16,
+    span: { row: 0, column: 0 },
+    used: true,
+    boxed: false,
+    owner: undefined,
+    slot: -1,
+    library: () => BLACK,
+  },
   RGBAModel: {
     kind: 'var',
     name: 'RGBAModel',
@@ -123,7 +158,6 @@ export const COLOR_PACKAGE = definePackage('image/color', colorMembers, [
   'NRGBA',
   'NRGBA64',
   'RGBA64',
-  'Gray16',
   'Alpha',
   'Alpha16',
   'CMYK',
@@ -131,8 +165,6 @@ export const COLOR_PACKAGE = definePackage('image/color', colorMembers, [
   'NYCbCrA',
   'Palette',
   'ModelFunc',
-  'Black',
-  'White',
   'Transparent',
   'Opaque',
   'GrayModel',
@@ -175,12 +207,27 @@ addMethod(POINT, 'Sub', fn([POINT], [POINT]), (receiver, [other]) => {
   const [dx, dy] = (other as GoStruct).fields as bigint[];
   return new GoStruct([x - dx, y - dy]);
 });
+addMethod(POINT, 'Mul', fn([INT], [POINT]), (receiver, [k]) => {
+  const [x, y] = (receiver as GoStruct).fields as bigint[];
+  return new GoStruct([x * (k as bigint), y * (k as bigint)]);
+});
+addMethod(POINT, 'Div', fn([INT], [POINT]), (receiver, [k]) => {
+  const [x, y] = (receiver as GoStruct).fields as bigint[];
+  const divisor = k as bigint;
+  if (divisor === 0n) divideByZeroPanic();
+  return new GoStruct([x / divisor, y / divisor]);
+});
 addMethod(POINT, 'Eq', fn([POINT], [BASIC.bool]), (receiver, [other]) => {
   const [x, y] = (receiver as GoStruct).fields as bigint[];
   const [ox, oy] = (other as GoStruct).fields as bigint[];
   return x === ox && y === oy;
 });
 addMethod(RECTANGLE, 'Dx', fn([], [INT]), (receiver) => corner(receiver, 1)[0] - corner(receiver, 0)[0]);
+addMethod(RECTANGLE, 'Size', fn([], [POINT]), (receiver) => {
+  const [x0, y0] = corner(receiver, 0);
+  const [x1, y1] = corner(receiver, 1);
+  return new GoStruct([x1 - x0, y1 - y0]);
+});
 addMethod(RECTANGLE, 'Empty', fn([], [BASIC.bool]), (receiver) => {
   const [x0, y0] = corner(receiver, 0);
   const [x1, y1] = corner(receiver, 1);
@@ -277,8 +324,6 @@ export const IMAGE_PACKAGE = definePackage('image', imageMembers, [
   'RegisterFormat',
   'ZP',
   'ZR',
-  'Black',
-  'White',
   'Transparent',
   'Opaque',
 ]);

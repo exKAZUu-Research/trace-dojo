@@ -51,6 +51,8 @@ export interface Operand {
     enabled?: () => boolean;
     /** Whether both factors are constants to Go's compiler, which computes the product before the program runs. */
     constant?: () => boolean;
+    /** When the function first computes this product, as Go's common subexpression elimination numbers it. */
+    order: number;
   };
   /**
    * Whether Go's compiler knows the value as a constant: a constant, or a local variable defined once from one, which

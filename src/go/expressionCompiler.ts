@@ -290,6 +290,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
           right: (frame) => frame.locals[factors.right] as Value,
           enabled: () => !entity.boxed && !entity.writes,
           constant: entity.definedAsConstant,
+          order: factors.order,
         },
         ssaConstant:
           entity.definedAsConstant &&
@@ -508,7 +509,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type,
         span: expression,
         eval: (frame) => apply(read(frame)),
-        product: { left: negated, right },
+        product: { ...operand.product, left: negated, right },
       };
     }
     if (this.hasTypeParam(type)) return { mode: 'value', type, span: expression, eval: () => {} };
@@ -645,13 +646,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const readLeft = left.eval;
     const readRight = right.eval;
     const ssaConstant = bothConstant(left, right);
-    if (operator === '*' && isFloat(type) && !isUntyped(type)) {
+    const factors = isFloat(type) && !isUntyped(type) ? fusableFactors(operator, left, right) : undefined;
+    if (factors) {
       return {
         mode: 'value',
         type,
         span: expression,
         eval: (frame) => apply(readLeft(frame), readRight(frame)),
-        product: { left: readLeft, right: readRight, constant: ssaConstant },
+        product: { ...factors, constant: ssaConstant, order: this.productOrder(operator, left, right) },
         ssaConstant,
       };
     }
@@ -678,8 +680,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /**
-   * Fuses `a + x*y`, `a - x*y`, and `x*y - a` into one rounding, as Go's compiler does on arm64, trying the right
-   * operand of an addition first, as its rewrite rules do.
+   * Fuses `a + x*y`, `a - x*y`, and `x*y - a` into one rounding, as Go's compiler does on arm64.
    */
   private fusedMultiplyAdd(
     span: Span,
@@ -727,9 +728,29 @@ export abstract class ExpressionCompiler extends CompilerBase {
         ssaConstant: bothConstant(left, right),
       };
     };
+    // Of two products, an addition fuses the one computed first, which Go's common subexpression elimination orders
+    // first; a subtraction fuses the subtracted one, as its rewrite rules try that form first.
+    const leftFirst = !right.product || (left.product !== undefined && left.product.order <= right.product.order);
+    if (left.product && (operator === '-' ? !right.product : leftFirst)) {
+      return choose(fused(right.eval, left.product, true, false, operator === '-'), left.product);
+    }
     if (right.product) return choose(fused(left.eval, right.product, false, operator === '-', false), right.product);
-    if (left.product) return choose(fused(right.eval, left.product, true, false, operator === '-'), left.product);
     return undefined;
+  }
+
+  /**
+   * The position of a product among those the function computes, where the same variables or constants multiplied
+   * again keep their first position, as Go's common subexpression elimination keeps the first value.
+   */
+  private productOrder(operator: string, left: Operand, right: Operand): number {
+    const orders = this.fn?.productOrders ?? new Map<string, number>();
+    const a = productKeyOf(left);
+    const b = productKeyOf(right);
+    const key = a !== undefined && b !== undefined ? [operator, ...[a, b].toSorted()].join(' ') : `#${orders.size}`;
+    const existing = orders.get(key);
+    if (existing !== undefined) return existing;
+    orders.set(key, orders.size);
+    return orders.size - 1;
   }
 
   private foldBinary(span: Span, operator: string, a: Constant, b: Constant, type: Type): Operand {
@@ -1508,6 +1529,44 @@ function elementOperand(
       : undefined,
     addressOf: addressable ? () => (frame) => new Pointer(...element(frame)) : undefined,
   };
+}
+
+/**
+ * The factors of a float operation that Go's compiler turns into a multiplication it can fuse: `x*y`, except by 2, 1,
+ * or -1, which become `x+x`, `x`, or `-x`, and `x/c` for a constant c whose reciprocal is exact, which becomes
+ * `x*(1/c)`.
+ */
+/** What tells apart the factors of products, for finding the same product again: a variable or a constant. */
+function productKeyOf(operand: Operand): string | undefined {
+  const entity = operand.variable?.entity;
+  if (entity && operand.type === entity.type) return `v${entity.slot}:${entity.name}`;
+  if (operand.mode === 'constant') return `c${describeConstant(operand.constant as Constant)}`;
+  return undefined;
+}
+
+function constantFactor(operand: Operand): number | undefined {
+  return operand.mode === 'constant' ? (operand.eval({} as Frame) as number) : undefined;
+}
+
+/** Multiplying by these, Go's compiler adds, copies, or negates instead, which leaves nothing to fuse. */
+function isTrivialFactor(value: number | undefined): boolean {
+  return value === 2 || value === 1 || value === -1;
+}
+
+function fusableFactors(operator: string, left: Operand, right: Operand): { left: Eval; right: Eval } | undefined {
+  if (operator === '*') {
+    if (isTrivialFactor(constantFactor(left)) || isTrivialFactor(constantFactor(right))) return undefined;
+    return { left: left.eval, right: right.eval };
+  }
+  if (operator !== '/') return undefined;
+  const divisor = constantFactor(right);
+  if (divisor === undefined || divisor === 0 || !Number.isFinite(divisor)) return undefined;
+  const reciprocal = 1 / divisor;
+  // A reciprocal is exact for powers of two, which a normal double holds exactly.
+  if (Math.abs(divisor) !== 2 ** Math.round(Math.log2(Math.abs(divisor))) || !Number.isFinite(reciprocal))
+    return undefined;
+  if (isTrivialFactor(reciprocal)) return undefined;
+  return { left: left.eval, right: () => reciprocal };
 }
 
 const always = (): boolean => true;

@@ -30,17 +30,17 @@ const UINT64_MASK = (1n << 64n) - 1n;
 
 // sin.go
 
-const PI4A = 7.85398125648498535156e-1; // 0x3fe921fb40000000, Pi/4 split into three parts
-const PI4B = 3.77489470793079817668e-8; // 0x3e64442d00000000,
-const PI4C = 2.69515142907905952645e-15; // 0x3ce8469898cc5170,
+const PI4A = 0.7853981256484985; // 0x3fe921fb40000000, Pi/4 split into three parts
+const PI4B = 3.774894707930798e-8; // 0x3e64442d00000000,
+const PI4C = 2.6951514290790595e-15; // 0x3ce8469898cc5170,
 
 const SIN = [
-  1.5896230157654656806e-10, -2.50507477628578072866e-8, 2.75573136213857245213e-6, -1.98412698295895385996e-4,
-  8.33333333332211858878e-3, -1.66666666666666307295e-1,
+  1.5896230157654656e-10, -2.5050747762857807e-8, 0.0000027557313621385722, -0.0001984126982958954,
+  0.008333333333322118, -0.1666666666666663,
 ];
 const COS = [
-  -1.135853652138768173e-11, 2.08757008419747316778e-9, -2.75573141792967388112e-7, 2.48015872888517045348e-5,
-  -1.38888888888730564116e-3, 4.16666666666665929218e-2,
+  -1.1358536521387682e-11, 2.087570084197473e-9, -2.755731417929674e-7, 0.000024801587288851704, -0.0013888888888873056,
+  0.041666666666666595,
 ];
 
 /** `math.Cos`. */
@@ -102,7 +102,7 @@ function sinPolynomial(z: number, zz: number): number {
   return fma(z * zz, p, z);
 }
 
-/** `1.0 - 0.5*zz + zz*zz*(...)`: both the subtraction and the addition fuse. */
+/** `1 - 0.5*zz + zz*zz*(...)`: both the subtraction and the addition fuse. */
 function cosPolynomial(zz: number): number {
   let p = fma(COS[0], zz, COS[1]);
   for (const coefficient of COS.slice(2)) p = fma(p, zz, coefficient);
@@ -111,10 +111,8 @@ function cosPolynomial(zz: number): number {
 
 // tan.go
 
-const TAN_P = [-1.30936939181383777646e4, 1.1535166483858741614e6, -1.79565251976484877988e7];
-const TAN_Q = [
-  1, 1.36812963470692954678e4, -1.32089234440210967447e6, 2.50083801823357915839e7, -5.38695755929454629881e7,
-];
+const TAN_P = [-13_093.693918138379, 1_153_516.6483858742, -17_956_525.197648488];
+const TAN_Q = [1, 13_681.296347069296, -1_320_892.3444021097, 25_008_380.18233579, -53_869_575.592945464];
 
 /** `math.Tan`. */
 export function tan(x: number): number {
@@ -229,16 +227,16 @@ export function acos(x: number): number {
 
 /** `xatan` evaluates a series valid in the range [0, 0.66]. */
 function xatan(x: number): number {
-  const P0 = -8.750608600031904122785e-1;
-  const P1 = -1.615753718733365076637e1;
-  const P2 = -7.50085579231470466734e1;
-  const P3 = -1.22886668449013617341e2;
-  const P4 = -6.485021904942025371773e1;
-  const Q0 = +2.485846490142306297962e1;
-  const Q1 = +1.650270098316988542046e2;
-  const Q2 = +4.328810604912902668951e2;
-  const Q3 = +4.853903996359136964868e2;
-  const Q4 = +1.945506571482613964425e2;
+  const P0 = -0.8750608600031904;
+  const P1 = -16.157537187333652;
+  const P2 = -75.00855792314705;
+  const P3 = -122.88666844901361;
+  const P4 = -64.85021904942025;
+  const Q0 = +24.858464901423062;
+  const Q1 = +165.02700983169885;
+  const Q2 = +432.88106049129027;
+  const Q3 = +485.3903996359137;
+  const Q4 = +194.5506571482614;
   let z = x * x;
   const p = fma(fma(fma(fma(P0, z, P1), z, P2), z, P3), z, P4);
   const q = fma(fma(fma(fma(z + Q0, z, Q1), z, Q2), z, Q3), z, Q4);
@@ -248,8 +246,8 @@ function xatan(x: number): number {
 
 /** `satan` reduces its argument (known to be positive) to the range [0, 0.66] and calls xatan. */
 function satan(x: number): number {
-  const Morebits = 6.12323399573676588613e-17; // pi/2 = PIO2 + Morebits
-  const Tan3pio8 = 2.4142135623730950488; // tan(3*pi/8)
+  const Morebits = 6.123233995736766e-17; // pi/2 = PIO2 + Morebits
+  const Tan3pio8 = 2.414213562373095; // tan(3*pi/8)
   if (x <= 0.66) return xatan(x);
   if (x > Tan3pio8) return PI_2 - xatan(1 / x) + Morebits;
   return PI_4 + xatan((x - 1) / (x + 1)) + 0.5 * Morebits;
@@ -286,13 +284,13 @@ export function atan2(y: number, x: number): number {
 
 /** `math.Sinh`. */
 export function sinh(x: number): number {
-  const P0 = -0.6307673640497716991184787251e6;
-  const P1 = -0.8991272022039509355398013511e5;
-  const P2 = -0.2894211355989563807284660366e4;
-  const P3 = -0.2630563213397497062819489e2;
-  const Q0 = -0.6307673640497716991212077277e6;
-  const Q1 = 0.1521517378790019070696485176e5;
-  const Q2 = -0.173678953558233699533450911e3;
+  const P0 = -630_767.3640497717;
+  const P1 = -89_912.72022039509;
+  const P2 = -2894.211355989564;
+  const P3 = -26.30563213397497;
+  const Q0 = -630_767.3640497717;
+  const Q1 = 15_215.17378790019;
+  const Q2 = -173.6789535582337;
   let sign = false;
   if (x < 0) {
     x = -x;
@@ -322,12 +320,12 @@ export function cosh(x: number): number {
 
 // tanh.go
 
-const TANH_P = [-9.64399179425052238628e-1, -9.92877231001918586564e1, -1.61468768441708447952e3];
-const TANH_Q = [1.12811678491632931402e2, 2.23548839060100448583e3, 4.84406305325125486048e3];
+const TANH_P = [-0.9643991794250523, -99.28772310019185, -1614.6876844170845];
+const TANH_Q = [112.81167849163293, 2235.4883906010045, 4844.063053251255];
 
 /** `math.Tanh`. */
 export function tanh(x: number): number {
-  const MAXLOG = 8.8029691931113054295988e1; // log(2**127)
+  const MAXLOG = 88.02969193111305; // log(2**127)
   let z = Math.abs(x);
   if (z > 0.5 * MAXLOG) return x < 0 ? -1 : 1;
   if (z >= 0.625) {
@@ -346,7 +344,7 @@ export function tanh(x: number): number {
 
 /** `math.Asinh`. */
 export function asinh(x: number): number {
-  const Ln2 = 6.93147180559945286227e-1; // 0x3FE62E42FEFA39EF
+  const Ln2 = 0.6931471805599453; // 0x3FE62E42FEFA39EF
   const NearZero = 1 / (1 << 28); // 2**-28
   const Large = 1 << 28; // 2**28
   if (Number.isNaN(x) || !Number.isFinite(x)) return x;
@@ -403,14 +401,14 @@ export function atanh(x: number): number {
 
 // exp_arm64.s
 
-const LN2_HI = 6.9314718036912381649e-1;
-const LN2_LO = 1.90821492927058770002e-10;
+const LN2_HI = 0.6931471803691238;
+const LN2_LO = 1.9082149292705877e-10;
 
 /** `math.Exp` as computed by archExp in exp_arm64.s. */
 export function exp(x: number): number {
-  const Log2e = 1.442695040888963387;
-  const Overflow = 7.09782712893383973096e2;
-  const Underflow = -7.4513321910194110842e2;
+  const Log2e = 1.4426950408889634;
+  const Overflow = 709.782712893384;
+  const Underflow = -745.1332191019411;
   const NearZero = 2 ** -28;
   if (Number.isNaN(x)) return x;
   if (x > Overflow) return Infinity;
@@ -425,8 +423,8 @@ export function exp(x: number): number {
 
 /** `math.Exp2` as computed by archExp2 in exp_arm64.s. */
 export function exp2(x: number): number {
-  const Overflow = 1.0239999999999999e3;
-  const Underflow = -1.074e3;
+  const Overflow = 1023.9999999999999;
+  const Underflow = -1074;
   if (Number.isNaN(x)) return x;
   if (x > Overflow) return Infinity;
   if (x < Underflow) return 0;
@@ -442,11 +440,11 @@ export function exp2(x: number): number {
  * which adds k to the exponent field and handles only the subnormal case.
  */
 function expmulti(hi: number, lo: number, k: number): number {
-  const P1 = 1.66666666666666657415e-1;
-  const P2 = -2.77777777770155933842e-3;
-  const P3 = 6.61375632143793436117e-5;
-  const P4 = -1.6533902205465251539e-6;
-  const P5 = 4.13813679705723846039e-8;
+  const P1 = 0.16666666666666666;
+  const P2 = -0.0027777777777015593;
+  const P3 = 0.00006613756321437934;
+  const P4 = -0.0000016533902205465252;
+  const P5 = 4.1381367970572385e-8;
   const r = hi - lo;
   const t = r * r;
   const c = fma(-t, fma(t, fma(t, fma(t, fma(t, P5, P4), P3), P2), P1), r);
@@ -467,17 +465,17 @@ const FRAC_MASK = (1n << SHIFT) - 1n;
 
 /** `math.Expm1`. */
 export function expm1(x: number): number {
-  const Othreshold = 7.09782712893383973096e2; // 0x40862E42FEFA39EF
-  const Ln2X56 = 3.88162421113569373274e1; // 0x4043687a9f1af2b1
-  const Ln2HalfX3 = 1.03972077083991796413; // 0x3ff0a2b23f3bab73
-  const Ln2Half = 3.46573590279972654709e-1; // 0x3fd62e42fefa39ef
-  const InvLn2 = 1.442695040888963387; // 0x3ff71547652b82fe
+  const Othreshold = 709.782712893384; // 0x40862E42FEFA39EF
+  const Ln2X56 = 38.816242111356935; // 0x4043687a9f1af2b1
+  const Ln2HalfX3 = 1.0397207708399179; // 0x3ff0a2b23f3bab73
+  const Ln2Half = 0.34657359027997264; // 0x3fd62e42fefa39ef
+  const InvLn2 = 1.4426950408889634; // 0x3ff71547652b82fe
   const Tiny = 1 / 2 ** 54; // 2**-54 = 0x3c90000000000000
-  const Q1 = -3.33333333333331316428e-2; // 0xBFA11111111110F4
-  const Q2 = 1.58730158725481460165e-3; // 0x3F5A01A019FE5585
-  const Q3 = -7.93650757867487942473e-5; // 0xBF14CE199EAADBB7
-  const Q4 = 4.00821782732936239552e-6; // 0x3ED0CFCA86E65239
-  const Q5 = -2.01099218183624371326e-7; // 0xBE8AFDB76E09C32D
+  const Q1 = -0.03333333333333313; // 0xBFA11111111110F4
+  const Q2 = 0.0015873015872548146; // 0x3F5A01A019FE5585
+  const Q3 = -0.0000793650757867488; // 0xBF14CE199EAADBB7
+  const Q4 = 0.000004008217827329362; // 0x3ED0CFCA86E65239
+  const Q5 = -2.0109921818362437e-7; // 0xBE8AFDB76E09C32D
   if (x === Infinity || Number.isNaN(x)) return x;
   if (x === -Infinity) return -1;
   let absx = x;
@@ -550,13 +548,13 @@ function addToExponent(y: number, k: number): number {
 
 /** `math.Log`. */
 export function log(x: number): number {
-  const L1 = 6.66666666666673513e-1;
-  const L2 = 3.999999999940941908e-1;
-  const L3 = 2.857142874366239149e-1;
-  const L4 = 2.222219843214978396e-1;
-  const L5 = 1.818357216161805012e-1;
-  const L6 = 1.531383769920937332e-1;
-  const L7 = 1.479819860511658591e-1;
+  const L1 = 0.6666666666666735;
+  const L2 = 0.3999999999940942;
+  const L3 = 0.2857142874366239;
+  const L4 = 0.22222198432149784;
+  const L5 = 0.1818357216161805;
+  const L6 = 0.15313837699209373;
+  const L7 = 0.14798198605116586;
   if (Number.isNaN(x) || x === Infinity) return x;
   if (x < 0) return Number.NaN;
   if (x === 0) return -Infinity;
@@ -570,11 +568,11 @@ export function log(x: number): number {
   const s = f / (2 + f);
   const s2 = s * s;
   const s4 = s2 * s2;
-  const t1 = s2 * fma(s4, fma(s4, fma(s4, L7, L5), L3), L1);
-  // R := t1 + t2 fuses the multiplication of t2 := s4 * (...).
-  const R = fma(s4, fma(s4, fma(s4, L6, L4), L2), t1);
-  // hfsq := 0.5 * f * f fuses into both `hfsq+R` and `hfsq - (...)`; `s*(hfsq+R) + k*Ln2Lo` fuses k*Ln2Lo.
-  const sum = fma(k, LN2_LO, s * fma(0.5 * f, f, R));
+  const t2 = s4 * fma(s4, fma(s4, L6, L4), L2);
+  // R := t1 + t2 fuses the multiplication of t1 := s2 * (...) (the compiler's argument order, checked on arm64).
+  const R = fma(s2, fma(s4, fma(s4, fma(s4, L7, L5), L3), L1), t2);
+  // hfsq := 0.5 * f * f fuses into both `hfsq+R` and `hfsq - (...)`; `s*(hfsq+R) + k*Ln2Lo` fuses s*(hfsq+R).
+  const sum = fma(s, fma(0.5 * f, f, R), k * LN2_LO);
   return fma(k, LN2_HI, -(fma(0.5 * f, f, -sum) - f));
 }
 
@@ -597,18 +595,18 @@ export function log2(x: number): number {
 
 /** `math.Log1p`. */
 export function log1p(x: number): number {
-  const Sqrt2M1 = 4.142135623730950488017e-1; // Sqrt(2)-1 = 0x3fda827999fcef34
-  const Sqrt2HalfM1 = -2.928932188134524755992e-1; // Sqrt(2)/2-1 = 0xbfd2bec333018866
+  const Sqrt2M1 = 0.41421356237309503; // Sqrt(2)-1 = 0x3fda827999fcef34
+  const Sqrt2HalfM1 = -0.2928932188134525; // Sqrt(2)/2-1 = 0xbfd2bec333018866
   const Small = 1 / (1 << 29); // 2**-29 = 0x3e20000000000000
   const Tiny = 1 / 2 ** 54; // 2**-54
   const Two53 = 2 ** 53; // 2**53
-  const Lp1 = 6.66666666666673513e-1; // 3FE5555555555593
-  const Lp2 = 3.999999999940941908e-1; // 3FD999999997FA04
-  const Lp3 = 2.857142874366239149e-1; // 3FD2492494229359
-  const Lp4 = 2.222219843214978396e-1; // 3FCC71C51D8E78AF
-  const Lp5 = 1.818357216161805012e-1; // 3FC7466496CB03DE
-  const Lp6 = 1.531383769920937332e-1; // 3FC39A09D078C69F
-  const Lp7 = 1.479819860511658591e-1; // 3FC2F112DF3E5244
+  const Lp1 = 0.6666666666666735; // 3FE5555555555593
+  const Lp2 = 0.3999999999940942; // 3FD999999997FA04
+  const Lp3 = 0.2857142874366239; // 3FD2492494229359
+  const Lp4 = 0.22222198432149784; // 3FCC71C51D8E78AF
+  const Lp5 = 0.1818357216161805; // 3FC7466496CB03DE
+  const Lp6 = 0.15313837699209373; // 3FC39A09D078C69F
+  const Lp7 = 0.14798198605116586; // 3FC2F112DF3E5244
   if (x < -1 || Number.isNaN(x)) return Number.NaN;
   if (x === -1) return -Infinity;
   if (x === Infinity) return Infinity;
@@ -660,14 +658,14 @@ export function log1p(x: number): number {
       c = fma(k, LN2_LO, c);
       return fma(k, LN2_HI, c);
     }
-    const p = fma(-0.66666666666666666, f, 1); // R = hfsq * p
+    const p = fma(-0.6666666666666666, f, 1); // R = hfsq * p
     if (k === 0) return fma(-hfsq, p, f);
     return fma(k, LN2_HI, -(fma(hfsq, p, -fma(k, LN2_LO, c)) - f));
   }
   const s = f / (2 + f);
   const z = s * s;
   const p = fma(z, fma(z, fma(z, fma(z, fma(z, fma(z, Lp7, Lp6), Lp5), Lp4), Lp3), Lp2), Lp1); // R = z * p
-  const hfsqPlusR = fma(z, p, hfsq);
+  const hfsqPlusR = fma(0.5 * f, f, z * p); // hfsq+R fuses hfsq, not R (the compiler's argument order)
   if (k === 0) return f - fma(-s, hfsqPlusR, hfsq);
   return fma(k, LN2_HI, -(fma(0.5 * f, f, -fma(s, hfsqPlusR, fma(k, LN2_LO, c))) - f));
 }
@@ -759,11 +757,11 @@ export function pow(x: number, y: number): number {
 export function cbrt(x: number): number {
   const B1 = 715_094_163n; // (682-0.03306235651)*2**20
   const B2 = 696_219_795n; // (664-0.03306235651)*2**20
-  const C = 5.42857142857142815906e-1; // 19/35     = 0x3FE15F15F15F15F1
-  const D = -7.0530612244897961105e-1; // -864/1225 = 0xBFE691DE2532C834
-  const E = 1.41428571428571436819; // 99/70     = 0x3FF6A0EA0EA0EA0F
-  const F = 1.6071428571428572063; // 45/28     = 0x3FF9B6DB6DB6DB6E
-  const G = 3.57142857142857150787e-1; // 5/14      = 0x3FD6DB6DB6DB6DB7
+  const C = 0.5428571428571428; // 19/35     = 0x3FE15F15F15F15F1
+  const D = -0.7053061224489796; // -864/1225 = 0xBFE691DE2532C834
+  const E = 1.4142857142857144; // 99/70     = 0x3FF6A0EA0EA0EA0F
+  const F = 1.6071428571428572; // 45/28     = 0x3FF9B6DB6DB6DB6E
+  const G = 0.35714285714285715; // 5/14      = 0x3FD6DB6DB6DB6DB7
   if (x === 0 || Number.isNaN(x) || !Number.isFinite(x)) return x;
   let sign = false;
   if (x < 0) {

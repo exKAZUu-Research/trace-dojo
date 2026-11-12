@@ -515,7 +515,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const left = this.hiddenSlot();
     const right = this.hiddenSlot();
     const variable = this.declareLocal(name.name, operand.type, name.span);
-    variable.productFactors = { left, right };
+    variable.productFactors = { left, right, order: product.order };
     variable.definedAsConstant = operand.ssaConstant;
     const multiply = arithmetic('*', operand.type);
     return this.withStep(

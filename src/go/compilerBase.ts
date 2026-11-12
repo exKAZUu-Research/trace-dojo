@@ -165,6 +165,7 @@ export abstract class CompilerBase {
       resultVariables: [],
       hasNamedResults: false,
       references: new Set(),
+      productOrders: new Map(),
       loopDepth: 0,
       breakDepth: 0,
       recordsSteps: this.trace !== undefined,

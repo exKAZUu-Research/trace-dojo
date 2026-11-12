@@ -44,7 +44,7 @@ export interface VarEntity {
    * The hidden slots holding the factors of the multiplication that initialized the variable, which a later addition
    * fuses with, as Go's compiler does through a variable whose value comes from that single definition.
    */
-  productFactors?: { left: number; right: number };
+  productFactors?: { left: number; right: number; order: number };
   /** Whether the declaration's value is a constant to Go's compiler. */
   definedAsConstant?: () => boolean;
 }
@@ -124,6 +124,8 @@ export interface FunctionContext {
   hasNamedResults: boolean;
   /** The package-level variables and functions that the body refers to, which decide initialization order. */
   references: Set<unknown>;
+  /** The order in which the function first computes each product, by the variables or constants it multiplies. */
+  productOrders: Map<string, number>;
   loopDepth: number;
   breakDepth: number;
   recordsSteps: boolean;

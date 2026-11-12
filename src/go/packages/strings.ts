@@ -146,6 +146,16 @@ function equalFold(a: string, b: string): boolean {
   );
 }
 
+/** The separators of words for `strings.Title`, as its isSeparator decides. */
+function isWordSeparator(rune: number): boolean {
+  if (rune <= 0x7f) {
+    const char = String.fromCodePoint(rune);
+    return !/[\dA-Za-z_]/.test(char);
+  }
+  if (/^[\p{L}\p{Nd}]$/u.test(String.fromCodePoint(rune))) return false;
+  return isSpace(rune);
+}
+
 function predicateOf(fnValue: Value): (rune: number) => boolean {
   return (rune) => callFunction(fnValue, [BigInt(rune)]) === true;
 }
@@ -489,6 +499,14 @@ const members: Record<string, Entity> = {
   }),
   ToLower: nativeFunction('ToLower', fn([STRING], [STRING]), ([s]) => mapRunes(s as string, toLower)),
   ToUpper: nativeFunction('ToUpper', fn([STRING], [STRING]), ([s]) => mapRunes(s as string, toUpper)),
+  Title: nativeFunction('Title', fn([STRING], [STRING]), ([s]) => {
+    let previous = 0x20;
+    return mapRunes(s as string, (rune) => {
+      const mapped = isWordSeparator(previous) ? toTitle(rune) : rune;
+      previous = rune;
+      return mapped;
+    });
+  }),
   ToTitle: nativeFunction('ToTitle', fn([STRING], [STRING]), ([s]) => mapRunes(s as string, toTitle)),
   Trim: nativeFunction(
     'Trim',
@@ -558,7 +576,5 @@ const members: Record<string, Entity> = {
 export const STRINGS_PACKAGE = definePackage(
   'strings',
   members,
-  ['Title', 'NewReader', 'Lines', 'SplitSeq', 'SplitAfterSeq', 'FieldsSeq', 'FieldsFuncSeq'].filter(
-    (name) => !(name in members)
-  )
+  ['NewReader', 'Lines', 'SplitSeq', 'SplitAfterSeq', 'FieldsSeq', 'FieldsFuncSeq'].filter((name) => !(name in members))
 );
