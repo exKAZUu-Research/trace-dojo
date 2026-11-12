@@ -75,7 +75,10 @@ function completion(source: string, line: LogicalLine): string {
 
 /** A body for the block a header opens. */
 function body(source: string, header: LogicalLine): string {
-  return `${indentation(source, header)} pass\n`;
+  const indent = indentation(source, header);
+  // A match statement's body must consist of case clauses.
+  if (/^\s*match\b/.test(source.slice(header.start))) return `${indent} case _:\n${indent}  pass\n`;
+  return `${indent} pass\n`;
 }
 
 /** `finally` clauses for the `try` statements whose handlers come after the last of the lines. */

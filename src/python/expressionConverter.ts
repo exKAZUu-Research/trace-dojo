@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 544 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 549 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { assignmentExpressionError } from './assignmentExpressions';
@@ -28,7 +28,7 @@ import {
   rowOf,
   unsupported,
 } from './convertNodes';
-import { hasUnbracketedLambda } from './fStringLambdas';
+import { hasUnbracketedLambda, isOperatorOperand } from './lambdaPositions';
 import { parseNumber } from './numberLiterals';
 import { fail, ScopeBuilder } from './scopes';
 
@@ -147,7 +147,7 @@ export abstract class ExpressionConverter {
         };
       }
       case 'dictionary': {
-        return { kind: 'dict', items: namedChildren(node).map((child) => this.dictItem(child)), row };
+        return this.dictionary(node, row);
       }
       case 'attribute': {
         return this.attribute(node);
@@ -173,7 +173,7 @@ export abstract class ExpressionConverter {
         return this.comparison(node);
       }
       case 'lambda': {
-        return { kind: 'lambda', fn: this.lambda(node), row };
+        return this.lambdaExpression(node, row);
       }
       case 'named_expression': {
         return this.namedExpression(node);
@@ -327,6 +327,7 @@ export abstract class ExpressionConverter {
         row: rowOf(node),
       };
     }
+    if (children(argumentsNode)[1]?.type === ',') fail(rowOf(argumentsNode), '引数の前に「,」は書けません。');
     return { kind: 'call', callee, args: this.argumentList(argumentsNode), row: rowOf(node) };
   }
 
@@ -364,6 +365,16 @@ export abstract class ExpressionConverter {
     }
     // CPython evaluates a * argument written after a keyword argument before that keyword's value.
     return [...positionals, ...named];
+  }
+
+  private lambdaExpression(node: Node, row: number): Expression {
+    if (isOperatorOperand(node)) fail(row, '演算子の前後に lambda を書くときは、( ) で囲んでください。');
+    return { kind: 'lambda', fn: this.lambda(node), row };
+  }
+
+  private dictionary(node: Node, row: number): Expression {
+    if (children(node)[1]?.type === ',') fail(row, '辞書の { の直後に「,」は書けません。');
+    return { kind: 'dict', items: namedChildren(node).map((child) => this.dictItem(child)), row };
   }
 
   private namedExpression(node: Node): Expression {

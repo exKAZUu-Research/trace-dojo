@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 698 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 703 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -580,6 +580,7 @@ export class ProgramConverter extends ExpressionConverter {
   // Imports ---------------------------------------------------------------------------------------------------------
 
   private importStatement(node: Node): Statement {
+    refuseTrailingComma(node);
     const names: ImportName[] = fieldNodes(node, 'name').map((nameNode) => {
       const aliased = nameNode.type === 'aliased_import';
       const dotted = aliased ? field(nameNode, 'name') : nameNode;
@@ -592,6 +593,7 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   private importFromStatement(node: Node): Statement {
+    refuseTrailingComma(node);
     const moduleNode = field(node, 'module_name');
     if (moduleNode.type === 'relative_import') unsupported(node, '相対 import（from . import）');
     const module = moduleNode.text.replaceAll(/\s/g, '');
@@ -1002,6 +1004,11 @@ function expandTabs(text: string): string {
     }
   }
   return result;
+}
+
+/** Refuses an import whose names end with a comma outside parentheses, which only `from m import (a, b,)` allows. */
+function refuseTrailingComma(node: Node): void {
+  if (children(node).at(-1)?.type === ',') fail(rowOf(node), 'import する名前の後に「,」は書けません。');
 }
 
 function starIndexOf(patterns: Pattern[], row: number): number | undefined {

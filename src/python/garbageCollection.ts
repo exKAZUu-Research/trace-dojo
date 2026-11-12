@@ -24,7 +24,6 @@ import {
 } from './values';
 
 /** Finds the turtles that `roots` reach, with the number of items scanned to find them. */
-// code-gauge-allow duplicateLines 19 -- Each language's runtime walks its own object model, so the loops cannot share code.
 export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleState>; scanned: number } {
   const reached = new Set<TurtleState>();
   const visited = new Set<object>();

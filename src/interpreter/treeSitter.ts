@@ -40,9 +40,13 @@ export function parseSource<T>(
     if (tooDeep) {
       throw new CompileError([{ row: tooDeep.startPosition.row, message: '括弧やブロックなどの入れ子が深すぎます。' }]);
     }
-    const syntaxErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames);
+    const syntaxErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, false);
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
-    return convert(tree.rootNode);
+    const converted = convert(tree.rootNode);
+    // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.
+    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true);
+    if (hiddenErrors.length > 0) throw new CompileError(hiddenErrors);
+    return converted;
   } finally {
     tree.delete();
   }
@@ -57,7 +61,7 @@ export function findSyntaxErrors(
   const tree = parser.parse(source);
   if (!tree) throw new Error('The parser returned no tree');
   try {
-    return collectSyntaxErrors(tree.rootNode, missingTokenNames);
+    return collectSyntaxErrors(tree.rootNode, missingTokenNames, true);
   } finally {
     tree.delete();
   }
@@ -81,26 +85,55 @@ function findTooDeepNode(root: Node): Node | undefined {
   }
 }
 
-function collectSyntaxErrors(root: Node, missingTokenNames: Record<string, string>): SourceDiagnostic[] {
+/**
+ * The syntax errors a tree shows, and with `includeHidden` also where only a node's error flag shows one: a token the
+ * parser inserted to recover is invisible when its grammar rule is hidden, like Python's newline and dedent.
+ */
+function collectSyntaxErrors(
+  root: Node,
+  missingTokenNames: Record<string, string>,
+  includeHidden: boolean
+): SourceDiagnostic[] {
   const errors: SourceDiagnostic[] = [];
   const visit = (node: Node): void => {
     if (errors.length >= 5) return;
-    if (node.isMissing) {
-      errors.push({
-        row: rowBeforeMissing(node),
-        message: `「${missingTokenNames[node.type] ?? node.type}」が足りません。`,
-      });
-      return;
-    }
-    if (node.isError) {
-      errors.push({ row: node.startPosition.row, message: '書き方に誤りがあります。' });
+    const own = ownError(node, missingTokenNames);
+    if (own) {
+      errors.push(own);
       return;
     }
     if (!node.hasError) return;
+    const found = errors.length;
     for (const child of node.children) if (child) visit(child);
+    if (includeHidden && errors.length === found) {
+      errors.push({ row: hiddenErrorRow(node), message: '書き方に誤りがあります。' });
+    }
   };
   visit(root);
   return errors;
+}
+
+/** The error a node is itself: a token the parser inserted, or text it could not parse. */
+function ownError(node: Node, missingTokenNames: Record<string, string>): SourceDiagnostic | undefined {
+  if (node.isMissing) {
+    return { row: rowBeforeMissing(node), message: `「${missingTokenNames[node.type] ?? node.type}」が足りません。` };
+  }
+  return node.isError ? { row: node.startPosition.row, message: '書き方に誤りがあります。' } : undefined;
+}
+
+/**
+ * The row of an error the parser recovered from with a hidden token: where two of the node's parts share a line with
+ * nothing between them, as two statements do when the newline between them is missing, or else the node's own row.
+ */
+function hiddenErrorRow(node: Node): number {
+  const parts = node.children.filter((child): child is Node => child !== null);
+  for (const [index, part] of parts.slice(1).entries()) {
+    const previous = parts[index];
+    if (previous.isNamed && part.isNamed && previous.endPosition.row === part.startPosition.row) {
+      return part.startPosition.row;
+    }
+  }
+  return node.startPosition.row;
 }
 
 /** The row where the code before a missing token ends, since the parser places that token at the next one. */
