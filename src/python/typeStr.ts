@@ -497,7 +497,7 @@ defineMethod(strClass, 'format', (self, args, kwargs) =>
   })
 );
 method(strClass, 'format_map', 'one', 1, 1, (self, [mapping]) =>
-  formatString(asStr(self), [], (name) => getItem(mapping, name))
+  formatString(asStr(self), undefined, (name) => getItem(mapping, name))
 );
 
 method(strClass, 'maketrans', 'expected', 1, 3, (_self, args) => makeTranslation(args), { binding: 'static' });

@@ -95,7 +95,15 @@ interface FieldState {
 }
 
 /** `str.format()` and `str.format_map()`. */
-export function formatString(template: string, args: readonly PyValue[], kwargs: (name: string) => PyValue): string {
+/**
+ * `str.format`, or `str.format_map` when `args` is undefined, which refuses positional fields as CPython does by
+ * passing no argument tuple.
+ */
+export function formatString(
+  template: string,
+  args: readonly PyValue[] | undefined,
+  kwargs: (name: string) => PyValue
+): string {
   const state: FieldState = { auto: 0 };
   const result = renderTemplate(template, args, kwargs, state, 2);
   currentRuntime().buildString(result.length);
@@ -104,7 +112,7 @@ export function formatString(template: string, args: readonly PyValue[], kwargs:
 
 function renderTemplate(
   template: string,
-  args: readonly PyValue[],
+  args: readonly PyValue[] | undefined,
   kwargs: (name: string) => PyValue,
   state: FieldState,
   depth: number
@@ -182,7 +190,7 @@ function formatSpecEnd(chars: readonly string[], start: number): number {
 
 function renderField(
   field: string,
-  args: readonly PyValue[],
+  args: readonly PyValue[] | undefined,
   kwargs: (name: string) => PyValue,
   state: FieldState,
   depth: number
@@ -212,7 +220,7 @@ function splitField(field: string): { name: string; conversion: string | undefin
  */
 function fieldObject(
   name: string,
-  args: readonly PyValue[],
+  args: readonly PyValue[] | undefined,
   kwargs: (name: string) => PyValue,
   state: FieldState
 ): PyValue {
@@ -250,7 +258,7 @@ function nextAccessor(chars: readonly string[], start: number): { isAttribute: b
 
 function fieldValue(
   name: string,
-  args: readonly PyValue[],
+  args: readonly PyValue[] | undefined,
   kwargs: (name: string) => PyValue,
   state: FieldState
 ): PyValue {
@@ -288,7 +296,8 @@ function convertField(value: PyValue, conversion: string): PyValue {
   throw valueError(`Unknown conversion specifier ${conversion}`);
 }
 
-function positional(args: readonly PyValue[], index: bigint): PyValue {
+function positional(args: readonly PyValue[] | undefined, index: bigint): PyValue {
+  if (args === undefined) throw valueError('Format string contains positional fields');
   if (index >= BigInt(args.length)) {
     throw currentRuntime().indexError(`Replacement index ${index} out of range for positional args tuple`);
   }
