@@ -8,6 +8,7 @@ import type { Frame } from './frame';
 import { parsePython } from './parse';
 import { runModule } from './run';
 import { Runtime } from './runtime';
+import { strRepr } from './strings';
 import { None } from './types';
 import {
   PyBoundMethod,
@@ -210,8 +211,10 @@ function containerNodeOf(value: PyObject, seen: Set<PyObject>): DisplayNode {
     return { kind: 'array', entries };
   }
   if (value instanceof PyDict) {
-    for (const entry of value.store.ordered())
-      entries[keyText(entry.key)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
+    const ordered = value.store.ordered();
+    const labels = keyLabels(ordered.map((entry) => entry.key));
+    for (const [index, entry] of ordered.entries())
+      entries[labels[index]] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
   } else if (value instanceof PyInstance) {
     addAttributeNodes(entries, value, seen);
   }
@@ -224,6 +227,24 @@ function addAttributeNodes(entries: Record<string, DisplayNode>, instance: PyIns
     const node = displayNodeOf(item, seen);
     if (node) entries[key] = node;
   }
+}
+
+/**
+ * Labels a dict's keys by their text. Distinct keys may share a text, such as `1` and `'1'`, so a string key whose text
+ * another key shares shows quoted, and a label still repeated gets its position among those sharing it.
+ */
+function keyLabels(keys: PyValue[]): string[] {
+  const texts = keys.map(keyText);
+  const typed = keys.map((key, index) =>
+    typeof key === 'string' && isShared(texts, index) ? strRepr(key) : texts[index]
+  );
+  return typed.map((label, index) =>
+    isShared(typed, index) ? `${label} (${typed.slice(0, index + 1).filter((other) => other === label).length})` : label
+  );
+}
+
+function isShared(labels: string[], index: number): boolean {
+  return labels.indexOf(labels[index]) !== labels.lastIndexOf(labels[index]);
 }
 
 /** A dict key as text, without running any of the program's own methods. */

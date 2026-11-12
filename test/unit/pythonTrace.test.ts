@@ -248,6 +248,15 @@ test('integers a number cannot hold exactly keep every digit in the variables', 
 });
 
 test.each([
+  ['an int and a string', 'd = {2: "a", 1: "b", "1": "c"}', ['1', '2', "'1'"]],
+  ['None and a string', 'd = {None: 0, "None": 1}', ['None', "'None'"]],
+  ['two instances of one class', 'class A:\n    pass\nd = {A(): 1, A(): 2}', ['<A> (1)', '<A> (2)']],
+])('dict keys of the same text, %s, keep distinct entries', (_name, program, labels) => {
+  const node = traceProgram('python', program, program).traceItems.at(-1)?.referenceVars.d;
+  expect(node?.kind === 'object' && Object.keys(node.entries)).toEqual(labels);
+});
+
+test.each([
   ['a for loop', 'for t in Pair():\n    t.forward()'],
   ['a list comprehension', 'moved = [move(t) for t in Pair()]'],
   ['a nested comprehension', 'moved = [move(t) for i in range(1) for t in Pair()]'],
