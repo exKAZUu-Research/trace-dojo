@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 537 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 541 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -664,8 +664,8 @@ export abstract class ExpressionConverter {
         return this.annotation(node);
       }
       case 'list': {
-        // A bracketed list of types, as Callable[[int], int] takes its parameters.
-        return { kind: 'list', elements: namedChildren(node).map((element) => this.annotation(element)), row };
+        // A bracketed list of types, as Callable[[int], int] takes its parameters, which may also unpack iterables.
+        return { kind: 'list', elements: namedChildren(node).map((element) => this.typeListElement(element)), row };
       }
       case 'constrained_type':
       case 'splat_type': {
@@ -675,6 +675,13 @@ export abstract class ExpressionConverter {
         return this.expression(node);
       }
     }
+  }
+  /** An element of a bracketed list in a type position: a type, or a `*` that unpacks one. */
+  private typeListElement(node: Node): Element {
+    if (node.type === 'list_splat') {
+      return { kind: 'starred', value: this.typeExpression(namedChildren(node)[0]), row: rowOf(node) };
+    }
+    return node.type === 'type' ? this.annotation(node) : this.element(node);
   }
 
   // Targets ---------------------------------------------------------------------------------------------------------
