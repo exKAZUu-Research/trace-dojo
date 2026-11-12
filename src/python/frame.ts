@@ -14,6 +14,8 @@ export class Frame implements TracedFrame {
   readonly annotations: AnnotationThunk[] = [];
   /** The frame an inlined (list, set, or dict) comprehension runs within, whose names CPython's frame shares. */
   inlinedIn?: Frame;
+  /** What a generator expression's frame holds as its first argument: the iterator of its first iterable. */
+  firstArgument?: PyValue;
 
   // code-gauge-allow functionParameterCount 9 -- Each frame field is set once at creation and read on every name access.
   constructor(

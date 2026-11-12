@@ -14,7 +14,7 @@ import { keyError } from './items';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
 import { DEFAULT_MAX_STR_DIGITS } from './numbers';
-import { bindValue, callValue, isTruthy, lookupSpecial, setAttribute, toArray } from './objects';
+import { bindValue, callValue, getIterator, isTruthy, lookupSpecial, newSuper, setAttribute, toArray } from './objects';
 import { withoutCharge } from './runtimeContext';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
@@ -47,11 +47,11 @@ import {
   PyFunction,
   PyGenerator,
   PyInstance,
+  PyIterator,
   type PyList,
   PyModule,
   PyObject,
   type PySet,
-  PySuper,
   type PyTuple,
   type PyValue,
 } from './values';
@@ -445,16 +445,14 @@ export class Runtime {
 
   /** The `self` and class that a zero-argument `super()` reads from the calling method. */
   zeroArgumentSuper(): PyValue {
-    const frame = this.frame;
+    // A list, set, or dict comprehension runs inline in its function's frame, as CPython compiles it (PEP 709).
+    let frame = this.frame;
+    while (frame.inlinedIn) frame = frame.inlinedIn;
     const cls = frame.classCell?.value;
-    const first = frame.fn?.def.params[0];
-    if (!first) throw pyError('RuntimeError', 'super(): no arguments');
+    const self = frame.kind === 'comprehension' ? genexprArgument(frame) : firstParameterOf(frame);
     if (!(cls instanceof PyClass)) throw pyError('RuntimeError', 'super(): __class__ cell not found');
-    const self = frame.locals.get(first.name) ?? frame.cells.get(first.name)?.value;
     if (self === undefined) throw pyError('RuntimeError', 'super(): arg[0] deleted');
-    const selfClass = self instanceof PyClass && self.isSubclassOf(cls) ? self : classOf(self);
-    if (!selfClass.isSubclassOf(cls)) throw typeError('super(type, obj): obj must be an instance or subtype of type');
-    return new PySuper(superClass, cls, self, selfClass);
+    return newSuper(superClass, cls, self);
   }
 
   /** The classes defined with `cls` as a base, for `__subclasses__()`. */
@@ -594,4 +592,22 @@ function objectAttributeNames(value: PyValue): Set<string> {
   if (value instanceof PyInstance || value instanceof PyFunction) for (const name of value.dict.keys()) names.add(name);
   for (const name of ownAttributesOf(value)?.keys() ?? []) names.add(name);
   return names;
+}
+
+/** The value of a function frame's first parameter, which a zero-argument `super()` takes as its object. */
+function firstParameterOf(frame: Frame): PyValue | undefined {
+  const first = frame.fn?.def.params[0];
+  if (!first) throw pyError('RuntimeError', 'super(): no arguments');
+  return frame.locals.get(first.name) ?? frame.cells.get(first.name)?.value;
+}
+
+/**
+ * A generator expression's first argument, the iterator of its first iterable, which CPython's `super()` there takes
+ * as its object; an iterable read natively is given the iterator CPython would have made of it.
+ */
+function genexprArgument(frame: Frame): PyValue | undefined {
+  const first = frame.firstArgument;
+  return first === undefined || first instanceof PyIterator || first instanceof PyGenerator
+    ? first
+    : getIterator(first);
 }

@@ -555,3 +555,13 @@ export function attributeName(name: PyValue): string {
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
   return name;
 }
+
+/** `super(type, obj)`, refusing an object that is neither an instance nor a subclass of the type as CPython does. */
+export function newSuper(cls: PyClass, thisClass: PyClass, self: PyValue): PySuper {
+  const selfClass = self instanceof PyClass && self.isSubclassOf(thisClass) ? self : classOf(self);
+  if (!selfClass.isSubclassOf(thisClass)) {
+    const described = self instanceof PyClass ? `type ${self.name}` : `instance of ${typeName(self)}`;
+    throw typeError(`super(type, obj): obj (${described}) is not an instance or subtype of type (${thisClass.name}).`);
+  }
+  return new PySuper(cls, thisClass, self, selfClass);
+}

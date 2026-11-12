@@ -583,7 +583,7 @@ export class ExpressionEvaluator {
     const { runtime } = this;
     const iterable = this.evaluateIterable(expression.generators[0].iterable, frame);
     const { next, held: first } = iterateHeld(iterable);
-    const inner = this.comprehensionFrame(expression, frame);
+    const inner = this.comprehensionFrame(expression, frame, first);
     if (expression.type === 'generator') {
       const body = this.comprehensionItems(expression, inner, next);
       return new PyGenerator(
@@ -623,7 +623,11 @@ export class ExpressionEvaluator {
     }
   }
 
-  private comprehensionFrame(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): Frame {
+  private comprehensionFrame(
+    expression: Extract<Expression, { kind: 'comprehension' }>,
+    frame: Frame,
+    firstIterator: PyValue
+  ): Frame {
     const cells = new Map<string, PyCell>();
     for (const name of expression.scope.frees) {
       let cell = frame.cells.get(name);
@@ -645,7 +649,8 @@ export class ExpressionEvaluator {
       frame.fn,
       frame.classCell
     );
-    if (expression.type !== 'generator') inner.inlinedIn = frame;
+    if (expression.type === 'generator') inner.firstArgument = firstIterator;
+    else inner.inlinedIn = frame;
     return inner;
   }
 

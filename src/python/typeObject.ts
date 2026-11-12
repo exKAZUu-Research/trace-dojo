@@ -5,7 +5,16 @@ import { defineUnsupportedAttributes } from './descriptors';
 import { isEnumClass } from './enums';
 import { identityHash, NATIVE_HASHES, pyHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
-import { attributeName, bindValue, callValue, getAttribute, isCallable, lookupSpecial, nextOf } from './objects';
+import {
+  attributeName,
+  bindValue,
+  callValue,
+  getAttribute,
+  isCallable,
+  lookupSpecial,
+  newSuper,
+  nextOf,
+} from './objects';
 import { currentRuntime } from './runtimeContext';
 import { typeOr } from './typeHints';
 import {
@@ -53,7 +62,7 @@ import {
   type PyModule,
   PyObject,
   PySlice,
-  PySuper,
+  type PySuper,
   type PyValue,
 } from './values';
 
@@ -378,10 +387,7 @@ superClass.construct = (cls, args, kwargs) => {
   const [thisClass, self] = args;
   if (!(thisClass instanceof PyClass)) throw typeError(`super() argument 1 must be a type, not ${typeName(thisClass)}`);
   if (self === undefined) throw currentRuntime().unsupported('引数が1つの super()');
-  const selfClass = self instanceof PyClass && self.isSubclassOf(thisClass) ? self : classOf(self);
-  if (!selfClass.isSubclassOf(thisClass))
-    throw typeError('super(type, obj): obj must be an instance or subtype of type');
-  return new PySuper(cls, thisClass, self, selfClass);
+  return newSuper(cls, thisClass, self);
 };
 method(superClass, '__repr__', 'none', 0, 0, (self) => {
   const sup = self as PySuper;
