@@ -1440,6 +1440,21 @@ class Main {
   }
 });
 
+test('Java checks an annotation-valued element default as an element value, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.lang.annotation.*;
+@Target({}) @interface Tag { String value(); }
+@Target(ElementType.FIELD) @interface Field { String value(); }
+@interface One { Tag value() default @Tag("x"); Field field() default @Field("y"); Tag[] all() default {@Tag("a")}; }
+@One class Main { public static void main(String[] args) { System.out.println("ok"); } }`,
+      'ok\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

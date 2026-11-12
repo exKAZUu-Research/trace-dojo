@@ -112,7 +112,7 @@ export function checkAnnotations(root: Node, imports: readonly ImportDeclaration
     const annotation = annotationInterfaceOf(name, declared, imported);
     if (!annotation) throw annotationError(use, `この採点環境には、アノテーション ${name} がありません。`);
     // An annotation written as an element value annotates no program element, so neither targets nor places apply.
-    if (ELEMENT_VALUE_PARENTS.has(use.parent?.type ?? '')) {
+    if (isElementValue(use)) {
       checkElements(use, name, annotation.elements);
       continue;
     }
@@ -123,6 +123,16 @@ export function checkAnnotations(root: Node, imports: readonly ImportDeclaration
     written.add(place);
     checkPlacement(use, name, annotation);
   }
+}
+
+/** Whether an annotation is an element value: an argument, an array element, or an element's default. */
+function isElementValue(use: Node): boolean {
+  const { parent } = use;
+  if (!parent) return false;
+  if (parent.type === 'annotation_type_element_declaration') {
+    return parent.childForFieldName('value')?.startIndex === use.startIndex;
+  }
+  return ELEMENT_VALUE_PARENTS.has(parent.type);
 }
 
 const ELEMENT_VALUE_PARENTS: ReadonlySet<string> = new Set([
