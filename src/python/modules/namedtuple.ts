@@ -1,5 +1,5 @@
 import { pyRepr, pyStr } from '../conversions';
-import { method, pythonFunction } from '../define';
+import { pythonFunction, pythonMethod } from '../define';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { argument } from '../nativeArgs';
 import { callValue, getAttribute, isTruthy, toArray } from '../objects';
@@ -141,9 +141,6 @@ function newNamedTuple(
   return new PyTuple(cls, items as PyValue[]);
 }
 
-/** Methods every namedtuple class has, defined on a shared base so that each class looks them up. */
-export const namedTupleBase = builtinClass('NamedTupleMethods');
-namedTupleBase.isWrittenInPython = true;
 const isNamedTuple = (value: PyValue): value is PyTuple =>
   value instanceof PyTuple && value.cls.lookup('_fields') !== undefined;
 
@@ -151,8 +148,12 @@ function fieldsOf(tuple: PyTuple): readonly PyValue[] {
   return (tuple.cls.lookup('_fields') as PyTuple | undefined)?.items ?? [];
 }
 
-function defineNamedTupleMethods(): void {
-  method(namedTupleBase, '__repr__', 'none', 0, 0, (self) => {
+/**
+ * Defines the methods collections.namedtuple writes in the body of each class it generates, on that class itself, so
+ * that their names and argument errors name the class as CPython's do.
+ */
+function defineNamedTupleMethods(cls: PyClass): void {
+  pythonMethod(cls, '__repr__', '', (self) => {
     if (!(self instanceof PyTuple)) throw unsupportedReceiver(self, 'NamedTuple.__repr__');
     const tuple = self;
     const fields = fieldsOf(tuple);
@@ -163,44 +164,29 @@ function defineNamedTupleMethods(): void {
         `${tuple.cls.name}(${fields.map((field, index) => `${field as string}=${pyRepr(tuple.items[index])}`).join(', ')})`
     );
   });
-  method(namedTupleBase, '_asdict', 'none', 0, 0, (self) => {
+  pythonMethod(cls, '_asdict', '', (self) => {
     const tuple = libraryReceiver(self, isNamedTuple, '_fields', 'NamedTuple._asdict');
     return newDict(fieldsOf(tuple).map((field, index) => [field, tuple.items[index]]));
   });
-  namedTupleBase.dict.set(
-    '_replace',
-    new PyBuiltinFunction(
-      builtinClass('method_descriptor'),
-      '_replace',
-      (args, kwargs) => {
-        const tuple = libraryReceiver(args[0], isNamedTuple, '_make', 'NamedTuple._replace');
-        if (args.length > 1)
-          throw typeError(`${tuple.cls.name}._replace() takes 1 positional argument but ${args.length} were given`);
-        // Transcribes `self._make(map(kwds.pop, field_names, self))` and its check of the keywords left over.
-        const remaining = new Map(kwargs);
-        const items = fieldsOf(tuple).map((field, index) => {
-          const value = remaining.get(field as string) ?? tuple.items[index];
-          remaining.delete(field as string);
-          return value;
-        });
-        const result = callValue(getAttribute(tuple.cls, '_make'), [newList(items)]);
-        if (remaining.size > 0) {
-          throw typeError(`Got unexpected field names: ${pyRepr(newList([...remaining.keys()]))}`);
-        }
-        return result;
-      },
-      undefined,
-      'method',
-      'NamedTuple'
-    )
-  );
-  method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => makeNamedTuple(cls as PyClass, iterable), {
-    binding: 'class',
-  });
-  namedTupleBase.dict.set('__replace__', namedTupleBase.dict.get('_replace') as PyValue);
-  method(namedTupleBase, '__getnewargs__', 'none', 0, 0, (self) => newTuple(toArray(self)));
+  pythonMethod(cls, '_replace', '**kwds', (self, _args, kwargs) => replaceFields(self, kwargs));
+  pythonMethod(cls, '_make', 'iterable', (owner, [iterable]) => makeNamedTuple(owner as PyClass, iterable), 'class');
+  cls.dict.set('__replace__', cls.dict.get('_replace') as PyValue);
+  pythonMethod(cls, '__getnewargs__', '', (self) => newTuple(toArray(self)));
 }
-defineNamedTupleMethods();
+
+/** Transcribes `self._make(map(kwds.pop, field_names, self))` of `_replace` and its check of the keywords left over. */
+function replaceFields(self: PyValue, kwargs: Kwargs): PyValue {
+  const tuple = libraryReceiver(self, isNamedTuple, '_make', 'NamedTuple._replace');
+  const remaining = new Map(kwargs);
+  const items = fieldsOf(tuple).map((field, index) => {
+    const value = remaining.get(field as string) ?? tuple.items[index];
+    remaining.delete(field as string);
+    return value;
+  });
+  const result = callValue(getAttribute(tuple.cls, '_make'), [newList(items)]);
+  if (remaining.size > 0) throw typeError(`Got unexpected field names: ${pyRepr(newList([...remaining.keys()]))}`);
+  return result;
+}
 
 /** Transcribes `_make` of collections.namedtuple, which builds the tuple without calling the class. */
 function makeNamedTuple(cls: PyClass, iterable: PyValue): PyTuple {
@@ -212,7 +198,7 @@ function makeNamedTuple(cls: PyClass, iterable: PyValue): PyTuple {
 
 function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = namedtuple(args, kwargs) as PyClass;
-  for (const [name, value] of namedTupleBase.dict) if (!cls.dict.has(name)) cls.dict.set(name, value);
+  defineNamedTupleMethods(cls);
   return cls;
 }
 
