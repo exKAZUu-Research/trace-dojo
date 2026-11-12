@@ -20,7 +20,7 @@ import { type Binding, isCallable, isObject, JsObject, JsThrow, Scope, toBoolean
 export type Completion = undefined | { kind: 'break' | 'continue'; label?: string } | { kind: 'return'; value: Value };
 
 /** What running code in a scope gives: a statement's completion, a loop body's `'next'`, or an expression's value. */
-export type Outcome = Completion | 'next' | Value;
+export type Outcome = Completion | Value;
 
 /**
  * Runs the statements of generator and async function bodies as host generators, which suspend at each `yield` and
