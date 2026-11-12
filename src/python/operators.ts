@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 620 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 623 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
 import { floatPower } from './floatPower';

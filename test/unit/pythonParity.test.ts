@@ -93,8 +93,15 @@ if list(d) != [2, 1, 2] or list(deque([1, 2, 3], maxlen=2) * 1000000001) != [2, 
 
 test('JSON output up to the string limit is allowed', () => {
   const program = `import json
-if len(json.dumps(['a' * 999995])) != 999999 or len(json.dumps({'k': 'a' * 999990})) != 999999:
-    raise ValueError('length')`;
+class Wrapped:
+    pass
+lengths = [
+    len(json.dumps(['a' * 999996])),
+    len(json.dumps({'k': 'a' * 999991})),
+    len(json.dumps(Wrapped(), default=lambda value: 'a' * 999998)),
+]
+if lengths != [1000000, 1000000, 1000000]:
+    raise ValueError(str(lengths))`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
