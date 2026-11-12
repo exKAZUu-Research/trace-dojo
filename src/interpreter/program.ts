@@ -35,7 +35,7 @@ export interface ProgramRecording extends ProgramRun {
 }
 
 export interface ProgramTrace extends ProgramRecording {
-  /** The program without its `// atomic` annotations, whose rows match the lines that trace items refer to. */
+  /** The program without its atomic annotations (`// atomic`, or `# atomic` in Python), whose rows match the lines that trace items refer to. */
   displayProgram: string;
 }
 
@@ -63,7 +63,7 @@ const interpreters = {
 } satisfies Record<string, Interpreter>;
 
 /**
- * Runs a model program and records its steps outside the methods marked `// atomic`.
+ * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python).
  *
  * @param program The program to run, with every blank filled in.
  * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.
