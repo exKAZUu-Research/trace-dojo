@@ -26,13 +26,23 @@ export function syncIteratorOf(runtime: Runtime, iterable: Value): ProtocolItera
  * The iteration `for await` and an async `yield*` run: the async iterator of the value, or its sync iterator, whose
  * results become promises of the same results with their values awaited, as `CreateAsyncFromSyncIterator` does.
  */
-export function asyncIteratorOf(runtime: Runtime, iterable: Value): ProtocolIteration {
-  const factory =
-    iterable === undefined || iterable === null ? undefined : runtime.get(iterable, WELL_KNOWN_SYMBOLS.asyncIterator);
+export function asyncIteratorOf(
+  runtime: Runtime,
+  iterable: Value,
+  factory = iterable === undefined || iterable === null
+    ? undefined
+    : runtime.get(iterable, WELL_KNOWN_SYMBOLS.asyncIterator),
+  syncFactory?: Value
+): ProtocolIteration {
   if (factory !== undefined && factory !== null) {
     return iterationOf(runtime, iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.asyncIterator, factory));
   }
-  const iterator = iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator);
+  const iterator = iteratorObject(
+    runtime,
+    iterable,
+    WELL_KNOWN_SYMBOLS.iterator,
+    syncFactory ?? runtime.get(iterable, WELL_KNOWN_SYMBOLS.iterator)
+  );
   return iterationOf(runtime, iterator, (step, method) => asyncFromSyncStep(runtime, iterator, step, method));
 }
 

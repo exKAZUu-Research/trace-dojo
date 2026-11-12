@@ -1066,6 +1066,26 @@ async function d() { { using s = { [Symbol.dispose]() { log('sync d'); } }; awai
 async function main() { for (const f of [a, b, c, d]) { f(); tick(4); await new Promise((r) => setTimeout(r, 0)); } }
 main();`,
   ],
+  [
+    'failing steps of Array.fromAsync',
+    `const mk = (next) => ({ [Symbol.iterator]() { return { next, return() { console.log('close'); return {}; } }; } });
+const amk = (next) => ({ [Symbol.asyncIterator]() { return { next, return() { console.log('aclose'); return {}; } }; } });
+(async () => {
+  for (const [name, it] of [
+    ['sync throw', mk(() => { throw Error('bad'); })],
+    ['sync nonobj', mk(() => 1)],
+    ['sync reject value', mk(() => ({ done: false, value: Promise.reject(Error('rv')) }))],
+    ['sync getter', mk(() => ({ get done() { throw Error('gd'); } }))],
+    ['async throw', amk(() => { throw Error('abad'); })],
+    ['async reject', amk(() => Promise.reject(Error('arej')))],
+    ['async nonobj', amk(() => Promise.resolve(1))],
+    ['map throw', mk(() => ({ done: false, value: 1 }))],
+  ]) {
+    console.log('--', name);
+    await Array.fromAsync(it, name === 'map throw' ? () => { throw Error('m'); } : undefined).catch((e) => console.log(e.message));
+  }
+})();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

@@ -1,3 +1,4 @@
+import { asyncIteratorOf, type ProtocolIteration } from './iteratorProtocol';
 import { newPromise, performThen, promiseResolve, rejectPromise, resolvePromise, resolvingFunctions } from './promises';
 import type { RealmBuilder } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
@@ -116,14 +117,55 @@ function startFromAsync(runtime: Runtime, promise: JsObject, args: Value[]): Ste
   const method = isAsync ? asyncMethod : runtime.get(items, WELL_KNOWN_SYMBOLS.iterator);
   return runtime.hold(array, () => {
     if (method === undefined || method === null) return fromArrayLike(context, items, add, array);
-    const iterator = runtime.call(method, items, []);
-    if (!isObject(iterator)) runtime.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
-    const nextMethod = runtime.get(iterator, 'next');
-    context.roots.push(iterator, nextMethod);
-    const step = isAsync ? asyncStep : syncStep;
-    const loop = (): Step => step(context, iterator, runtime.call(nextMethod, iterator, []), add, loop, array);
+    const iteration = isAsync
+      ? asyncIteratorOf(runtime, items, asyncMethod)
+      : asyncIteratorOf(runtime, items, undefined, method);
+    context.roots.push(iteration.iterator, iteration.nextMethod);
+    const loop = (): Step => iterationStep(context, iteration, add, loop, array);
     return loop();
   });
+}
+
+/**
+ * Takes one step of the iteration, awaiting its result. As V8's Array.fromAsync does, every failure, of `next`, of its
+ * promise, of reading its result, or of appending its value, closes the iterator before the promise rejects; a sync
+ * iterator's own adapter has closed it once already when its step failed.
+ */
+function iterationStep(
+  context: AwaitContext,
+  iteration: ProtocolIteration,
+  add: Add,
+  loop: () => Step,
+  array: JsArray
+): Step {
+  const { runtime, promise } = context;
+  const reject: Failure = (reason) => rejectPromise(runtime, promise, reason);
+  // AsyncIteratorClose awaits what `return` returns, and the failure that closed the iterator wins over its own.
+  const closeAndReject: Failure = (reason) => {
+    const rejectWithReason = (): void => reject(reason);
+    let closed: Value;
+    try {
+      const close = iteration.return;
+      if (!close) return reject(reason);
+      closed = close();
+    } catch (error) {
+      if (!(error instanceof JsThrow)) throw error;
+      return reject(reason);
+    }
+    awaitValue(context, closed, rejectWithReason, () => {
+      rejectWithReason();
+      return PENDING;
+    });
+  };
+  return guarded(closeAndReject, () =>
+    awaitValue(context, iteration.next(), closeAndReject, (result) =>
+      guarded(closeAndReject, () => {
+        if (!isObject(result)) runtime.throwError('TypeError', 'Iterator result Array.fromAsync is not an object');
+        if (toBoolean(runtime.get(result, 'done'))) return array;
+        return add(runtime.get(result, 'value'), closeAndReject, loop);
+      })
+    )
+  );
 }
 
 /** Runs a step whose exceptions fail through `fail`, as the steps after an iterator's value is taken do. */
@@ -135,77 +177,6 @@ function guarded(fail: Failure, run: () => Step): Step {
     fail(error.value);
     return PENDING;
   }
-}
-
-/** Awaits the result of an async iterator's `next`, closing the iterator when appending its value fails. */
-function asyncStep(
-  context: AwaitContext,
-  iterator: JsObject,
-  result: Value,
-  add: Add,
-  loop: () => Step,
-  array: JsArray
-): Step {
-  const { runtime, promise } = context;
-  const reject: Failure = (reason) => rejectPromise(runtime, promise, reason);
-  // AsyncIteratorClose awaits what `return` returns before the failure is reported.
-  const closeAndReject: Failure = (reason) =>
-    settleWith(runtime, promise, reject, () => {
-      const close = runtime.get(iterator, 'return');
-      if (close === undefined || close === null) throw new JsThrow(reason);
-      return awaitValue(context, runtime.call(close, iterator, []), reject, () => {
-        throw new JsThrow(reason);
-      });
-    });
-  return awaitValue(context, result, reject, (settledResult) => {
-    if (!isObject(settledResult)) {
-      runtime.throwError('TypeError', `Iterator result ${runtime.describe(settledResult)} is not an object`);
-    }
-    if (toBoolean(runtime.get(settledResult, 'done'))) return array;
-    const value = runtime.get(settledResult, 'value');
-    return guarded(closeAndReject, () => add(value, closeAndReject, loop));
-  });
-}
-
-/**
- * Steps a sync iterator as the async-from-sync iterator does: awaits each value to settle the step's result, which the
- * loop then awaits. A failure closes the iterator through the async-from-sync `return`, whose result takes one more
- * await before the rejection.
- */
-function syncStep(
-  context: AwaitContext,
-  iterator: JsObject,
-  result: Value,
-  add: Add,
-  loop: () => Step,
-  array: JsArray
-): Step {
-  const { runtime, promise } = context;
-  if (!isObject(result))
-    runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
-  const done = toBoolean(runtime.get(result, 'done'));
-  const value = runtime.get(result, 'value');
-  const reject: Failure = (reason) => rejectPromise(runtime, promise, reason);
-  const closeAndReject: Failure = (reason) =>
-    settleWith(runtime, promise, reject, () => {
-      const close = runtime.get(iterator, 'return');
-      if (close !== undefined && close !== null) runtime.call(close, iterator, []);
-      return awaitValue(context, undefined, reject, () => {
-        throw new JsThrow(reason);
-      });
-    });
-  // A rejected value rejects the step's result, which the loop's await of it then reports.
-  const rejectStep: Failure = (reason) =>
-    awaitValue(context, undefined, reject, () =>
-      guarded(closeAndReject, () => {
-        throw new JsThrow(reason);
-      })
-    );
-  return awaitValue(context, value, rejectStep, (settled) =>
-    awaitValue(context, undefined, reject, () =>
-      done ? array : guarded(closeAndReject, () => add(settled, closeAndReject, loop))
-    )
-  );
 }
 
 function fromArrayLike(context: AwaitContext, items: Value, add: Add, array: JsArray): Step {
