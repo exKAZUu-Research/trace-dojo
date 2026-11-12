@@ -1088,8 +1088,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const { method, path } = selection;
     const pointer = method.pointerReceiver ? this.deferredPointerReceiver(receiver, path) : undefined;
     const read = receiver.eval;
+    const viaPointer = underlying(receiver.type).kind === 'pointer';
     return (frame) => {
-      const value = pointer ? pointer(frame) : receiverFor(read(frame), path, method);
+      const value = pointer ? pointer(frame) : receiverFor(read(frame), path, method, viaPointer);
       const argValues = args(frame);
       frame.runtime.defer(frame, () => void invokeMethod(method, value, argValues, row, frame), [value, ...argValues]);
       return;

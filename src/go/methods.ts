@@ -1,5 +1,5 @@
 import { nilPointerPanic } from './runtimeErrors';
-import { funcType, lookupFieldOrMethod, type Method, type Type } from './types';
+import { funcType, lookupFieldOrMethod, type Method, type Type, underlying } from './types';
 import { copyValue, type GoStruct, type Iface, Pointer, type Value } from './values';
 
 /** Stands for a method with a pointer receiver, for reaching an embedded field's address. */
@@ -24,11 +24,12 @@ export function invokeMethod(
  * Walks embedded fields from a receiver value to the value that declares the method, dereferencing pointers along
  * the way, and then adapts it to the method's receiver.
  */
-export function receiverFor(value: Value, path: readonly number[], method: Method): Value {
+export function receiverFor(value: Value, path: readonly number[], method: Method, viaPointer = false): Value {
   if (method.pointerReceiver) return pointerAwareReceiver(value, path);
   const current = walk(value, path);
   if (current instanceof Pointer) return copyValue(current.load());
-  if (current === undefined && path.length > 0) nilPointerPanic();
+  // A value method called through a nil pointer dereferences it, which panics.
+  if (current === undefined && (path.length > 0 || viaPointer)) nilPointerPanic();
   return copyValue(current);
 }
 
@@ -47,7 +48,13 @@ export function dynamicMethod(type: Type, name: string): BoundCall | undefined {
   if (selection.kind === 'method') {
     const { method, path } = selection;
     call = (receiver, args, callRow, deferredFor) =>
-      invokeMethod(method, receiverFor(receiver, path, method), args, callRow, deferredFor);
+      invokeMethod(
+        method,
+        receiverFor(receiver, path, method, underlying(type).kind === 'pointer'),
+        args,
+        callRow,
+        deferredFor
+      );
   } else if (selection.kind === 'interfaceMethod') {
     const { path } = selection;
     call = (receiver, args, callRow, deferredFor) => {

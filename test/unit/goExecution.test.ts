@@ -159,6 +159,15 @@ test('a declaration may declare several names at once', () => {
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test('a value method called through a nil pointer panics', () => {
+  const program =
+    'package main\n\nimport "fmt"\n\ntype T float64\n\nfunc (t T) String() string { return "t" }\n\nfunc main() {\n\tvar p *T\n\tif s := fmt.Sprint(p); s != "<nil>" {\n\t\tpanic(s)\n\t}\n\tp.String()\n}';
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('nil pointer dereference'),
+  });
+});
+
 test('a wrong verb prints its value with the width and precision written', () => {
   const program = goMain(
     '\tif s := fmt.Sprintf("|%[3]*.[2]*[1]f|", 12, 2, 6); s != "|%!f(int=    12)|" {\n\t\tpanic(s)\n\t}'

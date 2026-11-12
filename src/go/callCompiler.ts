@@ -309,7 +309,8 @@ export abstract class CallCompiler extends CompositeCompiler {
       readReceiver = pointer;
     } else {
       const read = receiver.eval;
-      readReceiver = (frame) => receiverFor(read(frame), path, method);
+      const viaPointer = underlying(receiver.type).kind === 'pointer';
+      readReceiver = (frame) => receiverFor(read(frame), path, method, viaPointer);
     }
     return this.resultOperand(expression, methodType.results, (frame) => {
       const value = readReceiver(frame);
