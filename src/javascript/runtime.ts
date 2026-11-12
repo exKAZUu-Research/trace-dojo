@@ -365,10 +365,14 @@ export class Runtime {
     return this.ownKeys(object).filter((key) => this.getOwnProperty(object, key)?.enumerable);
   }
 
-  /** Own enumerable string keys and then symbols, which spread, rest, and `Object.assign` copy. */
-  ownEnumerablePropertyKeys(object: JsObject): Key[] {
-    const symbols = this.ownSymbols(object).filter((key) => this.getOwnProperty(object, key)?.enumerable);
-    return [...this.ownEnumerableKeys(object), ...symbols];
+  /**
+   * Visits the own string keys and then the symbols that are still enumerable when reached, as spread, rest, and
+   * `Object.assign` copy them while getters may change the object.
+   */
+  forEachOwnEnumerable(object: JsObject, visit: (key: Key) => void): void {
+    for (const key of [...this.ownKeys(object), ...this.ownSymbols(object)]) {
+      if (this.getOwnProperty(object, key)?.enumerable) visit(key);
+    }
   }
 
   // Private members -------------------------------------------------------------------------------------------------

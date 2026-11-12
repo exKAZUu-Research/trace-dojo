@@ -304,9 +304,9 @@ export abstract class EvaluatorBase {
     if (!isObject(source)) return rest;
     // Held while getters run, so the turtles copied so far stay reachable.
     return runtime.hold(rest, () => {
-      for (const key of runtime.ownEnumerablePropertyKeys(source)) {
+      runtime.forEachOwnEnumerable(source, (key) => {
         if (!used.has(key)) runtime.createDataProperty(rest, key, runtime.get(source, key));
-      }
+      });
       return rest;
     });
   }

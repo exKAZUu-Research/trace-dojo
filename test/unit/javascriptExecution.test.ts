@@ -993,6 +993,16 @@ try { new (1)(console.log('new arg')); } catch (e) { console.log(e.name); }
   console.log(await new C().f(new C()), await new C().f({}));
 })();`,
   ],
+  [
+    'delegated next arguments, copies under changing getters, sparse locale lists, and deep clones',
+    `function* outer() { yield* { [Symbol.iterator]() { return { next(...a) { console.log('next args', a.length); return { done: a.length === 1 && a[0] === undefined && this.n++ > 0, value: 1 }; }, n: 0 }; } }; }
+const g = outer(); g.next(); g.next(undefined);
+const s1 = Symbol('a'), s2 = Symbol('b');
+const src = { get x() { delete src[s2]; return 1; }, [s1]: 1, [s2]: 2 };
+console.log(Object.keys({ ...src }).length, Object.getOwnPropertySymbols({ ...src }).length);
+console.log(new Date(0).toLocaleDateString([, 'ja-JP'], { timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric' }));
+let x = {}; for (let i = 0; i < 10000; i++) x = { x }; try { structuredClone(x); console.log('ok'); } catch (e) { console.log(e.name); }`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

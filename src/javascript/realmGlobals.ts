@@ -90,7 +90,7 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
     for (const source of args.slice(1)) {
       if (source === undefined || source === null) continue;
       const object = runtime.toObject(source);
-      for (const key of runtime.ownEnumerablePropertyKeys(object)) runtime.set(target, key, runtime.get(object, key));
+      runtime.forEachOwnEnumerable(object, (key) => runtime.set(target, key, runtime.get(object, key)));
     }
     return target;
   });

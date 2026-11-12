@@ -139,10 +139,14 @@ function hostLocales(runtime: Runtime, value: Value): unknown {
   if (!(value instanceof JsObject)) return value;
   const length = Math.trunc(runtime.toNumber(runtime.get(value, 'length'))) || 0;
   runtime.scan(length);
-  return Array.from({ length }, (_, index) => {
+  // Absent entries are skipped, as CanonicalizeLocaleList checks each index before reading it.
+  const locales: unknown[] = [];
+  for (let index = 0; index < length; index++) {
+    if (!runtime.hasProperty(value, String(index))) continue;
     const locale = runtime.get(value, String(index));
-    return isObject(locale) ? runtime.toString(locale) : locale;
-  });
+    locales.push(isObject(locale) ? runtime.toString(locale) : locale);
+  }
+  return locales;
 }
 
 /** A host value for the options argument of a `toLocale...String` method. */

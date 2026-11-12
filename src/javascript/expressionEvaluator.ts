@@ -275,8 +275,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       return;
     }
     if (!isObject(source)) return;
-    for (const key of runtime.ownEnumerablePropertyKeys(source))
-      runtime.createDataProperty(target, key, runtime.get(source, key));
+    runtime.forEachOwnEnumerable(source, (key) => runtime.createDataProperty(target, key, runtime.get(source, key)));
   }
 
   private member(expression: Extract<Expression, { kind: 'member' }>): ChainValue {

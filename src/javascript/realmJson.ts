@@ -23,13 +23,32 @@ export function defineJsonBuiltins(builder: RealmBuilder): void {
   const json = builder.namespace('JSON');
   builder.constant(json, WELL_KNOWN_SYMBOLS.toStringTag, 'JSON');
   builder.method(json, 'stringify', 3, (call) =>
-    jsonStringify(call.runtime, call.args[0], call.args[1], call.args[2], call.callRow)
+    withStackLimit(call.runtime, () =>
+      jsonStringify(call.runtime, call.args[0], call.args[1], call.args[2], call.callRow)
+    )
   );
-  builder.method(json, 'parse', 2, jsonParse);
+  builder.method(json, 'parse', 2, (call) => withStackLimit(call.runtime, () => jsonParse(call)));
   builder.global(
     'structuredClone',
-    builder.function('structuredClone', 1, ({ runtime, args }) => structuredClone(runtime, args[0], new Map()))
+    builder.function('structuredClone', 1, ({ runtime, args }) =>
+      withStackLimit(runtime, () => structuredClone(runtime, args[0], new Map()))
+    )
   );
+}
+
+/**
+ * Runs a builtin that recurses on the host into nested data, turning a host stack overflow into the RangeError the
+ * program can catch, as Node.js throws it.
+ */
+function withStackLimit<T>(runtime: Runtime, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof RangeError && /call stack/i.test(error.message)) {
+      return runtime.throwError('RangeError', 'Maximum call stack size exceeded');
+    }
+    throw error;
+  }
 }
 
 // JSON.stringify ------------------------------------------------------------------------------------------------------

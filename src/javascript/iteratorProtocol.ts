@@ -8,7 +8,8 @@ import { isCallable, isObject, type JsObject, toBoolean, type Value } from './va
 export interface ProtocolIteration {
   /** The iterator object, which garbage collection must keep alive while the iteration lasts. */
   iterator: JsObject;
-  next: (value?: Value) => Value;
+  /** Calls the iterator's `next` with the given arguments: one for `yield*`, none for a loop. */
+  next: (...args: Value[]) => Value;
   /** Calls the iterator's `return`, or is undefined when it has none. */
   return: ((value?: Value) => Value) | undefined;
   /** Calls the iterator's `throw`, or is undefined when it has none. */
@@ -120,7 +121,7 @@ function iterationOf(runtime: Runtime, iterator: JsObject, adapt: (result: Value
   };
   return {
     iterator,
-    next: (value) => adapt(runtime.call(next, iterator, value === undefined ? [] : [value], runtime.currentRow)),
+    next: (...args) => adapt(runtime.call(next, iterator, args, runtime.currentRow)),
     get return() {
       return method('return');
     },
