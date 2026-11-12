@@ -661,13 +661,13 @@ export class Runtime {
     return iteration;
   }
 
-  /** Steps through an iterator object by calling its `next()`, and its `return()` when a loop leaves it early. */
   /** The iteration of an iterator object a builtin already has, such as a set-like's keys, tracked as runtime.iterator's are. */
   iteratorRecord(iterator: JsObject): ValueIterator {
     const next = this.get(iterator, 'next');
     return this.tracked(this.protocolIteration(iterator, next), [iterator, next]);
   }
 
+  /** Steps through an iterator object by calling its `next()`, and its `return()` when a loop leaves it early. */
   private protocolIteration(iterator: JsObject, next: Value): HostIterator {
     return {
       next: () => {

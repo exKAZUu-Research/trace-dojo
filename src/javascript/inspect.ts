@@ -263,10 +263,17 @@ function enumerableKeys(runtime: Runtime, object: JsObject): Key[] {
       ? [...object.properties.keys()].filter((key) => typeof key === 'string')
       : runtime.ownKeys(object);
   const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
-  return keys.filter((key) => {
+  const listed = keys.filter((key) => {
     if (object.isError && (key === 'message' || key === 'name' || key === 'stack')) return false;
     return object.properties.get(key)?.enumerable;
   });
+  // An error also shows its own hidden reasons, bracketed, as Node.js does.
+  if (object.isError) {
+    for (const key of ['error', 'suppressed', 'cause', 'errors']) {
+      if (object.properties.has(key) && !listed.includes(key)) listed.push(key);
+    }
+  }
+  return listed;
 }
 
 function functionBase(runtime: Runtime, fn: JsFunction): string {
@@ -386,6 +393,8 @@ function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, ke
     if (diff === 3 && ctx.breakLength < text.length) separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
   } else if (property?.get) text = property.set ? '[Getter/Setter]' : '[Getter]';
   else if (property?.set) text = '[Setter]';
+  if (property && !property.enumerable)
+    return `[${typeof key === 'symbol' ? key.toString() : key}]:${separator}${text}`;
   if (typeof key === 'symbol') return `${key.toString()}:${separator}${text}`;
   if (KEY_PATTERN.test(key)) return `${key === '__proto__' ? "['__proto__']" : key}:${separator}${text}`;
   return `${quote(key)}:${separator}${text}`;
