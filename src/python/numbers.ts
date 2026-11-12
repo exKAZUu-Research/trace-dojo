@@ -1,5 +1,6 @@
 import { bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
+import { stripNumberSpace } from './strings';
 import { pyError, typeError, typeName, valueError } from './types';
 import { type PyError, PyInstance, type PyValue } from './values';
 
@@ -80,7 +81,7 @@ function digitLimitError(limit: number): PyError {
 // code-gauge-allow functionNcss 37 -- Follows the grammar of int() literals.
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows the grammar of int() literals.
 export function parseIntText(text: string, base: number): bigint | undefined {
-  let body = text.trim().replaceAll(/^[\s]+|[\s]+$/gu, '');
+  let body = stripNumberSpace(text);
   let negative = false;
   if (body.startsWith('+') || body.startsWith('-')) {
     negative = body.startsWith('-');
@@ -142,7 +143,7 @@ export function toAsciiDigits(text: string): string {
 
 /** Parses a string as `float(text)` does, returning undefined when it is not a valid float. */
 export function parseFloatText(text: string): number | undefined {
-  const body = toAsciiDigits(text.trim());
+  const body = toAsciiDigits(stripNumberSpace(text));
   const special = /^([+-]?)(inf|infinity|nan)$/i.exec(body);
   if (special) {
     const value = special[2].toLowerCase() === 'nan' ? Number.NaN : Number.POSITIVE_INFINITY;

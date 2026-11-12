@@ -20,7 +20,7 @@ import {
 } from './numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
-import { strRepr } from './strings';
+import { stripNumberSpace, strRepr } from './strings';
 import {
   boolClass,
   complexClass,
@@ -286,10 +286,7 @@ function complexPartOf(value: PyValue, asksComplexMethod: boolean): ComplexPart 
 
 function parseComplex(text: string): PyComplex {
   // A part accepts what float() accepts: Unicode decimal digits and single underscores between digits.
-  const body = toAsciiDigits(text)
-    .trim()
-    .replace(/^\((.*)\)$/, '$1')
-    .trim();
+  const body = stripNumberSpace(stripNumberSpace(toAsciiDigits(text)).replace(/^\((.*)\)$/, '$1'));
   // The digits before and after the point are told apart by the point, so that a long number is not matched in every
   // split of its digits.
   const digits = String.raw`\d(?:_?\d)*`;

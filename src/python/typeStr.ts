@@ -9,7 +9,7 @@ import { contains } from './operators';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import { repeatText, StringBuilder } from './stringBuilder';
-import { isPrintable, iterStr, strLength, strRepr } from './strings';
+import { isPrintable, iterStr, PYTHON_WHITESPACE, strLength, strRepr } from './strings';
 import { hasAt, occurrences, pointIndex, unitOffset } from './strSearch';
 import {
   defineMethod,
@@ -58,15 +58,12 @@ strClass.construct = (_cls, args, kwargs) => {
   return value === undefined ? '' : pyStr(value);
 };
 
-// oxlint-disable-next-line eslint/no-control-regex -- Python counts these separators as whitespace.
-const PYTHON_SPACE = /^[\s\u001C-\u001F\u0085]$/u;
-const WHITESPACE_CHARS = ' \t\n\r\v\f\u001C\u001D\u001E\u001F\u0085                 　';
 const LINE_BREAKS = '\n\r\v\f\u001C\u001D\u001E\u0085  ';
 const CJK_NUMERALS = new Set('〇一二三四五六七八九十百千万億兆零壱弐参拾廿卅貳參陸伍捌玖');
 const DIGIT_LIKE = /[²³¹⁰⁴-⁹₀-₉①-⑨⑴-⑼⒈-⒐⓪⓵-⓽⓿❶-❾➀-➈➊-➒]/u;
 
 function isSpace(char: string): boolean {
-  return PYTHON_SPACE.test(char) || WHITESPACE_CHARS.includes(char);
+  return char.length === 1 && PYTHON_WHITESPACE.test(char);
 }
 
 function isDecimal(char: string): boolean {

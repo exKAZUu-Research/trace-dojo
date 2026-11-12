@@ -3,6 +3,7 @@ import { pythonFunction, pythonMethod } from '../define';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { argument } from '../nativeArgs';
 import { callValue, getAttribute, isTruthy, toArray } from '../objects';
+import { PYTHON_WHITESPACE } from '../strings';
 import { containerRepr } from '../typeContainers';
 import {
   builtinClass,
@@ -68,7 +69,10 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
 function namedTupleFields(fieldNames: PyValue, rename: boolean): string[] {
   const fields =
     typeof fieldNames === 'string'
-      ? fieldNames.replaceAll(',', ' ').split(/\s+/).filter(Boolean)
+      ? fieldNames
+          .replaceAll(',', ' ')
+          .split(new RegExp(`${PYTHON_WHITESPACE.source}+`, 'u'))
+          .filter(Boolean)
       : toArray(fieldNames).map(pyStr);
   if (!rename) return fields;
   const seen = new Set<string>();
