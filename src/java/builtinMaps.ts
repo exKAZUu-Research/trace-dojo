@@ -43,21 +43,35 @@ import {
 } from './types';
 import { HashStore, JavaArray, JavaObject, toInt32, type Value } from './values';
 
-/** `HashSet`, `LinkedHashSet`, `TreeSet`, and the class of the sets `Set.of` returns, which this returns. */
+/**
+ * `HashSet`, `LinkedHashSet`, `TreeSet`, and the classes of the sets `Set.of`, `Collections.emptySet`, and
+ * `Collections.singleton` return, which this returns.
+ */
 export function defineSets(
   context: Context,
   setClass: ClassInfo,
   collectionClass: ClassInfo,
   itrClass: ClassInfo
-): ClassInfo {
+): { immutableSet: ClassInfo; emptySet: ClassInfo; singletonSet: ClassInfo } {
   for (const name of ['HashSet', 'LinkedHashSet', 'TreeSet'])
     defineSetClass(context, name, setClass, collectionClass, itrClass);
   defineEnumSet(context, defineSetClass(context, 'EnumSet', setClass, collectionClass, itrClass), collectionClass);
-  return restrictToImmutable(
-    context.registry,
-    defineSetClass(context, 'ImmutableCollections$SetN', setClass, collectionClass, itrClass),
-    'SetN'
-  );
+  const collectionsSet = (name: string): ClassInfo =>
+    restrictToImmutable(
+      context.registry,
+      defineSetClass(context, `Collections$${name}`, setClass, collectionClass, itrClass),
+      name,
+      true
+    );
+  return {
+    immutableSet: restrictToImmutable(
+      context.registry,
+      defineSetClass(context, 'ImmutableCollections$SetN', setClass, collectionClass, itrClass),
+      'SetN'
+    ),
+    emptySet: collectionsSet('EmptySet'),
+    singletonSet: collectionsSet('SingletonSet'),
+  };
 }
 
 // code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
@@ -162,7 +176,7 @@ function defineSetClass(
 export function defineHashMap(
   context: Context,
   views: { setClass: ClassInfo; collectionClass: ClassInfo; snapshotSet: ClassInfo; snapshotCollection: ClassInfo }
-): { mapClass: ClassInfo; immutableMap: ClassInfo } {
+): { mapClass: ClassInfo; immutableMap: ClassInfo; emptyMap: ClassInfo; singletonMap: ClassInfo } {
   const { registry, objectType } = context;
   const mapClass = defineInterface(registry, 'Map', 'java.util');
   const [mapKey, mapValue] = addTypeParameters(mapClass, ['K', 'V'], objectType);
@@ -192,7 +206,14 @@ export function defineHashMap(
   defineEnumMap(defineClass('EnumMap'), registry.classes.get('Class') as ClassInfo);
   defineMapEntry(mapClass, entryClass, nodeClass, objectType);
   const immutableMap = defineClass('MapN', 'ImmutableCollections$MapN');
-  return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
+  const collectionsMap = (name: string): ClassInfo =>
+    restrictToImmutable(registry, defineClass(name, `Collections$${name}`), name, true);
+  return {
+    mapClass,
+    immutableMap: restrictToImmutable(registry, immutableMap, 'MapN'),
+    emptyMap: collectionsMap('EmptyMap'),
+    singletonMap: collectionsMap('SingletonMap'),
+  };
 }
 
 /** The views each map has given, which `keySet`, `values`, and `entrySet` return again, as the JDK's maps do. */
@@ -411,16 +432,39 @@ function defineMapEntry(mapClass: ClassInfo, entryClass: ClassInfo, nodeClass: C
  * Makes a map or set class the class of the collections `Map.of` or `Set.of` return, whose iteration order the JDK
  * randomizes per run.
  */
-export function restrictToImmutable(registry: Registry, cls: ClassInfo, name: string): ClassInfo {
+export function restrictToImmutable(
+  registry: Registry,
+  cls: ClassInfo,
+  name: string,
+  removesIfPresent = false
+): ClassInfo {
   registry.classes.delete(cls.name);
   unmodifiableClasses.add(cls);
-  defaultRemoveClasses.add(cls);
+  // The iterators of Collections' sets inherit no remove, so they reject it as their sets do, without a message.
+  if (!removesIfPresent) defaultRemoveClasses.add(cls);
   cls.name = name;
   cls.constructors = [];
   for (const method of cls.methods) {
-    if (MUTATORS.has(method.name)) method.native = (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
+    if (!MUTATORS.has(method.name)) continue;
+    const original = method.native;
+    const isRemoval = method.name === 'clear' || (method.name === 'remove' && method.parameterTypes[0] !== INT);
+    method.native =
+      removesIfPresent && isRemoval && original
+        ? (frame, receiver, args) =>
+            removesAny(frame, receiver, method.name, args)
+              ? throwBuiltin(frame, 'UnsupportedOperationException')
+              : original(frame, receiver, args)
+        : (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
   }
   return cls;
+}
+
+/**
+ * Whether `clear` or `remove` would remove anything from a set or map of `Collections`, which, as `AbstractCollection`
+ * and `AbstractMap` do, reject only a removal that would change them.
+ */
+function removesAny(frame: Frame, receiver: Value, name: string, [key]: Value[]): boolean {
+  return name === 'clear' ? storeOf(receiver).entries.length > 0 : findEntry(frame, receiver, key) !== undefined;
 }
 
 const MUTATORS = new Set(['put', 'remove', 'putIfAbsent', 'clear', 'putAll', 'add', 'addAll']);

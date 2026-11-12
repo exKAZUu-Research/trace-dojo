@@ -46,7 +46,11 @@ export function defineSerializable(registry: Registry, collections: Collections)
     collections.unmodifiableRandomAccessList,
     collections.fixedSizeList,
     collections.immutableSet,
+    collections.emptySet,
+    collections.singletonSet,
     collections.immutableMap,
+    collections.emptyMap,
+    collections.singletonMap,
     collections.unmodifiableViewSet,
   ];
   for (const implementation of [

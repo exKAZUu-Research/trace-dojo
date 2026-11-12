@@ -74,6 +74,10 @@ export interface Collections {
   immutableMap: ClassInfo;
   /** The class of the sets `Set.of` returns. */
   immutableSet: ClassInfo;
+  emptySet: ClassInfo;
+  singletonSet: ClassInfo;
+  emptyMap: ClassInfo;
+  singletonMap: ClassInfo;
   /** The class of `Collections.unmodifiableSet` of a set without a store of its own, such as a map's key set. */
   unmodifiableViewSet: ClassInfo;
   /** The class of the lists `Arrays.asList` returns, which share their array's elements. */
@@ -137,8 +141,8 @@ export function defineCollections(
   linkOverrides(snapshotSet);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
   const unmodifiableViewSet = defineUnmodifiableViewSet(context, setClass, itrClass);
-  const immutableSet = defineSets(context, setClass, collectionClass, itrClass);
-  const { mapClass, immutableMap } = defineHashMap(context, {
+  const sets = defineSets(context, setClass, collectionClass, itrClass);
+  const { mapClass, ...maps } = defineHashMap(context, {
     setClass,
     collectionClass,
     snapshotSet,
@@ -154,8 +158,8 @@ export function defineCollections(
     collectionClass,
     setClass,
     mapClass,
-    immutableMap,
-    immutableSet,
+    ...maps,
+    ...sets,
     unmodifiableViewSet,
     ...restrictedLists,
     sortedClasses: [
@@ -198,6 +202,7 @@ function defineRestrictedLists(
   );
   immutableCollectionsLists.add(immutableList);
   immutableCollectionsLists.add(pairList);
+  for (const cls of [emptyList, singletonList, copiesList]) removeOnlyIfPresent(cls);
   for (const cls of [
     immutableList,
     pairList,
@@ -457,6 +462,24 @@ function defineRestrictedList(
 }
 
 const MUTATORS = new Set(['add', 'addAll', 'set', 'remove', 'clear']);
+
+/**
+ * Makes `remove(Object)` and `clear` of a list of `Collections` reject only a removal that would change it, as
+ * `AbstractCollection`'s do; removing at an index still always fails, as `AbstractList`'s does.
+ */
+function removeOnlyIfPresent(cls: ClassInfo): void {
+  for (const method of cls.methods) {
+    const removesValue = method.name === 'remove' && method.parameterTypes[0] !== INT;
+    if (method.name !== 'clear' && !removesValue) continue;
+    method.native = (frame, receiver, [value]) => {
+      const items = elementsOf(receiver);
+      if (removesValue ? indexOf(frame, items, value) !== -1 : items.length > 0) {
+        throwBuiltin(frame, 'UnsupportedOperationException');
+      }
+      return removesValue ? false : undefined;
+    };
+  }
+}
 
 function declareCollectionMethods(cls: ClassInfo, element: JavaType, context: Context): void {
   const { objectType } = context;

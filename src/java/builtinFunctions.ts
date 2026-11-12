@@ -602,6 +602,7 @@ type DefaultFunctions = Parameters<typeof defineCollectionDefaults>[2];
 /** `Iterable.forEach` and `Collection.removeIf`, which every builtin collection inherits. */
 function defineIterableDefaults(collections: Collections, functions: DefaultFunctions): void {
   const { iterableClass, collectionClass } = collections;
+  const removesOnlyMatches = new Set([collections.emptyList, collections.copiesList, collections.emptySet]);
   const [iterableT] = iterableClass.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
   addMethod(
     iterableClass,
@@ -639,7 +640,8 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     BOOLEAN,
     false,
     (frame, receiver, [filter]) => {
-      checkModifiable(frame, receiver, false);
+      // Collections' empty lists and sets and nCopies reject only a removal, as Collection.removeIf's default does.
+      if (!removesOnlyMatches.has((receiver as JavaObject).cls)) checkModifiable(frame, receiver, false);
       return removeMatching(
         frame,
         receiver,

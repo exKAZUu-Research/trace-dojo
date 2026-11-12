@@ -305,23 +305,21 @@ function defineCollectionViews(
     )
   );
   generic(['T'], (t) =>
-    addMethod(cls, 'emptySet', [], classOf(setClass, t), true, (frame) =>
-      createFixedStore(frame, collections.immutableSet)
-    )
+    addMethod(cls, 'emptySet', [], classOf(setClass, t), true, (frame) => createFixedStore(frame, collections.emptySet))
   );
   generic(['T'], (t) =>
     addMethod(cls, 'singleton', [t], classOf(setClass, t), true, (frame, _, [value]) =>
-      createFixedStore(frame, collections.immutableSet, [value])
+      createFixedStore(frame, collections.singletonSet, [value])
     )
   );
   generic(['K', 'V'], (k, v) =>
     addMethod(cls, 'emptyMap', [], classOf(mapClass, k, v), true, (frame) =>
-      createFixedStore(frame, collections.immutableMap)
+      createFixedStore(frame, collections.emptyMap)
     )
   );
   generic(['K', 'V'], (k, v) =>
     addMethod(cls, 'singletonMap', [k, v], classOf(mapClass, k, v), true, (frame, _, [key, value]) =>
-      createFixedStore(frame, collections.immutableMap, [key, value])
+      createFixedStore(frame, collections.singletonMap, [key, value])
     )
   );
   generic(['T'], (t) =>

@@ -1272,6 +1272,61 @@ class Main {
   }
 });
 
+test("Java's empty and singleton collections of Collections reject only removals that would change them, as the JDK's do", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    t("esClear", () -> Collections.emptySet().clear());
+    t("esRemoveIf", () -> System.out.println(Collections.<Integer>emptySet().removeIf(x -> true)));
+    t("esRemove", () -> System.out.println(Collections.emptySet().remove(1)));
+    t("esAdd", () -> Collections.<Integer>emptySet().add(1));
+    t("emClear", () -> Collections.emptyMap().clear());
+    t("emRemove", () -> System.out.println(Collections.emptyMap().remove(1)));
+    t("emPut", () -> Collections.<Integer, Integer>emptyMap().put(1, 1));
+    t("elClear", () -> Collections.emptyList().clear());
+    t("elRemoveIf", () -> System.out.println(Collections.<Integer>emptyList().removeIf(x -> true)));
+    t("elRemove", () -> System.out.println(Collections.emptyList().remove((Object) 1)));
+    t("sRemove", () -> System.out.println(Collections.singleton(1).remove(2)));
+    t("sRemove1", () -> System.out.println(Collections.singleton(1).remove(1)));
+    t("sClear", () -> Collections.singleton(1).clear());
+    t("sRemoveIf", () -> System.out.println(Collections.singleton(1).removeIf(x -> false)));
+    t("slRemove", () -> System.out.println(Collections.singletonList(1).remove((Object) 2)));
+    t("slRemoveIf", () -> System.out.println(Collections.singletonList(1).removeIf(x -> false)));
+    t("smRemove", () -> System.out.println(Collections.singletonMap(1, 1).remove(2)));
+    t("smClear", () -> Collections.singletonMap(1, 1).clear());
+    System.out.println(Collections.emptySet().getClass().getName() + " " + Collections.singleton(1).getClass().getName() + " " + Collections.emptyMap().getClass().getName() + " " + Collections.singletonMap(1, 1).getClass().getName());
+  }
+}`,
+      'esClear ok\nfalse\nesRemoveIf ok\nfalse\nesRemove ok\nesAdd java.lang.UnsupportedOperationException\nemClear ok\nnull\nemRemove ok\nemPut java.lang.UnsupportedOperationException\nelClear ok\nfalse\nelRemoveIf ok\nfalse\nelRemove ok\nfalse\nsRemove ok\nsRemove1 java.lang.UnsupportedOperationException\nsClear java.lang.UnsupportedOperationException\nsRemoveIf java.lang.UnsupportedOperationException\nfalse\nslRemove ok\nslRemoveIf java.lang.UnsupportedOperationException\nnull\nsmRemove ok\nsmClear java.lang.UnsupportedOperationException\njava.util.Collections$EmptySet java.util.Collections$SingletonSet java.util.Collections$EmptyMap java.util.Collections$SingletonMap\n',
+    ],
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    t("ncRemove", () -> System.out.println(Collections.nCopies(2, 1).remove((Object) 3)));
+    t("ncRemoveIf", () -> System.out.println(Collections.nCopies(2, 1).removeIf(x -> x == 3)));
+    t("ncRemoveIf1", () -> System.out.println(Collections.nCopies(2, 1).removeIf(x -> x == 1)));
+    t("ncClear0", () -> Collections.nCopies(0, 1).clear());
+    t("ncClear", () -> Collections.nCopies(2, 1).clear());
+    t("elRemoveAt", () -> Collections.emptyList().remove(0));
+    t("smRemove2", () -> System.out.println(Collections.singletonMap(1, 1).remove(1, 2)));
+    t("smRemove3", () -> System.out.println(Collections.singletonMap(1, 1).remove(1, 1)));
+    System.out.println(Collections.emptySet().equals(Set.of()) + " " + Collections.singleton(1).equals(Set.of(1)) + " " + Collections.singletonMap(1, 2) + " " + Collections.emptyMap().equals(Map.of()) + " " + Collections.singleton(3) + " " + Collections.singletonMap(1, 2).hashCode());
+    Iterator<Integer> it = Collections.singleton(1).iterator(); it.next();
+    t("sItRemove", () -> it.remove());
+  }
+}`,
+      'false\nncRemove ok\nfalse\nncRemoveIf ok\nncRemoveIf1 java.lang.UnsupportedOperationException\nncClear0 ok\nncClear java.lang.UnsupportedOperationException\nelRemoveAt java.lang.UnsupportedOperationException\nsmRemove2 java.lang.UnsupportedOperationException\nsmRemove3 java.lang.UnsupportedOperationException\ntrue true {1=2} true [3] 3\nsItRemove java.lang.UnsupportedOperationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
