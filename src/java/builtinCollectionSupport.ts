@@ -461,7 +461,9 @@ export function checkListPosition(frame: Frame, list: Value, index: number, leng
 function checkingClassOf(list: Value): ClassInfo {
   const object = list as JavaObject;
   // A program's subclass of a list inherits its builtin superclass's checks.
-  let cls = (unmodifiableWrappers.has(object) ? (object.retained?.[0] as JavaObject) : object).cls;
+  let backing = object;
+  while (unmodifiableWrappers.has(backing)) backing = backing.retained?.[0] as JavaObject;
+  let { cls } = backing;
   while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
   return cls;
 }

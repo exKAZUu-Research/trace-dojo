@@ -703,6 +703,7 @@ function defineListSearches(cls: ClassInfo, context: Context): void {
     return -1;
   });
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (other === receiver) return true;
     if (!(other instanceof JavaObject) || !other.elements || !isList(other)) return false;
     subListChecks.get(other)?.();
     const items = elementsOf(receiver);

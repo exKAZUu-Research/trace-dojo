@@ -1327,6 +1327,38 @@ class Main {
   }
 });
 
+test('Java returns an unmodifiable list unwrapped again and compares an invalidated sublist with itself, as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    List<Integer> once = Collections.unmodifiableList(Arrays.asList(1, 2));
+    List<Integer> twice = Collections.unmodifiableList(once);
+    System.out.println(once == twice);
+    t("get", () -> twice.get(3));
+    List<Integer> of = Collections.unmodifiableList(Collections.unmodifiableList(List.of(1, 2)));
+    t("li", () -> of.listIterator(3));
+    t("ofGet", () -> of.get(3));
+    List<Integer> ll = Collections.unmodifiableList(Collections.unmodifiableList(new LinkedList<>(List.of(1))));
+    t("ll", () -> ll.get(3));
+    List<Integer> root = new ArrayList<>(List.of(1, 2));
+    List<Integer> v = root.subList(0, 1);
+    List<Integer> w = Collections.unmodifiableList(v);
+    root.add(3);
+    t("vv", () -> System.out.println(v.equals(v)));
+    t("ww", () -> System.out.println(w.equals(w)));
+    t("vw", () -> System.out.println(v.equals(w)));
+  }
+}`,
+      'true\nget java.lang.ArrayIndexOutOfBoundsException: Index 3 out of bounds for length 2\nli java.lang.IndexOutOfBoundsException: Index: 3 Size: 2\nofGet java.lang.IndexOutOfBoundsException: Index: 3 Size: 2\nll java.lang.IndexOutOfBoundsException: Index: 3, Size: 1\ntrue\nvv ok\ntrue\nww ok\nvw java.util.ConcurrentModificationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

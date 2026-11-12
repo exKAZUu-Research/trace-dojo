@@ -325,6 +325,9 @@ function defineCollectionViews(
   generic(['T'], (t) =>
     addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) => {
       const items = itemsOf(frame, list);
+      // As the JDK's, an unmodifiable list is returned as it is rather than wrapped again.
+      const { unmodifiableList: plain, unmodifiableRandomAccessList: randomAccess } = collections;
+      if ((list as JavaObject).cls === plain || (list as JavaObject).cls === randomAccess) return list;
       return wrapUnmodifiable(
         createList(frame, unmodifiableListClass(collections, list as JavaObject), items),
         list as JavaObject
