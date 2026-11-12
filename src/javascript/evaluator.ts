@@ -9,6 +9,7 @@ import type {
   Statement,
   VariableDeclaration,
 } from './ast';
+import { asyncIteratorOf, AwaitingIterator, createAsyncGeneratorObject, type LoopIterator } from './asyncGenerators';
 import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor } from './expressionEvaluator';
 import { createGeneratorObject, GeneratorReturn, runToEnd, type Steps } from './generators';
@@ -270,41 +271,49 @@ export class Evaluator extends StepEvaluator {
       statement.declarationKind && statement.declarationKind !== 'var'
         ? yield* this.scoped(statement.scope, () => this.value(statement.iterable))
         : yield* this.value(statement.iterable);
-    const iterator =
-      statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
+    const iterator: LoopIterator =
+      statement.kind === 'forIn'
+        ? syncLoopIterator(new ValueIterator(this.enumerableKeys(iterable)))
+        : statement.isAwait
+          ? new AwaitingIterator(runtime, asyncIteratorOf(runtime, iterable))
+          : syncLoopIterator(runtime.iterator(iterable));
+    return yield* this.holding(iterable, () => this.forEachIterations(statement, labels, iterator));
+  }
+
+  private *forEachIterations(
+    statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
+    labels: string[],
+    iterator: LoopIterator
+  ): Steps<Completion> {
+    const { runtime } = this;
     const frame = runtime.frame;
-    return yield* this.holding(
-      iterable,
-      function* (this: Evaluator): Steps<Completion> {
-        let isExhausted = false;
-        try {
-          for (;;) {
-            const value = iterator.next();
-            if (value === DONE) {
-              isExhausted = true;
-              return;
-            }
-            runtime.spend();
-            const outer = frame.scope;
-            try {
-              if (statement.declarationKind && statement.declarationKind !== 'var') {
-                frame.scope = new Scope(outer);
-                this.instantiate(frame.scope, statement.scope);
-              }
-              this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
-              this.stepBinding(statement, value);
-              const result = yield* this.loopBody(statement.body, labels);
-              if (result !== 'next') return result;
-            } finally {
-              frame.scope = outer;
-            }
-          }
-        } finally {
-          // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks.
-          if (!isExhausted) iterator.close();
+    let isExhausted = false;
+    try {
+      for (;;) {
+        const value = yield* iterator.next();
+        if (value === DONE) {
+          isExhausted = true;
+          return;
         }
-      }.bind(this)
-    );
+        runtime.spend();
+        const outer = frame.scope;
+        try {
+          if (statement.declarationKind && statement.declarationKind !== 'var') {
+            frame.scope = new Scope(outer);
+            this.instantiate(frame.scope, statement.scope);
+          }
+          this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
+          this.stepBinding(statement, value);
+          const result = yield* this.loopBody(statement.body, labels);
+          if (result !== 'next') return result;
+        } finally {
+          frame.scope = outer;
+        }
+      }
+    } finally {
+      // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks.
+      if (!isExhausted) yield* iterator.close();
+    }
   }
 
   /** The keys `for...in` visits: enumerable string keys of the object and its prototypes, each once. */
@@ -408,7 +417,8 @@ export class Evaluator extends StepEvaluator {
     if (node.bindsOwnName) closure.bindings.set(node.name, { value: fn, isMutable: false });
     defineFunctionProperties(fn, node.name, expectedArgumentCount(node));
     if (node.isGenerator) {
-      const prototype = runtime.newObject(runtime.realm.generatorPrototype);
+      const { asyncGeneratorPrototype, generatorPrototype } = runtime.realm;
+      const prototype = runtime.newObject(node.isAsync ? asyncGeneratorPrototype : generatorPrototype);
       fn.properties.set('prototype', { value: prototype, writable: true, enumerable: false, configurable: false });
     } else if (node.kind === 'normal' && !node.isAsync) {
       const prototype = runtime.newObject();
@@ -447,12 +457,14 @@ export class Evaluator extends StepEvaluator {
     );
     runtime.pushFrame(scope, callRow, node.isAtomic);
     try {
-      if (node.isAsync) return startAsyncFunction(runtime, runtime.frame, this.asyncBody(node, args));
+      if (node.isAsync && !node.isGenerator)
+        return startAsyncFunction(runtime, runtime.frame, this.asyncBody(node, args));
       this.bindParameters(node, args);
       if (!Array.isArray(node.body)) return this.evaluate(node.body);
       this.instantiate(scope, node.scope);
       if (node.isGenerator) {
-        return createGeneratorObject(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.statements(node.body));
+        const create = node.isAsync ? createAsyncGeneratorObject : createGeneratorObject;
+        return create(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.statements(node.body));
       }
       const completion = runToEnd(this.statements(node.body));
       return completion?.kind === 'return' ? completion.value : undefined;
@@ -762,4 +774,17 @@ export class Evaluator extends StepEvaluator {
 function privateIdentity(key: Key): string {
   if (typeof key !== 'string') throw new TypeError('A private name has a string identity');
   return key;
+}
+
+function syncLoopIterator(iterator: ValueIterator): LoopIterator {
+  return {
+    // oxlint-disable-next-line require-yield -- A sync iterator steps without suspending the loop.
+    *next() {
+      return iterator.next();
+    },
+    // oxlint-disable-next-line require-yield -- A sync iterator closes without suspending the loop.
+    *close() {
+      iterator.close();
+    },
+  };
 }

@@ -225,7 +225,7 @@ function functionBase(runtime: Runtime, fn: JsFunction): string {
   const name = runtime.functionName(fn);
   if (fn.behavior.kind !== 'class') {
     const node = fn.behavior.kind === 'user' ? fn.behavior.node : undefined;
-    const kind = node?.isGenerator ? 'GeneratorFunction' : node?.isAsync ? 'AsyncFunction' : 'Function';
+    const kind = `${node?.isAsync ? 'Async' : ''}${node?.isGenerator ? 'Generator' : ''}Function`;
     return name ? `[${kind}: ${name}]` : `[${kind} (anonymous)]`;
   }
   const superName = fn.proto instanceof JsFunction ? runtime.functionName(fn.proto) : '';

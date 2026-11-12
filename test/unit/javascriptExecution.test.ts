@@ -60,7 +60,12 @@ test.each([
     'super(...) は継承したクラスのコンストラクタの中にしか書けません。',
   ],
   ['a declaration as the body of if', 'if (true) let a = 1;', 0, '宣言を書くには { } で囲んでください。'],
-  ['an async generator', 'async function* f() {}', 0, 'async ジェネレータは、この採点環境では使えません。'],
+  [
+    'yield* in an async generator',
+    'async function* f() {\n  yield* [1];\n}',
+    1,
+    'async ジェネレータの yield* は、この採点環境では使えません。',
+  ],
   [
     'a yield in a destructuring default',
     'function* f() {\n  const [a = yield] = [];\n}',
@@ -549,6 +554,35 @@ for (const bad of [() => 1n + 1, () => +1n, () => 1n / 0n, () => 2n ** -1n, () =
 console.log(BigInt.asIntN(8, 255n), BigInt.asUintN(8, -1n), [3n, 1n, 2n].sort(), [10n, 9n].sort((a, b) => (a < b ? -1 : 1)), Object.prototype.toString.call(1n));
 let n = 5n; n++; n += 2n; console.log(n, n-- , --n, 3n * -1n, (123n).toLocaleString(), 12345678901234567890n.toLocaleString());
 console.log(1n + '1', '' + 2n, [1n].includes(1n), 1n.valueOf === BigInt.prototype.valueOf);`,
+  ],
+  [
+    'async generators and for await',
+    `const sleep = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
+async function* countdown(n) { try { while (n > 0) { await sleep(10); yield n--; } return 'liftoff'; } finally { console.log('cleanup'); } }
+(async () => {
+  for await (const v of countdown(3)) console.log('got', v);
+  const g = countdown(2);
+  console.log(await g.next(), await g.next(), await g.next(), await g.next());
+  for await (const v of countdown(5)) { if (v < 4) break; console.log('early', v); }
+  for await (const v of [sleep(5, 'a'), 'b', Promise.resolve('c')]) console.log(v);
+  const custom = { [Symbol.asyncIterator]() { let i = 0; return { next: async () => (i < 2 ? { value: i++, done: false } : { done: true }) }; } };
+  for await (const v of custom) console.log('custom', v);
+  async function* fails() { yield 1; throw new Error('gen failed'); }
+  try { for await (const v of fails()) console.log('f', v); } catch (e) { console.log('caught', e.message); }
+  const r = countdown(9); await r.next(); console.log(await r.return('stop'), await r.next());
+  console.log(countdown, countdown(1), Object.prototype.toString.call(countdown(1)), typeof countdown(1)[Symbol.asyncIterator]);
+  async function* echo() { let received = 'start'; while (true) received = yield received; }
+  const e = echo(); console.log((await e.next('x')).value, (await e.next('y')).value, (await e.next('z')).value);
+  const order = []; const q = (async function* () { yield 'a'; yield 'b'; })();
+  await Promise.all([q.next().then((x) => order.push(x.value)), q.next().then((x) => order.push(x.value)), q.next().then((x) => order.push(x.done))]);
+  console.log(order);
+})();`,
+  ],
+  [
+    'object literal prototypes and intervals',
+    `const o = { __proto__: { inherited: 1 }, own: 2, m() { return super.inherited; } };
+console.log(o.inherited, o.m(), Object.getPrototypeOf(o).inherited);
+let count = 0; const id = setInterval(() => { count++; console.log('tick', count); if (count === 3) clearInterval(id); }, 100);`,
   ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({

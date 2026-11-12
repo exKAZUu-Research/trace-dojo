@@ -214,7 +214,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   private forInStatement(node: Node): Statement {
     const header = field(node, 'header');
-    if (hasChild(header, 'await')) unsupported(node, 'for await 文');
+    const isAwait = hasChild(node, 'await');
     if (header.childForFieldName('value')) fail(node, 'for-in 文の変数には初期値を書けません。');
     const declarationKind = header.childForFieldName('kind')?.text as DeclarationKind | undefined;
     return this.withScope((scope) => {
@@ -224,6 +224,7 @@ export class ProgramConverter extends ExpressionConverter {
         : this.assignmentTarget(leftNode);
       return {
         kind: field(header, 'operator').text === 'of' ? 'forOf' : 'forIn',
+        isAwait,
         declarationKind,
         target,
         iterable: this.expression(field(header, 'right')),
@@ -327,7 +328,6 @@ export class ProgramConverter extends ExpressionConverter {
   functionNode(node: Node, kind: FunctionKind, name = node.childForFieldName('name')?.text ?? ''): FunctionNode {
     const isGenerator = hasChild(node, '*');
     const isAsync = hasChild(node, 'async');
-    if (isGenerator && isAsync) unsupported(node, 'async ジェネレータ');
     const bodyNode = field(node, 'body');
     const outer = this.context;
     const isArrow = kind === 'arrow';
@@ -340,7 +340,6 @@ export class ProgramConverter extends ExpressionConverter {
       context.argumentsUse = outer.argumentsUse;
       context.canUseNewTarget = outer.canUseNewTarget;
     }
-    context.isGenerator = isGenerator;
     context.isAsync = isAsync;
     return this.withContext(context, () => {
       const scope = this.pushScope(true);

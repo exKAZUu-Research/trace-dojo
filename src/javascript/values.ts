@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassNode, FunctionNode } from './ast';
+import type { AsyncGeneratorState } from './asyncGenerators';
 import type { GeneratorState } from './generators';
 import type { HostIterator } from './iteration';
 import type { PromiseState } from './promises';
@@ -56,6 +57,8 @@ export class JsObject {
   hostIterator?: HostIterator;
   /** Set on a generator object. */
   generator?: GeneratorState;
+  /** Set on an async generator object. */
+  asyncGenerator?: AsyncGeneratorState;
   /** Set on a promise. */
   promise?: PromiseState;
 

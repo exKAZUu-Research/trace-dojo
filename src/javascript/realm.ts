@@ -1,3 +1,4 @@
+import { defineAsyncGeneratorBuiltins } from './asyncGenerators';
 import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
 import { definePromiseBuiltins } from './promises';
@@ -29,6 +30,10 @@ export interface Realm {
   iteratorPrototype: JsObject;
   /** `%GeneratorPrototype%`, with the methods every generator object has. */
   generatorPrototype: JsObject;
+  /** `%AsyncIteratorPrototype%`, the parent of `%AsyncGeneratorPrototype%`. */
+  asyncIteratorPrototype: JsObject;
+  /** `%AsyncGeneratorPrototype%`, with the methods every async generator object has. */
+  asyncGeneratorPrototype: JsObject;
   errorPrototypes: Record<ErrorName, JsObject>;
   /** The scope of the builtin globals, which encloses the program's own scope. */
   globals: Scope;
@@ -43,6 +48,7 @@ export class RealmBuilder {
     const objectPrototype = new JsObject(null);
     const errorPrototype = new JsObject(objectPrototype);
     const iteratorPrototype = new JsObject(objectPrototype);
+    const asyncIteratorPrototype = new JsObject(objectPrototype);
     this.realm = {
       objectPrototype,
       functionPrototype: new JsObject(objectPrototype),
@@ -56,6 +62,8 @@ export class RealmBuilder {
       regExpPrototype: new JsObject(objectPrototype),
       iteratorPrototype,
       generatorPrototype: new JsObject(iteratorPrototype),
+      asyncIteratorPrototype,
+      asyncGeneratorPrototype: new JsObject(asyncIteratorPrototype),
       errorPrototypes: {
         Error: errorPrototype,
         TypeError: new JsObject(errorPrototype),
@@ -150,6 +158,7 @@ export function createRealm(runtime: Runtime): Realm {
   defineRegExpBuiltins(builder);
   defineGeneratorBuiltins(builder);
   definePromiseBuiltins(builder);
+  defineAsyncGeneratorBuiltins(builder);
   defineBigIntBuiltins(builder);
   return builder.realm;
 }

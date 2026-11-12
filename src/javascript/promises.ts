@@ -1,8 +1,8 @@
-import { type Resume, type Steps } from './generators';
+import { Awaiting, type BodyResult, type Resume, type Steps } from './generators';
 import type { RealmBuilder } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
-import { type JsFunction,isCallable,isObject,JsObject,JsThrow,type Value } from './values';
+import { isCallable, isObject, type JsFunction, JsObject, JsThrow, type Value } from './values';
 
 /** What a settled promise runs for each of its handlers, with the values that must stay reachable until then. */
 interface Reaction {
@@ -28,6 +28,8 @@ export interface Job {
 interface Timer extends Job {
   id: number;
   time: number;
+  /** The period of a `setInterval` timer, which runs again after each run until it is cleared. */
+  interval?: number;
 }
 
 /**
@@ -39,6 +41,8 @@ export class EventLoop {
   private readonly timers: Timer[] = [];
   private readonly rejections = new Set<JsObject>();
   private now = 0;
+  /** The timer whose callback is running, which clearing stops from running again. */
+  private runningTimer: Timer | undefined;
   private nextTimerId = 1;
 
   constructor(private readonly runtime: Runtime) {}
@@ -47,15 +51,17 @@ export class EventLoop {
     this.microtasks.push(job);
   }
 
-  addTimer(delay: number, job: Job): number {
+  addTimer(delay: number, job: Job, repeats: boolean): number {
     const id = this.nextTimerId++;
-    this.timers.push({ ...job, id, time: this.now + Math.max(1, delay) });
+    const interval = Math.max(1, delay);
+    this.timers.push({ ...job, id, time: this.now + interval, interval: repeats ? interval : undefined });
     return id;
   }
 
   clearTimer(id: Value): void {
     const index = this.timers.findIndex((timer) => timer.id === id);
     if (index !== -1) this.timers.splice(index, 1);
+    if (this.runningTimer?.id === id) this.runningTimer = undefined;
   }
 
   trackRejection(promise: JsObject): void {
@@ -73,7 +79,11 @@ export class EventLoop {
       const timer = this.nextTimer();
       if (!timer) return;
       this.now = timer.time;
+      this.runningTimer = timer;
       timer.run();
+      if (this.runningTimer && timer.interval !== undefined)
+        this.timers.push({ ...timer, time: this.now + timer.interval });
+      this.runningTimer = undefined;
     }
   }
 
@@ -249,14 +259,10 @@ export function promiseThen(runtime: Runtime, promise: JsObject, onFulfilled: Va
  * Starts the body of an async function, which runs until its first `await` now and resumes in a microtask once the
  * awaited value settles, returning the promise of its result.
  */
-export function startAsyncFunction(
-  runtime: Runtime,
-  frame: Frame,
-  body: Steps<{ kind: string; value?: Value } | undefined>
-): JsObject {
+export function startAsyncFunction(runtime: Runtime, frame: Frame, body: Steps<BodyResult>): JsObject {
   const promise = newPromise(runtime);
   const advance = (resume: Resume): void => {
-    let result: IteratorResult<Value, { kind: string; value?: Value } | undefined>;
+    let result: IteratorResult<Value | Awaiting, BodyResult>;
     try {
       result = body.next(resume);
     } catch (error) {
@@ -268,22 +274,37 @@ export function startAsyncFunction(
       resolvePromise(runtime, promise, result.value?.kind === 'return' ? result.value.value : undefined);
       return;
     }
-    const resumeInFrame = (next: Resume): void => {
-      runtime.resumeFrame(frame);
-      try {
-        advance(next);
-      } finally {
-        runtime.popFrame();
-      }
-    };
-    performThen(runtime, promiseResolve(runtime, result.value), {
-      onFulfilled: (value) => resumeInFrame({ kind: 'next', value }),
-      onRejected: (reason) => resumeInFrame({ kind: 'throw', value: reason }),
-      roots: [promise, frame.scope, ...frame.temporaries],
-    });
+    const awaited = result.value instanceof Awaiting ? result.value.value : result.value;
+    awaitValue(runtime, awaited, [promise, frame.scope, ...frame.temporaries], (next) =>
+      inFrame(runtime, frame, () => advance(next))
+    );
   };
   advance({ kind: 'next', value: undefined });
   return promise;
+}
+
+/** Waits for a value as `await` does, continuing with its result, or with its reason to throw, in a microtask. */
+export function awaitValue(
+  runtime: Runtime,
+  value: Value,
+  roots: unknown[],
+  continueWith: (resume: Resume) => void
+): void {
+  performThen(runtime, promiseResolve(runtime, value), {
+    onFulfilled: (result) => continueWith({ kind: 'next', value: result }),
+    onRejected: (reason) => continueWith({ kind: 'throw', value: reason }),
+    roots,
+  });
+}
+
+/** Runs `run` with a suspended body's frame pushed again. */
+export function inFrame(runtime: Runtime, frame: Frame, run: () => void): void {
+  runtime.resumeFrame(frame);
+  try {
+    run();
+  } finally {
+    runtime.popFrame();
+  }
 }
 
 // Builtins ----------------------------------------------------------------------------------------------------------
@@ -470,30 +491,36 @@ function combine(
 }
 
 function defineTimers(builder: RealmBuilder): void {
-  builder.global(
-    'setTimeout',
-    builder.function('setTimeout', 2, ({ runtime, args }) => {
-      const [callback, delay, ...rest] = args;
-      if (!isCallable(callback)) {
-        return runtime.throwError(
-          'TypeError',
-          `The "callback" argument must be of type function. Received ${runtime.describe(callback)}`
-        );
-      }
-      const milliseconds = Math.trunc(runtime.toNumber(delay));
-      return runtime.eventLoop.addTimer(Number.isNaN(milliseconds) ? 1 : milliseconds, {
-        run: () => runtime.call(callback, undefined, rest),
-        roots: [callback, ...rest],
-      });
-    })
-  );
-  builder.global(
-    'clearTimeout',
-    builder.function('clearTimeout', 1, ({ runtime, args }) => {
-      runtime.eventLoop.clearTimer(args[0]);
-      return;
-    })
-  );
+  for (const [name, repeats] of [
+    ['setTimeout', false],
+    ['setInterval', true],
+  ] as const) {
+    builder.global(
+      name,
+      builder.function(name, 2, ({ runtime, args }) => {
+        const [callback, delay, ...rest] = args;
+        if (!isCallable(callback)) {
+          return runtime.throwError(
+            'TypeError',
+            `The "callback" argument must be of type function. Received ${runtime.describe(callback)}`
+          );
+        }
+        const milliseconds = Math.trunc(runtime.toNumber(delay));
+        const job = { run: () => runtime.call(callback, undefined, rest), roots: [callback, ...rest] };
+        return runtime.eventLoop.addTimer(Number.isNaN(milliseconds) ? 1 : milliseconds, job, repeats);
+      })
+    );
+  }
+  // Each clears timers of both kinds, as in Node.js.
+  for (const name of ['clearTimeout', 'clearInterval']) {
+    builder.global(
+      name,
+      builder.function(name, 1, ({ runtime, args }) => {
+        runtime.eventLoop.clearTimer(args[0]);
+        return;
+      })
+    );
+  }
   builder.global(
     'queueMicrotask',
     builder.function('queueMicrotask', 1, ({ runtime, args }) => {

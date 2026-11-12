@@ -1,7 +1,7 @@
 import type { Argument, Expression } from './ast';
 import { referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import { ExpressionEvaluator, isLogicalOperator, shortCircuits } from './expressionEvaluator';
-import { GeneratorReturn, type Resume, resumedValue, resumeGenerator, type Steps } from './generators';
+import { Awaiting, GeneratorReturn, type Resume, resumedValue, resumeGenerator, type Steps } from './generators';
 import { DONE } from './iteration';
 import { appendAll, isCallable, JsFunction, JsObject, toBoolean, type Value } from './values';
 
@@ -22,7 +22,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         return resumedValue(yield value);
       }
       case 'await': {
-        return resumedValue(yield yield* this.evaluateSteps(expression.argument));
+        return resumedValue(yield new Awaiting(yield* this.evaluateSteps(expression.argument)));
       }
       case 'parenthesized': {
         return yield* this.evaluateSteps(expression.expression);

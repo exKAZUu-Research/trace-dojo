@@ -228,6 +228,11 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       this.copyDataProperties(object, this.evaluate(member.argument));
       return;
     }
+    if (member.kind === 'prototype') {
+      const prototype = this.evaluate(member.value);
+      if (prototype === null || isObject(prototype)) object.proto = prototype;
+      return;
+    }
     const key = this.propertyKey(member.key);
     if (member.kind !== 'property') {
       defineAccessor(

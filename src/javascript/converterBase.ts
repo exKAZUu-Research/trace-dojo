@@ -16,9 +16,7 @@ export interface FunctionContext {
   canReturn: boolean;
   canCallSuper: boolean;
   canReferenceSuper: boolean;
-  /** Whether `yield` may appear, in the body of a generator function. */
-  isGenerator: boolean;
-  /** Whether `await` may appear, in the body of an async function. */
+  /** Whether the function is async, where the grammar lets `await` appear and `yield*` is unsupported. */
   isAsync: boolean;
   /** The `yield` and `await` expressions converted so far in this function, which mark the expressions around them. */
   suspensionCount: number;
@@ -46,7 +44,6 @@ export function newContext(canReturn: boolean, canCallSuper: boolean, canReferen
     canCallSuper,
     canReferenceSuper,
     canUseNewTarget: true,
-    isGenerator: false,
     isAsync: false,
     suspensionCount: 0,
     labels: new Map(),

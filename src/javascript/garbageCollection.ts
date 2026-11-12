@@ -34,8 +34,9 @@ function pushObjectReferences(pending: unknown[], object: JsObject): number {
   pending.push(object.proto);
   for (const property of object.properties.values()) pushProperty(pending, property);
   for (const property of object.privateMembers?.values() ?? []) pushProperty(pending, property);
-  if (object.generator) {
-    const { frame } = object.generator;
+  const suspended = object.generator ?? object.asyncGenerator;
+  if (suspended) {
+    const { frame } = suspended;
     pending.push(frame.scope);
     for (const value of frame.temporaries) pending.push(value);
   }

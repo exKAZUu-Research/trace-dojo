@@ -10,11 +10,19 @@ export interface Resume {
   value: Value;
 }
 
-/** Evaluation that may suspend at a generator's `yield`, yielding the value the `yield` yields. */
-export type Steps<T> = Generator<Value, T, Resume>;
+/** What an `await` suspends its body with: the value it waits for, which the body's driver settles. */
+export class Awaiting {
+  constructor(readonly value: Value) {}
+}
+
+/**
+ * Evaluation that may suspend at a `yield`, yielding the value the `yield` yields, or at an `await`, yielding what it
+ * awaits.
+ */
+export type Steps<T> = Generator<Value | Awaiting, T, Resume>;
 
 /** The return value of a generator body: the value of its `return` statement, if one ended it. */
-type BodyResult = { kind: string; value?: Value } | undefined;
+export type BodyResult = { kind: string; value?: Value } | undefined;
 
 export interface GeneratorState {
   /** The frame of the body, which every resumption pushes again. */
@@ -76,7 +84,7 @@ export function resumeGenerator(runtime: Runtime, object: JsObject, resume: Resu
   }
   state.status = 'executing';
   runtime.resumeFrame(state.frame);
-  let result: IteratorResult<Value, BodyResult>;
+  let result: IteratorResult<Value | Awaiting, BodyResult>;
   try {
     result = state.body.next(resume);
   } catch (error) {
@@ -91,6 +99,7 @@ export function resumeGenerator(runtime: Runtime, object: JsObject, resume: Resu
     return { value: result.value?.kind === 'return' ? result.value.value : undefined, done: true };
   }
   state.status = 'suspendedYield';
+  if (result.value instanceof Awaiting) throw new Error('An await ran in a generator that is not async');
   return { value: result.value, done: false };
 }
 

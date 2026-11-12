@@ -43,6 +43,8 @@ export type Statement = Span &
       }
     | {
         kind: 'forOf' | 'forIn';
+        /** Whether it is `for await`, which awaits each result of the iterator. */
+        isAwait: boolean;
         declarationKind?: DeclarationKind;
         target: Pattern;
         iterable: Expression;
@@ -140,7 +142,9 @@ export type PropertyName =
 export type ObjectMember =
   | { kind: 'property'; key: PropertyName; value: Expression }
   | { kind: 'getter' | 'setter'; key: PropertyName; fn: FunctionNode }
-  | { kind: 'spread'; argument: Expression };
+  | { kind: 'spread'; argument: Expression }
+  /** `__proto__: value`, which sets the prototype of the object to the value when it is an object or null. */
+  | { kind: 'prototype'; value: Expression };
 
 export type Argument = Expression | { kind: 'spread'; argument: Expression };
 

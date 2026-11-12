@@ -107,18 +107,18 @@ export abstract class ExpressionConverter extends ConverterBase {
   }
 
   private awaitExpression(node: Node): Expression {
-    if (!this.context.isAsync) fail(node, 'await は async 関数の中にしか書けません。');
     const argument = this.expression(namedChildren(node)[0]);
     this.context.suspensionCount++;
     return { kind: 'await', argument, row: rowOf(node) };
   }
 
   private yieldExpression(node: Node): Expression {
-    if (!this.context.isGenerator) fail(node, 'yield はジェネレータ関数の中にしか書けません。');
     const argumentNode = namedChildren(node).at(0);
     const argument = argumentNode ? this.expression(argumentNode) : undefined;
+    const delegate = node.children.some((child) => child?.type === '*');
+    if (delegate && this.context.isAsync) unsupported(node, 'async ジェネレータの yield* ');
     this.context.suspensionCount++;
-    return { kind: 'yield', argument, delegate: node.children.some((child) => child?.type === '*'), row: rowOf(node) };
+    return { kind: 'yield', argument, delegate, row: rowOf(node) };
   }
 
   private metaProperty(node: Node): Expression {
@@ -258,11 +258,18 @@ export abstract class ExpressionConverter extends ConverterBase {
   }
 
   private objectMembers(node: Node): ObjectMember[] {
+    let hasPrototype = false;
     return namedChildren(node).map((member): ObjectMember => {
       switch (member.type) {
         case 'pair': {
-          const key = this.propertyName(field(member, 'key'));
+          const keyNode = field(member, 'key');
+          const key = this.propertyName(keyNode);
           const value = this.expression(field(member, 'value'));
+          if (keyNode.type !== 'computed_property_name' && key.kind === 'key' && key.key === '__proto__') {
+            if (hasPrototype) fail(member, '__proto__ は1つしか書けません。');
+            hasPrototype = true;
+            return { kind: 'prototype', value };
+          }
           if (key.kind === 'key') nameAnonymous(value, key.key);
           return { kind: 'property', key, value };
         }
