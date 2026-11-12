@@ -980,6 +980,19 @@ function* pairs() { try { yield { get 0() { throw new Error('bad'); }, 1: 2 }; }
 try { Object.fromEntries(pairs()); } catch (e) { console.log(e.message); }
 const log = []; Object.defineProperty({}, 'x', { get enumerable() { log.push('e'); return true; }, get configurable() { log.push('c'); return true; }, get value() { log.push('v'); return 1; }, get writable() { log.push('w'); return true; } }); console.log(log.join(''));`,
   ],
+  [
+    'timer delay clamping, argument order before callee checks, and private brand tests with await',
+    `setTimeout(() => console.log('later'), 5); setTimeout(() => console.log('zero'), 0);
+try { structuredClone((async function* () {})()); console.log('cloned'); } catch (e) { console.log(e.name); }
+try { undefinedThing(console.log('arg first')); } catch (e) { console.log(e.name); }
+try { (1)(console.log('call arg')); } catch (e) { console.log(e.name); }
+try { new (1)(console.log('new arg')); } catch (e) { console.log(e.name); }
+(async () => {
+  try { new (1)(await (async () => { console.log('awaited arg'); return 1; })()); } catch (e) { console.log(e.name); }
+  class C { #x; static has(o) { return #x in o; } async f(o) { return #x in await o; } }
+  console.log(await new C().f(new C()), await new C().f({}));
+})();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

@@ -593,16 +593,19 @@ export class Runtime {
     const next = this.get(iterator, 'next');
     const { hostIterator } = iterator;
     if (!hostIterator || !(next instanceof JsFunction) || !this.realm.hostIteratorMethods.has(next)) {
-      return new ValueIterator(this.protocolIteration(iterator, next));
+      return new ValueIterator(this.protocolIteration(iterator, next), iterator);
     }
-    return new ValueIterator({
-      next: () => hostIterator.next(),
-      close: () => {
-        const close = this.get(iterator, 'return');
-        if (close instanceof JsFunction && this.realm.hostIteratorMethods.has(close)) hostIterator.close?.();
-        else if (close !== undefined && close !== null) this.callReturn(iterator, close);
+    return new ValueIterator(
+      {
+        next: () => hostIterator.next(),
+        close: () => {
+          const close = this.get(iterator, 'return');
+          if (close instanceof JsFunction && this.realm.hostIteratorMethods.has(close)) hostIterator.close?.();
+          else if (close !== undefined && close !== null) this.callReturn(iterator, close);
+        },
       },
-    });
+      iterator
+    );
   }
 
   /** Steps through an iterator object by calling its `next()`, and its `return()` when a loop leaves it early. */

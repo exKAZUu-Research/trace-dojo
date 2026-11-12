@@ -119,14 +119,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         });
       }
       case 'privateIn': {
-        const right = this.evaluate(expression.right);
-        if (!isObject(right)) {
-          return runtime.throwError(
-            'TypeError',
-            `Cannot use 'in' operator to search for '${expression.name}' in ${runtime.describe(right)}`
-          );
-        }
-        return right.privateMembers?.has(this.privateKey(expression.name)) ?? false;
+        return this.hasPrivate(expression.name, this.evaluate(expression.right));
       }
       case 'logical': {
         const left = this.evaluate(expression.left);
@@ -151,6 +144,18 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         throw new Error(`A ${expression.kind} reached the synchronous evaluator`);
       }
     }
+  }
+
+  /** Tests `#name in object`, whether the object has the private member. */
+  protected hasPrivate(name: string, object: Value): boolean {
+    const { runtime } = this;
+    if (!isObject(object)) {
+      return runtime.throwError(
+        'TypeError',
+        `Cannot use 'in' operator to search for '${name}' in ${runtime.describe(object)}`
+      );
+    }
+    return object.privateMembers?.has(this.privateKey(name)) ?? false;
   }
 
   private template(strings: string[], expressions: Expression[]): string {
@@ -297,12 +302,13 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
-    if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(fn, thisValue);
     try {
+      // The arguments are evaluated before the callee is checked, as in JavaScript.
       const args = this.evaluateArguments(expression.args);
+      if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
       appendAll(temporaries, args);
       return runtime.call(fn, thisValue, args, expression.row);
     } finally {
@@ -342,14 +348,15 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   private newExpression(expression: Extract<Expression, { kind: 'new' }>): Value {
     const { runtime } = this;
     const constructor = this.evaluate(expression.callee);
-    if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
-      return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
-    }
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(constructor);
     try {
+      // The arguments are evaluated before the callee is checked, as in JavaScript.
       const args = this.evaluateArguments(expression.args);
+      if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
+        return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
+      }
       appendAll(temporaries, args);
       return runtime.construct(constructor, args, constructor, expression.row);
     } finally {

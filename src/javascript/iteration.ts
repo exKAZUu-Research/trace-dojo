@@ -1,4 +1,4 @@
-import { JsThrow, type Value } from './values';
+import { type JsObject, JsThrow, type Value } from './values';
 
 /** Runs `run`, closing the iterator when it throws, as the spec's IfAbruptCloseIterator does. */
 export function closingOnThrow<T>(iterator: ValueIterator, run: () => T): T {
@@ -29,7 +29,13 @@ export class ValueIterator {
   private index = 0;
   private isDone = false;
 
-  constructor(private readonly source: readonly Value[] | HostIterator) {}
+  /**
+   * @param object The iterator object stepped through, which consumers that run code while iterating keep reachable.
+   */
+  constructor(
+    private readonly source: readonly Value[] | HostIterator,
+    readonly object?: JsObject
+  ) {}
 
   next(): Value | typeof DONE {
     const { source } = this;

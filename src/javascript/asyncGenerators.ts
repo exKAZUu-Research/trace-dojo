@@ -151,6 +151,8 @@ function answer(
 
 /** How a `for...of` or `for await` loop steps through its iterable, suspending its body while it awaits. */
 export interface LoopIterator {
+  /** The iterator object, which must stay reachable while the loop runs. */
+  object: JsObject | undefined;
   next: () => Steps<Value | typeof DONE>;
   /** Closes the iterator when the loop ends before it is done, by a `break` or `return`, or by an exception. */
   close: (completion: 'normal' | 'throw') => Steps<void>;
@@ -163,10 +165,14 @@ export interface LoopIterator {
 export class AwaitingIterator implements LoopIterator {
   private isDone = false;
 
+  readonly object: JsObject;
+
   constructor(
     private readonly runtime: Runtime,
     private readonly iteration: ProtocolIteration
-  ) {}
+  ) {
+    this.object = iteration.iterator;
+  }
 
   *next(): Steps<Value | typeof DONE> {
     const { runtime } = this;

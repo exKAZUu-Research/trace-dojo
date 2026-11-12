@@ -38,6 +38,9 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
       case 'await': {
         return resumedValue(yield new Awaiting(yield* this.evaluateSteps(expression.argument)));
       }
+      case 'privateIn': {
+        return this.hasPrivate(expression.name, yield* this.evaluateSteps(expression.right));
+      }
       case 'parenthesized': {
         return yield* this.evaluateSteps(expression.expression);
       }
@@ -97,10 +100,10 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
       }
       case 'new': {
         const constructor = yield* this.evaluateSteps(expression.callee);
+        const args = yield* this.holdingSteps([constructor], () => this.argumentSteps(expression.args));
         if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
           return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
         }
-        const args = yield* this.holdingSteps([constructor], () => this.argumentSteps(expression.args));
         return this.holdWhile([constructor, ...args], () =>
           runtime.construct(constructor, args, constructor, expression.row)
         );
@@ -305,8 +308,8 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
-    if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
     const args = yield* this.holdingSteps([fn, thisValue], () => this.argumentSteps(expression.args));
+    if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
     return this.holdWhile([fn, thisValue, ...args], () => runtime.call(fn, thisValue, args, expression.row));
   }
 }

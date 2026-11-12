@@ -169,12 +169,12 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       completion = error;
     }
     const disposables = scope.disposables ?? [];
-    scope.disposables = undefined;
-    // The value the scope returns or throws stays reachable while the disposers run.
+    // The value the scope returns or throws stays reachable while the disposers run, as do the disposers not run yet.
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(pendingValue(result, completion));
-    for (const { value, method, isAsync, awaitsResult } of disposables.toReversed()) {
+    for (let disposable = disposables.pop(); disposable; disposable = disposables.pop()) {
+      const { value, method, isAsync, awaitsResult } = disposable;
       try {
         const disposed = method ? runtime.call(method, value, []) : undefined;
         if (isAsync) resumedValue(yield new Awaiting(awaitsResult ? disposed : undefined));
@@ -185,6 +185,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       }
     }
     temporaries.length = held;
+    scope.disposables = undefined;
     if (completion) throw completion;
     return result as T;
   }
@@ -320,7 +321,15 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         : statement.isAwait
           ? new AwaitingIterator(runtime, asyncIteratorOf(runtime, iterable))
           : syncLoopIterator(runtime.iterator(iterable));
-    return yield* this.holdingValue(iterable, () => this.forEachIterationsSteps(statement, labels, iterator));
+    // The iterable and the iterator it gave stay reachable while the loop runs.
+    const { temporaries } = runtime.frame;
+    const held = temporaries.length;
+    temporaries.push(iterable, iterator.object);
+    try {
+      return yield* this.forEachIterationsSteps(statement, labels, iterator);
+    } finally {
+      temporaries.length = held;
+    }
   }
 
   private *forEachIterationsSteps(
@@ -464,6 +473,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
 
 function syncLoopIterator(iterator: ValueIterator): LoopIterator {
   return {
+    object: iterator.object,
     // oxlint-disable-next-line require-yield -- A sync iterator steps without suspending the loop.
     *next() {
       return iterator.next();

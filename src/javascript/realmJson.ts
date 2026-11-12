@@ -500,7 +500,14 @@ function structuredClone(runtime: Runtime, value: Value, memory: Map<JsObject, J
   if (!isObject(value)) return value;
   const cloned = memory.get(value);
   if (cloned) return cloned;
-  if (value instanceof JsFunction || value.turtle || value.promise || value.generator || value.hostIterator) {
+  if (
+    value instanceof JsFunction ||
+    value.turtle ||
+    value.promise ||
+    value.generator ||
+    value.asyncGenerator ||
+    value.hostIterator
+  ) {
     return cloneError(
       runtime,
       value instanceof JsFunction && value.behavior.kind !== 'native' ? value.behavior.node.source : '#<Object>'

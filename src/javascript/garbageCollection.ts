@@ -7,20 +7,29 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
   const reached = new Set<TurtleState>();
   const visited = new Set<JsObject | Scope>();
   const pending = [...roots];
+  // A WeakMap's value is reachable only once its key is, which may happen after the map itself is scanned.
+  const ephemerons: [unknown, unknown][] = [];
   let scanned = 0;
-  while (pending.length > 0) {
-    const item = pending.pop();
-    if (!(item instanceof JsObject || item instanceof Scope) || visited.has(item)) continue;
-    visited.add(item);
-    scanned++;
-    if (item instanceof Scope) {
-      pushScopeReferences(pending, item);
-      continue;
+  for (;;) {
+    while (pending.length > 0) {
+      const item = pending.pop();
+      if (!(item instanceof JsObject || item instanceof Scope) || visited.has(item)) continue;
+      visited.add(item);
+      scanned++;
+      if (item instanceof Scope) {
+        pushScopeReferences(pending, item);
+        continue;
+      }
+      if (item.turtle) reached.add(item.turtle);
+      scanned += pushObjectReferences(pending, ephemerons, item);
     }
-    if (item.turtle) reached.add(item.turtle);
-    scanned += pushObjectReferences(pending, item);
+    const ready = ephemerons.filter(([key]) => !(key instanceof JsObject) || visited.has(key));
+    if (ready.length === 0) return { reached, scanned };
+    for (const entry of ready) {
+      ephemerons.splice(ephemerons.indexOf(entry), 1);
+      pending.push(entry[1]);
+    }
   }
-  return { reached, scanned };
 }
 
 function pushScopeReferences(pending: unknown[], scope: Scope): void {
@@ -34,7 +43,7 @@ function pushScopeReferences(pending: unknown[], scope: Scope): void {
 
 /** Pushes what an object refers to, returning the number of array elements among them. */
 // code-gauge-allow functionCognitiveComplexity 19 -- Lists what each kind of builtin state refers to, one branch per kind.
-function pushObjectReferences(pending: unknown[], object: JsObject): number {
+function pushObjectReferences(pending: unknown[], ephemerons: [unknown, unknown][], object: JsObject): number {
   pending.push(object.proto);
   for (const property of object.properties.values()) pushProperty(pending, property);
   for (const property of object.privateMembers?.values() ?? []) pushProperty(pending, property);
@@ -51,7 +60,7 @@ function pushObjectReferences(pending: unknown[], object: JsObject): number {
     for (const reaction of object.promise.reactions) for (const root of reaction.roots) pending.push(root);
   }
   pending.push(object.hostIterator?.source);
-  if (object.collection) pushCollectionReferences(pending, object.collection);
+  if (object.collection) pushCollectionReferences(pending, ephemerons, object.collection);
   if (object instanceof JsFunction) {
     if (object.behavior.kind !== 'native') pending.push(object.behavior.scope, object.behavior.homeObject);
     for (const value of object.captured) pending.push(value);
@@ -63,9 +72,16 @@ function pushObjectReferences(pending: unknown[], object: JsObject): number {
 }
 
 /** Pushes the keys and values of a Map or Set, leaving out the keys of a WeakMap or WeakSet, which hold them weakly. */
-function pushCollectionReferences(pending: unknown[], collection: CollectionState): void {
-  for (const entry of collection.entries)
-    if (entry) pending.push(collection.isWeak ? undefined : entry.key, entry.value);
+function pushCollectionReferences(
+  pending: unknown[],
+  ephemerons: [unknown, unknown][],
+  collection: CollectionState
+): void {
+  for (const entry of collection.entries) {
+    if (!entry) continue;
+    if (collection.isWeak) ephemerons.push([entry.key, entry.value]);
+    else pending.push(entry.key, entry.value);
+  }
 }
 
 function pushProperty(pending: unknown[], property: Property): void {

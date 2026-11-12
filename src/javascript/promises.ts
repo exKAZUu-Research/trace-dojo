@@ -345,11 +345,17 @@ export function definePromiseBuiltins(builder: RealmBuilder): void {
   builder.method(promisePrototype, 'finally', 1, ({ runtime, thisValue, args }) => {
     const [onFinally] = args;
     if (!isCallable(onFinally)) return runtime.call(runtime.get(thisValue, 'then'), thisValue, [onFinally, onFinally]);
+    // Each continuation captures the value or reason it delays, which stays reachable until it runs.
+    const continuation = (run: () => Value, delayed: Value): JsFunction => {
+      const fn = runtime.newNativeFunction('', 0, run);
+      fn.captured.push(delayed);
+      return fn;
+    };
     const thenFinally = runtime.newNativeFunction('', 1, ({ args: [value] }) =>
       promiseThen(
         runtime,
         promiseResolve(runtime, runtime.call(onFinally, undefined, [])),
-        runtime.newNativeFunction('', 0, () => value),
+        continuation(() => value, value),
         undefined
       )
     );
@@ -357,9 +363,9 @@ export function definePromiseBuiltins(builder: RealmBuilder): void {
       promiseThen(
         runtime,
         promiseResolve(runtime, runtime.call(onFinally, undefined, [])),
-        runtime.newNativeFunction('', 0, () => {
+        continuation(() => {
           throw new JsThrow(reason);
-        }),
+        }, reason),
         undefined
       )
     );
@@ -535,9 +541,11 @@ function defineTimers(builder: RealmBuilder): void {
             `The "callback" argument must be of type function. Received ${runtime.describe(callback)}`
           );
         }
-        const milliseconds = Math.trunc(runtime.toNumber(delay));
+        // Node.js runs a delay outside 1 to 2^31 - 1 milliseconds, NaN included, after 1 millisecond.
+        const milliseconds = runtime.toNumber(delay);
         const job = { run: () => runtime.call(callback, undefined, rest), roots: [callback, ...rest] };
-        return runtime.eventLoop.addTimer(Number.isNaN(milliseconds) ? 1 : milliseconds, job, repeats);
+        const isInRange = milliseconds >= 1 && milliseconds <= 2 ** 31 - 1;
+        return runtime.eventLoop.addTimer(isInRange ? Math.trunc(milliseconds) : 1, job, repeats);
       })
     );
   }

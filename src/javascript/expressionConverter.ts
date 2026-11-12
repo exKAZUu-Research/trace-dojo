@@ -527,7 +527,8 @@ function canSuspendIn(expression: Expression): boolean {
     case 'array':
     case 'object':
     case 'member':
-    case 'new': {
+    case 'new':
+    case 'privateIn': {
       return true;
     }
     case 'assign': {

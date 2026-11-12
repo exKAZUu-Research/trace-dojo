@@ -163,10 +163,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
       thrown = error;
     }
     const disposables = scope.disposables ?? [];
-    scope.disposables = undefined;
-    // The value the scope returns or throws stays reachable while the disposers run.
+    // The value the scope returns or throws stays reachable while the disposers run, as do the disposers not run yet.
     runtime.hold(pendingValue(result, thrown), () => {
-      for (const { value, method } of disposables.toReversed()) {
+      for (let disposable = disposables.pop(); disposable; disposable = disposables.pop()) {
+        const { value, method } = disposable;
         try {
           if (method) runtime.call(method, value, []);
         } catch (error) {
@@ -175,6 +175,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         }
       }
     });
+    scope.disposables = undefined;
     if (thrown) throw thrown;
     return result as T;
   }
@@ -251,7 +252,15 @@ export class Evaluator extends SuspendableStatementEvaluator {
         : this.evaluate(statement.iterable);
     const iterator =
       statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
-    return runtime.hold(iterable, () => this.forEachIterations(statement, labels, iterator));
+    // The iterable and the iterator it gave stay reachable while the loop runs.
+    const { temporaries } = runtime.frame;
+    const held = temporaries.length;
+    temporaries.push(iterable, iterator.object);
+    try {
+      return this.forEachIterations(statement, labels, iterator);
+    } finally {
+      temporaries.length = held;
+    }
   }
 
   private forEachIterations(
