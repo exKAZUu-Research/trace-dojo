@@ -65,7 +65,6 @@ export class Runtime {
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   readonly eventLoop = new EventLoop(this);
-  /** The iterations not ended yet, whose iterators may hold values the program reaches again when they resume. */
   readonly realm: Realm;
   /**
    * The row of the expression being evaluated, from which getters, setters, and conversions that run the program's
