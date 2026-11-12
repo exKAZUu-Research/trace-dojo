@@ -6,6 +6,11 @@ import type { Runtime } from './runtime';
  */
 let current: Runtime | undefined;
 
+/** The runtime of the program running now, if one is, as an identity that state kept per run can compare. */
+export function runningProgram(): object | undefined {
+  return current;
+}
+
 export function currentRuntime(): Runtime {
   if (!current) throw new Error('No Python program is running');
   return current;

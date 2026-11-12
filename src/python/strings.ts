@@ -1,51 +1,83 @@
-import { chargeScan, chargeStep } from './runtimeContext';
+import { chargeScan, chargeStep, runningProgram } from './runtimeContext';
 
 /** Python strings are sequences of code points, while JavaScript strings are UTF-16; these helpers bridge the two. */
 
 const SURROGATE = /[\uD800-\uDFFF]/;
 
-/** Strings shorter than this are scanned again each time; longer ones keep what a scan found. */
+/** Strings shorter than this are scanned again each time; longer ones keep an index of what a scan found. */
 const CACHED_LENGTH = 1024;
-/** How many long strings keep their scan; the oldest is forgotten first. */
-const CACHED_STRINGS = 32;
+/** The code units the cached strings may hold together, since the cache keeps them alive; the oldest go first. */
+const CACHED_UNITS = 1 << 22;
+/** An index keeps the UTF-16 offset of every this many code points, so a lookup walks at most this many. */
+const STRIDE = 64;
 
-/** What scanning a long string found: whether it holds surrogates and, if it does, its code points. */
-const scans = new Map<string, readonly string[] | undefined>();
+/** What scanning a long string found: its length in code points and, when it holds surrogates, where they lie. */
+interface Scan {
+  length: number;
+  /** The UTF-16 offset of every STRIDE-th code point, for a string holding surrogates. */
+  offsets?: Int32Array;
+}
+
+const scans = new Map<string, Scan>();
+let cachedUnits = 0;
+/** The run the scans belong to, so that none outlives the run that made it. */
+let scansRun: object | undefined;
 
 export function hasSurrogates(text: string): boolean {
   if (text.length < CACHED_LENGTH) return SURROGATE.test(text);
-  return codePointsOf(text) !== undefined;
+  return scanOf(text).offsets !== undefined;
 }
 
 /**
- * The code points of a long string that holds surrogates, or undefined for one that holds none, kept for the strings
- * scanned last, so that a program reading the same long string over and over does not scan it, or pay for it, each
- * time.
+ * The scan of a long string, kept for the strings this run read last, so that a program reading the same long string
+ * over and over does not scan it, or pay for it, each time.
  */
-function codePointsOf(text: string): readonly string[] | undefined {
-  if (scans.has(text)) {
-    const points = scans.get(text);
+function scanOf(text: string): Scan {
+  const run = runningProgram();
+  if (run !== scansRun) {
+    scans.clear();
+    cachedUnits = 0;
+    scansRun = run;
+  }
+  const known = scans.get(text);
+  if (known) {
     scans.delete(text);
-    scans.set(text, points);
-    return points;
+    scans.set(text, known);
+    return known;
   }
   chargeScan(text.length);
-  // oxlint-disable-next-line typescript/no-misused-spread -- Python iterates strings by code point.
-  const points = SURROGATE.test(text) ? [...text] : undefined;
-  if (scans.size >= CACHED_STRINGS) scans.delete(scans.keys().next().value as string);
-  scans.set(text, points);
-  return points;
+  const scan = scanText(text);
+  scans.set(text, scan);
+  cachedUnits += text.length;
+  for (const [oldest] of scans) {
+    if (cachedUnits <= CACHED_UNITS || oldest === text) break;
+    scans.delete(oldest);
+    cachedUnits -= oldest.length;
+  }
+  return scan;
 }
 
-/** The code points of a string held in no array a caller may change. */
-function readOnlyPoints(text: string): readonly string[] {
-  if (text.length >= CACHED_LENGTH) return codePointsOf(text) ?? text.split('');
-  return iterStr(text);
+function scanText(text: string): Scan {
+  if (!SURROGATE.test(text)) return { length: text.length };
+  const offsets: number[] = [];
+  let length = 0;
+  for (let offset = 0; offset < text.length; length++) {
+    if (length % STRIDE === 0) offsets.push(offset);
+    offset += (text.codePointAt(offset) as number) > 0xff_ff ? 2 : 1;
+  }
+  return { length, offsets: Int32Array.from(offsets) };
+}
+
+/** The UTF-16 offset of the code point at `index` of a long string holding surrogates. */
+function unitOffset(text: string, offsets: Int32Array, index: number): number {
+  let offset = offsets[Math.floor(index / STRIDE)] ?? text.length;
+  for (let step = index % STRIDE; step > 0; step--) offset += (text.codePointAt(offset) as number) > 0xff_ff ? 2 : 1;
+  return offset;
 }
 
 export function strLength(text: string): number {
-  if (!hasSurrogates(text)) return text.length;
-  return readOnlyPoints(text).length;
+  if (text.length >= CACHED_LENGTH) return scanOf(text).length;
+  return hasSurrogates(text) ? iterStr(text).length : text.length;
 }
 
 /** The code points of a string, each as a string. */
@@ -62,19 +94,28 @@ export function headStr(text: string, count: number): string {
 }
 
 export function codePointAt(text: string, index: number): string {
-  if (!hasSurrogates(text)) return text[index];
-  return readOnlyPoints(text)[index];
+  const offsets = text.length >= CACHED_LENGTH ? scanOf(text).offsets : undefined;
+  if (offsets) return String.fromCodePoint(text.codePointAt(unitOffset(text, offsets, index)) as number);
+  return hasSurrogates(text) ? iterStr(text)[index] : text[index];
 }
 
 /** The code points from `start` up to `stop` stepping by `step`, with indices already clamped to the string. */
 export function sliceStr(text: string, start: number, stop: number, step: number): string {
-  const surrogates = hasSurrogates(text);
-  if (step === 1 && !surrogates) return text.slice(start, stop);
-  const points = surrogates ? readOnlyPoints(text) : text;
+  const offsets = text.length >= CACHED_LENGTH ? scanOf(text).offsets : undefined;
+  if (offsets && step === 1) return text.slice(unitOffset(text, offsets, start), unitOffset(text, offsets, stop));
+  if (step === 1 && !offsets && !hasSurrogates(text)) return text.slice(start, stop);
+  const pointAt = pointReader(text, offsets);
   let result = '';
-  if (step > 0) for (let index = start; index < stop; index += step) result += points[index];
-  else for (let index = start; index > stop; index += step) result += points[index];
+  if (step > 0) for (let index = start; index < stop; index += step) result += pointAt(index);
+  else for (let index = start; index > stop; index += step) result += pointAt(index);
   return result;
+}
+
+/** Reads a string's code points by index: through the index of a long one, or from its code points split once. */
+function pointReader(text: string, offsets: Int32Array | undefined): (index: number) => string {
+  if (offsets) return (index) => codePointAt(text, index);
+  const points = hasSurrogates(text) ? iterStr(text) : text;
+  return (index) => points[index];
 }
 
 /**
