@@ -133,6 +133,22 @@ test.each([
   expect(executeProgram('javascript', source)).toMatchObject({ kind: 'executed', uncaughtException: description });
 });
 
+test('a recursion through loops reaches the depth it reaches in Node.js', () => {
+  const source = `function f(n) {
+  let s = 0;
+  for (const i of [1]) {
+    if (n > 0) s += f(n - 1) + 1;
+  }
+  return s;
+}
+console.log(f(150));`;
+  expect(executeProgram('javascript', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '150\n',
+  });
+});
+
 test('a caught exception lets the program continue', () => {
   expect(
     executeProgram(
