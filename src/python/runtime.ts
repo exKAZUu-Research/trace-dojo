@@ -229,7 +229,11 @@ export class Runtime {
 
   /** Runs a generator to its next `yield`, returning the value it yields or DONE when it ends. */
   resumeGenerator(generator: PyGenerator): PyValue | typeof DONE {
-    if (generator.finished) return DONE;
+    if (generator.finished) {
+      // Only the call that observed the end may report the return value; any later call ends without it.
+      generator.returned = undefined;
+      return DONE;
+    }
     if (generator.running) throw pyError('ValueError', 'generator already executing');
     generator.running = true;
     generator.started = true;

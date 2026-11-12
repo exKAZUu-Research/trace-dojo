@@ -255,6 +255,17 @@ ${loop}`;
   expect(counts.slice(1)).toEqual(counts.slice(1).map(() => 2));
 });
 
+test('a turtle captured by a generator expression stays visible after its function returns', () => {
+  const program = `def f():
+    t = Turtle()
+    return (t for _ in range(1))
+g = f()
+x = next(g)
+x.forward()`;
+  const counts = traceProgram('python', program, program).traceItems.map(({ turtles }) => turtles.length);
+  expect(counts).toEqual([0, 1, 1, 1, 1]);
+});
+
 test('display programs lose their annotations', () => {
   const program = 'def move(t):  # atomic\n    t.forward()\nt = Turtle()\nmove(t)';
   const trace = traceProgram('python', program, program);

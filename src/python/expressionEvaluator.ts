@@ -568,7 +568,7 @@ export class ExpressionEvaluator {
             runtime.popFrame();
           }
         },
-        () => [iterable, first, ...inner.locals.values(), ...inner.temporaries]
+        () => [iterable, first, ...inner.locals.values(), ...inner.cells.values(), ...inner.temporaries]
       );
     }
     runtime.pushFrame(inner);

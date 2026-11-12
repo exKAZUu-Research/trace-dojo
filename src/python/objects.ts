@@ -315,12 +315,7 @@ function iterateItems(sequence: PyList | PyTuple): NextFunction {
 
 function iterateGenerator(generator: PyGenerator): NextFunction {
   const runtime = currentRuntime();
-  return () => {
-    const value = runtime.resumeGenerator(generator);
-    // Iteration ends without raising, so the return value it observed is dropped, as CPython drops it there.
-    if (value === DONE) generator.returned = undefined;
-    return value;
-  };
+  return () => runtime.resumeGenerator(generator);
 }
 
 function iterateString(value: string): NextFunction {
