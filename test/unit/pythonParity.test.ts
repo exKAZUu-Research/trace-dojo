@@ -321,3 +321,8 @@ test.each([
   const trace = traceProgram('python', program, program);
   expect(trace.traceItems.map(({ line, callLines }) => `${line}:${callLines.join(',')}`)).toEqual(steps);
 });
+
+test('reversing a long list in place over and over ends at the operation limit', () => {
+  const program = 'a = list(range(100000))\nfor i in range(700):\n    a.reverse()';
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});

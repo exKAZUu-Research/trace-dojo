@@ -150,7 +150,10 @@ method(listClass, 'count', 'one', 1, 1, (self, [item]) =>
   BigInt(listOf(self).items.filter((element) => equals(element, item)).length)
 );
 method(listClass, 'reverse', 'none', 0, 0, (self) => {
-  listOf(self).editableItems.reverse();
+  const items = listOf(self).editableItems;
+  // Moving the items is charged at the rate of the other native scans over items.
+  currentRuntime().scan(items.length);
+  items.reverse();
   return None;
 });
 method(listClass, 'copy', 'none', 0, 0, (self) => newList([...listOf(self).items]));
