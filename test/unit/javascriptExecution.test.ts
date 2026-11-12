@@ -606,6 +606,28 @@ console.log(typeof Symbol.dispose, String(Symbol.asyncDispose), typeof Suppresse
   for (await using c of [ar(3)]) console.log('iter async');
 })();`,
   ],
+  [
+    'await and yield inside expressions',
+    `const v = (x) => Promise.resolve(x);
+(async () => {
+  const obj = { a: await v(1), [await v('k')]: 2, ...(await v({ s: 3 })), m() { return 'm'; }, get g() { return 'g'; } };
+  console.log(obj, obj.m(), obj.g);
+  console.log((await v(null))?.x, (await v({ x: { y: 5 } }))?.x.y, (await v(undefined))?.x.y.z);
+  for (const x of await v([1, 2])) console.log('for', x);
+  let i = 0; while (await v(i < 2)) i++; console.log('while', i);
+  switch (await v(2)) { case await v(1): console.log('one'); break; case await v(2): console.log('two'); }
+  const arr = [0, 0]; arr[await v(1)] = await v(9); console.log(arr);
+  let n = 1; n += await v(2); n *= await v(3); console.log(n);
+  console.log(\`t\${await v('x')}y\${await v('z')}\`, [...(await v([1, 2])), await v(3)], new Array(await v(2)).length);
+  if (await v(true)) console.log('if'); else console.log('else');
+  try { throw await v(new Error('thrown')); } catch (e) { console.log(e.message); } finally { console.log(await v('fin')); }
+  console.log(await v(1) + await v(2), (await v(false)) || (await v('or')), await v(true) ? await v('a') : 'b', typeof await v(1), -(await v(4)));
+  const f = async () => (await v('arrow'));
+  console.log(await f(), await (async function () { return await v('ret'); })());
+  function* g() { const o = { a: yield 1, b: yield 2 }; return o; }
+  const it = g(); it.next(); it.next('A'); console.log(it.next('B'));
+})();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

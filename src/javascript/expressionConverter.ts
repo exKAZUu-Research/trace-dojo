@@ -519,11 +519,14 @@ function canSuspendIn(expression: Expression): boolean {
     case 'conditional':
     case 'unary':
     case 'template':
-    case 'array': {
+    case 'array':
+    case 'object':
+    case 'member': {
       return true;
     }
     case 'assign': {
-      return !patternHasYield(expression.target);
+      // A member target evaluates its parts step by step, but a destructuring target binds in one go.
+      return expression.target.kind === 'member' || !patternSuspends(expression.target);
     }
     case 'call': {
       return !expression.optional && expression.callee.kind !== 'super' && !expression.callee.suspends;
@@ -531,22 +534,39 @@ function canSuspendIn(expression: Expression): boolean {
     case 'new': {
       return !expression.callee.suspends;
     }
-    case 'member': {
-      return !expression.optional;
-    }
     default: {
       return false;
     }
   }
 }
 
-/** Whether evaluating an assignment target runs a `yield`, which a destructuring default never may. */
-function patternHasYield(pattern: Pattern): boolean {
-  if (pattern.kind !== 'member') return false;
-  return (
-    (pattern.object.kind !== 'super' && pattern.object.suspends === true) ||
-    (pattern.property.kind === 'computed' && pattern.property.expression.suspends === true)
-  );
+/** Whether assigning to a pattern suspends, at a `yield` or an `await` in a member it assigns to or in a key. */
+function patternSuspends(pattern: Pattern): boolean {
+  switch (pattern.kind) {
+    case 'identifier': {
+      return false;
+    }
+    case 'member': {
+      return (
+        (pattern.object.kind !== 'super' && pattern.object.suspends === true) ||
+        (pattern.property.kind === 'computed' && pattern.property.expression.suspends === true)
+      );
+    }
+    case 'arrayPattern': {
+      return [...pattern.elements, pattern.rest].some((element) => element !== undefined && patternSuspends(element));
+    }
+    case 'objectPattern': {
+      return (
+        pattern.properties.some(
+          ({ key, value }) => (key.kind === 'computed' && key.expression.suspends === true) || patternSuspends(value)
+        ) ||
+        (pattern.rest !== undefined && patternSuspends(pattern.rest))
+      );
+    }
+    case 'default': {
+      return pattern.value.suspends === true || patternSuspends(pattern.target);
+    }
+  }
 }
 
 /** Converts a regular expression literal, rejecting a pattern or flags that JavaScript rejects. */

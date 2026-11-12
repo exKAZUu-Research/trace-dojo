@@ -222,7 +222,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     return object;
   }
 
-  private defineObjectMember(object: JsObject, member: ObjectMember): void {
+  protected defineObjectMember(object: JsObject, member: ObjectMember): void {
     const { runtime } = this;
     if (member.kind === 'spread') {
       this.copyDataProperties(object, this.evaluate(member.argument));
@@ -254,7 +254,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     runtime.createDataProperty(object, key, value);
   }
 
-  private copyDataProperties(target: JsObject, source: Value): void {
+  protected copyDataProperties(target: JsObject, source: Value): void {
     const { runtime } = this;
     if (source === undefined || source === null) return;
     if (typeof source === 'string') {

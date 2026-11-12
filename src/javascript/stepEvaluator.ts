@@ -1,10 +1,10 @@
-import type { Argument, Expression } from './ast';
+import type { Argument, Expression, MemberExpression, ObjectMember } from './ast';
 import { delegateAsync } from './asyncGenerators';
-import { referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
-import { ExpressionEvaluator, isLogicalOperator, shortCircuits } from './expressionEvaluator';
+import { type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
+import { defineAccessor, ExpressionEvaluator, isLogicalOperator, shortCircuits } from './expressionEvaluator';
 import { Awaiting, GeneratorReturn, type Resume, resumedValue, resumeGenerator, type Steps } from './generators';
 import { DONE } from './iteration';
-import { appendAll, isCallable, JsFunction, JsObject, toBoolean, type Value } from './values';
+import { appendAll, isCallable, isObject, JsFunction, JsObject, toBoolean, type Value } from './values';
 
 /**
  * Evaluates the expressions of a generator body that contain a `yield`, suspending at each `yield` with the value it
@@ -69,8 +69,12 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
       case 'array': {
         return runtime.newArray(yield* this.elementSteps(expression.elements));
       }
+      case 'object': {
+        return yield* this.objectSteps(expression.members);
+      }
       case 'member': {
-        return yield* this.memberSteps(expression);
+        const value = yield* this.memberSteps(expression);
+        return value === SHORT_CIRCUIT ? undefined : value;
       }
       case 'assign': {
         return yield* this.assignSteps(expression);
@@ -171,9 +175,17 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     }
   }
 
-  private *memberSteps(expression: Extract<Expression, { kind: 'member' }>): Steps<Value> {
+  /** Reads a member whose object or key suspends, which short-circuits the rest of its optional chain on nullish. */
+  private *memberSteps(expression: Extract<Expression, { kind: 'member' }>): Steps<Value | typeof SHORT_CIRCUIT> {
     const { runtime } = this;
-    const base = expression.object.kind === 'super' ? this.thisValue() : yield* this.evaluateSteps(expression.object);
+    const { object } = expression;
+    const base =
+      object.kind === 'super'
+        ? this.thisValue()
+        : object.kind === 'member' && object.suspends
+          ? yield* this.memberSteps(object)
+          : yield* this.evaluateSteps(object);
+    if (base === SHORT_CIRCUIT || (expression.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
     const { property } = expression;
     if (property.kind === 'private') return runtime.getPrivate(base, this.privateKey(property.name));
     const key =
@@ -181,6 +193,55 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         ? runtime.toPropertyKey(yield* this.holdingSteps([base], () => this.evaluateSteps(property.expression)))
         : property.key;
     return runtime.get(base, key);
+  }
+
+  /** Evaluates the object and the key of an assignment's member target step by step, as `memberReference` does. */
+  private *memberReferenceSteps(target: MemberExpression): Steps<Reference> {
+    if (
+      target.object.kind === 'super' ||
+      !(target.object.suspends || (target.property.kind === 'computed' && target.property.expression.suspends))
+    ) {
+      return this.memberReference(target);
+    }
+    const base = yield* this.evaluateSteps(target.object);
+    const { property } = target;
+    if (property.kind === 'private') return { kind: 'private', base, name: this.privateKey(property.name) };
+    const key =
+      property.kind === 'computed'
+        ? this.runtime.toPropertyKey(yield* this.holdingSteps([base], () => this.evaluateSteps(property.expression)))
+        : property.key;
+    return { kind: 'property', base, key };
+  }
+
+  private *objectSteps(members: ObjectMember[]): Steps<JsObject> {
+    const object = this.runtime.newObject();
+    yield* this.holdingSteps([object], () => this.objectMemberSteps(object, members));
+    return object;
+  }
+
+  private *objectMemberSteps(object: JsObject, members: ObjectMember[]): Steps<void> {
+    const { runtime } = this;
+    for (const member of members) {
+      if (!memberSuspends(member)) {
+        this.defineObjectMember(object, member);
+      } else if (member.kind === 'spread') {
+        this.copyDataProperties(object, yield* this.evaluateSteps(member.argument));
+      } else if (member.kind === 'prototype') {
+        const prototype = yield* this.evaluateSteps(member.value);
+        if (prototype === null || isObject(prototype)) object.proto = prototype;
+      } else {
+        const key =
+          member.key.kind === 'computed'
+            ? runtime.toPropertyKey(yield* this.evaluateSteps(member.key.expression))
+            : this.propertyKey(member.key);
+        if (member.kind === 'property') {
+          runtime.createDataProperty(object, key, yield* this.evaluateSteps(member.value));
+        } else {
+          const accessor = this.createFunction(member.fn, runtime.frame.scope, object);
+          defineAccessor(runtime, object, key, member.kind, accessor, true);
+        }
+      }
+    }
   }
 
   private *assignSteps(expression: Extract<Expression, { kind: 'assign' }>): Steps<Value> {
@@ -191,7 +252,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
       this.bindPattern(target, value, 'assign');
       return value;
     }
-    const reference = this.reference(target);
+    const reference = target.kind === 'member' ? yield* this.memberReferenceSteps(target) : this.reference(target);
     return yield* this.holdingSteps(
       [referenceBase(reference)],
       function* (this: StepEvaluator): Steps<Value> {
@@ -225,4 +286,12 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     const args = yield* this.holdingSteps([fn, thisValue], () => this.elementSteps(expression.args));
     return this.holdWhile([fn, thisValue, ...args], () => runtime.call(fn, thisValue, args, expression.row));
   }
+}
+
+/** Whether defining an object literal member suspends, which its value, its computed key, or its spread may. */
+function memberSuspends(member: ObjectMember): boolean {
+  if (member.kind === 'spread') return member.argument.suspends === true;
+  if (member.kind === 'prototype') return member.value.suspends === true;
+  if (member.key.kind === 'computed' && member.key.expression.suspends) return true;
+  return member.kind === 'property' && member.value.suspends === true;
 }
