@@ -84,6 +84,55 @@ export function rememberedHash(text: string, compute: () => bigint): bigint {
   return scan.hash;
 }
 
+/** The UTF-16 offset of the code point at `index`, or of the end of the text for an index at or past its end. */
+export function codePointOffset(text: string, index: number): number {
+  const offsets = text.length >= CACHED_LENGTH ? scanOf(text).offsets : undefined;
+  if (offsets) {
+    const sample = Math.min(Math.floor(index / STRIDE), offsets.length - 1);
+    return walkUnits(text, offsets[sample], index - sample * STRIDE);
+  }
+  if (!hasSurrogates(text)) return Math.min(index, text.length);
+  chargeScan(index);
+  return walkUnits(text, 0, index);
+}
+
+/** The index of the code point that starts at the UTF-16 offset `offset`. */
+export function codePointIndex(text: string, offset: number): number {
+  const offsets = text.length >= CACHED_LENGTH ? scanOf(text).offsets : undefined;
+  if (!offsets) {
+    if (!hasSurrogates(text)) return offset;
+    chargeScan(offset);
+    return countPoints(text, 0, offset);
+  }
+  // The last sampled code point at or before the offset, found by bisection, then a walk of at most STRIDE.
+  let low = 0;
+  let high = offsets.length - 1;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if (offsets[middle] <= offset) low = middle;
+    else high = middle - 1;
+  }
+  return low * STRIDE + countPoints(text, offsets[low], offset);
+}
+
+/** The offset `count` code points after `offset`, stopping at the end of the text. */
+function walkUnits(text: string, offset: number, count: number): number {
+  let unit = offset;
+  for (let point = 0; point < count && unit < text.length; point++) unit += isPairAt(text, unit) ? 2 : 1;
+  return unit;
+}
+
+/** The code points that start from `from` up to `to`. */
+function countPoints(text: string, from: number, to: number): number {
+  let count = 0;
+  for (let unit = from; unit < to; unit += isPairAt(text, unit) ? 2 : 1) count++;
+  return count;
+}
+
+function isPairAt(text: string, offset: number): boolean {
+  return (text.codePointAt(offset) as number) > 0xff_ff;
+}
+
 export function strLength(text: string): number {
   if (text.length >= CACHED_LENGTH) return scanOf(text).length;
   return hasSurrogates(text) ? iterStr(text).length : text.length;

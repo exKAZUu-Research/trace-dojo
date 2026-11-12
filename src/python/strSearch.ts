@@ -1,6 +1,5 @@
 /* oxlint-disable unicorn/prefer-code-point -- The search compares UTF-16 code units, which pairs make code points. */
 import { currentRuntime } from './runtimeContext';
-import { hasSurrogates } from './strings';
 
 /**
  * The longest needle searched with the host's indexOf and lastIndexOf, whose worst case is quadratic in V8 (the
@@ -37,24 +36,6 @@ export function containsStr(text: string, needle: string): boolean {
 /** Whether `text` has `needle` as whole code points at the UTF-16 offset `offset`. */
 export function hasAt(text: string, needle: string, offset: number): boolean {
   return offset >= 0 && text.startsWith(needle, offset) && isAligned(text, offset, needle.length);
-}
-
-/** The UTF-16 offset of the code point at `index`, or of the end of the text for an index at or past its end. */
-export function unitOffset(text: string, index: number): number {
-  if (!hasSurrogates(text)) return Math.min(index, text.length);
-  currentRuntime().scan(index);
-  let offset = 0;
-  for (let point = 0; point < index && offset < text.length; point++) offset += isPairAt(text, offset) ? 2 : 1;
-  return offset;
-}
-
-/** The index of the code point that starts at the UTF-16 offset `offset`. */
-export function pointIndex(text: string, offset: number): number {
-  if (!hasSurrogates(text)) return offset;
-  currentRuntime().scan(offset);
-  let index = 0;
-  for (let unit = 0; unit < offset; unit += isPairAt(text, unit) ? 2 : 1) index++;
-  return index;
 }
 
 function hostOccurrences(region: string, needle: string, fromEnd: boolean, limit: number): number[] {

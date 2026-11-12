@@ -9,8 +9,16 @@ import { contains } from './operators';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import { repeatText, StringBuilder } from './stringBuilder';
-import { isPrintable, iterStr, PYTHON_WHITESPACE, strLength, strRepr } from './strings';
-import { hasAt, occurrences, pointIndex, unitOffset } from './strSearch';
+import {
+  codePointIndex,
+  codePointOffset,
+  isPrintable,
+  iterStr,
+  PYTHON_WHITESPACE,
+  strLength,
+  strRepr,
+} from './strings';
+import { hasAt, occurrences } from './strSearch';
 import {
   argumentTypeName,
   defineMethod,
@@ -179,12 +187,12 @@ function findIn(
   if (sub === '') return from <= length && to >= from ? (fromEnd ? to : from) : -1;
   if (to < from) return -1;
   const [offset] = occurrences(text, sub, {
-    from: unitOffset(text, from),
-    to: unitOffset(text, to),
+    from: codePointOffset(text, from),
+    to: codePointOffset(text, to),
     fromEnd,
     limit: 1,
   });
-  return offset === undefined ? -1 : pointIndex(text, offset);
+  return offset === undefined ? -1 : codePointIndex(text, offset);
 }
 
 /**
@@ -209,7 +217,7 @@ method(strClass, 'count', 'expected', 1, 3, (self, [sub, start, end]) => {
   const { from, to } = bounds(text, start, end);
   if (needle === '') return BigInt(Math.max(to - from + 1, 0));
   if (to < from) return 0n;
-  return BigInt(occurrences(text, needle, { from: unitOffset(text, from), to: unitOffset(text, to) }).length);
+  return BigInt(occurrences(text, needle, { from: codePointOffset(text, from), to: codePointOffset(text, to) }).length);
 });
 
 for (const [name, atEnd] of [
@@ -221,7 +229,7 @@ for (const [name, atEnd] of [
     const { from, to } = bounds(text, start, end);
     const candidates = prefix instanceof PyTuple ? prefix.items : [prefix];
     const runtime = currentRuntime();
-    const anchor = unitOffset(text, atEnd ? to : from);
+    const anchor = codePointOffset(text, atEnd ? to : from);
     return candidates.some((candidate) => {
       if (typeof candidate !== 'string') {
         throw typeError(

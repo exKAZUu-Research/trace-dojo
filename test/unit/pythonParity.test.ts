@@ -349,8 +349,13 @@ test.each([
   expect(executeOnStillClock(program(failing))).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
-test.each(['startswith', 'endswith'])('str.%s of a short candidate is charged for the candidate only', (method) => {
-  const program = `s = 'a' * 500000\nfor i in range(10000):\n    v = s.${method}('a')`;
+test.each([
+  ['startswith', "'a'", "'a'"],
+  ['endswith', "'a'", "'a'"],
+  ['startswith', "'😀'", "'😀', len(s) - 1"],
+  ['endswith', "'😀'", "'😀'"],
+])('str.%s of a short candidate in %s text is charged for the candidate only', (method, letter, args) => {
+  const program = `s = ${letter} * 250000\nfor i in range(10000):\n    v = s.${method}(${args})`;
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
