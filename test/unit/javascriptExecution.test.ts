@@ -1108,6 +1108,21 @@ async function* h() { try { yield* s; } finally { console.log('h finally'); } }
     'regular expressions passed to literal string searches',
     `for (const m of ["includes","startsWith","endsWith"]) try { console.log("a/a/"[m](/a/)) } catch (e) { console.log(e.name, e.message) } console.log("abc".includes("b", 1), "abc".startsWith("b", 1), "abc".endsWith("b", 2), "abc".includes({ toString() { return "c" } }))`,
   ],
+  [
+    'async iteration of sync iterables without throw',
+    `const it = { get [Symbol.asyncIterator]() { console.log('get async'); return undefined; }, *[Symbol.iterator]() { yield 7; } };
+Array.fromAsync(it).then((a) => console.log(a));
+async function* g() { yield* [1, 2]; }
+const s = { [Symbol.iterator]() { return { next: () => ({ value: 1, done: false }), return() { console.log('sync close'); return {}; } }; } };
+async function* h() { yield* s; }
+(async () => {
+  const it2 = g(); await it2.next(); it2.throw('x').catch((e) => console.log('error', e.message));
+  let n = 0; function tick() { console.log('tick', ++n); if (n < 3) queueMicrotask(tick); } queueMicrotask(tick);
+  await new Promise((r) => setTimeout(r, 0));
+  const it3 = h(); await it3.next(); await it3.throw('y').catch((e) => console.log('error', e.message));
+  console.log(await Array.fromAsync({ async *[Symbol.asyncIterator]() { yield 1; } }));
+})();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

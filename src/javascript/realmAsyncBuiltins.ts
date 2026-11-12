@@ -114,12 +114,10 @@ function startFromAsync(runtime: Runtime, promise: JsObject, args: Value[]): Ste
   };
   const asyncMethod = runtime.get(items, WELL_KNOWN_SYMBOLS.asyncIterator);
   const isAsync = asyncMethod !== undefined && asyncMethod !== null;
-  const method = isAsync ? asyncMethod : runtime.get(items, WELL_KNOWN_SYMBOLS.iterator);
+  const method = isAsync ? undefined : runtime.get(items, WELL_KNOWN_SYMBOLS.iterator);
   return runtime.hold(array, () => {
-    if (method === undefined || method === null) return fromArrayLike(context, items, add, array);
-    const iteration = isAsync
-      ? asyncIteratorOf(runtime, items, asyncMethod)
-      : asyncIteratorOf(runtime, items, undefined, method);
+    if (!isAsync && (method === undefined || method === null)) return fromArrayLike(context, items, add, array);
+    const iteration = asyncIteratorOf(runtime, items, { async: asyncMethod, sync: method });
     context.roots.push(iteration.iterator, iteration.nextMethod);
     const loop = (): Step => iterationStep(context, iteration, add, loop, array);
     return loop();
