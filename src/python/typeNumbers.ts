@@ -15,6 +15,7 @@ import {
   parseFloatText,
   parseIntText,
   roundDecimal,
+  toAsciiDigits,
   toIndex,
 } from './numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial } from './objects';
@@ -284,13 +285,16 @@ function complexPartOf(value: PyValue, asksComplexMethod: boolean): ComplexPart 
 }
 
 function parseComplex(text: string): PyComplex {
-  const body = text
+  // A part accepts what float() accepts: Unicode decimal digits and single underscores between digits.
+  const body = toAsciiDigits(text)
     .trim()
     .replace(/^\((.*)\)$/, '$1')
     .trim();
   // The digits before and after the point are told apart by the point, so that a long number is not matched in every
   // split of its digits.
-  const unsigned = String.raw`(?:\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|inf(?:inity)?|nan)`;
+  const digits = String.raw`\d(?:_?\d)*`;
+  const exponent = String.raw`(?:[eE][+-]?${digits})?`;
+  const unsigned = `(?:${digits}(?:\\.(?:${digits})?)?${exponent}|\\.${digits}${exponent}|inf(?:inity)?|nan)`;
   const number = `[+-]?${unsigned}`;
   const full = new RegExp(`^(${number})([+-]${unsigned}?)[jJ]$`, 'i');
   const imaginaryOnly = new RegExp(`^(${number}|[+-])?[jJ]$`, 'i');
@@ -300,6 +304,8 @@ function parseComplex(text: string): PyComplex {
   match = imaginaryOnly.exec(body);
   if (match) return newComplex(0, imagPart(match[1] ?? '+'));
   if (realOnly.test(body)) return newComplex(parseFloatText(body) ?? Number.NaN, 0);
+  // CPython checks the underscores first and reports a string it cannot read with them in its own words.
+  if (text.includes('_')) throw valueError(`could not convert string to complex: ${pyRepr(text)}`);
   throw valueError('complex() arg is a malformed string');
 }
 
