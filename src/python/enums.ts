@@ -3,7 +3,7 @@ import { defineGetSet } from './descriptors';
 import { hashInt, identityHash, NATIVE_HASHES } from './hashing';
 import { unsupportedReceiver } from './libraryReceivers';
 import { importModule } from './modules';
-import { bindValue, callValue, getAttribute, getIterator } from './objects';
+import { bindValue, callValue, enumMemberGenerator, getAttribute } from './objects';
 import { intEnumValue, keysEqual } from './operators';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
@@ -160,12 +160,10 @@ defineEnumTypeMethod('__repr__', (self) => {
   return `<${cls.lookup('_flag_mask_') === undefined ? 'enum' : 'flag'} '${cls.name}'>`;
 });
 defineEnumTypeMethod('__contains__', (self, [value]) => callValue(enumHooks().contains, [self, value]));
-defineEnumTypeMethod('__iter__', (self) => getIterator(enumMembersOf(self as PyClass)));
+defineEnumTypeMethod('__iter__', (self) => enumMemberGenerator(self as PyClass, false));
 defineEnumTypeMethod('__len__', (self) => BigInt((self as PyClass).enumMembers?.length ?? 0));
 defineEnumTypeMethod('__bool__', () => true);
-defineEnumTypeMethod('__reversed__', (self) =>
-  getIterator(newList([...((self as PyClass).enumMembers ?? [])].toReversed()))
-);
+defineEnumTypeMethod('__reversed__', (self) => enumMemberGenerator(self as PyClass, true));
 
 // Enum --------------------------------------------------------------------------------------------------------------
 

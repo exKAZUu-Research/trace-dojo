@@ -49,10 +49,11 @@ export function classAttribute(cls: PyClass, name: string): PyValue | undefined 
     return nativeFunction('register', ([subclass]) => registerVirtualSubclass(cls, subclass, isSubclassOfClass));
   }
   if (attribute === undefined) {
-    // Methods of the metaclass, such as `mro()`, bind to the class.
-    const meta = typeClass.lookup(name);
+    // Methods of the metaclass, such as `mro()` or an enum's `__iter__`, bind to the class.
+    const metaclass = classOf(cls);
+    const meta = metaclass.lookup(name);
     if (isDataDescriptor(meta)) return readDescriptor(meta, cls);
-    return meta instanceof PyBuiltinFunction ? bindValue(meta, cls, typeClass) : undefined;
+    return meta instanceof PyBuiltinFunction ? bindValue(meta, cls, metaclass) : undefined;
   }
   if (attribute instanceof PyDescriptor) {
     if (attribute.cls === staticmethodClass) return attribute.fn;

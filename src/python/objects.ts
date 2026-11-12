@@ -11,6 +11,7 @@ import {
   classOf,
   exceptionClassNamed,
   frozensetClass,
+  generatorClass,
   iteratorClass,
   methodClass,
   newList,
@@ -477,6 +478,7 @@ export function toArray(value: PyValue, notIterable?: string): PyValue[] {
 /** The iterator object `iter()` returns. */
 export function getIterator(value: PyValue): PyValue {
   if (value instanceof PyIterator || value instanceof PyGenerator) return value;
+  if (value instanceof PyClass && value.enumMembers) return enumMemberGenerator(value, false);
   const iter = lookupSpecial(value, '__iter__');
   // A builtin's own __iter__ is bypassed only where iterateBuiltin reads the value directly, whose __iter__ comes back
   // here; any other builtin's __iter__ makes its own iterator type, such as a deque's.
@@ -512,6 +514,22 @@ function iteratorNameOf(value: PyValue): string {
   if (value instanceof PyDict) return dictIteratorName(value, 'keys');
   if (value instanceof PyDictView) return dictIteratorName(value.dict, value.view);
   return 'iterator';
+}
+
+/**
+ * The members of an enum class one by one, as the generator expressions of EnumType's `__iter__` and `__reversed__`,
+ * whose names the generator takes.
+ */
+export function enumMemberGenerator(cls: PyClass, isReversed: boolean): PyGenerator {
+  const members = isReversed ? [...(cls.enumMembers ?? [])].toReversed() : [...(cls.enumMembers ?? [])];
+  let index = 0;
+  return new PyGenerator(
+    generatorClass,
+    '<genexpr>',
+    `EnumType.${isReversed ? '__reversed__' : '__iter__'}.<locals>.<genexpr>`,
+    () => (index < members.length ? { done: false, value: members[index++] } : { done: true, value: None }),
+    () => members
+  );
 }
 
 /** The iterator type of a dict or its view, which an OrderedDict shares among all of them as CPython's does. */
