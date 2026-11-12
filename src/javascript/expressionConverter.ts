@@ -131,6 +131,7 @@ export abstract class ExpressionConverter extends ConverterBase {
 
   /** Reads a variable by name, noting a read of `arguments`, which the enclosing function then creates. */
   private identifierRead(node: Node): Expression {
+    this.checkContextualName(node, node.text);
     if (node.text === 'arguments') {
       if (this.context.argumentsUse.isForbidden)
         fail(node, 'フィールドの初期値や static ブロックの中では arguments を使えません。');

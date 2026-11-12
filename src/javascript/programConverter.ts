@@ -350,6 +350,9 @@ export class ProgramConverter extends ExpressionConverter {
   functionNode(node: Node, kind: FunctionKind, name = node.childForFieldName('name')?.text ?? ''): FunctionNode {
     const isGenerator = hasChild(node, '*');
     const isAsync = hasChild(node, 'async');
+    if (kind === 'classConstructor' && (isAsync || isGenerator)) {
+      fail(node, 'constructor には async や * を付けられません。');
+    }
     const bodyNode = field(node, 'body');
     const outer = this.context;
     const isArrow = kind === 'arrow';

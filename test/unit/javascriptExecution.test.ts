@@ -77,6 +77,19 @@ test.each([
   ['new.target outside functions', 'console.log(new.target);', 0, 'new.target は関数の中にしか書けません。'],
   ['a legacy octal number', 'const n = 017;', 0, '数値「017」は、この採点環境では使えません。'],
   [
+    'an async class constructor',
+    'class C {\n  async constructor() {}\n}',
+    1,
+    'constructor には async や * を付けられません。',
+  ],
+  [
+    'await as a variable name in an async function',
+    'async function f() {\n  let await = 1;\n}',
+    1,
+    'async 関数の中では await を変数名に使えません。',
+  ],
+  ['yield as a variable name', 'let yield = 1;', 0, 'yield は変数名に使えません。'],
+  [
     'a generator declaration as an if body',
     'if (true) function* f() { yield 1; }',
     0,

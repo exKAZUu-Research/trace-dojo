@@ -187,7 +187,14 @@ export abstract class ConverterBase {
     return this.scopes.at(-1) as ScopeBuilder;
   }
 
+  /** Rejects `yield`, reserved in strict mode, and `await` inside an async function, as names. */
+  protected checkContextualName(node: Node, name: string): void {
+    if (name === 'yield') fail(node, 'yield は変数名に使えません。');
+    if (name === 'await' && this.context.isAsync) fail(node, 'async 関数の中では await を変数名に使えません。');
+  }
+
   protected declareLexical(node: Node, name: string, kind?: 'constant' | 'using' | 'await using'): void {
+    this.checkContextualName(node, name);
     const scope = this.currentScope;
     if (scope.names.has(name)) duplicate(node, name);
     scope.names.set(name, 'lexical');
@@ -196,6 +203,7 @@ export abstract class ConverterBase {
   }
 
   protected declareVar(node: Node, name: string): void {
+    this.checkContextualName(node, name);
     for (const scope of this.scopes.toReversed()) {
       if (scope.names.get(name) === 'lexical') duplicate(node, name);
       if (!scope.isFunction) {
@@ -223,6 +231,7 @@ export abstract class ConverterBase {
   }
 
   protected declareParameter(node: Node, name: string): void {
+    this.checkContextualName(node, name);
     const scope = this.currentScope;
     if (scope.names.has(name)) duplicate(node, name);
     scope.names.set(name, 'parameter');
