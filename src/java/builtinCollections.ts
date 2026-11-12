@@ -3,27 +3,35 @@ import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
   batchRemovalClasses,
-  checkIndex,
+  checkListIndex,
+  checkModifiable,
   checkPosition,
   classType,
+  createIterator,
   defaultRemoveClasses,
+  defineIndexFailures,
   defineIteratorClass,
   defineReadMethods,
   defineSetEquality,
   defineSnapshot,
   elementsOf,
   fixedSizeClasses,
+  immutableCollectionsLists,
   indexOf,
   itemsOf,
   javaEquals,
   javaHash,
   linkOverrides,
+  subListChecks,
   touch,
   unmodifiableClasses,
+  unmodifiableWrappers,
+  wrapUnmodifiable,
 } from './builtinCollectionSupport';
 import { addListIterators, defineListIterator } from './builtinListIterator';
 import { defineHashMap, defineSets } from './builtinMaps';
 import { definePriorityQueue } from './builtinPriorityQueue';
+import { createSubList } from './builtinSubList';
 import {
   addAbstractMethod,
   addConstructor,
@@ -51,12 +59,29 @@ export interface Collections {
   iterableClass: ClassInfo;
   iteratorClass: ClassInfo;
   listClass: ClassInfo;
-  /** The class of the lists `List.of` returns. */
+  /** The class of the lists `List.of` returns, but of one or two elements. */
   immutableList: ClassInfo;
+  /** The class of the lists of one or two elements that `List.of` and `List.copyOf` return. */
+  pairList: ClassInfo;
+  /** The classes of `Collections.emptyList`, `Collections.singletonList`, and `Collections.nCopies`. */
+  emptyList: ClassInfo;
+  singletonList: ClassInfo;
+  copiesList: ClassInfo;
+  /** The classes of `Collections.unmodifiableList` of a `LinkedList` or a program's list, and of another list. */
+  unmodifiableList: ClassInfo;
+  unmodifiableRandomAccessList: ClassInfo;
   /** The class of the maps `Map.of` returns. */
   immutableMap: ClassInfo;
   /** The class of the sets `Set.of` returns. */
   immutableSet: ClassInfo;
+  emptySet: ClassInfo;
+  singletonSet: ClassInfo;
+  /** `AbstractList$SubList`, the class of views of `LinkedList`, which does not implement `RandomAccess`. */
+  sequentialSubList: ClassInfo;
+  /** `Collections$SynchronizedRandomAccessList`, the class of views of `Stack`. */
+  synchronizedSubList: ClassInfo;
+  emptyMap: ClassInfo;
+  singletonMap: ClassInfo;
   /** The class of `Collections.unmodifiableSet` of a set without a store of its own, such as a map's key set. */
   unmodifiableViewSet: ClassInfo;
   /** The class of the lists `Arrays.asList` returns, which share their array's elements. */
@@ -113,20 +138,15 @@ export function defineCollections(
   defineListClasses(context, lists, dequeClass);
   defineArrayDeque(context, lists, dequeClass);
   const priorityQueue = definePriorityQueue(context, lists, registry.classes.get('Queue') as ClassInfo);
-  const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
-  unmodifiableClasses.add(immutableList);
-  // Arrays.asList writes through to its array, so it may set elements but not change its size.
-  const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
-  fixedSizeClasses.add(fixedSizeList);
-  defaultRemoveClasses.add(fixedSizeList);
+  const restrictedLists = defineRestrictedLists(context, lists);
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   // A map's key and entry sets compare and hash as sets; its values, a plain collection, keep identity.
   defineSetEquality(snapshotSet, context, setClass);
   linkOverrides(snapshotSet);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
   const unmodifiableViewSet = defineUnmodifiableViewSet(context, setClass, itrClass);
-  const immutableSet = defineSets(context, setClass, collectionClass, itrClass);
-  const { mapClass, immutableMap } = defineHashMap(context, {
+  const sets = defineSets(context, setClass, collectionClass, itrClass);
+  const { mapClass, ...maps } = defineHashMap(context, {
     setClass,
     collectionClass,
     snapshotSet,
@@ -142,16 +162,126 @@ export function defineCollections(
     collectionClass,
     setClass,
     mapClass,
-    immutableMap,
-    immutableSet,
+    ...maps,
+    ...sets,
     unmodifiableViewSet,
-    immutableList,
-    fixedSizeList,
+    ...restrictedLists,
+    sequentialSubList: subListClasses.other,
+    synchronizedSubList: subListClasses.synchronized,
     sortedClasses: [
       ...['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
       priorityQueue,
     ],
   };
+}
+
+/**
+ * The lists that reject changes: those `List.of`, `Collections.emptyList`, `singletonList`, `nCopies`, and
+ * `unmodifiableList` return, and the fixed-size list of `Arrays.asList`.
+ */
+function defineRestrictedLists(
+  context: Context,
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo }
+): Pick<
+  Collections,
+  | 'immutableList'
+  | 'pairList'
+  | 'emptyList'
+  | 'singletonList'
+  | 'copiesList'
+  | 'unmodifiableList'
+  | 'unmodifiableRandomAccessList'
+  | 'fixedSizeList'
+> {
+  const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
+  const pairList = defineRestrictedList(context, 'List12', lists, () => true);
+  const emptyList = defineRestrictedList(context, 'EmptyList', lists, () => true, 'Collections$');
+  const singletonList = defineRestrictedList(context, 'SingletonList', lists, () => true, 'Collections$');
+  const copiesList = defineRestrictedList(context, 'CopiesList', lists, () => true, 'Collections$');
+  const unmodifiableList = defineRestrictedList(context, 'UnmodifiableList', lists, () => true, 'Collections$');
+  const unmodifiableRandomAccessList = defineRestrictedList(
+    context,
+    'UnmodifiableRandomAccessList',
+    lists,
+    () => true,
+    'Collections$'
+  );
+  immutableCollectionsLists.add(immutableList);
+  immutableCollectionsLists.add(pairList);
+  for (const cls of [emptyList, singletonList, copiesList]) rejectOnlyChanges(cls);
+  for (const cls of [
+    immutableList,
+    pairList,
+    emptyList,
+    singletonList,
+    copiesList,
+    unmodifiableList,
+    unmodifiableRandomAccessList,
+  ]) {
+    unmodifiableClasses.add(cls);
+  }
+  // Arrays.asList writes through to its array, so it may set elements but not change its size.
+  const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
+  fixedSizeClasses.add(fixedSizeList);
+  defaultRemoveClasses.add(fixedSizeList);
+  defineIndexFailures({ immutableList, pairList, emptyList, singletonList, fixedSizeList }, context.registry);
+  defineSubListClasses(context, lists);
+  return {
+    immutableList,
+    pairList,
+    emptyList,
+    singletonList,
+    copiesList,
+    unmodifiableList,
+    unmodifiableRandomAccessList,
+    fixedSizeList,
+  };
+}
+
+/** The classes of the views `subList` returns, which differ from their lists' classes as the JDK's do. */
+const subListClasses: Record<'arrayList' | 'other' | 'synchronized' | 'fixedSize' | 'immutable', ClassInfo> =
+  {} as never;
+
+/**
+ * The sublist classes: `ArrayList$SubList`, which removes in batches as its list does, `AbstractList$SubList` for the
+ * other modifiable lists, and the fixed-size and immutable views of `Arrays.asList` and `List.of`.
+ */
+function defineSubListClasses(
+  context: Context,
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo }
+): void {
+  subListClasses.arrayList = defineArrayList(context, 'SubList', lists, 'ArrayList$SubList');
+  batchRemovalClasses.add(subListClasses.arrayList);
+  subListClasses.other = defineArrayList(context, 'SubList', lists, 'AbstractList$SubList');
+  // Vector.subList wraps its view in a synchronized list, which implements RandomAccess as Vector does.
+  subListClasses.synchronized = defineArrayList(
+    context,
+    'SynchronizedRandomAccessList',
+    lists,
+    'Collections$SynchronizedRandomAccessList'
+  );
+  subListClasses.fixedSize = defineRestrictedList(
+    context,
+    'RandomAccessSubList',
+    lists,
+    (method) => method.name !== 'set',
+    'AbstractList$'
+  );
+  fixedSizeClasses.add(subListClasses.fixedSize);
+  subListClasses.immutable = defineRestrictedList(context, 'SubList', lists, () => true, 'ImmutableCollections$');
+  unmodifiableClasses.add(subListClasses.immutable);
+  immutableCollectionsLists.add(subListClasses.immutable);
+}
+
+/** The class of a view of a list of `cls`, whose JDK class decides how the view checks indexes and removes. */
+function subListClassOf(listClass: ClassInfo): ClassInfo {
+  let cls = listClass;
+  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
+  if (unmodifiableClasses.has(cls)) return subListClasses.immutable;
+  if (fixedSizeClasses.has(cls)) return subListClasses.fixedSize;
+  if (cls.name === 'ArrayList' || cls === subListClasses.arrayList) return subListClasses.arrayList;
+  if (cls.name === 'Stack' || cls === subListClasses.synchronized) return subListClasses.synchronized;
+  return subListClasses.other;
 }
 
 /** A read-only set over another set's elements, which it reads afresh at each use. */
@@ -212,6 +342,8 @@ function defineDequeInterfaces(context: Context, collectionClass: ClassInfo): Cl
     addAbstractMethod(dequeClass, name, [dequeElement], name.startsWith('offer') ? BOOLEAN : VOID);
   }
   for (const name of DEQUE_REMOVALS) addAbstractMethod(dequeClass, name, [], dequeElement);
+  const iteratorClass = context.registry.classes.get('Iterator') as ClassInfo;
+  addAbstractMethod(dequeClass, 'descendingIterator', [], classType(iteratorClass, dequeElement));
   return dequeClass;
 }
 
@@ -280,7 +412,7 @@ function defineArrayDeque(
   cls.methods = cls.methods.filter((method) => !isIndexed(method));
   cls.interfaces = [dequeClass];
   cls.supertypes = [cls.supertypes[0], classType(dequeClass, { kind: 'typeVar', variable: cls.typeParameters[0] })];
-  defineDequeMethods(cls, { kind: 'typeVar', variable: cls.typeParameters[0] });
+  defineDequeMethods(cls, { kind: 'typeVar', variable: cls.typeParameters[0] }, lists.itrClass);
   rejectNullElements(cls);
   linkOverrides(cls);
 }
@@ -346,6 +478,36 @@ function defineRestrictedList(
 }
 
 const MUTATORS = new Set(['add', 'addAll', 'set', 'remove', 'clear']);
+
+/**
+ * Makes `remove(Object)`, `clear`, and `addAll` of a list of `Collections` reject only a call that would change it, as
+ * `AbstractCollection`'s do; adding or removing at an index still always fails, as `AbstractList`'s does.
+ */
+function rejectOnlyChanges(cls: ClassInfo): void {
+  for (const method of cls.methods) {
+    const removesValue = method.name === 'remove' && method.parameterTypes[0] !== INT;
+    if (method.name === 'addAll') {
+      method.native = (frame, receiver, args) => {
+        // As AbstractList.addAll(int, Collection) does, a position is checked before the elements are read.
+        const size = elementsOf(receiver).length;
+        const index = args.length > 1 ? (args[0] as number) : size;
+        if (index < 0 || index > size) {
+          throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${size}`);
+        }
+        if (itemsOf(frame, args.at(-1)).length > 0) throwBuiltin(frame, 'UnsupportedOperationException');
+        return false;
+      };
+    }
+    if (method.name !== 'clear' && !removesValue) continue;
+    method.native = (frame, receiver, [value]) => {
+      const items = elementsOf(receiver);
+      if (removesValue ? indexOf(frame, items, value) !== -1 : items.length > 0) {
+        throwBuiltin(frame, 'UnsupportedOperationException');
+      }
+      return removesValue ? false : undefined;
+    };
+  }
+}
 
 function declareCollectionMethods(cls: ClassInfo, element: JavaType, context: Context): void {
   const { objectType } = context;
@@ -425,7 +587,7 @@ function defineArrayList(
     }
   );
   defineReadMethods(cls, element, context, itrClass, (frame, receiver, index) => {
-    if (hiddenName) throwBuiltin(frame, 'UnsupportedOperationException');
+    checkModifiable(frame, receiver, true);
     elementsOf(receiver).splice(index, 1);
     touch(receiver);
   });
@@ -433,7 +595,7 @@ function defineArrayList(
   addListIterators(cls, element, listItrClass);
   defineListUpdates(cls, element, context);
   defineListSearches(cls, context);
-  if (name === 'LinkedList') defineDequeMethods(cls, element);
+  if (name === 'LinkedList') defineDequeMethods(cls, element, itrClass);
   linkOverrides(cls);
   return cls;
 }
@@ -474,17 +636,19 @@ function defineListAdditions(
     (frame, receiver, [from, to]) => {
       const items = elementsOf(receiver);
       const [start, end] = [from as number, to as number];
-      if (start < 0 || end > items.length || start > end) {
-        throwBuiltin(frame, 'IndexOutOfBoundsException', `fromIndex: ${start}, toIndex: ${end}, size: ${items.length}`);
-      }
-      // A copy stands for the view, which these programs read rather than write through.
-      frame.runtime.allocateArray(frame, end - start);
-      const list = frame.runtime.allocateObject(frame, cls);
-      list.elements = items.slice(start, end);
-      list.modCount = 0;
-      return list;
+      if (start < 0) throwBuiltin(frame, 'IndexOutOfBoundsException', `fromIndex = ${start}`);
+      if (end > items.length) throwBuiltin(frame, 'IndexOutOfBoundsException', `toIndex = ${end}`);
+      if (start > end) throwBuiltin(frame, 'IllegalArgumentException', `fromIndex(${start}) > toIndex(${end})`);
+      return subListOf(frame, receiver as JavaObject, start, end);
     }
   );
+}
+
+/** A view of `list`, which wraps a view of the backing list of an unmodifiable wrapper, as `UnmodifiableList` does. */
+function subListOf(frame: Frame, list: JavaObject, start: number, end: number): JavaObject {
+  if (!unmodifiableWrappers.has(list)) return createSubList(frame, subListClassOf(list.cls), list, start, end);
+  const backing = subListOf(frame, list.retained?.[0] as JavaObject, start, end);
+  return wrapUnmodifiable(frame.runtime.allocateObject(frame, list.cls), backing);
 }
 
 /** The methods that copy a list into an array. */
@@ -529,17 +693,17 @@ function copiesBackingArray(collection: JavaObject): boolean {
 /** The methods that read, replace, and remove elements by position or value. */
 function defineListUpdates(cls: ClassInfo, element: JavaType, context: Context): void {
   addMethod(cls, 'get', [INT], element, false, (frame, receiver, [index]) => {
-    checkIndex(frame, index as number, elementsOf(receiver).length);
+    checkListIndex(frame, receiver, index as number, elementsOf(receiver).length);
     return elementsOf(receiver)[index as number];
   });
   addMethod(cls, 'set', [INT, element], element, false, (frame, receiver, [index, value]) => {
-    checkIndex(frame, index as number, elementsOf(receiver).length);
+    checkListIndex(frame, receiver, index as number, elementsOf(receiver).length);
     const previous = elementsOf(receiver)[index as number];
     elementsOf(receiver)[index as number] = value;
     return previous;
   });
   addMethod(cls, 'remove', [INT], element, false, (frame, receiver, [index]) => {
-    checkIndex(frame, index as number, elementsOf(receiver).length);
+    checkListIndex(frame, receiver, index as number, elementsOf(receiver).length);
     touch(receiver);
     return elementsOf(receiver).splice(index as number, 1)[0];
   });
@@ -567,7 +731,9 @@ function defineListSearches(cls: ClassInfo, context: Context): void {
     return -1;
   });
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (other === receiver) return true;
     if (!(other instanceof JavaObject) || !other.elements || !isList(other)) return false;
+    subListChecks.get(other)?.();
     const items = elementsOf(receiver);
     return (
       items.length === other.elements.length &&
@@ -589,7 +755,20 @@ function isList(object: JavaObject): boolean {
 
 /** The queue and stack methods of `LinkedList`, which learners use for breadth-first searches and stacks. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
-function defineDequeMethods(cls: ClassInfo, element: JavaType): void {
+function defineDequeMethods(cls: ClassInfo, element: JavaType, itrClass: ClassInfo): void {
+  addMethod(cls, 'descendingIterator', [], classType(itrClass, element), false, (frame, receiver) =>
+    createIterator(
+      frame,
+      itrClass,
+      receiver as JavaObject,
+      () => elementsOf(receiver).toReversed(),
+      (_, index) => {
+        const items = elementsOf(receiver);
+        items.splice(items.length - 1 - index, 1);
+        touch(receiver);
+      }
+    )
+  );
   for (const [name, atEnd] of [
     ['addFirst', false],
     ['addLast', true],

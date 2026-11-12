@@ -3,10 +3,12 @@ import {
   batchRemovalClasses,
   checkModifiable,
   defaultRemoveClasses,
+  elementsOf,
   itemsOf,
   type MapViewSource,
   mapViewSources,
   removeElements,
+  subListChecks,
 } from './builtinCollectionSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { type ClassInfo } from './types';
@@ -19,7 +21,10 @@ import { type JavaObject, type Value } from './values';
  */
 export function removeMatching(frame: Frame, receiver: Value, matches: (item: Value) => boolean): boolean {
   const collection = receiver as JavaObject;
-  const elements = Object.getOwnPropertyDescriptor(collection, 'elements')?.value as unknown;
+  // A sublist removes positions of its list as the list's own class does, though its elements are a view.
+  const elements = subListChecks.has(collection)
+    ? elementsOf(collection)
+    : (Object.getOwnPropertyDescriptor(collection, 'elements')?.value as unknown);
   if (Array.isArray(elements)) {
     return removesInBatch(collection.cls)
       ? removeMatchingPositions(frame, collection, elements as Value[], matches)

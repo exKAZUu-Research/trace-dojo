@@ -1358,6 +1358,121 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',
   ],
+  [
+    'serializable-class-with-version',
+    true,
+    'import java.io.Serializable;\nclass Main implements Serializable {\n  private static final long serialVersionUID = 1L;\n  public static void main(String[] args) {\n    Serializable s = new int[0];\n  }\n}',
+  ],
+  [
+    'char-sequence-without-its-methods',
+    false,
+    'class Text implements CharSequence {\n  public int length() { return 0; }\n}\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'functional-interface-annotation-on-two-methods',
+    false,
+    '@FunctionalInterface interface Two { void a(); void b(); }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'safe-varargs-on-an-overridable-method',
+    false,
+    'class Main {\n  @SafeVarargs <T> void f(T... xs) {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'safe-varargs-on-static-final-and-private-methods',
+    true,
+    'class Main {\n  @SafeVarargs static <T> void f(T... xs) {}\n  @SafeVarargs final <T> void g(T... xs) {}\n  @SafeVarargs private <T> void h(T... xs) {}\n  @SafeVarargs <T> Main(T... xs) {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'annotation-without-a-required-element',
+    false,
+    '@interface Info { String value(); int n() default 0; }\nclass Main {\n  @Info(n = 2) void f() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'annotation-with-an-undeclared-element',
+    false,
+    'class Main {\n  @Deprecated(foo = 1) void f() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'annotations-with-their-elements',
+    true,
+    '@interface Info { String value(); int n() default 0; }\nclass Main {\n  @Info("x") void f() {}\n  @Info(value = "y", n = 3) @Deprecated(since = "1") @SuppressWarnings({"a"}) void g() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'annotation-repeated-without-repeatable',
+    false,
+    'class Main {\n  @Deprecated @Deprecated void f() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'repeatable-annotation-repeated',
+    true,
+    'import java.lang.annotation.*;\n@Repeatable(Tags.class) @interface Tag { String value(); }\n@interface Tags { Tag[] value(); }\nclass Main {\n  @Tag("a") @Tag("b") void f() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'record-accessor-not-public',
+    false,
+    'record Point(int x) { int x() { return x + 1; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'record-accessor-of-another-type',
+    false,
+    'record Point(int x) { public long x() { return x; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'record-accessor-with-throws',
+    false,
+    'record Point(int x) { public int x() throws RuntimeException { return x; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'record-accessors-and-overloads',
+    true,
+    'import java.util.*;\nrecord Point(int x, List<String> tags) { public int x() { return x * 2; } public List<String> tags() { return List.copyOf(tags); } public int x(int scale) { return x * scale; } static int y() { return 1; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'lambda-varargs-parameter-before-another',
+    false,
+    'import java.util.function.*;\nclass Main {\n  public static void main(String[] args) {\n    BiConsumer<int[], Integer> f = (int... a, Integer b) -> System.out.println(b);\n  }\n}',
+  ],
+  [
+    'receiver-parameter-of-another-type',
+    false,
+    'class Main {\n  int f(String this) { return 1; }\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-parameter-of-a-static-method',
+    false,
+    'class Main {\n  static int f(Main this) { return 1; }\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-parameter-of-a-top-level-constructor',
+    false,
+    'class Main {\n  Main(Main this) {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-parameter-with-other-type-arguments',
+    false,
+    'class Main<T> {\n  void f(Main<String> this) {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-of-an-inner-constructor-without-its-qualifier',
+    false,
+    'class Outer {\n  class Inner {\n    Inner(Outer this) {}\n  }\n}\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-of-an-inner-constructor-named-by-its-own-class',
+    false,
+    'class Outer {\n  class Inner {\n    Inner(Outer Inner.this) {}\n  }\n}\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-of-a-method-named-by-another-class',
+    false,
+    'class Main {\n  int f(Main Other.this) { return 1; }\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'annotation-without-targets-on-a-type-use',
+    false,
+    '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

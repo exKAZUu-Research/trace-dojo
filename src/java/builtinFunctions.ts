@@ -1,7 +1,15 @@
 import { removeAllOf, removeMatching } from './builtinBulkRemoval';
-import { type Collections, compareNatural, itemsOf, putEntry } from './builtinCollections';
-import { checkModifiable, forEachLiveEntry, mapViewSources, sortedValues } from './builtinCollectionSupport';
+import { type Collections, compareNatural, itemsOf, javaEquals, putEntry } from './builtinCollections';
+import {
+  checkModifiable,
+  countsSortAsChange,
+  forEachLiveEntry,
+  mapViewSources,
+  sortedValues,
+  touch,
+} from './builtinCollectionSupport';
 import { defineKeyComparators } from './builtinComparators';
+import { recordAccess } from './builtinLinkedHashMap';
 import { defineMapRemappings, putComputed, startComputing, unchanging } from './builtinMapComputing';
 import {
   addAbstractMethod,
@@ -151,13 +159,8 @@ export function defineFunctions(
   const toInt = defineFunctional(context, 'ToIntFunction', pkg, ['T'], 'applyAsInt', (t) => [[t], INT]);
   const toDouble = defineFunctional(context, 'ToDoubleFunction', pkg, ['T'], 'applyAsDouble', (t) => [[t], DOUBLE]);
   const toLong = defineFunctional(context, 'ToLongFunction', pkg, ['T'], 'applyAsLong', (t) => [[t], LONG]);
-  defineFunctional(context, 'IntFunction', pkg, ['R'], 'apply', (r) => [[INT], r]);
-  defineFunctional(context, 'IntPredicate', pkg, [], 'test', () => [[INT], BOOLEAN]);
-  defineFunctional(context, 'IntUnaryOperator', pkg, [], 'applyAsInt', () => [[INT], INT]);
-  defineFunctional(context, 'IntBinaryOperator', pkg, [], 'applyAsInt', () => [[INT, INT], INT]);
-  defineFunctional(context, 'IntConsumer', pkg, [], 'accept', () => [[INT], VOID]);
-  defineFunctional(context, 'DoubleUnaryOperator', pkg, [], 'applyAsDouble', () => [[DOUBLE], DOUBLE]);
-  defineFunctional(context, 'DoubleBinaryOperator', pkg, [], 'applyAsDouble', () => [[DOUBLE, DOUBLE], DOUBLE]);
+  definePrimitiveFunctions(context, pkg);
+  defineFunctional(context, 'BooleanSupplier', pkg, [], 'getAsBoolean', () => [[], BOOLEAN]);
   const unary = defineInterface(registry, 'UnaryOperator', pkg);
   const [unaryT] = addTypeParameters(unary, ['T'], context.objectType);
   addInterface(unary, classType(fn.cls, unaryT, unaryT));
@@ -180,6 +183,7 @@ export function defineFunctions(
     context.objectType
   );
   definePredicateDefaults(predicate.cls, predicate.variables[0]);
+  definePredicateFactories(predicate.cls, context.objectType);
   defineCompositions(context, { fn, biFunction, consumer }, { unary, binary, comparator });
   defineCollectionDefaults(context, collections, {
     consumer: consumer.cls,
@@ -191,6 +195,31 @@ export function defineFunctions(
     biFunction: biFunction.cls,
   });
   return { comparatorClass: comparator };
+}
+
+/**
+ * The functional interfaces of `int`, `long`, and `double` values, such as `IntPredicate`, `LongFunction`, and
+ * `IntToDoubleFunction`, with the defaults of their predicates.
+ */
+function definePrimitiveFunctions(context: Context, pkg: string): void {
+  for (const [prefix, type] of [
+    ['Int', INT],
+    ['Long', LONG],
+    ['Double', DOUBLE],
+  ] as const) {
+    definePredicateDefaults(
+      defineFunctional(context, `${prefix}Predicate`, pkg, [], 'test', () => [[type], BOOLEAN]).cls
+    );
+    defineFunctional(context, `${prefix}Supplier`, pkg, [], `getAs${prefix}`, () => [[], type]);
+    defineFunctional(context, `${prefix}Consumer`, pkg, [], 'accept', () => [[type], VOID]);
+    defineFunctional(context, `Obj${prefix}Consumer`, pkg, ['T'], 'accept', (t) => [[t, type], VOID]);
+    defineFunctional(context, `${prefix}Function`, pkg, ['R'], 'apply', (r) => [[type], r]);
+    defineFunctional(context, `${prefix}UnaryOperator`, pkg, [], `applyAs${prefix}`, () => [[type], type]);
+    defineFunctional(context, `${prefix}BinaryOperator`, pkg, [], `applyAs${prefix}`, () => [[type, type], type]);
+    if (prefix === 'Int') continue;
+    defineFunctional(context, `IntTo${prefix}Function`, pkg, [], `applyAs${prefix}`, () => [[INT], type]);
+    defineFunctional(context, `${prefix}ToIntFunction`, pkg, [], 'applyAsInt', () => [[type], INT]);
+  }
 }
 
 /** `Map.Entry.comparingByKey` and `comparingByValue`, which order entries by their keys' or values' natural order. */
@@ -384,27 +413,50 @@ function defineThenComparing(
   }
 }
 
-function definePredicateDefaults(cls: ClassInfo, t: JavaType): void {
-  const predicateOf = classType(cls, t);
+/** `negate`, `and`, and `or` of `Predicate<T>` or, without `t`, of a primitive predicate such as `IntPredicate`. */
+function definePredicateDefaults(cls: ClassInfo, t?: JavaType): void {
+  const predicateOf = t ? classType(cls, t) : cls.type;
+  const otherType = t ? classType(cls, superOf(t)) : cls.type;
   const test = (frame: Frame, predicate: Value, value: Value): boolean =>
     callFunction(frame, cls, predicate, [value]) === true;
   addMethod(cls, 'negate', [], predicateOf, false, (frame, receiver) =>
     functionObject(frame, cls, (callFrame, [value]) => !test(callFrame, receiver, value))
   );
-  addMethod(cls, 'and', [classType(cls, superOf(t))], predicateOf, false, (frame, receiver, [other]) =>
-    functionObject(
-      frame,
-      cls,
-      (callFrame, [value]) => test(callFrame, receiver, value) && test(callFrame, other, value)
-    )
-  );
-  addMethod(cls, 'or', [classType(cls, superOf(t))], predicateOf, false, (frame, receiver, [other]) =>
-    functionObject(
-      frame,
-      cls,
-      (callFrame, [value]) => test(callFrame, receiver, value) || test(callFrame, other, value)
-    )
-  );
+  for (const [name, isAnd] of [
+    ['and', true],
+    ['or', false],
+  ] as const) {
+    addMethod(cls, name, [otherType], predicateOf, false, (frame, receiver, [other]) => {
+      // Both compositions require their argument at once, as `Objects.requireNonNull` in the JDK does.
+      if (other === undefined) throwBuiltin(frame, 'NullPointerException');
+      return functionObject(frame, cls, (callFrame, [value]) =>
+        isAnd
+          ? test(callFrame, receiver, value) && test(callFrame, other, value)
+          : test(callFrame, receiver, value) || test(callFrame, other, value)
+      );
+    });
+  }
+}
+
+/** `Predicate.isEqual` and `Predicate.not`. */
+function definePredicateFactories(cls: ClassInfo, objectType: JavaType): void {
+  const element: TypeVariable = { name: 'T', bounds: [objectType] };
+  const predicateOf = classType(cls, typeOf(element));
+  addMethod(cls, 'isEqual', [objectType], predicateOf, true, (frame, _, [target]) =>
+    functionObject(frame, cls, (callFrame, [value]) => javaEquals(callFrame, target, value))
+  ).typeParameters = [element];
+  const negated: TypeVariable = { name: 'T', bounds: [objectType] };
+  addMethod(
+    cls,
+    'not',
+    [classType(cls, superOf(typeOf(negated)))],
+    classType(cls, typeOf(negated)),
+    true,
+    (frame, _, [target]) => {
+      if (target === undefined) throwBuiltin(frame, 'NullPointerException');
+      return functionObject(frame, cls, (callFrame, [value]) => callFunction(callFrame, cls, target, [value]) !== true);
+    }
+  ).typeParameters = [negated];
 }
 
 interface Functional {
@@ -550,6 +602,7 @@ type DefaultFunctions = Parameters<typeof defineCollectionDefaults>[2];
 /** `Iterable.forEach` and `Collection.removeIf`, which every builtin collection inherits. */
 function defineIterableDefaults(collections: Collections, functions: DefaultFunctions): void {
   const { iterableClass, collectionClass } = collections;
+  const removesOnlyMatches = new Set([collections.emptyList, collections.copiesList, collections.emptySet]);
   const [iterableT] = iterableClass.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
   addMethod(
     iterableClass,
@@ -587,7 +640,10 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     BOOLEAN,
     false,
     (frame, receiver, [filter]) => {
-      checkModifiable(frame, receiver, false);
+      // Collections' empty lists and sets and nCopies reject only a removal, as Collection.removeIf's default does;
+      // the other unmodifiable collections reject every call before looking at the predicate.
+      if (!removesOnlyMatches.has((receiver as JavaObject).cls)) checkModifiable(frame, receiver, false);
+      if (filter === undefined) throwBuiltin(frame, 'NullPointerException');
       return removeMatching(
         frame,
         receiver,
@@ -595,11 +651,21 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
       );
     }
   );
-  defineBulkOperations(collectionClass);
+  defineBulkOperations(collections);
 }
 
 /** `containsAll`, `removeAll`, and `retainAll`, which ask the other collection whether it contains each element. */
-function defineBulkOperations(collectionClass: ClassInfo): void {
+function defineBulkOperations(collections: Collections): void {
+  const { collectionClass } = collections;
+  // Collections' empty and singleton collections and nCopies reject a bulk removal only when it removes anything, as
+  // AbstractCollection's removeAll and retainAll do.
+  const removesOnlyChanges = new Set([
+    collections.emptyList,
+    collections.singletonList,
+    collections.copiesList,
+    collections.emptySet,
+    collections.singletonSet,
+  ]);
   const otherType = classType(collectionClass, { kind: 'wildcard', bound: undefined, isSuper: false });
   const contains = (frame: Frame, collection: Value, item: Value): boolean => {
     if (collection === undefined) return throwBuiltin(frame, 'NullPointerException');
@@ -613,8 +679,11 @@ function defineBulkOperations(collectionClass: ClassInfo): void {
     ['retainAll', true],
   ] as const) {
     addMethod(collectionClass, name, [otherType], BOOLEAN, false, (frame, receiver, [other]) => {
-      checkModifiable(frame, receiver, false);
+      const checksFirst = !removesOnlyChanges.has((receiver as JavaObject).cls);
+      if (checksFirst) checkModifiable(frame, receiver, false);
+      if (other === undefined) throwBuiltin(frame, 'NullPointerException');
       const removed = [...itemsOf(frame, receiver)].filter((item) => contains(frame, other, item) !== keepsContained);
+      if (!checksFirst && removed.length > 0) checkModifiable(frame, receiver, false);
       return removeAllOf(frame, receiver, removed);
     });
   }
@@ -633,8 +702,7 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     (frame, receiver, [comparator]) => {
       checkModifiable(frame, receiver, false);
       sortValues(frame, itemsOf(frame, receiver), comparator, functions.comparator, receiver as JavaObject);
-      const object = receiver as JavaObject;
-      object.modCount = (object.modCount ?? 0) + 1;
+      if (countsSortAsChange(receiver)) touch(receiver);
     }
   );
   addMethod(
@@ -710,7 +778,10 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     false,
     (frame, receiver, [key, mapping]) => {
       const entry = startComputing(frame, receiver, key);
-      if (entry && entry.value !== undefined) return entry.value;
+      if (entry && entry.value !== undefined) {
+        recordAccess(receiver, entry);
+        return entry.value;
+      }
       const value = unchanging(frame, receiver, () => callFunction(frame, functions.fn, mapping, [key]));
       if (value !== undefined) putEntry(frame, receiver, key, false, value, true);
       return value;
@@ -754,8 +825,7 @@ function defineComparatorSorts(context: Context, collections: Collections, funct
     (frame, _, [list, comparator]) => {
       checkModifiable(frame, list, false);
       sortValues(frame, itemsOf(frame, list), comparator, functions.comparator, list as JavaObject);
-      const object = list as JavaObject;
-      object.modCount = (object.modCount ?? 0) + 1;
+      if (countsSortAsChange(list)) touch(list);
     }
   );
   sortList.typeParameters = [listVariable];

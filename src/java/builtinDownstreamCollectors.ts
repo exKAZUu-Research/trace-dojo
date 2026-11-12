@@ -3,11 +3,12 @@ import { type CollectorFunctions, collectors } from './builtinCollectors';
 import { callFunction } from './builtinFunctions';
 import { createStore } from './builtinMaps';
 import { classType, type Context, extendsOf, superOf, typeVariable, variableType } from './builtinStreamSupport';
+import { numericCollector } from './builtinSummaryStatistics';
 import { addMethod } from './builtinSupport';
 import { box } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
 import { type ClassInfo, type JavaType, type NativeMethod, type TypeVariable, type WildcardType } from './types';
-import { type HashEntry, JavaObject, toInt32, type Value } from './values';
+import { type HashEntry, JavaObject, type Value } from './values';
 
 type Create = (frame: Frame, functions: CollectorFunctions) => JavaObject;
 
@@ -153,7 +154,7 @@ export function defineDownstreamCollectors(
   );
 }
 
-/** `summingInt`, `summingDouble`, `averagingInt`, and `averagingDouble`, which read a number from each element. */
+/** The summing, averaging, and summarizing collectors, which read a number from each element. */
 function defineNumericCollectors(
   context: Context,
   define: (
@@ -166,33 +167,23 @@ function defineNumericCollectors(
   create: Create
 ): void {
   const { fn, wrappers } = context;
-  const integerClass = wrappers.byKind.get('int') as ClassInfo;
-  const doubleClass = wrappers.byKind.get('double') as ClassInfo;
-  for (const [name, iface, resultClass, average] of [
-    ['summingInt', 'ToIntFunction', integerClass, false],
-    ['summingDouble', 'ToDoubleFunction', doubleClass, false],
-    ['averagingInt', 'ToIntFunction', doubleClass, true],
-    ['averagingDouble', 'ToDoubleFunction', doubleClass, true],
-  ] as const) {
-    define(
-      name,
-      ['T'],
-      ([t]) => ({ parameters: [classType(fn(iface), superOf(t))], result: collectorOf(t, ANY, resultClass.type) }),
-      (frame, _, [mapper]) =>
-        create(frame, {
-          supply: () => ({ sum: 0, count: 0 }),
-          accumulate: (accumulateFrame, container, value) => {
-            const state = container as { sum: number; count: number };
-            const number = callFunction(accumulateFrame, fn(iface), mapper, [value]) as number;
-            state.sum = resultClass === integerClass ? toInt32(state.sum + number) : state.sum + number;
-            state.count++;
-          },
-          finish: (finishFrame, container) => {
-            const { sum, count } = container as { sum: number; count: number };
-            return box(finishFrame, resultClass, average ? (count === 0 ? 0 : sum / count) : sum);
-          },
-        })
-    );
+  for (const kind of ['Int', 'Long', 'Double'] as const) {
+    const statisticsClass = fn(`${kind}SummaryStatistics`);
+    const iface = fn(`To${kind}Function`);
+    for (const [operation, resultClass] of [
+      ['summing', wrappers.byKind.get(kind === 'Int' ? 'int' : kind === 'Long' ? 'long' : 'double')],
+      ['averaging', wrappers.byKind.get('double')],
+      ['summarizing', statisticsClass],
+    ] as const) {
+      const result = resultClass as ClassInfo;
+      define(
+        `${operation}${kind}`,
+        ['T'],
+        ([t]) => ({ parameters: [classType(iface, superOf(t))], result: collectorOf(t, ANY, result.type) }),
+        (frame, _, [mapper]) =>
+          create(frame, numericCollector({ cls: statisticsClass, kind, iface }, mapper, operation, result))
+      );
+    }
   }
 }
 

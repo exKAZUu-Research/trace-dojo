@@ -4,7 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
 import type { ClassInfo, LocalInfo, MethodInfo } from './types';
-import { isSubclass, sameType, superinterfacesOf } from './types';
+import { arrayInterfaces, isSubclass, sameType, superinterfacesOf } from './types';
 import { defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
 
 /** A local that is out of scope or not yet assigned. */
@@ -71,6 +71,8 @@ export class Runtime {
   }
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
+  /** The classes whose initialization failed, with the exception that failed it, which later uses report. */
+  private readonly erroneousClasses = new Map<ClassInfo, JavaObject>();
   private readonly dispatchCache = new Map<MethodInfo, Map<ClassInfo, MethodInfo>>();
   /** The strings by text that the program's literals and constants are, which `String.intern()` returns and extends. */
   internedStrings = new Map<string, JavaString>();
@@ -128,24 +130,51 @@ export class Runtime {
 
   /** Initializes a class on its first active use, superclass first, as the JVM does. */
   initializeClass(frame: Frame, cls: ClassInfo): void {
+    const failure = this.erroneousClasses.get(cls);
+    if (failure) this.throwUninitialized(frame, cls, failure);
     if (this.staticValues.has(cls) || this.initializingClasses.has(cls)) return;
-    if (cls.superclass) this.initializeClass(frame, cls.superclass);
+    try {
+      if (cls.superclass) this.initializeClass(frame, cls.superclass);
+    } catch (error) {
+      if (error instanceof JavaThrow) this.erroneousClasses.set(cls, error.value);
+      throw error;
+    }
     this.initializingClasses.add(cls);
     const values: Value[] = Array.from({ length: cls.staticFieldCount });
     for (const field of cls.staticFields) values[field.slot] = field.constant ?? defaultValue(field.type);
     this.staticValues.set(cls, values);
     try {
-      if (cls.initializeStatics) {
-        const initializerFrame = this.pushFrame(frame, undefined, [], undefined, undefined);
-        try {
-          cls.initializeStatics(initializerFrame);
-        } finally {
-          this.popFrame();
-        }
-      }
+      if (cls.initializeStatics) this.runStaticInitializers(frame, cls, cls.initializeStatics);
     } finally {
       this.initializingClasses.delete(cls);
     }
+  }
+
+  /**
+   * Runs a class's static initializers, after whose failure the class is erroneous: an Error propagates as it is, and
+   * another exception is wrapped in `ExceptionInInitializerError` (JLS 12.4.2).
+   */
+  private runStaticInitializers(frame: Frame, cls: ClassInfo, initializeStatics: (frame: Frame) => void): void {
+    const initializerFrame = this.pushFrame(frame, undefined, [], undefined, undefined);
+    try {
+      initializeStatics(initializerFrame);
+    } catch (error) {
+      if (!(error instanceof JavaThrow)) throw error;
+      this.erroneousClasses.set(cls, error.value);
+      this.staticValues.delete(cls);
+      if (this.isInstance(error.value, this.builtins.classes.get('Error') as ClassInfo)) throw error;
+      throwBuiltin(frame, 'ExceptionInInitializerError', undefined, error.value);
+    } finally {
+      this.popFrame();
+    }
+  }
+
+  /** Reports a use of a class whose initialization failed, with the cause that the JDK records. */
+  private throwUninitialized(frame: Frame, cls: ClassInfo, failure: JavaObject): never {
+    const description = this.invokeToString(frame, failure)?.value ?? 'null';
+    const cause = new JavaObject(this.builtins.classes.get('ExceptionInInitializerError') as ClassInfo);
+    cause.message = new JavaString(`Exception ${description} [in thread "main"]`);
+    return throwBuiltin(frame, 'NoClassDefFoundError', `Could not initialize class ${cls.binaryName}`, cause);
   }
 
   pushFrame(
@@ -275,7 +304,7 @@ export class Runtime {
     if (value instanceof JavaObject) return isSubclass(value.cls, cls);
     if (value instanceof JavaString)
       return isSubclass(this.builtins.stringClass, cls) || cls === this.builtins.objectClass;
-    if (value instanceof JavaArray) return cls === this.builtins.objectClass;
+    if (value instanceof JavaArray) return cls === this.builtins.objectClass || arrayInterfaces.has(cls);
     return false;
   }
 }

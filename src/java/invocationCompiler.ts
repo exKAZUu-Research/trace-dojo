@@ -79,7 +79,10 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     const bindings = memberBindings(type, cls);
     const constructor = this.selectMethod(
       expression,
-      cls.constructors.map((candidate) => methodView(candidate, bindings)),
+      this.withConstructorTypeArguments(
+        expression.typeArgs,
+        cls.constructors.map((candidate) => methodView(candidate, bindings))
+      ),
       argTypes,
       `コンストラクタ ${cls.name}`
     );
@@ -142,7 +145,10 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       const bindings = memberBindings(base, baseClass);
       superConstructor = this.selectMethod(
         expression,
-        baseClass.constructors.map((candidate) => methodView(candidate, bindings)),
+        this.withConstructorTypeArguments(
+          expression.typeArgs,
+          baseClass.constructors.map((candidate) => methodView(candidate, bindings))
+        ),
         args.map((arg) => arg.type),
         `コンストラクタ ${baseClass.name}`
       );
@@ -154,6 +160,15 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     this.checkThrown(context, expression, constructor.thrownTypes);
     const convertedArgs = this.convertArguments(context, constructor, args, expression.args);
     return this.compileCreation(context, expression, cls, cls.type, constructor, convertedArgs);
+  }
+
+  /** The constructors instantiated with explicit type arguments, as `new <String>Box(s)` and `<String>this(s)` write. */
+  protected withConstructorTypeArguments(typeArgs: TypeSyntax[] | undefined, constructors: MethodInfo[]): MethodInfo[] {
+    if (!typeArgs) return constructors;
+    return this.withTypeArguments(
+      constructors,
+      typeArgs.map((typeArg) => this.resolveTypeArgument(typeArg))
+    );
   }
 
   /**
@@ -441,8 +456,8 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
   ): CallTarget {
     if (context.isStatic)
       this.noInstanceError(context, expression, 'super', 'static メソッドの中では super を使えません。');
-    if (expression.superInterface)
-      return this.resolveInterfaceSuperCall(context, expression, expression.superInterface);
+    if (expression.superQualifier)
+      return this.resolveQualifiedSuperCall(context, expression, expression.superQualifier);
     if (context.cls.kind === 'interface') this.error(expression, 'インターフェースの中では super を使えません。');
     const owner = context.cls.superclass as ClassInfo;
     const receiver = superValue(context);
@@ -501,14 +516,22 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     });
   }
 
-  /** `Interface.super.m()`, which calls the default method of a direct superinterface. */
-  protected resolveInterfaceSuperCall(
+  /**
+   * `Interface.super.m()`, which calls the default method of a direct superinterface, or `Outer.super.m()`, which calls
+   * the method of the superclass of this class or of an enclosing class on that class's instance.
+   */
+  protected resolveQualifiedSuperCall(
     context: MethodContext,
     expression: Extract<Expression, { kind: 'call' }>,
     syntax: TypeSyntax
   ): CallTarget {
     const type = this.resolveType(syntax);
-    if (type.kind !== 'class' || type.cls.kind !== 'interface' || !context.cls.interfaces.includes(type.cls)) {
+    if (type.kind !== 'class' || type.cls.kind !== 'interface') {
+      const { superclass: owner, receiver } = this.qualifiedSuper(context, expression, syntax);
+      const candidates = this.viewMethods(this.collectMethods(owner, expression.name), receiver.type);
+      return { candidates, owner, receiver };
+    }
+    if (!context.cls.interfaces.includes(type.cls)) {
       return this.error(expression, `${typeName(type)}.super は、直接実装しているインターフェースにしか使えません。`);
     }
     const receiver: CompiledValue = {
