@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 416 -- The builtin functions and their namespace belong together.
 import { abstractSubclassCheck } from './abstractClasses';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
@@ -30,6 +29,7 @@ import {
 import { binaryOp, compareOp } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { iterStr, strLength } from './strings';
+import { sum } from './sum';
 import { turtleClass } from './turtle';
 import { sortList } from './typeContainers';
 import { unionClass } from './typeHints';
@@ -270,45 +270,6 @@ function printTexts(kwargs: Kwargs): { separator: string; end: string } {
     throw typeError(`sep must be None or a string, not ${typeName(separator)}`);
   if (end !== None && typeof end !== 'string') throw typeError(`end must be None or a string, not ${typeName(end)}`);
   return { separator: typeof separator === 'string' ? separator : ' ', end: typeof end === 'string' ? end : '\n' };
-}
-
-// code-gauge-allow functionNcss 33 -- Follows CPython's builtin sum, including its float compensation.
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows CPython's builtin sum, including its float compensation.
-function sum(args: PyValue[], kwargs: Kwargs): PyValue {
-  if (args.length === 0) throw typeError('sum() takes at least 1 positional argument (0 given)');
-  checkArgs({ qualified: 'sum', min: 1, max: 2, style: 'takes', keywords: ['start'], named: 1 }, args, kwargs);
-  let result = argument(args, kwargs, 1, 'start') ?? 0n;
-  if (typeof result === 'string') throw typeError("sum() can't sum strings [use ''.join(seq) instead]");
-  const runtime = currentRuntime();
-  const next = iterate(args[0]);
-  let item = next();
-  while (item !== DONE && typeof result === 'bigint' && (typeof item === 'bigint' || typeof item === 'boolean')) {
-    runtime.spend();
-    result += BigInt(item);
-    item = next();
-  }
-  if (item !== DONE && typeof result === 'bigint') {
-    result = binaryOp('+', result, item);
-    item = next();
-  }
-  if (typeof result === 'number') {
-    let high = result;
-    let low = 0;
-    for (; item !== DONE; item = next()) {
-      runtime.spend();
-      if (typeof item !== 'number' && typeof item !== 'bigint' && typeof item !== 'boolean') break;
-      const x = asFloat(item);
-      const total = high + x;
-      low += Math.abs(high) >= Math.abs(x) ? high - total + x : x - total + high;
-      high = total;
-    }
-    result = low && Number.isFinite(low) ? high + low : high;
-  }
-  for (; item !== DONE; item = next()) {
-    runtime.spend();
-    result = binaryOp('+', result, item);
-  }
-  return result;
 }
 
 function minMax(name: 'min' | 'max'): (args: PyValue[], kwargs: Kwargs) => PyValue {
