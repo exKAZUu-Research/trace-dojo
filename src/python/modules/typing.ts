@@ -12,7 +12,9 @@ import {
   concatenateGetItem,
   forwardRefClass,
   genericAliasClass,
+  isAlias,
   literalGetItem,
+  mapAliasArgs,
   newSpecialAlias,
   newSpecialForm,
   optionalGetItem,
@@ -328,8 +330,12 @@ function stripAnnotations(value: PyValue): PyValue {
     const [inner] = (getAttribute(value, '__args__') as PyTuple).items;
     return stripAnnotations(inner);
   }
-  if (value.cls === unionClass) return unionOf((value.data as PyValue[]).map(stripAnnotations));
-  return value;
+  if (value.cls === unionClass) {
+    const members = value.data as PyValue[];
+    const stripped = members.map(stripAnnotations);
+    return stripped.every((member, index) => member === members[index]) ? value : unionOf(stripped);
+  }
+  return isAlias(value) ? mapAliasArgs(value, stripAnnotations) : value;
 }
 
 function formName(value: PyOpaque): string {

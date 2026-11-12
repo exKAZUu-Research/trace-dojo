@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 422 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 432 -- The methods and attributes of the builtin types it defines belong together.
 import { isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { method } from './define';
@@ -139,6 +139,17 @@ function newTypingAlias(
   cls = typingAliasClass
 ): PyOpaque {
   return new PyOpaque(cls, '', { origin, args, name, inst } satisfies AliasData);
+}
+
+/**
+ * `value` with each argument mapped, as _GenericAlias.copy_with and `GenericAlias(origin, args)` build it, or `value`
+ * itself when no argument changes.
+ */
+export function mapAliasArgs(value: PyOpaque, map: (arg: PyValue) => PyValue): PyOpaque {
+  const { args } = aliasOf(value);
+  const mapped = args.map(map);
+  if (mapped.every((arg, index) => arg === args[index])) return value;
+  return new PyOpaque(value.cls, '', { ...aliasOf(value), args: mapped } satisfies AliasData);
 }
 
 export function isAlias(value: PyValue): value is PyOpaque {
@@ -432,6 +443,15 @@ method(callableTypeClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
   return newTypingAlias(data.origin, [...args, returns], 'Callable', true, callableAliasClass);
 });
 
+/**
+ * A typing alias's `__origin__`. An Annotated alias keeps the Annotated form as its origin and the wrapped type with
+ * the metadata as its args, which get_origin and get_args report, but its `__origin__` is the wrapped type.
+ */
+function originOf(self: PyOpaque): PyValue {
+  const alias = aliasOf(self);
+  return self.cls === annotatedAliasClass ? alias.args[0] : alias.origin;
+}
+
 function callAlias(
   alias: { origin: PyValue; name?: string; inst?: boolean },
   args: PyValue[],
@@ -460,7 +480,7 @@ for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, anno
     'expected',
     0,
     Number.POSITIVE_INFINITY,
-    (self, args, kwargs) => callAlias(aliasOf(self), args, kwargs),
+    (self, args, kwargs) => callAlias({ ...aliasOf(self), origin: originOf(self as PyOpaque) }, args, kwargs),
     { keywords: [] }
   );
   method(cls, '__or__', 'one', 1, 1, (self, [other]) => unionOf([self, other]));
@@ -471,10 +491,11 @@ for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, anno
   );
   cls.opaqueAttribute = (self, name) => {
     const alias = aliasOf(self);
-    if (name === '__origin__') return alias.origin;
-    if (name === '__args__') return newTuple(alias.args);
+    const isAnnotated = self.cls === annotatedAliasClass;
+    if (name === '__origin__') return originOf(self);
+    if (name === '__args__') return newTuple(isAnnotated ? alias.args.slice(0, 1) : alias.args);
     if (name === '__parameters__') return newTuple([]);
-    if (name === '__metadata__' && self.cls === annotatedAliasClass) return newTuple(alias.args.slice(1));
+    if (name === '__metadata__' && isAnnotated) return newTuple(alias.args.slice(1));
     if ((name === '__name__' || name === '__qualname__' || name === '_name') && alias.name !== undefined)
       return alias.name;
     if (name === '__module__') return 'typing';
