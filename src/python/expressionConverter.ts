@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 544 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { assignmentExpressionError } from './assignmentExpressions';
 import type {
   Argument,
   BinaryOperator,
@@ -365,6 +366,8 @@ export abstract class ExpressionConverter {
   }
 
   private namedExpression(node: Node): Expression {
+    const error = assignmentExpressionError(node);
+    if (error) fail(rowOf(node), error);
     const nameNode = field(node, 'name');
     const value = this.expression(field(node, 'value'));
     const { scope } = this.context;
@@ -447,6 +450,7 @@ export abstract class ExpressionConverter {
     const expressionNode = field(node, 'expression');
     const row = rowOf(node);
     if (expressionNode.type === 'yield') unsupported(node, '値を受け取る yield');
+    if (expressionNode.type === 'lambda') fail(row, 'f-string の { } の中の lambda は、( ) で囲んでください。');
     const expression =
       expressionNode.type === 'expression_list' || expressionNode.type === 'pattern_list'
         ? { kind: 'tuple' as const, elements: namedChildren(expressionNode).map((child) => this.element(child)), row }

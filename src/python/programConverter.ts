@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 692 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 696 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -30,6 +30,7 @@ import {
 import { ExpressionConverter } from './expressionConverter';
 import { isSupportedModule, unsupportedModuleFeature } from './moduleNames';
 import { literalKeyId } from './patternKeys';
+import { refuseReservedNames } from './reservedNames';
 import { fail, resolveScopes, ScopeBuilder } from './scopes';
 
 export const misplacedPythonAtomicMessage =
@@ -59,6 +60,7 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   convert(root: Node): Module {
+    refuseReservedNames(root);
     const body = this.block(namedChildren(root));
     resolveScopes(this.module);
     this.assignAtomicAnnotations();
@@ -703,6 +705,10 @@ export class ProgramConverter extends ExpressionConverter {
       case 'as_pattern': {
         const aliasNode = field(node, 'alias');
         if (aliasNode.text === '_') fail(row, 'as の後に _ は書けません。');
+        // The inner pattern is wrapped in a case_pattern node; a parenthesized one is a tuple_pattern inside it.
+        if (namedChildren(named[0])[0]?.type === 'as_pattern') {
+          fail(row, 'as を続けて書くときは、前のパターンを ( ) で囲んでください。');
+        }
         const pattern = this.pattern(named[0], names);
         return { kind: 'as', pattern, name: this.patternName(aliasNode, names), row };
       }
