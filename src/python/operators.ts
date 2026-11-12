@@ -918,7 +918,10 @@ export function contains(container: PyValue, item: PyValue): boolean {
 /** The number of items an iterator yields that equal a value, stopping at `limit` of them. */
 export function countEqual(next: NextFunction, item: PyValue, limit = Number.POSITIVE_INFINITY): number {
   let count = 0;
-  for (let element = next(); element !== DONE && count < limit; element = next()) {
+  // The limit is tested before the iterator is asked again: a generator must not run past the deciding item.
+  while (count < limit) {
+    const element = next();
+    if (element === DONE) break;
     currentRuntime().spend();
     if (equals(element, item)) count++;
   }
