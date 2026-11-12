@@ -1,11 +1,11 @@
 import { LIMITS } from '../../interpreter/limits';
 import { pyRepr } from '../conversions';
 import { builtin } from '../define';
+import { builtinMemberValue } from '../enums';
 import { runLibrarySource } from '../librarySource';
 import { registerHiddenAttributes, registerModule, registerUnsupportedAttributes } from '../modules';
 import { floatRepr, intToString, parseIntText, toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy, toArray } from '../objects';
-import { intEnumValue } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { repeatText } from '../stringBuilder';
 import { iterStr } from '../strings';
@@ -97,8 +97,9 @@ function write(state: EncodeState, text: string): void {
   state.parts.push(text);
 }
 
-function encode(value: PyValue, options: DumpOptions, level: number, state: EncodeState): void {
+function encode(member: PyValue, options: DumpOptions, level: number, state: EncodeState): void {
   currentRuntime().spend();
+  const value = builtinMemberValue(member);
   if (value instanceof PyList || value instanceof PyTuple) return encodeArray(value, options, level, state);
   if (value instanceof PyDict) return encodeObject(value, options, level, state);
   const text = scalarText(value, options, state);
@@ -114,8 +115,7 @@ function scalarText(value: PyValue, options: DumpOptions, state: EncodeState): s
   if (value === None) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return floatText(value, options);
-  const integer = typeof value === 'bigint' ? value : intEnumValue(value);
-  return typeof integer === 'bigint' ? intToString(integer) : undefined;
+  return typeof value === 'bigint' ? intToString(value) : undefined;
 }
 
 /** Quotes a string, refusing one that cannot fit before doing the work of escaping it. */
@@ -178,14 +178,14 @@ function writeNewline(options: DumpOptions, depth: number, state: EncodeState): 
 }
 
 /** The text of a dict key, or undefined for a key that `skipkeys` skips. */
-function keyText(key: PyValue, options: DumpOptions): string | undefined {
+function keyText(member: PyValue, options: DumpOptions): string | undefined {
+  const key = builtinMemberValue(member);
   if (typeof key === 'string') return key;
   if (typeof key === 'number') return floatText(key, options);
   if (key === true) return 'true';
   if (key === false) return 'false';
   if (key === None) return 'null';
-  const integer = intEnumValue(key);
-  if (typeof integer === 'bigint') return intToString(integer);
+  if (typeof key === 'bigint') return intToString(key);
   if (options.skipKeys) return undefined;
   throw typeError(`keys must be str, int, float, bool or None, not ${typeName(key)}`);
 }

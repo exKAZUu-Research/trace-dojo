@@ -120,6 +120,16 @@ export function finishEnumMember(member: PyInstance): PyValue {
   return value;
 }
 
+/**
+ * The int or str a member of an enum whose members CPython makes ints or strs (IntEnum, IntFlag, StrEnum) stands for,
+ * which consumers such as JSON encoders read in place of the member; any other value as it is.
+ */
+export function builtinMemberValue(value: PyValue): PyValue {
+  if (!(value instanceof PyInstance) || value.enumValue === undefined) return value;
+  const memberType = value.cls.lookup('_member_type_');
+  return memberType === intClass || memberType === strClass ? value.enumValue : value;
+}
+
 /** Sets the members that iterating the class gives, which exclude aliases. */
 export function setEnumMembers(cls: PyClass, members: PyInstance[]): void {
   cls.enumMembers = members;

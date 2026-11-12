@@ -28,3 +28,27 @@ check(lambda: json.dumps(loop), 'ValueError: Circular reference detected')
 check(lambda: json.dumps({(1, 2): 3}), 'TypeError: keys must be str, int, float, bool or None, not tuple')
 check(lambda: json.dumps([float("nan")], allow_nan=False), 'ValueError: Out of range float values are not JSON compliant: nan')
 check(lambda: json.dumps(set()), 'TypeError: Object of type set is not JSON serializable')
+
+# Members of enums whose members are ints or strs encode as those values, as values and as keys.
+from enum import Enum, IntEnum, IntFlag, StrEnum
+
+
+class Color(StrEnum):
+    RED = 'red'
+
+
+class Perm(IntFlag):
+    R = 1
+    W = 2
+
+
+class Level(IntEnum):
+    HIGH = 3
+
+
+class Plain(Enum):
+    ONE = 1
+
+
+check(lambda: json.dumps({'color': Color.RED, 'perm': Perm.R | Perm.W, 'level': Level.HIGH, Color.RED: 1, Perm.W: 2, Level.HIGH: 3}), repr('{"color": "red", "perm": 3, "level": 3, "red": 1, "2": 2, "3": 3}'))
+check(lambda: json.dumps(Plain.ONE), 'TypeError: Object of type Plain is not JSON serializable')
