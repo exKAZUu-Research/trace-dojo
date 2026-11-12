@@ -478,7 +478,7 @@ function defineFileWrites(context: IOContext, files: ClassInfo, { path }: FileTy
     bufferedWriter.type,
     (frame, _, [file, given]) => {
       const writer = frame.runtime.allocateObject(frame, bufferedWriter);
-      writeSinks.set(writer, new BufferedSink(openForWriting(frame, file, given), BUFFER_SIZE));
+      writeSinks.set(writer, new BufferedSink(openForWriting(frame, file, given), BUFFER_SIZE, true));
       return writer;
     }
   ).isVarargs = true;

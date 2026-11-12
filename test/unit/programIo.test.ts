@@ -176,6 +176,12 @@ test.each([
     'abcd\nabcdefgh\n',
   ],
   [
+    'a buffered writer given arrays and chars',
+    "StringWriter s = new StringWriter(); BufferedWriter w = new BufferedWriter(s, 4); w.write(\"ab\"); w.write(new char[] { 'c', 'd', 'e', 'f', 'g' }); System.out.println(s); w.write(new char[] { 'h', 'i' }); w.write(new char[] { 'j', 'k', 'l' }); System.out.println(s); for (char c : \"mnop\".toCharArray()) w.write(c); System.out.println(s); w.write('q'); System.out.println(s);",
+    {},
+    'abcdefg\nabcdefghi\nabcdefghijklm\nabcdefghijklm\n',
+  ],
+  [
     'a file that a reader reads after the program rewrites it',
     'FileInputStream in = new FileInputStream("x"); Files.writeString(Path.of("x"), "new"); System.out.println((char) in.read());',
     { x: 'old' },

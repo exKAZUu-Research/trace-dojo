@@ -133,8 +133,11 @@ export const STANDARD_INPUT: ReadSource = {
 };
 
 /** Where a writer or an output stream sends what it writes. */
+/** Which `write` overload wrote a text: one taking a string, an array of chars, or one char. */
+export type WriteKind = 'string' | 'chars' | 'char';
+
 export interface Sink {
-  write(frame: Frame, text: string): void;
+  write(frame: Frame, text: string, kind?: WriteKind): void;
   flush(frame: Frame): void;
   close(frame: Frame): void;
 }
@@ -159,20 +162,39 @@ export class BufferedSink implements Sink {
   private pending = '';
   private isClosed = false;
 
+  /**
+   * @param isBufferedWriter Whether the buffer is a `BufferedWriter`'s, which treats each `write` overload as Java's
+   * does, rather than an encoder's, which takes every text in buffer-sized chunks.
+   */
   constructor(
     private readonly target: Sink,
-    private readonly capacity: number
+    private readonly capacity: number,
+    private readonly isBufferedWriter = false
   ) {}
 
-  /** Fills the buffer, passing on each full buffer and keeping the rest, as `BufferedWriter.write(String)` does. */
-  write(frame: Frame, text: string): void {
+  /**
+   * Fills the buffer, passing on each full buffer and keeping the rest, as `BufferedWriter.write(String)` does. A
+   * `BufferedWriter` passes on an array as large as its buffer at once and makes room for a smaller one, and passes on
+   * a full buffer only before the next char.
+   */
+  write(frame: Frame, text: string, kind: WriteKind = 'string'): void {
     this.ensureOpen(frame);
     if (this.capacity === 0) {
-      this.target.write(frame, text);
+      this.target.write(frame, text, kind);
       return;
     }
     // The buffered text is a string the run builds, whatever capacity the program chose.
     frame.runtime.allocateString(frame, Math.min(this.pending.length + text.length, this.capacity), text.length);
+    if (this.isBufferedWriter && kind !== 'string') {
+      if (kind === 'chars' && text.length >= this.capacity) {
+        this.drain(frame);
+        this.target.write(frame, text, 'chars');
+        return;
+      }
+      if (this.pending.length + text.length > this.capacity || this.pending.length >= this.capacity) this.drain(frame);
+      this.pending += text;
+      return;
+    }
     for (let offset = 0; offset < text.length;) {
       const end = offset + this.capacity - this.pending.length;
       this.pending += text.slice(offset, end);
@@ -205,7 +227,7 @@ export class BufferedSink implements Sink {
     if (this.pending === '') return;
     const text = this.pending;
     this.pending = '';
-    this.target.write(frame, text);
+    this.target.write(frame, text, 'chars');
   }
 }
 

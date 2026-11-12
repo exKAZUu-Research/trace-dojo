@@ -10,6 +10,7 @@ import {
   sinkOf,
   standardSink,
   throwsIO,
+  type WriteKind,
   writeSinks,
 } from './builtinIoSupport';
 import { withLocaleFirst } from './builtinLocale';
@@ -69,10 +70,10 @@ export function defineWriters(context: IOContext, closeable: ClassInfo, flushabl
 }
 
 /** What `write` methods do with the text they are given. */
-type WriteText = (frame: Frame, receiver: Value, text: string) => void;
+type WriteText = (frame: Frame, receiver: Value, text: string, kind: WriteKind) => void;
 
-function sinkWrite(frame: Frame, receiver: Value, text: string): void {
-  sinkOf(frame, receiver).write(frame, text);
+function sinkWrite(frame: Frame, receiver: Value, text: string, kind: WriteKind): void {
+  sinkOf(frame, receiver).write(frame, text, kind);
 }
 
 /**
@@ -92,31 +93,31 @@ function defineWriterMethods(
     if (overrides(name, parameterTypes)) declare(addMethod(cls, name, parameterTypes, returnType, false, native));
   };
   add('write', [INT], VOID, (frame, receiver, [code]) => {
-    write(frame, receiver, charToString((code as number) & 0xff_ff));
+    write(frame, receiver, charToString((code as number) & 0xff_ff), 'char');
   });
   add('write', [stringType], VOID, (frame, receiver, [value]) => {
     if (!(value instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
-    write(frame, receiver, value.value);
+    write(frame, receiver, value.value, 'string');
   });
   add('write', [stringType, INT, INT], VOID, (frame, receiver, [value, offset, length]) => {
     if (!(value instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
-    write(frame, receiver, sliceChecked(frame, value.value, offset as number, length as number));
+    write(frame, receiver, sliceChecked(frame, value.value, offset as number, length as number), 'string');
   });
   add('write', [CHAR_ARRAY], VOID, (frame, receiver, [array]) => {
     if (!(array instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
-    write(frame, receiver, charsOf(frame, array));
+    write(frame, receiver, charsOf(frame, array), 'chars');
   });
   add('write', [CHAR_ARRAY, INT, INT], VOID, (frame, receiver, [array, offset, length]) => {
     if (!(array instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
-    write(frame, receiver, sliceChecked(frame, charsOf(frame, array), offset as number, length as number));
+    write(frame, receiver, sliceChecked(frame, charsOf(frame, array), offset as number, length as number), 'chars');
   });
   // `append` takes a CharSequence, which these programs pass as a String.
   add('append', [CHAR], cls.type, (frame, receiver, [code]) => {
-    write(frame, receiver, charToString(code as number));
+    write(frame, receiver, charToString(code as number), 'char');
     return receiver;
   });
   add('append', [stringType], cls.type, (frame, receiver, [value]) => {
-    write(frame, receiver, value instanceof JavaString ? value.value : 'null');
+    write(frame, receiver, value instanceof JavaString ? value.value : 'null', 'string');
     return receiver;
   });
   if (!withFlushAndClose) return;
@@ -230,7 +231,8 @@ function defineBufferedWriter(context: IOContext, writer: ClassInfo): void {
       if (size !== undefined && (size as number) <= 0) {
         throwBuiltin(frame, 'IllegalArgumentException', 'Buffer size <= 0');
       }
-      writeSinks.set(receiver as JavaObject, new BufferedSink(sinkOf(frame, inner), (size as number) ?? BUFFER_SIZE));
+      const sink = new BufferedSink(sinkOf(frame, inner), (size as number | undefined) ?? BUFFER_SIZE, true);
+      writeSinks.set(receiver as JavaObject, sink);
     });
   }
   throwsIO(
@@ -258,7 +260,7 @@ function definePrintWriter(context: IOContext, writer: ClassInfo, outputStream: 
     printWriter,
     context.stringType,
     (method) => method,
-    (frame, receiver, text) => printTo(frame, receiver, text, false),
+    (frame, receiver, text, kind) => printTo(frame, receiver, text, false, kind),
     false
   );
   addMethod(printWriter, 'flush', [], VOID, false, (frame, receiver) => {
@@ -293,7 +295,7 @@ function definePrintWriterConstructors(
   // A PrintWriter of a stream encodes through a buffered writer, as Java's does.
   for (const parameterTypes of [[outputStream.type], [outputStream.type, BOOLEAN]]) {
     addConstructor(printWriter, parameterTypes, (frame, receiver, [stream, autoFlush]) => {
-      startPrinting(receiver, new BufferedSink(sinkOf(frame, stream), BUFFER_SIZE), autoFlush);
+      startPrinting(receiver, new BufferedSink(sinkOf(frame, stream), BUFFER_SIZE, true), autoFlush);
     });
   }
   defineFileOpeners(
@@ -301,7 +303,8 @@ function definePrintWriterConstructors(
     printWriter,
     { takesAppend: false, thrown: classOf(context, 'FileNotFoundException') },
     (frame, receiver, path) => {
-      startPrinting(receiver, new BufferedSink(fileSink(openFileWriter(frame, path, false)), BUFFER_SIZE), false);
+      const sink = new BufferedSink(fileSink(openFileWriter(frame, path, false)), BUFFER_SIZE, true);
+      startPrinting(receiver, sink, false);
     }
   );
 }
@@ -311,9 +314,9 @@ function startPrinting(receiver: Value, sink: Sink, autoFlush: Value): void {
   printWriterStates.set(receiver as JavaObject, { autoFlush: autoFlush === true, hasError: false, isClosed: false });
 }
 
-function printTo(frame: Frame, receiver: Value, text: string, isLine: boolean): void {
+function printTo(frame: Frame, receiver: Value, text: string, isLine: boolean, kind: WriteKind = 'string'): void {
   guarded(frame, receiver, (sink) => {
-    sink.write(frame, text);
+    sink.write(frame, text, kind);
     if (isLine && printWriterStates.get(receiver as JavaObject)?.autoFlush) sink.flush(frame);
   });
 }
