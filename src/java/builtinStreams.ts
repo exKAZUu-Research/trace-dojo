@@ -2,6 +2,7 @@ import { fitsElement, runtimeClassNameOf } from './builtinClass';
 import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
 import { sortedValues } from './builtinCollectionSupport';
 import { type CollectorFunctions, collectors, defineCollectors } from './builtinCollectors';
+import { defineDoubleStreamOperations } from './builtinDoubleStreams';
 import { callFunction, type Functions } from './builtinFunctions';
 import { createOptional, defineOptionals, type Optionals, stateOf as optionalState } from './builtinOptionals';
 import {
@@ -20,9 +21,9 @@ import {
   variableType,
 } from './builtinStreamSupport';
 import { addMethod, defineInterface, newString, type Registry } from './builtinSupport';
-import { box, type Wrappers } from './builtinWrappers';
+import { box, compareValues, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
-import { BOOLEAN, type ClassInfo, type ClassType, createClass, INT, type JavaType, LONG, VOID } from './types';
+import { BOOLEAN, type ClassInfo, type ClassType, createClass, DOUBLE, INT, type JavaType, LONG, VOID } from './types';
 import { charCodeOf, JavaArray, type JavaObject, type JavaString, toInt32, type Value } from './values';
 
 export function defineStreams(
@@ -51,11 +52,13 @@ export function defineStreams(
   return { stream: streams.stream, streamImpl: streams.streamImpl };
 }
 
-interface StreamTypes {
+export interface StreamTypes {
   stream: ClassInfo;
   intStream: ClassInfo;
+  doubleStream: ClassInfo;
   streamImpl: ClassInfo;
   intStreamImpl: ClassInfo;
+  doubleStreamImpl: ClassInfo;
 }
 
 /**
@@ -77,17 +80,26 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
   const { registry, objectType, wrappers } = context;
   const stream = defineInterface(registry, 'Stream', 'java.util.stream');
   const intStream = defineInterface(registry, 'IntStream', 'java.util.stream');
+  const doubleStream = defineInterface(registry, 'DoubleStream', 'java.util.stream');
   const t = typeVariable('T', objectType);
   stream.typeParameters = [t];
   const streamImpl = createClass('ReferencePipeline', context.objectClass, true);
   streamImpl.typeParameters = [typeVariable('T', objectType)];
   streamImpl.interfaces = [stream];
   streamImpl.supertypes.push(classType(stream, variableType(streamImpl.typeParameters[0])));
-  const intStreamImpl = createClass('IntPipeline', context.objectClass, true);
-  intStreamImpl.interfaces = [intStream];
-  intStreamImpl.supertypes.push(intStream.type as ClassType);
-  const types = { stream, intStream, streamImpl, intStreamImpl };
-  defineClosing(context, [stream, intStream]);
+  const [intStreamImpl, doubleStreamImpl] = (
+    [
+      ['IntPipeline', intStream],
+      ['DoublePipeline', doubleStream],
+    ] as const
+  ).map(([name, iface]) => {
+    const impl = createClass(name, context.objectClass, true);
+    impl.interfaces = [iface];
+    impl.supertypes.push(iface.type as ClassType);
+    return impl;
+  });
+  const types = { stream, intStream, doubleStream, streamImpl, intStreamImpl, doubleStreamImpl };
+  defineClosing(context, [stream, intStream, doubleStream]);
   const tType = variableType(t);
   for (const kind of [
     streamKind(context, optionals, { cls: stream, impl: streamImpl, element: tType, self: classType(stream, tType) }),
@@ -97,20 +109,28 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
       element: INT,
       self: intStream.type as ClassType,
     }),
+    streamKind(context, optionals, {
+      cls: doubleStream,
+      impl: doubleStreamImpl,
+      element: DOUBLE,
+      self: doubleStream.type as ClassType,
+    }),
   ]) {
     defineIntermediateOperations(kind);
     defineTerminalOperations(kind);
   }
   defineReferenceOperations(context, types, tType, collector);
   defineIntStreamOperations(context, types, optionals, wrappers.byKind.get('int') as ClassInfo);
+  defineDoubleStreamOperations(context, types, optionals);
   return types;
 }
 
-/** What the operations that `Stream` and `IntStream` share differ in. */
+/** What the operations that `Stream`, `IntStream`, and `DoubleStream` share differ in. */
 interface StreamKind {
   cls: ClassInfo;
   impl: ClassInfo;
-  isInt: boolean;
+  /** The prefix of a primitive stream's functional interfaces, which its elements' type names. */
+  primitive: 'Int' | 'Double' | undefined;
   self: ClassType;
   predicate: ClassInfo;
   predicateType: JavaType;
@@ -122,7 +142,7 @@ interface StreamKind {
   /** The function that combines two elements, as `reduce` takes it. */
   binary: ClassInfo;
   binaryType: JavaType;
-  /** The parameters `max` and `min` take: a comparator, except for an `IntStream`, whose ints have an order. */
+  /** The parameters `max` and `min` take: a comparator, except for a primitive stream, whose values have an order. */
   orderParameters: JavaType[];
 }
 
@@ -131,34 +151,52 @@ function streamKind(
   optionals: Optionals,
   { cls, impl, element, self }: { cls: ClassInfo; impl: ClassInfo; element: JavaType; self: ClassType }
 ): StreamKind {
-  const isInt = element === INT;
+  const primitive = element === INT ? 'Int' : element === DOUBLE ? 'Double' : undefined;
   const { fn } = context;
-  const predicate = isInt ? fn('IntPredicate') : fn('Predicate');
-  const consumer = isInt ? fn('IntConsumer') : fn('Consumer');
-  const optionalClass = isInt ? optionals.optionalInt : optionals.optional;
+  const predicate = fn(`${primitive ?? ''}Predicate`);
+  const consumer = fn(`${primitive ?? ''}Consumer`);
   const comparator = fn('Comparator');
-  const binary = isInt ? fn('IntBinaryOperator') : fn('BinaryOperator');
+  const binary = fn(`${primitive ?? ''}BinaryOperator`);
+  if (!primitive) {
+    return {
+      cls,
+      impl,
+      primitive,
+      self,
+      predicate,
+      predicateType: classType(predicate, superOf(element)),
+      consumer,
+      consumerType: classType(consumer, superOf(element)),
+      optionalClass: optionals.optional,
+      optionalType: classType(optionals.optional, element),
+      comparator,
+      binary,
+      binaryType: classType(binary, element),
+      orderParameters: [classType(comparator, superOf(element))],
+    };
+  }
+  const optionalClass = primitive === 'Int' ? optionals.optionalInt : optionals.optionalDouble;
   return {
     cls,
     impl,
-    isInt,
+    primitive,
     self,
     predicate,
-    predicateType: isInt ? predicate.type : classType(predicate, superOf(element)),
+    predicateType: predicate.type,
     consumer,
-    consumerType: isInt ? consumer.type : classType(consumer, superOf(element)),
+    consumerType: consumer.type,
     optionalClass,
-    optionalType: isInt ? optionalClass.type : classType(optionalClass, element),
+    optionalType: optionalClass.type,
     comparator,
     binary,
-    binaryType: isInt ? binary.type : classType(binary, element),
-    orderParameters: isInt ? [] : [classType(comparator, superOf(element))],
+    binaryType: binary.type,
+    orderParameters: [],
   };
 }
 
 /** The operations that make a stream from another: filtering, limiting, skipping, deduplicating, and sorting. */
 function defineIntermediateOperations(kind: StreamKind): void {
-  const { cls, impl, isInt, self, predicate } = kind;
+  const { cls, impl, primitive, self, predicate } = kind;
   const test = (frame: Frame, function_: Value) => (value: Value) =>
     callFunction(frame, predicate, function_, [value]) === true;
   op(cls, 'filter', [kind.predicateType], self, (frame, receiver, [function_]) =>
@@ -191,10 +229,13 @@ function defineIntermediateOperations(kind: StreamKind): void {
     );
   });
   op(cls, 'distinct', [], self, (frame, receiver) =>
-    derive(impl, receiver, frame, (items) => distinct(items, (a, b) => (isInt ? a === b : javaEquals(frame, a, b))))
+    derive(impl, receiver, frame, (items) =>
+      // A DoubleStream compares as Double.equals does, which tells -0.0 from 0.0 and finds NaN equal to NaN.
+      distinct(items, (a, b) => (primitive ? Object.is(a, b) : javaEquals(frame, a, b)))
+    )
   );
   const natural = (frame: Frame) => (a: Value, b: Value) =>
-    isInt ? (a as number) - (b as number) : compareNatural(frame, a, b);
+    primitive ? compareValues(a, b) : compareNatural(frame, a, b);
   op(cls, 'sorted', [], self, (frame, receiver) =>
     derive(impl, receiver, frame, (items) => sortedValues([...iterate(items)], natural(frame))[Symbol.iterator](), true)
   );
@@ -321,7 +362,13 @@ function extremeOf(frame: Frame, kind: StreamKind, receiver: Value, order: Value
   let best: Value;
   let found = false;
   for (const value of iterate(take(frame, receiver))) {
-    const difference = kind.isInt
+    if (kind.primitive === 'Double') {
+      // DoubleStream reduces with Math.max or Math.min, which give NaN for any NaN and order -0.0 below 0.0.
+      best = found ? (sign > 0 ? Math.max : Math.min)(best as number, value as number) : value;
+      found = true;
+      continue;
+    }
+    const difference = kind.primitive
       ? (value as number) - (best as number)
       : found
         ? (callFunction(frame, kind.comparator, order, [value, best]) as number)
@@ -463,7 +510,7 @@ function defineFlatMap(context: Context, types: StreamTypes, tType: JavaType): v
 }
 
 /** The elements that applying the function object `mapper` of `iface` gives. */
-function* mapped(frame: Frame, items: Iterator<Value>, iface: ClassInfo, mapper: Value): Generator<Value> {
+export function* mapped(frame: Frame, items: Iterator<Value>, iface: ClassInfo, mapper: Value): Generator<Value> {
   for (const value of iterate(items)) yield callFunction(frame, iface, mapper, [value]);
 }
 

@@ -202,7 +202,7 @@ function defineNumericCollectors(
 }
 
 /** A running sum, of doubles with the compensation for lost low-order bits that the JDK's Kahan summation keeps. */
-interface NumericSum {
+export interface NumericSum {
   sum: number;
   compensation: number;
   simpleSum: number;
@@ -210,7 +210,7 @@ interface NumericSum {
 }
 
 /** Adds as `Collectors.sumWithCompensation` does. */
-function addWithCompensation(state: NumericSum, value: number): void {
+export function addWithCompensation(state: NumericSum, value: number): void {
   const corrected = value - state.compensation;
   const sum = state.sum + corrected;
   state.compensation = sum - state.sum - corrected;
@@ -219,7 +219,7 @@ function addWithCompensation(state: NumericSum, value: number): void {
 }
 
 /** The sum as `Collectors.computeFinalSum` gives it, which keeps an infinite sum that the compensation makes NaN. */
-function compensatedSum(state: NumericSum): number {
+export function compensatedSum(state: NumericSum): number {
   const sum = state.sum - state.compensation;
   return Number.isNaN(sum) && !Number.isFinite(state.simpleSum) && !Number.isNaN(state.simpleSum)
     ? state.simpleSum

@@ -485,6 +485,39 @@ public class Main {
   });
 });
 
+test("Java's DoubleStream sums with compensation and orders, compares, and reduces doubles as the JDK does", () => {
+  const program = `import java.util.*;
+import java.util.stream.*;
+public class Main {
+  record Item(String name, double price) {}
+  public static void main(String[] args) {
+    List<Item> items = List.of(new Item("a", 1.5), new Item("b", 2.25), new Item("c", 0.1));
+    System.out.println(items.stream().mapToDouble(Item::price).sum());
+    System.out.println(items.stream().mapToDouble(Item::price).average().getAsDouble());
+    System.out.println(items.stream().mapToDouble(Item::price).max().getAsDouble() + " " + items.stream().mapToDouble(i -> i.price()).min());
+    System.out.println(DoubleStream.of(1e16, 1.0, 1.0, -1e16).sum() + " " + DoubleStream.of(1e16, 1.0, 1.0, -1e16).average().getAsDouble());
+    System.out.println(DoubleStream.of(Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY).sum() + " " + DoubleStream.of(Double.POSITIVE_INFINITY, 1).sum());
+    System.out.println(DoubleStream.of().average() + " " + DoubleStream.of().sum() + " " + DoubleStream.of(3, 1, 2).sorted().boxed().toList());
+    System.out.println(Arrays.toString(DoubleStream.of(0.0, -0.0, Double.NaN, 0.0, Double.NaN).distinct().toArray()));
+    System.out.println(Arrays.toString(DoubleStream.of(2, Double.NaN, -0.0, 0.0, -1).sorted().toArray()));
+    System.out.println(DoubleStream.of(1, Double.NaN).max() + " " + DoubleStream.of(-0.0, 0.0).max() + " " + DoubleStream.of(0.0, -0.0).min());
+    double[] arr = {1.5, 2.5};
+    System.out.println(Arrays.stream(arr).map(x -> x * 2).filter(x -> x > 3).count() + " " + Arrays.stream(arr).mapToObj(x -> "v" + x).collect(Collectors.joining(",")));
+    System.out.println(IntStream.rangeClosed(1, 4).mapToDouble(i -> i / 2.0).sum() + " " + IntStream.range(0, 3).asDoubleStream().boxed().toList());
+    System.out.println(DoubleStream.of(1.7, 2.2).mapToInt(x -> (int) x).sum() + " " + DoubleStream.of(1, 2, 3).reduce(0, (a, b) -> a + b) + " " + DoubleStream.of(1, 2).reduce(Double::sum));
+    System.out.println(DoubleStream.of(1, 2, 3).anyMatch(x -> x > 2) + " " + DoubleStream.of(1, 2).limit(1).findFirst().getAsDouble() + " " + DoubleStream.of(4, 5).skip(1).boxed().toList());
+    DoubleStream.of(0.1, 0.2).forEach(x -> System.out.print(x + ";"));
+    System.out.println();
+    System.out.println(items.stream().mapToDouble(Item::price).map(Math::floor).sum());
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '3.85\n1.2833333333333334\n2.25 OptionalDouble[0.1]\n2.0 0.5\nNaN Infinity\nOptionalDouble.empty 0.0 [1.0, 2.0, 3.0]\n[0.0, -0.0, NaN]\n[-1.0, -0.0, 0.0, 2.0, NaN]\nOptionalDouble[NaN] OptionalDouble[0.0] OptionalDouble[-0.0]\n1 v1.5,v2.5\n5.0 [0.0, 1.0, 2.0]\n3 6.0 OptionalDouble[3.0]\ntrue 1.0 [5.0]\n0.1;0.2;\n3.0\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

@@ -168,6 +168,10 @@ export function defineFunctions(
   defineFunctional(context, 'IntBinaryOperator', pkg, [], 'applyAsInt', () => [[INT, INT], INT]);
   defineFunctional(context, 'IntConsumer', pkg, [], 'accept', () => [[INT], VOID]);
   defineFunctional(context, 'DoubleUnaryOperator', pkg, [], 'applyAsDouble', () => [[DOUBLE], DOUBLE]);
+  defineFunctional(context, 'DoubleConsumer', pkg, [], 'accept', () => [[DOUBLE], VOID]);
+  defineFunctional(context, 'DoubleFunction', pkg, ['R'], 'apply', (r) => [[DOUBLE], r]);
+  defineFunctional(context, 'IntToDoubleFunction', pkg, [], 'applyAsDouble', () => [[INT], DOUBLE]);
+  defineFunctional(context, 'DoubleToIntFunction', pkg, [], 'applyAsInt', () => [[DOUBLE], INT]);
   defineFunctional(context, 'DoubleBinaryOperator', pkg, [], 'applyAsDouble', () => [[DOUBLE, DOUBLE], DOUBLE]);
   const unary = defineInterface(registry, 'UnaryOperator', pkg);
   const [unaryT] = addTypeParameters(unary, ['T'], context.objectType);
