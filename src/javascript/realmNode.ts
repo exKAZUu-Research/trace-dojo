@@ -1,4 +1,4 @@
-import { FileSystemError, type FileSystemErrorCode } from '../interpreter/programIo';
+import { FileSystemError, type FileSystemErrorCode, type OpenMode } from '../interpreter/programIo';
 import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
@@ -51,16 +51,12 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     if (runtime.io.files.kindOf(path) === 'directory') throwNodeError(runtime, 'EISDIR', 'read');
     return withErrors(runtime, 'open', path, () => runtime.io.openReader(path).readRest());
   });
-  for (const [name, truncate] of [
-    ['writeFileSync', true],
-    ['appendFileSync', false],
+  for (const [name, defaultFlag] of [
+    ['writeFileSync', 'w'],
+    ['appendFileSync', 'a'],
   ] as const) {
     builder.method(fs, name, 3, ({ runtime, args }) => {
-      const path = requirePath(runtime, args[0]);
-      const data = requireText(runtime, args[1], 'data');
-      withErrors(runtime, 'open', path, () =>
-        runtime.io.files.open(path, { create: 'always', truncate, append: !truncate }).write(data)
-      );
+      writeFile(runtime, args, defaultFlag);
       return;
     });
   }
@@ -96,6 +92,15 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
   });
 }
 
+/** `writeFileSync` and `appendFileSync`, which open the file with the flag of their options or else `defaultFlag`. */
+function writeFile(runtime: Runtime, [file, content, options]: Value[], defaultFlag: string): void {
+  const path = requirePath(runtime, file);
+  const data = requireText(runtime, content, 'data');
+  const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
+  const mode = openModeOf(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
+  withErrors(runtime, 'open', path, () => runtime.io.files.open(path, mode).write(data));
+}
+
 /** Runs a file system call, throwing the error Node.js throws for its failure. */
 function withErrors<T>(runtime: Runtime, syscall: string, path: string, run: () => T, destination?: string): T {
   try {
@@ -122,6 +127,17 @@ function throwNodeError(
   if (path !== undefined) runtime.set(error, 'path', path);
   if (destination !== undefined) runtime.set(error, 'dest', destination);
   throw new JsThrow(error);
+}
+
+/** How Node.js opens a file to write with a file system flag such as `w`, `wx`, `a`, or `r+`. */
+function openModeOf(runtime: Runtime, flag: string): OpenMode {
+  const match = /^(?:(?<append>a|as|ax|xa)|(?<write>w|wx|xw)|(?<update>r|rs))\+?$/.exec(flag);
+  if (!match?.groups || (match.groups.update && !flag.endsWith('+'))) {
+    return runtime.throwError('TypeError', `The argument 'flags' is invalid. Received '${flag}'`);
+  }
+  const { append, write } = match.groups;
+  const create = flag.includes('x') ? 'exclusive' : append || write ? 'always' : 'never';
+  return { create, truncate: write !== undefined, append: append !== undefined };
 }
 
 function requirePath(runtime: Runtime, value: Value): string {

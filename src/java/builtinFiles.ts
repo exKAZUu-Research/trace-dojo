@@ -480,9 +480,6 @@ function defineFileWrites(context: IOContext, files: ClassInfo, { path }: FileTy
 function openForWriting(frame: Frame, file: Value, given: Value): Sink {
   const text = pathTextOf(frame, file);
   const mode = openModeOf(frame, optionNamesOf(frame, given));
-  if (fileSystemOf(frame).kindOf(text) === 'directory') {
-    throwBuiltin(frame, 'FileSystemException', `${text}: Is a directory`);
-  }
   return fileSink(withNioErrors(frame, text, () => fileSystemOf(frame).open(text, mode)));
 }
 
@@ -589,20 +586,19 @@ function copyOrMove(frame: Frame, isMove: boolean, from: string, to: string, giv
   if (kind === undefined) throwBuiltin(frame, 'NoSuchFileException', from);
   // Copying or moving a file to itself does nothing, as the paths name one file.
   if (resolvePath(from) === resolvePath(to)) return;
-  if (system.kindOf(to) !== undefined && !optionNamesOf(frame, given).includes('REPLACE_EXISTING')) {
-    throwBuiltin(frame, 'FileAlreadyExistsException', to);
+  if (system.kindOf(to) !== undefined) {
+    if (!optionNamesOf(frame, given).includes('REPLACE_EXISTING'))
+      throwBuiltin(frame, 'FileAlreadyExistsException', to);
+    // The target is deleted, not overwritten, so that a handle still open on it writes to the old file.
+    withNioErrors(frame, to, () => system.remove(to));
   }
   withNioErrors(
     frame,
     from,
     () => {
-      if (isMove) return system.rename(from, to);
-      if (system.kindOf(to) === 'directory') system.remove(to);
-      if (kind === 'directory') {
-        system.createDirectory(to, false);
-        return;
-      }
-      return system.open(to, { create: 'always', truncate: true, append: false }).write(system.readFile(from));
+      if (isMove) system.rename(from, to);
+      else if (kind === 'directory') system.createDirectory(to, false);
+      else system.open(to, { create: 'exclusive', truncate: false, append: false }).write(system.readFile(from));
     },
     to
   );

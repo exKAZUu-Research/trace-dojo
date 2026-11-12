@@ -48,6 +48,10 @@ export function defineReaders(context: IOContext, closeable: ClassInfo): void {
     if (!(text instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
     readSources.set(receiver as JavaObject, new TextSource(frame.runtime.io.textReader(text.value)));
   });
+  // StringReader's close throws no IOException, though its reads still declare one.
+  addMethod(stringReader, 'close', [], VOID, false, (frame, receiver) => {
+    readSourceOf(frame, receiver).close(frame);
+  });
   defineBufferedReader(context, reader);
 }
 

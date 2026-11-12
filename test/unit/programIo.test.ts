@@ -170,6 +170,42 @@ test.each([
     'old\n',
   ],
   [
+    'streams of files closed by try-with-resources',
+    'try (java.util.stream.Stream<String> lines = Files.lines(Path.of("x"))) { System.out.println(lines.count()); } java.util.stream.Stream<String> s = java.util.stream.Stream.of("a"); s.close(); try { s.count(); } catch (IllegalStateException e) { System.out.println(e.getMessage()); }',
+    { x: 'a\nb' },
+    '2\nstream has already been operated upon or closed\n',
+  ],
+  [
+    'a copy that replaces a file with a directory',
+    'Files.createDirectory(Path.of("d")); Files.copy(Path.of("d"), Path.of("x"), StandardCopyOption.REPLACE_EXISTING); System.out.println(Files.isDirectory(Path.of("x")));',
+    { x: 'old' },
+    'true\n',
+  ],
+  [
+    'a writer still open on a file that a copy replaces',
+    'FileOutputStream out = new FileOutputStream("x", true); Files.writeString(Path.of("y"), "hello"); Files.copy(Path.of("y"), Path.of("x"), StandardCopyOption.REPLACE_EXISTING); out.write(33); out.close(); System.out.println(Files.readString(Path.of("x")));',
+    { x: 'old' },
+    'hello\n',
+  ],
+  [
+    'an exclusive creation over a directory',
+    'Files.createDirectory(Path.of("d")); try { Files.createFile(Path.of("d")); } catch (FileAlreadyExistsException e) { System.out.println("exists " + e.getMessage()); }',
+    {},
+    'exists d\n',
+  ],
+  [
+    'a write past the end of a file another writer truncated',
+    'FileOutputStream first = new FileOutputStream("x"); first.write(65); first.write(66); FileOutputStream second = new FileOutputStream("x"); first.write(67); first.close(); second.close(); System.out.println(Files.readString(Path.of("x")).replace((char) 0, \'.\'));',
+    {},
+    '..C\n',
+  ],
+  [
+    'a PrintWriter that closes without failing',
+    'PrintWriter p = new PrintWriter(new StringWriter()); p.println(1); p.close(); System.out.println(p.checkError());',
+    {},
+    'false\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},
@@ -205,6 +241,19 @@ test('a deeply nested path is charged to the run, which ends with a result', () 
   ).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test('Java lets programs use StringWriter and close a StringReader without handling IOException', () => {
+  const source = `import java.io.*;\nclass Main {\n  public static void main(String[] args) {\n    StringWriter s = new StringWriter();\n    s.write("a");\n    s.append('b').flush();\n    new StringReader("c").close();\n    System.out.println(s);\n  }\n}`;
+  expect(executeProgram('java', source)).toMatchObject({ kind: 'executed', stdout: 'ab\n' });
+});
+
+test('a StringWriter grows only within the length of one string', () => {
+  expect(
+    runJava(
+      'StringWriter w = new StringWriter(); String x = "x".repeat(100000); for (int i = 0; i < 100; i++) w.write(x);'
+    )
+  ).toMatchObject({ uncaughtException: 'java.lang.OutOfMemoryError: Java heap space' });
+});
+
 test('Java requires programs to catch or declare the IOException of opening a file', () => {
   const source = `import java.io.*;\nclass Main {\n  public static void main(String[] args) {\n    new FileReader("a.txt");\n  }\n}`;
   expect(executeProgram('java', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 3 }] });
@@ -235,8 +284,8 @@ test.each([
   ],
   [
     'writes files',
-    "const fs = require('node:fs'); console.log(fs.mkdirSync('a/b', { recursive: true })); fs.writeFileSync('a/b/c.txt', 'x'); fs.appendFileSync('a/b/c.txt', 'y'); fs.renameSync('in.txt', 'a/in.txt'); console.log(fs.readdirSync('a'), fs.existsSync('in.txt')); fs.unlinkSync('a/in.txt');",
-    { stdout: "/a\n[ 'b', 'in.txt' ] false\n", stderr: '', finalFiles: { 'a/b/c.txt': 'xy' } },
+    "const fs = require('node:fs'); console.log(fs.mkdirSync('a/b', { recursive: true })); fs.writeFileSync('a/b/c.txt', 'x'); fs.writeFileSync('a/b/c.txt', 'y', { flag: 'a' }); fs.appendFileSync('a/b/c.txt', 'z'); fs.renameSync('in.txt', 'a/in.txt'); console.log(fs.readdirSync('a'), fs.existsSync('in.txt')); fs.unlinkSync('a/in.txt');",
+    { stdout: "/a\n[ 'b', 'in.txt' ] false\n", stderr: '', finalFiles: { 'a/b/c.txt': 'xyz' } },
   ],
   [
     'writes to the standard streams',
@@ -261,6 +310,15 @@ test.each([
     'Error: ENOENT-2unlinkx',
   ],
   ["require('http')", "Error: Cannot find module 'http'"],
+  ["require('fs').writeFileSync('d/f.txt', 'x', { flag: 'wx' })", "Error: EEXIST: file already exists, open 'd/f.txt'"],
+  [
+    "require('fs').writeFileSync('none.txt', 'x', { flag: 'r+' })",
+    "Error: ENOENT: no such file or directory, open 'none.txt'",
+  ],
+  [
+    "require('fs').writeFileSync('a.txt', 'x', { flag: 'q' })",
+    "TypeError: The argument 'flags' is invalid. Received 'q'",
+  ],
 ])('JavaScript throws as Node.js does: %s', (source, uncaughtException) => {
   expect(runJavaScript(source, { files: { 'd/f.txt': '' } })).toMatchObject({ uncaughtException });
 });
@@ -273,9 +331,7 @@ test.each([
 });
 
 test('standard output and standard error share one limit', () => {
-  expect(
-    executeProgram('javascript', "for (;;) { console.log('x'.repeat(500)); console.error('y'.repeat(500)); }")
-  ).toEqual({
+  expect(executeProgram('javascript', "console.log('x'.repeat(60000)); console.error('y'.repeat(60000));")).toEqual({
     kind: 'limitExceeded',
     limit: 'output',
   });

@@ -48,7 +48,7 @@ export function defineWriters(context: IOContext, closeable: ClassInfo, flushabl
     writer.interfaces.push(parent);
     writer.supertypes.push(classType(parent));
   }
-  defineWriterMethods(writer, context.stringType, (method) => throwsIO(context, method), sinkWrite);
+  defineWriterMethods(writer, context.stringType, (method) => throwsIO(context, method), sinkWrite, true);
   const outputStreamWriter = context.registry.define('OutputStreamWriter', writer, 'java.io');
   addConstructor(outputStreamWriter, [outputStream.type], (frame, receiver, [stream]) => {
     writeSinks.set(receiver as JavaObject, new BufferedSink(sinkOf(frame, stream), BUFFER_SIZE));
@@ -75,14 +75,17 @@ function sinkWrite(frame: Frame, receiver: Value, text: string): void {
   sinkOf(frame, receiver).write(frame, text);
 }
 
-/** Defines `write` and `append` on a writer class, and `flush` and `close` unless it is a PrintWriter, each passed to `declare`. */
+/**
+ * Defines `write` and `append` on a writer class, and `flush` and `close` with `withFlushAndClose`, each passed to
+ * `declare`, which subclasses that narrow the methods' throws clauses redefine.
+ */
 // code-gauge-allow functionNcss 36 -- One registration per builtin method, each a small native.
 function defineWriterMethods(
   cls: ClassInfo,
   stringType: JavaType,
   declare: (method: MethodInfo) => MethodInfo,
   write: WriteText,
-  isPrintWriter = false
+  withFlushAndClose: boolean
 ): void {
   const add = (name: string, parameterTypes: JavaType[], returnType: JavaType, native: NativeMethod): void => {
     declare(addMethod(cls, name, parameterTypes, returnType, false, native));
@@ -115,7 +118,7 @@ function defineWriterMethods(
     write(frame, receiver, value instanceof JavaString ? value.value : 'null');
     return receiver;
   });
-  if (isPrintWriter) return;
+  if (!withFlushAndClose) return;
   add('flush', [], VOID, (frame, receiver) => {
     sinkOf(frame, receiver).flush(frame);
   });
@@ -187,7 +190,9 @@ function defineOutputStreams(context: IOContext, outputStream: ClassInfo): void 
 class StringSink implements Sink {
   text = '';
 
-  write(_: Frame, text: string): void {
+  /** Grows the text as a `StringBuffer` does, within the length of one string. */
+  write(frame: Frame, text: string): void {
+    frame.runtime.allocateString(frame, this.text.length + text.length, text.length);
     this.text += text;
   }
 
@@ -202,6 +207,9 @@ function defineStringWriter(context: IOContext, writer: ClassInfo): void {
   addConstructor(stringWriter, [], (_, receiver) => {
     writeSinks.set(receiver as JavaObject, new StringSink());
   });
+  // StringWriter's writes and flush throw no IOException, though its close still declares one.
+  defineWriterMethods(stringWriter, context.stringType, (method) => method, sinkWrite, false);
+  addMethod(stringWriter, 'flush', [], VOID, false, () => {});
   addMethod(stringWriter, 'toString', [], context.stringType, false, (frame, receiver) =>
     newString(frame, (writeSinks.get(receiver as JavaObject) as StringSink).text)
   );
@@ -229,6 +237,8 @@ function defineBufferedWriter(context: IOContext, writer: ClassInfo): void {
 interface PrintWriterState {
   autoFlush: boolean;
   hasError: boolean;
+  /** Whether the program closed it, after which `checkError` no longer flushes. */
+  isClosed: boolean;
 }
 
 const printWriterStates = new WeakMap<JavaObject, PrintWriterState>();
@@ -241,17 +251,19 @@ function definePrintWriter(context: IOContext, writer: ClassInfo, outputStream: 
     context.stringType,
     (method) => method,
     (frame, receiver, text) => printTo(frame, receiver, text, false),
-    true
+    false
   );
   addMethod(printWriter, 'flush', [], VOID, false, (frame, receiver) => {
     guarded(frame, receiver, (sink) => sink.flush(frame));
   });
   addMethod(printWriter, 'close', [], VOID, false, (frame, receiver) => {
     guarded(frame, receiver, (sink) => sink.close(frame));
+    (printWriterStates.get(receiver as JavaObject) as PrintWriterState).isClosed = true;
   });
   addMethod(printWriter, 'checkError', [], BOOLEAN, false, (frame, receiver) => {
-    guarded(frame, receiver, (sink) => sink.flush(frame));
-    return (printWriterStates.get(receiver as JavaObject) as PrintWriterState).hasError;
+    const state = printWriterStates.get(receiver as JavaObject) as PrintWriterState;
+    if (!state.isClosed) guarded(frame, receiver, (sink) => sink.flush(frame));
+    return state.hasError;
   });
   definePrintMethods(printWriter, context.stringType, context.objectClass.type, printTo);
   definePrintf(printWriter, context.stringType, context.objectClass.type, printTo);
@@ -288,7 +300,7 @@ function definePrintWriterConstructors(
 
 function startPrinting(receiver: Value, sink: Sink, autoFlush: Value): void {
   writeSinks.set(receiver as JavaObject, sink);
-  printWriterStates.set(receiver as JavaObject, { autoFlush: autoFlush === true, hasError: false });
+  printWriterStates.set(receiver as JavaObject, { autoFlush: autoFlush === true, hasError: false, isClosed: false });
 }
 
 function printTo(frame: Frame, receiver: Value, text: string, isLine: boolean): void {

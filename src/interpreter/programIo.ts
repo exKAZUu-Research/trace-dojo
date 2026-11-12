@@ -231,8 +231,8 @@ export class VirtualFileSystem {
 
   open(path: string, mode: OpenMode): FileHandle {
     const { parent, name, node: existing } = this.locate(path);
-    if (existing?.kind === 'directory' || name === '') throw new FileSystemError('EISDIR', path);
     if (existing && mode.create === 'exclusive') throw new FileSystemError('EEXIST', path);
+    if (existing?.kind === 'directory' || name === '') throw new FileSystemError('EISDIR', path);
     if (!existing && mode.create === 'never') throw new FileSystemError('ENOENT', path);
     const node = existing ?? new FileNode();
     parent.children.set(name, node);
@@ -244,10 +244,11 @@ export class VirtualFileSystem {
   }
 
   writeAt(node: FileNode, position: number, text: string): void {
-    this.budget.spend(Math.ceil((text.length + 1) / 64));
-    const { content } = node;
+    this.budget.spend(Math.ceil((text.length + Math.max(position - node.content.length, 0) + 1) / 64));
+    // Writing past the end, as a handle may after another truncates the file, leaves a gap of NUL characters.
+    const content = node.content.padEnd(text === '' ? 0 : position, '\0');
     const updated = `${content.slice(0, position)}${text}${content.slice(position + text.length)}`;
-    this.storedLength += updated.length - content.length;
+    this.storedLength += updated.length - node.content.length;
     if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
     node.content = updated;
   }

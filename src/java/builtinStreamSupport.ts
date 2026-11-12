@@ -75,6 +75,12 @@ export function claim(frame: Frame, receiver: Value): Source {
   return state.source;
 }
 
+/** Closes a stream, after which no stage may take it. */
+export function closeStream(receiver: Value): void {
+  const state = sources.get(receiver as JavaObject);
+  if (state) state.isUsed = true;
+}
+
 export function* iterate(iterator: Iterator<Value>): Generator<Value> {
   for (let next = iterator.next(); !next.done; next = iterator.next()) yield next.value;
 }
