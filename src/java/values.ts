@@ -156,11 +156,13 @@ export class HashStore {
   }
 
   /** Moves an entry to the end of an insertion-ordered store, as an access-ordered `LinkedHashMap` does. */
-  moveToEnd(entry: HashEntry): void {
+  /** Moves an entry to the end, returning whether that changed the order. */
+  moveToEnd(entry: HashEntry): boolean {
     const index = this.list.indexOf(entry);
-    if (index === -1) return;
+    if (index === -1 || index === this.list.length - 1) return false;
     this.list.splice(index, 1);
     this.list.push(entry);
+    return true;
   }
 
   /** Removes an entry, keeping the order of the others. */

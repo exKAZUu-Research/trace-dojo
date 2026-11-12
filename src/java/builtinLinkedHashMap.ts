@@ -18,11 +18,13 @@ export function evictionOf(cls: ClassInfo): ((frame: Frame, map: JavaObject) => 
   }
 }
 
-/** Moves an entry an access-ordered map reads or writes to its end, which counts as a structural change. */
+/**
+ * Moves an entry an access-ordered map reads or writes to its end, which counts as a structural change only when the
+ * entry was not already last, as in the JDK.
+ */
 export function recordAccess(map: Value, entry: HashEntry): void {
   if (!accessOrderedMaps.has(map as JavaObject)) return;
-  storeOf(map).moveToEnd(entry);
-  touch(map);
+  if (storeOf(map).moveToEnd(entry)) touch(map);
 }
 
 /** The entry of `key`, which an access-ordered map moves to its end, as reading or writing it does. */

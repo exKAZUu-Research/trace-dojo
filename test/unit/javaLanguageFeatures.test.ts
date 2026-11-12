@@ -840,6 +840,7 @@ public class Main {
     access.put(1, "x"); access.put(2, "y"); access.put(3, "z");
     access.get(1); access.put(2, "Y"); access.getOrDefault(3, "d");
     System.out.println(access);
+    Iterator<Integer> it = access.keySet().iterator(); access.get(3); access.put(3, "Z"); System.out.println(it.next());
     Map<Integer, Integer> bounded = new LinkedHashMap<>() { protected boolean removeEldestEntry(Map.Entry<Integer, Integer> e) { return size() > 3; } };
     for (int i = 0; i < 6; i++) bounded.put(i, i * i);
     System.out.println(bounded);
@@ -847,7 +848,7 @@ public class Main {
     System.out.println(plain);
   }
 }`,
-      '{a=1, c=3}\n{1=x, 2=Y, 3=z}\n{3=9, 4=16, 5=25}\n{x=3, y=2}\n',
+      '{a=1, c=3}\n{1=x, 2=Y, 3=z}\n1\n{3=9, 4=16, 5=25}\n{x=3, y=2}\n',
     ],
     [
       `import java.util.*;
