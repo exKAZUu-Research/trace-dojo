@@ -1142,6 +1142,15 @@ try { mk().drop(NaN); } catch (e) { console.log(e.name, e.message); }`,
     'an iterator method getter read once by for await',
     `let n=0;const o={get [Symbol.iterator](){console.log("get",++n);return n===1?undefined:function*(){yield 1}}};(async()=>{try{for await(const x of o)console.log(x)}catch(e){console.log(e.name)}})()`,
   ],
+  [
+    'assignments to using bindings',
+    `const d = () => ({ [Symbol.dispose]() {}, [Symbol.asyncDispose]() {} });
+function f() { using x = d(); x = 1; }
+async function g() { await using y = d(); y = 1; }
+function h() { const z = 1; z = 2; }
+for (const fn of [f, h]) { try { fn(); } catch (e) { console.log(e.name, e.message); } }
+g().catch((e) => console.log(e.name, e.message));`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

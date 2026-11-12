@@ -61,7 +61,7 @@ export class ProgramConverter extends ExpressionConverter {
     generator_function_declaration: (node) => this.functionDeclaration(node),
     class_declaration: (node) => {
       const name = field(node, 'name').text;
-      this.declareLexical(node, name, false);
+      this.declareLexical(node, name);
       const suspensionsBefore = this.context.suspensionCount;
       const cls = this.classNode(node, name);
       // A class evaluates its heritage and keys in one go, as a class expression does.
@@ -333,7 +333,7 @@ export class ProgramConverter extends ExpressionConverter {
       handler = this.withScope((scope) => {
         const parameterNode = handlerNode.childForFieldName('parameter');
         const param = parameterNode
-          ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name, false))
+          ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name))
           : undefined;
         return { param, body: this.block(field(handlerNode, 'body')), scope };
       });

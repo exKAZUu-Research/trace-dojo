@@ -160,6 +160,8 @@ export const UNINITIALIZED = Symbol('uninitialized');
 export interface Binding {
   value: Value | typeof UNINITIALIZED;
   isMutable: boolean;
+  /** What the TypeError of an assignment to an immutable binding calls it, `constant` unless set. */
+  immutableKind?: 'using' | 'await using';
   /** Set on a `var` whose declaration has not run yet, which learners do not see as a variable. */
   isHoisted?: boolean;
 }

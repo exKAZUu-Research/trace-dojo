@@ -42,14 +42,20 @@ export abstract class EvaluatorBase {
   instantiate(scope: Scope, declarations: ScopeDeclarations): void {
     const { runtime } = this;
     runtime.allocate(declarations.order.length);
-    const lexical = new Map(declarations.lexical.map(({ name, isConst }) => [name, isConst]));
+    const lexical = new Map(declarations.lexical.map(({ name, kind }) => [name, kind]));
     // The last declaration of a function with a repeated name wins.
     const functions = new Map(declarations.functions.map((fn) => [fn.name, fn]));
     for (const name of declarations.order) {
       const fn = functions.get(name);
-      const isConst = lexical.get(name);
       if (fn) scope.bindings.set(name, { value: this.createFunction(fn, scope), isMutable: true });
-      else if (isConst !== undefined) scope.bindings.set(name, { value: UNINITIALIZED, isMutable: !isConst });
+      else if (lexical.has(name)) {
+        const kind = lexical.get(name);
+        scope.bindings.set(name, {
+          value: UNINITIALIZED,
+          isMutable: kind === undefined,
+          ...(kind === 'using' || kind === 'await using' ? { immutableKind: kind } : {}),
+        });
+      }
       // A parameter of the same name keeps its value.
       else if (!scope.bindings.has(name))
         scope.bindings.set(name, { value: undefined, isMutable: true, isHoisted: true });
@@ -121,7 +127,9 @@ export abstract class EvaluatorBase {
     }
     if (binding.value === UNINITIALIZED)
       runtime.throwError('ReferenceError', `Cannot access '${name}' before initialization`);
-    if (!binding.isMutable) runtime.throwError('TypeError', 'Assignment to constant variable.');
+    if (!binding.isMutable) {
+      runtime.throwError('TypeError', `Assignment to ${binding.immutableKind ?? 'constant'} variable.`);
+    }
     binding.value = value;
     binding.isHoisted = false;
   }

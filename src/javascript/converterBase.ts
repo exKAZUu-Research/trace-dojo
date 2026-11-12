@@ -187,11 +187,11 @@ export abstract class ConverterBase {
     return this.scopes.at(-1) as ScopeBuilder;
   }
 
-  protected declareLexical(node: Node, name: string, isConst: boolean): void {
+  protected declareLexical(node: Node, name: string, kind?: 'constant' | 'using' | 'await using'): void {
     const scope = this.currentScope;
     if (scope.names.has(name)) duplicate(node, name);
     scope.names.set(name, 'lexical');
-    scope.declarations.lexical.push({ name, isConst });
+    scope.declarations.lexical.push({ name, kind });
     scope.declarations.order.push(name);
   }
 
@@ -234,7 +234,7 @@ export abstract class ConverterBase {
       this.declareVar(node, name);
       return;
     }
-    this.declareLexical(node, name, kind !== 'let');
+    this.declareLexical(node, name, kind === 'let' ? undefined : kind === 'const' ? 'constant' : kind);
     if (kind === 'using' || kind === 'await using') this.currentScope.declarations.disposes = true;
   }
 }
