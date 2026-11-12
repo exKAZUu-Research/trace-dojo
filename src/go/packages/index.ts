@@ -1,4 +1,5 @@
 import type { GoPackage } from '../entities';
+import { BIG_PACKAGE } from './big';
 import { BITS_PACKAGE } from './bits';
 import { BUFIO_PACKAGE } from './bufio';
 import { BYTES_PACKAGE } from './bytes';
@@ -23,6 +24,7 @@ import { UNICODE_PACKAGE, UTF8_PACKAGE } from './unicode';
 
 const PACKAGES = new Map<string, GoPackage>(
   [
+    BIG_PACKAGE,
     BITS_PACKAGE,
     BUFIO_PACKAGE,
     BYTES_PACKAGE,
