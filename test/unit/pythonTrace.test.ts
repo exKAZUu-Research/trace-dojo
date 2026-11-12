@@ -138,6 +138,18 @@ merged = list(heapq.merge([1], [2], key=lambda v: -v))`;
   expect(trace.traceItems.at(-1)?.vars).toMatchObject({ merged: [2, 1] });
 });
 
+test('integers a number cannot hold exactly keep every digit in the variables', () => {
+  const program = 'x = 9007199254740993\ny = [x + 1, 2]';
+  const last = traceProgram('python', program, program).traceItems.at(-1) as TraceItem;
+  expect(last.vars).toEqual({ x: 9_007_199_254_740_993n, y: [9_007_199_254_740_994n, 2] });
+  expect(last.referenceVars).toEqual({
+    y: {
+      kind: 'array',
+      entries: { 0: { kind: 'value', value: 9_007_199_254_740_994n }, 1: { kind: 'value', value: 2 } },
+    },
+  });
+});
+
 test('display programs lose their annotations', () => {
   const program = 'def move(t):  # atomic\n    t.forward()\nt = Turtle()\nmove(t)';
   const trace = traceProgram('python', program, program);

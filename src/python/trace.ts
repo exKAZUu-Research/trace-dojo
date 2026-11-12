@@ -133,7 +133,7 @@ type Scalar = TraceItemVariable[string];
 function scalarOf(value: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCALAR {
   switch (typeof value) {
     case 'bigint': {
-      return Number(value);
+      return traceIntOf(value);
     }
     case 'number':
     case 'string':
@@ -158,12 +158,17 @@ function scalarOf(value: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCAL
   return items as Scalar;
 }
 
+function traceIntOf(value: bigint): number | bigint {
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : value;
+}
+
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows None as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
 function displayNodeOf(value: PyValue, seen: Set<PyObject>): DisplayNode | undefined {
-  if (typeof value === 'bigint') return { kind: 'value', value: Number(value) };
+  if (typeof value === 'bigint') return { kind: 'value', value: traceIntOf(value) };
   if (typeof value !== 'object') return { kind: 'value', value };
   if (value === None) return NULL_NODE;
   if (!isVariableValue(value) || value instanceof PyGenerator || value instanceof PyIterator || seen.has(value)) {

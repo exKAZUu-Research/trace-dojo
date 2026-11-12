@@ -70,6 +70,28 @@ test.each([
   expect(executeProgram('python', source)).toMatchObject({ kind: 'executed', uncaughtException: description });
 });
 
+test('a class defined in a function captures the variables of the function in its body, methods, and nested classes', () => {
+  const program = `def outer():
+    x = 7
+    y = 1
+    class C:
+        value = x
+        y = 2
+        doubled = [x * 2 for _ in range(2)]
+        def get(self):
+            return x + y
+        class D:
+            def get(self):
+                nonlocal x
+                x += 1
+                return x
+    return [C.value, C.y, C.doubled, C().get(), C.D().get(), x]
+actual = str(outer())
+if actual != '[7, 2, [14, 14], 8, 8, 8]':
+    raise ValueError(actual)`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('sys.exit ends the program without an uncaught exception', () => {
   expect(executeProgram('python', 'import sys\nsys.exit(3)\nraise ValueError')).toMatchObject({
     kind: 'executed',

@@ -109,7 +109,7 @@ function accessOf(scope: ScopeBuilder, name: string): NameRef['access'] {
   if (!owner) return scope.info.kind === 'class' ? 'name' : 'global';
   markCell(owner, name);
   for (let current: ScopeBuilder | undefined = scope; current && current !== owner; current = current.parent) {
-    if (current.info.kind !== 'class' && !current.info.frees.includes(name)) current.info.frees.push(name);
+    if (!current.info.frees.includes(name)) current.info.frees.push(name);
   }
   return scope.info.kind === 'class' ? 'classCell' : 'cell';
 }
