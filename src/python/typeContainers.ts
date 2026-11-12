@@ -192,6 +192,8 @@ export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
     },
   });
   const items = list.replaceItems(itemsDuringSort);
+  // The list no longer holds its items while the key function and the comparisons run.
+  currentRuntime().handToNative(items);
   try {
     sortDetachedItems(items, key, reverse);
     modified ||= list.items !== itemsDuringSort;

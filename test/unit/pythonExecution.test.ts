@@ -452,6 +452,7 @@ test.each([
   ['unpacking a generator', 'a, b, c = gen()', 3],
   ['building a deque from a generator', 'from collections import deque\nws = deque(gen())', 3],
   ['taking a product of a generator', 'import itertools\nws = list(itertools.product(gen(), [1]))', 3],
+  ['grouping a generator', 'import itertools\nws = [list(v) for k, v in itertools.groupby(gen(), key=key)]', 3],
 ])('turtles of objects that %s holds stay on every step while it runs Python code', (_name, body, count) => {
   const program = `class W:
     def __init__(self, n):
@@ -471,4 +472,21 @@ ${body}`;
   const counts = trace.traceItems.map(({ turtles }) => turtles.length);
   expect(counts.slice(counts.indexOf(1)).every((each, index, all) => index === 0 || each >= all[index - 1])).toBe(true);
   expect(trace.finalTurtles).toHaveLength(count);
+});
+
+test.each([
+  ['called directly', 'answer = check(1)', true],
+  ['called by map', 'answer = list(map(check, [1]))', [true]],
+  ['called by sorted as its key', 'answer = sorted([1], key=check)', [1]],
+])('a turtle a callback drops is gone when it asks canMoveForward, %s', (_name, call, answer) => {
+  const program = `t = Turtle(0, 0)
+seen = []
+def check(i):
+    blocker = Turtle(0, 1)
+    blocker = None
+    seen.append(t.canMoveForward())
+    return seen[-1]
+${call}`;
+  const trace = traceProgram('python', program, program);
+  expect(trace.traceItems.at(-1)?.vars).toMatchObject({ answer, seen: [true] });
 });

@@ -70,8 +70,7 @@ for (const [names, quarters] of [
   });
 }
 defineTurtleMethod(TURTLE_METHOD_NAMES.canMoveForward, (state) => {
-  // The method itself runs as a native call.
-  currentRuntime().collectGarbage(1);
+  currentRuntime().collectGarbage();
   return currentRuntime().world.canMoveForward(state);
 });
 defineTurtleMethod(TURTLE_METHOD_NAMES.isFrontPainted, (state) => currentRuntime().world.isFrontPainted(state));

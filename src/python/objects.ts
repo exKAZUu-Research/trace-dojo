@@ -305,7 +305,11 @@ function iterateBuiltin(value: PyValue): NextFunction | undefined {
   if (value instanceof PyDict && !hasOwnIter(value)) return iterateDict(value, 'keys');
   if (value instanceof PyDictView) return iterateDict(value.dict, value.view);
   if (value instanceof PySet) return iterateSet(value);
-  if (value instanceof PyIterator) return value.next;
+  if (value instanceof PyIterator) {
+    // A native iterator may hand on items that only its own state held, such as groupby's pending item.
+    const runtime = currentRuntime();
+    return () => runtime.runNative(value.next);
+  }
   if (value instanceof PyGenerator) return iterateGenerator(value);
   if (value instanceof PyClass && value.enumMembers) return iterate(newList([...value.enumMembers]));
   return undefined;

@@ -1,5 +1,5 @@
 import { pushAll } from '../arrays';
-// code-gauge-allow-file fileNcss 406 -- The iterators of itertools and their shared helpers belong together.
+// code-gauge-allow-file fileNcss 407 -- The iterators of itertools and their shared helpers belong together.
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -317,7 +317,7 @@ function* productOf(pools: PyValue[][]): Generator<PyValue[]> {
   }
 }
 
-// code-gauge-allow functionNcss 33 -- Follows itertools.groupby, whose groups share one underlying iterator.
+// code-gauge-allow functionNcss 34 -- Follows itertools.groupby, whose groups share one underlying iterator.
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows itertools.groupby, whose groups share one underlying iterator.
 function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
@@ -353,6 +353,8 @@ function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
           if (pending === undefined) advance();
           if (pending === DONE || currentGroup !== token || !equals(pendingKey as PyValue, groupKey)) return DONE;
           const item = pending as PyValue;
+          // Only this call holds the item while the next one is read.
+          currentRuntime().handToNative(item);
           advance();
           return item;
         },

@@ -5,6 +5,8 @@ import type { PyCell, PyFunction, PyValue } from './values';
 /** The variables of a running module, class body, or function call. */
 export class Frame implements TracedFrame {
   readonly temporaries: PyValue[] = [];
+  /** How many native calls were running when the frame last started or resumed running. */
+  nativeCalls = 0;
   /** The names a class body annotates, in order, which `@dataclass` reads. */
   readonly annotations: [string, () => PyValue][] = [];
   /** The frame an inlined (list, set, or dict) comprehension runs within, whose names CPython's frame shares. */

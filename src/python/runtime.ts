@@ -153,6 +153,7 @@ export class Runtime {
 
   pushFrame(frame: Frame): void {
     if (this.frames.length >= LIMITS.maxCallDepth) throw pyError('RecursionError', 'maximum recursion depth exceeded');
+    frame.nativeCalls = this.nativeCalls;
     this.frames.push(frame);
     this.entryRows.push(this.row);
   }
@@ -192,11 +193,14 @@ export class Runtime {
     const frame = this.newFunctionFrame(fn, args, kwargs);
     if (fn.def.scope.isGenerator) return this.newGenerator(fn, frame);
     this.pushFrame(frame);
+    let result: PyValue;
     try {
-      return this.guardRecursion(() => this.evaluator.runFunction(fn, frame));
+      result = this.guardRecursion(() => this.evaluator.runFunction(fn, frame));
     } finally {
       this.popFrame();
     }
+    this.handToNative(result);
+    return result;
   }
 
   private newGenerator(fn: PyFunction, frame: Frame): PyGenerator {
@@ -244,6 +248,7 @@ export class Runtime {
         if (result.value !== None) generator.returned = result.value;
         return DONE;
       }
+      this.handToNative(result.value);
       return result.value;
     } catch (error) {
       generator.finished = true;
@@ -478,27 +483,38 @@ export class Runtime {
 
   // Garbage collection ----------------------------------------------------------------------------------------------
 
-  /** How many calls of native code are running, which may hold values in places the collector cannot see. */
+  /** How many calls of native code are running. */
   private nativeCalls = 0;
-
-  /** Runs native code, during which no turtle is collected. */
-  runNative<T>(run: () => T): T {
-    this.nativeCalls++;
-    try {
-      return run();
-    } finally {
-      this.nativeCalls--;
-    }
-  }
+  /** What Python code handed the running native calls, which they may hold where the collector cannot see. */
+  private readonly nativeRoots: unknown[] = [];
 
   /**
-   * Removes the turtles that no variable, object, or pending value can reach any more. Native code may hold values
-   * where the collector cannot see them (a list's items while it sorts, the items a constructor has taken from an
-   * iterator), so nothing is collected while it runs, apart from the native calls `ownCalls` the caller is inside of.
+   * Runs native code. What Python code hands it (a function's result, a generator's item) stays reachable until it
+   * returns, and its own result passes on to the native code that called it.
    */
-  collectGarbage(ownCalls = 0): void {
-    if (!this.world.hasTurtles || this.nativeCalls > ownCalls) return;
-    const roots: unknown[] = [];
+  runNative<T>(run: () => T): T {
+    const roots = this.nativeRoots.length;
+    this.nativeCalls++;
+    let result: T;
+    try {
+      result = run();
+    } finally {
+      this.nativeCalls--;
+      this.nativeRoots.length = roots;
+    }
+    this.handToNative(result);
+    return result;
+  }
+
+  /** Keeps a value reachable while the native code it is handed to runs, if Python code hands it to native code. */
+  handToNative(value: unknown): void {
+    if (this.nativeCalls > (this.frames.at(-1)?.nativeCalls ?? 0)) this.nativeRoots.push(value);
+  }
+
+  /** Removes the turtles that no variable, object, pending value, or running native code can reach any more. */
+  collectGarbage(): void {
+    if (!this.world.hasTurtles) return;
+    const roots: unknown[] = [this.nativeRoots];
     for (const frame of this.frames) {
       for (const value of frame.locals.values()) roots.push(value);
       for (const cell of frame.cells.values()) roots.push(cell.value);
