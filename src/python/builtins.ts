@@ -517,7 +517,6 @@ function sorted(args: PyValue[], kwargs: Kwargs): PyValue {
   // The keywords go to list.sort, which reports the wrong ones under its own name.
   checkArgs({ qualified: 'sort', min: 0, max: 0, style: 'takes', keywords: ['key', 'reverse'] }, [], kwargs);
   const list = newList(toArray(args[0]));
-  currentRuntime().allocate(list.items.length + 1);
   sortList(list, kwargs?.get('key') ?? None, isTruthy(kwargs?.get('reverse') ?? false));
   return list;
 }

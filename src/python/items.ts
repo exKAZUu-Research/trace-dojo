@@ -83,7 +83,6 @@ export function getItem(container: PyValue, key: PyValue): PyValue {
     const kind = container instanceof PyList ? 'list' : 'tuple';
     if (key instanceof PySlice) {
       const items = sliceItems(container.items, sliceIndices(key, container.items.length));
-      runtime.allocate(items.length);
       return container instanceof PyList ? newList(items) : newTuple(items);
     }
     const index = normalizeIndex(key, container.items.length, kind);
@@ -162,7 +161,7 @@ export function setItem(container: PyValue, key: PyValue, value: PyValue): void 
     }
     const index = normalizeIndex(key, container.items.length, 'list');
     if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
-    container.items[index] = value;
+    container.editableItems[index] = value;
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {
@@ -181,17 +180,16 @@ export function setItem(container: PyValue, key: PyValue, value: PyValue): void 
 function assignSlice(list: PyList, slice: PySlice, value: PyValue): void {
   const items = value === list ? [...list.items] : toArray(value, 'must assign iterable to extended slice');
   const indices = sliceIndices(slice, list.items.length);
-  currentRuntime().allocate(items.length);
   if (indices.step === 1) {
     const stop = Math.max(indices.start, indices.stop);
-    list.items.splice(indices.start, stop - indices.start, ...items);
+    list.splice(indices.start, stop - indices.start, items);
     return;
   }
   if (items.length !== indices.count) {
     throw valueError(`attempt to assign sequence of size ${items.length} to extended slice of size ${indices.count}`);
   }
   for (let index = 0, position = indices.start; index < indices.count; index++, position += indices.step) {
-    list.items[position] = items[index];
+    list.editableItems[position] = items[index];
   }
 }
 
@@ -201,18 +199,18 @@ export function deleteItem(container: PyValue, key: PyValue): void {
     if (key instanceof PySlice) {
       const indices = sliceIndices(key, container.items.length);
       if (indices.step === 1) {
-        container.items.splice(indices.start, Math.max(0, indices.stop - indices.start));
+        container.editableItems.splice(indices.start, Math.max(0, indices.stop - indices.start));
         return;
       }
       const remove = new Set<number>();
       for (let index = 0, position = indices.start; index < indices.count; index++, position += indices.step)
         remove.add(position);
-      container.items = container.items.filter((_, index) => !remove.has(index));
+      container.replaceItems(container.items.filter((_, index) => !remove.has(index)));
       return;
     }
     const index = normalizeIndex(key, container.items.length, 'list');
     if (index === undefined) throw pyError('IndexError', 'list assignment index out of range');
-    container.items.splice(index, 1);
+    container.editableItems.splice(index, 1);
     return;
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) {

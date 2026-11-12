@@ -128,8 +128,8 @@ function listInplace(operator: '+' | '*', list: PyList, other: PyValue): PyValue
     return NotImplemented;
   }
   const times = repeatCount(toIndex(other));
-  if (times <= 0) list.items = [];
-  else appendRepeats(list.items, [...list.items], times - 1);
+  if (times <= 0) list.replaceItems([]);
+  else list.extend(repeatItems(list.items, times - 1));
   return list;
 }
 
@@ -189,19 +189,13 @@ function nativeInplace(operator: BinaryOperator, left: PyValue, right: PyValue):
 
 /** `list += iterable` and `list.extend(iterable)`, which append each item as the iterable yields it. */
 export function extendList(list: PyList, iterable: PyValue): void {
-  const runtime = currentRuntime();
   // CPython copies the items of a list or tuple at once, so that `a.extend(a)` ends.
   if (iterable === list || ((iterable instanceof PyList || iterable instanceof PyTuple) && iterable.cls.isBuiltin)) {
-    const items = [...(iterable as PyList | PyTuple).items];
-    runtime.allocate(items.length);
-    for (const item of items) list.items.push(item);
+    list.extend([...(iterable as PyList | PyTuple).items]);
     return;
   }
   const next = iterate(iterable);
-  for (let item = next(); item !== DONE; item = next()) {
-    runtime.allocate(1);
-    list.items.push(item);
-  }
+  for (let item = next(); item !== DONE; item = next()) list.append(item);
 }
 
 /** The in-place set operators, which change the set's table as CPython does: that decides the order of its elements. */
@@ -383,7 +377,6 @@ function stringBinary(operator: BinaryOperator, left: string, right: PyValue): P
 function sequenceBinary(operator: BinaryOperator, left: PyList | PyTuple, right: PyValue): PyValue {
   if (operator === '+' && isSequence(right) && sameSequenceKind(left, right)) {
     const items = [...left.items, ...right.items];
-    currentRuntime().allocate(items.length);
     return left instanceof PyList ? newList(items) : newTuple(items);
   }
   if (operator === '*' && isIntLike(right)) return repeatSequence(left, right);
@@ -421,16 +414,17 @@ function repeatString(text: string, count: bigint | boolean): string {
 function repeatSequence(sequence: PyList | PyTuple, count: bigint | boolean): PyValue {
   const times = repeatCount(count);
   if (times === 1 && sequence.cls === tupleClass) return sequence;
-  const items: PyValue[] = [];
-  appendRepeats(items, sequence.items, times);
+  const items = repeatItems(sequence.items, times);
   return sequence instanceof PyList ? newList(items) : newTuple(items);
 }
 
-/** Appends `rounds` copies of the items, refusing through the budget before any copy is made. */
-function appendRepeats(target: PyValue[], items: readonly PyValue[], rounds: number): void {
-  if (items.length === 0 || rounds <= 0) return;
-  currentRuntime().allocate(items.length * rounds);
-  for (let round = 0; round < rounds; round++) for (const item of items) target.push(item);
+/** `rounds` copies of the items, refused before any copy is made when the program has no room for them. */
+function repeatItems(items: readonly PyValue[], rounds: number): PyValue[] {
+  const repeated: PyValue[] = [];
+  if (items.length === 0 || rounds <= 0) return repeated;
+  currentRuntime().ensureRoom(items.length * rounds);
+  for (let round = 0; round < rounds; round++) for (const item of items) repeated.push(item);
+  return repeated;
 }
 
 function setBinary(operator: BinaryOperator, left: PySet, right: PySet): PyValue {

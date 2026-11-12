@@ -87,9 +87,7 @@ function joinReprs(items: readonly PyValue[]): string {
 
 listClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'list', min: 0, max: 1, style: 'expected' }, args, kwargs);
-  const items = args.length === 0 ? [] : toArray(args[0]);
-  currentRuntime().allocate(items.length + 1);
-  return new PyList(cls, items);
+  return new PyList(cls, args.length === 0 ? [] : toArray(args[0]));
 };
 const listOf = (self: PyValue): PyList => self as PyList;
 
@@ -102,8 +100,7 @@ method(listClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key
 method(listClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
 method(listClass, '__reversed__', 'none', 0, 0, (self) => reversedIterator(listOf(self), 'list_reverseiterator'));
 method(listClass, 'append', 'one', 1, 1, (self, [item]) => {
-  currentRuntime().allocate(1);
-  listOf(self).items.push(item);
+  listOf(self).append(item);
   return None;
 });
 method(listClass, 'extend', 'one', 1, 1, (self, [iterable]) => {
@@ -111,24 +108,22 @@ method(listClass, 'extend', 'one', 1, 1, (self, [iterable]) => {
   return None;
 });
 method(listClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
-  const { items } = listOf(self);
   let position = toIndex(index);
-  const length = BigInt(items.length);
+  const length = BigInt(listOf(self).items.length);
   if (position < 0n) position = position + length < 0n ? 0n : position + length;
   if (position > length) position = length;
-  currentRuntime().allocate(1);
-  items.splice(Number(position), 0, item);
+  listOf(self).splice(Number(position), 0, [item]);
   return None;
 });
 method(listClass, 'remove', 'one', 1, 1, (self, [item]) => {
-  const { items } = listOf(self);
+  const items = listOf(self).editableItems;
   const index = items.findIndex((element) => equals(element, item));
   if (index === -1) throw valueError('list.remove(x): x not in list');
   items.splice(index, 1);
   return None;
 });
 method(listClass, 'pop', 'expected', 0, 1, (self, [index]) => {
-  const { items } = listOf(self);
+  const items = listOf(self).editableItems;
   if (items.length === 0) throw pyError('IndexError', 'pop from empty list');
   let position = index === undefined ? -1n : toIndex(index);
   if (position < 0n) position += BigInt(items.length);
@@ -136,7 +131,7 @@ method(listClass, 'pop', 'expected', 0, 1, (self, [index]) => {
   return items.splice(Number(position), 1)[0];
 });
 method(listClass, 'clear', 'none', 0, 0, (self) => {
-  listOf(self).items.length = 0;
+  listOf(self).editableItems.length = 0;
   return None;
 });
 method(listClass, 'index', 'expected', 1, 3, (self, [item, start, stop]) => {
@@ -148,7 +143,7 @@ method(listClass, 'count', 'one', 1, 1, (self, [item]) =>
   BigInt(listOf(self).items.filter((element) => equals(element, item)).length)
 );
 method(listClass, 'reverse', 'none', 0, 0, (self) => {
-  listOf(self).items.reverse();
+  listOf(self).editableItems.reverse();
   return None;
 });
 method(listClass, 'copy', 'none', 0, 0, (self) => newList([...listOf(self).items]));
@@ -186,7 +181,6 @@ function sequenceIndex(
 
 /** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
 export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
-  const items = list.items;
   let modified = false;
   // CPython also reports a list that was filled and emptied again during the sort, which the final length hides.
   const itemsDuringSort = new Proxy<PyValue[]>([], {
@@ -195,12 +189,12 @@ export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
       return Reflect.set(target, property, value);
     },
   });
-  list.items = itemsDuringSort;
+  const items = list.replaceItems(itemsDuringSort);
   try {
     sortDetachedItems(items, key, reverse);
     modified ||= list.items !== itemsDuringSort;
   } finally {
-    list.items = items;
+    list.replaceItems(items);
   }
   if (modified) throw valueError('list modified during sort');
 }
@@ -252,7 +246,6 @@ tupleClass.construct = (cls, args, kwargs) => {
   if (args.length === 0) return cls === tupleClass ? newTuple([]) : new PyTuple(cls, []);
   if (args[0] instanceof PyTuple && cls === tupleClass && args[0].cls === tupleClass) return args[0];
   const items = toArray(args[0]);
-  currentRuntime().allocate(items.length + 1);
   return cls === tupleClass ? newTuple(items) : new PyTuple(cls, items);
 };
 const tupleOf = (self: PyValue): PyTuple => self as PyTuple;
@@ -490,7 +483,6 @@ for (const cls of [setClass, frozensetClass]) {
     if (isExactFrozenset(args[0]) && setType === frozensetClass) return args[0];
     const table = new SetTable();
     if (args.length > 0) updateTable(table, args[0]);
-    currentRuntime().allocate(1);
     return new PySet(setType, table);
   };
 }

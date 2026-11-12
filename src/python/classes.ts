@@ -239,9 +239,7 @@ function checkLayout(bases: PyClass[]): void {
 
 /** Calls a class: creates an instance and runs its `__init__`. */
 // code-gauge-allow functionCognitiveComplexity 21 -- Follows how calling a class creates and initializes an instance.
-// code-gauge-allow functionNcss 31 -- Follows how calling a class creates and initializes an instance.
 export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
-  const runtime = currentRuntime();
   if (cls === typeClass && args.length === 1 && !kwargs) return classOf(args[0]);
   if (isEnumClass(cls)) return enumLookup(cls, args, kwargs);
   if (cls.construct) return cls.construct(cls, args, kwargs);
@@ -249,13 +247,10 @@ export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyVa
   if (cls.isBuiltin && !builtinBase) throw typeError(`cannot create '${cls.qualifiedName}' instances`);
   const abstract = abstractInstantiationError(cls);
   if (abstract) throw abstract;
-  let instance: PyValue;
-  if (builtinBase && builtinBase !== objectClass && builtinBase.construct && !cls.isBuiltin) {
-    instance = builtinBase.construct(cls, args, kwargs);
-  } else {
-    runtime.allocate(1);
-    instance = new PyInstance(cls);
-  }
+  const instance =
+    builtinBase && builtinBase !== objectClass && builtinBase.construct && !cls.isBuiltin
+      ? builtinBase.construct(cls, args, kwargs)
+      : new PyInstance(cls);
   const init = cls.lookup('__init__');
   const hasArguments = args.length > 0 || (kwargs !== undefined && kwargs.size > 0);
   if (init === objectClass.dict.get('__init__')) {

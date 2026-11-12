@@ -76,7 +76,7 @@ function tee(args: PyValue[]): PyValue {
   const count = countValue === undefined ? 2n : toIndex(countValue);
   if (count < 0n) throw valueError('n must be >= 0');
   if (count === 0n) return newTuple([]);
-  currentRuntime().allocate(Number(count));
+  currentRuntime().ensureRoom(Number(count));
   const copyOf = iterable instanceof PyIterator ? teeStates.get(iterable) : undefined;
   const first = copyOf ? copyOf() : newTee({ source: iterable, next: iterate(iterable), items: [], done: false }, 0);
   const copies: PyValue[] = [first];
@@ -86,13 +86,11 @@ function tee(args: PyValue[]): PyValue {
 
 /** An iterator that makes each tuple only when it is asked for, as the combinatoric iterators of CPython do. */
 function lazily(name: string, tuples: Generator<PyValue[]>, pools: PyValue[][]): PyIterator {
-  const runtime = currentRuntime();
   return iteratorOf(
     name,
     () => {
       const result = tuples.next();
       if (result.done) return DONE;
-      runtime.allocate(result.value.length + 1);
       return newTuple(result.value);
     },
     () => pools
@@ -468,7 +466,7 @@ function batched(args: PyValue[], kwargs: Kwargs): PyValue {
       while (items.length < size) {
         const item = next();
         if (item === DONE) break;
-        currentRuntime().allocate(1);
+        currentRuntime().spend();
         items.push(item);
       }
       if (items.length === 0) return DONE;

@@ -17,33 +17,24 @@ export function updateTable(table: SetTable, other: PyValue): void {
     return;
   }
   if (isExactDict(other)) {
-    const runtime = currentRuntime();
-    runtime.scan(other.store.size);
-    const size = table.size;
+    currentRuntime().scan(other.store.size);
     table.reserveFor(other.store.size);
     for (const entry of other.store.ordered()) table.add(entry.key, entry.hash);
-    runtime.allocate(table.size - size);
     return;
   }
   const next = iterate(other);
   for (let item = next(); item !== DONE; item = next()) addToTable(table, item);
 }
 
-/** Adds one element taken from an iterator, charging the step and the slot a new element takes. */
+/** Adds one element taken from an iterator, charging the step. */
 export function addToTable(table: SetTable, item: PyValue, hash?: bigint): void {
-  const runtime = currentRuntime();
-  runtime.spend();
-  const size = table.size;
+  currentRuntime().spend();
   table.add(item, hash);
-  if (table.size > size) runtime.allocate(1);
 }
 
 function mergeTable(table: SetTable, other: SetTable): void {
-  const runtime = currentRuntime();
-  runtime.scan(other.size);
-  const size = table.size;
+  currentRuntime().scan(other.size);
   table.merge(other);
-  runtime.allocate(table.size - size);
 }
 
 /** CPython pre-sizes a set and reads keys with their stored hashes only for an exact dict, not for a subclass. */
@@ -76,7 +67,6 @@ export function setIntersection(set: PySet, other: PyValue): PySet {
     const runtime = currentRuntime();
     runtime.scan(small.size);
     for (const entry of small.entries()) if (large.has(entry.key, entry.hash)) result.add(entry.key, entry.hash);
-    runtime.allocate(result.size);
     return setLike(set, result);
   }
   const next = iterate(other);
@@ -134,7 +124,6 @@ export function setDifference(set: PySet, other: PyValue): PySet {
     const found = otherTable ? otherTable.has(entry.key, entry.hash) : (other as PyDict).store.has(entry.key);
     if (!found) result.add(entry.key, entry.hash);
   }
-  runtime.allocate(result.size);
   return setLike(set, result);
 }
 
@@ -149,11 +138,9 @@ export function symmetricDifferenceUpdate(table: SetTable, other: PyValue): void
     : [...(other instanceof PySet ? other.table : tableFrom(other)).entries()];
   const runtime = currentRuntime();
   runtime.scan(entries.length);
-  const size = table.size;
   for (const entry of entries) {
     if (!table.discard(entry.key, entry.hash)) table.add(entry.key, entry.hash);
   }
-  runtime.allocate(Math.max(table.size - size, 0));
 }
 
 /** `set ^ other`, which CPython computes by updating a new set of the other operand with the set. */

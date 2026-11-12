@@ -1,6 +1,6 @@
 import { keyHash } from './hashing';
 import { keysEqual } from './operators';
-import { chargeCollision } from './runtimeContext';
+import { chargeCollision, chargeSlots } from './runtimeContext';
 import type { PyValue } from './values';
 
 const MIN_SIZE = 8;
@@ -92,8 +92,7 @@ export class SetTable {
       do {
         const entry = this.table[slot];
         if (entry === undefined) {
-          this.used++;
-          this.version++;
+          this.countNewEntry();
           if (freeSlot !== undefined) {
             this.table[freeSlot] = { key, hash };
             return;
@@ -115,6 +114,12 @@ export class SetTable {
       perturb >>= PERTURB_SHIFT;
       index = Number((BigInt(index) * 5n + 1n + perturb) & BigInt(mask));
     }
+  }
+
+  private countNewEntry(): void {
+    chargeSlots(1);
+    this.used++;
+    this.version++;
   }
 
   discard(key: PyValue, hash = keyHash(key, 'set element')): boolean {
@@ -190,11 +195,13 @@ export class SetTable {
     if (other === this || other.used === 0) return;
     if ((this.fill + other.used) * 5 >= this.mask * 3) this.resize((this.used + other.used) * 2);
     if (this.fill === 0 && this.mask === other.mask && other.fill === other.used) {
+      chargeSlots(other.used);
       this.table = [...other.table];
       this.fill = other.fill;
       this.used = other.used;
       this.version++;
     } else if (this.fill === 0) {
+      chargeSlots(other.used);
       this.fill = other.used;
       this.used = other.used;
       for (const entry of other.entries()) this.insertClean(entry);

@@ -53,7 +53,7 @@ function insort(right: boolean, name: string): (args: PyValue[], kwargs: Kwargs)
     others.delete('a');
     others.delete('x');
     const index = search([a, key === None ? x : callValue(key, [x]), ...args.slice(2)], others, name, right);
-    if (a instanceof PyList) a.items.splice(index, 0, x);
+    if (a instanceof PyList) a.splice(index, 0, [x]);
     else callValue(getAttribute(a, 'insert'), [BigInt(index), x]);
     return None;
   };

@@ -21,6 +21,7 @@ import {
 } from './objects';
 import { binaryOp, compareOp, unaryOp } from './operators';
 import type { Runtime } from './runtime';
+import { withoutCharge } from './runtimeContext';
 import { addToTable, updateTable } from './setOperations';
 import {
   dictClass,
@@ -141,7 +142,6 @@ export class ExpressionEvaluator {
   private display(expression: Extract<Expression, { kind: 'list' | 'tuple' | 'set' }>, frame: Frame): PyValue {
     if (expression.kind === 'set') return this.setDisplay(expression.elements, frame, false);
     const items = this.elements(expression.elements, frame);
-    this.runtime.allocate(items.length + 1);
     return expression.kind === 'list' ? newList(items) : newTuple(items);
   }
 
@@ -160,9 +160,11 @@ export class ExpressionEvaluator {
       const isFolded = leadingCount >= MIN_FOLDED_ELEMENTS && !(iterated && starIndex === -1);
       const constants = isFolded ? foldConstants(leading) : undefined;
       const set = newSet();
-      this.runtime.allocate(1);
       if (constants) {
-        updateTable(set.table, newSet(constants, true));
+        updateTable(
+          set.table,
+          withoutCharge(() => newSet(constants, true))
+        );
       } else {
         const items = this.elements(leading, frame);
         frame.temporaries.push(...items);
@@ -402,7 +404,6 @@ export class ExpressionEvaluator {
         const value = this.evaluate(item.value, frame);
         dict.store.set(key, value);
       }
-      this.runtime.allocate(1);
       return dict;
     });
   }
@@ -561,7 +562,6 @@ export class ExpressionEvaluator {
 
   // Comprehensions --------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 32 -- Follows how CPython runs each kind of comprehension in its own scope.
   private comprehension(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): PyValue {
     const { runtime } = this;
     const first = this.evaluateIterable(expression.generators[0].iterable, frame);
@@ -594,12 +594,10 @@ export class ExpressionEvaluator {
         while (!items.next().done);
         return dict;
       }
-      const items: PyValue[] = [];
-      const container = expression.type === 'list' ? newList(items) : newSet();
+      const container = expression.type === 'list' ? newList([]) : newSet();
       inner.temporaries.push(container);
       for (const item of this.comprehensionItems(expression, inner, next)) {
-        runtime.allocate(1);
-        if (container instanceof PyList) items.push(item);
+        if (container instanceof PyList) container.append(item);
         else container.table.add(item);
       }
       return container;

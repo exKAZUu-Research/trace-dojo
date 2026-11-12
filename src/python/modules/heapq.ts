@@ -17,7 +17,7 @@ function heapOf(value: PyValue, name: string, onlyArgument: boolean): PyValue[] 
   if (!(value instanceof PyList)) {
     throw typeError(`${name}() argument${onlyArgument ? '' : ' 1'} must be list, not ${typeName(value)}`);
   }
-  return value.items;
+  return value.editableItems;
 }
 
 type Less = (a: PyValue, b: PyValue) => boolean;
@@ -63,7 +63,7 @@ function siftUp(heap: PyValue[], position: number, less: Less = minLess): void {
 
 function heappush([heap, item]: PyValue[], less: Less = minLess): PyValue {
   const items = heapOf(heap, less === minLess ? 'heappush' : 'heappush_max', false);
-  items.push(item);
+  (heap as PyList).append(item);
   siftDown(items, 0, items.length - 1, less);
   return None;
 }

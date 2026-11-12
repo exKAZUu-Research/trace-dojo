@@ -202,7 +202,7 @@ function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): Py
   if (counts !== None) return sampleWithCounts(generator, population, n, kValue, counts);
   const k = Number(toIndex(kValue));
   if (k < 0 || k > n) throw valueError('Sample larger than population or is negative');
-  currentRuntime().allocate(k + 1);
+  currentRuntime().ensureRoom(k);
   const result: PyValue[] = [];
   let setSize = 21;
   if (k > 5) setSize += 4 ** Math.ceil(Math.log(k * 3) / Math.log(4));
@@ -270,7 +270,7 @@ function choices(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): P
   const result: PyValue[] = [];
   if (cumulative === None) {
     if (weights === None) {
-      currentRuntime().allocate(Math.max(k, 0) + 1);
+      currentRuntime().ensureRoom(k);
       for (let index = 0; index < k; index++)
         result.push(getItem(population, BigInt(Math.floor(generator.random() * n))));
       return newList(result);
@@ -285,7 +285,7 @@ function choices(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): P
   const total = realArgument(cumulativeWeights.at(-1) ?? 0n) + 0;
   if (total <= 0) throw valueError('Total of weights must be greater than zero');
   if (!Number.isFinite(total)) throw valueError('Total of weights must be finite');
-  currentRuntime().allocate(Math.max(k, 0) + 1);
+  currentRuntime().ensureRoom(k);
   for (let index = 0; index < k; index++) {
     currentRuntime().spend();
     const target = generator.random() * total;

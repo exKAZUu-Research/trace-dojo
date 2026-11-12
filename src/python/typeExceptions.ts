@@ -73,7 +73,7 @@ method(baseExceptionClass, 'add_note', 'one', 1, 1, (self, [note]) => {
   if (!state) return None;
   state.notes ??= newList([]);
   if (!(state.notes instanceof PyList)) throw typeError('Cannot add note: __notes__ is not a list');
-  state.notes.items.push(note);
+  state.notes.append(note);
   return None;
 });
 method(baseExceptionClass, 'with_traceback', 'one', 1, 1, (self) => self);

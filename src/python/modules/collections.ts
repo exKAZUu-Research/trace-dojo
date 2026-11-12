@@ -82,13 +82,16 @@ dequeClass.construct = (cls, args, kwargs) => {
 const dequeOf = (self: PyValue): PyDeque => self as PyDeque;
 
 function push(deque: PyDeque, item: PyValue, left: boolean): void {
-  currentRuntime().allocate(1);
-  if (deque.maxlen === 0) return;
-  if (left) deque.items.unshift(item);
-  else deque.items.push(item);
+  if (deque.maxlen === 0) {
+    // Nothing is stored to charge, and an endless iterable must still end.
+    currentRuntime().spend();
+    return;
+  }
+  if (left) deque.splice(0, 0, [item]);
+  else deque.append(item);
   if (deque.maxlen !== undefined && deque.items.length > deque.maxlen) {
-    if (left) deque.items.pop();
-    else deque.items.shift();
+    if (left) deque.editableItems.pop();
+    else deque.editableItems.shift();
   }
 }
 
@@ -129,14 +132,14 @@ function extendDeque(deque: PyDeque, iterable: PyValue, left: boolean): void {
 }
 method(dequeClass, 'pop', 'none', 0, 0, (self) => {
   if (dequeOf(self).items.length === 0) throw pyError('IndexError', 'pop from an empty deque');
-  return dequeOf(self).items.pop() as PyValue;
+  return dequeOf(self).editableItems.pop() as PyValue;
 });
 method(dequeClass, 'popleft', 'none', 0, 0, (self) => {
   if (dequeOf(self).items.length === 0) throw pyError('IndexError', 'pop from an empty deque');
-  return dequeOf(self).items.shift() as PyValue;
+  return dequeOf(self).editableItems.shift() as PyValue;
 });
 method(dequeClass, 'rotate', 'expected', 0, 1, (self, [steps]) => {
-  const { items } = dequeOf(self);
+  const items = dequeOf(self).editableItems;
   if (items.length === 0) return None;
   const count = Number(toIndex(steps ?? 1n)) % items.length;
   const shift = (count + items.length) % items.length;
@@ -144,7 +147,7 @@ method(dequeClass, 'rotate', 'expected', 0, 1, (self, [steps]) => {
   return None;
 });
 method(dequeClass, 'clear', 'none', 0, 0, (self) => {
-  dequeOf(self).items.length = 0;
+  dequeOf(self).editableItems.length = 0;
   return None;
 });
 method(dequeClass, 'count', 'one', 1, 1, (self, [item]) =>
@@ -161,18 +164,18 @@ method(dequeClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
     throw pyError('IndexError', 'deque already at its maximum size');
   let position = Number(toIndex(index));
   if (position < 0) position = Math.max(0, position + deque.items.length);
-  deque.items.splice(Math.min(position, deque.items.length), 0, item);
+  deque.splice(Math.min(position, deque.items.length), 0, [item]);
   return None;
 });
 method(dequeClass, 'remove', 'one', 1, 1, (self, [item]) => {
-  const { items } = dequeOf(self);
+  const items = dequeOf(self).editableItems;
   const index = items.findIndex((each) => equals(each, item));
   if (index === -1) throw valueError(`${pyRepr(item)} is not in deque`);
   items.splice(index, 1);
   return None;
 });
 method(dequeClass, 'reverse', 'none', 0, 0, (self) => {
-  dequeOf(self).items.reverse();
+  dequeOf(self).editableItems.reverse();
   return None;
 });
 method(
@@ -221,34 +224,36 @@ method(dequeClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGeneri
 dequeClass.dict.set('__module__', 'collections');
 
 function copyDeque(deque: PyDeque): PyDeque {
-  currentRuntime().allocate(deque.items.length);
   return new PyDeque(deque.cls, [...deque.items], deque.maxlen);
 }
 
-/** Repeats a deque's items in place, keeping only the last `maxlen` as appending them one by one would. */
 /** Repeats a deque in place, computing what a bounded one keeps instead of appending every round. */
 function repeatDeque(deque: PyDeque, countValue: PyValue): void {
   const count = toIndex(countValue);
   if (count >= 1n << 63n || count < -(1n << 63n)) {
     throw pyError('OverflowError', "cannot fit 'int' into an index-sized integer");
   }
-  const items = [...deque.items];
+  const { items } = deque;
   const size = BigInt(items.length);
-  deque.items.length = 0;
-  if (count <= 0n || size === 0n) return;
+  if (count <= 0n || size === 0n) {
+    deque.editableItems.length = 0;
+    return;
+  }
   const total = size * count;
   const kept = deque.maxlen !== undefined && BigInt(deque.maxlen) < total ? BigInt(deque.maxlen) : total;
-  currentRuntime().allocate(Number(kept - (kept < size ? kept : size)));
+  currentRuntime().ensureRoom(Number(kept - size));
   const skipped = total - kept;
-  for (let index = 0n; index < kept; index++) deque.items.push(items[Number((skipped + index) % size)]);
+  const repeated: PyValue[] = [];
+  for (let index = 0n; index < kept; index++) repeated.push(items[Number((skipped + index) % size)]);
+  deque.splice(0, items.length, repeated);
 }
 method(dequeClass, '__getitem__', 'one', 1, 1, (self, [key]) => dequeOf(self).items[dequeIndex(dequeOf(self), key)]);
 method(dequeClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
-  dequeOf(self).items[dequeIndex(dequeOf(self), key)] = value;
+  dequeOf(self).editableItems[dequeIndex(dequeOf(self), key)] = value;
   return None;
 });
 method(dequeClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
-  dequeOf(self).items.splice(dequeIndex(dequeOf(self), key), 1);
+  dequeOf(self).editableItems.splice(dequeIndex(dequeOf(self), key), 1);
   return None;
 });
 method(dequeClass, '__contains__', 'one', 1, 1, (self, [item]) =>
@@ -297,7 +302,11 @@ for (const [name, operator] of [
 }
 
 /** Compares as CPython's deque_richcompare does: by the first pair of unequal items, then by length. */
-function compareDeques(operator: '==' | '!=' | '<' | '<=' | '>' | '>=', a: PyValue[], b: PyValue[]): boolean {
+function compareDeques(
+  operator: '==' | '!=' | '<' | '<=' | '>' | '>=',
+  a: readonly PyValue[],
+  b: readonly PyValue[]
+): boolean {
   if (a === b) return operator === '==' || operator === '<=' || operator === '>=';
   if (a.length !== b.length && (operator === '==' || operator === '!=')) return operator === '!=';
   const length = Math.min(a.length, b.length);
@@ -424,7 +433,6 @@ const isPositive = (value: PyValue): boolean => isTruthy(compareOp('>', value, 0
 const isCounter = (value: PyValue): value is PyDict => value instanceof PyDict && value.cls.isSubclassOf(counterClass);
 
 function newCounter(): PyDict {
-  currentRuntime().allocate(1);
   return new PyDict(counterClass, new DictStore());
 }
 
@@ -793,7 +801,6 @@ function newNamedTuple(
       `${qualified}() missing ${missing.length} required positional argument${missing.length === 1 ? '' : 's'}: ${names}`
     );
   }
-  currentRuntime().allocate(fields.length + 1);
   return new PyTuple(cls, items as PyValue[]);
 }
 

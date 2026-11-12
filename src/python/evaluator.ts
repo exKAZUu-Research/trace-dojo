@@ -258,7 +258,6 @@ export class Evaluator extends ExpressionEvaluator {
             items.push(item);
             frame.temporaries.push(item);
           }
-          this.runtime.allocate(items.length + 1);
           return [expression.kind === 'list' ? newList(items) : newTuple(items), created];
         } finally {
           frame.temporaries.length = length;
@@ -691,7 +690,7 @@ export class Evaluator extends ExpressionEvaluator {
     }
     const star = patterns[starIndex];
     if (star.kind === 'star' && star.name) {
-      bindings.set(star.name, this.listOf(items.slice(starIndex, items.length - after)));
+      bindings.set(star.name, newList(items.slice(starIndex, items.length - after)));
     }
     return true;
   }
@@ -769,11 +768,6 @@ export class Evaluator extends ExpressionEvaluator {
       if (value === undefined || !this.matchPattern(sub, value, bindings, frame)) return undefined;
     }
     return names;
-  }
-
-  private listOf(items: PyValue[]): PyValue {
-    this.runtime.allocate(items.length + 1);
-    return newList(items);
   }
 
   private reprOf(value: PyValue): string {

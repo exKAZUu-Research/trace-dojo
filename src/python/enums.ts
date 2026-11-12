@@ -91,7 +91,6 @@ export function createEnumMembers(cls: PyClass, namespace: EnumNamespace, bounda
 
 /** A member without its value yet, so that the class's `__init__` can still set attributes on it. */
 export function newEnumMember(cls: PyClass, name: PyValue, value: PyValue): PyInstance {
-  currentRuntime().allocate(1);
   const member = new PyInstance(cls);
   member.dict.set('_name_', name);
   member.dict.set('_value_', value);

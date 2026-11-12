@@ -52,7 +52,7 @@ function deepCopy(value: PyValue, memo: PyDict): PyValue {
   if (value instanceof PyList) {
     const copy = new PyList(value.cls, []);
     memo.store.set(id, copy);
-    for (const item of value.items) copy.items.push(deepCopy(item, memo));
+    for (const item of value.items) copy.append(deepCopy(item, memo));
     return copy;
   }
   if (value instanceof PyTuple) return deepCopyTuple(value, id, memo);
@@ -71,7 +71,7 @@ function deepCopy(value: PyValue, memo: PyDict): PyValue {
   if (value instanceof PyDeque) {
     const copy = new PyDeque(value.cls, [], value.maxlen);
     memo.store.set(id, copy);
-    for (const item of value.items) copy.items.push(deepCopy(item, memo));
+    for (const item of value.items) copy.append(deepCopy(item, memo));
     return copy;
   }
   if (value instanceof PyInstance && !value.cls.isBuiltin && !value.turtle && value.enumValue === undefined) {

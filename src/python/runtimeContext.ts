@@ -19,9 +19,26 @@ export function chargeCollision(): void {
   current?.spend();
 }
 
-/** Charges the running program for a new dict entry, wherever the entry comes from; see {@link chargeCollision}. */
-export function chargeEntry(): void {
-  current?.allocate(1);
+/**
+ * Charges the running program for slots of storage it creates, wherever the storage comes from; see
+ * {@link chargeCollision}.
+ */
+export function chargeSlots(count: number): void {
+  current?.allocate(count);
+}
+
+/**
+ * Builds a value at no charge: a constant, which CPython creates once when it compiles the program, or the MemoryError
+ * that reports the limit, which charging would raise again without end.
+ */
+export function withoutCharge<T>(build: () => T): T {
+  const running = current;
+  current = undefined;
+  try {
+    return build();
+  } finally {
+    current = running;
+  }
 }
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {

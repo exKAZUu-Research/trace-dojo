@@ -2,6 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
+import { chargeSlots } from './runtimeContext';
 import type { SetTable } from './setTable';
 
 /**
@@ -144,21 +145,78 @@ export interface ExceptionState {
 
 /** An instance of a class written in the program, or of a builtin class with instance attributes. */
 export class PyInstance extends PyObject {
-  readonly dict = new Map<string, PyValue>();
+  readonly dict: Map<string, PyValue> = new AttributeMap();
   exception?: ExceptionState;
   turtle?: TurtleState;
   /** The value of an Enum member. */
   enumValue?: PyValue;
-}
 
-export class PyList extends PyObject {
-  constructor(
-    cls: PyClass,
-    public items: PyValue[]
-  ) {
+  constructor(cls: PyClass | undefined) {
     super(cls);
+    chargeSlots(1);
   }
 }
+
+/** The attributes of an instance, which charge the slot each new name takes. */
+class AttributeMap extends Map<string, PyValue> {
+  override set(name: string, value: PyValue): this {
+    if (!this.has(name)) chargeSlots(1);
+    return super.set(name, value);
+  }
+}
+
+/**
+ * Storage charges itself: a list, tuple, deque, set, dict, or instance costs one slot when it is created, and one more
+ * for each item, entry, or attribute it holds from then or gains later. The classes that own the storage charge it, so
+ * that code building or growing a container neither forgets the charge nor repeats it.
+ */
+abstract class PyGrowableSequence extends PyObject {
+  private storage: PyValue[];
+
+  constructor(cls: PyClass, items: PyValue[]) {
+    super(cls);
+    chargeSlots(items.length + 1);
+    this.storage = items;
+  }
+
+  get items(): readonly PyValue[] {
+    return this.storage;
+  }
+
+  /** The items for an edit in place that overwrites, reorders, or removes them: only the methods below add items. */
+  get editableItems(): PyValue[] {
+    return this.storage;
+  }
+
+  append(item: PyValue): void {
+    chargeSlots(1);
+    this.storage.push(item);
+  }
+
+  extend(items: readonly PyValue[]): void {
+    chargeSlots(items.length);
+    for (const item of items) this.storage.push(item);
+  }
+
+  /** Puts `items` in place of the `deleteCount` items from `start`, charging the items the sequence gains. */
+  splice(start: number, deleteCount: number, items: readonly PyValue[]): void {
+    chargeSlots(Math.max(items.length - deleteCount, 0));
+    if (items.length === 1) this.storage.splice(start, deleteCount, items[0]);
+    else this.storage = [...this.storage.slice(0, start), ...items, ...this.storage.slice(start + deleteCount)];
+  }
+
+  /**
+   * Puts another array in place of the items at no charge and returns the previous one, for a caller that drops items
+   * or lends the array out and back, as a sort does.
+   */
+  replaceItems(items: PyValue[]): PyValue[] {
+    const previous = this.storage;
+    this.storage = items;
+    return previous;
+  }
+}
+
+export class PyList extends PyGrowableSequence {}
 
 export class PyTuple extends PyObject {
   constructor(
@@ -166,6 +224,7 @@ export class PyTuple extends PyObject {
     readonly items: readonly PyValue[]
   ) {
     super(cls);
+    chargeSlots(items.length + 1);
   }
 }
 
@@ -177,6 +236,7 @@ export class PyDict extends PyObject {
     public defaultFactory?: PyValue
   ) {
     super(cls);
+    chargeSlots(1);
   }
 }
 
@@ -186,6 +246,7 @@ export class PySet extends PyObject {
     public table: SetTable
   ) {
     super(cls);
+    chargeSlots(1);
   }
 }
 
@@ -395,13 +456,13 @@ export class PyOpaque extends PyObject {
 }
 
 /** A `collections.deque`. */
-export class PyDeque extends PyObject {
+export class PyDeque extends PyGrowableSequence {
   constructor(
     cls: PyClass,
-    public items: PyValue[],
+    items: PyValue[],
     readonly maxlen: number | undefined
   ) {
-    super(cls);
+    super(cls, items);
   }
 }
 

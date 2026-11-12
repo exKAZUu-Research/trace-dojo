@@ -75,6 +75,10 @@ test.each([
     'a dict filled by assignment and a list beyond the slot limit together',
     'd = {}\nfor i in range(200000):\n    d[i] = i\na = [0] * 900000',
   ],
+  ['a copy of a list beyond the slot limit together', 'a = [0] * 800000\nb = a.copy()'],
+  ['a copy.copy of a list beyond the slot limit together', 'import copy\na = [0] * 800000\nb = copy.copy(a)'],
+  ['a deep copy of a list beyond the slot limit together', 'import copy\na = [0] * 800000\nb = copy.deepcopy(a)'],
+  ['a slice of a list beyond the slot limit together', 'a = [0] * 800000\nb = a[:]'],
   ['a list repeated in place beyond memory', 'x = [1]\nx *= 100000000'],
   ['a deque repeated in place beyond memory', 'from collections import deque\nd = deque([1])\nd *= 1000000000'],
   ['a product with a huge repeat', 'import itertools\nitertools.product([1], repeat=10**12)'],
@@ -93,6 +97,17 @@ test.each([
   ['a JSON text with a huge indent', 'import json\nx = json.dumps([[[[1]]]] * 1000, indent=100000)'],
 ])('%s raises MemoryError', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ uncaughtException: 'MemoryError' });
+});
+
+test('containers built in different ways are each charged once', () => {
+  // Ten containers of 99,000 items fit in the slot limit only when none of them is charged twice.
+  const program = `import copy
+from collections import deque
+a = [0] * 99000
+containers = [a.copy(), copy.copy(a), copy.deepcopy(a), a[:], list(a), tuple(a), sorted(a), a + [], deque(a)]
+if [len(container) for container in containers] != [99000] * 9:
+    raise AssertionError("wrong length")`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test('a bounded deque repeated a billion times keeps its last items without running the rounds', () => {

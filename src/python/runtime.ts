@@ -14,6 +14,7 @@ import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
 import { DEFAULT_MAX_STR_DIGITS } from './numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial, setAttribute, toArray } from './objects';
+import { withoutCharge } from './runtimeContext';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import { newGenericAlias, unionClass, unionGetItem } from './typeHints';
@@ -67,7 +68,7 @@ export class Runtime {
   private readonly entryRows: (number | undefined)[] = [];
   /** The classes this run defined, by base class: builtin classes outlive a run, so they cannot hold them. */
   private readonly subclasses = new Map<PyClass, PyClass[]>();
-  private allocatedSlots = 0;
+  private slots = 0;
   private reprDepth = 0;
 
   constructor() {
@@ -99,10 +100,24 @@ export class Runtime {
     this.spend(Math.ceil(length / 64));
   }
 
+  /** The slots charged so far, which only grows: a run pays for storage it has dropped too. */
+  get allocatedSlots(): number {
+    return this.slots;
+  }
+
+  /** Charges storage about to be created. Storage it refuses is not charged, so a program may catch the error. */
   allocate(count: number): void {
-    this.allocatedSlots += count;
-    if (this.allocatedSlots > LIMITS.maxSlots) throw pyError('MemoryError');
+    this.ensureRoom(count);
+    this.slots += count;
     this.spend(Math.ceil(count / 64));
+  }
+
+  /**
+   * Refuses storage of a size the program chose before a JavaScript array of that size is built. It charges nothing:
+   * the storage charges itself once created.
+   */
+  ensureRoom(count: number): void {
+    if (this.slots + count > LIMITS.maxSlots) throw withoutCharge(() => pyError('MemoryError'));
   }
 
   buildString(length: number): void {
@@ -257,7 +272,6 @@ export class Runtime {
   }
 
   tuple(items: PyValue[]): PyTuple {
-    this.allocate(items.length);
     return newTuple(items);
   }
 
@@ -330,7 +344,6 @@ export class Runtime {
   }
 
   listOf(items: PyValue[]): PyList {
-    this.allocate(items.length + 1);
     return newList(items);
   }
 
