@@ -310,19 +310,22 @@ test.each([
   expect(() => traceProgram('python', program, program)).toThrow(message);
 });
 
-test("a static method shows its parameters' fields no more than Java's static method does", () => {
-  const python = `class Point:
+test.each([
+  ['decorators', '@staticmethod\n    def show(p):\n        y = 1\n    @classmethod\n    def make(cls):\n        z = 2'],
+  [
+    'calls of staticmethod and classmethod',
+    'def show(p):\n        y = 1\n    show = staticmethod(show)\n    def make(cls):\n        z = 2\n    make = classmethod(make)',
+  ],
+])(
+  "a static method made by %s shows its parameters' fields no more than Java's static method does",
+  (_name, methods) => {
+    const python = `class Point:
     def __init__(self):
         self.x = 3
-    @staticmethod
-    def show(p):
-        y = 1
-    @classmethod
-    def make(cls):
-        z = 2
+    ${methods}
 Point.show(Point())
 Point.make()`;
-  const java = `public class Main {
+    const java = `public class Main {
   static class Point {
     int x;
     Point() {
@@ -340,8 +343,9 @@ Point.make()`;
     Point.make();
   }
 }`;
-  expect(varsOf('python', python)).toEqual(varsOf('java', java));
-});
+    expect(varsOf('python', python)).toEqual(varsOf('java', java));
+  }
+);
 
 function varsOf(language: 'java' | 'python', program: string): unknown[] {
   return traceProgram(language, program, program).traceItems.map(({ vars }) =>

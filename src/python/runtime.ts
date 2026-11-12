@@ -208,8 +208,10 @@ export class Runtime {
     return new Frame('function', locals, cells, fn.globals, callRow, def.isAtomic, def.scope, fn, fn.classCell);
   }
 
-  callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): PyValue {
+  /** Calls a function, through a bound method when `receiver` is the instance or class that method is bound to. */
+  callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs, receiver?: PyValue): PyValue {
     const frame = this.newFunctionFrame(fn, args, kwargs);
+    frame.receiver = receiver;
     if (fn.def.scope.isGenerator) return this.newGenerator(fn, frame);
     this.pushFrame(frame);
     let result: PyValue;

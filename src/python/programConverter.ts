@@ -505,15 +505,8 @@ export class ProgramConverter extends ExpressionConverter {
     if (hasToken(node, 'async')) unsupported(node, 'async def');
     if (node.childForFieldName('type_parameters')) unsupported(node, '型引数');
     const name = this.mangle(field(node, 'name').text);
-    // A static or class method has no instance to show as Java's `this`.
-    const isMethod =
-      this.context.scope.info.kind === 'class' &&
-      !decorators.some(
-        (decorator) => decorator.kind === 'name' && ['staticmethod', 'classmethod'].includes(decorator.name)
-      );
     const fn = this.newFunction(node, name, `${this.context.qualifiedPrefix}${name}`);
     fn.decorators = decorators;
-    fn.isMethod = isMethod;
     fn.params = this.parameters(field(node, 'parameters'));
     const returnsNode = node.childForFieldName('return_type');
     fn.returns = returnsNode ? this.annotation(returnsNode) : undefined;

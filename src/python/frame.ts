@@ -14,6 +14,8 @@ export class Frame implements TracedFrame {
   readonly annotations: AnnotationThunk[] = [];
   /** The frame an inlined (list, set, or dict) comprehension runs within, whose names CPython's frame shares. */
   inlinedIn?: Frame;
+  /** What a bound method's call passed as the first argument, which a method of an instance shows like Java's `this`. */
+  receiver?: PyValue;
 
   // code-gauge-allow functionParameterCount 9 -- Each frame field is set once at creation and read on every name access.
   constructor(
