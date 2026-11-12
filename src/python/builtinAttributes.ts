@@ -6,7 +6,7 @@ import './builtinComparisons';
 import { pyRepr } from './conversions';
 import { method, redeclareMethods } from './define';
 import { defineGetSet, defineUnsupportedAttributes } from './descriptors';
-import { deleteItem, setItem, sliceIndices } from './items';
+import { deleteItem, exactSliceBounds, setItem } from './items';
 import { mappingProxyClass, newMappingProxy } from './mappingProxy';
 import { exactBinary, scaleToFloat, toIndex } from './numbers';
 import { bindValue, callValue, getAttribute, isCallable, isTruthy, toArray } from './objects';
@@ -392,8 +392,8 @@ method(sliceClass, 'indices', 'one', 1, 1, (self, [length]) => sliceIndicesOf(se
 function sliceIndicesOf(slice: PySlice, lengthValue: PyValue): PyValue {
   const length = toIndex(lengthValue);
   if (length < 0n) throw valueError('length should not be negative');
-  const { start, stop, step } = sliceIndices(slice, Number(length));
-  return newTuple([BigInt(start), BigInt(stop), BigInt(step)]);
+  const { start, stop, step } = exactSliceBounds(slice, length);
+  return newTuple([start, stop, step]);
 }
 
 method(notImplementedClass, '__bool__', 'none', 0, 0, () => {

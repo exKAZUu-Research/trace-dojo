@@ -28,26 +28,10 @@ function sliceIndex(value: PyValue): bigint | undefined {
   return toIndex(value, () => 'slice indices must be integers or None or have an __index__ method');
 }
 
-/** Resolves a slice against a sequence length, as CPython's slice.indices does. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes CPython's PySlice_AdjustIndices.
+/** Resolves a slice against the length of a sequence held in an array, whose indices are numbers. */
 export function sliceIndices(slice: PySlice, length: number): SliceIndices {
-  const stepValue = sliceIndex(slice.step) ?? 1n;
-  if (stepValue === 0n) throw valueError('slice step cannot be zero');
-  const step = Number(stepValue);
-  const len = BigInt(length);
-  const clamp = (value: bigint | undefined, defaultValue: bigint): number => {
-    if (value === undefined) return Number(defaultValue);
-    let index = value;
-    if (index < 0n) {
-      index += len;
-      if (index < 0n) index = step < 0 ? -1n : 0n;
-    } else if (index >= len) {
-      index = step < 0 ? len - 1n : len;
-    }
-    return Number(index);
-  };
-  const start = clamp(sliceIndex(slice.start), step < 0 ? len - 1n : 0n);
-  const stop = clamp(sliceIndex(slice.stop), step < 0 ? -1n : len);
+  const bounds = exactSliceBounds(slice, BigInt(length));
+  const [start, stop, step] = [Number(bounds.start), Number(bounds.stop), Number(bounds.step)];
   let count = 0;
   if (step < 0) {
     if (stop < start) count = Math.floor((start - stop - 1) / -step) + 1;
@@ -55,6 +39,28 @@ export function sliceIndices(slice: PySlice, length: number): SliceIndices {
     count = Math.floor((stop - start - 1) / step) + 1;
   }
   return { start, stop, step, count };
+}
+
+/**
+ * Resolves a slice against a length with exact integers, as CPython's PySlice_AdjustIndices does for sequences and
+ * _PySlice_GetLongIndices for ranges and `slice.indices`.
+ */
+// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes CPython's PySlice_AdjustIndices.
+export function exactSliceBounds(slice: PySlice, length: bigint): { start: bigint; stop: bigint; step: bigint } {
+  const step = sliceIndex(slice.step) ?? 1n;
+  if (step === 0n) throw valueError('slice step cannot be zero');
+  const clamp = (value: bigint | undefined, defaultValue: bigint): bigint => {
+    if (value === undefined) return defaultValue;
+    if (value < 0n) {
+      const index = value + length;
+      return index < 0n ? (step < 0n ? -1n : 0n) : index;
+    }
+    if (value >= length) return step < 0n ? length - 1n : length;
+    return value;
+  };
+  const start = clamp(sliceIndex(slice.start), step < 0n ? length - 1n : 0n);
+  const stop = clamp(sliceIndex(slice.stop), step < 0n ? -1n : length);
+  return { start, stop, step };
 }
 
 function sliceItems<T>(items: readonly T[], indices: SliceIndices): T[] {
@@ -141,11 +147,11 @@ export function keyError(key: PyValue): PyError {
 function rangeItem(range: PyRange, key: PyValue): PyValue {
   const length = range.length;
   if (key instanceof PySlice) {
-    const indices = sliceIndices(key, Number(length));
-    const start = range.start + BigInt(indices.start) * range.step;
+    const bounds = exactSliceBounds(key, length);
+    const start = range.start + bounds.start * range.step;
     // CPython's compute_slice maps the slice's adjusted stop as it maps its start, not the stop after the last item.
-    const stop = range.start + BigInt(indices.stop) * range.step;
-    return new PyRange(rangeClass, start, stop, range.step * BigInt(indices.step));
+    const stop = range.start + bounds.stop * range.step;
+    return new PyRange(rangeClass, start, stop, range.step * bounds.step);
   }
   const index = toIndex(key, (value) => `range indices must be integers or slices, not ${typeName(value)}`);
   const resolved = index < 0n ? index + length : index;
