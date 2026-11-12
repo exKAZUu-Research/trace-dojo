@@ -18,6 +18,7 @@ export type Value =
   | GoMap
   | GoFunc
   | Iface
+  | Channel
   | undefined;
 
 export class Complex {
@@ -108,7 +109,31 @@ export class GoFunc {
      */
     readonly call: (args: Value[], callRow?: number, deferredFor?: unknown) => Value | Value[],
     /** The values the function keeps alive, which garbage collection follows. */
-    readonly captured: readonly unknown[] = []
+    readonly captured: readonly unknown[] = [],
+    /** Runs the function as {@link call} does, yielding when its goroutine blocks; absent when it never blocks. */
+    readonly resume?: (
+      args: Value[],
+      callRow?: number,
+      deferredFor?: unknown
+    ) => Generator<{ reason: string }, Value | Value[], unknown>
+  ) {}
+}
+
+/** A channel: its buffer, and the goroutines waiting to send to it or receive from it, which the scheduler manages. */
+export class Channel {
+  readonly buffer: Value[] = [];
+  closed = false;
+  /** Goroutines blocked sending, with the values they send, which the scheduler manages. */
+  readonly senders: unknown[] = [];
+  /** Goroutines blocked receiving. */
+  readonly receivers: unknown[] = [];
+
+  constructor(
+    readonly capacity: number,
+    /** The zero value of the element type, which a receive from a closed channel gives. */
+    readonly zero: () => Value,
+    /** Numbers channels in the order the program makes them, for printing them as addresses. */
+    readonly id: number
   ) {}
 }
 
@@ -122,7 +147,12 @@ export class Iface {
 
 /** Copies a value as assignment does: structs and arrays are values, everything else is shared. */
 export function copyValue(value: Value): Value {
-  if (value instanceof GoStruct) return new GoStruct(value.fields.map(copyValue), value.native);
+  if (value instanceof GoStruct) {
+    // A library type whose state Go copies with the struct, such as a sync.Mutex, copies it here.
+    const native = value.native;
+    const copied = typeof native?.copy === 'function' ? (native.copy as () => NativeState)() : native;
+    return new GoStruct(value.fields.map(copyValue), copied);
+  }
   if (value instanceof GoArray) return new GoArray(value.elements.map(copyValue));
   return value;
 }

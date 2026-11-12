@@ -19,8 +19,18 @@ import { fma } from './fma';
 import { utf8Decode } from './literals';
 import type { Operand } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
-import { type Eval, type Frame, readLocal, writeLocal } from './runtime';
+import {
+  clearHoists,
+  type Eval,
+  type Frame,
+  readLocal,
+  runHoists,
+  runToEnd,
+  type Suspending,
+  writeLocal,
+} from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
+import { receive } from './scheduler';
 import {
   BASIC,
   type BasicKind,
@@ -50,7 +60,19 @@ import {
   typeString,
   underlying,
 } from './types';
-import { Cell, Complex, copyValue, GoArray, type GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
+import {
+  Cell,
+  type Channel,
+  Complex,
+  copyValue,
+  GoArray,
+  type GoMap,
+  GoStruct,
+  Iface,
+  Pointer,
+  Slice,
+  type Value,
+} from './values';
 
 /** Compiles expressions, checking their types as Go's compiler does. */
 export abstract class ExpressionCompiler extends CompilerBase {
@@ -459,9 +481,50 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Operators ------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 40 -- One case per unary operator, as the specification lists them.
+  /** Compiles a channel that a receive uses, which a send-only channel cannot be. */
+  protected receivableChannel(expression: Expression): Eval | undefined {
+    const operand = this.value(expression);
+    if (this.isInvalid(operand)) return undefined;
+    const type = coreType(operand.type);
+    if (type?.kind !== 'chan') {
+      this.error(expression, `${describeType(operand.type)} 型の値はチャネルではないので、<- で受信できません。`);
+      return undefined;
+    }
+    if (type.dir === 'send') {
+      this.error(expression, '送信専用のチャネルからは受信できません。');
+      return undefined;
+    }
+    return operand.eval;
+  }
+
+  /**
+   * `<-ch`: the value received, or with `commaOk`, also whether a send gave it rather than the channel's closing, as
+   * `v, ok := <-ch` takes them.
+   */
+  protected receive(expression: Extract<Expression, { kind: 'unary' }>, commaOk: boolean): Operand {
+    const channel = this.receivableChannel(expression.operand);
+    if (!channel) return this.invalid(expression);
+    const type = (coreType(this.withoutHoists(() => this.value(expression.operand)).type) as { element: Type }).element;
+    const run = function* (frame: Frame): Suspending<Value> {
+      const [value, ok] = yield* receive(channel(frame) as Channel | undefined);
+      return (commaOk ? [value, ok] : value) as Value;
+    };
+    const evaluate = this.suspending(run, (frame) => runToEnd(run(frame)));
+    if (!commaOk) return { mode: 'value', type, span: expression, eval: evaluate, isCall: true };
+    return {
+      mode: 'value',
+      type,
+      span: expression,
+      eval: (frame) => (evaluate(frame) as unknown as [Value, boolean])[0],
+      commaOk: (frame) => evaluate(frame) as unknown as [Value, boolean],
+      isCall: true,
+    };
+  }
+
   private unary(expression: Extract<Expression, { kind: 'unary' }>): Operand {
     const { operator } = expression;
     if (operator === '&') return this.addressOf(expression);
+    if (operator === '<-') return this.receive(expression, false);
     if (operator === '*') {
       const target = this.expression(expression.operand);
       // `*T` where T is a type is the pointer type, as in the conversion `(*T)(p)`.
@@ -584,12 +647,39 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // code-gauge-allow functionCognitiveComplexity 50 -- The binary operators and their type rules, one at a time.
   private binary(expression: Extract<Expression, { kind: 'binary' }>): Operand {
+    const { operator } = expression;
+    if ((operator === '&&' || operator === '||') && this.hoists) return this.blockingLogical(expression);
     return this.binaryOfOperands(
       expression,
       expression.operator,
       this.value(expression.left),
       this.value(expression.right)
     );
+  }
+
+  /**
+   * `a && b` and `a || b` in a statement that may block: the computations that may block in `b` run only when `a`
+   * does not decide the result, so the whole operation runs with them.
+   */
+  private blockingLogical(expression: Extract<Expression, { kind: 'binary' }>): Operand {
+    const left = this.value(expression.left);
+    const right = this.part(() => this.value(expression.right));
+    const result = this.binaryOfOperands(expression, expression.operator, left, right.value);
+    const hoists = right.hoists;
+    if (!hoists || this.isInvalid(result) || result.mode === 'constant') return result;
+    const readLeft = left.eval;
+    const readRight = right.value.eval;
+    const decides = expression.operator === '||';
+    const run = function* (frame: Frame): Suspending<Value> {
+      if ((readLeft(frame) as boolean) === decides) return decides;
+      yield* runHoists(frame, hoists);
+      try {
+        return readRight(frame);
+      } finally {
+        clearHoists(frame, hoists);
+      }
+    };
+    return { ...result, eval: this.suspending(run, result.eval) };
   }
 
   /** Applies a binary operator to compiled operands, as `x op= y` also does. */

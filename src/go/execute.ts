@@ -7,6 +7,7 @@ import { withRuntime } from './native';
 import { describePanic } from './panicText';
 import { parseGo } from './parse';
 import { type Frame, GoFatal, GoPanic, ProgramExit, Runtime } from './runtime';
+import { Scheduler } from './scheduler';
 import { Cell } from './values';
 
 export function executeGoProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -37,10 +38,17 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     try {
       runtime.call(program.initializer, [], [], undefined);
       // The turtles that main's variables still reach when it ends are the final ones, as in Java.
-      runtime.call(program.main, [], [], undefined, undefined, (frame) => {
+      const onMainEnd = (frame: Frame): void => {
         onEnd?.(frame);
         runtime.collectGarbage();
-      });
+      };
+      if (program.concurrent) {
+        const scheduler = new Scheduler(runtime);
+        const main = scheduler.spawn(() => runtime.resume(program.main, [], [], undefined, undefined, onMainEnd));
+        scheduler.run(main);
+      } else {
+        runtime.call(program.main, [], [], undefined, undefined, onMainEnd);
+      }
     } catch (error) {
       uncaughtException = describeUncaught(error);
     }

@@ -16,6 +16,7 @@ import type {
   NameSpan,
   Parameter,
   Receiver,
+  SelectCase,
   SignatureSyntax,
   SimpleStatement,
   Span,
@@ -328,7 +329,11 @@ export class Converter {
         return unsupported(node, '( ) で囲んだ型');
       }
       case 'channel_type': {
-        return unsupported(node, 'チャネル');
+        // `chan<- T` has the arrow after `chan`, `<-chan T` before it.
+        const tokens = node.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type);
+        const arrow = tokens.indexOf('<-');
+        const dir = arrow === -1 ? 'both' : arrow < tokens.indexOf('chan') ? 'receive' : 'send';
+        return { kind: 'chan', ...span, dir, element: this.convertType(required(node.childForFieldName('value'))) };
       }
       case 'negated_type':
       case 'type_elem': {
@@ -414,6 +419,7 @@ export class Converter {
       case 'short_var_declaration':
       case 'inc_statement':
       case 'dec_statement':
+      case 'send_statement':
       case 'empty_statement': {
         return this.convertSimpleStatement(node);
       }
@@ -461,13 +467,11 @@ export class Converter {
         return unsupported(node, 'goto 文');
       }
       case 'go_statement': {
-        return unsupported(node, 'go 文（goroutine）');
+        const call = named(node).find((child) => child.type !== 'comment');
+        return { kind: 'go', ...span, call: this.convertExpression(required(call)) };
       }
       case 'select_statement': {
-        return unsupported(node, 'select 文');
-      }
-      case 'send_statement': {
-        return unsupported(node, 'チャネルへの送信');
+        return this.convertSelect(node);
       }
       default: {
         throw syntaxError(node, '文の書き方に誤りがあります。');
@@ -511,12 +515,46 @@ export class Converter {
         return { kind: 'empty', ...span };
       }
       case 'send_statement': {
-        return unsupported(node, 'チャネルへの送信');
+        return {
+          kind: 'send',
+          ...span,
+          channel: this.convertExpression(required(node.childForFieldName('channel'))),
+          value: this.convertExpression(required(node.childForFieldName('value'))),
+        };
       }
       default: {
         throw syntaxError(node, '文の書き方に誤りがあります。');
       }
     }
+  }
+
+  private convertSelect(node: Node): Statement {
+    const cases: SelectCase[] = [];
+    for (const child of named(node)) {
+      if (child.type !== 'communication_case' && child.type !== 'default_case') continue;
+      cases.push({ ...spanOf(child), comm: this.convertCommunication(child), body: this.caseBody(child) });
+    }
+    return { kind: 'select', ...spanOf(node), cases };
+  }
+
+  private convertCommunication(node: Node): SelectCase['comm'] {
+    if (node.type === 'default_case') return undefined;
+    const comm = required(node.childForFieldName('communication'));
+    if (comm.type === 'send_statement') return this.convertSimpleStatement(comm) as SelectCase['comm'];
+    const right = this.convertExpression(required(comm.childForFieldName('right')));
+    let receive = right;
+    while (receive.kind === 'paren') receive = receive.expression;
+    if (receive.kind !== 'unary' || receive.operator !== '<-') {
+      throw syntaxError(comm, 'select の case には、チャネルへの送信かチャネルからの受信を書いてください。');
+    }
+    const left = comm.childForFieldName('left');
+    return {
+      kind: 'receive',
+      ...spanOf(comm),
+      left: left ? this.convertExpressionList(left) : [],
+      define: comm.children.some((child) => child?.type === ':='),
+      channel: receive.operand,
+    };
   }
 
   private convertIf(node: Node): Extract<Statement, { kind: 'if' }> {
@@ -757,7 +795,6 @@ export class Converter {
       }
       case 'unary_expression': {
         const operator = required(node.childForFieldName('operator')).text;
-        if (operator === '<-') unsupported(node, 'チャネルからの受信');
         return {
           kind: 'unary',
           ...span,

@@ -7,13 +7,14 @@ import { toInterface } from './conversions';
 import type { FuncEntity, GenericFunc } from './entities';
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
 import { utf8Decode } from './literals';
-import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
+import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor, resumeDynamicMethod, resumeMethod } from './methods';
 import { currentRuntime } from './native';
 import type { Operand } from './operand';
 import { ordering } from './operators';
-import { type Eval, evaluateAll, type Frame, GoPanic, type ListEval } from './runtime';
-import { nilPointerPanic, panicNilValue, runtimeErrorPanic } from './runtimeErrors';
+import { type Eval, evaluateAll, type Frame, GoPanic, type ListEval, type Suspending } from './runtime';
+import { nilPointerPanic, panicNilValue, plainPanic, runtimeErrorPanic } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
+import { closeChannel, makeChannel } from './scheduler';
 import { appendValues } from './sliceOps';
 import { newTurtle, TURTLE_POINTER } from './turtle';
 import {
@@ -38,7 +39,7 @@ import {
   type TypeParamType,
   underlying,
 } from './types';
-import { Complex, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
+import { type Channel, Complex, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
 
 /** Builtins whose call has a value that a statement must use, as Go reports `len(s) (value) is not used`. */
 const VALUE_BUILTINS = new Set([
@@ -181,9 +182,15 @@ export abstract class CallCompiler extends CompositeCompiler {
     };
   }
 
-  protected resultOperand(span: Span, results: Type[], evaluate: (frame: Frame) => Value | Value[]): Operand {
+  protected resultOperand(
+    span: Span,
+    results: Type[],
+    evaluate: (frame: Frame) => Value | Value[],
+    /** Makes the call as `evaluate` does, yielding when its goroutine blocks. */
+    resume?: (frame: Frame) => Suspending<Value | Value[]>
+  ): Operand {
     // A call with several results evaluates to an array of them, which only assignments and arguments take apart.
-    const call = evaluate as Eval;
+    const call = resume ? this.suspending(resume, evaluate as Eval) : (evaluate as Eval);
     if (results.length === 0) return { mode: 'novalue', type: NO_VALUE, span, eval: call, isCall: true };
     if (results.length === 1) return { mode: 'value', type: results[0], span, eval: call, isCall: true };
     return { mode: 'value', type: { kind: 'tuple', types: results }, span, eval: call, isCall: true };
@@ -204,14 +211,32 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (!args) return this.invalid(expression);
     const row = expression.row;
     const direct = callee.func?.direct;
-    if (direct) return this.resultOperand(expression, signature.results, (frame) => direct(args(frame), row));
+    if (direct) {
+      const directResume = callee.func?.directResume;
+      return this.resultOperand(
+        expression,
+        signature.results,
+        (frame) => direct(args(frame), row),
+        directResume && ((frame) => directResume(args(frame), row))
+      );
+    }
     const read = callee.eval;
-    return this.resultOperand(expression, signature.results, (frame) => {
-      const fn = read(frame);
-      const argValues = args(frame);
-      if (!(fn instanceof GoFunc)) nilPointerPanic();
-      return fn.call(argValues, row);
-    });
+    return this.resultOperand(
+      expression,
+      signature.results,
+      (frame) => {
+        const fn = read(frame);
+        const argValues = args(frame);
+        if (!(fn instanceof GoFunc)) nilPointerPanic();
+        return fn.call(argValues, row);
+      },
+      function* (frame) {
+        const fn = read(frame);
+        const argValues = args(frame);
+        if (!(fn instanceof GoFunc)) nilPointerPanic();
+        return fn.resume ? yield* fn.resume(argValues, row) : fn.call(argValues, row);
+      }
+    );
   }
 
   private genericCall(expression: Extract<Expression, { kind: 'call' }>, entity: FuncEntity): Operand {
@@ -231,7 +256,15 @@ export abstract class CallCompiler extends CompositeCompiler {
     }
     const instance = generic.instantiate(typeArgs);
     const row = expression.row;
-    return this.resultOperand(expression, signature.results, (frame) => instance.call(args(frame), row));
+    return this.resultOperand(
+      expression,
+      signature.results,
+      (frame) => instance.call(args(frame), row),
+      function* (frame) {
+        const argValues = args(frame);
+        return instance.resume ? yield* instance.resume(argValues, row) : instance.call(argValues, row);
+      }
+    );
   }
 
   /** Infers the type arguments of a generic call from its arguments: typed ones first, then untyped defaults. */
@@ -294,14 +327,24 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (selection.kind === 'interfaceMethod') {
       const readReceiver = this.embeddedReceiver(receiver, selection.path);
       const methodName = selection.method.name;
-      return this.resultOperand(expression, methodType.results, (frame) => {
-        const iface = readReceiver(frame) as { type: Type; value: Value } | undefined;
-        const argValues = args(frame);
-        if (!iface) nilPointerPanic();
-        const call = dynamicMethod(iface.type, methodName);
-        if (!call) throw new Error(`Missing method ${methodName}`);
-        return call(iface.value, argValues, row);
-      });
+      return this.resultOperand(
+        expression,
+        methodType.results,
+        (frame) => {
+          const iface = readReceiver(frame) as { type: Type; value: Value } | undefined;
+          const argValues = args(frame);
+          if (!iface) nilPointerPanic();
+          const call = dynamicMethod(iface.type, methodName);
+          if (!call) throw new Error(`Missing method ${methodName}`);
+          return call(iface.value, argValues, row);
+        },
+        function* (frame) {
+          const iface = readReceiver(frame) as { type: Type; value: Value } | undefined;
+          const argValues = args(frame);
+          if (!iface) nilPointerPanic();
+          return yield* resumeDynamicMethod(iface.type, methodName, iface.value, argValues, row);
+        }
+      );
     }
     const { method, path } = selection;
     let readReceiver: Eval;
@@ -314,10 +357,21 @@ export abstract class CallCompiler extends CompositeCompiler {
       const viaPointer = underlying(receiver.type).kind === 'pointer';
       readReceiver = (frame) => receiverFor(read(frame), path, method, viaPointer);
     }
-    return this.resultOperand(expression, methodType.results, (frame) => {
-      const value = readReceiver(frame);
-      return invokeMethod(method, value, args(frame), row);
-    });
+    return this.resultOperand(
+      expression,
+      methodType.results,
+      (frame) => {
+        const value = readReceiver(frame);
+        return invokeMethod(method, value, args(frame), row);
+      },
+      // The program's methods get their code after their bodies compile, which may come later.
+      method.code?.resume || !method.code?.call
+        ? function* (frame) {
+            const value = readReceiver(frame);
+            return yield* resumeMethod(method, value, args(frame), row);
+          }
+        : undefined
+    );
   }
 
   /** Evaluates the embedded field that holds an interface, for a method promoted from it. */
@@ -439,8 +493,7 @@ export abstract class CallCompiler extends CompositeCompiler {
         return this.printBuiltin(expression, name);
       }
       case 'close': {
-        this.unsupported(expression, 'チャネル（close）');
-        return this.invalid(expression);
+        return count(1) ? this.closeBuiltin(expression) : this.invalid(expression);
       }
       case 'NewTurtle': {
         return this.newTurtleBuiltin(expression);
@@ -511,6 +564,17 @@ export abstract class CallCompiler extends CompositeCompiler {
         eval: (frame) => {
           const slice = read(frame) as Slice | undefined;
           return BigInt(slice ? (name === 'len' ? slice.length : slice.capacity) : 0);
+        },
+      };
+    }
+    if (type.kind === 'chan') {
+      return {
+        mode: 'value',
+        type: BASIC.int,
+        span: expression,
+        eval: (frame) => {
+          const channel = read(frame) as Channel | undefined;
+          return BigInt(channel ? (name === 'len' ? channel.buffer.length : channel.capacity) : 0);
         },
       };
     }
@@ -620,11 +684,60 @@ export abstract class CallCompiler extends CompositeCompiler {
         },
       };
     }
-    this.error(expression, `make で作れるのはスライスと map だけです（${describeType(type)} 型が書かれています）。`);
+    if (under?.kind === 'chan') {
+      if (expression.args.length > 2) {
+        this.error(expression, 'チャネルを make で作るときの引数は、型とバッファの大きさの2つまでです。');
+        return this.invalid(expression);
+      }
+      const zero = this.zeroOf(under.element);
+      return {
+        mode: 'value',
+        type,
+        span: expression,
+        createsObject: true,
+        eval: (frame) => {
+          const size = length ? (length(frame) as bigint) : 0n;
+          if (size < 0n || size > 1n << 31n) plainPanic('makechan: size out of range');
+          frame.runtime.allocate(Number(size));
+          return makeChannel(Number(size), zero);
+        },
+      };
+    }
+    this.error(
+      expression,
+      `make で作れるのはスライスと map とチャネルだけです（${describeType(type)} 型が書かれています）。`
+    );
     return this.invalid(expression);
   }
 
   protected abstract mapKeyFunction(type: Type): (key: Value) => unknown;
+
+  private closeBuiltin(expression: Extract<Expression, { kind: 'call' }>): Operand {
+    const operand = this.value(expression.args[0]);
+    if (this.isInvalid(operand)) return operand;
+    const type = coreType(operand.type);
+    if (type?.kind !== 'chan') {
+      this.error(
+        expression,
+        `close に渡せるのはチャネルだけです（${describeType(operand.type)} 型の値が書かれています）。`
+      );
+      return this.invalid(expression);
+    }
+    if (type.dir === 'receive') {
+      this.error(expression, '受信専用のチャネルは close できません。');
+      return this.invalid(expression);
+    }
+    const read = operand.eval;
+    return {
+      mode: 'novalue',
+      type: NO_VALUE,
+      span: expression,
+      eval: (frame) => {
+        closeChannel(read(frame) as Channel | undefined);
+        return;
+      },
+    };
+  }
 
   private constantSize(expression: Expression | undefined): bigint | undefined {
     if (!expression) return undefined;
@@ -931,7 +1044,7 @@ function containsCall(expression: Expression): boolean {
       return containsCall(expression.operand) || expression.indices.some(containsCall);
     }
     case 'unary': {
-      return containsCall(expression.operand);
+      return expression.operator === '<-' || containsCall(expression.operand);
     }
     case 'binary': {
       return containsCall(expression.left) || containsCall(expression.right);

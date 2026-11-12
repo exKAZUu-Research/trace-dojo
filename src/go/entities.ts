@@ -83,6 +83,11 @@ export interface FuncEntity {
   value(): GoFunc;
   /** Calls the function directly, which skips creating a function value. */
   direct?: (args: Value[], callRow: number | undefined) => Value | Value[];
+  /** Calls the function directly as `direct` does, yielding when its goroutine blocks; absent when it never blocks. */
+  directResume?: (
+    args: Value[],
+    callRow: number | undefined
+  ) => Generator<{ reason: string }, Value | Value[], unknown>;
   generic?: GenericFunc;
   declaration?: FunctionDeclaration;
 }
@@ -110,6 +115,8 @@ export interface GoPackage {
   members: Map<string, Entity>;
   /** Members this environment does not provide, which are rejected rather than reported as undefined. */
   unsupported?: ReadonlySet<string>;
+  /** A package this environment does not provide, whose uses report nothing more than its import did. */
+  unavailable?: boolean;
 }
 
 /** The compile-time state of one function body. */

@@ -1,3 +1,4 @@
+// oxlint-disable require-yield -- Statements that never block are generators like the others, so that all run alike.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import type {
   Block,
@@ -12,27 +13,35 @@ import type {
   VarDeclaration,
 } from './ast';
 import { CallCompiler } from './callCompiler';
+import type { Hoist, Part } from './compilerBase';
 import type { FunctionContext, VarEntity } from './entities';
 import { equalityOf } from './equality';
 import { runesOf } from './literals';
-import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
+import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor, resumeDynamicMethod, resumeMethod } from './methods';
 import type { Operand } from './operand';
 import { arithmetic } from './operators';
 import {
   BREAK,
+  clearHoists,
   type Completion,
   CONTINUE,
   type Eval,
   evaluateAll,
+  evaluatePart,
   type Exec,
+  type Execution,
   FALLTHROUGH,
   type Frame,
   GoPanic,
   readLocal,
   RETURN,
+  runHoists,
+  runToEnd,
+  type Suspending,
   UNASSIGNED,
 } from './runtime';
-import { nilPointerPanic, panicNilValue } from './runtimeErrors';
+import { nilPointerPanic, panicNilValue, plainPanic } from './runtimeErrors';
+import { closeChannel, receive, scheduler, select, type SelectOp, send } from './scheduler';
 import {
   ANY,
   BASIC,
@@ -51,6 +60,7 @@ import {
 } from './types';
 import {
   Cell,
+  type Channel,
   copyValue,
   type GoArray,
   GoFunc,
@@ -73,10 +83,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** Records the step of a statement after it runs, as `StepTracker.runStatement` decides. */
-  protected withStep(span: Span, exec: Exec, onlyCalls: boolean): Exec {
-    const row = this.stepRow(span);
-    if (row === undefined) return exec;
-    return (frame) => frame.runtime.steps.runStatement(row, onlyCalls, () => exec(frame));
+  protected withStep(span: Span, run: Run, onlyCalls: boolean): Simple {
+    return { run, row: this.stepRow(span), onlyCalls };
   }
 
   // Blocks --------------------------------------------------------------------------------------------------------
@@ -93,9 +101,9 @@ export abstract class StatementCompiler extends CallCompiler {
     if (keepsLocals) return exec;
     const slots = fn.info.locals.slice(firstLocal).map((local) => local.slot);
     if (slots.length === 0) return exec;
-    return (frame) => {
+    return function* (frame) {
       try {
-        return exec(frame);
+        return yield* exec(frame);
       } finally {
         for (const slot of slots) frame.locals[slot] = UNASSIGNED;
       }
@@ -105,9 +113,9 @@ export abstract class StatementCompiler extends CallCompiler {
   protected statements(statements: Statement[]): Exec {
     const compiled = statements.map((statement) => this.statement(statement));
     if (compiled.length === 1) return compiled[0];
-    return (frame) => {
+    return function* (frame) {
       for (const exec of compiled) {
-        const completion = exec(frame);
+        const completion = yield* exec(frame);
         if (completion) return completion;
       }
       return;
@@ -117,9 +125,9 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per statement kind.
   protected statement(statement: Statement): Exec {
     const exec = this.statementBody(statement);
-    return (frame) => {
+    return function* (frame) {
       frame.runtime.spend();
-      return exec(frame);
+      return yield* exec(frame);
     };
   }
 
@@ -129,6 +137,7 @@ export abstract class StatementCompiler extends CallCompiler {
       case 'assign':
       case 'define':
       case 'incDec':
+      case 'send':
       case 'empty': {
         return this.simpleStatement(statement);
       }
@@ -137,11 +146,11 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       case 'const': {
         this.constDeclaration(statement);
-        return () => {};
+        return NOOP;
       }
       case 'type': {
         this.localTypeDeclaration(statement);
-        return () => {};
+        return NOOP;
       }
       case 'block': {
         return this.block(statement.block);
@@ -167,19 +176,23 @@ export abstract class StatementCompiler extends CallCompiler {
       case 'break': {
         if ((this.fn as FunctionContext).breakDepth === 0)
           this.error(statement, 'break 文はループや switch 文の中にしか書けません。');
-        return () => BREAK;
+        return completing(BREAK);
       }
       case 'continue': {
         if ((this.fn as FunctionContext).loopDepth === 0)
           this.error(statement, 'continue 文はループの中にしか書けません。');
-        return () => CONTINUE;
+        return completing(CONTINUE);
       }
       case 'fallthrough': {
         this.error(statement, 'fallthrough は switch 文の case の最後にしか書けません。');
-        return () => FALLTHROUGH;
+        return completing(FALLTHROUGH);
       }
-      case 'defer': {
+      case 'defer':
+      case 'go': {
         return this.deferStatement(statement);
+      }
+      case 'select': {
+        return this.selectStatement(statement);
       }
     }
   }
@@ -189,17 +202,23 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Simple statements ---------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of simple statement.
+  /** Compiles a simple statement, which runs the computations that may block in it first. */
   protected simpleStatement(statement: SimpleStatement): Exec {
+    const { value, hoists } = this.part(() => this.simple(statement));
+    return execOf(value, hoists);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of simple statement.
+  private simple(statement: SimpleStatement): Simple {
     switch (statement.kind) {
       case 'expression': {
         const operand = this.expression(statement.expression);
-        if (this.isInvalid(operand)) return () => {};
+        if (this.isInvalid(operand)) return NO_SIMPLE;
         if (!operand.isCall || (operand as { pureValue?: boolean }).pureValue) {
           if (operand.mode === 'type')
             this.error(statement, `${describeType(operand.type)} は型なので、文としては書けません。`);
           else this.error(statement, '式の値を使っていません（文として書けるのは関数の呼び出しなどだけです）。');
-          return () => {};
+          return NO_SIMPLE;
         }
         const read = operand.eval;
         return this.withStep(
@@ -220,23 +239,26 @@ export abstract class StatementCompiler extends CallCompiler {
       case 'incDec': {
         return this.incDec(statement);
       }
+      case 'send': {
+        return this.sendStatement(statement);
+      }
       case 'empty': {
-        return () => {};
+        return NO_SIMPLE;
       }
     }
   }
 
-  private incDec(statement: Extract<SimpleStatement, { kind: 'incDec' }>): Exec {
+  private incDec(statement: Extract<SimpleStatement, { kind: 'incDec' }>): Simple {
     const target = this.expression(statement.operand);
-    if (this.isInvalid(target)) return () => {};
-    if (!this.isAssignable(target, statement.operand)) return () => {};
+    if (this.isInvalid(target)) return NO_SIMPLE;
+    if (!this.isAssignable(target, statement.operand)) return NO_SIMPLE;
     target.variable?.markUsed();
     if (!isNumericType(target.type)) {
       this.error(
         statement,
         `${statement.operator} は数の変数にしか使えません（${describeType(target.type)} 型の値が書かれています）。`
       );
-      return () => {};
+      return NO_SIMPLE;
     }
     const one = this.assign(this.constant({ kind: 'int', value: 1n }, BASIC.untypedInt, statement), target.type, '値');
     const apply: (a: Value, b: Value) => Value = this.hasTypeParam(target.type)
@@ -293,7 +315,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Plain, compound, multiple, and comma-ok assignments.
-  private assignment(statement: Extract<SimpleStatement, { kind: 'assign' }>): Exec {
+  private assignment(statement: Extract<SimpleStatement, { kind: 'assign' }>): Simple {
     const { operator, left, right } = statement;
     if (operator !== '=') return this.compoundAssignment(statement);
     const targets = left.map((target) => this.assignmentTarget(target));
@@ -309,9 +331,9 @@ export abstract class StatementCompiler extends CallCompiler {
       return target.type;
     };
     const values = this.rightSide(statement, right, left.length, typeOf);
-    if (!values) return () => {};
+    if (!values) return NO_SIMPLE;
     const storeFns = values.map((value, index) => stores(index, value));
-    const exec: Exec =
+    const exec: Run =
       values.length === 1
         ? (frame) => {
             storeFns[0](frame, values[0](frame));
@@ -373,7 +395,8 @@ export abstract class StatementCompiler extends CallCompiler {
       });
     }
     if (right.length === 1) {
-      const operand = precompiled ?? this.expression(right[0]);
+      const receiving = count === 2 && !precompiled ? receiveOperand(right[0]) : undefined;
+      const operand = receiving ? this.receive(receiving, true) : (precompiled ?? this.expression(right[0]));
       if (this.isInvalid(operand)) return undefined;
       if (operand.type.kind === 'tuple' && operand.type.types.length === count) return spreadResults(operand, convert);
       if (count === 2 && operand.commaOk) return commaOkResults(operand, convert);
@@ -394,23 +417,23 @@ export abstract class StatementCompiler extends CallCompiler {
     return name !== undefined && CONSTRUCTOR_NAME.test(name);
   }
 
-  private compoundAssignment(statement: Extract<SimpleStatement, { kind: 'assign' }>): Exec {
+  private compoundAssignment(statement: Extract<SimpleStatement, { kind: 'assign' }>): Simple {
     const { left, right } = statement;
     const operator = statement.operator.slice(0, -1);
     if (left.length !== 1 || right.length !== 1) {
       this.error(statement, `${statement.operator} の左辺と右辺には、値を1つずつ書いてください。`);
-      return () => {};
+      return NO_SIMPLE;
     }
     const target = this.expression(left[0]);
     if (this.isInvalid(target) || !this.isAssignable(target, left[0])) {
       this.expression(right[0]);
-      return () => {};
+      return NO_SIMPLE;
     }
     target.variable?.markUsed();
     countWrite(target);
     const current: Operand = { ...target, mode: 'value', eval: (frame) => frame.temporaries.at(-1) as Value };
     const combined = this.binaryOfOperands(statement, operator, current, this.expression(right[0]));
-    if (this.isInvalid(combined)) return () => {};
+    if (this.isInvalid(combined)) return NO_SIMPLE;
     const result = this.assign(combined, target.type, '変数');
     const update = this.updater(target, left[0]);
     return this.withStep(
@@ -431,13 +454,13 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- := declares new variables and assigns existing ones.
-  private shortVarDeclaration(statement: Extract<SimpleStatement, { kind: 'define' }>): Exec {
+  private shortVarDeclaration(statement: Extract<SimpleStatement, { kind: 'define' }>): Simple {
     const { left, right } = statement;
     const names: { name: string; span: Span }[] = [];
     for (const target of left) {
       if (target.kind !== 'name') {
         this.error(target, ':= の左辺には名前だけを書いてください。');
-        return () => {};
+        return NO_SIMPLE;
       }
       names.push({ name: target.name, span: target });
     }
@@ -471,7 +494,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (!values) {
       for (const [index, { name, span }] of names.entries())
         if (!existing[index] && name !== '_') this.declareLocal(name, BASIC.invalid, span).used = true;
-      return () => {};
+      return NO_SIMPLE;
     }
     const targets: ((frame: Frame, value: Value) => void)[] = names.map(({ name, span }, index) => {
       const entity = existing[index];
@@ -491,7 +514,7 @@ export abstract class StatementCompiler extends CallCompiler {
       if (single) variable.definedAsConstant = definedAsConstant;
       return (frame, value) => declareValue(frame, variable, value);
     });
-    const exec: Exec =
+    const exec: Run =
       values.length === 1
         ? (frame) => {
             targets[0](frame, values[0](frame));
@@ -510,7 +533,7 @@ export abstract class StatementCompiler extends CallCompiler {
    * `x := a * b` with floats: keeps the factors in hidden slots so that an addition using x fuses the multiplication,
    * as Go's compiler does on arm64 while x keeps this single definition.
    */
-  private productDeclaration(statement: Span, name: { name: string; span: Span }, operand: Operand): Exec {
+  private productDeclaration(statement: Span, name: { name: string; span: Span }, operand: Operand): Simple {
     const product = operand.product as NonNullable<Operand['product']>;
     const left = this.hiddenSlot();
     const right = this.hiddenSlot();
@@ -540,35 +563,47 @@ export abstract class StatementCompiler extends CallCompiler {
       if (spec.values.length === 0) {
         const zero: () => Value = declaredType ? this.zeroOf(declaredType) : () => {};
         const variables = spec.names.map((name) => this.declareLocal(name.name, declaredType ?? BASIC.invalid, name));
-        parts.push((frame) => {
-          for (const variable of variables) declareValue(frame, variable, zero());
-          return;
-        });
+        parts.push(
+          execOf(
+            {
+              run: (frame) => {
+                for (const variable of variables) declareValue(frame, variable, zero());
+              },
+              onlyCalls: false,
+            },
+            undefined
+          )
+        );
         continue;
       }
       const types: Type[] = [];
-      const values = this.rightSide(spec, spec.values, spec.names.length, () => declaredType, types);
+      const { value: values, hoists } = this.part(() =>
+        this.rightSide(spec, spec.values, spec.names.length, () => declaredType, types)
+      );
       const variables = spec.names.map((name, index) => {
         const type = declaredType ?? types[index] ?? BASIC.invalid;
         if (isUntyped(type)) this.error(name, `${name.name} の型を決められません（nil には型がありません）。`);
         return this.declareLocal(name.name, type, name);
       });
       if (!values) continue;
-      const exec: Exec = (frame) => {
+      const exec: Run = (frame) => {
         const evaluated = evaluateAll(frame, values);
         for (const [index, variable] of variables.entries()) declareValue(frame, variable, evaluated[index]);
-        return;
       };
       parts.push(
-        this.withStep(
-          spec,
-          exec,
-          spec.values.every((value) => this.createsObject(value))
+        execOf(
+          this.withStep(
+            spec,
+            exec,
+            spec.values.every((value) => this.createsObject(value))
+          ),
+          hoists
         )
       );
     }
-    return (frame) => {
-      for (const part of parts) part(frame);
+    if (parts.length === 1) return parts[0];
+    return function* (frame) {
+      for (const part of parts) yield* part(frame);
       return;
     };
   }
@@ -590,7 +625,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   private ifStatement(statement: Extract<Statement, { kind: 'if' }>): Exec {
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
-    const condition = this.condition(statement.condition, 'if 文');
+    const condition = this.part(() => this.condition(statement.condition, 'if 文'));
     const consequence = this.block(statement.consequence);
     const { alternative } = statement;
     let otherwise: Exec | undefined;
@@ -598,10 +633,11 @@ export abstract class StatementCompiler extends CallCompiler {
       otherwise =
         'statements' in alternative ? this.block(alternative) : this.scoped(() => this.ifStatement(alternative));
     }
-    return (frame) => {
-      init?.(frame);
-      if (condition(frame)) return consequence(frame);
-      return otherwise?.(frame);
+    return function* (frame) {
+      if (init) yield* init(frame);
+      if (condition.hoists ? yield* evaluatePart(frame, condition) : condition.value(frame))
+        return yield* consequence(frame);
+      return otherwise ? yield* otherwise(frame) : undefined;
     };
   }
 
@@ -628,38 +664,30 @@ export abstract class StatementCompiler extends CallCompiler {
       (entity): entity is VarEntity => entity.kind === 'var'
     );
     void firstLocal;
-    const condition = statement.condition ? this.condition(statement.condition, 'for 文') : () => true;
+    const condition = this.part(() =>
+      statement.condition ? this.condition(statement.condition, 'for 文') : (): Value => true
+    );
     const body = this.loopBody(statement.body);
     const post =
       statement.post && statement.post.kind !== 'empty' ? this.simpleStatementWithoutStep(statement.post) : undefined;
-    const init: Exec | undefined =
-      initExec && row !== undefined
-        ? (frame) => {
-            initExec(frame);
-            frame.runtime.steps.step(row);
-            return;
-          }
-        : initExec;
-    const update: Exec | undefined =
-      post && row !== undefined
-        ? (frame) => {
-            post(frame);
-            frame.runtime.steps.step(row);
-            return;
-          }
-        : post;
-    return (frame) => {
-      init?.(frame);
-      while (condition(frame)) {
+    return function* (frame) {
+      if (initExec) {
+        yield* initExec(frame);
+        frame.runtime.steps.step(row);
+      }
+      while (condition.hoists ? yield* evaluatePart(frame, condition) : condition.value(frame)) {
         frame.runtime.spend();
-        const completion = body(frame);
+        const completion = yield* body(frame);
         if (completion === BREAK) return;
         if (completion && completion !== CONTINUE) return completion;
         // Each iteration has its own copy of the loop's variables, which closures may have captured.
         for (const variable of loopVariables) {
           if (variable.boxed) frame.locals[variable.slot] = new Cell(readLocal(frame, variable.slot));
         }
-        update?.(frame);
+        if (post) {
+          yield* post(frame);
+          frame.runtime.steps.step(row);
+        }
       }
       return;
     };
@@ -678,30 +706,40 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private rangeStatement(statement: Extract<Statement, { kind: 'range' }>): Exec {
-    const range = this.value(statement.range);
+    const { value: range, hoists } = this.part(() => this.value(statement.range));
+    const rangeType = this.isInvalid(range) ? undefined : coreType(range.type);
+    if (rangeType?.kind === 'chan') {
+      if (rangeType.dir === 'send') {
+        this.error(statement.range, '送信専用のチャネルは range で回せません。');
+      } else {
+        return this.rangeChannel(statement, { value: range.eval, hoists }, rangeType.element);
+      }
+    }
     const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range);
     if (!source) {
       this.declareRangeTargets(statement, BASIC.invalid, BASIC.invalid);
       this.loopBody(statement.body);
-      return () => {};
+      return NOOP;
     }
     const { read, keyType, valueType, iterate } = source;
     const bind = this.rangeTargets(statement, keyType, valueType);
     const row = this.stepRow(statement);
     const storesAnswer = bind.answered;
     const body = this.loopBody(statement.body);
-    return (frame) => {
-      const collection = read(frame);
+    const collectionPart: Part = { value: read, hoists };
+    return function* (frame) {
+      const collection = hoists ? yield* evaluatePart(frame, collectionPart) : read(frame);
       frame.temporaries.push(collection);
       try {
-        const result = iterate(collection, (key, value) => {
+        for (const [key, value] of iterate(collection)) {
           frame.runtime.spend();
           bind.assign(frame, key, value);
           frame.runtime.steps.stepBinding(row, storesAnswer);
-          const completion = body(frame);
-          return completion === CONTINUE ? undefined : completion;
-        });
-        return result === BREAK ? undefined : result;
+          const completion = yield* body(frame);
+          if (completion === BREAK) return;
+          if (completion && completion !== CONTINUE) return completion;
+        }
+        return;
       } finally {
         frame.temporaries.pop();
       }
@@ -802,15 +840,20 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- Expression switches with Go's rules for duplicates and fallthrough.
   private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
-    let tag = statement.tag ? this.value(statement.tag) : undefined;
-    if (tag && !this.isInvalid(tag)) tag = this.defaulted(tag);
+    const tagPart = this.part(() => {
+      const value = statement.tag ? this.value(statement.tag) : undefined;
+      return value && !this.isInvalid(value) ? this.defaulted(value) : value;
+    });
+    const tag = tagPart.value;
     const tagType = tag && !this.isInvalid(tag) ? tag.type : statement.tag ? BASIC.invalid : BASIC.bool;
     const defaults = statement.cases.filter((switchCase) => !switchCase.values);
     if (defaults.length > 1) this.error(defaults[1], 'switch 文に default が2つあります。');
     const seenConstants = new Map<string, Span>();
     const fn = this.fn as FunctionContext;
     const cases = statement.cases.map((switchCase, index) => {
-      const tests = (switchCase.values ?? []).map((value) => this.caseTest(value, tag, tagType, seenConstants));
+      const tests = (switchCase.values ?? []).map((value) =>
+        this.part(() => this.caseTest(value, tag, tagType, seenConstants))
+      );
       const last = switchCase.body.at(-1);
       const fallsThrough = last?.kind === 'fallthrough';
       if (fallsThrough && index === statement.cases.length - 1) {
@@ -825,15 +868,30 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       return { tests, body, fallsThrough, isDefault: !switchCase.values };
     });
-    const readTag = tag && !this.isInvalid(tag) ? tag.eval : () => true;
-    return (frame) => {
-      init?.(frame);
-      const value = readTag(frame);
-      let start = cases.findIndex((switchCase) => switchCase.tests.some((test) => test(frame, value)));
+    const readTag: Part = {
+      value: tag && !this.isInvalid(tag) ? tag.eval : (): Value => true,
+      hoists: tagPart.hoists,
+    };
+    return function* (frame) {
+      if (init) yield* init(frame);
+      const value = readTag.hoists ? yield* evaluatePart(frame, readTag) : readTag.value(frame);
+      let start = -1;
+      for (const [index, switchCase] of cases.entries()) {
+        for (const test of switchCase.tests) {
+          if (test.hoists) yield* runHoists(frame, test.hoists);
+          try {
+            if (test.value(frame, value)) start = index;
+          } finally {
+            if (test.hoists) clearHoists(frame, test.hoists);
+          }
+          if (start >= 0) break;
+        }
+        if (start >= 0) break;
+      }
       if (start < 0) start = cases.findIndex((switchCase) => switchCase.isDefault);
       if (start < 0) return;
       for (let index = start; index < cases.length; index++) {
-        const completion = cases[index].body(frame);
+        const completion = yield* cases[index].body(frame);
         if (completion === BREAK) return;
         if (completion) return completion;
         if (!cases[index].fallsThrough) return;
@@ -901,7 +959,8 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- Type switches with their bound variable per clause.
   private typeSwitchStatement(statement: Extract<Statement, { kind: 'typeSwitch' }>): Exec {
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
-    const operand = this.value(statement.operand);
+    const operandPart = this.part(() => this.value(statement.operand));
+    const operand = operandPart.value;
     const valid = !this.isInvalid(operand);
     if (valid && !isInterface(operand.type)) {
       this.error(
@@ -917,16 +976,16 @@ export abstract class StatementCompiler extends CallCompiler {
       this.error(statement.binding, `宣言した変数 ${statement.binding.name} を使っていません。`);
     }
     for (const binding of bindings) binding.used = true;
-    const read = operand.eval;
-    return (frame) => {
-      init?.(frame);
-      const value = read(frame);
+    const read: Part = { value: operand.eval, hoists: operandPart.hoists };
+    return function* (frame) {
+      if (init) yield* init(frame);
+      const value = read.hoists ? yield* evaluatePart(frame, read) : read.value(frame);
       const chosen =
         cases.find((typeCase) => !typeCase.isDefault && typeCase.matched(value)) ??
         cases.find((typeCase) => typeCase.isDefault);
       if (!chosen) return;
       if (chosen.binding) declareValue(frame, chosen.binding, copyValue(chosen.extract(value)));
-      const completion = chosen.body(frame);
+      const completion = yield* chosen.body(frame);
       return completion === BREAK ? undefined : completion;
     };
   }
@@ -987,23 +1046,29 @@ export abstract class StatementCompiler extends CallCompiler {
         this.error(statement, 'return 文に値が足りません。');
       }
       if (fn.hasNamedResults) this.checkShadowedResults(statement);
-      return () => RETURN;
+      return completing(RETURN);
     }
     if (results.length === 0) {
       for (const result of statement.results) this.expression(result);
       this.error(statement, '結果を返さない関数の return 文には、値を書けません。');
-      return () => RETURN;
+      return completing(RETURN);
     }
-    const values = this.rightSide(statement, statement.results, results.length, (index) => results[index]);
-    if (!values) return () => RETURN;
+    const { value: values, hoists } = this.part(() =>
+      this.rightSide(statement, statement.results, results.length, (index) => results[index])
+    );
+    if (!values) return completing(RETURN);
     const slots = fn.info.resultSlots;
-    return (frame) => {
+    const store = (frame: Frame): void => {
       const evaluated = evaluateAll(frame, values);
       for (const [index, slot] of slots.entries()) {
         const current = frame.locals[slot];
         if (current instanceof Cell) current.v = evaluated[index];
         else frame.locals[slot] = evaluated[index];
       }
+    };
+    const exec = execOf({ run: store, onlyCalls: false }, hoists);
+    return function* (frame) {
+      yield* exec(frame);
       return RETURN;
     };
   }
@@ -1019,10 +1084,22 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Deferred calls of functions, methods, and builtins.
-  private deferStatement(statement: Extract<Statement, { kind: 'defer' }>): Exec {
+  private deferStatement(statement: Extract<Statement, { kind: 'defer' | 'go' }>): Exec {
+    const { value: run, hoists } = this.part(() => this.launchedCall(statement));
+    return execOf({ run, onlyCalls: false }, hoists);
+  }
+
+  /**
+   * Evaluates the function and arguments of a deferred call or a goroutine's call now, as Go does, and defers the call,
+   * which runs where it cannot block, or starts a goroutine that runs it.
+   */
+  // code-gauge-allow functionCognitiveComplexity 25 -- Calls of functions, function values, generic functions, and methods.
+  private launchedCall(statement: Extract<Statement, { kind: 'defer' | 'go' }>): Run {
+    const keyword = statement.kind;
+    const launch = keyword === 'defer' ? deferLaunch : goLaunch;
     const call = stripParens(statement.call);
     if (call.kind !== 'call') {
-      this.error(statement, 'defer には関数の呼び出しを書いてください。');
+      this.error(statement, `${keyword} には関数の呼び出しを書いてください。`);
       return () => {};
     }
     const callee = this.expression(call.callee);
@@ -1031,25 +1108,26 @@ export abstract class StatementCompiler extends CallCompiler {
       return () => {};
     }
     const row = call.row;
-    if (callee.mode === 'builtin') return this.deferBuiltin(statement, call, callee.builtin as string);
+    if (callee.mode === 'builtin') return this.launchedBuiltin(statement, call, callee.builtin as string, launch);
     if (callee.mode === 'type') {
-      this.error(statement, 'defer には関数の呼び出しを書いてください（型の変換は書けません）。');
+      this.error(statement, `${keyword} には関数の呼び出しを書いてください（型の変換は書けません）。`);
       return () => {};
     }
-    if (callee.mode === 'method') return this.deferMethod(call, callee, row);
+    if (callee.mode === 'method') return this.launchedMethod(call, callee, row, launch);
     const value = this.asValue(callee);
     if (this.isInvalid(value)) return () => {};
     const signature = coreType(value.type);
     if (signature?.kind !== 'func' || value.func?.generic) {
       if (value.func?.generic) {
-        const operand = this.expression(call);
+        if (keyword === 'go') {
+          this.unsupported(statement, 'go 文での型引数を持つ関数の呼び出し');
+          return () => {};
+        }
+        const operand = this.withoutHoists(() => this.expression(call));
         const read = operand.eval;
-        return (frame) => {
-          frame.runtime.defer(frame, () => void read(frame), []);
-          return;
-        };
+        return (frame) => launch(frame, () => void read(frame), undefined, []);
       }
-      this.error(statement, `${describeType(value.type)} 型の値は関数ではないので、defer で呼び出せません。`);
+      this.error(statement, `${describeType(value.type)} 型の値は関数ではないので、${keyword} で呼び出せません。`);
       return () => {};
     }
     const args = this.callArguments(call, signature);
@@ -1059,15 +1137,25 @@ export abstract class StatementCompiler extends CallCompiler {
       const fn = readFunction(frame);
       const argValues = args(frame);
       if (!(fn instanceof GoFunc)) {
-        frame.runtime.defer(frame, () => nilPointerPanic(), []);
+        if (keyword === 'go') plainPanic('go of nil func value');
+        launch(frame, () => nilPointerPanic(), undefined, []);
         return;
       }
-      frame.runtime.defer(frame, () => void fn.call(argValues, row, frame), [fn, ...argValues]);
-      return;
+      launch(
+        frame,
+        () => void fn.call(argValues, row, frame),
+        fn.resume && (() => (fn.resume as NonNullable<GoFunc['resume']>)(argValues, row)),
+        [fn, ...argValues]
+      );
     };
   }
 
-  private deferMethod(call: Extract<Expression, { kind: 'call' }>, callee: Operand, row: number): Exec {
+  private launchedMethod(
+    call: Extract<Expression, { kind: 'call' }>,
+    callee: Operand,
+    row: number,
+    launch: Launch
+  ): Run {
     const { receiver, selection } = callee.method as NonNullable<Operand['method']>;
     const args = this.callArguments(call, selection.method.type);
     if (!args) return () => {};
@@ -1077,12 +1165,19 @@ export abstract class StatementCompiler extends CallCompiler {
       return (frame) => {
         const iface = read(frame) as { type: Type; value: Value } | undefined;
         const argValues = args(frame);
-        frame.runtime.defer(frame, () => {
-          if (!iface) nilPointerPanic();
-          const target = dynamicMethod(iface.type, name);
-          target?.(iface.value, argValues, row, frame);
-        }, [iface, ...argValues]);
-        return;
+        launch(
+          frame,
+          () => {
+            if (!iface) nilPointerPanic();
+            const target = dynamicMethod(iface.type, name);
+            target?.(iface.value, argValues, row, frame);
+          },
+          () => {
+            if (!iface) nilPointerPanic();
+            return resumeDynamicMethod(iface.type, name, iface.value, argValues, row);
+          },
+          [iface, ...argValues]
+        );
       };
     }
     const { method, path } = selection;
@@ -1092,8 +1187,12 @@ export abstract class StatementCompiler extends CallCompiler {
     return (frame) => {
       const value = pointer ? pointer(frame) : receiverFor(read(frame), path, method, viaPointer);
       const argValues = args(frame);
-      frame.runtime.defer(frame, () => void invokeMethod(method, value, argValues, row, frame), [value, ...argValues]);
-      return;
+      launch(
+        frame,
+        () => void invokeMethod(method, value, argValues, row, frame),
+        () => resumeMethod(method, value, argValues, row),
+        [value, ...argValues]
+      );
     };
   }
 
@@ -1108,7 +1207,12 @@ export abstract class StatementCompiler extends CallCompiler {
     return (frame) => receiverFor(read(frame), path, POINTER_METHOD);
   }
 
-  private deferBuiltin(statement: Span, call: Extract<Expression, { kind: 'call' }>, name: string): Exec {
+  private launchedBuiltin(
+    statement: Extract<Statement, { kind: 'defer' | 'go' }>,
+    call: Extract<Expression, { kind: 'call' }>,
+    name: string,
+    launch: Launch
+  ): Run {
     if (name === 'panic' || name === 'print' || name === 'println') {
       const values = call.args.map((arg) =>
         name === 'panic' ? this.assign(this.expression(arg), ANY, '引数') : this.defaulted(this.value(arg)).eval
@@ -1116,25 +1220,238 @@ export abstract class StatementCompiler extends CallCompiler {
       if (name === 'panic' && values.length !== 1) this.error(call, 'panic の引数の数が合いません。');
       return (frame) => {
         const evaluated = values.map((value) => value(frame));
-        frame.runtime.defer(
+        launch(
           frame,
           () => {
             if (name === 'panic') throw new GoPanic(evaluated[0] ?? panicNilValue());
           },
+          undefined,
           evaluated
         );
-        return;
+      };
+    }
+    if (name === 'close') {
+      if (call.args.length !== 1) {
+        this.error(call, 'close の引数の数が合いません。');
+        return () => {};
+      }
+      const channel = this.sendableChannel(call.args[0], 'close');
+      if (!channel) return () => {};
+      const read = channel.eval;
+      return (frame) => {
+        const value = read(frame);
+        launch(frame, () => closeChannel(value as Channel | undefined), undefined, [value]);
       };
     }
     if (name === 'recover') {
       // A recover that the deferred mechanism calls directly is not called by a deferred function, so it stops nothing.
-      return (frame) => {
-        frame.runtime.defer(frame, () => {}, []);
-        return;
-      };
+      return (frame) => launch(frame, () => {}, undefined, []);
     }
-    this.unsupported(statement, `defer での ${name} の呼び出し`);
+    this.unsupported(statement, `${statement.kind} での ${name} の呼び出し`);
     return () => {};
+  }
+
+  // Channels --------------------------------------------------------------------------------------------------------
+
+  /** Compiles a channel that a send or `close` uses, which a receive-only channel cannot be. */
+  private sendableChannel(expression: Expression, use: 'send' | 'close'): { eval: Eval; element: Type } | undefined {
+    const operand = this.value(expression);
+    if (this.isInvalid(operand)) return undefined;
+    const type = coreType(operand.type);
+    if (type?.kind !== 'chan') {
+      this.error(
+        expression,
+        use === 'send'
+          ? `${describeType(operand.type)} 型の値はチャネルではないので、<- で送信できません。`
+          : `close に渡せるのはチャネルだけです（${describeType(operand.type)} 型の値が書かれています）。`
+      );
+      return undefined;
+    }
+    if (type.dir === 'receive') {
+      this.error(
+        expression,
+        use === 'send' ? '受信専用のチャネルには送信できません。' : '受信専用のチャネルは close できません。'
+      );
+      return undefined;
+    }
+    return { eval: operand.eval, element: type.element };
+  }
+
+  /** Compiles the channel and value of a send, as a send statement and a select case evaluate them. */
+  private sendParts(statement: Extract<SimpleStatement, { kind: 'send' }>): { channel: Eval; value: Eval } | undefined {
+    const channel = this.sendableChannel(statement.channel, 'send');
+    const value = this.expression(statement.value);
+    if (!channel || this.isInvalid(value)) return undefined;
+    return { channel: channel.eval, value: this.assign(value, channel.element, '送信する値') };
+  }
+
+  /** `ch <- v`: the send is the statement's last computation that may block. */
+  private sendStatement(statement: Extract<SimpleStatement, { kind: 'send' }>): Simple {
+    const parts = this.sendParts(statement);
+    if (!parts) return NO_SIMPLE;
+    const { channel, value } = parts;
+    const run = function* (frame: Frame): Suspending<undefined> {
+      yield* send(channel(frame) as Channel | undefined, value(frame));
+      return undefined;
+    };
+    const sent = this.suspending(run, (frame) => runToEnd(run(frame)));
+    return this.withStep(statement, (frame) => void sent(frame), false);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 30 -- The cases of select, with the variables a receive declares.
+  /**
+   * `select`: evaluates every case's channel and value once in order, waits for a case that can proceed, then makes
+   * that case's receive assignment and runs its statements.
+   */
+  private selectStatement(statement: Extract<Statement, { kind: 'select' }>): Exec {
+    const defaults = statement.cases.filter((selectCase) => !selectCase.comm);
+    if (defaults.length > 1) this.error(defaults[1], 'select 文に default が2つあります。');
+    const fn = this.fn as FunctionContext;
+    const row = this.stepRow(statement);
+    const { value: ops, hoists } = this.part(() =>
+      statement.cases.map((selectCase): ((frame: Frame) => SelectOp) | undefined => {
+        const { comm } = selectCase;
+        if (!comm) return undefined;
+        if (comm.kind === 'send') {
+          const parts = this.sendParts(comm);
+          if (!parts) return () => ({ kind: 'receive', channel: undefined });
+          const { channel, value } = parts;
+          return (frame) => ({ kind: 'send', channel: channel(frame) as Channel | undefined, value: value(frame) });
+        }
+        const channel = this.receivableChannel(comm.channel);
+        return (frame) => ({ kind: 'receive', channel: channel?.(frame) as Channel | undefined });
+      })
+    );
+    const bodies = statement.cases.map((selectCase) => {
+      fn.breakDepth++;
+      try {
+        return this.scoped(() => this.selectCaseBody(selectCase));
+      } finally {
+        fn.breakDepth--;
+      }
+    });
+    const defaultIndex = statement.cases.findIndex((selectCase) => !selectCase.comm);
+    const caseIndexes = ops.flatMap((op, index) => (op ? [index] : []));
+    const evaluators = caseIndexes.map((index) => ops[index] as (frame: Frame) => SelectOp);
+    return function* (frame) {
+      if (hoists) yield* runHoists(frame, hoists);
+      let evaluated: SelectOp[];
+      try {
+        evaluated = evaluators.map((evaluate) => evaluate(frame));
+      } finally {
+        if (hoists) clearHoists(frame, hoists);
+      }
+      frame.temporaries.push(evaluated);
+      let chosen: { index: number; value: Value; ok: boolean };
+      try {
+        chosen = yield* select(evaluated, defaultIndex !== -1);
+      } finally {
+        frame.temporaries.pop();
+      }
+      const index = chosen.index < 0 ? defaultIndex : (caseIndexes[chosen.index] as number);
+      frame.temporaries.push(chosen);
+      let completion: Completion | void;
+      try {
+        completion = yield* bodies[index](frame);
+      } finally {
+        frame.temporaries.pop();
+      }
+      void row;
+      return completion === BREAK ? undefined : completion;
+    };
+  }
+
+  /** A select case's statements, after the variables its receive declares or assigns. */
+  private selectCaseBody(selectCase: Extract<Statement, { kind: 'select' }>['cases'][number]): Exec {
+    const { comm } = selectCase;
+    let bind: ((frame: Frame, value: Value, ok: boolean) => void) | undefined;
+    let answered = false;
+    if (comm?.kind === 'receive' && comm.left.length > 0) {
+      const element = this.receiveElement(comm.channel);
+      const types = [element, BASIC.bool];
+      if (comm.left.length > 2) this.error(comm, 'select の case で受け取れる値は2つまでです。');
+      if (comm.define) {
+        const variables = comm.left.slice(0, 2).map((target, index) => {
+          if (target.kind !== 'name') {
+            this.error(target, ':= の左辺には名前だけを書いてください。');
+            return;
+          }
+          if (target.name === '_') return;
+          if (isAnswerType(types[index])) answered = true;
+          return this.declareLocal(target.name, types[index], target);
+        });
+        bind = (frame, value, ok) => {
+          if (variables[0]) declareValue(frame, variables[0], value);
+          if (variables[1]) declareValue(frame, variables[1], ok);
+        };
+      } else {
+        const stores = comm.left.slice(0, 2).map((target, index) => {
+          const operand = this.assignmentTarget(target);
+          if (!operand || this.isInvalid(operand)) return;
+          if (isAnswerType(types[index])) answered = true;
+          const convert = this.assign(
+            { mode: 'value', type: types[index], span: target, eval: (frame) => frame.temporaries.at(-1) as Value },
+            operand.type,
+            '変数'
+          );
+          const store = operand.store as NonNullable<Operand['store']>;
+          return (frame: Frame, value: Value): void => {
+            frame.temporaries.push(value);
+            try {
+              store(frame, convert(frame));
+            } finally {
+              frame.temporaries.pop();
+            }
+          };
+        });
+        bind = (frame, value, ok) => {
+          stores[0]?.(frame, value);
+          stores[1]?.(frame, ok);
+        };
+      }
+    }
+    const row = this.stepRow(selectCase);
+    const body = this.statements(selectCase.body);
+    if (!bind) return body;
+    const assign = bind;
+    return function* (frame) {
+      const chosen = frame.temporaries.at(-1) as { value: Value; ok: boolean };
+      assign(frame, chosen.value, chosen.ok);
+      frame.runtime.steps.stepBinding(row, answered);
+      return yield* body(frame);
+    };
+  }
+
+  /** The element type of a channel that a receive uses, or the invalid type after reporting why it cannot. */
+  private receiveElement(expression: Expression): Type {
+    const type = coreType(this.withoutHoists(() => this.value(expression)).type);
+    return type?.kind === 'chan' ? type.element : BASIC.invalid;
+  }
+
+  /** `for v := range ch`: receives until the channel is closed and empty. */
+  private rangeChannel(statement: Extract<Statement, { kind: 'range' }>, channel: Part, element: Type): Exec {
+    if (statement.value) this.error(statement.value, 'チャネルの range で受け取れる値は1つだけです。');
+    const bind = this.rangeTargets({ ...statement, value: undefined }, element, BASIC.invalid);
+    const row = this.stepRow(statement);
+    const body = this.loopBody(statement.body);
+    return function* (frame) {
+      const value = channel.hoists ? yield* evaluatePart(frame, channel) : channel.value(frame);
+      frame.temporaries.push(value);
+      try {
+        for (;;) {
+          const [received, ok] = yield* receive(value as Channel | undefined);
+          if (!ok) return;
+          frame.runtime.spend();
+          bind.assign(frame, received, undefined);
+          frame.runtime.steps.stepBinding(row, bind.answered);
+          const completion = yield* body(frame);
+          if (completion === BREAK) return;
+          if (completion && completion !== CONTINUE) return completion;
+        }
+      } finally {
+        frame.temporaries.pop();
+      }
+    };
   }
 
   // Functions -------------------------------------------------------------------------------------------------------
@@ -1153,10 +1470,12 @@ export abstract class StatementCompiler extends CallCompiler {
     isAtomic: boolean
   ): FunctionContext {
     const outer = this.fn;
-    const fn = this.newFunctionContext(name, outer, () => {});
+    const outerHoists = this.hoists;
+    const fn = this.newFunctionContext(name, outer, NOOP);
     fn.info.isAtomic = isAtomic;
     if (outer && !outer.recordsSteps) fn.recordsSteps = false;
     this.fn = fn;
+    this.hoists = undefined;
     try {
       this.withScope(() => {
         if (receiver) {
@@ -1185,13 +1504,13 @@ export abstract class StatementCompiler extends CallCompiler {
         const statements = this.statements(body.statements);
         const resultSlots = fn.info.resultSlots;
         const resultVariables = fn.resultVariables;
-        fn.info.body = (frame) => {
+        fn.info.body = function* (frame) {
           for (const [index, slot] of resultSlots.entries()) {
             const variable = resultVariables[index];
             if (variable) declareValue(frame, variable, zeros[index]());
             else frame.locals[slot] = zeros[index]();
           }
-          return statements(frame);
+          return yield* statements(frame);
         };
         if (type.results.length > 0 && !isTerminatingList(body.statements)) {
           this.error(
@@ -1202,6 +1521,7 @@ export abstract class StatementCompiler extends CallCompiler {
       });
     } finally {
       this.fn = outer;
+      this.hoists = outerHoists;
     }
     return fn;
   }
@@ -1231,58 +1551,46 @@ export abstract class StatementCompiler extends CallCompiler {
         const runtime = frame.runtime;
         return new GoFunc(
           (args, callRow, deferredFor) => runtime.call(info, cells, args, callRow, deferredFor as Frame | undefined),
-          cells
+          cells,
+          (args, callRow, deferredFor) => runtime.resume(info, cells, args, callRow, deferredFor as Frame | undefined)
         );
       },
     };
   }
 }
 
-type RangeVisit = (key: Value, value: Value) => Completion | undefined;
-type RangeIterator = (collection: Value, visit: RangeVisit) => Completion | undefined;
+type RangeIterator = (collection: Value) => Iterable<[Value, Value]>;
 
 /** Visits the runes of a string with their byte offsets. */
-function iterateString(collection: Value, visit: RangeVisit): Completion | undefined {
+function* iterateString(collection: Value): Iterable<[Value, Value]> {
   const text = collection as string;
   let offset = 0;
   for (const rune of runesOf(text)) {
-    const result = visit(BigInt(offset), BigInt(rune));
-    if (result) return result;
+    yield [BigInt(offset), BigInt(rune)];
     offset += runeSize(text, offset);
   }
-  return undefined;
 }
 
 /** Visits a copy of an array's elements, since the range expression is evaluated, and copied, once. */
-function iterateArray(collection: Value, visit: RangeVisit): Completion | undefined {
-  for (const [index, value] of [...(collection as GoArray).elements].entries()) {
-    const result = visit(BigInt(index), value);
-    if (result) return result;
-  }
-  return undefined;
+function* iterateArray(collection: Value): Iterable<[Value, Value]> {
+  for (const [index, value] of [...(collection as GoArray).elements].entries()) yield [BigInt(index), value];
 }
 
 /** Visits a slice's elements up to its length when the loop began, reading each from the shared array. */
-function iterateSlice(collection: Value, visit: RangeVisit): Completion | undefined {
+function* iterateSlice(collection: Value): Iterable<[Value, Value]> {
   const slice = collection as Slice | undefined;
   const length = slice?.length ?? 0;
-  for (let index = 0; index < length; index++) {
-    const result = visit(BigInt(index), (slice as Slice).get(index));
-    if (result) return result;
-  }
-  return undefined;
+  for (let index = 0; index < length; index++) yield [BigInt(index), (slice as Slice).get(index)];
 }
 
 /** Visits a map's entries, skipping entries deleted during the loop; entries added may or may not be visited, as in Go. */
-function iterateMap(collection: Value, visit: RangeVisit): Completion | undefined {
+function* iterateMap(collection: Value): Iterable<[Value, Value]> {
   const map = collection as GoMap | undefined;
-  if (!map) return undefined;
+  if (!map) return;
   for (const [key, entry] of map.entries) {
     if (!map.entries.has(key)) continue;
-    const result = visit(entry.key, entry.value);
-    if (result) return result;
+    yield [entry.key, entry.value];
   }
-  return undefined;
 }
 
 type Convert = (operand: Operand, index: number) => Eval;
@@ -1343,6 +1651,12 @@ function runeSize(text: string, offset: number): number {
   if (rune < 0x8_00) return 2;
   if (rune < 0x1_00_00) return 3;
   return 4;
+}
+
+/** The receive `<-ch` that an expression is, inside any parentheses. */
+function receiveOperand(expression: Expression): Extract<Expression, { kind: 'unary' }> | undefined {
+  const inner = stripParens(expression);
+  return inner.kind === 'unary' && inner.operator === '<-' ? inner : undefined;
 }
 
 function stripParens(expression: Expression): Expression {
@@ -1449,6 +1763,78 @@ function hasBreak(statements: Statement[]): boolean {
       }
     }
   });
+}
+
+/** A simple statement's code, which runs after the computations that may block in it. */
+type Run = (frame: Frame) => void;
+
+/** Defers a call or starts a goroutine for it: `run` calls it where it cannot block, `resume` where it can. */
+type Launch = (
+  frame: Frame,
+  run: () => void,
+  resume: (() => Suspending<unknown>) | undefined,
+  values: unknown[]
+) => void;
+
+const deferLaunch: Launch = (frame, run, _resume, values) => frame.runtime.defer(frame, run, values);
+
+const goLaunch: Launch = (_frame, run, resume, values) => {
+  void values;
+  scheduler().spawn(
+    resume ??
+      function* () {
+        run();
+        return;
+      }
+  );
+};
+
+/** A simple statement's code and the step it records, if any. */
+interface Simple {
+  run: Run;
+  row?: number;
+  onlyCalls: boolean;
+}
+
+const NO_SIMPLE: Simple = { run: () => {}, onlyCalls: false };
+
+const NOOP: Exec = function* () {
+  return;
+};
+
+function completing(completion: Completion): Exec {
+  return function* () {
+    return completion;
+  };
+}
+
+/** A simple statement as a statement: the computations that may block in it, its code, and then its step. */
+export function execOf(simple: Simple, hoists: Hoist[] | undefined): Exec {
+  const { run, row, onlyCalls } = simple;
+  if (!hoists) {
+    if (row === undefined) {
+      return function* (frame): Execution {
+        run(frame);
+        return undefined;
+      };
+    }
+    return function* (frame): Execution {
+      frame.runtime.steps.runStatement(row, onlyCalls, () => run(frame));
+      return undefined;
+    };
+  }
+  return function* (frame): Execution {
+    const { steps } = frame.runtime;
+    const before = steps.recorded;
+    yield* runHoists(frame, hoists);
+    try {
+      run(frame);
+    } finally {
+      clearHoists(frame, hoists);
+    }
+    if (row !== undefined) steps.completeStatement(row, onlyCalls, before);
+    return undefined;
+  };
 }
 
 export type { Completion, Slice };

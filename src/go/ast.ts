@@ -101,6 +101,7 @@ export type TypeExpression =
   | ({ kind: 'slice'; element: TypeExpression } & Span)
   | ({ kind: 'array'; length: Expression | undefined; element: TypeExpression } & Span)
   | ({ kind: 'map'; key: TypeExpression; value: TypeExpression } & Span)
+  | ({ kind: 'chan'; dir: 'both' | 'send' | 'receive'; element: TypeExpression } & Span)
   | ({ kind: 'func'; signature: SignatureSyntax } & Span)
   | ({ kind: 'struct'; fields: FieldSyntax[] } & Span)
   | ({ kind: 'interface'; methods: MethodSyntax[] } & Span);
@@ -170,7 +171,18 @@ export type SimpleStatement =
   | ({ kind: 'assign'; operator: string; left: Expression[]; right: Expression[] } & Span)
   | ({ kind: 'define'; left: Expression[]; right: Expression[] } & Span)
   | ({ kind: 'incDec'; operator: '++' | '--'; operand: Expression } & Span)
+  | ({ kind: 'send'; channel: Expression; value: Expression } & Span)
   | ({ kind: 'empty' } & Span);
+
+/** One case of a select statement: a send, a receive that may assign or declare, or `default`. */
+export interface SelectCase extends Span {
+  /** Undefined for `default`. */
+  comm:
+    | Extract<SimpleStatement, { kind: 'send' }>
+    | ({ kind: 'receive'; left: Expression[]; define: boolean; channel: Expression } & Span)
+    | undefined;
+  body: Statement[];
+}
 
 export interface SwitchCase extends Span {
   /** Undefined for `default`. */
@@ -222,4 +234,6 @@ export type Statement =
   | ({ kind: 'break' } & Span)
   | ({ kind: 'continue' } & Span)
   | ({ kind: 'fallthrough' } & Span)
-  | ({ kind: 'defer'; call: Expression } & Span);
+  | ({ kind: 'defer'; call: Expression } & Span)
+  | ({ kind: 'go'; call: Expression } & Span)
+  | ({ kind: 'select'; cases: SelectCase[] } & Span);

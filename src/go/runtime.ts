@@ -3,8 +3,9 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import type { Hoist, Part } from './compilerBase';
 import type { Type } from './types';
-import { Cell, GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
+import { Cell, Channel, GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
 
 /** What a statement does next, when it does not simply complete. */
 export type Completion = { kind: 'break' } | { kind: 'continue' } | { kind: 'return' } | { kind: 'fallthrough' };
@@ -17,7 +18,20 @@ export const FALLTHROUGH: Completion = { kind: 'fallthrough' };
 export type Eval = (frame: Frame) => Value;
 /** Evaluates a list of values, such as the arguments of a call or the results of one with several. */
 export type ListEval = (frame: Frame) => Value[];
-export type Exec = (frame: Frame) => Completion | undefined;
+/**
+ * Runs statements as a generator, which yields when its goroutine blocks (on a channel, a lock, or a sleep) and is
+ * resumed when the scheduler runs the goroutine again.
+ */
+// oxlint-disable-next-line typescript/no-invalid-void-type -- A generator that ends with a bare return returns void.
+export type Execution = Generator<Blocked, Completion | void, unknown>;
+export type Exec = (frame: Frame) => Execution;
+/** A computation that may block, such as a call of a function of the program. */
+export type Suspending<T> = Generator<Blocked, T, unknown>;
+
+/** What a blocked goroutine waits for, as Go names it in a goroutine's status (`chan receive`, `sleep`, ...). */
+export interface Blocked {
+  reason: string;
+}
 
 /** A local variable as the trace shows it. */
 export interface LocalInfo {
@@ -105,7 +119,10 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The standard streams and the files of the run. */
   readonly io: ProgramIO;
   readonly steps = new StepTracker();
-  readonly frames: Frame[] = [];
+  /** The frames of the running goroutine. */
+  frames: Frame[] = [];
+  /** Runs the goroutines when the program uses them. */
+  scheduler: { roots(): unknown[] } | undefined;
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
@@ -142,6 +159,18 @@ export class Runtime implements TracedRuntime<Frame> {
     /** Receives the frame when the call ends, for reading the entry point's final variables. */
     onExit?: (frame: Frame) => void
   ): Value | Value[] {
+    return runToEnd(this.resume(info, cells, args, callRow, deferredFor, onExit));
+  }
+
+  /** Calls a compiled function as {@link call} does, yielding when its goroutine blocks. */
+  *resume(
+    info: FunctionInfo,
+    cells: readonly Cell[],
+    args: Value[],
+    callRow: number | undefined,
+    deferredFor?: Frame,
+    onExit?: (frame: Frame) => void
+  ): Suspending<Value | Value[]> {
     this.spend();
     if (this.frames.length >= LIMITS.maxCallDepth) {
       throw new GoFatal('runtime: goroutine stack exceeds 1000000000-byte limit\nfatal error: stack overflow');
@@ -149,21 +178,22 @@ export class Runtime implements TracedRuntime<Frame> {
     const frame = new Frame(this, info, cells, callRow, deferredFor);
     for (const [index, { slot, boxed }] of info.params.entries())
       frame.locals[slot] = boxed ? new Cell(args[index]) : args[index];
-    this.frames.push(frame);
+    const frames = this.frames;
+    frames.push(frame);
     try {
-      this.runBody(frame);
+      yield* this.runBody(frame);
     } finally {
       onExit?.(frame);
-      this.frames.pop();
+      frames.pop();
     }
     if (info.isAtomic) this.steps.completeAtomicCall();
     return resultsOf(frame);
   }
 
-  private runBody(frame: Frame): void {
+  private *runBody(frame: Frame): Suspending<void> {
     let panic: GoPanic | undefined;
     try {
-      frame.info.body(frame);
+      yield* frame.info.body(frame);
     } catch (error) {
       if (!(error instanceof GoPanic)) throw error;
       panic = error;
@@ -206,11 +236,8 @@ export class Runtime implements TracedRuntime<Frame> {
     const reached = new Set<unknown>();
     const stack: unknown[] = [];
     for (const cell of this.globals) stack.push(cell);
-    for (const frame of this.frames) {
-      stack.push(...frame.locals, ...frame.cells, ...frame.temporaries);
-      for (const deferred of frame.defers ?? []) stack.push(...deferred.values);
-      if (frame.panicking) stack.push(frame.panicking.value);
-    }
+    if (this.scheduler) stack.push(...this.scheduler.roots());
+    else pushFrameRoots(this.frames, stack);
     const turtles = new Set<unknown>();
     while (stack.length > 0) {
       const item = stack.pop();
@@ -220,6 +247,28 @@ export class Runtime implements TracedRuntime<Frame> {
     }
     this.world.retain((turtle) => turtles.has(turtle));
   }
+}
+
+/** Pushes what the frames of a goroutine keep alive, for garbage collection. */
+export function pushFrameRoots(frames: readonly Frame[], stack: unknown[]): void {
+  for (const frame of frames) {
+    stack.push(...frame.locals, ...frame.cells, ...frame.temporaries);
+    for (const deferred of frame.defers ?? []) stack.push(...deferred.values);
+    if (frame.panicking) stack.push(frame.panicking.value);
+  }
+}
+
+/**
+ * Runs a computation that may block to its end, where the caller cannot wait, such as a callback that a library
+ * function calls. Blocking there is a limit of this interpreter, which it reports instead of behaving differently.
+ */
+export function runToEnd<T>(computation: Suspending<T>): T {
+  const next = computation.next();
+  if (next.done) return next.value;
+  computation.return(undefined as T);
+  throw new GoFatal(
+    'ライブラリの関数から呼ばれた関数の中や defer で呼ぶ関数の中で、チャネルやロックを待つことは、この採点環境では使えません。'
+  );
 }
 
 function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): void {
@@ -236,6 +285,10 @@ function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): vo
   else if (item instanceof GoMap) for (const entry of item.entries.values()) stack.push(entry.key, entry.value);
   else if (item instanceof GoFunc) stack.push(...item.captured);
   else if (item instanceof Iface) stack.push(item.value);
+  else if (item instanceof Channel) {
+    stack.push(...item.buffer);
+    for (const sender of item.senders) stack.push((sender as { value: unknown }).value);
+  }
 }
 
 function resultsOf(frame: Frame): Value | Value[] {
@@ -275,4 +328,25 @@ export function writeLocal(frame: Frame, slot: number, value: Value): void {
   const current = frame.locals[slot];
   if (current instanceof Cell) current.v = value;
   else frame.locals[slot] = value;
+}
+
+/** Runs the computations that may block of a statement, keeping their results in their hidden slots. */
+export function* runHoists(frame: Frame, hoists: readonly Hoist[]): Suspending<void> {
+  for (const hoist of hoists) frame.locals[hoist.slot] = (yield* hoist.run(frame)) as Value;
+}
+
+/** Lets go of the results of the computations that may block once their statement used them. */
+export function clearHoists(frame: Frame, hoists: readonly Hoist[]): void {
+  for (const hoist of hoists) frame.locals[hoist.slot] = undefined;
+}
+
+/** Evaluates an expression after the computations that may block in it. */
+export function* evaluatePart(frame: Frame, part: Part): Suspending<Value> {
+  const hoists = part.hoists as Hoist[];
+  yield* runHoists(frame, hoists);
+  try {
+    return part.value(frame);
+  } finally {
+    clearHoists(frame, hoists);
+  }
 }

@@ -70,6 +70,13 @@ export interface MapType {
   value: Type;
 }
 
+/** A channel type: `chan T`, the send-only `chan<- T`, or the receive-only `<-chan T`. */
+export interface ChanType {
+  kind: 'chan';
+  dir: 'both' | 'send' | 'receive';
+  element: Type;
+}
+
 export interface FuncType {
   kind: 'func';
   params: Type[];
@@ -121,6 +128,13 @@ export interface Method {
 /** The runtime half of a method, filled in once the method's body compiles. */
 export interface MethodCode {
   call?: (receiver: unknown, args: unknown[], callRow?: number, deferredFor?: unknown) => unknown;
+  /** Runs the method as `call` does, yielding when its goroutine blocks; absent when it never blocks. */
+  resume?: (
+    receiver: unknown,
+    args: unknown[],
+    callRow?: number,
+    deferredFor?: unknown
+  ) => Generator<{ reason: string }, unknown, unknown>;
 }
 
 export interface NamedType {
@@ -146,6 +160,7 @@ export type Type =
   | SliceType
   | ArrayType
   | MapType
+  | ChanType
   | StructType
   | FuncType
   | InterfaceType
@@ -382,6 +397,10 @@ export function identical(a: Type, b: Type): boolean {
       const other = b as MapType;
       return identical(a.key, other.key) && identical(a.value, other.value);
     }
+    case 'chan': {
+      const other = b as ChanType;
+      return a.dir === other.dir && identical(a.element, other.element);
+    }
     case 'struct': {
       const other = b as StructType;
       return (
@@ -466,6 +485,13 @@ export function typeString(type: Type, qualify = true): string {
     }
     case 'map': {
       return `map[${typeString(type.key, qualify)}]${typeString(type.value, qualify)}`;
+    }
+    case 'chan': {
+      const element = typeString(type.element, qualify);
+      if (type.dir === 'send') return `chan<- ${element}`;
+      if (type.dir === 'receive') return `<-chan ${element}`;
+      // `chan (<-chan T)` keeps the inner direction apart from the outer channel.
+      return type.element.kind === 'chan' && type.element.dir === 'receive' ? `chan (${element})` : `chan ${element}`;
     }
     case 'struct': {
       if (type.fields.length === 0) return 'struct {}';

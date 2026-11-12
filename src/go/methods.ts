@@ -33,6 +33,38 @@ export function receiverFor(value: Value, path: readonly number[], method: Metho
   return copyValue(current);
 }
 
+/** Calls a method's code as {@link invokeMethod} does, yielding when its goroutine blocks. */
+export function* resumeMethod(
+  method: Method,
+  receiver: Value,
+  args: Value[],
+  callRow?: number,
+  deferredFor?: unknown
+): Generator<{ reason: string }, Value | Value[], unknown> {
+  const resume = method.code?.resume;
+  if (!resume) return invokeMethod(method, receiver, args, callRow, deferredFor);
+  return (yield* resume(receiver, args, callRow, deferredFor)) as Value | Value[];
+}
+
+/** Calls the method that a dynamic type provides as {@link dynamicMethod} does, yielding when its goroutine blocks. */
+export function* resumeDynamicMethod(
+  type: Type,
+  name: string,
+  receiver: Value,
+  args: Value[],
+  callRow?: number
+): Generator<{ reason: string }, Value | Value[], unknown> {
+  const selection = lookupFieldOrMethod(type, name);
+  if (selection.kind === 'method') {
+    const { method, path } = selection;
+    return yield* resumeMethod(method, receiverFor(receiver, path, method), args, callRow);
+  }
+  if (selection.kind !== 'interfaceMethod') throw new Error(`Missing method ${name}`);
+  const inner = walk(receiver, selection.path) as Iface | undefined;
+  if (!inner) nilPointerPanic();
+  return yield* resumeDynamicMethod(inner.type, name, inner.value, args, callRow);
+}
+
 const dispatchCache = new WeakMap<Type, Map<string, BoundCall | undefined>>();
 
 /** A call of the method that a dynamic type provides, as calling through an interface does. */

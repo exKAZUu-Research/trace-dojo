@@ -2,7 +2,7 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 import type { Expression, Span, TypeExpression, TypeParameter } from './ast';
 import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
 import { substituteInterface } from './generics';
-import type { Exec, FunctionInfo, LocalInfo } from './runtime';
+import type { Eval, Exec, Frame, FunctionInfo, LocalInfo, Suspending } from './runtime';
 import { Scope } from './scope';
 import {
   BASIC,
@@ -30,6 +30,22 @@ export interface TraceSettings {
 
 let nextTypeParamId = 0;
 
+/**
+ * A computation that may block, such as a call of the program's function or a channel receive, which a statement of a
+ * program that uses goroutines runs before the rest of it, keeping the result in a hidden slot. Go evaluates calls and
+ * receives in the order they are written, before the other operands, which this order follows.
+ */
+export interface Hoist {
+  slot: number;
+  run: (frame: Frame) => Suspending<unknown>;
+}
+
+/** An expression and the computations that may block that it needs to run first. */
+export interface Part<T = Eval> {
+  value: T;
+  hoists: Hoist[] | undefined;
+}
+
 /** The shared state of compiling one file: scopes, diagnostics, and the function being compiled. */
 export abstract class CompilerBase {
   protected readonly diagnostics: SourceDiagnostic[] = [];
@@ -40,6 +56,10 @@ export abstract class CompilerBase {
   protected fn: FunctionContext | undefined;
   /** Whether errors are being reported; instances of generic code were checked once already. */
   protected reporting = true;
+  /** Whether the program uses goroutines, channels, locks, or sleeps, whose statements may block. */
+  protected concurrent = false;
+  /** Where the computations that may block of the expression being compiled go, when it may block. */
+  protected hoists: Hoist[] | undefined;
 
   constructor(protected readonly trace: TraceSettings | undefined) {}
 
@@ -118,6 +138,45 @@ export abstract class CompilerBase {
     const entity: VarEntity = { kind: 'var', name, type, span, used: false, boxed: false, owner: fn, slot, local };
     this.declare(name, entity, span);
     return entity;
+  }
+
+  // Blocking -----------------------------------------------------------------------------------------------------
+
+  /** Compiles an expression or statement, collecting the computations that may block that it must run first. */
+  protected part<T>(compile: () => T): Part<T> {
+    if (!this.concurrent || !this.fn) return { value: compile(), hoists: undefined };
+    const outer = this.hoists;
+    const hoists: Hoist[] = [];
+    this.hoists = hoists;
+    try {
+      const value = compile();
+      return { value, hoists: hoists.length > 0 ? hoists : undefined };
+    } finally {
+      this.hoists = outer;
+    }
+  }
+
+  /** Compiles code that runs where it cannot block, such as a deferred call, whose calls run to their end. */
+  protected withoutHoists<T>(compile: () => T): T {
+    const outer = this.hoists;
+    this.hoists = undefined;
+    try {
+      return compile();
+    } finally {
+      this.hoists = outer;
+    }
+  }
+
+  /**
+   * Runs a computation that may block before the statement, when the statement can block, and reads its result in its
+   * place; elsewhere, runs it to its end in place.
+   */
+  protected suspending(run: (frame: Frame) => Suspending<unknown>, plain: Eval): Eval {
+    const hoists = this.hoists;
+    if (!hoists) return plain;
+    const slot = this.hiddenSlot();
+    hoists.push({ slot, run });
+    return (frame) => frame.locals[slot] as never;
   }
 
   /** Allocates a slot that no name refers to, such as an unnamed result. */
@@ -210,6 +269,9 @@ export abstract class CompilerBase {
         }
         return { kind: 'map', key, value };
       }
+      case 'chan': {
+        return { kind: 'chan', dir: syntax.dir, element: this.resolveType(syntax.element) };
+      }
       case 'func': {
         return this.resolveSignature(syntax.signature).type;
       }
@@ -269,6 +331,7 @@ export abstract class CompilerBase {
 
   protected packageMember(pkg: PackageEntity, name: string, span: Span): Entity | undefined {
     pkg.used = true;
+    if (pkg.package.unavailable) return undefined;
     const member = pkg.package.members.get(name);
     if (member) return member;
     if (pkg.package.unsupported?.has(name)) {

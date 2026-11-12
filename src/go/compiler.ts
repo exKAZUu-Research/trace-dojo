@@ -1,3 +1,4 @@
+// oxlint-disable require-yield -- Statements that never block are generators like the others, so that all run alike.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { represent } from './assignability';
 import type { ConstDeclaration, File, FunctionDeclaration, Span, TypeDeclaration, TypeSpec, VarSpec } from './ast';
@@ -7,7 +8,7 @@ import { mapKeyOf } from './equality';
 import { substitute } from './generics';
 import { currentRuntime } from './native';
 import { lookupPackage } from './packages/index';
-import type { FunctionInfo, LocalInfo } from './runtime';
+import type { FunctionInfo, LocalInfo, Suspending } from './runtime';
 import { Scope } from './scope';
 import { STANDARD_PACKAGES } from './standardPackages';
 import { declareValue, StatementCompiler } from './statementCompiler';
@@ -33,6 +34,8 @@ export interface CompiledProgram {
   initializer: FunctionInfo;
   globals: { name: string; type: Type; slot: number }[];
   globalZeros: (() => Value)[];
+  /** Whether the program uses goroutines, channels, locks, or sleeps, which the scheduler runs. */
+  concurrent: boolean;
 }
 
 interface FunctionDeclarationState {
@@ -44,7 +47,9 @@ interface FunctionDeclarationState {
 export class ProgramCompiler extends StatementCompiler {
   private readonly globals: VarEntity[] = [];
   private readonly globalZeros: (() => Value)[] = [];
-  private readonly initContext = this.newFunctionContext('init', undefined, () => {});
+  private readonly initContext = this.newFunctionContext('init', undefined, function* () {
+    return;
+  });
   private readonly initializers: {
     spec: VarSpec;
     variables: VarEntity[];
@@ -74,6 +79,7 @@ export class ProgramCompiler extends StatementCompiler {
         `package ${file.packageName} ではなく package main にしてください（実行できるのは main パッケージだけです）。`
       );
     }
+    this.concurrent = usesConcurrency(file);
     this.declareImports();
     this.collectDeclarations();
     for (const [entity] of this.typeStates) this.useType(entity);
@@ -94,6 +100,7 @@ export class ProgramCompiler extends StatementCompiler {
         .filter((variable) => variable.name !== '_')
         .map(({ name, type, slot }) => ({ name, type, slot })),
       globalZeros: this.globalZeros,
+      concurrent: this.concurrent,
     };
   }
 
@@ -107,8 +114,14 @@ export class ProgramCompiler extends StatementCompiler {
     for (const spec of this.file.imports) {
       const pkg = lookupPackage(spec.path);
       if (!pkg) {
-        if (STANDARD_PACKAGES.has(spec.path)) this.unsupported(spec, `パッケージ ${spec.path}`);
-        else if (/^[^/]*\./.test(spec.path)) this.unsupported(spec, `標準ライブラリ以外のパッケージ（${spec.path}）`);
+        if (STANDARD_PACKAGES.has(spec.path)) {
+          this.unsupported(spec, `パッケージ ${spec.path}`);
+          // Its uses then report nothing more, as the import already says why the program cannot run.
+          const name = spec.alias ?? spec.path.split('/').at(-1) ?? spec.path;
+          const unavailable = { path: spec.path, name, members: new Map(), unavailable: true };
+          if (name !== '_' && !this.fileScope.entities.has(name))
+            this.fileScope.entities.set(name, { kind: 'package', name, package: unavailable, span: spec, used: true });
+        } else if (/^[^/]*\./.test(spec.path)) this.unsupported(spec, `標準ライブラリ以外のパッケージ（${spec.path}）`);
         else this.error(spec, `パッケージ ${spec.path} は標準ライブラリにありません。`);
         continue;
       }
@@ -432,12 +445,11 @@ export class ProgramCompiler extends StatementCompiler {
         this.functionReferences.set(method, fn.references);
         if (params.length > 0 && !isInstance) return;
         const { info } = fn;
-        (method.code as { call?: unknown }).call = (
-          receiverValue: Value,
-          argValues: Value[],
-          callRow?: number,
-          deferredFor?: unknown
-        ) => currentRuntime().call(info, [], [receiverValue, ...argValues], callRow, deferredFor as never);
+        const code = method.code as NonNullable<typeof method.code>;
+        code.call = (receiverValue: unknown, argValues: unknown[], callRow?: number, deferredFor?: unknown) =>
+          currentRuntime().call(info, [], [receiverValue, ...argValues] as Value[], callRow, deferredFor as never);
+        code.resume = (receiverValue: unknown, argValues: unknown[], callRow?: number, deferredFor?: unknown) =>
+          currentRuntime().resume(info, [], [receiverValue, ...argValues] as Value[], callRow, deferredFor as never);
       });
     } finally {
       this.reporting = outerReporting;
@@ -466,14 +478,17 @@ export class ProgramCompiler extends StatementCompiler {
     let value: GoFunc | undefined;
     const call = (args: Value[], callRow?: number, deferredFor?: unknown): Value | Value[] =>
       currentRuntime().call(state.info as FunctionInfo, [], args, callRow, deferredFor as never);
+    const resume = (args: Value[], callRow?: number, deferredFor?: unknown): Suspending<Value | Value[]> =>
+      currentRuntime().resume(state.info as FunctionInfo, [], args, callRow, deferredFor as never);
     const entity = {
       kind: 'func' as const,
       name,
       type,
       span: declaration,
       declaration,
-      value: () => (value ??= new GoFunc(call)),
+      value: () => (value ??= new GoFunc(call, [], resume)),
       direct: (args: Value[], callRow: number | undefined) => call(args, callRow),
+      directResume: (args: Value[], callRow: number | undefined) => resume(args, callRow),
     };
     this.declarePackageName(name, entity, declaration.nameSpan);
     this.pendingSignatures.push(() => {
@@ -524,8 +539,12 @@ export class ProgramCompiler extends StatementCompiler {
         const cached = cache.get(key);
         if (cached) return cached;
         const state: { info?: FunctionInfo } = {};
-        const instance = new GoFunc((argValues, callRow, deferredFor) =>
-          currentRuntime().call(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never)
+        const instance = new GoFunc(
+          (argValues, callRow, deferredFor) =>
+            currentRuntime().call(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never),
+          [],
+          (argValues, callRow, deferredFor) =>
+            currentRuntime().resume(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never)
         );
         cache.set(key, instance);
         this.pendingBodies.push(() => {
@@ -723,7 +742,7 @@ export class ProgramCompiler extends StatementCompiler {
   private initializerFunction(): FunctionInfo {
     const order = this.initializationOrder();
     const info = this.initContext.info;
-    info.body = (frame) => {
+    info.body = function* (frame) {
       for (const initializer of order) initializer.run(frame as never);
       return;
     };
@@ -908,6 +927,9 @@ function typeKey(type: Type): string {
     case 'map': {
       return `map(${typeKey(type.key)},${typeKey(type.value)})`;
     }
+    case 'chan': {
+      return `chan:${type.dir}(${typeKey(type.element)})`;
+    }
     default: {
       return describeType(type);
     }
@@ -917,9 +939,34 @@ function typeKey(type: Type): string {
 function containsTypeParams(type: Type): boolean {
   if (type.kind === 'typeParam') return true;
   if (type.kind === 'named') return (type.typeArgs ?? []).some(containsTypeParams);
-  if (type.kind === 'pointer' || type.kind === 'slice' || type.kind === 'array')
+  if (type.kind === 'pointer' || type.kind === 'slice' || type.kind === 'array' || type.kind === 'chan')
     return containsTypeParams(type.element);
   if (type.kind === 'map') return containsTypeParams(type.key) || containsTypeParams(type.value);
+  return false;
+}
+
+/** Packages whose functions block, which only programs run by the scheduler can call. */
+const BLOCKING_PACKAGES = new Set(['sync', 'time']);
+
+/**
+ * Whether a program uses goroutines, channels, or packages that block, which compiles its statements so that they can
+ * wait; other programs run their calls directly.
+ */
+function usesConcurrency(file: File): boolean {
+  if (file.imports.some((spec) => BLOCKING_PACKAGES.has(spec.path))) return true;
+  const pending: unknown[] = [file.declarations];
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (typeof item !== 'object' || item === null) continue;
+    if (Array.isArray(item)) {
+      pending.push(...(item as unknown[]));
+      continue;
+    }
+    const node = item as { kind?: unknown; operator?: unknown };
+    if (node.kind === 'go' || node.kind === 'select' || node.kind === 'send' || node.kind === 'chan') return true;
+    if (node.kind === 'unary' && node.operator === '<-') return true;
+    for (const value of Object.values(node)) if (typeof value === 'object') pending.push(value);
+  }
   return false;
 }
 

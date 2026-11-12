@@ -35,6 +35,10 @@ export function substitute(
     case 'map': {
       return { kind: 'map', key: recur(type.key), value: recur(type.value) };
     }
+    case 'chan': {
+      const element = recur(type.element);
+      return element === type.element ? type : { ...type, element };
+    }
     case 'struct': {
       return { kind: 'struct', fields: type.fields.map((field) => ({ ...field, type: recur(field.type) })) };
     }
@@ -101,6 +105,10 @@ export function unify(param: Type, arg: Type, mapping: Substitution, params: rea
         unify(param.element, target.element, mapping, params)
       );
     }
+    case 'chan': {
+      const target = underlying(arg);
+      return target.kind === 'chan' && unify(param.element, target.element, mapping, params);
+    }
     case 'map': {
       const target = underlying(arg);
       return (
@@ -158,7 +166,7 @@ export function inferFromConstraints(params: readonly TypeParamType[], mapping: 
 
 function containsUnbound(type: Type, params: readonly TypeParamType[], mapping: Substitution): boolean {
   if (type.kind === 'typeParam') return params.some((param) => param.id === type.id) && !mapping.has(type.id);
-  if (type.kind === 'slice' || type.kind === 'pointer' || type.kind === 'array')
+  if (type.kind === 'slice' || type.kind === 'pointer' || type.kind === 'array' || type.kind === 'chan')
     return containsUnbound(type.element, params, mapping);
   if (type.kind === 'map')
     return containsUnbound(type.key, params, mapping) || containsUnbound(type.value, params, mapping);
@@ -177,7 +185,8 @@ export function containsTypeParam(type: Type, seen = new Set<Type>()): boolean {
     }
     case 'pointer':
     case 'slice':
-    case 'array': {
+    case 'array':
+    case 'chan': {
       return containsTypeParam(type.element, seen);
     }
     case 'map': {

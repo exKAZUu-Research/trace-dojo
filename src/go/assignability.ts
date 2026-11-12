@@ -122,7 +122,7 @@ export function assignFailure(from: Type, to: Type): AssignFailure | undefined {
   const fromUnder = underlying(from);
   const toUnder = underlying(to);
   if (from.kind === 'basic' && from.basic === 'untypedNil') {
-    return ['pointer', 'slice', 'map', 'func', 'interface'].includes(toUnder.kind) && to.kind !== 'typeParam'
+    return ['pointer', 'slice', 'map', 'chan', 'func', 'interface'].includes(toUnder.kind) && to.kind !== 'typeParam'
       ? undefined
       : { kind: 'mismatch' };
   }
@@ -142,6 +142,16 @@ export function assignFailure(from: Type, to: Type): AssignFailure | undefined {
     from.kind !== 'typeParam' &&
     to.kind !== 'typeParam' &&
     identical(fromUnder, toUnder)
+  ) {
+    return undefined;
+  }
+  // A bidirectional channel goes where a directional one of the same element type is wanted.
+  if (
+    fromUnder.kind === 'chan' &&
+    toUnder.kind === 'chan' &&
+    fromUnder.dir === 'both' &&
+    (!fromNamed || !toNamed) &&
+    identical(fromUnder.element, toUnder.element)
   ) {
     return undefined;
   }

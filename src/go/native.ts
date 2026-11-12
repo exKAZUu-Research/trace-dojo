@@ -1,5 +1,5 @@
 import type { Entity, FuncEntity, GoPackage } from './entities';
-import type { Runtime } from './runtime';
+import { type Runtime, runToEnd, type Suspending } from './runtime';
 import {
   type FuncType,
   funcType,
@@ -46,6 +46,45 @@ export function addMethod(
   const method: Method = { name, pointerReceiver, type: signature, code: { call: impl as never } };
   type.methods.push(method);
   return method;
+}
+
+/** A library method that may block its goroutine, such as `(*sync.WaitGroup).Wait`. */
+export function addBlockingMethod(
+  type: NamedType,
+  name: string,
+  signature: FuncType,
+  // oxlint-disable-next-line typescript/no-invalid-void-type -- A generator that ends with a bare return returns void.
+  resume: (receiver: Value, args: Value[]) => Suspending<Value | Value[] | void>,
+  pointerReceiver = true
+): Method {
+  const method = addMethod(
+    type,
+    name,
+    signature,
+    (receiver, args) => runToEnd(resume(receiver, args)) as Value | Value[],
+    pointerReceiver
+  );
+  (method.code as NonNullable<Method['code']>).resume = resume as never;
+  return method;
+}
+
+/** A library function that may block its goroutine, such as `time.Sleep`. */
+export function blockingFunction(
+  name: string,
+  signature: FuncType,
+  // oxlint-disable-next-line typescript/no-invalid-void-type -- A generator that ends with a bare return returns void.
+  resume: (args: Value[]) => Suspending<Value | Value[] | void>
+): FuncEntity {
+  const call = (args: Value[]): Value | Value[] => runToEnd(resume(args)) as Value | Value[];
+  const value = new GoFunc(call, [], (args) => resume(args) as Suspending<Value | Value[]>);
+  return {
+    kind: 'func',
+    name,
+    type: signature,
+    value: () => value,
+    direct: call,
+    directResume: (args) => resume(args) as Suspending<Value | Value[]>,
+  };
 }
 
 export function nativeFunction(name: string, signature: FuncType, impl: NativeImpl): FuncEntity {

@@ -13,6 +13,7 @@ import { OS_PACKAGE } from './os';
 import { RAND_PACKAGE, RAND_V2_PACKAGE } from './rand';
 import { STRCONV_PACKAGE } from './strconv';
 import { STRINGS_PACKAGE } from './strings';
+import { SYNC_PACKAGE } from './sync';
 import { TIME_PACKAGE } from './time';
 import { UNICODE_PACKAGE, UTF8_PACKAGE } from './unicode';
 
@@ -40,6 +41,7 @@ const PACKAGES = new Map<string, GoPackage>(
     SORT_PACKAGE,
     STRCONV_PACKAGE,
     STRINGS_PACKAGE,
+    SYNC_PACKAGE,
     UNICODE_PACKAGE,
     UTF8_PACKAGE,
   ].map((pkg) => [pkg.path, pkg])

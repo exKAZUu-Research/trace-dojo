@@ -212,11 +212,14 @@ test('a wrong verb prints its value with the width and precision written', () =>
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
-test('syntax of later stages is rejected as unavailable', () => {
-  const execution = executeProgram('go', goMain('\tch := make(chan int)\n\tfmt.Println(ch)'));
+test('packages that learners do not meet are rejected as unavailable', () => {
+  const execution = executeProgram(
+    'go',
+    'package main\n\nimport "reflect"\n\nfunc main() {\n\t_ = reflect.TypeOf(1)\n}'
+  );
   expect(execution).toMatchObject({
     kind: 'compileError',
-    diagnostics: [{ message: 'チャネルは、この採点環境では使えません。' }],
+    diagnostics: [{ message: 'パッケージ reflectは、この採点環境では使えません。' }],
   });
 });
 
