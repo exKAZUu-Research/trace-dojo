@@ -1,6 +1,6 @@
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { formatLogArguments } from './consoleFormat';
-import { inspect } from './inspect';
+import { inspect, inspectValue } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { defineHidden, type Runtime } from './runtime';
@@ -379,6 +379,12 @@ function defineMath(builder: RealmBuilder): void {
 
 function defineConsole(builder: RealmBuilder): void {
   const console = builder.namespace('console');
+  // Grouping indents everything printed after it, on every line, as Node.js does.
+  let groupIndentation = '';
+  const write = (runtime: Runtime, stream: 'stdout' | 'stderr', text: string): void => {
+    const indented = groupIndentation ? groupIndentation + text.replaceAll('\n', `\n${groupIndentation}`) : text;
+    runtime.io[stream].write(`${indented}\n`);
+  };
   // Node.js writes warnings and errors to standard error.
   for (const [name, stream] of [
     ['log', 'stdout'],
@@ -388,10 +394,56 @@ function defineConsole(builder: RealmBuilder): void {
     ['error', 'stderr'],
   ] as const) {
     builder.method(console, name, 0, ({ runtime, args }) => {
-      runtime.io[stream].write(`${formatLogArguments(runtime, args)}\n`);
+      write(runtime, stream, formatLogArguments(runtime, args));
       return;
     });
   }
+  builder.method(console, 'dir', 0, ({ runtime, args }) => {
+    const [value, options] = args;
+    const depth = isObject(options) ? runtime.get(options, 'depth') : undefined;
+    const levels =
+      depth === undefined ? undefined : depth === null ? Number.POSITIVE_INFINITY : runtime.toNumber(depth);
+    write(runtime, 'stdout', inspectValue(runtime, value, undefined, levels));
+    return;
+  });
+  for (const name of ['group', 'groupCollapsed']) {
+    builder.method(console, name, 0, ({ runtime, args }) => {
+      if (args.length > 0) write(runtime, 'stdout', formatLogArguments(runtime, args));
+      groupIndentation += '  ';
+      return;
+    });
+  }
+  builder.method(console, 'groupEnd', 0, () => {
+    groupIndentation = groupIndentation.slice(2);
+    return;
+  });
+  const counts = new Map<string, number>();
+  builder.method(console, 'count', 0, ({ runtime, args }) => {
+    const label = labelOf(runtime, args[0]);
+    const count = (counts.get(label) ?? 0) + 1;
+    counts.set(label, count);
+    write(runtime, 'stdout', `${label}: ${count}`);
+    return;
+  });
+  builder.method(console, 'countReset', 0, ({ runtime, args }) => {
+    const label = labelOf(runtime, args[0]);
+    if (counts.has(label)) counts.set(label, 0);
+    else write(runtime, 'stderr', `Count for '${label}' does not exist`);
+    return;
+  });
+  builder.method(console, 'assert', 0, ({ runtime, args }) => {
+    const [condition, ...data] = args;
+    if (toBoolean(condition)) return;
+    const message =
+      typeof data[0] === 'string' ? [`Assertion failed: ${data[0]}`, ...data.slice(1)] : ['Assertion failed', ...data];
+    write(runtime, 'stderr', formatLogArguments(runtime, message));
+    return;
+  });
+}
+
+/** The label `console.count` counts under, `default` when none is given. */
+function labelOf(runtime: Runtime, label: Value): string {
+  return label === undefined ? 'default' : runtime.toString(label);
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Lists the builtin methods, each a small closure of its own.

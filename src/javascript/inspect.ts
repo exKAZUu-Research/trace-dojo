@@ -47,12 +47,25 @@ interface Context {
   circular: Map<JsObject, number>;
 }
 
-/** Formats a value as `util.inspect` does with its defaults, without running the program's own code. */
+/**
+ * Formats a value as `console.log` formats each argument, without running the program's own code: a string as it is,
+ * anything else as `util.inspect` does.
+ */
 export function inspect(runtime: Runtime, value: Value, budget = new OutputBudget(), depth = DEFAULT_DEPTH): string {
   if (typeof value === 'string') {
     budget.charge(value.length);
     return value;
   }
+  return inspectValue(runtime, value, budget, depth);
+}
+
+/** Formats a value as `util.inspect` does, quoting a string, as `console.dir` prints it. */
+export function inspectValue(
+  runtime: Runtime,
+  value: Value,
+  budget = new OutputBudget(),
+  depth = DEFAULT_DEPTH
+): string {
   const ctx: Context = {
     runtime,
     budget,

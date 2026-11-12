@@ -641,6 +641,15 @@ console.log(typeof Symbol.dispose, String(Symbol.asyncDispose), typeof Suppresse
 for (const k of ['rf', 'rg', 'rm', 'wf', 'wg', 'wm', 'sm']) try { T[k]({}); } catch (e) { console.log(k, e.message); }
 class S { static #s = 1; static #sm() {} static r(o) { return o.#s; } static m(o) { return o.#sm(); } } for (const k of ['r', 'm']) try { S[k]({}); } catch (e) { console.log(k, e.message); }`,
   ],
+  [
+    'console.dir, group, count, and assert',
+    `console.info('info', 1); console.debug('debug'); console.dir({ a: { b: { c: { d: 1 } } } }); console.dir([1], { depth: 0 });
+console.group('G'); console.log('inside'); console.group(); console.log('deeper'); console.groupEnd(); console.groupEnd(); console.log('out');
+console.count(); console.count('x'); console.count(); console.countReset(); console.count();
+console.assert(1 === 2, 'assert msg'); console.assert(true, 'no');
+console.group('Outer', 1); console.log({ a: [1, 2, 3, 4, 5, 6, 7], b: 'x'.repeat(70) }); console.error('err\\nline'); console.groupEnd(); console.groupEnd(); console.log('after');
+console.dir('str'); console.dir({ deep: { a: { b: { c: {} } } } }, { depth: null });`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
