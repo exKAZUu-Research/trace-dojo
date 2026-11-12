@@ -1,3 +1,4 @@
+import { currentRuntime } from './runtimeContext';
 import { exceptionClassNamed, newException, newTuple } from './types';
 import { type PyClass, PyInstance, type PyValue } from './values';
 
@@ -64,6 +65,7 @@ export function splitGroup(
   const matched: PyInstance[] = [];
   const rest: PyInstance[] = [];
   for (const exception of exceptions) {
+    currentRuntime().spend();
     if (exception.exception?.exceptions) {
       const [match, remaining] = splitGroup(exception, predicate);
       if (match) matched.push(match);

@@ -1,6 +1,6 @@
 import { keyHash } from './hashing';
 import { keysEqual } from './operators';
-import { chargeCollision, chargeSlots } from './runtimeContext';
+import { chargeSlots, chargeStep } from './runtimeContext';
 import type { PyValue } from './values';
 
 const MIN_SIZE = 8;
@@ -74,7 +74,7 @@ export class SetTable {
         if (entry !== DUMMY && entry.hash === hash && keysEqual(entry.key, key)) return slot;
         slot++;
       } while (probes-- > 0);
-      chargeCollision();
+      chargeStep();
       perturb >>= PERTURB_SHIFT;
       index = Number((BigInt(index) * 5n + 1n + perturb) & BigInt(mask));
     }
@@ -110,7 +110,7 @@ export class SetTable {
         }
         slot++;
       } while (probes-- > 0);
-      chargeCollision();
+      chargeStep();
       perturb >>= PERTURB_SHIFT;
       index = Number((BigInt(index) * 5n + 1n + perturb) & BigInt(mask));
     }
@@ -184,7 +184,7 @@ export class SetTable {
           }
         }
       }
-      chargeCollision();
+      chargeStep();
       perturb >>= PERTURB_SHIFT;
       index = Number((BigInt(index) * 5n + 1n + perturb) & BigInt(mask));
     }

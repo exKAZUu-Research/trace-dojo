@@ -17,6 +17,15 @@ test.each([
   ['a set updated from an endless iterator', 'import itertools\nset().update(itertools.repeat(0))'],
   ['a set difference with an endless iterator', 'import itertools\nset().difference_update(itertools.repeat(0))'],
   ['a rejection loop that never accepts', 'import random\nrandom.gammavariate(float("nan"), 1)'],
+  ['hashing a deeply shared tuple', 't = (0,)\nfor i in range(28):\n    t = (t, t)\nhash(t)'],
+  [
+    'comparing deeply shared dicts',
+    "a = {'v': 0}\nb = {'v': 0}\nfor i in range(27):\n    a = {'x': a, 'y': a}\n    b = {'x': b, 'y': b}\na == b",
+  ],
+  [
+    'splitting a deeply shared exception group',
+    'g = ExceptionGroup("x", [ValueError()])\nfor i in range(27):\n    g = ExceptionGroup("x", [g, g])\ntry:\n    raise g\nexcept* TypeError:\n    pass',
+  ],
   [
     'repeated decimal conversions of a huge int with the digit limit off',
     'import sys\nsys.set_int_max_str_digits(0)\nn = 1 << 3000000\nfor i in range(100):\n    x = str(n)',

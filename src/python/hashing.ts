@@ -1,5 +1,6 @@
 import { pyStr } from './conversions';
 import { callSpecial, lookupSpecial } from './objects';
+import { chargeStep } from './runtimeContext';
 import { exceptionClassNamed, None, typeError, typeName } from './types';
 import { PyComplex, PyError, PyInstance, type PyObject, PySet, PyTuple, type PyValue } from './values';
 
@@ -74,6 +75,7 @@ export function frexp(value: number): { mantissa: number; exponent: number } {
 function hashTuple(items: readonly PyValue[]): bigint {
   let acc = XXPRIME_5;
   for (const item of items) {
+    chargeStep();
     const lane = pyHash(item) & MASK64;
     acc = (acc + lane * XXPRIME_2) & MASK64;
     acc = ((acc << 31n) | (acc >> 33n)) & MASK64;

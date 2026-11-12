@@ -12,16 +12,17 @@ export function currentRuntime(): Runtime {
 }
 
 /**
- * Charges the running program for a step of a scan past colliding hashes. No program is running while the builtins
- * are defined, which fills tables too.
+ * Charges the running program for a step of native work that visits one element: a scan past colliding hashes, or one
+ * element of a recursive hash, comparison, or split. No program is running while the builtins are defined, which
+ * fills tables too.
  */
-export function chargeCollision(): void {
+export function chargeStep(): void {
   current?.spend();
 }
 
 /**
  * Charges the running program for slots of storage it creates, wherever the storage comes from; see
- * {@link chargeCollision}.
+ * {@link chargeStep}.
  */
 export function chargeSlots(count: number): void {
   current?.allocate(count);

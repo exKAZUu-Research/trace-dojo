@@ -789,6 +789,7 @@ function rangesEqual(left: PyRange, right: PyRange): boolean {
 function dictsEqual(left: PyDict, right: PyDict): boolean {
   if (left.store.size !== right.store.size) return false;
   for (const entry of left.store.ordered()) {
+    currentRuntime().spend();
     const other = right.store.lookup(entry.key);
     if (!other || !equals(entry.value, other.value)) return false;
   }
@@ -814,7 +815,10 @@ function compareSequences(
 }
 
 function subset(a: PySet, b: PySet): boolean {
-  return a.table.keys().every((key) => b.table.has(key));
+  return a.table.keys().every((key) => {
+    currentRuntime().spend();
+    return b.table.has(key);
+  });
 }
 
 function compareSets(operator: keyof typeof COMPARE_NAMES, left: PySet, right: PySet): boolean {

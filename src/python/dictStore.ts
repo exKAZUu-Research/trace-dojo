@@ -1,6 +1,6 @@
 import { keyHash, pyHash } from './hashing';
 import { keysEqual } from './operators';
-import { chargeCollision, chargeSlots } from './runtimeContext';
+import { chargeSlots, chargeStep } from './runtimeContext';
 import type { PyValue } from './values';
 
 export interface DictEntry {
@@ -31,7 +31,7 @@ export class DictStore {
     const bucket = this.index.get(hash);
     if (!bucket) return undefined;
     for (const [index, entry] of bucket.entries()) {
-      if (index > 0) chargeCollision();
+      if (index > 0) chargeStep();
       if (entry.alive && keysEqual(entry.key, key)) return entry;
     }
     return undefined;
