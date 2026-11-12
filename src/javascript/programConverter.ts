@@ -40,6 +40,7 @@ const declarationTypes = new Set([
   'using_declaration',
   'class_declaration',
   'function_declaration',
+  'generator_function_declaration',
 ]);
 
 /** Converts a tree-sitter tree to the AST, settling scopes, steps, and early errors. */

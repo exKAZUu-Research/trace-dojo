@@ -77,6 +77,12 @@ test.each([
   ['new.target outside functions', 'console.log(new.target);', 0, 'new.target は関数の中にしか書けません。'],
   ['a legacy octal number', 'const n = 017;', 0, '数値「017」は、この採点環境では使えません。'],
   [
+    'a generator declaration as an if body',
+    'if (true) function* f() { yield 1; }',
+    0,
+    '宣言を書くには { } で囲んでください。',
+  ],
+  [
     'await in a static block of an async function',
     'async function f() {\n  class C {\n    static {\n      await 1;\n    }\n  }\n}',
     3,
