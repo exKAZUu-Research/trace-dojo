@@ -265,6 +265,10 @@ test.each([
   ['a capture pattern before another case', 'match 1:\n    case x:\n        pass\n    case 2:\n        pass', 1],
   ['nonlocal at module level', 'nonlocal x', 0],
   ['a wildcard before another alternative', 'match 5:\n    case _ | 1:\n        pass', 1],
+  ['a name as a mapping pattern key', 'match 1:\n    case {k: v}:\n        pass', 1],
+  ['a double star before another key', 'match 1:\n    case {**rest, "a": 1}:\n        pass', 1],
+  ['two double stars in a mapping pattern', 'match 1:\n    case {**a, **b}:\n        pass', 1],
+  ['a star in a class pattern', 'match 1:\n    case P(*a):\n        pass', 1],
   [
     'a case after an or-pattern with a wildcard',
     'match 5:\n    case 1 | _:\n        pass\n    case _:\n        pass',

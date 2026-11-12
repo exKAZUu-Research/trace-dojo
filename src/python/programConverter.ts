@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 659 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 673 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -735,7 +735,6 @@ export class ProgramConverter extends ExpressionConverter {
   private mappingPattern(node: Node, names: Set<string>): Pattern {
     const keys: Expression[] = [];
     const patterns: Pattern[] = [];
-    let rest: NameRef | undefined;
     const keyTexts = new Set<string>();
     const valueNodes = fieldNodes(node, 'value');
     let sign: Node | undefined;
@@ -753,19 +752,32 @@ export class ProgramConverter extends ExpressionConverter {
       patterns.push(this.pattern(valueNodes[patterns.length], names));
       sign = undefined;
     }
-    const splat = namedChildren(node).find((child) => child.type === 'splat_pattern');
-    if (splat) {
-      const nameNode = namedChildren(splat)[0];
-      if (!nameNode || nameNode.text === '_') fail(rowOf(splat), '** の後に _ は書けません。');
-      rest = this.patternName(nameNode, names);
-    }
-    return { kind: 'mapping', keys, patterns, rest, row: rowOf(node) };
+    return { kind: 'mapping', keys, patterns, rest: this.mappingRest(node, names), row: rowOf(node) };
   }
 
+  /** The name a mapping pattern's `**rest` binds, which may appear once, as the last subpattern. */
+  private mappingRest(node: Node, names: Set<string>): NameRef | undefined {
+    const children = namedChildren(node);
+    const splats = children.filter((child) => child.type === 'splat_pattern');
+    if (splats.length === 0) return undefined;
+    if (splats.length > 1) fail(rowOf(splats[1]), 'マッピングのパターンには、** を1つしか書けません。');
+    const [splat] = splats;
+    if (children.at(-1) !== splat) {
+      fail(rowOf(splat), 'マッピングのパターンでは、** を付けたパターンを最後に書いてください。');
+    }
+    const nameNode = namedChildren(splat)[0];
+    if (!nameNode || nameNode.text === '_') fail(rowOf(splat), '** の後に _ は書けません。');
+    return this.patternName(nameNode, names);
+  }
+
+  /** A mapping pattern's key, which CPython allows to be only a literal or an attribute lookup (`a.b`). */
   private mappingKey(node: Node, names: Set<string>): Expression {
-    if (node.type === 'dotted_name') return this.dottedValue(namedChildren(node));
-    const pattern = this.pattern(node, names);
-    return pattern.kind === 'value' ? pattern.value : this.expression(node);
+    const isAttribute = node.type === 'dotted_name' && namedChildren(node).length > 1;
+    if (isAttribute) return this.dottedValue(namedChildren(node));
+    const pattern = node.type === 'dotted_name' || node.type === '_' ? undefined : this.pattern(node, names);
+    if (pattern?.kind === 'value') return pattern.value;
+    if (pattern?.kind === 'singleton') return this.expression(node);
+    return fail(rowOf(node), 'マッピングのパターンのキーには、リテラルか属性（a.b）しか書けません。');
   }
 
   private classPattern(node: Node, names: Set<string>): Pattern {
@@ -775,6 +787,7 @@ export class ProgramConverter extends ExpressionConverter {
     const keywordPatterns: Pattern[] = [];
     for (const argument of argumentNodes) {
       const inner = argument.type === 'case_pattern' ? namedChildren(argument)[0] : argument;
+      if (inner?.type === 'splat_pattern') fail(rowOf(inner), 'クラスのパターンには、* を書けません。');
       if (inner?.type === 'keyword_pattern') {
         const [keywordNode, valueNode] = patternChildren(inner);
         if (keywords.includes(keywordNode.text))
