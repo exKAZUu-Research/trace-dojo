@@ -20,10 +20,8 @@ interface Scan {
   offsets?: Int32Array;
 }
 
-const scans = new Map<string, Scan>();
-let cachedUnits = 0;
-/** The run the scans belong to, so that none outlives the run that made it. */
-let scansRun: object | undefined;
+/** The scans each run keeps, which go with the run, and the code units of the strings they keep alive. */
+const runScans = new WeakMap<object, { scans: Map<string, Scan>; units: number }>();
 
 export function hasSurrogates(text: string): boolean {
   if (text.length < CACHED_LENGTH) return SURROGATE.test(text);
@@ -36,25 +34,26 @@ export function hasSurrogates(text: string): boolean {
  */
 function scanOf(text: string): Scan {
   const run = runningProgram();
-  if (run !== scansRun) {
-    scans.clear();
-    cachedUnits = 0;
-    scansRun = run;
+  let cache = run && runScans.get(run);
+  if (run && !cache) {
+    cache = { scans: new Map(), units: 0 };
+    runScans.set(run, cache);
   }
-  const known = scans.get(text);
-  if (known) {
-    scans.delete(text);
-    scans.set(text, known);
+  const known = cache?.scans.get(text);
+  if (cache && known) {
+    cache.scans.delete(text);
+    cache.scans.set(text, known);
     return known;
   }
   chargeScan(text.length);
   const scan = scanText(text);
-  scans.set(text, scan);
-  cachedUnits += text.length;
-  for (const [oldest] of scans) {
-    if (cachedUnits <= CACHED_UNITS || oldest === text) break;
-    scans.delete(oldest);
-    cachedUnits -= oldest.length;
+  if (!cache) return scan;
+  cache.scans.set(text, scan);
+  cache.units += text.length;
+  for (const [oldest] of cache.scans) {
+    if (cache.units <= CACHED_UNITS || oldest === text) break;
+    cache.scans.delete(oldest);
+    cache.units -= oldest.length;
   }
   return scan;
 }
