@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 650 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 652 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
 import { floatPower } from './floatPower';
@@ -234,9 +234,9 @@ function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue,
   const [name, reflected] = SPECIAL_NAMES[operator];
   const leftClass = classOf(left);
   const rightClass = classOf(right);
-  const callLeft = binarySlot(operator, left, right, left, name);
+  const callLeft = binarySlot(operator, left, right, 'left', name);
   const callRight = asksReflected(operator, left, right, isInplace)
-    ? binarySlot(operator, left, right, right, reflected)
+    ? binarySlot(operator, left, right, 'right', reflected)
     : undefined;
   // A subclass that overrides the reflected method gets the first chance, and so does any reflected method before
   // a sequence concatenates or repeats, which is not a numeric operator in CPython and raises where the operator
@@ -271,12 +271,13 @@ function binarySlot(
   operator: BinaryOperator,
   left: PyValue,
   right: PyValue,
-  receiver: PyValue,
+  side: 'left' | 'right',
   name: string
 ): (() => PyValue) | undefined {
+  const [receiver, other] = side === 'left' ? [left, right] : [right, left];
   const method = lookupSpecial(receiver, name);
   if (method === undefined) return undefined;
-  const call = (): PyValue => callValue(bindValue(method, receiver), [receiver === left ? right : left]);
+  const call = (): PyValue => callValue(bindValue(method, receiver), [other]);
   if (overrides(receiver, name)) return call;
   return () => {
     const native = nativeBinary(operator, left, right);
@@ -289,15 +290,16 @@ function binarySlot(
  * `__index__`. The sequence's own `__mul__` is not asked, because it raises where the operator must go on.
  */
 function dispatchRepeat(left: PyValue, right: PyValue, isInplace: boolean): PyValue {
-  const [sequence, other] = isBuiltinSequence(left) ? [left, right] : [right, left];
+  const isSequenceLeft = isBuiltinSequence(left);
+  const [sequence, other] = isSequenceLeft ? [left, right] : [right, left];
   if (isBuiltinSequence(other)) return NotImplemented;
-  const method = lookupSpecial(other, sequence === left ? '__rmul__' : '__mul__');
+  const method = lookupSpecial(other, isSequenceLeft ? '__rmul__' : '__mul__');
   if (method !== undefined) {
     const result = callValue(bindValue(method, other), [sequence]);
     if (result !== NotImplemented) return result;
   }
   // `other *= sequence` repeats the sequence only for a number: an instance of a class has sequence slots of its own.
-  if (isInplace && other === left && isUserObject(other)) return NotImplemented;
+  if (isInplace && !isSequenceLeft && isUserObject(other)) return NotImplemented;
   if (lookupSpecial(other, '__index__') === undefined) return NotImplemented;
   return nativeBinary('*', sequence, toIndex(other));
 }
