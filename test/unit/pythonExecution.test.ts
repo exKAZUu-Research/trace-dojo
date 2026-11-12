@@ -385,9 +385,9 @@ test.each([
     '例外のトレースバック（__traceback__）は、この採点環境では使えません。',
   ],
   [
-    'math.gamma, which CPython takes from the C library',
-    'import math\nmath.gamma(1.5)',
-    'math.gamma()（C ライブラリの tgamma と最後の桁まで同じ値を出せないため）は、この採点環境では使えません。',
+    'math.erf, which CPython takes from the C library',
+    'import math\nmath.erf(1.5)',
+    'math.erf()（C ライブラリの erf と最後の桁まで同じ値を出せないため）は、この採点環境では使えません。',
   ],
 ])('%s ends as in CPython', (_, source, uncaughtException) => {
   expect(executeProgram('python', source)).toMatchObject({ kind: 'executed', uncaughtException });

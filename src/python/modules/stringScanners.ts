@@ -1,3 +1,4 @@
+import { currentRuntime } from '../runtimeContext';
 import { iterStr } from '../strings';
 import { iteratorClass, newList, newTuple, None, typeError, typeName, valueError } from '../types';
 import { DONE, PyIterator, type PyValue } from '../values';
@@ -68,7 +69,7 @@ function identifierEnd(chars: readonly string[], start: number): number {
 /** `_string.formatter_parser`: the `(literal_text, field_name, format_spec, conversion)` parts of a format string. */
 export function formatterParser([format]: PyValue[]): PyValue {
   if (typeof format !== 'string') throw typeError(`expected str, got ${typeName(format)}`);
-  const chars = iterStr(format);
+  const chars = retainedChars(format);
   let index = 0;
   return new PyIterator(iteratorClass('formatteriterator'), () => {
     if (index >= chars.length) return DONE;
@@ -152,7 +153,7 @@ function formatSpecEnd(chars: readonly string[], start: number): number {
 /** `_string.formatter_field_name_split`: the first part of a field name and an iterator of its accessors. */
 export function formatterFieldNameSplit([fieldName]: PyValue[]): PyValue {
   if (typeof fieldName !== 'string') throw typeError(`expected str, got ${typeName(fieldName)}`);
-  const chars = iterStr(fieldName);
+  const chars = retainedChars(fieldName);
   let index = 0;
   while (index < chars.length && chars[index] !== '[' && chars[index] !== '.') index++;
   const first = chars.slice(0, index).join('');
@@ -163,6 +164,13 @@ export function formatterFieldNameSplit([fieldName]: PyValue[]): PyValue {
     return newTuple([accessor.isAttribute, accessor.key]);
   });
   return newTuple([integerOr(first), accessors]);
+}
+
+/** The code points of a string that an iterator keeps, charged as the storage they take. */
+function retainedChars(text: string): string[] {
+  const chars = iterStr(text);
+  currentRuntime().allocate(chars.length);
+  return chars;
 }
 
 /** Transcribes FieldNameIterator_next of CPython's string_format.h. */

@@ -118,7 +118,7 @@ export function builtin(
     keywords: options.keywords,
     named: options.named,
   };
-  return nativeFunction(
+  const fn = nativeFunction(
     name,
     (args, kwargs) => {
       checkArgs(spec, args, kwargs);
@@ -126,6 +126,8 @@ export function builtin(
     },
     options.owner
   );
+  fn.module = options.module;
+  return fn;
 }
 
 /**

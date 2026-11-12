@@ -18,6 +18,8 @@ import {
   isCallable,
   isTruthy,
   iterate,
+  iterateEach,
+  iterateHeld,
   lengthOf,
   lookupSpecial,
   nextOf,
@@ -72,9 +74,8 @@ import { DONE, type Kwargs, PyClass, PyComplex, PyDict, PyIterator, PyObject, Py
 export const enumerateClass = builtinClass('enumerate');
 enumerateClass.construct = (cls, args, kwargs) => {
   checkEnumerateArgs(args.length, [...(kwargs?.keys() ?? [])]);
-  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
+  const { next, held } = iterateHeld(argument(args, kwargs, 0, 'iterable') as PyValue);
   let index = toIndex(argument(args, kwargs, 1, 'start') ?? 0n);
-  const next = iterate(iterable);
   return new PyIterator(
     cls,
     () => {
@@ -82,7 +83,7 @@ enumerateClass.construct = (cls, args, kwargs) => {
       if (item === DONE) return DONE;
       return currentRuntime().tuple([index++, item]);
     },
-    () => [iterable]
+    () => [held]
   );
 };
 
@@ -105,7 +106,7 @@ zipClass.construct = (cls, args, kwargs) => {
     kwargs
   );
   const strict = isTruthy(kwargs?.get('strict') ?? false);
-  const nexts = args.map((iterable) => iterate(iterable));
+  const { nexts, held } = iterateEach(args);
   let finished = false;
   return new PyIterator(
     cls,
@@ -123,7 +124,7 @@ zipClass.construct = (cls, args, kwargs) => {
       }
       return currentRuntime().tuple(items);
     },
-    () => args
+    held
   );
 };
 
@@ -150,7 +151,7 @@ mapClass.construct = (cls, args, kwargs) => {
   if (args.length < 2) throw typeError('map() must have at least two arguments.');
   const [fn, ...iterables] = args;
   const strict = isTruthy(kwargs?.get('strict') ?? false);
-  const nexts = iterables.map((iterable) => iterate(iterable));
+  const { nexts, held } = iterateEach(iterables);
   return new PyIterator(
     cls,
     () => {
@@ -165,7 +166,7 @@ mapClass.construct = (cls, args, kwargs) => {
       }
       return callValue(fn, items);
     },
-    () => args
+    () => [fn, ...held()]
   );
 };
 
@@ -173,7 +174,7 @@ export const filterClass = builtinClass('filter');
 filterClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'filter', min: 2, max: 2, style: 'expected' }, args, kwargs);
   const [fn, iterable] = args;
-  const next = iterate(iterable);
+  const { next, held } = iterateHeld(iterable);
   return new PyIterator(
     cls,
     () => {
@@ -183,7 +184,7 @@ filterClass.construct = (cls, args, kwargs) => {
       }
       return DONE;
     },
-    () => args
+    () => [fn, held]
   );
 };
 

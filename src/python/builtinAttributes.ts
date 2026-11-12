@@ -592,7 +592,7 @@ defineGetSet(
   (self) => (self as PyBuiltinFunction).self ?? currentRuntime().builtinsModule()
 );
 defineGetSet(builtinFunctionClass, '__module__', (self) =>
-  (self as PyBuiltinFunction).self === undefined ? 'builtins' : None
+  (self as PyBuiltinFunction).self === undefined ? ((self as PyBuiltinFunction).module ?? 'builtins') : None
 );
 defineGetSet(methodDescriptorClass, '__objclass__', (self) => objclassOf(self as PyBuiltinFunction));
 method(methodDescriptorClass, '__get__', 'expected', 1, 2, (self, [instance]) =>

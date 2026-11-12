@@ -12,7 +12,7 @@ import {
 } from './numbers';
 import { currentRuntime } from './runtimeContext';
 import { repeatText } from './stringBuilder';
-import { iterStr, strLength } from './strings';
+import { headStr, iterStr, strLength } from './strings';
 import { pyError, typeName, valueError } from './types';
 import type { PyValue } from './values';
 
@@ -156,8 +156,13 @@ function formatStr(value: string, specText: string): string {
   if (spec.coerceZero) throw valueError('Negative zero coercion (z) not allowed in string format specifier');
   if (spec.alternate) throw valueError('Alternate form (#) not allowed in string format specifier');
   if (spec.align === '=') throw valueError("'=' alignment not allowed in string format specifier");
-  const text = spec.precision === undefined ? value : iterStr(value).slice(0, spec.precision).join('');
-  return pad(text, '', spec);
+  return pad(spec.precision === undefined ? value : truncateStr(value, spec.precision), '', spec);
+}
+
+/** The first `precision` code points of a string, charging only for the part of it read to find them. */
+export function truncateStr(value: string, precision: number): string {
+  currentRuntime().scan(Math.min(value.length, precision * 2));
+  return headStr(value, precision);
 }
 
 function formatInt(original: bigint | boolean, specText: string): string {

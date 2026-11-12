@@ -128,6 +128,7 @@ function renderTemplate(
     } else {
       const end = fieldEnd(chars, index + 1);
       result += renderField(chars.slice(index + 1, end).join(''), args, kwargs, state, depth);
+      currentRuntime().ensureStringFits(result.length);
       index = end + 1;
     }
   }

@@ -1,11 +1,11 @@
 // code-gauge-allow-file fileNcss 490 -- The expression evaluator keeps one method per kind of expression together.
 import type { Argument, Comprehension, Element, Expression, FormattedValue, FunctionDef, NameRef, Target } from './ast';
+import { functionStr, KeywordArguments, mappingEntries } from './callArguments';
 import { moduleNameOf } from './classes';
 import { constantValue, foldConstants } from './constantFolding';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
 import {
-  bindValue,
   callValue,
   deleteAttribute,
   deleteItem,
@@ -43,12 +43,10 @@ import {
   DONE,
   type Kwargs,
   PyCell,
-  PyClass,
   PyDict,
   PyError,
   PyFunction,
   PyGenerator,
-  PyInstance,
   PyList,
   type PySet,
   PySlice,
@@ -444,59 +442,45 @@ export class ExpressionEvaluator {
     });
   }
 
-  /** Evaluates call arguments, holding each for garbage collection until the call returns. */
-  // code-gauge-allow functionNcss 40 -- Evaluates each kind of argument in order, raising CPython's errors for unpacking.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Evaluates each kind of argument in order, raising CPython's errors for unpacking.
+  /**
+   * Evaluates call arguments, holding each for garbage collection until the call returns. As CPython compiles a call
+   * whose only positional argument is starred to CALL_FUNCTION_EX, which converts that iterable after evaluating the
+   * keywords and names the callee if it fails, such an argument is read last; any other starred argument is read in
+   * order, as a list display reads it.
+   */
   protected arguments(argumentList: Argument[], frame: Frame, callee: PyValue): { args: PyValue[]; kwargs: Kwargs } {
+    const positionals = argumentList.filter((argument) => argument.kind === 'positional' || argument.kind === 'star');
+    const soleStar = positionals.length === 1 && positionals[0].kind === 'star' ? positionals[0] : undefined;
     const args: PyValue[] = [];
-    let kwargs: Map<string, PyValue> | undefined;
+    const keywords = new KeywordArguments(callee);
+    let deferred: PyValue | undefined;
     for (const argument of argumentList) {
-      switch (argument.kind) {
-        case 'positional': {
-          const value = this.evaluate(argument.value, frame);
-          args.push(value);
-          frame.temporaries.push(value);
-          break;
-        }
-        case 'star': {
-          const iterable = this.evaluate(argument.value, frame);
-          if (!isIterable(iterable)) {
-            throw typeError(`${calleeName(callee)} argument after * must be an iterable, not ${typeName(iterable)}`);
-          }
-          for (const item of toArray(iterable)) {
-            args.push(item);
-            frame.temporaries.push(item);
-          }
-          break;
-        }
-        case 'keyword': {
-          const value = this.evaluate(argument.value, frame);
-          kwargs ??= new Map();
-          if (kwargs.has(argument.name)) {
-            throw typeError(`${calleeName(callee)} got multiple values for keyword argument '${argument.name}'`);
-          }
-          kwargs.set(argument.name, value);
-          frame.temporaries.push(value);
-          break;
-        }
-        case 'doubleStar': {
-          const mapping = this.evaluate(argument.value, frame);
-          if (lookupSpecial(mapping, 'keys') === undefined) {
-            throw typeError(`${calleeName(callee)} argument after ** must be a mapping, not ${typeName(mapping)}`);
-          }
-          kwargs ??= new Map();
-          for (const [key, value] of mappingEntries(mapping)) {
-            if (typeof key !== 'string') throw typeError('keywords must be strings');
-            if (kwargs.has(key))
-              throw typeError(`${calleeName(callee)} got multiple values for keyword argument '${key}'`);
-            kwargs.set(key, value);
-            frame.temporaries.push(value);
-          }
-          break;
-        }
+      if (argument === soleStar) {
+        deferred = this.evaluate(argument.value, frame);
+        frame.temporaries.push(deferred);
+        continue;
       }
+      const value = this.evaluate(argument.value, frame);
+      frame.temporaries.push(value);
+      if (argument.kind === 'positional') args.push(value);
+      else if (argument.kind === 'star') this.pushAll(frame, args, starredItems(value));
+      else if (argument.kind === 'keyword') keywords.add(argument.name, value);
+      else keywords.merge(value, frame);
     }
-    return { args, kwargs };
+    if (deferred !== undefined) {
+      if (!isIterable(deferred)) {
+        throw typeError(`${functionStr(callee)} argument after * must be an iterable, not ${typeName(deferred)}`);
+      }
+      this.pushAll(frame, args, toArray(deferred));
+    }
+    return { args, kwargs: keywords.finish() };
+  }
+
+  private pushAll(frame: Frame, args: PyValue[], items: PyValue[]): void {
+    for (const item of items) {
+      args.push(item);
+      frame.temporaries.push(item);
+    }
   }
 
   private compare(expression: Extract<Expression, { kind: 'compare' }>, frame: Frame): PyValue {
@@ -687,31 +671,16 @@ function unboundLocal(name: string): PyError {
   return error;
 }
 
-function calleeName(callee: PyValue): string {
-  if (callee instanceof PyFunction) return `${callee.qualifiedName}()`;
-  if (callee instanceof PyClass) return `${callee.qualifiedName}()`;
-  if (callee instanceof PyInstance || callee instanceof PyTuple) return `${typeName(callee)} object`;
-  const name = (callee as { qualifiedName?: string }).qualifiedName;
-  return name ? `${name}()` : `${typeName(callee)} object`;
-}
-
 function isIterable(value: PyValue): boolean {
   if (typeof value === 'string' || value instanceof PyList || value instanceof PyTuple || value instanceof PyDict)
     return true;
   return lookupSpecial(value, '__iter__') !== undefined || lookupSpecial(value, '__getitem__') !== undefined;
 }
 
+/** The items of a starred value that is read as a list display reads it. */
 function starredItems(value: PyValue): PyValue[] {
   if (!isIterable(value)) throw typeError(`Value after * must be an iterable, not ${typeName(value)}`);
   return toArray(value);
-}
-
-/** The key-value pairs of a mapping, read through `keys()` and indexing for mappings that are not dicts. */
-export function mappingEntries(mapping: PyValue): [PyValue, PyValue][] {
-  if (mapping instanceof PyDict) return mapping.store.ordered().map((entry) => [entry.key, entry.value]);
-  const keys = lookupSpecial(mapping, 'keys');
-  if (keys === undefined) throw typeError(`'${typeName(mapping)}' object is not a mapping`);
-  return toArray(callValue(bindValue(keys, mapping), [])).map((key) => [key, getItem(mapping, key)]);
 }
 
 /**

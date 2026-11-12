@@ -1,10 +1,10 @@
 import { floatPower } from '../floatPower';
-import { toIndex } from '../numbers';
+import { intToFloat, toIndex } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
 import { pyError, valueError } from '../types';
-import { UnsupportedFeatureError } from '../unsupported';
 import type { PyValue } from '../values';
 import { realArgument } from './math';
+import { transformedRejection } from './randomBinomial';
 
 /** The source of random floats in [0, 1) the distributions draw from, a Random instance's Mersenne Twister. */
 export interface RandomSource {
@@ -148,7 +148,6 @@ export function weibullvariate(source: RandomSource, alpha: number, beta: number
   return alpha * floatPower(-Math.log(u), 1 / beta);
 }
 
-/** `random.binomialvariate(n, p)`, whose BTRS method needs the C library's lgamma, which this grader lacks. */
 export function binomialvariate(source: RandomSource, nValue: PyValue, pValue: PyValue): bigint {
   const n = toIndex(nValue);
   const p = realArgument(pValue);
@@ -160,10 +159,8 @@ export function binomialvariate(source: RandomSource, nValue: PyValue, pValue: P
   }
   if (n === 1n) return source.random() < p ? 1n : 0n;
   if (p > 0.5) return n - binomialvariate(source, n, 1 - p);
-  if (Number(n) * p < 10) return geometricBinomial(source, n, p);
-  throw new UnsupportedFeatureError(
-    'n * p が 10 以上の random.binomialvariate()（C ライブラリの lgamma と最後の桁まで同じ値を出せないため）'
-  );
+  if (intToFloat(n) * p < 10) return geometricBinomial(source, n, p);
+  return transformedRejection(source, n, p);
 }
 
 /** The geometric method of binomialvariate for small n * p, which counts the trials that fit before n. */

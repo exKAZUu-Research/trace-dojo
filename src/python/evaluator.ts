@@ -1,9 +1,10 @@
 // code-gauge-allow-file fileNcss 598 -- The statement evaluator keeps one method per kind of statement together.
 import type { ExceptHandler, Expression, MatchCase, Pattern, Statement, Target } from './ast';
+import { mappingEntries } from './callArguments';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
-import { ExpressionEvaluator, mappingEntries } from './expressionEvaluator';
+import { ExpressionEvaluator } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import {

@@ -68,6 +68,9 @@ test.each([
     'a backward search for a long needle over and over',
     "s = 'a' * 1000000\nt = 'a' * 500000 + 'b'\nwhile True:\n    s.rfind(t)",
   ],
+  ['a prefix test of many long candidates', "s = 'x' * 500000\np = ('x' * 499999 + 'y',) * 5000\ns.startswith(p)"],
+  ['a suffix test of many long candidates', "s = 'x' * 500000\np = ('y' + 'x' * 499999,) * 5000\ns.endswith(p)"],
+  ['a binomial coefficient of a huge size', 'import math\nmath.comb(10**6, 5 * 10**5)'],
 ])('%s ends at the execution limit', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded' });
 });
@@ -90,6 +93,10 @@ test.each([
   [
     'a search for a periodic needle',
     "s = '😀a' * 300000\nt = '😀a' * 100000 + '😀b'\nr = [s.find(t), s.rfind(t), s.rfind(t, 3, 500000), s.count(t)]\nif r != [-1, -1, -1, 0]:\n    raise AssertionError(r)",
+  ],
+  [
+    'a precision applied to a long string by many fields',
+    "s = 'x' * 500000\nr = [len(('{0:.1}' * 5000).format(s)), len('%.1s' * 5000 % ((s,) * 5000))]\nif r != [5000, 5000]:\n    raise AssertionError(r)",
   ],
 ])('%s finishes within the limits', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
@@ -139,6 +146,31 @@ test.each([
   ['the binary digits of a huge int', 'x = bin(1 << 1000000)'],
   ['a complex number padded to a huge width', 'x = format(complex(1, 2), ">1000000000")'],
   ['the repr of a deque of long strings', 'from collections import deque\nx = repr(deque(["x" * 1000] * 1001))'],
+  ['a long string padded by many fields', "s = 'x' * 500000\nx = ('{0:>3}' * 5000).format(s)"],
+  ['a long string formatted by many percent fields', "s = 'x' * 500000\nx = '%5s' * 5000 % ((s,) * 5000)"],
+  ['the permutations of a huge int', 'import math\nx = math.perm(1 << 4000000, 100)'],
+  ['the permutations of a large int', 'import math\nx = math.perm(1 << 1000000, 10)'],
+  ['the combinations of a large int', 'import math\nx = math.comb(1 << 1000000, 10)'],
+  [
+    'the items a cycle saves and a list beyond the slot limit together',
+    'import itertools\nc = itertools.cycle(range(300000))\ns = sum(itertools.islice(c, 300000))\na = [0] * 800000',
+  ],
+  [
+    'the pool of a product and a list beyond the slot limit together',
+    'import itertools\np = itertools.product(range(300000))\na = [0] * 800000',
+  ],
+  [
+    'the pool of permutations and a list beyond the slot limit together',
+    'import itertools\np = itertools.permutations(range(300000))\na = [0] * 800000',
+  ],
+  [
+    'the pool of combinations and a list beyond the slot limit together',
+    'import itertools\np = itertools.combinations(range(300000), 1)\na = [0] * 800000',
+  ],
+  [
+    'a reverse iterator over a dict and a list beyond the slot limit together',
+    'd = dict.fromkeys(range(300000))\nr = reversed(d)\na = [0] * 500000',
+  ],
 ])('%s raises MemoryError', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ uncaughtException: 'MemoryError' });
 });

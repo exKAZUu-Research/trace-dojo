@@ -2,7 +2,7 @@ import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { callValue, isTruthy, iterate, type NextFunction, toArray } from '../objects';
+import { callValue, isTruthy, iterateHeld, type NextFunction, toArray } from '../objects';
 import { binaryOp, equals } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newGenericAlias } from '../typeHints';
@@ -40,6 +40,7 @@ function asType(fn: PyBuiltinFunction): PyClass {
 // itertools.tee -------------------------------------------------------------------------------------------------------
 
 interface TeeBuffer {
+  /** What holds the items the buffer has yet to read. */
   source: PyValue;
   next: NextFunction;
   items: PyValue[];
@@ -63,13 +64,18 @@ function newTee(buffer: TeeBuffer, position: number): PyIterator {
       }
       return buffer.items[index++];
     },
-    () => [buffer.source, ...buffer.items]
+    () => [buffer.source, buffer.items]
   );
   teeStates.set(iterator, () => newTee(buffer, index));
   return iterator;
 }
 
 const teeStates = new WeakMap<PyIterator, () => PyIterator>();
+
+function newTeeOf(iterable: PyValue): PyIterator {
+  const { next, held } = iterateHeld(iterable);
+  return newTee({ source: held, next, items: [], done: false }, 0);
+}
 
 function tee(args: PyValue[]): PyValue {
   const [iterable, countValue] = args;
@@ -78,7 +84,7 @@ function tee(args: PyValue[]): PyValue {
   if (count === 0n) return newTuple([]);
   currentRuntime().ensureRoom(Number(count));
   const copyOf = iterable instanceof PyIterator ? teeStates.get(iterable) : undefined;
-  const first = copyOf ? copyOf() : newTee({ source: iterable, next: iterate(iterable), items: [], done: false }, 0);
+  const first = copyOf ? copyOf() : newTeeOf(iterable);
   const copies: PyValue[] = [first];
   while (copies.length < Number(count)) copies.push((teeStates.get(first) as () => PyIterator)());
   return newTuple(copies);
@@ -117,7 +123,7 @@ function count(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 function cycle([iterable]: PyValue[]): PyValue {
-  const next = iterate(iterable);
+  const { next, held } = iterateHeld(iterable);
   const saved: PyValue[] = [];
   let exhausted = false;
   let index = 0;
@@ -127,6 +133,7 @@ function cycle([iterable]: PyValue[]): PyValue {
       if (!exhausted) {
         const item = next();
         if (item !== DONE) {
+          currentRuntime().allocate(1);
           saved.push(item);
           return item;
         }
@@ -137,7 +144,7 @@ function cycle([iterable]: PyValue[]): PyValue {
       index = (index + 1) % saved.length;
       return item;
     },
-    () => [iterable, ...saved]
+    () => [held, saved]
   );
 }
 
@@ -167,8 +174,7 @@ function accumulate(args: PyValue[], kwargs: Kwargs): PyValue {
     args,
     kwargs
   );
-  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
-  const next = iterate(iterable);
+  const { next, held } = iterateHeld(argument(args, kwargs, 0, 'iterable') as PyValue);
   const fn = argument(args, kwargs, 1, 'func') ?? None;
   const initial = kwargs?.get('initial') ?? None;
   let total: PyValue | undefined = initial === None ? undefined : initial;
@@ -185,7 +191,7 @@ function accumulate(args: PyValue[], kwargs: Kwargs): PyValue {
       total = total === undefined ? item : fn === None ? binaryOp('+', total, item) : callValue(fn, [total, item]);
       return total;
     },
-    () => [iterable, fn, total]
+    () => [held, fn, total]
   );
 }
 
@@ -198,12 +204,13 @@ function chain(iterables: PyValue[]): PyIterator {
 }
 
 function chainFromIterable([iterable]: PyValue[]): PyIterator {
-  return chainOf(iterate(iterable), () => [iterable]);
+  const { next, held } = iterateHeld(iterable);
+  return chainOf(next, () => [held]);
 }
 
 /** Chains the items of the iterables that `nextIterable` returns one by one. */
-function chainOf(nextIterable: NextFunction, holds: () => Iterable<unknown>): PyIterator {
-  let inner: NextFunction | undefined;
+function chainOf(nextIterable: NextFunction, holds: () => unknown[]): PyIterator {
+  let inner: { next: NextFunction; held: PyValue } | undefined;
   return iteratorOf(
     'chain',
     () => {
@@ -211,15 +218,15 @@ function chainOf(nextIterable: NextFunction, holds: () => Iterable<unknown>): Py
         if (!inner) {
           const iterable = nextIterable();
           if (iterable === DONE) return DONE;
-          inner = iterate(iterable);
+          inner = iterateHeld(iterable);
         }
-        const item = inner();
+        const item = inner.next();
         if (item !== DONE) return item;
         currentRuntime().spend();
         inner = undefined;
       }
     },
-    holds
+    () => [...holds(), inner?.held]
   );
 }
 
@@ -251,6 +258,7 @@ function* combinations(pool: PyValue[], r: number, withReplacement: boolean): Ge
 function* permutations(pool: PyValue[], r: number): Generator<PyValue[]> {
   const n = pool.length;
   if (r > n) return;
+  currentRuntime().allocate(n + r);
   const indices = Array.from({ length: n }, (_, index) => index);
   const cycles = Array.from({ length: r }, (_, index) => n - index);
   yield indices.slice(0, r).map((index) => pool[index]);
@@ -283,7 +291,7 @@ function product(args: PyValue[], kwargs: Kwargs): PyValue {
   );
   const times = Number(toIndex(kwargs?.get('repeat') ?? 1n));
   if (times < 0) throw valueError('repeat argument cannot be negative');
-  const sources = args.map((iterable) => toArray(iterable));
+  const sources = args.map((iterable) => retainedItems(iterable));
   const pools: PyValue[][] = [];
   if (sources.length > 0) {
     currentRuntime().allocate(sources.length * times);
@@ -308,15 +316,13 @@ function* productOf(pools: PyValue[][]): Generator<PyValue[]> {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows itertools.groupby, whose groups share one underlying iterator.
-// code-gauge-allow functionNcss 31 -- Follows itertools.groupby, whose groups share one underlying iterator.
 function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
     { qualified: 'groupby', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'key'], named: 2 },
     args,
     kwargs
   );
-  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
-  const next = iterate(iterable);
+  const { next, held } = iterateHeld(argument(args, kwargs, 0, 'iterable') as PyValue);
   const keyFn = argument(args, kwargs, 1, 'key') ?? None;
   let pending: PyValue | typeof DONE | undefined;
   let pendingKey: PyValue | undefined;
@@ -343,11 +349,11 @@ function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
           advance();
           return item;
         },
-        () => [iterable, pending]
+        () => [held, pending, pendingKey, groupKey]
       );
       return newTuple([groupKey, group]);
     },
-    () => [iterable, keyFn, pending, pendingKey]
+    () => [held, keyFn, pending, pendingKey, currentKey]
   );
 }
 
@@ -368,7 +374,7 @@ function sizeOf(value: PyValue | undefined, fallback: number): number {
 
 function islice(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'islice', min: 2, max: 4, style: 'expected' }, args, kwargs);
-  const next = iterate(args[0]);
+  const { next, held } = iterateHeld(args[0]);
   const [start, stop, step] =
     args.length === 2
       ? [0, toBound(args[1], 'Stop'), 1]
@@ -390,7 +396,7 @@ function islice(args: PyValue[], kwargs: Kwargs): PyValue {
         }
       }
     },
-    () => [args[0]]
+    () => [held]
   );
 }
 
@@ -400,7 +406,8 @@ function zipLongest(args: PyValue[], kwargs: Kwargs): PyValue {
     throw typeError('zip_longest() got an unexpected keyword argument');
   }
   const fill = kwargs?.get('fillvalue') ?? None;
-  const nexts = args.map((iterable) => iterate(iterable));
+  const iterations = args.map((iterable) => iterateHeld(iterable));
+  const nexts = iterations.map((iteration) => iteration.next);
   const finished = nexts.map(() => false);
   return iteratorOf(
     'zip_longest',
@@ -416,7 +423,7 @@ function zipLongest(args: PyValue[], kwargs: Kwargs): PyValue {
       }
       return finished.every(Boolean) ? DONE : newTuple(items);
     },
-    () => args
+    () => [fill, ...iterations.map((iteration) => iteration.held)]
   );
 }
 
@@ -425,7 +432,7 @@ function filtering(
   keep: (fn: PyValue, item: PyValue, state: { dropping: boolean }) => boolean | 'stop'
 ): PyBuiltinFunction {
   return builtin(name, 'expected', 2, 2, ([fn, iterable]) => {
-    const next = iterate(iterable);
+    const { next, held } = iterateHeld(iterable);
     const state = { dropping: true };
     let stopped = false;
     return iteratorOf(
@@ -443,7 +450,7 @@ function filtering(
         }
         return DONE;
       },
-      () => [iterable]
+      () => [fn, held]
     );
   });
 }
@@ -454,8 +461,7 @@ function batched(args: PyValue[], kwargs: Kwargs): PyValue {
     args,
     kwargs
   );
-  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
-  const next = iterate(iterable);
+  const { next, held } = iterateHeld(argument(args, kwargs, 0, 'iterable') as PyValue);
   const size = Number(toIndex(argument(args, kwargs, 1, 'n') as PyValue));
   if (size < 1) throw valueError('n must be at least one');
   const strict = isTruthy(kwargs?.get('strict') ?? false);
@@ -473,7 +479,7 @@ function batched(args: PyValue[], kwargs: Kwargs): PyValue {
       if (strict && items.length < size) throw valueError('batched(): incomplete batch');
       return newTuple(items);
     },
-    () => [iterable]
+    () => [held]
   );
 }
 
@@ -538,7 +544,7 @@ function combinationsBuiltin(name: string, withReplacement: boolean): PyBuiltinF
     2,
     2,
     (args, kwargs) => {
-      const pool = toArray(argument(args, kwargs, 0, 'iterable') as PyValue);
+      const pool = retainedItems(argument(args, kwargs, 0, 'iterable') as PyValue);
       return lazily(name, combinations(pool, sizeOf(argument(args, kwargs, 1, 'r'), 0), withReplacement), [pool]);
     },
     { keywords: ['iterable', 'r'], named: 2 }
@@ -546,19 +552,26 @@ function combinationsBuiltin(name: string, withReplacement: boolean): PyBuiltinF
 }
 
 function permutationsOf(args: PyValue[], kwargs: Kwargs): PyIterator {
-  const pool = toArray(argument(args, kwargs, 0, 'iterable') as PyValue);
+  const pool = retainedItems(argument(args, kwargs, 0, 'iterable') as PyValue);
   return lazily('permutations', permutations(pool, sizeOf(argument(args, kwargs, 1, 'r'), pool.length)), [pool]);
 }
 
+/** The items of an iterable that an iterator keeps, charged as the storage they take. */
+function retainedItems(iterable: PyValue): PyValue[] {
+  const items = toArray(iterable);
+  currentRuntime().allocate(items.length);
+  return items;
+}
+
 function starmap([fn, iterable]: PyValue[]): PyIterator {
-  const next = iterate(iterable);
+  const { next, held } = iterateHeld(iterable);
   return iteratorOf(
     'starmap',
     () => {
       const item = next();
       return item === DONE ? DONE : callValue(fn, toArray(item));
     },
-    () => [fn, iterable]
+    () => [fn, held]
   );
 }
 
@@ -569,27 +582,25 @@ function keepAfterDropping(fn: PyValue, item: PyValue, state: { dropping: boolea
 }
 
 function compress(args: PyValue[], kwargs: Kwargs): PyIterator {
-  const data = argument(args, kwargs, 0, 'data') as PyValue;
-  const selectors = argument(args, kwargs, 1, 'selectors') as PyValue;
-  const nextData = iterate(data);
-  const nextSelector = iterate(selectors);
+  const data = iterateHeld(argument(args, kwargs, 0, 'data') as PyValue);
+  const selectors = iterateHeld(argument(args, kwargs, 1, 'selectors') as PyValue);
   return iteratorOf(
     'compress',
     () => {
       for (;;) {
-        const item = nextData();
-        const selector = nextSelector();
+        const item = data.next();
+        const selector = selectors.next();
         if (item === DONE || selector === DONE) return DONE;
         if (isTruthy(selector)) return item;
         currentRuntime().spend();
       }
     },
-    () => [data, selectors]
+    () => [data.held, selectors.held]
   );
 }
 
 function pairwise([iterable]: PyValue[]): PyIterator {
-  const next = iterate(iterable);
+  const { next, held } = iterateHeld(iterable);
   let previous: PyValue | typeof DONE | undefined;
   return iteratorOf(
     'pairwise',
@@ -602,7 +613,7 @@ function pairwise([iterable]: PyValue[]): PyIterator {
       previous = item;
       return pair;
     },
-    () => [iterable]
+    () => [held, previous]
   );
 }
 

@@ -1,7 +1,7 @@
+import { mappingEntries } from './callArguments';
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { DictStore } from './dictStore';
-import { mappingEntries } from './expressionEvaluator';
 import { NATIVE_HASHES, pyHash } from './hashing';
 import { keyError, sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
@@ -442,7 +442,9 @@ method(
 );
 dictClass.dict.set('__hash__', None);
 
+/** An iterator over a snapshot of a container's items, which it keeps and so charges as storage. */
 function listIterator(items: PyValue[], name: string): PyIterator {
+  currentRuntime().allocate(items.length);
   let index = 0;
   const iterator = new PyIterator(
     iteratorClass(name),

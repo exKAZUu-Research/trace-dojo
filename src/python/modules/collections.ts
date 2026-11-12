@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 464 -- The methods and attributes of the builtin types it defines belong together.
+import { mappingEntries } from '../callArguments';
+// code-gauge-allow-file fileNcss 472 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
 import { DictStore } from '../dictStore';
-import { mappingEntries } from '../expressionEvaluator';
 import { pyHash } from '../hashing';
 import { keyError } from '../items';
 import { libraryReceiver } from '../libraryReceivers';
@@ -275,12 +275,20 @@ method(dequeClass, '__iter__', 'none', 0, 0, (self) => {
   );
 });
 method(dequeClass, '__reversed__', 'none', 0, 0, (self) => {
-  const items = [...dequeOf(self).items].toReversed();
-  let index = 0;
+  const deque = dequeOf(self);
+  const length = deque.items.length;
+  let remaining = length;
   return new PyIterator(
     iteratorClass('_collections._deque_reverse_iterator'),
-    () => (index < items.length ? items[index++] : DONE),
-    () => items
+    () => {
+      if (remaining === 0) return DONE;
+      if (deque.items.length !== length) {
+        remaining = 0;
+        throw pyError('RuntimeError', 'deque mutated during iteration');
+      }
+      return deque.items[--remaining];
+    },
+    () => [deque]
   );
 });
 method(dequeClass, '__repr__', 'none', 0, 0, (self) => {
@@ -387,6 +395,7 @@ pythonMethod(counterClass, 'most_common', 'n=None', (self, [count]) => {
 });
 pythonMethod(counterClass, 'elements', '', (self) => {
   const entries = counterReceiver(self, 'elements').store.ordered();
+  currentRuntime().allocate(entries.length);
   let position = 0;
   let key: PyValue = None;
   let remaining = 0n;

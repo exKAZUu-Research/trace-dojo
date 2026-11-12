@@ -17,6 +17,13 @@ export function iterStr(text: string): string[] {
   return hasSurrogates(text) ? [...text] : text.split('');
 }
 
+/** The first `count` code points of a string, read from no more of it than they can occupy. */
+export function headStr(text: string, count: number): string {
+  // Each code point takes at most two UTF-16 units.
+  const units = text.slice(0, count * 2);
+  return hasSurrogates(units) ? iterStr(units).slice(0, count).join('') : units.slice(0, count);
+}
+
 export function codePointAt(text: string, index: number): string {
   if (!hasSurrogates(text)) return text[index];
   return iterStr(text)[index];

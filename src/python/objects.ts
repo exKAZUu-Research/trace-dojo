@@ -273,6 +273,29 @@ export type NextFunction = () => PyValue | typeof DONE;
 
 /** Starts iterating a value, returning a function that gives the next item or DONE. */
 export function iterate(value: PyValue): NextFunction {
+  return iterateBuiltin(value) ?? iterateByProtocol(value);
+}
+
+/** Starts iterating each of several iterables as {@link iterateHeld} does, as zip and map read theirs. */
+export function iterateEach(iterables: PyValue[]): { nexts: NextFunction[]; held: () => PyValue[] } {
+  const iterations = iterables.map((iterable) => iterateHeld(iterable));
+  return { nexts: iterations.map((iteration) => iteration.next), held: () => iterations.map(({ held }) => held) };
+}
+
+/**
+ * Starts iterating a value as {@link iterate} does, also returning what holds the items yet to come, which a native
+ * iterator built on the iteration must report as held: the iterator object that `__iter__` returned, or the value.
+ */
+export function iterateHeld(value: PyValue): { next: NextFunction; held: PyValue } {
+  const next = iterateBuiltin(value);
+  if (next) return { next, held: value };
+  const iter = lookupSpecial(value, '__iter__');
+  if (iter === undefined || iter === None) return { next: iterateByProtocol(value), held: value };
+  const iterator = callValue(bindValue(iter, value), []);
+  return { next: nextOf(iterator), held: iterator };
+}
+
+function iterateBuiltin(value: PyValue): NextFunction | undefined {
   if (value instanceof PyList || (value instanceof PyTuple && !hasOwnIter(value))) return iterateItems(value);
   if (typeof value === 'string') return iterateString(value);
   if (value instanceof PyRange) return iterateRange(value);
@@ -282,7 +305,7 @@ export function iterate(value: PyValue): NextFunction {
   if (value instanceof PyIterator) return value.next;
   if (value instanceof PyGenerator) return iterateGenerator(value);
   if (value instanceof PyClass && value.enumMembers) return iterate(newList([...value.enumMembers]));
-  return iterateByProtocol(value);
+  return undefined;
 }
 
 function iterateItems(sequence: PyList | PyTuple): NextFunction {

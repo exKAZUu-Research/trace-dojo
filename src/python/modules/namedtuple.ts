@@ -2,7 +2,7 @@ import { pyRepr, pyStr } from '../conversions';
 import { method, pythonFunction } from '../define';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { argument } from '../nativeArgs';
-import { callValue, isTruthy, toArray } from '../objects';
+import { callValue, getAttribute, isTruthy, toArray } from '../objects';
 import { containerRepr } from '../typeContainers';
 import {
   builtinClass,
@@ -43,7 +43,7 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
   cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
   const module = kwargs?.get('module');
   cls.module = typeof module === 'string' ? module : '__main__';
-  cls.dict.set('__doc__', `${typename}(${fields.join(', ')})`);
+  cls.dict.set('__doc__', `${typename}(${fields.join(', ')}${fields.length === 1 ? ',' : ''})`);
   cls.dict.set('__slots__', newTuple([]));
   cls.dict.set('_fields', newTuple(fields));
   cls.dict.set(
@@ -176,27 +176,39 @@ function defineNamedTupleMethods(): void {
         const tuple = libraryReceiver(args[0], isNamedTuple, '_make', 'NamedTuple._replace');
         if (args.length > 1)
           throw typeError(`${tuple.cls.name}._replace() takes 1 positional argument but ${args.length} were given`);
-        const fields = fieldsOf(tuple);
-        const items = [...tuple.items];
-        for (const [key, value] of kwargs ?? []) {
-          const index = fields.indexOf(key);
-          if (index === -1) throw valueError(`Got unexpected field names: [${pyRepr(key)}]`);
-          items[index] = value;
+        // Transcribes `self._make(map(kwds.pop, field_names, self))` and its check of the keywords left over.
+        const remaining = new Map(kwargs);
+        const items = fieldsOf(tuple).map((field, index) => {
+          const value = remaining.get(field as string) ?? tuple.items[index];
+          remaining.delete(field as string);
+          return value;
+        });
+        const result = callValue(getAttribute(tuple.cls, '_make'), [newList(items)]);
+        if (remaining.size > 0) {
+          throw typeError(`Got unexpected field names: ${pyRepr(newList([...remaining.keys()]))}`);
         }
-        return new PyTuple(tuple.cls, items);
+        return result;
       },
       undefined,
       'method',
       'NamedTuple'
     )
   );
-  method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => callValue(cls, toArray(iterable)), {
+  method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => makeNamedTuple(cls as PyClass, iterable), {
     binding: 'class',
   });
   namedTupleBase.dict.set('__replace__', namedTupleBase.dict.get('_replace') as PyValue);
   method(namedTupleBase, '__getnewargs__', 'none', 0, 0, (self) => newTuple(toArray(self)));
 }
 defineNamedTupleMethods();
+
+/** Transcribes `_make` of collections.namedtuple, which builds the tuple without calling the class. */
+function makeNamedTuple(cls: PyClass, iterable: PyValue): PyTuple {
+  const items = toArray(iterable);
+  const count = (cls.lookup('_fields') as PyTuple).items.length;
+  if (items.length !== count) throw typeError(`Expected ${count} arguments, got ${items.length}`);
+  return new PyTuple(cls, items);
+}
 
 function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
   const cls = namedtuple(args, kwargs) as PyClass;

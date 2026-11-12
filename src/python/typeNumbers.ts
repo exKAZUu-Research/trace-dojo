@@ -30,7 +30,7 @@ import {
   typeName,
   valueError,
 } from './types';
-import { PyComplex, PyInstance, type PyValue } from './values';
+import { PyComplex, type PyValue } from './values';
 
 // int ---------------------------------------------------------------------------------------------------------------
 
@@ -61,7 +61,7 @@ export function toInt(value: PyValue): bigint {
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'number') return floatToInt(value);
   if (typeof value === 'string') return parseIntOrThrow(value, 10);
-  for (const name of ['__int__', '__index__', '__trunc__']) {
+  for (const name of ['__int__', '__index__']) {
     const special = lookupSpecial(value, name);
     if (special === undefined) continue;
     const result = callValue(bindValue(special, value), []);
@@ -69,8 +69,6 @@ export function toInt(value: PyValue): bigint {
     if (typeof result === 'boolean') return result ? 1n : 0n;
     throw typeError(`${name} returned non-int (type ${typeName(result)})`);
   }
-  if (value instanceof PyInstance && value.enumValue !== undefined && typeof value.enumValue === 'bigint')
-    return value.enumValue;
   throw typeError(`int() argument must be a string, a bytes-like object or a real number, not '${typeName(value)}'`);
 }
 

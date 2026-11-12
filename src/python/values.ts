@@ -41,6 +41,8 @@ const checkedRuns = new WeakSet<NativeFunction>();
 
 export class PyBuiltinFunction extends PyObject {
   readonly run: NativeFunction;
+  /** The `__module__` of a module's function: the name its module has in C, such as `_functools`. */
+  module?: string;
 
   constructor(
     cls: PyClass,

@@ -3,13 +3,15 @@ import { floatPower } from '../floatPower';
 import { frexp } from '../hashing';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { argument } from '../nativeArgs';
-import { exactBinary, floatRepr, intToFloat, scaleToFloat, toIndex } from '../numbers';
+import { floatRepr, intToFloat, toIndex } from '../numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial, toArray } from '../objects';
 import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
 import type { Kwargs, PyValue } from '../values';
 import { fma } from './mathFma';
+import { fsum } from './mathFsum';
+import { type GammaResult, lgamma, tgamma } from './mathGamma';
 import { sumprod } from './mathSumprod';
 
 const builtin = moduleBuiltin('math');
@@ -40,6 +42,17 @@ function floatFunction(name: string, fn: (x: number) => number, check?: (x: numb
     const result = fn(x);
     if (Number.isNaN(result) && !Number.isNaN(x)) throw domainError();
     if (!Number.isFinite(result) && Number.isFinite(x)) throw rangeError();
+    return result;
+  });
+}
+
+/** Wraps a gamma function as math_1a does, with the error message CPython gives for its poles. */
+function gammaFunction(name: string, fn: (x: number) => GammaResult): PyValue {
+  return builtin(name, 'one', 1, 1, ([value]) => {
+    const x = realArgument(value);
+    const result = fn(x);
+    if (result === 'domain') throw valueError(`expected a noninteger or positive integer, got ${floatRepr(x)}`);
+    if (result === 'range') throw rangeError();
     return result;
   });
 }
@@ -158,8 +171,9 @@ function comb(nValue: PyValue, kValue: PyValue): bigint {
   const smaller = k < n - k ? k : n - k;
   let result = 1n;
   for (let index = 1n; index <= smaller; index++) {
-    currentRuntime().spend();
-    result = (result * (n - smaller + index)) / index;
+    const factor = n - smaller + index;
+    currentRuntime().chargeBigint(result, factor);
+    result = (result * factor) / index;
   }
   return result;
 }
@@ -173,32 +187,9 @@ function perm(nValue: PyValue, kValue: PyValue | undefined): bigint {
   if (k > n) return 0n;
   let result = 1n;
   for (let index = n - k + 1n; index <= n; index++) {
-    currentRuntime().spend();
+    currentRuntime().chargeBigint(result, index);
     result *= index;
   }
-  return result;
-}
-
-/** `math.fsum`: the exact sum of the floats, rounded once. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows math.fsum's handling of NaN, infinities, and signed zero.
-function fsum(iterable: PyValue): number {
-  const values = toArray(iterable).map(realArgument);
-  let infinity = 0;
-  for (const value of values) {
-    if (Number.isNaN(value)) return Number.NaN;
-    if (!Number.isFinite(value)) {
-      if (infinity !== 0 && Math.sign(value) !== infinity) throw valueError('-inf + inf in fsum');
-      infinity = Math.sign(value);
-    }
-  }
-  if (infinity !== 0) return infinity * Number.POSITIVE_INFINITY;
-  const parts = values.filter((value) => value !== 0).map(exactBinary);
-  if (parts.length === 0) return values.some((value) => !Object.is(value, -0)) || values.length === 0 ? 0 : -0;
-  const exponent = Math.min(...parts.map((part) => part.exponent));
-  let total = 0n;
-  for (const part of parts) total += part.mantissa << BigInt(part.exponent - exponent);
-  const result = scaleToFloat(total, exponent);
-  if (!Number.isFinite(result)) throw pyError('OverflowError', 'intermediate overflow in fsum');
   return result;
 }
 
@@ -340,8 +331,6 @@ function lcm(values: bigint[]): bigint {
 registerUnsupportedAttributes('math', {
   erf: 'math.erf()（C ライブラリの erf と最後の桁まで同じ値を出せないため）',
   erfc: 'math.erfc()（C ライブラリの erfc と最後の桁まで同じ値を出せないため）',
-  gamma: 'math.gamma()（C ライブラリの tgamma と最後の桁まで同じ値を出せないため）',
-  lgamma: 'math.lgamma()（C ライブラリの lgamma と最後の桁まで同じ値を出せないため）',
 });
 
 registerModule('math', () => {
@@ -355,7 +344,7 @@ registerModule('math', () => {
     ['isqrt', builtin('isqrt', 'one', 1, 1, ([value]) => isqrt(integerArgument(value)))],
     ['cbrt', floatFunction('cbrt', Math.cbrt)],
     ['exp', floatFunction('exp', Math.exp)],
-    ['exp2', floatFunction('exp2', (x) => 2 ** x)],
+    ['exp2', floatFunction('exp2', (x) => floatPower(2, x))],
     ['expm1', floatFunction('expm1', Math.expm1)],
     ['log', builtin('log', 'expected', 1, 2, ([value, base]) => log(value, base))],
     ['log2', builtin('log2', 'one', 1, 1, ([value]) => log2Of(value))],
@@ -395,6 +384,8 @@ registerModule('math', () => {
     ['ceil', floorOrCeil('ceil', Math.ceil, '__ceil__')],
     ['trunc', floorOrCeil('trunc', Math.trunc, '__trunc__')],
     ['fabs', floatFunction('fabs', Math.abs)],
+    ['gamma', gammaFunction('gamma', tgamma)],
+    ['lgamma', gammaFunction('lgamma', lgamma)],
     ['factorial', builtin('factorial', 'one', 1, 1, ([value]) => factorial(value))],
     ['gcd', builtin('gcd', 'expected', 0, Number.POSITIVE_INFINITY, (args) => gcd(args.map(integerArgument)))],
     ['lcm', builtin('lcm', 'expected', 0, Number.POSITIVE_INFINITY, (args) => lcm(args.map(integerArgument)))],
@@ -403,7 +394,7 @@ registerModule('math', () => {
     ['pow', two('pow', pow)],
     ['hypot', builtin('hypot', 'expected', 0, Number.POSITIVE_INFINITY, (args) => hypot(args.map(realArgument)))],
     ['dist', builtin('dist', 'expected', 2, 2, ([p, q]) => dist(p, q))],
-    ['fsum', builtin('fsum', 'one', 1, 1, ([iterable]) => fsum(iterable))],
+    ['fsum', builtin('fsum', 'one', 1, 1, ([iterable]) => fsum(iterable, realArgument))],
     ['prod', builtin('prod', 'takes', 1, 1, product, { keywords: ['start'] })],
     ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumprod(p, q))],
     ['isclose', builtin('isclose', 'takes', 2, 2, isclose, { keywords: ['a', 'b', 'rel_tol', 'abs_tol'], named: 2 })],

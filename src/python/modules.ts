@@ -2,7 +2,7 @@ import type { Runtime } from './runtime';
 import { UNSUPPORTED_SYS_ATTRIBUTES } from './sysAttributes';
 import { moduleClass } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { PyModule, type PyValue } from './values';
+import { PyBuiltinFunction, PyModule, type PyValue } from './values';
 
 type ModuleFactory = (runtime: Runtime) => Map<string, PyValue>;
 
@@ -58,7 +58,7 @@ export function importModule(runtime: Runtime, name: string): PyModule {
   const module = new PyModule(moduleClass, name, new Map());
   runtime.modules.set(name, module);
   module.dict.set('__name__', name);
-  for (const [key, value] of factory(runtime)) module.dict.set(key, value);
+  for (const [key, value] of factory(runtime)) module.dict.set(key, ownedBy(name, value));
   for (const [key, create] of lazyAttributes.get(name) ?? []) module.lazy.set(key, () => create(runtime));
   for (const [key, feature] of Object.entries(unsupportedAttributes.get(name) ?? {})) {
     if (!module.dict.has(key) && !module.lazy.has(key)) module.unsupported.set(key, feature);
@@ -70,4 +70,10 @@ export function importModule(runtime: Runtime, name: string): PyModule {
     if (values.all && !module.dict.has('__all__')) module.dict.set('__all__', runtime.listOf([...values.all]));
   }
   return module;
+}
+
+/** Records the module that a native function belongs to, which its `__module__` reports. */
+function ownedBy(module: string, value: PyValue): PyValue {
+  if (value instanceof PyBuiltinFunction && value.self === undefined) value.module ??= module;
+  return value;
 }

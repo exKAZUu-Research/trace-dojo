@@ -1,11 +1,12 @@
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
-import { floatToInt } from './numbers';
-import { callValue, getAttribute, getItem, lookupSpecial } from './objects';
+import { truncateStr } from './formatSpec';
+import { toIndex } from './numbers';
+import { callValue, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { repeatText } from './stringBuilder';
-import { iterStr } from './strings';
-import { pyError, typeError, typeName, valueError } from './types';
-import { PyInstance, PyTuple, type PyValue } from './values';
+import { iterStr, strLength } from './strings';
+import { exceptionClassNamed, floatClass, intClass, None, pyError, typeError, typeName, valueError } from './types';
+import { PyComplex, PyError, PyInstance, PyTuple, type PyValue } from './values';
 
 /** The `%` operator on a string. */
 export function formatPercent(template: string, argument: PyValue): string {
@@ -16,15 +17,17 @@ export function formatPercent(template: string, argument: PyValue): string {
       ? argument
       : undefined;
   const reader = new TemplateReader(iterStr(template), args, mapping);
+  const runtime = currentRuntime();
   let result = '';
   while (!reader.done) {
     const char = reader.read();
     result += char === '%' ? reader.convert() : char;
+    runtime.ensureStringFits(result.length);
   }
   if (reader.hasUnusedArguments && mapping === undefined) {
     throw typeError('not all arguments converted during string formatting');
   }
-  currentRuntime().buildString(result.length);
+  runtime.buildString(result.length);
   return result;
 }
 
@@ -158,12 +161,13 @@ function convertOne(
 
 function textOf(type: string, value: PyValue, precision: number | undefined): string {
   const text = type === 's' ? pyStr(value) : type === 'r' ? pyRepr(value) : pyAscii(value);
-  return precision === undefined ? text : iterStr(text).slice(0, precision).join('');
+  return precision === undefined ? text : truncateStr(text, precision);
 }
 
 function charOf(value: PyValue): string {
   if (typeof value === 'string') {
-    const length = iterStr(value).length;
+    currentRuntime().scan(value.length);
+    const length = strLength(value);
     if (length !== 1) throw typeError(`%c requires an int or a unicode character, not a string of length ${length}`);
     return value;
   }
@@ -192,22 +196,35 @@ function padNumber(signAndPrefix: string, digits: string, { align, zero, width }
   return zero ? signAndPrefix + repeatText('0', padding) + digits : repeatText(' ', padding) + signAndPrefix + digits;
 }
 
+/** The integer a `%d`-like conversion formats, as mainformatlong of CPython's unicodeobject.c converts it. */
 function toInteger(type: string, value: PyValue): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'boolean') return value ? 1n : 0n;
-  if (typeof value === 'number' && 'diu'.includes(type)) return floatToInt(value);
-  if ('diu'.includes(type)) {
-    if (value instanceof PyInstance && lookupSpecial(value, '__int__') !== undefined) {
-      return toInteger(type, callValue(getAttribute(value, '__int__'), []));
-    }
-    throw typeError(`%${type} format: a real number is required, not ${typeName(value)}`);
+  const isDecimal = 'diu'.includes(type);
+  const wrongType = (): Error =>
+    typeError(`%${type} format: ${isDecimal ? 'a real number' : 'an integer'} is required, not ${typeName(value)}`);
+  if (!isNumber(value)) throw wrongType();
+  try {
+    return isDecimal ? (callValue(intClass, [value]) as bigint) : toIndex(value);
+  } catch (error) {
+    if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError')))
+      throw wrongType();
+    throw error;
   }
-  throw typeError(`%${type} format: an integer is required, not ${typeName(value)}`);
 }
 
+/** The float a `%f`-like conversion formats, as PyFloat_AsDouble converts it. */
 function toFloat(value: PyValue): number {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'boolean') return value ? 1 : 0;
-  throw typeError(`must be real number, not ${typeName(value)}`);
+  if (typeof value === 'string' || !isNumber(value) || value instanceof PyComplex) {
+    throw typeError(`must be real number, not ${typeName(value)}`);
+  }
+  return callValue(floatClass, [value]) as number;
+}
+
+/** CPython's PyNumber_Check: a value with an int, index, or float conversion, or a complex number. */
+function isNumber(value: PyValue): boolean {
+  if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') return true;
+  if (typeof value === 'string' || value === None) return false;
+  if (value instanceof PyComplex) return true;
+  return ['__index__', '__int__', '__float__'].some((name) => lookupSpecial(value, name) !== undefined);
 }

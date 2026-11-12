@@ -144,6 +144,47 @@ done = True`;
   expect(trace.traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 1, 1, 0, 0]);
 });
 
+test.each([
+  {
+    name: 'the inner iterable of chain.from_iterable',
+    program: `from itertools import chain
+def make(i):
+    return [Turtle(0, 0), Turtle(1, 0)]
+g = chain.from_iterable(map(make, range(1)))
+t = next(g)
+t = next(g)
+t.forward()`,
+    expected: ['', '', '0,0 1,0', '0,0 1,0', '0,0 1,1'],
+  },
+  {
+    name: 'the iterator that __iter__ returned to enumerate',
+    program: `class Pair:
+    def __iter__(self):
+        return iter([Turtle(0, 0), Turtle(1, 0)])
+g = enumerate(Pair())
+i, t = next(g)
+i, t = next(g)
+t.forward()`,
+    expected: ['', '0,0 1,0', '0,0 1,0', '0,0 1,0', '0,0 1,1'],
+  },
+  {
+    name: 'the item pairwise keeps for its next pair',
+    program: `from itertools import pairwise
+def gen():
+    yield Turtle(0, 0)
+    yield Turtle(1, 0)
+    yield Turtle(2, 0)
+p = pairwise(gen())
+first = next(p)[0]
+second = next(p)[1]
+second.forward()`,
+    expected: ['', '', '0,0 1,0', '0,0 2,0', '0,0 2,1'],
+  },
+])('a turtle that only $name reaches stays visible', ({ program, expected }) => {
+  const trace = traceProgram('python', program, program);
+  expect(trace.traceItems.map(({ turtles }) => turtles.map(({ x, y }) => `${x},${y}`).join(' '))).toEqual(expected);
+});
+
 test('class bodies and definitions record no steps, and class variables show as Class.name', () => {
   const program = `class Counter:
     count = 0

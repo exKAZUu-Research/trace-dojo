@@ -1,0 +1,40 @@
+def check(call, expected):
+    try:
+        actual = repr(call())
+    except Exception as error:
+        actual = type(error).__name__ + ': ' + str(error)
+    if actual != expected:
+        raise AssertionError(actual + ' != ' + expected)
+
+s = '\U0001F600a\U0001F600bc'
+
+check(lambda: '{:.3}'.format(s), "'😀a😀'")
+check(lambda: '{:.1}'.format(s), "'😀'")
+check(lambda: '{:.0}'.format(s), "''")
+check(lambda: '{:.10}'.format(s), "'😀a😀bc'")
+check(lambda: '{:>6.2}'.format(s), "'    😀a'")
+check(lambda: '{:*^7.3}'.format(s), "'**😀a😀**'")
+check(lambda: format(s, '.4'), "'😀a😀b'")
+check(lambda: '%.2s' % s, "'😀a'")
+check(lambda: '%.3r' % s, '"\'😀a"')
+check(lambda: '%5.1s|' % s, "'    😀|'")
+check(lambda: '%-5.4s|' % s, "'😀a😀b |'")
+check(lambda: '%.2a' % s, '"\'\\\\"')
+check(lambda: '%c' % 'xy', 'TypeError: %c requires an int or a unicode character, not a string of length 2')
+check(lambda: '%c' % s[0], "'😀'")
+check(lambda: '{0:.1}{0:.2}'.format('abc' * 3), "'aab'")
+check(lambda: len(('{0:.2}' * 100).format('x' * 1000)), '200')
+check(lambda: s.startswith(('\U0001F600a', 'z')), 'True')
+check(lambda: s.startswith(('a', 'z'), 1), 'True')
+check(lambda: s.startswith(('a\U0001F600',), 1, 3), 'True')
+check(lambda: s.startswith(('a\U0001F600b',), 1, 3), 'False')
+check(lambda: s.endswith(('bc', 'q')), 'True')
+check(lambda: s.endswith(('\U0001F600',), 0, 3), 'True')
+check(lambda: s.endswith(('',), 6), 'False')
+check(lambda: s.endswith(('',), 5), 'True')
+check(lambda: s.startswith(('', 'x'), 9), 'False')
+check(lambda: s.endswith(()), 'False')
+check(lambda: s.startswith(('a', 1)), 'TypeError: tuple for startswith must only contain str, not int')
+check(lambda: s.endswith(1), 'TypeError: endswith first arg must be str or a tuple of str, not int')
+check(lambda: 'abc'.endswith(('c', 'bc'), -2), 'True')
+check(lambda: 'abc'.startswith(('b',), -2, -1), 'True')
