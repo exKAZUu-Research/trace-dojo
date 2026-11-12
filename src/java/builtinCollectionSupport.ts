@@ -238,8 +238,12 @@ export function checkModifiable(frame: Frame, collection: Value, changesSize: bo
 }
 
 export function elementsOf(receiver: Value): Value[] {
+  subListChecks.get(receiver as JavaObject)?.();
   return (receiver as JavaObject).elements as Value[];
 }
+
+/** The checks of sublists, which fail once their list changed in size other than through them, as the JDK's do. */
+export const subListChecks = new WeakMap<JavaObject, () => void>();
 
 export function touch(receiver: Value): void {
   const object = receiver as JavaObject;
@@ -436,6 +440,38 @@ export function checkListPosition(frame: Frame, list: Value, index: number, leng
 function checkingClassOf(list: Value): ClassInfo {
   const object = list as JavaObject;
   return (unmodifiableWrappers.has(object) ? (object.retained?.[0] as JavaObject) : object).cls;
+}
+
+/**
+ * Reports an index outside a list as its JDK class does: an array access for `List.of`, `Arrays.asList`, and `Stack`, and
+ * messages of their own for the other lists that do not call `Objects.checkIndex`.
+ */
+export function defineIndexFailures(lists: Record<string, ClassInfo>, registry: Context['registry']): void {
+  indexFailures.set(lists.immutableList, arrayAccessFailure);
+  indexFailures.set(lists.fixedSizeList, arrayAccessFailure);
+  indexFailures.set(lists.pairList, (frame, index, length) =>
+    throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index} Size: ${length}`)
+  );
+  indexFailures.set(lists.emptyList, (frame, index) =>
+    throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}`)
+  );
+  indexFailures.set(lists.singletonList, sizedIndexFailure);
+  indexFailures.set(registry.classes.get('LinkedList') as ClassInfo, sizedIndexFailure);
+  // A Vector checks only the upper bound and reads its array, whose capacity starts at 10 and doubles.
+  indexFailures.set(registry.classes.get('Stack') as ClassInfo, (frame, index, length) => {
+    if (index >= length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${index}`);
+    let capacity = 10;
+    while (capacity < length) capacity *= 2;
+    return arrayAccessFailure(frame, index, capacity);
+  });
+}
+
+function arrayAccessFailure(frame: Frame, index: number, length: number): never {
+  return throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Index ${index} out of bounds for length ${length}`);
+}
+
+function sizedIndexFailure(frame: Frame, index: number, length: number): never {
+  return throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${length}`);
 }
 
 export function checkIndex(frame: Frame, index: number, length: number): void {

@@ -494,18 +494,14 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
 
   /** Rejects an accessor a record declares that is not public, generic, or static, or that changes its component's type. */
   protected checkAccessor(member: MethodDeclaration, method: MethodInfo, component: FieldInfo): void {
-    const fault =
-      method.access !== 'public'
-        ? 'は public にしてください'
-        : method.isStatic
-          ? 'に static は付けられません'
-          : (method.typeParameters?.length ?? 0) > 0
-            ? 'には型パラメータを書けません'
-            : !sameType(method.returnType, component.type)
-              ? `の戻り値の型は ${typeName(component.type)} にしてください`
-              : member.throwsTypes.length > 0
-                ? 'には throws を書けません'
-                : undefined;
+    const faults: [isFaulty: boolean, fault: string][] = [
+      [method.access !== 'public', 'は public にしてください'],
+      [method.isStatic, 'に static は付けられません'],
+      [(method.typeParameters?.length ?? 0) > 0, 'には型パラメータを書けません'],
+      [!sameType(method.returnType, component.type), `の戻り値の型は ${typeName(component.type)} にしてください`],
+      [member.throwsTypes.length > 0, 'には throws を書けません'],
+    ];
+    const fault = faults.find(([isFaulty]) => isFaulty)?.[1];
     if (fault) this.error(member, `レコードのアクセサ ${member.name} ${fault}。`);
   }
 

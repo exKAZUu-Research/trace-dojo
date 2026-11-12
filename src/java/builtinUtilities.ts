@@ -9,7 +9,13 @@ import {
   javaHash,
   putEntry,
 } from './builtinCollections';
-import { checkModifiable, mapViewSources, sortedValues, unmodifiableWrappers } from './builtinCollectionSupport';
+import {
+  checkModifiable,
+  mapViewSources,
+  sortedValues,
+  subListChecks,
+  unmodifiableWrappers,
+} from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
 import { addMethod, newString, type Registry } from './builtinSupport';
@@ -532,6 +538,7 @@ function copyRange(frame: Frame, array: JavaArray, from: number, to: number): Ja
 
 function elementsOf(frame: Frame, value: Value): Value[] {
   if (!(value instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+  subListChecks.get(value)?.();
   return value.elements ?? itemsOf(frame, value);
 }
 

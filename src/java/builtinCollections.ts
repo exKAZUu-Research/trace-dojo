@@ -7,6 +7,7 @@ import {
   checkPosition,
   classType,
   defaultRemoveClasses,
+  defineIndexFailures,
   defineIteratorClass,
   defineReadMethods,
   defineSetEquality,
@@ -14,7 +15,6 @@ import {
   elementsOf,
   fixedSizeClasses,
   immutableCollectionsLists,
-  indexFailures,
   indexOf,
   itemsOf,
   javaEquals,
@@ -26,6 +26,7 @@ import {
 import { addListIterators, defineListIterator } from './builtinListIterator';
 import { defineHashMap, defineSets } from './builtinMaps';
 import { definePriorityQueue } from './builtinPriorityQueue';
+import { createSubList } from './builtinSubList';
 import {
   addAbstractMethod,
   addConstructor,
@@ -232,38 +233,6 @@ function defineUnmodifiableViewSet(context: Context, setClass: ClassInfo, itrCla
   }
   unmodifiableClasses.add(cls);
   return cls;
-}
-
-/**
- * Reports an index outside a list as its JDK class does: an array access for `List.of`, `Arrays.asList`, and `Stack`, and
- * messages of their own for the other lists that do not call `Objects.checkIndex`.
- */
-function defineIndexFailures(lists: Record<string, ClassInfo>, registry: Context['registry']): void {
-  indexFailures.set(lists.immutableList, arrayAccessFailure);
-  indexFailures.set(lists.fixedSizeList, arrayAccessFailure);
-  indexFailures.set(lists.pairList, (frame, index, length) =>
-    throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index} Size: ${length}`)
-  );
-  indexFailures.set(lists.emptyList, (frame, index) =>
-    throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}`)
-  );
-  indexFailures.set(lists.singletonList, sizedIndexFailure);
-  indexFailures.set(registry.classes.get('LinkedList') as ClassInfo, sizedIndexFailure);
-  // A Vector checks only the upper bound and reads its array, whose capacity starts at 10 and doubles.
-  indexFailures.set(registry.classes.get('Stack') as ClassInfo, (frame, index, length) => {
-    if (index >= length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${index}`);
-    let capacity = 10;
-    while (capacity < length) capacity *= 2;
-    return arrayAccessFailure(frame, index, capacity);
-  });
-}
-
-function arrayAccessFailure(frame: Frame, index: number, length: number): never {
-  return throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Index ${index} out of bounds for length ${length}`);
-}
-
-function sizedIndexFailure(frame: Frame, index: number, length: number): never {
-  return throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${length}`);
 }
 
 /** `ArrayList`, `Stack`, and `LinkedList`, which hold their elements in an array. */
@@ -575,12 +544,7 @@ function defineListAdditions(
       if (start < 0) throwBuiltin(frame, 'IndexOutOfBoundsException', `fromIndex = ${start}`);
       if (end > items.length) throwBuiltin(frame, 'IndexOutOfBoundsException', `toIndex = ${end}`);
       if (start > end) throwBuiltin(frame, 'IllegalArgumentException', `fromIndex(${start}) > toIndex(${end})`);
-      // A copy stands for the view, which these programs read rather than write through.
-      frame.runtime.allocateArray(frame, end - start);
-      const list = frame.runtime.allocateObject(frame, cls);
-      list.elements = items.slice(start, end);
-      list.modCount = 0;
-      return list;
+      return createSubList(frame, cls, receiver as JavaObject, start, end);
     }
   );
 }

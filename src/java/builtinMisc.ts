@@ -87,6 +87,11 @@ function defineObjects(registry: Registry, objectClass: ClassInfo, stringType: J
   addMethod(cls, 'toString', [objectType, stringType], stringType, true, (frame, _, [value, fallback]) =>
     value === undefined ? fallback : newString(frame, stringify(frame, value, objectType))
   );
+  defineNullChecks(cls, objectType, stringType);
+}
+
+/** `Objects.requireNonNull` and `requireNonNullElse`. */
+function defineNullChecks(cls: ClassInfo, objectType: JavaType, stringType: JavaType): void {
   for (const parameterTypes of [[], [stringType]]) {
     const variable: TypeVariable = { name: 'T', bounds: [objectType] };
     const t: JavaType = { kind: 'typeVar', variable };

@@ -189,11 +189,7 @@ class Translator {
     const point = this.pattern.codePointAt(this.index) as number;
     const char = String.fromCodePoint(point);
     this.index += char.length;
-    if (this.current().isComments && this.skipsComment(char)) return '';
-    const canRepeat = this.canRepeat;
-    // Only a quantifier, `|`, and a group's opening leave nothing for a quantifier to repeat.
-    this.canRepeat = !'*+?{|('.includes(char);
-    if ('*+?'.includes(char) && !canRepeat) this.fail(`Dangling meta character '${char}'`, this.index - 1);
+    if (this.skipsToken(char)) return '';
     switch (char) {
       case '\\': {
         return this.escape();
@@ -229,6 +225,19 @@ class Translator {
         return this.literal(point);
       }
     }
+  }
+
+  /**
+   * Whether the token starting with `char` is whitespace or a comment that comments mode skips; rejects a quantifier
+   * with nothing to repeat, as Java's dangling meta character error does.
+   */
+  private skipsToken(char: string): boolean {
+    if (this.current().isComments && this.skipsComment(char)) return true;
+    const canRepeat = this.canRepeat;
+    // Only a quantifier, `|`, and a group's opening leave nothing for a quantifier to repeat.
+    this.canRepeat = !'*+?{|('.includes(char);
+    if ('*+?'.includes(char) && !canRepeat) this.fail(`Dangling meta character '${char}'`, this.index - 1);
+    return false;
   }
 
   /** Where `^` or `$` matches, at the input's bounds or, with MULTILINE, at its lines'. */

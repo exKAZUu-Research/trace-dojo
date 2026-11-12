@@ -739,6 +739,68 @@ public class Main {
   });
 });
 
+test("Java's subList is a view that writes through to its list and fails once the list changes in size", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+public class Main {
+  public static void main(String[] args) {
+    List<Integer> list = new ArrayList<>(List.of(1, 2, 3, 4, 5, 6));
+    list.subList(1, 3).clear();
+    System.out.println(list);
+    List<Integer> mid = list.subList(1, 3);
+    mid.set(0, 40); mid.add(99); mid.remove(Integer.valueOf(5));
+    System.out.println(mid + " " + list + " " + mid.size());
+    Collections.sort(list.subList(0, 3), Collections.reverseOrder());
+    System.out.println(list);
+    list.subList(0, 2).replaceAll(x -> x * 10);
+    System.out.println(list + " " + list.subList(1, 4).indexOf(990) + " " + list.subList(1, 4).contains(6) + " " + list.subList(2, 2).isEmpty());
+    int sum = 0; for (int x : list.subList(1, 3)) sum += x; System.out.println(sum);
+    List<Integer> nested = list.subList(0, 4).subList(1, 3); nested.clear(); System.out.println(list);
+    list.subList(0, 1).removeIf(x -> x > 100); System.out.println(list);
+    List<String> linked = new LinkedList<>(List.of("a", "b", "c", "d"));
+    linked.subList(1, 3).add(0, "x"); System.out.println(linked);
+    List<String> fixed = Arrays.asList("p", "q", "r");
+    fixed.subList(0, 2).set(1, "Q"); System.out.println(fixed);
+    try { fixed.subList(0, 1).add("z"); } catch (UnsupportedOperationException e) { System.out.println("UOE"); }
+    try { List.of(1, 2).subList(0, 1).set(0, 3); } catch (UnsupportedOperationException e) { System.out.println("UOE2"); }
+    List<Integer> nums = new ArrayList<>(List.of(1, 2, 3));
+    Iterator<Integer> it = nums.iterator(); nums.subList(0, 1).clear();
+    try { it.next(); } catch (ConcurrentModificationException e) { System.out.println("CME"); }
+    System.out.println(nums.subList(0, 2).toString() + nums.subList(0, 2).equals(List.of(2, 3)) + " " + new ArrayList<>(nums.subList(1, 2)) + " " + nums.subList(0, 2).stream().mapToInt(x -> x).sum());
+  }
+}`,
+      '[1, 4, 5, 6]\n[40, 99] [1, 40, 99, 6] 2\n[99, 40, 1, 6]\n[990, 400, 1, 6] -1 true true\n401\n[990, 6]\n[6]\n[a, x, b, c, d]\n[p, Q, r]\nUOE\nUOE2\nCME\n[2, 3]true [3] 5\n',
+    ],
+    [
+      `import java.util.*;
+public class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    List<Integer> list = new ArrayList<>(List.of(1, 2, 3, 4));
+    List<Integer> view = list.subList(1, 3);
+    list.add(5);
+    t("get", () -> view.get(0));
+    t("size", () -> view.size());
+    t("print", () -> System.out.println(view));
+    t("set", () -> view.set(0, 9));
+    List<Integer> second = list.subList(0, 2);
+    list.set(0, 7);
+    t("afterSet", () -> System.out.println(second));
+    List<Integer> nested = list.subList(0, 4).subList(1, 3);
+    nested.add(8);
+    t("parentOfNested", () -> System.out.println(list));
+    t("sort", () -> Collections.sort(view));
+    t("forEach", () -> { for (int x : view) {} });
+  }
+}`,
+      'get java.util.ConcurrentModificationException\nsize java.util.ConcurrentModificationException\nprint java.util.ConcurrentModificationException\nset java.util.ConcurrentModificationException\n[7, 2]\nafterSet ok\n[7, 2, 3, 8, 4, 5]\nparentOfNested ok\nsort java.util.ConcurrentModificationException\nforEach java.util.ConcurrentModificationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
