@@ -223,6 +223,11 @@ test.each([
     'class A {}\nclass B { Object o = (Runnable & A) null; }',
     '交差型の & の後ろには、インターフェースしか書けません。',
   ],
+  [
+    'a subclass of an inner class without an enclosing instance',
+    'class Outer { class Inner {} }\nclass Sub extends Outer.Inner { Sub() { super(); } }',
+    'Inner のコンストラクタを呼び出すには、Outer のオブジェクトが必要です。',
+  ],
 ])('Java rejects %s', (_, declarations, message) => {
   const source = `${declarations}\npublic class Main { public static void main(String[] args) {} }`;
   expect(executeProgram('java', source)).toEqual({
@@ -308,6 +313,19 @@ class Pair<A> { final A first; final String tag; <B> Pair(A first, B tag) { this
     stdout: 'ANN2030\nbase basebasederived\nx7102\n[run] 2 true true\n5 yz\nabc bc c 5\n',
     uncaughtException: undefined,
   });
+});
+
+test('Java gives an inner superclass the enclosing instance that outer.super(...) names', () => {
+  const program = `class Outer { String name; Outer(String n) { name = n; } class Inner { final String tag; Inner(String t) { tag = t; } String get() { return name + tag; } } }
+class Sub extends Outer.Inner { Sub(Outer o, String t) { o.super(t + "!"); } }
+public class Main {
+  public static void main(String[] a) {
+    System.out.println(new Sub(new Outer("x"), "y").get());
+    Outer none = null;
+    try { new Sub(none, "z"); } catch (NullPointerException e) { System.out.println("NPE"); }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'xy!\nNPE\n' });
 });
 
 test('Java concatenates numbers and characters onto a String with +=', () => {

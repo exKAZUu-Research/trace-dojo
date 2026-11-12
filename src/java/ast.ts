@@ -148,6 +148,8 @@ export interface InitializerBlock extends Span {
 export interface ExplicitConstructorCall extends Span {
   kind: 'explicitConstructorCall';
   target: 'this' | 'super';
+  /** The enclosing instance written before `.super`, as in `outer.super()`, for a superclass that is an inner class. */
+  outer?: Expression;
   args: Expression[];
 }
 

@@ -14,7 +14,7 @@ import type {
   Statement,
   TypeSyntax,
 } from './ast';
-import { convertArguments } from './parseExpression';
+import { convertArguments, convertExpression } from './parseExpression';
 import {
   convertModifiers,
   convertType,
@@ -367,10 +367,11 @@ function convertConstructor(node: Node): ConstructorDeclaration {
 }
 
 function convertExplicitConstructorCall(node: Node): ExplicitConstructorCall {
-  if (node.childForFieldName('object')) unsupported(node, '修飾された super(...)');
+  const outer = node.childForFieldName('object');
   return {
     kind: 'explicitConstructorCall',
     target: field(node, 'constructor').type === 'this' ? 'this' : 'super',
+    ...(outer && { outer: convertExpression(outer) }),
     args: convertArguments(field(node, 'arguments')),
     ...span(node),
   };
