@@ -1,6 +1,7 @@
 import { ArrayOps } from './arrayOps';
 import { DONE, type HostIterator } from './iteration';
 import type { RealmBuilder } from './realm';
+import { receiverText } from './realmCollections';
 import type { Runtime } from './runtime';
 import { JsArray, JsObject, type Value } from './values';
 
@@ -59,7 +60,7 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
     if (!iterator) {
       return runtime.throwError(
         'TypeError',
-        `next method called on incompatible receiver ${runtime.describe(thisValue)}`
+        `Method ${tag}.prototype.next called on incompatible receiver ${receiverText(runtime, thisValue)}`
       );
     }
     const value = iterator.next();

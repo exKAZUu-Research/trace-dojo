@@ -570,6 +570,33 @@ for (const text of ['x', '', '{', '[1,]', '{"a":1,}', '{a:1}', '"abc', '1 2', 'u
 const copy = structuredClone({ m: new Map([[1, [2]]]), s: new Set([1]) }); console.log(copy);`,
   ],
   [
+    'iterator helpers',
+    `function* naturals() { let i = 0; while (true) yield i++; }
+console.log(naturals().filter((x) => x % 2).map((x) => x * x).drop(1).take(3).toArray());
+console.log(naturals().take(5).reduce((a, b) => a + b), naturals().some((x) => x > 3), naturals().find((x) => x > 10));
+naturals().take(2).forEach((v, i) => console.log('each', v, i));
+console.log([[1, 2], [3]].values().flatMap((x) => x).toArray(), new Map([[1, 'a']]).entries().map(([k, v]) => k + v).toArray());
+console.log([1].values().map((x) => x), Iterator.from({ next() { return { value: 1, done: false }; } }).take(2).toArray(), Iterator.from('ab').toArray());
+function* closing() { try { yield 1; yield 2; } finally { console.log('cleanup'); } }
+for (const v of closing().map((x) => x * 10)) { console.log(v); break; }
+const helper = [1, 2].values().map((x) => x); console.log(helper.next(), helper.return(), helper.next());
+for (const f of [() => [1].values().map(1), () => [1].values().take(-1), () => [].values().reduce((a, b) => a + b), () => new Iterator()]) {
+  try { f(); } catch (e) { console.log(e.name, e.message); }
+}`,
+  ],
+  [
+    'Promise.withResolvers, Promise.try, and Array.fromAsync',
+    `const { promise, resolve } = Promise.withResolvers(); promise.then((v) => console.log('resolved', v)); resolve(5);
+Promise.try((a, b) => a + b, 1, 2).then((v) => console.log('try', v));
+Promise.try(() => { throw new Error('bad'); }).catch((e) => console.log('caught', e.message));
+Array.fromAsync([1, Promise.resolve(2)]).then((a) => console.log('sync', a));
+Array.fromAsync({ length: 1, 0: 'a' }, (x) => x + '!').then((a) => console.log('array-like', a));
+Array.fromAsync([1, 2], (x) => { if (x === 2) throw new Error('m'); return x; }).catch((e) => console.log('mapper', e.message));
+const ticks = (n) => n > 0 && Promise.resolve().then(() => { console.log('tick'); ticks(n - 1); });
+ticks(6);
+console.log(Array.fromAsync([]));`,
+  ],
+  [
     'everyday Array, Object, Number, String, and Math members',
     `const a = [3, 1, 2];
 console.log(a.toSorted(), a.toReversed(), a.toSpliced(1, 1, 'x', 'y'), a.with(-1, 9), a, [1, 2, 3, 4, 5].copyWithin(0, 3));

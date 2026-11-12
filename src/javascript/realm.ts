@@ -2,8 +2,10 @@ import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
 import { definePromiseBuiltins } from './promises';
 import { defineArrayBuiltins } from './realmArrays';
+import { defineAsyncBuiltins } from './realmAsyncBuiltins';
 import { defineCollectionBuiltins } from './realmCollections';
 import { defineGlobalBuiltins } from './realmGlobals';
+import { defineIteratorHelpers } from './realmIteratorHelpers';
 import { defineIteratorBuiltins } from './realmIterators';
 import { defineJsonBuiltins } from './realmJson';
 import { defineNodeBuiltins } from './realmNode';
@@ -153,5 +155,7 @@ export function createRealm(runtime: Runtime): Realm {
   definePromiseBuiltins(builder);
   defineCollectionBuiltins(builder);
   defineJsonBuiltins(builder);
+  defineIteratorHelpers(builder);
+  defineAsyncBuiltins(builder);
   return builder.realm;
 }

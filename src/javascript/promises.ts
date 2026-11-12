@@ -2,7 +2,7 @@ import { type Resume, type Steps } from './generators';
 import type { RealmBuilder } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
-import { type JsFunction,isCallable,isObject,JsObject,JsThrow,type Value } from './values';
+import { isCallable, isObject, type JsFunction, JsObject, JsThrow, type Value } from './values';
 
 /** What a settled promise runs for each of its handlers, with the values that must stay reachable until then. */
 interface Reaction {
@@ -180,7 +180,7 @@ export function performThen(runtime: Runtime, promise: JsObject, reaction: React
 }
 
 /** The resolve and reject functions passed to an executor, of which only the first call has an effect. */
-function resolvingFunctions(runtime: Runtime, promise: JsObject): { resolve: JsFunction; reject: JsFunction } {
+export function resolvingFunctions(runtime: Runtime, promise: JsObject): { resolve: JsFunction; reject: JsFunction } {
   let isResolved = false;
   const once =
     (settleWith: (value: Value) => void) =>
