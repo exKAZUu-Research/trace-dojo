@@ -514,8 +514,45 @@ class EnumType:
                 or value in cls._hashable_values_
                 )
 
+    def __bool__(cls):
+        return True
 
-_register_enum_hooks(_enum_dict_new, _enum_dict_setitem, _build_enum_class, EnumType.__call__, EnumType.__contains__)
+    def __getitem__(cls, name):
+        return cls._member_map_[name]
+
+    def __iter__(cls):
+        return (cls._member_map_[name] for name in cls._member_names_)
+
+    def __len__(cls):
+        return len(cls._member_names_)
+
+    def __reversed__(cls):
+        return (cls._member_map_[name] for name in reversed(cls._member_names_))
+
+    def __repr__(cls):
+        if Flag is not None and issubclass(cls, Flag):
+            return "<flag %r>" % cls.__name__
+        else:
+            return "<enum %r>" % cls.__name__
+
+
+_register_enum_hooks(
+        _enum_dict_new,
+        _enum_dict_setitem,
+        _build_enum_class,
+        EnumType.__call__,
+        EnumType.__contains__,
+        {
+                '__bool__': EnumType.__bool__,
+                '__call__': EnumType.__call__,
+                '__contains__': EnumType.__contains__,
+                '__getitem__': EnumType.__getitem__,
+                '__iter__': EnumType.__iter__,
+                '__len__': EnumType.__len__,
+                '__reversed__': EnumType.__reversed__,
+                '__repr__': EnumType.__repr__,
+                },
+        )
 del EnumType
 
 

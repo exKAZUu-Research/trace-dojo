@@ -3,6 +3,7 @@ import { isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { deleteDescriptor, isDataDescriptor, readDescriptor, writeDescriptor } from './descriptors';
 import { newMappingProxy } from './mappingProxy';
+import { metaclassFunction } from './metaclassFunctions';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import {
@@ -42,19 +43,15 @@ export const BUILTIN_DOC = '組み込みの関数・型・モジュールの説�
 /** Reads an attribute of a class: its own data, then the attributes of its MRO, bound as a class reads them. */
 // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of class attribute and descriptor CPython binds.
 export function classAttribute(cls: PyClass, name: string): PyValue | undefined {
+  const python = metaclassFunction(cls, name);
+  if (python !== undefined) return python;
   const own = typeData(cls, name);
   if (own !== undefined) return own;
   const attribute = cls.lookup(name);
   if (attribute === undefined && name === 'register' && cls.abc) {
     return nativeFunction('register', ([subclass]) => registerVirtualSubclass(cls, subclass, isSubclassOfClass));
   }
-  if (attribute === undefined) {
-    // Methods of the metaclass, such as `mro()` or an enum's `__iter__`, bind to the class.
-    const metaclass = classOf(cls);
-    const meta = metaclass.lookup(name);
-    if (isDataDescriptor(meta)) return readDescriptor(meta, cls);
-    return meta instanceof PyBuiltinFunction ? bindValue(meta, cls, metaclass) : undefined;
-  }
+  if (attribute === undefined) return metaclassAttribute(cls, name);
   if (attribute instanceof PyDescriptor) {
     if (attribute.cls === staticmethodClass) return attribute.fn;
     if (attribute.cls === classmethodClass) return bindValue(attribute, cls, cls);
@@ -69,6 +66,16 @@ export function classAttribute(cls: PyClass, name: string): PyValue | undefined 
   }
   if (attribute instanceof PyObject && attribute.cls.nativeGet) return attribute.cls.nativeGet(attribute, None, cls);
   return attribute;
+}
+
+/** A method or data descriptor of a class's metaclass, such as `mro()` or an enum's `__iter__`, bound to the class. */
+function metaclassAttribute(cls: PyClass, name: string): PyValue | undefined {
+  const metaclass = classOf(cls);
+  const python = metaclassFunction(metaclass, name);
+  if (python !== undefined) return bindValue(python, cls, metaclass);
+  const meta = metaclass.lookup(name);
+  if (isDataDescriptor(meta)) return readDescriptor(meta, cls);
+  return meta instanceof PyBuiltinFunction ? bindValue(meta, cls, metaclass) : undefined;
 }
 
 function typeData(cls: PyClass, name: string): PyValue | undefined {

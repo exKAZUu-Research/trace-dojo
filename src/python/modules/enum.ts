@@ -16,7 +16,7 @@ import { registerModule } from '../modules';
 import { toArray } from '../objects';
 import { None } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import { type PyClass, type PyInstance, type PyTuple, type PyValue } from '../values';
+import { type PyClass, type PyDict, type PyInstance, type PyTuple, type PyValue } from '../values';
 import { ENUM_SOURCE } from './enumSource';
 
 inheritIntMethods();
@@ -36,8 +36,8 @@ function nativeHelpers(): [string, PyValue][] {
     ['MappingProxyType', mappingProxyClass],
     [
       '_register_enum_hooks',
-      builtin('_register_enum_hooks', 'expected', 5, 5, ([prepare, setItem, build, call, contains]) => {
-        registerEnumHooks({ prepare, setItem, build, call, contains });
+      builtin('_register_enum_hooks', 'expected', 6, 6, ([prepare, setItem, build, call, contains, methods]) => {
+        registerEnumHooks({ prepare, setItem, build, call, contains, methods: methods as PyDict });
         return None;
       }),
     ],

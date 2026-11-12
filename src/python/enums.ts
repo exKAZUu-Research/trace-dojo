@@ -2,6 +2,7 @@ import { pyFormat, pyRepr, pyStr } from './conversions';
 import { defineGetSet } from './descriptors';
 import { hashInt, identityHash, NATIVE_HASHES } from './hashing';
 import { unsupportedReceiver } from './libraryReceivers';
+import { registerMetaclassFunctions } from './metaclassFunctions';
 import { importModule } from './modules';
 import { bindValue, callValue, enumMemberGenerator, getAttribute } from './objects';
 import { intEnumValue, keysEqual } from './operators';
@@ -21,7 +22,15 @@ import {
   typeClass,
   typeError,
 } from './types';
-import { type Kwargs, PyBuiltinFunction, PyClass, PyInstance, type PyObject, type PyValue } from './values';
+import {
+  type Kwargs,
+  PyBuiltinFunction,
+  PyClass,
+  type PyDict,
+  PyInstance,
+  type PyObject,
+  type PyValue,
+} from './values';
 
 /**
  * The `enum` module's native part: the classes `Enum` and `IntEnum`, the metaclass their subclasses get, and the
@@ -60,6 +69,8 @@ interface EnumHooks {
   call: PyValue;
   /** `EnumType.__contains__`. */
   contains: PyValue;
+  /** The functions enum.py defines on EnumType, which a program reading them gets as CPython's program does. */
+  methods: PyDict;
 }
 
 const hooksByRuntime = new WeakMap<Runtime, EnumHooks>();
@@ -68,6 +79,8 @@ const hooksByRuntime = new WeakMap<Runtime, EnumHooks>();
 export function registerEnumHooks(hooks: EnumHooks): void {
   hooksByRuntime.set(currentRuntime(), hooks);
 }
+
+registerMetaclassFunctions(enumTypeClass, (name) => enumHooks().methods.store.lookup(name)?.value);
 
 function enumHooks(): EnumHooks {
   const runtime = currentRuntime();
