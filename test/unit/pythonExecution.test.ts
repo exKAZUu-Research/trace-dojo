@@ -311,6 +311,8 @@ test.each([
   ['a bare lambda in an f-string', "x = 1\ny = f'{lambda: 1}'", 1],
   ['a bare lambda among an f-string tuple', "x = 1\ny = f'{1, lambda: 2}'", 1],
   ['two as in one pattern', 'match 1:\n    case 1 as a as b:\n        pass', 1],
+  ['an else indented as deep as its if body', 'if True:\n    x = 1\n    else:\n        x = 2', 2],
+  ['an except indented as deep as its try body', 'try:\n    x = 1\n    except ValueError:\n        x = 2', 2],
   ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],
   ['an import of a file', 'import mymodule', 0],
   ['a missing indented block at the end', 'x = 1\nif x:\n', 1],
