@@ -44,6 +44,7 @@ import {
   intClass,
   iteratorClass,
   listClass,
+  nativeFunction,
   newList,
   newTuple,
   None,
@@ -69,13 +70,8 @@ import { DONE, type Kwargs, PyClass, PyComplex, PyDict, PyIterator, PyObject, Py
 
 export const enumerateClass = builtinClass('enumerate');
 enumerateClass.construct = (cls, args, kwargs) => {
-  const iterable = argument(args, kwargs, 0, 'iterable');
-  if (iterable === undefined) throw typeError("enumerate() missing required argument 'iterable'");
-  checkArgs(
-    { qualified: 'enumerate', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'start'], named: 2 },
-    args,
-    kwargs
-  );
+  checkEnumerateArgs(args.length, [...(kwargs?.keys() ?? [])]);
+  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
   let index = toIndex(argument(args, kwargs, 1, 'start') ?? 0n);
   const next = iterate(iterable);
   return new PyIterator(
@@ -89,8 +85,18 @@ enumerateClass.construct = (cls, args, kwargs) => {
   );
 };
 
+/** Follows enumerate's own argument parser (enum_vectorcall in Objects/enumobject.c). */
+function checkEnumerateArgs(count: number, keywords: string[]): void {
+  const given = count + keywords.length;
+  if (given === 0 || (given > 2 && count === 0)) throw typeError("enumerate() missing required argument 'iterable'");
+  if (given > 2) throw typeError(`enumerate() takes at most 2 arguments (${given} given)`);
+  const expected = keywords[0] === 'start' && given === 2 ? ['start', 'iterable'] : ['iterable', 'start'].slice(count);
+  const wrong = keywords.find((keyword, index) => keyword !== expected[index]);
+  if (wrong !== undefined) throw typeError(`'${wrong}' is an invalid keyword argument for enumerate()`);
+}
+
 export const zipClass = builtinClass('zip');
-// code-gauge-allow duplicateLines 23 -- zip and itertools.zip_longest stop on exhausted iterables differently.
+// code-gauge-allow duplicateLines 27 -- zip yields tuples where map calls a function, and itertools.zip_longest stops differently.
 zipClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'zip', min: 0, max: Number.POSITIVE_INFINITY, style: 'takes', keywords: ['strict'] },
@@ -109,7 +115,7 @@ zipClass.construct = (cls, args, kwargs) => {
         const item = next();
         if (item === DONE) {
           finished = true;
-          if (strict) checkStrictZip(nexts, index);
+          if (strict) checkStrictLengths('zip', nexts, index);
           return DONE;
         }
         items.push(item);
@@ -120,24 +126,20 @@ zipClass.construct = (cls, args, kwargs) => {
   );
 };
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Words each length mismatch as CPython's strict zip does.
-function checkStrictZip(nexts: (() => PyValue | typeof DONE)[], index: number): void {
-  if (index > 0) {
-    throw valueError(
-      `zip() argument ${index + 1} is shorter than argument${index === 1 ? '' : 's'} 1${index > 1 ? `-${index}` : ''}`
+/** Raises the error of a strict `zip` or `map` whose iterable at `index` ended first, unless all end together. */
+function checkStrictLengths(name: 'zip' | 'map', nexts: (() => PyValue | typeof DONE)[], index: number): void {
+  const mismatch = (position: number, relation: string): Error =>
+    valueError(
+      `${name}() argument ${position + 1} is ${relation} than argument${position === 1 ? '' : 's'} 1${position > 1 ? `-${position}` : ''}`
     );
-  }
+  if (index > 0) throw mismatch(index, 'shorter');
   for (const [other, next] of nexts.entries()) {
-    if (other === 0) continue;
-    if (next() !== DONE) {
-      throw valueError(
-        `zip() argument ${other + 1} is longer than argument${other === 1 ? '' : 's'} 1${other > 1 ? `-${other}` : ''}`
-      );
-    }
+    if (other > 0 && next() !== DONE) throw mismatch(other, 'longer');
   }
 }
 
 export const mapClass = builtinClass('map');
+// code-gauge-allow duplicateLines 25 -- map calls a function where zip yields tuples.
 mapClass.construct = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'map', min: 0, max: Number.POSITIVE_INFINITY, style: 'takes', keywords: ['strict'] },
@@ -146,14 +148,18 @@ mapClass.construct = (cls, args, kwargs) => {
   );
   if (args.length < 2) throw typeError('map() must have at least two arguments.');
   const [fn, ...iterables] = args;
+  const strict = isTruthy(kwargs?.get('strict') ?? false);
   const nexts = iterables.map((iterable) => iterate(iterable));
   return new PyIterator(
     cls,
     () => {
       const items: PyValue[] = [];
-      for (const next of nexts) {
+      for (const [index, next] of nexts.entries()) {
         const item = next();
-        if (item === DONE) return DONE;
+        if (item === DONE) {
+          if (strict) checkStrictLengths('map', nexts, index);
+          return DONE;
+        }
         items.push(item);
       }
       return callValue(fn, items);
@@ -233,7 +239,7 @@ function print(args: PyValue[], kwargs: Kwargs): PyValue {
 // code-gauge-allow functionCognitiveComplexity 21 -- Follows CPython's builtin sum, including its float compensation.
 function sum(args: PyValue[], kwargs: Kwargs): PyValue {
   if (args.length === 0) throw typeError('sum() takes at least 1 positional argument (0 given)');
-  checkArgs({ qualified: 'sum', min: 1, max: 2, style: 'takes', keywords: ['start'] }, args, kwargs);
+  checkArgs({ qualified: 'sum', min: 1, max: 2, style: 'takes', keywords: ['start'], named: 1 }, args, kwargs);
   let result = argument(args, kwargs, 1, 'start') ?? 0n;
   if (typeof result === 'string') throw typeError("sum() can't sum strings [use ''.join(seq) instead]");
   const runtime = currentRuntime();
@@ -268,12 +274,8 @@ function sum(args: PyValue[], kwargs: Kwargs): PyValue {
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows CPython's min_max argument checks.
 function minMax(name: 'min' | 'max'): (args: PyValue[], kwargs: Kwargs) => PyValue {
   return (args, kwargs) => {
-    const unexpected = [...(kwargs?.keys() ?? [])].find((key) => key !== 'key' && key !== 'default');
-    if (unexpected !== undefined) throw typeError(`${name}() got an unexpected keyword argument '${unexpected}'`);
-    if (args.length === 0) throw typeError(`${name} expected at least 1 argument, got 0`);
     const key = kwargs?.get('key') ?? None;
     const fallback = kwargs?.get('default');
     if (args.length > 1 && fallback !== undefined) {
@@ -334,7 +336,11 @@ function divmod([a, b]: PyValue[]): PyValue {
 }
 
 function pow(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'pow', min: 0, max: 3, style: 'takes', keywords: ['base', 'exp', 'mod'] }, args, kwargs);
+  checkArgs(
+    { qualified: 'pow', min: 2, max: 3, style: 'takes', keywords: ['base', 'exp', 'mod'], named: 3 },
+    args,
+    kwargs
+  );
   const base = argument(args, kwargs, 0, 'base');
   const exponent = argument(args, kwargs, 1, 'exp');
   const modulus = argument(args, kwargs, 2, 'mod') ?? None;
@@ -487,7 +493,9 @@ function getattr(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 function sorted(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'sorted', min: 1, max: 1, style: 'expected', keywords: ['key', 'reverse'] }, args, kwargs);
+  checkArgs({ qualified: 'sorted', min: 1, max: 1, style: 'expected' }, args, undefined);
+  // The keywords go to list.sort, which reports the wrong ones under its own name.
+  checkArgs({ qualified: 'sort', min: 0, max: 0, style: 'takes', keywords: ['key', 'reverse'] }, [], kwargs);
   const list = newList(toArray(args[0]));
   currentRuntime().allocate(list.items.length + 1);
   sortList(list, kwargs?.get('key') ?? None, isTruthy(kwargs?.get('reverse') ?? false));
@@ -589,13 +597,13 @@ export function createBuiltins(): Map<string, PyValue> {
     ['aiter', unsupportedFunction('aiter', 'aiter()')],
     ['len', one('len', ([value]) => BigInt(lengthOf(value)))],
     ['locals', unsupportedFunction('locals', 'locals()')],
-    ['max', builtin('max', 'expected', 0, Number.POSITIVE_INFINITY, minMax('max'), { keywords: ['key', 'default'] })],
-    ['min', builtin('min', 'expected', 0, Number.POSITIVE_INFINITY, minMax('min'), { keywords: ['key', 'default'] })],
+    ['max', builtin('max', 'expected', 1, Number.POSITIVE_INFINITY, minMax('max'), { keywords: ['key', 'default'] })],
+    ['min', builtin('min', 'expected', 1, Number.POSITIVE_INFINITY, minMax('min'), { keywords: ['key', 'default'] })],
     ['next', builtin('next', 'expected', 1, 2, next)],
     ['anext', unsupportedFunction('anext', 'anext()')],
     ['oct', one('oct', radix('0o', 8))],
     ['ord', one('ord', ord)],
-    ['pow', builtin('pow', 'takes', 0, 3, pow, { keywords: ['base', 'exp', 'mod'] })],
+    ['pow', builtin('pow', 'takes', 2, 3, pow, { keywords: ['base', 'exp', 'mod'], named: 3 })],
     [
       'print',
       builtin('print', 'expected', 0, Number.POSITIVE_INFINITY, print, { keywords: ['sep', 'end', 'file', 'flush'] }),
@@ -610,8 +618,8 @@ export function createBuiltins(): Map<string, PyValue> {
         return None;
       }),
     ],
-    ['sorted', builtin('sorted', 'expected', 1, 1, sorted, { keywords: ['key', 'reverse'] })],
-    ['sum', builtin('sum', 'takes', 0, 2, sum, { keywords: ['start'] })],
+    ['sorted', nativeFunction('sorted', sorted)],
+    ['sum', builtin('sum', 'takes', 1, 2, sum, { keywords: ['start'], named: 1 })],
     ['vars', builtin('vars', 'expected', 0, 1, vars)],
     ['None', None],
     ['Ellipsis', Ellipsis],

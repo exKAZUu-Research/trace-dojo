@@ -17,7 +17,9 @@ export const LIMITS = {
   maxStringLength: 1_000_000,
   maxOutputLength: 100_000,
 };
-const OPERATIONS_PER_CLOCK_CHECK = 1024;
+// An operation may stand for a slow native call (e.g., a search of a long list), so a larger interval lets a program
+// of such calls run seconds past the deadline.
+const OPERATIONS_PER_CLOCK_CHECK = 16;
 
 /** Counts the operations and output of one run against {@link LIMITS}. */
 export class ExecutionBudget {

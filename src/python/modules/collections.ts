@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 539 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 546 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonFunction, pythonMethod } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -63,7 +63,11 @@ export const dequeClass = builtinClass('deque');
 dequeClass.tpName = 'collections.deque';
 dequeClass.module = 'collections';
 dequeClass.construct = (cls, args, kwargs) => {
-  checkArgs({ qualified: 'deque', min: 0, max: 2, style: 'takes', keywords: ['iterable', 'maxlen'] }, args, kwargs);
+  checkArgs(
+    { qualified: 'deque', min: 0, max: 2, style: 'takes', keywords: ['iterable', 'maxlen'], named: 2 },
+    args,
+    kwargs
+  );
   const iterable = argument(args, kwargs, 0, 'iterable');
   const maxlenValue = argument(args, kwargs, 1, 'maxlen') ?? None;
   let maxlen: number | undefined;
@@ -372,16 +376,23 @@ pythonMethod(counterClass, 'most_common', 'n=None', (self, [count]) => {
   return newList(items.map((item) => newTuple(item)));
 });
 pythonMethod(counterClass, 'elements', '', (self) => {
-  const items: PyValue[] = [];
-  for (const entry of counterOf(self).store.ordered()) {
-    const count = typeof entry.value === 'bigint' ? entry.value : 0n;
-    for (let index = 0n; index < count; index++) items.push(entry.key);
-  }
+  const entries = counterOf(self).store.ordered();
   let position = 0;
+  let key: PyValue = None;
+  let remaining = 0n;
   return new PyIterator(
     iteratorClass('itertools.chain'),
-    () => (position < items.length ? items[position++] : DONE),
-    () => items
+    () => {
+      while (remaining <= 0n) {
+        if (position === entries.length) return DONE;
+        const entry = entries[position++];
+        key = entry.key;
+        remaining = typeof entry.value === 'bigint' ? entry.value : 0n;
+      }
+      remaining--;
+      return key;
+    },
+    () => entries.map((entry) => entry.key)
   );
 });
 for (const [name, sign] of [
@@ -632,12 +643,13 @@ method(
   2,
   (self, args, kwargs) => {
     const dict = self as PyDict;
-    const entry = dict.store.lookup(args[0], pyHash(args[0]));
-    if (!entry) throw keyError(args[0]);
+    const key = argument(args, kwargs, 0, 'key') as PyValue;
+    const entry = dict.store.lookup(key, pyHash(key));
+    if (!entry) throw keyError(key);
     dict.store.moveToEnd(entry, isTruthy(argument(args, kwargs, 1, 'last') ?? true));
     return None;
   },
-  { keywords: ['last'] }
+  { keywords: ['key', 'last'], named: 2 }
 );
 method(
   orderedDictClass,
@@ -653,7 +665,7 @@ method(
     dict.store.remove(entry);
     return newTuple([entry.key, entry.value]);
   },
-  { keywords: ['last'] }
+  { keywords: ['last'], named: 1 }
 );
 method(orderedDictClass, '__eq__', 'one', 1, 1, (self, [other]) => {
   if (!(other instanceof PyDict)) return NotImplemented;

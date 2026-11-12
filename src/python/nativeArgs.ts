@@ -1,16 +1,21 @@
 import { bindArguments, type Signature } from './calls';
+import { bestSuggestion } from './describe';
 import { typeError } from './types';
 import type { Kwargs, PyTuple, PyValue } from './values';
 
 /**
  * How CPython words an argument-count error for a builtin, which depends on how the builtin parses its arguments:
- * `one` and `none` for single-argument and argument-less builtins, `expected` for positional-only parsers, and `takes`
- * for parsers that also accept keywords.
+ * `one` and `none` for single-argument and argument-less builtins (METH_O and METH_NOARGS), `expected` for
+ * positional-only parsers, `takes` for the parsers that also bind keywords to parameters, and `wrapper` for the
+ * special methods a type implements in a slot, which take a fixed number of arguments.
  */
-export type ArgStyle = 'one' | 'none' | 'expected' | 'takes';
+export type ArgStyle = 'one' | 'none' | 'expected' | 'takes' | 'wrapper';
 
 export interface ArgSpec {
-  /** The name in messages of the `one`, `none`, and no-keyword kinds, such as `len` or `list.append`. */
+  /**
+   * The name in messages of the `one`, `none`, and no-keyword kinds, which CPython qualifies with the type or the C
+   * module: `len`, `list.append`, `math.sqrt`, or `_heapq.heappop`.
+   */
   qualified: string;
   /** The name in messages of the `expected` and `takes` kinds, such as `pop`. */
   short?: string;
@@ -19,62 +24,113 @@ export interface ArgSpec {
   style: ArgStyle;
   /** The keyword arguments the builtin accepts, which it reads itself. */
   keywords?: readonly string[];
-  /** How many of the first `keywords` name the positional parameters in order, which may be passed either way. */
+  /**
+   * How many of the first `keywords` name the last positional parameters in order, which may be passed either way;
+   * the positional parameters before them are positional-only.
+   */
   named?: number;
 }
 
 const plural = (count: number): string => (count === 1 ? '' : 's');
 
 /** Checks the number of positional arguments and that only accepted keywords are passed, as CPython does. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Words argument-count errors as each CPython argument parser does.
-// code-gauge-allow functionNcss 31 -- Words argument-count errors as each CPython argument parser does.
 export function checkArgs(spec: ArgSpec, args: readonly PyValue[], kwargs: Kwargs): void {
   const { qualified, min, max, style } = spec;
   const short = spec.short ?? qualified.split('.').at(-1) ?? qualified;
   const accepted = spec.keywords ?? [];
-  if (kwargs && kwargs.size > 0 && accepted.length === 0) throw typeError(`${qualified}() takes no keyword arguments`);
-  for (const key of kwargs?.keys() ?? []) {
-    if (!accepted.includes(key)) throw typeError(`${short}() got an unexpected keyword argument '${key}'`);
-  }
   const count = args.length;
-  const named = spec.named ?? 0;
-  checkNamed(short, accepted.slice(0, named), min, args, kwargs);
-  if (count <= max && (count >= min || min <= named)) return;
-  switch (style) {
-    case 'one': {
-      throw typeError(`${qualified}() takes exactly one argument (${count} given)`);
-    }
-    case 'none': {
-      throw typeError(`${qualified}() takes no arguments (${count} given)`);
-    }
-    case 'expected': {
-      if (min === max) throw typeError(`${short} expected ${min} argument${plural(min)}, got ${count}`);
-      if (count < min) throw typeError(`${short} expected at least ${min} argument${plural(min)}, got ${count}`);
-      throw typeError(`${short} expected at most ${max} argument${plural(max)}, got ${count}`);
-    }
-    default: {
-      if (max === 0) throw typeError(`${short}() takes no positional arguments`);
-      if (count > max) throw typeError(`${short}() takes at most ${max} argument${plural(max)} (${count} given)`);
-      throw typeError(`${short}() takes at least ${min} positional argument${plural(min)} (${count} given)`);
-    }
+  if (style === 'wrapper') return checkWrapper(short, min, max, count, kwargs);
+  if (kwargs && kwargs.size > 0 && accepted.length === 0) throw typeError(`${qualified}() takes no keyword arguments`);
+  if (style === 'takes') {
+    checkKeywordParser(short, spec, accepted, args, kwargs);
+  } else if (style === 'expected') {
+    checkPositional(`${short} `, min, max, count);
+    // Such a builtin parses its keywords apart from its positional arguments.
+    checkKeywordParser(short, { ...spec, min: 0, max: 0, named: 0 }, accepted, [], kwargs);
+  } else if (style === 'one' ? count !== 1 : count !== 0) {
+    throw typeError(
+      `${qualified}() takes ${style === 'one' ? 'exactly one argument' : 'no arguments'} (${count} given)`
+    );
   }
 }
 
-/** Checks parameters that may be passed by position or by name: each once, and the required ones at all. */
-function checkNamed(
+/** Follows the wrappers of slots (Objects/typeobject.c), which name the method only when it takes two arguments. */
+function checkWrapper(short: string, min: number, max: number, count: number, kwargs: Kwargs): void {
+  if (kwargs && kwargs.size > 0) throw typeError(`wrapper ${short}() takes no keyword arguments`);
+  if (min !== max && (count < min || count > max)) {
+    throw typeError(`expected ${min} or ${max} arguments, got ${count}`);
+  }
+  checkPositional(max >= 2 ? `${short} ` : '', min, max, count);
+}
+
+function checkPositional(prefix: string, min: number, max: number, count: number): void {
+  if (count >= min && count <= max) return;
+  const bound = count < min ? min : max;
+  const limit = min === max ? '' : count < min ? 'at least ' : 'at most ';
+  throw typeError(`${prefix}expected ${limit}${bound} argument${plural(bound)}, got ${count}`);
+}
+
+function checkKeywordNames(short: string, accepted: readonly string[], kwargs: Kwargs): void {
+  for (const key of kwargs?.keys() ?? []) {
+    if (accepted.includes(key)) continue;
+    const suggestion = bestSuggestion(key, [...accepted]);
+    throw typeError(
+      `${short}() got an unexpected keyword argument '${key}'${suggestion ? `. Did you mean '${suggestion}'?` : ''}`
+    );
+  }
+}
+
+/** Follows `_PyArg_UnpackKeywords` (Python/getargs.c), whose checks run in this order. */
+function checkKeywordParser(
   short: string,
+  { min, max, named = 0 }: ArgSpec,
   names: readonly string[],
-  min: number,
   args: readonly PyValue[],
   kwargs: Kwargs
 ): void {
-  for (const [index, name] of names.entries()) {
-    const isNamed = kwargs?.has(name) ?? false;
-    if (index < args.length && isNamed) {
-      throw typeError(`argument for ${short}() given by name ('${name}') and position (${index + 1})`);
-    }
-    if (index >= args.length && index < min && !isNamed) {
+  // A builtin taking any number of positional arguments parses its keywords alone.
+  const count = Number.isFinite(max) ? args.length : 0;
+  const given = count + (kwargs?.size ?? 0);
+  const positionalOnly = Number.isFinite(max) ? max - named : 0;
+  const total = positionalOnly + names.length;
+  if (given > total) {
+    const kind = count === 0 ? 'keyword ' : '';
+    throw typeError(`${short}() takes at most ${total} ${kind}argument${plural(total)} (${given} given)`);
+  }
+  if (count > max)
+    throw typeError(`${short}() takes ${positionalLimit(min < max ? 'at most' : 'exactly', max, count)}`);
+  const required = Math.min(positionalOnly, min);
+  if (count < required) {
+    throw typeError(`${short}() takes ${positionalLimit(required < max ? 'at least' : 'exactly', required, count)}`);
+  }
+  checkNamed(short, names.slice(0, named), positionalOnly, min, count, kwargs);
+  checkKeywordNames(short, names, kwargs);
+}
+
+function positionalLimit(limit: string, bound: number, count: number): string {
+  if (bound === 0) return 'no positional arguments';
+  return `${limit} ${bound} positional argument${plural(bound)} (${count} given)`;
+}
+
+/** Checks parameters that may be passed by position or by name: the required ones at all, and each only once. */
+function checkNamed(
+  short: string,
+  names: readonly string[],
+  positionalOnly: number,
+  min: number,
+  count: number,
+  kwargs: Kwargs
+): void {
+  for (const [offset, name] of names.entries()) {
+    const index = positionalOnly + offset;
+    if (index >= count && index < min && !kwargs?.has(name)) {
       throw typeError(`${short}() missing required argument '${name}' (pos ${index + 1})`);
+    }
+  }
+  for (const [offset, name] of names.entries()) {
+    const index = positionalOnly + offset;
+    if (index < count && kwargs?.has(name)) {
+      throw typeError(`argument for ${short}() given by name ('${name}') and position (${index + 1})`);
     }
   }
 }

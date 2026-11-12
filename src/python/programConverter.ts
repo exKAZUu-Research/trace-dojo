@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 645 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 656 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -708,8 +708,12 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   private negativeLiteral(node: Node, row: number): Pattern {
+    return { kind: 'value', value: this.negativeNumber(node, row), row };
+  }
+
+  private negativeNumber(node: Node, row: number): Expression {
     if (node.type !== 'integer' && node.type !== 'float') fail(row, 'パターンの - の後には数を書いてください。');
-    return { kind: 'value', value: { kind: 'unary', operator: '-', operand: this.expression(node), row }, row };
+    return { kind: 'unary', operator: '-', operand: this.expression(node), row };
   }
 
   private dottedValue(parts: Node[]): Expression {
@@ -730,15 +734,21 @@ export class ProgramConverter extends ExpressionConverter {
     const patterns: Pattern[] = [];
     let rest: NameRef | undefined;
     const keyTexts = new Set<string>();
-    const keyNodes = fieldNodes(node, 'key');
     const valueNodes = fieldNodes(node, 'value');
-    for (const [index, keyNode] of keyNodes.entries()) {
-      const text = this.textOf(keyNode);
+    let sign: Node | undefined;
+    // The sign of a negative number is a key node of its own, before the number's.
+    for (const keyNode of fieldNodes(node, 'key')) {
+      if (keyNode.type === '-') {
+        sign = keyNode;
+        continue;
+      }
+      const text = `${sign ? '-' : ''}${this.textOf(keyNode)}`;
       if (keyNode.type !== 'dotted_name' && keyTexts.has(text))
         fail(rowOf(keyNode), `マッピングのパターンで、キー ${text} が重複しています。`);
       keyTexts.add(text);
-      keys.push(this.mappingKey(keyNode, names));
-      patterns.push(this.pattern(valueNodes[index], names));
+      keys.push(sign ? this.negativeNumber(keyNode, rowOf(sign)) : this.mappingKey(keyNode, names));
+      patterns.push(this.pattern(valueNodes[patterns.length], names));
+      sign = undefined;
     }
     const splat = namedChildren(node).find((child) => child.type === 'splat_pattern');
     if (splat) {
@@ -788,13 +798,20 @@ export class ProgramConverter extends ExpressionConverter {
     return this.pattern(node, names);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Checks the rules CPython applies to the alternatives of an or-pattern.
   private orPattern(node: Node, names: Set<string>): Pattern {
     const alternatives = namedChildren(node);
+    const signs = new Map<number, Node>();
+    // The sign of a negative number is a child of its own, before the number.
+    for (const [index, child] of children(node).entries()) {
+      if (child.type === '-') signs.set(children(node)[index + 1].startIndex, child);
+    }
     const patterns: Pattern[] = [];
     let bound: Set<string> | undefined;
     for (const [index, alternative] of alternatives.entries()) {
       const own = new Set<string>();
-      const pattern = this.pattern(alternative, own);
+      const sign = signs.get(alternative.startIndex);
+      const pattern = sign ? this.negativeLiteral(alternative, rowOf(sign)) : this.pattern(alternative, own);
       if (index < alternatives.length - 1 && isIrrefutable(pattern)) {
         fail(rowOf(alternative), '| の前のパターンがどんな値にも当てはまるので、後のパターンが使われません。');
       }

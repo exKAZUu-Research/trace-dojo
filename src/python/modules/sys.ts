@@ -1,9 +1,11 @@
-import { builtin } from '../define';
+import { moduleBuiltin } from '../define';
 import { registerModule } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { exceptionClassNamed, newException, None, typeError, valueError } from '../types';
 import { PyError, type PyValue } from '../values';
+
+const builtin = moduleBuiltin('sys');
 
 registerModule(
   'sys',

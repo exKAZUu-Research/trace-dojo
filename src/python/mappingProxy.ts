@@ -2,6 +2,7 @@ import { pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
 import { getItem } from './items';
+import { argument, checkArgs } from './nativeArgs';
 import { callValue, getAttribute, getIterator, lengthOf, lookupSpecial } from './objects';
 import { binaryOp, compareOp, contains } from './operators';
 import { builtinClass, typeError, typeName } from './types';
@@ -17,9 +18,9 @@ export function newMappingProxy(mapping: PyValue): PyOpaque {
 const mappingOf = (self: PyValue): PyValue => (self as PyOpaque).data as PyValue;
 
 mappingProxyClass.construct = (_cls, args, kwargs) => {
-  if (kwargs !== undefined && kwargs.size > 0) throw typeError('mappingproxy() takes no keyword arguments');
-  if (args.length !== 1) throw typeError(`mappingproxy() takes exactly one argument (${args.length} given)`);
-  const [mapping] = args;
+  const spec = { qualified: 'mappingproxy', min: 1, max: 1, style: 'takes', keywords: ['mapping'], named: 1 } as const;
+  checkArgs(spec, args, kwargs);
+  const mapping = argument(args, kwargs, 0, 'mapping') as PyValue;
   const isMapping = mapping instanceof PyDict || lookupSpecial(mapping, 'keys') !== undefined;
   if (!isMapping || lookupSpecial(mapping, '__getitem__') === undefined) {
     throw typeError(`mappingproxy() argument must be a mapping, not ${typeName(mapping)}`);

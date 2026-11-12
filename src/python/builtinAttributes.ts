@@ -167,6 +167,7 @@ defineGetSet(intClass, 'denominator', () => 1n);
 method(intClass, 'from_bytes', 'takes', 1, 2, (cls, args, kwargs) => intFromBytes(cls, args, kwargs), {
   binding: 'class',
   keywords: ['bytes', 'byteorder', 'signed'],
+  named: 2,
 });
 
 function intFromBytes(cls: PyValue, args: PyValue[], kwargs: Map<string, PyValue> | undefined): PyValue {

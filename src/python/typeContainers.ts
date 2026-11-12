@@ -7,7 +7,7 @@ import { keyError, sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
 import { callValue, getItem, getIterator, isTruthy, iterate, lookupSpecial, toArray } from './objects';
-import { contains, equals, extendList, lessThan } from './operators';
+import { contains, countEqual, equals, extendList, lessThan } from './operators';
 import { currentRuntime } from './runtimeContext';
 import {
   addToTable,
@@ -297,14 +297,26 @@ method(rangeClass, '__hash__', 'none', 0, 0, (self) => {
   const { start, step, length } = rangeOf(self);
   return pyHash(newTuple([length, length === 0n ? None : start, length <= 1n ? None : step]));
 });
-method(rangeClass, 'count', 'one', 1, 1, (self, [item]) => (contains(self, item) ? 1n : 0n));
+method(rangeClass, 'count', 'one', 1, 1, (self, [item]) =>
+  isExactInt(item) ? (contains(self, item) ? 1n : 0n) : BigInt(countEqual(iterate(self), item))
+);
 method(rangeClass, 'index', 'one', 1, 1, (self, [item]) => {
   const range = rangeOf(self);
-  if (!contains(self, item) || (typeof item !== 'bigint' && typeof item !== 'boolean')) {
-    throw valueError(`${pyRepr(item)} is not in range`);
-  }
+  if (!isExactInt(item)) return indexByIteration(self, item);
+  if (!contains(self, item)) throw valueError('range.index(x): x not in range');
   return (BigInt(item) - range.start) / range.step;
 });
+const isExactInt = (item: PyValue): item is bigint | boolean => typeof item === 'bigint' || typeof item === 'boolean';
+
+function indexByIteration(range: PyValue, item: PyValue): bigint {
+  const next = iterate(range);
+  let index = 0n;
+  for (let element = next(); element !== DONE; element = next(), index++) {
+    currentRuntime().spend();
+    if (equals(element, item)) return index;
+  }
+  throw valueError('sequence.index(x): x not in sequence');
+}
 
 // dict --------------------------------------------------------------------------------------------------------------
 
@@ -315,7 +327,6 @@ dictClass.construct = (cls, args, kwargs) => {
 };
 const dictOf = (self: PyValue): PyDict => self as PyDict;
 
-/** Adds the entries of a mapping, or of an iterable of pairs, as `dict.update` does. */
 /** Updates a dict from an optional mapping or iterable of pairs, then from keyword arguments, as `dict()` does. */
 function updateFromArguments(qualified: string, dict: PyDict, args: PyValue[], kwargs: Kwargs): void {
   checkArgs({ qualified, min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] }, args, kwargs);
@@ -324,19 +335,19 @@ function updateFromArguments(qualified: string, dict: PyDict, args: PyValue[], k
 }
 
 export function updateDict(dict: PyDict, source: PyValue): void {
+  const runtime = currentRuntime();
   if (source instanceof PyDict || lookupSpecial(source, 'keys') !== undefined) {
-    for (const [key, value] of mappingEntries(source)) dict.store.set(key, value);
+    for (const [key, value] of mappingEntries(source)) {
+      runtime.spend();
+      dict.store.set(key, value);
+    }
     return;
   }
   const next = iterate(source);
   let index = 0;
   for (let item = next(); item !== DONE; item = next(), index++) {
-    let pair: PyValue[];
-    try {
-      pair = toArray(item);
-    } catch {
-      throw typeError(`cannot convert dictionary update sequence element #${index} to a sequence`);
-    }
+    runtime.spend();
+    const pair = toArray(item, 'object is not iterable');
     if (pair.length !== 2) {
       throw valueError(`dictionary update sequence element #${index} has length ${pair.length}; 2 is required`);
     }
@@ -459,7 +470,7 @@ for (const [cls, view] of [
     )
   );
   if (view !== 'values') {
-    method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => toArray(other).every((item) => !contains(self, item)));
+    method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => !someItem(other, (item) => contains(self, item)));
   }
 }
 

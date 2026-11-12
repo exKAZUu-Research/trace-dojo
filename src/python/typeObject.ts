@@ -290,7 +290,7 @@ iteratorClassSetup.push(defineIteratorClass);
 
 propertyClass.construct = (cls, args, kwargs) => {
   checkArgs(
-    { qualified: 'property', min: 0, max: 4, style: 'takes', keywords: ['fget', 'fset', 'fdel', 'doc'] },
+    { qualified: 'property', min: 0, max: 4, style: 'takes', keywords: ['fget', 'fset', 'fdel', 'doc'], named: 4 },
     args,
     kwargs
   );

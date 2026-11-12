@@ -34,7 +34,9 @@ import { PyComplex, PyInstance, type PyValue } from './values';
 // int ---------------------------------------------------------------------------------------------------------------
 
 intClass.construct = (cls, args, kwargs) => {
-  checkArgs({ qualified: 'int', min: 0, max: 2, style: 'expected', keywords: ['base'] }, args, kwargs);
+  // Called with keywords, int parses its arguments as a keyword parser does.
+  const style = kwargs && kwargs.size > 0 ? 'takes' : 'expected';
+  checkArgs({ qualified: 'int', min: 0, max: 2, style, keywords: ['base'], named: 1 }, args, kwargs);
   const value = args[0];
   const base = argument(args, kwargs, 1, 'base');
   if (value === undefined) {
@@ -224,7 +226,11 @@ export function roundFloat(value: number, digits: PyValue | undefined): PyValue 
 // complex -----------------------------------------------------------------------------------------------------------
 
 complexClass.construct = (_cls, args, kwargs) => {
-  checkArgs({ qualified: 'complex', min: 0, max: 2, style: 'takes', keywords: ['real', 'imag'] }, args, kwargs);
+  checkArgs(
+    { qualified: 'complex', min: 0, max: 2, style: 'takes', keywords: ['real', 'imag'], named: 2 },
+    args,
+    kwargs
+  );
   const real = argument(args, kwargs, 0, 'real') ?? false;
   const imag = argument(args, kwargs, 1, 'imag');
   if (imag === undefined) return complexOf(real);
@@ -279,15 +285,15 @@ function parseComplex(text: string): PyComplex {
     .trim()
     .replace(/^\((.*)\)$/, '$1')
     .trim();
-  const number = String.raw`[+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|inf|nan)`;
-  const full = new RegExp(
-    `^(${number})([+-](?:\\d+\\.?\\d*(?:[eE][+-]?\\d+)?|\\.\\d+(?:[eE][+-]?\\d+)?|inf|nan)?)[jJ]$`,
-    'i'
-  );
-  const imaginaryOnly = new RegExp(`^(${number})?[jJ]$`, 'i');
+  // The digits before and after the point are told apart by the point, so that a long number is not matched in every
+  // split of its digits.
+  const unsigned = String.raw`(?:\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|inf(?:inity)?|nan)`;
+  const number = `[+-]?${unsigned}`;
+  const full = new RegExp(`^(${number})([+-]${unsigned}?)[jJ]$`, 'i');
+  const imaginaryOnly = new RegExp(`^(${number}|[+-])?[jJ]$`, 'i');
   const realOnly = new RegExp(`^${number}$`, 'i');
   let match = full.exec(body);
-  if (match) return newComplex(Number(match[1]), imagPart(match[2]));
+  if (match) return newComplex(parseFloatText(match[1]) ?? Number.NaN, imagPart(match[2]));
   match = imaginaryOnly.exec(body);
   if (match) return newComplex(0, imagPart(match[1] ?? '+'));
   if (realOnly.test(body)) return newComplex(parseFloatText(body) ?? Number.NaN, 0);

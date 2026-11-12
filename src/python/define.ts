@@ -11,6 +11,35 @@ interface Options {
   binding?: NativeBinding;
 }
 
+interface BuiltinOptions extends Options {
+  owner?: string;
+  /** The C module whose name qualifies the function in `one`, `none`, and no-keyword messages. */
+  module?: string;
+}
+
+const OPERATORS = 'add sub mul matmul truediv floordiv mod divmod pow lshift rshift and xor or';
+const SLOT_METHODS = new Set(
+  [
+    ...OPERATORS.split(' ').flatMap((name) => [`__${name}__`, `__r${name}__`, `__i${name}__`]),
+    ...'getattribute getattr setattr delattr repr hash str lt le eq ne gt ge iter next get set delete'.split(' '),
+    ...'neg pos abs bool invert int float index len getitem setitem delitem contains'.split(' '),
+  ].map((name) => (name.startsWith('__') ? name : `__${name}__`))
+);
+// CPython defines these as methods besides the slot, for speed.
+const SLOT_AND_METHOD = new Set([
+  'list.__getitem__',
+  'dict.__getitem__',
+  'dict.__contains__',
+  'set.__contains__',
+  'frozenset.__contains__',
+]);
+
+/** Whether CPython reaches the method through a slot wrapper, which words a wrong call in its own way. */
+function isSlotWrapper(qualified: string, name: string, style: ArgStyle, min: number, max: number): boolean {
+  const isFixed = min === max || name.endsWith('pow__');
+  return style !== 'takes' && isFixed && SLOT_METHODS.has(name) && !SLOT_AND_METHOD.has(qualified);
+}
+
 /** Defines a builtin method that checks its argument count as CPython's parser for `style` does. */
 // code-gauge-allow functionParameterCount 7 -- Mirrors the positional parameters of builtin, adding the owner class.
 export function method(
@@ -22,12 +51,13 @@ export function method(
   run: (self: PyValue, args: PyValue[], kwargs: Kwargs) => PyValue,
   options: Options = {}
 ): void {
+  const qualified = `${cls.name}.${name}`;
   const spec = {
-    qualified: `${cls.name}.${name}`,
+    qualified,
     short: options.short ?? name,
     min,
     max,
-    style,
+    style: isSlotWrapper(qualified, name, style, min, max) ? ('wrapper' as const) : style,
     keywords: options.keywords,
     named: options.named,
   };
@@ -36,7 +66,7 @@ export function method(
     name,
     (self, args, kwargs) => {
       // A static method receives no instance, so what arrives as `self` is its first argument.
-      const all = options.binding === 'static' ? [self, ...args] : args;
+      const all = options.binding === 'static' && self !== undefined ? [self, ...args] : args;
       checkArgs(spec, all, kwargs);
       return run(self, all, kwargs);
     },
@@ -51,10 +81,10 @@ export function builtin(
   min: number,
   max: number,
   run: (args: PyValue[], kwargs: Kwargs) => PyValue,
-  options: Options & { owner?: string } = {}
+  options: BuiltinOptions = {}
 ): PyBuiltinFunction {
   const spec = {
-    qualified: name,
+    qualified: options.module === undefined ? name : `${options.module}.${name}`,
     short: options.short ?? name,
     min,
     max,
@@ -70,6 +100,14 @@ export function builtin(
     },
     options.owner
   );
+}
+
+/**
+ * The `builtin` of the functions of a C module, which CPython's messages qualify with the name the module has in C,
+ * such as `math` or `_heapq`.
+ */
+export function moduleBuiltin(module: string): typeof builtin {
+  return (name, style, min, max, run, options) => builtin(name, style, min, max, run, { ...options, module });
 }
 
 /**

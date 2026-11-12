@@ -93,20 +93,29 @@ export function parseIntText(text: string, base: number): bigint | undefined {
   const normalized = toAsciiDigits(digits);
   if (!valid.test(normalized)) return undefined;
   const limit = maxStrDigits();
-  if (radix === 10 && limit > 0 && normalized.length > limit) {
+  // Only a radix that is a power of two converts in linear time, which CPython leaves unlimited.
+  if ((radix & (radix - 1)) !== 0 && limit > 0 && normalized.length > limit) {
     throw valueError(
       `Exceeds the limit (${limit} digits) for integer string conversion: value has ${normalized.length} digits; use sys.set_int_max_str_digits() to increase the limit`
     );
   }
-  let result = 0n;
-  const bigRadix = BigInt(radix);
-  if (radix === 10) result = BigInt(normalized);
-  else for (const digit of normalized.toLowerCase()) result = result * bigRadix + BigInt(Number.parseInt(digit, radix));
+  const result = radix === 10 ? BigInt(normalized) : digitsValue(normalized, radix);
   return negative ? -result : result;
 }
 
+/** The value of digits in a radix, halved so that a long text costs a few large multiplications, not one per digit. */
+function digitsValue(digits: string, radix: number): bigint {
+  // Ten digits of the largest radix fit a float exactly.
+  if (digits.length <= 10) return BigInt(Number.parseInt(digits, radix));
+  const low = digits.length >> 1;
+  const split = digits.length - low;
+  return (
+    digitsValue(digits.slice(0, split), radix) * BigInt(radix) ** BigInt(low) + digitsValue(digits.slice(split), radix)
+  );
+}
+
 /** Converts Unicode decimal digits, which int() and float() accept, to ASCII digits. */
-function toAsciiDigits(text: string): string {
+export function toAsciiDigits(text: string): string {
   return text.replaceAll(/\p{Nd}/gu, (digit) => {
     const code = digit.codePointAt(0) as number;
     if (code < 0x80) return digit;
@@ -146,9 +155,11 @@ export function modInt(a: bigint, b: bigint): bigint {
 }
 
 /** Divides floats as CPython's float divmod does, returning the floored quotient and the remainder. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes float_divmod of CPython's floatobject.c.
 export function divmodFloat(a: number, b: number): [number, number] {
   if (b === 0) throw pyError('ZeroDivisionError', 'division by zero');
   let mod = a % b;
+  if (Number.isNaN(mod)) return [Number.NaN, Number.NaN];
   let div = (a - mod) / b;
   if (mod) {
     if (b < 0 !== mod < 0) {

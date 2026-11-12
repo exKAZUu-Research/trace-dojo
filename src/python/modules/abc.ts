@@ -32,7 +32,10 @@ registerModule('abc', () => {
         return cls;
       }),
     ],
-    ['get_cache_token', builtin('get_cache_token', 'none', 0, 0, () => BigInt(abcInvalidationCount()))],
+    [
+      'get_cache_token',
+      builtin('get_cache_token', 'none', 0, 0, () => BigInt(abcInvalidationCount()), { module: '_abc' }),
+    ],
   ]);
 });
 registerModuleValues('abc', '', undefined);

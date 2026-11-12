@@ -48,6 +48,21 @@ export function parseSource<T>(
   }
 }
 
+/** The syntax errors of a text that is not a whole program, such as the part of one before another error. */
+export function findSyntaxErrors(
+  parser: Parser,
+  source: string,
+  missingTokenNames: Record<string, string>
+): SourceDiagnostic[] {
+  const tree = parser.parse(source);
+  if (!tree) throw new Error('The parser returned no tree');
+  try {
+    return collectSyntaxErrors(tree.rootNode, missingTokenNames);
+  } finally {
+    tree.delete();
+  }
+}
+
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
 

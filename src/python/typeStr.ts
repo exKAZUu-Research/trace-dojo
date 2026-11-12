@@ -36,7 +36,15 @@ import { type DONE, PyDict, PySlice, PyTuple, type PyValue } from './values';
 
 strClass.construct = (_cls, args, kwargs) => {
   checkArgs(
-    { qualified: 'str', min: 0, max: 3, style: 'expected', keywords: ['object', 'encoding', 'errors'] },
+    {
+      qualified: 'str',
+      min: 0,
+      max: 3,
+      // Called with keywords, str parses its arguments as a keyword parser does.
+      style: kwargs && kwargs.size > 0 ? 'takes' : 'expected',
+      keywords: ['object', 'encoding', 'errors'],
+      named: 3,
+    },
     args,
     kwargs
   );
@@ -282,7 +290,7 @@ for (const [name, fromEnd] of [
       if (!fromEnd) return newList([...parts.slice(0, limit), parts.slice(limit).join(separator)]);
       return newList([parts.slice(0, parts.length - limit).join(separator), ...parts.slice(parts.length - limit)]);
     },
-    { keywords: ['sep', 'maxsplit'] }
+    { keywords: ['sep', 'maxsplit'], named: 2 }
   );
 }
 
@@ -309,7 +317,7 @@ method(
     if (start < points.length) lines.push(points.slice(start).join(''));
     return newList(lines);
   },
-  { keywords: ['keepends'] }
+  { keywords: ['keepends'], named: 1 }
 );
 
 method(strClass, 'join', 'one', 1, 1, (self, [iterable]) => {
@@ -421,7 +429,7 @@ method(
     }
     return result;
   },
-  { keywords: ['tabsize'] }
+  { keywords: ['tabsize'], named: 1 }
 );
 
 // Replacing and formatting ------------------------------------------------------------------------------------------
@@ -464,7 +472,7 @@ method(
     currentRuntime().buildString(result.length);
     return result;
   },
-  { keywords: ['count'] }
+  { keywords: ['count'], named: 1 }
 );
 
 method(strClass, 'removeprefix', 'one', 1, 1, (self, [prefix]) => {
@@ -547,7 +555,7 @@ method(
   () => {
     throw currentRuntime().unsupported('str.encode()（bytes への変換）');
   },
-  { keywords: ['encoding', 'errors'] }
+  { keywords: ['encoding', 'errors'], named: 2 }
 );
 
 export function iterString(text: string): () => PyValue | typeof DONE {

@@ -1,8 +1,8 @@
-import { builtin } from '../define';
+import { moduleBuiltin } from '../define';
 import { floatPower } from '../floatPower';
 import { frexp } from '../hashing';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
-import { argument, checkArgs } from '../nativeArgs';
+import { argument } from '../nativeArgs';
 import { exactBinary, floatRepr, intToFloat, scaleToFloat, toIndex } from '../numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial, toArray } from '../objects';
 import { binaryOp } from '../operators';
@@ -11,6 +11,8 @@ import { newTuple, pyError, typeError, typeName, valueError } from '../types';
 import type { Kwargs, PyValue } from '../values';
 import { fma } from './mathFma';
 import { sumprod } from './mathSumprod';
+
+const builtin = moduleBuiltin('math');
 
 /** A real number argument as a float, as math functions convert theirs. */
 export function realArgument(value: PyValue): number {
@@ -47,6 +49,9 @@ const rangeCheck =
   (x: number): Error | undefined =>
     x < low || x > high ? valueError(`${message}, got ${floatRepr(x)}`) : undefined;
 
+const finiteCheck = (x: number): Error | undefined =>
+  Number.isFinite(x) || Number.isNaN(x) ? undefined : valueError(`expected a finite input, got ${floatRepr(x)}`);
+
 /** The natural logarithm of an int too large for a float, from its bit length. */
 function logOfInt(value: bigint): number {
   const bits = value.toString(2).length;
@@ -56,12 +61,14 @@ function logOfInt(value: bigint): number {
 }
 
 function logOf(value: PyValue, base: (x: number) => number): number {
-  if ((typeof value === 'bigint' || typeof value === 'boolean') && BigInt(value) > 0n)
+  if (typeof value === 'bigint' || typeof value === 'boolean') {
+    if (BigInt(value) <= 0n) throw valueError('expected a positive input');
     return base(logOfInt(BigInt(value)));
+  }
   const x = realArgument(value);
   if (!(x > 0)) {
     if (Number.isNaN(x)) return x;
-    throw valueError('expected a positive input');
+    throw valueError(`expected a positive input, got ${floatRepr(x)}`);
   }
   return base(Math.log(x));
 }
@@ -97,10 +104,28 @@ function factorial(value: PyValue): bigint {
   return result;
 }
 
+const SMALL_INT = 1n << 64n;
+/** The bits of operand that one remainder step of Euclid's algorithm handles for one unit of the budget. */
+const BITS_PER_OPERATION = 1 << 13;
+
 function gcdOf(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y) [x, y] = [y, x % y];
+  if (x < SMALL_INT && y < SMALL_INT) {
+    while (y) [x, y] = [y, x % y];
+    return x;
+  }
+  // The steps of large operands are too many and too slow to leave uncharged.
+  const bits = Math.max(x.toString(16).length, y.toString(16).length) * 4;
+  let work = 0;
+  while (y) {
+    work += bits;
+    if (work >= BITS_PER_OPERATION) {
+      currentRuntime().spend(Math.floor(work / BITS_PER_OPERATION));
+      work %= BITS_PER_OPERATION;
+    }
+    [x, y] = [y, x % y];
+  }
   return x;
 }
 
@@ -178,6 +203,7 @@ function fsum(iterable: PyValue): number {
 }
 
 function hypot(values: number[]): number {
+  currentRuntime().scan(values.length);
   const magnitudes = values.map(Math.abs);
   let max = 0;
   for (const magnitude of magnitudes) if (magnitude > max) max = magnitude;
@@ -226,15 +252,21 @@ function vectorNorm(values: number[], max: number): number {
   return h / scale;
 }
 
+/** CPython's m_remainder (Modules/mathmodule.c), every step of which is exact. */
 function remainder(x: number, y: number): number {
   if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
   if (!Number.isFinite(x) || y === 0) throw domainError();
   if (!Number.isFinite(y)) return x;
-  const quotient = x / y;
-  let nearest = Math.round(quotient);
-  if (Math.abs(quotient - Math.trunc(quotient)) === 0.5) nearest = 2 * Math.round(quotient / 2);
-  const result = x - nearest * y;
-  return result === 0 ? signedZero(x) : result;
+  const absX = Math.abs(x);
+  const absY = Math.abs(y);
+  const modulus = absX % absY;
+  const complement = absY - modulus;
+  let result: number;
+  if (modulus < complement) result = modulus;
+  else if (modulus > complement) result = -complement;
+  // Halfway between two multiples of y, the even one is the nearest.
+  else result = modulus - 2 * ((0.5 * (absX - modulus)) % absY);
+  return copysign(1, x) * result;
 }
 
 /** Zero with the sign of `x`. */
@@ -262,9 +294,8 @@ function ulp(x: number): number {
 }
 
 function isclose(args: PyValue[], kwargs: Kwargs): boolean {
-  checkArgs({ qualified: 'isclose', min: 2, max: 2, style: 'takes', keywords: ['rel_tol', 'abs_tol'] }, args, kwargs);
-  const a = realArgument(args[0]);
-  const b = realArgument(args[1]);
+  const a = realArgument(argument(args, kwargs, 0, 'a') as PyValue);
+  const b = realArgument(argument(args, kwargs, 1, 'b') as PyValue);
   const relative = realArgument(kwargs?.get('rel_tol') ?? 1e-9);
   const absolute = realArgument(kwargs?.get('abs_tol') ?? 0);
   if (relative < 0 || absolute < 0) throw valueError('tolerances must be non-negative');
@@ -284,7 +315,6 @@ function pow(x: number, y: number): number {
 }
 
 function product(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'prod', min: 1, max: 1, style: 'takes', keywords: ['start'] }, args, kwargs);
   let result = kwargs?.get('start') ?? 1n;
   for (const item of toArray(args[0])) result = binaryOp('*', result, item);
   return result;
@@ -298,6 +328,7 @@ function lcm(values: bigint[]): bigint {
   let result = 1n;
   for (const value of values) {
     if (result === 0n || value === 0n) return 0n;
+    currentRuntime().chargeBigint(result, value);
     const product = result * value;
     result = (product < 0n ? -product : product) / gcdOf(result, value);
   }
@@ -335,9 +366,9 @@ registerModule('math', () => {
         x <= -1 ? valueError(`expected argument value > -1, got ${floatRepr(x)}`) : undefined
       ),
     ],
-    ['sin', floatFunction('sin', Math.sin)],
-    ['cos', floatFunction('cos', Math.cos)],
-    ['tan', floatFunction('tan', Math.tan)],
+    ['sin', floatFunction('sin', Math.sin, finiteCheck)],
+    ['cos', floatFunction('cos', Math.cos, finiteCheck)],
+    ['tan', floatFunction('tan', Math.tan, finiteCheck)],
     ['asin', floatFunction('asin', Math.asin, rangeCheck(-1, 1, 'expected a number in range from -1 up to 1'))],
     ['acos', floatFunction('acos', Math.acos, rangeCheck(-1, 1, 'expected a number in range from -1 up to 1'))],
     ['atan', floatFunction('atan', Math.atan)],
@@ -375,7 +406,7 @@ registerModule('math', () => {
     ['fsum', builtin('fsum', 'one', 1, 1, ([iterable]) => fsum(iterable))],
     ['prod', builtin('prod', 'takes', 1, 1, product, { keywords: ['start'] })],
     ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumprod(p, q))],
-    ['isclose', builtin('isclose', 'takes', 2, 2, isclose, { keywords: ['rel_tol', 'abs_tol'] })],
+    ['isclose', builtin('isclose', 'takes', 2, 2, isclose, { keywords: ['a', 'b', 'rel_tol', 'abs_tol'], named: 2 })],
     ['isfinite', builtin('isfinite', 'one', 1, 1, ([value]) => Number.isFinite(realArgument(value)))],
     ['isinf', builtin('isinf', 'one', 1, 1, ([value]) => isInfinite(realArgument(value)))],
     ['isnan', builtin('isnan', 'one', 1, 1, ([value]) => Number.isNaN(realArgument(value)))],

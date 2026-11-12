@@ -1,5 +1,6 @@
 import { iterate } from '../objects';
 import { binaryOp } from '../operators';
+import { currentRuntime } from '../runtimeContext';
 import { valueError } from '../types';
 import { DONE, type PyValue } from '../values';
 import { fma } from './mathFma';
@@ -41,6 +42,7 @@ export function sumprod(p: PyValue, q: PyValue): PyValue {
     const b = nextQ();
     if ((a === DONE) !== (b === DONE)) throw valueError('Inputs are not the same length');
     const pair: Pair = a === DONE || b === DONE ? undefined : [a, b];
+    currentRuntime().spend();
     if (addOnIntPath(sums, pair) || addOnFloatPath(sums, pair)) continue;
     if (!pair) return sums.total;
     sums.total = binaryOp('+', sums.total, binaryOp('*', pair[0], pair[1]));

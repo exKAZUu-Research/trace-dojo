@@ -1,10 +1,11 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import { CompileError } from '../interpreter/diagnostics';
+import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
-import { loadParser, parseSource } from '../interpreter/treeSitter';
+import { findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Module } from './ast';
-import { findIndentationError } from './indentation';
+import { findFirstSyntaxError } from './headerColons';
+import { findIndentationError, logicalLines } from './indentation';
 import { ProgramConverter } from './programConverter';
 
 const parser = await loadParser('@willbooster/tree-sitter-python/tree-sitter-python.wasm');
@@ -23,9 +24,24 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
  * @param trace Makes the statements that record steps report their rows, for a model program.
  */
 export function parsePython(source: string, trace?: TraceOptions): Module {
-  const indentationError = findIndentationError(source);
-  if (indentationError) throw new CompileError([indentationError]);
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => new ProgramConverter(source, trace).convert(root));
+  const lines = logicalLines(source);
+  const indentationError = findIndentationError(source, lines);
+  if (indentationError) {
+    const first = findFirstSyntaxError(source, lines, syntaxErrorsOf, indentationError);
+    throw new CompileError(first ?? [indentationError.diagnostic]);
+  }
+  try {
+    return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) =>
+      new ProgramConverter(source, trace).convert(root)
+    );
+  } catch (error) {
+    const first = error instanceof CompileError ? findFirstSyntaxError(source, lines, syntaxErrorsOf) : undefined;
+    throw first ? new CompileError(first) : error;
+  }
+}
+
+function syntaxErrorsOf(text: string): SourceDiagnostic[] {
+  return findSyntaxErrors(parser, text, MISSING_TOKEN_NAMES);
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

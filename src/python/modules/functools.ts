@@ -380,7 +380,7 @@ registerModule('functools', (runtime) =>
     'functools',
     FUNCTOOLS_SOURCE,
     new Map<string, PyValue>([
-      ['reduce', builtin('reduce', 'takes', 2, 3, reduce, { keywords: ['initial'] })],
+      ['reduce', builtin('reduce', 'takes', 2, 3, reduce, { keywords: ['initial'], named: 1 })],
       ['partial', partialClass],
       ['itemgetter', itemgetterClass],
       ['Placeholder', Placeholder],
@@ -388,7 +388,10 @@ registerModule('functools', (runtime) =>
       ['_CacheInfo', makeNamedTupleClass('CacheInfo', ['hits', 'misses', 'maxsize', 'currsize'], 'functools')],
       ['cmp_to_key', builtin('cmp_to_key', 'takes', 1, 1, cmpToKey, { keywords: ['mycmp'], named: 1 })],
       ['total_ordering', pythonFunction('total_ordering', 'cls', totalOrdering)],
-      ['get_cache_token', builtin('get_cache_token', 'none', 0, 0, () => BigInt(abcInvalidationCount()))],
+      [
+        'get_cache_token',
+        builtin('get_cache_token', 'none', 0, 0, () => BigInt(abcInvalidationCount()), { module: '_abc' }),
+      ],
       ['GenericAlias', genericAliasClass],
       ['MappingProxyType', mappingProxyClass],
       ['MethodType', methodClass],

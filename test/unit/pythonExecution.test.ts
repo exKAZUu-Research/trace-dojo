@@ -266,10 +266,43 @@ test.each([
   ['a Python 2 print statement', "print 'x'", 0],
   ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],
   ['an import of a file', 'import mymodule', 0],
+  ['a missing indented block at the end', 'x = 1\nif x:\n', 1],
+  ['an unexpected indent after a syntax error', 'x = = 1\n    y = 2', 0],
+  ['a decorated function indented too far', 'class A:\n    @staticmethod\n        def f():\n            pass', 2],
+  ['a handler indented too little', 'try:\n    pass\n  except ValueError:\n    pass', 2],
 ])('%s is a compile error', (_, source, row) => {
   const execution = executeProgram('python', source);
   expect(execution.kind).toBe('compileError');
   if (execution.kind === 'compileError') expect(execution.diagnostics[0].row).toBe(row);
+});
+
+test.each([
+  ['if before an indented body', 'x = 1\nif x\n    y = 2', 1, 'if'],
+  ['if before a body that is not indented', 'x = 5\nif x > 3\nprint(x)', 1, 'if'],
+  ['if at the end', 'if True', 0, 'if'],
+  ['if before a dedent to no outer level', 'if x\n    pass\n  y = 1', 0, 'if'],
+  ['elif', 'if x:\n    pass\nelif y\n    pass', 2, 'elif'],
+  ['else', 'if x:\n    pass\nelse\n    pass', 2, 'else'],
+  ['for', 'for i in range(3)\n    print(i)', 0, 'for'],
+  ['while', 'while True\n    break', 0, 'while'],
+  ['def', 'def f()\n    return 1', 0, 'def'],
+  ['def with parameters on several lines', 'def f(\n    a,\n    b\n)\n    return a', 3, 'def'],
+  ['a decorated def', '@d\ndef f()\n    pass', 1, 'def'],
+  ['class', 'class C\n    pass', 0, 'class'],
+  ['with', "with open('f') as f\n    pass", 0, 'with'],
+  ['try', 'try\n    pass\nexcept ValueError:\n    pass', 0, 'try'],
+  ['except', 'try:\n    pass\nexcept ValueError\n    pass', 2, 'except'],
+  ['finally', 'try:\n    pass\nfinally\n    pass', 2, 'finally'],
+  ['match', 'match x\n    case 1:\n        pass', 0, 'match'],
+  ['case', 'match x:\n    case 1\n        pass', 1, 'case'],
+  ['a nested if in a try statement', 'try:\n    if x\n        pass\nexcept ValueError:\n    pass', 1, 'if'],
+  ['if with a comment', 'if x  # why:\n    pass', 0, 'if'],
+  ['if with an assignment expression', 'if (y := 5) and y\n    pass', 0, 'if'],
+])('a missing colon after %s is reported on the header', (_, source, row, keyword) => {
+  expect(executeProgram('python', source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row, message: `「${keyword}」で始まる行の終わりに「:」が足りません。` }],
+  });
 });
 
 test.each([

@@ -1,3 +1,4 @@
+import { LIMITS } from '../../interpreter/limits';
 import { pyRepr } from '../conversions';
 import { builtin } from '../define';
 import { runLibrarySource } from '../librarySource';
@@ -16,6 +17,7 @@ import {
   newList,
   newTuple,
   None,
+  pyError,
   typeError,
   typeName,
   valueError,
@@ -75,35 +77,69 @@ function floatText(value: number, options: DumpOptions): string {
   return value > 0 ? 'Infinity' : '-Infinity';
 }
 
-function encode(value: PyValue, options: DumpOptions, level: number, stack: Set<PyObject>): string {
+/** What one call of the encoder has done so far. */
+interface EncodeState {
+  /** The containers being encoded, among which a repeated one is a circular reference. */
+  containers: Set<PyObject>;
+  /** The length of the text made so far. */
+  length: number;
+}
+
+/** Counts text that joins the output, so that an output beyond the string limit ends before the rest is made. */
+function charge(state: EncodeState, length: number): void {
+  state.length += length;
+  if (state.length > LIMITS.maxStringLength) throw pyError('MemoryError');
+}
+
+function encode(value: PyValue, options: DumpOptions, level: number, state: EncodeState): string {
   currentRuntime().spend();
-  if (value === None) return 'null';
-  if (value === true) return 'true';
-  if (value === false) return 'false';
-  if (typeof value === 'bigint') return intToString(value);
-  if (typeof value === 'number') return floatText(value, options);
-  if (typeof value === 'string') return quote(value, options.ensureAscii);
-  if (value instanceof PyList || value instanceof PyTuple) return encodeArray(value, options, level, stack);
-  if (value instanceof PyDict) return encodeObject(value, options, level, stack);
-  const integer = intEnumValue(value);
-  if (typeof integer === 'bigint') return intToString(integer);
-  enterContainer(value as PyObject, stack, options);
-  const result = encode(callValue(options.defaultFn, [value]), options, level, stack);
-  stack.delete(value as PyObject);
+  if (value instanceof PyList || value instanceof PyTuple) return encodeArray(value, options, level, state);
+  if (value instanceof PyDict) return encodeObject(value, options, level, state);
+  const text = encodeScalar(value, options, state);
+  if (text !== undefined) return text;
+  enterContainer(value as PyObject, state, options);
+  const result = encode(callValue(options.defaultFn, [value]), options, level, state);
+  state.containers.delete(value as PyObject);
   return result;
 }
 
-function encodeArray(value: PyList | PyTuple, options: DumpOptions, level: number, stack: Set<PyObject>): string {
-  if (value.items.length === 0) return '[]';
-  enterContainer(value, stack, options);
-  const items = value.items.map((item) => newline(options, level + 1) + encode(item, options, level + 1, stack));
-  stack.delete(value);
-  return `[${items.join(options.itemSeparator)}${newline(options, level)}]`;
+/** The text of a value that is not a container, or undefined for one the `default` function must convert. */
+function encodeScalar(value: PyValue, options: DumpOptions, state: EncodeState): string | undefined {
+  if (typeof value === 'string') return quoteCharged(value, options.ensureAscii, state);
+  let text: string | undefined;
+  if (value === None) text = 'null';
+  else if (typeof value === 'boolean') text = value ? 'true' : 'false';
+  else if (typeof value === 'number') text = floatText(value, options);
+  else {
+    const integer = typeof value === 'bigint' ? value : intEnumValue(value);
+    if (typeof integer === 'bigint') text = intToString(integer);
+  }
+  if (text !== undefined) charge(state, text.length);
+  return text;
 }
 
-function encodeObject(value: PyDict, options: DumpOptions, level: number, stack: Set<PyObject>): string {
-  if (value.store.size === 0) return '{}';
-  enterContainer(value, stack, options);
+function quoteCharged(text: string, ensureAscii: boolean, state: EncodeState): string {
+  charge(state, text.length + 2);
+  currentRuntime().buildString(text.length);
+  const quoted = quote(text, ensureAscii);
+  charge(state, quoted.length - text.length - 2);
+  return quoted;
+}
+
+function encodeArray(value: PyList | PyTuple, options: DumpOptions, level: number, state: EncodeState): string {
+  enterContainer(value, state, options);
+  if (value.items.length === 0) return leaveContainer(value, state, '[]');
+  const items = value.items.map((item) => {
+    charge(state, options.itemSeparator.length);
+    return newline(options, level + 1, state) + encode(item, options, level + 1, state);
+  });
+  state.containers.delete(value);
+  return `[${items.join(options.itemSeparator)}${newline(options, level, state)}]`;
+}
+
+function encodeObject(value: PyDict, options: DumpOptions, level: number, state: EncodeState): string {
+  enterContainer(value, state, options);
+  if (value.store.size === 0) return leaveContainer(value, state, '{}');
   let entries: (readonly [PyValue, PyValue])[] = value.store
     .ordered()
     .map((entry) => [entry.key, entry.value] as const);
@@ -117,23 +153,32 @@ function encodeObject(value: PyDict, options: DumpOptions, level: number, stack:
   for (const [key, item] of entries) {
     const text = keyText(key, options);
     if (text === undefined) continue;
+    charge(state, options.itemSeparator.length + options.keySeparator.length);
     parts.push(
-      `${newline(options, level + 1)}${quote(text, options.ensureAscii)}${options.keySeparator}${encode(item, options, level + 1, stack)}`
+      `${newline(options, level + 1, state)}${quoteCharged(text, options.ensureAscii, state)}${options.keySeparator}${encode(item, options, level + 1, state)}`
     );
   }
-  stack.delete(value);
+  state.containers.delete(value);
   if (parts.length === 0) return '{}';
-  return `{${parts.join(options.itemSeparator)}${newline(options, level)}}`;
+  return `{${parts.join(options.itemSeparator)}${newline(options, level, state)}}`;
 }
 
-function enterContainer(value: PyObject, stack: Set<PyObject>, options: DumpOptions): void {
+function enterContainer(value: PyObject, state: EncodeState, options: DumpOptions): void {
+  charge(state, 2);
   if (!options.checkCircular) return;
-  if (stack.has(value)) throw valueError('Circular reference detected');
-  stack.add(value);
+  if (state.containers.has(value)) throw valueError('Circular reference detected');
+  state.containers.add(value);
 }
 
-function newline(options: DumpOptions, depth: number): string {
-  return options.indent === undefined ? '' : `\n${options.indent.repeat(depth)}`;
+function leaveContainer(value: PyObject, state: EncodeState, text: string): string {
+  state.containers.delete(value);
+  return text;
+}
+
+function newline(options: DumpOptions, depth: number, state: EncodeState): string {
+  if (options.indent === undefined) return '';
+  charge(state, 1 + options.indent.length * depth);
+  return `\n${options.indent.repeat(depth)}`;
 }
 
 /** The text of a dict key, or undefined for a key that `skipkeys` skips. */
@@ -366,8 +411,8 @@ registerHiddenAttributes('json', [
 
 registerModule('json', (runtime) => {
   const namespace = new Map<string, PyValue>();
-  const encodeAscii = builtin('encode_basestring_ascii', 'one', 1, 1, ([text]) => quote(text as string, true));
-  const encodeText = builtin('encode_basestring', 'one', 1, 1, ([text]) => quote(text as string, false));
+  const encodeAscii = builtin('encode_basestring_ascii', 'one', 1, 1, ([text]) => quoteAlone(text as string, true));
+  const encodeText = builtin('encode_basestring', 'one', 1, 1, ([text]) => quoteAlone(text as string, false));
   for (const [name, value] of [
     ['encode_basestring_ascii', encodeAscii],
     ['encode_basestring', encodeText],
@@ -384,6 +429,13 @@ registerModule('json', (runtime) => {
   }
   return runLibrarySource('json', JSON_SOURCE, namespace);
 });
+
+function quoteAlone(text: string, ensureAscii: boolean): string {
+  currentRuntime().buildString(text.length);
+  const quoted = quote(text, ensureAscii);
+  currentRuntime().buildString(quoted.length);
+  return quoted;
+}
 
 function unsupportedBuiltin(runtime: { unsupported(feature: string): Error }, name: string, feature: string): PyValue {
   return builtin(
@@ -420,7 +472,7 @@ function makeEncoder(args: PyValue[], encodeAscii: PyValue): PyValue {
     defaultFn,
   };
   return builtin('_iterencode', 'expected', 2, 2, ([value]) => {
-    const text = encode(value, options, 0, new Set());
+    const text = encode(value, options, 0, { containers: new Set(), length: 0 });
     currentRuntime().buildString(text.length);
     return newTuple([text]);
   });

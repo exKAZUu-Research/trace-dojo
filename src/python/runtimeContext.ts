@@ -11,6 +11,14 @@ export function currentRuntime(): Runtime {
   return current;
 }
 
+/**
+ * Charges the running program for a step of a scan past colliding hashes. No program is running while the builtins
+ * are defined, which fills tables too.
+ */
+export function chargeCollision(): void {
+  current?.spend();
+}
+
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   const outer = current;
   current = runtime;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 595 -- The statement evaluator keeps one method per kind of statement together.
+// code-gauge-allow-file fileNcss 598 -- The statement evaluator keeps one method per kind of statement together.
 import type { ExceptHandler, Expression, MatchCase, Pattern, Statement, Target } from './ast';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
@@ -20,6 +20,7 @@ import {
 } from './objects';
 import { compareOp, equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
+import { currentRuntime } from './runtimeContext';
 import {
   baseExceptionClass,
   exceptionClassNamed,
@@ -858,7 +859,11 @@ function checkExceptStarTypes(types: PyValue): void {
 function toItems(subject: PyValue): PyValue[] {
   const next = iterate(subject);
   const items: PyValue[] = [];
-  for (let item = next(); item !== DONE; item = next()) items.push(item);
+  const runtime = currentRuntime();
+  for (let item = next(); item !== DONE; item = next()) {
+    runtime.spend();
+    items.push(item);
+  }
   return items;
 }
 

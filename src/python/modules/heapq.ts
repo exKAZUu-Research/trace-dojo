@@ -1,5 +1,5 @@
 import { BUILTIN_DOC } from '../attributes';
-import { builtin, pythonFunction } from '../define';
+import { moduleBuiltin, pythonFunction } from '../define';
 import { runLibrarySource } from '../librarySource';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { argument } from '../nativeArgs';
@@ -9,6 +9,8 @@ import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newList, None, pyError, typeError, typeName } from '../types';
 import { PyList, type PyValue } from '../values';
+
+const builtin = moduleBuiltin('_heapq');
 
 /** The items of a heap argument, which argument clinic checks is a list, naming the function. */
 function heapOf(value: PyValue, name: string, onlyArgument: boolean): PyValue[] {
