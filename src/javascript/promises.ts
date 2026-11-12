@@ -47,6 +47,11 @@ export class EventLoop {
 
   constructor(private readonly runtime: Runtime) {}
 
+  /** The milliseconds the simulated clock has advanced since the program started. */
+  get time(): number {
+    return this.now;
+  }
+
   enqueue(job: Job): void {
     this.microtasks.push(job);
   }
@@ -190,7 +195,7 @@ export function performThen(runtime: Runtime, promise: JsObject, reaction: React
 }
 
 /** The resolve and reject functions passed to an executor, of which only the first call has an effect. */
-function resolvingFunctions(runtime: Runtime, promise: JsObject): { resolve: JsFunction; reject: JsFunction } {
+export function resolvingFunctions(runtime: Runtime, promise: JsObject): { resolve: JsFunction; reject: JsFunction } {
   let isResolved = false;
   const once =
     (settleWith: (value: Value) => void) =>

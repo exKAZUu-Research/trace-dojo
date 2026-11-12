@@ -2,6 +2,7 @@ import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { formatLogArguments } from './consoleFormat';
 import { inspect, inspectValue } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
+import { dateValueOf } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { defineHidden, type Runtime } from './runtime';
 import {
@@ -65,6 +66,7 @@ function tagOf(value: Value): string {
   if (value instanceof JsFunction) return 'Function';
   if (value instanceof JsObject) {
     if (value.regexp) return 'RegExp';
+    if (dateValueOf(value) !== undefined) return 'Date';
     return value.isError ? 'Error' : 'Object';
   }
   if (typeof value === 'string') return 'String';
@@ -245,7 +247,7 @@ function createAggregateError(call: NativeCall, prototype: JsObject): JsObject {
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Lists the builtin methods, each a small closure of its own.
-// code-gauge-allow functionNcss 32 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss 33 -- Lists the builtin methods, each a small closure of its own.
 function defineNumber(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
   const numberConstructor = builder.defineClass(
@@ -314,7 +316,30 @@ function defineNumber(builder: RealmBuilder): void {
       runtime.throwError('RangeError', 'toFixed() digits argument must be between 0 and 100');
     return value.toFixed(digits);
   });
+  defineNumberFormats(builder);
   builder.method(numberPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisNumber(runtime, thisValue));
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+function defineNumberFormats(builder: RealmBuilder): void {
+  const { numberPrototype } = builder.realm;
+  builder.method(numberPrototype, 'toPrecision', 1, ({ runtime, thisValue, args }) => {
+    const value = thisNumber(runtime, thisValue);
+    if (args[0] === undefined) return String(value);
+    const precision = Math.trunc(runtime.toNumber(args[0])) || 0;
+    if (!Number.isFinite(value)) return String(value);
+    if (!(precision >= 1 && precision <= 100))
+      runtime.throwError('RangeError', 'toPrecision() argument must be between 1 and 100');
+    return value.toPrecision(precision);
+  });
+  builder.method(numberPrototype, 'toExponential', 1, ({ runtime, thisValue, args }) => {
+    const value = thisNumber(runtime, thisValue);
+    const digits = Math.trunc(runtime.toNumber(args[0])) || 0;
+    if (!Number.isFinite(value)) return String(value);
+    if (!(digits >= 0 && digits <= 100))
+      runtime.throwError('RangeError', 'toExponential() argument must be between 0 and 100');
+    return args[0] === undefined ? value.toExponential() : value.toExponential(digits);
+  });
 }
 
 function thisNumber(runtime: Runtime, value: Value): number {
@@ -343,26 +368,36 @@ function defineMath(builder: RealmBuilder): void {
   for (const name of [
     'abs',
     'acos',
+    'acosh',
     'asin',
+    'asinh',
     'atan',
+    'atanh',
     'cbrt',
     'ceil',
+    'clz32',
     'cos',
+    'cosh',
     'exp',
+    'expm1',
     'floor',
+    'fround',
     'log',
     'log10',
+    'log1p',
     'log2',
     'round',
     'sign',
     'sin',
+    'sinh',
     'sqrt',
     'tan',
+    'tanh',
     'trunc',
   ] as const) {
     builder.method(math, name, 1, ({ runtime, args }) => Math[name](runtime.toNumber(args[0])));
   }
-  for (const name of ['atan2', 'pow'] as const) {
+  for (const name of ['atan2', 'imul', 'pow'] as const) {
     builder.method(math, name, 2, ({ runtime, args }) =>
       Math[name](runtime.toNumber(args[0]), runtime.toNumber(args[1]))
     );

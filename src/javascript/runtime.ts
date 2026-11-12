@@ -482,6 +482,12 @@ export class Runtime {
 
   toPrimitive(value: Value, hint: 'number' | 'string' | 'default'): Primitive {
     if (!isObject(value)) return value;
+    const exotic = this.get(value, WELL_KNOWN_SYMBOLS.toPrimitive);
+    if (exotic !== undefined && exotic !== null) {
+      const result = this.call(exotic, value, [hint], this.currentRow);
+      if (!isObject(result)) return result;
+      return this.throwError('TypeError', 'Cannot convert object to primitive value');
+    }
     for (const name of hint === 'string' ? ['toString', 'valueOf'] : ['valueOf', 'toString']) {
       const method = this.get(value, name);
       if (isCallable(method)) {

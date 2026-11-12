@@ -3,10 +3,16 @@ import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
 import { definePromiseBuiltins } from './promises';
 import { defineArrayBuiltins } from './realmArrays';
+import { defineAsyncBuiltins } from './realmAsyncBuiltins';
 import { defineBigIntBuiltins } from './realmBigInt';
+import { defineCollectionBuiltins } from './realmCollections';
+import { defineDateBuiltins } from './realmDate';
 import { defineGlobalBuiltins } from './realmGlobals';
+import { defineIteratorHelpers } from './realmIteratorHelpers';
 import { defineIteratorBuiltins } from './realmIterators';
+import { defineJsonBuiltins } from './realmJson';
 import { defineNodeBuiltins } from './realmNode';
+import { defineObjectBuiltins } from './realmObjects';
 import { defineRegExpBuiltins } from './realmRegExp';
 import { defineStringBuiltins } from './realmStrings';
 import type { Runtime } from './runtime';
@@ -159,6 +165,7 @@ function functionNameOf(key: Key): string {
 export function createRealm(runtime: Runtime): Realm {
   const builder = new RealmBuilder(runtime);
   defineGlobalBuiltins(builder);
+  defineObjectBuiltins(builder);
   defineNodeBuiltins(builder);
   defineArrayBuiltins(builder);
   defineStringBuiltins(builder);
@@ -168,5 +175,10 @@ export function createRealm(runtime: Runtime): Realm {
   definePromiseBuiltins(builder);
   defineAsyncGeneratorBuiltins(builder);
   defineBigIntBuiltins(builder);
+  defineCollectionBuiltins(builder);
+  defineJsonBuiltins(builder);
+  defineIteratorHelpers(builder);
+  defineAsyncBuiltins(builder);
+  defineDateBuiltins(builder);
   return builder.realm;
 }

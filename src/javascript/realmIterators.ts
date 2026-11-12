@@ -1,6 +1,7 @@
 import { ArrayOps } from './arrayOps';
 import { DONE, type HostIterator } from './iteration';
 import type { RealmBuilder } from './realm';
+import { receiverText } from './realmCollections';
 import type { Runtime } from './runtime';
 import { JsArray, JsObject, type Value } from './values';
 
@@ -11,6 +12,7 @@ export const WELL_KNOWN_SYMBOLS = {
   toStringTag: Symbol('Symbol.toStringTag'),
   dispose: Symbol('Symbol.dispose'),
   asyncDispose: Symbol('Symbol.asyncDispose'),
+  toPrimitive: Symbol('Symbol.toPrimitive'),
 } as const;
 
 /** Defines Symbol and the iterators of arrays and strings, which `%IteratorPrototype%` makes iterable themselves. */
@@ -61,7 +63,7 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
     if (!iterator) {
       return runtime.throwError(
         'TypeError',
-        `next method called on incompatible receiver ${runtime.describe(thisValue)}`
+        `Method ${tag}.prototype.next called on incompatible receiver ${receiverText(runtime, thisValue)}`
       );
     }
     const value = iterator.next();
@@ -89,6 +91,7 @@ function arrayIteration(runtime: Runtime, object: JsObject, kind: 'keys' | 'valu
   let index = 0;
   const ops = object instanceof JsArray ? new ArrayOps(runtime, object) : undefined;
   return {
+    source: object,
     next: () => {
       const length = ops ? ops.length : Math.trunc(runtime.toNumber(runtime.get(object, 'length'))) || 0;
       if (index >= length) {

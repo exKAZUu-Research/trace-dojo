@@ -4,6 +4,7 @@ import type { AsyncGeneratorState } from './asyncGenerators';
 import type { GeneratorState } from './generators';
 import type { HostIterator } from './iteration';
 import type { PromiseState } from './promises';
+import type { CollectionState } from './realmCollections';
 import type { Runtime } from './runtime';
 
 /** A JavaScript value: primitives are the host's own, BigInts and symbols included, while objects are interpreter objects. */
@@ -61,6 +62,8 @@ export class JsObject {
   asyncGenerator?: AsyncGeneratorState;
   /** Set on a promise. */
   promise?: PromiseState;
+  /** Set on a Map, Set, WeakMap, or WeakSet. */
+  collection?: CollectionState;
 
   constructor(public proto: JsObject | null) {}
 }
