@@ -18,7 +18,7 @@ import {
   typeError,
   valueError,
 } from '../types';
-import { type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyTuple, type PyValue } from '../values';
+import { AttributeMap, type Kwargs, PyBuiltinFunction, PyClass, PyDescriptor, PyTuple, type PyValue } from '../values';
 import { PYTHON_KEYWORDS } from './keywords';
 
 /** `collections.namedtuple`. */
@@ -120,7 +120,7 @@ function newNamedTuple(
     keywordDefaults: new Map(),
   };
   const bound = bindArguments(signature, [cls, ...values], kwargs);
-  return new PyTuple(
+  return namedTupleInstance(
     cls,
     fields.map((field) => bound.get(field) as PyValue)
   );
@@ -178,7 +178,17 @@ function makeNamedTuple(cls: PyClass, iterable: PyValue): PyTuple {
   const items = toArray(iterable);
   const count = (cls.lookup('_fields') as PyTuple).items.length;
   if (items.length !== count) throw typeError(`Expected ${count} arguments, got ${items.length}`);
-  return new PyTuple(cls, items);
+  return namedTupleInstance(cls, items);
+}
+
+/**
+ * An instance of a namedtuple class or its subclass, however it is made. A subclass that does not define `__slots__`,
+ * as the class namedtuple creates does, gives its instances a `__dict__`.
+ */
+function namedTupleInstance(cls: PyClass, items: PyValue[]): PyTuple {
+  const tuple = new PyTuple(cls, items);
+  if (cls.mro.some((each) => !each.isBuiltin && !each.dict.has('__slots__'))) tuple.attributes = new AttributeMap();
+  return tuple;
 }
 
 function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {

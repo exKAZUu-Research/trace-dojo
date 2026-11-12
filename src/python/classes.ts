@@ -9,7 +9,7 @@ import { bindValue, callValue } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { builtinClass, classOf, newTuple, None, objectClass, typeClass, typeError, typeName } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { AttributeMap, type Kwargs, PyCell, PyClass, PyInstance, PyOpaque, PyTuple, type PyValue } from './values';
+import { type Kwargs, PyCell, PyClass, PyInstance, PyOpaque, type PyValue } from './values';
 
 /** The class of the `__dict__` and `__weakref__` entries a class defines for its instances. */
 const attributeDescriptorClass = builtinClass('getset_descriptor');
@@ -278,8 +278,6 @@ export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyVa
     builtinBase && builtinBase !== objectClass && builtinBase.construct && !cls.isBuiltin
       ? currentRuntime().runNative(() => (builtinBase.construct as Construct)(cls, args, kwargs))
       : new PyInstance(cls);
-  if (instance instanceof PyTuple && hasInstanceDict(cls, builtinBase as PyClass))
-    instance.attributes = new AttributeMap();
   const init = cls.lookup('__init__');
   const hasArguments = args.length > 0 || (kwargs !== undefined && kwargs.size > 0);
   if (init === objectClass.dict.get('__init__')) {
@@ -293,9 +291,4 @@ export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyVa
     if (result !== None) throw typeError(`__init__() should return None, not '${typeName(result)}'`);
   }
   return instance;
-}
-
-/** Whether instances of a subclass of a native class get a `__dict__`: some class below the native one has no `__slots__`. */
-function hasInstanceDict(cls: PyClass, nativeBase: PyClass): boolean {
-  return cls.mro.slice(0, cls.mro.indexOf(nativeBase)).some((each) => !each.dict.has('__slots__'));
 }

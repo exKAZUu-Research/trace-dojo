@@ -55,3 +55,13 @@ del m.m
 got.append(m.m())
 if got != ["can't set attribute", "can't delete attribute", 7, {}, 1]:
     raise AssertionError(got)
+
+# Copies made by _make and _replace are instances of the subclass with a __dict__ too.
+replaced = NamedPoint(1, 2)._replace(x=3)
+replaced.label = 'A'
+made = NamedPoint._make([1, 2])
+made.label = 'B'
+plain = Point._make([1, 2])
+got = [replaced.label, replaced.__dict__, made.label, repr(replaced), hasattr(plain, '__dict__')]
+if got != ['A', {'label': 'A'}, 'B', 'NamedPoint(x=3, y=2)', False]:
+    raise AssertionError(got)

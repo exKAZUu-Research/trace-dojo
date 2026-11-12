@@ -20,14 +20,15 @@ export function chargeStep(): void {
   current?.spend();
 }
 
-/**
- * Charges the running program for slots of storage it creates, wherever the storage comes from; see
- * {@link chargeStep}.
- */
+/** Charges the running program for native work that scans `length` elements; see {@link chargeStep}. */
 export function chargeScan(length: number): void {
   current?.scan(length);
 }
 
+/**
+ * Charges the running program for slots of storage it creates, wherever the storage comes from, refusing storage
+ * beyond the limit; see {@link chargeStep}.
+ */
 export function chargeSlots(count: number): void {
   current?.allocate(count);
 }
