@@ -1,6 +1,7 @@
 import { findEntry, javaEquals, putEntry, removeEntry } from './builtinCollections';
 import { checkModifiable, uncountedMapClasses } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
+import { accessedEntry } from './builtinLinkedHashMap';
 import { classType, extendsOf, superOf } from './builtinStreamSupport';
 import { addMethod } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
@@ -50,7 +51,7 @@ export function defineMapRemappings(
   });
   addMethod(mapClass, 'replace', [mapK, mapV], mapV, false, (frame, receiver, [key, value]) => {
     checkModifiable(frame, receiver, false);
-    const entry = findEntry(frame, receiver, key);
+    const entry = accessedEntry(frame, receiver, key);
     if (!entry) return;
     const previous = entry.value;
     entry.value = value;

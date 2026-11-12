@@ -18,6 +18,7 @@ import {
   unmodifiableClasses,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
+import { accessedEntry, defineLinkedHashMapOrder, evictionOf, recordAccess } from './builtinLinkedHashMap';
 import { stringify } from './builtins';
 import {
   addAbstractMethod,
@@ -187,6 +188,7 @@ export function defineHashMap(
     return cls;
   };
   for (const name of ['HashMap', 'LinkedHashMap', 'TreeMap']) defineClass(name);
+  defineLinkedHashMapOrder(registry.classes.get('LinkedHashMap') as ClassInfo, entryClass, nodeClass);
   defineEnumMap(defineClass('EnumMap'), registry.classes.get('Class') as ClassInfo);
   defineMapEntry(mapClass, entryClass, nodeClass, objectType);
   const immutableMap = defineClass('MapN', 'ImmutableCollections$MapN');
@@ -448,7 +450,7 @@ export function mapSignatures(
 }
 
 /** The maps whose entries the nodes from `entrySet` are, which other nodes, such as `Map.entry`'s, lack. */
-const nodeMaps = new WeakMap<JavaObject, JavaObject>();
+export const nodeMaps = new WeakMap<JavaObject, JavaObject>();
 
 /** The entry objects that `entrySet` gives, which write `setValue` through to their map. */
 export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassInfo {
@@ -541,7 +543,7 @@ export function defineMapMethods(
     return previous === NO_ENTRY ? undefined : previous;
   });
   addMethod(cls, 'putIfAbsent', [key, value], value, false, (frame, receiver, [keyValue, newValue]) => {
-    const entry = findEntry(frame, receiver, keyValue);
+    const entry = accessedEntry(frame, receiver, keyValue);
     if (entry && entry.value !== undefined) return entry.value;
     if (entry) entry.value = newValue;
     else putEntry(frame, receiver, keyValue, false, newValue);
@@ -553,10 +555,10 @@ export function defineMapMethods(
     [objectType],
     value,
     false,
-    (frame, receiver, [keyValue]) => findEntry(frame, receiver, keyValue)?.value
+    (frame, receiver, [keyValue]) => accessedEntry(frame, receiver, keyValue)?.value
   );
   addMethod(cls, 'getOrDefault', [objectType, value], value, false, (frame, receiver, [keyValue, fallback]) => {
-    const entry = findEntry(frame, receiver, keyValue);
+    const entry = accessedEntry(frame, receiver, keyValue);
     return entry ? entry.value : fallback;
   });
   addMethod(
@@ -733,12 +735,19 @@ export const STORE_ORDERS: Record<string, HashStore['order']> = {
   EnumSet: 'sorted',
 };
 
+/** The order of the builtin map or set class that `cls` is or extends, as a program's subclass of `TreeMap` keeps. */
+function storeOrderOf(cls: ClassInfo): HashStore['order'] {
+  let builtin: ClassInfo | undefined = cls;
+  while (builtin && !builtin.isBuiltin) builtin = builtin.superclass;
+  return (builtin && STORE_ORDERS[builtin.name]) ?? 'hash';
+}
+
 /** Gives a new map or set its entries, which a sorted one compares with `comparator` or in natural order. */
 export function createStore(receiver: Value, capacity = 16, comparator?: Value): Value {
   const object = receiver as JavaObject;
   const store = new HashStore();
   store.capacity = capacity;
-  store.order = STORE_ORDERS[object.cls.name] ?? 'hash';
+  store.order = storeOrderOf(object.cls);
   if (store.order === 'sorted') {
     store.comparator = comparator;
     if (comparator !== undefined) object.retained = [...(object.retained ?? []), comparator];
@@ -798,6 +807,7 @@ export function putEntry(
   if (entry) {
     const previous = entry.value;
     if (!keepsExisting) entry.value = value;
+    recordAccess(receiver, entry);
     return previous;
   }
   frame.runtime.allocateArray(frame, 2);
@@ -805,6 +815,7 @@ export function putEntry(
   else if (atBucketHead) store.addAtBucketHead({ key, value, hash: javaHash(frame, key) });
   else store.add({ key, value, hash: javaHash(frame, key) });
   touch(receiver);
+  evictionOf((receiver as JavaObject).cls)?.(frame, receiver as JavaObject);
   return NO_ENTRY;
 }
 

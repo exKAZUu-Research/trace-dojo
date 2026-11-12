@@ -6,6 +6,7 @@ import {
   checkListIndex,
   checkPosition,
   classType,
+  createIterator,
   defaultRemoveClasses,
   defineIndexFailures,
   defineIteratorClass,
@@ -279,6 +280,8 @@ function defineDequeInterfaces(context: Context, collectionClass: ClassInfo): Cl
     addAbstractMethod(dequeClass, name, [dequeElement], name.startsWith('offer') ? BOOLEAN : VOID);
   }
   for (const name of DEQUE_REMOVALS) addAbstractMethod(dequeClass, name, [], dequeElement);
+  const iteratorClass = context.registry.classes.get('Iterator') as ClassInfo;
+  addAbstractMethod(dequeClass, 'descendingIterator', [], classType(iteratorClass, dequeElement));
   return dequeClass;
 }
 
@@ -347,7 +350,7 @@ function defineArrayDeque(
   cls.methods = cls.methods.filter((method) => !isIndexed(method));
   cls.interfaces = [dequeClass];
   cls.supertypes = [cls.supertypes[0], classType(dequeClass, { kind: 'typeVar', variable: cls.typeParameters[0] })];
-  defineDequeMethods(cls, { kind: 'typeVar', variable: cls.typeParameters[0] });
+  defineDequeMethods(cls, { kind: 'typeVar', variable: cls.typeParameters[0] }, lists.itrClass);
   rejectNullElements(cls);
   linkOverrides(cls);
 }
@@ -500,7 +503,7 @@ function defineArrayList(
   addListIterators(cls, element, listItrClass);
   defineListUpdates(cls, element, context);
   defineListSearches(cls, context);
-  if (name === 'LinkedList') defineDequeMethods(cls, element);
+  if (name === 'LinkedList') defineDequeMethods(cls, element, itrClass);
   linkOverrides(cls);
   return cls;
 }
@@ -651,7 +654,20 @@ function isList(object: JavaObject): boolean {
 
 /** The queue and stack methods of `LinkedList`, which learners use for breadth-first searches and stacks. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
-function defineDequeMethods(cls: ClassInfo, element: JavaType): void {
+function defineDequeMethods(cls: ClassInfo, element: JavaType, itrClass: ClassInfo): void {
+  addMethod(cls, 'descendingIterator', [], classType(itrClass, element), false, (frame, receiver) =>
+    createIterator(
+      frame,
+      itrClass,
+      receiver as JavaObject,
+      () => elementsOf(receiver).toReversed(),
+      (_, index) => {
+        const items = elementsOf(receiver);
+        items.splice(items.length - 1 - index, 1);
+        touch(receiver);
+      }
+    )
+  );
   for (const [name, atEnd] of [
     ['addFirst', false],
     ['addLast', true],

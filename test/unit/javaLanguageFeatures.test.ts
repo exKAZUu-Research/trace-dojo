@@ -801,6 +801,79 @@ public class Main {
   }
 });
 
+test("Java's deques iterate in reverse, and LinkedHashMap orders by access and evicts through removeEldestEntry", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+public class Main {
+  public static void main(String[] args) {
+    Deque<Integer> dq = new ArrayDeque<>(List.of(1, 2, 3, 4));
+    Iterator<Integer> it = dq.descendingIterator();
+    while (it.hasNext()) { int x = it.next(); System.out.print(x); if (x % 2 == 0) it.remove(); }
+    System.out.println(" " + dq);
+    LinkedList<String> ll = new LinkedList<>(List.of("a", "b", "c"));
+    for (Iterator<String> i = ll.descendingIterator(); i.hasNext();) System.out.print(i.next());
+    System.out.println();
+    Iterator<String> j = ll.descendingIterator(); j.next(); ll.add("d");
+    try { j.next(); } catch (ConcurrentModificationException e) { System.out.println("CME"); }
+    Iterator<Integer> k = dq.descendingIterator();
+    try { k.remove(); } catch (IllegalStateException e) { System.out.println("ISE"); }
+    Iterator<Integer> e = new ArrayDeque<Integer>().descendingIterator();
+    try { e.next(); } catch (NoSuchElementException ex) { System.out.println("NSE"); }
+  }
+}`,
+      '4321 [1, 3]\ncba\nCME\nISE\nNSE\n',
+    ],
+    [
+      `import java.util.*;
+public class Main {
+  static class Lru<K, V> extends LinkedHashMap<K, V> {
+    final int capacity;
+    Lru(int capacity) { super(16, 0.75f, true); this.capacity = capacity; }
+    @Override protected boolean removeEldestEntry(Map.Entry<K, V> eldest) { return size() > capacity; }
+  }
+  public static void main(String[] args) {
+    Lru<String, Integer> cache = new Lru<>(2);
+    cache.put("a", 1); cache.put("b", 2); cache.get("a"); cache.put("c", 3);
+    System.out.println(cache);
+    Map<Integer, String> access = new LinkedHashMap<>(4, 0.75f, true);
+    access.put(1, "x"); access.put(2, "y"); access.put(3, "z");
+    access.get(1); access.put(2, "Y"); access.getOrDefault(3, "d");
+    System.out.println(access);
+    Map<Integer, Integer> bounded = new LinkedHashMap<>() { protected boolean removeEldestEntry(Map.Entry<Integer, Integer> e) { return size() > 3; } };
+    for (int i = 0; i < 6; i++) bounded.put(i, i * i);
+    System.out.println(bounded);
+    Map<String, Integer> plain = new LinkedHashMap<>(); plain.put("x", 1); plain.put("y", 2); plain.get("x"); plain.put("x", 3);
+    System.out.println(plain);
+  }
+}`,
+      '{a=1, c=3}\n{1=x, 2=Y, 3=z}\n{3=9, 4=16, 5=25}\n{x=3, y=2}\n',
+    ],
+    [
+      `import java.util.*;
+public class Main {
+  static class Sorted extends TreeMap<String, Integer> {}
+  static class Ordered extends LinkedHashSet<String> {}
+  public static void main(String[] args) {
+    Sorted s = new Sorted(); s.put("b", 1); s.put("a", 2); s.put("c", 3); System.out.println(s + " " + s.firstKey());
+    Ordered o = new Ordered(); o.add("z"); o.add("a"); o.add("m"); System.out.println(o);
+    Map<String, Integer> m = new HashMap<>() {{ put("k1", 1); put("k2", 2); }}; System.out.println(m);
+    LinkedHashMap<String, Integer> lru = new LinkedHashMap<>(4, 0.75f, true);
+    lru.put("a", 1); lru.put("b", 2); lru.put("c", 3);
+    try { for (String k : lru.keySet()) lru.get(k); } catch (ConcurrentModificationException e) { System.out.println("CME"); }
+    lru.replace("a", 10); lru.merge("b", 5, Integer::sum); lru.compute("c", (k, v) -> v + 100); lru.putIfAbsent("a", 0);
+    System.out.println(lru);
+    try { new LinkedHashMap<String, String>(-1, 0.75f, true); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
+    try { new LinkedHashMap<String, String>(1, 0f); } catch (IllegalArgumentException e) { System.out.println(e.getMessage()); }
+  }
+}`,
+      '{a=2, b=1, c=3} a\n[z, a, m]\n{k1=1, k2=2}\nCME\n{b=7, c=103, a=10}\nIllegal initial capacity: -1\nIllegal load factor: 0.0\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
