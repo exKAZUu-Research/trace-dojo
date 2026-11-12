@@ -446,7 +446,7 @@ function defineConsole(builder: RealmBuilder): void {
     const limit = (name: string): number | undefined => {
       const option = isObject(options) ? runtime.get(options, name) : undefined;
       if (option === undefined) return undefined;
-      return option === null ? Number.POSITIVE_INFINITY : Math.max(0, runtime.toNumber(option));
+      return option === null ? Number.POSITIVE_INFINITY : runtime.toNumber(option);
     };
     const compact = isObject(options) ? runtime.get(options, 'compact') : undefined;
     write(

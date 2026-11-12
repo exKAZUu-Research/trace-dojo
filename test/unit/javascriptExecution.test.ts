@@ -1186,7 +1186,12 @@ console.dir(new Map([[1, 'a'], [2, 'b'], [3, 'c']]), { maxArrayLength: 2 });
 console.dir(new Set([1, 2, 3]), { maxArrayLength: 0 });
 console.dir({ s: 'x'.repeat(30), t: [1, 2, 3] }, { breakLength: Infinity });
 console.dir(Array.from({ length: 10 }, (_, i) => i), { compact: false });
-console.dir([[1, 2, [3, 4]], { k: 'v' }], { compact: true, breakLength: 10 });`,
+console.dir([[1, 2, [3, 4]], { k: 'v' }], { compact: true, breakLength: 10 });
+console.dir({ a: 1 }, { depth: -1 }); console.dir([1, 2], { depth: -1 }); console.dir([1, 2, 3], { maxArrayLength: -2 });
+const o = { a: 1 }; o.self = o; console.dir(o, { compact: true }); console.dir(o, { compact: true, breakLength: 1 }); console.dir(o, { compact: false });
+console.dir({ alpha: { beta: [1, 2, 3], gamma: 'a long string value here' }, delta: [ { x: 1 }, { y: 2 } ] }, { compact: true, breakLength: 20 });
+console.dir({ a: [1, 2, 3, 4, 5, 6, 7, 8], b: new Map([[1, { z: 1 }]]) }, { compact: true });
+console.dir({ a: { b: 1 } }, { compact: 0 });`,
   ],
   [
     'locale formatting of invalid dates',

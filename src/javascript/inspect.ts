@@ -91,7 +91,7 @@ export function inspectValue(
     circular: new Map(),
     breakLength: options.breakLength ?? BREAK_LENGTH,
     compact: options.compact ?? COMPACT,
-    maxArrayLength: options.maxArrayLength ?? MAX_ARRAY_LENGTH,
+    maxArrayLength: Math.max(0, options.maxArrayLength ?? MAX_ARRAY_LENGTH),
   };
   return formatCharged(ctx, value, 0);
 }
@@ -177,9 +177,15 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   runtime.scan(output.length);
   const reference = ctx.circular.get(value);
   let { base } = frame;
-  if (reference !== undefined) base = base === '' ? `<ref *${reference}>` : `<ref *${reference}> ${base}`;
+  const braces = [...frame.braces];
+  if (reference !== undefined) {
+    // The compact layout puts its base after the opening brace, so the reference goes before the brace instead.
+    const label = `<ref *${reference}>`;
+    if (ctx.compact === true) braces[0] = `${label} ${braces[0]}`;
+    else base = base === '' ? label : `${label} ${base}`;
+  }
   ctx.seen.delete(value);
-  return reduceToSingleString(ctx, output, base, frame.braces, recurseTimes, value);
+  return reduceToSingleString(ctx, output, base, braces, recurseTimes, value);
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
@@ -368,18 +374,23 @@ function promiseEntry(ctx: Context, state: PromiseState, recurseTimes: number): 
 function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key): string {
   const property = object.properties.get(key);
   let text = 'undefined';
-  if (property && !isAccessor(property)) text = formatIndented(ctx, property.value, recurseTimes);
-  else if (property?.get) text = property.set ? '[Getter/Setter]' : '[Getter]';
+  let separator = ' ';
+  if (property && !isAccessor(property)) {
+    // The compact layout indents an object's values one more and moves a value too wide for a line to the next.
+    const diff = ctx.compact === true && !(object instanceof JsArray) ? 3 : 2;
+    text = formatIndented(ctx, property.value, recurseTimes, diff);
+    if (diff === 3 && ctx.breakLength < text.length) separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
+  } else if (property?.get) text = property.set ? '[Getter/Setter]' : '[Getter]';
   else if (property?.set) text = '[Setter]';
-  if (typeof key === 'symbol') return `${key.toString()}: ${text}`;
-  if (KEY_PATTERN.test(key)) return `${key === '__proto__' ? "['__proto__']" : key}: ${text}`;
-  return `${quote(key)}: ${text}`;
+  if (typeof key === 'symbol') return `${key.toString()}:${separator}${text}`;
+  if (KEY_PATTERN.test(key)) return `${key === '__proto__' ? "['__proto__']" : key}:${separator}${text}`;
+  return `${quote(key)}:${separator}${text}`;
 }
 
-function formatIndented(ctx: Context, value: Value, recurseTimes: number): string {
-  ctx.indentationLvl += 2;
+function formatIndented(ctx: Context, value: Value, recurseTimes: number, diff = 2): string {
+  ctx.indentationLvl += diff;
   const text = formatCharged(ctx, value, recurseTimes);
-  ctx.indentationLvl -= 2;
+  ctx.indentationLvl -= diff;
   return text;
 }
 
