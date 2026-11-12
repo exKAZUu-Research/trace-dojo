@@ -466,7 +466,7 @@ export abstract class ExpressionConverter {
             : 'generator';
     const clauses = namedChildren(node).filter((child) => child.type === 'for_in_clause' || child.type === 'if_clause');
     const outer = this.context;
-    const scope = new ScopeBuilder('comprehension', outer.scope);
+    const scope = new ScopeBuilder('comprehension', outer.scope, type !== 'generator');
     const generators: Comprehension[] = [];
     for (const [index, clause] of clauses.entries()) {
       if (clause.type === 'if_clause') {

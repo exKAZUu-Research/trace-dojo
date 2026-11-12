@@ -19,7 +19,9 @@ export class ScopeBuilder {
 
   constructor(
     kind: ScopeInfo['kind'],
-    readonly parent: ScopeBuilder | undefined
+    readonly parent: ScopeBuilder | undefined,
+    /** Whether CPython compiles this comprehension inline in its enclosing scope (a list, set, or dict comprehension). */
+    readonly isInlined = false
   ) {
     this.info = { kind, locals: [], cells: [], frees: [], isGenerator: false };
     parent?.children.push(this);
@@ -70,7 +72,7 @@ export function resolveScopes(module: ScopeBuilder): void {
 
 function checkNonlocals(scope: ScopeBuilder): void {
   for (const [name, declaration] of scope.declarations) {
-    if (declaration === 'nonlocal' && !ownerOf(scope.parent, name)) {
+    if (declaration === 'nonlocal' && !ownerOf(scope, name)) {
       const row = scope.refs.find((ref) => ref.name === name)?.row ?? 0;
       fail(row, `nonlocal で宣言した ${name} が、外側の関数に見つかりません。`);
     }
@@ -78,12 +80,16 @@ function checkNonlocals(scope: ScopeBuilder): void {
   for (const child of scope.children) checkNonlocals(child);
 }
 
-/** The nearest enclosing function that owns `name`, skipping class bodies, which nested functions do not see. */
-function ownerOf(scope: ScopeBuilder | undefined, name: string): ScopeBuilder | undefined {
-  for (let current = scope; current; current = current.parent) {
-    // A class body owns the implicit `__class__` cell its methods read, and no other name nested functions see.
+/**
+ * The nearest scope enclosing `scope` that owns `name`, skipping class bodies, which nested functions do not see. A class
+ * body owns only the implicit `__class__` cell, and only for the functions CPython compiles as functions in it: an
+ * inlined comprehension directly in a class body reads `__class__` as the class body does.
+ */
+function ownerOf(scope: ScopeBuilder, name: string): ScopeBuilder | undefined {
+  let below = scope;
+  for (let current = scope.parent; current; below = current, current = current.parent) {
     if (current.info.kind === 'class') {
-      if (name === '__class__') return current;
+      if (name === '__class__' && !below.isInlined) return current;
       continue;
     }
     if (current.info.kind === 'module') return undefined;
@@ -109,7 +115,7 @@ function accessOf(scope: ScopeBuilder, name: string): NameRef['access'] {
     if (scope.info.kind === 'class') return 'name';
     return capturedBelow(scope, name) ? markCell(scope, name) : 'local';
   }
-  const owner = ownerOf(scope.parent, name);
+  const owner = ownerOf(scope, name);
   if (!owner) return scope.info.kind === 'class' ? 'name' : 'global';
   markCell(owner, name);
   for (let current: ScopeBuilder | undefined = scope; current && current !== owner; current = current.parent) {
