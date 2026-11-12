@@ -412,6 +412,37 @@ public class Main {
   });
 });
 
+test('Java appends any CharSequence to string builders and writers through Appendable', () => {
+  const program = `import java.io.*;
+public class Main {
+  static void fill(Appendable out) throws IOException { out.append("ab").append('c').append(new StringBuilder("xyz"), 1, 3); }
+  public static void main(String[] args) throws IOException {
+    StringBuilder sb = new StringBuilder();
+    fill(sb);
+    sb.append((CharSequence) null).append("hello", 1, 3).append(new StringBuilder("!"));
+    System.out.println(sb);
+    StringWriter sw = new StringWriter();
+    fill(sw);
+    sw.append(new StringBuilder("q")).append(null).append("hey", 0, 2);
+    System.out.println(sw);
+    PrintWriter pw = new PrintWriter(System.out, true);
+    pw.append(sb, 0, 2).append('\\n');
+    pw.flush();
+    try { sb.append("abc", 2, 1); } catch (IndexOutOfBoundsException e) { System.out.println(e); }
+    try { sw.append("abc", 2, 1); } catch (IndexOutOfBoundsException e) { System.out.println(e); }
+    try { sw.append(new StringBuilder("abc"), 2, 5); } catch (IndexOutOfBoundsException e) { System.out.println(e); }
+    try { sw.append(null, 0, 9); } catch (IndexOutOfBoundsException e) { System.out.println(e); }
+    Appendable a = sb;
+    System.out.println(a instanceof CharSequence);
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'abcyznullel!\nabcyzqnullhe\nab\njava.lang.IndexOutOfBoundsException: Range [2, 1) out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Range [2, 1) out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Range [2, 5) out of bounds for length 3\njava.lang.StringIndexOutOfBoundsException: Range [0, 9) out of bounds for length 4\ntrue\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

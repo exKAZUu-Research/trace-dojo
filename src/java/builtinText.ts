@@ -144,6 +144,54 @@ function defineCharSequence(registry: Registry, implementations: ClassInfo[]): v
     addInterface(implementation, { kind: 'class', cls });
     linkOverrides(implementation);
   }
+  defineAppendable(registry, cls, implementations.slice(1));
+}
+
+/**
+ * `Appendable`, whose methods declare `IOException`, and the `append` methods of string builders that implement it,
+ * which take any `CharSequence` and throw nothing checked.
+ */
+function defineAppendable(registry: Registry, charSequence: ClassInfo, builders: ClassInfo[]): void {
+  const cls = defineInterface(registry, 'Appendable', 'java.lang');
+  const ioException = registry.classes.get('IOException') as ClassInfo;
+  for (const parameterTypes of [[charSequence.type], [charSequence.type, INT, INT], [CHAR]]) {
+    addAbstractMethod(cls, 'append', parameterTypes, cls.type).thrownTypes = [ioException];
+  }
+  for (const builder of builders) {
+    addMethod(builder, 'append', [charSequence.type], builder.type, false, (frame, receiver, [value]) => {
+      const appended = charSequenceText(frame, value);
+      return setBuilder(frame, receiver, builderOf(receiver) + appended, appended.length);
+    });
+    addMethod(
+      builder,
+      'append',
+      [charSequence.type, INT, INT],
+      builder.type,
+      false,
+      (frame, receiver, [value, start, end]) => {
+        const text = charSequenceText(frame, value);
+        const [begin, finish] = [start as number, end as number];
+        if (begin < 0 || begin > finish || finish > text.length) {
+          throwBuiltin(
+            frame,
+            'IndexOutOfBoundsException',
+            `Range [${begin}, ${finish}) out of bounds for length ${text.length}`
+          );
+        }
+        const appended = text.slice(begin, finish);
+        return setBuilder(frame, receiver, builderOf(receiver) + appended, appended.length);
+      }
+    );
+    addInterface(builder, { kind: 'class', cls });
+    linkOverrides(builder);
+  }
+}
+
+/** The characters of a `CharSequence` argument, which `append` writes as `null` for null. */
+export function charSequenceText(frame: Frame, value: Value): string {
+  if (value === undefined) return 'null';
+  if (value instanceof JavaString) return value.value;
+  return frame.runtime.invokeToString(frame, value as JavaObject)?.value ?? 'null';
 }
 
 function joinerOf(receiver: Value): Joiner {

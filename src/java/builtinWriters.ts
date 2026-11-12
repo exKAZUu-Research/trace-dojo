@@ -1,3 +1,4 @@
+import { linkOverrides } from './builtinCollectionSupport';
 import {
   BUFFER_SIZE,
   bufferedEncoderSink,
@@ -20,8 +21,8 @@ import { withLocaleFirst } from './builtinLocale';
 import { definePrintMethods } from './builtinPrint';
 import { defineFileOpeners } from './builtinReaders';
 import { standardChannelOf } from './builtins';
-import { addConstructor, addMethod, newString } from './builtinSupport';
-import { definePrintf } from './builtinText';
+import { addConstructor, addInterface, addMethod, newString } from './builtinSupport';
+import { charSequenceText, definePrintf } from './builtinText';
 import { type Frame, JavaThrow, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -53,7 +54,10 @@ export function defineWriters(context: IOContext, closeable: ClassInfo, flushabl
     writer.interfaces.push(parent);
     writer.supertypes.push(classType(parent));
   }
-  defineWriterMethods(writer, context.stringType, (method) => throwsIO(context, method), sinkWrite, true);
+  defineWriterMethods(writer, context, (method) => throwsIO(context, method), sinkWrite, true);
+  const appendable = classOf(context, 'Appendable');
+  addInterface(writer, classType(appendable));
+  linkOverrides(writer);
   const outputStreamWriter = context.registry.define('OutputStreamWriter', writer, 'java.io');
   addConstructor(outputStreamWriter, [outputStream.type], (frame, receiver, [stream]) => {
     writeSinks.set(receiver as JavaObject, new EncoderSink(sinkOf(frame, stream)));
@@ -87,12 +91,14 @@ function sinkWrite(frame: Frame, receiver: Value, text: string, kind: WriteKind)
 // code-gauge-allow functionNcss 36 -- One registration per builtin method, each a small native.
 function defineWriterMethods(
   cls: ClassInfo,
-  stringType: JavaType,
+  context: IOContext,
   declare: (method: MethodInfo) => MethodInfo,
   write: WriteText,
   withFlushAndClose: boolean,
   overrides: (name: string, parameterTypes: JavaType[]) => boolean = () => true
 ): void {
+  const { stringType } = context;
+  const charSequence = classOf(context, 'CharSequence');
   const add = (name: string, parameterTypes: JavaType[], returnType: JavaType, native: NativeMethod): void => {
     if (overrides(name, parameterTypes)) declare(addMethod(cls, name, parameterTypes, returnType, false, native));
   };
@@ -115,13 +121,18 @@ function defineWriterMethods(
     if (!(array instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
     write(frame, receiver, sliceChecked(frame, charsOf(frame, array), offset as number, length as number), 'chars');
   });
-  // `append` takes a CharSequence, which these programs pass as a String.
   add('append', [CHAR], cls.type, (frame, receiver, [code]) => {
     write(frame, receiver, charToString(code as number), 'char');
     return receiver;
   });
-  add('append', [stringType], cls.type, (frame, receiver, [value]) => {
-    write(frame, receiver, value instanceof JavaString ? value.value : 'null', 'string');
+  add('append', [charSequence.type], cls.type, (frame, receiver, [value]) => {
+    write(frame, receiver, charSequenceText(frame, value), 'string');
+    return receiver;
+  });
+  add('append', [charSequence.type, INT, INT], cls.type, (frame, receiver, [value, start, end]) => {
+    const sequence = value ?? new JavaString('null');
+    const part = frame.runtime.invokeVirtual(frame, charSequence, 'subSequence', sequence, [start, end]);
+    write(frame, receiver, charSequenceText(frame, part), 'string');
     return receiver;
   });
   if (!withFlushAndClose) return;
@@ -216,7 +227,7 @@ function defineStringWriter(context: IOContext, writer: ClassInfo): void {
   // StringWriter overrides its writes and flush without IOException, though not write(char[]) or close.
   defineWriterMethods(
     stringWriter,
-    context.stringType,
+    context,
     (method) => method,
     sinkWrite,
     false,
@@ -262,7 +273,7 @@ function definePrintWriter(context: IOContext, writer: ClassInfo, outputStream: 
   definePrintWriterConstructors(context, printWriter, writer, outputStream);
   defineWriterMethods(
     printWriter,
-    context.stringType,
+    context,
     (method) => method,
     (frame, receiver, text, kind) => printTo(frame, receiver, text, false, kind),
     false
