@@ -117,7 +117,7 @@ function renderTemplate(
   state: FieldState,
   depth: number
 ): string {
-  if (depth < 0) throw valueError('Max string recursion exceeded');
+  if (depth <= 0) throw valueError('Max string recursion exceeded');
   const chars = iterStr(template);
   let result = '';
   let index = 0;
