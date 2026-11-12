@@ -290,6 +290,9 @@ test.each([
   ['an unexpected indent after a syntax error', 'x = = 1\n    y = 2', 0],
   ['a decorated function indented too far', 'class A:\n    @staticmethod\n        def f():\n            pass', 2],
   ['a handler indented too little', 'try:\n    pass\n  except ValueError:\n    pass', 2],
+  ['a sole generator argument with a trailing comma', 'print(sum(i for i in [1, 2],))', 0],
+  ['a list comprehension with a comma after its iterable', 'x = [i for i in [1],]', 0],
+  ['a generator with a comma after its iterable', 'x = (i for i in [1],)', 0],
 ])('%s is a compile error', (_, source, row) => {
   const execution = executeProgram('python', source);
   expect(execution.kind).toBe('compileError');

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 541 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 544 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -309,6 +309,11 @@ export abstract class ExpressionConverter {
     const callee = this.expression(field(node, 'function'));
     const argumentsNode = field(node, 'arguments');
     if (argumentsNode.type === 'generator_expression') {
+      // The parser folds a trailing comma into the generator's last clause, which only ( ) around it would allow.
+      const lastClause = namedChildren(argumentsNode).at(-1);
+      if (lastClause && hasToken(lastClause, ',')) {
+        fail(rowOf(argumentsNode), 'ジェネレータ式を引数にするときは、それだけを書くか、( ) で囲んでください。');
+      }
       return {
         kind: 'call',
         callee,
@@ -478,7 +483,7 @@ export abstract class ExpressionConverter {
   // Comprehensions and lambdas --------------------------------------------------------------------------------------
 
   // code-gauge-allow functionNcss 37 -- Follows how CPython scopes each part of a comprehension.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Follows how CPython scopes each part of a comprehension.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Follows how CPython scopes each part of a comprehension.
   private comprehension(node: Node): Expression {
     const type =
       node.type === 'list_comprehension'
@@ -500,7 +505,9 @@ export abstract class ExpressionConverter {
       }
       if (hasToken(clause, 'async')) unsupported(clause, 'async for');
       const rights = fieldNodes(clause, 'right');
-      if (rights.length > 1) fail(rowOf(clause), '内包表記の in の後に複数の式を書くときは、( ) で囲んでください。');
+      if (rights.length > 1 || hasToken(clause, ',')) {
+        fail(rowOf(clause), '内包表記の in の後に複数の式を書くときは、( ) で囲んでください。');
+      }
       // The first iterable is evaluated in the enclosing scope, before the comprehension starts.
       this.context = index === 0 ? outer : { ...outer, scope };
       const iterable = this.expression(rights[0]);
