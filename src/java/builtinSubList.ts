@@ -1,4 +1,4 @@
-import { elementsOf, subListChecks } from './builtinCollectionSupport';
+import { subListChecks } from './builtinCollectionSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import type { ClassInfo } from './types';
 import type { JavaObject, Value } from './values';
@@ -25,7 +25,7 @@ export function createSubList(frame: Frame, cls: ClassInfo, list: JavaObject, st
     set: (_, property, value: Value) => writeElement(state, property, value),
     deleteProperty: (_, property) => {
       const index = arrayIndexOf(property);
-      if (index !== undefined && index < state.size) elementsOf(state.list)[state.start + index] = undefined;
+      if (index !== undefined && index < state.size) elementsOfList(state)[state.start + index] = undefined;
       return true;
     },
     has: (target, property) => {
@@ -52,7 +52,7 @@ export function createSubList(frame: Frame, cls: ClassInfo, list: JavaObject, st
 function readElement(state: SubListState, target: Value[], property: string | symbol): unknown {
   if (property === 'length') return state.size;
   const index = arrayIndexOf(property);
-  return index === undefined ? Reflect.get(target, property) : elementsOf(state.list)[state.start + index];
+  return index === undefined ? Reflect.get(target, property) : elementsOfList(state)[state.start + index];
 }
 
 /** Writes an element, or the length, which removes or inserts elements of the list at the view's end. */
@@ -64,12 +64,12 @@ function writeElement(state: SubListState, property: string | symbol, value: Val
   const index = arrayIndexOf(property);
   if (index === undefined) return false;
   if (index >= state.size) resize(state, index + 1);
-  elementsOf(state.list)[state.start + index] = value;
+  elementsOfList(state)[state.start + index] = value;
   return true;
 }
 
 function resize(state: SubListState, length: number): void {
-  const elements = elementsOf(state.list);
+  const elements = elementsOfList(state);
   if (length < state.size) elements.splice(state.start + length, state.size - length);
   else
     elements.splice(
@@ -83,4 +83,9 @@ function resize(state: SubListState, length: number): void {
 /** The index an array property names, or `undefined` for another property such as `length`. */
 function arrayIndexOf(property: string | symbol): number | undefined {
   return typeof property === 'string' && /^(?:0|[1-9]\d*)$/.test(property) ? Number(property) : undefined;
+}
+
+/** The list's elements, read without a nested view's check, which only Java operations on a view run. */
+function elementsOfList(state: SubListState): Value[] {
+  return state.list.elements as Value[];
 }

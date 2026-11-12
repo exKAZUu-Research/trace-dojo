@@ -4,6 +4,7 @@ import type { Context } from './builtinCollectionSupport';
 import {
   batchRemovalClasses,
   checkListIndex,
+  checkModifiable,
   checkPosition,
   classType,
   createIterator,
@@ -24,6 +25,8 @@ import {
   subListChecks,
   touch,
   unmodifiableClasses,
+  unmodifiableWrappers,
+  wrapUnmodifiable,
 } from './builtinCollectionSupport';
 import { addListIterators, defineListIterator } from './builtinListIterator';
 import { defineHashMap, defineSets } from './builtinMaps';
@@ -246,14 +249,15 @@ function defineSubListClasses(
     'AbstractList$'
   );
   fixedSizeClasses.add(subListClasses.fixedSize);
-  defaultRemoveClasses.add(subListClasses.fixedSize);
   subListClasses.immutable = defineRestrictedList(context, 'SubList', lists, () => true, 'ImmutableCollections$');
   unmodifiableClasses.add(subListClasses.immutable);
   immutableCollectionsLists.add(subListClasses.immutable);
 }
 
 /** The class of a view of a list of `cls`, whose JDK class decides how the view checks indexes and removes. */
-function subListClassOf(cls: ClassInfo): ClassInfo {
+function subListClassOf(listClass: ClassInfo): ClassInfo {
+  let cls = listClass;
+  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
   if (unmodifiableClasses.has(cls)) return subListClasses.immutable;
   if (fixedSizeClasses.has(cls)) return subListClasses.fixedSize;
   return cls.name === 'ArrayList' || cls === subListClasses.arrayList ? subListClasses.arrayList : subListClasses.other;
@@ -532,7 +536,7 @@ function defineArrayList(
     }
   );
   defineReadMethods(cls, element, context, itrClass, (frame, receiver, index) => {
-    if (hiddenName) throwBuiltin(frame, 'UnsupportedOperationException');
+    checkModifiable(frame, receiver, true);
     elementsOf(receiver).splice(index, 1);
     touch(receiver);
   });
@@ -584,9 +588,16 @@ function defineListAdditions(
       if (start < 0) throwBuiltin(frame, 'IndexOutOfBoundsException', `fromIndex = ${start}`);
       if (end > items.length) throwBuiltin(frame, 'IndexOutOfBoundsException', `toIndex = ${end}`);
       if (start > end) throwBuiltin(frame, 'IllegalArgumentException', `fromIndex(${start}) > toIndex(${end})`);
-      return createSubList(frame, subListClassOf(cls), receiver as JavaObject, start, end);
+      return subListOf(frame, receiver as JavaObject, start, end);
     }
   );
+}
+
+/** A view of `list`, which wraps a view of the backing list of an unmodifiable wrapper, as `UnmodifiableList` does. */
+function subListOf(frame: Frame, list: JavaObject, start: number, end: number): JavaObject {
+  if (!unmodifiableWrappers.has(list)) return createSubList(frame, subListClassOf(list.cls), list, start, end);
+  const backing = subListOf(frame, list.retained?.[0] as JavaObject, start, end);
+  return wrapUnmodifiable(frame.runtime.allocateObject(frame, list.cls), backing);
 }
 
 /** The methods that copy a list into an array. */

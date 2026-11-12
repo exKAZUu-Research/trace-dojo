@@ -794,3 +794,18 @@ test('a for statement records no step for an absent init or update', () => {
     { line: 7, vars: { i: 1, j: 1 } },
   ]);
 });
+
+test('a trace shows nested sublists whose list changed without running their checks', () => {
+  const program = `import java.util.*;
+class Main {
+  public static void main(String[] args) {
+    List<Integer> a = new ArrayList<>(List.of(1, 2, 3));
+    List<Integer> b = a.subList(0, 3).subList(1, 2).subList(0, 1);
+    a.add(4);
+    System.out.println("ok");
+  }
+}`;
+  const result = traceProgram('java', program, program);
+  expect(result.stdout).toBe('ok\n');
+  expect(result.uncaughtException).toBeUndefined();
+});

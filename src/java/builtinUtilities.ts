@@ -15,7 +15,7 @@ import {
   mapViewSources,
   sortedValues,
   subListChecks,
-  unmodifiableWrappers,
+  wrapUnmodifiable,
 } from './builtinCollectionSupport';
 import { createStore, NO_ENTRY } from './builtinMaps';
 import { stringify } from './builtins';
@@ -327,7 +327,10 @@ function defineCollectionViews(
   generic(['T'], (t) =>
     addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) => {
       const items = itemsOf(frame, list);
-      return wrap(createList(frame, unmodifiableListClass(collections, list as JavaObject), items), list as JavaObject);
+      return wrapUnmodifiable(
+        createList(frame, unmodifiableListClass(collections, list as JavaObject), items),
+        list as JavaObject
+      );
     })
   );
   for (const [owner, immutable, names] of [
@@ -349,7 +352,7 @@ function defineCollectionViews(
           // A map's view keeps its map's iterators, which traverse the entries they started with.
           const mapSource = mapViewSources.get(source);
           if (mapSource) mapViewSources.set(view, mapSource);
-          return wrap(view, source);
+          return wrapUnmodifiable(view, source);
         }
       )
     );
@@ -364,18 +367,6 @@ function defineCollectionViews(
   addMethod(cls, 'binarySearch', [readOnly(listClass, comparable), key], INT, true, (frame, _, [list, target]) =>
     binarySearch(frame, itemsOf(frame, list), target, compareNatural)
   ).typeParameters = [keyVariable];
-}
-
-/**
- * Makes `view` an unmodifiable wrapper of `source`, whose elements it shares: it follows the changes made to
- * `source`, so that its iterators fail fast on them, and keeps `source` alive.
- */
-function wrap(view: JavaObject, source: JavaObject): JavaObject {
-  Object.defineProperty(view, 'modCount', { get: () => source.modCount, set: () => {} });
-  if (source.elements) Object.defineProperty(view, 'elements', { get: () => source.elements, set: () => {} });
-  view.retained = [source];
-  unmodifiableWrappers.add(view);
-  return view;
 }
 
 /**

@@ -61,6 +61,8 @@ function removeThroughIterator(frame: Frame, receiver: Value): Value {
   if (defaultRemoveClasses.has(owner.cls) && !unmodifiableWrappers.has(owner)) {
     throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
   }
+  // A sublist's iterator is its list's ListItr, which checks its own state before the list rejects the removal.
+  if (subListChecks.has(owner) && state.removed) throwBuiltin(frame, 'IllegalStateException');
   checkModifiable(frame, owner, true);
   // Only the element the last next() returned may be removed, once.
   if (state.removed) throwBuiltin(frame, 'IllegalStateException');
@@ -223,6 +225,18 @@ export const bulkRemovalRepairs = new WeakMap<ClassInfo, (frame: Frame, receiver
 
 /** The `Collections.unmodifiableSet` and `unmodifiableMap` wrappers, whose iterators reject removal without a message. */
 export const unmodifiableWrappers = new WeakSet<JavaObject>();
+
+/**
+ * Makes `view` an unmodifiable wrapper of `source`, whose elements it shares: it follows the changes made to
+ * `source`, so that its iterators fail fast on them, and keeps `source` alive.
+ */
+export function wrapUnmodifiable(view: JavaObject, source: JavaObject): JavaObject {
+  Object.defineProperty(view, 'modCount', { get: () => source.modCount, set: () => {} });
+  if (source.elements) Object.defineProperty(view, 'elements', { get: () => source.elements, set: () => {} });
+  view.retained = [source];
+  unmodifiableWrappers.add(view);
+  return view;
+}
 
 /**
  * Throws `UnsupportedOperationException` for a change to a collection that rejects it, as every method that changes

@@ -111,6 +111,11 @@ export function checkAnnotations(root: Node, imports: readonly ImportDeclaration
     const name = (use.childForFieldName('name')?.text ?? '').replaceAll(/\s/g, '');
     const annotation = annotationInterfaceOf(name, declared, imported);
     if (!annotation) throw annotationError(use, `この採点環境には、アノテーション ${name} がありません。`);
+    // An annotation written as an element value annotates no program element, so neither targets nor places apply.
+    if (ELEMENT_VALUE_PARENTS.has(use.parent?.type ?? '')) {
+      checkElements(use, name, annotation.elements);
+      continue;
+    }
     const place = `${use.parent?.startIndex}:${name.split('.').at(-1)}`;
     if (written.has(place) && !annotation.isRepeatable) {
       throw annotationError(use, `アノテーション @${name} は同じ場所に 2 回付けられません。`);
@@ -119,6 +124,12 @@ export function checkAnnotations(root: Node, imports: readonly ImportDeclaration
     checkPlacement(use, name, annotation);
   }
 }
+
+const ELEMENT_VALUE_PARENTS: ReadonlySet<string> = new Set([
+  'annotation_argument_list',
+  'element_value_pair',
+  'element_value_array_initializer',
+]);
 
 /** The names of the annotation interfaces of java.lang.annotation that the imports bring in. */
 function importedMetaAnnotations(imports: readonly ImportDeclaration[]): ReadonlySet<string> {

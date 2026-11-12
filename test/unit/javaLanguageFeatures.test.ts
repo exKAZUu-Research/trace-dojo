@@ -1125,6 +1125,45 @@ class Main {
   }
 });
 
+test("Java's sublists remove through their iterators, keep unmodifiable wrappers, and annotations nest as element values, as the JDK does", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.io.*;
+import java.util.*;
+@interface Tag { String value(); }
+@interface Tags { Tag[] value(); }
+@interface One { Tag value(); }
+@interface Named { Tag tag(); }
+@Tags({@Tag("a"), @Tag("b")}) @One(@Tag("x")) @Named(tag = @Tag("y"))
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    List<Integer> a = new ArrayList<>(List.of(1, 2, 3));
+    Iterator<Integer> it = a.subList(0, 2).iterator(); it.next(); it.remove(); System.out.println(a);
+    List<Integer> l = new LinkedList<>(List.of(1, 2, 3));
+    Iterator<Integer> li = l.subList(0, 2).iterator(); li.next(); li.remove(); System.out.println(l);
+    List<Integer> u = Collections.unmodifiableList(new ArrayList<>(List.of(1, 2)));
+    List<Integer> ub = u.subList(0, 1);
+    System.out.println(ub.getClass().getName() + " " + (ub instanceof Serializable) + " " + ub);
+    List<Integer> ul = Collections.unmodifiableList(new LinkedList<>(List.of(1, 2)));
+    System.out.println(ul.subList(0, 1).getClass().getName() + " " + (ul.subList(0, 1) instanceof Serializable));
+    t("ubAdd", () -> ub.add(3));
+    Iterator<Integer> fi = Arrays.asList(1, 2).subList(0, 1).iterator();
+    t("fi1", () -> fi.remove()); fi.next(); t("fi2", () -> fi.remove());
+    t("fsRemoveIf", () -> Arrays.asList(1, 2).subList(0, 1).removeIf(x -> true));
+    List<Integer> r = new ArrayList<>(List.of(1, 2, 3));
+    List<Integer> nested = r.subList(0, 3).subList(1, 2);
+    r.add(4);
+    System.out.println("nested ok " + r);
+  }
+}`,
+      '[2, 3]\n[2, 3]\njava.util.Collections$UnmodifiableRandomAccessList true [1]\njava.util.Collections$UnmodifiableList true\nubAdd java.lang.UnsupportedOperationException\nfi1 java.lang.IllegalStateException\nfi2 java.lang.UnsupportedOperationException\nfsRemoveIf java.lang.UnsupportedOperationException\nnested ok [1, 2, 3, 4]\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
