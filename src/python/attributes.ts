@@ -3,7 +3,7 @@ import { isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { deleteDescriptor, isDataDescriptor, readDescriptor, writeDescriptor } from './descriptors';
 import { newMappingProxy } from './mappingProxy';
-import { metaclassFunction } from './metaclassFunctions';
+import { classDefault, metaclassFunction } from './metaclassFunctions';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import {
@@ -70,6 +70,8 @@ export function classAttribute(cls: PyClass, name: string): PyValue | undefined 
 
 /** A method or data descriptor of a class's metaclass, such as `mro()` or an enum's `__iter__`, bound to the class. */
 function metaclassAttribute(cls: PyClass, name: string): PyValue | undefined {
+  const fallback = classDefault(cls, name);
+  if (fallback !== undefined) return fallback;
   const metaclass = classOf(cls);
   const python = metaclassFunction(metaclass, name);
   if (python !== undefined) return bindValue(python, cls, metaclass);

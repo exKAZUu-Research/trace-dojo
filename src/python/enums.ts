@@ -2,7 +2,8 @@ import { pyFormat, pyRepr, pyStr } from './conversions';
 import { defineGetSet } from './descriptors';
 import { hashInt, identityHash, NATIVE_HASHES } from './hashing';
 import { unsupportedReceiver } from './libraryReceivers';
-import { registerMetaclassFunctions } from './metaclassFunctions';
+import { newMappingProxy } from './mappingProxy';
+import { registerClassDefaults, registerMetaclassFunctions } from './metaclassFunctions';
 import { importModule } from './modules';
 import { bindValue, callValue, enumMemberGenerator, getAttribute } from './objects';
 import { intEnumValue, keysEqual } from './operators';
@@ -13,6 +14,7 @@ import {
   classOf,
   defineMethod,
   intClass,
+  newDict,
   newList,
   newTuple,
   None,
@@ -80,6 +82,31 @@ export function registerEnumHooks(hooks: EnumHooks): void {
   hooksByRuntime.set(currentRuntime(), hooks);
 }
 
+/** The empty bookkeeping EnumType gives the base classes it builds, which the native Enum and IntEnum get per run. */
+const baseBookkeeping = new WeakMap<Runtime, Map<PyClass, Map<string, PyValue>>>();
+
+function enumBaseAttribute(cls: PyClass, name: string): PyValue | undefined {
+  const runtime = currentRuntime();
+  let byClass = baseBookkeeping.get(runtime);
+  if (!byClass) baseBookkeeping.set(runtime, (byClass = new Map()));
+  let attributes = byClass.get(cls);
+  if (!attributes) {
+    const memberMap = newDict();
+    attributes = new Map<string, PyValue>([
+      ['_member_names_', newList([])],
+      ['_member_map_', memberMap],
+      ['_value2member_map_', newDict()],
+      ['_hashable_values_', newList([])],
+      ['_unhashable_values_', newList([])],
+      ['_unhashable_values_map_', newDict()],
+      ['__members__', newMappingProxy(memberMap)],
+    ]);
+    byClass.set(cls, attributes);
+  }
+  return attributes.get(name);
+}
+
+for (const base of [enumClass, intEnumClass]) registerClassDefaults(base, (name) => enumBaseAttribute(base, name));
 registerMetaclassFunctions(enumTypeClass, (name) => enumHooks().methods.store.lookup(name)?.value);
 
 function enumHooks(): EnumHooks {
