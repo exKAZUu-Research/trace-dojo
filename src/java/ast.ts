@@ -395,6 +395,8 @@ export interface FieldAccess extends Span {
   kind: 'fieldAccess';
   /** `super` names the superclass view of `this`. */
   object: Expression | 'super';
+  /** The class before `.super` in `Outer.super.field`, whose instance's superclass view `super` names. */
+  superQualifier?: TypeSyntax;
   name: string;
 }
 

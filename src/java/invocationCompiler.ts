@@ -513,20 +513,12 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     syntax: TypeSyntax
   ): CallTarget {
     const type = this.resolveType(syntax);
-    const enclosing =
-      type.kind === 'class' && type.cls.kind !== 'interface'
-        ? this.outerInstanceValue(context, type.cls, true)
-        : undefined;
-    if (type.kind === 'class' && enclosing && type.cls.superclass) {
-      const owner = type.cls.superclass;
-      const receiver: CompiledValue = { ...enclosing, type: asSuper(thisTypeOf(type.cls), owner) ?? owner.type };
+    if (type.kind !== 'class' || type.cls.kind !== 'interface') {
+      const { superclass: owner, receiver } = this.qualifiedSuper(context, expression, syntax);
       const candidates = this.viewMethods(this.collectMethods(owner, expression.name), receiver.type);
       return { candidates, owner, receiver };
     }
-    if (type.kind === 'class' && type.cls.kind !== 'interface') {
-      return this.error(expression, `${typeName(type)}.super は、このクラスか外側のクラスにしか使えません。`);
-    }
-    if (type.kind !== 'class' || !context.cls.interfaces.includes(type.cls)) {
+    if (!context.cls.interfaces.includes(type.cls)) {
       return this.error(expression, `${typeName(type)}.super は、直接実装しているインターフェースにしか使えません。`);
     }
     const receiver: CompiledValue = {

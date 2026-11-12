@@ -1,15 +1,38 @@
 import type { Collections } from './builtinCollections';
+import { linkOverrides } from './builtinCollectionSupport';
 import { defineLocale } from './builtinLocale';
 import { type PrintWrite } from './builtinPrint';
 import { standardChannelOf, stringify } from './builtins';
-import { addConstructor, addMethod, newString, type Registry, requireString, text } from './builtinSupport';
+import {
+  addAbstractMethod,
+  addConstructor,
+  addInterface,
+  addMethod,
+  defineInterface,
+  newString,
+  type Registry,
+  requireString,
+  text,
+} from './builtinSupport';
 import { JAVA_WHITESPACE } from './builtinWrappers';
 import { formatText } from './javaFormatter';
 import { translateJavaRegex, UnsupportedRegexError } from './javaRegex';
 import { javaReplacer, ReplacementError } from './javaReplacement';
 import { encodable, type Frame, throwBuiltin } from './runtime';
 import { defineStringIdentity } from './stringIdentity';
-import { BOOLEAN, CHAR, type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG, VOID } from './types';
+import {
+  BOOLEAN,
+  CHAR,
+  type ClassInfo,
+  DOUBLE,
+  FLOAT,
+  INT,
+  type JavaType,
+  LONG,
+  type MethodInfo,
+  type NativeMethod,
+  VOID,
+} from './types';
 import { charCodeOf, charToString, JavaArray, JavaObject, JavaString, type Value } from './values';
 
 const LEADING_WHITESPACE = new RegExp(`^${JAVA_WHITESPACE}+`, 'u');
@@ -29,6 +52,10 @@ export function defineText(
   const objectArray: JavaType = { kind: 'array', element: objectType };
   // StringBuffer has StringBuilder's members, synchronized, which a single-threaded program cannot tell apart.
   for (const name of ['StringBuilder', 'StringBuffer']) defineStringBuilder(registry, objectClass, stringClass, name);
+  defineCharSequence(registry, [
+    stringClass,
+    ...['StringBuilder', 'StringBuffer'].map((name) => registry.classes.get(name) as ClassInfo),
+  ]);
   defineStringJoiner(registry, objectClass, stringClass.type);
   defineStringExtras(stringClass, collections);
   defineStringVariants(stringClass, objectClass);
@@ -92,6 +119,32 @@ interface Joiner {
 }
 
 const joiners = new WeakMap<JavaObject, Joiner>();
+
+/** `CharSequence`, which strings and string builders implement, its `isEmpty` a default method as in the JDK. */
+function defineCharSequence(registry: Registry, implementations: ClassInfo[]): void {
+  const cls = defineInterface(registry, 'CharSequence', 'java.lang');
+  addAbstractMethod(cls, 'length', [], INT);
+  addAbstractMethod(cls, 'charAt', [INT], CHAR);
+  addAbstractMethod(cls, 'subSequence', [INT, INT], cls.type);
+  addMethod(
+    cls,
+    'isEmpty',
+    [],
+    BOOLEAN,
+    false,
+    (frame, receiver) => frame.runtime.invokeVirtual(frame, cls, 'length', receiver, []) === 0
+  );
+  for (const implementation of implementations) {
+    const substring = implementation.methods.find(
+      (method) => method.name === 'substring' && method.parameterTypes.length === 2
+    ) as MethodInfo;
+    addMethod(implementation, 'subSequence', [INT, INT], cls.type, false, (frame, receiver, args) =>
+      (substring.native as NativeMethod)(frame, receiver, args)
+    );
+    addInterface(implementation, { kind: 'class', cls });
+    linkOverrides(implementation);
+  }
+}
 
 function joinerOf(receiver: Value): Joiner {
   return joiners.get(receiver as JavaObject) as Joiner;

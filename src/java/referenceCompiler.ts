@@ -1,4 +1,4 @@
-import type { Expression, PatternBinding, Span } from './ast';
+import type { Expression, PatternBinding, Span, TypeSyntax } from './ast';
 import { classObjectOfType, fitsElement, isReifiable, runtimeClassNameOf } from './builtinClass';
 import { boxedTypeOf } from './builtinWrappers';
 import {
@@ -216,10 +216,27 @@ export abstract class ReferenceCompiler extends CompilerBase {
   ): Reference {
     if (context.isStatic)
       this.noInstanceError(context, access, 'super', 'static メソッドの中では super を使えません。');
-    const superclass = context.cls.superclass as ClassInfo;
+    const { superclass, receiver } = access.superQualifier
+      ? this.qualifiedSuper(context, access, access.superQualifier)
+      : { superclass: context.cls.superclass as ClassInfo, receiver: superValue(context) };
     const field = this.findField(superclass, access.name);
     if (!field) return this.error(access, missingFieldMessage(superclass, access.name));
-    return notConstant(this.fieldReference(field, field.isStatic ? undefined : superValue(context)));
+    return notConstant(this.fieldReference(field, field.isStatic ? undefined : receiver));
+  }
+
+  /** The superclass of this class or of an enclosing class that `Outer.super` names, and that instance's view of it. */
+  protected qualifiedSuper(
+    context: MethodContext,
+    span: Span,
+    syntax: TypeSyntax
+  ): { superclass: ClassInfo; receiver: CompiledValue } {
+    const type = this.resolveType(syntax);
+    const outer = type.kind === 'class' ? this.outerInstanceValue(context, type.cls, true) : undefined;
+    if (type.kind !== 'class' || !outer || !type.cls.superclass) {
+      return this.error(span, `${typeName(type)}.super は、このクラスか外側のクラスにしか使えません。`);
+    }
+    const { superclass } = type.cls;
+    return { superclass, receiver: { ...outer, type: asSuper(thisTypeOf(type.cls), superclass) ?? superclass.type } };
   }
 
   /**

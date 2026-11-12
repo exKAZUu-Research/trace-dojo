@@ -274,14 +274,20 @@ function convertField(node: Node): FieldDeclaration {
   };
 }
 
+/** Converts the parameters but a receiver parameter such as `Main this`, which only documents the receiver's type. */
 function convertParameters(node: Node): Parameter[] {
-  const parameters = namedChildren(node);
+  const parameters = namedChildren(node).filter((parameter, index) => {
+    if (parameter.type !== 'receiver_parameter') return true;
+    if (index !== 0) {
+      throw new CompileError([{ row: parameter.startPosition.row, message: 'this は最初の引数にしか書けません。' }]);
+    }
+    return false;
+  });
   return parameters.map((parameter, index) => {
     if (parameter.type === 'spread_parameter') {
       if (index !== parameters.length - 1) throw varargsNotLastError(parameter);
       return convertVarargsParameter(parameter);
     }
-    if (parameter.type !== 'formal_parameter') unsupported(parameter, '受け取りパラメータ');
     const modifiers = convertModifiers(modifiersOf(parameter));
     const type = convertVariableType(parameter);
     const name = identifierOf(parameter, '名前のない引数');
@@ -315,7 +321,6 @@ function convertThrows(node: Node): TypeSyntax[] {
 }
 
 function convertMethod(node: Node): MethodDeclaration {
-  if (node.childForFieldName('dimensions')) unsupported(node, 'メソッド名の後ろの []');
   const typeNode = field(node, 'type');
   const body = node.childForFieldName('body');
   return {
@@ -323,7 +328,7 @@ function convertMethod(node: Node): MethodDeclaration {
     name: field(node, 'name').text,
     typeParameters: convertTypeParameters(node.childForFieldName('type_parameters')),
     modifiers: convertModifiers(modifiersOf(node)),
-    returnType: typeNode.type === 'void_type' ? undefined : convertType(typeNode),
+    returnType: typeNode.type === 'void_type' ? undefined : convertVariableType(node),
     parameters: convertParameters(field(node, 'parameters')),
     throwsTypes: convertThrows(node),
     body: body ? convertBlock(body) : undefined,

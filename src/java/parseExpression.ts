@@ -256,8 +256,11 @@ function convertFieldAccess(node: Node): Expression {
     if (!qualifier) return unsupported(node, '修飾された this');
     return { kind: 'this', qualifier, ...span(node) };
   }
-  if (node.children.filter((child) => child?.type === 'super').length > (object.type === 'super' ? 1 : 0))
-    unsupported(node, '修飾された super');
+  // `Outer.super.field` writes the type where the object goes and `super` after it.
+  if (node.children.some((child) => child?.type === 'super' && child.startIndex !== object.startIndex)) {
+    const superQualifier = expressionAsTypeSyntax(object) ?? unsupported(node, '修飾された super');
+    return { kind: 'fieldAccess', object: 'super', superQualifier, name: name.text, ...span(node) };
+  }
   return {
     kind: 'fieldAccess',
     object: object.type === 'super' ? 'super' : convertExpression(object),
