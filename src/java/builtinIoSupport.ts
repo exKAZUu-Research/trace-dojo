@@ -132,10 +132,10 @@ export const STANDARD_INPUT: ReadSource = {
   },
 };
 
-/** Where a writer or an output stream sends what it writes. */
 /** Which `write` overload wrote a text: one taking a string, an array of chars, or one char. */
 export type WriteKind = 'string' | 'chars' | 'char';
 
+/** Where a writer or an output stream sends what it writes. */
 export interface Sink {
   write(frame: Frame, text: string, kind?: WriteKind): void;
   flush(frame: Frame): void;
@@ -151,86 +151,111 @@ export function sinkOf(frame: Frame, value: Value): Sink {
 }
 
 /**
- * The size of the buffers of `BufferedWriter` and of the encoder of `OutputStreamWriter`. Their text reaches its
- * destination only when they fill up, flush, or close, so a program that never closes its writer loses its output,
- * as in Java. The encoder's buffer counts bytes, which these buffers count as characters, alike for ASCII text.
+ * The size of the buffers of `BufferedWriter` and of the encoder of `OutputStreamWriter`, whose text reaches its
+ * destination only when they pass it on, flush, or close, so a program that never closes its writer loses its
+ * output, as in Java.
  */
 export const BUFFER_SIZE = 8192;
 
-/** Holds what is written in a buffer of `capacity` characters until it fills or is flushed; a capacity of 0 holds nothing. */
-export class BufferedSink implements Sink {
-  private pending = '';
+/**
+ * A writer's stage, which passes on what is written until it is closed. The buffered stages port OpenJDK's
+ * algorithms, so that their text reaches the next stage when Java's does.
+ */
+export class DirectSink implements Sink {
+  protected pending = '';
   private isClosed = false;
 
-  /**
-   * @param isBufferedWriter Whether the buffer is a `BufferedWriter`'s, which treats each `write` overload as Java's
-   * does, rather than an encoder's, which takes every text in buffer-sized chunks.
-   */
-  constructor(
-    private readonly target: Sink,
-    private readonly capacity: number,
-    private readonly isBufferedWriter = false
-  ) {}
+  constructor(protected readonly target: Sink) {}
 
-  /**
-   * Fills the buffer, passing on each full buffer and keeping the rest: an encoder once more text comes, and a
-   * `BufferedWriter` as soon as a string fills it. A `BufferedWriter` passes on an array as large as its buffer at
-   * once, makes room for a smaller one, and passes on a full buffer only before the next char.
-   */
   write(frame: Frame, text: string, kind: WriteKind = 'string'): void {
     this.ensureOpen(frame);
-    if (this.capacity === 0) {
-      this.target.write(frame, text, kind);
-      return;
-    }
-    // The buffered text is a string the run builds, whatever capacity the program chose.
-    frame.runtime.allocateString(frame, Math.min(this.pending.length + text.length, this.capacity), text.length);
-    if (this.isBufferedWriter && kind !== 'string') {
-      if (kind === 'chars' && text.length >= this.capacity) {
-        this.drain(frame);
-        this.target.write(frame, text, 'chars');
-        return;
-      }
-      if (this.pending.length + text.length > this.capacity || this.pending.length >= this.capacity) this.drain(frame);
-      this.pending += text;
-      return;
-    }
-    for (let offset = 0; offset < text.length;) {
-      // An encoder passes on a full buffer only when more text comes, though a BufferedWriter does once it fills.
-      if (this.pending.length >= this.capacity) this.drain(frame);
-      const end = offset + this.capacity - this.pending.length;
-      this.pending += text.slice(offset, end);
-      offset = end;
-      if (this.isBufferedWriter && this.pending.length >= this.capacity) this.drain(frame);
-    }
+    this.target.write(frame, text, kind);
   }
 
   flush(frame: Frame): void {
     this.ensureOpen(frame);
-    this.drain(frame);
+    this.passOn(frame);
     this.target.flush(frame);
   }
 
   close(frame: Frame): void {
     if (this.isClosed) return;
     try {
-      this.drain(frame);
+      this.passOn(frame);
     } finally {
       this.isClosed = true;
       this.target.close(frame);
     }
   }
 
-  private ensureOpen(frame: Frame): void {
+  protected ensureOpen(frame: Frame): void {
     if (this.isClosed) throwBuiltin(frame, 'IOException', 'Stream closed');
   }
 
-  private drain(frame: Frame): void {
+  /** Adds text to the buffer, which is a string the run builds, whatever capacity the program chose. */
+  protected buffer(frame: Frame, text: string): void {
+    frame.runtime.allocateString(frame, this.pending.length + text.length, text.length);
+    this.pending += text;
+  }
+
+  protected passOn(frame: Frame): void {
     if (this.pending === '') return;
     const text = this.pending;
     this.pending = '';
     this.target.write(frame, text, 'chars');
   }
+}
+
+/** OpenJDK's `BufferedWriter`, whose `write` overloads fill its buffer of `capacity` chars by different rules. */
+export class BufferedWriterSink extends DirectSink {
+  constructor(
+    target: Sink,
+    private readonly capacity: number
+  ) {
+    super(target);
+  }
+
+  override write(frame: Frame, text: string, kind: WriteKind = 'string'): void {
+    this.ensureOpen(frame);
+    if (kind === 'char') {
+      if (this.pending.length >= this.capacity) this.passOn(frame);
+      this.buffer(frame, text);
+      return;
+    }
+    // An array as large as the buffer bypasses it.
+    if (kind === 'chars' && text.length >= this.capacity) {
+      this.passOn(frame);
+      this.target.write(frame, text, 'chars');
+      return;
+    }
+    for (let offset = 0; offset < text.length;) {
+      const end = offset + this.capacity - this.pending.length;
+      this.buffer(frame, text.slice(offset, end));
+      offset = end;
+      if (this.pending.length >= this.capacity) this.passOn(frame);
+    }
+  }
+}
+
+/**
+ * OpenJDK's `StreamEncoder`, which an `OutputStreamWriter` writes through, whose byte buffer passes on its bytes only
+ * when it overflows; these count chars, equal to the bytes of ASCII text, since files hold text.
+ */
+export class EncoderSink extends DirectSink {
+  override write(frame: Frame, text: string): void {
+    this.ensureOpen(frame);
+    for (let offset = 0; offset < text.length;) {
+      if (this.pending.length >= BUFFER_SIZE) this.passOn(frame);
+      const end = offset + BUFFER_SIZE - this.pending.length;
+      this.buffer(frame, text.slice(offset, end));
+      offset = end;
+    }
+  }
+}
+
+/** The stages of a writer that `BufferedWriter`, `PrintWriter`, or `Files` builds over an output stream. */
+export function bufferedEncoderSink(target: Sink): Sink {
+  return new BufferedWriterSink(new EncoderSink(target), BUFFER_SIZE);
 }
 
 export function fileSink(handle: FileHandle): Sink {

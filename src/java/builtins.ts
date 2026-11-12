@@ -8,6 +8,7 @@ import { defineFunctions, type Functions } from './builtinFunctions';
 import { defineFileIO, standardStreamsOf } from './builtinIo';
 import { defineMath } from './builtinMath';
 import { defineMisc } from './builtinMisc';
+import { definePrintMethods } from './builtinPrint';
 import { defineStreams } from './builtinStreams';
 import {
   addConstant,
@@ -346,9 +347,6 @@ function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableT
   });
 }
 
-/** Writes text that a print method formats, where `isLine` tells a `println`, `printf`, or `format` call. */
-export type PrintWrite = (frame: Frame, receiver: Value, text: string, isLine: boolean) => void;
-
 let standardError: JavaObject | undefined;
 
 /** The channel `System.out` or `System.err` writes to. */
@@ -373,38 +371,6 @@ function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: Ja
   defineArrayCopy(systemClass, objectClass.type);
   definePrintMethods(printStreamClass, stringType, objectClass.type, (frame, receiver, text) => {
     standardChannelOf(frame, receiver).write(encodable(text));
-  });
-}
-
-/** Defines `print` and `println` for each type of argument, which format the argument as `String.valueOf` does. */
-export function definePrintMethods(
-  cls: ClassInfo,
-  stringType: JavaType,
-  objectType: JavaType,
-  write: PrintWrite
-): void {
-  for (const [name, suffix] of [
-    ['print', ''],
-    ['println', '\n'],
-  ] as const) {
-    for (const type of [INT, LONG, FLOAT, DOUBLE, CHAR, BOOLEAN, stringType, objectType]) {
-      addMethod(cls, name, [type], VOID, false, (frame, receiver, [value]) => {
-        write(frame, receiver, `${stringify(frame, value, type)}${suffix}`, suffix !== '');
-      });
-    }
-    addMethod(cls, name, [CHAR_ARRAY], VOID, false, (frame, receiver, [value]) => {
-      if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
-      frame.runtime.scanString(value.values.length);
-      write(
-        frame,
-        receiver,
-        `${value.values.map((code) => charToString(code as number)).join('')}${suffix}`,
-        suffix !== ''
-      );
-    });
-  }
-  addMethod(cls, 'println', [], VOID, false, (frame, receiver) => {
-    write(frame, receiver, '\n', true);
   });
 }
 

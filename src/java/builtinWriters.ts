@@ -1,8 +1,11 @@
 import {
   BUFFER_SIZE,
-  BufferedSink,
+  bufferedEncoderSink,
+  BufferedWriterSink,
   classOf,
   classType,
+  DirectSink,
+  EncoderSink,
   fileSink,
   type IOContext,
   openFileWriter,
@@ -14,8 +17,9 @@ import {
   writeSinks,
 } from './builtinIoSupport';
 import { withLocaleFirst } from './builtinLocale';
+import { definePrintMethods } from './builtinPrint';
 import { defineFileOpeners } from './builtinReaders';
-import { definePrintMethods, standardChannelOf } from './builtins';
+import { standardChannelOf } from './builtins';
 import { addConstructor, addMethod, newString } from './builtinSupport';
 import { definePrintf } from './builtinText';
 import { type Frame, JavaThrow, throwBuiltin } from './runtime';
@@ -52,7 +56,7 @@ export function defineWriters(context: IOContext, closeable: ClassInfo, flushabl
   defineWriterMethods(writer, context.stringType, (method) => throwsIO(context, method), sinkWrite, true);
   const outputStreamWriter = context.registry.define('OutputStreamWriter', writer, 'java.io');
   addConstructor(outputStreamWriter, [outputStream.type], (frame, receiver, [stream]) => {
-    writeSinks.set(receiver as JavaObject, new BufferedSink(sinkOf(frame, stream), BUFFER_SIZE));
+    writeSinks.set(receiver as JavaObject, new EncoderSink(sinkOf(frame, stream)));
   });
   const fileWriter = context.registry.define('FileWriter', outputStreamWriter, 'java.io');
   defineFileOpeners(
@@ -60,7 +64,7 @@ export function defineWriters(context: IOContext, closeable: ClassInfo, flushabl
     fileWriter,
     { takesAppend: true, thrown: context.ioException },
     (frame, receiver, path, append) => {
-      const sink = new BufferedSink(fileSink(openFileWriter(frame, path, append)), BUFFER_SIZE);
+      const sink = new EncoderSink(fileSink(openFileWriter(frame, path, append)));
       writeSinks.set(receiver as JavaObject, sink);
     }
   );
@@ -184,7 +188,7 @@ function defineOutputStreams(context: IOContext, outputStream: ClassInfo): void 
     fileOutputStream,
     { takesAppend: true, thrown: classOf(context, 'FileNotFoundException') },
     (frame, receiver, path, append) => {
-      writeSinks.set(receiver as JavaObject, new BufferedSink(fileSink(openFileWriter(frame, path, append)), 0));
+      writeSinks.set(receiver as JavaObject, new DirectSink(fileSink(openFileWriter(frame, path, append))));
     }
   );
 }
@@ -231,7 +235,7 @@ function defineBufferedWriter(context: IOContext, writer: ClassInfo): void {
       if (size !== undefined && (size as number) <= 0) {
         throwBuiltin(frame, 'IllegalArgumentException', 'Buffer size <= 0');
       }
-      const sink = new BufferedSink(sinkOf(frame, inner), (size as number | undefined) ?? BUFFER_SIZE, true);
+      const sink = new BufferedWriterSink(sinkOf(frame, inner), (size as number | undefined) ?? BUFFER_SIZE);
       writeSinks.set(receiver as JavaObject, sink);
     });
   }
@@ -289,13 +293,13 @@ function definePrintWriterConstructors(
 ): void {
   for (const parameterTypes of [[writer.type], [writer.type, BOOLEAN]]) {
     addConstructor(printWriter, parameterTypes, (frame, receiver, [inner, autoFlush]) => {
-      startPrinting(receiver, new BufferedSink(sinkOf(frame, inner), 0), autoFlush);
+      startPrinting(receiver, new DirectSink(sinkOf(frame, inner)), autoFlush);
     });
   }
   // A PrintWriter of a stream encodes through a buffered writer, as Java's does.
   for (const parameterTypes of [[outputStream.type], [outputStream.type, BOOLEAN]]) {
     addConstructor(printWriter, parameterTypes, (frame, receiver, [stream, autoFlush]) => {
-      startPrinting(receiver, new BufferedSink(sinkOf(frame, stream), BUFFER_SIZE, true), autoFlush);
+      startPrinting(receiver, bufferedEncoderSink(sinkOf(frame, stream)), autoFlush);
     });
   }
   defineFileOpeners(
@@ -303,7 +307,7 @@ function definePrintWriterConstructors(
     printWriter,
     { takesAppend: false, thrown: classOf(context, 'FileNotFoundException') },
     (frame, receiver, path) => {
-      const sink = new BufferedSink(fileSink(openFileWriter(frame, path, false)), BUFFER_SIZE, true);
+      const sink = bufferedEncoderSink(fileSink(openFileWriter(frame, path, false)));
       startPrinting(receiver, sink, false);
     }
   );

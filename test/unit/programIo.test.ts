@@ -188,10 +188,16 @@ test.each([
     'abcd\nabcdefgh\n',
   ],
   [
+    'a PrintWriter that prints arrays and chars through a buffered writer',
+    "StringWriter s = new StringWriter(); PrintWriter p = new PrintWriter(new BufferedWriter(s, 4)); p.print(new char[] { 'a', 'b', 'c', 'd', 'e' }); System.out.println(s); for (char c : \"fghi\".toCharArray()) p.print(c); System.out.println(s); p.println(\"j\"); System.out.println(s);",
+    {},
+    'abcde\nabcde\nabcdefghi\n',
+  ],
+  [
     'a buffered writer given arrays and chars',
     "StringWriter s = new StringWriter(); BufferedWriter w = new BufferedWriter(s, 4); w.write(\"ab\"); w.write(new char[] { 'c', 'd', 'e', 'f', 'g' }); System.out.println(s); w.write(new char[] { 'h', 'i' }); w.write(new char[] { 'j', 'k', 'l' }); System.out.println(s); for (char c : \"mnop\".toCharArray()) w.write(c); System.out.println(s); w.write('q'); System.out.println(s);",
     {},
-    'abcdefg\nabcdefghi\nabcdefghijklm\nabcdefghijklm\n',
+    'abcdefg\nabcdefghijk\nabcdefghijklmno\nabcdefghijklmno\n',
   ],
   [
     'a file that a reader reads after the program rewrites it',
@@ -310,8 +316,12 @@ test('an unclosed FileWriter keeps only the full buffers it passed on', () => {
   expect(execution).toMatchObject({ kind: 'executed', finalFiles: { 'a.txt': 'x'.repeat(8192) } });
 });
 
-test('an unclosed FileWriter keeps an exactly full buffer to itself', () => {
-  const execution = executeProgram('java', main('FileWriter w = new FileWriter("a.txt"); w.write("x".repeat(8192));'));
+test.each([
+  ['FileWriter', 'new FileWriter("a.txt")'],
+  ['Files.newBufferedWriter', 'Files.newBufferedWriter(Path.of("a.txt"))'],
+  ['PrintWriter of a file', 'new PrintWriter("a.txt")'],
+])('an unclosed %s keeps an exactly full buffer to itself', (_, writer) => {
+  const execution = executeProgram('java', main(`Writer w = ${writer}; w.write("x".repeat(8192));`));
   expect(execution).toMatchObject({ kind: 'executed', finalFiles: { 'a.txt': '' } });
 });
 
@@ -437,6 +447,8 @@ test.each([
   ["require('fs').writeFileSync('new/', 'x')", "Error: EISDIR: illegal operation on a directory, open 'new/'"],
   ["require('fs').renameSync('d/f.txt', 'g/')", "Error: ENOTDIR: not a directory, rename 'd/f.txt' -> 'g/'"],
   ["require('fs').readFileSync('')", "Error: ENOENT: no such file or directory, open ''"],
+  ["require('fs').mkdirSync('new/.')", "Error: ENOENT: no such file or directory, mkdir 'new/.'"],
+  ["require('fs').mkdirSync('new/./')", "Error: ENOENT: no such file or directory, mkdir 'new/./'"],
   ["require('fs').rmdirSync('d/.')", "Error: EINVAL: invalid argument, rmdir 'd/.'"],
   ["require('fs').renameSync('d/.', 'e')", "Error: EINVAL: invalid argument, rename 'd/.' -> 'e'"],
   ["if (require('fs').existsSync('')) throw new Error('exists');", undefined],

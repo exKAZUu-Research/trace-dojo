@@ -3,8 +3,7 @@ import { itemsOf, javaHash } from './builtinCollectionSupport';
 import { newList } from './builtinCollectors';
 import {
   absolutePathOf,
-  BUFFER_SIZE,
-  BufferedSink,
+  bufferedEncoderSink,
   classOf,
   classType,
   defineIOInterface,
@@ -478,7 +477,7 @@ function defineFileWrites(context: IOContext, files: ClassInfo, { path }: FileTy
     bufferedWriter.type,
     (frame, _, [file, given]) => {
       const writer = frame.runtime.allocateObject(frame, bufferedWriter);
-      writeSinks.set(writer, new BufferedSink(openForWriting(frame, file, given), BUFFER_SIZE, true));
+      writeSinks.set(writer, bufferedEncoderSink(openForWriting(frame, file, given)));
       return writer;
     }
   ).isVarargs = true;

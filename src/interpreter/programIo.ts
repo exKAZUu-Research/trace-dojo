@@ -286,7 +286,7 @@ export class VirtualFileSystem {
     let firstCreated: string | undefined;
     for (const [index, name] of components.entries()) {
       const current = (steps.at(-1) as Step).directory;
-      if (name !== '..' && !current.children.has(name)) {
+      if (name !== '.' && name !== '..' && !current.children.has(name)) {
         current.children.set(name, new DirectoryNode());
         firstCreated ??= `/${[...steps.slice(1).map((step) => step.name), name].join('/')}`;
       }
@@ -393,8 +393,8 @@ export class VirtualFileSystem {
     for (const name of components) this.enter(steps, name, path);
     if (last === '..' && steps.length > 1) steps.pop();
     const names = steps.slice(1).map((step) => step.name);
-    if (last === undefined || last === '..') {
-      // The path names a directory it walked through, as `a/..` names the directory holding `a`.
+    if (last === undefined || last === '.' || last === '..') {
+      // The path names a directory it walked through, as `a/.` names `a` and `a/..` the directory holding `a`.
       const { directory, name } = steps.at(-1) as Step;
       return { parent: steps.at(-2)?.directory ?? this.root, name, node: directory, names, namesDirectory, dots };
     }
@@ -404,8 +404,12 @@ export class VirtualFileSystem {
     return { parent, name: last, node, names: [...names, last], namesDirectory, dots };
   }
 
-  /** Enters the directory a name names, or with `..` leaves the current one, which the root never does. */
+  /**
+   * Enters the directory a name names, stays with `.`, or with `..` leaves the current one, which the root never
+   * does.
+   */
   private enter(steps: Step[], name: string, path: string): void {
+    if (name === '.') return;
     if (name === '..') {
       if (steps.length > 1) steps.pop();
       return;
@@ -417,7 +421,7 @@ export class VirtualFileSystem {
   }
 
   /**
-   * The names of a path from the root, keeping `..` for the walk to resolve, and whether the path must name a
+   * The names of a path from the root, keeping `.` and `..` for the walk to resolve, and whether the path must name a
    * directory, while charging the run for reading the path and walking its names.
    */
   private componentsOf(path: string): {
@@ -428,7 +432,7 @@ export class VirtualFileSystem {
     this.budget.spend(Math.ceil((path.length + 1) / 16));
     const absolute = path.startsWith('/') ? path : `${WORKING_DIRECTORY}/${path}`;
     const raw = absolute.split('/');
-    const components = raw.filter((name) => name !== '' && name !== '.');
+    const components = raw.filter((name) => name !== '');
     this.budget.spend(components.length);
     const last = raw.at(-1);
     const dots = last === '.' || last === '..' ? last : undefined;

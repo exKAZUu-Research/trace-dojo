@@ -1,6 +1,7 @@
 import type { Collections } from './builtinCollections';
 import { defineLocale } from './builtinLocale';
-import { type PrintWrite, standardChannelOf, stringify } from './builtins';
+import { type PrintWrite } from './builtinPrint';
+import { standardChannelOf, stringify } from './builtins';
 import { addConstructor, addMethod, newString, type Registry, requireString, text } from './builtinSupport';
 import { JAVA_WHITESPACE } from './builtinWrappers';
 import { formatText } from './javaFormatter';

@@ -45,7 +45,7 @@ const scannerStates = new WeakMap<JavaObject, ScannerState>();
 
 /**
  * `java.util.Scanner`, which splits its input into tokens at whitespace. It reads numbers as an English locale does,
- * from ASCII digits only.
+ * with any one-char Unicode decimal digits.
  */
 export function defineScanner(context: IOContext, closeable: ClassInfo): void {
   const scanner = context.registry.define('Scanner', context.objectClass, 'java.util');
