@@ -24,6 +24,8 @@ export interface PromiseState {
 export interface Job {
   run: () => void;
   roots: unknown[];
+  /** What the job keeps reachable only until it starts, such as the result it hands to its continuation. */
+  queuedRoots?: unknown[];
 }
 
 interface Timer extends Job {
@@ -97,7 +99,10 @@ export class EventLoop {
 
   /** Everything the pending and running jobs keep reachable, which garbage collection must see. */
   roots(): unknown[] {
-    return [...this.running, ...this.microtasks, ...this.timers].flatMap((job) => job.roots);
+    return [
+      ...this.running.flatMap((job) => job.roots),
+      ...[...this.microtasks, ...this.timers].flatMap((job) => [...(job.queuedRoots ?? []), ...job.roots]),
+    ];
   }
 
   /** Runs a job, whose roots stay reachable while it runs, since what it resumes may depend on them. */
@@ -195,7 +200,7 @@ function settle(runtime: Runtime, promise: JsObject, status: 'fulfilled' | 'reje
 function queueReaction(runtime: Runtime, state: PromiseState, reaction: Reaction): void {
   const { result } = state;
   const run = state.status === 'fulfilled' ? reaction.onFulfilled : reaction.onRejected;
-  runtime.eventLoop.enqueue({ run: () => run(result), roots: [result, ...reaction.roots] });
+  runtime.eventLoop.enqueue({ run: () => run(result), roots: reaction.roots, queuedRoots: [result] });
 }
 
 /** Adds handlers to a promise, which run in a microtask once it settles, as `then` does without its new promise. */
@@ -295,10 +300,7 @@ export function startAsyncFunction(runtime: Runtime, frame: Frame, body: Steps<B
     // An async function's body suspends only at an `await`.
     if (!(result.value instanceof Awaiting)) throw new Error('An async function body suspended without an await');
     const awaited = result.value.value;
-    // The frame's live temporaries, not a copy, so values the body has since let go of are not kept.
-    awaitValue(runtime, awaited, [promise, frame.scope, frame.temporaries], (next) =>
-      inFrame(runtime, frame, () => advance(next))
-    );
+    awaitValue(runtime, awaited, [promise, frameRoots(frame)], (next) => inFrame(runtime, frame, () => advance(next)));
   };
   advance({ kind: 'next', value: undefined });
   return promise;
@@ -316,6 +318,14 @@ export function awaitValue(
     onRejected: (reason) => continueWith({ kind: 'throw', value: reason }),
     roots,
   });
+}
+
+/**
+ * The roots of a suspended body's frame, read when garbage collection runs rather than copied at the `await`, so
+ * that what the resumed body has since let go of is not kept.
+ */
+export function frameRoots(frame: Frame): () => unknown[] {
+  return () => [frame.scope, ...frame.temporaries];
 }
 
 /** Runs `run` with a suspended body's frame pushed again. */

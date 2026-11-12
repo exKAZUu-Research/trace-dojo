@@ -10,7 +10,7 @@ import {
 } from './generators';
 import { DONE } from './iteration';
 import type { ProtocolIteration } from './iteratorProtocol';
-import { awaitValue, newPromise, rejectPromise, resolvePromise } from './promises';
+import { awaitValue, frameRoots, newPromise, rejectPromise, resolvePromise } from './promises';
 import type { RealmBuilder } from './realm';
 import { iteratorResult, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
@@ -117,8 +117,7 @@ function advance(runtime: Runtime, state: AsyncGeneratorState, resume: Resume): 
   } finally {
     runtime.popFrame();
   }
-  // The frame's live temporaries, not a copy, so values the body has since let go of are not kept.
-  const roots = [state.object, frame.scope, frame.temporaries];
+  const roots = [state.object, frameRoots(frame)];
   if (result.done) {
     state.status = 'completed';
     answer(runtime, state, result.value?.kind === 'return' ? result.value.value : undefined, false, true);

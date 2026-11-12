@@ -21,9 +21,9 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
   let scanned = 0;
   while (pending.length > 0) {
     const item = pending.pop();
-    // A root may be a frame's live list of temporaries, whose current values are reachable.
-    if (Array.isArray(item)) {
-      for (const value of item) pending.push(value);
+    // A suspended frame's roots are read now, as the frame stands.
+    if (typeof item === 'function') {
+      for (const value of (item as () => unknown[])()) pending.push(value);
       continue;
     }
     if (!(item instanceof JsObject || item instanceof Scope) || visited.has(item)) continue;
