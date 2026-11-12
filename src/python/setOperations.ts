@@ -90,10 +90,15 @@ export function setIntersection(set: PySet, other: PyValue): PySet {
     return setLike(set, result);
   }
   const next = iterate(other);
+  // As set_intersection does, the reading stops once every element of the set has been found.
   for (let item = next(); item !== DONE; item = next()) {
     const hash = pyHash(item);
-    if (set.table.has(item, hash)) addToTable(result, item, hash);
-    else currentRuntime().spend();
+    if (!set.table.has(item, hash)) {
+      currentRuntime().spend();
+      continue;
+    }
+    addToTable(result, item, hash);
+    if (result.size >= set.table.size) break;
   }
   return setLike(set, result);
 }

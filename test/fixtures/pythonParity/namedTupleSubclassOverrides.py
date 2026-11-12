@@ -29,3 +29,19 @@ got = [flag, bool(failed), bool(Result(True, 0)), not failed, len(short), bool(S
 expected = ['no', False, True, True, 1, True, 7, {'ok': 'it'}, {'ok': 1, 'value': 2}, 2, True]
 if got != expected:
     raise AssertionError(got)
+
+# _replace maps the fields over the tuple's iteration, so an overriding __iter__ supplies the unchanged values.
+
+
+class Iterating(Base):
+    def __iter__(self):
+        return iter([10, 20])
+
+
+got = [Iterating(1, 2)._replace(ok=7)]
+try:
+    Short(1, 2)._replace(ok=7)
+except TypeError as error:
+    got.append(str(error))
+if got != [Iterating(7, 20), 'Expected 2 arguments, got 1']:
+    raise AssertionError(got)

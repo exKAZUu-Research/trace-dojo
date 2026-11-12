@@ -169,11 +169,15 @@ function defineNamedTupleMethods(cls: PyClass): void {
 function replaceFields(self: PyValue, kwargs: Kwargs): PyValue {
   const tuple = libraryReceiver(self, isNamedTuple, '_make', 'NamedTuple._replace');
   const remaining = new Map(kwargs);
-  const items = fieldsOf(tuple).map((field, index) => {
-    const value = remaining.get(field as string) ?? tuple.items[index];
-    remaining.delete(field as string);
-    return value;
-  });
+  // map() stops at the shorter of the fields and the tuple's iteration, which a subclass may override.
+  const values = toArray(tuple);
+  const items = fieldsOf(tuple)
+    .slice(0, values.length)
+    .map((field, index) => {
+      const value = remaining.get(field as string) ?? values[index];
+      remaining.delete(field as string);
+      return value;
+    });
   const result = callValue(getAttribute(tuple.cls, '_make'), [newList(items)]);
   if (remaining.size > 0) throw typeError(`Got unexpected field names: ${pyRepr(newList([...remaining.keys()]))}`);
   return result;
