@@ -259,9 +259,10 @@ export class Converter {
   }
 
   private namesOf(node: Node): NameSpan[] {
+    // The grammar also labels the commas between the names as names.
     return node
       .childrenForFieldName('name')
-      .filter((name) => name !== null)
+      .filter((name) => name?.isNamed === true)
       .map((name) => ({ ...spanOf(name), name: name.text }));
   }
 

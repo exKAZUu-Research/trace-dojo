@@ -153,6 +153,12 @@ test.each([
   if (execution.kind === 'compileError') expect(execution.diagnostics[0].row + 1).toBe(line);
 });
 
+test('a declaration may declare several names at once', () => {
+  const program =
+    'package main\n\nimport "fmt"\n\nconst x, y = 1, 2\n\nfunc main() {\n\tvar a, b int = 3, 4\n\tfmt.Println(x, y, a, b)\n}';
+  expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('syntax of later stages is rejected as unavailable', () => {
   const execution = executeProgram('go', goMain('\tch := make(chan int)\n\tfmt.Println(ch)'));
   expect(execution).toMatchObject({
