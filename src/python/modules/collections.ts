@@ -1,5 +1,5 @@
 import { mappingEntries } from '../callArguments';
-// code-gauge-allow-file fileNcss 478 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 480 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -659,6 +659,7 @@ orderedDictClass.mro = [orderedDictClass, ...dictClass.mro];
 orderedDictClass.module = 'collections';
 orderedDictClass.layout = { base: 'native' };
 orderedDictClass.construct = (cls, args, kwargs) => {
+  if (args.length > 1) throw typeError(`expected at most 1 argument, got ${args.length}`);
   const dict = new PyDict(cls, new DictStore(true));
   if (args.length > 0) updateDict(dict, args[0]);
   for (const [key, value] of kwargs ?? []) dict.store.set(key, value);

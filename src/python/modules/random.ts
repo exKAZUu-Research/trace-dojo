@@ -7,7 +7,7 @@ import { defineUnsupportedAttributes } from '../descriptors';
 import { pyHash } from '../hashing';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
-import { type ArgStyle, argument } from '../nativeArgs';
+import { type ArgStyle, argument, bindPythonArgs, pythonSignature } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import {
   bindValue,
@@ -337,12 +337,11 @@ const randomClass = builtinClass('Random');
 randomClass.module = 'random';
 randomClass.dict.set('__module__', 'random');
 randomClass.dict.set('VERSION', 3n);
+const RANDOM_INIT = pythonSignature('Random.__init__', 'self, x=None');
 randomClass.construct = (cls, args, kwargs) => {
-  if (args.length > 1) {
-    throw typeError(`Random.__init__() takes from 1 to 2 positional arguments but ${args.length + 1} were given`);
-  }
+  const [, seed] = bindPythonArgs(RANDOM_INIT, [cls, ...args], kwargs);
   const generator = new MersenneTwister();
-  generator.initByArray(seedKey(argument(args, kwargs, 0, 'x')));
+  generator.initByArray(seedKey(seed));
   return new PyOpaque(cls, 'Random', generator);
 };
 
