@@ -197,7 +197,6 @@ function bounds(
   start: PyValue | undefined,
   end: PyValue | undefined
 ): { length: number; from: number; to: number } {
-  currentRuntime().scan(text.length);
   const length = strLength(text);
   const { start: from, stop: to } = sliceIndices(new PySlice(sliceClass, start ?? None, end ?? None, None), length);
   const isBeyond = start !== undefined && start !== None && toIndex(start) > BigInt(length);

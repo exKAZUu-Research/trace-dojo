@@ -42,6 +42,7 @@ export function hasAt(text: string, needle: string, offset: number): boolean {
 /** The UTF-16 offset of the code point at `index`, or of the end of the text for an index at or past its end. */
 export function unitOffset(text: string, index: number): number {
   if (!hasSurrogates(text)) return Math.min(index, text.length);
+  currentRuntime().scan(index);
   let offset = 0;
   for (let point = 0; point < index && offset < text.length; point++) offset += isPairAt(text, offset) ? 2 : 1;
   return offset;
@@ -50,6 +51,7 @@ export function unitOffset(text: string, index: number): number {
 /** The index of the code point that starts at the UTF-16 offset `offset`. */
 export function pointIndex(text: string, offset: number): number {
   if (!hasSurrogates(text)) return offset;
+  currentRuntime().scan(offset);
   let index = 0;
   for (let unit = 0; unit < offset; unit += isPairAt(text, unit) ? 2 : 1) index++;
   return index;
