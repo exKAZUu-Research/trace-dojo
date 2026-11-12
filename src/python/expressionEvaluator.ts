@@ -118,7 +118,7 @@ export class ExpressionEvaluator {
         return this.compare(expression, frame);
       }
       case 'lambda': {
-        return this.createFunction(expression.fn, frame, []);
+        return this.createFunction(expression.fn, frame);
       }
       case 'namedExpression': {
         const value = this.evaluate(expression.value, frame);
@@ -500,16 +500,36 @@ export class ExpressionEvaluator {
 
   // Functions -------------------------------------------------------------------------------------------------------
 
-  /** Creates a function object, evaluating its defaults in the defining frame. */
-  createFunction(def: FunctionDef, frame: Frame, decorators: PyValue[]): PyValue {
-    const defaults: PyValue[] = [];
-    const keywordDefaults = new Map<string, PyValue>();
-    for (const param of def.params) {
-      if (!param.default) continue;
-      const value = this.evaluate(param.default, frame);
-      if (param.kind === 'keywordOnly') keywordDefaults.set(param.name, value);
-      else defaults.push(value);
-    }
+  /**
+   * Creates a function object, evaluating its decorators and defaults in the defining frame, which holds each of them
+   * as a temporary until the function exists, so that a step taken meanwhile still sees the turtles they reference.
+   */
+  createFunction(def: FunctionDef, frame: Frame): PyValue {
+    return this.withTemporaries(frame, () => {
+      const decorators = def.decorators.map((decorator) => this.held(frame, this.evaluate(decorator, frame)));
+      const defaults: PyValue[] = [];
+      const keywordDefaults = new Map<string, PyValue>();
+      for (const param of def.params) {
+        if (!param.default) continue;
+        const value = this.held(frame, this.evaluate(param.default, frame));
+        if (param.kind === 'keywordOnly') keywordDefaults.set(param.name, value);
+        else defaults.push(value);
+      }
+      return this.decorate(this.newFunction(def, frame, defaults, keywordDefaults), decorators);
+    });
+  }
+
+  private held(frame: Frame, value: PyValue): PyValue {
+    frame.temporaries.push(value);
+    return value;
+  }
+
+  private newFunction(
+    def: FunctionDef,
+    frame: Frame,
+    defaults: PyValue[],
+    keywordDefaults: Map<string, PyValue>
+  ): PyFunction {
     const closure = new Map<string, PyCell>();
     for (const name of def.scope.frees) {
       let cell = frame.cells.get(name);
@@ -531,6 +551,10 @@ export class ExpressionEvaluator {
     if (def.returns || def.params.some((param) => param.annotation)) fn.definingFrame = frame;
     fn.module = moduleNameOf(frame);
     this.runtime.allocate(2);
+    return fn;
+  }
+
+  private decorate(fn: PyFunction, decorators: PyValue[]): PyValue {
     let result: PyValue = fn;
     for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
     return result;

@@ -148,8 +148,7 @@ export class Evaluator extends ExpressionEvaluator {
         throw this.raise(statement, frame);
       }
       case 'functionDef': {
-        const decorators = statement.fn.decorators.map((decorator) => this.evaluate(decorator, frame));
-        this.storeName(statement.binding, this.createFunction(statement.fn, frame, decorators), frame);
+        this.storeName(statement.binding, this.createFunction(statement.fn, frame), frame);
         return undefined;
       }
       case 'classDef': {

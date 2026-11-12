@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { executeProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 test('a program that draws reports its final board and the turtles still reachable', () => {
   const execution = executeProgram(
@@ -421,4 +421,18 @@ for name, listed in names:
 if dir(1) != sorted(dir(int)) or '__dict__' in dir(object()):
     raise ValueError('dir')`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each([
+  ['a default', 'def draw(t=Turtle(), count=n()):\n    t.forward()\ndraw()'],
+  ['a keyword-only default', 'def draw(*, t=Turtle(), count=n()):\n    t.forward()\ndraw()'],
+  [
+    'a decorator argument',
+    'def keep(t):\n    def deco(f):\n        f.t = t\n        return f\n    return deco\n@keep(Turtle())\n@keep(n())\ndef g():\n    pass\ng.t.forward()',
+  ],
+])('a turtle created for %s stays on every step while later defaults and decorators run', (_name, body) => {
+  const program = `def n():\n    x = 2\n    return x\n${body}`;
+  const trace = traceProgram('python', program, program);
+  expect(trace.traceItems.slice(1).map(({ turtles }) => turtles.length)).not.toContain(0);
+  expect(trace.finalTurtles).toHaveLength(1);
 });
