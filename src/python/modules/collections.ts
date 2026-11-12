@@ -1,5 +1,5 @@
 import { mappingEntries } from '../callArguments';
-// code-gauge-allow-file fileNcss 496 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 497 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -29,6 +29,7 @@ import { newGenericAlias } from '../typeHints';
 import {
   builtinClass,
   classOf,
+  defineMethod,
   dictClass,
   iteratorClass,
   newDict,
@@ -58,6 +59,7 @@ import {
 import { COLLECTIONS_SOURCE } from './collectionsSource';
 import { comparedReceiver, counterReceiver, inPlaceReceiver, superError } from './counterReceivers';
 import { makeNamedTupleClass, namedtupleFunction } from './namedtuple';
+import { updateOrderedDict } from './orderedDictUpdate';
 
 // deque -------------------------------------------------------------------------------------------------------------
 
@@ -682,8 +684,7 @@ orderedDictClass.layout = { base: 'native' };
 orderedDictClass.construct = (cls, args, kwargs) => {
   if (args.length > 1) throw typeError(`expected at most 1 argument, got ${args.length}`);
   const dict = new PyDict(cls, new DictStore(true));
-  if (args.length > 0) updateDict(dict, args[0]);
-  for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
+  updateOrderedDict(dict, args, kwargs);
   return dict;
 };
 redeclareMethods(orderedDictClass, dictClass, [
@@ -693,10 +694,13 @@ redeclareMethods(orderedDictClass, dictClass, [
   'keys',
   'pop',
   'setdefault',
-  'update',
   'values',
   '__reversed__',
 ]);
+defineMethod(orderedDictClass, 'update', (self, args, kwargs) => {
+  updateOrderedDict(self, args, kwargs);
+  return None;
+});
 method(orderedDictClass, '__repr__', 'none', 0, 0, (self) => {
   const dict = self as PyDict;
   if (dict.store.size === 0) return 'OrderedDict()';
