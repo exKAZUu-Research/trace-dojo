@@ -166,6 +166,17 @@ function createImmutableSet(frame: Frame, cls: ClassInfo, values: Value[]): Java
   return set;
 }
 
+/**
+ * An empty or one-element set (`[element]`) or map (`[key, value]`), as `Collections.emptySet`, `singleton`,
+ * `emptyMap`, and `singletonMap` make it, which may hold null.
+ */
+function createFixedStore(frame: Frame, cls: ClassInfo, entry?: [key: Value, value?: Value]): JavaObject {
+  const object = frame.runtime.allocateObject(frame, cls);
+  createStore(object);
+  if (entry) putEntry(frame, object, entry[0], false, entry[1]);
+  return object;
+}
+
 /** A map of the keys and values that alternate in `args`, as `Map.of` makes it. */
 function createImmutableMap(frame: Frame, cls: ClassInfo, args: Value[]): JavaObject {
   const map = frame.runtime.allocateObject(frame, cls);
@@ -293,8 +304,23 @@ function defineCollectionViews(
     )
   );
   generic(['T'], (t) =>
+    addMethod(cls, 'emptySet', [], classOf(setClass, t), true, (frame) =>
+      createFixedStore(frame, collections.immutableSet)
+    )
+  );
+  generic(['T'], (t) =>
     addMethod(cls, 'singleton', [t], classOf(setClass, t), true, (frame, _, [value]) =>
-      createImmutableSet(frame, collections.immutableSet, [value])
+      createFixedStore(frame, collections.immutableSet, [value])
+    )
+  );
+  generic(['K', 'V'], (k, v) =>
+    addMethod(cls, 'emptyMap', [], classOf(mapClass, k, v), true, (frame) =>
+      createFixedStore(frame, collections.immutableMap)
+    )
+  );
+  generic(['K', 'V'], (k, v) =>
+    addMethod(cls, 'singletonMap', [k, v], classOf(mapClass, k, v), true, (frame, _, [key, value]) =>
+      createFixedStore(frame, collections.immutableMap, [key, value])
     )
   );
   generic(['T'], (t) =>

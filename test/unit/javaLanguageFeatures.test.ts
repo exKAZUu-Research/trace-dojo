@@ -874,6 +874,26 @@ public class Main {
   }
 });
 
+test("Java's Collections give empty and one-element sets and maps, which may hold null and reject changes", () => {
+  const program = `import java.util.*;
+public class Main {
+  public static void main(String[] args) {
+    System.out.println(Collections.singleton(5) + " " + Collections.singletonMap("k", 1) + " " + Collections.emptyMap() + " " + Collections.emptySet());
+    try { Collections.singleton(1).add(2); } catch (UnsupportedOperationException e) { System.out.println("UOE"); }
+    try { Collections.<String, Integer>emptyMap().put("a", 1); } catch (UnsupportedOperationException e) { System.out.println("UOE2"); }
+    Set<String> withNull = Collections.singleton(null);
+    Map<String, Integer> nullValue = Collections.singletonMap(null, null);
+    System.out.println(withNull + " " + withNull.contains(null) + " " + nullValue + " " + nullValue.containsKey(null) + " " + Collections.emptySet().contains(1) + " " + Collections.emptyMap().get("x") + " " + Collections.emptySet().size());
+    Map<String, List<Integer>> m = new HashMap<>(Collections.singletonMap("a", List.of(1)));
+    System.out.println(m + " " + Collections.emptyMap().equals(Map.of()) + " " + Collections.singleton(3).equals(Set.of(3)));
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[5] {k=1} {} []\nUOE\nUOE2\n[null] true {null=null} true false null 0\n{a=[1]} true true\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
