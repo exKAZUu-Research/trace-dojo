@@ -92,8 +92,21 @@ export class Runtime {
 
   // Budget ----------------------------------------------------------------------------------------------------------
 
+  /** How many builds that charge nothing are running; the run itself stays installed for them. */
+  private freeBuilds = 0;
+
+  /** Builds a value at no charge; see the function of the same name in runtimeContext. */
+  withoutCharge<T>(build: () => T): T {
+    this.freeBuilds++;
+    try {
+      return build();
+    } finally {
+      this.freeBuilds--;
+    }
+  }
+
   spend(cost = 1): void {
-    this.budget.spend(cost);
+    if (this.freeBuilds === 0) this.budget.spend(cost);
   }
 
   scan(length: number): void {
@@ -107,6 +120,7 @@ export class Runtime {
 
   /** Charges storage about to be created. Storage it refuses is not charged, so a program may catch the error. */
   allocate(count: number): void {
+    if (this.freeBuilds > 0) return;
     this.ensureRoom(count);
     this.slots += count;
     this.spend(Math.ceil(count / 64));

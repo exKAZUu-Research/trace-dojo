@@ -51,13 +51,7 @@ export function asPythonError(error: unknown): unknown {
  * that reports the limit, which charging would raise again without end.
  */
 export function withoutCharge<T>(build: () => T): T {
-  const running = current;
-  current = undefined;
-  try {
-    return build();
-  } finally {
-    current = running;
-  }
+  return current ? current.withoutCharge(build) : build();
 }
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
