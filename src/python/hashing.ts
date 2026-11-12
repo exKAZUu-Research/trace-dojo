@@ -92,8 +92,14 @@ function shuffleBits(hash: bigint): bigint {
 }
 
 function hashFrozenset(set: PySet): bigint {
+  set.hash ??= computeFrozensetHash(set);
+  return set.hash;
+}
+
+function computeFrozensetHash(set: PySet): bigint {
   let hash = 0n;
   const { table } = set;
+  chargeScan(table.capacity);
   for (const slot of table.slots()) hash ^= shuffleBits(slot === undefined ? 0n : slot.hash & MASK64);
   if ((BigInt(table.capacity - table.fill) & 1n) === 1n) hash ^= shuffleBits(0n);
   if ((BigInt(table.fill - table.used) & 1n) === 1n) hash ^= shuffleBits(MASK64);

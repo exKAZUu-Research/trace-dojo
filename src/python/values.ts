@@ -299,6 +299,9 @@ export class PyDict extends PyObject {
 }
 
 export class PySet extends PyObject {
+  /** The hash of a frozenset, which cannot change, once something hashed it, as CPython keeps it. */
+  hash?: bigint;
+
   constructor(
     cls: PyClass,
     public table: SetTable
