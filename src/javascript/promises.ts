@@ -40,6 +40,8 @@ interface Timer extends Job {
 export class EventLoop {
   private readonly microtasks: Job[] = [];
   private readonly timers: Timer[] = [];
+  /** The jobs running now, innermost last. */
+  private readonly running: Job[] = [];
   private readonly rejections = new Set<JsObject>();
   private now = 0;
   /** The timer whose callback is running, which clearing stops from running again. */
@@ -86,23 +88,33 @@ export class EventLoop {
       if (!timer) return;
       this.now = timer.time;
       this.runningTimer = timer;
-      timer.run();
+      this.runJob(timer);
       if (this.runningTimer && timer.interval !== undefined)
         this.timers.push({ ...timer, time: this.now + timer.interval });
       this.runningTimer = undefined;
     }
   }
 
-  /** Everything the pending jobs and promises keep reachable, which garbage collection must see. */
+  /** Everything the pending and running jobs keep reachable, which garbage collection must see. */
   roots(): unknown[] {
-    return [...this.microtasks, ...this.timers].flatMap((job) => job.roots);
+    return [...this.running, ...this.microtasks, ...this.timers].flatMap((job) => job.roots);
+  }
+
+  /** Runs a job, whose roots stay reachable while it runs, since what it resumes may depend on them. */
+  private runJob(job: Job): void {
+    this.running.push(job);
+    try {
+      job.run();
+    } finally {
+      this.running.pop();
+    }
   }
 
   private drainMicrotasks(): void {
     const { runtime } = this;
     for (let job = this.microtasks.shift(); job; job = this.microtasks.shift()) {
       runtime.spend();
-      job.run();
+      this.runJob(job);
     }
     // A rejection without a handler once the microtasks are done ends the program, as in Node.js.
     for (const promise of this.rejections) throw new JsThrow((promise.promise as PromiseState).result);
