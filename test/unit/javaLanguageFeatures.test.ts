@@ -383,6 +383,35 @@ public class Main {
   });
 });
 
+test('Java offers primitive functional interfaces, Predicate factories, and utilities that compute as the JDK does', () => {
+  const program = `import java.util.*;
+import java.util.function.*;
+import java.util.stream.*;
+enum Op { A { }, B }
+public class Main {
+  public static void main(String[] args) {
+    IntSupplier supplier = () -> 3;
+    LongPredicate big = x -> x > 2;
+    IntPredicate even = x -> x % 2 == 0;
+    ObjIntConsumer<String> show = (s, i) -> System.out.print(s + i + " ");
+    show.accept("x", supplier.getAsInt());
+    System.out.println(big.negate().test(3) + " " + even.and(x -> x > 2).test(4) + " " + Predicate.isEqual("a").test("a") + " " + Predicate.not(Predicate.isEqual("a")).test("a"));
+    List<Integer> dst = new ArrayList<>(List.of(0, 0, 0));
+    Collections.copy(dst, List.of(1, 2));
+    System.out.println(dst + " " + Collections.singleton(5));
+    System.out.println(Integer.compareUnsigned(-1, 1) + " " + Integer.toUnsignedLong(-1) + " " + Integer.rotateLeft(1, 33) + " " + Integer.decode("-0x10") + " " + Integer.decode("010") + " " + Character.charCount(0x1F600));
+    try { Integer.decode("0x-1"); } catch (NumberFormatException e) { System.out.println(e.getMessage()); }
+    System.out.println(Stream.of(1e16, 1.0, 1.0, -1e16).collect(Collectors.summingDouble(x -> x)) + " " + Stream.of(1e16, 1.0, 1.0, -1e16).collect(Collectors.averagingDouble(x -> x)));
+    System.out.println(Op.A.getDeclaringClass() + " " + Op.B.getDeclaringClass());
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'x3 false true true false\n[1, 2, 0] [5]\n1 4294967295 2 -16 8 2\nSign character in wrong position\n2.0 0.5\nclass Op class Op\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

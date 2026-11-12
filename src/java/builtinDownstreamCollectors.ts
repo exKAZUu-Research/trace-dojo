@@ -180,20 +180,50 @@ function defineNumericCollectors(
       ([t]) => ({ parameters: [classType(fn(iface), superOf(t))], result: collectorOf(t, ANY, resultClass.type) }),
       (frame, _, [mapper]) =>
         create(frame, {
-          supply: () => ({ sum: 0, count: 0 }),
+          supply: (): NumericSum => ({ sum: 0, compensation: 0, simpleSum: 0, count: 0 }),
           accumulate: (accumulateFrame, container, value) => {
-            const state = container as { sum: number; count: number };
+            const state = container as NumericSum;
             const number = callFunction(accumulateFrame, fn(iface), mapper, [value]) as number;
-            state.sum = resultClass === integerClass ? toInt32(state.sum + number) : state.sum + number;
+            if (iface === 'ToIntFunction') {
+              state.sum = resultClass === integerClass ? toInt32(state.sum + number) : state.sum + number;
+            } else {
+              addWithCompensation(state, number);
+            }
             state.count++;
           },
           finish: (finishFrame, container) => {
-            const { sum, count } = container as { sum: number; count: number };
-            return box(finishFrame, resultClass, average ? (count === 0 ? 0 : sum / count) : sum);
+            const state = container as NumericSum;
+            const sum = iface === 'ToIntFunction' ? state.sum : compensatedSum(state);
+            return box(finishFrame, resultClass, average ? (state.count === 0 ? 0 : sum / state.count) : sum);
           },
         })
     );
   }
+}
+
+/** A running sum, of doubles with the compensation for lost low-order bits that the JDK's Kahan summation keeps. */
+interface NumericSum {
+  sum: number;
+  compensation: number;
+  simpleSum: number;
+  count: number;
+}
+
+/** Adds as `Collectors.sumWithCompensation` does. */
+function addWithCompensation(state: NumericSum, value: number): void {
+  const corrected = value - state.compensation;
+  const sum = state.sum + corrected;
+  state.compensation = sum - state.sum - corrected;
+  state.sum = sum;
+  state.simpleSum += value;
+}
+
+/** The sum as `Collectors.computeFinalSum` gives it, which keeps an infinite sum that the compensation makes NaN. */
+function compensatedSum(state: NumericSum): number {
+  const sum = state.sum - state.compensation;
+  return Number.isNaN(sum) && !Number.isFinite(state.simpleSum) && !Number.isNaN(state.simpleSum)
+    ? state.simpleSum
+    : sum;
 }
 
 /** The collector functions behind a collector object, which only the builtin collectors have. */

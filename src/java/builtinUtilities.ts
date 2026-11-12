@@ -287,6 +287,11 @@ function defineCollectionViews(
     )
   );
   generic(['T'], (t) =>
+    addMethod(cls, 'singleton', [t], classOf(setClass, t), true, (frame, _, [value]) =>
+      createImmutableSet(frame, collections.immutableSet, [value])
+    )
+  );
+  generic(['T'], (t) =>
     addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) =>
       wrap(
         createList(
@@ -715,6 +720,27 @@ function defineCollectionsClass(
         }
       }
       [values[i as number], values[j as number]] = [values[j as number], values[i as number]];
+    }
+  );
+  addGenericStatic(
+    cls,
+    'copy',
+    ['T'],
+    objectType,
+    (element) => ({
+      parameterTypes: [
+        classOf(collections.listClass, { kind: 'wildcard', bound: element, isSuper: true }),
+        readOnly(collections.listClass, element),
+      ],
+      returnType: VOID,
+    }),
+    (frame, _, [dest, src]) => {
+      const values = itemsOf(frame, src);
+      const size = frame.runtime.invokeVirtual(frame, collections.collectionClass, 'size', dest, []) as number;
+      if (values.length > size) throwBuiltin(frame, 'IndexOutOfBoundsException', 'Source does not fit in dest');
+      for (const [index, value] of values.entries()) {
+        frame.runtime.invokeVirtual(frame, collections.listClass, 'set', dest, [index, value]);
+      }
     }
   );
   addGenericStatic(

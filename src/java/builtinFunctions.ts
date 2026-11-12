@@ -1,5 +1,5 @@
 import { removeAllOf, removeMatching } from './builtinBulkRemoval';
-import { type Collections, compareNatural, itemsOf, putEntry } from './builtinCollections';
+import { type Collections, compareNatural, itemsOf, javaEquals, putEntry } from './builtinCollections';
 import { checkModifiable, forEachLiveEntry, mapViewSources, sortedValues } from './builtinCollectionSupport';
 import { defineKeyComparators } from './builtinComparators';
 import { defineMapRemappings, putComputed, startComputing, unchanging } from './builtinMapComputing';
@@ -152,7 +152,18 @@ export function defineFunctions(
   const toDouble = defineFunctional(context, 'ToDoubleFunction', pkg, ['T'], 'applyAsDouble', (t) => [[t], DOUBLE]);
   const toLong = defineFunctional(context, 'ToLongFunction', pkg, ['T'], 'applyAsLong', (t) => [[t], LONG]);
   defineFunctional(context, 'IntFunction', pkg, ['R'], 'apply', (r) => [[INT], r]);
-  defineFunctional(context, 'IntPredicate', pkg, [], 'test', () => [[INT], BOOLEAN]);
+  for (const [prefix, type] of [
+    ['Int', INT],
+    ['Long', LONG],
+    ['Double', DOUBLE],
+  ] as const) {
+    definePredicateDefaults(
+      defineFunctional(context, `${prefix}Predicate`, pkg, [], 'test', () => [[type], BOOLEAN]).cls
+    );
+    defineFunctional(context, `${prefix}Supplier`, pkg, [], `getAs${prefix}`, () => [[], type]);
+    defineFunctional(context, `Obj${prefix}Consumer`, pkg, ['T'], 'accept', (t) => [[t, type], VOID]);
+  }
+  defineFunctional(context, 'BooleanSupplier', pkg, [], 'getAsBoolean', () => [[], BOOLEAN]);
   defineFunctional(context, 'IntUnaryOperator', pkg, [], 'applyAsInt', () => [[INT], INT]);
   defineFunctional(context, 'IntBinaryOperator', pkg, [], 'applyAsInt', () => [[INT, INT], INT]);
   defineFunctional(context, 'IntConsumer', pkg, [], 'accept', () => [[INT], VOID]);
@@ -180,6 +191,7 @@ export function defineFunctions(
     context.objectType
   );
   definePredicateDefaults(predicate.cls, predicate.variables[0]);
+  definePredicateFactories(predicate.cls, context.objectType);
   defineCompositions(context, { fn, biFunction, consumer }, { unary, binary, comparator });
   defineCollectionDefaults(context, collections, {
     consumer: consumer.cls,
@@ -384,27 +396,50 @@ function defineThenComparing(
   }
 }
 
-function definePredicateDefaults(cls: ClassInfo, t: JavaType): void {
-  const predicateOf = classType(cls, t);
+/** `negate`, `and`, and `or` of `Predicate<T>` or, without `t`, of a primitive predicate such as `IntPredicate`. */
+function definePredicateDefaults(cls: ClassInfo, t?: JavaType): void {
+  const predicateOf = t ? classType(cls, t) : cls.type;
+  const otherType = t ? classType(cls, superOf(t)) : cls.type;
   const test = (frame: Frame, predicate: Value, value: Value): boolean =>
     callFunction(frame, cls, predicate, [value]) === true;
   addMethod(cls, 'negate', [], predicateOf, false, (frame, receiver) =>
     functionObject(frame, cls, (callFrame, [value]) => !test(callFrame, receiver, value))
   );
-  addMethod(cls, 'and', [classType(cls, superOf(t))], predicateOf, false, (frame, receiver, [other]) =>
+  addMethod(cls, 'and', [otherType], predicateOf, false, (frame, receiver, [other]) =>
     functionObject(
       frame,
       cls,
       (callFrame, [value]) => test(callFrame, receiver, value) && test(callFrame, other, value)
     )
   );
-  addMethod(cls, 'or', [classType(cls, superOf(t))], predicateOf, false, (frame, receiver, [other]) =>
+  addMethod(cls, 'or', [otherType], predicateOf, false, (frame, receiver, [other]) =>
     functionObject(
       frame,
       cls,
       (callFrame, [value]) => test(callFrame, receiver, value) || test(callFrame, other, value)
     )
   );
+}
+
+/** `Predicate.isEqual` and `Predicate.not`. */
+function definePredicateFactories(cls: ClassInfo, objectType: JavaType): void {
+  const element: TypeVariable = { name: 'T', bounds: [objectType] };
+  const predicateOf = classType(cls, typeOf(element));
+  addMethod(cls, 'isEqual', [objectType], predicateOf, true, (frame, _, [target]) =>
+    functionObject(frame, cls, (callFrame, [value]) => javaEquals(callFrame, target, value))
+  ).typeParameters = [element];
+  const negated: TypeVariable = { name: 'T', bounds: [objectType] };
+  addMethod(
+    cls,
+    'not',
+    [classType(cls, superOf(typeOf(negated)))],
+    classType(cls, typeOf(negated)),
+    true,
+    (frame, _, [target]) => {
+      if (target === undefined) throwBuiltin(frame, 'NullPointerException');
+      return functionObject(frame, cls, (callFrame, [value]) => callFunction(callFrame, cls, target, [value]) !== true);
+    }
+  ).typeParameters = [negated];
 }
 
 interface Functional {
