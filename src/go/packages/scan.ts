@@ -3,12 +3,9 @@ import { newError } from '../errorValues';
 import { decodeRune, encodeRune } from '../literals';
 import { type Type, typeString, underlying } from '../types';
 import { Complex, type Iface, Pointer, type Value } from '../values';
-import { EOF } from './io';
+import { EOF, ERR_UNEXPECTED_EOF } from './io';
 import { STRCONV_PACKAGE } from './strconv';
 import { byteSlice } from './support';
-
-/** `io.ErrUnexpectedEOF`, which a format that wants more input than there is reports. */
-export const ERR_UNEXPECTED_EOF = newError('unexpected EOF');
 
 const END = -1;
 const HUGE_WIDTH = 1 << 30;
