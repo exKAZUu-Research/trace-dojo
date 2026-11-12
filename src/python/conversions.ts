@@ -259,7 +259,7 @@ function fieldValue(
       throw valueError('cannot switch from manual field specification to automatic field numbering');
     }
     state.mode = 'auto';
-    return positional(args, state.auto++);
+    return positional(args, BigInt(state.auto++));
   }
   const index = fieldIndex(name);
   if (index !== undefined) {
@@ -267,7 +267,7 @@ function fieldValue(
       throw valueError('cannot switch from automatic field numbering to manual field specification');
     }
     state.mode = 'manual';
-    return positional(args, Number(index));
+    return positional(args, index);
   }
   return kwargs(name);
 }
@@ -288,11 +288,11 @@ function convertField(value: PyValue, conversion: string): PyValue {
   throw valueError(`Unknown conversion specifier ${conversion}`);
 }
 
-function positional(args: readonly PyValue[], index: number): PyValue {
-  if (index >= args.length) {
+function positional(args: readonly PyValue[], index: bigint): PyValue {
+  if (index >= BigInt(args.length)) {
     throw currentRuntime().indexError(`Replacement index ${index} out of range for positional args tuple`);
   }
-  return args[index];
+  return args[Number(index)];
 }
 
 export function isStringLike(value: PyValue): value is string {
