@@ -201,7 +201,11 @@ function regExpArgument(runtime: Runtime, value: Value, flags: string): RegExpOb
   return newRegExp(runtime, value === undefined ? '(?:)' : runtime.toString(value), flags) as RegExpObject;
 }
 
-/** Replaces the matches of a regular expression, calling `replacement` for each when it is a function. */
+/**
+ * Replaces the matches of a regular expression, calling `replacement` for each when it is a function. As in
+ * JavaScript, every match is found first, which settles `lastIndex` before any replacement function runs, and the
+ * result is built match by match within the string length limit.
+ */
 export function replaceWithRegExp(
   { runtime, callRow }: NativeCall,
   text: string,
@@ -212,21 +216,101 @@ export function replaceWithRegExp(
   if (all && !object.regexp.global) {
     return runtime.throwError('TypeError', 'String.prototype.replaceAll called with a non-global RegExp argument');
   }
-  const replaceValue = isCallable(replacement) ? undefined : runtime.toString(replacement);
-  return withHostRegExp(runtime, object, (regexp) => {
-    const result =
-      replaceValue === undefined
-        ? text.replace(regexp, (...parts: unknown[]) => {
-            // The host passes the groups object last only when the expression names a group.
-            const hasGroups = typeof parts.at(-1) === 'object';
-            const args = (hasGroups ? parts.slice(0, -1) : parts) as Value[];
-            if (hasGroups) args.push(groupsObject(runtime, parts.at(-1) as Record<string, Value>));
-            return runtime.toString(runtime.call(replacement, undefined, args, callRow));
-          })
-        : text.replace(regexp, replaceValue);
-    runtime.buildString(result.length);
-    return result;
+  const template = isCallable(replacement) ? undefined : runtime.toString(replacement);
+  runtime.scan(text.length);
+  const matches = withHostRegExp(runtime, object, (regexp): RegExpExecArray[] => {
+    if (!regexp.global) {
+      const match = regexp.exec(text);
+      return match ? [match] : [];
+    }
+    regexp.lastIndex = 0;
+    // The host's matchAll steps over empty matches as JavaScript's replace does, and leaves lastIndex at 0.
+    return [...text.matchAll(regexp)];
   });
+  let result = '';
+  let position = 0;
+  for (const match of matches) {
+    runtime.spend();
+    const [matched] = match;
+    const captures = match.slice(1);
+    const inserted =
+      template === undefined
+        ? runtime.toString(
+            runtime.call(
+              replacement,
+              undefined,
+              [matched, ...captures, match.index, text, ...(match.groups ? [groupsObject(runtime, match.groups)] : [])],
+              callRow
+            )
+          )
+        : substitution(template, matched, text, match.index, captures, match.groups);
+    const part = text.slice(position, match.index) + inserted;
+    runtime.extendString(result.length + part.length, part.length);
+    result += part;
+    position = match.index + matched.length;
+  }
+  const suffix = text.slice(position);
+  runtime.extendString(result.length + suffix.length, suffix.length);
+  return result + suffix;
+}
+
+/** Expands a replacement template for one match as the spec's GetSubstitution does: `$&`, `$1`, `$<name>`, and so on. */
+function substitution(
+  template: string,
+  matched: string,
+  text: string,
+  position: number,
+  captures: (string | undefined)[],
+  groups: Record<string, string | undefined> | undefined
+): string {
+  let result = '';
+  for (let index = 0; index < template.length; index++) {
+    const character = template[index];
+    const next = template[index + 1] as string | undefined;
+    if (character !== '$' || next === undefined) {
+      result += character;
+      continue;
+    }
+    const expansion = dollarExpansion(template, index, matched, text, position, captures, groups);
+    if (expansion) {
+      result += expansion.text;
+      index += expansion.length - 1;
+    } else {
+      result += '$';
+    }
+  }
+  return result;
+}
+
+function dollarExpansion(
+  template: string,
+  index: number,
+  matched: string,
+  text: string,
+  position: number,
+  captures: (string | undefined)[],
+  groups: Record<string, string | undefined> | undefined
+): { text: string; length: number } | undefined {
+  const next = template[index + 1];
+  if (next === '$') return { text: '$', length: 2 };
+  if (next === '&') return { text: matched, length: 2 };
+  if (next === '`') return { text: text.slice(0, position), length: 2 };
+  if (next === "'") return { text: text.slice(position + matched.length), length: 2 };
+  if (next === '<') {
+    if (groups === undefined) return undefined;
+    const close = template.indexOf('>', index + 2);
+    if (close === -1) return undefined;
+    return { text: groups[template.slice(index + 2, close)] ?? '', length: close - index + 1 };
+  }
+  if (!/\d/.test(next)) return undefined;
+  // Two digits name a capture when there is one of that number, else the first digit does.
+  const twoDigits = /^\d\d$/.test(template.slice(index + 1, index + 3))
+    ? Number(template.slice(index + 1, index + 3))
+    : 0;
+  if (twoDigits >= 1 && twoDigits <= captures.length) return { text: captures[twoDigits - 1] ?? '', length: 3 };
+  const oneDigit = Number(next);
+  if (oneDigit >= 1 && oneDigit <= captures.length) return { text: captures[oneDigit - 1] ?? '', length: 2 };
+  return undefined;
 }
 
 /** The regular expression object a value is, if it is one. */

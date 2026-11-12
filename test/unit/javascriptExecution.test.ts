@@ -76,6 +76,13 @@ test.each([
   ],
   ['new.target outside functions', 'console.log(new.target);', 0, 'new.target は関数の中にしか書けません。'],
   ['a legacy octal number', 'const n = 017;', 0, '数値「017」は、この採点環境では使えません。'],
+  ['a using declaration at the top level', 'using x = null;', 0, 'using 宣言はプログラムの一番外側には書けません。'],
+  [
+    'a using declaration directly in a case',
+    'switch (1) {\n  case 1:\n    using x = null;\n}',
+    2,
+    'using 宣言は case の中に直接は書けません。{ } で囲んでください。',
+  ],
   ['import', "import x from 'x';", 0, 'import や export は、この採点環境では使えません。'],
   ['a syntax error', 'const t = new Turtle(;', 0, '「)」が足りません。'],
   ['try without catch or finally', 'try {\n  console.log(1);\n}', 0, '書き方に誤りがあります。'],
@@ -798,6 +805,63 @@ console.log(Object.fromEntries([['a', 1], ['b', 2]]), Object.groupBy([1, 2, 3], 
 console.log(Object.setPrototypeOf({ n: 'x' }, { hi() { return 'hi ' + this.n; } }).hi(), Object.isSealed(Object.seal({ a: 1 })));
 console.log((123.456).toPrecision(4), (0.00012).toPrecision(1), (12345).toExponential(2), 'Å'.normalize('NFD').length);
 console.log(Math.fround(5.5), Math.clz32(1), Math.imul(3, 4), Math.expm1(0), Math.log1p(0), Math.sinh(0), Math.cosh(0), Math.tanh(0));`,
+  ],
+  [
+    'format placeholders with BigInts and symbols',
+    `console.log('%i', 7n); console.log('%d items', 3n); console.log('%d|%i|%f|%s', Symbol('s'), Symbol('t'), Symbol('u'), Symbol('v'));
+console.log('%s|%s', 5n, 0n, -0); console.log('%f', 5n, '%d', -0); console.log('%d|%i|%f|%s', {}, {}, {}, -0);`,
+  ],
+  [
+    'optional chains, holes, and templates around await',
+    `{
+async function f(a) { return a?.b(await 1).c; }
+async function g(a) { return [a?.b(await 2).c(), a?.b(await 3).c ?? 'fallback', a?.(await 4).x, (a?.b)?.(await 5)]; }
+(async () => { console.log(await f(null), await g(null), await f({ b: (x) => ({ c: x }) })); })();
+}
+{
+(async () => {
+  const a = [, await 1]; console.log(0 in a, a);
+  const o = { [Symbol.toPrimitive]() { console.log('coerce'); return 'A'; } };
+  console.log(\`\${o}\${await (async () => { console.log('awaited'); return 'B'; })()}\`);
+  function f(...args) { return args.length; } console.log(f(await 1, ...[2, 3]));
+})();
+}`,
+  ],
+  [
+    'regular expression replacement callbacks and templates',
+    `const re = /a/g; re.lastIndex = 1;
+console.log('xaxa'.replace(re, (m) => { console.log(re.lastIndex); re.lastIndex = 20; return 'x'; }), re.lastIndex);
+const y = /a/y; y.lastIndex = 1; console.log('aa'.replace(y, (m) => String(y.lastIndex)), y.lastIndex);
+console.log('John Smith'.replace(/(\\w+)\\s(\\w+)/, '$2 $1 $$ $& $\` $\\' $3 $10 $01 $<x>'), 'abc'.replace(/(?<x>b)/, '[$<x>][$<y>][$<x]'));
+console.log('a1b2c3d4e5f6g7h8i9j0k'.replace(/(a)(1)(b)(2)(c)(3)(d)(4)(e)(5)(f)/, '$11|$10|$1$0|$12'), 'aaa'.replace(/a*?/g, '-'), 'x'.replace(/(y)?x/, '[$1]'));
+console.log('abc'.replace(/(?<n>b)/, (...args) => JSON.stringify(args)));
+try { const s = 'a'.repeat(100000); console.log(s.replace(/a/g, s).length); } catch (e) { console.log(e.name, e.message); }`,
+  ],
+  [
+    'overridden iterators and passed-through results',
+    `{
+const a = [1, 2]; a[Symbol.iterator] = function* () { yield 9; }; console.log([...a]); console.log([...[1, 2]]);
+const b = [3, 4]; b[Symbol.iterator] = undefined; try { [...b]; } catch (e) { console.log(e.constructor.name); }
+const g = (function* () { yield 1; yield 2; })(); g.next = () => ({ done: true }); console.log([...g]);
+const it = [5, 6].values(); it.return = () => { console.log('ret'); return {}; }; for (const v of it) break;
+}
+{
+const r={done:false,get value(){console.log("value");return 3}};const it={ [Symbol.iterator](){return {next(){return r}}}};function* f(){yield* it} let x=f().next();console.log(x===r);console.log("after");console.log(x.value); const y = { get [Symbol.asyncIterator]() { console.log("get"); return function(){ return {next(){return Promise.resolve({done:true})}}} } }; (async()=>{ for await (const v of y) {} })();
+}`,
+  ],
+  [
+    'promise combinators over lazy iterables',
+    `const a = { get then() { console.log('then'); return undefined; } };
+const it = { *[Symbol.iterator]() { yield a; console.log('next'); yield 2; } };
+Promise.all(it).then((v) => console.log('all', v.length));
+const twice = { then(resolve) { resolve(1); resolve(2); } };
+Promise.all([twice, 3]).then((v) => console.log(v));
+Promise.allSettled([]).then((v) => console.log('empty', v)); Promise.any([]).catch((e) => console.log(e.constructor.name, e.errors));
+Promise.race([]).then(() => console.log('never'));`,
+  ],
+  [
+    'await using with a sync disposer',
+    `async function f(){ { await using x = { [Symbol.dispose](){ console.log("dispose"); return new Promise(()=>{}); } }; } console.log("after"); } f();`,
   ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({

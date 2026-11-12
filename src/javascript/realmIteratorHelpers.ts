@@ -58,7 +58,7 @@ export function defineIteratorHelpers(builder: RealmBuilder): void {
 /** A builtin iterator prototype whose `return()` closes the iteration, as an iterator helper's does. */
 function defineClosingPrototype(builder: RealmBuilder, tag: string): JsObject {
   const prototype = defineHostIteratorPrototype(builder, tag);
-  builder.method(prototype, 'return', 0, ({ runtime, thisValue }) => {
+  const returnMethod = builder.method(prototype, 'return', 0, ({ runtime, thisValue }) => {
     const iterator = thisValue instanceof JsObject ? thisValue.hostIterator : undefined;
     if (!iterator) {
       return runtime.throwError(
@@ -69,6 +69,7 @@ function defineClosingPrototype(builder: RealmBuilder, tag: string): JsObject {
     iterator.close?.();
     return iteratorResult(runtime, undefined, true);
   });
+  builder.realm.hostIteratorMethods.add(returnMethod);
   return prototype;
 }
 

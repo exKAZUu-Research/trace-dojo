@@ -1,4 +1,4 @@
-import { Awaiting, GeneratorReturn, type Resume, resumedValue, type Steps } from './generators';
+import { Awaiting, DelegatedResult, GeneratorReturn, type Resume, resumedValue, type Steps } from './generators';
 import { awaitValue, newPromise, rejectPromise, resolvePromise } from './promises';
 import { iteratorResult, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
@@ -28,7 +28,7 @@ export function asyncIteratorOf(runtime: Runtime, iterable: Value): ProtocolIter
   if (factory !== undefined && factory !== null) {
     return iterationOf(
       runtime,
-      iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.asyncIterator),
+      iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.asyncIterator, factory),
       (result) => result
     );
   }
@@ -51,22 +51,26 @@ export function* delegateYield(runtime: Runtime, iterable: Value, isAsync: boole
     if (resume.kind === 'next') {
       request = iteration.next(resume.value);
     } else if (resume.kind === 'throw') {
-      if (!iteration.throw) {
-        if (iteration.return) checkResult(runtime, yield* settle(iteration.return()));
+      const throwMethod = iteration.throw;
+      if (!throwMethod) {
+        const close = iteration.return;
+        if (close) checkResult(runtime, yield* settle(close()));
         return runtime.throwError('TypeError', "The iterator does not provide a 'throw' method.");
       }
-      request = iteration.throw(resume.value);
+      request = throwMethod(resume.value);
     } else {
-      if (!iteration.return) throw new GeneratorReturn(yield* settle(resume.value));
-      request = iteration.return(resume.value);
+      const close = iteration.return;
+      if (!close) throw new GeneratorReturn(yield* settle(resume.value));
+      request = close(resume.value);
     }
     const result = checkResult(runtime, yield* settle(request));
-    const value = runtime.get(result, 'value');
     if (toBoolean(runtime.get(result, 'done'))) {
+      const value = runtime.get(result, 'value');
       if (resume.kind === 'return') throw new GeneratorReturn(value);
       return value;
     }
-    resume = yield value;
+    // A sync generator passes the delegate's result through as it is; an async one yields its value.
+    resume = isAsync ? yield runtime.get(result, 'value') : yield new DelegatedResult(result);
   }
 }
 
@@ -75,8 +79,13 @@ function checkResult(runtime: Runtime, result: Value): JsObject {
   return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
 }
 
-function iteratorObject(runtime: Runtime, iterable: Value, key: symbol): JsObject {
-  const factory = iterable === undefined || iterable === null ? undefined : runtime.get(iterable, key);
+/** Calls the method under `key` to get an iterator, reading the method unless the caller has already read it. */
+function iteratorObject(
+  runtime: Runtime,
+  iterable: Value,
+  key: symbol,
+  factory = iterable === undefined || iterable === null ? undefined : runtime.get(iterable, key)
+): JsObject {
   if (!isCallable(factory)) {
     const what = key === WELL_KNOWN_SYMBOLS.iterator ? 'iterable' : 'async iterable';
     return runtime.throwError('TypeError', `${runtime.describe(iterable)} is not ${what}`);

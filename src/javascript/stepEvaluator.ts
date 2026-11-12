@@ -3,7 +3,17 @@ import { type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import { defineAccessor, ExpressionEvaluator, isLogicalOperator, shortCircuits } from './expressionEvaluator';
 import { Awaiting, GeneratorReturn, resumedValue, type Steps } from './generators';
 import { delegateYield } from './iteratorProtocol';
-import { appendAll, isCallable, isObject, JsFunction, type JsObject, toBoolean, type Value } from './values';
+import {
+  appendAll,
+  type Element,
+  HOLE,
+  isCallable,
+  isObject,
+  JsFunction,
+  type JsObject,
+  toBoolean,
+  type Value,
+} from './values';
 
 /**
  * Evaluates the expressions of a generator body that contain a `yield`, suspending at each `yield` with the value it
@@ -59,10 +69,10 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         return this.unaryValue(expression.operator, yield* this.evaluateSteps(expression.argument));
       }
       case 'template': {
-        const values = yield* this.elementSteps(expression.expressions);
+        // Each substitution becomes a string before the next one is evaluated, as in JavaScript.
         let text = expression.strings[0];
-        for (const [index, value] of values.entries()) {
-          const part = runtime.toString(value) + expression.strings[index + 1];
+        for (const [index, substitution] of expression.expressions.entries()) {
+          const part = runtime.toString(yield* this.evaluateSteps(substitution)) + expression.strings[index + 1];
           runtime.extendString(text.length + part.length, part.length);
           text += part;
         }
@@ -82,14 +92,15 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         return yield* this.assignSteps(expression);
       }
       case 'call': {
-        return yield* this.callSteps(expression);
+        const value = yield* this.callSteps(expression);
+        return value === SHORT_CIRCUIT ? undefined : value;
       }
       case 'new': {
         const constructor = yield* this.evaluateSteps(expression.callee);
         if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
           return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
         }
-        const args = yield* this.holdingSteps([constructor], () => this.elementSteps(expression.args));
+        const args = yield* this.holdingSteps([constructor], () => this.argumentSteps(expression.args));
         return this.holdWhile([constructor, ...args], () =>
           runtime.construct(constructor, args, constructor, expression.row)
         );
@@ -100,16 +111,21 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     }
   }
 
-  /** Evaluates elements or arguments in order, holding the values so far for garbage collection. */
-  private *elementSteps(elements: (Argument | undefined)[]): Steps<Value[]> {
+  private *argumentSteps(args: Argument[]): Steps<Value[]> {
+    // Arguments have no elisions, which are the only source of holes.
+    return (yield* this.elementSteps(args)) as Value[];
+  }
+
+  /** Evaluates elements or arguments in order, holding the values so far; an elision leaves a hole. */
+  private *elementSteps(elements: (Argument | undefined)[]): Steps<Element[]> {
     const { runtime } = this;
-    const values: Value[] = [];
+    const values: Element[] = [];
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     try {
       for (const element of elements) {
         if (element === undefined) {
-          values.push(undefined);
+          values.push(HOLE);
         } else if (element.kind === 'spread') {
           const spread = runtime.iterate(yield* this.evaluateSteps(element.argument));
           runtime.allocate(spread.length);
@@ -149,6 +165,13 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     }
   }
 
+  /** Evaluates the object of a member or call in an optional chain, keeping the chain's short-circuit. */
+  private *chainSteps(expression: Expression): Steps<Value | typeof SHORT_CIRCUIT> {
+    if (expression.kind === 'member' && expression.suspends) return yield* this.memberSteps(expression);
+    if (expression.kind === 'call' && expression.suspends) return yield* this.callSteps(expression);
+    return yield* this.evaluateSteps(expression);
+  }
+
   /** Reads a member whose object or key suspends, which short-circuits the rest of its optional chain on nullish. */
   private *memberSteps(expression: MemberExpression): Steps<Value | typeof SHORT_CIRCUIT> {
     const reference = yield* this.referenceSteps(expression);
@@ -172,8 +195,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
           : this.propertyKey(property);
       return { kind: 'super', key, thisValue };
     }
-    const base =
-      object.kind === 'member' && object.suspends ? yield* this.memberSteps(object) : yield* this.evaluateSteps(object);
+    const base = yield* this.chainSteps(object);
     if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
     if (property.kind === 'private') return { kind: 'private', base, name: this.privateKey(property.name) };
     const key =
@@ -257,22 +279,26 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   private *calleeSteps(callee: Expression): Steps<{ fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT> {
     let target = callee;
     while (target.kind === 'parenthesized') target = target.expression;
-    if (target.kind !== 'member') return { fn: yield* this.evaluateSteps(callee), thisValue: undefined };
+    if (target.kind !== 'member') {
+      const fn = yield* this.chainSteps(callee);
+      return fn === SHORT_CIRCUIT ? SHORT_CIRCUIT : { fn, thisValue: undefined };
+    }
     const reference = yield* this.referenceSteps(target);
     if (reference === SHORT_CIRCUIT) return target === callee ? SHORT_CIRCUIT : { fn: undefined, thisValue: undefined };
     const thisValue = referenceBase(reference);
     return { fn: this.runtime.hold(thisValue, () => this.getReference(reference)), thisValue };
   }
 
-  private *callSteps(expression: Extract<Expression, { kind: 'call' }>): Steps<Value> {
+  /** Calls a function whose callee or arguments suspend, which short-circuits the rest of its optional chain on nullish. */
+  private *callSteps(expression: Extract<Expression, { kind: 'call' }>): Steps<Value | typeof SHORT_CIRCUIT> {
     const { runtime } = this;
     const callee = expression.callee as Expression;
     const resolved = callee.suspends ? yield* this.calleeSteps(callee) : this.callee(callee);
-    if (resolved === SHORT_CIRCUIT) return undefined;
+    if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
-    if (expression.optional && (fn === undefined || fn === null)) return undefined;
+    if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
     if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
-    const args = yield* this.holdingSteps([fn, thisValue], () => this.elementSteps(expression.args));
+    const args = yield* this.holdingSteps([fn, thisValue], () => this.argumentSteps(expression.args));
     return this.holdWhile([fn, thisValue, ...args], () => runtime.call(fn, thisValue, args, expression.row));
   }
 }

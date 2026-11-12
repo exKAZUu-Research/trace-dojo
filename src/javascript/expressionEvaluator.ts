@@ -611,12 +611,12 @@ function bigintArithmetic(runtime: Runtime, operator: string, left: bigint, righ
 }
 
 /** Charges for a BigInt result of `bits` bits, which the host would otherwise build at any size. */
-function chargeBigInt(runtime: Runtime, bits: number): void {
+export function chargeBigInt(runtime: Runtime, bits: number): void {
   if (bits > LIMITS.maxStringLength) runtime.throwError('RangeError', 'Maximum BigInt size exceeded');
   runtime.spend(Math.ceil(bits / 64));
 }
 
-function bitLength(value: bigint): number {
+export function bitLength(value: bigint): number {
   return (value < 0n ? -value : value).toString(2).length;
 }
 

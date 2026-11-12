@@ -4,7 +4,7 @@ import type { RealmBuilder } from './realm';
 import { defineArrayCopies } from './realmArrayCopies';
 import { defineArrayIterations } from './realmArrayIterations';
 import type { Runtime } from './runtime';
-import { isCallable, JsArray, type NativeCall, type Value } from './values';
+import { isCallable, JsArray, JsThrow, type NativeCall, type Value } from './values';
 
 /**
  * Defines Array and Array.prototype. Each method follows its algorithm in the ECMAScript specification step by step,
@@ -60,7 +60,14 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
     if (runtime.isIterable(source)) {
       // Each value is read just before its mapper runs, as JavaScript's iteration does.
       const iterator = runtime.iterator(source);
-      for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) add(value, index);
+      try {
+        for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
+          add(value, index);
+      } catch (error) {
+        // A mapper that throws closes the iterator; a failed `next()` has already ended it.
+        if (error instanceof JsThrow) iterator.close('throw');
+        throw error;
+      }
       return;
     }
     // Null and undefined are neither iterable nor array-like, which JavaScript reports as a TypeError.

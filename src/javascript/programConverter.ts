@@ -35,7 +35,12 @@ import { isConstantExpression } from './stepRules';
 type StatementConverter = (node: Node) => Statement;
 
 const loopTypes = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement']);
-const declarationTypes = new Set(['lexical_declaration', 'class_declaration', 'function_declaration']);
+const declarationTypes = new Set([
+  'lexical_declaration',
+  'using_declaration',
+  'class_declaration',
+  'function_declaration',
+]);
 
 /** Converts a tree-sitter tree to the AST, settling scopes, steps, and early errors. */
 export class ProgramConverter extends ExpressionConverter {
@@ -103,7 +108,9 @@ export class ProgramConverter extends ExpressionConverter {
 
   convert(root: Node): Program {
     const scope = this.pushScope(true);
-    const body = this.statementList(namedChildren(root).filter((child) => child.type !== 'hash_bang_line'));
+    const statements = namedChildren(root).filter((child) => child.type !== 'hash_bang_line');
+    rejectUsingIn(statements, 'using 宣言はプログラムの一番外側には書けません。');
+    const body = this.statementList(statements);
     this.popScope();
     this.assignAtomicAnnotations();
     return { body, scope };
@@ -298,12 +305,17 @@ export class ProgramConverter extends ExpressionConverter {
           const valueNode = caseNode.childForFieldName('value');
           return {
             test: valueNode ? this.expression(valueNode) : undefined,
-            body: this.statementList(caseNode.childrenForFieldName('body').filter(isPresent)),
+            body: this.caseBody(caseNode.childrenForFieldName('body').filter(isPresent)),
           };
         });
         return { kind: 'switch', discriminant, cases, scope, row: rowOf(node) };
       })
     );
+  }
+
+  private caseBody(statements: Node[]): Statement[] {
+    rejectUsingIn(statements, 'using 宣言は case の中に直接は書けません。{ } で囲んでください。');
+    return this.statementList(statements);
   }
 
   private tryStatement(node: Node): Statement {
@@ -450,6 +462,12 @@ export class ProgramConverter extends ExpressionConverter {
       }
     });
   }
+}
+
+/** Rejects a `using` declaration among statements that JavaScript does not let one appear in directly. */
+function rejectUsingIn(statements: Node[], message: string): void {
+  const usingDeclaration = statements.find((statement) => statement.type === 'using_declaration');
+  if (usingDeclaration) fail(usingDeclaration, message);
 }
 
 /** The kind of a declaration, or of the declaration in a `for...of` header. */

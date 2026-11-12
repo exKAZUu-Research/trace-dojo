@@ -486,6 +486,8 @@ export abstract class ExpressionConverter extends ConverterBase {
         case 'pair_pattern':
         case 'pair': {
           const key = this.propertyName(field(child, 'key'));
+          if (key.kind === 'computed' && key.expression.suspends)
+            unsupported(child, '分割代入のキーの yield や await ');
           properties.push({ key, value: this.pattern(field(child, 'value'), leaf) });
           break;
         }

@@ -2,7 +2,7 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { iteratorResult, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
-import { JsObject, JsThrow, type Value } from './values';
+import { JsObject, JsThrow, toBoolean, type Value } from './values';
 
 /** What resumes a suspended generator body: the method of the generator object called and its argument. */
 export interface Resume {
@@ -15,11 +15,21 @@ export class Awaiting {
   constructor(readonly value: Value) {}
 }
 
+/** What a sync `yield*` suspends with: the delegate's unfinished result, which `next()` returns as it is. */
+export class DelegatedResult {
+  constructor(readonly result: JsObject) {}
+}
+
 /**
- * Evaluation that may suspend at a `yield`, yielding the value the `yield` yields, or at an `await`, yielding what it
- * awaits.
+ * Evaluation that may suspend at a `yield`, yielding the value the `yield` yields, at a sync `yield*`, yielding the
+ * delegate's result, or at an `await`, yielding what it awaits.
  */
-export type Steps<T> = Generator<Value | Awaiting, T, Resume>;
+export type Steps<T> = Generator<Suspension, T, Resume>;
+
+export type Suspension = Value | Awaiting | DelegatedResult;
+
+/** What resuming a generator gives: a value and whether the body ended, or the result a `yield*` passes through. */
+type GeneratorStep = { value: Value; done: boolean } | { delegated: JsObject };
 
 /** The return value of a generator body: the value of its `return` statement, if one ended it. */
 export type BodyResult = { kind: string; value?: Value } | undefined;
@@ -61,8 +71,12 @@ export function createGeneratorObject(
   object.generator = { frame, body, status: 'suspendedStart' };
   object.hostIterator = {
     next: () => {
-      const result = resumeGenerator(runtime, object, { kind: 'next', value: undefined });
-      return result.done ? DONE : result.value;
+      const step = resumeGenerator(runtime, object, { kind: 'next', value: undefined });
+      if ('delegated' in step) {
+        const { delegated } = step;
+        return toBoolean(runtime.get(delegated, 'done')) ? DONE : runtime.get(delegated, 'value');
+      }
+      return step.done ? DONE : step.value;
     },
     close: () => {
       resumeGenerator(runtime, object, { kind: 'return', value: undefined });
@@ -72,7 +86,7 @@ export function createGeneratorObject(
 }
 
 /** Resumes a generator as its `next`, `throw`, or `return` method does. */
-export function resumeGenerator(runtime: Runtime, object: JsObject, resume: Resume): { value: Value; done: boolean } {
+export function resumeGenerator(runtime: Runtime, object: JsObject, resume: Resume): GeneratorStep {
   const state = object.generator;
   if (!state)
     return runtime.throwError('TypeError', `next method called on incompatible receiver ${runtime.describe(object)}`);
@@ -84,7 +98,7 @@ export function resumeGenerator(runtime: Runtime, object: JsObject, resume: Resu
   }
   state.status = 'executing';
   runtime.resumeFrame(state.frame);
-  let result: IteratorResult<Value | Awaiting, BodyResult>;
+  let result: IteratorResult<Suspension, BodyResult>;
   try {
     result = state.body.next(resume);
   } catch (error) {
@@ -100,6 +114,7 @@ export function resumeGenerator(runtime: Runtime, object: JsObject, resume: Resu
   }
   state.status = 'suspendedYield';
   if (result.value instanceof Awaiting) throw new Error('An await ran in a generator that is not async');
+  if (result.value instanceof DelegatedResult) return { delegated: result.value.result };
   return { value: result.value, done: false };
 }
 
@@ -108,15 +123,16 @@ export function defineGeneratorBuiltins(builder: RealmBuilder): void {
   const { generatorPrototype } = builder.realm;
   builder.constant(generatorPrototype, WELL_KNOWN_SYMBOLS.toStringTag, 'Generator');
   for (const kind of ['next', 'return', 'throw'] as const) {
-    builder.method(generatorPrototype, kind, 1, ({ runtime, thisValue, args }) => {
+    const method = builder.method(generatorPrototype, kind, 1, ({ runtime, thisValue, args }) => {
       if (!(thisValue instanceof JsObject) || !thisValue.generator) {
         return runtime.throwError(
           'TypeError',
           `${kind} method called on incompatible receiver ${runtime.describe(thisValue)}`
         );
       }
-      const { value, done } = resumeGenerator(runtime, thisValue, { kind, value: args[0] });
-      return iteratorResult(runtime, value, done);
+      const step = resumeGenerator(runtime, thisValue, { kind, value: args[0] });
+      return 'delegated' in step ? step.delegated : iteratorResult(runtime, step.value, step.done);
     });
+    builder.realm.hostIteratorMethods.add(method);
   }
 }

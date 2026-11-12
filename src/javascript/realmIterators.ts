@@ -58,7 +58,7 @@ export function defineIteratorBuiltins(builder: RealmBuilder): void {
  */
 export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string): JsObject {
   const prototype = new JsObject(builder.realm.iteratorPrototype);
-  builder.method(prototype, 'next', 0, ({ runtime, thisValue }) => {
+  const next = builder.method(prototype, 'next', 0, ({ runtime, thisValue }) => {
     const iterator = thisValue instanceof JsObject ? thisValue.hostIterator : undefined;
     if (!iterator) {
       return runtime.throwError(
@@ -69,6 +69,7 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
     const value = iterator.next();
     return iteratorResult(runtime, value === DONE ? undefined : value, value === DONE);
   });
+  builder.realm.hostIteratorMethods.add(next);
   builder.constant(prototype, WELL_KNOWN_SYMBOLS.toStringTag, tag);
   return prototype;
 }
@@ -93,6 +94,7 @@ function arrayIteration(runtime: Runtime, object: JsObject, kind: 'keys' | 'valu
   return {
     source: object,
     next: () => {
+      runtime.spend();
       const length = ops ? ops.length : Math.trunc(runtime.toNumber(runtime.get(object, 'length'))) || 0;
       if (index >= length) {
         index = Number.POSITIVE_INFINITY;

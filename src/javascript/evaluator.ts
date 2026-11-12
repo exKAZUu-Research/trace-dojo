@@ -203,10 +203,10 @@ export class Evaluator extends StepEvaluator {
     }
     const disposables = scope.disposables ?? [];
     scope.disposables = undefined;
-    for (const { value, method, isAsync } of disposables.toReversed()) {
+    for (const { value, method, isAsync, awaitsResult } of disposables.toReversed()) {
       try {
         const disposed = method ? runtime.call(method, value, []) : undefined;
-        if (isAsync) resumedValue(yield new Awaiting(disposed));
+        if (isAsync) resumedValue(yield new Awaiting(awaitsResult ? disposed : undefined));
       } catch (error) {
         if (!(error instanceof JsThrow)) throw error;
         completion =
@@ -225,7 +225,7 @@ export class Evaluator extends StepEvaluator {
     scope.disposables ??= [];
     // An `await using` of null or undefined still awaits when its scope ends.
     if (value === null || value === undefined) {
-      if (isAsync) scope.disposables.push({ value, method: undefined, isAsync });
+      if (isAsync) scope.disposables.push({ value, method: undefined, isAsync, awaitsResult: false });
       return;
     }
     if (!isObject(value)) runtime.throwError('TypeError', 'An object is expected with `using` declarations');
@@ -235,7 +235,7 @@ export class Evaluator extends StepEvaluator {
       const key = isAsync ? WELL_KNOWN_SYMBOLS.asyncDispose : WELL_KNOWN_SYMBOLS.dispose;
       return runtime.throwError('TypeError', `${key.toString()} is not a function`);
     }
-    scope.disposables.push({ value, method, isAsync });
+    scope.disposables.push({ value, method, isAsync, awaitsResult: asyncMethod !== undefined && asyncMethod !== null });
   }
 
   /** Keeps `value` reachable for garbage collection while `run` computes with it. */

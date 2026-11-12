@@ -175,7 +175,10 @@ export interface FunctionFrame {
 export interface Disposable {
   value: Value;
   method: JsFunction | undefined;
+  /** Whether disposal awaits, as an `await using` does even for a sync `Symbol.dispose` or a null value. */
   isAsync: boolean;
+  /** Whether disposal awaits what the method returns, which only a `Symbol.asyncDispose` method's result is. */
+  awaitsResult: boolean;
 }
 
 export class Scope {

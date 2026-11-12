@@ -3,7 +3,6 @@ import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
-import { ArrayOps } from './arrayOps';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { DONE, type HostIterator, ValueIterator } from './iteration';
@@ -564,21 +563,30 @@ export class Runtime {
   }
 
   /** The iterator that `for...of`, spread, and array destructuring use: over an array, or a string's code points. */
+  /**
+   * The iterator of a value, from its `Symbol.iterator` method. A builtin iterator whose `next` and `return` are still
+   * the builtin ones is stepped through directly, which reads an array at each step as its iterator does.
+   */
   iterator(value: Value): ValueIterator {
-    if (value instanceof JsArray) return new ValueIterator(new ArrayOps(this, value));
-    if (typeof value === 'string') {
-      this.scan(value.length);
-      // oxlint-disable-next-line typescript/no-misused-spread -- JavaScript iterates strings by code point.
-      return new ValueIterator([...value]);
-    }
-    if (value instanceof JsObject && value.hostIterator) return new ValueIterator(value.hostIterator);
     const method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator);
     if (!isCallable(method)) return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
     const iterator = this.call(method, value, [], this.currentRow);
     if (!isObject(iterator))
       return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
-    if (iterator.hostIterator) return new ValueIterator(iterator.hostIterator);
+    if (iterator.hostIterator && this.hasBuiltinIteratorMethods(iterator))
+      return new ValueIterator(iterator.hostIterator);
     return new ValueIterator(this.protocolIteration(iterator));
+  }
+
+  private hasBuiltinIteratorMethods(iterator: JsObject): boolean {
+    const { hostIteratorMethods } = this.realm;
+    const next = this.get(iterator, 'next');
+    const close = this.get(iterator, 'return');
+    return (
+      next instanceof JsFunction &&
+      hostIteratorMethods.has(next) &&
+      (close === undefined || (close instanceof JsFunction && hostIteratorMethods.has(close)))
+    );
   }
 
   /** Steps through an iterator object by calling its `next()`, and its `return()` when a loop leaves it early. */
@@ -604,9 +612,7 @@ export class Runtime {
   /** Whether a value has a `Symbol.iterator` method, which iterating it calls. */
   isIterable(value: Value): boolean {
     if (value === undefined || value === null) return false;
-    return (
-      value instanceof JsArray || typeof value === 'string' || isCallable(this.get(value, WELL_KNOWN_SYMBOLS.iterator))
-    );
+    return isCallable(this.get(value, WELL_KNOWN_SYMBOLS.iterator));
   }
 
   /** All the values an iterable yields, as spread reads them. */

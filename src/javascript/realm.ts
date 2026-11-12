@@ -41,6 +41,11 @@ export interface Realm {
   regExpPrototype: JsObject;
   /** `%IteratorPrototype%`, the parent of the builtin iterators' prototypes. */
   iteratorPrototype: JsObject;
+  /**
+   * The builtin `next` and `return` methods of the iterators that step through a host iteration, which loops may then
+   * step through directly; an iterator whose methods the program replaced is stepped through its methods instead.
+   */
+  hostIteratorMethods: Set<JsFunction>;
   /** `%GeneratorPrototype%`, with the methods every generator object has. */
   generatorPrototype: JsObject;
   /** `%AsyncIteratorPrototype%`, the parent of `%AsyncGeneratorPrototype%`. */
@@ -74,6 +79,7 @@ export class RealmBuilder {
       promisePrototype: new JsObject(objectPrototype),
       regExpPrototype: new JsObject(objectPrototype),
       iteratorPrototype,
+      hostIteratorMethods: new Set(),
       generatorPrototype: new JsObject(iteratorPrototype),
       asyncIteratorPrototype,
       asyncGeneratorPrototype: new JsObject(asyncIteratorPrototype),

@@ -1,4 +1,13 @@
-import { Awaiting, type BodyResult, GeneratorReturn, type Resume, resumedValue, type Steps } from './generators';
+import {
+  Awaiting,
+  type BodyResult,
+  DelegatedResult,
+  GeneratorReturn,
+  type Resume,
+  resumedValue,
+  type Steps,
+  type Suspension,
+} from './generators';
 import { DONE } from './iteration';
 import type { ProtocolIteration } from './iteratorProtocol';
 import { awaitValue, newPromise, rejectPromise, resolvePromise } from './promises';
@@ -93,7 +102,7 @@ function resumeNext(runtime: Runtime, state: AsyncGeneratorState): void {
 function advance(runtime: Runtime, state: AsyncGeneratorState, resume: Resume): void {
   const { frame } = state;
   runtime.resumeFrame(frame);
-  let result: IteratorResult<Value | Awaiting, BodyResult>;
+  let result: IteratorResult<Suspension, BodyResult>;
   try {
     result = state.body.next(resume);
   } catch (error) {
@@ -113,6 +122,7 @@ function advance(runtime: Runtime, state: AsyncGeneratorState, resume: Resume): 
     resumeNext(runtime, state);
     return;
   }
+  if (result.value instanceof DelegatedResult) throw new Error('A sync yield* ran in an async generator');
   if (result.value instanceof Awaiting) {
     awaitValue(runtime, result.value.value, roots, (next) => advance(runtime, state, next));
     return;

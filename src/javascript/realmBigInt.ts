@@ -1,3 +1,4 @@
+import { bitLength, chargeBigInt } from './expressionEvaluator';
 import type { RealmBuilder } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
@@ -13,12 +14,18 @@ export function defineBigIntBuiltins(builder: RealmBuilder): void {
     ({ runtime, args }) => toBigInt(runtime, runtime.toPrimitive(args[0], 'number')),
     false
   );
-  builder.method(bigintConstructor, 'asIntN', 2, ({ runtime, args }) =>
-    BigInt.asIntN(bitCount(runtime, args[0]), toBigInt(runtime, args[1]))
-  );
-  builder.method(bigintConstructor, 'asUintN', 2, ({ runtime, args }) =>
-    BigInt.asUintN(bitCount(runtime, args[0]), toBigInt(runtime, args[1]))
-  );
+  for (const [name, narrow] of [
+    ['asIntN', (bits: number, value: bigint) => BigInt.asIntN(bits, value)],
+    ['asUintN', (bits: number, value: bigint) => BigInt.asUintN(bits, value)],
+  ] as const) {
+    builder.method(bigintConstructor, name, 2, ({ runtime, args }) => {
+      const bits = bitCount(runtime, args[0]);
+      const value = toBigIntStrictly(runtime, args[1]);
+      // The result has up to `bits` bits, which a negative value fills for asUintN, so it is charged as `*` is.
+      chargeBigInt(runtime, Math.min(bits, value < 0n ? bits : bitLength(value)));
+      return narrow(bits, value);
+    });
+  }
   builder.method(bigintPrototype, 'toString', 0, ({ runtime, thisValue, args }) => {
     const radix = args[0] === undefined ? 10 : Math.trunc(runtime.toNumber(args[0]));
     if (!(radix >= 2 && radix <= 36)) runtime.throwError('RangeError', 'toString() radix must be between 2 and 36');
@@ -29,6 +36,15 @@ export function defineBigIntBuiltins(builder: RealmBuilder): void {
   );
   builder.method(bigintPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisBigInt(runtime, thisValue, 'valueOf'));
   builder.constant(bigintPrototype, WELL_KNOWN_SYMBOLS.toStringTag, 'BigInt');
+}
+
+/** Converts a value to a BigInt as the spec's ToBigInt does, which rejects numbers. */
+function toBigIntStrictly(runtime: Runtime, value: Value): bigint {
+  const primitive = runtime.toPrimitive(value, 'number');
+  if (typeof primitive === 'number') {
+    return runtime.throwError('TypeError', `Cannot convert ${runtime.toString(primitive)} to a BigInt`);
+  }
+  return toBigInt(runtime, primitive);
 }
 
 /** Converts a primitive to a BigInt as `BigInt(value)` does, where a number must be an integer. */
@@ -46,12 +62,15 @@ function toBigInt(runtime: Runtime, value: Value): bigint {
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'string') {
     runtime.scan(value.length);
+    let result: bigint;
     try {
-      return BigInt(value);
+      result = BigInt(value);
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
       return runtime.throwError('SyntaxError', `Cannot convert ${value} to a BigInt`);
     }
+    chargeBigInt(runtime, bitLength(result));
+    return result;
   }
   return runtime.throwError('TypeError', `Cannot convert ${runtime.describe(value)} to a BigInt`);
 }

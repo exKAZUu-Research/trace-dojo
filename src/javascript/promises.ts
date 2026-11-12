@@ -1,4 +1,5 @@
-import { Awaiting, type BodyResult, type Resume, type Steps } from './generators';
+import { Awaiting, type BodyResult, type Resume, type Steps, type Suspension } from './generators';
+import { DONE, type ValueIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Frame, Runtime } from './runtime';
@@ -267,7 +268,7 @@ export function promiseThen(runtime: Runtime, promise: JsObject, onFulfilled: Va
 export function startAsyncFunction(runtime: Runtime, frame: Frame, body: Steps<BodyResult>): JsObject {
   const promise = newPromise(runtime);
   const advance = (resume: Resume): void => {
-    let result: IteratorResult<Value | Awaiting, BodyResult>;
+    let result: IteratorResult<Suspension, BodyResult>;
     try {
       result = body.next(resume);
     } catch (error) {
@@ -279,7 +280,9 @@ export function startAsyncFunction(runtime: Runtime, frame: Frame, body: Steps<B
       resolvePromise(runtime, promise, result.value?.kind === 'return' ? result.value.value : undefined);
       return;
     }
-    const awaited = result.value instanceof Awaiting ? result.value.value : result.value;
+    // An async function's body suspends only at an `await`.
+    if (!(result.value instanceof Awaiting)) throw new Error('An async function body suspended without an await');
+    const awaited = result.value.value;
     awaitValue(runtime, awaited, [promise, frame.scope, ...frame.temporaries], (next) =>
       inFrame(runtime, frame, () => advance(next))
     );
@@ -385,120 +388,135 @@ function thisPromise(runtime: Runtime, value: Value, name: string): JsObject {
 /** Defines `Promise.all`, `allSettled`, `race`, and `any`, which settle as their inputs settle. */
 function defineCombinators(builder: RealmBuilder, promiseConstructor: JsFunction): void {
   builder.method(promiseConstructor, 'all', 1, ({ runtime, args }) =>
-    combine(runtime, args[0], (result, items, index, remaining) => ({
-      onFulfilled: (value) => {
-        items[index] = value;
-        if (--remaining.count === 0) resolvePromise(runtime, result, runtime.newArray(items));
+    combine(runtime, args[0], {
+      onFulfilled: (state, index, value, settled) => {
+        state.items[index] = value;
+        settled();
       },
-      onRejected: (reason) => rejectPromise(runtime, result, reason),
-    }))
+      onRejected: (state, _, reason) => rejectPromise(runtime, state.result, reason),
+      onComplete: resolveWithItems(runtime),
+    })
   );
   builder.method(promiseConstructor, 'allSettled', 1, ({ runtime, args }) =>
-    combine(runtime, args[0], (result, items, index, remaining) => {
-      const record = (status: string, key: string) => (value: Value) => {
-        const entry = runtime.newObject();
-        runtime.createDataProperty(entry, 'status', status);
-        runtime.createDataProperty(entry, key, value);
-        items[index] = entry;
-        if (--remaining.count === 0) resolvePromise(runtime, result, runtime.newArray(items));
-      };
-      return { onFulfilled: record('fulfilled', 'value'), onRejected: record('rejected', 'reason') };
+    combine(runtime, args[0], {
+      onFulfilled: settledEntry(runtime, 'fulfilled', 'value'),
+      onRejected: settledEntry(runtime, 'rejected', 'reason'),
+      onComplete: resolveWithItems(runtime),
     })
   );
   builder.method(promiseConstructor, 'race', 1, ({ runtime, args }) =>
-    combine(
-      runtime,
-      args[0],
-      (result) => ({
-        onFulfilled: (value) => resolvePromise(runtime, result, value),
-        onRejected: (reason) => rejectPromise(runtime, result, reason),
-      }),
-      false
-    )
+    combine(runtime, args[0], {
+      onFulfilled: (state, _, value) => resolvePromise(runtime, state.result, value),
+      onRejected: (state, _, reason) => rejectPromise(runtime, state.result, reason),
+    })
   );
   builder.method(promiseConstructor, 'any', 1, ({ runtime, args }) =>
-    combine(
-      runtime,
-      args[0],
-      (result, items, index, remaining) => ({
-        onFulfilled: (value) => resolvePromise(runtime, result, value),
-        onRejected: (reason) => {
-          items[index] = reason;
-          if (--remaining.count === 0) {
-            const error = runtime.newError('AggregateError', 'All promises were rejected');
-            runtime.defineProperty(error, 'errors', {
-              value: runtime.newArray(items),
-              writable: true,
-              enumerable: false,
-              configurable: true,
-            });
-            rejectPromise(runtime, result, error);
-          }
-        },
-      }),
-      true,
-      true
-    )
-  );
-}
-
-/**
- * Subscribes to each value of an iterable through `Promise.resolve(value).then`, settling the returned promise once
- * every value has (or, for `race`, once the first has).
- */
-function combine(
-  runtime: Runtime,
-  iterable: Value,
-  reactionFor: (
-    result: JsObject,
-    items: Value[],
-    index: number,
-    remaining: { count: number }
-  ) => Pick<Reaction, 'onFulfilled' | 'onRejected'>,
-  settlesWhenEmpty = true,
-  rejectsWhenEmpty = false
-): JsObject {
-  const result = newPromise(runtime);
-  // An iterable or a `then` that throws rejects the returned promise instead of throwing, as JavaScript does.
-  try {
-    const values = runtime.iterate(iterable);
-    const items: Value[] = Array.from({ length: values.length });
-    const remaining = { count: values.length };
-    for (const [index, value] of values.entries()) {
-      const promise = promiseResolve(runtime, value);
-      const thenMethod = runtime.get(promise, 'then');
-      const { onFulfilled, onRejected } = reactionFor(result, items, index, remaining);
-      const fulfill = runtime.newNativeFunction('', 1, ({ args }) => {
-        onFulfilled(args[0]);
-        return;
-      });
-      const reject = runtime.newNativeFunction('', 1, ({ args }) => {
-        onRejected(args[0]);
-        return;
-      });
-      fulfill.captured.push(result);
-      reject.captured.push(result);
-      runtime.call(thenMethod, promise, [fulfill, reject]);
-    }
-    if (values.length === 0 && settlesWhenEmpty) {
-      if (rejectsWhenEmpty) {
+    combine(runtime, args[0], {
+      onFulfilled: (state, _, value) => resolvePromise(runtime, state.result, value),
+      onRejected: (state, index, reason, settled) => {
+        state.items[index] = reason;
+        settled();
+      },
+      onComplete: (state) => {
         const error = runtime.newError('AggregateError', 'All promises were rejected');
         runtime.defineProperty(error, 'errors', {
-          value: runtime.newArray([]),
+          value: runtime.newArray(state.items),
           writable: true,
           enumerable: false,
           configurable: true,
         });
-        rejectPromise(runtime, result, error);
-      } else {
-        resolvePromise(runtime, result, runtime.newArray([]));
-      }
+        rejectPromise(runtime, state.result, error);
+      },
+    })
+  );
+}
+
+function resolveWithItems(runtime: Runtime): (state: Combination) => void {
+  return (state) => resolvePromise(runtime, state.result, runtime.newArray(state.items));
+}
+
+/** Records an input of `allSettled` as `{ status, value }` or `{ status, reason }`. */
+function settledEntry(
+  runtime: Runtime,
+  status: string,
+  key: string
+): (state: Combination, index: number, value: Value, settled: () => void) => void {
+  return (state, index, value, settled) => {
+    const entry = runtime.newObject();
+    runtime.createDataProperty(entry, 'status', status);
+    runtime.createDataProperty(entry, key, value);
+    state.items[index] = entry;
+    settled();
+  };
+}
+
+/** The promise a combinator returns and what its inputs settled with so far. */
+interface Combination {
+  result: JsObject;
+  items: Value[];
+}
+
+/** What a combinator does as each input settles: `settled` counts the input down toward `onComplete`. */
+interface CombinatorHandlers {
+  onFulfilled: (state: Combination, index: number, value: Value, settled: () => void) => void;
+  onRejected: (state: Combination, index: number, reason: Value, settled: () => void) => void;
+  /** Settles the result once every input has been counted down, which an empty iterable does at once. */
+  onComplete?: (state: Combination) => void;
+}
+
+/**
+ * Subscribes to each value of an iterable through `Promise.resolve(value).then` as the iterator produces it, so that
+ * each value's `then` runs before the next value is requested, as in JavaScript.
+ */
+function combine(runtime: Runtime, iterable: Value, handlers: CombinatorHandlers): JsObject {
+  const state: Combination = { result: newPromise(runtime), items: [] };
+  // One count stands for the iteration itself, so the result settles only after it ends.
+  let remaining = 1;
+  const settled = (): void => {
+    if (--remaining === 0) handlers.onComplete?.(state);
+  };
+  let iterator: ValueIterator | undefined;
+  try {
+    iterator = runtime.iterator(iterable);
+    for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) {
+      state.items.push(undefined);
+      remaining++;
+      subscribe(runtime, state, index, promiseResolve(runtime, value), handlers, settled);
     }
   } catch (error) {
     if (!(error instanceof JsThrow)) throw error;
-    rejectPromise(runtime, result, error.value);
+    // An error from the iterator's own `next()` has already ended it; other errors close it.
+    iterator?.close('throw');
+    rejectPromise(runtime, state.result, error.value);
+    return state.result;
   }
-  return result;
+  settled();
+  return state.result;
+}
+
+/** Calls an input's `then` with functions of which only the first call counts, as an element's functions do. */
+function subscribe(
+  runtime: Runtime,
+  state: Combination,
+  index: number,
+  promise: JsObject,
+  handlers: CombinatorHandlers,
+  settled: () => void
+): void {
+  const thenMethod = runtime.get(promise, 'then');
+  let isCalled = false;
+  const element = (handle: CombinatorHandlers['onFulfilled']): JsFunction => {
+    const fn = runtime.newNativeFunction('', 1, ({ args }) => {
+      if (!isCalled) {
+        isCalled = true;
+        handle(state, index, args[0], settled);
+      }
+      return;
+    });
+    fn.captured.push(state.result);
+    return fn;
+  };
+  runtime.call(thenMethod, promise, [element(handlers.onFulfilled), element(handlers.onRejected)]);
 }
 
 function defineTimers(builder: RealmBuilder): void {

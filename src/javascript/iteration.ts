@@ -1,4 +1,3 @@
-import { ArrayOps } from './arrayOps';
 import { JsThrow, type Value } from './values';
 
 /** What {@link ValueIterator.next} returns once the iteration has ended. */
@@ -13,24 +12,19 @@ export interface HostIterator {
 }
 
 /**
- * JavaScript's iterator over an array, a string, or a builtin iterator. An array is read at each step, so changes the
- * loop body makes are seen, and once the iterator has passed the end it stays done even if the array grows, as an
- * array iterator does.
+ * An iteration a loop, a spread, or a destructuring steps through: a builtin iterator, or fixed values such as the
+ * keys `for...in` visits. Once it has ended, it stays done.
  */
 export class ValueIterator {
   private index = 0;
   private isDone = false;
 
-  /**
-   * @param source An array, read by the spec's Get, values that cannot change, such as a string's code points, or a
-   * builtin iterator.
-   */
-  constructor(private readonly source: ArrayOps | readonly Value[] | HostIterator) {}
+  constructor(private readonly source: readonly Value[] | HostIterator) {}
 
   next(): Value | typeof DONE {
     const { source } = this;
     if (this.isDone) return DONE;
-    if (!Array.isArray(source) && !(source instanceof ArrayOps)) {
+    if (!Array.isArray(source)) {
       let value: Value | typeof DONE;
       try {
         value = (source as HostIterator).next();
@@ -46,8 +40,7 @@ export class ValueIterator {
       this.isDone = true;
       return DONE;
     }
-    const index = this.index++;
-    return Array.isArray(source) ? (source as readonly Value[])[index] : (source as ArrayOps).get(index);
+    return (source as readonly Value[])[this.index++];
   }
 
   /**
@@ -58,7 +51,7 @@ export class ValueIterator {
     if (this.isDone) return;
     this.isDone = true;
     const { source } = this;
-    if (Array.isArray(source) || source instanceof ArrayOps) return;
+    if (Array.isArray(source)) return;
     try {
       (source as HostIterator).close?.();
     } catch (error) {
