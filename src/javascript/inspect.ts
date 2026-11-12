@@ -10,8 +10,8 @@ const MAX_ARRAY_LENGTH = 100;
 const MIN_LINE_LENGTH = 16;
 
 const KEY_PATTERN = /^[A-Z_a-z]\w*$/;
-// oxlint-disable-next-line no-control-regex -- Node.js escapes these control characters.
 const ESCAPED_CHARACTER =
+  // oxlint-disable-next-line no-control-regex -- Node.js escapes these control characters.
   /[\u0000-\u001F\\\u007F-\u009F]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 const NAMED_ESCAPES: Record<string, string> = {
   '\b': String.raw`\b`,
