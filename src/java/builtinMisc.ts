@@ -45,6 +45,7 @@ export function defineSerializable(registry: Registry, collections: Collections)
     collections.unmodifiableList,
     collections.unmodifiableRandomAccessList,
     collections.fixedSizeList,
+    collections.synchronizedSubList,
     collections.immutableSet,
     collections.emptySet,
     collections.singletonSet,

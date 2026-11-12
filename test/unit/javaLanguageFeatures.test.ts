@@ -1568,6 +1568,34 @@ class Main {
   }
 });
 
+test("Java's Stack sublists are synchronized random-access lists, as the JDK's are", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.io.*;
+import java.util.*;
+class Main {
+  static class MyStack extends Stack<Integer> {}
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    Stack<Integer> s = new Stack<>(); s.push(1); s.push(2); s.push(3);
+    List<Integer> v = s.subList(0, 2);
+    System.out.println(v.getClass().getName() + " " + Collections.unmodifiableList(v).getClass().getName() + " " + (v instanceof Serializable));
+    System.out.println(v.subList(0, 1).getClass().getName() + " " + Collections.unmodifiableList(v.subList(0, 1)).getClass().getName());
+    MyStack m = new MyStack(); m.push(1);
+    System.out.println(Collections.unmodifiableList(m.subList(0, 1)).getClass().getName());
+    t("get", () -> v.get(5));
+    v.add(9); v.remove(0); System.out.println(s + " " + v);
+    v.removeIf(x -> x == 9); System.out.println(s);
+    Iterator<Integer> it = v.iterator(); it.next(); it.remove(); System.out.println(s + " " + v);
+  }
+}`,
+      'java.util.Collections$SynchronizedRandomAccessList java.util.Collections$UnmodifiableRandomAccessList true\njava.util.Collections$SynchronizedRandomAccessList java.util.Collections$UnmodifiableRandomAccessList\njava.util.Collections$UnmodifiableRandomAccessList\nget java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 2\n[2, 9, 3] [2, 9]\n[2, 3]\n[3] []\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

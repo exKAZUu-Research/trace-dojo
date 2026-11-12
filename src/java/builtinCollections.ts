@@ -78,6 +78,8 @@ export interface Collections {
   singletonSet: ClassInfo;
   /** `AbstractList$SubList`, the class of views of `LinkedList`, which does not implement `RandomAccess`. */
   sequentialSubList: ClassInfo;
+  /** `Collections$SynchronizedRandomAccessList`, the class of views of `Stack`. */
+  synchronizedSubList: ClassInfo;
   emptyMap: ClassInfo;
   singletonMap: ClassInfo;
   /** The class of `Collections.unmodifiableSet` of a set without a store of its own, such as a map's key set. */
@@ -165,6 +167,7 @@ export function defineCollections(
     unmodifiableViewSet,
     ...restrictedLists,
     sequentialSubList: subListClasses.other,
+    synchronizedSubList: subListClasses.synchronized,
     sortedClasses: [
       ...['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
       priorityQueue,
@@ -236,7 +239,8 @@ function defineRestrictedLists(
 }
 
 /** The classes of the views `subList` returns, which differ from their lists' classes as the JDK's do. */
-const subListClasses: Record<'arrayList' | 'other' | 'fixedSize' | 'immutable', ClassInfo> = {} as never;
+const subListClasses: Record<'arrayList' | 'other' | 'synchronized' | 'fixedSize' | 'immutable', ClassInfo> =
+  {} as never;
 
 /**
  * The sublist classes: `ArrayList$SubList`, which removes in batches as its list does, `AbstractList$SubList` for the
@@ -249,6 +253,13 @@ function defineSubListClasses(
   subListClasses.arrayList = defineArrayList(context, 'SubList', lists, 'ArrayList$SubList');
   batchRemovalClasses.add(subListClasses.arrayList);
   subListClasses.other = defineArrayList(context, 'SubList', lists, 'AbstractList$SubList');
+  // Vector.subList wraps its view in a synchronized list, which implements RandomAccess as Vector does.
+  subListClasses.synchronized = defineArrayList(
+    context,
+    'SynchronizedRandomAccessList',
+    lists,
+    'Collections$SynchronizedRandomAccessList'
+  );
   subListClasses.fixedSize = defineRestrictedList(
     context,
     'RandomAccessSubList',
@@ -268,7 +279,9 @@ function subListClassOf(listClass: ClassInfo): ClassInfo {
   while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
   if (unmodifiableClasses.has(cls)) return subListClasses.immutable;
   if (fixedSizeClasses.has(cls)) return subListClasses.fixedSize;
-  return cls.name === 'ArrayList' || cls === subListClasses.arrayList ? subListClasses.arrayList : subListClasses.other;
+  if (cls.name === 'ArrayList' || cls === subListClasses.arrayList) return subListClasses.arrayList;
+  if (cls.name === 'Stack' || cls === subListClasses.synchronized) return subListClasses.synchronized;
+  return subListClasses.other;
 }
 
 /** A read-only set over another set's elements, which it reads afresh at each use. */
