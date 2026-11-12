@@ -1,0 +1,18 @@
+[20.0°C 36.6°C]
+[20.0°C 36.6°C] [20.0°C 36.6°C] [20.00 36.60] [%!d(main.Temp=20) %!d(main.Temp=36.6)]
+map[a:1.0°C]
+{5.0°C}
+{T:5.0°C} struct { T main.Temp }{T:5}
+[] [{1}]
+PS<7> {7}
+[E1 x <nil>]
+error wins
+gs-string Gs! gs-string
+Fm(v) Fm(d) Fm(s)|
+Fm(v) [Fm(v)]
+<nil>
+%!s(PANIC=String method: boom in String)|%!v(PANIC=String method: boom in String)
+<nil>
+[1.0°C E2 s 3]
+["1.0°C"]
+312e30c2b043

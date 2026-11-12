@@ -173,3 +173,36 @@ func main() {
     [6, { sum: 7, v: 4 }],
   ]);
 });
+
+test('goroutines record their steps in the order the scheduler runs them', () => {
+  const program = `package main
+
+import "sync"
+
+func main() {
+\tvar wg sync.WaitGroup
+\ttotal := 0
+\tfor i := 1; i <= 2; i++ {
+\t\twg.Add(1)
+\t\tgo func(n int) {
+\t\t\tdefer wg.Done()
+\t\t\ttotal += n
+\t\t}(i)
+\t}
+\twg.Wait()
+\tch := make(chan int, 1)
+\tch <- total
+\tv := <-ch
+\t_ = v
+}
+`;
+  const trace = traceProgram('go', program, program);
+  expect(trace.uncaughtException).toBeUndefined();
+  const steps = trace.traceItems.map((item) => [item.line, JSON.stringify(item.vars)]);
+  // The goroutines run in the order they started once main waits, each until it ends.
+  expect(steps.filter(([line]) => line === 12)).toEqual([
+    [12, '{"n":1,"total":1}'],
+    [12, '{"n":2,"total":3}'],
+  ]);
+  expect(steps.at(-1)).toEqual([19, '{"total":3,"v":3}']);
+});
