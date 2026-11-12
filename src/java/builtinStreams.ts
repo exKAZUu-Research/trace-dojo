@@ -31,7 +31,7 @@ export function defineStreams(
   collections: Collections,
   wrappers: Wrappers,
   _functions: Functions
-): void {
+): { stream: ClassInfo; streamImpl: ClassInfo } {
   const context: Context = {
     registry,
     objectClass,
@@ -47,6 +47,7 @@ export function defineStreams(
   defineSources(context, streams);
   defineStringStreams(context, streams);
   defineGeneratedStreams(context, streams);
+  return { stream: streams.stream, streamImpl: streams.streamImpl };
 }
 
 interface StreamTypes {

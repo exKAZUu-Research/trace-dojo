@@ -1,6 +1,7 @@
 import { defineFunctionProperties } from './memberProperties';
 import { defineArrayBuiltins } from './realmArrays';
 import { defineGlobalBuiltins } from './realmGlobals';
+import { defineNodeBuiltins } from './realmNode';
 import { defineStringBuiltins } from './realmStrings';
 import type { Runtime } from './runtime';
 import { JsFunction, JsObject, type NativeFunction, Scope, type Value } from './values';
@@ -101,6 +102,7 @@ export class RealmBuilder {
 export function createRealm(runtime: Runtime): Realm {
   const builder = new RealmBuilder(runtime);
   defineGlobalBuiltins(builder);
+  defineNodeBuiltins(builder);
   defineArrayBuiltins(builder);
   defineStringBuiltins(builder);
   return builder.realm;

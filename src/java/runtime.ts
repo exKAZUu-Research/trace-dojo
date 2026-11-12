@@ -1,4 +1,5 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
@@ -43,6 +44,11 @@ export function throwBuiltin(frame: Frame, className: string, message?: string, 
   throw new JavaThrow(exception);
 }
 
+/** The text that Java writes in UTF-8, which encodes an unpaired surrogate as `?`. */
+export function encodable(text: string): string {
+  return text.replaceAll(/\p{Cs}/gu, '?');
+}
+
 /** Ends the program as `System.exit` does, skipping finally blocks and catch clauses. */
 export class ProgramExit {}
 
@@ -57,10 +63,11 @@ export class Runtime {
   readonly staticValues = new Map<ClassInfo, Value[]>();
   readonly steps = new StepTracker();
   readonly budget = new ExecutionBudget();
+  readonly io: ProgramIO;
 
-  /** Prints to standard output, which Java encodes in UTF-8, so that an unpaired surrogate prints as `?`. */
+  /** Prints to standard output. */
   print(text: string): void {
-    this.budget.print(text.replaceAll(/\p{Cs}/gu, '?'));
+    this.io.stdout.write(encodable(text));
   }
   private allocatedSlots = 0;
   private readonly initializingClasses = new Set<ClassInfo>();
@@ -68,7 +75,12 @@ export class Runtime {
   /** The strings by text that the program's literals and constants are, which `String.intern()` returns and extends. */
   internedStrings = new Map<string, JavaString>();
 
-  constructor(readonly builtins: Builtins) {}
+  constructor(
+    readonly builtins: Builtins,
+    input?: ProgramInput
+  ) {
+    this.io = new ProgramIO(this.budget, input);
+  }
 
   spend(cost = 1): void {
     this.budget.spend(cost);

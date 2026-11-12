@@ -1,12 +1,12 @@
 import type { Collections } from './builtinCollections';
 import { defineLocale } from './builtinLocale';
-import { stringify } from './builtins';
+import { type PrintWrite, standardChannelOf, stringify } from './builtins';
 import { addConstructor, addMethod, newString, type Registry, requireString, text } from './builtinSupport';
 import { JAVA_WHITESPACE } from './builtinWrappers';
 import { formatText } from './javaFormatter';
 import { translateJavaRegex, UnsupportedRegexError } from './javaRegex';
 import { javaReplacer, ReplacementError } from './javaReplacement';
-import { type Frame, throwBuiltin } from './runtime';
+import { encodable, type Frame, throwBuiltin } from './runtime';
 import { defineStringIdentity } from './stringIdentity';
 import { BOOLEAN, CHAR, type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG, VOID } from './types';
 import { charCodeOf, charToString, JavaArray, JavaObject, JavaString, type Value } from './values';
@@ -52,23 +52,33 @@ export function defineText(
     newString(frame, formatText(frame, text(receiver), (args as JavaArray | undefined)?.values ?? [undefined]))
   );
   formatted.isVarargs = true;
+  definePrintf(printStreamClass, stringType, objectType, (frame, receiver, text) => {
+    standardChannelOf(frame, receiver).write(encodable(text));
+  });
+  defineLocale(registry, objectClass, stringClass, printStreamClass);
+}
+
+/** Defines `printf` and `format`, which write what `String.format` returns and return the receiver. */
+export function definePrintf(cls: ClassInfo, stringType: JavaType, objectType: JavaType, write: PrintWrite): void {
   for (const name of ['printf', 'format']) {
     const method = addMethod(
-      printStreamClass,
+      cls,
       name,
-      [stringType, objectArray],
-      printStreamClass.type,
+      [stringType, { kind: 'array', element: objectType }],
+      cls.type,
       false,
       (frame, receiver, [pattern, args]) => {
-        frame.runtime.print(
-          formatText(frame, requireString(frame, pattern), (args as JavaArray | undefined)?.values ?? [undefined])
+        const text = formatText(
+          frame,
+          requireString(frame, pattern),
+          (args as JavaArray | undefined)?.values ?? [undefined]
         );
+        write(frame, receiver, text, true);
         return receiver;
       }
     );
     method.isVarargs = true;
   }
-  defineLocale(registry, objectClass, stringClass, printStreamClass);
 }
 
 /** What a `StringJoiner` holds: its delimiter, prefix, and suffix, the parts added, and the text when it is empty. */

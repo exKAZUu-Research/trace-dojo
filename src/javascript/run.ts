@@ -1,12 +1,13 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
 import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
 import { JsThrow, Scope } from './values';
 
-export function executeJavaScriptProgram(source: string): ProgramExecution {
+export function executeJavaScriptProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
     program = parseJavaScript(source);
@@ -15,7 +16,7 @@ export function executeJavaScriptProgram(source: string): ProgramExecution {
     throw error;
   }
   try {
-    return { kind: 'executed', ...runProgram(new Runtime(), program) };
+    return { kind: 'executed', ...runProgram(new Runtime(input), program) };
   } catch (error) {
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
@@ -44,7 +45,12 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: S
     }
     onEnd?.(scope);
     runtime.collectGarbage();
-    return { finalBoard: runtime.world.boardText(), finalTurtles: runtime.world.turtleTraces(), uncaughtException };
+    return {
+      finalBoard: runtime.world.boardText(),
+      finalTurtles: runtime.world.turtleTraces(),
+      uncaughtException,
+      ...runtime.io.output(),
+    };
   } finally {
     runtime.popFrame();
   }
