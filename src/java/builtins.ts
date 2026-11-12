@@ -7,7 +7,7 @@ import { makeEnumGeneric } from './builtinEnum';
 import { defineFunctions, type Functions } from './builtinFunctions';
 import { defineFileIO, standardStreamsOf } from './builtinIo';
 import { defineMath } from './builtinMath';
-import { defineMisc } from './builtinMisc';
+import { defineMisc, defineSerializable } from './builtinMisc';
 import { definePrintMethods } from './builtinPrint';
 import { defineStreams } from './builtinStreams';
 import {
@@ -113,6 +113,7 @@ function createBuiltins(): Builtins {
     ioException: registry.classes.get('IOException') as ClassInfo,
     ...standardStreamsOf(registry.classes.get('System') as ClassInfo),
   });
+  defineSerializable(registry);
   return {
     classes: registry.classes,
     objectClass,

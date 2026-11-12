@@ -476,12 +476,15 @@ export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo)
   if (to.kind !== 'class' && to.kind !== 'array') return false;
   if (from.kind === 'class') return to.kind === 'class' && isClassWidening(from, to, objectClass);
   if (from.kind === 'array') {
-    if (to.kind === 'class') return to.cls === objectClass;
+    if (to.kind === 'class') return to.cls === objectClass || arrayInterfaces.has(to.cls);
     if (isPrimitive(from.element) || isPrimitive(to.element)) return sameType(from.element, to.element);
     return isWidening(from.element, to.element, objectClass);
   }
   return false;
 }
+
+/** The interfaces every array type implements, `Cloneable` and `Serializable` (JLS 4.10.3). */
+export const arrayInterfaces = new Set<ClassInfo>();
 
 /** The classes an intersection type such as `Number & Comparable` stands for, keyed by the class that models it. */
 export const intersectionParts = new WeakMap<ClassInfo, readonly ClassInfo[]>();

@@ -405,7 +405,12 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       this.error(member, `メソッド ${member.name} はすでに定義されています。`);
     }
     this.checkOverride(cls, method, member);
-    if (member.modifiers.hasOverride && (method.isStatic || method.overrides?.size === 0)) {
+    // A record's accessor may carry `@Override` though it overrides nothing (JLS 9.6.4.4).
+    const isAccessor =
+      !method.isStatic &&
+      method.parameterTypes.length === 0 &&
+      cls.recordComponents?.some((component) => component.name === method.name) === true;
+    if (member.modifiers.hasOverride && !isAccessor && (method.isStatic || method.overrides?.size === 0)) {
       this.error(
         member,
         `メソッド ${member.name} には @Override が付いていますが、親クラスやインターフェースのメソッドをオーバーライドしていません。`

@@ -4,7 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Builtins } from './builtins';
 import type { ClassInfo, LocalInfo, MethodInfo } from './types';
-import { isSubclass, sameType, superinterfacesOf } from './types';
+import { arrayInterfaces, isSubclass, sameType, superinterfacesOf } from './types';
 import { defaultValue, JavaArray, JavaObject, JavaString, type Value } from './values';
 
 /** A local that is out of scope or not yet assigned. */
@@ -275,7 +275,7 @@ export class Runtime {
     if (value instanceof JavaObject) return isSubclass(value.cls, cls);
     if (value instanceof JavaString)
       return isSubclass(this.builtins.stringClass, cls) || cls === this.builtins.objectClass;
-    if (value instanceof JavaArray) return cls === this.builtins.objectClass;
+    if (value instanceof JavaArray) return cls === this.builtins.objectClass || arrayInterfaces.has(cls);
     return false;
   }
 }

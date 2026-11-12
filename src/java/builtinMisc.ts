@@ -1,21 +1,71 @@
 import { javaEquals, javaHash } from './builtinCollections';
 import { stringify } from './builtins';
-import { addConstructor, addMethod, defineInterface, newString, type Registry } from './builtinSupport';
+import { addConstructor, addInterface, addMethod, defineInterface, newString, type Registry } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
-import { BOOLEAN, type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG, type TypeVariable, VOID } from './types';
+import {
+  arrayInterfaces,
+  BOOLEAN,
+  type ClassInfo,
+  DOUBLE,
+  FLOAT,
+  INT,
+  type JavaType,
+  LONG,
+  type TypeVariable,
+  VOID,
+} from './types';
 import type { JavaArray, JavaObject, JavaString, Value } from './values';
 import { toInt32, toInt64 } from './values';
 
 export function defineMisc(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
   defineObjects(registry, objectClass, stringType);
   defineRandom(registry, objectClass);
-  defineInterface(registry, 'Cloneable', 'java.lang');
+  arrayInterfaces.add(defineInterface(registry, 'Cloneable', 'java.lang'));
   defineSystemQueries(registry.classes.get('System') as ClassInfo, stringType);
   // Programs pause between turtle moves, which a trace shows step by step, so sleeping returns at once.
   const thread = registry.define('Thread', objectClass);
   const sleep = addMethod(thread, 'sleep', [LONG], VOID, true, () => {});
   sleep.thrownTypes = [registry.classes.get('InterruptedException') as ClassInfo];
 }
+
+/**
+ * `Serializable`, which only marks classes, implemented by the builtin classes whose JDK counterparts implement it
+ * directly; their subclasses, such as every exception and wrapper, inherit it.
+ */
+export function defineSerializable(registry: Registry): void {
+  const cls = defineInterface(registry, 'Serializable', 'java.io');
+  arrayInterfaces.add(cls);
+  for (const name of SERIALIZABLE_CLASSES)
+    addInterface(registry.classes.get(name) as ClassInfo, { kind: 'class', cls });
+}
+
+const SERIALIZABLE_CLASSES = [
+  'String',
+  'Class',
+  'Enum',
+  'Throwable',
+  'Number',
+  'Character',
+  'Boolean',
+  'StringBuilder',
+  'StringBuffer',
+  'ArrayList',
+  'Stack',
+  'LinkedList',
+  'ArrayDeque',
+  'PriorityQueue',
+  'HashSet',
+  'LinkedHashSet',
+  'TreeSet',
+  'EnumSet',
+  'HashMap',
+  'LinkedHashMap',
+  'TreeMap',
+  'EnumMap',
+  'Random',
+  'Locale',
+  'File',
+];
 
 function defineObjects(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
   const cls = registry.define('Objects', objectClass, 'java.util');
