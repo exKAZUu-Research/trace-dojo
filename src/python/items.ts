@@ -1,7 +1,7 @@
 import { toIndex } from './numbers';
 import { bindValue, callValue, lookupSpecial, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
-import { codePointAt, hasSurrogates, iterStr, sliceStr, strLength } from './strings';
+import { codePointAt, sliceStr, strLength } from './strings';
 import {
   classOf,
   newException,
@@ -123,10 +123,7 @@ function stringItem(text: string, key: PyValue): string {
     const index = lookupSpecial(key, '__index__');
     if (index === undefined) throw typeError(`string indices must be integers, not '${typeName(key)}'`);
   }
-  // A string with characters outside the BMP is indexed by scanning it.
-  if (hasSurrogates(text)) currentRuntime().scan(text.length);
-  const length = hasSurrogates(text) ? iterStr(text).length : text.length;
-  const index = normalizeIndex(key, length, 'string');
+  const index = normalizeIndex(key, strLength(text), 'string');
   if (index === undefined) throw pyError('IndexError', 'string index out of range');
   return codePointAt(text, index);
 }

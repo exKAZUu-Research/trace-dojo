@@ -363,6 +363,17 @@ test.each([
 });
 
 test.each([
+  ['the length', "'a' * 500000", 'len(s)'],
+  ['an item', "'a' * 500000", 's[0]'],
+  ['the length of a text outside the BMP', "'😀' * 500000", 'len(s)'],
+  ['an item of a text outside the BMP', "'😀' * 500000", 's[-1]'],
+])('%s of a long unchanged text read over and over is found without scanning it each time', (_name, text, read) => {
+  // Scanning the text each time would take far longer than the time limit; reading it takes milliseconds.
+  const program = `s = ${text}\nfor i in range(10000):\n    n = ${read}`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each([
   'del a[:0]',
   'del a[5:2]',
   'del a[0:0:2]',

@@ -1,16 +1,51 @@
-import { chargeStep } from './runtimeContext';
+import { chargeScan, chargeStep } from './runtimeContext';
 
 /** Python strings are sequences of code points, while JavaScript strings are UTF-16; these helpers bridge the two. */
 
 const SURROGATE = /[\uD800-\uDFFF]/;
 
+/** Strings shorter than this are scanned again each time; longer ones keep what a scan found. */
+const CACHED_LENGTH = 1024;
+/** How many long strings keep their scan; the oldest is forgotten first. */
+const CACHED_STRINGS = 32;
+
+/** What scanning a long string found: whether it holds surrogates and, if it does, its code points. */
+const scans = new Map<string, readonly string[] | undefined>();
+
 export function hasSurrogates(text: string): boolean {
-  return SURROGATE.test(text);
+  if (text.length < CACHED_LENGTH) return SURROGATE.test(text);
+  return codePointsOf(text) !== undefined;
+}
+
+/**
+ * The code points of a long string that holds surrogates, or undefined for one that holds none, kept for the strings
+ * scanned last, so that a program reading the same long string over and over does not scan it, or pay for it, each
+ * time.
+ */
+function codePointsOf(text: string): readonly string[] | undefined {
+  if (scans.has(text)) {
+    const points = scans.get(text);
+    scans.delete(text);
+    scans.set(text, points);
+    return points;
+  }
+  chargeScan(text.length);
+  // oxlint-disable-next-line typescript/no-misused-spread -- Python iterates strings by code point.
+  const points = SURROGATE.test(text) ? [...text] : undefined;
+  if (scans.size >= CACHED_STRINGS) scans.delete(scans.keys().next().value as string);
+  scans.set(text, points);
+  return points;
+}
+
+/** The code points of a string held in no array a caller may change. */
+function readOnlyPoints(text: string): readonly string[] {
+  if (text.length >= CACHED_LENGTH) return codePointsOf(text) ?? text.split('');
+  return iterStr(text);
 }
 
 export function strLength(text: string): number {
   if (!hasSurrogates(text)) return text.length;
-  return iterStr(text).length;
+  return readOnlyPoints(text).length;
 }
 
 /** The code points of a string, each as a string. */
@@ -28,14 +63,14 @@ export function headStr(text: string, count: number): string {
 
 export function codePointAt(text: string, index: number): string {
   if (!hasSurrogates(text)) return text[index];
-  return iterStr(text)[index];
+  return readOnlyPoints(text)[index];
 }
 
 /** The code points from `start` up to `stop` stepping by `step`, with indices already clamped to the string. */
 export function sliceStr(text: string, start: number, stop: number, step: number): string {
   const surrogates = hasSurrogates(text);
   if (step === 1 && !surrogates) return text.slice(start, stop);
-  const points = surrogates ? iterStr(text) : text;
+  const points = surrogates ? readOnlyPoints(text) : text;
   let result = '';
   if (step > 0) for (let index = start; index < stop; index += step) result += points[index];
   else for (let index = start; index > stop; index += step) result += points[index];
