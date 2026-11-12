@@ -241,14 +241,15 @@ class JsonParser {
     this.skipWhitespace();
     const start = this.position;
     const value = this.parseValue(depth);
-    if (this.sources && !isObject(value)) {
-      let holderSources = this.sources.get(holder);
-      if (!holderSources) {
-        holderSources = new Map();
-        this.sources.set(holder, holderSources);
-      }
-      holderSources.set(key, { value, source: this.text.slice(start, this.position) });
+    if (!this.sources) return value;
+    let holderSources = this.sources.get(holder);
+    if (!holderSources) {
+      holderSources = new Map();
+      this.sources.set(holder, holderSources);
     }
+    // A later duplicate key replaces the source of an earlier one, and an object or array has none.
+    if (isObject(value)) holderSources.delete(key);
+    else holderSources.set(key, { value, source: this.text.slice(start, this.position) });
     return value;
   }
 
