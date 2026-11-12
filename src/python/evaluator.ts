@@ -15,6 +15,7 @@ import {
   getItem,
   isTruthy,
   iterate,
+  iterateHeld,
   lookupSpecial,
   setAttribute,
   setItem,
@@ -358,7 +359,9 @@ export class Evaluator extends ExpressionEvaluator {
     const length = frame.temporaries.length;
     frame.temporaries.push(iterable);
     try {
-      const next = iterate(iterable);
+      // The iterator `__iter__` returns may be a new object, which only the loop holds.
+      const { next, held } = iterateHeld(iterable);
+      frame.temporaries.push(held);
       for (let item = next(); item !== DONE; item = next()) {
         runtime.spend();
         this.assign(statement.target, item, frame);

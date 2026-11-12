@@ -13,6 +13,7 @@ import {
   getItem,
   isTruthy,
   iterate,
+  iterateHeld,
   lengthOf,
   lookupSpecial,
   setAttribute,
@@ -548,8 +549,8 @@ export class ExpressionEvaluator {
 
   private comprehension(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): PyValue {
     const { runtime } = this;
-    const first = this.evaluateIterable(expression.generators[0].iterable, frame);
-    const next = iterate(first);
+    const iterable = this.evaluateIterable(expression.generators[0].iterable, frame);
+    const { next, held: first } = iterateHeld(iterable);
     const inner = this.comprehensionFrame(expression, frame);
     if (expression.type === 'generator') {
       const body = this.comprehensionItems(expression, inner, next);
@@ -565,12 +566,12 @@ export class ExpressionEvaluator {
             runtime.popFrame();
           }
         },
-        () => [first, ...inner.locals.values(), ...inner.temporaries]
+        () => [iterable, first, ...inner.locals.values(), ...inner.temporaries]
       );
     }
     runtime.pushFrame(inner);
     try {
-      inner.temporaries.push(first);
+      inner.temporaries.push(iterable, first);
       if (expression.type === 'dict') {
         const dict = newDict();
         inner.temporaries.push(dict);
@@ -636,9 +637,10 @@ export class ExpressionEvaluator {
         if (index + 1 < generators.length) {
           const iterable = this.evaluateIterable(generators[index + 1].iterable, frame);
           const length = frame.temporaries.length;
-          frame.temporaries.push(iterable);
+          const { next: innerNext, held } = iterateHeld(iterable);
+          frame.temporaries.push(iterable, held);
           try {
-            yield* level.call(this, index + 1, iterate(iterable));
+            yield* level.call(this, index + 1, innerNext);
           } finally {
             frame.temporaries.length = length;
           }

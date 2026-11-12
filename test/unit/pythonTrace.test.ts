@@ -239,6 +239,22 @@ test('integers a number cannot hold exactly keep every digit in the variables', 
   });
 });
 
+test.each([
+  ['a for loop', 'for t in Pair():\n    t.forward()'],
+  ['a list comprehension', 'moved = [move(t) for t in Pair()]'],
+  ['a nested comprehension', 'moved = [move(t) for i in range(1) for t in Pair()]'],
+])('turtles that only the iterator returned by __iter__ holds stay visible in %s', (_name, loop) => {
+  const program = `class Pair:
+    def __iter__(self):
+        return iter([Turtle(0, 0), Turtle(1, 0)])
+def move(t):
+    t.forward()
+    return t
+${loop}`;
+  const counts = traceProgram('python', program, program).traceItems.map(({ turtles }) => turtles.length);
+  expect(counts.slice(1)).toEqual(counts.slice(1).map(() => 2));
+});
+
 test('display programs lose their annotations', () => {
   const program = 'def move(t):  # atomic\n    t.forward()\nt = Turtle()\nmove(t)';
   const trace = traceProgram('python', program, program);
