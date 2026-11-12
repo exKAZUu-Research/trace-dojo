@@ -2,7 +2,7 @@ import { bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { iterStr, stripNumberSpace } from './strings';
 import { pyError, typeError, typeName, valueError } from './types';
-import { decimalDigitValue, isDecimalChar } from './unicodeClasses';
+import { decimalDigitValue, isDecimalCode } from './unicodeClasses';
 import { type PyError, PyInstance, type PyValue } from './values';
 
 /** The limit of decimal digits an int may convert to or from, which sys.set_int_max_str_digits changes (0: none). */
@@ -131,14 +131,16 @@ function digitsValue(digits: string, radix: number): bigint {
 
 /** The value of text made only of decimal digits, Unicode ones included, as format field names read an index. */
 export function decimalValue(text: string): bigint | undefined {
-  if (text === '' || !iterStr(text).every((char) => isDecimalChar(char))) return undefined;
+  if (text === '' || !iterStr(text).every((char) => isDecimalCode(char.codePointAt(0) as number))) return undefined;
   return BigInt(toAsciiDigits(text));
 }
 
 /** Converts Unicode decimal digits, which int() and float() accept, to ASCII digits. */
 export function toAsciiDigits(text: string): string {
   // oxlint-disable-next-line eslint/no-control-regex -- Only non-ASCII characters can be non-ASCII digits.
-  return text.replaceAll(/[^\u0000-\u007F]/gu, (char) => String(decimalDigitValue(char) ?? char));
+  return text.replaceAll(/[^\u0000-\u007F]/gu, (char) =>
+    String(decimalDigitValue(char.codePointAt(0) as number) ?? char)
+  );
 }
 
 /** Parses a string as `float(text)` does, returning undefined when it is not a valid float. */

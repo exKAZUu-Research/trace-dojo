@@ -75,19 +75,41 @@ const codesOf = (text: string): number[] => Array.from(text, (char) => char.code
 const map = (mapping: Mapping, code: number): string => mapping.get(code) ?? String.fromCodePoint(code);
 
 export function isUpperCode(code: number): boolean {
-  return loadTables().isUpper.has(code);
+  return hasCase(code, UPPER, 'isUpper');
 }
 
 export function isLowerCode(code: number): boolean {
-  return loadTables().isLower.has(code);
+  return hasCase(code, LOWER, 'isLower');
 }
 
 export function isTitleCode(code: number): boolean {
-  return loadTables().isTitle.has(code);
+  return hasCase(code, TITLE, 'isTitle');
 }
 
 export function isCasedCode(code: number): boolean {
-  return loadTables().isCased.has(code);
+  return hasCase(code, CASED, 'isCased');
+}
+
+const UPPER = 1;
+const LOWER = 2;
+const TITLE = 4;
+const CASED = 8;
+/** The code points below this have their case classes in a bit table, since most text consists of them. */
+const TABLED_CODES = 0x1_00;
+let tabledCases: Uint8Array | undefined;
+
+function hasCase(code: number, bit: number, set: 'isUpper' | 'isLower' | 'isTitle' | 'isCased'): boolean {
+  if (code >= TABLED_CODES) return loadTables()[set].has(code);
+  tabledCases ??= Uint8Array.from({ length: TABLED_CODES }, (_, each) => {
+    const { isUpper, isLower, isTitle, isCased } = loadTables();
+    return (
+      (isUpper.has(each) ? UPPER : 0) |
+      (isLower.has(each) ? LOWER : 0) |
+      (isTitle.has(each) ? TITLE : 0) |
+      (isCased.has(each) ? CASED : 0)
+    );
+  });
+  return (tabledCases[code] & bit) !== 0;
 }
 
 export function upper(text: string): string {
@@ -194,9 +216,11 @@ export function isTitleText(text: string): boolean {
 export function everyCode(text: string, test: (code: number) => boolean): boolean {
   let read = 0;
   try {
-    for (const char of text) {
+    for (let index = 0; index < text.length; index++) {
+      const code = text.codePointAt(index) as number;
+      if (code > 0xff_ff) index++;
       read++;
-      if (!test(char.codePointAt(0) as number)) return false;
+      if (!test(code)) return false;
     }
     return true;
   } finally {

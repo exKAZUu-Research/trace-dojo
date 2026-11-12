@@ -9,7 +9,7 @@ import { contains } from './operators';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import { repeatText, StringBuilder } from './stringBuilder';
-import { codePointIndex, codePointOffset, iterStr, PYTHON_WHITESPACE, strLength, strRepr } from './strings';
+import { codePointIndex, codePointOffset, isSpaceCode, iterStr, strLength, strRepr } from './strings';
 import { hasAt, occurrences } from './strSearch';
 import {
   argumentTypeName,
@@ -38,13 +38,13 @@ import {
   upper,
 } from './unicodeCase';
 import {
-  isAlphaChar,
-  isDecimalChar,
-  isDigitChar,
-  isIdentifierContinueChar,
-  isIdentifierStartChar,
-  isNumericChar,
-  isPrintableChar,
+  isAlphaCode,
+  isDecimalCode,
+  isDigitCode,
+  isIdentifierContinueCode,
+  isIdentifierStartCode,
+  isNumericCode,
+  isPrintableCode,
 } from './unicodeClasses';
 import { type DONE, PyDict, PySlice, PyTuple, type PyValue } from './values';
 
@@ -72,7 +72,7 @@ strClass.construct = (_cls, args, kwargs) => {
 const LINE_BREAKS = '\n\r\v\f\u001C\u001D\u001E\u0085  ';
 
 function isSpace(char: string): boolean {
-  return char.length === 1 && PYTHON_WHITESPACE.test(char);
+  return isSpaceCode(char.codePointAt(0) as number);
 }
 
 const asStr = (self: PyValue): string => self as string;
@@ -97,8 +97,8 @@ function scanned(self: PyValue): string {
 }
 
 /** Whether a text is nonempty and every character passes a test, read lazily and charged as everyCode charges. */
-function every(text: string, test: (char: string) => boolean): boolean {
-  return text !== '' && everyCode(text, (code) => test(String.fromCodePoint(code)));
+function every(text: string, test: (code: number) => boolean): boolean {
+  return text !== '' && everyCode(text, test);
 }
 
 // Basic protocol ----------------------------------------------------------------------------------------------------
@@ -126,27 +126,24 @@ method(strClass, 'title', 'none', 0, 0, (self) => title(asStr(self)));
 
 // Predicates --------------------------------------------------------------------------------------------------------
 
-method(strClass, 'isalpha', 'none', 0, 0, (self) => every(asStr(self), isAlphaChar));
-method(strClass, 'isdecimal', 'none', 0, 0, (self) => every(asStr(self), isDecimalChar));
-method(strClass, 'isdigit', 'none', 0, 0, (self) => every(asStr(self), isDigitChar));
-method(strClass, 'isnumeric', 'none', 0, 0, (self) => every(asStr(self), isNumericChar));
+method(strClass, 'isalpha', 'none', 0, 0, (self) => every(asStr(self), isAlphaCode));
+method(strClass, 'isdecimal', 'none', 0, 0, (self) => every(asStr(self), isDecimalCode));
+method(strClass, 'isdigit', 'none', 0, 0, (self) => every(asStr(self), isDigitCode));
+method(strClass, 'isnumeric', 'none', 0, 0, (self) => every(asStr(self), isNumericCode));
 method(strClass, 'isalnum', 'none', 0, 0, (self) =>
-  every(asStr(self), (char) => isAlphaChar(char) || isNumericChar(char) || isDigitChar(char))
+  every(asStr(self), (code) => isAlphaCode(code) || isNumericCode(code) || isDigitCode(code))
 );
-method(strClass, 'isspace', 'none', 0, 0, (self) => every(asStr(self), isSpace));
+method(strClass, 'isspace', 'none', 0, 0, (self) => every(asStr(self), isSpaceCode));
 // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
 method(strClass, 'isascii', 'none', 0, 0, (self) => everyCode(asStr(self), (code) => code < 0x80));
-method(strClass, 'isprintable', 'none', 0, 0, (self) =>
-  everyCode(asStr(self), (code) => isPrintableChar(String.fromCodePoint(code)))
-);
+method(strClass, 'isprintable', 'none', 0, 0, (self) => everyCode(asStr(self), isPrintableCode));
 method(strClass, 'isidentifier', 'none', 0, 0, (self) => {
   const text = asStr(self);
   let first = true;
   return (
     text !== '' &&
     everyCode(text, (code) => {
-      const char = String.fromCodePoint(code);
-      const isValid = first ? isIdentifierStartChar(char) : isIdentifierContinueChar(char);
+      const isValid = first ? isIdentifierStartCode(code) : isIdentifierContinueCode(code);
       first = false;
       return isValid;
     })

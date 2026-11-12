@@ -1,5 +1,5 @@
 import { chargeScan, chargeStep, runningProgram } from './runtimeContext';
-import { isPrintableChar } from './unicodeClasses';
+import { isPrintableCode } from './unicodeClasses';
 
 /** Python strings are sequences of code points, while JavaScript strings are UTF-16; these helpers bridge the two. */
 
@@ -185,6 +185,17 @@ export const PYTHON_WHITESPACE =
   // oxlint-disable-next-line eslint/no-control-regex -- Python counts these separators as whitespace.
   /[\t\n\v\f\r\u001C-\u001F \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/u;
 
+const SPACE_CODES = new Set(
+  Array.from({ length: 0x30_01 }, (_, code) => code).filter((code) =>
+    PYTHON_WHITESPACE.test(String.fromCodePoint(code))
+  )
+);
+
+/** Whether a code point is whitespace to `str.isspace()`, `split()`, and `strip()`. */
+export function isSpaceCode(code: number): boolean {
+  return SPACE_CODES.has(code);
+}
+
 const NUMBER_SPACE = String.raw`[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]`;
 const NUMBER_SPACE_AROUND = new RegExp(`^${NUMBER_SPACE}+|${NUMBER_SPACE}+$`, 'gu');
 
@@ -236,7 +247,7 @@ export function strRepr(text: string, asciiOnly = false): string {
     else if (char === '\t') result += String.raw`\t`;
     else if (code < 0x20 || code === 0x7f) result += escapeCodePoint(code);
     else if (code < 0x7f) result += char;
-    else if (asciiOnly || !isPrintableChar(char)) result += escapeCodePoint(code);
+    else if (asciiOnly || !isPrintableCode(code)) result += escapeCodePoint(code);
     else result += char;
   }
   return result + quote;

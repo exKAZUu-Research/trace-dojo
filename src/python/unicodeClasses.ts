@@ -4,62 +4,84 @@ import { CLASS_DATA } from './unicodeClassData';
  * The character classes of str's predicates, as CPython 3.14's Unicode database (16.0.0) decides them rather than the
  * JavaScript engine's, whose Unicode version differs and whose classes leave out numeric ideographs such as 京 and 壹.
  */
-export function isDecimalChar(char: string): boolean {
-  return inRuns(tables().decimal, char);
+export function isDecimalCode(code: number): boolean {
+  return isInClass('decimal', code);
 }
 
-export function isDigitChar(char: string): boolean {
-  return inRuns(tables().digit, char);
+export function isDigitCode(code: number): boolean {
+  return isInClass('digit', code);
 }
 
-export function isNumericChar(char: string): boolean {
-  return inRuns(tables().numeric, char);
+export function isNumericCode(code: number): boolean {
+  return isInClass('numeric', code);
 }
 
-export function isAlphaChar(char: string): boolean {
-  return inRuns(tables().alpha, char);
+export function isAlphaCode(code: number): boolean {
+  return isInClass('alpha', code);
 }
 
-/** Whether `repr()` shows a character as it is and `str.isprintable()` accepts it. */
-export function isPrintableChar(char: string): boolean {
-  return inRuns(tables().printable, char);
+/** Whether `repr()` shows a code point as it is and `str.isprintable()` accepts it. */
+export function isPrintableCode(code: number): boolean {
+  return isInClass('printable', code);
 }
 
-/** Whether a character may start an identifier: XID_Start or `_`. */
-export function isIdentifierStartChar(char: string): boolean {
-  return inRuns(tables().identifierStart, char);
+/** Whether a code point may start an identifier: XID_Start or `_`. */
+export function isIdentifierStartCode(code: number): boolean {
+  return isInClass('identifierStart', code);
 }
 
 /** Whether a text is an identifier, as `str.isidentifier()` decides. */
 export function isIdentifierText(text: string): boolean {
-  const chars = [...text];
-  return chars.length > 0 && isIdentifierStartChar(chars[0]) && chars.slice(1).every(isIdentifierContinueChar);
+  const codes = Array.from(text, (char) => char.codePointAt(0) as number);
+  return codes.length > 0 && isIdentifierStartCode(codes[0]) && codes.slice(1).every(isIdentifierContinueCode);
 }
 
-/** Whether a character may follow the first one in an identifier: XID_Continue. */
-export function isIdentifierContinueChar(char: string): boolean {
-  return inRuns(tables().identifierContinue, char);
+/** Whether a code point may follow the first one in an identifier: XID_Continue. */
+export function isIdentifierContinueCode(code: number): boolean {
+  return isInClass('identifierContinue', code);
 }
 
 /**
- * The value of a decimal character, or undefined for another one. Decimal digits come in blocks from 0 to 9, which
+ * The value of a decimal code point, or undefined for another one. Decimal digits come in blocks from 0 to 9, which
  * adjacent blocks extend into one longer run, so a digit's value is its offset from the run's start modulo ten.
  */
-export function decimalDigitValue(char: string): number | undefined {
-  const bounds = tables().decimal;
-  const index = runIndex(bounds, char.codePointAt(0) as number);
-  return index % 2 === 1 ? ((char.codePointAt(0) as number) - bounds[index - 1]) % 10 : undefined;
+export function decimalDigitValue(code: number): number | undefined {
+  const bounds = tables().runs.decimal;
+  const index = runIndex(bounds, code);
+  return index % 2 === 1 ? (code - bounds[index - 1]) % 10 : undefined;
 }
 
 type ClassName = keyof typeof CLASS_DATA;
 
-let decoded: Record<ClassName, number[]> | undefined;
+const CLASS_NAMES = Object.keys(CLASS_DATA) as ClassName[];
+const CLASS_BITS = Object.fromEntries(CLASS_NAMES.map((name, index) => [name, 1 << index])) as Record<
+  ClassName,
+  number
+>;
+/** The code points below this have their classes in a bit table, since most text consists of them. */
+const TABLED_CODES = 0x1_00;
 
-function tables(): Record<ClassName, number[]> {
-  decoded ??= Object.fromEntries(Object.entries(CLASS_DATA).map(([name, runs]) => [name, decodeRuns(runs)])) as Record<
+let decoded: { runs: Record<ClassName, number[]>; tabled: Uint8Array } | undefined;
+
+function isInClass(name: ClassName, code: number): boolean {
+  const { runs, tabled } = tables();
+  if (code < TABLED_CODES) return (tabled[code] & CLASS_BITS[name]) !== 0;
+  // An odd count of bounds at or below the code point places it inside a run.
+  return runIndex(runs[name], code) % 2 === 1;
+}
+
+function tables(): { runs: Record<ClassName, number[]>; tabled: Uint8Array } {
+  if (decoded) return decoded;
+  const runs = Object.fromEntries(CLASS_NAMES.map((name) => [name, decodeRuns(CLASS_DATA[name])])) as Record<
     ClassName,
     number[]
   >;
+  const tabled = new Uint8Array(TABLED_CODES);
+  for (const name of CLASS_NAMES) {
+    for (let code = 0; code < TABLED_CODES; code++)
+      if (runIndex(runs[name], code) % 2 === 1) tabled[code] |= CLASS_BITS[name];
+  }
+  decoded = { runs, tabled };
   return decoded;
 }
 
@@ -74,11 +96,6 @@ function decodeRuns(text: string): number[] {
     bounds.push(start, end);
   }
   return bounds;
-}
-
-function inRuns(bounds: number[], char: string): boolean {
-  // An odd count of bounds at or below the code point places it inside a run.
-  return runIndex(bounds, char.codePointAt(0) as number) % 2 === 1;
 }
 
 /** The count of bounds at or below a code point. */
