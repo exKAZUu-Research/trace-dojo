@@ -4,6 +4,7 @@ import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { defineGetSet, defineUnsupportedAttributes } from '../descriptors';
 import { DictStore } from '../dictStore';
+import { pyHash } from '../hashing';
 import { runLibrarySource } from '../librarySource';
 import { mappingProxyClass } from '../mappingProxy';
 import { importModule, registerModule, registerUnsupportedAttributes } from '../modules';
@@ -240,7 +241,9 @@ function callCached(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {
     return callValue(cache.fn, args, kwargs);
   }
   const key = cacheKey(cache, args, kwargs);
-  const found = cache.store.lookup(key);
+  // _lru_cache_wrapper hashes the key itself, so an unhashable argument reports its own type, not a dict key's.
+  const hash = pyHash(key);
+  const found = cache.store.lookup(key, hash);
   if (found) {
     cache.hits++;
     if (cache.maxsize !== undefined) cache.store.moveToEnd(found, true);
@@ -248,12 +251,12 @@ function callCached(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {
   }
   cache.misses++;
   const value = callValue(cache.fn, args, kwargs);
-  if (cache.store.lookup(key)) return value;
+  if (cache.store.lookup(key, hash)) return value;
   if (cache.maxsize !== undefined && cache.store.size >= cache.maxsize) {
     const oldest = cache.store.first();
     if (oldest) cache.store.remove(oldest);
   }
-  cache.store.set(key, value);
+  cache.store.set(key, value, hash);
   return value;
 }
 
