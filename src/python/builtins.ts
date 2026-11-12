@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 407 -- The builtin functions and their namespace belong together.
+// code-gauge-allow-file fileNcss 416 -- The builtin functions and their namespace belong together.
 import { abstractSubclassCheck } from './abstractClasses';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
@@ -57,6 +57,7 @@ import {
   NotImplemented,
   objectClass,
   propertyClass,
+  pyError,
   rangeClass,
   setClass,
   sliceClass,
@@ -232,9 +233,10 @@ for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClas
 
 function print(args: PyValue[], kwargs: Kwargs): PyValue {
   const { separator, end } = printTexts(kwargs);
-  const file = kwargs?.get('file') ?? None;
   const runtime = currentRuntime();
-  const isStdout = file === None || file === runtime.standardStream('stdout');
+  const file = printFile(kwargs?.get('file') ?? None);
+  if (file === None) return None;
+  const isStdout = file === runtime.standardStream('stdout');
   // Each piece is written on its own, as CPython writes them, so that the output limit ends a huge print early.
   const write = (text: string): void => {
     if (isStdout) runtime.budget.print(text);
@@ -246,6 +248,14 @@ function print(args: PyValue[], kwargs: Kwargs): PyValue {
   }
   write(end);
   return None;
+}
+
+/** The stream `print` writes to: its `file`, else the current `sys.stdout`, which a program may replace or remove. */
+function printFile(file: PyValue): PyValue {
+  if (file !== None) return file;
+  const stdout = currentRuntime().importModule('sys').dict.get('stdout');
+  if (stdout === undefined) throw pyError('RuntimeError', 'lost sys.stdout');
+  return stdout;
 }
 
 /** The separator and the end of a print call, after the checks CPython makes on its keywords. */

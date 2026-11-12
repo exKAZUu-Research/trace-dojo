@@ -181,6 +181,8 @@ function wordsOfHex(hex: string): number[] {
 function randrange(generator: MersenneTwister, args: PyValue[]): bigint {
   const start = toIndex(args[0]);
   if (args[1] === undefined || args[1] === None) {
+    // random.py checks `step is not _ONE`, which only the cached int 1 passes.
+    if (args[2] !== undefined && args[2] !== 1n) throw typeError('Missing a non-None stop argument');
     if (start > 0n) return generator.randbelow(start);
     throw valueError('empty range for randrange()');
   }
