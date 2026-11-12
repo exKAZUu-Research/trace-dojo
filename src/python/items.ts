@@ -195,6 +195,7 @@ function assignSlice(list: PyList, slice: PySlice, value: PyValue): void {
   if (items.length !== indices.count) {
     throw valueError(`attempt to assign sequence of size ${items.length} to extended slice of size ${indices.count}`);
   }
+  currentRuntime().scan(indices.count);
   for (let index = 0, position = indices.start; index < indices.count; index++, position += indices.step) {
     list.editableItems[position] = items[index];
   }
@@ -209,10 +210,10 @@ export function deleteItem(container: PyValue, key: PyValue): void {
         container.removeRange(indices.start, Math.max(0, indices.stop - indices.start));
         return;
       }
-      const remove = new Set<number>();
-      for (let index = 0, position = indices.start; index < indices.count; index++, position += indices.step)
-        remove.add(position);
-      container.replaceItems(container.items.filter((_, index) => !remove.has(index)));
+      // As list_ass_subscript does, an empty slice removes nothing without visiting the list.
+      if (indices.count === 0) return;
+      currentRuntime().scan(container.items.length);
+      container.replaceItems(withoutSlice(container.items, indices));
       return;
     }
     const index = normalizeIndex(key, container.items.length, 'list');
@@ -230,6 +231,25 @@ export function deleteItem(container: PyValue, key: PyValue): void {
     return;
   }
   throw unsupportedDeletion(container, key);
+}
+
+/** The items left after deleting an extended slice, kept in order. */
+function withoutSlice(items: readonly PyValue[], { start, step, count }: SliceIndices): PyValue[] {
+  // Walk the slice from its lowest position, so that each removed position is met in order.
+  const lowest = step > 0 ? start : start + step * (count - 1);
+  const stride = Math.abs(step);
+  const kept: PyValue[] = [];
+  let next = lowest;
+  let removed = 0;
+  for (let index = 0; index < items.length; index++) {
+    if (index === next && removed < count) {
+      removed++;
+      next += stride;
+    } else {
+      kept.push(items[index]);
+    }
+  }
+  return kept;
 }
 
 /**

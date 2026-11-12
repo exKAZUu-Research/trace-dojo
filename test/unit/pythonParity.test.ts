@@ -335,7 +335,10 @@ test.each([
   expect(trace.traceItems.map(({ line, callLines }) => `${line}:${callLines.join(',')}`)).toEqual(steps);
 });
 
-test('reversing a long list in place over and over ends at the operation limit', () => {
-  const program = 'a = list(range(100000))\nfor i in range(700):\n    a.reverse()';
+test.each([
+  ['reversing a long list in place', 'a.reverse()'],
+  ['deleting an extended slice of a long list', 'del a[::100000]\n    a.append(i)'],
+])('%s over and over ends at the operation limit', (_name, body) => {
+  const program = `a = list(range(100000))\nfor i in range(700):\n    ${body}`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
