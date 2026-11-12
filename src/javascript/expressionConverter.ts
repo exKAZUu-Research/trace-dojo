@@ -509,9 +509,9 @@ export abstract class ExpressionConverter extends ConverterBase {
 }
 
 /**
- * Whether a generator can evaluate an expression containing a `yield` step by step: the parts of the expression that
- * hold the `yield` must be evaluated in order without a callback, as operands and arguments are, but destructuring
- * defaults and object literal members are not.
+ * Whether a generator can evaluate an expression containing a `yield` or `await` step by step: the parts of the
+ * expression that hold it must be evaluated in order without a callback, as operands, arguments, and object literal
+ * members are, but destructuring defaults and `super(...)` arguments are not.
  */
 function canSuspendIn(expression: Expression): boolean {
   switch (expression.kind) {
