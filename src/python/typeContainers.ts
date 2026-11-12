@@ -21,6 +21,7 @@ import {
   updateTable,
 } from './setOperations';
 import { SetTable } from './setTable';
+import { StringBuilder } from './stringBuilder';
 import { timsort } from './timsort';
 import {
   defineMethod,
@@ -73,14 +74,14 @@ export function containerRepr(object: PyObject, placeholder: string, render: () 
   }
 }
 
-function joinReprs(items: readonly PyValue[]): string {
-  let result = '';
+/** The reprs of items separated by commas, refused once they outgrow the string limit. */
+export function joinReprs(items: readonly PyValue[]): string {
+  const result = new StringBuilder();
   for (const [index, item] of items.entries()) {
-    if (index > 0) result += ', ';
-    result += pyRepr(item);
-    currentRuntime().buildString(result.length);
+    if (index > 0) result.append(', ');
+    result.append(pyRepr(item));
   }
-  return result;
+  return result.build();
 }
 
 // list --------------------------------------------------------------------------------------------------------------
@@ -361,13 +362,12 @@ method(dictClass, '__repr__', 'none', 0, 0, (self) =>
 );
 
 export function dictBody(dict: PyDict): string {
-  let result = '{';
+  const result = new StringBuilder().append('{');
   for (const [index, entry] of dict.store.ordered().entries()) {
-    if (index > 0) result += ', ';
-    result += `${pyRepr(entry.key)}: ${pyRepr(entry.value)}`;
-    currentRuntime().buildString(result.length);
+    if (index > 0) result.append(', ');
+    result.append(pyRepr(entry.key)).append(': ').append(pyRepr(entry.value));
   }
-  return `${result}}`;
+  return result.append('}').build();
 }
 
 method(dictClass, '__len__', 'none', 0, 0, (self) => BigInt(dictOf(self).store.size));

@@ -2,6 +2,7 @@ import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { floatToInt } from './numbers';
 import { callValue, getAttribute, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
+import { repeatText } from './stringBuilder';
 import { iterStr } from './strings';
 import { pyError, typeError, typeName, valueError } from './types';
 import { PyInstance, PyTuple, type PyValue } from './values';
@@ -187,9 +188,8 @@ function formatInteger(type: string, integer: bigint, conversion: Conversion): s
 /** Pads a number to the width: with zeros between its sign and prefix and its digits, or with spaces outside. */
 function padNumber(signAndPrefix: string, digits: string, { align, zero, width }: Conversion): string {
   const padding = Math.max(0, Number(width) - signAndPrefix.length - digits.length);
-  currentRuntime().buildString(padding);
-  if (align === '<') return signAndPrefix + digits + ' '.repeat(padding);
-  return zero ? signAndPrefix + '0'.repeat(padding) + digits : ' '.repeat(padding) + signAndPrefix + digits;
+  if (align === '<') return signAndPrefix + digits + repeatText(' ', padding);
+  return zero ? signAndPrefix + repeatText('0', padding) + digits : repeatText(' ', padding) + signAndPrefix + digits;
 }
 
 function toInteger(type: string, value: PyValue): bigint {

@@ -59,6 +59,11 @@ test.each([
   ],
   ['a sequence pattern matched against a huge range', 'match range(10**12):\n    case [a, *b]:\n        pass'],
   ['the elements of a huge count', 'from collections import Counter\nx = list(Counter(a=10**12).elements())'],
+  ['a generator seeded with a long string over and over', 'import random\nwhile True:\n    random.seed("x" * 1000000)'],
+  [
+    'a generator seeded with a huge int over and over',
+    'import random\nx = 1 << 7999999\nwhile True:\n    random.seed(x)',
+  ],
 ])('%s ends at the execution limit', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded' });
 });
@@ -95,8 +100,33 @@ test.each([
     'import json\ns = "x" * 100000\nx = json.dumps({str(i): s for i in range(2000)})',
   ],
   ['a JSON text with a huge indent', 'import json\nx = json.dumps([[[[1]]]] * 1000, indent=100000)'],
+  ['a str filled with zeros to a huge width', 'x = "x".zfill(1000000000)'],
+  ['a str filled with zeros beyond what the host can hold', 'x = "x".zfill(10000000000)'],
+  ['a tab expanded to a huge size', String.raw`x = "\t".expandtabs(1000000000)`],
+  ['a tab expanded beyond what the host can hold', String.raw`x = "\t".expandtabs(10000000000)`],
+  ['a str justified to a huge width', 'x = "x".rjust(10000000000, "*")'],
+  ['a translation that grows a str beyond the limit', 'x = ("x" * 1000).translate({120: "y" * 1001})'],
+  ['a replacement that grows a str beyond the limit', 'x = ("x" * 1000).replace("", "y" * 1001)'],
+  ['a repr that grows a str beyond the limit', String.raw`x = repr("\0" * 300000)`],
+  ['an upper-casing that grows a str beyond the limit', 'x = ("ß" * 600000).upper()'],
+  ['the binary digits of a huge int', 'x = bin(1 << 1000000)'],
+  ['a complex number padded to a huge width', 'x = format(complex(1, 2), ">1000000000")'],
+  ['the repr of a deque of long strings', 'from collections import deque\nx = repr(deque(["x" * 1000] * 1001))'],
 ])('%s raises MemoryError', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ uncaughtException: 'MemoryError' });
+});
+
+test('a long text built from many pieces is charged for its length, not for each piece', () => {
+  const program = `lengths = [
+    len(str(list(range(100000)))),
+    len(str({i: i for i in range(20000)})),
+    len(("x" * 400000).replace("x", "yy")),
+    len(("x\\t" * 100000).expandtabs(4)),
+    len(("x" * 400000).translate({120: "yy"})),
+]
+if lengths != [688890, 257780, 800000, 400000, 800000]:
+    raise AssertionError(str(lengths))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test('containers built in different ways are each charged once', () => {

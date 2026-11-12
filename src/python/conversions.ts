@@ -1,10 +1,11 @@
+import { formatComplex } from './formatComplex';
 import { formatValue } from './formatSpec';
 import { floatRepr, intToString } from './numbers';
 import { bindValue, callValue, getAttribute, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { asciiEscape, iterStr, strRepr } from './strings';
 import { classOf, None, typeError, typeName, valueError } from './types';
-import { PyBuiltinFunction, PyInstance, type PyObject, type PyValue } from './values';
+import { PyBuiltinFunction, PyComplex, PyInstance, type PyObject, type PyValue } from './values';
 
 /** `repr()` of a value. */
 export function pyRepr(value: PyValue): string {
@@ -74,7 +75,8 @@ export function pyFormat(value: PyValue, spec: string): string {
     }
   }
   if (value === None && spec !== '') throw typeError('unsupported format string passed to NoneType.__format__');
-  if (typeof value === 'object' && !isNativeFormattable(value) && spec !== '') {
+  if (value instanceof PyComplex) return formatComplex(value, spec);
+  if (typeof value === 'object' && spec !== '') {
     throw typeError(`unsupported format string passed to ${typeName(value)}.__format__`);
   }
   return formatValue(value, spec, pyStr);
@@ -83,10 +85,6 @@ export function pyFormat(value: PyValue, spec: string): string {
 /** An Enum member, whose builtin `__format__` formats its `str()` or, for an IntEnum, its value. */
 function isEnumMember(value: PyObject): boolean {
   return value instanceof PyInstance && value.enumValue !== undefined;
-}
-
-function isNativeFormattable(value: PyObject): boolean {
-  return classOf(value).name === 'complex';
 }
 
 // str.format ---------------------------------------------------------------------------------------------------------

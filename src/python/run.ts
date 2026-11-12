@@ -4,7 +4,7 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { Module } from './ast';
 import { describeException } from './describe';
 import { parsePython } from './parse';
-import { Frame, isHostStackOverflow, Runtime } from './runtime';
+import { Frame, hostRefusal, Runtime } from './runtime';
 import { withRuntime } from './runtimeContext';
 import { None } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -74,8 +74,8 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
 
 function describeUncaught(error: unknown): string | undefined {
   if (error instanceof UnsupportedFeatureError) return error.message;
-  if (isHostStackOverflow(error)) return 'RecursionError: maximum recursion depth exceeded';
-  if (!(error instanceof PyError)) throw error;
-  if (error.exception.cls.name === 'SystemExit' && error.exception.cls.isBuiltin) return undefined;
-  return describeException(error.exception);
+  const raised = hostRefusal(error) ?? error;
+  if (!(raised instanceof PyError)) throw raised;
+  if (raised.exception.cls.name === 'SystemExit' && raised.exception.cls.isBuiltin) return undefined;
+  return describeException(raised.exception);
 }

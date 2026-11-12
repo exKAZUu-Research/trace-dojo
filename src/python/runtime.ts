@@ -121,8 +121,13 @@ export class Runtime {
   }
 
   buildString(length: number): void {
-    if (length > LIMITS.maxStringLength) throw pyError('MemoryError');
+    this.ensureStringFits(length);
     this.spend(Math.ceil(length / 16));
+  }
+
+  /** Refuses a string of a length the program chose before the host builds it, charging nothing. */
+  ensureStringFits(length: number): void {
+    if (length > LIMITS.maxStringLength) throw pyError('MemoryError');
   }
 
   /** Charges for an integer of `bits` bits about to be computed, refusing ones that would exhaust memory. */
@@ -150,15 +155,12 @@ export class Runtime {
     if (frame?.isAtomic) this.steps.completeAtomicCall();
   }
 
-  /** Runs `run`, turning the host's stack overflow into Python's RecursionError. */
+  /** Runs `run`, turning a refusal of the host into the exception Python raises for it. */
   guardRecursion<T>(run: () => T): T {
     try {
       return run();
     } catch (error) {
-      if (isHostStackOverflow(error)) {
-        throw pyError('RecursionError', 'maximum recursion depth exceeded');
-      }
-      throw error;
+      throw hostRefusal(error) ?? error;
     }
   }
 
@@ -482,11 +484,25 @@ export class Runtime {
 export { Frame, PyCell };
 
 /**
- * Whether the host's stack ran out, which can happen before the call depth limit when each call nests many statements.
- * Only a type check is safe here: on an exhausted stack, even testing the message may overflow again.
+ * The Python exception for an error of the host itself: RecursionError when its stack ran out, which can happen before
+ * the call depth limit when each call nests many statements, and MemoryError when it refused a value for its size
+ * (a string, an array, or an integer beyond what it can hold).
  */
-export function isHostStackOverflow(error: unknown): boolean {
-  return error instanceof RangeError;
+export function hostRefusal(error: unknown): PyError | undefined {
+  if (!(error instanceof RangeError)) return undefined;
+  return isHostStackOverflow(error)
+    ? pyError('RecursionError', 'maximum recursion depth exceeded')
+    : withoutCharge(() => pyError('MemoryError'));
+}
+
+function isHostStackOverflow(error: RangeError): boolean {
+  try {
+    // JavaScriptCore and V8 both word it "Maximum call stack size exceeded".
+    return error.message.includes('call stack');
+  } catch {
+    // Reading the message overflowed again, so the stack is exhausted.
+    return true;
+  }
 }
 
 function compareNames(a: string, b: string): number {

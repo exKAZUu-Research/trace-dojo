@@ -28,6 +28,14 @@ export function chargeSlots(count: number): void {
 }
 
 /**
+ * Refuses a string beyond the length limit that a native function returns, so that none can hand one to the program
+ * even when it built the string without consulting the limit.
+ */
+export function refuseOversizedString(value: unknown): void {
+  if (typeof value === 'string') current?.ensureStringFits(value.length);
+}
+
+/**
  * Builds a value at no charge: a constant, which CPython creates once when it compiles the program, or the MemoryError
  * that reports the limit, which charging would raise again without end.
  */

@@ -1,4 +1,3 @@
-import { complexRepr } from './complexNumbers';
 import {
   type Decimal,
   exactDecimal,
@@ -12,14 +11,15 @@ import {
   toAsciiDigits,
 } from './numbers';
 import { currentRuntime } from './runtimeContext';
+import { repeatText } from './stringBuilder';
 import { iterStr, strLength } from './strings';
 import { pyError, typeName, valueError } from './types';
-import { PyComplex, type PyValue } from './values';
+import type { PyValue } from './values';
 
 type Align = '<' | '>' | '=' | '^';
 type Separator = ',' | '_';
 
-interface Spec {
+export interface Spec {
   fill: string;
   align: Align;
   sign?: '+' | '-' | ' ';
@@ -42,7 +42,7 @@ const MAX_SSIZE = (1n << 63n) - 1n;
 const MAX_C_INT = 2 ** 31 - 1;
 
 /** Reads a format specification as CPython's `parse_internal_render_format_spec` does. */
-function parseSpec(text: string, value: PyValue, defaults: Defaults): Spec {
+export function parseSpec(text: string, value: PyValue, defaults: Defaults): Spec {
   const reader = new SpecReader(iterStr(text));
   const spec: Spec = { fill: ' ', coerceZero: false, alternate: false, width: 0, ...defaults };
   const given = reader.readFillAndAlign(spec);
@@ -55,7 +55,7 @@ function parseSpec(text: string, value: PyValue, defaults: Defaults): Spec {
     if (given === undefined && defaults.align === '>') spec.align = '=';
   }
   spec.width = reader.readCount() ?? 0;
-  currentRuntime().buildString(spec.width);
+  currentRuntime().ensureStringFits(spec.width);
   spec.grouping = reader.readSeparator();
   if (reader.take('.') !== undefined) {
     spec.precision = reader.readCount();
@@ -127,7 +127,7 @@ function invalidSeparator(separator: Separator, type: string): Error {
   return valueError(`Cannot specify '${separator}' with '${typeCode(type)}'.`);
 }
 
-function unknownType(type: string, value: PyValue): Error {
+export function unknownType(type: string, value: PyValue): Error {
   return valueError(`Unknown format code '${typeCode(type)}' for object of type '${typeName(value)}'`);
 }
 
@@ -143,7 +143,6 @@ export function formatValue(value: PyValue, text: string, fallback: (value: PyVa
   if (typeof value === 'bigint' || typeof value === 'boolean') return formatInt(value, text);
   if (typeof value === 'number') return formatFloat(value, parseSpec(text, value, { align: '>' }), value);
   if (typeof value === 'string') return text === '' ? value : formatStr(value, text);
-  if (value instanceof PyComplex && text === '') return complexRepr(value);
   if (text !== '') throw valueError(`unsupported format string passed to ${typeName(value)}.__format__`);
   return fallback(value);
 }
@@ -189,7 +188,7 @@ function formatCharacter(value: bigint, spec: Spec): string {
 }
 
 /** @param original The value being formatted, which is an int for a float presentation type of an int. */
-function formatFloat(value: number, spec: Spec, original: PyValue): string {
+export function formatFloat(value: number, spec: Spec, original: PyValue): string {
   const type = spec.type;
   if (type !== undefined && !'eEfFgGn%'.includes(type)) throw unknownType(type, original);
   chargePrecision(spec.precision);
@@ -226,7 +225,7 @@ function finiteText(value: number, spec: Spec, upper: boolean): string {
   return generalText(decimal, precision ?? 6, alternate, type === undefined, upper);
 }
 
-function chargePrecision(precision: number | undefined): void {
+export function chargePrecision(precision: number | undefined): void {
   if (precision === undefined) return;
   if (precision > MAX_C_INT) throw valueError('precision too big');
   currentRuntime().buildString(precision);
@@ -306,24 +305,24 @@ function group(digits: string, separator: string, size: number, fromLeft = false
   return digits.slice(0, start) + groups.join(separator) + digits.slice(start + body.length);
 }
 
-function pad(body: string, signAndPrefix: string, spec: Spec): string {
+export function pad(body: string, signAndPrefix: string, spec: Spec): string {
   const length = strLength(body) + strLength(signAndPrefix);
   const missing = spec.width - length;
   if (missing <= 0) return signAndPrefix + body;
-  const fill = spec.fill;
+  const fill = (count: number): string => repeatText(spec.fill, count);
   switch (spec.align) {
     case '<': {
-      return signAndPrefix + body + fill.repeat(missing);
+      return signAndPrefix + body + fill(missing);
     }
     case '>': {
-      return fill.repeat(missing) + signAndPrefix + body;
+      return fill(missing) + signAndPrefix + body;
     }
     case '=': {
-      return signAndPrefix + fill.repeat(missing) + body;
+      return signAndPrefix + fill(missing) + body;
     }
     default: {
       const left = Math.floor(missing / 2);
-      return fill.repeat(left) + signAndPrefix + body + fill.repeat(missing - left);
+      return fill(left) + signAndPrefix + body + fill(missing - left);
     }
   }
 }

@@ -35,7 +35,7 @@ export function sliceIndices(slice: PySlice, length: number): SliceIndices {
   if (stepValue === 0n) throw valueError('slice step cannot be zero');
   const step = Number(stepValue);
   const len = BigInt(length);
-  const clamp = (value: bigint | undefined, defaultValue: bigint, isStart: boolean): number => {
+  const clamp = (value: bigint | undefined, defaultValue: bigint): number => {
     if (value === undefined) return Number(defaultValue);
     let index = value;
     if (index < 0n) {
@@ -44,11 +44,10 @@ export function sliceIndices(slice: PySlice, length: number): SliceIndices {
     } else if (index >= len) {
       index = step < 0 ? len - 1n : len;
     }
-    void isStart;
     return Number(index);
   };
-  const start = clamp(sliceIndex(slice.start), step < 0 ? len - 1n : 0n, true);
-  const stop = clamp(sliceIndex(slice.stop), step < 0 ? -1n : len, false);
+  const start = clamp(sliceIndex(slice.start), step < 0 ? len - 1n : 0n);
+  const stop = clamp(sliceIndex(slice.stop), step < 0 ? -1n : len);
   let count = 0;
   if (step < 0) {
     if (stop < start) count = Math.floor((start - stop - 1) / -step) + 1;

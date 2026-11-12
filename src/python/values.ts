@@ -2,7 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
-import { chargeSlots } from './runtimeContext';
+import { chargeSlots, refuseOversizedString } from './runtimeContext';
 import type { SetTable } from './setTable';
 
 /**
@@ -37,22 +37,42 @@ export type NativeFunction = (args: PyValue[], kwargs: Kwargs) => PyValue;
 /** How a builtin in a class dictionary binds when read from an instance. */
 export type NativeBinding = 'method' | 'static' | 'class';
 
+const checkedRuns = new WeakSet<NativeFunction>();
+
 export class PyBuiltinFunction extends PyObject {
+  readonly run: NativeFunction;
+
   constructor(
     cls: PyClass,
     readonly name: string,
-    readonly run: NativeFunction,
+    run: NativeFunction,
     /** The object a bound builtin method was read from, or the module a function belongs to. */
     readonly self?: PyValue,
     readonly binding: NativeBinding = 'method',
     readonly ownerName?: string
   ) {
     super(cls);
+    this.run = refusingOversizedStrings(run);
   }
 
   get qualifiedName(): string {
     return this.ownerName ? `${this.ownerName}.${this.name}` : this.name;
   }
+}
+
+/**
+ * Makes a native function refuse to return a string beyond the length limit. A function already wrapped is kept, since
+ * bound methods are equal when they share their function.
+ */
+function refusingOversizedStrings(run: NativeFunction): NativeFunction {
+  if (checkedRuns.has(run)) return run;
+  const checked: NativeFunction = (args, kwargs) => {
+    const result = run(args, kwargs);
+    refuseOversizedString(result);
+    return result;
+  };
+  checkedRuns.add(checked);
+  return checked;
 }
 
 export interface ClassLayout {

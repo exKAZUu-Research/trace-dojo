@@ -14,6 +14,7 @@ import {
   symmetricDifferenceUpdate,
   updateTable,
 } from './setOperations';
+import { repeatText } from './stringBuilder';
 import { compareStr, strLength } from './strings';
 import {
   boolClass,
@@ -406,9 +407,7 @@ function repeatCount(count: PyValue): number {
 
 function repeatString(text: string, count: bigint | boolean): string {
   const times = repeatCount(count);
-  if (times <= 0 || text === '') return '';
-  currentRuntime().buildString(text.length * times);
-  return text.repeat(times);
+  return repeatText(text, times);
 }
 
 function repeatSequence(sequence: PyList | PyTuple, count: bigint | boolean): PyValue {

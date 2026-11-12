@@ -137,29 +137,33 @@ class MersenneTwister {
   }
 }
 
-/** The 32-bit words of a seed's absolute value, least significant first, as CPython's random_seed splits it. */
-function keyOf(seed: bigint): number[] {
-  let value = seed < 0n ? -seed : seed;
-  if (value === 0n) return [0];
-  const key: number[] = [];
-  while (value > 0n) {
-    key.push(Number(value & 0xff_ff_ff_ffn));
-    value >>= 32n;
-  }
-  return key;
-}
-
-function seedOf(value: PyValue | undefined): bigint {
-  if (value === undefined || value === None) return BigInt(`0x${randomBytes(32).toString('hex')}`);
-  if (typeof value === 'bigint' || typeof value === 'boolean') return BigInt(value);
+/** The key a seed initializes the generator with: its 32-bit words, as CPython's random_seed splits it. */
+function seedKey(value: PyValue | undefined): number[] {
+  if (value === undefined || value === None) return wordsOfHex(randomBytes(32).toString('hex'));
+  if (typeof value === 'bigint' || typeof value === 'boolean') return keyOf(BigInt(value));
   if (typeof value === 'string') {
     const bytes = Buffer.from(value, 'utf8');
+    currentRuntime().scan(bytes.length);
     const digest = createHash('sha512').update(bytes).digest();
-    return BigInt(`0x${Buffer.concat([bytes, digest]).toString('hex')}`);
+    return wordsOfHex(Buffer.concat([bytes, digest]).toString('hex'));
   }
   // CPython seeds from a non-int's hash converted to size_t, so a negative hash wraps instead of losing its sign.
-  if (typeof value === 'number') return BigInt.asUintN(64, pyHash(value));
+  if (typeof value === 'number') return keyOf(BigInt.asUintN(64, pyHash(value)));
   throw typeError('The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.');
+}
+
+/** The 32-bit words of an int's absolute value, least significant first. */
+function keyOf(seed: bigint): number[] {
+  const hex = (seed < 0n ? -seed : seed).toString(16);
+  currentRuntime().chargeBits(BigInt(hex.length * 4));
+  return wordsOfHex(hex);
+}
+
+/** The 32-bit words of a hexadecimal number, least significant first, read in one pass over its digits. */
+function wordsOfHex(hex: string): number[] {
+  const words: number[] = [];
+  for (let end = hex.length; end > 0; end -= 8) words.push(Number.parseInt(hex.slice(Math.max(end - 8, 0), end), 16));
+  return words;
 }
 
 function randrange(generator: MersenneTwister, args: PyValue[]): bigint {
@@ -323,7 +327,7 @@ randomClass.construct = (cls, args, kwargs) => {
     throw typeError(`Random.__init__() takes from 1 to 2 positional arguments but ${args.length + 1} were given`);
   }
   const generator = new MersenneTwister();
-  generator.initByArray(keyOf(seedOf(argument(args, kwargs, 0, 'x'))));
+  generator.initByArray(seedKey(argument(args, kwargs, 0, 'x')));
   return new PyOpaque(cls, 'Random', generator);
 };
 
@@ -441,7 +445,7 @@ function seedMethod(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs)
   if (version === 1n && typeof a === 'string') {
     generator.initByArray(keyOf(versionOneSeed(a)));
   } else {
-    generator.initByArray(keyOf(seedOf(a)));
+    generator.initByArray(seedKey(a));
   }
   generator.gaussNext = undefined;
   return None;
@@ -449,6 +453,7 @@ function seedMethod(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs)
 
 /** The seed version 1 of random.seed makes from a string, which hashes it as Python 2 did. */
 function versionOneSeed(text: string): bigint {
+  currentRuntime().scan(text.length);
   const codes = Array.from(text, (char) => BigInt(char.codePointAt(0) as number));
   let x = codes.length > 0 ? codes[0] << 7n : 0n;
   for (const code of codes) x = ((1_000_003n * x) ^ code) & 0xff_ff_ff_ff_ff_ff_ff_ffn;

@@ -7,6 +7,7 @@ import { toIndex } from './numbers';
 import { getItem, getIterator, iterate, toArray } from './objects';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
+import { repeatText, StringBuilder } from './stringBuilder';
 import { hasSurrogates, isPrintable, iterStr, strLength, strRepr } from './strings';
 import {
   defineMethod,
@@ -327,7 +328,7 @@ method(strClass, 'join', 'one', 1, 1, (self, [iterable]) => {
   for (const [index, item] of items.entries()) {
     if (typeof item !== 'string')
       throw typeError(`sequence item ${index}: expected str instance, ${typeName(item)} found`);
-    length += item.length + separator.length;
+    length += item.length + (index > 0 ? separator.length : 0);
   }
   currentRuntime().buildString(length);
   return (items as string[]).join(separator);
@@ -387,11 +388,13 @@ for (const [name, place] of [
     const length = strLength(text);
     const missing = target - length;
     if (missing <= 0) return text;
-    currentRuntime().buildString(target);
-    if (place === 'left') return text + fillChar.repeat(missing);
-    if (place === 'right') return fillChar.repeat(missing) + text;
-    const leftPad = Math.floor(missing / 2) + (missing & target & 1);
-    return fillChar.repeat(leftPad) + text + fillChar.repeat(missing - leftPad);
+    const centered = Math.floor(missing / 2) + (missing & target & 1);
+    const leftPad = place === 'left' ? 0 : place === 'right' ? missing : centered;
+    return new StringBuilder()
+      .appendRepeated(fillChar, leftPad)
+      .append(text)
+      .appendRepeated(fillChar, missing - leftPad)
+      .build();
   });
 }
 
@@ -402,7 +405,7 @@ method(strClass, 'zfill', 'one', 1, 1, (self, [width]) => {
   if (length >= target) return text;
   const signed = text.startsWith('+') || text.startsWith('-');
   const sign = signed ? text[0] : '';
-  return sign + '0'.repeat(target - length) + text.slice(sign.length);
+  return sign + repeatText('0', target - length) + text.slice(sign.length);
 });
 
 method(
@@ -414,20 +417,20 @@ method(
   (self, args, kwargs) => {
     const size = Number(toIndex(argument(args, kwargs, 0, 'tabsize') ?? 8n));
     let column = 0;
-    let result = '';
+    const result = new StringBuilder();
     for (const char of iterStr(asStr(self))) {
       if (char === '\t') {
         if (size > 0) {
           const spaces = size - (column % size);
-          result += ' '.repeat(spaces);
+          result.appendRepeated(' ', spaces);
           column += spaces;
         }
       } else {
-        result += char;
+        result.append(char);
         column = char === '\n' || char === '\r' ? 0 : column + 1;
       }
     }
-    return result;
+    return result.build();
   },
   { keywords: ['tabsize'], named: 1 }
 );
@@ -446,31 +449,29 @@ method(
     const replacement = expectStr(args[1], mustBeStr('replace() argument 2'));
     let count = Number(toIndex(argument(args, kwargs, 2, 'count') ?? -1n));
     if (count < 0) count = Number.POSITIVE_INFINITY;
-    let result = '';
+    const result = new StringBuilder();
     if (old === '') {
       const points = iterStr(text);
       let replaced = 0;
       for (const point of points) {
         if (replaced < count) {
-          result += replacement;
+          result.append(replacement);
           replaced++;
         }
-        result += point;
+        result.append(point);
       }
-      if (replaced < count) result += replacement;
+      if (replaced < count) result.append(replacement);
     } else {
       let position = 0;
       let replaced = 0;
       for (let index = text.indexOf(old); index !== -1 && replaced < count; index = text.indexOf(old, position)) {
-        result += text.slice(position, index) + replacement;
+        result.append(text.slice(position, index)).append(replacement);
         position = index + old.length;
         replaced++;
-        currentRuntime().buildString(result.length);
       }
-      result += text.slice(position);
+      result.append(text.slice(position));
     }
-    currentRuntime().buildString(result.length);
-    return result;
+    return result.build();
   },
   { keywords: ['count'], named: 1 }
 );
@@ -499,24 +500,24 @@ method(strClass, 'format_map', 'one', 1, 1, (self, [mapping]) =>
 
 method(strClass, 'maketrans', 'expected', 1, 3, (_self, args) => makeTranslation(args), { binding: 'static' });
 method(strClass, 'translate', 'one', 1, 1, (self, [table]) => {
-  let result = '';
+  const result = new StringBuilder();
   for (const char of iterStr(asStr(self))) {
     let mapped: PyValue;
     try {
       mapped = getItem(table, BigInt(char.codePointAt(0) as number));
     } catch (error) {
       if (currentRuntime().isLookupError(error)) {
-        result += char;
+        result.append(char);
         continue;
       }
       throw error;
     }
     if (mapped === None) continue;
-    if (typeof mapped === 'bigint') result += String.fromCodePoint(Number(mapped));
-    else if (typeof mapped === 'string') result += mapped;
+    if (typeof mapped === 'bigint') result.append(String.fromCodePoint(Number(mapped)));
+    else if (typeof mapped === 'string') result.append(mapped);
     else throw typeError('character mapping must return integer, None or str');
   }
-  return result;
+  return result.build();
 });
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Follows str.maketrans for its one-, two-, and three-argument forms.

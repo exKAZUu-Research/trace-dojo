@@ -7,6 +7,7 @@ import { floatRepr, intToString, parseIntText, toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy, toArray } from '../objects';
 import { intEnumValue } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { repeatText } from '../stringBuilder';
 import { iterStr } from '../strings';
 import {
   exceptionClassNamed,
@@ -173,7 +174,7 @@ function enterContainer(value: PyObject, state: EncodeState, options: DumpOption
 }
 
 function writeNewline(options: DumpOptions, depth: number, state: EncodeState): void {
-  if (options.indent !== undefined) write(state, `\n${options.indent.repeat(depth)}`);
+  if (options.indent !== undefined) write(state, `\n${repeatText(options.indent, depth)}`);
 }
 
 /** The text of a dict key, or undefined for a key that `skipkeys` skips. */

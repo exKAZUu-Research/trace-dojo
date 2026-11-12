@@ -23,7 +23,7 @@ import {
 } from '../objects';
 import { binaryOp, compareOp, equals, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { containerRepr, dictBody, updateDict } from '../typeContainers';
+import { containerRepr, dictBody, joinReprs, updateDict } from '../typeContainers';
 import { newGenericAlias } from '../typeHints';
 import {
   builtinClass,
@@ -284,7 +284,7 @@ method(dequeClass, '__reversed__', 'none', 0, 0, (self) => {
 method(dequeClass, '__repr__', 'none', 0, 0, (self) => {
   const deque = dequeOf(self);
   return containerRepr(deque, '[...]', () => {
-    const body = `[${deque.items.map((item) => pyRepr(item)).join(', ')}]`;
+    const body = `[${joinReprs(deque.items)}]`;
     return deque.maxlen === undefined ? `deque(${body})` : `deque(${body}, maxlen=${deque.maxlen})`;
   });
 });
