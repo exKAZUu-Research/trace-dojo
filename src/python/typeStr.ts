@@ -295,10 +295,14 @@ for (const [name, fromEnd] of [
       const sep = argument(args, kwargs, 0, 'sep') ?? None;
       const limit = Number(toIndex(argument(args, kwargs, 1, 'maxsplit') ?? -1n));
       const text = asStr(self);
-      currentRuntime().scan(text.length);
-      if (sep === None) return newList(splitWhitespace(text, limit, fromEnd));
+      if (sep === None) {
+        currentRuntime().scan(text.length);
+        return newList(splitWhitespace(text, limit, fromEnd));
+      }
       const separator = expectStr(sep, (type) => `must be str or None, not ${type}`);
       if (separator === '') throw valueError('empty separator');
+      // No split leaves the text as it is without looking at it.
+      if (limit === 0) return newList([text]);
       return newList(splitAt(text, separator, limit, fromEnd));
     },
     { keywords: ['sep', 'maxsplit'], named: 2 }
