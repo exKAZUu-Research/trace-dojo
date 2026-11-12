@@ -14,6 +14,7 @@ import { binaryOp, inplaceOp, nativeBinaryOperation, unaryOp } from './operators
 import { currentRuntime } from './runtimeContext';
 import { newGenericAlias } from './typeHints';
 import {
+  argumentTypeName,
   baseExceptionClass,
   boolClass,
   builtinFunctionClass,
@@ -216,7 +217,8 @@ method(
   1,
   1,
   (_cls, [kind]) => {
-    if (typeof kind !== 'string') throw typeError(`__getformat__() argument must be str, not ${typeName(kind)}`);
+    if (typeof kind !== 'string')
+      throw typeError(`__getformat__() argument must be str, not ${argumentTypeName(kind)}`);
     if (kind !== 'double' && kind !== 'float')
       throw valueError("__getformat__() argument 1 must be 'double' or 'float'");
     return 'IEEE, little-endian';
@@ -903,7 +905,7 @@ method(
   1,
   1,
   (cls, [text]) => {
-    if (typeof text !== 'string') throw typeError(`fromhex() argument must be str, not ${typeName(text)}`);
+    if (typeof text !== 'string') throw typeError('bad argument type for built-in operation');
     const value = floatFromHex(text);
     return cls === floatClass ? value : callValue(cls, [value]);
   },

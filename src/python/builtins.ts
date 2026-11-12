@@ -8,6 +8,7 @@ import { pyHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
 import { asFloat, divmodFloat, floorDivInt, modInt, toIndex } from './numbers';
 import {
+  attributeName,
   bindValue,
   callValue,
   deleteAttribute,
@@ -34,6 +35,7 @@ import { sortList } from './typeContainers';
 import { roundFloat, roundInt } from './typeNumbers';
 import { defineIteratorClass, nextValue } from './typeObject';
 import {
+  argumentTypeName,
   boolClass,
   builtinClass,
   classmethodClass,
@@ -507,8 +509,8 @@ function next(args: PyValue[], kwargs: Kwargs): PyValue {
 
 function getattr(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'getattr', min: 2, max: 3, style: 'expected' }, args, kwargs);
-  const [object, name, fallback] = args;
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  const [object, nameValue, fallback] = args;
+  const name = attributeName(nameValue);
   if (fallback === undefined) return getAttribute(object, name);
   return getAttributeOrUndefined(object, name) ?? fallback;
 }
@@ -582,7 +584,7 @@ export function createBuiltins(): Map<string, PyValue> {
     [
       'delattr',
       builtin('delattr', 'expected', 2, 2, ([object, name]) => {
-        deleteAttribute(object, name as string);
+        deleteAttribute(object, attributeName(name));
         return None;
       }),
     ],
@@ -594,7 +596,7 @@ export function createBuiltins(): Map<string, PyValue> {
       'format',
       builtin('format', 'expected', 1, 2, ([value, spec]) => {
         if (spec !== undefined && typeof spec !== 'string')
-          throw typeError(`format() argument 2 must be str, not ${typeName(spec)}`);
+          throw typeError(`format() argument 2 must be str, not ${argumentTypeName(spec)}`);
         return pyFormat(value, spec ?? '');
       }),
     ],
@@ -603,8 +605,7 @@ export function createBuiltins(): Map<string, PyValue> {
     [
       'hasattr',
       builtin('hasattr', 'expected', 2, 2, ([object, name]) => {
-        if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-        return getAttributeOrUndefined(object, name) !== undefined;
+        return getAttributeOrUndefined(object, attributeName(name)) !== undefined;
       }),
     ],
     ['hash', one('hash', ([value]) => pyHash(value))],
@@ -633,8 +634,7 @@ export function createBuiltins(): Map<string, PyValue> {
     [
       'setattr',
       builtin('setattr', 'expected', 3, 3, ([object, name, value]) => {
-        if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-        setAttribute(object, name, value);
+        setAttribute(object, attributeName(name), value);
         return None;
       }),
     ],

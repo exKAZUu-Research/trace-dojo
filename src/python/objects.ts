@@ -497,3 +497,9 @@ export function isFrozenset(value: PyValue): value is PySet {
 }
 
 export { NotImplemented };
+
+/** The name argument of getattr(), setattr(), delattr(), and object's attribute methods, which must be a str. */
+export function attributeName(name: PyValue): string {
+  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  return name;
+}

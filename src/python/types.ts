@@ -388,4 +388,9 @@ export function typeName(value: PyValue): string {
   return cls.tpName ?? cls.name;
 }
 
+/** The type an Argument Clinic error names for an argument, which spells None as `None` rather than its type. */
+export function argumentTypeName(value: PyValue): string {
+  return value === None ? 'None' : typeName(value);
+}
+
 export type { Kwargs };

@@ -4,6 +4,7 @@ import { deriveGroup, makeExceptionGroup, splitGroup } from './exceptionGroups';
 import { callValue, isTruthy, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import {
+  argumentTypeName,
   baseExceptionClass,
   defineMethod,
   exceptionClasses,
@@ -73,7 +74,7 @@ method(baseExceptionClass, '__repr__', 'none', 0, 0, (self) => {
   return args.length === 1 ? `${name}(${pyRepr(args[0])})` : `${name}${pyRepr(newTuple(args))}`;
 });
 method(baseExceptionClass, 'add_note', 'one', 1, 1, (self, [note]) => {
-  if (typeof note !== 'string') throw typeError(`note must be a str, not '${typeName(note)}'`);
+  if (typeof note !== 'string') throw typeError(`add_note() argument must be str, not ${argumentTypeName(note)}`);
   const state = instanceOf(self).exception;
   if (!state) return None;
   state.notes ??= newList([]);

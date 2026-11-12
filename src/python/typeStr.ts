@@ -12,6 +12,7 @@ import { repeatText, StringBuilder } from './stringBuilder';
 import { isPrintable, iterStr, PYTHON_WHITESPACE, strLength, strRepr } from './strings';
 import { hasAt, occurrences, pointIndex, unitOffset } from './strSearch';
 import {
+  argumentTypeName,
   defineMethod,
   newDict,
   newList,
@@ -77,10 +78,11 @@ function expectStr(value: PyValue, message: (type: string) => string): string {
   return value;
 }
 
-const mustBeStr =
-  (what: string) =>
-  (type: string): string =>
-    `${what} must be str, not ${type}`;
+/** Checks a str argument that Argument Clinic converts, raising its TypeError naming the argument as `what`. */
+function expectStrArgument(value: PyValue, what: string): string {
+  if (typeof value !== 'string') throw typeError(`${what} must be str, not ${argumentTypeName(value)}`);
+  return value;
+}
 
 function every(text: string, test: (char: string) => boolean): boolean {
   const chars = iterStr(text);
@@ -99,7 +101,7 @@ method(strClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
 method(strClass, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
 method(strClass, '__mod__', 'one', 1, 1, (self, [value]) => formatPercent(asStr(self), value));
 method(strClass, '__format__', 'one', 1, 1, (self, [spec]) =>
-  pyFormat(self, expectStr(spec, mustBeStr('__format__() argument')))
+  pyFormat(self, expectStrArgument(spec, '__format__() argument'))
 );
 
 // Case --------------------------------------------------------------------------------------------------------------
@@ -138,7 +140,7 @@ for (const [name, fromEnd, raises] of [
   ['rindex', true, true],
 ] as const) {
   method(strClass, name, 'expected', 1, 3, (self, [sub, start, end]) => {
-    const index = findIn(asStr(self), expectStr(sub, mustBeStr(`${name}() argument 1`)), start, end, fromEnd);
+    const index = findIn(asStr(self), expectStrArgument(sub, `${name}() argument 1`), start, end, fromEnd);
     if (index === -1 && raises) throw valueError('substring not found');
     return BigInt(index);
   });
@@ -182,7 +184,7 @@ function bounds(
 
 method(strClass, 'count', 'expected', 1, 3, (self, [sub, start, end]) => {
   const text = asStr(self);
-  const needle = expectStr(sub, mustBeStr('count() argument 1'));
+  const needle = expectStrArgument(sub, 'count() argument 1');
   const { from, to } = bounds(text, start, end);
   if (needle === '') return BigInt(Math.max(to - from + 1, 0));
   if (to < from) return 0n;
@@ -425,8 +427,8 @@ method(
   3,
   (self, args, kwargs) => {
     const text = asStr(self);
-    const old = expectStr(args[0], mustBeStr('replace() argument 1'));
-    const replacement = expectStr(args[1], mustBeStr('replace() argument 2'));
+    const old = expectStrArgument(args[0], 'replace() argument 1');
+    const replacement = expectStrArgument(args[1], 'replace() argument 2');
     let count = Number(toIndex(argument(args, kwargs, 2, 'count') ?? -1n));
     if (count < 0) count = Number.POSITIVE_INFINITY;
     const result = new StringBuilder();
@@ -456,12 +458,12 @@ method(
 
 method(strClass, 'removeprefix', 'one', 1, 1, (self, [prefix]) => {
   const text = asStr(self);
-  const value = expectStr(prefix, mustBeStr('removeprefix() argument'));
+  const value = expectStrArgument(prefix, 'removeprefix() argument');
   return value !== '' && hasAt(text, value, 0) ? text.slice(value.length) : text;
 });
 method(strClass, 'removesuffix', 'one', 1, 1, (self, [suffix]) => {
   const text = asStr(self);
-  const value = expectStr(suffix, mustBeStr('removesuffix() argument'));
+  const value = expectStrArgument(suffix, 'removesuffix() argument');
   return value !== '' && hasAt(text, value, text.length - value.length) ? text.slice(0, -value.length) : text;
 });
 
@@ -515,12 +517,12 @@ function makeTranslation(args: PyValue[]): PyDict {
   const from = iterStr(
     expectStr(args[0], () => 'first maketrans argument must be a string if there is a second argument')
   );
-  const to = iterStr(expectStr(args[1], mustBeStr('maketrans() argument 2')));
+  const to = iterStr(expectStrArgument(args[1], 'maketrans() argument 2'));
   if (from.length !== to.length) throw valueError('the first two maketrans arguments must have equal length');
   for (const [index, char] of from.entries())
     table.store.set(BigInt(char.codePointAt(0) as number), BigInt(to[index].codePointAt(0) as number));
   if (args[2] !== undefined)
-    for (const char of iterStr(expectStr(args[2], mustBeStr('maketrans() argument 3'))))
+    for (const char of iterStr(expectStrArgument(args[2], 'maketrans() argument 3')))
       table.store.set(BigInt(char.codePointAt(0) as number), None);
   return table;
 }

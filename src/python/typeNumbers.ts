@@ -22,6 +22,7 @@ import { bindValue, callValue, isTruthy, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { stripNumberSpace, strRepr } from './strings';
 import {
+  argumentTypeName,
   boolClass,
   complexClass,
   floatClass,
@@ -314,7 +315,7 @@ function imagPart(text: string): number {
 
 method(complexClass, '__repr__', 'none', 0, 0, (self) => complexRepr(self as PyComplex));
 method(complexClass, '__format__', 'one', 1, 1, (self, [spec]) => {
-  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${typeName(spec)}`);
+  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
   return formatComplex(self as PyComplex, spec);
 });
 method(complexClass, 'conjugate', 'none', 0, 0, (self) =>

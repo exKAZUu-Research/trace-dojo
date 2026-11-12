@@ -5,10 +5,20 @@ import { defineUnsupportedAttributes } from './descriptors';
 import { isEnumClass } from './enums';
 import { identityHash, NATIVE_HASHES, pyHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
-import { bindValue, callValue, deleteAttribute, getAttribute, isCallable, lookupSpecial, nextOf } from './objects';
+import {
+  attributeName,
+  bindValue,
+  callValue,
+  deleteAttribute,
+  getAttribute,
+  isCallable,
+  lookupSpecial,
+  nextOf,
+} from './objects';
 import { currentRuntime } from './runtimeContext';
 import { typeOr } from './typeHints';
 import {
+  argumentTypeName,
   builtinFunctionClass,
   classmethodClass,
   classOf,
@@ -82,19 +92,19 @@ for (const name of ['__lt__', '__le__', '__gt__', '__ge__'])
 method(objectClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
 NATIVE_HASHES.add(objectClass.dict.get('__hash__') as PyValue);
 method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
-  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${typeName(spec)}`);
+  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
   if (spec !== '') throw typeError(`unsupported format string passed to ${typeName(self)}.__format__`);
   return pyStr(self);
 });
-method(objectClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+method(objectClass, '__setattr__', 'expected', 2, 2, (self, [nameValue, value]) => {
+  const name = attributeName(nameValue);
   if (self instanceof PyInstance) setInstanceAttribute(self, name, value);
   else currentRuntime().setAttributeOf(self, name, value);
   return None;
 });
-method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => getAttribute(self, name as string));
-method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => getAttribute(self, attributeName(name)));
+method(objectClass, '__delattr__', 'one', 1, 1, (self, [nameValue]) => {
+  const name = attributeName(nameValue);
   if (self instanceof PyInstance) deleteInstanceAttribute(self, name);
   else deleteAttribute(self, name);
   return None;
