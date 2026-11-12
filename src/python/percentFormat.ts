@@ -60,6 +60,11 @@ class TemplateReader {
   /** Converts the specifier following a `%`, following the grammar of printf-style conversion specifiers. */
   convert(): string {
     if (this.done) throw valueError('incomplete format');
+    // Only `%%` escapes a percent sign; after a key, flag, width, precision, or length, `%` is a conversion.
+    if (this.peek() === '%') {
+      this.index++;
+      return '%';
+    }
     let value = this.peek() === '(' ? this.mappingValue() : undefined;
     let flags = '';
     while ('-+ #0'.includes(this.peek() ?? 'x')) flags += this.read();
@@ -79,7 +84,6 @@ class TemplateReader {
     const type = this.peek();
     this.index++;
     if (type === undefined) throw valueError('incomplete format');
-    if (type === '%') return '%';
     value ??= this.take();
     return convertOne(type, value, flags, width === 0n ? '' : String(width), precision, this.index - 1);
   }
