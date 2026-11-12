@@ -80,7 +80,8 @@ class TemplateReader {
       const count = this.readCount('precision', MAX_INT, 'int');
       precision = count < 0n ? 0 : Number(count);
     }
-    while ('hlL'.includes(this.peek() ?? 'x')) this.index++;
+    // CPython skips one length modifier; a second is read as the conversion character.
+    if ('hlL'.includes(this.peek() ?? 'x')) this.index++;
     const type = this.peek();
     this.index++;
     if (type === undefined) throw valueError('incomplete format');
