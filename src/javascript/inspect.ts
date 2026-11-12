@@ -13,6 +13,7 @@ const DEFAULT_DEPTH = 2;
 const BREAK_LENGTH = 80;
 const COMPACT = 3;
 const MAX_ARRAY_LENGTH = 100;
+const MAX_STRING_LENGTH = 10_000;
 const MIN_LINE_LENGTH = 16;
 
 const KEY_PATTERN = /^[A-Z_a-z]\w*$/;
@@ -127,18 +128,27 @@ export function formatNumber(value: number): string {
   return Object.is(value, -0) ? '-0' : String(value);
 }
 
-function formatString(ctx: Context, value: string): string {
+function formatString(ctx: Context, text: string): string {
+  let value = text;
+  let trailer = '';
+  if (value.length > MAX_STRING_LENGTH) {
+    const remaining = value.length - MAX_STRING_LENGTH;
+    value = value.slice(0, MAX_STRING_LENGTH);
+    trailer = `... ${remaining} more character${remaining > 1 ? 's' : ''}`;
+  }
   if (
     ctx.compact !== true &&
     value.length > MIN_LINE_LENGTH &&
     value.length > ctx.breakLength - ctx.indentationLvl - 4
   ) {
-    return value
-      .split(/(?<=\n)/)
-      .map((line) => quote(line))
-      .join(` +\n${' '.repeat(ctx.indentationLvl + 2)}`);
+    return (
+      value
+        .split(/(?<=\n)/)
+        .map((line) => quote(line))
+        .join(` +\n${' '.repeat(ctx.indentationLvl + 2)}`) + trailer
+    );
   }
-  return quote(value);
+  return quote(value) + trailer;
 }
 
 /** Quotes a string with the first of `'`, `"`, and `` ` `` it does not contain, escaping what it must. */

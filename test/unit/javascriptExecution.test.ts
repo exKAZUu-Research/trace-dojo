@@ -1231,6 +1231,18 @@ console.log(['日本語', 'abc', 'ｱｲｳ', '한국어', '👨‍👩‍👧',
 console.log(Array.from({ length: 12 }, (_, i) => '★'.repeat(i % 3 + 1)));
 console.log({ [Symbol()]: 1, [Symbol('k')]: [1], a: 2 }, [Object.assign([1], { [Symbol.iterator]: 0 })]);`,
   ],
+  [
+    'long nested strings and named generator expressions',
+    `const o = { text: 'x'.repeat(12000) };
+console.log(['a'.repeat(10001)].toString().length);
+console.log([('ab\\n').repeat(4000)]);
+console.log({ t: 'y'.repeat(10002) });
+console.log('z'.repeat(10005).length);
+console.log(['q'.repeat(10000)]);
+const values = function* recur(n) { if (n > 0) yield* recur(n - 1); yield n; }; console.log([...values(2)]);
+const g = function* inner() { yield inner === g; }; console.log(g().next());
+const a = async function* ai() { yield typeof ai; }; a().next().then(console.log);`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

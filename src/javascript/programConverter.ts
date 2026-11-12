@@ -374,7 +374,9 @@ export class ProgramConverter extends ExpressionConverter {
         const { params, rest } = this.parameters(node, kind);
         const body =
           bodyNode.type === 'statement_block' ? this.statementList(namedChildren(bodyNode)) : this.expression(bodyNode);
-        const bindsOwnName = node.type === 'function_expression' && node.childForFieldName('name') !== null;
+        const bindsOwnName =
+          (node.type === 'function_expression' || node.type === 'generator_function') &&
+          node.childForFieldName('name') !== null;
         // Only an arrow function's own uses are its enclosing function's; a function's own uses get its arguments.
         const usesArguments = !isArrow && context.argumentsUse.isUsed;
         const fn: FunctionNode = {
