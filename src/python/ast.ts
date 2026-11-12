@@ -84,6 +84,8 @@ export type Expression = Span &
         value?: Expression;
         generators: Comprehension[];
         scope: ScopeInfo;
+        /** A generator expression's `__qualname__`, such as `f.<locals>.<genexpr>`. */
+        qualifiedName?: string;
       }
   );
 

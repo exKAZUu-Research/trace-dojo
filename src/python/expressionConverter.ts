@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 549 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 555 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { assignmentExpressionError } from './assignmentExpressions';
@@ -506,7 +506,7 @@ export abstract class ExpressionConverter {
 
   // Comprehensions and lambdas --------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 37 -- Follows how CPython scopes each part of a comprehension.
+  // code-gauge-allow functionNcss 38 -- Follows how CPython scopes each part of a comprehension.
   // code-gauge-allow functionCognitiveComplexity 24 -- Follows how CPython scopes each part of a comprehension.
   private comprehension(node: Node): Expression {
     const type =
@@ -520,10 +520,11 @@ export abstract class ExpressionConverter {
     const clauses = namedChildren(node).filter((child) => child.type === 'for_in_clause' || child.type === 'if_clause');
     const outer = this.context;
     const scope = new ScopeBuilder('comprehension', outer.scope, type !== 'generator');
+    const { qualifiedName, inner } = comprehensionContext(type, outer, scope);
     const generators: Comprehension[] = [];
     for (const [index, clause] of clauses.entries()) {
       if (clause.type === 'if_clause') {
-        this.context = { ...outer, scope };
+        this.context = inner;
         (generators.at(-1) as Comprehension).conditions.push(this.expression(namedChildren(clause)[0]));
         continue;
       }
@@ -533,10 +534,10 @@ export abstract class ExpressionConverter {
         fail(rowOf(clause), '内包表記の in の後に複数の式を書くときは、( ) で囲んでください。');
       }
       // The first iterable is evaluated in the enclosing scope, before the comprehension starts.
-      this.context = index === 0 ? outer : { ...outer, scope };
+      this.context = index === 0 ? outer : inner;
       const iterable = this.expression(rights[0]);
       if (iterable.kind === 'namedExpression') fail(rowOf(clause), '内包表記の繰り返す対象には、代入式を使えません。');
-      this.context = { ...outer, scope };
+      this.context = inner;
       const target = this.target(field(clause, 'left'), (nameNode) => {
         const ref = this.bindName(nameNode);
         scope.iterationVariables.add(ref.name);
@@ -544,7 +545,7 @@ export abstract class ExpressionConverter {
       });
       generators.push({ target, iterable, conditions: [] });
     }
-    this.context = { ...outer, scope };
+    this.context = inner;
     try {
       const body = field(node, 'body');
       if (body.type === 'list_splat' || body.type === 'dictionary_splat') {
@@ -553,7 +554,16 @@ export abstract class ExpressionConverter {
       if (body.type === 'yield') fail(rowOf(body), '内包表記の中には yield を書けません。');
       const element = body.type === 'pair' ? this.expression(field(body, 'key')) : this.expression(body);
       const value = body.type === 'pair' ? this.expression(field(body, 'value')) : undefined;
-      return { kind: 'comprehension', type, element, value, generators, scope: scope.info, row: rowOf(node) };
+      return {
+        kind: 'comprehension',
+        type,
+        element,
+        value,
+        generators,
+        scope: scope.info,
+        qualifiedName,
+        row: rowOf(node),
+      };
     } finally {
       this.context = outer;
     }
@@ -832,4 +842,18 @@ function constantOf(node: Node): Constant {
       return parseNumber(node);
     }
   }
+}
+
+/**
+ * The context a comprehension's parts are converted in. A generator expression is a function of its own, whose name
+ * prefixes what it defines, without `<locals>` as CPython names it (`<genexpr>.<lambda>`); the others run inline.
+ */
+function comprehensionContext(
+  type: 'list' | 'set' | 'dict' | 'generator',
+  outer: Context,
+  scope: ScopeBuilder
+): { qualifiedName: string | undefined; inner: Context } {
+  if (type !== 'generator') return { qualifiedName: undefined, inner: { ...outer, scope } };
+  const qualifiedName = `${outer.qualifiedPrefix}<genexpr>`;
+  return { qualifiedName, inner: { ...outer, scope, qualifiedPrefix: `${qualifiedName}.` } };
 }

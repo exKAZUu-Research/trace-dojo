@@ -478,14 +478,17 @@ export function toArray(value: PyValue, notIterable?: string): PyValue[] {
 export function getIterator(value: PyValue): PyValue {
   if (value instanceof PyIterator || value instanceof PyGenerator) return value;
   const iter = lookupSpecial(value, '__iter__');
-  if (iter !== undefined && iter !== None && !(classOf(value).isBuiltin && iter instanceof PyBuiltinFunction)) {
+  // A builtin's own __iter__ is bypassed only where iterateBuiltin reads the value directly, whose __iter__ comes back
+  // here; any other builtin's __iter__ makes its own iterator type, such as a deque's.
+  const builtin = classOf(value).isBuiltin && iter instanceof PyBuiltinFunction ? iterateBuiltin(value) : undefined;
+  if (!builtin && iter !== undefined && iter !== None) {
     const iterator = callValue(bindValue(iter, value), []);
     if (lookupSpecial(iterator, '__next__') === undefined) {
       throw typeError(`iter() returned non-iterator of type '${typeName(iterator)}'`);
     }
     return iterator;
   }
-  const base = iterate(value);
+  const base = builtin ?? iterate(value);
   let consumed = 0;
   let exhausted = false;
   const next = (): PyValue | typeof DONE => {

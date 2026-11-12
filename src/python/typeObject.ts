@@ -313,7 +313,7 @@ export function defineIteratorClass(cls: PyClass): void {
     if (value === DONE) throw pyError('StopIteration');
     return value;
   });
-  method(cls, '__repr__', 'none', 0, 0, (self) => `<${cls.name} object at ${addressOf(self as PyObject)}>`);
+  method(cls, '__repr__', 'none', 0, 0, (self) => defaultRepr(self as PyObject));
 }
 
 for (const cls of iteratorClasses.values()) defineIteratorClass(cls);

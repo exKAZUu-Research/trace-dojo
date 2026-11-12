@@ -1,5 +1,5 @@
 import { mappingEntries } from '../callArguments';
-// code-gauge-allow-file fileNcss 501 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 505 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -272,12 +272,16 @@ method(dequeClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
 method(dequeClass, '__contains__', 'one', 1, 1, (self, [item]) =>
   dequeOf(self).items.some((each) => equals(each, item))
 );
+const dequeIteratorClass = iteratorClass('_deque_iterator');
+dequeIteratorClass.module = 'collections';
+const dequeReverseIteratorClass = iteratorClass('_deque_reverse_iterator');
+dequeReverseIteratorClass.module = 'collections';
 method(dequeClass, '__iter__', 'none', 0, 0, (self) => {
   const deque = dequeOf(self);
   let index = 0;
   const length = deque.length;
   return new PyIterator(
-    iteratorClass('_collections._deque_iterator'),
+    dequeIteratorClass,
     () => {
       if (deque.length !== length) throw pyError('RuntimeError', 'deque mutated during iteration');
       return index < deque.length ? deque.at(index++) : DONE;
@@ -290,7 +294,7 @@ method(dequeClass, '__reversed__', 'none', 0, 0, (self) => {
   const length = deque.length;
   let remaining = length;
   return new PyIterator(
-    iteratorClass('_collections._deque_reverse_iterator'),
+    dequeReverseIteratorClass,
     () => {
       if (remaining === 0) return DONE;
       if (deque.length !== length) {

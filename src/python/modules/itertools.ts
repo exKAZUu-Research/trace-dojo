@@ -1,5 +1,6 @@
 import { pushAll } from '../arrays';
-// code-gauge-allow-file fileNcss 419 -- The iterators of itertools and their shared helpers belong together.
+// code-gauge-allow-file fileNcss 430 -- The iterators of itertools and their shared helpers belong together.
+import { pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -18,6 +19,21 @@ function iteratorOf(name: string, next: NextFunction, holds: () => Iterable<unkn
   return new PyIterator(iteratorType(name), next, holds);
 }
 
+/** An itertools iterator whose repr shows its state, as count's and repeat's do. */
+function describedIterator(
+  name: string,
+  next: NextFunction,
+  holds: () => Iterable<unknown>,
+  describe: () => string
+): PyIterator {
+  const iterator = iteratorOf(name, next, holds);
+  STATE_REPRS.set(iterator, describe);
+  return iterator;
+}
+
+/** The reprs of the iterators whose repr shows their state, as count's and repeat's do. */
+const STATE_REPRS = new WeakMap<PyIterator, () => string>();
+
 /** The class of an itertools iterator, which is also what the module calls to make one. */
 function iteratorType(name: string): PyClass {
   let cls = classes.get(name);
@@ -27,6 +43,9 @@ function iteratorType(name: string): PyClass {
     cls.tpName = `itertools.${name}`;
     cls.dict.set('__module__', 'itertools');
     defineIteratorClass(cls);
+    if (name === 'count' || name === 'repeat') {
+      method(cls, '__repr__', 'none', 0, 0, (self) => (STATE_REPRS.get(self as PyIterator) as () => string)());
+    }
     classes.set(name, cls);
   }
   return cls;
@@ -111,16 +130,22 @@ function count(args: PyValue[], kwargs: Kwargs): PyValue {
     args,
     kwargs
   );
-  let current = argument(args, kwargs, 0, 'start') ?? 0n;
-  const step = argument(args, kwargs, 1, 'step') ?? 1n;
-  return iteratorOf(
+  const start = argument(args, kwargs, 0, 'start') ?? 0n;
+  const given = argument(args, kwargs, 1, 'step') ?? 1n;
+  // A step of the int 1 counts in ints, as count's fast mode does, so a bool start or step counts as its int.
+  const isUnitStep = given === 1n || given === true;
+  const step = isUnitStep ? 1n : given;
+  let current = isUnitStep && typeof start === 'boolean' ? BigInt(start) : start;
+  return describedIterator(
     'count',
     () => {
       const value = current;
       current = binaryOp('+', current, step);
       return value;
     },
-    () => [current]
+    () => [current],
+    // As count_repr does, the step shows unless it is the int 1.
+    () => (isUnitStep ? `count(${pyRepr(current)})` : `count(${pyRepr(current)}, ${pyRepr(step)})`)
   );
 }
 
@@ -159,14 +184,19 @@ function repeat(args: PyValue[], kwargs: Kwargs): PyValue {
   const object = argument(args, kwargs, 0, 'object') as PyValue;
   const times = argument(args, kwargs, 1, 'times');
   let remaining = times === undefined ? -1n : toIndex(times);
-  return iteratorOf(
+  return describedIterator(
     'repeat',
     () => {
       if (remaining === 0n || (times !== undefined && remaining < 0n)) return DONE;
       if (times !== undefined) remaining--;
       return object;
     },
-    () => [object]
+    () => [object],
+    // As repeat_repr does, the count left shows when one was given, and a negative one as 0.
+    () =>
+      times === undefined
+        ? `repeat(${pyRepr(object)})`
+        : `repeat(${pyRepr(object)}, ${remaining < 0n ? 0n : remaining})`
   );
 }
 

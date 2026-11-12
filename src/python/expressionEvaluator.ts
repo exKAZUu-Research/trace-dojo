@@ -589,7 +589,7 @@ export class ExpressionEvaluator {
       return new PyGenerator(
         generatorClass,
         '<genexpr>',
-        '<genexpr>',
+        expression.qualifiedName ?? '<genexpr>',
         () => {
           runtime.pushFrame(inner);
           try {
