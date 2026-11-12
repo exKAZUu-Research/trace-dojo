@@ -179,7 +179,7 @@ function findAttribute(value: PyValue, name: string): PyValue | undefined {
   if (value instanceof PyModule) {
     const feature = value.unsupported.get(name);
     if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-    return value.attribute(name);
+    return value.attribute(name) ?? specialAttribute(value, name);
   }
   if (value instanceof PySuper) {
     const found = superAttribute(value, name);

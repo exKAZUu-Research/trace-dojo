@@ -112,10 +112,16 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   if (name === '__class__') return classOf(value);
   if (typeof value !== 'object') return undefined;
   if (value instanceof PyBoundMethod) return boundMethodAttribute(value, name);
-  if (value instanceof PyModule) return name === '__dict__' ? namespaceDict(value.dict) : undefined;
+  if (value instanceof PyModule) return name === '__dict__' ? moduleDict(value) : undefined;
   if (value instanceof PyInstance) return instanceAttribute(value, name);
   if (value instanceof PyOpaque) return value.cls.opaqueAttribute?.(value, name);
   return undefined;
+}
+
+/** A module's namespace as a dict, with the attributes it creates when first read created first, as CPython has them. */
+function moduleDict(module: PyModule): PyValue {
+  for (const name of module.lazy.keys()) module.attribute(name);
+  return namespaceDict(module.dict);
 }
 
 const FUNCTION_ATTRIBUTES_OF_METHODS = new Set([
