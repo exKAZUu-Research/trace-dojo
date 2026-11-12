@@ -68,9 +68,7 @@ function pushObjectReferences(
   const suspended = object.generator ?? object.asyncGenerator;
   // A completed generator, or one answering a return after completing, never resumes its frame.
   if (suspended && suspended.status !== 'completed' && suspended.status !== 'awaitingReturn') {
-    const { frame } = suspended;
-    pending.push(frame.scope);
-    for (const value of frame.temporaries) pending.push(value);
+    for (const value of suspended.frame.reachableValues()) pending.push(value);
   }
   if (object.promise) {
     pending.push(object.promise.result);

@@ -325,7 +325,7 @@ export function awaitValue(
  * that what the resumed body has since let go of is not kept.
  */
 export function frameRoots(frame: Frame): () => unknown[] {
-  return () => [frame.scope, ...frame.temporaries];
+  return () => frame.reachableValues();
 }
 
 /** Runs `run` with a suspended body's frame pushed again. */

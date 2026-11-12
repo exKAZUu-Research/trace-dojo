@@ -38,6 +38,8 @@ import {
 export class Frame {
   /** Values a pending call or allocation holds outside any variable, which must keep their turtles alive. */
   readonly temporaries: Value[] = [];
+  /** The unfinished iterations the frame runs, which stay reachable as long as the frame can still resume them. */
+  readonly iterations = new Set<ValueIterator>();
 
   constructor(
     public scope: Scope,
@@ -46,6 +48,13 @@ export class Frame {
     /** Whether this frame runs a function marked `// atomic`. */
     readonly isAtomic: boolean
   ) {}
+
+  /** What the frame keeps reachable: its scope, its temporaries, and its unfinished iterations' roots. */
+  reachableValues(): unknown[] {
+    const values: unknown[] = [this.scope, ...this.temporaries];
+    for (const iteration of this.iterations) values.push(...iteration.roots);
+    return values;
+  }
 }
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
@@ -57,7 +66,6 @@ export class Runtime {
   readonly frames: Frame[] = [];
   readonly eventLoop = new EventLoop(this);
   /** The iterations not ended yet, whose iterators may hold values the program reaches again when they resume. */
-  private readonly activeIterations = new Set<ValueIterator>();
   readonly realm: Realm;
   /**
    * The row of the expression being evaluated, from which getters, setters, and conversions that run the program's
@@ -656,8 +664,9 @@ export class Runtime {
 
   /** An iteration that stays a garbage-collection root, with its iterator object and `next` method, until it ends. */
   private tracked(source: HostIterator, roots: Value[]): ValueIterator {
-    const iteration: ValueIterator = new ValueIterator(source, roots, () => this.activeIterations.delete(iteration));
-    this.activeIterations.add(iteration);
+    const { frame } = this;
+    const iteration: ValueIterator = new ValueIterator(source, roots, () => frame.iterations.delete(iteration));
+    frame.iterations.add(iteration);
     return iteration;
   }
 
@@ -714,12 +723,8 @@ export class Runtime {
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
     const roots: unknown[] = [];
-    for (const frame of this.frames) {
-      roots.push(frame.scope);
-      appendAll(roots, frame.temporaries);
-    }
+    for (const frame of this.frames) appendAll(roots, frame.reachableValues());
     appendAll(roots, this.eventLoop.roots());
-    for (const iteration of this.activeIterations) appendAll(roots, iteration.roots);
     const { reached, scanned } = findReachableTurtles(roots);
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
