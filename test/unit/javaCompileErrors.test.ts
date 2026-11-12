@@ -1409,6 +1409,26 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'import java.lang.annotation.*;\n@Repeatable(Tags.class) @interface Tag { String value(); }\n@interface Tags { Tag[] value(); }\nclass Main {\n  @Tag("a") @Tag("b") void f() {}\n  public static void main(String[] args) {}\n}',
   ],
   [
+    'record-accessor-not-public',
+    false,
+    'record Point(int x) { int x() { return x + 1; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'record-accessor-of-another-type',
+    false,
+    'record Point(int x) { public long x() { return x; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'record-accessor-with-throws',
+    false,
+    'record Point(int x) { public int x() throws RuntimeException { return x; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'record-accessors-and-overloads',
+    true,
+    'import java.util.*;\nrecord Point(int x, List<String> tags) { public int x() { return x * 2; } public List<String> tags() { return List.copyOf(tags); } public int x(int scale) { return x * scale; } static int y() { return 1; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
     'annotation-without-targets-on-a-type-use',
     false,
     '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',

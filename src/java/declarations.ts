@@ -28,6 +28,7 @@ import {
   substitute,
   superinterfacesOf,
   thisTypeOf,
+  typeName,
   type TypeVariable,
   VOID,
 } from './types';
@@ -410,11 +411,13 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       method.isVarargs === true && (modifiers.isStatic || modifiers.isFinal || modifiers.access === 'private')
     );
     this.checkOverride(cls, method, member);
+    const component =
+      method.parameterTypes.length === 0
+        ? cls.recordComponents?.find((candidate) => candidate.name === method.name)
+        : undefined;
+    if (component) this.checkAccessor(member, method, component);
     // A record's accessor may carry `@Override` though it overrides nothing (JLS 9.6.4.4).
-    const isAccessor =
-      !method.isStatic &&
-      method.parameterTypes.length === 0 &&
-      cls.recordComponents?.some((component) => component.name === method.name) === true;
+    const isAccessor = component !== undefined;
     if (member.modifiers.hasOverride && !isAccessor && (method.isStatic || method.overrides?.size === 0)) {
       this.error(
         member,
@@ -487,6 +490,23 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       this.error(member, `コンストラクタ ${cls.name} はすでに定義されています。`);
     }
     cls.constructors.push(constructor);
+  }
+
+  /** Rejects an accessor a record declares that is not public, generic, or static, or that changes its component's type. */
+  protected checkAccessor(member: MethodDeclaration, method: MethodInfo, component: FieldInfo): void {
+    const fault =
+      method.access !== 'public'
+        ? 'は public にしてください'
+        : method.isStatic
+          ? 'に static は付けられません'
+          : (method.typeParameters?.length ?? 0) > 0
+            ? 'には型パラメータを書けません'
+            : !sameType(method.returnType, component.type)
+              ? `の戻り値の型は ${typeName(component.type)} にしてください`
+              : member.throwsTypes.length > 0
+                ? 'には throws を書けません'
+                : undefined;
+    if (fault) this.error(member, `レコードのアクセサ ${member.name} ${fault}。`);
   }
 
   /** Rejects `@SafeVarargs` on a method or constructor that is not of variable arity or may be overridden. */
