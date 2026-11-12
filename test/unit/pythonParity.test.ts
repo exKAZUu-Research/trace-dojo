@@ -10,7 +10,7 @@ const FIXTURE_DIR = path.join(import.meta.dirname, '..', 'fixtures', 'pythonPari
 // Each fixture checks its own results and raises on a difference; CPython 3.14.10 runs all of them without raising.
 test.each(fs.readdirSync(FIXTURE_DIR).filter((name) => name.endsWith('.py')))('%s runs as in CPython', (name) => {
   const program = fs.readFileSync(path.join(FIXTURE_DIR, name), 'utf8');
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test.each([
@@ -216,7 +216,7 @@ test.each([
     'd = dict.fromkeys(range(300000))\nr = reversed(d)\na = [0] * 500000',
   ],
 ])('%s raises MemoryError', (_name, program) => {
-  expect(executeProgram('python', program)).toMatchObject({ uncaughtException: 'MemoryError' });
+  expect(executeOnStillClock(program)).toMatchObject({ uncaughtException: 'MemoryError' });
 });
 
 test('a long text built from many pieces is charged for its length, not for each piece', () => {
@@ -240,7 +240,7 @@ a = [0] * 99000
 containers = [a.copy(), copy.copy(a), copy.deepcopy(a), a[:], list(a), tuple(a), sorted(a), a + [], deque(a)]
 if [len(container) for container in containers] != [99000] * 9:
     raise AssertionError("wrong length")`;
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test('a bounded deque repeated a billion times keeps its last items without running the rounds', () => {
@@ -249,7 +249,7 @@ d = deque([1, 2], maxlen=3)
 d *= 1000000000
 if list(d) != [2, 1, 2] or list(deque([1, 2, 3], maxlen=2) * 1000000001) != [2, 3]:
     raise AssertionError(str(d))`;
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test('a huge int is refused before its decimal conversion', () => {
@@ -259,7 +259,7 @@ for i in range(100):
         x = str(n)
     except ValueError:
         pass`;
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test.each([
@@ -309,7 +309,7 @@ lengths = [
 ]
 if lengths != [1000000, 1000000, 1000000]:
     raise ValueError(str(lengths))`;
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test('a misspelled name in from-import gets the suggestion CPython gives', () => {
