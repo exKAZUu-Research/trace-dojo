@@ -239,7 +239,7 @@ function print(args: PyValue[], kwargs: Kwargs): PyValue {
   const isStdout = file === runtime.standardStream('stdout');
   // Each piece is written on its own, as CPython writes them, so that the output limit ends a huge print early.
   const write = (text: string): void => {
-    if (isStdout) runtime.budget.print(text);
+    if (isStdout) runtime.io.stdout.write(text);
     else callValue(getAttribute(file, 'write'), [text]);
   };
   for (const [index, value] of args.entries()) {

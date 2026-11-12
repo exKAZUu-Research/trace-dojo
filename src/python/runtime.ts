@@ -1,4 +1,5 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { LIBRARY_ROW } from './ast';
@@ -71,7 +72,11 @@ export class Runtime {
   private slots = 0;
   private reprDepth = 0;
 
-  constructor() {
+  /** The standard streams and files of the run; Python writes standard output only. */
+  readonly io: ProgramIO;
+
+  constructor(input?: ProgramInput) {
+    this.io = new ProgramIO(this.budget, input);
     this.builtins = createBuiltins();
     this.evaluator = new Evaluator(this);
   }

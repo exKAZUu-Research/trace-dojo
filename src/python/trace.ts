@@ -1,4 +1,5 @@
 import type { ProgramRecording } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
@@ -30,9 +31,9 @@ import {
   type PyValue,
 } from './values';
 
-export function tracePythonProgram(program: string, trace: TraceOptions): ProgramRecording {
+export function tracePythonProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const parsed = parsePython(program, trace);
-  const runtime = new Runtime();
+  const runtime = new Runtime(input);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(frame, true),
@@ -40,7 +41,7 @@ export function tracePythonProgram(program: string, trace: TraceOptions): Progra
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
   // A model program may end with an uncaught exception to show how one stops the program.
-  const { output: _output, ...run } = runModule(runtime, parsed, (frame) => {
+  const run = runModule(runtime, parsed, (frame) => {
     finalVars = variablesOf(frame, false).vars;
   });
   return { traceItems: recorder.traceItems, finalVars, ...run };

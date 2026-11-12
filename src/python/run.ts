@@ -1,6 +1,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import type { Module } from './ast';
 import { describeException } from './describe';
 import { parsePython } from './parse';
@@ -13,7 +14,7 @@ import { PyError, type PyValue } from './values';
 import './library';
 
 // code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
-export function executePythonProgram(source: string): ProgramExecution {
+export function executePythonProgram(source: string, input?: ProgramInput): ProgramExecution {
   let module: Module;
   try {
     module = parsePython(source);
@@ -22,17 +23,11 @@ export function executePythonProgram(source: string): ProgramExecution {
     throw error;
   }
   try {
-    const { output: _output, ...run } = runModule(new Runtime(), module);
-    return { kind: 'executed', ...run };
+    return { kind: 'executed', ...runModule(new Runtime(input), module) };
   } catch (error) {
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
   }
-}
-
-/** The output of a run along with how it ended, which tests compare with CPython's. */
-export interface PythonRun extends ProgramRun {
-  output: string;
 }
 
 /**
@@ -40,8 +35,8 @@ export interface PythonRun extends ProgramRun {
  *
  * @param onEnd Called when the module ends, while its frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 21 -- Each language's runner wraps its own parser and runtime.
-export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): PythonRun {
+// code-gauge-allow duplicateLines 22 -- Each language's runner wraps its own parser and runtime.
+export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     const globals = new Map<string, PyValue>([
       ['__name__', '__main__'],
@@ -64,7 +59,7 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
         finalBoard: runtime.world.boardText(),
         finalTurtles: runtime.world.turtleTraces(),
         uncaughtException,
-        output: runtime.budget.output,
+        ...runtime.io.output(),
       };
     } finally {
       runtime.popFrame();

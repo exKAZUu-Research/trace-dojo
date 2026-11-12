@@ -27,7 +27,7 @@ const stateOf = (self: PyValue): StreamState => (self as PyOpaque).data as Strea
 export function createStream(runtime: Runtime, name: 'stdout' | 'stderr'): PyValue {
   const isStdout = name === 'stdout';
   const stream = new PyOpaque(textIOClass, name, {
-    write: isStdout ? (text: string) => runtime.budget.print(text) : () => {},
+    write: isStdout ? (text: string) => runtime.io.stdout.write(text) : () => {},
     // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- CPython names the encoding 'utf-8'.
     encoding: 'utf-8',
     errors: isStdout ? 'strict' : 'backslashreplace',

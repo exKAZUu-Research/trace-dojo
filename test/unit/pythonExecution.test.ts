@@ -26,6 +26,9 @@ keep.前に進む()`
     finalBoard: ['.......', '.GG....', '.......', '.......', '....Y..', '....Y..', '.......'].join('\n'),
     finalTurtles: [{ x: 2, y: 1, color: 'G', dir: 'E' }],
     uncaughtException: undefined,
+    stdout: '',
+    stderr: '',
+    finalFiles: {},
   });
 });
 
@@ -500,4 +503,14 @@ def check(i):
 ${call}`;
   const trace = traceProgram('python', program, program);
   expect(trace.traceItems.at(-1)?.vars).toMatchObject({ answer, seen: [true] });
+});
+
+test('a run reports what the program prints, leaves standard error empty, and keeps its files', () => {
+  const program = "import sys\nprint('out')\nsys.stdout.write('more')\nprint('err', file=sys.stderr)";
+  expect(executeProgram('python', program, { files: { 'data.txt': 'x' } })).toMatchObject({
+    kind: 'executed',
+    stdout: 'out\nmore',
+    stderr: '',
+    finalFiles: { 'data.txt': 'x' },
+  });
 });
