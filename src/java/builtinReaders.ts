@@ -43,27 +43,7 @@ export function defineReaders(context: IOContext, closeable: ClassInfo): void {
   defineFileOpeners(context, fileReader, notFound, (frame, receiver, path) => {
     readSources.set(receiver as JavaObject, new TextSource(openFileReader(frame, path)));
   });
-  const stringReader = context.registry.define('StringReader', reader, 'java.io');
-  addConstructor(stringReader, [context.stringType], (frame, receiver, [text]) => {
-    if (!(text instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
-    readSources.set(receiver as JavaObject, new TextSource(frame.runtime.io.textReader(text.value), true));
-  });
-  // StringReader skips backward for a negative count, within the text, and skips nothing at its end.
-  throwsIO(
-    context,
-    addMethod(stringReader, 'skip', [LONG], LONG, false, (frame, receiver, [count]) => {
-      const text = textOf(frame, receiver);
-      if (text.isAtEnd) return 0n;
-      const skipped = Math.max(Math.min(Number(count as bigint), text.text.length - text.position), -text.position);
-      text.position += skipped;
-      frame.runtime.scanString(Math.abs(skipped));
-      return BigInt(skipped);
-    })
-  );
-  // StringReader's close throws no IOException, though its reads still declare one.
-  addMethod(stringReader, 'close', [], VOID, false, (frame, receiver) => {
-    readSourceOf(frame, receiver).close(frame);
-  });
+  defineStringReader(context, reader);
   defineBufferedReader(context, reader);
 }
 
@@ -191,6 +171,30 @@ function readInto(frame: Frame, receiver: Value, array: Value, offset: number, l
     array.values[offset + count] = readChar(text);
   }
   return count;
+}
+
+function defineStringReader(context: IOContext, reader: ClassInfo): void {
+  const stringReader = context.registry.define('StringReader', reader, 'java.io');
+  addConstructor(stringReader, [context.stringType], (frame, receiver, [text]) => {
+    if (!(text instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
+    readSources.set(receiver as JavaObject, new TextSource(frame.runtime.io.textReader(text.value), true));
+  });
+  // StringReader skips backward for a negative count, within the text, and skips nothing at its end.
+  throwsIO(
+    context,
+    addMethod(stringReader, 'skip', [LONG], LONG, false, (frame, receiver, [count]) => {
+      const text = textOf(frame, receiver);
+      if (text.isAtEnd) return 0n;
+      const skipped = Math.max(Math.min(Number(count as bigint), text.text.length - text.position), -text.position);
+      text.position += skipped;
+      frame.runtime.scanString(Math.abs(skipped));
+      return BigInt(skipped);
+    })
+  );
+  // StringReader's close throws no IOException, though its reads still declare one.
+  addMethod(stringReader, 'close', [], VOID, false, (frame, receiver) => {
+    readSourceOf(frame, receiver).close(frame);
+  });
 }
 
 function defineBufferedReader(context: IOContext, reader: ClassInfo): void {
