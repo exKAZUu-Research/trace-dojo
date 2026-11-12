@@ -82,6 +82,18 @@ test.each([
     '1 false\n',
   ],
   [
+    'readers of the console that take no more than their buffers hold',
+    'InputStreamReader r = new InputStreamReader(System.in); BufferedReader b = new BufferedReader(r, 1); System.out.println((char) b.read() + " " + r.read()); Scanner s = new Scanner(r); System.out.println(s.next().length() + " " + r.read());',
+    `abc\n${'x'.repeat(1100)}\n`,
+    'a 98\n1 120\n',
+  ],
+  [
+    'a scanner of a reader of the console, which reads no more than its buffer of 1024 chars',
+    'InputStreamReader r = new InputStreamReader(System.in); Scanner s = new Scanner(r); System.out.println(s.next() + " " + r.read());',
+    `a ${'x'.repeat(1100)}\n`,
+    'a 120\n',
+  ],
+  [
     'lines from a BufferedReader',
     'BufferedReader br = new BufferedReader(new InputStreamReader(System.in)); String line; while ((line = br.readLine()) != null) System.out.println("[" + line + "]");',
     'x\r\ny\n\nz',

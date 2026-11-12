@@ -168,11 +168,12 @@ export class ReadAheadSource implements ReadSource {
     const source = this.inner.reader(frame);
     if (source.isAtEnd) return false;
     const { text, position } = source;
+    // A read takes what fits in the buffer, and from a console no more than the line entered.
     let end = Math.min(position + this.chunkSize, text.length);
     if (this.isConsole) {
       const terminator = /\r\n|[\n\r]/g;
       terminator.lastIndex = position;
-      end = terminator.test(text) ? terminator.lastIndex : text.length;
+      if (terminator.test(text)) end = Math.min(end, terminator.lastIndex);
     }
     source.position = end;
     const part = text.slice(position, end);
