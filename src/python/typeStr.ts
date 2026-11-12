@@ -227,7 +227,6 @@ for (const [name, atEnd] of [
     const text = asStr(self);
     const { from, to } = bounds(text, start, end);
     const candidates = prefix instanceof PyTuple ? prefix.items : [prefix];
-    const runtime = currentRuntime();
     const anchor = codePointOffset(text, atEnd ? to : from);
     return candidates.some((candidate) => {
       if (typeof candidate !== 'string') {
@@ -237,8 +236,6 @@ for (const [name, atEnd] of [
             : `${name} first arg must be str or a tuple of str, not ${typeName(candidate)}`
         );
       }
-      // Counting the candidate's code points and comparing it with the text each scan its length.
-      runtime.scan(candidate.length * 2);
       if (to - strLength(candidate) < from) return false;
       return hasAt(text, candidate, atEnd ? anchor - candidate.length : anchor);
     });

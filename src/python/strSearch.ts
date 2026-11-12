@@ -46,7 +46,12 @@ export function containsStr(text: string, needle: string): boolean {
 
 /** Whether `text` has `needle` as whole code points at the UTF-16 offset `offset`. */
 export function hasAt(text: string, needle: string, offset: number): boolean {
-  return offset >= 0 && text.startsWith(needle, offset) && isAligned(text, offset, needle.length);
+  if (offset < 0 || offset + needle.length > text.length) return false;
+  // Compared unit by unit up to the first mismatch, and charged for the units compared.
+  let compared = 0;
+  while (compared < needle.length && text.charCodeAt(offset + compared) === needle.charCodeAt(compared)) compared++;
+  currentRuntime().scan(Math.min(compared + 1, needle.length));
+  return compared === needle.length && isAligned(text, offset, needle.length);
 }
 
 function hostOccurrences(region: string, needle: string, fromEnd: boolean, limit: number): number[] {

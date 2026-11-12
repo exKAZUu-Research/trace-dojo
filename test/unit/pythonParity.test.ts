@@ -86,7 +86,7 @@ test.each([
     "s = 'a' * 1000000\nt = 'a' * 500000 + 'b'\nwhile True:\n    s.rfind(t)",
   ],
   ['a prefix test of many long candidates', "s = 'x' * 500000\np = ('x' * 499999 + 'y',) * 5000\ns.startswith(p)"],
-  ['a suffix test of many long candidates', "s = 'x' * 500000\np = ('y' + 'x' * 499999,) * 5000\ns.endswith(p)"],
+  ['a suffix test of many long candidates', "s = 'x' * 500000\np = ('x' * 499999 + 'y',) * 5000\ns.endswith(p)"],
   ['a binomial coefficient of a huge size', 'import math\nmath.comb(10**6, 5 * 10**5)'],
   [
     'inserting and popping at the front of a long list over and over',
@@ -384,6 +384,11 @@ test.each([
   's in u',
 ])('a search of a long text that stops at once, %s, is charged for what it reads', (search) => {
   const program = `s = 'a' * 500000\nu = 'a'\nfor i in range(10000):\n    v = ${search}`;
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each(['startswith', 'endswith'])('str.%s of a long candidate that differs at once compares no more', (method) => {
+  const program = `s = 'b' + 'a' * 499999\nt = 'a' * 500000\nfor i in range(10000):\n    v = s.${method}(t)`;
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
