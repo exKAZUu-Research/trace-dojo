@@ -1399,6 +1399,16 @@ const programs: [name: string, runs: boolean, source: string][] = [
     '@interface Info { String value(); int n() default 0; }\nclass Main {\n  @Info("x") void f() {}\n  @Info(value = "y", n = 3) @Deprecated(since = "1") @SuppressWarnings({"a"}) void g() {}\n  public static void main(String[] args) {}\n}',
   ],
   [
+    'annotation-repeated-without-repeatable',
+    false,
+    'class Main {\n  @Deprecated @Deprecated void f() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'repeatable-annotation-repeated',
+    true,
+    'import java.lang.annotation.*;\n@Repeatable(Tags.class) @interface Tag { String value(); }\n@interface Tags { Tag[] value(); }\nclass Main {\n  @Tag("a") @Tag("b") void f() {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
     'annotation-without-targets-on-a-type-use',
     false,
     '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',

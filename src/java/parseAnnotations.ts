@@ -31,10 +31,14 @@ const DECLARATION_CONTEXTS: readonly ElementType[] = [
 
 const ELEMENT_TYPES: ReadonlySet<string> = new Set([...DECLARATION_CONTEXTS, 'TYPE_USE']);
 
-/** What javac checks of an annotation: where it may be written, and its elements by whether each has a default. */
+/**
+ * What javac checks of an annotation: where it may be written, its elements by whether each has a default, and whether
+ * it may be written twice in one place.
+ */
 interface AnnotationInterface {
   targets: readonly ElementType[];
   elements: Readonly<Record<string, boolean>>;
+  isRepeatable?: boolean;
 }
 
 const LANG_ANNOTATIONS: Readonly<Record<string, AnnotationInterface>> = {
@@ -81,10 +85,15 @@ export function checkAnnotations(root: Node, imports: readonly ImportDeclaration
       .filter((declaration) => !declaration.isStatic && declaration.names.join('.').startsWith('java.lang.annotation'))
       .flatMap((declaration) => (declaration.isWildcard ? Object.keys(META_ANNOTATIONS) : declaration.names.slice(-1)))
   );
+  const written = new Set<string>();
   for (const use of uses) {
     const name = (use.childForFieldName('name')?.text ?? '').replaceAll(/\s/g, '');
     const annotation = annotationInterfaceOf(name, declared, imported);
     if (!annotation) throw annotationError(use, `この採点環境には、アノテーション ${name} がありません。`);
+    const place = `${use.parent?.startIndex}:${name.split('.').at(-1)}`;
+    if (written.has(place) && !annotation.isRepeatable)
+      throw annotationError(use, `アノテーション @${name} は同じ場所に 2 回付けられません。`);
+    written.add(place);
     if (!contextsOf(use).some((context) => annotation.targets.includes(context))) {
       throw annotationError(use, `アノテーション @${name} はここには付けられません。`);
     }
@@ -94,10 +103,12 @@ export function checkAnnotations(root: Node, imports: readonly ImportDeclaration
 
 /** A declared annotation interface: the contexts its `@Target` lists, or every declaration context, and its elements. */
 function declaredInterface(declaration: Node): AnnotationInterface {
-  const target = namedChildren(modifiersOf(declaration) ?? declaration).find(
-    (child) =>
-      isAnnotation(child) && /^(java\.lang\.annotation\.)?Target$/.test(child.childForFieldName('name')?.text ?? '')
-  );
+  const metaAnnotations = namedChildren(modifiersOf(declaration) ?? declaration).filter((child) => isAnnotation(child));
+  const metaAnnotation = (name: string): Node | undefined =>
+    metaAnnotations.find(
+      (child) => child.childForFieldName('name')?.text.replace(/^java\.lang\.annotation\./, '') === name
+    );
+  const target = metaAnnotation('Target');
   const listed: string[] = target?.childForFieldName('arguments')?.text.match(/\b[A-Z_]+\b/g) ?? [];
   const elements = namedChildren(declaration.childForFieldName('body') ?? declaration)
     .filter((member) => member.type === 'annotation_type_element_declaration')
@@ -105,6 +116,7 @@ function declaredInterface(declaration: Node): AnnotationInterface {
   return {
     targets: target ? listed.filter((name): name is ElementType => ELEMENT_TYPES.has(name)) : DECLARATION_CONTEXTS,
     elements: Object.fromEntries(elements),
+    isRepeatable: metaAnnotation('Repeatable') !== undefined,
   };
 }
 
