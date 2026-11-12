@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 677 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 683 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -634,7 +634,7 @@ export class ProgramConverter extends ExpressionConverter {
       const pattern: Pattern =
         patternNodes.length === 1 && !children(caseNode).some((child) => child.type === ',')
           ? this.pattern(patternNodes[0], names)
-          : { kind: 'sequence', patterns: patternNodes.map((child) => this.pattern(child, names)), row: caseRow };
+          : { kind: 'sequence', patterns: patternNodes.map((child) => this.sequenceItem(child, names)), row: caseRow };
       if (pattern.kind === 'sequence') pattern.starIndex = starIndexOf(pattern.patterns, caseRow);
       const guardNode = caseNode.childForFieldName('guard');
       const guard = guardNode ? this.expression(namedChildren(guardNode)[0]) : undefined;
@@ -684,16 +684,14 @@ export class ProgramConverter extends ExpressionConverter {
       }
       case 'list_pattern':
       case 'tuple_pattern': {
-        const patterns = named.map((child) => this.pattern(child, names));
         const isGroup =
-          node.type === 'tuple_pattern' && patterns.length === 1 && !children(node).some((child) => child.type === ',');
-        if (isGroup) return patterns[0];
+          node.type === 'tuple_pattern' && named.length === 1 && !children(node).some((child) => child.type === ',');
+        if (isGroup) return this.pattern(named[0], names);
+        const patterns = named.map((child) => this.sequenceItem(child, names));
         return { kind: 'sequence', patterns, starIndex: starIndexOf(patterns, row), row };
       }
       case 'splat_pattern': {
-        const nameNode = named[0];
-        if (!nameNode || nameNode.text === '_') return { kind: 'star', row };
-        return { kind: 'star', name: this.patternName(nameNode, names), row };
+        return fail(row, '* を付けたパターンは、シーケンスのパターンの要素としてしか書けません。');
       }
       case 'dict_pattern': {
         return this.mappingPattern(node, names);
@@ -762,6 +760,16 @@ export class ProgramConverter extends ExpressionConverter {
       sign = undefined;
     }
     return { kind: 'mapping', keys, patterns, rest: this.mappingRest(node, names), row: rowOf(node) };
+  }
+
+  /** An item of a sequence pattern, the only place where a star pattern (`*rest`) may stand. */
+  private sequenceItem(node: Node, names: Set<string>): Pattern {
+    const named = namedChildren(node);
+    const splat = node.type === 'case_pattern' && named.length === 1 ? named[0] : node;
+    if (splat.type !== 'splat_pattern') return this.pattern(node, names);
+    const nameNode = namedChildren(splat)[0];
+    if (!nameNode || nameNode.text === '_') return { kind: 'star', row: rowOf(splat) };
+    return { kind: 'star', name: this.patternName(nameNode, names), row: rowOf(splat) };
   }
 
   /** The name a mapping pattern's `**rest` binds, which may appear once, as the last subpattern. */

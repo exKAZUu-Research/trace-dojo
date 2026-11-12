@@ -306,6 +306,9 @@ test.each([
   ['a generator with a comma after its iterable', 'x = (i for i in [1],)', 0],
   ['a match without case clauses', "match 1:\n    print('hi')", 0],
   ['a try with else and finally but no except', 'try:\n    x = 1\nelse:\n    x = 2\nfinally:\n    x = 3', 2],
+  ['a star pattern as a whole case pattern', "match 5:\n    case *a:\n        print('x')", 1],
+  ['a star pattern in a group', "match 5:\n    case (*a):\n        print('x')", 1],
+  ['a star pattern in an or-pattern', "match [5]:\n    case [*a | 1]:\n        print('x')", 1],
   ['a match without case clauses in a function', 'def f(x):\n    match x:\n        y = 1\n    return 2', 1],
 ])('%s is a compile error', (_, source, row) => {
   const execution = executeProgram('python', source);

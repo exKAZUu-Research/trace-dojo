@@ -65,7 +65,7 @@ const rangeCheck =
 const finiteCheck = (x: number): Error | undefined =>
   Number.isFinite(x) || Number.isNaN(x) ? undefined : valueError(`expected a finite input, got ${floatRepr(x)}`);
 
-/** The natural logarithm of an int too large for a float, from its bit length. */
+/** The logarithm `func` gives of a positive int or float, refusing other values as CPython's loghelper does. */
 function logOf(value: PyValue, func: (x: number) => number): number {
   if (typeof value === 'bigint' || typeof value === 'boolean') {
     if (BigInt(value) <= 0n) throw valueError('expected a positive input');
