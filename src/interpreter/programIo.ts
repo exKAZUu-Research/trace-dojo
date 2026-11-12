@@ -190,11 +190,21 @@ export class FileHandle {
 
 type FileSystemNode = FileNode | DirectoryNode;
 
-/** Where a path leads: the directory holding its entry, the entry's name (empty for the root), and the entry. */
+/**
+ * Where a path leads: the directory holding its entry, the entry's name (empty for the root), the entry, and the
+ * names of the absolute path to it.
+ */
 interface Location {
   parent: DirectoryNode;
   name: string;
   node: FileSystemNode | undefined;
+  names: string[];
+}
+
+/** A directory that a walk down a path has entered, with its name in its parent. */
+interface Step {
+  directory: DirectoryNode;
+  name: string;
 }
 
 /**
@@ -259,25 +269,32 @@ export class VirtualFileSystem {
    */
   createDirectory(path: string, recursive: boolean): string | undefined {
     if (!recursive) {
-      const { parent, name, node } = this.locate(path);
+      const { parent, name, node, names } = this.locate(path);
       if (name === '' || node) throw new FileSystemError('EEXIST', path);
       parent.children.set(name, new DirectoryNode());
-      return resolvePath(path);
+      return `/${names.join('/')}`;
     }
-    const segments = this.segmentsOf(path);
-    let current = this.root;
+    const components = this.componentsOf(path);
+    const steps: Step[] = [{ directory: this.root, name: '' }];
     let firstCreated: string | undefined;
-    for (const [index, segment] of segments.entries()) {
-      let child = current.children.get(segment);
-      if (child?.kind === 'file') throw new FileSystemError(index === segments.length - 1 ? 'EEXIST' : 'ENOTDIR', path);
-      if (!child) {
-        child = new DirectoryNode();
-        current.children.set(segment, child);
-        firstCreated ??= `/${segments.slice(0, index + 1).join('/')}`;
+    for (const [index, name] of components.entries()) {
+      const current = (steps.at(-1) as Step).directory;
+      if (name !== '..' && !current.children.has(name)) {
+        current.children.set(name, new DirectoryNode());
+        firstCreated ??= `/${[...steps.slice(1).map((step) => step.name), name].join('/')}`;
       }
-      current = child;
+      if (current.children.get(name)?.kind === 'file' && index === components.length - 1) {
+        throw new FileSystemError('EEXIST', path);
+      }
+      this.enter(steps, name, path);
     }
     return firstCreated;
+  }
+
+  /** Whether two paths name one file or directory, failing as a lookup does when a directory on the way is missing. */
+  isSameFile(path: string, other: string): boolean {
+    const { node } = this.locate(path);
+    return node !== undefined && node === this.locate(other).node;
   }
 
   /** Removes a file or an empty directory, or only one of `kind` when it is given. */
@@ -306,7 +323,7 @@ export class VirtualFileSystem {
     const source = this.locate(from);
     if (!source.node || source.name === '') throw new FileSystemError(source.node ? 'EINVAL' : 'ENOENT', from);
     const target = this.locate(to);
-    if (isInside(this.segmentsOf(to), this.segmentsOf(from)) || target.name === '') {
+    if (isInside(target.names, source.names) || target.name === '') {
       throw new FileSystemError('EINVAL', to);
     }
     const { node } = source;
@@ -346,27 +363,48 @@ export class VirtualFileSystem {
     return node;
   }
 
-  /** Walks a path once, failing when a directory on the way is missing or is a file. */
+  /**
+   * Walks a path once, name by name as Linux resolves one, so that `..` leaves a directory only after entering it,
+   * failing when a directory on the way is missing or is a file.
+   */
   private locate(path: string): Location {
-    const segments = this.segmentsOf(path);
-    const name = segments.pop();
-    let parent = this.root;
-    for (const segment of segments) {
-      const child = parent.children.get(segment);
-      if (!child) throw new FileSystemError('ENOENT', path);
-      if (child.kind === 'file') throw new FileSystemError('ENOTDIR', path);
-      parent = child;
+    const components = this.componentsOf(path);
+    const last = components.pop();
+    const steps: Step[] = [{ directory: this.root, name: '' }];
+    for (const name of components) this.enter(steps, name, path);
+    if (last === '..' && steps.length > 1) steps.pop();
+    const names = steps.slice(1).map((step) => step.name);
+    if (last === undefined || last === '..') {
+      // The path names a directory it walked through, as `a/..` names the directory holding `a`.
+      const { directory, name } = steps.at(-1) as Step;
+      return { parent: steps.at(-2)?.directory ?? this.root, name, node: directory, names };
     }
-    if (name === undefined) return { parent, name: '', node: this.root };
-    return { parent, name, node: parent.children.get(name) };
+    const parent = (steps.at(-1) as Step).directory;
+    return { parent, name: last, node: parent.children.get(last), names: [...names, last] };
   }
 
-  /** The names of an absolute path, charging the run for reading the path and walking its names. */
-  private segmentsOf(path: string): string[] {
+  /** Enters the directory a name names, or with `..` leaves the current one, which the root never does. */
+  private enter(steps: Step[], name: string, path: string): void {
+    if (name === '..') {
+      if (steps.length > 1) steps.pop();
+      return;
+    }
+    const child = (steps.at(-1) as Step).directory.children.get(name);
+    if (!child) throw new FileSystemError('ENOENT', path);
+    if (child.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+    steps.push({ directory: child, name });
+  }
+
+  /**
+   * The names of a path from the root, keeping `..` for the walk to resolve, while charging the run for reading the
+   * path and walking its names.
+   */
+  private componentsOf(path: string): string[] {
     this.budget.spend(Math.ceil((path.length + 1) / 16));
-    const segments = segmentsOf(path);
-    this.budget.spend(segments.length);
-    return segments;
+    const absolute = path.startsWith('/') ? path : `${WORKING_DIRECTORY}/${path}`;
+    const components = absolute.split('/').filter((name) => name !== '' && name !== '.');
+    this.budget.spend(components.length);
+    return components;
   }
 }
 
@@ -385,7 +423,7 @@ function replacementConflictOf(node: FileSystemNode, existing: FileSystemNode): 
   return existing.children.size > 0 ? 'ENOTEMPTY' : undefined;
 }
 
-/** The absolute path that a path names, resolving `.` and `..` by its text as `java.io.File` and Node.js do. */
+/** The absolute path that a path names by its text, which needs no file system, as for `/dev/stdin` and input files. */
 export function resolvePath(path: string): string {
   return `/${segmentsOf(path).join('/')}`;
 }

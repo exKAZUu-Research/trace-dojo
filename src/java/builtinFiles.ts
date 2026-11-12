@@ -1,4 +1,4 @@
-import { FileSystemError, resolvePath, type VirtualFileSystem } from '../interpreter/programIo';
+import { FileSystemError, type TextReader, type VirtualFileSystem } from '../interpreter/programIo';
 import { itemsOf, javaHash } from './builtinCollectionSupport';
 import { newList } from './builtinCollectors';
 import {
@@ -407,7 +407,7 @@ function defineFileReads(context: IOContext, files: ClassInfo, { path }: FileTyp
   const bufferedReader = classOf(context, 'BufferedReader');
   addStatic(context, files, 'newBufferedReader', [path.type], bufferedReader.type, (frame, _, [file]) => {
     const reader = frame.runtime.allocateObject(frame, bufferedReader);
-    readSources.set(reader, new TextSource(frame.runtime.io.textReader(readText(frame, file))));
+    readSources.set(reader, new TextSource(openText(frame, file)));
     return reader;
   });
 }
@@ -425,9 +425,14 @@ function addStatic(
 
 /** The text of a file, read as `Files` reads it. */
 function readText(frame: Frame, file: Value): string {
+  return openText(frame, file).readRest();
+}
+
+/** Opens a file to read as `Files` does, which reads the file's text as it is when read. */
+function openText(frame: Frame, file: Value): TextReader {
   const text = pathTextOf(frame, file);
   if (fileSystemOf(frame).kindOf(text) === 'directory') return throwBuiltin(frame, 'IOException', 'Is a directory');
-  return withNioErrors(frame, text, () => frame.runtime.io.openReader(text).readRest());
+  return withNioErrors(frame, text, () => frame.runtime.io.openReader(text));
 }
 
 function linesOf(frame: Frame, content: string): Value[] {
@@ -589,8 +594,8 @@ function copyOrMove(frame: Frame, isMove: boolean, from: string, to: string, giv
   const system = fileSystemOf(frame);
   const kind = system.kindOf(from);
   if (kind === undefined) throwBuiltin(frame, 'NoSuchFileException', from);
-  // Copying or moving a file to itself does nothing, as the paths name one file.
-  if (resolvePath(from) === resolvePath(to)) return;
+  // Copying or moving a file to itself does nothing.
+  if (withNioErrors(frame, to, () => system.isSameFile(from, to))) return;
   if (system.kindOf(to) !== undefined) {
     if (!optionNamesOf(frame, given).includes('REPLACE_EXISTING'))
       throwBuiltin(frame, 'FileAlreadyExistsException', to);

@@ -218,6 +218,12 @@ test.each([
     'closed\nused\n1\n',
   ],
   [
+    'a reader by path that reads the file as rewritten',
+    'BufferedReader r = Files.newBufferedReader(Path.of("x")); Files.writeString(Path.of("x"), "new"); System.out.println(r.readLine());',
+    { x: 'old' },
+    'new\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},
@@ -310,7 +316,7 @@ test.each([
   ],
   [
     'writes files',
-    "const fs = require('node:fs'); console.log(fs.mkdirSync('a/b', { recursive: true })); fs.writeFileSync('a/b/c.txt', 'x'); fs.writeFileSync('a/b/c.txt', 'y', { flag: 'a' }); fs.appendFileSync('a/b/c.txt', 'z'); fs.renameSync('in.txt', 'a/in.txt'); console.log(fs.readdirSync('a'), fs.existsSync('in.txt')); fs.unlinkSync('a/in.txt');",
+    "const fs = require('node:fs'); console.log(fs.mkdirSync('a/b', { recursive: true })); fs.writeFileSync('a/b/c.txt', 'x'); fs.writeFileSync('a/b/c.txt', 'y', { flag: 'a' }); fs.appendFileSync('a/b/c.txt', 'z'); fs.renameSync('in.txt', 'a/b/../in.txt'); fs.mkdirSync('a/b/../c/../e', { recursive: true }); fs.rmdirSync('a/e'); fs.rmdirSync('a/c'); console.log(fs.readdirSync('a'), fs.existsSync('in.txt')); fs.unlinkSync('a/in.txt');",
     { stdout: "/a\n[ 'b', 'in.txt' ] false\n", stderr: '', finalFiles: { 'a/b/c.txt': 'xyz' } },
   ],
   [
@@ -336,6 +342,11 @@ test.each([
     'Error: ENOENT-2unlinkx',
   ],
   ["require('http')", "Error: Cannot find module 'http'"],
+  [
+    "require('fs').readFileSync('missing/../d/f.txt')",
+    "Error: ENOENT: no such file or directory, open 'missing/../d/f.txt'",
+  ],
+  ["require('fs').readFileSync('d/f.txt/../f.txt')", "Error: ENOTDIR: not a directory, open 'd/f.txt/../f.txt'"],
   ["require('fs').writeFileSync('d/f.txt', 'x', { flag: 'wx' })", "Error: EEXIST: file already exists, open 'd/f.txt'"],
   [
     "require('fs').writeFileSync('none.txt', 'x', { flag: 'r+' })",
