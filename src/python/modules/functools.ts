@@ -1,4 +1,5 @@
 import { abcInvalidationCount } from '../abstractClasses';
+import { pushAll } from '../arrays';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { defineGetSet, defineUnsupportedAttributes } from '../descriptors';
@@ -206,9 +207,19 @@ function cacheKey(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {
     return newTuple(args);
   }
   const items = [...args];
-  if (keywords.length > 0) items.push(KEYWORD_MARK, ...keywords.flat());
+  if (keywords.length > 0) {
+    items.push(KEYWORD_MARK);
+    pushAll(items, keywords.flat());
+  }
   if (cache.typed) {
-    items.push(...args.map((arg) => classOf(arg)), ...keywords.map(([, value]) => classOf(value)));
+    pushAll(
+      items,
+      args.map((arg) => classOf(arg))
+    );
+    pushAll(
+      items,
+      keywords.map(([, value]) => classOf(value))
+    );
   }
   return newTuple(items);
 }

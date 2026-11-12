@@ -1,3 +1,4 @@
+import { pushAll } from './arrays';
 import { bindArguments, type Signature } from './calls';
 import { bestSuggestion } from './describe';
 import { typeError } from './types';
@@ -185,7 +186,7 @@ export function bindPythonArgs(signature: Signature, args: readonly PyValue[], k
   for (const { name, kind } of signature.def.params) {
     const value = bound.get(name);
     if (kind === 'positionalOnly' || kind === 'positional') values.push(value === OMITTED ? undefined : value);
-    else if (kind === 'varArgs') values.push(...(value as PyTuple).items);
+    else if (kind === 'varArgs') pushAll(values, (value as PyTuple).items);
   }
   while (values.length > 0 && values.at(-1) === undefined) values.pop();
   return values as PyValue[];

@@ -1,3 +1,4 @@
+import { pushAll } from './arrays';
 // code-gauge-allow-file fileNcss 490 -- The expression evaluator keeps one method per kind of expression together.
 import type { Argument, Comprehension, Element, Expression, FormattedValue, FunctionDef, NameRef, Target } from './ast';
 import { functionStr, KeywordArguments, mappingEntries } from './callArguments';
@@ -166,7 +167,7 @@ export class ExpressionEvaluator {
         );
       } else {
         const items = this.elements(leading, frame);
-        frame.temporaries.push(...items);
+        pushAll(frame.temporaries, items);
         for (const item of items) addToTable(set.table, item);
       }
       frame.temporaries.push(set);

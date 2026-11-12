@@ -16,6 +16,7 @@ interface DescriptorData {
   name: string;
   get?: (self: PyValue) => PyValue;
   set?: (self: PyValue, value: PyValue) => void;
+  delete?: (self: PyValue) => void;
   /** The feature an unsupported attribute's error names. */
   unsupported?: string;
   /** Whether an instance's own attribute of the name takes precedence, as for `__doc__`. */
@@ -47,10 +48,22 @@ export function defineGetSet(
   cls: PyClass,
   name: string,
   get: DescriptorData['get'],
-  options: { set?: DescriptorData['set']; member?: boolean; nonData?: boolean } = {}
+  options: {
+    set?: DescriptorData['set'];
+    delete?: DescriptorData['delete'];
+    member?: boolean;
+    nonData?: boolean;
+  } = {}
 ): void {
   const descriptorClass = options.member ? memberDescriptorClass : getsetDescriptorClass;
-  const data: DescriptorData = { owner: cls, name, get, set: options.set, nonData: options.nonData };
+  const data: DescriptorData = {
+    owner: cls,
+    name,
+    get,
+    set: options.set,
+    delete: options.delete,
+    nonData: options.nonData,
+  };
   cls.dict.set(name, new PyOpaque(descriptorClass, name, data));
 }
 
@@ -92,6 +105,14 @@ export function writeDescriptor(descriptor: PyOpaque, instance: PyValue, value: 
   if (data.unsupported !== undefined) throw new UnsupportedFeatureError(data.unsupported);
   if (!data.set) throw unwritableError(descriptor);
   data.set(instance, value);
+}
+
+/** Deletes an attribute through a builtin data descriptor, which may not allow it. */
+export function deleteDescriptor(descriptor: PyOpaque, instance: PyValue): void {
+  const data = dataOf(descriptor);
+  if (data.unsupported !== undefined) throw new UnsupportedFeatureError(data.unsupported);
+  if (!data.delete) throw unwritableError(descriptor);
+  data.delete(instance);
 }
 
 /** The error of assigning to or deleting an attribute whose builtin data descriptor has no setter. */

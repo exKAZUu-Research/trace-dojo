@@ -1,5 +1,5 @@
 import { mappingEntries } from '../callArguments';
-// code-gauge-allow-file fileNcss 472 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 475 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -145,7 +145,10 @@ method(dequeClass, 'rotate', 'expected', 0, 1, (self, [steps]) => {
   if (items.length === 0) return None;
   const count = Number(toIndex(steps ?? 1n)) % items.length;
   const shift = (count + items.length) % items.length;
-  if (shift) items.unshift(...items.splice(items.length - shift, shift));
+  if (shift) {
+    currentRuntime().spend(Math.ceil(items.length / 64));
+    dequeOf(self).replaceItems([...items.slice(items.length - shift), ...items.slice(0, items.length - shift)]);
+  }
   return None;
 });
 method(dequeClass, 'clear', 'none', 0, 0, (self) => {
@@ -638,17 +641,15 @@ method(defaultdictClass, '__missing__', 'one', 1, 1, (self, [key]) => currentRun
 redeclareMethods(defaultdictClass, dictClass, ['copy']);
 method(defaultdictClass, '__copy__', 'none', 0, 0, (self) => callValue(getAttribute(self, 'copy'), []));
 defaultdictClass.dict.set('__module__', 'collections');
-defaultdictClass.dict.set(
-  'default_factory',
-  new PyDescriptor(
-    propertyClass,
-    new PyBuiltinFunction(
-      builtinClass('getter'),
-      'default_factory',
-      ([self]) => (self as PyDict).defaultFactory ?? None
-    )
-  )
-);
+defineGetSet(defaultdictClass, 'default_factory', (self) => (self as PyDict).defaultFactory ?? None, {
+  member: true,
+  set: (self, value) => {
+    (self as PyDict).defaultFactory = value === None ? undefined : value;
+  },
+  delete: (self) => {
+    (self as PyDict).defaultFactory = undefined;
+  },
+});
 
 // OrderedDict -------------------------------------------------------------------------------------------------------
 

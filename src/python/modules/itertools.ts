@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 402 -- The iterators of itertools and their shared helpers belong together.
+import { pushAll } from '../arrays';
+// code-gauge-allow-file fileNcss 403 -- The iterators of itertools and their shared helpers belong together.
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -296,7 +297,7 @@ function product(args: PyValue[], kwargs: Kwargs): PyValue {
   const pools: PyValue[][] = [];
   if (sources.length > 0) {
     currentRuntime().allocate(sources.length * times);
-    for (let index = 0; index < times; index++) pools.push(...sources);
+    for (let index = 0; index < times; index++) pushAll(pools, sources);
   }
   return lazily('product', productOf(pools), pools);
 }

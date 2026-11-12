@@ -1,4 +1,5 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
+import { pushAll } from './arrays';
 import { DictStore } from './dictStore';
 import {
   PyBoundMethod,
@@ -111,9 +112,4 @@ function pushNativeData(pending: unknown[], data: object): void {
   else if (data instanceof Map) for (const [key, value] of data) pending.push(key, value);
   else if (data instanceof DictStore) for (const entry of data.ordered()) pending.push(entry.key, entry.value);
   else if (Object.getPrototypeOf(data) === Object.prototype) pushAll(pending, Object.values(data));
-}
-
-/** Pushes values one by one: spreading a large array into push() exceeds the engine's argument limit. */
-function pushAll(pending: unknown[], values: Iterable<unknown>): void {
-  for (const value of values) pending.push(value);
 }

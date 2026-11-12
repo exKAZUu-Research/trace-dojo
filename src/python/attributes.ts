@@ -1,6 +1,6 @@
 import { registerVirtualSubclass } from './abstractClasses';
 import { isSubclassOfClass } from './builtins';
-import { isDataDescriptor, readDescriptor, unwritableError, writeDescriptor } from './descriptors';
+import { deleteDescriptor, isDataDescriptor, readDescriptor, writeDescriptor } from './descriptors';
 import { newMappingProxy } from './mappingProxy';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
@@ -271,7 +271,7 @@ export function deleteAttribute(target: PyValue, name: string): void {
     return;
   }
   const descriptor = classOf(target).lookup(name);
-  if (isDataDescriptor(descriptor)) throw unwritableError(descriptor);
+  if (isDataDescriptor(descriptor)) return deleteDescriptor(descriptor, target);
   if (isNamedTupleField(descriptor)) throw pyError('AttributeError', "can't delete attribute");
   if (descriptor !== undefined) {
     throw pyError('AttributeError', `'${typeName(target)}' object attribute '${name}' is read-only`);
