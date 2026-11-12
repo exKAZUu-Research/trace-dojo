@@ -349,11 +349,16 @@ test.each([
   }
 });
 
-test.each(['del a[:0]', 'del a[5:2]', 'del a[0:0:2]', 'a[3:3] = []', 'a[3:5] = [0, 0]'])(
-  'a change of a long list that moves nothing, %s, over and over costs no scan of it',
-  (statement) => {
-    // Work that copies the list would take far longer than the time limit; the change itself takes milliseconds.
-    const program = `a = [0] * 100000\nfor i in range(10000):\n    ${statement}`;
-    expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
-  }
-);
+test.each([
+  'del a[:0]',
+  'del a[5:2]',
+  'del a[0:0:2]',
+  'a[3:3] = []',
+  'a[3:5] = [0, 0]',
+  'a[len(a):] = [1, 2]\n    del a[-2:]',
+  'a[-2:] = []\n    a.extend([1, 2])',
+])('a change of a long list that moves little of it, %s, over and over costs no scan of it', (statement) => {
+  // Work that copies the list would take far longer than the time limit; the change itself takes milliseconds.
+  const program = `a = [0] * 100000\nfor i in range(10000):\n    ${statement}`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
