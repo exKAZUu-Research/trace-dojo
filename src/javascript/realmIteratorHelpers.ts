@@ -164,7 +164,9 @@ function closingOnThrow<T>(runtime: Runtime, record: IteratorRecord, run: () => 
 function notCallableText(runtime: Runtime, value: Value): string {
   if (typeof value === 'string') return `string "${value}"`;
   if (typeof value === 'number' || typeof value === 'boolean') return `${typeof value} ${String(value)}`;
-  return runtime.describe(value);
+  if (value === null) return 'object null';
+  if (typeof value === 'symbol' || typeof value === 'bigint') return typeof value;
+  return isObject(value) ? 'object' : runtime.describe(value);
 }
 
 /** Checks the receiver and the callback of a helper, closing the receiver when the callback is not a function. */
@@ -191,7 +193,7 @@ function startLimited(call: NativeCall, name: string): { record: IteratorRecord;
   const integer = Number.isNaN(limit) ? Number.NaN : Math.trunc(limit);
   if (Number.isNaN(integer) || integer < 0) {
     closingOnThrow(runtime, record, () =>
-      runtime.throwError('RangeError', `${typeof args[0] === 'symbol' ? 'Symbol()' : String(limit)} must be positive`)
+      runtime.throwError('RangeError', `${typeof args[0] === 'symbol' ? 'Symbol()' : String(args[0])} must be positive`)
     );
   }
   record.next = runtime.get(thisValue, 'next');

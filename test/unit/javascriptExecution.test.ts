@@ -1165,6 +1165,12 @@ try { d.toLocaleString('en-US', { get timeZone() { throw new Error('tz'); } }); 
     'BigInt toLocaleString with locales and options',
     `console.log((1234n).toLocaleString("de-DE"), (1234n).toLocaleString("en-US", { useGrouping: false }), (1234567n).toLocaleString(), (12n).toLocaleString("en-US", { style: "currency", currency: "JPY" }));`,
   ],
+  [
+    'invalid arguments of iterator helpers',
+    `function* g() {}
+for (const v of [Symbol.iterator, null, 1n, 123, undefined, {}, [1], 'has', true]) { try { g().map(v); } catch (e) { console.log(e.message); } }
+for (const v of ['abc', undefined, NaN, -1, -0.5, Symbol()]) { try { g().take(v); } catch (e) { console.log(e.message); } try { g().drop(v); } catch (e) { console.log(e.message); } }`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
