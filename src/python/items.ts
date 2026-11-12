@@ -229,5 +229,19 @@ export function deleteItem(container: PyValue, key: PyValue): void {
     callValue(bindValue(special, container), [key]);
     return;
   }
-  throw typeError(`'${typeName(container)}' object doesn't support item deletion`);
+  throw unsupportedDeletion(container, key);
+}
+
+/**
+ * The error of deleting an item from a value that cannot, as PyObject_DelItem decides it: a class with `__setitem__`
+ * has the slot that then misses `__delitem__`; a sequence type with an index refuses in its own words; others refuse.
+ */
+function unsupportedDeletion(container: PyValue, key: PyValue): Error {
+  if (lookupSpecial(container, '__setitem__') !== undefined) return pyError('AttributeError', '__delitem__');
+  const cls = classOf(container);
+  // A program's classes always have the sequence slots; a builtin type has them when it has a sequence protocol.
+  const isSequenceType = !cls.isBuiltin || ['__getitem__', '__len__', '__contains__'].some((name) => cls.lookup(name));
+  const isIndex = typeof key === 'bigint' || typeof key === 'boolean' || lookupSpecial(key, '__index__') !== undefined;
+  const words = isSequenceType && isIndex ? "doesn't" : 'does not';
+  return typeError(`'${typeName(container)}' object ${words} support item deletion`);
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 535 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 537 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -662,6 +662,10 @@ export abstract class ExpressionConverter {
       }
       case 'type': {
         return this.annotation(node);
+      }
+      case 'list': {
+        // A bracketed list of types, as Callable[[int], int] takes its parameters.
+        return { kind: 'list', elements: namedChildren(node).map((element) => this.annotation(element)), row };
       }
       case 'constrained_type':
       case 'splat_type': {
