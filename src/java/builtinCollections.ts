@@ -13,6 +13,7 @@ import {
   defineSnapshot,
   elementsOf,
   fixedSizeClasses,
+  immutableCollectionsLists,
   indexFailures,
   indexOf,
   itemsOf,
@@ -189,6 +190,8 @@ function defineRestrictedLists(
     () => true,
     'Collections$'
   );
+  immutableCollectionsLists.add(immutableList);
+  immutableCollectionsLists.add(pairList);
   for (const cls of [
     immutableList,
     pairList,
@@ -569,9 +572,9 @@ function defineListAdditions(
     (frame, receiver, [from, to]) => {
       const items = elementsOf(receiver);
       const [start, end] = [from as number, to as number];
-      if (start < 0 || end > items.length || start > end) {
-        throwBuiltin(frame, 'IndexOutOfBoundsException', `fromIndex: ${start}, toIndex: ${end}, size: ${items.length}`);
-      }
+      if (start < 0) throwBuiltin(frame, 'IndexOutOfBoundsException', `fromIndex = ${start}`);
+      if (end > items.length) throwBuiltin(frame, 'IndexOutOfBoundsException', `toIndex = ${end}`);
+      if (start > end) throwBuiltin(frame, 'IllegalArgumentException', `fromIndex(${start}) > toIndex(${end})`);
       // A copy stands for the view, which these programs read rather than write through.
       frame.runtime.allocateArray(frame, end - start);
       const list = frame.runtime.allocateObject(frame, cls);

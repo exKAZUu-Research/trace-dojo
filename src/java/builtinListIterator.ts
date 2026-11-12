@@ -1,4 +1,11 @@
-import { checkModifiable, classType, type Context, elementsOf, linkOverrides } from './builtinCollectionSupport';
+import {
+  checkListPosition,
+  checkModifiable,
+  classType,
+  type Context,
+  elementsOf,
+  linkOverrides,
+} from './builtinCollectionSupport';
 import { addAbstractMethod, addInterface, addMethod, addTypeParameters, defineInterface } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, INT, type JavaType, VOID } from './types';
@@ -63,7 +70,7 @@ export function addListIterators(cls: ClassInfo, element: JavaType, listItrClass
 
 function createListIterator(frame: Frame, cls: ClassInfo, list: Value, index: number): JavaObject {
   const size = elementsOf(list).length;
-  if (index < 0 || index > size) throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}`);
+  checkListPosition(frame, list, index, size);
   const iterator = frame.runtime.allocateObject(frame, cls);
   const source = list as JavaObject;
   states.set(iterator, { list: source, cursor: index, lastReturned: -1, expectedModCount: source.modCount });

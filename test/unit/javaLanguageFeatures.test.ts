@@ -630,6 +630,40 @@ public class Main {
   });
 });
 
+test("Java's lists check listIterator positions and subList ranges with each JDK list's exception and message", () => {
+  const program = `import java.util.*;
+public class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    List<Integer> a = new ArrayList<>(List.of(1, 2));
+    t("li", () -> a.listIterator(5));
+    t("liNeg", () -> a.listIterator(-1));
+    t("liLinked", () -> new LinkedList<>(a).listIterator(5));
+    t("liOf", () -> List.of(1, 2).listIterator(5));
+    t("liOf3", () -> List.of(1, 2, 3).listIterator(5));
+    t("liAsList", () -> Arrays.asList(1, 2).listIterator(5));
+    t("sub5", () -> a.subList(0, 5));
+    t("subNeg", () -> a.subList(-1, 1));
+    t("sub21", () -> a.subList(2, 1));
+    t("subLinked", () -> new LinkedList<>(a).subList(0, 5));
+    t("subOf", () -> List.of(1, 2).subList(0, 5));
+    t("subOf3", () -> List.of(1, 2, 3).subList(2, 1));
+    t("subAsList", () -> Arrays.asList(1, 2).subList(-1, 1));
+    t("addAt", () -> a.add(5, 9));
+    t("addAtLinked", () -> new LinkedList<>(a).add(5, 9));
+    t("addAtNeg", () -> a.add(-1, 9));
+    t("removeLinked", () -> new LinkedList<>(a).remove(5));
+    t("setStack", () -> { Stack<Integer> s = new Stack<>(); s.push(1); s.set(-1, 2); });
+    t("addAll", () -> a.addAll(5, List.of(1)));
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'li java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\nliNeg java.lang.IndexOutOfBoundsException: Index: -1, Size: 2\nliLinked java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\nliOf java.lang.IndexOutOfBoundsException: Index: 5 Size: 2\nliOf3 java.lang.IndexOutOfBoundsException: Index: 5 Size: 3\nliAsList java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\nsub5 java.lang.IndexOutOfBoundsException: toIndex = 5\nsubNeg java.lang.IndexOutOfBoundsException: fromIndex = -1\nsub21 java.lang.IllegalArgumentException: fromIndex(2) > toIndex(1)\nsubLinked java.lang.IndexOutOfBoundsException: toIndex = 5\nsubOf java.lang.IndexOutOfBoundsException: toIndex = 5\nsubOf3 java.lang.IllegalArgumentException: fromIndex(2) > toIndex(1)\nsubAsList java.lang.IndexOutOfBoundsException: fromIndex = -1\naddAt java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\naddAtLinked java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\naddAtNeg java.lang.IndexOutOfBoundsException: Index: -1, Size: 2\nremoveLinked java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\nsetStack java.lang.ArrayIndexOutOfBoundsException: Index -1 out of bounds for length 10\naddAll java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

@@ -415,13 +415,27 @@ export function compareNatural(frame: Frame, a: Value, b: Value): number {
 /** How a list class reports an index outside it, as the JDK implementation it stands for checks the index. */
 export const indexFailures = new Map<ClassInfo, (frame: Frame, index: number, length: number) => never>();
 
+/** The classes of `List.of`, whose position checks write their messages without a comma. */
+export const immutableCollectionsLists = new WeakSet<ClassInfo>();
+
 /** Checks the index of an element of `list`, which an unmodifiable wrapper leaves to the list it wraps. */
 export function checkListIndex(frame: Frame, list: Value, index: number, length: number): void {
   if (index >= 0 && index < length) return;
-  const object = list as JavaObject;
-  const checked = unmodifiableWrappers.has(object) ? (object.retained?.[0] as JavaObject) : object;
-  indexFailures.get(checked.cls)?.(frame, index, length);
+  indexFailures.get(checkingClassOf(list))?.(frame, index, length);
   checkIndex(frame, index, length);
+}
+
+/** Checks the position `listIterator` starts at, which may be the size of the list. */
+export function checkListPosition(frame: Frame, list: Value, index: number, length: number): void {
+  if (index >= 0 && index <= length) return;
+  const separator = immutableCollectionsLists.has(checkingClassOf(list)) ? '' : ',';
+  throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}${separator} Size: ${length}`);
+}
+
+/** The class whose checks a list's methods make, which is that of the list an unmodifiable wrapper wraps. */
+function checkingClassOf(list: Value): ClassInfo {
+  const object = list as JavaObject;
+  return (unmodifiableWrappers.has(object) ? (object.retained?.[0] as JavaObject) : object).cls;
 }
 
 export function checkIndex(frame: Frame, index: number, length: number): void {
