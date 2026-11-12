@@ -192,8 +192,10 @@ function intFromBytes(cls: PyValue, args: PyValue[], kwargs: Map<string, PyValue
     return value;
   });
   if (order === 'little') bytes.reverse();
-  let result = 0n;
-  for (const byte of bytes) result = (result << 8n) | byte;
+  currentRuntime().chargeBits(BigInt(bytes.length * 8));
+  // One hex literal builds the integer in linear time, where shifting a growing integer per byte is quadratic.
+  let result =
+    bytes.length === 0 ? 0n : BigInt(`0x${bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`);
   if (signed === true && bytes.length > 0 && (bytes[0] & 0x80n) !== 0n) result -= 1n << BigInt(bytes.length * 8);
   return cls === intClass || cls === boolClass
     ? cls === boolClass

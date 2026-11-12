@@ -268,6 +268,7 @@ test.each([
     'sorting long strings outside the BMP that differ at their first character',
     'a = "a" + "😀" * 5000\nb = "b" + "😀" * 5000\nx = sorted([a, b] * 5000)',
   ],
+  ['building an int from many bytes', 'x = int.from_bytes([255] * 300000, byteorder="big")'],
   [
     'peeking and draining a deque',
     'from collections import deque\nq = deque(range(50000))\ns = 0\nwhile q:\n    s += q[0]\n    q.popleft()',
