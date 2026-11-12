@@ -1,6 +1,6 @@
 import { formatComplex } from './formatComplex';
 import { formatValue } from './formatSpec';
-import { floatRepr, intToString } from './numbers';
+import { decimalValue, floatRepr, intToString } from './numbers';
 import { bindValue, callValue, getAttribute, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { asciiEscape, iterStr, strRepr } from './strings';
@@ -169,7 +169,7 @@ function renderField(
       value = getAttribute(value, accessor.slice(1));
     } else {
       const key = accessor.slice(1, -1);
-      value = getItem(value, /^\d+$/.test(key) ? BigInt(key) : key);
+      value = getItem(value, decimalValue(key) ?? key);
     }
   }
   if (conversion !== undefined) value = convertField(value, conversion);
@@ -190,12 +190,13 @@ function fieldValue(
     state.mode = 'auto';
     return positional(args, state.auto++);
   }
-  if (/^\d+$/.test(name)) {
+  const index = decimalValue(name);
+  if (index !== undefined) {
     if (state.mode === 'auto') {
       throw valueError('cannot switch from automatic field numbering to manual field specification');
     }
     state.mode = 'manual';
-    return positional(args, Number(name));
+    return positional(args, Number(index));
   }
   return kwargs(name);
 }

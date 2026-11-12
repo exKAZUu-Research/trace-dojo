@@ -1,3 +1,4 @@
+import { decimalValue } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
 import { iterStr } from '../strings';
 import { iteratorClass, newList, newTuple, None, typeError, typeName, valueError } from '../types';
@@ -190,7 +191,8 @@ function parseAccessor(chars: readonly string[], start: number): { isAttribute: 
 }
 
 function integerOr(text: string): PyValue {
-  if (!/^\d+$/.test(text)) return text;
-  if (BigInt(text) >= 2n ** 63n) throw valueError('Too many decimal digits in format string');
-  return BigInt(text);
+  const value = decimalValue(text);
+  if (value === undefined) return text;
+  if (value >= 2n ** 63n) throw valueError('Too many decimal digits in format string');
+  return value;
 }
