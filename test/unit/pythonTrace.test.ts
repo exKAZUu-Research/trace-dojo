@@ -251,6 +251,11 @@ test.each([
   ['an int and a string', 'd = {2: "a", 1: "b", "1": "c"}', ['1', '2', "'1'"]],
   ['None and a string', 'd = {None: 0, "None": 1}', ['None', "'None'"]],
   ['two instances of one class', 'class A:\n    pass\nd = {A(): 1, A(): 2}', ['<A> (1)', '<A> (2)']],
+  [
+    'tuples and a text like a numbered label',
+    'd = {(1, "2"): "a", ("1", 2): "b", "(1, 2) (1)": "c"}',
+    ["(1, '2')", "('1', 2)", "'(1, 2) (1)'"],
+  ],
 ])('dict keys of the same text, %s, keep distinct entries', (_name, program, labels) => {
   const node = traceProgram('python', program, program).traceItems.at(-1)?.referenceVars.d;
   expect(node?.kind === 'object' && Object.keys(node.entries)).toEqual(labels);

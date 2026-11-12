@@ -230,38 +230,34 @@ function addAttributeNodes(entries: Record<string, DisplayNode>, instance: PyIns
 }
 
 /**
- * Labels a dict's keys by their text. Distinct keys may share a text, such as `1` and `'1'`, so a string key whose text
- * another key shares shows quoted, and a label still repeated gets its position among those sharing it.
+ * Labels a dict's keys, distinct for distinct keys: by their text when no two keys share one, and otherwise by their
+ * literals, with strings quoted, where only keys that are no literal (instances, or NaNs) can share a label, so those
+ * get their position among the keys sharing it, a form no literal takes.
  */
 function keyLabels(keys: PyValue[]): string[] {
-  const texts = keys.map(keyText);
-  const textCounts = countsOf(texts);
-  const typed = keys.map((key, index) =>
-    typeof key === 'string' && (textCounts.get(texts[index]) ?? 0) > 1 ? strRepr(key) : texts[index]
-  );
-  const typedCounts = countsOf(typed);
-  const seen = new Map<string, number>();
-  return typed.map((label) => {
-    if ((typedCounts.get(label) ?? 0) === 1) return label;
-    const position = (seen.get(label) ?? 0) + 1;
-    seen.set(label, position);
-    return `${label} (${position})`;
+  const texts = keys.map((key) => keyText(key, false));
+  if (new Set(texts).size === texts.length) return texts;
+  const literals = keys.map((key) => keyText(key, true));
+  const counts = new Map<string, number>();
+  for (const literal of literals) counts.set(literal, (counts.get(literal) ?? 0) + 1);
+  const positions = new Map<string, number>();
+  return literals.map((literal) => {
+    if (counts.get(literal) === 1) return literal;
+    const position = (positions.get(literal) ?? 0) + 1;
+    positions.set(literal, position);
+    return `${literal} (${position})`;
   });
 }
 
-function countsOf(labels: string[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
-  return counts;
-}
-
-/** A dict key as text, without running any of the program's own methods. */
-function keyText(key: PyValue): string {
-  if (typeof key === 'string') return key;
-  if (typeof key === 'bigint' || typeof key === 'number' || typeof key === 'boolean') {
-    return typeof key === 'boolean' ? (key ? 'True' : 'False') : String(key);
-  }
+/** A dict key as text, quoting strings when `quoted`, without running any of the program's own methods. */
+function keyText(key: PyValue, quoted: boolean): string {
+  if (typeof key === 'string') return quoted ? strRepr(key) : key;
+  if (typeof key === 'boolean') return key ? 'True' : 'False';
+  if (typeof key === 'bigint' || typeof key === 'number') return String(key);
   if (key === None) return 'None';
-  if (key instanceof PyTuple) return `(${key.items.map(keyText).join(', ')}${key.items.length === 1 ? ',' : ''})`;
+  if (key instanceof PyTuple) {
+    const items = key.items.map((item) => keyText(item, quoted));
+    return `(${items.join(', ')}${items.length === 1 ? ',' : ''})`;
+  }
   return `<${key.cls.name}>`;
 }
