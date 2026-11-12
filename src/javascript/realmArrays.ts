@@ -1,9 +1,11 @@
 import { ArrayOps } from './arrayOps';
 import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
+import { defineArrayCopies } from './realmArrayCopies';
 import { defineArrayIterations } from './realmArrayIterations';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { isCallable, JsArray, type NativeCall, type Value } from './values';
+import { isCallable, JsArray, JsThrow, type NativeCall, type Value } from './values';
 
 /**
  * Defines Array and Array.prototype. Each method follows its algorithm in the ECMAScript specification step by step,
@@ -26,6 +28,7 @@ export function defineArrayBuiltins(builder: RealmBuilder): void {
   defineCopies(builder);
   defineSearches(builder);
   defineArrayIterations(builder);
+  defineArrayCopies(builder);
 }
 
 export type ArrayMethod = (call: NativeCall, ops: ArrayOps) => Value;
@@ -55,10 +58,19 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
   return buildArray(runtime, (result) => {
     const add = (value: Value, index: number): void =>
       result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
-    if (source instanceof JsArray || typeof source === 'string') {
+    const method =
+      source === undefined || source === null ? undefined : runtime.get(source, WELL_KNOWN_SYMBOLS.iterator);
+    if (method !== undefined && method !== null) {
       // Each value is read just before its mapper runs, as JavaScript's iteration does.
-      const iterator = runtime.iterator(source);
-      for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) add(value, index);
+      const iterator = runtime.iterator(source, method);
+      try {
+        for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
+          add(value, index);
+      } catch (error) {
+        // A mapper that throws closes the iterator; a failed `next()` has already ended it.
+        if (error instanceof JsThrow) iterator.close('throw');
+        throw error;
+      }
       return;
     }
     // Null and undefined are neither iterable nor array-like, which JavaScript reports as a TypeError.
@@ -74,13 +86,13 @@ function toLength(runtime: Runtime, value: Value): number {
 }
 
 /** The spec's ToIntegerOrInfinity. */
-function toInteger(runtime: Runtime, value: Value): number {
+export function toInteger(runtime: Runtime, value: Value): number {
   const number = runtime.toNumber(value);
   return Number.isNaN(number) ? 0 : Math.trunc(number);
 }
 
 /** Resolves a relative index as slice, splice, and fill do: negative counts from the end, clamped to the array. */
-function relativeIndex(runtime: Runtime, value: Value, length: number, fallback: number): number {
+export function relativeIndex(runtime: Runtime, value: Value, length: number, fallback: number): number {
   if (value === undefined) return fallback;
   const index = toInteger(runtime, value);
   return index < 0 ? Math.max(length + index, 0) : Math.min(index, length);
@@ -196,26 +208,15 @@ function defineReorderings(builder: RealmBuilder): void {
   arrayMethod(builder, 'sort', 1, sortArray);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-function sortArray({ runtime, args, callRow }: NativeCall, ops: ArrayOps): JsArray {
-  const comparator = args[0];
-  if (comparator !== undefined && !isCallable(comparator)) {
-    runtime.throwError('TypeError', 'The comparison function must be either a function or undefined');
-  }
+function sortArray(call: NativeCall, ops: ArrayOps): JsArray {
+  const { runtime } = call;
+  const compare = sortComparison(call);
   const { length } = ops;
   // SortIndexedProperties collects the present elements into a list, held while the comparator runs.
   const collected = buildArray(runtime, (items) => {
     for (let index = 0; index < length; index++) if (ops.has(index)) items.set(items.length, ops.get(index));
   });
   runtime.scan(collected.elements.length * Math.ceil(Math.log2(collected.elements.length + 1)));
-  const compare = comparator
-    ? (left: Value, right: Value): number =>
-        runtime.toNumber(runtime.call(comparator, undefined, [left, right], callRow)) || 0
-    : (left: Value, right: Value): number => {
-        const leftText = runtime.toString(left);
-        const rightText = runtime.toString(right);
-        return leftText < rightText ? -1 : leftText > rightText ? 1 : 0;
-      };
   return runtime.hold(collected, () => {
     // The host's sort also places undefined last without calling the comparison.
     const sorted = (collected.elements as Value[]).toSorted(compare);
@@ -223,6 +224,24 @@ function sortArray({ runtime, args, callRow }: NativeCall, ops: ArrayOps): JsArr
     for (let index = sorted.length; index < length; index++) ops.delete(index);
     return ops.array;
   });
+}
+
+/**
+ * The spec's SortCompare with the comparator `call.args[0]`, which the host's sort calls only on values other than
+ * undefined, as SortCompare does.
+ */
+export function sortComparison({ runtime, args, callRow }: NativeCall): (left: Value, right: Value) => number {
+  const comparator = args[0];
+  if (comparator !== undefined && !isCallable(comparator)) {
+    runtime.throwError('TypeError', 'The comparison function must be either a function or undefined');
+  }
+  return comparator
+    ? (left, right) => runtime.toNumber(runtime.call(comparator, undefined, [left, right], callRow)) || 0
+    : (left, right) => {
+        const leftText = runtime.toString(left);
+        const rightText = runtime.toString(right);
+        return leftText < rightText ? -1 : leftText > rightText ? 1 : 0;
+      };
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.

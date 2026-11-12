@@ -2,7 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
-import type { ClassNode, Expression, FunctionKind, FunctionNode, ScopeDeclarations } from './ast';
+import type { ClassNode, DeclarationKind, Expression, FunctionKind, FunctionNode, ScopeDeclarations } from './ast';
 import { fail, rowOf } from './convertNodes';
 
 interface ScopeBuilder {
@@ -16,12 +16,30 @@ export interface FunctionContext {
   canReturn: boolean;
   canCallSuper: boolean;
   canReferenceSuper: boolean;
+  /** Whether `yield` may appear: in a generator, but not in a static block or a field initializer inside one. */
+  isGenerator: boolean;
+  /** Whether `await` may appear: in an async function, but not in a static block or a field initializer inside one. */
+  isAsync: boolean;
+  /** Whether the function is an async generator, whose `yield` and `return` await their values. */
+  isAsyncGenerator: boolean;
+  /** The `yield` and `await` expressions converted so far in this function, which mark the expressions around them. */
+  suspensionCount: number;
+  /** Whether `new.target` may appear: anywhere but outside every function, which arrow functions inherit. */
+  canUseNewTarget: boolean;
   /** Labels in scope, each with whether it labels a loop. */
   labels: Map<string, boolean>;
   breakableDepth: number;
   loopDepth: number;
-  /** Shared by a function and the arrow functions inside it, which read its `arguments`. */
-  argumentsUse: { isUsed: boolean };
+  /**
+   * Shared by a function and the arrow functions inside it, which read its `arguments`; a field initializer or a
+   * static block forbids reading it.
+   */
+  argumentsUse: { isUsed: boolean; isForbidden?: boolean };
+}
+
+/** The context of a class field initializer or a static block, where `this` is the instance or the class. */
+export function initializerContext(): FunctionContext {
+  return { ...newContext(false, false, true), argumentsUse: { isUsed: false, isForbidden: true } };
 }
 
 export function newContext(canReturn: boolean, canCallSuper: boolean, canReferenceSuper: boolean): FunctionContext {
@@ -29,6 +47,11 @@ export function newContext(canReturn: boolean, canCallSuper: boolean, canReferen
     canReturn,
     canCallSuper,
     canReferenceSuper,
+    canUseNewTarget: true,
+    isGenerator: false,
+    isAsync: false,
+    isAsyncGenerator: false,
+    suspensionCount: 0,
     labels: new Map(),
     breakableDepth: 0,
     loopDepth: 0,
@@ -48,7 +71,10 @@ interface ConvertedFunction {
 
 /** The scopes, steps, and contexts that converting a program tracks, which its early errors depend on. */
 export abstract class ConverterBase {
-  protected context: FunctionContext = newContext(false, false, false);
+  protected context: FunctionContext = {
+    ...newContext(false, false, false),
+    canUseNewTarget: false,
+  };
   private readonly scopes: ScopeBuilder[] = [];
   /** The functions converted so far, among which the annotations find their owners once the program is converted. */
   private readonly functions: ConvertedFunction[] = [];
@@ -128,7 +154,7 @@ export abstract class ConverterBase {
   // Scopes ----------------------------------------------------------------------------------------------------------
 
   protected pushScope(isFunction: boolean): ScopeDeclarations {
-    const declarations: ScopeDeclarations = { lexical: [], functions: [], vars: [], order: [] };
+    const declarations: ScopeDeclarations = { lexical: [], functions: [], vars: [], order: [], disposes: false };
     this.scopes.push({ declarations, names: new Map(), isFunction });
     return declarations;
   }
@@ -161,15 +187,23 @@ export abstract class ConverterBase {
     return this.scopes.at(-1) as ScopeBuilder;
   }
 
-  protected declareLexical(node: Node, name: string, isConst: boolean): void {
+  /** Rejects `yield`, reserved in strict mode, and `await` inside an async function, as names. */
+  protected checkContextualName(node: Node, name: string): void {
+    if (name === 'yield') fail(node, 'yield は変数名に使えません。');
+    if (name === 'await' && this.context.isAsync) fail(node, 'async 関数の中では await を変数名に使えません。');
+  }
+
+  protected declareLexical(node: Node, name: string, kind?: 'constant' | 'using' | 'await using'): void {
+    this.checkContextualName(node, name);
     const scope = this.currentScope;
     if (scope.names.has(name)) duplicate(node, name);
     scope.names.set(name, 'lexical');
-    scope.declarations.lexical.push({ name, isConst });
+    scope.declarations.lexical.push({ name, kind });
     scope.declarations.order.push(name);
   }
 
   protected declareVar(node: Node, name: string): void {
+    this.checkContextualName(node, name);
     for (const scope of this.scopes.toReversed()) {
       if (scope.names.get(name) === 'lexical') duplicate(node, name);
       if (!scope.isFunction) {
@@ -197,15 +231,20 @@ export abstract class ConverterBase {
   }
 
   protected declareParameter(node: Node, name: string): void {
+    this.checkContextualName(node, name);
     const scope = this.currentScope;
     if (scope.names.has(name)) duplicate(node, name);
     scope.names.set(name, 'parameter');
   }
 
-  /** Declares a name of a `var`, `let`, or `const` declaration. */
-  protected declareVariable(node: Node, name: string, kind: 'var' | 'let' | 'const'): void {
-    if (kind === 'var') this.declareVar(node, name);
-    else this.declareLexical(node, name, kind === 'const');
+  /** Declares a name of a `var`, `let`, `const`, or `using` declaration. */
+  protected declareVariable(node: Node, name: string, kind: DeclarationKind): void {
+    if (kind === 'var') {
+      this.declareVar(node, name);
+      return;
+    }
+    this.declareLexical(node, name, kind === 'let' ? undefined : kind === 'const' ? 'constant' : kind);
+    if (kind === 'using' || kind === 'await using') this.currentScope.declarations.disposes = true;
   }
 }
 

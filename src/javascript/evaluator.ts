@@ -1,6 +1,17 @@
-import type { Block, ClassMember, ClassNode, FunctionNode, Program, Statement, VariableDeclaration } from './ast';
+import type {
+  Block,
+  ClassMember,
+  ClassNode,
+  FunctionNode,
+  Program,
+  ScopeDeclarations,
+  Statement,
+  VariableDeclaration,
+} from './ast';
+import { createAsyncGeneratorObject } from './asyncGenerators';
 import { nameFunction, patternNames } from './evaluatorBase';
-import { defineAccessor, ExpressionEvaluator } from './expressionEvaluator';
+import { defineAccessor } from './expressionEvaluator';
+import { createGeneratorObject, type Steps } from './generators';
 import { DONE, ValueIterator } from './iteration';
 import {
   defineFunctionProperties,
@@ -8,10 +19,17 @@ import {
   mergePrivate,
   privateMethodProperty,
 } from './memberProperties';
-import { isObjectCreation, onlyCalls, onlyCreates, storesReference } from './stepRules';
+import { startAsyncFunction } from './promises';
+import { isObjectCreation, onlyCalls, onlyCreates } from './stepRules';
+import {
+  type Completion,
+  type Outcome,
+  pendingValue,
+  suppressedError,
+  SuspendableStatementEvaluator,
+} from './suspendableStatements';
 import {
   appendAll,
-  type Binding,
   type ClassField,
   type FunctionBehavior,
   type FunctionFrame,
@@ -19,6 +37,7 @@ import {
   JsFunction,
   type JsObject,
   JsThrow,
+  type Key,
   Scope,
   toBoolean,
   UNINITIALIZED,
@@ -27,15 +46,15 @@ import {
 
 let nextPrivateId = 0;
 
-type Completion = undefined | { kind: 'break' | 'continue'; label?: string } | { kind: 'return'; value: Value };
 type UserBehavior = Extract<FunctionBehavior, { kind: 'user' }>;
 type ClassBehavior = Extract<FunctionBehavior, { kind: 'class' }>;
 
-export class Evaluator extends ExpressionEvaluator {
+export class Evaluator extends SuspendableStatementEvaluator {
   /** Runs a program in the frame the caller pushed, whose scope becomes the program's own. */
   runProgram(program: Program): void {
     this.instantiate(this.runtime.frame.scope, program.scope);
-    this.statements(program.body);
+    this.body(program.body, program.scope);
+    this.runtime.eventLoop.run();
   }
 
   // Statements --------------------------------------------------------------------------------------------------------
@@ -46,11 +65,6 @@ export class Evaluator extends ExpressionEvaluator {
       if (completion) return completion;
     }
     return undefined;
-  }
-
-  /** Records the step of binding a loop's target, whose destructuring stores the values it reads out of an object. */
-  private stepBinding({ target, stepRow }: Extract<Statement, { kind: 'forOf' | 'forIn' }>, value: Value): void {
-    this.runtime.steps.stepBinding(stepRow, !storesReference(target) || (!isObject(value) && value !== null));
   }
 
   // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
@@ -123,8 +137,57 @@ export class Evaluator extends ExpressionEvaluator {
     }
   }
 
+  /** Runs `run` in a new scope with `declarations`, disposing of what its `using` declarations declared. */
+  private scoped<T extends Outcome>(declarations: ScopeDeclarations, run: () => T): T {
+    return this.withScope(declarations, () => (declarations.disposes ? this.disposing(run) : run()));
+  }
+
+  /** Runs the statements of a function body or the program, disposing of what their `using` declarations declared. */
+  private body(statements: Statement[], declarations: ScopeDeclarations): Completion {
+    return declarations.disposes ? this.disposing(() => this.statements(statements)) : this.statements(statements);
+  }
+
+  /**
+   * Runs `run`, then disposes of the values the `using` declarations in the current scope declared, the last first. An
+   * error a disposal throws suppresses the error before it, which a SuppressedError then holds.
+   */
+  private disposing<T extends Outcome>(run: () => T): T {
+    const { runtime } = this;
+    const scope = runtime.frame.scope;
+    let result: T | undefined;
+    let thrown: JsThrow | undefined;
+    try {
+      result = run();
+    } catch (error) {
+      if (!(error instanceof JsThrow)) throw error;
+      thrown = error;
+    }
+    const disposables = scope.disposables ?? [];
+    // The value the scope returns or throws stays reachable while the disposers run, as do the disposers not run yet.
+    const { temporaries } = runtime.frame;
+    const held = temporaries.length;
+    temporaries.push(pendingValue(result, thrown));
+    try {
+      for (let disposable = disposables.pop(); disposable; disposable = disposables.pop()) {
+        const { value, method } = disposable;
+        try {
+          if (method) runtime.call(method, value, []);
+        } catch (error) {
+          if (!(error instanceof JsThrow)) throw error;
+          thrown = thrown ? new JsThrow(suppressedError(runtime, error.value, thrown.value)) : error;
+          temporaries[held] = thrown.value;
+        }
+      }
+    } finally {
+      temporaries.length = held;
+    }
+    scope.disposables = undefined;
+    if (thrown) throw thrown;
+    return result as T;
+  }
+
   private block(block: Block): Completion {
-    return this.withScope(block.scope, () => this.statements(block.body));
+    return this.scoped(block.scope, () => this.statements(block.body));
   }
 
   private declaration(declaration: VariableDeclaration): void {
@@ -135,7 +198,7 @@ export class Evaluator extends ExpressionEvaluator {
         else if (target.kind === 'identifier') this.revealVar(target.name);
         continue;
       }
-      this.bindPattern(target, this.evaluate(init), 'initialize');
+      this.bindDeclared(target, this.evaluate(init), declaration.declarationKind);
     }
   }
 
@@ -151,7 +214,7 @@ export class Evaluator extends ExpressionEvaluator {
 
   private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Completion {
     const { runtime } = this;
-    return this.withScope(statement.scope, () => {
+    return this.scoped(statement.scope, () => {
       const { update, stepRow, perIterationNames } = statement;
       this.forInit(statement);
       const frame = runtime.frame;
@@ -186,16 +249,6 @@ export class Evaluator extends ExpressionEvaluator {
     }
   }
 
-  /** Gives the next iteration its own copy of the `let` variables, which closures created in an iteration keep. */
-  private copyIterationScope(names: string[]): void {
-    if (names.length === 0) return;
-    const frame = this.runtime.frame;
-    const current = frame.scope;
-    const next = new Scope(current.parent);
-    for (const name of names) next.bindings.set(name, { ...(current.bindings.get(name) as Binding) });
-    frame.scope = next;
-  }
-
   private forEachStatement(statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>, labels: string[]): Completion {
     const { runtime } = this;
     // The loop's let or const names are uninitialized while the iterable is evaluated, so `for (let x of x)` throws.
@@ -205,51 +258,64 @@ export class Evaluator extends ExpressionEvaluator {
         : this.evaluate(statement.iterable);
     const iterator =
       statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
+    return runtime.hold(iterable, () => this.forEachIterations(statement, labels, iterator));
+  }
+
+  private forEachIterations(
+    statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
+    labels: string[],
+    iterator: ValueIterator
+  ): Completion {
+    const { runtime } = this;
     const frame = runtime.frame;
-    return runtime.hold(iterable, () => {
+    let isExhausted = false;
+    let completion: 'normal' | 'throw' = 'normal';
+    let pending: Value;
+    try {
       for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
         runtime.spend();
         const outer = frame.scope;
         try {
-          if (statement.declarationKind && statement.declarationKind !== 'var') {
+          const { declarationKind } = statement;
+          if (declarationKind && declarationKind !== 'var') {
             frame.scope = new Scope(outer);
             this.instantiate(frame.scope, statement.scope);
           }
-          this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
-          this.stepBinding(statement, value);
-          const result = this.loopBody(statement.body, labels);
-          if (result !== 'next') return result;
+          const iteration = (): 'next' | Completion => {
+            if (declarationKind) this.bindDeclared(statement.target, value, declarationKind);
+            else this.bindPattern(statement.target, value, 'assign');
+            this.stepBinding(statement, value);
+            return this.loopBody(statement.body, labels);
+          };
+          const result = statement.scope.disposes ? this.disposing(iteration) : iteration();
+          if (result !== 'next') {
+            pending = pendingValue(result);
+            return result;
+          }
         } finally {
           frame.scope = outer;
         }
       }
-      return;
-    });
-  }
-
-  /** The keys `for...in` visits: enumerable string keys of the object and its prototypes, each once. */
-  private enumerableKeys(value: Value): string[] {
-    const { runtime } = this;
-    if (value === undefined || value === null) return [];
-    if (typeof value === 'string') return Array.from({ length: value.length }, (_, index) => String(index));
-    if (!isObject(value)) return [];
-    const keys: string[] = [];
-    const seen = new Set<string>();
-    for (let current: JsObject | null = value; current; current = current.proto) {
-      for (const key of runtime.ownKeys(current)) {
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (runtime.getOwnProperty(current, key)?.enumerable) keys.push(key);
+      isExhausted = true;
+      return undefined;
+    } catch (error) {
+      if (error instanceof JsThrow) {
+        completion = 'throw';
+        pending = error.value;
       }
+      throw error;
+    } finally {
+      // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks, while the value the loop
+      // returns or throws stays reachable.
+      if (!isExhausted) runtime.hold(pending, () => iterator.close(completion));
     }
-    return keys;
   }
 
   private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Completion {
     const { runtime } = this;
     const discriminant = this.evaluate(statement.discriminant);
     return runtime.hold(discriminant, () =>
-      this.withScope(statement.scope, () => {
+      this.scoped(statement.scope, () => {
         const { cases } = statement;
         for (const switchCase of cases.slice(this.matchingCase(statement, discriminant))) {
           const completion = this.statements(switchCase.body);
@@ -277,7 +343,7 @@ export class Evaluator extends ExpressionEvaluator {
     if (outcome.thrown && handler) {
       const { value } = outcome.thrown;
       outcome = this.catchThrow(() =>
-        this.withScope(handler.scope, () => {
+        this.scoped(handler.scope, () => {
           if (handler.param) this.bindPattern(handler.param, value, 'initialize');
           return this.block(handler.body);
         })
@@ -314,44 +380,87 @@ export class Evaluator extends ExpressionEvaluator {
     runtime.allocate(3);
     let closure = scope;
     if (node.bindsOwnName) closure = new Scope(scope);
-    const fn = new JsFunction(runtime.realm.functionPrototype, { kind: 'user', node, scope: closure, homeObject });
+    const fn = new JsFunction(runtime.realm.functionPrototype, {
+      kind: 'user',
+      node,
+      scope: closure,
+      homeObject,
+    });
     if (node.bindsOwnName) closure.bindings.set(node.name, { value: fn, isMutable: false });
     defineFunctionProperties(fn, node.name, expectedArgumentCount(node));
-    if (node.kind === 'normal') {
-      const prototype = runtime.newObject();
-      prototype.properties.set('constructor', { value: fn, writable: true, enumerable: false, configurable: true });
+    if (node.isGenerator) {
+      const { asyncGeneratorPrototype, generatorPrototype } = runtime.realm;
+      const prototype = runtime.newObject(node.isAsync ? asyncGeneratorPrototype : generatorPrototype);
       fn.properties.set('prototype', { value: prototype, writable: true, enumerable: false, configurable: false });
+    } else if (node.kind === 'normal' && !node.isAsync) {
+      const prototype = runtime.newObject();
+      prototype.properties.set('constructor', {
+        value: fn,
+        writable: true,
+        enumerable: false,
+        configurable: true,
+      });
+      fn.properties.set('prototype', {
+        value: prototype,
+        writable: true,
+        enumerable: false,
+        configurable: false,
+      });
     }
     return fn;
   }
 
-  callFunction(behavior: UserBehavior, thisValue: Value, args: Value[], callRow: number | undefined): Value {
+  callFunction(
+    fn: JsFunction,
+    behavior: UserBehavior,
+    thisValue: Value,
+    args: Value[],
+    callRow: number | undefined,
+    newTarget?: JsFunction
+  ): Value {
     const { runtime } = this;
     const { node } = behavior;
     const scope = new Scope(
       behavior.scope,
       node.kind === 'arrow'
         ? undefined
-        : { thisValue, homeObject: behavior.homeObject, constructing: undefined, newTarget: undefined },
+        : { thisValue, homeObject: behavior.homeObject, constructing: undefined, newTarget },
       true
     );
     runtime.pushFrame(scope, callRow, node.isAtomic);
     try {
+      if (node.isAsync && !node.isGenerator)
+        return startAsyncFunction(runtime, runtime.frame, this.asyncBody(node, args));
       this.bindParameters(node, args);
       if (!Array.isArray(node.body)) return this.evaluate(node.body);
       this.instantiate(scope, node.scope);
-      const completion = this.statements(node.body);
+      if (node.isGenerator) {
+        const create = node.isAsync ? createAsyncGeneratorObject : createGeneratorObject;
+        return create(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.bodySteps(node.body, node.scope));
+      }
+      const completion = this.body(node.body, node.scope);
       return completion?.kind === 'return' ? completion.value : undefined;
     } finally {
       runtime.popFrame();
     }
   }
 
+  /** Runs an async function's body, whose parameters' errors reject its promise as the body's own errors do. */
+  private *asyncBody(node: FunctionNode, args: Value[]): Steps<Completion> {
+    this.bindParameters(node, args);
+    if (!Array.isArray(node.body)) return { kind: 'return', value: yield* this.valueSteps(node.body) };
+    this.instantiate(this.runtime.frame.scope, node.scope);
+    return yield* this.bodySteps(node.body, node.scope);
+  }
+
   /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */
   private bindParameters(node: FunctionNode, args: Value[]): void {
     const { runtime } = this;
     if (node.usesArguments) {
-      runtime.frame.scope.bindings.set('arguments', { value: runtime.newArray([...args]), isMutable: false });
+      runtime.frame.scope.bindings.set('arguments', {
+        value: runtime.newArray([...args]),
+        isMutable: false,
+      });
     }
     const params = node.rest ? [...node.params, node.rest] : node.params;
     const { bindings } = runtime.frame.scope;
@@ -370,10 +479,12 @@ export class Evaluator extends ExpressionEvaluator {
     const classScope = new Scope(runtime.frame.scope);
     if (cls.name) classScope.bindings.set(cls.name, { value: UNINITIALIZED, isMutable: false });
     for (const member of cls.members) {
+      if (member.kind === 'staticBlock') continue;
       const { key } = member;
       // Private names live in the class scope, where `#` keeps them apart from variables.
       if (key.kind === 'private' && !classScope.bindings.has(key.name)) {
-        const identity = `${key.name}\0${cls.name}\0${nextPrivateId++}`;
+        const brand = member.kind === 'field' ? 'field' : member.isStatic ? 'static' : 'instance';
+        const identity = `${key.name}\0${cls.name}\0${nextPrivateId++}\0${brand}`;
         classScope.bindings.set(key.name, { value: identity, isMutable: false });
       }
     }
@@ -390,18 +501,31 @@ export class Evaluator extends ExpressionEvaluator {
     const fn = new JsFunction(constructorParent, behavior);
     runtime.allocate(3);
     defineFunctionProperties(fn, cls.name, cls.ctor ? expectedArgumentCount(cls.ctor) : 0);
-    fn.properties.set('prototype', { value: prototype, writable: false, enumerable: false, configurable: false });
-    prototype.properties.set('constructor', { value: fn, writable: true, enumerable: false, configurable: true });
-    const staticFields = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior.fields));
+    fn.properties.set('prototype', {
+      value: prototype,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    prototype.properties.set('constructor', {
+      value: fn,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+    const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior.fields));
     if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
     this.inScope(classScope, () => {
-      for (const field of staticFields) this.initializeField(fn, field);
+      for (const initialize of staticInitializers) initialize();
     });
     return fn;
   }
 
   /** The prototypes of a class's prototype object and of the class itself, which `extends` decides. */
-  private classParents(cls: ClassNode): { prototypeParent: JsObject | null; constructorParent: JsObject } {
+  private classParents(cls: ClassNode): {
+    prototypeParent: JsObject | null;
+    constructorParent: JsObject;
+  } {
     const { runtime } = this;
     const { realm } = runtime;
     if (!cls.superClass) return { prototypeParent: realm.objectPrototype, constructorParent: realm.functionPrototype };
@@ -421,17 +545,24 @@ export class Evaluator extends ExpressionEvaluator {
     return { prototypeParent: parentPrototype, constructorParent: superClass };
   }
 
-  /** Defines the methods and accessors, collecting the fields, which return the static ones to initialize. */
+  /**
+   * Defines the methods and accessors and collects the instance fields, returning what initializes the class itself:
+   * its static fields and static blocks in source order.
+   */
   private defineMembers(
     cls: ClassNode,
     fn: JsFunction,
     prototype: JsObject,
     instanceFields: ClassField[]
-  ): ClassField[] {
+  ): (() => void)[] {
     const { runtime } = this;
-    const staticFields: ClassField[] = [];
+    const staticInitializers: (() => void)[] = [];
     const classScope = runtime.frame.scope;
     for (const member of cls.members) {
+      if (member.kind === 'staticBlock') {
+        staticInitializers.push(() => this.runStaticBlock(member, this.methodScope(classScope, fn, fn)));
+        continue;
+      }
       const target = member.isStatic ? fn : prototype;
       const isPrivate = member.key.kind === 'private';
       const key = this.propertyKey(member.key);
@@ -441,24 +572,33 @@ export class Evaluator extends ExpressionEvaluator {
           ? (thisValue: JsObject): Value =>
               this.inScope(this.methodScope(classScope, thisValue, target), () => this.evaluate(value))
           : undefined;
-        (member.isStatic ? staticFields : instanceFields).push({
+        const field: ClassField = {
           key,
           isPrivate,
           initialize,
           stepRow: member.stepRow,
           onlyCalls: value !== undefined && isObjectCreation(value),
-        });
+        };
+        if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field));
+        else instanceFields.push(field);
         continue;
       }
       this.defineMethod(member, key, target, classScope, instanceFields);
     }
-    return staticFields;
+    return staticInitializers;
+  }
+
+  private runStaticBlock(block: Extract<ClassMember, { kind: 'staticBlock' }>, scope: Scope): void {
+    this.inScope(scope, () => {
+      this.instantiate(scope, block.scope);
+      this.body(block.body, block.scope);
+    });
   }
 
   /** Defines a method or accessor, which instances get as private members when its name is private. */
   private defineMethod(
     member: Extract<ClassMember, { fn: FunctionNode }>,
-    key: string,
+    key: Key,
     target: JsObject,
     classScope: Scope,
     instanceFields: ClassField[]
@@ -468,7 +608,7 @@ export class Evaluator extends ExpressionEvaluator {
     if (member.key.kind === 'computed') nameFunction(runtime, method, key);
     if (member.key.kind === 'private') {
       const property = privateMethodProperty(member.kind, method);
-      if (member.isStatic) mergePrivate(runtime, target, key, property);
+      if (member.isStatic) mergePrivate(runtime, target, privateIdentity(key), property);
       else
         instanceFields.unshift({
           key,
@@ -479,26 +619,41 @@ export class Evaluator extends ExpressionEvaluator {
           property,
         });
     } else if (member.kind === 'method') {
-      runtime.defineProperty(target, key, { value: method, writable: true, enumerable: false, configurable: true });
+      runtime.defineProperty(target, key, {
+        value: method,
+        writable: true,
+        enumerable: false,
+        configurable: true,
+      });
     } else {
       defineAccessor(runtime, target, key, member.kind, method, false);
     }
   }
 
   private methodScope(scope: Scope, thisValue: JsObject, homeObject: JsObject): Scope {
-    return new Scope(scope, { thisValue, homeObject, constructing: undefined, newTarget: undefined });
+    return new Scope(scope, {
+      thisValue,
+      homeObject,
+      constructing: undefined,
+      newTarget: undefined,
+    });
   }
 
   private initializeField(target: JsObject, field: ClassField): void {
     const { runtime } = this;
     if (field.property) {
-      mergePrivate(runtime, target, field.key, field.property);
+      mergePrivate(runtime, target, privateIdentity(field.key), field.property);
       return;
     }
     this.runtime.steps.runStatement(field.stepRow, field.onlyCalls, () => {
       const value = field.initialize ? field.initialize(target) : undefined;
       if (field.isPrivate)
-        runtime.definePrivate(target, field.key, { value, writable: true, enumerable: false, configurable: false });
+        runtime.definePrivate(target, privateIdentity(field.key), {
+          value,
+          writable: true,
+          enumerable: false,
+          configurable: false,
+        });
       else runtime.createDataProperty(target, field.key, value);
     });
   }
@@ -514,7 +669,12 @@ export class Evaluator extends ExpressionEvaluator {
     const thisValue = behavior.isDerived
       ? UNINITIALIZED
       : runtime.newObject(runtime.prototypeFor(newTarget, runtime.realm.objectPrototype));
-    const functionFrame: FunctionFrame = { thisValue, homeObject: behavior.homeObject, constructing: fn, newTarget };
+    const functionFrame: FunctionFrame = {
+      thisValue,
+      homeObject: behavior.homeObject,
+      constructing: fn,
+      newTarget,
+    };
     const scope = new Scope(behavior.scope, functionFrame);
     runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false);
     try {
@@ -526,7 +686,7 @@ export class Evaluator extends ExpressionEvaluator {
       if (ctor) {
         this.bindParameters(ctor, args);
         this.instantiate(scope, ctor.scope);
-        const completion = this.statements(ctor.body as Statement[]);
+        const completion = this.body(ctor.body as Statement[], ctor.scope);
         if (completion?.kind === 'return') result = completion.value;
       } else if (behavior.isDerived) {
         this.superCall(args, undefined);
@@ -581,4 +741,10 @@ export class Evaluator extends ExpressionEvaluator {
     }
     return constructed;
   }
+}
+
+/** The key of a private member, which is the string identity of its private name rather than a property key. */
+function privateIdentity(key: Key): string {
+  if (typeof key !== 'string') throw new TypeError('A private name has a string identity');
+  return key;
 }
