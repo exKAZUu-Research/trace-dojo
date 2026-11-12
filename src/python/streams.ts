@@ -7,7 +7,7 @@ import type { Runtime } from './runtime';
 import { strLength } from './strings';
 import { builtinClass, defineMethod, None, pyError, typeError, typeName, valueError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, type Kwargs, PyOpaque, type PyValue } from './values';
+import { AttributeMap, DONE, type Kwargs, PyOpaque, type PyValue } from './values';
 
 interface StreamState {
   write: (text: string) => void;
@@ -34,7 +34,7 @@ export function createStream(runtime: Runtime, name: 'stdout' | 'stderr'): PyVal
     lineBuffering: !isStdout,
     writeThrough: false,
   } satisfies StreamState);
-  stream.attributes = new Map<string, PyValue>([['mode', 'w']]);
+  stream.attributes = new AttributeMap([['mode', 'w']]);
   return stream;
 }
 

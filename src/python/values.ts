@@ -188,8 +188,8 @@ export class PyInstance extends PyObject {
   }
 }
 
-/** The attributes of an instance, which charge the slot each new name takes. */
-class AttributeMap extends Map<string, PyValue> {
+/** The attributes of an instance or opaque object, which charge the slot each new name takes. */
+export class AttributeMap extends Map<string, PyValue> {
   override set(name: string, value: PyValue): this {
     if (!this.has(name)) chargeSlots(1);
     return super.set(name, value);
@@ -473,7 +473,7 @@ export class PyDictView extends PyObject {
 /** An opaque value, such as a `typing` construct, that only supports being subscripted, combined, and shown. */
 export class PyOpaque extends PyObject {
   /** The attributes of an opaque object that has a `__dict__`, such as an lru_cache wrapper. */
-  attributes?: Map<string, PyValue>;
+  attributes?: AttributeMap;
 
   constructor(
     cls: PyClass,

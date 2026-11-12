@@ -119,6 +119,10 @@ test.each([
   ['a huge random.choices result', 'import random\nx = random.choices([1], k=1000001)'],
   ['a huge random integer', 'import random\nx = random.getrandbits(9000000)'],
   ['a huge format width', 'format(1, "01000000000000,")'],
+  [
+    'arguments bound by functools.partial beside a list beyond the slot limit',
+    'from functools import partial\ndef f(*args):\n    pass\np = partial(f, *([0] * 400000))\na = [0] * 500000',
+  ],
   ['ranges kept beside a list beyond the slot limit', 'a = list(map(range, range(200000)))\nb = [0] * 700000'],
   ['slices kept beside a list beyond the slot limit', 'a = [slice(i) for i in range(200000)]\nb = [0] * 700000'],
   [

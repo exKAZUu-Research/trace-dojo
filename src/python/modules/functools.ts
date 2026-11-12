@@ -25,6 +25,7 @@ import {
   typeError,
 } from '../types';
 import {
+  AttributeMap,
   DONE,
   type Kwargs,
   PyBoundMethod,
@@ -49,10 +50,11 @@ function bindAsMethod(self: PyObject, instance: PyValue): PyValue {
 const partialClass = builtinClass('partial');
 partialClass.tpName = 'functools.partial';
 partialClass.module = 'functools';
+/** What a partial keeps, as CPython's keeps its `args` tuple and `keywords` dict, which charge their own storage. */
 interface Partial {
   fn: PyValue;
-  args: PyValue[];
-  kwargs: Map<string, PyValue>;
+  args: PyTuple;
+  keywords: PyDict;
 }
 /** `functools.Placeholder`, which a partial's positional arguments leave for the call to fill. */
 const placeholderClass = builtinClass('_PlaceholderType');
@@ -72,17 +74,25 @@ partialClass.construct = (_cls, args, kwargs) => {
   }
   if (fn instanceof PyOpaque && fn.cls === partialClass) {
     const inner = fn.data as Partial;
-    const merged = new Map(inner.kwargs);
+    const merged = new Map(keywordsOf(inner));
     for (const [key, value] of kwargs ?? []) merged.set(key, value);
-    return newPartial(inner.fn, fillPlaceholders(inner.args, rest, true), merged);
+    return newPartial(inner.fn, fillPlaceholders(inner.args.items, rest, true), merged);
   }
   return newPartial(fn, rest, new Map(kwargs));
 };
 
 function newPartial(fn: PyValue, args: PyValue[], kwargs: Map<string, PyValue>): PyOpaque {
-  const partial = new PyOpaque(partialClass, 'partial', { fn, args, kwargs } satisfies Partial);
-  partial.attributes = new Map();
+  const partial = new PyOpaque(partialClass, 'partial', {
+    fn,
+    args: newTuple(args),
+    keywords: newDict(kwargs),
+  } satisfies Partial);
+  partial.attributes = new AttributeMap();
   return partial;
+}
+
+function keywordsOf(partial: Partial): Map<string, PyValue> {
+  return new Map(partial.keywords.store.ordered().map((entry) => [entry.key as string, entry.value]));
 }
 
 /** Fills a partial's placeholders with call arguments in order, as CPython's partial does. */
@@ -99,8 +109,8 @@ function fillPlaceholders(args: readonly PyValue[], given: readonly PyValue[], n
 partialClass.nativeGet = bindAsMethod;
 partialClass.dict.set('__module__', 'functools');
 defineGetSet(partialClass, 'func', (self) => ((self as PyOpaque).data as Partial).fn, { member: true });
-defineGetSet(partialClass, 'args', (self) => newTuple(((self as PyOpaque).data as Partial).args), { member: true });
-defineGetSet(partialClass, 'keywords', (self) => newDict(((self as PyOpaque).data as Partial).kwargs), {
+defineGetSet(partialClass, 'args', (self) => ((self as PyOpaque).data as Partial).args, { member: true });
+defineGetSet(partialClass, 'keywords', (self) => ((self as PyOpaque).data as Partial).keywords, {
   member: true,
 });
 defineGetSet(partialClass, '__dict__', (self) => namespaceDict(attributesOf(self as PyOpaque)));
@@ -115,8 +125,8 @@ method(partialClass, '__class_getitem__', 'one', 1, 1, (owner, [key]) => newGene
   binding: 'class',
 });
 
-function attributesOf(object: PyOpaque): Map<string, PyValue> {
-  object.attributes ??= new Map();
+function attributesOf(object: PyOpaque): AttributeMap {
+  object.attributes ??= new AttributeMap();
   return object.attributes;
 }
 defineMethod(
@@ -124,9 +134,9 @@ defineMethod(
   '__call__',
   (self, args, kwargs) => {
     const partial = (self as PyOpaque).data as Partial;
-    const merged = new Map(partial.kwargs);
+    const merged = keywordsOf(partial);
     for (const [key, value] of kwargs ?? []) merged.set(key, value);
-    return callValue(partial.fn, fillPlaceholders(partial.args, args), merged.size > 0 ? merged : undefined);
+    return callValue(partial.fn, fillPlaceholders(partial.args.items, args), merged.size > 0 ? merged : undefined);
   },
   { receiver: 'wrapper' }
 );
@@ -134,8 +144,8 @@ method(partialClass, '__repr__', 'none', 0, 0, (self) => {
   const partial = (self as PyOpaque).data as Partial;
   const parts = [
     pyRepr(partial.fn),
-    ...partial.args.map((arg) => pyRepr(arg)),
-    ...[...partial.kwargs].map(([key, value]) => `${key}=${pyRepr(value)}`),
+    ...partial.args.items.map((arg) => pyRepr(arg)),
+    ...[...keywordsOf(partial)].map(([key, value]) => `${key}=${pyRepr(value)}`),
   ];
   return `functools.partial(${parts.join(', ')})`;
 });
@@ -187,7 +197,7 @@ function lruCacheWrapper([fn, maxsize, typed, cacheInfo]: PyValue[]): PyValue {
     cacheInfo,
   };
   const wrapper = new PyOpaque(cacheClass, 'cache', cache);
-  wrapper.attributes = new Map();
+  wrapper.attributes = new AttributeMap();
   return wrapper;
 }
 
