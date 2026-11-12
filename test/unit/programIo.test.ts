@@ -94,6 +94,12 @@ test.each([
     'a 120\n',
   ],
   [
+    'an array read of the console, which takes the line entered',
+    'Reader r = new InputStreamReader(System.in); char[] a = new char[10]; System.out.println(r.read(a) + " " + r.read(a) + " " + r.read(a));',
+    'a\nbc\n',
+    '2 3 -1\n',
+  ],
+  [
     'lines from a BufferedReader',
     'BufferedReader br = new BufferedReader(new InputStreamReader(System.in)); String line; while ((line = br.readLine()) != null) System.out.println("[" + line + "]");',
     'x\r\ny\n\nz',

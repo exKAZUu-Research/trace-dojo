@@ -173,10 +173,9 @@ function readInto(frame: Frame, receiver: Value, array: Value, offset: number, l
   const text = textOf(frame, receiver);
   if (length === 0) return 0;
   if (text.isAtEnd) return -1;
-  let count = 0;
-  for (; count < length && !text.isAtEnd; count++) {
-    array.values[offset + count] = readChar(text);
-  }
+  // A read takes what one fill made available, as Java's does, rather than waiting for more input.
+  const count = Math.min(length, text.text.length - text.position);
+  for (let index = 0; index < count; index++) array.values[offset + index] = readChar(text);
   return count;
 }
 
