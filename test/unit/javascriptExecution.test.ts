@@ -77,6 +77,12 @@ test.each([
   ['new.target outside functions', 'console.log(new.target);', 0, 'new.target は関数の中にしか書けません。'],
   ['a legacy octal number', 'const n = 017;', 0, '数値「017」は、この採点環境では使えません。'],
   [
+    'an async getter',
+    'class C {\n  async get x() {\n    return 1;\n  }\n}',
+    1,
+    'get や set には async や * を付けられません。',
+  ],
+  [
     'an async class constructor',
     'class C {\n  async constructor() {}\n}',
     1,
