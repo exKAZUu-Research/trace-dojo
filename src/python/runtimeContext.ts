@@ -35,6 +35,12 @@ export function refuseOversizedString(value: unknown): void {
   if (typeof value === 'string') current?.ensureStringFits(value.length);
 }
 
+/** Turns a slip of the interpreter that escaped a native function into a Python exception; see Runtime.internalError. */
+export function asPythonError(error: unknown): unknown {
+  if (current && (error instanceof TypeError || error instanceof ReferenceError)) return current.internalError(error);
+  return error;
+}
+
 /**
  * Builds a value at no charge: a constant, which CPython creates once when it compiles the program, or the MemoryError
  * that reports the limit, which charging would raise again without end.

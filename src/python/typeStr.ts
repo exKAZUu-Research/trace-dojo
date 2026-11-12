@@ -5,10 +5,12 @@ import { sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
 import { getItem, getIterator, iterate, toArray } from './objects';
+import { contains } from './operators';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import { repeatText, StringBuilder } from './stringBuilder';
-import { hasSurrogates, isPrintable, iterStr, strLength, strRepr } from './strings';
+import { isPrintable, iterStr, strLength, strRepr } from './strings';
+import { hasAt, occurrences, pointIndex, unitOffset } from './strSearch';
 import {
   defineMethod,
   newDict,
@@ -110,9 +112,7 @@ method(strClass, '__hash__', 'none', 0, 0, (self) => pyHash(self));
 method(strClass, '__len__', 'none', 0, 0, (self) => BigInt(strLength(asStr(self))));
 method(strClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
 method(strClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
-method(strClass, '__contains__', 'one', 1, 1, (self, [item]) =>
-  asStr(self).includes(expectStr(item, (type) => `'in <string>' requires string as left operand, not ${type}`))
-);
+method(strClass, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
 method(strClass, '__mod__', 'one', 1, 1, (self, [value]) => formatPercent(asStr(self), value));
 method(strClass, '__format__', 'one', 1, 1, (self, [spec]) =>
   pyFormat(self, expectStr(spec, mustBeStr('__format__() argument')))
@@ -147,60 +147,6 @@ method(strClass, 'istitle', 'none', 0, 0, (self) => isTitleText(asStr(self)));
 
 // Searching ---------------------------------------------------------------------------------------------------------
 
-/**
- * The code points of a string and the bounds a `start`/`end` pair gives, adjusted as CPython's ADJUST_INDICES does:
- * unlike the bounds of a slice, `from` may exceed the length and `to` may precede `from`, and such a range holds no
- * match, not even of an empty string.
- */
-function bounds(
-  text: string,
-  start: PyValue | undefined,
-  end: PyValue | undefined
-): { points: string[]; from: number; to: number } {
-  const points = iterStr(text);
-  const { start: from, stop: to } = sliceIndices(
-    new PySlice(sliceClass, start ?? None, end ?? None, None),
-    points.length
-  );
-  const isBeyond = start !== undefined && start !== None && toIndex(start) > BigInt(points.length);
-  return { points, from: isBeyond ? points.length + 1 : from, to };
-}
-
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows str.find's slice arguments and empty-substring cases.
-function findIn(
-  text: string,
-  sub: string,
-  start: PyValue | undefined,
-  end: PyValue | undefined,
-  fromEnd: boolean
-): number {
-  const { points, from, to } = bounds(text, start, end);
-  currentRuntime().scan(points.length);
-  if (!hasSurrogates(text) && !hasSurrogates(sub)) {
-    if (to - from < sub.length)
-      return sub.length === 0 && from <= points.length && to >= from ? (fromEnd ? to : from) : -1;
-    const region = text.slice(from, to);
-    const index = fromEnd ? region.lastIndexOf(sub) : region.indexOf(sub);
-    return index === -1 ? -1 : index + from;
-  }
-  const subPoints = iterStr(sub);
-  const positions = fromEnd ? rangeDown(to - subPoints.length, from) : rangeUp(from, to - subPoints.length);
-  for (const position of positions) {
-    if (subPoints.every((char, offset) => points[position + offset] === char)) return position;
-  }
-  return -1;
-}
-
-function rangeUp(from: number, to: number): number[] {
-  const result: number[] = [];
-  for (let index = from; index <= to; index++) result.push(index);
-  return result;
-}
-
-function rangeDown(from: number, to: number): number[] {
-  return rangeUp(to, from).toReversed();
-}
-
 for (const [name, fromEnd, raises] of [
   ['find', false, false],
   ['rfind', true, false],
@@ -214,15 +160,49 @@ for (const [name, fromEnd, raises] of [
   });
 }
 
+function findIn(
+  text: string,
+  sub: string,
+  start: PyValue | undefined,
+  end: PyValue | undefined,
+  fromEnd: boolean
+): number {
+  const { length, from, to } = bounds(text, start, end);
+  if (sub === '') return from <= length && to >= from ? (fromEnd ? to : from) : -1;
+  if (to < from) return -1;
+  const [offset] = occurrences(text, sub, {
+    from: unitOffset(text, from),
+    to: unitOffset(text, to),
+    fromEnd,
+    limit: 1,
+  });
+  return offset === undefined ? -1 : pointIndex(text, offset);
+}
+
+/**
+ * The length in code points of a string and the bounds a `start`/`end` pair gives, adjusted as CPython's
+ * ADJUST_INDICES does: unlike the bounds of a slice, `from` may exceed the length and `to` may precede `from`, and such
+ * a range holds no match, not even of an empty string.
+ */
+function bounds(
+  text: string,
+  start: PyValue | undefined,
+  end: PyValue | undefined
+): { length: number; from: number; to: number } {
+  currentRuntime().scan(text.length);
+  const length = strLength(text);
+  const { start: from, stop: to } = sliceIndices(new PySlice(sliceClass, start ?? None, end ?? None, None), length);
+  const isBeyond = start !== undefined && start !== None && toIndex(start) > BigInt(length);
+  return { length, from: isBeyond ? length + 1 : from, to };
+}
+
 method(strClass, 'count', 'expected', 1, 3, (self, [sub, start, end]) => {
+  const text = asStr(self);
   const needle = expectStr(sub, mustBeStr('count() argument 1'));
-  const { points, from, to } = bounds(asStr(self), start, end);
-  currentRuntime().scan(points.length);
+  const { from, to } = bounds(text, start, end);
   if (needle === '') return BigInt(Math.max(to - from + 1, 0));
-  const region = points.slice(from, to).join('');
-  let count = 0n;
-  for (let index = region.indexOf(needle); index !== -1; index = region.indexOf(needle, index + needle.length)) count++;
-  return count;
+  if (to < from) return 0n;
+  return BigInt(occurrences(text, needle, { from: unitOffset(text, from), to: unitOffset(text, to) }).length);
 });
 
 for (const [name, atEnd] of [
@@ -230,8 +210,8 @@ for (const [name, atEnd] of [
   ['endswith', true],
 ] as const) {
   method(strClass, name, 'expected', 1, 3, (self, [prefix, start, end]) => {
-    const { points, from, to } = bounds(asStr(self), start, end);
-    const region = points.slice(from, to).join('');
+    const text = asStr(self);
+    const { from, to } = bounds(text, start, end);
     const candidates = prefix instanceof PyTuple ? prefix.items : [prefix];
     return candidates.some((candidate) => {
       if (typeof candidate !== 'string') {
@@ -241,13 +221,27 @@ for (const [name, atEnd] of [
             : `${name} first arg must be str or a tuple of str, not ${typeName(candidate)}`
         );
       }
-      if (to - iterStr(candidate).length < from) return false;
-      return atEnd ? region.endsWith(candidate) : region.startsWith(candidate);
+      if (to - strLength(candidate) < from) return false;
+      return hasAt(text, candidate, atEnd ? unitOffset(text, to) - candidate.length : unitOffset(text, from));
     });
   });
 }
 
 // Splitting and joining ---------------------------------------------------------------------------------------------
+
+/** Splits at the first or, from the end, the last `limit` occurrences of `separator`, or at all for a negative one. */
+function splitAt(text: string, separator: string, limit: number, fromEnd: boolean): string[] {
+  const offsets = occurrences(text, separator, { fromEnd, limit: limit < 0 ? Number.POSITIVE_INFINITY : limit });
+  if (fromEnd) offsets.reverse();
+  const parts: string[] = [];
+  let position = 0;
+  for (const offset of offsets) {
+    parts.push(text.slice(position, offset));
+    position = offset + separator.length;
+  }
+  parts.push(text.slice(position));
+  return parts;
+}
 
 /** Splits at runs of whitespace as CPython does: the part left after `limit` splits keeps its far end's spaces. */
 function splitWhitespace(text: string, limit: number, fromEnd: boolean): string[] {
@@ -286,10 +280,7 @@ for (const [name, fromEnd] of [
       if (sep === None) return newList(splitWhitespace(text, limit, fromEnd));
       const separator = expectStr(sep, (type) => `must be str or None, not ${type}`);
       if (separator === '') throw valueError('empty separator');
-      const parts = text.split(separator);
-      if (limit < 0 || parts.length - 1 <= limit) return newList(parts);
-      if (!fromEnd) return newList([...parts.slice(0, limit), parts.slice(limit).join(separator)]);
-      return newList([parts.slice(0, parts.length - limit).join(separator), ...parts.slice(parts.length - limit)]);
+      return newList(splitAt(text, separator, limit, fromEnd));
     },
     { keywords: ['sep', 'maxsplit'], named: 2 }
   );
@@ -342,8 +333,8 @@ for (const [name, fromEnd] of [
     const text = asStr(self);
     const separator = expectStr(sep, (type) => `must be str, not ${type}`);
     if (separator === '') throw valueError('empty separator');
-    const index = fromEnd ? text.lastIndexOf(separator) : text.indexOf(separator);
-    if (index === -1) return newTuple(fromEnd ? ['', '', text] : [text, '', '']);
+    const [index] = occurrences(text, separator, { fromEnd, limit: 1 });
+    if (index === undefined) return newTuple(fromEnd ? ['', '', text] : [text, '', '']);
     return newTuple([text.slice(0, index), separator, text.slice(index + separator.length)]);
   });
 }
@@ -357,6 +348,7 @@ for (const [name, left, right] of [
 ] as const) {
   method(strClass, name, 'expected', 0, 1, (self, [chars]) => {
     const points = iterStr(asStr(self));
+    currentRuntime().scan(points.length);
     const strip =
       chars === undefined || chars === None
         ? isSpace
@@ -463,11 +455,9 @@ method(
       if (replaced < count) result.append(replacement);
     } else {
       let position = 0;
-      let replaced = 0;
-      for (let index = text.indexOf(old); index !== -1 && replaced < count; index = text.indexOf(old, position)) {
+      for (const index of occurrences(text, old, { limit: count })) {
         result.append(text.slice(position, index)).append(replacement);
         position = index + old.length;
-        replaced++;
       }
       result.append(text.slice(position));
     }
@@ -479,12 +469,12 @@ method(
 method(strClass, 'removeprefix', 'one', 1, 1, (self, [prefix]) => {
   const text = asStr(self);
   const value = expectStr(prefix, mustBeStr('removeprefix() argument'));
-  return value !== '' && text.startsWith(value) ? text.slice(value.length) : text;
+  return value !== '' && hasAt(text, value, 0) ? text.slice(value.length) : text;
 });
 method(strClass, 'removesuffix', 'one', 1, 1, (self, [suffix]) => {
   const text = asStr(self);
   const value = expectStr(suffix, mustBeStr('removesuffix() argument'));
-  return value !== '' && text.endsWith(value) ? text.slice(0, -value.length) : text;
+  return value !== '' && hasAt(text, value, text.length - value.length) ? text.slice(0, -value.length) : text;
 });
 
 defineMethod(strClass, 'format', (self, args, kwargs) =>

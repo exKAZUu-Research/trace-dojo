@@ -12,6 +12,7 @@ import { PyClass, PyFunction, PySet, type PyValue } from './values';
 
 export const abcMetaClass = builtinClass('ABCMeta', typeClass);
 abcMetaClass.module = 'abc';
+abcMetaClass.isWrittenInPython = true;
 
 /** Makes a class an abstract base class, as `metaclass=ABCMeta` (or a subclass of it) does. */
 export function initAbstractClass(cls: PyClass, metaclass?: PyClass): void {

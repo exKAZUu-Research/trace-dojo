@@ -1,13 +1,15 @@
 import { createHash, randomBytes } from 'node:crypto';
 
+import { setAttribute } from '../attributes';
 import { pyStr } from '../conversions';
 import { method, pythonMethod } from '../define';
 import { defineUnsupportedAttributes } from '../descriptors';
 import { pyHash } from '../hashing';
+import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { type ArgStyle, argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { bindValue, callValue, getItem, isTruthy, lengthOf, setItem, toArray } from '../objects';
+import { bindValue, callValue, getAttribute, getItem, isTruthy, lengthOf, setItem, toArray } from '../objects';
 import { binaryOp, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { builtinClass, newList, newTuple, None, pyError, typeError, typeName, valueError } from '../types';
@@ -333,6 +335,43 @@ randomClass.construct = (cls, args, kwargs) => {
 
 type RandomMethod = (generator: MersenneTwister, args: PyValue[], kwargs: Kwargs) => PyValue;
 const generatorOf = (self: PyValue): MersenneTwister => (self as PyOpaque).data as MersenneTwister;
+const isRandom = (value: PyValue): value is PyOpaque => value instanceof PyOpaque && value.cls === randomClass;
+/** The attribute of `self` that methods random.py writes read before checking their arguments. */
+const EAGER_READS: Record<string, string> = {
+  choices: 'random',
+  shuffle: '_randbelow',
+  lognormvariate: 'normalvariate',
+  betavariate: 'gammavariate',
+  getstate: 'VERSION',
+};
+/** The attribute of `self` random.py reads where the native body uses each member of the generator. */
+const GENERATOR_READS: Record<string, string> = { randbelow: '_randbelow', getrandbits: 'getrandbits' };
+
+/**
+ * The generator of the receiver of a method random.py writes. With another receiver, the method fails as its body
+ * does: at the first read of an attribute of `self`, which may come after the body has checked its arguments.
+ */
+function pythonGeneratorOf(self: PyValue, name: string): MersenneTwister {
+  if (isRandom(self)) return generatorOf(self);
+  if (name === 'seed') {
+    throw typeError(
+      `super(type, obj): obj (instance of ${typeName(self)}) is not an instance or subtype of type (Random).`
+    );
+  }
+  const method = `Random.${name}`;
+  const eager = EAGER_READS[name];
+  if (eager !== undefined) libraryReceiver(self, isRandom, eager, method);
+  return new Proxy({} as MersenneTwister, {
+    get: (_target, member) => {
+      getAttribute(self, GENERATOR_READS[String(member)] ?? 'random');
+      throw unsupportedReceiver(self, method);
+    },
+    set: () => {
+      setAttribute(self, 'gauss_next', None);
+      throw unsupportedReceiver(self, method);
+    },
+  });
+}
 
 /**
  * The methods of Random, which the module's functions also are, bound to the hidden instance. A string gives the
@@ -421,9 +460,12 @@ const RANDOM_METHODS: [string, { style: ArgStyle; min: number; max: number } | s
 ];
 
 for (const [name, spec, run] of RANDOM_METHODS) {
-  const runMethod = (self: PyValue, args: PyValue[], kwargs: Kwargs): PyValue => run(generatorOf(self), args, kwargs);
-  if (typeof spec === 'string') pythonMethod(randomClass, name, spec, runMethod);
-  else method(randomClass, name, spec.style, spec.min, spec.max, runMethod);
+  if (typeof spec === 'string') {
+    pythonMethod(randomClass, name, spec, (self, args, kwargs) => run(pythonGeneratorOf(self, name), args, kwargs));
+  } else {
+    const runMethod = (self: PyValue, args: PyValue[], kwargs: Kwargs): PyValue => run(generatorOf(self), args, kwargs);
+    method(randomClass, name, spec.style, spec.min, spec.max, runMethod, { ownerName: '_random.Random' });
+  }
 }
 defineUnsupportedAttributes(randomClass, { randbytes: 'random.randbytes()（bytes 型）' });
 
@@ -506,6 +548,7 @@ function setstate(generator: MersenneTwister, state: PyValue): PyValue {
   }
   if (items.length !== 3) throw valueError(`too many values to unpack (expected 3, got ${items.length})`);
   const [, internal, gaussNext] = items;
+  generator.gaussNext = gaussNext === None ? undefined : realArgument(gaussNext);
   if (!(internal instanceof PyTuple)) throw typeError('state vector must be a tuple');
   if (internal.items.length !== 625) throw valueError('state vector is the wrong size');
   const words = internal.items.slice(0, 624).map((word) => {
@@ -517,7 +560,6 @@ function setstate(generator: MersenneTwister, state: PyValue): PyValue {
   const index = Number(toIndex(internal.items[624]));
   if (index < 0 || index > 624) throw valueError('invalid state');
   generator.restore(words, index);
-  generator.gaussNext = gaussNext === None ? undefined : realArgument(gaussNext);
   return None;
 }
 

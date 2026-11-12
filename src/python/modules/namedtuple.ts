@@ -1,5 +1,6 @@
 import { pyRepr, pyStr } from '../conversions';
 import { method, pythonFunction } from '../define';
+import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { argument } from '../nativeArgs';
 import { callValue, isTruthy, toArray } from '../objects';
 import { containerRepr } from '../typeContainers';
@@ -142,13 +143,18 @@ function newNamedTuple(
 
 /** Methods every namedtuple class has, defined on a shared base so that each class looks them up. */
 export const namedTupleBase = builtinClass('NamedTupleMethods');
+namedTupleBase.isWrittenInPython = true;
+const isNamedTuple = (value: PyValue): value is PyTuple =>
+  value instanceof PyTuple && value.cls.lookup('_fields') !== undefined;
+
 function fieldsOf(tuple: PyTuple): readonly PyValue[] {
   return (tuple.cls.lookup('_fields') as PyTuple | undefined)?.items ?? [];
 }
 
 function defineNamedTupleMethods(): void {
   method(namedTupleBase, '__repr__', 'none', 0, 0, (self) => {
-    const tuple = self as PyTuple;
+    if (!(self instanceof PyTuple)) throw unsupportedReceiver(self, 'NamedTuple.__repr__');
+    const tuple = self;
     const fields = fieldsOf(tuple);
     return containerRepr(
       tuple,
@@ -158,7 +164,7 @@ function defineNamedTupleMethods(): void {
     );
   });
   method(namedTupleBase, '_asdict', 'none', 0, 0, (self) => {
-    const tuple = self as PyTuple;
+    const tuple = libraryReceiver(self, isNamedTuple, '_fields', 'NamedTuple._asdict');
     return newDict(fieldsOf(tuple).map((field, index) => [field, tuple.items[index]]));
   });
   namedTupleBase.dict.set(
@@ -167,7 +173,7 @@ function defineNamedTupleMethods(): void {
       builtinClass('method_descriptor'),
       '_replace',
       (args, kwargs) => {
-        const tuple = args[0] as PyTuple;
+        const tuple = libraryReceiver(args[0], isNamedTuple, '_make', 'NamedTuple._replace');
         if (args.length > 1)
           throw typeError(`${tuple.cls.name}._replace() takes 1 positional argument but ${args.length} were given`);
         const fields = fieldsOf(tuple);
@@ -188,7 +194,7 @@ function defineNamedTupleMethods(): void {
     binding: 'class',
   });
   namedTupleBase.dict.set('__replace__', namedTupleBase.dict.get('_replace') as PyValue);
-  method(namedTupleBase, '__getnewargs__', 'none', 0, 0, (self) => newTuple([...(self as PyTuple).items]));
+  method(namedTupleBase, '__getnewargs__', 'none', 0, 0, (self) => newTuple(toArray(self)));
 }
 defineNamedTupleMethods();
 

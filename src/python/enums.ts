@@ -1,13 +1,27 @@
 import { pyFormat, pyRepr, pyStr } from './conversions';
 import { defineGetSet } from './descriptors';
 import { hashInt, identityHash, NATIVE_HASHES } from './hashing';
+import { unsupportedReceiver } from './libraryReceivers';
 import { importModule } from './modules';
-import { bindValue, callValue, getIterator } from './objects';
+import { bindValue, callValue, getAttribute, getIterator } from './objects';
 import { intEnumValue, keysEqual } from './operators';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
-import { builtinClass, defineMethod, intClass, newList, newTuple, None, objectClass, typeClass } from './types';
-import { type Kwargs, PyBuiltinFunction, type PyClass, PyInstance, type PyObject, type PyValue } from './values';
+import {
+  builtinClass,
+  classOf,
+  defineMethod,
+  intClass,
+  newList,
+  newTuple,
+  None,
+  NotImplemented,
+  objectClass,
+  strClass,
+  typeClass,
+  typeError,
+} from './types';
+import { type Kwargs, PyBuiltinFunction, PyClass, PyInstance, type PyObject, type PyValue } from './values';
 
 /**
  * The `enum` module's native part: the classes `Enum` and `IntEnum`, the metaclass their subclasses get, and the
@@ -29,6 +43,7 @@ intEnumClass.flags.isEnum = true;
 intEnumClass.layout = { base: 'object' };
 intEnumClass.cls = enumTypeClass;
 intEnumClass.dict.set('_member_type_', intClass);
+for (const cls of [enumTypeClass, enumClass, intEnumClass]) cls.isWrittenInPython = true;
 
 export function isEnumClass(cls: PyClass): boolean {
   return cls.flags.isEnum === true;
@@ -117,19 +132,58 @@ export function enumMembersOf(cls: PyClass): PyValue {
 
 // EnumType ----------------------------------------------------------------------------------------------------------
 
-defineMethod(enumTypeClass, '__repr__', (self) => {
+/**
+ * Defines a method of EnumType, which enum.py writes in Python: its body reads the members of a receiver that is not
+ * an enum class from `_member_names_`, which fails for any other class, and `__repr__` asks issubclass() about it.
+ */
+function defineEnumTypeMethod(name: string, run: (self: PyValue, args: PyValue[]) => PyValue): void {
+  defineMethod(enumTypeClass, name, (self, args) => {
+    if (self instanceof PyClass && (self.flags.isEnum || name === '__repr__')) return run(self, args);
+    if (name === '__repr__') throw typeError('issubclass() arg 1 must be a class');
+    if (name === '__bool__' || name === '__contains__') return run(self, args);
+    return failedRead(self, '_member_names_', `EnumType.${name}`);
+  });
+}
+
+defineEnumTypeMethod('__repr__', (self) => {
   const cls = self as PyClass;
   return `<${cls.lookup('_flag_mask_') === undefined ? 'enum' : 'flag'} '${cls.name}'>`;
 });
-defineMethod(enumTypeClass, '__contains__', (self, [value]) => callValue(enumHooks().contains, [self, value]));
-defineMethod(enumTypeClass, '__iter__', (self) => getIterator(enumMembersOf(self as PyClass)));
-defineMethod(enumTypeClass, '__len__', (self) => BigInt((self as PyClass).enumMembers?.length ?? 0));
-defineMethod(enumTypeClass, '__bool__', () => true);
-defineMethod(enumTypeClass, '__reversed__', (self) =>
+defineEnumTypeMethod('__contains__', (self, [value]) => callValue(enumHooks().contains, [self, value]));
+defineEnumTypeMethod('__iter__', (self) => getIterator(enumMembersOf(self as PyClass)));
+defineEnumTypeMethod('__len__', (self) => BigInt((self as PyClass).enumMembers?.length ?? 0));
+defineEnumTypeMethod('__bool__', () => true);
+defineEnumTypeMethod('__reversed__', (self) =>
   getIterator(newList([...((self as PyClass).enumMembers ?? [])].toReversed()))
 );
 
 // Enum --------------------------------------------------------------------------------------------------------------
+
+const isMember = (value: PyValue): value is PyInstance =>
+  value instanceof PyInstance && value.cls.isSubclassOf(enumClass);
+
+/** What the methods enum.py writes for Enum do with a receiver that is not a member. */
+const FOREIGN_RECEIVERS: Record<string, (self: PyValue, args: PyValue[]) => PyValue> = {
+  __repr__: (self) => failedRead(classOf(self), '_value_repr_', 'Enum.__repr__'),
+  __str__: (self) => failedRead(self, '_name_', 'Enum.__str__'),
+  __hash__: (self) => failedRead(self, '_name_', 'Enum.__hash__'),
+  __format__: (self, [spec]) => callValue(strClass.dict.get('__format__') as PyValue, [pyStr(self), spec]),
+  __eq__: (self, [other]) => (self === other ? true : NotImplemented),
+  __reduce_ex__: (self) => failedRead(self, '_value_', 'Enum.__reduce_ex__'),
+  __copy__: (self) => self,
+  __deepcopy__: (self) => self,
+};
+
+function defineMemberMethod(name: string, run: (self: PyValue, args: PyValue[]) => PyValue): void {
+  const foreign = FOREIGN_RECEIVERS[name] as (self: PyValue, args: PyValue[]) => PyValue;
+  defineMethod(enumClass, name, (self, args) => (isMember(self) ? run(self, args) : foreign(self, args)));
+}
+
+/** Fails as reading `attribute` from `owner` does, or, if it has the attribute, as a call this grader cannot follow. */
+function failedRead(owner: PyValue, attribute: string, method: string): never {
+  getAttribute(owner, attribute);
+  throw unsupportedReceiver(owner, method);
+}
 
 const valueOf = (member: PyValue): PyValue => (member as PyInstance).enumValue as PyValue;
 const describe = (member: PyValue): string => `${(member as PyInstance).cls.name}.${pyStr(memberName(member))}`;
@@ -138,20 +192,20 @@ function memberName(member: PyValue): PyValue {
   return (member as PyInstance).dict.get('_name_') ?? None;
 }
 
-defineMethod(enumClass, '__repr__', (self) => `<${describe(self)}: ${pyRepr(valueOf(self))}>`);
-defineMethod(enumClass, '__str__', (self) => describe(self));
-defineMethod(enumClass, '__format__', (self, [spec]) => {
+defineMemberMethod('__repr__', (self) => `<${describe(self)}: ${pyRepr(valueOf(self))}>`);
+defineMemberMethod('__str__', (self) => describe(self));
+defineMemberMethod('__format__', (self, [spec]) => {
   const str = (self as PyInstance).cls.lookup('__str__') as PyValue;
   return pyFormat(callValue(bindValue(str, self), []), spec as string);
 });
-defineMethod(enumClass, '__hash__', (self) => identityHash(self as PyObject));
+defineMemberMethod('__hash__', (self) => identityHash(self as PyObject));
 // CPython hashes a member by its name, whose hash is randomized, so the identity hash is as good and keeps sets cheap.
 NATIVE_HASHES.add(enumClass.dict.get('__hash__') as PyValue);
-defineMethod(enumClass, '__eq__', (self, [other]) => self === other);
-defineMethod(enumClass, '_missing_', () => None, 'class');
-defineMethod(enumClass, '__reduce_ex__', (self) => newTuple([(self as PyInstance).cls, newTuple([valueOf(self)])]));
-defineMethod(enumClass, '__copy__', (self) => self);
-defineMethod(enumClass, '__deepcopy__', (self) => self);
+defineMemberMethod('__eq__', (self, [other]) => self === other);
+defineMethod(enumClass, '_missing_', () => None, { binding: 'class' });
+defineMemberMethod('__reduce_ex__', (self) => newTuple([(self as PyInstance).cls, newTuple([valueOf(self)])]));
+defineMemberMethod('__copy__', (self) => self);
+defineMemberMethod('__deepcopy__', (self) => self);
 
 /** `Enum.__dir__`: a member lists the attributes it is meant to have, plus its own and its class's public ones. */
 enumClass.dirNames = (self) => {
@@ -168,13 +222,23 @@ enumClass.dirNames = (self) => {
 
 // IntEnum -----------------------------------------------------------------------------------------------------------
 
-defineMethod(intEnumClass, '__str__', (self) => pyRepr(valueOf(self)));
-defineMethod(intEnumClass, '__format__', (self, [spec]) => pyFormat(valueOf(self), spec as string));
-defineMethod(intEnumClass, '__hash__', (self) => hashInt(valueOf(self) as bigint));
-defineMethod(intEnumClass, '__eq__', (self, [other]) => keysEqual(valueOf(self), intEnumValue(other)));
-defineMethod(intEnumClass, '__index__', (self) => valueOf(self));
-defineMethod(intEnumClass, '__int__', (self) => valueOf(self));
-defineMethod(intEnumClass, '__bool__', (self) => valueOf(self) !== 0n);
+/** The method of int that IntEnum's method is in CPython, which takes any int as its receiver. */
+const INT_METHODS: Record<string, string> = { __str__: '__repr__' };
+
+function defineIntMemberMethod(name: string, run: (self: PyValue, args: PyValue[], kwargs: Kwargs) => PyValue): void {
+  defineMethod(intEnumClass, name, (self, args, kwargs) => {
+    if (isMember(self)) return run(self, args, kwargs);
+    return callValue(intClass.lookup(INT_METHODS[name] ?? name) as PyValue, [self, ...args], kwargs);
+  });
+}
+
+defineIntMemberMethod('__str__', (self) => pyRepr(valueOf(self)));
+defineIntMemberMethod('__format__', (self, [spec]) => pyFormat(valueOf(self), spec as string));
+defineIntMemberMethod('__hash__', (self) => hashInt(valueOf(self) as bigint));
+defineIntMemberMethod('__eq__', (self, [other]) => keysEqual(valueOf(self), intEnumValue(other)));
+defineIntMemberMethod('__index__', (self) => valueOf(self));
+defineIntMemberMethod('__int__', (self) => valueOf(self));
+defineIntMemberMethod('__bool__', (self) => valueOf(self) !== 0n);
 
 /**
  * The operators of int apply to a member through `intEnumValue`; the other methods of int that a member inherits in
@@ -199,7 +263,7 @@ export function inheritIntMethods(): void {
 function inheritIntMethod(name: string, attribute: PyValue): void {
   const isInherited = !name.startsWith('_') || INHERITED_INT_SPECIALS.has(name);
   if (!isInherited || intEnumClass.dict.has(name) || !(attribute instanceof PyBuiltinFunction)) return;
-  defineMethod(intEnumClass, name, (self, args, kwargs) =>
+  defineIntMemberMethod(name, (self, args, kwargs) =>
     callValue(
       bindValue(attribute, valueOf(self)),
       args.map((arg) => intEnumValue(arg)),

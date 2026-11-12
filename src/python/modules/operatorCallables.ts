@@ -55,11 +55,16 @@ function callableClass(name: string, apply: (self: PyOpaque, target: PyValue) =>
   cls.module = 'operator';
   cls.tpName = `operator.${name}`;
   method(cls, '__repr__', 'none', 0, 0, (self) => `operator.${name}(${(self as PyOpaque).text})`);
-  defineMethod(cls, '__call__', (self, args, kwargs) => {
-    if (kwargs && kwargs.size > 0) throw typeError(`${name}() takes no keyword arguments`);
-    if (args.length !== 1) throw typeError(`${name} expected 1 argument, got ${args.length}`);
-    return apply(self as PyOpaque, args[0]);
-  });
+  defineMethod(
+    cls,
+    '__call__',
+    (self, args, kwargs) => {
+      if (kwargs && kwargs.size > 0) throw typeError(`${name}() takes no keyword arguments`);
+      if (args.length !== 1) throw typeError(`${name} expected 1 argument, got ${args.length}`);
+      return apply(self as PyOpaque, args[0]);
+    },
+    { receiver: 'wrapper' }
+  );
   return cls;
 }
 

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 414 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 418 -- The methods and attributes of the builtin types it defines belong together.
 import { isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { method } from './define';
@@ -47,6 +47,7 @@ interface SpecialAliasData {
 function typingClass(name: string, base?: PyClass): PyClass {
   const cls = builtinClass(name, base);
   cls.module = 'typing';
+  cls.isWrittenInPython = true;
   return cls;
 }
 
@@ -55,6 +56,8 @@ genericAliasClass.module = 'types';
 genericAliasClass.tpName = 'types.GenericAlias';
 export const unionClass = typingClass('Union');
 unionClass.tpName = 'typing.Union';
+// CPython writes typing.Union in C, unlike the other classes of typing.
+unionClass.isWrittenInPython = false;
 export const typingAliasClass = typingClass('_GenericAlias');
 const callableAliasClass = typingClass('_CallableGenericAlias', typingAliasClass);
 const literalAliasClass = typingClass('_LiteralGenericAlias', typingAliasClass);
@@ -67,6 +70,7 @@ const typedCacheSpecialFormClass = typingClass('_TypedCacheSpecialForm', special
 const anyMetaClass = typingClass('_AnyMeta');
 export const forwardRefClass = builtinClass('ForwardRef');
 forwardRefClass.module = 'annotationlib';
+forwardRefClass.isWrittenInPython = true;
 
 const aliasOf = (value: PyValue): AliasData => (value as PyOpaque).data as AliasData;
 const specialOf = (value: PyValue): SpecialAliasData => (value as PyOpaque).data as SpecialAliasData;
@@ -574,6 +578,7 @@ genericAliasClass.subclassCheck = (_self, _cls, caller) => {
 
 export const callableGenericAliasClass = builtinClass('_CallableGenericAlias', genericAliasClass);
 callableGenericAliasClass.module = 'collections.abc';
+callableGenericAliasClass.isWrittenInPython = true;
 callableGenericAliasClass.construct = (cls, args) => {
   const [origin, key] = args;
   if (!(key instanceof PyTuple && key.items.length === 2)) {

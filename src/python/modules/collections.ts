@@ -1,11 +1,12 @@
-// code-gauge-allow-file fileNcss 449 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 464 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
-import { method, pythonMethod } from '../define';
+import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { mappingEntries } from '../expressionEvaluator';
 import { pyHash } from '../hashing';
 import { keyError } from '../items';
+import { libraryReceiver } from '../libraryReceivers';
 import { runLibrarySource } from '../librarySource';
 import { registerLazyAttributes, registerModule } from '../modules';
 import { argument, bindPythonArgs, checkArgs, pythonSignature } from '../nativeArgs';
@@ -21,12 +22,13 @@ import {
   lookupSpecial,
   toArray,
 } from '../objects';
-import { binaryOp, compareOp, equals, lessThan } from '../operators';
+import { binaryOp, compareOp, contains, equals, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { containerRepr, dictBody, joinReprs, sequenceIndex, updateDict } from '../typeContainers';
 import { newGenericAlias } from '../typeHints';
 import {
   builtinClass,
+  classOf,
   dictClass,
   iteratorClass,
   newDict,
@@ -54,6 +56,7 @@ import {
   type PyValue,
 } from '../values';
 import { COLLECTIONS_SOURCE } from './collectionsSource';
+import { comparedReceiver, counterReceiver, inPlaceReceiver, superError } from './counterReceivers';
 import { makeNamedTupleClass, namedtupleFunction } from './namedtuple';
 
 // deque -------------------------------------------------------------------------------------------------------------
@@ -333,6 +336,7 @@ export const counterClass = new PyClass('Counter', [dictClass], typeClass);
 counterClass.mro = [counterClass, ...dictClass.mro];
 counterClass.module = 'collections';
 counterClass.layout = { base: 'native' };
+counterClass.isWrittenInPython = true;
 const COUNTING_PARAMETERS = 'iterable=None, /, **kwds';
 const COUNTER_INIT = pythonSignature('Counter.__init__', `self, ${COUNTING_PARAMETERS}`);
 
@@ -363,8 +367,6 @@ function countInto(counter: PyDict, source: PyValue | undefined, kwargs: Kwargs,
   for (const [key, value] of kwargs ?? []) add(key, value);
 }
 
-const counterOf = (self: PyValue): PyDict => self as PyDict;
-
 /** The items of a Counter from the most common, ties in insertion order. */
 function mostCommon(counter: PyDict): [PyValue, PyValue][] {
   const entries: [PyValue, PyValue][] = counter.store.ordered().map((entry) => [entry.key, entry.value]);
@@ -379,12 +381,12 @@ function mostCommon(counter: PyDict): [PyValue, PyValue][] {
 }
 
 pythonMethod(counterClass, 'most_common', 'n=None', (self, [count]) => {
-  let items = mostCommon(counterOf(self));
+  let items = mostCommon(counterReceiver(self, 'most_common'));
   if (count !== undefined && count !== None) items = items.slice(0, Math.max(0, Number(toIndex(count))));
   return newList(items.map((item) => newTuple(item)));
 });
 pythonMethod(counterClass, 'elements', '', (self) => {
-  const entries = counterOf(self).store.ordered();
+  const entries = counterReceiver(self, 'elements').store.ordered();
   let position = 0;
   let key: PyValue = None;
   let remaining = 0n;
@@ -409,18 +411,21 @@ for (const [name, sign] of [
   ['subtract', -1n],
 ] as const) {
   pythonMethod(counterClass, name, COUNTING_PARAMETERS, (self, [iterable], kwargs) => {
-    countInto(counterOf(self), iterable, kwargs, sign);
+    const isEmpty = (iterable === undefined || iterable === None) && !kwargs?.size;
+    if (!isEmpty) countInto(counterReceiver(self, name, 'get'), iterable, kwargs, sign);
     return None;
   });
 }
 pythonMethod(counterClass, 'total', '', (self) => {
   let total: PyValue = 0n;
-  for (const entry of counterOf(self).store.ordered()) total = binaryOp('+', total, entry.value);
+  for (const entry of counterReceiver(self, 'total', 'values').store.ordered()) {
+    total = binaryOp('+', total, entry.value);
+  }
   return total;
 });
 method(counterClass, '__repr__', 'none', 0, 0, (self) => {
-  const counter = counterOf(self);
-  if (counter.store.size === 0) return `${counter.cls.name}()`;
+  if (!isTruthy(self)) return `${classOf(self).name}()`;
+  const counter = libraryReceiver(self, isCounter, 'most_common', 'Counter.__repr__');
   return containerRepr(counter, '...', () => {
     const ordered = newDict(mostCommon(counter));
     return `${counter.cls.name}(${dictBody(ordered)})`;
@@ -428,7 +433,9 @@ method(counterClass, '__repr__', 'none', 0, 0, (self) => {
 });
 // The arithmetic, comparisons, and in-place operators of Counter, as CPython's collections/__init__.py writes them.
 
-const countOf = (counter: PyDict, key: PyValue): PyValue => counter.store.get(key) ?? 0n;
+/** `counter[key]`, which a plain dict given as the receiver answers with a KeyError for a missing key. */
+const countOf = (counter: PyDict, key: PyValue): PyValue =>
+  isCounter(counter) ? (counter.store.get(key) ?? 0n) : getItem(counter, key);
 const isPositive = (value: PyValue): boolean => isTruthy(compareOp('>', value, 0n));
 const isCounter = (value: PyValue): value is PyDict => value instanceof PyDict && value.cls.isSubclassOf(counterClass);
 
@@ -486,7 +493,7 @@ for (const [name, run] of [
   ['__and__', (a: PyDict, b: PyDict) => counterBinary(a, b, pickSmaller)],
 ] as const) {
   method(counterClass, name, 'one', 1, 1, (self, [other]) =>
-    isCounter(other) ? run(counterOf(self), other) : NotImplemented
+    isCounter(other) ? run(counterReceiver(self, name), other) : NotImplemented
   );
 }
 
@@ -496,12 +503,18 @@ for (const [name, keep] of [
 ] as const) {
   method(counterClass, name, 'none', 0, 0, (self) => {
     const result = newCounter();
-    for (const { key, value } of counterOf(self).store.ordered()) {
+    for (const { key, value } of counterReceiver(self, name).store.ordered()) {
       const count = keep(value);
       if (count !== undefined) result.store.set(key, count);
     }
     return result;
   });
+}
+
+/** Ends an in-place operator, whose body calls `self._keep_positive()`, which a plain dict receiver lacks. */
+function keepPositiveInPlace(counter: PyDict): PyDict {
+  if (!isCounter(counter)) getAttribute(counter, '_keep_positive');
+  return keepPositive(counter);
 }
 
 /** Removes the counts that are not positive, as Counter's `_keep_positive` does after an in-place operator. */
@@ -516,21 +529,22 @@ for (const [name, update] of [
   ['__ior__', (count: PyValue, otherCount: PyValue) => (lessThan(count, otherCount) ? otherCount : undefined)],
 ] as const) {
   method(counterClass, name, 'one', 1, 1, (self, [other]) => {
-    const counter = counterOf(self);
-    for (const [key, otherCount] of itemsOf(other)) {
+    const items = itemsOf(other);
+    const counter = inPlaceReceiver(self, items[0]?.[0], name);
+    for (const [key, otherCount] of items) {
       const count = update(countOf(counter, key), otherCount);
       if (count !== undefined) counter.store.set(key, count);
     }
-    return keepPositive(counter);
+    return keepPositiveInPlace(counter);
   });
 }
 method(counterClass, '__iand__', 'one', 1, 1, (self, [other]) => {
-  const counter = counterOf(self);
+  const counter = counterReceiver(self, '__iand__');
   for (const entry of counter.store.ordered()) {
     const otherCount = getItem(other, entry.key);
     if (lessThan(otherCount, entry.value)) entry.value = otherCount;
   }
-  return keepPositive(counter);
+  return keepPositiveInPlace(counter);
 });
 
 /** The pairs of `other.items()`: the in-place operators of Counter take any object that has the method. */
@@ -563,11 +577,11 @@ for (const [name, compare] of [
   ['__gt__', (a: PyDict, b: PyDict) => everyCount(a, b, '>=') && !everyCount(a, b, '==')],
 ] as const) {
   method(counterClass, name, 'one', 1, 1, (self, [other]) =>
-    isCounter(other) ? compare(counterOf(self), other) : NotImplemented
+    isCounter(other) ? compare(comparedReceiver(self, name), other) : NotImplemented
   );
 }
 pythonMethod(counterClass, '__missing__', 'key', () => 0n);
-pythonMethod(counterClass, '_keep_positive', '', (self) => keepPositive(counterOf(self)));
+pythonMethod(counterClass, '_keep_positive', '', (self) => keepPositive(counterReceiver(self, '_keep_positive')));
 // Counter is a class written in Python in CPython, whose dictionary has what a class statement gives it.
 counterClass.dict.set('__module__', 'collections');
 counterClass.dict.set('__firstlineno__', 551n);
@@ -575,10 +589,12 @@ counterClass.dict.set('__static_attributes__', newTuple([]));
 defineGetSet(counterClass, '__dict__', () => newDict());
 defineGetSet(counterClass, '__weakref__', () => None);
 method(counterClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
-  counterOf(self).store.delete(key);
+  if (!contains(self, key)) return None;
+  if (!isCounter(self)) throw superError(self);
+  self.store.delete(key);
   return None;
 });
-pythonMethod(counterClass, 'copy', '', (self) => callValue(counterOf(self).cls, [self]));
+pythonMethod(counterClass, 'copy', '', (self) => callValue(classOf(self), [self]));
 pythonMethod(
   counterClass,
   'fromkeys',
@@ -610,6 +626,7 @@ method(defaultdictClass, '__repr__', 'none', 0, 0, (self) => {
   return containerRepr(dict, '...', () => `defaultdict(${pyRepr(dict.defaultFactory ?? None)}, ${dictBody(dict)})`);
 });
 method(defaultdictClass, '__missing__', 'one', 1, 1, (self, [key]) => currentRuntime().missingKey(self as PyDict, key));
+redeclareMethods(defaultdictClass, dictClass, ['copy']);
 method(defaultdictClass, '__copy__', 'none', 0, 0, (self) => callValue(getAttribute(self, 'copy'), []));
 defaultdictClass.dict.set('__module__', 'collections');
 defaultdictClass.dict.set(
@@ -638,6 +655,17 @@ orderedDictClass.construct = (cls, args, kwargs) => {
   for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
   return dict;
 };
+redeclareMethods(orderedDictClass, dictClass, [
+  'clear',
+  'copy',
+  'items',
+  'keys',
+  'pop',
+  'setdefault',
+  'update',
+  'values',
+  '__reversed__',
+]);
 method(orderedDictClass, '__repr__', 'none', 0, 0, (self) => {
   const dict = self as PyDict;
   if (dict.store.size === 0) return 'OrderedDict()';

@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 469 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 470 -- The methods and attributes of the builtin types it defines belong together.
 import type { BinaryOperator } from './ast';
 import { BUILTIN_DOC } from './attributes';
 import { enumerateClass, isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
-import { method } from './define';
+import { method, redeclareMethods } from './define';
 import { defineGetSet, defineUnsupportedAttributes } from './descriptors';
 import { deleteItem, setItem, sliceIndices } from './items';
 import { mappingProxyClass, newMappingProxy } from './mappingProxy';
@@ -145,6 +145,15 @@ function defineNumberDunders(
 const INT_OPERATORS: BinaryOperator[] = ['+', '-', '*', '/', '//', '%', '<<', '>>', '&', '|', '^'];
 defineNumberDunders(intClass, isInt, INT_OPERATORS);
 method(intClass, '__invert__', 'none', 0, 0, (self) => unaryOp('~', self));
+redeclareMethods(boolClass, intClass, [
+  '__and__',
+  '__rand__',
+  '__or__',
+  '__ror__',
+  '__xor__',
+  '__rxor__',
+  '__invert__',
+]);
 for (const name of ['__divmod__', '__rdivmod__']) {
   for (const [cls, accepts] of [
     [intClass, isInt],

@@ -15,8 +15,8 @@ import { forwardRefClass, genericAliasClass, newGenericAlias, unionClass } from 
 import {
   builtinClass,
   classOf,
+  defineMethod,
   methodClass,
-  methodDescriptorClass,
   namespaceDict,
   newDict,
   newTuple,
@@ -119,21 +119,16 @@ function attributesOf(object: PyOpaque): Map<string, PyValue> {
   object.attributes ??= new Map();
   return object.attributes;
 }
-partialClass.dict.set(
+defineMethod(
+  partialClass,
   '__call__',
-  new PyBuiltinFunction(
-    builtinClass('method_descriptor'),
-    '__call__',
-    (args, kwargs) => {
-      const partial = (args[0] as PyOpaque).data as Partial;
-      const merged = new Map(partial.kwargs);
-      for (const [key, value] of kwargs ?? []) merged.set(key, value);
-      return callValue(partial.fn, fillPlaceholders(partial.args, args.slice(1)), merged.size > 0 ? merged : undefined);
-    },
-    undefined,
-    'method',
-    'partial'
-  )
+  (self, args, kwargs) => {
+    const partial = (self as PyOpaque).data as Partial;
+    const merged = new Map(partial.kwargs);
+    for (const [key, value] of kwargs ?? []) merged.set(key, value);
+    return callValue(partial.fn, fillPlaceholders(partial.args, args), merged.size > 0 ? merged : undefined);
+  },
+  { receiver: 'wrapper' }
 );
 method(partialClass, '__repr__', 'none', 0, 0, (self) => {
   const partial = (self as PyOpaque).data as Partial;
@@ -212,16 +207,13 @@ function cacheKey(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 cacheClass.nativeGet = bindAsMethod;
-cacheClass.dict.set(
+defineMethod(
+  cacheClass,
   '__call__',
-  new PyBuiltinFunction(
-    methodDescriptorClass,
-    '__call__',
-    (args, kwargs) => callCached((args[0] as PyOpaque).data as Cache, args.slice(1), kwargs),
-    undefined,
-    'method',
-    '_lru_cache_wrapper'
-  )
+  (self, args, kwargs) => callCached((self as PyOpaque).data as Cache, args, kwargs),
+  {
+    receiver: 'wrapper',
+  }
 );
 
 function callCached(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {

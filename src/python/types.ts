@@ -294,24 +294,67 @@ export function nativeFunction(name: string, run: NativeFunction, ownerName?: st
   return new PyBuiltinFunction(builtinFunctionClass, name, run, undefined, 'method', ownerName);
 }
 
+/**
+ * How a builtin method treats the receiver it is called with: CPython's method descriptors (`method`) and slot wrappers
+ * (`wrapper`) reject one that is not an instance of the declaring class, each in its own words, while a method its
+ * library writes in Python (`unchecked`) runs its body with any receiver.
+ */
+export type ReceiverCheck = 'method' | 'wrapper' | 'unchecked';
+
+export interface MethodOptions {
+  binding?: NativeBinding;
+  receiver?: ReceiverCheck;
+  /** The name receiver errors give the declaring class, when CPython declares the method on a C base of it. */
+  ownerName?: string;
+}
+
 /** Adds a builtin method to a class, which receives the instance as its first argument. */
 export function defineMethod(
   cls: PyClass,
   name: string,
   run: (self: PyValue, args: PyValue[], kwargs: Kwargs) => PyValue,
-  binding: NativeBinding = 'method'
+  { binding = 'method', receiver = 'method', ownerName }: MethodOptions = {}
 ): void {
+  const check = binding === 'method' ? receiverCheck(cls, name, receiver, ownerName) : undefined;
   cls.dict.set(
     name,
     new PyBuiltinFunction(
       methodDescriptorClass,
       name,
-      (args, kwargs) => run(args[0], args.slice(1), kwargs),
+      (args, kwargs) => {
+        check?.(args[0]);
+        return run(args[0], args.slice(1), kwargs);
+      },
       undefined,
       binding,
       cls.name
     )
   );
+}
+
+function receiverCheck(
+  cls: PyClass,
+  name: string,
+  receiver: ReceiverCheck,
+  ownerName = cls.tpName ?? cls.name
+): ((self: PyValue | undefined) => void) | undefined {
+  if (receiver === 'unchecked') return undefined;
+  return (self) => {
+    if (self === undefined) throw typeError(missingReceiverMessage(cls, name, receiver, ownerName));
+    if (cls.isWrittenInPython || isInstanceOf(self, cls)) return;
+    throw typeError(
+      receiver === 'wrapper'
+        ? `descriptor '${name}' requires a '${ownerName}' object but received a '${typeName(self)}'`
+        : `descriptor '${name}' for '${ownerName}' objects doesn't apply to a '${typeName(self)}' object`
+    );
+  };
+}
+
+function missingReceiverMessage(cls: PyClass, name: string, receiver: ReceiverCheck, ownerName: string): string {
+  if (cls.isWrittenInPython) return `${cls.name}.${name}() missing 1 required positional argument: 'self'`;
+  return receiver === 'wrapper'
+    ? `descriptor '${name}' of '${ownerName}' object needs an argument`
+    : `unbound method ${cls.name}.${name}() needs an argument`;
 }
 
 /** Whether a value is an instance of `cls`, counting `bool` as an `int`. */

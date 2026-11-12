@@ -203,6 +203,7 @@ function aliases(abc: PyModule, collections: PyModule): [string, PyValue][] {
 
 const protocolMetaClass = builtinClass('_ProtocolMeta', abcMetaClass);
 protocolMetaClass.module = 'typing';
+protocolMetaClass.isWrittenInPython = true;
 
 const noDefaultClass = builtinClass('NoDefaultType');
 method(noDefaultClass, '__repr__', 'none', 0, 0, () => 'typing.NoDefault');

@@ -1,6 +1,6 @@
 import { type ArgStyle, bindPythonArgs, checkArgs, pythonSignature } from './nativeArgs';
 import { defineMethod, nativeFunction } from './types';
-import type { Kwargs, NativeBinding, PyBuiltinFunction, PyClass, PyValue } from './values';
+import { type Kwargs, type NativeBinding, PyBuiltinFunction, type PyClass, type PyValue } from './values';
 
 interface Options {
   keywords?: readonly string[];
@@ -9,6 +9,8 @@ interface Options {
   /** The name in `expected` and `takes` messages, when it differs from the method's name. */
   short?: string;
   binding?: NativeBinding;
+  /** The name receiver errors give the declaring class, when CPython declares the method on a C base of it. */
+  ownerName?: string;
 }
 
 interface BuiltinOptions extends Options {
@@ -25,6 +27,7 @@ const SLOT_METHODS = new Set(
     ...'neg pos abs bool invert int float index len getitem setitem delitem contains'.split(' '),
   ].map((name) => (name.startsWith('__') ? name : `__${name}__`))
 );
+const VARIADIC_SLOTS = new Set(['__init__', '__call__', '__del__']);
 // CPython defines these as methods besides the slot, for speed.
 const SLOT_AND_METHOD = new Set([
   'list.__getitem__',
@@ -38,6 +41,11 @@ const SLOT_AND_METHOD = new Set([
 function isSlotWrapper(qualified: string, name: string, style: ArgStyle, min: number, max: number): boolean {
   const isFixed = min === max || name.endsWith('pow__');
   return style !== 'takes' && isFixed && SLOT_METHODS.has(name) && !SLOT_AND_METHOD.has(qualified);
+}
+
+/** Whether the method is a slot wrapper as far as its receiver goes, whatever arguments the slot takes. */
+function hasSlot(qualified: string, name: string): boolean {
+  return (SLOT_METHODS.has(name) || VARIADIC_SLOTS.has(name)) && !SLOT_AND_METHOD.has(qualified);
 }
 
 /** Defines a builtin method that checks its argument count as CPython's parser for `style` does. */
@@ -70,8 +78,26 @@ export function method(
       checkArgs(spec, all, kwargs);
       return run(self, all, kwargs);
     },
-    options.binding
+    {
+      binding: options.binding,
+      receiver: hasSlot(qualified, name) ? 'wrapper' : 'method',
+      ownerName: options.ownerName,
+    }
   );
+}
+
+/**
+ * Declares on `cls` methods that it inherits from `base` here but declares itself in CPython: each runs as the base's
+ * does, but rejects receivers that are not instances of `cls` and names `cls` in that error.
+ */
+export function redeclareMethods(cls: PyClass, base: PyClass, names: readonly string[]): void {
+  for (const name of names) {
+    const inherited = base.dict.get(name);
+    if (!(inherited instanceof PyBuiltinFunction)) throw new Error(`${base.name}.${name} is not a builtin method`);
+    defineMethod(cls, name, (self, args, kwargs) => inherited.run([self, ...args], kwargs), {
+      receiver: hasSlot(`${cls.name}.${name}`, name) ? 'wrapper' : 'method',
+    });
+  }
 }
 
 /** Creates a builtin function that checks its argument count as CPython's parser for `style` does. */
@@ -128,7 +154,7 @@ export function pythonMethod(
     // Called through the class without an instance, the method lacks `self` as the `def` would.
     (self, args, kwargs) =>
       run(self, bindPythonArgs(signature, self === undefined ? [] : [self, ...args], kwargs).slice(1), kwargs),
-    binding
+    { binding, receiver: 'unchecked' }
   );
 }
 

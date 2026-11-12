@@ -12,6 +12,7 @@ import {
   builtinFunctionClass,
   classmethodClass,
   classOf,
+  defineMethod,
   ellipsisClass,
   functionClass,
   generatorClass,
@@ -59,11 +60,7 @@ objectClass.construct = (cls, args, kwargs) => {
     throw typeError('object() takes no arguments');
   return new PyInstance(cls);
 };
-method(objectClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, () => None, { keywords: [] });
-objectClass.dict.set(
-  '__init__',
-  new PyBuiltinFunction(methodDescriptorClass, '__init__', () => None, undefined, 'method', 'object')
-);
+defineMethod(objectClass, '__init__', () => None, { receiver: 'wrapper' });
 method(objectClass, '__repr__', 'none', 0, 0, (self) => defaultRepr(self as PyObject));
 // Calls the class's __repr__ without checking its result, which str() then checks as __str__'s, as CPython does.
 method(objectClass, '__str__', 'none', 0, 0, (self) => {
@@ -118,7 +115,10 @@ method(
   'expected',
   1,
   Number.POSITIVE_INFINITY,
-  (_self, [cls]) => new PyInstance(cls as PyClass),
+  (_self, [cls]) => {
+    if (!(cls instanceof PyClass)) throw typeError(`object.__new__(X): X is not a type object (${typeName(cls)})`);
+    return new PyInstance(cls);
+  },
   { binding: 'static', keywords: [] }
 );
 method(objectClass, '__dir__', 'none', 0, 0, (self) => currentRuntime().dir(self));

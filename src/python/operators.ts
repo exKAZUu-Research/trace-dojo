@@ -16,6 +16,7 @@ import {
 } from './setOperations';
 import { repeatText } from './stringBuilder';
 import { compareStr, strLength } from './strings';
+import { containsStr } from './strSearch';
 import {
   boolClass,
   classOf,
@@ -889,8 +890,7 @@ export function contains(container: PyValue, item: PyValue): boolean {
     if (typeof item !== 'string') {
       throw typeError(`'in <string>' requires string as left operand, not ${typeName(item)}`);
     }
-    currentRuntime().scan(container.length);
-    return container.includes(item);
+    return containsStr(container, item);
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) return container.store.has(item);
   if (container instanceof PySet) return container.table.has(item);

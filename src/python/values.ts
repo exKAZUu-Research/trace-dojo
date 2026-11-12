@@ -2,7 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
-import { chargeSlots, refuseOversizedString } from './runtimeContext';
+import { asPythonError, chargeSlots, refuseOversizedString } from './runtimeContext';
 import type { SetTable } from './setTable';
 
 /**
@@ -67,7 +67,12 @@ export class PyBuiltinFunction extends PyObject {
 function refusingOversizedStrings(run: NativeFunction): NativeFunction {
   if (checkedRuns.has(run)) return run;
   const checked: NativeFunction = (args, kwargs) => {
-    const result = run(args, kwargs);
+    let result: PyValue;
+    try {
+      result = run(args, kwargs);
+    } catch (error) {
+      throw asPythonError(error);
+    }
     refuseOversizedString(result);
     return result;
   };
@@ -94,6 +99,8 @@ export class PyClass extends PyObject {
   isBuiltin = true;
   /** Whether a program may subclass this builtin class. */
   isBaseType = false;
+  /** Whether CPython's library writes this class in Python, so that its methods run their bodies with any receiver. */
+  isWrittenInPython = false;
   /** The ordered annotations of the class body, which `@dataclass` reads. */
   annotationNames: string[] = [];
   /** The `__annotations__` a program read or assigned, which later reads return as it is. */

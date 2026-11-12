@@ -64,8 +64,35 @@ test.each([
     'a generator seeded with a huge int over and over',
     'import random\nx = 1 << 7999999\nwhile True:\n    random.seed(x)',
   ],
+  [
+    'a backward search for a long needle over and over',
+    "s = 'a' * 1000000\nt = 'a' * 500000 + 'b'\nwhile True:\n    s.rfind(t)",
+  ],
 ])('%s ends at the execution limit', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded' });
+});
+
+// Each search repeats a prefix of the needle throughout the text, the worst case of a naive search and of V8's
+// lastIndexOf, which take time growing with the product of the lengths.
+test.each([
+  [
+    'a search among supplementary characters',
+    "s = '😀' * 100000 + 'a'\nt = '😀' * 50000 + 'b'\nr = [s.find(t), s.rfind(t), s.count(t), t in s, s.rsplit(t), s.rpartition(t)[1]]\nif r != [-1, -1, 0, False, [s], '']:\n    raise AssertionError(r)",
+  ],
+  [
+    'a search for a repetitive needle',
+    "s = 'a' * 1000000\nt = 'a' * 500000 + 'b'\nr = [s.find(t), s.rfind(t), s.index(t[:-1]), s.rfind(t[:-1]), s.count(t), s.replace(t, '') == s, s.rsplit(t)[0] == s]\nif r != [-1, -1, 0, 500000, 0, True, True]:\n    raise AssertionError(r)",
+  ],
+  [
+    'a backward search for a needle that starts with a mismatch',
+    "s = 'a' * 1000000\nt = 'b' + 'a' * 500000\nr = [s.rfind(t), s.rpartition(t)[0], t in s]\nif r != [-1, '', False]:\n    raise AssertionError(r)",
+  ],
+  [
+    'a search for a periodic needle',
+    "s = '😀a' * 300000\nt = '😀a' * 100000 + '😀b'\nr = [s.find(t), s.rfind(t), s.rfind(t, 3, 500000), s.count(t)]\nif r != [-1, -1, -1, 0]:\n    raise AssertionError(r)",
+  ],
+])('%s finishes within the limits', (_name, program) => {
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
 test.each([

@@ -130,6 +130,14 @@ export class Runtime {
     if (length > LIMITS.maxStringLength) throw pyError('MemoryError');
   }
 
+  /**
+   * The exception for a JavaScript TypeError or ReferenceError that a native function threw, a slip of the interpreter
+   * rather than a refusal, which the program can still handle and whose text keeps the host's message.
+   */
+  internalError(error: TypeError | ReferenceError): PyError {
+    return pyError('SystemError', `internal error: ${error.message}`);
+  }
+
   /** Charges for an integer of `bits` bits about to be computed, refusing ones that would exhaust memory. */
   chargeBits(bits: bigint): void {
     if (bits > BigInt(LIMITS.maxStringLength) * 8n) throw pyError('MemoryError');

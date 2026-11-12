@@ -9,6 +9,7 @@ import { PyInstance, type PyValue } from './values';
 /** The Turtle class, which programs may also extend. */
 export const turtleClass = builtinClass('Turtle', undefined, true);
 turtleClass.layout = { base: 'turtle' };
+turtleClass.isWrittenInPython = true;
 
 method(
   turtleClass,

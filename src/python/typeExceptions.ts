@@ -50,13 +50,18 @@ baseExceptionClass.construct = (cls, args, kwargs) => {
 for (const cls of exceptionClasses.values())
   if (cls !== baseExceptionClass) cls.construct = baseExceptionClass.construct;
 
-defineMethod(baseExceptionClass, '__init__', (self, args, kwargs) => {
-  const { cls, exception: state } = instanceOf(self);
-  if (!state) return None;
-  initKeywords(cls, state, kwargs);
-  if (!state.exceptions) state.args = newTuple(args);
-  return None;
-});
+defineMethod(
+  baseExceptionClass,
+  '__init__',
+  (self, args, kwargs) => {
+    const { cls, exception: state } = instanceOf(self);
+    if (!state) return None;
+    initKeywords(cls, state, kwargs);
+    if (!state.exceptions) state.args = newTuple(args);
+    return None;
+  },
+  { receiver: 'wrapper' }
+);
 method(baseExceptionClass, '__str__', 'none', 0, 0, (self) => exceptionStr(instanceOf(self)));
 method(baseExceptionClass, '__repr__', 'none', 0, 0, (self) => {
   const exception = instanceOf(self);
