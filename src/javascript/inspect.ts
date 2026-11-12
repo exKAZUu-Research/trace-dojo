@@ -126,7 +126,11 @@ export function formatNumber(value: number): string {
 }
 
 function formatString(ctx: Context, value: string): string {
-  if (value.length > MIN_LINE_LENGTH && value.length > ctx.breakLength - ctx.indentationLvl - 4) {
+  if (
+    ctx.compact !== true &&
+    value.length > MIN_LINE_LENGTH &&
+    value.length > ctx.breakLength - ctx.indentationLvl - 4
+  ) {
     return value
       .split(/(?<=\n)/)
       .map((line) => quote(line))

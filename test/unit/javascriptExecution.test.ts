@@ -1191,7 +1191,11 @@ console.dir({ a: 1 }, { depth: -1 }); console.dir([1, 2], { depth: -1 }); consol
 const o = { a: 1 }; o.self = o; console.dir(o, { compact: true }); console.dir(o, { compact: true, breakLength: 1 }); console.dir(o, { compact: false });
 console.dir({ alpha: { beta: [1, 2, 3], gamma: 'a long string value here' }, delta: [ { x: 1 }, { y: 2 } ] }, { compact: true, breakLength: 20 });
 console.dir({ a: [1, 2, 3, 4, 5, 6, 7, 8], b: new Map([[1, { z: 1 }]]) }, { compact: true });
-console.dir({ a: { b: 1 } }, { compact: 0 });`,
+console.dir({ a: { b: 1 } }, { compact: 0 });
+console.dir({text:"abcdefghijklmnop
+next"},{compact:true,breakLength:10});console.dir(["abcdefghijklmnop
+next"],{compact:true,breakLength:10});console.dir({text:"abcdefghijklmnop
+next"},{breakLength:10});`,
   ],
   [
     'locale formatting of invalid dates',
