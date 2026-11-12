@@ -354,6 +354,7 @@ export function removeElements(
 /** The items of any builtin collection or array-backed view, in iteration order. */
 export function itemsOf(frame: Frame, source: Value): Value[] {
   if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+  subListChecks.get(source)?.();
   if (source.elements) return source.elements;
   if (source.store) return source.store.ordered().map((entry) => entry.key);
   return throwBuiltin(frame, 'UnsupportedOperationException');

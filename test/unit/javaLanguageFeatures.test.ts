@@ -1002,6 +1002,62 @@ class Main {
   }
 });
 
+test("Java's sublists have the JDK's classes, index checks, and positional removal, fail on every read once their list changed, and the hidden JDK collections are Serializable", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    t("of3", () -> List.of(1, 2, 3).subList(0, 2).get(5));
+    t("linked", () -> new LinkedList<>(List.of(1, 2, 3, 4)).subList(0, 2).get(5));
+    t("of2", () -> List.of(1, 2).subList(0, 1).get(5));
+    t("asList", () -> Arrays.asList(1, 2, 3).subList(0, 2).get(5));
+    t("stack", () -> { Stack<Integer> s = new Stack<>(); s.push(1); s.push(2); s.subList(0, 1).get(5); });
+    t("array", () -> new ArrayList<>(List.of(1, 2, 3)).subList(0, 2).get(5));
+    t("liOf", () -> List.of(1, 2, 3).subList(0, 2).listIterator(5));
+    t("liArray", () -> new ArrayList<>(List.of(1, 2, 3)).subList(0, 2).listIterator(5));
+    t("asListSet", () -> Arrays.asList(1, 2, 3).subList(0, 2).set(0, 9));
+    t("asListAdd", () -> Arrays.asList(1, 2, 3).subList(0, 2).add(9));
+    t("ofSet", () -> List.of(1, 2, 3).subList(0, 2).set(0, 9));
+    List<Integer> a = new ArrayList<>(List.of(1, 1, 2)); int[] n = {0};
+    a.subList(0, 3).removeIf(x -> n[0]++ == 0); System.out.println(a);
+    List<Integer> l = new LinkedList<>(List.of(1, 1, 2)); int[] m = {0};
+    l.subList(0, 3).removeIf(x -> m[0]++ == 0); System.out.println(l);
+    List<Integer> b = new ArrayList<>(List.of(1, 2, 3)); List<Integer> v = b.subList(1, 3); b.add(4);
+    t("copy", () -> new ArrayList<>(v));
+    t("addAll", () -> new ArrayList<Integer>().addAll(v));
+    t("stream", () -> v.stream().count());
+    t("equals", () -> List.of(2, 3).equals(v));
+    t("join", () -> String.join(",", new ArrayList<String>(List.of("x")).subList(0, 1)));
+    List<String> strs = new ArrayList<>(List.of("p", "q")); List<String> sv = strs.subList(0, 1); strs.add("r");
+    t("join2", () -> String.join(",", sv));
+    List<Integer> c = new ArrayList<>(List.of(5, 6, 7)); List<Integer> cv = c.subList(0, 2); cv.add(8);
+    System.out.println(c + " " + cv + " " + cv.getClass().getSimpleName() + " " + c.subList(0, 2).subList(0, 1).getClass().getName());
+  }
+}`,
+      'of3 java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 2\nlinked java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 2\nof2 java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 1\nasList java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 2\nstack java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 1\narray java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 2\nliOf java.lang.IndexOutOfBoundsException: Index: 5 Size: 2\nliArray java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\nasListSet ok\nasListAdd java.lang.UnsupportedOperationException\nofSet java.lang.UnsupportedOperationException\n[1, 2]\n[1, 2]\ncopy java.util.ConcurrentModificationException\naddAll java.util.ConcurrentModificationException\nstream java.util.ConcurrentModificationException\nequals java.util.ConcurrentModificationException\njoin ok\njoin2 java.util.ConcurrentModificationException\n[5, 6, 8, 7] [5, 6, 8] SubList java.util.ArrayList$SubList\n',
+    ],
+    [
+      `import java.io.*;
+import java.util.*;
+class Main {
+  static String s(Object o) { return o instanceof Serializable ? "S" : "-"; }
+  public static void main(String[] args) {
+    System.out.println(s(List.of()) + s(List.of(1)) + s(List.of(1, 2, 3)) + s(Arrays.asList(1)) + s(Collections.emptyList()) + s(Collections.singletonList(1)) + s(Collections.nCopies(2, 1)) + s(Collections.unmodifiableList(new ArrayList<>())) + s(Collections.unmodifiableList(new LinkedList<>())));
+    System.out.println(s(Set.of(1)) + s(Map.of(1, 2)) + s(Collections.emptySet()) + s(Collections.singleton(1)) + s(Collections.emptyMap()) + s(Collections.singletonMap(1, 2)) + s(Collections.unmodifiableSet(new HashSet<>())) + s(Collections.unmodifiableMap(new HashMap<>())) + s(new HashMap<>(Map.of(1, 2)).keySet()));
+    List<Integer> a = new ArrayList<>(List.of(1, 2, 3));
+    System.out.println(s(a.subList(0, 1)) + s(List.of(1, 2).subList(0, 1)) + s(Arrays.asList(1, 2).subList(0, 1)) + s(new LinkedList<>(a).subList(0, 1)));
+    System.out.println(a.subList(0, 1).getClass().getName() + " " + List.of(1, 2).subList(0, 1).getClass().getName() + " " + Arrays.asList(1, 2).subList(0, 1).getClass().getName() + " " + new LinkedList<>(a).subList(0, 1).getClass().getName());
+  }
+}`,
+      'SSSSSSSSS\nSSSSSSSS-\n----\njava.util.ArrayList$SubList java.util.ImmutableCollections$SubList java.util.AbstractList$RandomAccessSubList java.util.AbstractList$SubList\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

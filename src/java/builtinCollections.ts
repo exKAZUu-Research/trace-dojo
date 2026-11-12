@@ -21,6 +21,7 @@ import {
   javaEquals,
   javaHash,
   linkOverrides,
+  subListChecks,
   touch,
   unmodifiableClasses,
 } from './builtinCollectionSupport';
@@ -210,6 +211,7 @@ function defineRestrictedLists(
   fixedSizeClasses.add(fixedSizeList);
   defaultRemoveClasses.add(fixedSizeList);
   defineIndexFailures({ immutableList, pairList, emptyList, singletonList, fixedSizeList }, context.registry);
+  defineSubListClasses(context, lists);
   return {
     immutableList,
     pairList,
@@ -220,6 +222,41 @@ function defineRestrictedLists(
     unmodifiableRandomAccessList,
     fixedSizeList,
   };
+}
+
+/** The classes of the views `subList` returns, which differ from their lists' classes as the JDK's do. */
+const subListClasses: Record<'arrayList' | 'other' | 'fixedSize' | 'immutable', ClassInfo> = {} as never;
+
+/**
+ * The sublist classes: `ArrayList$SubList`, which removes in batches as its list does, `AbstractList$SubList` for the
+ * other modifiable lists, and the fixed-size and immutable views of `Arrays.asList` and `List.of`.
+ */
+function defineSubListClasses(
+  context: Context,
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo }
+): void {
+  subListClasses.arrayList = defineArrayList(context, 'SubList', lists, 'ArrayList$SubList');
+  batchRemovalClasses.add(subListClasses.arrayList);
+  subListClasses.other = defineArrayList(context, 'SubList', lists, 'AbstractList$SubList');
+  subListClasses.fixedSize = defineRestrictedList(
+    context,
+    'RandomAccessSubList',
+    lists,
+    (method) => method.name !== 'set',
+    'AbstractList$'
+  );
+  fixedSizeClasses.add(subListClasses.fixedSize);
+  defaultRemoveClasses.add(subListClasses.fixedSize);
+  subListClasses.immutable = defineRestrictedList(context, 'SubList', lists, () => true, 'ImmutableCollections$');
+  unmodifiableClasses.add(subListClasses.immutable);
+  immutableCollectionsLists.add(subListClasses.immutable);
+}
+
+/** The class of a view of a list of `cls`, whose JDK class decides how the view checks indexes and removes. */
+function subListClassOf(cls: ClassInfo): ClassInfo {
+  if (unmodifiableClasses.has(cls)) return subListClasses.immutable;
+  if (fixedSizeClasses.has(cls)) return subListClasses.fixedSize;
+  return cls.name === 'ArrayList' || cls === subListClasses.arrayList ? subListClasses.arrayList : subListClasses.other;
 }
 
 /** A read-only set over another set's elements, which it reads afresh at each use. */
@@ -547,7 +584,7 @@ function defineListAdditions(
       if (start < 0) throwBuiltin(frame, 'IndexOutOfBoundsException', `fromIndex = ${start}`);
       if (end > items.length) throwBuiltin(frame, 'IndexOutOfBoundsException', `toIndex = ${end}`);
       if (start > end) throwBuiltin(frame, 'IllegalArgumentException', `fromIndex(${start}) > toIndex(${end})`);
-      return createSubList(frame, cls, receiver as JavaObject, start, end);
+      return createSubList(frame, subListClassOf(cls), receiver as JavaObject, start, end);
     }
   );
 }
@@ -633,6 +670,7 @@ function defineListSearches(cls: ClassInfo, context: Context): void {
   });
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
     if (!(other instanceof JavaObject) || !other.elements || !isList(other)) return false;
+    subListChecks.get(other)?.();
     const items = elementsOf(receiver);
     return (
       items.length === other.elements.length &&

@@ -113,7 +113,7 @@ function createBuiltins(): Builtins {
     ioException: registry.classes.get('IOException') as ClassInfo,
     ...standardStreamsOf(registry.classes.get('System') as ClassInfo),
   });
-  defineSerializable(registry);
+  defineSerializable(registry, collections);
   return {
     classes: registry.classes,
     objectClass,

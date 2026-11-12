@@ -1,5 +1,5 @@
 import type { Collections } from './builtinCollections';
-import { linkOverrides } from './builtinCollectionSupport';
+import { linkOverrides, subListChecks } from './builtinCollectionSupport';
 import { defineLocale } from './builtinLocale';
 import { type PrintWrite } from './builtinPrint';
 import { standardChannelOf, stringify } from './builtins';
@@ -481,6 +481,7 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
     true,
     (frame, _, [delimiter, parts]) => {
       if (!(parts instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+      subListChecks.get(parts)?.();
       const items = parts.elements ?? parts.store?.ordered().map((entry) => entry.key) ?? [];
       return joinText(frame, requireString(frame, delimiter), items);
     }

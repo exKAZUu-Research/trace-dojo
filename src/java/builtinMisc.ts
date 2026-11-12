@@ -1,4 +1,4 @@
-import { javaEquals, javaHash } from './builtinCollections';
+import { type Collections, javaEquals, javaHash } from './builtinCollections';
 import { stringify } from './builtins';
 import { addConstructor, addInterface, addMethod, defineInterface, newString, type Registry } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
@@ -30,13 +30,31 @@ export function defineMisc(registry: Registry, objectClass: ClassInfo, stringTyp
 
 /**
  * `Serializable`, which only marks classes, implemented by the builtin classes whose JDK counterparts implement it
- * directly; their subclasses, such as every exception and wrapper, inherit it.
+ * directly, including the hidden lists, sets, and maps of `List.of`, `Arrays.asList`, and `Collections`; their
+ * subclasses, such as every exception and wrapper, inherit it.
  */
-export function defineSerializable(registry: Registry): void {
+export function defineSerializable(registry: Registry, collections: Collections): void {
   const cls = defineInterface(registry, 'Serializable', 'java.io');
   arrayInterfaces.add(cls);
-  for (const name of SERIALIZABLE_CLASSES)
-    addInterface(registry.classes.get(name) as ClassInfo, { kind: 'class', cls });
+  const hiddenClasses = [
+    collections.immutableList,
+    collections.pairList,
+    collections.emptyList,
+    collections.singletonList,
+    collections.copiesList,
+    collections.unmodifiableList,
+    collections.unmodifiableRandomAccessList,
+    collections.fixedSizeList,
+    collections.immutableSet,
+    collections.immutableMap,
+    collections.unmodifiableViewSet,
+  ];
+  for (const implementation of [
+    ...SERIALIZABLE_CLASSES.map((name) => registry.classes.get(name) as ClassInfo),
+    ...hiddenClasses,
+  ]) {
+    addInterface(implementation, { kind: 'class', cls });
+  }
 }
 
 const SERIALIZABLE_CLASSES = [
