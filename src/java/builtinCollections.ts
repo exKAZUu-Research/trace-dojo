@@ -474,7 +474,13 @@ function rejectOnlyChanges(cls: ClassInfo): void {
   for (const method of cls.methods) {
     const removesValue = method.name === 'remove' && method.parameterTypes[0] !== INT;
     if (method.name === 'addAll') {
-      method.native = (frame, _, args) => {
+      method.native = (frame, receiver, args) => {
+        // As AbstractList.addAll(int, Collection) does, a position is checked before the elements are read.
+        const size = elementsOf(receiver).length;
+        const index = args.length > 1 ? (args[0] as number) : size;
+        if (index < 0 || index > size) {
+          throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${size}`);
+        }
         if (itemsOf(frame, args.at(-1)).length > 0) throwBuiltin(frame, 'UnsupportedOperationException');
         return false;
       };

@@ -1547,6 +1547,27 @@ class Main {
   }
 });
 
+test("Java checks the position of an indexed addAll on Collections' lists first, as the JDK does", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    t("el1", () -> System.out.println(Collections.emptyList().addAll(1, List.of())));
+    t("el0", () -> System.out.println(Collections.emptyList().addAll(0, List.of())));
+    t("sl", () -> System.out.println(Collections.singletonList(1).addAll(-1, List.of())));
+    t("nc", () -> System.out.println(Collections.nCopies(2, 1).addAll(3, List.of(1))));
+    t("nc2", () -> System.out.println(Collections.nCopies(2, 1).addAll(2, List.of(1))));
+  }
+}`,
+      'el1 java.lang.IndexOutOfBoundsException: Index: 1, Size: 0\nfalse\nel0 ok\nsl java.lang.IndexOutOfBoundsException: Index: -1, Size: 1\nnc java.lang.IndexOutOfBoundsException: Index: 3, Size: 2\nnc2 java.lang.UnsupportedOperationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
