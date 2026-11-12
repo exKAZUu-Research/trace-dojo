@@ -123,6 +123,10 @@ export interface Method {
   /** The function that runs the method, receiving the receiver first. */
   code?: MethodCode;
   span?: Span;
+  /** The method's own type parameters, which Go 1.27 allows; such a method satisfies no interface. */
+  typeParams?: TypeParamType[];
+  /** The code of the method for its own type arguments, for a method with type parameters. */
+  instantiate?: (args: Type[]) => MethodCode;
 }
 
 /** The runtime half of a method, filled in once the method's body compiles. */
@@ -650,7 +654,7 @@ export function missingMethod(type: Type, iface: InterfaceType): MissingMethod |
       if (!identical(found.method.type, wanted.type)) return { name: wanted.name, wrongType: found.method.type };
       continue;
     }
-    if (found.kind !== 'method') return { name: wanted.name };
+    if (found.kind !== 'method' || found.method.typeParams) return { name: wanted.name };
     if (!identical(found.method.type, wanted.type)) return { name: wanted.name, wrongType: found.method.type };
     // A value's method set lacks the methods with pointer receivers, unless an embedded pointer provides them.
     if (found.method.pointerReceiver && type.kind !== 'pointer' && !found.indirect) {

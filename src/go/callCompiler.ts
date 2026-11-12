@@ -7,7 +7,15 @@ import { toInterface } from './conversions';
 import type { FuncEntity, GenericFunc } from './entities';
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
 import { utf8Decode } from './literals';
-import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor, resumeDynamicMethod, resumeMethod } from './methods';
+import {
+  type BoundCall,
+  dynamicMethod,
+  invokeMethod,
+  POINTER_METHOD,
+  receiverFor,
+  resumeDynamicMethod,
+  resumeMethod,
+} from './methods';
 import { currentRuntime } from './native';
 import type { Operand } from './operand';
 import { ordering } from './operators';
@@ -34,12 +42,13 @@ import {
   isOrdered,
   isString,
   isUntyped,
+  lookupFieldOrMethod,
   NO_VALUE,
   type Type,
   type TypeParamType,
   underlying,
 } from './types';
-import { type Channel, Complex, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
+import { type Channel, Complex, GoArray, GoFunc, GoMap, type Iface, Pointer, Slice, type Value } from './values';
 
 /** Builtins whose call has a value that a statement must use, as Go reports `len(s) (value) is not used`. */
 const VALUE_BUILTINS = new Set([
@@ -100,6 +109,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     name: string
   ): ListEval | undefined {
     const { params, variadic } = signature;
+    if (expression.spread) return this.spreadSliceArguments(expression, signature, name);
     if (expression.args.length === 1 && (params.length !== 1 || variadic)) {
       const only = this.expression(expression.args[0]);
       if (only.type.kind === 'tuple') return this.spreadArguments(expression, only, signature, name);
@@ -114,6 +124,29 @@ export abstract class CallCompiler extends CompositeCompiler {
     }
     if (variadic) return this.variadicArguments(expression, operands, signature, name);
     return this.listArguments(expression, operands, signature, name);
+  }
+
+  /** `f(a, xs...)`: passes the slice as the variadic parameter itself. */
+  private spreadSliceArguments(
+    expression: Extract<Expression, { kind: 'call' }>,
+    signature: FuncType,
+    name: string
+  ): ListEval | undefined {
+    const operands = expression.args.map((arg) => this.expression(arg));
+    if (!signature.variadic) {
+      this.error(expression, `${name} は可変個の引数を取らない関数なので、... で渡せません。`);
+      return undefined;
+    }
+    if (operands.length !== signature.params.length) {
+      this.argumentCountError(expression, operands.length, signature, name);
+      return undefined;
+    }
+    return this.spreadValues(operands, signature);
+  }
+
+  private spreadValues(operands: Operand[], signature: FuncType): ListEval {
+    const values = operands.map((operand, index) => this.assign(operand, signature.params[index], '引数'));
+    return (frame) => evaluateAll(frame, values);
   }
 
   private listArguments(span: Span, operands: Operand[], signature: FuncType, name: string): ListEval | undefined {
@@ -199,7 +232,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   // code-gauge-allow functionCognitiveComplexity 20 -- Generic and ordinary calls of functions and function values.
   private functionCall(expression: Extract<Expression, { kind: 'call' }>, callee: Operand): Operand {
     if (this.isInvalid(callee)) return callee;
-    if (callee.func?.generic) return this.genericCall(expression, callee.func);
+    if (callee.func?.generic) return this.genericCall(expression, callee.func, callee.typeArgs);
     const signature = coreType(callee.type);
     if (signature?.kind !== 'func') {
       this.error(expression, `${describeType(callee.type)} 型の値は関数ではないので、呼び出せません。`);
@@ -239,17 +272,23 @@ export abstract class CallCompiler extends CompositeCompiler {
     );
   }
 
-  private genericCall(expression: Extract<Expression, { kind: 'call' }>, entity: FuncEntity): Operand {
+  private genericCall(
+    expression: Extract<Expression, { kind: 'call' }>,
+    entity: FuncEntity,
+    written: Type[] = []
+  ): Operand {
     const generic = entity.generic as GenericFunc;
     const operands = expression.args.map((arg) => this.expression(arg));
-    const mapping = this.inferTypeArguments(expression, generic, operands);
+    const mapping = this.inferTypeArguments(expression, generic, operands, written, expression.spread === true);
     if (!mapping) return this.invalid(expression);
     const typeArgs = generic.typeParams.map((param) => mapping.get(param.id) as Type);
     if (!this.checkTypeArguments(generic.typeParams, typeArgs, expression)) return this.invalid(expression);
     const signature = substitute(generic.type, mapping, (named, args) =>
       this.instantiateNamed(named, args)
     ) as FuncType;
-    const args = this.listArguments(expression, operands, signature, entity.name);
+    const args = expression.spread
+      ? this.spreadValues(operands, signature)
+      : this.listArguments(expression, operands, signature, entity.name);
     if (!args) return this.invalid(expression);
     if (typeArgs.some((arg) => containsTypeParam(arg))) {
       return this.resultOperand(expression, signature.results, () => {});
@@ -268,11 +307,17 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** Infers the type arguments of a generic call from its arguments: typed ones first, then untyped defaults. */
-  private inferTypeArguments(span: Span, generic: GenericFunc, operands: Operand[]): Substitution | undefined {
+  private inferTypeArguments(
+    span: Span,
+    generic: GenericFunc,
+    operands: Operand[],
+    written: Type[],
+    spread: boolean
+  ): Substitution | undefined {
     const { typeParams, type } = generic;
-    const mapping: Substitution = new Map();
+    const mapping: Substitution = new Map(written.map((arg, index) => [typeParams[index].id, arg]));
     const params = type.params;
-    if (!type.variadic && operands.length !== params.length) {
+    if ((!type.variadic || spread) && operands.length !== params.length) {
       this.error(
         span,
         `関数の呼び出しの引数の数が合いません（${params.length} 個必要ですが、${operands.length} 個書かれています）。`
@@ -280,7 +325,9 @@ export abstract class CallCompiler extends CompositeCompiler {
       return undefined;
     }
     const paramFor = (index: number): Type =>
-      type.variadic && index >= params.length - 1 ? (params.at(-1) as { element: Type }).element : params[index];
+      type.variadic && !spread && index >= params.length - 1
+        ? (params.at(-1) as { element: Type }).element
+        : params[index];
     const untyped: [Type, Operand][] = [];
     for (const [index, operand] of operands.entries()) {
       if (this.isInvalid(operand)) return undefined;
@@ -319,6 +366,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   // code-gauge-allow functionCognitiveComplexity 25 -- Method calls through values, pointers, embedded fields, and interfaces.
   private methodCall(expression: Extract<Expression, { kind: 'call' }>, callee: Operand): Operand {
     const { receiver, selection } = callee.method as NonNullable<Operand['method']>;
+    if (selection.kind === 'method' && selection.method.typeParams) return this.genericMethodCall(expression, callee);
     const methodType = selection.method.type;
     const name = (expression.callee as { field?: string }).field ?? selection.method.name;
     const args = this.argumentsFor(expression, methodType, name);
@@ -371,6 +419,154 @@ export abstract class CallCompiler extends CompositeCompiler {
             return yield* resumeMethod(method, value, args(frame), row);
           }
         : undefined
+    );
+  }
+
+  protected methodValue(callee: Operand): Operand {
+    const { receiver, selection } = callee.method as NonNullable<Operand['method']>;
+    const span = callee.span;
+    if (selection.kind === 'method' && selection.method.typeParams) {
+      this.unsupported(span, '型引数を持つメソッドを、呼び出さずに値として使う書き方');
+      return this.invalid(span);
+    }
+    const type = selection.method.type;
+    if (selection.kind === 'interfaceMethod') {
+      const readReceiver = this.embeddedReceiver(receiver, selection.path);
+      const name = selection.method.name;
+      return {
+        mode: 'value',
+        type,
+        span,
+        eval: (frame) => {
+          const iface = readReceiver(frame) as Iface | undefined;
+          if (!iface) nilPointerPanic();
+          return new GoFunc(
+            (args, row, deferredFor) =>
+              (dynamicMethod(iface.type, name) as BoundCall)(iface.value, args, row, deferredFor),
+            [iface],
+            (args, row) => resumeDynamicMethod(iface.type, name, iface.value, args, row)
+          );
+        },
+      };
+    }
+    const { method, path } = selection;
+    let readReceiver: Eval | undefined;
+    if (method.pointerReceiver) readReceiver = this.pointerReceiver(span, receiver, path);
+    else {
+      const read = receiver.eval;
+      readReceiver = (frame) => receiverFor(read(frame), path, method);
+    }
+    if (!readReceiver) return this.invalid(span);
+    const bound = readReceiver;
+    return {
+      mode: 'value',
+      type,
+      span,
+      eval: (frame) => {
+        const value = bound(frame);
+        return new GoFunc(
+          (args, row, deferredFor) => invokeMethod(method, value, args, row, deferredFor),
+          [value],
+          (args, row) => resumeMethod(method, value, args, row)
+        );
+      },
+    };
+  }
+
+  protected methodExpression(span: Span, type: Type, name: string): Operand {
+    const selection = lookupFieldOrMethod(type, name);
+    if (selection.kind !== 'method' && selection.kind !== 'interfaceMethod') {
+      this.error(span, `${describeType(type)} 型には ${name} というメソッドがありません。`);
+      return this.invalid(span);
+    }
+    if (selection.kind === 'method' && selection.method.pointerReceiver && underlying(type).kind !== 'pointer') {
+      this.error(
+        span,
+        `メソッド ${name} はポインタのレシーバを持つので、(*${describeType(type)}).${name} と書いてください。`
+      );
+      return this.invalid(span);
+    }
+    const methodType = selection.method.type;
+    const signature: FuncType = {
+      kind: 'func',
+      params: [type, ...methodType.params],
+      results: methodType.results,
+      variadic: methodType.variadic,
+    };
+    const call =
+      selection.kind === 'method'
+        ? (args: Value[], row?: number, deferredFor?: unknown): Value | Value[] =>
+            invokeMethod(
+              selection.method,
+              receiverFor(args[0], selection.path, selection.method),
+              args.slice(1),
+              row,
+              deferredFor
+            )
+        : (args: Value[], row?: number, deferredFor?: unknown): Value | Value[] => {
+            const iface = args[0] as Iface | undefined;
+            if (!iface) nilPointerPanic();
+            return (dynamicMethod(iface.type, name) as BoundCall)(iface.value, args.slice(1), row, deferredFor);
+          };
+    const resume =
+      selection.kind === 'method'
+        ? (args: Value[], row?: number) =>
+            resumeMethod(selection.method, receiverFor(args[0], selection.path, selection.method), args.slice(1), row)
+        : (args: Value[], row?: number) => {
+            const iface = args[0] as Iface | undefined;
+            if (!iface) nilPointerPanic();
+            return resumeDynamicMethod(iface.type, name, iface.value, args.slice(1), row);
+          };
+    const value = new GoFunc(call, [], resume);
+    return { mode: 'value', type: signature, span, eval: () => value };
+  }
+
+  /** A call of a method with its own type parameters, inferred from the arguments as a generic function's are. */
+  private genericMethodCall(expression: Extract<Expression, { kind: 'call' }>, callee: Operand): Operand {
+    const { receiver, selection } = callee.method as NonNullable<Operand['method']>;
+    const { method, path } = selection as Extract<typeof selection, { kind: 'method' }>;
+    const typeParams = method.typeParams as TypeParamType[];
+    const generic: GenericFunc = { typeParams, type: method.type, instantiate: () => new GoFunc(() => {}) };
+    const operands = expression.args.map((arg) => this.expression(arg));
+    const mapping = this.inferTypeArguments(
+      expression,
+      generic,
+      operands,
+      callee.typeArgs ?? [],
+      expression.spread === true
+    );
+    if (!mapping) return this.invalid(expression);
+    const typeArgs = typeParams.map((param) => mapping.get(param.id) as Type);
+    if (!this.checkTypeArguments(typeParams, typeArgs, expression)) return this.invalid(expression);
+    const signature = substitute(method.type, mapping, (named, args) => this.instantiateNamed(named, args)) as FuncType;
+    const args = expression.spread
+      ? this.spreadValues(operands, signature)
+      : this.listArguments(expression, operands, signature, method.name);
+    if (!args) return this.invalid(expression);
+    let readReceiver: Eval | undefined;
+    if (method.pointerReceiver) readReceiver = this.pointerReceiver(expression, receiver, path);
+    else {
+      const read = receiver.eval;
+      readReceiver = (frame) => receiverFor(read(frame), path, method);
+    }
+    if (!readReceiver || !method.instantiate || typeArgs.some((arg) => containsTypeParam(arg))) {
+      return this.resultOperand(expression, signature.results, () => {});
+    }
+    const code = method.instantiate(typeArgs);
+    const bound = readReceiver;
+    const row = expression.row;
+    return this.resultOperand(
+      expression,
+      signature.results,
+      (frame) => {
+        const value = bound(frame);
+        return code.call?.(value, args(frame), row) as Value | Value[];
+      },
+      function* (frame) {
+        const value = bound(frame);
+        const argValues = args(frame);
+        return (yield* (code.resume as NonNullable<typeof code.resume>)(value, argValues, row)) as Value | Value[];
+      }
     );
   }
 
@@ -613,6 +809,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       return this.invalid(expression);
     }
     const element = sliceType.element;
+    if (expression.spread) return this.appendSpread(expression, slice, sliceType);
     const values = rest.map((arg) => this.assign(this.expression(arg), element, '要素'));
     const read = slice.eval;
     const zero = this.zeroOf(element);
@@ -627,6 +824,42 @@ export abstract class CallCompiler extends CompositeCompiler {
         const target = read(frame) as Slice | undefined;
         const added = evaluateAll(frame, values);
         return appendValues(target, added, element, zero, (count) => frame.runtime.allocate(count), onStack());
+      },
+    };
+  }
+
+  /** `append(s, t...)`: the elements of a slice of the same type, or the bytes of a string for a []byte. */
+  private appendSpread(
+    expression: Extract<Expression, { kind: 'call' }>,
+    slice: Operand,
+    sliceType: Extract<Type, { kind: 'slice' }>
+  ): Operand {
+    const { element } = sliceType;
+    if (expression.args.length !== 2) {
+      for (const arg of expression.args.slice(1)) this.expression(arg);
+      this.error(expression, '... で渡すときの append の引数は、スライスと、... を付けた値の2つにしてください。');
+      return this.invalid(expression);
+    }
+    const added = this.value(expression.args[1]);
+    if (this.isInvalid(added)) return added;
+    const fromString = isString(added.type) && isBasic(element, 'uint8');
+    const source = fromString ? this.defaulted(added).eval : this.assign(added, { kind: 'slice', element }, '引数');
+    const read = slice.eval;
+    const zero = this.zeroOf(element);
+    const local = slice.variable?.entity;
+    const onStack = (): boolean => local?.owner !== undefined && !local.escapes;
+    return {
+      mode: 'value',
+      type: slice.type,
+      span: expression,
+      eval: (frame) => {
+        const target = read(frame) as Slice | undefined;
+        const value = source(frame);
+        const values =
+          typeof value === 'string'
+            ? Array.from(value, (byte) => BigInt(byte.charCodeAt(0)))
+            : ((value as Slice | undefined)?.values() ?? []);
+        return appendValues(target, values, element, zero, (count) => frame.runtime.allocate(count), onStack());
       },
     };
   }

@@ -44,9 +44,13 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
       };
       if (program.concurrent) {
         const scheduler = new Scheduler(runtime);
-        const main = scheduler.spawn(() => runtime.resume(program.main, [], [], undefined, undefined, onMainEnd));
+        const main = scheduler.spawn(function* () {
+          for (const init of program.inits) yield* runtime.resume(init, [], [], undefined);
+          return yield* runtime.resume(program.main, [], [], undefined, undefined, onMainEnd);
+        });
         scheduler.run(main);
       } else {
+        for (const init of program.inits) runtime.call(init, [], [], undefined);
         runtime.call(program.main, [], [], undefined, undefined, onMainEnd);
       }
     } catch (error) {

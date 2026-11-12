@@ -53,6 +53,44 @@ export class Pointer {
   }
 }
 
+/**
+ * A pointer to an array that a slice's elements make up, as converting a slice to `*[N]T` gives: the array shares the
+ * slice's elements, and storing a whole array through the pointer stores its elements there.
+ */
+export class SliceArrayPointer extends Pointer {
+  constructor(
+    array: Value[],
+    offset: number,
+    private readonly length: number
+  ) {
+    super(array, offset);
+  }
+
+  override load(): Value {
+    const array = this.base as Value[];
+    const offset = this.key as number;
+    const length = this.length;
+    const view = new Proxy([] as Value[], {
+      get: (target, property, receiver) => {
+        if (property === 'length') return length;
+        if (typeof property === 'string' && /^\d+$/.test(property)) return array[offset + Number(property)];
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+      set: (_target, property, value: Value) => {
+        if (typeof property === 'string' && /^\d+$/.test(property)) array[offset + Number(property)] = value;
+        return true;
+      },
+      has: (_target, property) => typeof property === 'string' && /^\d+$/.test(property) && Number(property) < length,
+    });
+    return new GoArray(view);
+  }
+
+  override store(value: Value): void {
+    const array = this.base as Value[];
+    for (const [index, element] of (value as GoArray).elements.entries()) array[(this.key as number) + index] = element;
+  }
+}
+
 /** A struct value, which assignment copies. Library types keep their state in `native`. */
 export class GoStruct {
   constructor(

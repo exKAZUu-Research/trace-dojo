@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { assignFailure, constantValue, convertible, represent } from './assignability';
-import type { CompositeLiteral, Expression, Span } from './ast';
+import type { CompositeLiteral, Expression, Span, TypeExpression } from './ast';
 import { CompilerBase } from './compilerBase';
 import {
   binaryConstant,
@@ -14,9 +14,10 @@ import {
   unaryConstant,
 } from './constants';
 import { conversion, toInterface } from './conversions';
-import type { Entity, VarEntity } from './entities';
+import type { Entity, FuncEntity, VarEntity } from './entities';
 import { equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
+import { containsTypeParam, substitute } from './generics';
 import { utf8Decode } from './literals';
 import type { Operand } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
@@ -30,7 +31,14 @@ import {
   type Suspending,
   writeLocal,
 } from './runtime';
-import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
+import {
+  boundsPanic,
+  indexPanic,
+  nilPointerPanic,
+  plainPanic,
+  runtimeErrorPanic,
+  typeAssertionPanic,
+} from './runtimeErrors';
 import { receive } from './scheduler';
 import {
   BASIC,
@@ -55,6 +63,7 @@ import {
   isUntyped,
   lookupFieldOrMethod,
   missingMethod,
+  type NamedType,
   NO_VALUE,
   RUNE,
   type Type,
@@ -67,11 +76,13 @@ import {
   Complex,
   copyValue,
   GoArray,
+  type GoFunc,
   type GoMap,
   GoStruct,
   Iface,
   Pointer,
   Slice,
+  SliceArrayPointer,
   type Value,
 } from './values';
 
@@ -211,8 +222,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.invalid(operand.span);
       }
       case 'method': {
-        this.unsupported(operand.span, 'メソッド値（呼び出さずにメソッドを取り出す書き方）');
-        return this.invalid(operand.span);
+        return this.methodValue(operand);
       }
       default: {
         if (operand.type.kind === 'tuple') {
@@ -526,6 +536,68 @@ export abstract class ExpressionCompiler extends CompilerBase {
       commaOk: (frame) => evaluate(frame) as unknown as [Value, boolean],
       isCall: true,
     };
+  }
+
+  /** `Box[int]` written where an expression may stand, as in a conversion: the instance of a generic type. */
+  private genericTypeIndex(expression: Extract<Expression, { kind: 'index' }>): Operand | undefined {
+    const operand = expression.operand;
+    let entity;
+    if (operand.kind === 'name') entity = this.scope.lookup(operand.name);
+    else if (operand.kind === 'selector' && operand.operand.kind === 'name') {
+      const pkg = this.scope.lookup(operand.operand.name);
+      if (pkg?.kind === 'package') entity = pkg.package.members.get(operand.field);
+    }
+    if (entity?.kind !== 'type' || !entity.generic) return undefined;
+    const syntax = typeSyntaxOf(expression);
+    if (!syntax) {
+      this.error(expression, '型引数には型を書いてください。');
+      return this.invalid(expression);
+    }
+    const type = this.resolveType(syntax);
+    if (type === BASIC.invalid) return this.invalid(expression);
+    return { mode: 'type', type, span: expression, eval: () => {} };
+  }
+
+  /**
+   * `f[int, string]`: a generic function with written type arguments, which is an ordinary function when it has all
+   * of them; with fewer, a call infers the rest.
+   */
+  private instantiation(expression: Extract<Expression, { kind: 'index' }>, base: Operand): Operand {
+    const entity = base.func as FuncEntity;
+    const generic = entity.generic as NonNullable<FuncEntity['generic']>;
+    const args: Type[] = [];
+    for (const index of expression.indices) {
+      const syntax = typeSyntaxOf(index);
+      const type = syntax ? this.resolveType(syntax) : undefined;
+      if (!syntax) this.error(index, 'ここには型を書いてください。');
+      if (type === undefined || type === BASIC.invalid) return this.invalid(expression);
+      args.push(type);
+    }
+    if (args.length > generic.typeParams.length) {
+      this.error(
+        expression,
+        `${entity.name} の型引数が多すぎます（${generic.typeParams.length} 個ですが、${args.length} 個書かれています）。`
+      );
+      return this.invalid(expression);
+    }
+    if (args.length < generic.typeParams.length) return { ...base, span: expression, typeArgs: args };
+    if (!this.checkTypeArguments(generic.typeParams, args, expression)) return this.invalid(expression);
+    const mapping = new Map<number, Type>(generic.typeParams.map((param, index) => [param.id, args[index]]));
+    const type = substitute(generic.type, mapping, (named: NamedType, typeArgs: Type[]) =>
+      this.instantiateNamed(named, typeArgs)
+    ) as FuncType;
+    if (args.some((arg) => containsTypeParam(arg))) return { mode: 'value', type, span: expression, eval: () => {} };
+    const instance = generic.instantiate(args);
+    const func: FuncEntity = {
+      kind: 'func',
+      name: entity.name,
+      type,
+      value: () => instance,
+      direct: (values, row) => instance.call(values, row),
+      directResume:
+        instance.resume && ((values, row) => (instance.resume as NonNullable<GoFunc['resume']>)(values, row)),
+    };
+    return { mode: 'value', type, span: expression, eval: () => instance, func };
   }
 
   private unary(expression: Extract<Expression, { kind: 'unary' }>): Operand {
@@ -1093,14 +1165,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const base = this.expression(expression.operand);
     if (this.isInvalid(base)) return base;
-    if (base.mode === 'type') {
-      this.unsupported(expression, 'メソッド式（型.メソッド の形で関数として取り出す書き方）');
-      return this.invalid(expression);
-    }
+    if (base.mode === 'type') return this.methodExpression(expression, base.type, expression.field);
     const operand = this.asValue(base);
     if (this.isInvalid(operand)) return operand;
     return this.selectMember(expression, operand, expression.field);
   }
+
+  /** `v.M` used as a value: a function that calls the method with the receiver evaluated now. */
+  protected abstract methodValue(operand: Operand): Operand;
+  /** `T.M`: a function that takes the receiver as its first argument. */
+  protected abstract methodExpression(span: Span, type: Type, name: string): Operand;
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Fields and methods through embedded fields and pointers.
   protected selectMember(span: Span, operand: Operand, field: string): Operand {
@@ -1220,10 +1294,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   private index(expression: Extract<Expression, { kind: 'index' }>): Operand {
+    const genericType = this.genericTypeIndex(expression);
+    if (genericType) return genericType;
     const base = this.expression(expression.operand);
     if (this.isInvalid(base)) return base;
-    if (base.mode === 'type' || (base.mode === 'value' && base.func?.generic)) {
-      this.unsupported(expression, '型引数を明示する書き方');
+    if (base.mode === 'value' && base.func?.generic) return this.instantiation(expression, base);
+    if (base.mode === 'method' && base.method?.selection.kind === 'method' && base.method.selection.method.typeParams) {
+      const typeArgs: Type[] = [];
+      for (const index of expression.indices) {
+        const syntax = typeSyntaxOf(index);
+        const type = syntax ? this.resolveType(syntax) : undefined;
+        if (!syntax) this.error(index, 'ここには型を書いてください。');
+        if (type === undefined || type === BASIC.invalid) return this.invalid(expression);
+        typeArgs.push(type);
+      }
+      return { ...base, span: expression, typeArgs };
+    }
+    if (base.mode === 'type') {
+      this.error(expression, `${describeType(base.type)} は型引数を持たない型です。`);
       return this.invalid(expression);
     }
     const operand = this.asValue(base);
@@ -1329,8 +1417,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const low = expression.low ? this.indexValue(expression.low) : () => 0;
     const high = expression.high ? this.indexValue(expression.high) : undefined;
-    if (!low || (expression.high && !high)) return this.invalid(expression);
+    const max = expression.max ? this.indexValue(expression.max) : undefined;
+    if (!low || (expression.high && !high) || (expression.max && !max)) return this.invalid(expression);
     this.checkConstantBounds(expression);
+    if (max) return this.fullSliceExpression(expression, operand, low, high as NonNullable<typeof high>, max);
     const bounds = (frame: Frame, length: number, limit: number, limitName: string): [number, number] => {
       const from = low(frame);
       const to = high ? high(frame) : length;
@@ -1380,11 +1470,52 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.invalid(expression);
   }
 
+  /** `a[low:high:max]`, whose result has the capacity max - low; strings cannot take a third index. */
+  private fullSliceExpression(
+    expression: Extract<Expression, { kind: 'slice' }>,
+    operand: Operand,
+    low: (frame: Frame) => number,
+    high: (frame: Frame) => number,
+    max: (frame: Frame) => number
+  ): Operand {
+    const { type, read } = throughArrayPointer(operand);
+    if (type.kind !== 'array' && type.kind !== 'slice') {
+      this.error(expression, `${describeType(operand.type)} 型の値には、3つの添字のスライス式を使えません。`);
+      return this.invalid(expression);
+    }
+    const resultType: Type = type.kind === 'array' ? { kind: 'slice', element: type.element } : operand.type;
+    return {
+      mode: 'value',
+      type: resultType,
+      span: expression,
+      eval: (frame) => {
+        const value = read(frame) as GoArray | Slice | undefined;
+        const array = value instanceof GoArray ? value.elements : (value?.array ?? []);
+        const offset = value instanceof Slice ? value.offset : 0;
+        const capacity = value instanceof GoArray ? value.elements.length : (value?.capacity ?? 0);
+        const from = low(frame);
+        const to = high(frame);
+        const limit = max(frame);
+        if (limit < 0 || limit > capacity)
+          boundsPanic(`slice bounds out of range [::${limit}] with capacity ${capacity}`);
+        if (to < 0 || to > limit) boundsPanic(`slice bounds out of range [:${to}:${limit}]`);
+        if (from < 0 || from > to) boundsPanic(`slice bounds out of range [${from}:${to}:]`);
+        if (value === undefined) return;
+        return new Slice(array, offset + from, to - from, limit - from);
+      },
+    };
+  }
+
   private checkConstantBounds(expression: Extract<Expression, { kind: 'slice' }>): void {
     const low = expression.low ? this.constantExpression(expression.low).value : undefined;
     const high = expression.high ? this.constantExpression(expression.high).value : undefined;
+    const max = expression.max ? this.constantExpression(expression.max).value : undefined;
     if (low !== undefined && high !== undefined && low > high) {
       this.error(expression, `スライスの範囲が逆になっています（${low} > ${high}）。`);
+    } else if (high !== undefined && max !== undefined && high > max) {
+      this.error(expression, `スライスの範囲が逆になっています（${high} > ${max}）。`);
+    } else if (low !== undefined && max !== undefined && low > max) {
+      this.error(expression, `スライスの範囲が逆になっています（${low} > ${max}）。`);
     }
   }
 
@@ -1512,8 +1643,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (this.hasTypeParam(source.type) || this.hasTypeParam(target))
       return { mode: 'value', type: target, span, eval: () => {} };
     if (underlying(source.type).kind === 'slice' && underlying(target).kind === 'pointer') {
-      this.unsupported(span, 'スライスから配列へのポインタへの変換');
-      return this.invalid(span);
+      const length = (underlying((underlying(target) as { element: Type }).element) as { length: number }).length;
+      const read = source.eval;
+      return {
+        mode: 'value',
+        type: target,
+        span,
+        eval: (frame) => {
+          const slice = read(frame) as Slice | undefined;
+          if (slice === undefined) return length === 0 ? undefined : sliceToArrayPanic(0, length);
+          if (slice.length < length) sliceToArrayPanic(slice.length, length);
+          return new SliceArrayPointer(slice.array, slice.offset, length);
+        },
+      };
     }
     const apply = conversion(source.type, target);
     const read = source.eval;
@@ -1732,4 +1874,51 @@ export { RUNE };
 function imaginaryPart(text: string): Rational {
   if (/^[\d_]+$/.test(text)) return { num: BigInt(text.replaceAll('_', '')), den: 1n };
   return parseFloatLiteral(text);
+}
+
+/** The type that an expression names, such as a type argument `[]int` or `Pair[int, string]`, if it names one. */
+function typeSyntaxOf(expression: Expression): TypeExpression | undefined {
+  switch (expression.kind) {
+    case 'name': {
+      return { kind: 'name', row: expression.row, column: expression.column, name: expression.name, typeArguments: [] };
+    }
+    case 'selector': {
+      if (expression.operand.kind !== 'name') return undefined;
+      return {
+        kind: 'name',
+        row: expression.row,
+        column: expression.column,
+        package: expression.operand.name,
+        name: expression.field,
+        typeArguments: [],
+      };
+    }
+    case 'index': {
+      const base = typeSyntaxOf(expression.operand);
+      if (base?.kind !== 'name') return undefined;
+      const args = expression.indices.map((index) => typeSyntaxOf(index));
+      if (args.includes(undefined)) return undefined;
+      return { ...base, typeArguments: args as TypeExpression[] };
+    }
+    case 'type': {
+      return expression.type;
+    }
+    case 'paren': {
+      return typeSyntaxOf(expression.expression);
+    }
+    case 'unary': {
+      if (expression.operator !== '*') return undefined;
+      const element = typeSyntaxOf(expression.operand);
+      return element && { kind: 'pointer', row: expression.row, column: expression.column, element };
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+function sliceToArrayPanic(length: number, wanted: number): never {
+  return runtimeErrorPanic(
+    `cannot convert slice with length ${length} to array or pointer to array with length ${wanted}`
+  );
 }

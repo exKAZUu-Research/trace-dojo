@@ -3,7 +3,7 @@ import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { represent } from './assignability';
 import type { ConstDeclaration, File, FunctionDeclaration, Span, TypeDeclaration, TypeSpec, VarSpec } from './ast';
 import type { TraceSettings } from './compilerBase';
-import type { ConstEntity, FunctionContext, GenericFunc, TypeEntity, VarEntity } from './entities';
+import type { ConstEntity, FunctionContext, GenericFunc, PackageEntity, TypeEntity, VarEntity } from './entities';
 import { mapKeyOf } from './equality';
 import { substitute } from './generics';
 import { currentRuntime } from './native';
@@ -34,6 +34,8 @@ export interface CompiledProgram {
   initializer: FunctionInfo;
   globals: { name: string; type: Type; slot: number }[];
   globalZeros: (() => Value)[];
+  /** The init functions in the order declared, which run before main. */
+  inits: FunctionInfo[];
   /** Whether the program uses goroutines, channels, locks, or sleeps, which the scheduler runs. */
   concurrent: boolean;
 }
@@ -59,7 +61,7 @@ export class ProgramCompiler extends StatementCompiler {
   }[] = [];
   /** Code that must compile once every declaration is known: function bodies and instances of generic code. */
   private readonly pendingBodies: (() => void)[] = [];
-  private readonly typeStates = new Map<TypeEntity, { spec: TypeSpec; resolved: boolean }>();
+  private readonly typeStates = new Map<TypeEntity, { spec: TypeSpec; resolved: boolean; scope: Scope }>();
   private readonly methodSpecs = new Map<string, FunctionDeclaration[]>();
   private readonly functionReferences = new Map<unknown, Set<unknown>>();
   private readonly claimedAtomicRows = new Set<number>();
@@ -100,6 +102,7 @@ export class ProgramCompiler extends StatementCompiler {
         .filter((variable) => variable.name !== '_')
         .map(({ name, type, slot }) => ({ name, type, slot })),
       globalZeros: this.globalZeros,
+      inits: this.inits.map((init) => init.info as FunctionInfo),
       concurrent: this.concurrent,
     };
   }
@@ -127,6 +130,18 @@ export class ProgramCompiler extends StatementCompiler {
       }
       const name = spec.alias ?? pkg.name;
       if (name === '_') continue;
+      if (name === '.') {
+        // `import . "fmt"` puts the package's members in the file's scope, as if declared there.
+        const entity: PackageEntity = { kind: 'package', name: pkg.name, package: pkg, span: spec, used: false };
+        this.dotImports.push(entity);
+        for (const [member, memberEntity] of pkg.members) {
+          if (!this.fileScope.entities.has(member)) {
+            this.fileScope.entities.set(member, memberEntity);
+            this.dotMembers.set(memberEntity, entity);
+          }
+        }
+        continue;
+      }
       if (this.fileScope.entities.has(name)) {
         this.error(spec, `パッケージの名前 ${name} が2回 import されています。`);
         continue;
@@ -136,6 +151,10 @@ export class ProgramCompiler extends StatementCompiler {
   }
 
   private checkImportsUsed(): void {
+    for (const entity of this.dotImports) {
+      if (!entity.used)
+        this.error(entity.span, `パッケージ "${entity.package.path}" を import していますが、使っていません。`);
+    }
     for (const entity of this.fileScope.entities.values()) {
       if (entity.kind === 'package' && !entity.used) {
         this.error(entity.span, `パッケージ "${entity.package.path}" を import していますが、使っていません。`);
@@ -199,7 +218,8 @@ export class ProgramCompiler extends StatementCompiler {
       span: spec,
     };
     const entity: TypeEntity = { kind: 'type', name: spec.name, type: shell, span: spec };
-    if (spec.typeParameters.length > 0) {
+    if (spec.alias && spec.typeParameters.length > 0) this.unsupported(spec, '型引数を持つ型の別名');
+    if (spec.typeParameters.length > 0 && !spec.alias) {
       const cache = new Map<string, NamedType>();
       this.instances.set(entity, cache);
       entity.generic = {
@@ -209,7 +229,7 @@ export class ProgramCompiler extends StatementCompiler {
     }
     if (scope === this.packageScope) this.declarePackageName(spec.name, entity, spec);
     else this.declare(spec.name, entity, spec);
-    this.typeStates.set(entity, { spec, resolved: false });
+    this.typeStates.set(entity, { spec, resolved: false, scope });
     return entity;
   }
 
@@ -217,6 +237,17 @@ export class ProgramCompiler extends StatementCompiler {
     const state = this.typeStates.get(entity);
     if (!state || state.resolved) return;
     state.resolved = true;
+    if (state.spec.alias) {
+      // An alias names the type itself, which its uses then see.
+      entity.type = BASIC.invalid;
+      const outerFn = this.fn;
+      try {
+        entity.type = this.withScopeOf(this.scopeOfType(entity), () => this.resolveType(state.spec.type));
+      } finally {
+        this.fn = outerFn;
+      }
+      return;
+    }
     const shell = entity.type as NamedType;
     const outerScope = this.scope;
     const outerFn = this.fn;
@@ -231,19 +262,17 @@ export class ProgramCompiler extends StatementCompiler {
       this.resolvingTypes.delete(shell);
       shell.underlying = underlyingType.kind === 'named' ? underlying(underlyingType) : underlyingType;
       if (entity.generic) this.completeInstances(entity);
-      if (underlyingType.kind === 'interface' && underlyingType.typeSet) {
-        this.error(state.spec, '型の集合を持つインターフェースは、型の制約にしか使えません。');
-      }
     } finally {
       this.scope = outerScope;
       this.fn = outerFn;
     }
   }
 
+  /** The scope a type's declaration resolves in: the file's for a package-level type, its block's for a local one. */
   private scopeOfType(entity: TypeEntity): Scope {
-    return this.typeStates.has(entity) && this.packageScope.entities.get(entity.name) === entity
-      ? this.fileScope
-      : this.scope;
+    const state = this.typeStates.get(entity);
+    if (!state) return this.scope;
+    return this.packageScope.entities.get(entity.name) === entity ? this.fileScope : state.scope;
   }
 
   /** Instantiates a generic type with type arguments, once per distinct list of arguments. */
@@ -299,8 +328,14 @@ export class ProgramCompiler extends StatementCompiler {
         type,
         code: {},
         span: method.span,
+        typeParams: method.typeParams,
       };
       instance.methods.push(instanceMethod);
+      const genericDeclaration = this.genericMethodDeclarations.get(method);
+      if (method.typeParams && genericDeclaration && !args.some((arg) => containsTypeParams(arg))) {
+        instanceMethod.instantiate = this.methodInstances(genericDeclaration, instance, instanceMethod, args);
+        continue;
+      }
       const declaration = this.genericMethodDeclarations.get(method);
       if (declaration && !args.some((arg) => containsTypeParams(arg))) {
         this.pendingBodies.push(() => this.compileMethod(declaration, instance, instanceMethod, args));
@@ -370,19 +405,22 @@ export class ProgramCompiler extends StatementCompiler {
           );
           continue;
         }
-        const type = this.withTypeArguments(
-          generic?.typeParams ?? [],
-          receiver.typeArguments,
-          undefined,
-          () => this.resolveSignature(declaration.signature).type
-        );
+        let methodTypeParams: TypeParamType[] | undefined;
+        const type = this.withTypeArguments(generic?.typeParams ?? [], receiver.typeArguments, undefined, () => {
+          if (declaration.typeParameters.length > 0)
+            methodTypeParams = this.declareTypeParameters(declaration.typeParameters);
+          return this.resolveSignature(declaration.signature).type;
+        });
         const method: Method = {
           name: declaration.name,
           pointerReceiver: receiver.pointer,
           type,
           code: {},
           span: declaration,
+          typeParams: methodTypeParams,
         };
+        if (methodTypeParams && !generic)
+          method.instantiate = this.methodInstances(declaration, shell, method, undefined);
         shell.methods.push(method);
         if (generic) {
           this.genericMethodDeclarations.set(method, declaration);
@@ -415,14 +453,38 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
+  /**
+   * The code of a method with its own type parameters for each list of its type arguments, compiled once per list as a
+   * generic function's instances are.
+   */
+  private methodInstances(
+    declaration: FunctionDeclaration,
+    owner: NamedType,
+    method: Method,
+    receiverArgs: Type[] | undefined
+  ): (args: Type[]) => NonNullable<Method['code']> {
+    const cache = new Map<string, NonNullable<Method['code']>>();
+    return (args) => {
+      const key = args.map((arg) => typeKey(arg)).join(',');
+      const cached = cache.get(key);
+      if (cached) return cached;
+      const code: NonNullable<Method['code']> = {};
+      cache.set(key, code);
+      this.pendingBodies.push(() => this.compileMethod(declaration, owner, method, receiverArgs, { args, code }));
+      return code;
+    };
+  }
+
   private compileMethod(
     declaration: FunctionDeclaration,
     owner: NamedType,
     method: Method,
-    args: Type[] | undefined
+    args: Type[] | undefined,
+    /** The type arguments of a method with its own type parameters, and the code to fill for them. */
+    methodInstance?: { args: Type[]; code: NonNullable<Method['code']> }
   ): void {
     const receiver = declaration.receiver as NonNullable<FunctionDeclaration['receiver']>;
-    const isInstance = args !== undefined;
+    const isInstance = args !== undefined || methodInstance !== undefined;
     const origin = owner.origin ?? owner;
     const params = origin.typeParams ?? [];
     const outerReporting = this.reporting;
@@ -430,6 +492,11 @@ export class ProgramCompiler extends StatementCompiler {
     if (isInstance) this.reporting = false;
     try {
       this.withTypeArguments(params, receiver.typeArguments, args, () => {
+        const methodParams = method.typeParams ?? [];
+        for (const [index, param] of declaration.typeParameters.entries()) {
+          const type = methodInstance ? methodInstance.args[index] : methodParams[index];
+          if (type) this.scope.entities.set(param.name, { kind: 'type', name: param.name, type });
+        }
         const receiverBase: Type = params.length > 0 ? this.instantiateNamed(origin, args ?? params) : owner;
         const receiverType: Type = receiver.pointer ? { kind: 'pointer', element: receiverBase } : receiverBase;
         const type = this.resolveSignature(declaration.signature).type;
@@ -443,9 +510,9 @@ export class ProgramCompiler extends StatementCompiler {
           this.isAtomic(declaration)
         );
         this.functionReferences.set(method, fn.references);
-        if (params.length > 0 && !isInstance) return;
+        if ((params.length > 0 && args === undefined) || (methodParams.length > 0 && !methodInstance)) return;
         const { info } = fn;
-        const code = method.code as NonNullable<typeof method.code>;
+        const code = methodInstance?.code ?? (method.code as NonNullable<typeof method.code>);
         code.call = (receiverValue: unknown, argValues: unknown[], callRow?: number, deferredFor?: unknown) =>
           currentRuntime().call(info, [], [receiverValue, ...argValues] as Value[], callRow, deferredFor as never);
         code.resume = (receiverValue: unknown, argValues: unknown[], callRow?: number, deferredFor?: unknown) =>
@@ -462,7 +529,7 @@ export class ProgramCompiler extends StatementCompiler {
   private declareFunction(declaration: FunctionDeclaration): void {
     const { name } = declaration;
     if (name === 'init') {
-      this.unsupported(declaration, 'init 関数');
+      this.declareInit(declaration);
       return;
     }
     if (!declaration.body) {
@@ -511,6 +578,38 @@ export class ProgramCompiler extends StatementCompiler {
       this.functionReferences.set(entity, fn.references);
     });
     if (name === 'main') this.mainEntity = { entity, state, declaration };
+  }
+
+  /** The init functions, which run in the order declared after the package-level variables are initialized. */
+  private readonly inits: { info?: FunctionInfo }[] = [];
+
+  private declareInit(declaration: FunctionDeclaration): void {
+    const { signature } = declaration;
+    if (declaration.typeParameters.length > 0) this.error(declaration, 'init 関数は型引数を持てません。');
+    if (signature.parameters.length > 0 || signature.results.length > 0) {
+      this.error(declaration, 'init 関数は引数も結果も持てません。');
+      return;
+    }
+    if (!declaration.body) {
+      this.error(declaration, '関数 init に本体がありません。');
+      return;
+    }
+    const state: { info?: FunctionInfo } = {};
+    this.inits.push(state);
+    this.pendingBodies.push(() => {
+      this.fn = undefined;
+      const fn = this.withScopeOf(this.fileScope, () =>
+        this.functionBody(
+          'init',
+          signature,
+          funcType([], []),
+          declaration.body as NonNullable<FunctionDeclaration['body']>,
+          undefined,
+          this.isAtomic(declaration)
+        )
+      );
+      state.info = fn.info;
+    });
   }
 
   private readonly pendingSignatures: (() => void)[] = [];
@@ -888,10 +987,6 @@ export class ProgramCompiler extends StatementCompiler {
 
   protected localTypeDeclaration(declaration: TypeDeclaration): void {
     for (const spec of declaration.specs) {
-      if (spec.typeParameters.length > 0) {
-        this.unsupported(spec, '関数の中で宣言する、型引数を持つ型');
-        continue;
-      }
       const entity = this.declareTypeSpec(spec, this.scope);
       this.useType(entity);
     }

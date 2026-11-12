@@ -1,5 +1,5 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
-import type { Expression, Span, TypeExpression, TypeParameter } from './ast';
+import type { Expression, Span, TypeElementSyntax, TypeExpression, TypeParameter } from './ast';
 import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
 import { substituteInterface } from './generics';
 import type { Eval, Exec, Frame, FunctionInfo, LocalInfo, Suspending } from './runtime';
@@ -56,6 +56,8 @@ export abstract class CompilerBase {
   protected fn: FunctionContext | undefined;
   /** Whether errors are being reported; instances of generic code were checked once already. */
   protected reporting = true;
+  /** Whether a constraint is being resolved, where interfaces with type sets may appear. */
+  private inConstraint = false;
   /** The value of `iota` in the constant spec being compiled, which is undefined elsewhere. */
   protected iota: number | undefined;
   /** Whether the program uses goroutines, channels, locks, or sleeps, whose statements may block. */
@@ -187,8 +189,14 @@ export abstract class CompilerBase {
   }
 
   /** Looks up a name, marking variables of enclosing functions as captured by the function being compiled. */
+  /** The packages imported with `.`, whose members the file's scope holds. */
+  protected readonly dotImports: PackageEntity[] = [];
+  protected readonly dotMembers = new Map<Entity, PackageEntity>();
+
   protected lookup(name: string): Entity | undefined {
     const entity = this.scope.lookup(name);
+    const dotPackage = entity && this.dotMembers.get(entity);
+    if (dotPackage) dotPackage.used = true;
     if (entity?.kind === 'var' && entity.owner && this.fn && entity.owner !== this.fn) this.capture(entity, this.fn);
     if (entity?.kind === 'package') entity.used = true;
     return entity;
@@ -290,6 +298,8 @@ export abstract class CompilerBase {
   private isComparableKey(type: Type): boolean {
     // A named type still being declared is checked when it is complete.
     if (type.kind === 'named' && type.underlying === BASIC.invalid) return true;
+    // A constraint may use a type parameter whose own constraint comes later in the list.
+    if (type.kind === 'typeParam' && this.inConstraint) return true;
     return isComparable(type);
   }
 
@@ -326,7 +336,28 @@ export abstract class CompilerBase {
     if (direct && type.kind === 'named' && this.resolvingTypes.has(type)) {
       return this.error(type.span ?? syntax, `型 ${type.name} が自分自身を直接含んでいます。`);
     }
+    this.checkConstraintUse(type, syntax);
     return type;
+  }
+
+  /** An interface with a type set, such as `comparable`, may only be a constraint, as Go reports elsewhere. */
+  private checkConstraintUse(type: Type, span: Span): void {
+    if (this.inConstraint) return;
+    const under = underlying(type);
+    if (under.kind === 'interface' && under.typeSet && type !== BASIC.invalid) {
+      this.error(span, `${describeType(type)} は型の集合を持つインターフェースなので、型の制約にしか使えません。`);
+    }
+  }
+
+  /** Resolves a constraint, where interfaces with type sets may appear. */
+  protected resolveConstraint(syntax: TypeExpression): Type {
+    const outer = this.inConstraint;
+    this.inConstraint = true;
+    try {
+      return this.resolveType(syntax);
+    } finally {
+      this.inConstraint = outer;
+    }
   }
 
   /** Completes a type entity whose declaration has not been resolved yet. */
@@ -372,9 +403,17 @@ export abstract class CompilerBase {
     return { kind: 'struct', fields };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 25 -- Methods, embedded interfaces, and unions of type terms.
   private resolveInterface(syntax: Extract<TypeExpression, { kind: 'interface' }>): InterfaceType {
-    if (syntax.methods.length === 0) return EMPTY_INTERFACE;
+    if (syntax.methods.length === 0 && syntax.elements.length === 0) return EMPTY_INTERFACE;
     const methods: InterfaceMethod[] = [];
+    const addMethod = (method: InterfaceMethod, span: Span): void => {
+      const existing = methods.find((other) => other.name === method.name);
+      // An interface may embed the same method twice, with identical signatures.
+      if (existing && !identical(existing.type, method.type))
+        this.error(span, `メソッド ${method.name} が2回宣言されています。`);
+      if (!existing) methods.push(method);
+    };
     for (const method of syntax.methods) {
       if (methods.some((other) => other.name === method.name)) {
         this.error(method, `メソッド ${method.name} が2回宣言されています。`);
@@ -382,19 +421,79 @@ export abstract class CompilerBase {
       }
       methods.push({ name: method.name, type: this.resolveSignature(method.signature).type });
     }
+    let terms: TypeTerm[] | undefined;
+    let comparable = false;
+    for (const element of syntax.elements) {
+      const resolved = this.resolveTypeElement(element);
+      if (!resolved) continue;
+      if ('embedded' in resolved) {
+        for (const method of resolved.embedded.methods) addMethod(method, element);
+        if (resolved.embedded.typeSet?.comparable) comparable = true;
+        const embeddedTerms = resolved.embedded.typeSet?.terms;
+        if (embeddedTerms) terms = terms ? intersectTerms(terms, embeddedTerms) : embeddedTerms;
+        continue;
+      }
+      terms = terms ? intersectTerms(terms, resolved.terms) : resolved.terms;
+    }
     methods.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return { kind: 'interface', methods };
+    if (!terms && !comparable) return { kind: 'interface', methods };
+    return { kind: 'interface', methods, typeSet: { comparable: comparable || undefined, terms } };
+  }
+
+  /** An element of an interface: an embedded interface, or a union of type terms, which may contain interfaces. */
+  private resolveTypeElement(
+    element: TypeElementSyntax
+  ): { embedded: InterfaceType } | { terms: TypeTerm[] } | undefined {
+    const resolved = element.terms.map((term) => ({
+      tilde: term.tilde,
+      type: this.resolveConstraint(term.type),
+      syntax: term,
+    }));
+    if (resolved.some((term) => term.type === BASIC.invalid)) return undefined;
+    if (resolved.length === 1 && !resolved[0].tilde && underlying(resolved[0].type).kind === 'interface') {
+      return { embedded: underlying(resolved[0].type) as InterfaceType };
+    }
+    const terms: TypeTerm[] = [];
+    for (const term of resolved) {
+      const under = underlying(term.type);
+      if (under.kind === 'interface') {
+        if (under.methods.length > 0) {
+          this.error(
+            term.syntax.type,
+            `メソッドを持つインターフェース ${describeType(term.type)} は、| で並べられません。`
+          );
+          continue;
+        }
+        terms.push(...(under.typeSet?.terms ?? []));
+        continue;
+      }
+      if (term.tilde && !identical(term.type, under)) {
+        this.error(
+          term.syntax.type,
+          `~ を付けられるのは、元の型そのものだけです（${describeType(term.type)} の元の型は ${describeType(under)} です）。`
+        );
+        continue;
+      }
+      terms.push({ tilde: term.tilde, type: term.type });
+    }
+    return { terms };
   }
 
   protected resolveSignature(signature: {
-    parameters: { name?: string; type: TypeExpression }[];
+    parameters: ({ name?: string; type: TypeExpression; variadic?: boolean } & Partial<Span>)[];
     results: { name?: string; type: TypeExpression }[];
   }): {
     type: FuncType;
   } {
-    const params = signature.parameters.map((parameter) => this.resolveType(parameter.type));
+    const last = signature.parameters.length - 1;
+    const params = signature.parameters.map((parameter, index): Type => {
+      const type = this.resolveType(parameter.type);
+      if (!parameter.variadic) return type;
+      if (index !== last) this.error(parameter as Span, '... を付けられるのは最後の引数だけです。');
+      return type === BASIC.invalid ? type : { kind: 'slice', element: type };
+    });
     const results = signature.results.map((result) => this.resolveType(result.type));
-    return { type: funcType(params, results) };
+    return { type: funcType(params, results, signature.parameters.at(-1)?.variadic === true) };
   }
 
   /** Creates the type parameters of a generic declaration, resolving their constraints in `scope`. */
@@ -409,17 +508,14 @@ export abstract class CompilerBase {
       this.declare(parameter.name, { kind: 'type', name: parameter.name, type: declared[index] }, parameter);
     }
     for (const [index, parameter] of parameters.entries()) {
-      const constraint = this.resolveType(parameter.constraint);
+      const constraint = this.resolveConstraint(parameter.constraint);
       const under = underlying(constraint);
       if (constraint === BASIC.invalid) continue;
-      if (under.kind !== 'interface') {
-        this.error(
-          parameter.constraint,
-          `${describeType(constraint)} は型の制約には使えません（インターフェースを書いてください）。`
-        );
-        continue;
-      }
-      declared[index].constraint = under;
+      // A constraint that is not an interface, `[T int]`, stands for the interface of that single type.
+      declared[index].constraint =
+        under.kind === 'interface'
+          ? under
+          : { kind: 'interface', methods: [], typeSet: { terms: [{ tilde: false, type: constraint }] } };
     }
     return declared;
   }
@@ -480,4 +576,24 @@ function describeConstraint(constraint: InterfaceType): string {
     return 'comparable';
   if (constraint === EMPTY_INTERFACE) return 'any';
   return describeType(constraint);
+}
+
+interface TypeTerm { tilde: boolean; type: Type }
+
+/** Whether a term's types all belong to another term's. */
+function termIncludes(outer: TypeTerm, inner: TypeTerm): boolean {
+  if (outer.tilde) return identical(underlying(inner.type), outer.type);
+  return !inner.tilde && identical(inner.type, outer.type);
+}
+
+/** The terms of the intersection of two unions, as an interface with several type elements has. */
+function intersectTerms(a: TypeTerm[], b: TypeTerm[]): TypeTerm[] {
+  const result: TypeTerm[] = [];
+  for (const x of a) {
+    for (const y of b) {
+      if (termIncludes(y, x)) result.push(x);
+      else if (termIncludes(x, y)) result.push(y);
+    }
+  }
+  return result;
 }
