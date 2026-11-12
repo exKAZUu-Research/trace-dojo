@@ -30,6 +30,7 @@ import {
   PyModule,
   PyObject,
   PyOpaque,
+  PyTuple,
   type PyValue,
 } from './values';
 
@@ -156,13 +157,24 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
 
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
+  const hook = attributeHook(target, '__setattr__');
+  if (hook !== undefined) {
+    callValue(bindValue(hook, target), [name, value]);
+    return;
+  }
+  setAttributeDirectly(target, name, value);
+}
+
+/** A `__setattr__` or `__delattr__` a program's class defines, which the class's instances, native or not, go through. */
+function attributeHook(target: PyValue, name: string): PyValue | undefined {
+  if (!(target instanceof PyInstance || target instanceof PyTuple) || target.cls.isBuiltin) return undefined;
+  const hook = lookupSpecial(target, name);
+  return hook instanceof PyBuiltinFunction ? undefined : hook;
+}
+
+/** `object.__setattr__`: sets an attribute without the hook a program's class may define. */
+export function setAttributeDirectly(target: PyValue, name: string, value: PyValue): void {
   if (target instanceof PyInstance) {
-    const cls = target.cls;
-    const custom = cls.isBuiltin ? undefined : lookupSpecial(target, '__setattr__');
-    if (custom !== undefined && !(custom instanceof PyBuiltinFunction)) {
-      callValue(bindValue(custom, target), [name, value]);
-      return;
-    }
     setInstanceAttribute(target, name, value);
     return;
   }
@@ -286,14 +298,19 @@ function noDictError(target: PyValue, name: string): Error {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Follows the rules of attribute deletion for each kind of object.
 export function deleteAttribute(target: PyValue, name: string): void {
+  const hook = attributeHook(target, '__delattr__');
+  if (hook !== undefined) {
+    callValue(bindValue(hook, target), [name]);
+    return;
+  }
+  deleteAttributeDirectly(target, name);
+}
+
+/** `object.__delattr__`: deletes an attribute without the hook a program's class may define. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Follows the rules of attribute deletion for each kind of object.
+export function deleteAttributeDirectly(target: PyValue, name: string): void {
   if (target instanceof PyInstance) {
-    const custom = target.cls.isBuiltin ? undefined : lookupSpecial(target, '__delattr__');
-    if (custom !== undefined && !(custom instanceof PyBuiltinFunction)) {
-      callValue(bindValue(custom, target), [name]);
-      return;
-    }
     deleteInstanceAttribute(target, name);
     return;
   }

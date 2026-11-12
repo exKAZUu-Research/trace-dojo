@@ -1,20 +1,11 @@
-import { deleteInstanceAttribute, setInstanceAttribute } from './attributes';
+import { deleteAttributeDirectly, setAttributeDirectly } from './attributes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { defineUnsupportedAttributes } from './descriptors';
 import { isEnumClass } from './enums';
 import { identityHash, NATIVE_HASHES, pyHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
-import {
-  attributeName,
-  bindValue,
-  callValue,
-  deleteAttribute,
-  getAttribute,
-  isCallable,
-  lookupSpecial,
-  nextOf,
-} from './objects';
+import { attributeName, bindValue, callValue, getAttribute, isCallable, lookupSpecial, nextOf } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { typeOr } from './typeHints';
 import {
@@ -98,15 +89,13 @@ method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
 });
 method(objectClass, '__setattr__', 'expected', 2, 2, (self, [nameValue, value]) => {
   const name = attributeName(nameValue);
-  if (self instanceof PyInstance) setInstanceAttribute(self, name, value);
-  else currentRuntime().setAttributeOf(self, name, value);
+  setAttributeDirectly(self, name, value);
   return None;
 });
 method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => getAttribute(self, attributeName(name)));
 method(objectClass, '__delattr__', 'one', 1, 1, (self, [nameValue]) => {
   const name = attributeName(nameValue);
-  if (self instanceof PyInstance) deleteInstanceAttribute(self, name);
-  else deleteAttribute(self, name);
+  deleteAttributeDirectly(self, name);
   return None;
 });
 method(objectClass, '__sizeof__', 'none', 0, 0, () => 16n);

@@ -2,10 +2,10 @@ import type { TracedFrame } from '../interpreter/traceRecorder';
 import type { Expression, ScopeInfo } from './ast';
 import type { PyCell, PyFunction, PyValue } from './values';
 
-/** The variables of a running module, class body, or function call. */
 /** An annotation of a class body: its name, how to evaluate it, and its expression when the program wrote one. */
 export type AnnotationThunk = [name: string, evaluate: () => PyValue, expression?: Expression];
 
+/** The variables of a running module, class body, or function call. */
 export class Frame implements TracedFrame {
   readonly temporaries: PyValue[] = [];
   /** How many native calls were running when the frame last started or resumed running. */
