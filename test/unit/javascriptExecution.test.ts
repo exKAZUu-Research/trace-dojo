@@ -1093,6 +1093,21 @@ async function* g() { const r = yield* arr; console.log('r', r); }
 const tick = (n) => n > 0 && Promise.resolve().then(() => { console.log('tick'); tick(n - 1); });
 (async () => { const it = g(); await it.next(); tick(5); console.log(await it.return(7)); for await (const x of arr) { if (x === 1) break; } console.log('after break'); })();`,
   ],
+  [
+    'return values passed to async generators delegating with yield*',
+    `const it = { [Symbol.asyncIterator]() { return this; }, next() { return Promise.resolve({ value: 1, done: false }); }, return(v) { console.log('received', v instanceof Promise, v); return Promise.resolve({ value: v, done: true }); } };
+async function* f() { yield* it; }
+const s = { [Symbol.iterator]() { return { next: () => ({ value: 1, done: false }), return(v) { console.log('sync received', v); return { value: v, done: true }; } }; } };
+async function* h() { try { yield* s; } finally { console.log('h finally'); } }
+(async () => {
+  let g = f(); await g.next(); console.log(await g.return(Promise.resolve(5)));
+  g = h(); await g.next(); console.log(await g.return(Promise.resolve(6)));
+})();`,
+  ],
+  [
+    'regular expressions passed to literal string searches',
+    `for (const m of ["includes","startsWith","endsWith"]) try { console.log("a/a/"[m](/a/)) } catch (e) { console.log(e.name, e.message) } console.log("abc".includes("b", 1), "abc".startsWith("b", 1), "abc".endsWith("b", 2), "abc".includes({ toString() { return "c" } }))`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

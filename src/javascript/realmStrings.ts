@@ -1,7 +1,7 @@
 import type { RealmBuilder } from './realm';
 import { asRegExp, replaceWithRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
-import { isCallable, type NativeCall, type Value } from './values';
+import { isCallable, JsObject, type NativeCall, type Value } from './values';
 
 /** One fixed locale, so that sorting with localeCompare gives the same order on every server. */
 const collator = new Intl.Collator('en');
@@ -79,15 +79,17 @@ function defineSearches(method: StringMethod): void {
       args[1] === undefined ? Number.POSITIVE_INFINITY : runtime.toNumber(args[1])
     )
   );
-  method('includes', 1, ({ runtime, args }, text) =>
-    text.includes(runtime.toString(args[0]), integerArgument(runtime, args[1], 0))
-  );
-  method('startsWith', 1, ({ runtime, args }, text) =>
-    text.startsWith(runtime.toString(args[0]), integerArgument(runtime, args[1], 0))
-  );
-  method('endsWith', 1, ({ runtime, args }, text) =>
-    text.endsWith(runtime.toString(args[0]), integerArgument(runtime, args[1], text.length))
-  );
+  for (const name of ['includes', 'startsWith', 'endsWith'] as const) {
+    method(name, 1, ({ runtime, args }, text) => {
+      if (args[0] instanceof JsObject && args[0].regexp) {
+        runtime.throwError('TypeError', `First argument to String.prototype.${name} must not be a regular expression`);
+      }
+      const search = runtime.toString(args[0]);
+      return name === 'endsWith'
+        ? text.endsWith(search, integerArgument(runtime, args[1], text.length))
+        : text[name](search, integerArgument(runtime, args[1], 0));
+    });
+  }
   method('localeCompare', 1, ({ runtime, args }, text) => collator.compare(text, runtime.toString(args[0])));
 }
 

@@ -50,12 +50,16 @@ export function asyncIteratorOf(
     iterator,
     nextMethod: iteration.nextMethod,
     next: iteration.next,
-    // The async-from-sync iterator always has `return`, which ends at once when the sync iterator has none.
+    // The async-from-sync iterator always has `return`, which resolves at once, without awaiting the value, when the
+    // sync iterator has none.
     get return() {
       return (
         iteration.return ??
-        ((...args: Value[]) =>
-          asyncFromSyncStep(runtime, iterator, () => iteratorResult(runtime, args[0], true), 'return'))
+        ((...args: Value[]) => {
+          const promise = newPromise(runtime);
+          resolvePromise(runtime, promise, iteratorResult(runtime, args[0], true));
+          return promise;
+        })
       );
     },
     get throw() {
@@ -78,6 +82,15 @@ export function* delegateYield(runtime: Runtime, iterable: Value, isAsync: boole
     return yield* delegateTo(runtime, iteration, isAsync);
   } finally {
     temporaries.length = held;
+  }
+}
+
+function* awaitedReturn(value: Value): Steps<Resume> {
+  try {
+    return { kind: 'return', value: resumedValue(yield new Awaiting(value)) };
+  } catch (error) {
+    if (!(error instanceof JsThrow)) throw error;
+    return { kind: 'throw', value: error.value };
   }
 }
 
@@ -111,6 +124,8 @@ function* delegateTo(runtime: Runtime, iteration: ProtocolIteration, isAsync: bo
     }
     // A sync generator passes the delegate's result through as it is; an async one yields its value.
     resume = isAsync ? yield runtime.get(result, 'value') : yield new DelegatedResult(result);
+    // An async generator awaits a return value it resumes with, as AsyncGeneratorUnwrapYieldResumption does.
+    if (isAsync && resume.kind === 'return') resume = yield* awaitedReturn(resume.value);
   }
 }
 
