@@ -1,6 +1,6 @@
-// code-gauge-allow-file fileNcss 557 -- The methods and attributes of the builtin types it defines belong together.
-import { pyRepr, pyStr } from '../conversions';
-import { method, pythonFunction, pythonMethod } from '../define';
+// code-gauge-allow-file fileNcss 449 -- The methods and attributes of the builtin types it defines belong together.
+import { pyRepr } from '../conversions';
+import { method, pythonMethod } from '../define';
 import { defineGetSet } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { mappingEntries } from '../expressionEvaluator';
@@ -36,7 +36,6 @@ import {
   NotImplemented,
   propertyClass,
   pyError,
-  tupleClass,
   typeClass,
   typeError,
   typeName,
@@ -52,11 +51,10 @@ import {
   PyDict,
   PyIterator,
   PyObject,
-  PyTuple,
   type PyValue,
 } from '../values';
 import { COLLECTIONS_SOURCE } from './collectionsSource';
-import { PYTHON_KEYWORDS } from './keywords';
+import { makeNamedTupleClass, namedtupleFunction } from './namedtuple';
 
 // deque -------------------------------------------------------------------------------------------------------------
 
@@ -710,185 +708,6 @@ function unionLike(like: PyDict, first: PyDict, second: PyDict): PyDict {
   return result;
 }
 
-// namedtuple --------------------------------------------------------------------------------------------------------
-
-function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
-  const typename = pyStr(argument(args, kwargs, 0, 'typename') as PyValue);
-  const fields = namedTupleFields(
-    argument(args, kwargs, 1, 'field_names') as PyValue,
-    isTruthy(kwargs?.get('rename') ?? false)
-  );
-  checkNamedTupleNames(typename, fields, isTruthy(kwargs?.get('rename') ?? false));
-  const defaults = toArray(kwargs?.get('defaults') ?? newTuple([]));
-  if (defaults.length > fields.length) throw typeError('Got more default values than field names');
-  const cls = new PyClass(typename, [tupleClass], typeClass);
-  cls.mro = [cls, ...tupleClass.mro];
-  cls.isBuiltin = false;
-  cls.layout = { base: 'native' };
-  cls.construct = (tupleType, values, keywords) => newNamedTuple(tupleType, fields, defaults, values, keywords);
-  const module = kwargs?.get('module');
-  cls.module = typeof module === 'string' ? module : '__main__';
-  cls.dict.set('__doc__', `${typename}(${fields.join(', ')})`);
-  cls.dict.set('__slots__', newTuple([]));
-  cls.dict.set('_fields', newTuple(fields));
-  cls.dict.set(
-    '_field_defaults',
-    newDict(defaults.map((value, index) => [fields[fields.length - defaults.length + index], value]))
-  );
-  cls.dict.set('__match_args__', newTuple(fields));
-  cls.dict.set('__module__', cls.module);
-  for (const [index, name] of fields.entries()) {
-    cls.dict.set(
-      name,
-      new PyDescriptor(
-        propertyClass,
-        new PyBuiltinFunction(builtinClass('getter'), name, ([self]) => (self as PyTuple).items[index])
-      )
-    );
-  }
-  return cls;
-}
-
-/** The field names of a namedtuple, with `rename` replacing each unusable or repeated name by `_<index>`. */
-function namedTupleFields(fieldNames: PyValue, rename: boolean): string[] {
-  const fields =
-    typeof fieldNames === 'string'
-      ? fieldNames.replaceAll(',', ' ').split(/\s+/).filter(Boolean)
-      : toArray(fieldNames).map(pyStr);
-  if (!rename) return fields;
-  const seen = new Set<string>();
-  return fields.map((name, index) => {
-    const isUnusable = !isIdentifier(name) || PYTHON_KEYWORDS.has(name) || name.startsWith('_') || seen.has(name);
-    seen.add(name);
-    return isUnusable ? `_${index}` : name;
-  });
-}
-
-/** Checks the names of a namedtuple as collections.namedtuple does, in its order. */
-function checkNamedTupleNames(typename: string, fields: string[], rename: boolean): void {
-  for (const name of [typename, ...fields]) {
-    if (!isIdentifier(name)) throw valueError(`Type names and field names must be valid identifiers: ${pyRepr(name)}`);
-    if (PYTHON_KEYWORDS.has(name)) throw valueError(`Type names and field names cannot be a keyword: ${pyRepr(name)}`);
-  }
-  const seen = new Set<string>();
-  for (const name of fields) {
-    if (name.startsWith('_') && !rename)
-      throw valueError(`Field names cannot start with an underscore: ${pyRepr(name)}`);
-    if (seen.has(name)) throw valueError(`Encountered duplicate field name: ${pyRepr(name)}`);
-    seen.add(name);
-  }
-}
-
-function isIdentifier(name: string): boolean {
-  return /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(name);
-}
-
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows how a namedtuple binds positional and keyword arguments to its fields.
-function newNamedTuple(
-  cls: PyClass,
-  fields: string[],
-  defaults: PyValue[],
-  values: PyValue[],
-  kwargs: Kwargs
-): PyTuple {
-  const qualified = `${cls.name}.__new__`;
-  if (values.length > fields.length) {
-    throw typeError(
-      `${qualified}() takes ${fields.length + 1} positional arguments but ${values.length + 1} were given`
-    );
-  }
-  const items: (PyValue | undefined)[] = [...values];
-  for (const [key, value] of kwargs ?? []) {
-    const index = fields.indexOf(key);
-    if (index === -1) throw typeError(`${qualified}() got an unexpected keyword argument '${key}'`);
-    if (items[index] !== undefined) throw typeError(`${qualified}() got multiple values for argument '${key}'`);
-    items[index] = value;
-  }
-  const defaultsStart = fields.length - defaults.length;
-  const missing: string[] = [];
-  for (let index = 0; index < fields.length; index++) {
-    if (items[index] !== undefined) continue;
-    if (index >= defaultsStart) items[index] = defaults[index - defaultsStart];
-    else missing.push(fields[index]);
-  }
-  if (missing.length > 0) {
-    const quoted = missing.map((name) => `'${name}'`);
-    const names =
-      quoted.length === 1
-        ? quoted[0]
-        : quoted.length === 2
-          ? `${quoted[0]} and ${quoted[1]}`
-          : `${quoted.slice(0, -1).join(', ')}, and ${quoted.at(-1)}`;
-    throw typeError(
-      `${qualified}() missing ${missing.length} required positional argument${missing.length === 1 ? '' : 's'}: ${names}`
-    );
-  }
-  return new PyTuple(cls, items as PyValue[]);
-}
-
-/** Methods every namedtuple class has, defined on a shared base so that each class looks them up. */
-export const namedTupleBase = builtinClass('NamedTupleMethods');
-function fieldsOf(tuple: PyTuple): readonly PyValue[] {
-  return (tuple.cls.lookup('_fields') as PyTuple | undefined)?.items ?? [];
-}
-
-function defineNamedTupleMethods(): void {
-  method(namedTupleBase, '__repr__', 'none', 0, 0, (self) => {
-    const tuple = self as PyTuple;
-    const fields = fieldsOf(tuple);
-    return containerRepr(
-      tuple,
-      '...',
-      () =>
-        `${tuple.cls.name}(${fields.map((field, index) => `${field as string}=${pyRepr(tuple.items[index])}`).join(', ')})`
-    );
-  });
-  method(namedTupleBase, '_asdict', 'none', 0, 0, (self) => {
-    const tuple = self as PyTuple;
-    return newDict(fieldsOf(tuple).map((field, index) => [field, tuple.items[index]]));
-  });
-  namedTupleBase.dict.set(
-    '_replace',
-    new PyBuiltinFunction(
-      builtinClass('method_descriptor'),
-      '_replace',
-      (args, kwargs) => {
-        const tuple = args[0] as PyTuple;
-        if (args.length > 1)
-          throw typeError(`${tuple.cls.name}._replace() takes 1 positional argument but ${args.length} were given`);
-        const fields = fieldsOf(tuple);
-        const items = [...tuple.items];
-        for (const [key, value] of kwargs ?? []) {
-          const index = fields.indexOf(key);
-          if (index === -1) throw valueError(`Got unexpected field names: [${pyRepr(key)}]`);
-          items[index] = value;
-        }
-        return new PyTuple(tuple.cls, items);
-      },
-      undefined,
-      'method',
-      'NamedTuple'
-    )
-  );
-  method(namedTupleBase, '_make', 'one', 1, 1, (cls, [iterable]) => callValue(cls, toArray(iterable)), {
-    binding: 'class',
-  });
-  namedTupleBase.dict.set('__replace__', namedTupleBase.dict.get('_replace') as PyValue);
-  method(namedTupleBase, '__getnewargs__', 'none', 0, 0, (self) => newTuple([...(self as PyTuple).items]));
-}
-defineNamedTupleMethods();
-
-function namedtupleWithMethods(args: PyValue[], kwargs: Kwargs): PyValue {
-  const cls = namedtuple(args, kwargs) as PyClass;
-  for (const [name, value] of namedTupleBase.dict) if (!cls.dict.has(name)) cls.dict.set(name, value);
-  return cls;
-}
-
-/** A namedtuple class that a library module defines, such as `functools.CacheInfo`. */
-export function makeNamedTupleClass(name: string, fields: string[], module: string): PyClass {
-  return namedtupleWithMethods([name, newList(fields)], new Map([['module', module]])) as PyClass;
-}
-
 const pythonNamespaces = new WeakMap<object, Map<string, PyValue>>();
 registerLazyAttributes('collections', ['ChainMap', 'UserDict', 'UserList', 'UserString'], (runtime, name) => {
   let namespace = pythonNamespaces.get(runtime);
@@ -909,15 +728,8 @@ registerModule(
       ['Counter', counterClass],
       ['defaultdict', defaultdictClass],
       ['OrderedDict', orderedDictClass],
-      [
-        'namedtuple',
-        pythonFunction(
-          'namedtuple',
-          'typename, field_names, *, rename=False, defaults=None, module=None',
-          namedtupleWithMethods
-        ),
-      ],
+      ['namedtuple', namedtupleFunction],
     ])
 );
 
-export { getIterator, PyObject };
+export { getIterator, makeNamedTupleClass, PyObject };
