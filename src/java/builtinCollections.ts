@@ -3,7 +3,7 @@ import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
   batchRemovalClasses,
-  checkIndex,
+  checkListIndex,
   checkPosition,
   classType,
   defaultRemoveClasses,
@@ -13,6 +13,7 @@ import {
   defineSnapshot,
   elementsOf,
   fixedSizeClasses,
+  indexFailures,
   indexOf,
   itemsOf,
   javaEquals,
@@ -51,8 +52,17 @@ export interface Collections {
   iterableClass: ClassInfo;
   iteratorClass: ClassInfo;
   listClass: ClassInfo;
-  /** The class of the lists `List.of` returns. */
+  /** The class of the lists `List.of` returns, but of one or two elements. */
   immutableList: ClassInfo;
+  /** The class of the lists of one or two elements that `List.of` and `List.copyOf` return. */
+  pairList: ClassInfo;
+  /** The classes of `Collections.emptyList`, `Collections.singletonList`, and `Collections.nCopies`. */
+  emptyList: ClassInfo;
+  singletonList: ClassInfo;
+  copiesList: ClassInfo;
+  /** The classes of `Collections.unmodifiableList` of a `LinkedList` or a program's list, and of another list. */
+  unmodifiableList: ClassInfo;
+  unmodifiableRandomAccessList: ClassInfo;
   /** The class of the maps `Map.of` returns. */
   immutableMap: ClassInfo;
   /** The class of the sets `Set.of` returns. */
@@ -114,11 +124,34 @@ export function defineCollections(
   defineArrayDeque(context, lists, dequeClass);
   const priorityQueue = definePriorityQueue(context, lists, registry.classes.get('Queue') as ClassInfo);
   const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
-  unmodifiableClasses.add(immutableList);
+  const pairList = defineRestrictedList(context, 'List12', lists, () => true);
+  const emptyList = defineRestrictedList(context, 'EmptyList', lists, () => true, 'Collections$');
+  const singletonList = defineRestrictedList(context, 'SingletonList', lists, () => true, 'Collections$');
+  const copiesList = defineRestrictedList(context, 'CopiesList', lists, () => true, 'Collections$');
+  const unmodifiableList = defineRestrictedList(context, 'UnmodifiableList', lists, () => true, 'Collections$');
+  const unmodifiableRandomAccessList = defineRestrictedList(
+    context,
+    'UnmodifiableRandomAccessList',
+    lists,
+    () => true,
+    'Collections$'
+  );
+  for (const cls of [
+    immutableList,
+    pairList,
+    emptyList,
+    singletonList,
+    copiesList,
+    unmodifiableList,
+    unmodifiableRandomAccessList,
+  ]) {
+    unmodifiableClasses.add(cls);
+  }
   // Arrays.asList writes through to its array, so it may set elements but not change its size.
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   fixedSizeClasses.add(fixedSizeList);
   defaultRemoveClasses.add(fixedSizeList);
+  defineIndexFailures({ immutableList, pairList, emptyList, singletonList, fixedSizeList }, registry);
   const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
   // A map's key and entry sets compare and hash as sets; its values, a plain collection, keep identity.
   defineSetEquality(snapshotSet, context, setClass);
@@ -146,6 +179,12 @@ export function defineCollections(
     immutableSet,
     unmodifiableViewSet,
     immutableList,
+    pairList,
+    emptyList,
+    singletonList,
+    copiesList,
+    unmodifiableList,
+    unmodifiableRandomAccessList,
     fixedSizeList,
     sortedClasses: [
       ...['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
@@ -166,6 +205,38 @@ function defineUnmodifiableViewSet(context: Context, setClass: ClassInfo, itrCla
   }
   unmodifiableClasses.add(cls);
   return cls;
+}
+
+/**
+ * Reports an index outside a list as its JDK class does: an array access for `List.of`, `Arrays.asList`, and `Stack`, and
+ * messages of their own for the other lists that do not call `Objects.checkIndex`.
+ */
+function defineIndexFailures(lists: Record<string, ClassInfo>, registry: Context['registry']): void {
+  indexFailures.set(lists.immutableList, arrayAccessFailure);
+  indexFailures.set(lists.fixedSizeList, arrayAccessFailure);
+  indexFailures.set(lists.pairList, (frame, index, length) =>
+    throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index} Size: ${length}`)
+  );
+  indexFailures.set(lists.emptyList, (frame, index) =>
+    throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}`)
+  );
+  indexFailures.set(lists.singletonList, sizedIndexFailure);
+  indexFailures.set(registry.classes.get('LinkedList') as ClassInfo, sizedIndexFailure);
+  // A Vector checks only the upper bound and reads its array, whose capacity starts at 10 and doubles.
+  indexFailures.set(registry.classes.get('Stack') as ClassInfo, (frame, index, length) => {
+    if (index >= length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${index}`);
+    let capacity = 10;
+    while (capacity < length) capacity *= 2;
+    return arrayAccessFailure(frame, index, capacity);
+  });
+}
+
+function arrayAccessFailure(frame: Frame, index: number, length: number): never {
+  return throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Index ${index} out of bounds for length ${length}`);
+}
+
+function sizedIndexFailure(frame: Frame, index: number, length: number): never {
+  return throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${length}`);
 }
 
 /** `ArrayList`, `Stack`, and `LinkedList`, which hold their elements in an array. */
@@ -529,17 +600,17 @@ function copiesBackingArray(collection: JavaObject): boolean {
 /** The methods that read, replace, and remove elements by position or value. */
 function defineListUpdates(cls: ClassInfo, element: JavaType, context: Context): void {
   addMethod(cls, 'get', [INT], element, false, (frame, receiver, [index]) => {
-    checkIndex(frame, index as number, elementsOf(receiver).length);
+    checkListIndex(frame, receiver, index as number, elementsOf(receiver).length);
     return elementsOf(receiver)[index as number];
   });
   addMethod(cls, 'set', [INT, element], element, false, (frame, receiver, [index, value]) => {
-    checkIndex(frame, index as number, elementsOf(receiver).length);
+    checkListIndex(frame, receiver, index as number, elementsOf(receiver).length);
     const previous = elementsOf(receiver)[index as number];
     elementsOf(receiver)[index as number] = value;
     return previous;
   });
   addMethod(cls, 'remove', [INT], element, false, (frame, receiver, [index]) => {
-    checkIndex(frame, index as number, elementsOf(receiver).length);
+    checkListIndex(frame, receiver, index as number, elementsOf(receiver).length);
     touch(receiver);
     return elementsOf(receiver).splice(index as number, 1)[0];
   });

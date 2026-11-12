@@ -78,7 +78,7 @@ export function defineUtilities(
     (frame, _, [array]) => {
       const values = arrayOf(frame, array).values;
       if (values.includes(undefined)) throwBuiltin(frame, 'NullPointerException');
-      return createList(frame, collections.immutableList, [...values]);
+      return createList(frame, immutableListClass(collections, values.length), [...values]);
     }
   );
   addGenericStatic(
@@ -99,7 +99,7 @@ export function defineUtilities(
     (frame, _, [collection]) => {
       const values = itemsOf(frame, collection);
       if (values.includes(undefined)) throwBuiltin(frame, 'NullPointerException');
-      return createList(frame, collections.immutableList, [...values]);
+      return createList(frame, immutableListClass(collections, values.length), [...values]);
     }
   );
   defineMapOf(collections, objectType);
@@ -278,17 +278,24 @@ function defineCollectionViews(
   };
   generic(['T'], (t) =>
     addMethod(cls, 'emptyList', [], classOf(listClass, t), true, (frame) =>
-      createList(frame, collections.immutableList, [])
+      createList(frame, collections.emptyList, [])
     )
   );
   generic(['T'], (t) =>
     addMethod(cls, 'singletonList', [t], classOf(listClass, t), true, (frame, _, [value]) =>
-      createList(frame, collections.immutableList, [value])
+      createList(frame, collections.singletonList, [value])
     )
   );
   generic(['T'], (t) =>
     addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) =>
-      wrap(createList(frame, collections.immutableList, itemsOf(frame, list)), list as JavaObject)
+      wrap(
+        createList(
+          frame,
+          isRandomAccess(list as JavaObject) ? collections.unmodifiableRandomAccessList : collections.unmodifiableList,
+          itemsOf(frame, list)
+        ),
+        list as JavaObject
+      )
     )
   );
   for (const [owner, immutable, names] of [
@@ -337,6 +344,18 @@ function wrap(view: JavaObject, source: JavaObject): JavaObject {
   view.retained = [source];
   unmodifiableWrappers.add(view);
   return view;
+}
+
+/** Whether a list implements `RandomAccess`, as every list of the JDK's here but `LinkedList` does. */
+function isRandomAccess(list: JavaObject): boolean {
+  let cls = list.cls;
+  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
+  return cls.name !== 'LinkedList' && cls.name !== 'Object';
+}
+
+/** The class of the list `List.of` and `List.copyOf` return, which the JDK picks by the number of elements. */
+function immutableListClass(collections: Collections, length: number): ClassInfo {
+  return length === 1 || length === 2 ? collections.pairList : collections.immutableList;
 }
 
 function createList(frame: Frame, cls: ClassInfo, elements: Value[]): JavaObject {
@@ -717,7 +736,7 @@ function defineCollectionsClass(
       if ((count as number) < 0) throwBuiltin(frame, 'IllegalArgumentException', `List length = ${count as number}`);
       return createList(
         frame,
-        collections.immutableList,
+        collections.copiesList,
         Array.from({ length: count as number }, () => value)
       );
     }

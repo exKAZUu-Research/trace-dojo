@@ -351,6 +351,38 @@ public class Main {
   });
 });
 
+test("Java's lists report indexes outside them with the exception and message of each JDK list class", () => {
+  const program = `import java.util.*;
+public class Main {
+  static void t(String label, Runnable r) { try { r.run(); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] a) {
+    t("nCopies", () -> Collections.nCopies(3, "x").get(5));
+    t("single", () -> Collections.singletonList(1).get(1));
+    t("emptyNeg", () -> Collections.emptyList().get(-1));
+    t("unmodOf", () -> Collections.unmodifiableList(List.of(1, 2, 3)).get(5));
+    t("unmodLinked", () -> Collections.unmodifiableList(new LinkedList<>(List.of(1))).get(5));
+    t("unmodAsList", () -> Collections.unmodifiableList(Arrays.asList(1)).get(5));
+    t("linkedSet", () -> new LinkedList<>(List.of(1)).set(3, 1));
+    t("linkedRemove", () -> new LinkedList<>(List.of(1)).remove(3));
+    t("linkedAdd", () -> new LinkedList<>(List.of(1)).add(3, 1));
+    t("asListSet", () -> Arrays.asList(1).set(3, 1));
+    t("of12set", () -> List.of(1).set(3, 1));
+    t("copyOf1", () -> List.copyOf(List.of(1)).get(4));
+    t("copyOf2", () -> List.copyOf(new ArrayList<>(List.of(1, 2))).get(4));
+    t("stack", () -> new Stack<Integer>().get(0));
+    t("vectorish", () -> { Stack<Integer> s = new Stack<>(); s.push(1); s.set(2, 1); });
+    t("linkedGetFirst", () -> new LinkedList<Integer>().getFirst());
+    t("ofIndexOf", () -> System.out.println(List.of(1, 2).indexOf(2)));
+    System.out.println(List.of(1).getClass().getName() + " " + List.of(1, 2, 3).getClass().getName() + " " + List.of().getClass().getName() + " " + Collections.emptyList().getClass().getName() + " " + Collections.singletonList(1).getClass().getName() + " " + Arrays.asList(1).getClass().getName() + " " + Collections.nCopies(2, 1).getClass().getName() + " " + Collections.unmodifiableList(new ArrayList<>()).getClass().getName() + " " + Collections.unmodifiableList(new LinkedList<>()).getClass().getName() + " " + java.util.stream.Stream.of(1).toList().getClass().getName());
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'nCopies java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 3\nsingle java.lang.IndexOutOfBoundsException: Index: 1, Size: 1\nemptyNeg java.lang.IndexOutOfBoundsException: Index: -1\nunmodOf java.lang.ArrayIndexOutOfBoundsException: Index 5 out of bounds for length 3\nunmodLinked java.lang.IndexOutOfBoundsException: Index: 5, Size: 1\nunmodAsList java.lang.ArrayIndexOutOfBoundsException: Index 5 out of bounds for length 1\nlinkedSet java.lang.IndexOutOfBoundsException: Index: 3, Size: 1\nlinkedRemove java.lang.IndexOutOfBoundsException: Index: 3, Size: 1\nlinkedAdd java.lang.IndexOutOfBoundsException: Index: 3, Size: 1\nasListSet java.lang.ArrayIndexOutOfBoundsException: Index 3 out of bounds for length 1\nof12set java.lang.UnsupportedOperationException\ncopyOf1 java.lang.IndexOutOfBoundsException: Index: 4 Size: 1\ncopyOf2 java.lang.IndexOutOfBoundsException: Index: 4 Size: 2\nstack java.lang.ArrayIndexOutOfBoundsException: Array index out of range: 0\nvectorish java.lang.ArrayIndexOutOfBoundsException: Array index out of range: 2\nlinkedGetFirst java.util.NoSuchElementException\n1\njava.util.ImmutableCollections$List12 java.util.ImmutableCollections$ListN java.util.ImmutableCollections$ListN java.util.Collections$EmptyList java.util.Collections$SingletonList java.util.Arrays$ArrayList java.util.Collections$CopiesList java.util.Collections$UnmodifiableRandomAccessList java.util.Collections$UnmodifiableList java.util.ImmutableCollections$ListN\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

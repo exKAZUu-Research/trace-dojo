@@ -412,6 +412,18 @@ export function compareNatural(frame: Frame, a: Value, b: Value): number {
   return frame.runtime.invokeVirtual(frame, comparable, 'compareTo', a, [b]) as number;
 }
 
+/** How a list class reports an index outside it, as the JDK implementation it stands for checks the index. */
+export const indexFailures = new Map<ClassInfo, (frame: Frame, index: number, length: number) => never>();
+
+/** Checks the index of an element of `list`, which an unmodifiable wrapper leaves to the list it wraps. */
+export function checkListIndex(frame: Frame, list: Value, index: number, length: number): void {
+  if (index >= 0 && index < length) return;
+  const object = list as JavaObject;
+  const checked = unmodifiableWrappers.has(object) ? (object.retained?.[0] as JavaObject) : object;
+  indexFailures.get(checked.cls)?.(frame, index, length);
+  checkIndex(frame, index, length);
+}
+
 export function checkIndex(frame: Frame, index: number, length: number): void {
   if (index < 0 || index >= length) {
     throwBuiltin(frame, 'IndexOutOfBoundsException', `Index ${index} out of bounds for length ${length}`);
