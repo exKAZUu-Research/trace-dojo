@@ -36,14 +36,14 @@ export class ValueIterator {
   private index = 0;
   private done = false;
 
-  /**
-   * @param roots The iterator object and the `next` method read from it, which garbage collection keeps reachable until
-   * the iteration ends.
-   * @param onEnd Called once when the iteration ends, by running out, failing, or closing.
-   */
   /** The values {@link rest} has taken so far, which stay reachable with the roots while it takes the others. */
   private collected: Value[] = [];
 
+  /**
+   * @param iterationRoots The iterator object and the `next` method read from it, which garbage collection keeps
+   * reachable until the iteration ends.
+   * @param onEnd Called once when the iteration ends, by running out, failing, or closing.
+   */
   constructor(
     private readonly source: readonly Value[] | HostIterator,
     private readonly iterationRoots: readonly Value[] = [],
