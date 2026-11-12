@@ -82,16 +82,19 @@ function checkNonlocals(scope: ScopeBuilder): void {
 
 /**
  * The nearest scope enclosing `scope` that owns `name`, skipping class bodies, which nested functions do not see. A class
- * body owns only the implicit `__class__` cell, and only for the functions CPython compiles as functions in it: an
- * inlined comprehension directly in a class body reads `__class__` as the class body does.
+ * body owns only the implicit `__class__` cell, and only for the scopes CPython compiles as functions in it, however
+ * deep: an inlined comprehension directly in a class body reads `__class__` as the class body does.
  */
 function ownerOf(scope: ScopeBuilder, name: string): ScopeBuilder | undefined {
-  let below = scope;
-  for (let current = scope.parent; current; below = current, current = current.parent) {
+  // Inlined comprehensions are part of the scope around them, so only a function among the scopes walked so far makes
+  // the reference come from a function of the class body.
+  let fromFunction = !scope.isInlined;
+  for (let current = scope.parent; current; current = current.parent) {
     if (current.info.kind === 'class') {
-      if (name === '__class__' && !below.isInlined) return current;
+      if (name === '__class__' && fromFunction) return current;
       continue;
     }
+    if (!current.isInlined) fromFunction = true;
     if (current.info.kind === 'module') return undefined;
     if (current.declarations.get(name) === 'global') return undefined;
     if (current.owns(name)) return current;
