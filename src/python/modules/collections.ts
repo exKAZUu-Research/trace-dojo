@@ -1,5 +1,5 @@
 import { mappingEntries } from '../callArguments';
-// code-gauge-allow-file fileNcss 475 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 478 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr } from '../conversions';
 import { method, pythonMethod, redeclareMethods } from '../define';
 import { defineGetSet } from '../descriptors';
@@ -712,9 +712,16 @@ method(
   },
   { keywords: ['last'], named: 1 }
 );
-method(orderedDictClass, '__eq__', 'one', 1, 1, (self, [other]) => {
+method(orderedDictClass, '__eq__', 'one', 1, 1, (self, [other]) => orderedDictEquals(self as PyDict, other));
+// odict_richcompare answers `!=` as the negation of its order-sensitive `==`, where dict's would ignore the order.
+method(orderedDictClass, '__ne__', 'one', 1, 1, (self, [other]) => {
+  const equal = orderedDictEquals(self as PyDict, other);
+  return equal === NotImplemented ? equal : !equal;
+});
+
+function orderedDictEquals(self: PyDict, other: PyValue): PyValue {
   if (!(other instanceof PyDict)) return NotImplemented;
-  const a = (self as PyDict).store.ordered();
+  const a = self.store.ordered();
   const b = other.store.ordered();
   if (a.length !== b.length) return false;
   if (other.cls.isSubclassOf(orderedDictClass)) {
@@ -724,7 +731,7 @@ method(orderedDictClass, '__eq__', 'one', 1, 1, (self, [other]) => {
     const found = other.store.lookup(entry.key);
     return found !== undefined && equals(found.value, entry.value);
   });
-});
+}
 
 // CPython's defaultdict and OrderedDict define `|` themselves, which keeps their type where dict gives a plain dict.
 for (const cls of [defaultdictClass, orderedDictClass]) {
