@@ -1055,6 +1055,17 @@ f().then(g);`,
 async function g() { try { { await using x = { [Symbol.asyncDispose]() { console.log('adispose'); throw 'aerr'; } }; } } catch (e) { console.log('caught', e); } }
 f(); g(); queueMicrotask(() => console.log('micro')); console.log('end');`,
   ],
+  [
+    'null resources of await using among other disposers',
+    `const log = (s) => console.log(s);
+const tick = (n) => { for (let i = 0; i < n; i++) queueMicrotask(() => log('tick ' + i)); };
+async function a() { { await using x = null, y = undefined; } log('a done'); }
+async function b() { { await using x = null; using s = { [Symbol.dispose]() { log('sync b'); } }; await using z = null; } log('b done'); }
+async function c() { { await using x = { async [Symbol.asyncDispose]() { log('async c'); } }; await using n = null; } log('c done'); }
+async function d() { { using s = { [Symbol.dispose]() { log('sync d'); } }; await using n = null; } log('d done'); }
+async function main() { for (const f of [a, b, c, d]) { f(); tick(4); await new Promise((r) => setTimeout(r, 0)); } }
+main();`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

@@ -173,18 +173,36 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(pendingValue(result, completion));
+    // As DisposeResources does, a run of null `await using` resources awaits once, before the next sync disposer or
+    // at the end, and not at all after an awaited disposer.
+    let needsAwait = false;
+    let hasAwaited = false;
     for (let disposable = disposables.pop(); disposable; disposable = disposables.pop()) {
-      const { value, method, isAsync, awaitsResult } = disposable;
+      const { value, method, isAsync } = disposable;
+      if (!isAsync && needsAwait && !hasAwaited) {
+        yield new Awaiting(undefined);
+        needsAwait = false;
+      }
+      if (!method) {
+        needsAwait = true;
+        continue;
+      }
       try {
         let disposed: Value;
         try {
-          disposed = method ? runtime.call(method, value, []) : undefined;
+          disposed = runtime.call(method, value, []);
         } catch (error) {
           // A Symbol.dispose fallback of `await using` runs wrapped in an async function, so its throw is awaited too.
-          if (isAsync && !awaitsResult && error instanceof JsThrow) yield new Awaiting(undefined);
+          if (isAsync && !disposable.awaitsResult && error instanceof JsThrow) {
+            hasAwaited = true;
+            yield new Awaiting(undefined);
+          }
           throw error;
         }
-        if (isAsync) resumedValue(yield new Awaiting(awaitsResult ? disposed : undefined));
+        if (isAsync) {
+          hasAwaited = true;
+          resumedValue(yield new Awaiting(disposable.awaitsResult ? disposed : undefined));
+        }
       } catch (error) {
         if (!(error instanceof JsThrow)) throw error;
         completion =
@@ -192,6 +210,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         temporaries[held] = completion.value;
       }
     }
+    if (needsAwait && !hasAwaited) yield new Awaiting(undefined);
     temporaries.length = held;
     scope.disposables = undefined;
     if (completion) throw completion;
