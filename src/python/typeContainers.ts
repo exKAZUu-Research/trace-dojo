@@ -41,8 +41,6 @@ import {
   setClass,
   sliceClass,
   tupleClass,
-  typeError,
-  typeName,
   valueError,
 } from './types';
 import {
@@ -519,11 +517,6 @@ function setRepr(self: PyValue): string {
   });
 }
 
-function otherSet(value: PyValue, operator: string, self: PyValue): PySet {
-  if (value instanceof PySet) return value;
-  throw typeError(`unsupported operand type(s) for ${operator}: '${typeName(self)}' and '${typeName(value)}'`);
-}
-
 for (const cls of [setClass, frozensetClass]) {
   method(cls, '__repr__', 'none', 0, 0, setRepr);
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt(setOf(self).table.size));
@@ -547,7 +540,6 @@ for (const cls of [setClass, frozensetClass]) {
       .every((key) => other.table.has(key));
   });
   method(cls, 'issuperset', 'one', 1, 1, (self, [other]) => !someItem(other, (item) => !setOf(self).table.has(item)));
-  void otherSet;
 }
 
 /** Whether an iterable has an item passing the test, reading no further than the first one as CPython does. */
