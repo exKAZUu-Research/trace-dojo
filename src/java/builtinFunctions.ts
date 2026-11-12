@@ -1,6 +1,13 @@
 import { removeAllOf, removeMatching } from './builtinBulkRemoval';
 import { type Collections, compareNatural, itemsOf, javaEquals, putEntry } from './builtinCollections';
-import { checkModifiable, forEachLiveEntry, mapViewSources, sortedValues } from './builtinCollectionSupport';
+import {
+  checkModifiable,
+  countsSortAsChange,
+  forEachLiveEntry,
+  mapViewSources,
+  sortedValues,
+  touch,
+} from './builtinCollectionSupport';
 import { defineKeyComparators } from './builtinComparators';
 import { recordAccess } from './builtinLinkedHashMap';
 import { defineMapRemappings, putComputed, startComputing, unchanging } from './builtinMapComputing';
@@ -678,8 +685,7 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     (frame, receiver, [comparator]) => {
       checkModifiable(frame, receiver, false);
       sortValues(frame, itemsOf(frame, receiver), comparator, functions.comparator, receiver as JavaObject);
-      const object = receiver as JavaObject;
-      object.modCount = (object.modCount ?? 0) + 1;
+      if (countsSortAsChange(receiver)) touch(receiver);
     }
   );
   addMethod(
@@ -802,8 +808,7 @@ function defineComparatorSorts(context: Context, collections: Collections, funct
     (frame, _, [list, comparator]) => {
       checkModifiable(frame, list, false);
       sortValues(frame, itemsOf(frame, list), comparator, functions.comparator, list as JavaObject);
-      const object = list as JavaObject;
-      object.modCount = (object.modCount ?? 0) + 1;
+      if (countsSortAsChange(list)) touch(list);
     }
   );
   sortList.typeParameters = [listVariable];

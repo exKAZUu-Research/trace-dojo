@@ -22,6 +22,7 @@ import {
   convertVariableType,
   field,
   identifierOf,
+  isAnnotation,
   modifiersOf,
   namedChildren,
   span,
@@ -274,6 +275,13 @@ function convertField(node: Node): FieldDeclaration {
   };
 }
 
+/** The type a receiver parameter such as `Main this` writes, which `convertParameters` leaves out. */
+function convertReceiverType(node: Node): TypeSyntax | undefined {
+  const receiver = namedChildren(node).find((parameter) => parameter.type === 'receiver_parameter');
+  const typeNode = receiver && namedChildren(receiver).find((child) => !isAnnotation(child));
+  return typeNode && convertType(typeNode);
+}
+
 /** Converts the parameters but a receiver parameter such as `Main this`, which only documents the receiver's type. */
 function convertParameters(node: Node): Parameter[] {
   const parameters = namedChildren(node).filter((parameter, index) => {
@@ -293,6 +301,11 @@ function convertParameters(node: Node): Parameter[] {
     const name = identifierOf(parameter, '名前のない引数');
     return { name: name.text, type, isFinal: modifiers.isFinal, isVarargs: false, ...span(parameter) };
   });
+}
+
+function withReceiverType(node: Node): { receiverType?: TypeSyntax } {
+  const receiverType = convertReceiverType(node);
+  return receiverType ? { receiverType } : {};
 }
 
 export function varargsNotLastError(node: Node): CompileError {
@@ -330,6 +343,7 @@ function convertMethod(node: Node): MethodDeclaration {
     modifiers: convertModifiers(modifiersOf(node)),
     returnType: typeNode.type === 'void_type' ? undefined : convertVariableType(node),
     parameters: convertParameters(field(node, 'parameters')),
+    ...withReceiverType(field(node, 'parameters')),
     throwsTypes: convertThrows(node),
     body: body ? convertBlock(body) : undefined,
     ...span(node),
@@ -358,6 +372,7 @@ function convertConstructor(node: Node): ConstructorDeclaration {
     ...(typeParameters && { typeParameters: convertTypeParameters(typeParameters) }),
     modifiers: convertModifiers(modifiersOf(node)),
     parameters: convertParameters(field(node, 'parameters')),
+    ...withReceiverType(field(node, 'parameters')),
     throwsTypes: convertThrows(node),
     explicitCall,
     prologue,

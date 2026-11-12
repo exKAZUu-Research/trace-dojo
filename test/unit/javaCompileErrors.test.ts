@@ -1434,6 +1434,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'import java.util.function.*;\nclass Main {\n  public static void main(String[] args) {\n    BiConsumer<int[], Integer> f = (int... a, Integer b) -> System.out.println(b);\n  }\n}',
   ],
   [
+    'receiver-parameter-of-another-type',
+    false,
+    'class Main {\n  int f(String this) { return 1; }\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-parameter-of-a-static-method',
+    false,
+    'class Main {\n  static int f(Main this) { return 1; }\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'receiver-parameter-of-a-top-level-constructor',
+    false,
+    'class Main {\n  Main(Main this) {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
     'annotation-without-targets-on-a-type-use',
     false,
     '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',

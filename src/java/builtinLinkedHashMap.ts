@@ -1,7 +1,7 @@
 import { classType, touch } from './builtinCollectionSupport';
 import { createStore, findEntry, nodeEntries, nodeMaps, removeEntry, storeOf, tableSizeFor } from './builtinMaps';
 import { addConstructor, addMethod } from './builtinSupport';
-import { type Frame, throwBuiltin } from './runtime';
+import { findImplementation, type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, FLOAT, INT, type JavaType } from './types';
 import { formatFloat, type HashEntry, type JavaObject, type Value } from './values';
 
@@ -65,7 +65,10 @@ export function defineLinkedHashMapOrder(cls: ClassInfo, entryClass: ClassInfo, 
   );
   removeEldestEntry.access = 'protected';
   evictions.set(cls, (frame, map) => {
-    const eldest = storeOf(map).ordered()[0];
+    // Only a program's override can evict, so an ordinary map neither reads its eldest entry nor calls the method.
+    if (findImplementation(map.cls, removeEldestEntry) === removeEldestEntry) return;
+    // An insertion-ordered store keeps its entries in iteration order, the eldest first.
+    const eldest = storeOf(map).entries[0];
     if (!eldest) return;
     const node = frame.runtime.allocateObject(frame, nodeClass);
     nodeEntries.set(node, eldest);

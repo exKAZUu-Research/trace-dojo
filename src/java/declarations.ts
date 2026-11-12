@@ -406,6 +406,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     if (cls.methods.some((other) => other.name === method.name && sameParameters(other, method))) {
       this.error(member, `メソッド ${member.name} はすでに定義されています。`);
     }
+    this.checkReceiver(member, cls, modifiers.isStatic ? undefined : cls);
     this.checkSafeVarargs(
       member,
       method.isVarargs === true && (modifiers.isStatic || modifiers.isFinal || modifiers.access === 'private')
@@ -490,6 +491,7 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       isAbstract: false,
       isConstructor: true,
     };
+    this.checkReceiver(member, cls, cls.hasOuterInstance ? cls.enclosing : undefined);
     this.checkSafeVarargs(member, constructor.isVarargs === true);
     if (cls.constructors.some((other) => sameParameters(other, constructor))) {
       this.error(member, `コンストラクタ ${cls.name} はすでに定義されています。`);
@@ -508,6 +510,23 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     ];
     const fault = faults.find(([isFaulty]) => isFaulty)?.[1];
     if (fault) this.error(member, `レコードのアクセサ ${member.name} ${fault}。`);
+  }
+
+  /**
+   * Rejects a receiver parameter whose type is not `expected`: the class of an instance method, or the enclosing class
+   * of an inner class's constructor; a static method or another constructor has no receiver (`expected` undefined).
+   */
+  protected checkReceiver(
+    member: MethodDeclaration | ConstructorDeclaration,
+    cls: ClassInfo,
+    expected: ClassInfo | undefined
+  ): void {
+    if (!member.receiverType) return;
+    const type = this.withInstanceTypeVariables(cls, true, () => this.resolveType(member.receiverType as TypeSyntax));
+    if (!expected) this.error(member, 'ここでは this を引数に書けません。');
+    if (type.kind !== 'class' || type.cls !== expected) {
+      this.error(member, `this の型は ${expected.name} にしてください。`);
+    }
   }
 
   /** Rejects `@SafeVarargs` on a method or constructor that is not of variable arity or may be overridden. */

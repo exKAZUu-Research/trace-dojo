@@ -440,7 +440,20 @@ export function checkListPosition(frame: Frame, list: Value, index: number, leng
 /** The class whose checks a list's methods make, which is that of the list an unmodifiable wrapper wraps. */
 function checkingClassOf(list: Value): ClassInfo {
   const object = list as JavaObject;
-  return (unmodifiableWrappers.has(object) ? (object.retained?.[0] as JavaObject) : object).cls;
+  // A program's subclass of a list inherits its builtin superclass's checks.
+  let cls = (unmodifiableWrappers.has(object) ? (object.retained?.[0] as JavaObject) : object).cls;
+  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
+  return cls;
+}
+
+/**
+ * Whether sorting `list` counts as a structural change, as `ArrayList.sort` and `Vector.sort` count it, unlike
+ * `List.sort`'s default, which sublists, `LinkedList`, and `Arrays.asList` use.
+ */
+export function countsSortAsChange(list: Value): boolean {
+  if (subListChecks.has(list as JavaObject)) return false;
+  const cls = checkingClassOf(list);
+  return (cls.name === 'ArrayList' && !fixedSizeClasses.has(cls)) || cls.name === 'Stack';
 }
 
 /**

@@ -66,15 +66,15 @@ const META_ANNOTATIONS: Readonly<Record<string, AnnotationInterface>> = {
 
 /** The contexts of the declarations whose modifiers an annotation may be among, by their nodes' types. */
 const DECLARATION_OWNERS: Readonly<Record<string, readonly ElementType[]>> = {
-  class_declaration: ['TYPE'],
-  interface_declaration: ['TYPE'],
-  enum_declaration: ['TYPE'],
-  record_declaration: ['TYPE'],
-  annotation_type_declaration: ['TYPE', 'ANNOTATION_TYPE'],
+  class_declaration: ['TYPE', 'TYPE_USE'],
+  interface_declaration: ['TYPE', 'TYPE_USE'],
+  enum_declaration: ['TYPE', 'TYPE_USE'],
+  record_declaration: ['TYPE', 'TYPE_USE'],
+  annotation_type_declaration: ['TYPE', 'ANNOTATION_TYPE', 'TYPE_USE'],
   method_declaration: ['METHOD', 'TYPE_USE'],
   annotation_type_element_declaration: ['METHOD', 'TYPE_USE'],
-  constructor_declaration: ['CONSTRUCTOR'],
-  compact_constructor_declaration: ['CONSTRUCTOR'],
+  constructor_declaration: ['CONSTRUCTOR', 'TYPE_USE'],
+  compact_constructor_declaration: ['CONSTRUCTOR', 'TYPE_USE'],
   enum_constant: ['FIELD'],
   field_declaration: ['FIELD', 'TYPE_USE'],
   constant_declaration: ['FIELD', 'TYPE_USE'],

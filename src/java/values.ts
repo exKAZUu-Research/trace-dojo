@@ -155,8 +155,10 @@ export class HashStore {
     this.indexEntry(entry);
   }
 
-  /** Moves an entry to the end of an insertion-ordered store, as an access-ordered `LinkedHashMap` does. */
-  /** Moves an entry to the end, returning whether that changed the order. */
+  /**
+   * Moves an entry to the end of an insertion-ordered store, as an access-ordered `LinkedHashMap` does, returning
+   * whether that changed the order.
+   */
   moveToEnd(entry: HashEntry): boolean {
     const index = this.list.indexOf(entry);
     if (index === -1 || index === this.list.length - 1) return false;

@@ -11,6 +11,7 @@ import {
 } from './builtinCollections';
 import {
   checkModifiable,
+  countsSortAsChange,
   mapViewSources,
   sortedValues,
   subListChecks,
@@ -689,7 +690,7 @@ function defineCollectionsClass(
       frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
       const sorted = sortedValues(values, (a, b) => compareNatural(frame, a, b));
       values.splice(0, values.length, ...sorted);
-      touch(list);
+      if (countsSortAsChange(list)) touch(list);
     }
   );
   comparableBound((sort.typeParameters as TypeVariable[])[0]);

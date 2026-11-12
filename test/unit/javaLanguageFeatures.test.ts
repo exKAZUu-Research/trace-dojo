@@ -1058,6 +1058,73 @@ class Main {
   }
 });
 
+test('Java checks receiver parameters, accepts TYPE_USE annotations on classes and constructors, and counts sorts and evictions as the JDK does', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.lang.annotation.*;
+@Target(ElementType.TYPE_USE) @interface Mark {}
+@Mark class A { @Mark A() {} }
+class Main<T> {
+  int v = 3;
+  int get(Main<T> this) { return v; }
+  class Inner { int w = 4; Inner(Main<T> Main.this) {} int sum(Main<T>.Inner this) { return w + v; } }
+  public static void main(String[] args) {
+    Main<String> m = new Main<>();
+    System.out.println(m.get() + " " + m.new Inner().sum());
+    new A();
+  }
+}`,
+      '3 7\n',
+    ],
+    [
+      `import java.util.*;
+class Main {
+  static class MyL extends LinkedList<Integer> {}
+  static class MyS extends Stack<Integer> {}
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    Map<Integer, Integer> m = new LinkedHashMap<>();
+    for (int i = 0; i < 80000; i++) m.put(i, i);
+    System.out.println(m.size());
+    MyL l = new MyL(); l.add(1);
+    t("myl", () -> l.get(5));
+    t("anon", () -> new LinkedList<Integer>() {}.get(0));
+    MyS s = new MyS(); s.push(1);
+    t("mys", () -> s.get(5));
+    List<Integer> a = new ArrayList<>(List.of(3, 2, 1)); Iterator<Integer> it = a.iterator();
+    Collections.sort(a.subList(1, 3)); a.subList(0, 2).sort(null);
+    System.out.println(it.next() + " " + a);
+    Iterator<Integer> it2 = a.iterator(); a.sort(null);
+    t("arraySort", () -> it2.next());
+    List<Integer> ll = new LinkedList<>(List.of(2, 1)); Iterator<Integer> it3 = ll.iterator(); Collections.sort(ll);
+    t("linkedSort", () -> System.out.println(it3.next()));
+    List<Integer> fs = Arrays.asList(2, 1); Iterator<Integer> it4 = fs.iterator(); fs.sort(null);
+    t("asListSort", () -> System.out.println(it4.next()));
+    Stack<Integer> st = new Stack<>(); st.push(2); st.push(1); Iterator<Integer> it5 = st.iterator(); st.sort(null);
+    t("stackSort", () -> it5.next());
+  }
+}`,
+      '80000\nmyl java.lang.IndexOutOfBoundsException: Index: 5, Size: 1\nanon java.lang.IndexOutOfBoundsException: Index: 0, Size: 0\nmys java.lang.ArrayIndexOutOfBoundsException: Array index out of range: 5\n1 [1, 3, 2]\narraySort java.util.ConcurrentModificationException\n1\nlinkedSort ok\n1\nasListSort ok\nstackSort java.util.ConcurrentModificationException\n',
+    ],
+    [
+      `import java.util.*;
+class Main {
+  public static void main(String[] args) {
+    List<Integer> a = new ArrayList<>(List.of(3, 2, 1)); Iterator<Integer> it = a.iterator();
+    Collections.sort(a.subList(1, 3));
+    System.out.println(it.next());
+    Iterator<Integer> it2 = a.iterator();
+    a.subList(0, 2).sort(null);
+    System.out.println(it2.next());
+  }
+}`,
+      '3\n1\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
