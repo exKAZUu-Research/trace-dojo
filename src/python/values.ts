@@ -35,7 +35,8 @@ export class PyObject {
   }
 }
 
-export type NativeFunction = (args: PyValue[], kwargs: Kwargs) => PyValue;
+/** A builtin's body; `boundTo` is the object a bound method was read from, which names it in its errors. */
+export type NativeFunction = (args: PyValue[], kwargs: Kwargs, boundTo?: PyValue) => PyValue;
 
 /** How a builtin in a class dictionary binds when read from an instance. */
 export type NativeBinding = 'method' | 'static' | 'class';
@@ -71,10 +72,10 @@ export class PyBuiltinFunction extends PyObject {
  */
 function refusingOversizedStrings(run: NativeFunction): NativeFunction {
   if (checkedRuns.has(run)) return run;
-  const checked: NativeFunction = (args, kwargs) => {
+  const checked: NativeFunction = (args, kwargs, boundTo) => {
     let result: PyValue;
     try {
-      result = run(args, kwargs);
+      result = run(args, kwargs, boundTo);
     } catch (error) {
       throw asPythonError(error);
     }

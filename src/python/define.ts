@@ -1,6 +1,6 @@
 import { type ArgStyle, bindPythonArgs, checkArgs, pythonSignature } from './nativeArgs';
-import { defineMethod, nativeFunction } from './types';
-import { type Kwargs, type NativeBinding, PyBuiltinFunction, type PyClass, type PyValue } from './values';
+import { defineMethod, nativeFunction, typeClass } from './types';
+import { type Kwargs, type NativeBinding, PyBuiltinFunction, PyClass, type PyValue } from './values';
 
 interface Options {
   keywords?: readonly string[];
@@ -72,10 +72,16 @@ export function method(
   defineMethod(
     cls,
     name,
-    (self, args, kwargs) => {
+    (self, args, kwargs, boundTo) => {
       // A static method receives no instance, so what arrives as `self` is its first argument.
       const all = options.binding === 'static' && self !== undefined ? [self, ...args] : args;
-      checkArgs(spec, all, kwargs);
+      // A metaclass method read from a class is named after that class, as a builtin bound to a type is in CPython;
+      // whether `cls` is a metaclass is asked here, since `type` is still being set up when its methods are defined.
+      const named =
+        boundTo instanceof PyClass && cls.isSubclassOf(typeClass)
+          ? { ...spec, qualified: `${boundTo.qualifiedName}.${name}` }
+          : spec;
+      checkArgs(named, all, kwargs);
       return run(self, all, kwargs);
     },
     {

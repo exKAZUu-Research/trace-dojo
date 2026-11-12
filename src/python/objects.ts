@@ -56,7 +56,7 @@ export function callValue(fn: PyValue, args: PyValue[], kwargs?: Kwargs): PyValu
   if (fn instanceof PyBuiltinFunction) {
     const runtime = currentRuntime();
     runtime.spend();
-    return runtime.runNative(() => fn.run(fn.self === undefined ? args : [fn.self, ...args], kwargs));
+    return runtime.runNative(() => fn.run(fn.self === undefined ? args : [fn.self, ...args], kwargs, fn.self));
   }
   if (fn instanceof PyBoundMethod) return callValue(fn.fn, [fn.self, ...args], kwargs);
   if (fn instanceof PyClass) return currentRuntime().instantiate(fn, args, kwargs);

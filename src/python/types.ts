@@ -321,7 +321,7 @@ export interface MethodOptions {
 export function defineMethod(
   cls: PyClass,
   name: string,
-  run: (self: PyValue, args: PyValue[], kwargs: Kwargs) => PyValue,
+  run: (self: PyValue, args: PyValue[], kwargs: Kwargs, boundTo?: PyValue) => PyValue,
   { binding = 'method', receiver = 'method', ownerName }: MethodOptions = {}
 ): void {
   const check = binding === 'method' ? receiverCheck(cls, name, receiver, ownerName) : undefined;
@@ -330,9 +330,9 @@ export function defineMethod(
     new PyBuiltinFunction(
       methodDescriptorClass,
       name,
-      (args, kwargs) => {
+      (args, kwargs, boundTo) => {
         check?.(args[0]);
-        return run(args[0], args.slice(1), kwargs);
+        return run(args[0], args.slice(1), kwargs, boundTo);
       },
       undefined,
       binding,
