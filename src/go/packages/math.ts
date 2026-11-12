@@ -1,0 +1,320 @@
+import type { Entity } from '../entities';
+import { fma } from '../fma';
+import { definePackage, fn, nativeFunction } from '../native';
+import { BASIC, type Type } from '../types';
+import { Complex, type Value } from '../values';
+import { BOOL, FLOAT64, INT } from './support';
+
+type Unary = (x: number) => number;
+
+function constant(name: string, text: string, type: Type = BASIC.untypedFloat): Entity {
+  const [whole, fraction = ''] = text.split('.');
+  const num = BigInt(whole + fraction);
+  const den = 10n ** BigInt(fraction.length);
+  return {
+    kind: 'const',
+    name,
+    type,
+    value: { kind: 'float', value: { num, den } },
+    span: { row: 0, column: 0 },
+    used: true,
+  };
+}
+
+function intConstant(name: string, value: bigint): Entity {
+  return {
+    kind: 'const',
+    name,
+    type: BASIC.untypedInt,
+    value: { kind: 'int', value },
+    span: { row: 0, column: 0 },
+    used: true,
+  };
+}
+
+/** A float constant written as an exact fraction, for the limits of float types. */
+function exactFloat(name: string, num: bigint, den: bigint): Entity {
+  return {
+    kind: 'const',
+    name,
+    type: BASIC.untypedFloat,
+    value: { kind: 'float', value: { num, den } },
+    span: { row: 0, column: 0 },
+    used: true,
+  };
+}
+
+function unary(name: string, impl: Unary): Entity {
+  return nativeFunction(name, fn([FLOAT64], [FLOAT64]), ([x]) => impl(x as number));
+}
+
+function binary(name: string, impl: (x: number, y: number) => number): Entity {
+  return nativeFunction(name, fn([FLOAT64, FLOAT64], [FLOAT64]), ([x, y]) => impl(x as number, y as number));
+}
+
+/** `math.Mod`, whose result has the sign of x. */
+function mod(x: number, y: number): number {
+  if (y === 0 || !Number.isFinite(x) || Number.isNaN(y)) return Number.NaN;
+  return x % y;
+}
+
+/** `math.Remainder` (IEEE 754): x - n*y with n the integer nearest x/y, halves to even. */
+function remainder(x: number, y: number): number {
+  if (Number.isNaN(x) || Number.isNaN(y) || !Number.isFinite(x) || y === 0) return Number.NaN;
+  if (!Number.isFinite(y)) return x;
+  const quotient = x / y;
+  let n = Math.round(quotient);
+  if (Math.abs(quotient - Math.trunc(quotient)) === 0.5) n = 2 * Math.round(quotient / 2);
+  const result = x - n * y;
+  return result === 0 ? Math.sign(x) * 0 : result;
+}
+
+/** `math.Round`: halves away from zero. */
+function round(x: number): number {
+  if (!Number.isFinite(x)) return x;
+  const rounded = Math.sign(x) * Math.round(Math.abs(x));
+  return rounded === 0 ? (Object.is(x, -0) || x < 0 ? -0 : 0) : rounded;
+}
+
+/** `math.RoundToEven`. */
+function roundToEven(x: number): number {
+  if (!Number.isFinite(x)) return x;
+  const floor = Math.floor(x);
+  const difference = x - floor;
+  let result = floor;
+  if (difference > 0.5 || (difference === 0.5 && floor % 2 !== 0)) result = floor + 1;
+  return result === 0 && (x < 0 || Object.is(x, -0)) ? -0 : result;
+}
+
+function trunc(x: number): number {
+  return Math.trunc(x);
+}
+
+/** `math.Max`, where NaN wins over everything but +Inf, and +0 is larger than -0. */
+function max(x: number, y: number): number {
+  if (x === Infinity || y === Infinity) return Infinity;
+  if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
+  if (x === 0 && y === 0) return Object.is(x, -0) ? y : x;
+  return x > y ? x : y;
+}
+
+function min(x: number, y: number): number {
+  if (x === -Infinity || y === -Infinity) return -Infinity;
+  if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
+  if (x === 0 && y === 0) return Object.is(x, -0) ? x : y;
+  return x < y ? x : y;
+}
+
+function signbit(x: number): boolean {
+  return x < 0 || Object.is(x, -0);
+}
+
+function copysign(magnitude: number, sign: number): number {
+  return signbit(magnitude) === signbit(sign) ? magnitude : -magnitude;
+}
+
+function float64bits(value: number): bigint {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value);
+  return view.getBigUint64(0);
+}
+
+function float64frombits(bits: bigint): number {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setBigUint64(0, BigInt.asUintN(64, bits));
+  return view.getFloat64(0);
+}
+
+function float32bits(value: number): bigint {
+  const view = new DataView(new ArrayBuffer(4));
+  view.setFloat32(0, value);
+  return BigInt(view.getUint32(0));
+}
+
+function float32frombits(bits: bigint): number {
+  const view = new DataView(new ArrayBuffer(4));
+  view.setUint32(0, Number(BigInt.asUintN(32, bits)));
+  return view.getFloat32(0);
+}
+
+/** `math.Frexp`: a fraction in [0.5, 1) and a power of two. */
+function frexp(value: number): [number, bigint] {
+  if (value === 0 || !Number.isFinite(value)) return [value, 0n];
+  let exponent = Math.max(-1023, Math.floor(Math.log2(Math.abs(value))) + 1);
+  let fraction = value * 2 ** -exponent;
+  while (Math.abs(fraction) < 0.5) {
+    fraction *= 2;
+    exponent--;
+  }
+  while (Math.abs(fraction) >= 1) {
+    fraction /= 2;
+    exponent++;
+  }
+  return [fraction, BigInt(exponent)];
+}
+
+function ldexp(fraction: number, exponent: number): number {
+  if (exponent > 1023) return fraction * 2 ** 1023 * 2 ** (exponent - 1023);
+  if (exponent < -1022) return fraction * 2 ** -1022 * 2 ** (exponent + 1022);
+  return fraction * 2 ** exponent;
+}
+
+function pow(x: number, y: number): number {
+  // Go defines Pow(1, y) = 1 and Pow(x, 0) = 1 even for NaN, and Pow(-1, ±Inf) = 1, where JavaScript gives NaN.
+  if (x === 1 || y === 0) return 1;
+  if (x === -1 && !Number.isFinite(y) && !Number.isNaN(y)) return 1;
+  return x ** y;
+}
+
+/** `math.Hypot`, transcribed from Go's hypot.go with the fused `1+q*q` that its arm64 build computes. */
+export function hypot(x: number, y: number): number {
+  let p = Math.abs(x);
+  let q = Math.abs(y);
+  if (p === Infinity || q === Infinity) return Infinity;
+  if (Number.isNaN(p) || Number.isNaN(q)) return Number.NaN;
+  if (p < q) [p, q] = [q, p];
+  if (p === 0) return 0;
+  q /= p;
+  return p * Math.sqrt(fma(q, q, 1));
+}
+
+const MAX_UINT64 = (1n << 64n) - 1n;
+
+const members: Record<string, Entity> = {
+  Pi: constant('Pi', '3.14159265358979323846264338327950288419716939937510582097494459'),
+  E: constant('E', '2.71828182845904523536028747135266249775724709369995957496696763'),
+  Phi: constant('Phi', '1.61803398874989484820458683436563811772030917980576286213544862'),
+  Sqrt2: constant('Sqrt2', '1.41421356237309504880168872420969807856967187537694807317667974'),
+  SqrtE: constant('SqrtE', '1.64872127070012814684865078831848098737480349221048208617800616'),
+  SqrtPi: constant('SqrtPi', '1.77245385090551602729816748334114518279754945612238712821380779'),
+  SqrtPhi: constant('SqrtPhi', '1.27201964951406896425242246173749149171560804184009624861664038'),
+  Ln2: constant('Ln2', '0.693147180559945309417232121458176568075500134360255254120680009'),
+  Log2E: exactLog('Log2E', 'Ln2'),
+  Ln10: constant('Ln10', '2.30258509299404568401799145468436420760110148862877297603332790'),
+  Log10E: exactLog('Log10E', 'Ln10'),
+  MaxInt: intConstant('MaxInt', (1n << 63n) - 1n),
+  MinInt: intConstant('MinInt', -(1n << 63n)),
+  MaxInt8: intConstant('MaxInt8', 127n),
+  MinInt8: intConstant('MinInt8', -128n),
+  MaxInt16: intConstant('MaxInt16', 32_767n),
+  MinInt16: intConstant('MinInt16', -32_768n),
+  MaxInt32: intConstant('MaxInt32', 2_147_483_647n),
+  MinInt32: intConstant('MinInt32', -2_147_483_648n),
+  MaxInt64: intConstant('MaxInt64', (1n << 63n) - 1n),
+  MinInt64: intConstant('MinInt64', -(1n << 63n)),
+  MaxUint: intConstant('MaxUint', MAX_UINT64),
+  MaxUint8: intConstant('MaxUint8', 255n),
+  MaxUint16: intConstant('MaxUint16', 65_535n),
+  MaxUint32: intConstant('MaxUint32', 4_294_967_295n),
+  MaxUint64: intConstant('MaxUint64', MAX_UINT64),
+  // 0x1p127 * (1 + (1 - 0x1p-23)) and its relatives, as math/const.go defines them.
+  MaxFloat32: exactFloat('MaxFloat32', (1n << 127n) * ((1n << 24n) - 1n), 1n << 23n),
+  SmallestNonzeroFloat32: exactFloat('SmallestNonzeroFloat32', 1n, 1n << 149n),
+  MaxFloat64: exactFloat('MaxFloat64', (1n << 1023n) * ((1n << 53n) - 1n), 1n << 52n),
+  SmallestNonzeroFloat64: exactFloat('SmallestNonzeroFloat64', 1n, 1n << 1074n),
+  Abs: unary('Abs', Math.abs),
+  Sqrt: unary('Sqrt', Math.sqrt),
+  Cbrt: unary('Cbrt', Math.cbrt),
+  Floor: unary('Floor', Math.floor),
+  Ceil: unary('Ceil', Math.ceil),
+  Trunc: unary('Trunc', trunc),
+  Round: unary('Round', round),
+  RoundToEven: unary('RoundToEven', roundToEven),
+  Exp: unary('Exp', Math.exp),
+  Exp2: unary('Exp2', (x) => 2 ** x),
+  Expm1: unary('Expm1', Math.expm1),
+  Log: unary('Log', Math.log),
+  Log2: unary('Log2', Math.log2),
+  Log10: unary('Log10', Math.log10),
+  Log1p: unary('Log1p', Math.log1p),
+  Sin: unary('Sin', Math.sin),
+  Cos: unary('Cos', Math.cos),
+  Tan: unary('Tan', Math.tan),
+  Asin: unary('Asin', Math.asin),
+  Acos: unary('Acos', Math.acos),
+  Atan: unary('Atan', Math.atan),
+  Sinh: unary('Sinh', Math.sinh),
+  Cosh: unary('Cosh', Math.cosh),
+  Tanh: unary('Tanh', Math.tanh),
+  Asinh: unary('Asinh', Math.asinh),
+  Acosh: unary('Acosh', Math.acosh),
+  Atanh: unary('Atanh', Math.atanh),
+  Atan2: binary('Atan2', Math.atan2),
+  Hypot: binary('Hypot', hypot),
+  Pow: binary('Pow', pow),
+  Mod: binary('Mod', mod),
+  Remainder: binary('Remainder', remainder),
+  Max: binary('Max', max),
+  Min: binary('Min', min),
+  Dim: binary('Dim', (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : Math.max(x - y, 0))),
+  Copysign: binary('Copysign', copysign),
+  FMA: nativeFunction('FMA', fn([FLOAT64, FLOAT64, FLOAT64], [FLOAT64]), ([x, y, z]) =>
+    fma(x as number, y as number, z as number)
+  ),
+  Inf: nativeFunction('Inf', fn([INT], [FLOAT64]), ([sign]) => ((sign as bigint) >= 0n ? Infinity : -Infinity)),
+  NaN: nativeFunction('NaN', fn([], [FLOAT64]), () => Number.NaN),
+  IsNaN: nativeFunction('IsNaN', fn([FLOAT64], [BOOL]), ([x]) => Number.isNaN(x)),
+  IsInf: nativeFunction('IsInf', fn([FLOAT64, INT], [BOOL]), ([x, sign]) => {
+    const s = sign as bigint;
+    return (s >= 0n && x === Infinity) || (s <= 0n && x === -Infinity);
+  }),
+  Signbit: nativeFunction('Signbit', fn([FLOAT64], [BOOL]), ([x]) => signbit(x as number)),
+  Modf: nativeFunction('Modf', fn([FLOAT64], [FLOAT64, FLOAT64]), ([x]) => {
+    const value = x as number;
+    if (!Number.isFinite(value)) return Number.isNaN(value) ? [value, value] : [value, Number.NaN];
+    const integer = Math.trunc(value);
+    const fraction = value - integer;
+    return [integer === 0 && signbit(value) ? -0 : integer, fraction === 0 && signbit(value) ? -0 : fraction];
+  }),
+  Frexp: nativeFunction('Frexp', fn([FLOAT64], [FLOAT64, INT]), ([x]) => frexp(x as number)),
+  Ldexp: nativeFunction('Ldexp', fn([FLOAT64, INT], [FLOAT64]), ([x, exponent]) =>
+    ldexp(x as number, Number(exponent as bigint))
+  ),
+  Float64bits: nativeFunction('Float64bits', fn([FLOAT64], [BASIC.uint64]), ([x]) => float64bits(x as number)),
+  Float64frombits: nativeFunction('Float64frombits', fn([BASIC.uint64], [FLOAT64]), ([bits]) =>
+    float64frombits(bits as bigint)
+  ),
+  Float32bits: nativeFunction('Float32bits', fn([BASIC.float32], [BASIC.uint32]), ([x]) => float32bits(x as number)),
+  Float32frombits: nativeFunction('Float32frombits', fn([BASIC.uint32], [BASIC.float32]), ([bits]) =>
+    float32frombits(bits as bigint)
+  ),
+  Nextafter: binary('Nextafter', (x, y) => {
+    if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
+    if (x === y) return x;
+    if (x === 0) return copysign(float64frombits(1n), y);
+    const bits = float64bits(x);
+    return float64frombits(y > x === x > 0 ? bits + 1n : bits - 1n);
+  }),
+};
+
+/** 1/Ln2 and 1/Ln10, which math/const.go defines by division of the exact constants. */
+function exactLog(name: string, of: string): Entity {
+  const denominator =
+    of === 'Ln2'
+      ? '0.693147180559945309417232121458176568075500134360255254120680009'
+      : '2.30258509299404568401799145468436420760110148862877297603332790';
+  const [whole, fraction] = denominator.split('.');
+  return exactFloat(name, 10n ** BigInt(fraction.length), BigInt(whole + fraction));
+}
+
+export const MATH_PACKAGE = definePackage('math', members, [
+  'Gamma',
+  'Lgamma',
+  'Erf',
+  'Erfc',
+  'Erfinv',
+  'Erfcinv',
+  'J0',
+  'J1',
+  'Jn',
+  'Y0',
+  'Y1',
+  'Yn',
+  'Ilogb',
+  'Logb',
+  'Sincos',
+  'Pow10',
+]);
+
+export { Complex };
+export type { Value };
