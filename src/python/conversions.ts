@@ -135,19 +135,49 @@ function renderTemplate(
   return result;
 }
 
-/** Returns the index of the `}` closing the replacement field that starts at `start`. */
+/**
+ * Returns the index of the `}` closing the replacement field that starts at `start`, failing as CPython's
+ * MarkupIterator_next and parse_field do: a field name ends at `}`, `:` or `!` outside brackets, and a format spec
+ * counts its own braces.
+ */
 function fieldEnd(chars: readonly string[], start: number): number {
-  let level = 1;
-  let inBracket = false;
-  for (let end = start; end < chars.length; end++) {
-    const c = chars[end];
-    if (c === '[') inBracket = true;
-    if (c === ']') inBracket = false;
-    if (inBracket) continue;
-    if (c === '{') level++;
-    if (c === '}' && --level === 0) return end;
+  if (start >= chars.length) throw valueError("Single '{' encountered in format string");
+  const { index, terminator } = fieldNameEnd(chars, start);
+  if (terminator === '}') return index - 1;
+  if (terminator === ':') return formatSpecEnd(chars, index);
+  return conversionEnd(chars, index);
+}
+
+/** Reads a field name up to the `}`, `:` or `!` after it, which brackets hide. */
+function fieldNameEnd(chars: readonly string[], start: number): { index: number; terminator: string } {
+  let index = start;
+  while (index < chars.length) {
+    const c = chars[index++];
+    if (c === '{') throw valueError("unexpected '{' in field name");
+    if (c === '}' || c === ':' || c === '!') return { index, terminator: c };
+    if (c === '[') while (index < chars.length && chars[index] !== ']') index++;
   }
-  throw valueError(level > 1 ? "expected '}' before end of string" : "Single '{' encountered in format string");
+  throw valueError("expected '}' before end of string");
+}
+
+/** The index of the `}` closing a field after its `!` and conversion character, through any format spec. */
+function conversionEnd(chars: readonly string[], start: number): number {
+  if (start >= chars.length) throw valueError('end of string while looking for conversion specifier');
+  const index = start + 1;
+  if (index >= chars.length) return formatSpecEnd(chars, index);
+  if (chars[index] === '}') return index;
+  if (chars[index] !== ':') throw valueError("expected ':' after conversion specifier");
+  return formatSpecEnd(chars, index + 1);
+}
+
+/** The index of the `}` closing a format spec that starts at `start`, whose own nested fields count their braces. */
+function formatSpecEnd(chars: readonly string[], start: number): number {
+  let level = 1;
+  for (let index = start; index < chars.length; index++) {
+    if (chars[index] === '{') level++;
+    else if (chars[index] === '}' && --level === 0) return index;
+  }
+  throw valueError("unmatched '{' in format spec");
 }
 
 function renderField(

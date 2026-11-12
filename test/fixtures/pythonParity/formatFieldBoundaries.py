@@ -1,0 +1,32 @@
+def check(call, expected):
+    try:
+        actual = repr(call())
+    except Exception as e:
+        actual = type(e).__name__ + ': ' + str(e)
+    if actual != expected:
+        raise AssertionError(actual + ' != ' + expected)
+
+check(lambda: '{'.format([5], 3, a=1), "ValueError: Single '{' encountered in format string")
+check(lambda: '{0'.format([5], 3, a=1), "ValueError: expected '}' before end of string")
+check(lambda: '{a'.format([5], 3, a=1), "ValueError: expected '}' before end of string")
+check(lambda: '{:d'.format([5], 3, a=1), "ValueError: unmatched '{' in format spec")
+check(lambda: '{!r'.format([5], 3, a=1), "ValueError: unmatched '{' in format spec")
+check(lambda: '{0:'.format([5], 3, a=1), "ValueError: unmatched '{' in format spec")
+check(lambda: '{0.b'.format([5], 3, a=1), "ValueError: expected '}' before end of string")
+check(lambda: 'x{'.format([5], 3, a=1), "ValueError: Single '{' encountered in format string")
+check(lambda: 'x{0'.format([5], 3, a=1), "ValueError: expected '}' before end of string")
+check(lambda: '{0!'.format([5], 3, a=1), 'ValueError: end of string while looking for conversion specifier')
+check(lambda: '{0!r'.format([5], 3, a=1), "ValueError: unmatched '{' in format spec")
+check(lambda: '{0!rx}'.format([5], 3, a=1), "ValueError: expected ':' after conversion specifier")
+check(lambda: '{0!r:>5}'.format([5], 3, a=1), "'  [5]'")
+check(lambda: '{0[a}b]}'.format([5], 3, a=1), 'TypeError: list indices must be integers or slices, not str')
+check(lambda: '{0:{1}}'.format([5], 3, a=1), 'TypeError: unsupported format string passed to list.__format__')
+check(lambda: '{0:{1}'.format([5], 3, a=1), "ValueError: unmatched '{' in format spec")
+check(lambda: '{a{}'.format([5], 3, a=1), "ValueError: unexpected '{' in field name")
+check(lambda: '{0}}'.format([5], 3, a=1), "ValueError: Single '}' encountered in format string")
+check(lambda: '}'.format([5], 3, a=1), "ValueError: Single '}' encountered in format string")
+check(lambda: '{{}}'.format([5], 3, a=1), "'{}'")
+check(lambda: '{0[}'.format([5], 3, a=1), "ValueError: expected '}' before end of string")
+check(lambda: '{0:}}'.format([5], 3, a=1), "ValueError: Single '}' encountered in format string")
+check(lambda: '{0:{{}}}'.format([5], 3, a=1), 'TypeError: unsupported format string passed to list.__format__')
+check(lambda: '{0[0]}x'.format([5], 3, a=1), "'5x'")
