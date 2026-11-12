@@ -4,7 +4,7 @@ import { newError } from '../errorValues';
 import { formatFloat } from '../floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR } from '../literals';
 import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
-import { quote, quoteRune } from '../quote';
+import { canBackquote, isPrint, quote, quoteRune } from '../quote';
 import { BASIC, ERROR_TYPE, pointerTo, RUNE } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
 import { BOOL, BYTES, byteSlice, bytesOf, errorText, FLOAT64, INT, STRING } from './support';
@@ -316,19 +316,42 @@ const members: Record<string, Entity> = {
   AppendQuote: nativeFunction('AppendQuote', fn([BYTES, STRING], [BYTES]), ([bytes, text]) =>
     byteSlice(bytesOf(bytes) + quote(text as string))
   ),
+  AppendQuoteToASCII: nativeFunction('AppendQuoteToASCII', fn([BYTES, STRING], [BYTES]), ([bytes, text]) =>
+    byteSlice(bytesOf(bytes) + quote(text as string, '"', true))
+  ),
+  AppendQuoteRune: nativeFunction('AppendQuoteRune', fn([BYTES, RUNE], [BYTES]), ([bytes, rune]) =>
+    byteSlice(bytesOf(bytes) + quoteRune(Number(rune as bigint)))
+  ),
+  AppendUint: nativeFunction('AppendUint', fn([BYTES, BASIC.uint64, INT], [BYTES]), ([bytes, value, base]) =>
+    byteSlice(bytesOf(bytes) + formatInteger(value as bigint, Number(base as bigint)))
+  ),
+  AppendFloat: nativeFunction(
+    'AppendFloat',
+    fn([BYTES, FLOAT64, BASIC.uint8, INT, INT], [BYTES]),
+    ([bytes, value, format, precision, bits]) =>
+      byteSlice(
+        bytesOf(bytes) +
+          formatFloat(
+            value as number,
+            String.fromCharCode(Number(format as bigint)),
+            Number(precision as bigint),
+            Number(bits as bigint) === 32 ? 32 : 64
+          )
+      )
+  ),
+  CanBackquote: nativeFunction('CanBackquote', fn([STRING], [BOOL]), ([text]) => canBackquote(text as string)),
+  IsPrint: nativeFunction('IsPrint', fn([RUNE], [BOOL]), ([rune]) => isPrint(Number(rune as bigint))),
+  // Graphic characters are the printable ones and the other spaces of category Zs.
+  IsGraphic: nativeFunction('IsGraphic', fn([RUNE], [BOOL]), ([rune]) => {
+    const code = Number(rune as bigint);
+    return isPrint(code) || (code >= 0 && code <= 0x10_ff_ff && /^\p{Zs}$/u.test(String.fromCodePoint(code)));
+  }),
 };
 
 export const STRCONV_PACKAGE = definePackage('strconv', members, [
   'ParseComplex',
   'FormatComplex',
-  'AppendFloat',
-  'AppendUint',
-  'AppendQuoteRune',
-  'AppendQuoteToASCII',
   'UnquoteChar',
-  'CanBackquote',
-  'IsPrint',
-  'IsGraphic',
   'QuoteToGraphic',
   'QuotedPrefix',
 ]);

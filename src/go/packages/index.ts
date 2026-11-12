@@ -3,7 +3,7 @@ import { BITS_PACKAGE } from './bits';
 import { BUFIO_PACKAGE } from './bufio';
 import { CMPLX_PACKAGE } from './cmplx';
 import { CMP_PACKAGE, MAPS_PACKAGE, SLICES_PACKAGE, SORT_PACKAGE } from './collections';
-import { HEAP_PACKAGE, LIST_PACKAGE } from './containers';
+import { HEAP_PACKAGE, LIST_PACKAGE, RING_PACKAGE } from './containers';
 import { ERRORS_PACKAGE } from './errors';
 import { FMT_PACKAGE } from './fmt';
 import { IO_PACKAGE } from './io';
@@ -30,6 +30,7 @@ const PACKAGES = new Map<string, GoPackage>(
     LIST_PACKAGE,
     RAND_PACKAGE,
     RAND_V2_PACKAGE,
+    RING_PACKAGE,
     RUNTIME_PACKAGE,
     TIME_PACKAGE,
     ERRORS_PACKAGE,

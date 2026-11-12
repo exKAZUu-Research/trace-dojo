@@ -200,6 +200,22 @@ const members: Record<string, Entity> = {
   Log10: unary('Log10', goMath.log10),
   Log1p: unary('Log1p', goMath.log1p),
   Sin: unary('Sin', goMath.sin),
+  Sincos: nativeFunction('Sincos', fn([FLOAT64], [FLOAT64, FLOAT64]), ([x]) => [
+    goMath.sin(x as number),
+    goMath.cos(x as number),
+  ]),
+  Pow10: nativeFunction('Pow10', fn([INT], [FLOAT64]), ([n]) => pow10(Number(n as bigint))),
+  Logb: unary('Logb', (x) => {
+    if (x === 0) return -Infinity;
+    if (!Number.isFinite(x)) return Number.isNaN(x) ? x : Infinity;
+    return goMath.frexp(x)[1] - 1;
+  }),
+  Ilogb: nativeFunction('Ilogb', fn([FLOAT64], [INT]), ([value]) => {
+    const x = value as number;
+    if (x === 0) return -(2n ** 31n);
+    if (!Number.isFinite(x)) return 2n ** 31n - 1n;
+    return BigInt(goMath.frexp(x)[1] - 1);
+  }),
   Cos: unary('Cos', goMath.cos),
   Tan: unary('Tan', goMath.tan),
   Asin: unary('Asin', goMath.asin),
@@ -279,11 +295,18 @@ export const MATH_PACKAGE = definePackage('math', members, [
   'Y0',
   'Y1',
   'Yn',
-  'Ilogb',
-  'Logb',
-  'Sincos',
-  'Pow10',
 ]);
 
 export { Complex };
 export type { Value };
+
+const POW10_TAB = Array.from({ length: 32 }, (_, index) => Number(`1e${index}`));
+const POW10_POS_TAB32 = Array.from({ length: 10 }, (_, index) => Number(`1e${index * 32}`));
+const POW10_NEG_TAB32 = Array.from({ length: 11 }, (_, index) => Number(`1e-${index * 32}`));
+
+/** Go's Pow10, which multiplies entries of its tables of powers of ten. */
+function pow10(n: number): number {
+  if (n >= 0 && n <= 308) return POW10_POS_TAB32[Math.floor(n / 32)] * POW10_TAB[n % 32];
+  if (n >= -323 && n <= 0) return POW10_NEG_TAB32[Math.floor(-n / 32)] / POW10_TAB[-n % 32];
+  return n > 0 ? Infinity : 0;
+}

@@ -1,6 +1,16 @@
 import type { Entity } from '../entities';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import {
+  addMethod,
+  blockingFunction,
+  currentRuntime,
+  definePackage,
+  fn,
+  namedType,
+  nativeFunction,
+  typeEntity,
+} from '../native';
 import { divideByZeroPanic } from '../runtimeErrors';
+import { Scheduler } from '../scheduler';
 import { BASIC, type NamedType } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
 import { INT, STRING } from './support';
@@ -22,10 +32,15 @@ function stringConstant(name: string, value: string): Entity {
 const runtimeMembers: Record<string, Entity> = {
   GOOS: stringConstant('GOOS', 'darwin'),
   GOARCH: stringConstant('GOARCH', 'arm64'),
+  /** Lets the other goroutines that can run go first; a program without goroutines has none. */
+  Gosched: blockingFunction('Gosched', fn([], []), function* () {
+    const running = currentRuntime().scheduler;
+    if (running instanceof Scheduler) yield* running.yieldTurn();
+    return;
+  }),
 };
 
 export const RUNTIME_PACKAGE = definePackage('runtime', runtimeMembers, [
-  'Gosched',
   'GC',
   'NumGoroutine',
   'NumCPU',
