@@ -70,7 +70,7 @@
     "@willbooster/shared-lib-react": "6.3.0",
     "@willbooster/tree-sitter-java": "32.0.1",
     "@willbooster/tree-sitter-javascript": "22.0.1",
-    "@willbooster/tree-sitter-python": "16.0.0",
+    "@willbooster/tree-sitter-python": "17.0.0",
     "@willbooster/wb": "23.3.0",
     "@willbooster/web-tree-sitter": "18.0.2",
     "at-decorators": "7.1.3",
