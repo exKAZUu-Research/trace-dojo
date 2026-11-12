@@ -12,6 +12,7 @@ import { currentRuntime } from './runtimeContext';
 import {
   addToTable,
   differenceUpdate,
+  lookupSetKey,
   setDifferenceAll,
   setIntersection,
   setIntersectionAll,
@@ -515,7 +516,7 @@ function otherSet(value: PyValue, operator: string, self: PyValue): PySet {
 for (const cls of [setClass, frozensetClass]) {
   method(cls, '__repr__', 'none', 0, 0, setRepr);
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt(setOf(self).table.size));
-  method(cls, '__contains__', 'one', 1, 1, (self, [item]) => setOf(self).table.has(item));
+  method(cls, '__contains__', 'one', 1, 1, (self, [item]) => lookupSetKey(item, (key) => setOf(self).table.has(key)));
   method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
   method(cls, 'copy', 'none', 0, 0, (self) => (isExactFrozenset(self) ? self : setUnion(setOf(self), [])));
   method(cls, 'union', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => setUnion(setOf(self), others));
@@ -557,11 +558,11 @@ method(setClass, 'add', 'one', 1, 1, (self, [item]) => {
   return None;
 });
 method(setClass, 'remove', 'one', 1, 1, (self, [item]) => {
-  if (!setOf(self).table.discard(item)) throw keyError(item);
+  if (!lookupSetKey(item, (key) => setOf(self).table.discard(key))) throw keyError(item);
   return None;
 });
 method(setClass, 'discard', 'one', 1, 1, (self, [item]) => {
-  setOf(self).table.discard(item);
+  lookupSetKey(item, (key) => setOf(self).table.discard(key));
   return None;
 });
 method(setClass, 'pop', 'none', 0, 0, (self) => {

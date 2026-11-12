@@ -2,8 +2,28 @@ import { pyHash } from './hashing';
 import { iterate } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { SetTable } from './setTable';
-import { dictClass, frozensetClass, newTuple, setClass } from './types';
-import { DONE, PyDict, PyDictView, PySet, type PyValue } from './values';
+import { dictClass, exceptionClassNamed, frozensetClass, newTuple, setClass } from './types';
+import { DONE, PyDict, PyDictView, PyError, PySet, type PyValue } from './values';
+
+/**
+ * Looks `key` up as CPython's set_contains, set_discard, and set_remove do: a mutable set, unhashable, is looked up
+ * again as the frozenset of its elements, so that it finds the equal frozenset.
+ */
+export function lookupSetKey<T>(key: PyValue, lookup: (key: PyValue) => T): T {
+  try {
+    return lookup(key);
+  } catch (error) {
+    const isUnhashableSet =
+      key instanceof PySet &&
+      key.cls.isSubclassOf(setClass) &&
+      error instanceof PyError &&
+      error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError'));
+    if (!isUnhashableSet) throw error;
+    const table = new SetTable();
+    mergeTable(table, key.table);
+    return lookup(new PySet(frozensetClass, table));
+  }
+}
 
 /** A new set or frozenset filled from a table: the builtin type of `like`, as CPython gives for a subclass too. */
 function setLike(like: PySet, table: SetTable): PySet {

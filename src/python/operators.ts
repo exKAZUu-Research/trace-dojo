@@ -10,6 +10,7 @@ import {
   dictViewBinary,
   differenceUpdate,
   isSetLikeView,
+  lookupSetKey,
   setIntersection,
   symmetricDifferenceUpdate,
   updateTable,
@@ -903,7 +904,7 @@ export function contains(container: PyValue, item: PyValue): boolean {
     return containsStr(container, item);
   }
   if (container instanceof PyDict && classOf(container).isBuiltin) return container.store.has(item);
-  if (container instanceof PySet) return container.table.has(item);
+  if (container instanceof PySet) return lookupSetKey(item, (key) => container.table.has(key));
   if (container instanceof PyDictView && container.view !== 'values') return viewContains(container, item);
   if (container instanceof PyRange) {
     return isIntLike(item) ? rangeContains(container, asInt(item)) : countEqual(iterate(container), item, 1) > 0;
