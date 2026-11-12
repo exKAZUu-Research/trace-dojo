@@ -449,6 +449,15 @@ test.each([
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test.each([
+  ['dicts', 'a = dict.fromkeys(range(100000), 0)\nb = dict.fromkeys(range(100000), 1)', 'a == b'],
+  ['sets', 'a = set(range(100000))\nb = set(range(1, 100001))', 'a <= b'],
+])('a comparison of long %s decided by the first item does not copy them', (_name, setup, comparison) => {
+  // Copying the entries for each comparison would take longer than the time limit; the comparisons take milliseconds.
+  const program = `${setup}\nfor i in range(5000):\n    x = ${comparison}`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('a backward search for a long needle that matches at the end does not copy the text', () => {
   // Copying the text for each search would take far longer than the time limit; the search takes milliseconds.
   const program = `s = 'a' * 500000\nfor i in range(500):\n    v = s.rfind('aaaaaaaaa')`;
