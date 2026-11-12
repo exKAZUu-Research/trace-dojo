@@ -123,6 +123,7 @@ function jsonText(runtime: Runtime, value: Value, ancestors: Set<JsObject>): str
   if (value === null || typeof value === 'boolean') return String(value);
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'null';
   if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'bigint') return runtime.throwError('TypeError', 'Do not know how to serialize a BigInt');
   if (value === undefined || typeof value === 'symbol' || value instanceof JsFunction) return undefined;
   if (ancestors.has(value)) throw new CircularError();
   ancestors.add(value);

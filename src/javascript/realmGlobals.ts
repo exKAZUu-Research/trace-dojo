@@ -228,7 +228,12 @@ function defineNumber(builder: RealmBuilder): void {
     'Number',
     1,
     numberPrototype,
-    ({ runtime, args }) => (args.length === 0 ? 0 : runtime.toNumber(args[0])),
+    ({ runtime, args }) => {
+      if (args.length === 0) return 0;
+      // Number converts a BigInt, which the implicit conversion of arithmetic rejects.
+      const numeric = runtime.toNumeric(args[0]);
+      return typeof numeric === 'bigint' ? Number(numeric) : numeric;
+    },
     false
   );
   for (const [name, value] of [

@@ -76,7 +76,7 @@ test.each([
     'フィールドの初期値や static ブロックの中では arguments を使えません。',
   ],
   ['new.target outside functions', 'console.log(new.target);', 0, 'new.target は関数の中にしか書けません。'],
-  ['a BigInt', 'const n = 1n;', 0, '数値「1n」は、この採点環境では使えません。'],
+  ['a legacy octal number', 'const n = 017;', 0, '数値「017」は、この採点環境では使えません。'],
   ['import', "import x from 'x';", 0, 'import や export は、この採点環境では使えません。'],
   ['a syntax error', 'const t = new Turtle(;', 0, '「)」が足りません。'],
   ['try without catch or finally', 'try {\n  console.log(1);\n}', 0, '書き方に誤りがあります。'],
@@ -536,6 +536,19 @@ const sleep = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
     `setTimeout(() => { console.log('t1'); Promise.resolve().then(() => console.log('m in t1')); }, 0);
 setTimeout(() => console.log('t2'), 0);
 const id = setTimeout(() => console.log('never'), 1); clearTimeout(id);`,
+  ],
+  [
+    'BigInts',
+    `let f = 1n; for (let i = 1n; i <= 25n; i++) f *= i; console.log(f, String(f), \`\${f}\`, f.toString(16));
+console.log(7n / 2n, -7n / 2n, -7n % 3n, 2n ** 100n, 1n << 70n, -9n >> 2n, 5n & 3n, 5n | 3n, 5n ^ 3n, ~5n, -(-3n));
+console.log(1n < 2, 2n > 1.5, 1n == 1, 1n === 1, 0n ? 'y' : 'n', !0n, typeof 1n, BigInt(42), BigInt('0x1f'), BigInt(true), Number(12n), parseInt('9n'));
+console.log([1n, 22n, 333n, 4444n, 5n, 6n, 77777n], { big: 10n ** 20n }, 0x10n, 0b11n, 0o7n, 1_000n);
+for (const bad of [() => 1n + 1, () => +1n, () => 1n / 0n, () => 2n ** -1n, () => 1n >>> 1n, () => BigInt(1.5), () => BigInt('x'), () => new BigInt(1), () => Math.max(1n), () => 1n < Symbol()]) {
+  try { bad(); } catch (e) { console.log(e.name + ': ' + e.message); }
+}
+console.log(BigInt.asIntN(8, 255n), BigInt.asUintN(8, -1n), [3n, 1n, 2n].sort(), [10n, 9n].sort((a, b) => (a < b ? -1 : 1)), Object.prototype.toString.call(1n));
+let n = 5n; n++; n += 2n; console.log(n, n-- , --n, 3n * -1n, (123n).toLocaleString(), 12345678901234567890n.toLocaleString());
+console.log(1n + '1', '' + 2n, [1n].includes(1n), 1n.valueOf === BigInt.prototype.valueOf);`,
   ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({

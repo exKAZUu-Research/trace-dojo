@@ -1,6 +1,8 @@
+import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
 import { newRegExp } from './realmRegExp';
+import type { Runtime } from './runtime';
 import {
   type AccessorProperty,
   appendAll,
@@ -95,8 +97,13 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       }
       case 'update': {
         const reference = this.reference(expression.target);
-        const oldValue = runtime.toNumber(this.getReference(reference));
-        const newValue = expression.operator === '++' ? oldValue + 1 : oldValue - 1;
+        const oldValue = runtime.toNumeric(this.getReference(reference));
+        const newValue = arithmetic(
+          runtime,
+          expression.operator === '++' ? '+' : '-',
+          oldValue,
+          typeof oldValue === 'bigint' ? 1n : 1
+        );
         this.putReference(reference, newValue);
         return expression.prefix ? newValue : oldValue;
       }
@@ -420,13 +427,15 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return !toBoolean(value);
       }
       case '-': {
-        return -runtime.toNumber(value);
+        const numeric = runtime.toNumeric(value);
+        return -numeric;
       }
       case '+': {
         return runtime.toNumber(value);
       }
       case '~': {
-        return ~runtime.toNumber(value);
+        const numeric = runtime.toNumeric(value);
+        return ~numeric;
       }
       default: {
         throw new Error(`Unknown unary operator: ${operator}`);
@@ -446,7 +455,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
           runtime.buildString(text.length);
           return text;
         }
-        return runtime.toNumber(leftPrimitive) + runtime.toNumber(rightPrimitive);
+        return arithmetic(runtime, '+', runtime.toNumeric(leftPrimitive), runtime.toNumeric(rightPrimitive));
       }
       case '===': {
         return left === right;
@@ -484,7 +493,8 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return runtime.hasProperty(right, runtime.toPropertyKey(left));
       }
       default: {
-        return arithmetic(operator, runtime.toNumber(left), runtime.toNumber(right));
+        const leftNumeric = runtime.toNumeric(left);
+        return arithmetic(runtime, operator, leftNumeric, runtime.toNumeric(right));
       }
     }
   }
@@ -503,7 +513,7 @@ export function shortCircuits(operator: LogicalOperator, left: Value): boolean {
   return left !== undefined && left !== null;
 }
 
-type Primitive = undefined | null | boolean | number | string | symbol;
+type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 
 /** Compares primitives with the host's operators, which follow JavaScript's rules for them. */
 function compare(operator: '<' | '>' | '<=' | '>=', left: Primitive, right: Primitive): boolean {
@@ -525,8 +535,88 @@ function compare(operator: '<' | '>' | '<=' | '>=', left: Primitive, right: Prim
   }
 }
 
-function arithmetic(operator: string, left: number, right: number): number {
+/**
+ * Applies an arithmetic or bitwise operator to two numbers or two BigInts; mixing them is a TypeError, as are the
+ * operations BigInts lack.
+ */
+function arithmetic(
+  runtime: Runtime,
+  operator: string,
+  left: number | bigint,
+  right: number | bigint
+): number | bigint {
+  if (typeof left === 'bigint' || typeof right === 'bigint') {
+    if (typeof left !== 'bigint' || typeof right !== 'bigint') {
+      return runtime.throwError('TypeError', 'Cannot mix BigInt and other types, use explicit conversions');
+    }
+    return bigintArithmetic(runtime, operator, left, right);
+  }
+  return numberArithmetic(operator, left, right);
+}
+
+// code-gauge-allow functionNcss 40 -- One case per operator, as for numbers.
+function bigintArithmetic(runtime: Runtime, operator: string, left: bigint, right: bigint): bigint {
   switch (operator) {
+    case '+': {
+      return left + right;
+    }
+    case '-': {
+      return left - right;
+    }
+    case '*': {
+      chargeBigInt(runtime, bitLength(left) + bitLength(right));
+      return left * right;
+    }
+    case '/':
+    case '%': {
+      if (right === 0n) return runtime.throwError('RangeError', 'Division by zero');
+      return operator === '/' ? left / right : left % right;
+    }
+    case '**': {
+      if (right < 0n) return runtime.throwError('RangeError', 'Exponent must be positive');
+      if (left !== 0n && left !== 1n && left !== -1n) chargeBigInt(runtime, Number(right) * bitLength(left));
+      return left ** right;
+    }
+    case '&': {
+      return left & right;
+    }
+    case '|': {
+      return left | right;
+    }
+    case '^': {
+      return left ^ right;
+    }
+    case '<<':
+    case '>>': {
+      // A shift by a negative amount shifts the other way.
+      const shift = operator === '<<' ? right : -right;
+      if (shift > 0n && left !== 0n) chargeBigInt(runtime, bitLength(left) + Number(shift));
+      return shift >= 0n ? left << shift : left >> -shift;
+    }
+    case '>>>': {
+      return runtime.throwError('TypeError', 'BigInts have no unsigned right shift, use >> instead');
+    }
+    default: {
+      throw new Error(`Unknown binary operator: ${operator}`);
+    }
+  }
+}
+
+/** Charges for a BigInt result of `bits` bits, which the host would otherwise build at any size. */
+function chargeBigInt(runtime: Runtime, bits: number): void {
+  if (bits > LIMITS.maxStringLength) runtime.throwError('RangeError', 'Maximum BigInt size exceeded');
+  runtime.spend(Math.ceil(bits / 64));
+}
+
+function bitLength(value: bigint): number {
+  return (value < 0n ? -value : value).toString(2).length;
+}
+
+function numberArithmetic(operator: string, left: number, right: number): number {
+  switch (operator) {
+    case '+': {
+      return left + right;
+    }
     case '-': {
       return left - right;
     }

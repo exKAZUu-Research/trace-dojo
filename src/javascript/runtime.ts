@@ -47,7 +47,7 @@ export class Frame {
   ) {}
 }
 
-type Primitive = undefined | null | boolean | number | string | symbol;
+type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 
 export class Runtime {
   readonly world = new TurtleWorld();
@@ -175,6 +175,7 @@ export class Runtime {
     if (typeof value === 'number') return this.realm.numberPrototype;
     if (typeof value === 'boolean') return this.realm.booleanPrototype;
     if (typeof value === 'symbol') return this.realm.symbolPrototype;
+    if (typeof value === 'bigint') return this.realm.bigintPrototype;
     return this.throwError('TypeError', `Cannot read properties of ${String(value)} (reading '${String(key)}')`);
   }
 
@@ -479,7 +480,14 @@ export class Runtime {
     const primitive = this.toPrimitive(value, 'number');
     if (typeof primitive === 'string') this.scan(primitive.length);
     if (typeof primitive === 'symbol') this.throwError('TypeError', 'Cannot convert a Symbol value to a number');
+    if (typeof primitive === 'bigint') this.throwError('TypeError', 'Cannot convert a BigInt value to a number');
     return Number(primitive);
+  }
+
+  /** Converts a value to a number or a BigInt, as arithmetic operators do before deciding which they compute with. */
+  toNumeric(value: Value): number | bigint {
+    const primitive = this.toPrimitive(value, 'number');
+    return typeof primitive === 'bigint' ? primitive : this.toNumber(primitive);
   }
 
   toString(value: Value): string {

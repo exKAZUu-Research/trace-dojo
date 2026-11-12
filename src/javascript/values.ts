@@ -5,8 +5,8 @@ import type { HostIterator } from './iteration';
 import type { PromiseState } from './promises';
 import type { Runtime } from './runtime';
 
-/** A JavaScript value: primitives are the host's own, symbols included, while objects are interpreter objects. */
-export type Value = undefined | null | boolean | number | string | symbol | JsObject;
+/** A JavaScript value: primitives are the host's own, BigInts and symbols included, while objects are interpreter objects. */
+export type Value = undefined | null | boolean | number | bigint | string | symbol | JsObject;
 
 /** A property key, which JavaScript converts every other value to a string to make. */
 export type Key = string | symbol;

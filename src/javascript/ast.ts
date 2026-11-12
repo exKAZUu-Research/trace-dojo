@@ -151,7 +151,7 @@ export type Expression = Span & {
    */
   suspends?: boolean;
 } & (
-    | { kind: 'literal'; value: undefined | null | boolean | number | string }
+    | { kind: 'literal'; value: undefined | null | boolean | number | bigint | string }
     | { kind: 'template'; strings: string[]; expressions: Expression[] }
     /**
      * The strings of a tagged template, which its tag receives as a frozen array with a frozen `raw` array; a string

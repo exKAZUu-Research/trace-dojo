@@ -148,7 +148,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     return value;
   }
 
-  private number(node: Node): number {
+  private number(node: Node): number | bigint {
     const value = parseNumberLiteral(node.text);
     if (value === undefined) return unsupported(node, `数値「${node.text}」`);
     return value;

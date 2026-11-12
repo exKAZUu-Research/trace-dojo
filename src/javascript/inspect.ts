@@ -76,6 +76,7 @@ function formatCharged(ctx: Context, value: Value, recurseTimes: number): string
 function formatValue(ctx: Context, value: Value, recurseTimes: number): string {
   if (typeof value === 'string') return formatString(ctx, value);
   if (typeof value === 'number') return formatNumber(value);
+  if (typeof value === 'bigint') return `${value}n`;
   if (!(value instanceof JsObject)) return String(value);
   if (ctx.seen.has(value)) {
     let index = ctx.circular.get(value);
@@ -359,7 +360,9 @@ function groupArrayElements(ctx: Context, output: string[], array: JsArray): str
     for (let j = i; j < output.length; j += columns) lineMaxLength = Math.max(lineMaxLength, dataLength[j] ?? 0);
     maxLineLength.push(lineMaxLength + separatorSpace);
   }
-  const padStart = output.every((_, i) => typeof array.elements[i] === 'number');
+  const padStart = output.every(
+    (_, i) => typeof array.elements[i] === 'number' || typeof array.elements[i] === 'bigint'
+  );
   const grouped: string[] = [];
   for (let i = 0; i < outputLength; i += columns) {
     const max = Math.min(i + columns, outputLength);

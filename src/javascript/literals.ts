@@ -1,9 +1,8 @@
-/** Reads a numeric literal, or returns undefined for a BigInt or a legacy octal one, which the interpreter rejects. */
-export function parseNumberLiteral(text: string): number | undefined {
-  if (text.endsWith('n')) return undefined;
+/** Reads a numeric or BigInt literal, or returns undefined for a legacy octal one, which the interpreter rejects. */
+export function parseNumberLiteral(text: string): number | bigint | undefined {
   const digits = text.replaceAll('_', '');
   if (/^0\d/.test(digits)) return undefined;
-  return Number(digits);
+  return digits.endsWith('n') ? BigInt(digits.slice(0, -1)) : Number(digits);
 }
 
 /** Decodes a quoted string literal. */

@@ -2,6 +2,7 @@ import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
 import { definePromiseBuiltins } from './promises';
 import { defineArrayBuiltins } from './realmArrays';
+import { defineBigIntBuiltins } from './realmBigInt';
 import { defineGlobalBuiltins } from './realmGlobals';
 import { defineIteratorBuiltins } from './realmIterators';
 import { defineNodeBuiltins } from './realmNode';
@@ -21,6 +22,7 @@ export interface Realm {
   numberPrototype: JsObject;
   booleanPrototype: JsObject;
   symbolPrototype: JsObject;
+  bigintPrototype: JsObject;
   promisePrototype: JsObject;
   regExpPrototype: JsObject;
   /** `%IteratorPrototype%`, the parent of the builtin iterators' prototypes. */
@@ -49,6 +51,7 @@ export class RealmBuilder {
       numberPrototype: new JsObject(objectPrototype),
       booleanPrototype: new JsObject(objectPrototype),
       symbolPrototype: new JsObject(objectPrototype),
+      bigintPrototype: new JsObject(objectPrototype),
       promisePrototype: new JsObject(objectPrototype),
       regExpPrototype: new JsObject(objectPrototype),
       iteratorPrototype,
@@ -147,5 +150,6 @@ export function createRealm(runtime: Runtime): Realm {
   defineRegExpBuiltins(builder);
   defineGeneratorBuiltins(builder);
   definePromiseBuiltins(builder);
+  defineBigIntBuiltins(builder);
   return builder.realm;
 }

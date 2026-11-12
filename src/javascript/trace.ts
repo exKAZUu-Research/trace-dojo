@@ -130,6 +130,9 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
     return { kind: 'value', value };
   if (typeof value === 'symbol') return { kind: 'value', value: value.toString() };
+  // A BigInt shows its digits, as learners write it without the `n` of its literal.
+  if (typeof value === 'bigint')
+    return { kind: 'value', value: Number.isSafeInteger(Number(value)) ? Number(value) : String(value) };
   if (value instanceof JsFunction || seen.has(value)) return undefined;
   if (value.turtle) {
     if (!value.turtle.isAlive) return undefined;
