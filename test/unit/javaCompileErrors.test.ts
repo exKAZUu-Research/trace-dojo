@@ -1358,6 +1358,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     true,
     'import java.util.*;\nclass Main {\n  record P(String name, int age) {}\n  public static void main(String[] args) {\n    List<P> ps = new ArrayList<>(); ps.sort(Comparator.comparing(P::name, Comparator.reverseOrder()).reversed());\n  }\n}',
   ],
+  [
+    'serializable-class-with-version',
+    true,
+    'import java.io.Serializable;\nclass Main implements Serializable {\n  private static final long serialVersionUID = 1L;\n  public static void main(String[] args) {\n    Serializable s = new int[0];\n  }\n}',
+  ],
+  [
+    'char-sequence-without-its-methods',
+    false,
+    'class Text implements CharSequence {\n  public int length() { return 0; }\n}\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'annotation-without-targets-on-a-type-use',
+    false,
+    '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',
+  ],
 ];
 
 test.each(programs)('%s is accepted exactly when Java accepts it', (_, runs, source) => {

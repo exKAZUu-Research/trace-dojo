@@ -77,11 +77,12 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     const argTypes = args.map((arg) => arg.type);
     const type = resolved.args?.length === 0 ? this.inferDiamond(cls, argTypes, targetType) : resolved;
     const bindings = memberBindings(type, cls);
-    const candidates = cls.constructors.map((candidate) => methodView(candidate, bindings));
-    const explicitTypeArgs = expression.typeArgs?.map((typeArg) => this.resolveTypeArgument(typeArg));
     const constructor = this.selectMethod(
       expression,
-      explicitTypeArgs ? this.withTypeArguments(candidates, explicitTypeArgs) : candidates,
+      this.withExplicitTypeArguments(
+        expression,
+        cls.constructors.map((candidate) => methodView(candidate, bindings))
+      ),
       argTypes,
       `コンストラクタ ${cls.name}`
     );
@@ -144,7 +145,10 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
       const bindings = memberBindings(base, baseClass);
       superConstructor = this.selectMethod(
         expression,
-        baseClass.constructors.map((candidate) => methodView(candidate, bindings)),
+        this.withExplicitTypeArguments(
+          expression,
+          baseClass.constructors.map((candidate) => methodView(candidate, bindings))
+        ),
         args.map((arg) => arg.type),
         `コンストラクタ ${baseClass.name}`
       );
@@ -156,6 +160,15 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     this.checkThrown(context, expression, constructor.thrownTypes);
     const convertedArgs = this.convertArguments(context, constructor, args, expression.args);
     return this.compileCreation(context, expression, cls, cls.type, constructor, convertedArgs);
+  }
+
+  /** The constructors instantiated with the type arguments written after `new`, as in `new <String>Box(s)`. */
+  protected withExplicitTypeArguments(
+    expression: Extract<Expression, { kind: 'new' }>,
+    constructors: MethodInfo[]
+  ): MethodInfo[] {
+    const typeArgs = expression.typeArgs?.map((typeArg) => this.resolveTypeArgument(typeArg));
+    return typeArgs ? this.withTypeArguments(constructors, typeArgs) : constructors;
   }
 
   /**

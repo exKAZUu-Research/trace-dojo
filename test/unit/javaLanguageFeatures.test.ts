@@ -198,6 +198,31 @@ test.each([
     'sealed interface S permits A {}\nfinal class B implements S {}\nfinal class A implements S {}',
     'B は sealed な S の permits に含まれていないので、継承できません。',
   ],
+  [
+    'an annotation of an undeclared type',
+    'class A {}\n@Missing class B {}',
+    'この採点環境には、アノテーション Missing がありません。',
+  ],
+  [
+    'an annotation outside its targets',
+    '@java.lang.annotation.Target(java.lang.annotation.ElementType.METHOD) @interface M {}\n@M class B {}',
+    'アノテーション @M はここには付けられません。',
+  ],
+  [
+    'a variable arity record component before another',
+    'class A {}\nrecord R(int... xs, int y) {}',
+    '可変長引数は最後の引数にしか使えません。',
+  ],
+  [
+    'Type.super naming a class that does not enclose the code',
+    'class A { String n() { return ""; } }\nclass B { String m() { return A.super.n(); } }',
+    'A.super は、このクラスか外側のクラスにしか使えません。',
+  ],
+  [
+    'an intersection cast with a class after &',
+    'class A {}\nclass B { Object o = (Runnable & A) null; }',
+    '交差型の & の後ろには、インターフェースしか書けません。',
+  ],
 ])('Java rejects %s', (_, declarations, message) => {
   const source = `${declarations}\npublic class Main { public static void main(String[] args) {} }`;
   expect(executeProgram('java', source)).toEqual({
@@ -235,6 +260,54 @@ public class Main {
   }
 }`;
   expect(traceProgram('java', program, program).finalVars).toEqual({ count: 3, kind: 'right', size: 8 });
+});
+
+test('Java runs varargs records and lambdas, qualified super, generic constructors, annotations, and intersection casts', () => {
+  const program = `import java.io.Serializable;
+import java.lang.annotation.*;
+import java.util.*;
+import java.util.function.*;
+@Retention(RetentionPolicy.RUNTIME) @Target({ElementType.TYPE_USE, ElementType.METHOD}) @interface Tag { String value() default ""; }
+@interface Note { int[] ids() default {}; }
+record Scores(@Note String name, int... values) { @Override public String name() { return name.toUpperCase(); } }
+record Box<T>(T value) {}
+interface Summer { int of(int... xs); }
+class Base { String who = "base"; String name() { return "base"; } }
+class Derived extends Base {
+  String name() { return "derived"; }
+  Supplier<String> parentName() { return super::name; }
+  class Inner { String names() { return Derived.super.name() + Derived.super.who + Derived.this.name(); } }
+}
+class Pair<A> { final A first; final String tag; <B> Pair(A first, B tag) { this.first = first; this.tag = String.valueOf(tag); } }
+@Note(ids = {1, 2}) public class Main {
+  int base = 2;
+  @Tag("m") int times(@Tag Main this, int x) { return base * x; }
+  static int digits()[] { return new int[] {4, 2}; }
+  static int count(CharSequence text) { return text.length(); }
+  public static void main(String[] args) {
+    Scores s = new Scores("ann", 3, 4);
+    Summer sum = (int... xs) -> Arrays.stream(xs).sum();
+    System.out.println(s.name() + s.values().length + new Scores("bo").values().length + sum.of(1, 2) + sum.of());
+    Derived d = new Derived();
+    System.out.println(d.parentName().get() + " " + d.new Inner().names());
+    Pair<String> p = new <Integer>Pair<String>("x", 7);
+    System.out.println(p.first + p.tag + new Main().times(5) + digits()[1]);
+    @Tag List<@Tag String> tags = new ArrayList<>();
+    int @Tag [] grid = new int @Tag [2];
+    Runnable r = (Runnable & Serializable) () -> tags.add("run");
+    r.run();
+    System.out.println(tags + " " + grid.length + " " + (r instanceof Serializable) + " " + ("s" instanceof Serializable));
+    System.out.println(count("abc") + count(new StringBuilder("de")) + " " + ((CharSequence) "xyz").subSequence(1, 3));
+    for (Object o = "abc"; o instanceof String str && !str.isEmpty(); o = str.substring(1)) System.out.print(str + " ");
+    Box<String> box = new Box<>("hello");
+    if (box instanceof Box(var v)) System.out.println(v.length());
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ANN2030\nbase basebasederived\nx7102\n[run] 2 true true\n5 yz\nabc bc c 5\n',
+    uncaughtException: undefined,
+  });
 });
 
 test('Java concatenates numbers and characters onto a String with +=', () => {
