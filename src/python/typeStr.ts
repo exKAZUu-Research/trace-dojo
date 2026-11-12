@@ -9,15 +9,7 @@ import { contains } from './operators';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import { repeatText, StringBuilder } from './stringBuilder';
-import {
-  codePointIndex,
-  codePointOffset,
-  isPrintable,
-  iterStr,
-  PYTHON_WHITESPACE,
-  strLength,
-  strRepr,
-} from './strings';
+import { codePointIndex, codePointOffset, iterStr, PYTHON_WHITESPACE, strLength, strRepr } from './strings';
 import { hasAt, occurrences } from './strSearch';
 import {
   argumentTypeName,
@@ -45,7 +37,15 @@ import {
   title,
   upper,
 } from './unicodeCase';
-import { isDecimalChar, isDigitChar, isNumericChar } from './unicodeNumeric';
+import {
+  isAlphaChar,
+  isDecimalChar,
+  isDigitChar,
+  isIdentifierContinueChar,
+  isIdentifierStartChar,
+  isNumericChar,
+  isPrintableChar,
+} from './unicodeClasses';
 import { type DONE, PyDict, PySlice, PyTuple, type PyValue } from './values';
 
 strClass.construct = (_cls, args, kwargs) => {
@@ -73,10 +73,6 @@ const LINE_BREAKS = '\n\r\v\f\u001C\u001D\u001E\u0085  ';
 
 function isSpace(char: string): boolean {
   return char.length === 1 && PYTHON_WHITESPACE.test(char);
-}
-
-function isAlpha(char: string): boolean {
-  return /\p{L}/u.test(char);
 }
 
 const asStr = (self: PyValue): string => self as string;
@@ -130,18 +126,18 @@ method(strClass, 'title', 'none', 0, 0, (self) => title(asStr(self)));
 
 // Predicates --------------------------------------------------------------------------------------------------------
 
-method(strClass, 'isalpha', 'none', 0, 0, (self) => every(asStr(self), isAlpha));
+method(strClass, 'isalpha', 'none', 0, 0, (self) => every(asStr(self), isAlphaChar));
 method(strClass, 'isdecimal', 'none', 0, 0, (self) => every(asStr(self), isDecimalChar));
 method(strClass, 'isdigit', 'none', 0, 0, (self) => every(asStr(self), isDigitChar));
 method(strClass, 'isnumeric', 'none', 0, 0, (self) => every(asStr(self), isNumericChar));
 method(strClass, 'isalnum', 'none', 0, 0, (self) =>
-  every(asStr(self), (char) => isAlpha(char) || isNumericChar(char) || isDigitChar(char))
+  every(asStr(self), (char) => isAlphaChar(char) || isNumericChar(char) || isDigitChar(char))
 );
 method(strClass, 'isspace', 'none', 0, 0, (self) => every(asStr(self), isSpace));
 // oxlint-disable-next-line eslint/no-control-regex -- ASCII includes the control characters.
 method(strClass, 'isascii', 'none', 0, 0, (self) => everyCode(asStr(self), (code) => code < 0x80));
 method(strClass, 'isprintable', 'none', 0, 0, (self) =>
-  everyCode(asStr(self), (code) => isPrintable(String.fromCodePoint(code)))
+  everyCode(asStr(self), (code) => isPrintableChar(String.fromCodePoint(code)))
 );
 method(strClass, 'isidentifier', 'none', 0, 0, (self) => {
   const text = asStr(self);
@@ -150,7 +146,7 @@ method(strClass, 'isidentifier', 'none', 0, 0, (self) => {
     text !== '' &&
     everyCode(text, (code) => {
       const char = String.fromCodePoint(code);
-      const isValid = first ? /[\p{XID_Start}_]/u.test(char) : /\p{XID_Continue}/u.test(char);
+      const isValid = first ? isIdentifierStartChar(char) : isIdentifierContinueChar(char);
       first = false;
       return isValid;
     })

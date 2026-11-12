@@ -2,7 +2,7 @@ import { bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { iterStr, stripNumberSpace } from './strings';
 import { pyError, typeError, typeName, valueError } from './types';
-import { decimalDigitValue, isDecimalChar } from './unicodeNumeric';
+import { decimalDigitValue, isDecimalChar } from './unicodeClasses';
 import { type PyError, PyInstance, type PyValue } from './values';
 
 /** The limit of decimal digits an int may convert to or from, which sys.set_int_max_str_digits changes (0: none). */

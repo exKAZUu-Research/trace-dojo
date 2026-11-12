@@ -1,4 +1,5 @@
 import { chargeScan, chargeStep, runningProgram } from './runtimeContext';
+import { isPrintableChar } from './unicodeClasses';
 
 /** Python strings are sequences of code points, while JavaScript strings are UTF-16; these helpers bridge the two. */
 
@@ -217,13 +218,6 @@ export function compareStr(a: string, b: string): number {
   return (index < a.length ? 1 : 0) - (index < b.length ? 1 : 0);
 }
 
-const NON_PRINTABLE = /[\p{C}\p{Z}]/u;
-
-/** Whether a code point is printable, as `str.isprintable()` decides: not a control, format, or separator other than space. */
-export function isPrintable(char: string): boolean {
-  return char === ' ' || !NON_PRINTABLE.test(char);
-}
-
 function escapeCodePoint(code: number): string {
   if (code < 0x1_00) return `\\x${code.toString(16).padStart(2, '0')}`;
   if (code < 0x1_00_00) return `\\u${code.toString(16).padStart(4, '0')}`;
@@ -242,7 +236,7 @@ export function strRepr(text: string, asciiOnly = false): string {
     else if (char === '\t') result += String.raw`\t`;
     else if (code < 0x20 || code === 0x7f) result += escapeCodePoint(code);
     else if (code < 0x7f) result += char;
-    else if (asciiOnly || !isPrintable(char)) result += escapeCodePoint(code);
+    else if (asciiOnly || !isPrintableChar(char)) result += escapeCodePoint(code);
     else result += char;
   }
   return result + quote;

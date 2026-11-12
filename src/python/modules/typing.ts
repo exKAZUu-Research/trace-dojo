@@ -42,6 +42,7 @@ import {
   typeClass,
   typeError,
 } from '../types';
+import { isIdentifierText } from '../unicodeClasses';
 import { UnsupportedFeatureError } from '../unsupported';
 import { type Kwargs, PyClass, PyDict, PyFunction, PyModule, PyOpaque, type PyTuple, type PyValue } from '../values';
 import { counterClass, defaultdictClass, dequeClass, orderedDictClass } from './collections';
@@ -309,7 +310,7 @@ function resolveHint(value: PyValue, locals: Map<string, PyValue>, globals: Map<
 
 function resolveName(text: string, locals: Map<string, PyValue>, globals: Map<string, PyValue>): PyValue {
   const parts = text.trim().split('.');
-  if (!parts.every((part) => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(part))) {
+  if (!parts.every((part) => isIdentifierText(part))) {
     throw new UnsupportedFeatureError(`名前でない文字列の型ヒントの評価（${text}）`);
   }
   const runtime = currentRuntime();

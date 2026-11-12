@@ -18,6 +18,7 @@ import {
   typeError,
   valueError,
 } from '../types';
+import { isIdentifierText } from '../unicodeClasses';
 import {
   AttributeMap,
   DONE,
@@ -88,7 +89,7 @@ function namedTupleFields(fieldNames: PyValue, rename: boolean): string[] {
   if (!rename) return fields;
   const seen = new Set<string>();
   return fields.map((name, index) => {
-    const isUnusable = !isIdentifier(name) || PYTHON_KEYWORDS.has(name) || name.startsWith('_') || seen.has(name);
+    const isUnusable = !isIdentifierText(name) || PYTHON_KEYWORDS.has(name) || name.startsWith('_') || seen.has(name);
     seen.add(name);
     return isUnusable ? `_${index}` : name;
   });
@@ -97,7 +98,8 @@ function namedTupleFields(fieldNames: PyValue, rename: boolean): string[] {
 /** Checks the names of a namedtuple as collections.namedtuple does, in its order. */
 function checkNamedTupleNames(typename: string, fields: string[], rename: boolean): void {
   for (const name of [typename, ...fields]) {
-    if (!isIdentifier(name)) throw valueError(`Type names and field names must be valid identifiers: ${pyRepr(name)}`);
+    if (!isIdentifierText(name))
+      throw valueError(`Type names and field names must be valid identifiers: ${pyRepr(name)}`);
     if (PYTHON_KEYWORDS.has(name)) throw valueError(`Type names and field names cannot be a keyword: ${pyRepr(name)}`);
   }
   const seen = new Set<string>();
@@ -107,10 +109,6 @@ function checkNamedTupleNames(typename: string, fields: string[], rename: boolea
     if (seen.has(name)) throw valueError(`Encountered duplicate field name: ${pyRepr(name)}`);
     seen.add(name);
   }
-}
-
-function isIdentifier(name: string): boolean {
-  return /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(name);
 }
 
 /** Binds the arguments as CPython's generated `__new__(_cls, field, ...)` does, with the shared binding's checks. */

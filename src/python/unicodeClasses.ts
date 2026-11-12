@@ -1,9 +1,8 @@
-import { NUMERIC_DATA } from './unicodeNumericData';
+import { CLASS_DATA } from './unicodeClassData';
 
 /**
- * Whether characters are decimal, digits, or numeric, as str.isdecimal, isdigit, and isnumeric decide on CPython 3.14's
- * Unicode database rather than the JavaScript engine's, whose Unicode version differs and whose classes leave out
- * numeric ideographs such as 京 and 壹.
+ * The character classes of str's predicates, as CPython 3.14's Unicode database (16.0.0) decides them rather than the
+ * JavaScript engine's, whose Unicode version differs and whose classes leave out numeric ideographs such as 京 and 壹.
  */
 export function isDecimalChar(char: string): boolean {
   return inRuns(tables().decimal, char);
@@ -17,6 +16,31 @@ export function isNumericChar(char: string): boolean {
   return inRuns(tables().numeric, char);
 }
 
+export function isAlphaChar(char: string): boolean {
+  return inRuns(tables().alpha, char);
+}
+
+/** Whether `repr()` shows a character as it is and `str.isprintable()` accepts it. */
+export function isPrintableChar(char: string): boolean {
+  return inRuns(tables().printable, char);
+}
+
+/** Whether a character may start an identifier: XID_Start or `_`. */
+export function isIdentifierStartChar(char: string): boolean {
+  return inRuns(tables().identifierStart, char);
+}
+
+/** Whether a text is an identifier, as `str.isidentifier()` decides. */
+export function isIdentifierText(text: string): boolean {
+  const chars = [...text];
+  return chars.length > 0 && isIdentifierStartChar(chars[0]) && chars.slice(1).every(isIdentifierContinueChar);
+}
+
+/** Whether a character may follow the first one in an identifier: XID_Continue. */
+export function isIdentifierContinueChar(char: string): boolean {
+  return inRuns(tables().identifierContinue, char);
+}
+
 /**
  * The value of a decimal character, or undefined for another one. Decimal digits come in blocks from 0 to 9, which
  * adjacent blocks extend into one longer run, so a digit's value is its offset from the run's start modulo ten.
@@ -27,14 +51,15 @@ export function decimalDigitValue(char: string): number | undefined {
   return index % 2 === 1 ? ((char.codePointAt(0) as number) - bounds[index - 1]) % 10 : undefined;
 }
 
-let decoded: { decimal: number[]; digit: number[]; numeric: number[] } | undefined;
+type ClassName = keyof typeof CLASS_DATA;
 
-function tables(): { decimal: number[]; digit: number[]; numeric: number[] } {
-  decoded ??= {
-    decimal: decodeRuns(NUMERIC_DATA.decimal),
-    digit: decodeRuns(NUMERIC_DATA.digit),
-    numeric: decodeRuns(NUMERIC_DATA.numeric),
-  };
+let decoded: Record<ClassName, number[]> | undefined;
+
+function tables(): Record<ClassName, number[]> {
+  decoded ??= Object.fromEntries(Object.entries(CLASS_DATA).map(([name, runs]) => [name, decodeRuns(runs)])) as Record<
+    ClassName,
+    number[]
+  >;
   return decoded;
 }
 

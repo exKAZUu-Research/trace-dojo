@@ -14,6 +14,7 @@ import { currentRuntime } from './runtimeContext';
 import { repeatText } from './stringBuilder';
 import { headStr, iterStr, strLength } from './strings';
 import { pyError, typeName, valueError } from './types';
+import { isDecimalChar } from './unicodeClasses';
 import type { PyValue } from './values';
 
 type Align = '<' | '>' | '=' | '^';
@@ -99,7 +100,7 @@ class SpecReader {
   /** A width or precision, which CPython reads into a Py_ssize_t. */
   readCount(): number | undefined {
     let digits = '';
-    while (/\p{Nd}/u.test(this.chars[this.index] ?? '')) digits += this.chars[this.index++];
+    while (this.index < this.chars.length && isDecimalChar(this.chars[this.index])) digits += this.chars[this.index++];
     if (!digits) return undefined;
     digits = toAsciiDigits(digits);
     if (digits.length > 18 && BigInt(digits) > MAX_SSIZE) throw valueError('Too many decimal digits in format string');
