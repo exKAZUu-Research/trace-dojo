@@ -549,11 +549,9 @@ export class Printer {
     if (type === undefined) {
       this.buffer += '<nil>';
     } else {
+      // Go keeps the width and precision for the value, as its badVerb prints with the flags it parsed.
       this.buffer += `${typeString(type)}=`;
-      const saved = this.flags;
-      this.flags = noFlags();
       this.printValue(value, type, 'v', 0);
-      this.flags = saved;
     }
     this.buffer += ')';
   }

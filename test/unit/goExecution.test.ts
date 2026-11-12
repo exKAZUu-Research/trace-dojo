@@ -159,6 +159,13 @@ test('a declaration may declare several names at once', () => {
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test('a wrong verb prints its value with the width and precision written', () => {
+  const program = goMain(
+    '\tif s := fmt.Sprintf("|%[3]*.[2]*[1]f|", 12, 2, 6); s != "|%!f(int=    12)|" {\n\t\tpanic(s)\n\t}'
+  );
+  expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('syntax of later stages is rejected as unavailable', () => {
   const execution = executeProgram('go', goMain('\tch := make(chan int)\n\tfmt.Println(ch)'));
   expect(execution).toMatchObject({
