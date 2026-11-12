@@ -332,7 +332,7 @@ const members: Record<string, Entity> = {
       byteSlice(
         bytesOf(bytes) +
           formatFloat(
-            value as number,
+            Number(bits as bigint) === 32 ? Math.fround(value as number) : (value as number),
             String.fromCharCode(Number(format as bigint)),
             Number(precision as bigint),
             Number(bits as bigint) === 32 ? 32 : 64
