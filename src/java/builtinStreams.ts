@@ -20,6 +20,7 @@ import {
   typeVariable,
   variableType,
 } from './builtinStreamSupport';
+import { defineStatisticsOperations, defineSummaryStatistics } from './builtinSummaryStatistics';
 import { addMethod, defineInterface, newString, type Registry } from './builtinSupport';
 import { box, compareValues, type Wrappers } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
@@ -44,8 +45,10 @@ export function defineStreams(
     fn: (name) => registry.classes.get(name) as ClassInfo,
   };
   const optional = defineOptionals(context);
+  defineSummaryStatistics(context);
   const collector = defineCollectors(context);
   const streams = defineStreamTypes(context, optional, collector);
+  defineStatisticsOperations(context, streams.intStream, streams.doubleStream);
   defineSources(context, streams);
   defineStringStreams(context, streams);
   defineGeneratedStreams(context, streams);

@@ -518,6 +518,34 @@ public class Main {
   });
 });
 
+test('Java summarizes ints and doubles in IntSummaryStatistics and DoubleSummaryStatistics as the JDK does', () => {
+  const program = `import java.util.*;
+import java.util.stream.*;
+public class Main {
+  public static void main(String[] args) {
+    IntSummaryStatistics is = IntStream.of(4, -2, 9).summaryStatistics();
+    System.out.println(is + " " + is.getCount() + " " + is.getSum() + " " + is.getMin() + " " + is.getMax() + " " + is.getAverage());
+    IntSummaryStatistics empty = new IntSummaryStatistics();
+    System.out.println(empty + " " + empty.getAverage());
+    empty.accept(Integer.MAX_VALUE); empty.accept(Integer.MAX_VALUE); empty.combine(is);
+    System.out.println(empty.getSum() + " " + empty.getCount());
+    DoubleSummaryStatistics ds = DoubleStream.of(0.1, 0.2, 0.3).summaryStatistics();
+    System.out.println(ds + " " + ds.getSum() + " " + ds.getAverage() + " " + ds.getMax());
+    DoubleSummaryStatistics de = new DoubleSummaryStatistics();
+    System.out.println(de + " " + de.getMin() + " " + de.getAverage());
+    de.accept(1e16); de.accept(1); de.accept(1); de.combine(DoubleStream.of(-1e16, Double.NaN).summaryStatistics());
+    System.out.println(de.getSum() + " " + de.getMax() + " " + de.getMin());
+    System.out.println(Stream.of("aa", "b", "cccc").collect(Collectors.summarizingInt(String::length)));
+    System.out.println(Stream.of(1.5, 2.5).collect(Collectors.summarizingDouble(x -> x)).getSum());
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'IntSummaryStatistics{count=3, sum=11, min=-2, average=3.666667, max=9} 3 11 -2 9 3.6666666666666665\nIntSummaryStatistics{count=0, sum=0, min=2147483647, average=0.000000, max=-2147483648} 0.0\n4294967305 5\nDoubleSummaryStatistics{count=3, sum=0.600000, min=0.100000, average=0.200000, max=0.300000} 0.6 0.19999999999999998 0.3\nDoubleSummaryStatistics{count=0, sum=0.000000, min=Infinity, average=0.000000, max=-Infinity} Infinity 0.0\nNaN NaN NaN\nIntSummaryStatistics{count=3, sum=7, min=1, average=2.333333, max=4}\n4.0\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

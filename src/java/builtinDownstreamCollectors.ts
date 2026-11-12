@@ -3,6 +3,7 @@ import { type CollectorFunctions, collectors } from './builtinCollectors';
 import { callFunction } from './builtinFunctions';
 import { createStore } from './builtinMaps';
 import { classType, type Context, extendsOf, superOf, typeVariable, variableType } from './builtinStreamSupport';
+import { statisticsCollector } from './builtinSummaryStatistics';
 import { addMethod } from './builtinSupport';
 import { box } from './builtinWrappers';
 import { type Frame, throwBuiltin } from './runtime';
@@ -197,6 +198,18 @@ function defineNumericCollectors(
             return box(finishFrame, resultClass, average ? (state.count === 0 ? 0 : sum / state.count) : sum);
           },
         })
+    );
+  }
+  for (const [name, iface, isInt] of [
+    ['summarizingInt', 'ToIntFunction', true],
+    ['summarizingDouble', 'ToDoubleFunction', false],
+  ] as const) {
+    const statisticsClass = fn(isInt ? 'IntSummaryStatistics' : 'DoubleSummaryStatistics');
+    define(
+      name,
+      ['T'],
+      ([t]) => ({ parameters: [classType(fn(iface), superOf(t))], result: collectorOf(t, ANY, statisticsClass.type) }),
+      (frame, _, [mapper]) => create(frame, statisticsCollector(statisticsClass, isInt, fn(iface), mapper))
     );
   }
 }
