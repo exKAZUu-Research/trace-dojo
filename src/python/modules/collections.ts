@@ -89,11 +89,11 @@ function push(deque: PyDeque, item: PyValue, left: boolean): void {
     currentRuntime().spend();
     return;
   }
-  if (left) deque.splice(0, 0, [item]);
+  if (left) deque.appendLeft(item);
   else deque.append(item);
-  if (deque.maxlen !== undefined && deque.items.length > deque.maxlen) {
+  if (deque.maxlen !== undefined && deque.length > deque.maxlen) {
     if (left) deque.editableItems.pop();
-    else deque.editableItems.shift();
+    else deque.popLeft();
   }
 }
 
@@ -133,12 +133,12 @@ function extendDeque(deque: PyDeque, iterable: PyValue, left: boolean): void {
   for (let item = next(); item !== DONE; item = next()) push(deque, item, left);
 }
 method(dequeClass, 'pop', 'none', 0, 0, (self) => {
-  if (dequeOf(self).items.length === 0) throw pyError('IndexError', 'pop from an empty deque');
+  if (dequeOf(self).length === 0) throw pyError('IndexError', 'pop from an empty deque');
   return dequeOf(self).editableItems.pop() as PyValue;
 });
 method(dequeClass, 'popleft', 'none', 0, 0, (self) => {
-  if (dequeOf(self).items.length === 0) throw pyError('IndexError', 'pop from an empty deque');
-  return dequeOf(self).editableItems.shift() as PyValue;
+  if (dequeOf(self).length === 0) throw pyError('IndexError', 'pop from an empty deque');
+  return dequeOf(self).popLeft();
 });
 method(dequeClass, 'rotate', 'expected', 0, 1, (self, [steps]) => {
   const items = dequeOf(self).editableItems;
@@ -191,7 +191,7 @@ method(
   0,
   (self) => new PyDeque(dequeOf(self).cls, [...dequeOf(self).items], dequeOf(self).maxlen)
 );
-method(dequeClass, '__len__', 'none', 0, 0, (self) => BigInt(dequeOf(self).items.length));
+method(dequeClass, '__len__', 'none', 0, 0, (self) => BigInt(dequeOf(self).length));
 method(dequeClass, '__add__', 'one', 1, 1, (self, [other]) => {
   if (!(other instanceof PyDeque)) throw typeError(`can only concatenate deque (not "${typeName(other)}") to deque`);
   const result = copyDeque(dequeOf(self));

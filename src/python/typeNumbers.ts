@@ -1,6 +1,7 @@
 import { complexRepr, newComplex } from './complexNumbers';
 import { pyRepr } from './conversions';
 import { method } from './define';
+import { defineUnsupportedAttributes } from './descriptors';
 import { formatComplex } from './formatComplex';
 import { frexp, hashFloat, hashInt } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
@@ -106,9 +107,7 @@ method(intClass, 'as_integer_ratio', 'none', 0, 0, (self) => newTuple([intLike(s
 method(intClass, 'is_integer', 'none', 0, 0, () => true);
 method(intClass, 'conjugate', 'none', 0, 0, (self) => intLike(self));
 method(intClass, '__round__', 'expected', 0, 1, (self, [digits]) => roundInt(intLike(self), digits));
-method(intClass, 'to_bytes', 'expected', 0, 3, () => {
-  throw valueError('int.to_bytes() はこの採点環境では使えません。');
-});
+defineUnsupportedAttributes(intClass, { to_bytes: 'int.to_bytes()（bytes 型）' });
 
 /** `round(n, digits)` for an int, rounding halves to even. */
 export function roundInt(value: bigint, digits: PyValue | undefined): bigint {

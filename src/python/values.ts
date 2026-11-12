@@ -202,7 +202,7 @@ export class AttributeMap extends Map<string, PyValue> {
  * that code building or growing a container neither forgets the charge nor repeats it.
  */
 abstract class PyGrowableSequence extends PyObject {
-  private storage: PyValue[];
+  protected storage: PyValue[];
 
   constructor(cls: PyClass, items: PyValue[]) {
     super(cls);
@@ -485,13 +485,63 @@ export class PyOpaque extends PyObject {
 }
 
 /** A `collections.deque`. */
+/**
+ * A `collections.deque`. Its items start `front` places into the storage, so that taking and adding items at the left
+ * end costs no move of the others; reading `items` packs them first, which a left-end operation pays for only once
+ * the free places are as many as the items.
+ */
 export class PyDeque extends PyGrowableSequence {
+  private front = 0;
+
   constructor(
     cls: PyClass,
     items: PyValue[],
     readonly maxlen: number | undefined
   ) {
     super(cls, items);
+  }
+
+  override get items(): readonly PyValue[] {
+    this.pack();
+    return this.storage;
+  }
+
+  override get editableItems(): PyValue[] {
+    this.pack();
+    return this.storage;
+  }
+
+  get length(): number {
+    return this.storage.length - this.front;
+  }
+
+  popLeft(): PyValue {
+    const item = this.storage[this.front] as PyValue;
+    this.storage[this.front] = undefined as unknown as PyValue;
+    this.front++;
+    if (this.front >= this.length) this.pack();
+    return item;
+  }
+
+  appendLeft(item: PyValue): void {
+    chargeSlots(1);
+    if (this.front === 0) this.reserveFront();
+    this.front--;
+    this.storage[this.front] = item;
+  }
+
+  private reserveFront(): void {
+    const room = Math.max(this.storage.length, 8);
+    const storage: PyValue[] = Array.from({ length: room });
+    for (const item of this.storage) storage.push(item);
+    this.storage = storage;
+    this.front = room;
+  }
+
+  private pack(): void {
+    if (this.front === 0) return;
+    this.storage = this.storage.slice(this.front);
+    this.front = 0;
   }
 }
 

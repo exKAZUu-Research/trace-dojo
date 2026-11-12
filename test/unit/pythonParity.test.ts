@@ -244,6 +244,14 @@ for i in range(100):
 test.each([
   ['sorting many references to one long string', 's = "x" * 100000\nx = sorted([s] * 10000)'],
   ['counting equal copies of a long string', 'a = "a" * 100000\nl = [a] * 30000\nx = l.count("a" * 99999 + "a")'],
+  [
+    'draining a deque from the left',
+    'from collections import deque\nq = deque(range(100000))\nwhile q:\n    q.popleft()',
+  ],
+  [
+    'filling a deque from the left',
+    'from collections import deque\nr = deque()\nfor i in range(100000):\n    r.appendleft(i)',
+  ],
 ])('%s runs within the limits', (_name, program) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
