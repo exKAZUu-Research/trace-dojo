@@ -534,7 +534,8 @@ export function defineMapMethods(
       // As HashMap.putMapEntries does: a table for the entries, filled in the source's iteration order.
       const entries = source.store.ordered();
       createStore(receiver, entries.length === 0 ? 16 : tableSizeFor(Math.ceil(entries.length / 0.75)));
-      for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value);
+      // As the JDK's constructor does, the copy asks no `removeEldestEntry` override to evict.
+      for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value, false, false);
       return;
     }
   );
@@ -793,7 +794,8 @@ export function putEntry(
   key: Value,
   keepsExisting: boolean,
   value?: Value,
-  atBucketHead = false
+  atBucketHead = false,
+  evicts = true
 ): Value | typeof NO_ENTRY {
   const store = storeOf(receiver);
   // Comparing a key with itself rejects null and keys that are not comparable, even in an empty map.
@@ -815,7 +817,7 @@ export function putEntry(
   else if (atBucketHead) store.addAtBucketHead({ key, value, hash: javaHash(frame, key) });
   else store.add({ key, value, hash: javaHash(frame, key) });
   touch(receiver);
-  evictionOf((receiver as JavaObject).cls)?.(frame, receiver as JavaObject);
+  if (evicts) evictionOf((receiver as JavaObject).cls)?.(frame, receiver as JavaObject);
   return NO_ENTRY;
 }
 

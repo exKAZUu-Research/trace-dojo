@@ -1,7 +1,8 @@
+import { linkOverrides } from './builtinCollectionSupport';
 import { type CollectorFunctions } from './builtinCollectors';
 import { callFunction } from './builtinFunctions';
 import { type Context, iterate, op, take } from './builtinStreamSupport';
-import { addConstructor, addMethod, newString } from './builtinSupport';
+import { addConstructor, addInterface, addMethod, newString } from './builtinSupport';
 import { box } from './builtinWrappers';
 import { formatText } from './javaFormatter';
 import { type Frame, throwBuiltin } from './runtime';
@@ -44,6 +45,10 @@ export function defineSummaryStatistics(context: Context): void {
     const name = `${kind}SummaryStatistics`;
     const cls = context.registry.define(name, context.objectClass, 'java.util');
     const element = ELEMENTS[kind].type;
+    // Each is the consumer of its values, and a LongSummaryStatistics of ints too, as in the JDK.
+    for (const consumer of kind === 'Long' ? ['LongConsumer', 'IntConsumer'] : [`${kind}Consumer`]) {
+      addInterface(cls, { kind: 'class', cls: context.fn(consumer) });
+    }
     addConstructor(cls, [], (_, receiver) => {
       statistics.set(receiver as JavaObject, emptyStatistics(kind));
     });
@@ -86,6 +91,7 @@ export function defineSummaryStatistics(context: Context): void {
       ];
       return newString(frame, formatText(frame, pattern, args));
     });
+    linkOverrides(cls);
   }
 }
 

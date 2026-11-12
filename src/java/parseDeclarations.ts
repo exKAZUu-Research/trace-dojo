@@ -295,7 +295,7 @@ function convertParameters(node: Node): Parameter[] {
   });
 }
 
-function varargsNotLastError(node: Node): CompileError {
+export function varargsNotLastError(node: Node): CompileError {
   return new CompileError([{ row: node.startPosition.row, message: '可変長引数は最後の引数にしか使えません。' }]);
 }
 

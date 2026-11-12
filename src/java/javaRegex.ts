@@ -4,7 +4,6 @@ export interface TranslatedRegex {
   flags: string;
 }
 
-/** Thrown for a pattern that Java rejects or that JavaScript cannot express, with what makes it so. */
 /** A pattern that Java rejects, or that uses what JavaScript cannot express, with where `Pattern` reports it. */
 export class UnsupportedRegexError extends Error {
   constructor(

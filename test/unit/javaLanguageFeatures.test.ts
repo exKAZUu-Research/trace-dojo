@@ -966,6 +966,42 @@ class Main {
   }
 });
 
+test("Java's summary statistics are consumers, and LinkedHashMap counts computeIfAbsent hits and copies without evicting, as the JDK does", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+import java.util.function.*;
+import java.util.stream.*;
+class Main {
+  static class Box { <T> Box(T t) { System.out.println("object"); } <T extends Number> Box(T t) { System.out.println("number"); } }
+  static class Cache extends LinkedHashMap<Integer, Integer> {
+    Cache(Map<Integer, Integer> m) { super(m); }
+    protected boolean removeEldestEntry(Map.Entry<Integer, Integer> e) { return size() > 1; }
+  }
+  public static void main(String[] args) {
+    IntSummaryStatistics s = new IntSummaryStatistics();
+    IntStream.of(1, 2).forEach(s);
+    LongSummaryStatistics l = new LongSummaryStatistics();
+    IntStream.of(3, 4).forEach(l);
+    LongStream.of(5).forEach(l);
+    DoubleSummaryStatistics d = new DoubleSummaryStatistics(); DoubleStream.of(1.5).forEach(d);
+    System.out.println(s.getSum() + " " + l.getSum() + " " + d.getSum());
+    Map<Integer, Integer> m = new LinkedHashMap<>(16, .75f, true);
+    m.put(1, 1); m.put(2, 2); m.computeIfAbsent(1, k -> 9); System.out.println(m);
+    Function<Integer, Box> f = Box::<Object>new; f.apply(1);
+    Cache c = new Cache(new TreeMap<>(Map.of(1, 2, 3, 4)));
+    System.out.println(c);
+    c.put(5, 6);
+    System.out.println(c);
+  }
+}`,
+      '3 12 1.5\n{2=2, 1=1}\nobject\n{1=2, 3=4}\n{3=4, 5=6}\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

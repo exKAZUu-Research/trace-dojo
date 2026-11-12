@@ -520,9 +520,9 @@ export abstract class LambdaCompiler extends PatternCompiler {
     if (!targetType) {
       const named = 'expression' in target ? expressionAsType(target.expression) : undefined;
       if (!named) return this.error(reference, 'new のメソッド参照には型を書いてください。');
-      return { kind: 'new', type: named, args, ...span };
+      return { kind: 'new', type: named, args, typeArgs, ...span };
     }
-    if (targetType.kind !== 'array') return { kind: 'new', type: targetType, args, ...span };
+    if (targetType.kind !== 'array') return { kind: 'new', type: targetType, args, typeArgs, ...span };
     return {
       kind: 'newArray',
       elementType: targetType.element,

@@ -2,6 +2,7 @@ import { removeAllOf, removeMatching } from './builtinBulkRemoval';
 import { type Collections, compareNatural, itemsOf, javaEquals, putEntry } from './builtinCollections';
 import { checkModifiable, forEachLiveEntry, mapViewSources, sortedValues } from './builtinCollectionSupport';
 import { defineKeyComparators } from './builtinComparators';
+import { recordAccess } from './builtinLinkedHashMap';
 import { defineMapRemappings, putComputed, startComputing, unchanging } from './builtinMapComputing';
 import {
   addAbstractMethod,
@@ -754,7 +755,10 @@ function defineMapDefaults(collections: Collections, functions: DefaultFunctions
     false,
     (frame, receiver, [key, mapping]) => {
       const entry = startComputing(frame, receiver, key);
-      if (entry && entry.value !== undefined) return entry.value;
+      if (entry && entry.value !== undefined) {
+        recordAccess(receiver, entry);
+        return entry.value;
+      }
       const value = unchanging(frame, receiver, () => callFunction(frame, functions.fn, mapping, [key]));
       if (value !== undefined) putEntry(frame, receiver, key, false, value, true);
       return value;

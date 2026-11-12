@@ -12,7 +12,7 @@ import type {
   TypeSyntax,
 } from './ast';
 import { parseHexFloat } from './hexFloat';
-import { convertMember, convertVarargsParameter } from './parseDeclarations';
+import { convertMember, convertVarargsParameter, varargsNotLastError } from './parseDeclarations';
 import {
   convertModifiers,
   convertPattern,
@@ -128,8 +128,9 @@ function convertLambda(node: Node): Expression {
       ...span(parameter),
     }));
   } else {
-    parameters = namedChildren(parametersNode).map((parameter) => {
+    parameters = namedChildren(parametersNode).map((parameter, index, all) => {
       if (parameter.type === 'spread_parameter') {
+        if (index !== all.length - 1) throw varargsNotLastError(parameter);
         const { name, type, isFinal } = convertVarargsParameter(parameter);
         return { name, type, isFinal, ...span(parameter) };
       }

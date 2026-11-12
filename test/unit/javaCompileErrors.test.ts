@@ -1429,6 +1429,11 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'import java.util.*;\nrecord Point(int x, List<String> tags) { public int x() { return x * 2; } public List<String> tags() { return List.copyOf(tags); } public int x(int scale) { return x * scale; } static int y() { return 1; } }\nclass Main {\n  public static void main(String[] args) {}\n}',
   ],
   [
+    'lambda-varargs-parameter-before-another',
+    false,
+    'import java.util.function.*;\nclass Main {\n  public static void main(String[] args) {\n    BiConsumer<int[], Integer> f = (int... a, Integer b) -> System.out.println(b);\n  }\n}',
+  ],
+  [
     'annotation-without-targets-on-a-type-use',
     false,
     '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',
