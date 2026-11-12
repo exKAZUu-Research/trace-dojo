@@ -206,8 +206,9 @@ function comb(nValue: PyValue, kValue: PyValue): bigint {
 
 function perm(nValue: PyValue, kValue: PyValue | undefined): bigint {
   const n = integerArgument(nValue);
-  if (n < 0n) throw valueError('n must be a non-negative integer');
+  // As math_perm_impl does, the one-argument form is factorial, with factorial's own checks.
   if (kValue === undefined || kValue === currentRuntime().none) return factorial(n);
+  if (n < 0n) throw valueError('n must be a non-negative integer');
   const k = integerArgument(kValue);
   if (k < 0n) throw valueError('k must be a non-negative integer');
   if (k > n) return 0n;
