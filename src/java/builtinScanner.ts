@@ -210,14 +210,21 @@ function readAhead(frame: Frame, state: ScannerState): boolean {
  * the input ends; an empty token means that only whitespace remains.
  */
 function tokenBounds(frame: Frame, state: ScannerState): { start: number; end: number } {
+  // The bounds are relative to the position, which reading ahead keeps at the same text, so that each char is
+  // examined once however many lines the search reads.
+  let [start, end, isInToken] = [0, 0, false];
   for (;;) {
     const { buffer, position } = state;
-    let start = position;
-    while (start < buffer.length && WHITESPACE.test(buffer[start])) start++;
-    let end = start;
-    while (end < buffer.length && !WHITESPACE.test(buffer[end])) end++;
-    frame.runtime.scanString(end - position);
-    if (end < buffer.length || !readAhead(frame, state)) return { start: start - position, end: end - position };
+    const from = position + end;
+    let index = from;
+    if (!isInToken) {
+      while (index < buffer.length && WHITESPACE.test(buffer[index])) index++;
+      [start, isInToken] = [index - position, index < buffer.length];
+    }
+    while (isInToken && index < buffer.length && !WHITESPACE.test(buffer[index])) index++;
+    end = index - position;
+    frame.runtime.scanString(index - from);
+    if (index < buffer.length || !readAhead(frame, state)) return { start, end };
   }
 }
 

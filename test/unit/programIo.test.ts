@@ -76,6 +76,12 @@ test.each([
     '1 b  a\n',
   ],
   [
+    'a token after many blank lines',
+    'Scanner sc = new Scanner(System.in); System.out.println(sc.nextInt() + " " + sc.hasNext());',
+    `${'\n'.repeat(20_000)}1${'\n'.repeat(20_000)}`,
+    '1 false\n',
+  ],
+  [
     'lines from a BufferedReader',
     'BufferedReader br = new BufferedReader(new InputStreamReader(System.in)); String line; while ((line = br.readLine()) != null) System.out.println("[" + line + "]");',
     'x\r\ny\n\nz',
