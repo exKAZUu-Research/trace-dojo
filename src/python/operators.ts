@@ -10,6 +10,7 @@ import {
   dictViewBinary,
   differenceUpdate,
   isSetLikeView,
+  isSubset,
   lookupSetKey,
   setIntersection,
   symmetricDifferenceUpdate,
@@ -863,33 +864,25 @@ function compareSequences(
   return applyOrder(operator, left.length, right.length);
 }
 
-function subset(a: PySet, b: PySet): boolean {
-  for (const entry of a.table.entries()) {
-    currentRuntime().spend();
-    if (!b.table.findEntry(entry.key, entry.hash)) return false;
-  }
-  return true;
-}
-
 function compareSets(operator: keyof typeof COMPARE_NAMES, left: PySet, right: PySet): boolean {
   switch (operator) {
     case '==': {
-      return left.table.size === right.table.size && subset(left, right);
+      return left.table.size === right.table.size && isSubset(left.table, right.table);
     }
     case '!=': {
-      return !(left.table.size === right.table.size && subset(left, right));
+      return !(left.table.size === right.table.size && isSubset(left.table, right.table));
     }
     case '<=': {
-      return subset(left, right);
+      return isSubset(left.table, right.table);
     }
     case '<': {
-      return left.table.size < right.table.size && subset(left, right);
+      return left.table.size < right.table.size && isSubset(left.table, right.table);
     }
     case '>=': {
-      return subset(right, left);
+      return isSubset(right.table, left.table);
     }
     default: {
-      return right.table.size < left.table.size && subset(right, left);
+      return right.table.size < left.table.size && isSubset(right.table, left.table);
     }
   }
 }

@@ -389,13 +389,17 @@ test.each([
 test.each([
   ['a list', 'a = list(range(100000))', '0 in a'],
   ['a tuple', 'a = tuple(range(100000))', '0 in a'],
+  ['a larger set under a smaller one', 'a = set(range(100000))\nb = set()', 'a <= b'],
+  ['issubset of a larger set', 'a = set(range(100000))\nb = set()', 'a.issubset(b)'],
+  ['issuperset of a larger set', 'a = set(range(50000))\nb = set(range(100000))', 'a.issuperset(b)'],
+  ['isdisjoint of a small set and a large one', 'a = {-1}\nb = set(range(100000))', 'a.isdisjoint(b)'],
   ['a keys view under a set', 'd = dict.fromkeys(range(100000))\ns = set(range(1, 100001))', 'd.keys() <= s'],
   [
     'a keys view under a keys view',
     'd = dict.fromkeys(range(100000))\ne = dict.fromkeys(range(1, 100001))',
     'd.keys() <= e.keys()',
   ],
-])('a test of %s decided by its first item is charged for that item', (_name, setup, test) => {
+])('a test of %s decided at once is charged only for what it reads', (_name, setup, test) => {
   const program = `${setup}\nfor i in range(5000):\n    x = ${test}`;
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });

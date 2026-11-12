@@ -11,7 +11,9 @@ import { contains, countEqual, equals, extendList, lessThan } from './operators'
 import { currentRuntime } from './runtimeContext';
 import {
   addToTable,
+  areDisjoint,
   differenceUpdate,
+  isSubset,
   lookupSetKey,
   setDifferenceAll,
   setIntersection,
@@ -531,15 +533,22 @@ for (const cls of [setClass, frozensetClass]) {
     setDifferenceAll(setOf(self), others)
   );
   method(cls, 'symmetric_difference', 'one', 1, 1, (self, [other]) => setSymmetricDifference(setOf(self), other));
-  method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => !someItem(other, (item) => setOf(self).table.has(item)));
-  method(cls, 'issubset', 'one', 1, 1, (self, [other]) => {
+  method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) =>
+    other instanceof PySet
+      ? areDisjoint(setOf(self).table, other.table)
+      : !someItem(other, (item) => setOf(self).table.has(item))
+  );
+  method(cls, 'issubset', 'one', 1, 1, (self, [other]) =>
     // CPython compares the size of the intersection unless the other operand is a set.
-    if (!(other instanceof PySet)) return setIntersection(setOf(self), other).table.size === setOf(self).table.size;
-    return setOf(self)
-      .table.keys()
-      .every((key) => other.table.has(key));
-  });
-  method(cls, 'issuperset', 'one', 1, 1, (self, [other]) => !someItem(other, (item) => !setOf(self).table.has(item)));
+    other instanceof PySet
+      ? isSubset(setOf(self).table, other.table)
+      : setIntersection(setOf(self), other).table.size === setOf(self).table.size
+  );
+  method(cls, 'issuperset', 'one', 1, 1, (self, [other]) =>
+    other instanceof PySet
+      ? isSubset(other.table, setOf(self).table)
+      : !someItem(other, (item) => !setOf(self).table.has(item))
+  );
 }
 
 /** Whether an iterable has an item passing the test, reading no further than the first one as CPython does. */

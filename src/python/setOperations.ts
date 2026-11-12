@@ -152,6 +152,28 @@ export function setDifference(set: PySet, other: PyValue): PySet {
   return setLike(set, result);
 }
 
+/** Whether every element of `set` is in `other`, as CPython's set_issubset decides it, sizes first. */
+export function isSubset(set: SetTable, other: SetTable): boolean {
+  if (set.size > other.size) return false;
+  const runtime = currentRuntime();
+  for (const entry of set.entries()) {
+    runtime.spend();
+    if (!other.findEntry(entry.key, entry.hash)) return false;
+  }
+  return true;
+}
+
+/** Whether two sets share no element, as CPython's set_isdisjoint decides it, visiting the smaller one. */
+export function areDisjoint(set: SetTable, other: SetTable): boolean {
+  const [visited, probed] = other.size > set.size ? [set, other] : [other, set];
+  const runtime = currentRuntime();
+  for (const entry of visited.entries()) {
+    runtime.spend();
+    if (probed.findEntry(entry.key, entry.hash)) return false;
+  }
+  return true;
+}
+
 /** `set ^= other`, as CPython's set_symmetric_difference_update does: a dict's keys in dict order, anything else as a set. */
 export function symmetricDifferenceUpdate(table: SetTable, other: PyValue): void {
   if (other instanceof PySet && other.table === table) {
