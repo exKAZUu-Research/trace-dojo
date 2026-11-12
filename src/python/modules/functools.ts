@@ -1,6 +1,6 @@
 import { abcInvalidationCount } from '../abstractClasses';
 import { addressOf, pyRepr } from '../conversions';
-import { builtin, method, pythonFunction } from '../define';
+import { builtin, method } from '../define';
 import { defineGetSet, defineUnsupportedAttributes } from '../descriptors';
 import { DictStore } from '../dictStore';
 import { runLibrarySource } from '../librarySource';
@@ -8,7 +8,7 @@ import { mappingProxyClass } from '../mappingProxy';
 import { importModule, registerModule, registerUnsupportedAttributes } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { bindValue, callValue, isCallable, isTruthy, iterateOr, lookupSpecial } from '../objects';
+import { callValue, isCallable, isTruthy, iterateOr, lookupSpecial } from '../objects';
 import { compareOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { forwardRefClass, genericAliasClass, newGenericAlias, unionClass } from '../typeHints';
@@ -21,7 +21,6 @@ import {
   newDict,
   newTuple,
   None,
-  NotImplemented,
   typeError,
 } from '../types';
 import {
@@ -29,8 +28,6 @@ import {
   DONE,
   type Kwargs,
   PyBoundMethod,
-  PyBuiltinFunction,
-  PyClass,
   PyDict,
   PyInstance,
   type PyObject,
@@ -313,66 +310,6 @@ function cmpToKey(args: PyValue[], kwargs: Kwargs): PyValue {
   );
 }
 
-/** `functools.total_ordering`: derives the missing comparisons from `__eq__` and one ordering method. */
-function totalOrdering([cls]: PyValue[]): PyValue {
-  if (!(cls instanceof PyClass)) throw typeError('total_ordering requires a class');
-  const roots = ['__lt__', '__le__', '__gt__', '__ge__'].filter((name) => cls.dict.has(name));
-  if (roots.length === 0) throw currentRuntime().valueErrorOf('must define at least one ordering operation: < > <= >=');
-  const root = roots[0];
-  const call = (self: PyValue, name: string, other: PyValue): PyValue =>
-    callValue(bindValue(cls.lookup(name) as PyValue, self), [other]);
-  const derived: Record<string, Record<string, (self: PyValue, other: PyValue) => PyValue>> = {
-    __lt__: {
-      __gt__: (self, other) =>
-        wrapNot(call(self, '__lt__', other), (lt) => !isTruthy(lt) && !isTruthy(compareOp('==', self, other))),
-      __le__: (self, other) =>
-        wrapNot(call(self, '__lt__', other), (lt) => isTruthy(lt) || isTruthy(compareOp('==', self, other))),
-      __ge__: (self, other) => wrapNot(call(self, '__lt__', other), (lt) => !isTruthy(lt)),
-    },
-    __le__: {
-      __ge__: (self, other) =>
-        wrapNot(call(self, '__le__', other), (le) => !isTruthy(le) || isTruthy(compareOp('==', self, other))),
-      __lt__: (self, other) =>
-        wrapNot(call(self, '__le__', other), (le) => isTruthy(le) && !isTruthy(compareOp('==', self, other))),
-      __gt__: (self, other) => wrapNot(call(self, '__le__', other), (le) => !isTruthy(le)),
-    },
-    __gt__: {
-      __lt__: (self, other) =>
-        wrapNot(call(self, '__gt__', other), (gt) => !isTruthy(gt) && !isTruthy(compareOp('==', self, other))),
-      __ge__: (self, other) =>
-        wrapNot(call(self, '__gt__', other), (gt) => isTruthy(gt) || isTruthy(compareOp('==', self, other))),
-      __le__: (self, other) => wrapNot(call(self, '__gt__', other), (gt) => !isTruthy(gt)),
-    },
-    __ge__: {
-      __le__: (self, other) =>
-        wrapNot(call(self, '__ge__', other), (ge) => !isTruthy(ge) || isTruthy(compareOp('==', self, other))),
-      __gt__: (self, other) =>
-        wrapNot(call(self, '__ge__', other), (ge) => isTruthy(ge) && !isTruthy(compareOp('==', self, other))),
-      __lt__: (self, other) => wrapNot(call(self, '__ge__', other), (ge) => !isTruthy(ge)),
-    },
-  };
-  for (const [name, fn] of Object.entries(derived[root])) {
-    if (!cls.dict.has(name)) {
-      cls.dict.set(
-        name,
-        new PyBuiltinFunction(
-          builtinClass('method_descriptor'),
-          name,
-          ([self, other]) => fn(self, other),
-          undefined,
-          'method',
-          cls.name
-        )
-      );
-    }
-  }
-  return cls;
-}
-
-function wrapNot(result: PyValue, convert: (value: PyValue) => boolean): PyValue {
-  return result === NotImplemented ? NotImplemented : convert(result);
-}
-
 registerUnsupportedAttributes('functools', {
   RLock: 'functools.RLock（スレッド）',
 });
@@ -389,7 +326,6 @@ registerModule('functools', (runtime) =>
       ['_lru_cache_wrapper', builtin('_lru_cache_wrapper', 'expected', 4, 4, lruCacheWrapper)],
       ['_CacheInfo', makeNamedTupleClass('CacheInfo', ['hits', 'misses', 'maxsize', 'currsize'], 'functools')],
       ['cmp_to_key', builtin('cmp_to_key', 'takes', 1, 1, cmpToKey, { keywords: ['mycmp'], named: 1 })],
-      ['total_ordering', pythonFunction('total_ordering', 'cls', totalOrdering)],
       [
         'get_cache_token',
         builtin('get_cache_token', 'none', 0, 0, () => BigInt(abcInvalidationCount()), { module: '_abc' }),

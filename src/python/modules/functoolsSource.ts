@@ -9,6 +9,119 @@ WRAPPER_ASSIGNMENTS = ('__module__', '__name__', '__qualname__', '__doc__',
 WRAPPER_UPDATES = ('__dict__',)
 
 
+def _gt_from_lt(self, other):
+    'Return a > b.  Computed by @total_ordering from (not a < b) and (a != b).'
+    op_result = type(self).__lt__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return not op_result and self != other
+
+def _le_from_lt(self, other):
+    'Return a <= b.  Computed by @total_ordering from (a < b) or (a == b).'
+    op_result = type(self).__lt__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return op_result or self == other
+
+def _ge_from_lt(self, other):
+    'Return a >= b.  Computed by @total_ordering from (not a < b).'
+    op_result = type(self).__lt__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return not op_result
+
+def _ge_from_le(self, other):
+    'Return a >= b.  Computed by @total_ordering from (not a <= b) or (a == b).'
+    op_result = type(self).__le__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return not op_result or self == other
+
+def _lt_from_le(self, other):
+    'Return a < b.  Computed by @total_ordering from (a <= b) and (a != b).'
+    op_result = type(self).__le__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return op_result and self != other
+
+def _gt_from_le(self, other):
+    'Return a > b.  Computed by @total_ordering from (not a <= b).'
+    op_result = type(self).__le__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return not op_result
+
+def _lt_from_gt(self, other):
+    'Return a < b.  Computed by @total_ordering from (not a > b) and (a != b).'
+    op_result = type(self).__gt__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return not op_result and self != other
+
+def _ge_from_gt(self, other):
+    'Return a >= b.  Computed by @total_ordering from (a > b) or (a == b).'
+    op_result = type(self).__gt__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return op_result or self == other
+
+def _le_from_gt(self, other):
+    'Return a <= b.  Computed by @total_ordering from (not a > b).'
+    op_result = type(self).__gt__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return not op_result
+
+def _le_from_ge(self, other):
+    'Return a <= b.  Computed by @total_ordering from (not a >= b) or (a == b).'
+    op_result = type(self).__ge__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return not op_result or self == other
+
+def _gt_from_ge(self, other):
+    'Return a > b.  Computed by @total_ordering from (a >= b) and (a != b).'
+    op_result = type(self).__ge__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return op_result and self != other
+
+def _lt_from_ge(self, other):
+    'Return a < b.  Computed by @total_ordering from (not a >= b).'
+    op_result = type(self).__ge__(self, other)
+    if op_result is NotImplemented:
+        return op_result
+    return not op_result
+
+_convert = {
+    '__lt__': [('__gt__', _gt_from_lt),
+               ('__le__', _le_from_lt),
+               ('__ge__', _ge_from_lt)],
+    '__le__': [('__ge__', _ge_from_le),
+               ('__lt__', _lt_from_le),
+               ('__gt__', _gt_from_le)],
+    '__gt__': [('__lt__', _lt_from_gt),
+               ('__ge__', _ge_from_gt),
+               ('__le__', _le_from_gt)],
+    '__ge__': [('__le__', _le_from_ge),
+               ('__gt__', _gt_from_ge),
+               ('__lt__', _lt_from_ge)]
+}
+
+def total_ordering(cls):
+    """Class decorator that fills in missing ordering methods"""
+    # Find user-defined comparisons (not those inherited from object).
+    roots = {op for op in _convert if getattr(cls, op, None) is not getattr(object, op, None)}
+    if not roots:
+        raise ValueError('must define at least one ordering operation: < > <= >=')
+    root = max(roots)       # prefer __lt__ to __le__ to __gt__ to __ge__
+    for opname, opfunc in _convert[root]:
+        if opname not in roots:
+            opfunc.__name__ = opname
+            setattr(cls, opname, opfunc)
+    return cls
+
+
 def update_wrapper(wrapper,
                    wrapped,
                    assigned = WRAPPER_ASSIGNMENTS,
