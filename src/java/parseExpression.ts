@@ -8,10 +8,11 @@ import type {
   Expression,
   LambdaParameter,
   LiteralValue,
+  MethodReference,
   TypeSyntax,
 } from './ast';
 import { parseHexFloat } from './hexFloat';
-import { convertMember } from './parseDeclarations';
+import { convertMember, convertVarargsParameter } from './parseDeclarations';
 import {
   convertModifiers,
   convertPattern,
@@ -19,6 +20,7 @@ import {
   convertVariableType,
   countDimensions,
   field,
+  isAnnotation,
   isComment,
   modifiersOf,
   namedChildren,
@@ -127,7 +129,10 @@ function convertLambda(node: Node): Expression {
     }));
   } else {
     parameters = namedChildren(parametersNode).map((parameter) => {
-      if (parameter.type !== 'formal_parameter') unsupported(parameter, 'ラムダ式の可変長引数');
+      if (parameter.type === 'spread_parameter') {
+        const { name, type, isFinal } = convertVarargsParameter(parameter);
+        return { name, type, isFinal, ...span(parameter) };
+      }
       const typeNode = field(parameter, 'type');
       return {
         name: field(parameter, 'name').text,
@@ -162,10 +167,7 @@ function convertMethodReference(node: Node): Expression {
   const [targetNode] = parts;
   const argumentsNode = parts.find((part) => part.type === 'type_arguments');
   const nameNode = parts.at(-1) as Node;
-  if (targetNode.type === 'super') unsupported(node, 'super のメソッド参照');
-  const target = TYPE_NODES.has(targetNode.type)
-    ? { type: convertType(targetNode) }
-    : { expression: convertExpression(targetNode) };
+  const target = convertMethodReferenceTarget(targetNode, parts);
   const typeArgs = argumentsNode && namedChildren(argumentsNode).map((arg) => convertType(arg));
   return {
     kind: 'methodRef',
@@ -174,6 +176,14 @@ function convertMethodReference(node: Node): Expression {
     ...(typeArgs && { typeArgs }),
     ...span(node),
   };
+}
+
+function convertMethodReferenceTarget(targetNode: Node, parts: Node[]): MethodReference['target'] {
+  if (targetNode.type === 'super') return { super: undefined };
+  if (parts[1]?.type === 'super') return { super: expressionAsTypeSyntax(targetNode) ?? unsupported(targetNode, '式') };
+  return TYPE_NODES.has(targetNode.type)
+    ? { type: convertType(targetNode) }
+    : { expression: convertExpression(targetNode) };
 }
 
 function convertIntegerLiteral(node: Node): Expression {
@@ -266,28 +276,28 @@ function expressionAsTypeSyntax(node: Node): TypeSyntax | undefined {
 function convertMethodInvocation(node: Node): Expression {
   const typeArgs = node.childForFieldName('type_arguments');
   const object = node.childForFieldName('object');
-  // `Interface.super.m()` writes the interface where the object goes and `super` after it.
-  const superInterface =
+  // `Type.super.m()` writes the type where the object goes and `super` after it.
+  const superQualifier =
     object && node.children.some((child) => child?.type === 'super' && child.startIndex !== object.startIndex)
       ? expressionAsTypeSyntax(object)
       : undefined;
   if (
     object &&
-    !superInterface &&
+    !superQualifier &&
     node.children.some((child) => child?.type === 'super' && child.startIndex !== object.startIndex)
   ) {
     unsupported(node, '修飾された super');
   }
   return {
     kind: 'call',
-    object: superInterface
+    object: superQualifier
       ? 'super'
       : object
         ? object.type === 'super'
           ? 'super'
           : convertExpression(object)
         : undefined,
-    superInterface,
+    superQualifier,
     name: field(node, 'name').text,
     args: convertArguments(field(node, 'arguments')),
     typeArgs: typeArgs ? namedChildren(typeArgs).map((type) => convertType(type)) : undefined,
@@ -296,15 +306,18 @@ function convertMethodInvocation(node: Node): Expression {
 }
 
 function convertObjectCreation(node: Node): Expression {
-  if (node.childForFieldName('type_arguments')) unsupported(node, 'コンストラクタへの型引数');
+  const typeArgs = node.childForFieldName('type_arguments');
   const typeNode = field(node, 'type');
   const parts = namedChildren(node);
-  const outerNode = parts[0]?.startIndex === typeNode.startIndex ? undefined : parts[0];
+  const outerNode = [typeNode, typeArgs].some((child) => child?.startIndex === parts[0]?.startIndex)
+    ? undefined
+    : parts[0];
   const bodyNode = parts.find((child) => child.type === 'class_body');
   return {
     kind: 'new',
     type: convertType(typeNode),
     args: convertArguments(field(node, 'arguments')),
+    ...(typeArgs && { typeArgs: namedChildren(typeArgs).map((type) => convertType(type)) }),
     body: bodyNode ? namedChildren(bodyNode).map((member) => convertMember(member)) : undefined,
     outer: outerNode ? convertExpression(outerNode) : undefined,
     ...span(node),
@@ -316,9 +329,8 @@ function convertArrayCreation(node: Node): Expression {
   let extraDimensions = 0;
   for (const dimension of node.childrenForFieldName('dimensions')) {
     if (dimension.type === 'dimensions_expr') {
-      const expressions = namedChildren(dimension);
-      if (expressions.length !== 1) unsupported(dimension, '配列の次元へのアノテーション');
-      dimensionLengths.push(convertExpression(expressions[0]));
+      const expression = namedChildren(dimension).find((child) => !isAnnotation(child)) as Node;
+      dimensionLengths.push(convertExpression(expression));
     } else {
       extraDimensions += countDimensions(dimension);
     }

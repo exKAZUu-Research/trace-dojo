@@ -168,7 +168,9 @@ class Compiler extends DeclarationCompiler {
       );
     }
     this.withInstanceTypeVariables(cls, true, () => {
-      for (const constructor of cls.constructors) this.compileConstructor(cls, constructor);
+      for (const constructor of cls.constructors) {
+        this.withTypeVariables(constructor.typeParameters ?? [], () => this.compileConstructor(cls, constructor));
+      }
     });
   }
 

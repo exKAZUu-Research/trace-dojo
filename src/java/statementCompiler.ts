@@ -445,12 +445,27 @@ export abstract class StatementCompiler extends InvocationCompiler {
     statement: Extract<Statement, { kind: 'for' }>,
     labels: string[]
   ): Exec {
-    const { init, update } = this.compileForHeader(context, statement);
+    const { init: initSyntax } = statement;
+    const init = Array.isArray(initSyntax)
+      ? this.compileForHeaderPart(statement, initSyntax.length === 0, () => this.compileStatements(context, initSyntax))
+      : this.compileForHeaderPart(
+          statement,
+          initSyntax.declarators.every((declarator) => !declarator.initializer),
+          () => this.compileLocal(context, initSyntax)
+        );
     const { condition: conditionSyntax } = statement;
     const condition = conditionSyntax ? this.compileCondition(context, conditionSyntax) : () => true;
     if (conditionSyntax) this.checkLoopBodyReachable(conditionSyntax, statement.body);
-    const body = this.withBindings(context, conditionSyntax ? bindingsWhen(conditionSyntax, true) : [], () =>
-      this.compileLoopBody(context, statement.body, labels)
+    // The condition's bindings are in scope in the update as well as in the body (JLS 6.3.2.5).
+    const { update, body } = this.withBindings(
+      context,
+      conditionSyntax ? bindingsWhen(conditionSyntax, true) : [],
+      () => ({
+        update: this.compileForHeaderPart(statement, statement.update.length === 0, () =>
+          this.compileStatements(context, statement.update)
+        ),
+        body: this.compileLoopBody(context, statement.body, labels),
+      })
     );
     return (frame) => {
       init(frame);
@@ -466,33 +481,21 @@ export abstract class StatementCompiler extends InvocationCompiler {
     };
   }
 
-  /** Compiles the init and the update so that each records one step after it runs as a whole. */
-  protected compileForHeader(
-    context: MethodContext,
-    statement: Extract<Statement, { kind: 'for' }>
-  ): { init: Exec; update: Exec } {
+  /** Compiles the init or the update so that, unless it is empty, it records one step after it runs as a whole. */
+  protected compileForHeaderPart(
+    statement: Extract<Statement, { kind: 'for' }>,
+    isEmpty: boolean,
+    compile: () => Exec
+  ): Exec {
     const stepRow = this.stepRowOf(statement);
     this.compilesForHeader = true;
     try {
-      const init = Array.isArray(statement.init)
-        ? this.compileStatements(context, statement.init)
-        : this.compileLocal(context, statement.init);
-      const update = this.compileStatements(context, statement.update);
-      if (stepRow === undefined) return { init, update };
-      const recordStep =
-        (exec: Exec): Exec =>
-        (frame) => {
-          exec(frame);
-          frame.runtime.steps.step(stepRow);
-          return;
-        };
-      const { init: initPart } = statement;
-      const initRecordsStep = Array.isArray(initPart)
-        ? initPart.length > 0
-        : initPart.declarators.some((declarator) => declarator.initializer);
-      return {
-        init: initRecordsStep ? recordStep(init) : init,
-        update: statement.update.length > 0 ? recordStep(update) : update,
+      const exec = compile();
+      if (stepRow === undefined || isEmpty) return exec;
+      return (frame) => {
+        exec(frame);
+        frame.runtime.steps.step(stepRow);
+        return;
       };
     } finally {
       this.compilesForHeader = false;

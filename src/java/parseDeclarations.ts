@@ -35,6 +35,7 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
     class_declaration: 'class',
     interface_declaration: 'interface',
     record_declaration: 'class',
+    annotation_type_declaration: 'interface',
   } as const;
   const kind = kinds[node.type as keyof typeof kinds] ?? ('enum' as const);
   const superclassNode = node.childForFieldName('superclass');
@@ -47,6 +48,7 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
     if (member.type === 'enum_constant') enumConstants.push(convertEnumConstant(member));
     else if (member.type === 'enum_body_declarations') members.push(...namedChildren(member).map(convertMember));
     else if (member.type === 'compact_constructor_declaration') members.push(convertCompactConstructor(member));
+    else if (member.type === 'annotation_type_element_declaration') members.push(convertAnnotationElement(member));
     else members.push(convertMember(member));
   }
   const header = node.type === 'record_declaration' ? field(node, 'parameters') : undefined;
@@ -64,6 +66,21 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
     permits: permitsNode
       ? namedChildren(namedChildren(permitsNode)[0] ?? permitsNode).map((type) => convertType(type))
       : undefined,
+    ...span(node),
+  };
+}
+
+/** An element of an annotation interface, which these programs never read, as an abstract method. */
+function convertAnnotationElement(node: Node): MethodDeclaration {
+  return {
+    kind: 'method',
+    name: field(node, 'name').text,
+    typeParameters: [],
+    modifiers: convertModifiers(modifiersOf(node)),
+    returnType: convertVariableType(node),
+    parameters: [],
+    throwsTypes: [],
+    body: undefined,
     ...span(node),
   };
 }
@@ -89,13 +106,17 @@ function convertCompactConstructor(node: Node): ConstructorDeclaration {
  */
 function desugarRecord(node: Node, header: Node, members: MemberDeclaration[]): void {
   const where = span(header);
-  const components = namedChildren(header).map((component) => {
-    if (component.type !== 'record_component') unsupported(component, 'レコードの可変長引数');
+  const componentNodes = namedChildren(header);
+  const components = componentNodes.map((component, index) => {
+    const typeNode = field(component, 'type');
+    const isVarargs = component.children.some((child) => child?.type === '...');
+    if (isVarargs && index !== componentNodes.length - 1) throw varargsNotLastError(component);
+    const type = convertType(typeNode);
     return {
       name: field(component, 'name').text,
-      type: convertType(field(component, 'type')),
+      type: isVarargs ? ({ kind: 'array', element: type, ...span(typeNode) } as const) : type,
       isFinal: false,
-      isVarargs: false,
+      isVarargs,
       ...span(component),
     };
   });
@@ -196,7 +217,6 @@ function withoutSpans(type: TypeSyntax): string {
 }
 
 function convertEnumConstant(node: Node): EnumConstant {
-  if (modifiersOf(node)) unsupported(node, '列挙定数へのアノテーション');
   const args = node.childForFieldName('arguments');
   const body = node.childForFieldName('body');
   return {
@@ -232,10 +252,9 @@ export function convertMember(member: Node): MemberDeclaration {
     }
     case 'class_declaration':
     case 'interface_declaration':
-    case 'enum_declaration': {
-      return convertTypeDeclaration(member);
-    }
-    case 'record_declaration': {
+    case 'enum_declaration':
+    case 'record_declaration':
+    case 'annotation_type_declaration': {
       return convertTypeDeclaration(member);
     }
     default: {
@@ -259,7 +278,7 @@ function convertParameters(node: Node): Parameter[] {
   const parameters = namedChildren(node);
   return parameters.map((parameter, index) => {
     if (parameter.type === 'spread_parameter') {
-      if (index !== parameters.length - 1) unsupported(parameter, '最後以外の可変長引数');
+      if (index !== parameters.length - 1) throw varargsNotLastError(parameter);
       return convertVarargsParameter(parameter);
     }
     if (parameter.type !== 'formal_parameter') unsupported(parameter, '受け取りパラメータ');
@@ -270,8 +289,12 @@ function convertParameters(node: Node): Parameter[] {
   });
 }
 
+function varargsNotLastError(node: Node): CompileError {
+  return new CompileError([{ row: node.startPosition.row, message: '可変長引数は最後の引数にしか使えません。' }]);
+}
+
 /** Converts `int... values`, whose variable holds the arguments as an array. */
-function convertVarargsParameter(parameter: Node): Parameter {
+export function convertVarargsParameter(parameter: Node): Parameter {
   const modifiers = convertModifiers(modifiersOf(parameter));
   const parts = namedChildren(parameter).filter((child) => child.type !== 'modifiers');
   const [typeNode, nameNode] = parts;
@@ -309,7 +332,7 @@ function convertMethod(node: Node): MethodDeclaration {
 }
 
 function convertConstructor(node: Node): ConstructorDeclaration {
-  if (node.childForFieldName('type_parameters')) unsupported(node, '型パラメータ');
+  const typeParameters = node.childForFieldName('type_parameters');
   const bodyNode = field(node, 'body');
   let statements: Statement[] = [];
   let prologue: Statement[] | undefined;
@@ -327,6 +350,7 @@ function convertConstructor(node: Node): ConstructorDeclaration {
   return {
     kind: 'constructor',
     name: field(node, 'name').text,
+    ...(typeParameters && { typeParameters: convertTypeParameters(typeParameters) }),
     modifiers: convertModifiers(modifiersOf(node)),
     parameters: convertParameters(field(node, 'parameters')),
     throwsTypes: convertThrows(node),

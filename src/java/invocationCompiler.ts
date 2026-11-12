@@ -77,9 +77,11 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     const argTypes = args.map((arg) => arg.type);
     const type = resolved.args?.length === 0 ? this.inferDiamond(cls, argTypes, targetType) : resolved;
     const bindings = memberBindings(type, cls);
+    const candidates = cls.constructors.map((candidate) => methodView(candidate, bindings));
+    const explicitTypeArgs = expression.typeArgs?.map((typeArg) => this.resolveTypeArgument(typeArg));
     const constructor = this.selectMethod(
       expression,
-      cls.constructors.map((candidate) => methodView(candidate, bindings)),
+      explicitTypeArgs ? this.withTypeArguments(candidates, explicitTypeArgs) : candidates,
       argTypes,
       `コンストラクタ ${cls.name}`
     );
@@ -441,8 +443,8 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
   ): CallTarget {
     if (context.isStatic)
       this.noInstanceError(context, expression, 'super', 'static メソッドの中では super を使えません。');
-    if (expression.superInterface)
-      return this.resolveInterfaceSuperCall(context, expression, expression.superInterface);
+    if (expression.superQualifier)
+      return this.resolveQualifiedSuperCall(context, expression, expression.superQualifier);
     if (context.cls.kind === 'interface') this.error(expression, 'インターフェースの中では super を使えません。');
     const owner = context.cls.superclass as ClassInfo;
     const receiver = superValue(context);
@@ -501,14 +503,30 @@ export abstract class InvocationCompiler extends ExpressionCompiler {
     });
   }
 
-  /** `Interface.super.m()`, which calls the default method of a direct superinterface. */
-  protected resolveInterfaceSuperCall(
+  /**
+   * `Interface.super.m()`, which calls the default method of a direct superinterface, or `Outer.super.m()`, which calls
+   * the method of the superclass of this class or of an enclosing class on that class's instance.
+   */
+  protected resolveQualifiedSuperCall(
     context: MethodContext,
     expression: Extract<Expression, { kind: 'call' }>,
     syntax: TypeSyntax
   ): CallTarget {
     const type = this.resolveType(syntax);
-    if (type.kind !== 'class' || type.cls.kind !== 'interface' || !context.cls.interfaces.includes(type.cls)) {
+    const enclosing =
+      type.kind === 'class' && type.cls.kind !== 'interface'
+        ? this.outerInstanceValue(context, type.cls, true)
+        : undefined;
+    if (type.kind === 'class' && enclosing && type.cls.superclass) {
+      const owner = type.cls.superclass;
+      const receiver: CompiledValue = { ...enclosing, type: asSuper(thisTypeOf(type.cls), owner) ?? owner.type };
+      const candidates = this.viewMethods(this.collectMethods(owner, expression.name), receiver.type);
+      return { candidates, owner, receiver };
+    }
+    if (type.kind === 'class' && type.cls.kind !== 'interface') {
+      return this.error(expression, `${typeName(type)}.super は、このクラスか外側のクラスにしか使えません。`);
+    }
+    if (type.kind !== 'class' || !context.cls.interfaces.includes(type.cls)) {
       return this.error(expression, `${typeName(type)}.super は、直接実装しているインターフェースにしか使えません。`);
     }
     const receiver: CompiledValue = {

@@ -126,6 +126,8 @@ export interface MethodDeclaration extends Span {
 export interface ConstructorDeclaration extends Span {
   kind: 'constructor';
   name: string;
+  /** The type parameters of a generic constructor, as in `<T> Box(T value)`. */
+  typeParameters?: TypeParameter[];
   modifiers: Modifiers;
   parameters: Parameter[];
   throwsTypes: TypeSyntax[];
@@ -409,14 +411,16 @@ export interface MethodCall extends Span {
   args: Expression[];
   /** Type arguments written before the name, as in `Collections.<String>emptyList()`. */
   typeArgs?: TypeSyntax[];
-  /** The interface whose default method `Interface.super.m()` calls, with `object` set to `super`. */
-  superInterface?: TypeSyntax;
+  /** The type before `.super` in `Interface.super.m()` or `Outer.super.m()`, with `object` set to `super`. */
+  superQualifier?: TypeSyntax;
 }
 
 export interface NewObject extends Span {
   kind: 'new';
   type: TypeSyntax;
   args: Expression[];
+  /** Type arguments of a generic constructor, written after `new` as in `new <String>Box(s)`. */
+  typeArgs?: TypeSyntax[];
   /** The body of an anonymous class, which extends or implements `type`. */
   body?: MemberDeclaration[];
   /** The enclosing instance written before `.new`, as in `outer.new Inner()`. */
@@ -528,11 +532,14 @@ export interface LambdaParameter extends Span {
   isFinal: boolean;
 }
 
-/** `Type::method`, `expression::method`, or `Type::new`. */
+/** `Type::method`, `expression::method`, `super::method`, `Type.super::method`, or `Type::new`. */
 export interface MethodReference extends Span {
   kind: 'methodRef';
-  /** An expression, which may turn out to name a class, or a type that only a type syntax can write. */
-  target: { expression: Expression } | { type: TypeSyntax };
+  /**
+   * An expression, which may turn out to name a class, a type that only a type syntax can write, or `super` with the
+   * type written before it.
+   */
+  target: { expression: Expression } | { type: TypeSyntax } | { super: TypeSyntax | undefined };
   /** The method's name, or `new` for a constructor. */
   name: string;
   /** Type arguments written after `::`, as in `Collections::<String>emptyList`, which the call they make takes. */

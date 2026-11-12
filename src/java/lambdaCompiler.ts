@@ -467,6 +467,17 @@ export abstract class LambdaCompiler extends PatternCompiler {
       return lambda;
     };
     const { target } = reference;
+    if ('super' in target) {
+      return lambdaOf({
+        kind: 'call',
+        object: 'super',
+        superQualifier: target.super,
+        name: reference.name,
+        args,
+        typeArgs: reference.typeArgs,
+        ...span,
+      });
+    }
     const targetType = 'type' in target ? target.type : undefined;
     if (reference.name === 'new') {
       if (!targetType) {
@@ -541,7 +552,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
     const { target } = expression;
     let hint: JavaType | undefined;
     if ('type' in target) hint = this.resolveType(target.type);
-    else if (this.namesType(context, target.expression)) {
+    else if ('expression' in target && this.namesType(context, target.expression)) {
       const named = this.compileExpression(context, target.expression);
       if (named.kind === 'class') hint = named.cls.type;
     }
@@ -578,6 +589,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
    */
   protected referenceArities(context: MethodContext, reference: MethodReference): number[] | undefined {
     const { target } = reference;
+    if ('super' in target) return undefined;
     const isType = 'type' in target || this.namesType(context, target.expression);
     const owner = this.referenceOwner(context, reference);
     if (!owner) return undefined;
@@ -599,6 +611,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
     const { target } = reference;
     try {
       if ('type' in target) return this.resolveType(target.type);
+      if ('super' in target) return undefined;
       const named = this.compileExpression(context, target.expression);
       return named.kind === 'class' ? named.cls.type : named.type;
     } catch (error) {
@@ -623,6 +636,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
 function referenceReceiver(reference: MethodReference, span: Span, receiverLocal: string | undefined): Expression {
   const { target } = reference;
   if ('type' in target) return { kind: 'typeRef', type: target.type, ...span };
+  if ('super' in target) throw new Error('A super method reference has no receiver expression');
   return receiverLocal ? { kind: 'name', name: receiverLocal, ...span } : target.expression;
 }
 
