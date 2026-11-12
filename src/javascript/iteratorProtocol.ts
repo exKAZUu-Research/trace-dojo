@@ -19,7 +19,15 @@ export interface ProtocolIteration {
 
 /** The iteration a sync `yield*` runs: the object the value's `Symbol.iterator` method returns. */
 export function syncIteratorOf(runtime: Runtime, iterable: Value): ProtocolIteration {
-  return iterationOf(runtime, iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator));
+  return iterationOf(
+    runtime,
+    iteratorObject(
+      runtime,
+      iterable,
+      WELL_KNOWN_SYMBOLS.iterator,
+      methodOf(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator)
+    )
+  );
 }
 
 /**
@@ -31,11 +39,7 @@ export function asyncIteratorOf(
   iterable: Value,
   methods?: { async: Value; sync?: Value }
 ): ProtocolIteration {
-  const factory =
-    methods?.async ??
-    (methods || iterable === undefined || iterable === null
-      ? undefined
-      : runtime.get(iterable, WELL_KNOWN_SYMBOLS.asyncIterator));
+  const factory = methods ? methods.async : methodOf(runtime, iterable, WELL_KNOWN_SYMBOLS.asyncIterator);
   if (factory !== undefined && factory !== null) {
     return iterationOf(runtime, iteratorObject(runtime, iterable, WELL_KNOWN_SYMBOLS.asyncIterator, factory));
   }
@@ -43,7 +47,7 @@ export function asyncIteratorOf(
     runtime,
     iterable,
     WELL_KNOWN_SYMBOLS.iterator,
-    methods ? methods.sync : runtime.get(iterable, WELL_KNOWN_SYMBOLS.iterator)
+    methods ? methods.sync : methodOf(runtime, iterable, WELL_KNOWN_SYMBOLS.iterator)
   );
   const iteration = iterationOf(runtime, iterator, (step, method) =>
     asyncFromSyncStep(runtime, iterator, step, method)
@@ -154,12 +158,11 @@ function checkResult(runtime: Runtime, result: Value): JsObject {
 }
 
 /** Calls the method under `key` to get an iterator, reading the method unless the caller has already read it. */
-function iteratorObject(
-  runtime: Runtime,
-  iterable: Value,
-  key: symbol,
-  factory = iterable === undefined || iterable === null ? undefined : runtime.get(iterable, key)
-): JsObject {
+function methodOf(runtime: Runtime, iterable: Value, key: symbol): Value {
+  return iterable === undefined || iterable === null ? undefined : runtime.get(iterable, key);
+}
+
+function iteratorObject(runtime: Runtime, iterable: Value, key: symbol, factory: Value): JsObject {
   if (!isCallable(factory)) {
     const what = key === WELL_KNOWN_SYMBOLS.iterator ? 'iterable' : 'async iterable';
     return runtime.throwError('TypeError', `${runtime.describe(iterable)} is not ${what}`);

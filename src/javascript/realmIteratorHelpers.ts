@@ -174,8 +174,9 @@ function startHelper(call: NativeCall, name: string): { record: IteratorRecord; 
   const record: IteratorRecord = { iterator: thisValue, next: undefined, done: false };
   const [callback] = args;
   if (!isCallable(callback)) {
-    closeIterator(runtime, record);
-    return runtime.throwError('TypeError', `${notCallableText(runtime, callback)} is not a function`);
+    return closingOnThrow(runtime, record, () =>
+      runtime.throwError('TypeError', `${notCallableText(runtime, callback)} is not a function`)
+    );
   }
   record.next = runtime.get(thisValue, 'next');
   return { record, callback };
@@ -189,8 +190,9 @@ function startLimited(call: NativeCall, name: string): { record: IteratorRecord;
   const limit = closingOnThrow(runtime, record, () => runtime.toNumber(args[0]));
   const integer = Number.isNaN(limit) ? Number.NaN : Math.trunc(limit);
   if (Number.isNaN(integer) || integer < 0) {
-    closeIterator(runtime, record);
-    runtime.throwError('RangeError', `${typeof args[0] === 'symbol' ? 'Symbol()' : String(limit)} must be positive`);
+    closingOnThrow(runtime, record, () =>
+      runtime.throwError('RangeError', `${typeof args[0] === 'symbol' ? 'Symbol()' : String(limit)} must be positive`)
+    );
   }
   record.next = runtime.get(thisValue, 'next');
   return { record, limit: integer };

@@ -195,7 +195,9 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
           // A Symbol.dispose fallback of `await using` runs wrapped in an async function, so its throw is awaited too.
           if (isAsync && !disposable.awaitsResult && error instanceof JsThrow) {
             hasAwaited = true;
+            temporaries.push(error.value);
             yield new Awaiting(undefined);
+            temporaries.pop();
           }
           throw error;
         }

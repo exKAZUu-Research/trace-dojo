@@ -1131,6 +1131,17 @@ function* g() { try { yield 1; } finally { console.log('sclose'); throw Error('s
   for (const it of [f(), g()]) await Array.fromAsync(it, () => { throw Error('mapper'); }).then(() => console.log('ok'), (e) => console.log(e.message));
 })();`,
   ],
+  [
+    'iterator helpers whose arguments are invalid and whose cleanup fails',
+    `const mk = () => Iterator.from({ next() { return { done: false, value: 1 }; }, return() { console.log('close'); throw Error('close'); } });
+try { mk().take(-1); } catch (e) { console.log(e.name, e.message); }
+try { mk().map(2); } catch (e) { console.log(e.name, e.message); }
+try { mk().drop(NaN); } catch (e) { console.log(e.name, e.message); }`,
+  ],
+  [
+    'an iterator method getter read once by for await',
+    `let n=0;const o={get [Symbol.iterator](){console.log("get",++n);return n===1?undefined:function*(){yield 1}}};(async()=>{try{for await(const x of o)console.log(x)}catch(e){console.log(e.name)}})()`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
