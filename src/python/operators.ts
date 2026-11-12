@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 623 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 650 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
 import { floatPower } from './floatPower';
@@ -672,7 +672,7 @@ function isTruthyValue(value: PyValue): boolean {
   return currentRuntime().truthy(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of builtin value.
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of builtin value.
 export function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) {
     const a = typeof left === 'boolean' ? Number(left) : left;
@@ -688,6 +688,7 @@ export function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValu
     return compareSequences(operator, left.items, right.items);
   }
   if (left instanceof PySet && right instanceof PySet) return compareSets(operator, left, right);
+  if (isSetLike(left) && isSetLike(right)) return compareSetLikeView(operator, left, right);
   return NotImplemented;
 }
 
@@ -750,13 +751,57 @@ function mappingEquals(left: PyValue, right: PyValue): boolean | undefined {
 function viewEquals(left: PyValue, right: PyValue): boolean {
   if (left === right) return true;
   if (!isSetLike(left) || !isSetLike(right)) return false;
-  const [view, other] = left instanceof PyDictView ? [left, right] : [right as PyDictView, left];
-  const items = iterateAll(view);
-  const size = other instanceof PySet ? other.table.keys().length : other.dict.store.ordered().length;
-  return (
-    items.length === size &&
-    items.every((item) => (other instanceof PySet ? other.table.has(item) : viewContains(other, item)))
-  );
+  return compareSetLikeView('==', left, right);
+}
+
+const SWAPPED = { '<': '>', '<=': '>=', '>': '<', '>=': '<=', '==': '==', '!=': '!=' } as const;
+
+/**
+ * Compares a keys or items view with a set or another such view, as CPython's dictview_richcompare does. With a set on
+ * the left, the set refuses the view and the view answers the swapped comparison.
+ */
+function compareSetLikeView(
+  operator: keyof typeof COMPARE_NAMES,
+  left: PyDictView | PySet,
+  right: PyDictView | PySet
+): boolean {
+  if (left instanceof PySet) return compareSetLikeView(SWAPPED[operator], right, left);
+  const leftSize = setLikeSize(left);
+  const rightSize = setLikeSize(right);
+  switch (operator) {
+    case '==': {
+      return leftSize === rightSize && allContainedIn(left, right);
+    }
+    case '!=': {
+      return !(leftSize === rightSize && allContainedIn(left, right));
+    }
+    case '<': {
+      return leftSize < rightSize && allContainedIn(left, right);
+    }
+    case '<=': {
+      return leftSize <= rightSize && allContainedIn(left, right);
+    }
+    case '>': {
+      return leftSize > rightSize && allContainedIn(right, left);
+    }
+    default: {
+      return leftSize >= rightSize && allContainedIn(right, left);
+    }
+  }
+}
+
+function setLikeSize(value: PyDictView | PySet): number {
+  return value instanceof PySet ? value.table.size : value.dict.store.size;
+}
+
+function allContainedIn(items: PyDictView | PySet, container: PyDictView | PySet): boolean {
+  const runtime = currentRuntime();
+  return iterateAll(items).every((item) => {
+    runtime.spend();
+    return container instanceof PySet
+      ? lookupSetKey(item, (key) => container.table.has(key))
+      : viewContains(container, item);
+  });
 }
 
 function iterateAll(value: PyValue): PyValue[] {

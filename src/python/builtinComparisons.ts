@@ -1,8 +1,11 @@
 import { method } from './define';
 import { nativeCompare } from './operators';
+import { isSetLikeView } from './setOperations';
 import {
   complexClass,
   dictClass,
+  dictItemsClass,
+  dictKeysClass,
   floatClass,
   frozensetClass,
   intClass,
@@ -24,6 +27,7 @@ const COMPARISONS = [
   ['__ge__', '>='],
 ] as const;
 
+const isSetLike = (value: PyValue): boolean => value instanceof PySet || isSetLikeView(value);
 const isInt = (value: PyValue): boolean => typeof value === 'bigint' || typeof value === 'boolean';
 const isReal = (value: PyValue): boolean => isInt(value) || typeof value === 'number';
 
@@ -42,6 +46,8 @@ const COMPARABLE: [cls: PyClass, accepts: (other: PyValue) => boolean, ordered: 
   [setClass, (other) => other instanceof PySet, true],
   [frozensetClass, (other) => other instanceof PySet, true],
   [rangeClass, (other) => other instanceof PyRange, false],
+  [dictKeysClass, isSetLike, true],
+  [dictItemsClass, isSetLike, true],
 ];
 
 for (const [cls, accepts, ordered] of COMPARABLE) {
