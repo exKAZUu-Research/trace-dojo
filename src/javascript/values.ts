@@ -4,6 +4,7 @@ import type { AsyncGeneratorState } from './asyncGenerators';
 import type { GeneratorState } from './generators';
 import type { HostIterator } from './iteration';
 import type { PromiseState } from './promises';
+import type { ErrorName } from './realm';
 import type { CollectionState } from './realmCollections';
 import type { Runtime } from './runtime';
 
@@ -35,7 +36,7 @@ export function isAccessor(property: Property): property is AccessorProperty {
 
 /** Makes an object's properties read-only and stops it from gaining new ones, as `Object.freeze` does. */
 export function freeze(object: JsObject): void {
-  if (object instanceof JsArray) object.frozen = true;
+  if (object instanceof JsArray) object.frozen = object.sealed = true;
   object.extensible = false;
   for (const property of object.properties.values()) {
     property.configurable = false;
@@ -77,7 +78,9 @@ export function valueOfElement(element: Element): Value {
 }
 
 export class JsArray extends JsObject {
-  /** Set by Object.freeze, which leaves the elements and the length read-only. */
+  /** Set by Object.seal and Object.freeze, which make the elements non-configurable. */
+  sealed = false;
+  /** Set by Object.freeze, which also leaves the elements and the length read-only. */
   frozen = false;
 
   constructor(
@@ -206,6 +209,18 @@ export class Scope {
 /** Thrown through the host stack to carry a JavaScript exception. */
 export class JsThrow {
   constructor(readonly value: Value) {}
+}
+
+/** Runs a host builtin on a program's arguments, throwing its SyntaxError, RangeError, or TypeError as JavaScript's. */
+export function throwingHostErrors<T>(runtime: Runtime, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    for (const type of [SyntaxError, RangeError, TypeError]) {
+      if (error instanceof type) return runtime.throwError(type.name as ErrorName, error.message);
+    }
+    throw error;
+  }
 }
 
 export function isObject(value: Value): value is JsObject {

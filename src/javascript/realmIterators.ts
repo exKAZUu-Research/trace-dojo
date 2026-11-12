@@ -110,7 +110,6 @@ function arrayIteration(runtime: Runtime, object: JsObject, kind: 'keys' | 'valu
 
 function defineSymbol(builder: RealmBuilder): void {
   const { symbolPrototype } = builder.realm;
-  const registry = new Map<string, symbol>();
   const symbolConstructor = builder.defineClass(
     'Symbol',
     0,
@@ -119,20 +118,13 @@ function defineSymbol(builder: RealmBuilder): void {
     false
   );
   for (const [name, symbol] of Object.entries(WELL_KNOWN_SYMBOLS)) builder.constant(symbolConstructor, name, symbol);
-  builder.method(symbolConstructor, 'for', 1, ({ runtime, args }) => {
-    const key = runtime.toString(args[0]);
-    let symbol = registry.get(key);
-    if (!symbol) {
-      symbol = Symbol(key);
-      registry.set(key, symbol);
-    }
-    return symbol;
-  });
+  // The host's registry, so that the weak collections' check of registered symbols sees the same ones.
+  builder.method(symbolConstructor, 'for', 1, ({ runtime, args }) => Symbol.for(runtime.toString(args[0])));
   builder.method(symbolConstructor, 'keyFor', 1, ({ runtime, args }) => {
     const [symbol] = args;
     if (typeof symbol !== 'symbol')
       return runtime.throwError('TypeError', `${runtime.describe(symbol)} is not a symbol`);
-    return registry.get(symbol.description ?? '') === symbol ? symbol.description : undefined;
+    return Symbol.keyFor(symbol);
   });
   builder.method(symbolPrototype, 'toString', 0, ({ runtime, thisValue }) => thisSymbol(runtime, thisValue).toString());
   builder.method(symbolPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisSymbol(runtime, thisValue));

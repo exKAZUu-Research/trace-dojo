@@ -322,9 +322,7 @@ function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): 
   const state = iterator ? iterator.state : value.collection;
   if (!state) return [];
   if (state.isWeak) return ['<items unknown>'];
-  let entries: CollectionEntry[] = [];
-  if (!iterator) entries = state.liveEntries(ctx.runtime);
-  else if (iterator.position !== Number.POSITIVE_INFINITY) entries = state.liveEntries(ctx.runtime, iterator.position);
+  const entries = iterator ? iterator.remainingEntries() : state.liveEntries(ctx.runtime);
   const formatEntry = (entry: CollectionEntry): string => {
     if (!iterator) {
       const key = formatCharged(ctx, entry.key, recurseTimes);

@@ -2,7 +2,7 @@ import type { RealmBuilder } from './realm';
 import { receiverText } from './realmCollections';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { isCallable, isObject, JsObject, type NativeCall, type Value } from './values';
+import { isCallable, isObject, JsObject, type NativeCall, throwingHostErrors, type Value } from './values';
 
 /** The spec's `[[DateValue]]` of each Date object, the milliseconds since the epoch or NaN. */
 const timeValues = new WeakMap<JsObject, number>();
@@ -29,7 +29,7 @@ export function newDate(runtime: Runtime, time: number, prototype: JsObject): Js
  * time is the host's time zone, as it is Node.js's, and `Date.now()` advances with the event loop's simulated clock.
  */
 export function defineDateBuiltins(builder: RealmBuilder): void {
-  const prototype = new JsObject(builder.realm.objectPrototype);
+  const prototype = builder.realm.datePrototype;
   const startTime = Date.now();
   const now = (runtime: Runtime): number => startTime + runtime.eventLoop.time;
   const dateConstructor = builder.defineClass('Date', 7, prototype, (call) => {
@@ -134,8 +134,19 @@ function defineSetters(builder: RealmBuilder, prototype: JsObject): void {
   }
 }
 
-/** A host value for the locale or options argument of a `toLocale...String` method. */
-function hostLocaleArgument(runtime: Runtime, value: Value): unknown {
+/** A host value for the locales argument of a `toLocale...String` method: a tag, or a list of them. */
+function hostLocales(runtime: Runtime, value: Value): unknown {
+  if (!(value instanceof JsObject)) return value;
+  const length = Math.trunc(runtime.toNumber(runtime.get(value, 'length'))) || 0;
+  runtime.scan(length);
+  return Array.from({ length }, (_, index) => {
+    const locale = runtime.get(value, String(index));
+    return isObject(locale) ? runtime.toString(locale) : locale;
+  });
+}
+
+/** A host value for the options argument of a `toLocale...String` method. */
+function hostOptions(runtime: Runtime, value: Value): unknown {
   if (!(value instanceof JsObject)) return value;
   const options: Record<string, unknown> = {};
   for (const key of runtime.ownEnumerableKeys(value)) {
@@ -159,8 +170,9 @@ function defineConversions(builder: RealmBuilder, prototype: JsObject): void {
   for (const name of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'] as const) {
     builder.method(prototype, name, 0, ({ runtime, thisValue, args }) => {
       const date = new Date(thisTime(runtime, thisValue));
-      const locales = hostLocaleArgument(runtime, args[0]) as Intl.LocalesArgument;
-      return date[name](locales, hostLocaleArgument(runtime, args[1]) as Intl.DateTimeFormatOptions);
+      const locales = hostLocales(runtime, args[0]) as Intl.LocalesArgument;
+      const options = hostOptions(runtime, args[1]) as Intl.DateTimeFormatOptions;
+      return throwingHostErrors(runtime, () => date[name](locales, options));
     });
   }
   builder.method(prototype, 'toJSON', 1, ({ runtime, thisValue }) => {

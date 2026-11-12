@@ -3,6 +3,7 @@ import type { RealmBuilder } from './realm';
 import { CollectionState, constructorNameOf } from './realmCollections';
 import { dateValueOf, newDate } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
+import { newRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
 import {
   HOLE,
@@ -174,7 +175,8 @@ function serializeArray(serializer: Serializer, array: JsArray): string {
   serializer.indent += serializer.gap;
   const parts: string[] = [];
   let length = 0;
-  for (let index = 0; index < array.elements.length; index++) {
+  const elementCount = array.elements.length;
+  for (let index = 0; index < elementCount; index++) {
     const part = serializeProperty(serializer, String(index), array, true) ?? 'null';
     length += part.length + serializer.indent.length + 2;
     runtime.extendString(length, part.length);
@@ -196,19 +198,38 @@ function joinParts(serializer: Serializer, parts: string[], stepback: string, op
 
 const MAX_CONTEXT_CHARACTERS = 10;
 
+/** The text of each primitive a JSON text gives, by the object that holds it and its key, for a reviver's context. */
+type PrimitiveSources = Map<JsObject, Map<string, { value: Value; source: string }>>;
+
 /** A JSON text parser whose SyntaxError messages are V8's. */
 class JsonParser {
   private position = 0;
 
   constructor(
     private readonly runtime: Runtime,
-    private readonly text: string
+    private readonly text: string,
+    private readonly sources?: PrimitiveSources
   ) {}
 
-  parse(): Value {
-    const value = this.parseValue(0);
+  /** Parses the text into the property `''` of `root`. */
+  parse(root: JsObject): void {
+    this.runtime.createDataProperty(root, '', this.parseChild(root, '', 0));
     this.skipWhitespace();
     if (this.position < this.text.length) this.fail('Unexpected non-whitespace character after JSON', '');
+  }
+
+  private parseChild(holder: JsObject, key: string, depth: number): Value {
+    this.skipWhitespace();
+    const start = this.position;
+    const value = this.parseValue(depth);
+    if (this.sources && !isObject(value)) {
+      let holderSources = this.sources.get(holder);
+      if (!holderSources) {
+        holderSources = new Map();
+        this.sources.set(holder, holderSources);
+      }
+      holderSources.set(key, { value, source: this.text.slice(start, this.position) });
+    }
     return value;
   }
 
@@ -251,7 +272,7 @@ class JsonParser {
         this.skipWhitespace();
         if (this.text[this.position] !== ':') this.fail("Expected ':' after property name");
         this.position++;
-        this.runtime.createDataProperty(object, key, this.parseValue(depth + 1));
+        this.runtime.createDataProperty(object, key, this.parseChild(object, key, depth + 1));
         this.skipWhitespace();
         const next = this.text[this.position];
         if (next === '}') {
@@ -274,7 +295,7 @@ class JsonParser {
         return array;
       }
       for (;;) {
-        const element = this.parseValue(depth + 1);
+        const element = this.parseChild(array, String(array.elements.length), depth + 1);
         this.runtime.allocate(1);
         array.elements.push(element);
         this.skipWhitespace();
@@ -428,12 +449,14 @@ class JsonParser {
 function jsonParse({ runtime, args, callRow }: NativeCall): Value {
   const text = runtime.toString(args[0]);
   runtime.scan(text.length);
-  const value = new JsonParser(runtime, text).parse();
   const reviver = args[1];
-  if (!isCallable(reviver)) return value;
+  const sources: PrimitiveSources | undefined = isCallable(reviver) ? new Map() : undefined;
   const root = runtime.newObject();
-  runtime.createDataProperty(root, '', value);
-  return runtime.hold(root, () => internalize(runtime, root, '', reviver, callRow));
+  return runtime.hold(root, () => {
+    new JsonParser(runtime, text, sources).parse(root);
+    if (!isCallable(reviver)) return runtime.get(root, '');
+    return internalize(runtime, root, '', reviver, sources as PrimitiveSources, callRow);
+  });
 }
 
 /** The spec's InternalizeJSONProperty, which passes each value to the reviver from the leaves up. */
@@ -442,6 +465,7 @@ function internalize(
   holder: JsObject,
   key: string,
   reviver: JsFunction,
+  sources: PrimitiveSources,
   callRow: number | undefined
 ): Value {
   runtime.spend();
@@ -453,13 +477,16 @@ function internalize(
           ? Array.from({ length: value.elements.length }, (_, index) => String(index))
           : runtime.ownEnumerableKeys(value);
       for (const childKey of keys) {
-        const revived = internalize(runtime, value, childKey, reviver, callRow);
+        const revived = internalize(runtime, value, childKey, reviver, sources, callRow);
         if (revived === undefined) runtime.deleteProperty(value, childKey);
         else runtime.createDataProperty(value, childKey, revived);
       }
     });
   }
-  return runtime.call(reviver, holder, [key, value], callRow);
+  const context = runtime.newObject();
+  const parsed = isObject(value) ? undefined : sources.get(holder)?.get(key);
+  if (parsed && Object.is(parsed.value, value)) runtime.createDataProperty(context, 'source', parsed.source);
+  return runtime.call(reviver, holder, [key, value, context], callRow);
 }
 
 // structuredClone -----------------------------------------------------------------------------------------------------
@@ -481,10 +508,23 @@ function structuredClone(runtime: Runtime, value: Value, memory: Map<JsObject, J
   }
   if (value.collection?.isWeak) return cloneError(runtime, `#<${value.collection.kind}>`);
   if (value instanceof JsArray) return cloneArray(runtime, value, memory);
+  const { realm } = runtime;
   const time = dateValueOf(value);
-  if (time !== undefined) return newDate(runtime, time, value.proto ?? runtime.realm.objectPrototype);
+  if (time !== undefined) {
+    const date = newDate(runtime, time, realm.datePrototype);
+    memory.set(value, date);
+    return date;
+  }
+  if (value.regexp) {
+    const regexp = newRegExp(runtime, value.regexp.source, value.regexp.flags);
+    memory.set(value, regexp);
+    return regexp;
+  }
   const { collection } = value;
-  const copy = runtime.newObject(collection || value.isError ? value.proto : runtime.realm.objectPrototype);
+  let prototype = realm.objectPrototype;
+  if (collection) prototype = collection.kind === 'Map' ? realm.mapPrototype : realm.setPrototype;
+  else if (value.isError) prototype = clonedErrorPrototype(runtime, value);
+  const copy = runtime.newObject(prototype);
   memory.set(value, copy);
   return runtime.hold(copy, () => {
     if (collection) {
@@ -512,6 +552,17 @@ function structuredClone(runtime: Runtime, value: Value, memory: Map<JsObject, J
     return copy;
   });
 }
+
+/** The prototype of an error's clone, which is that of the standard error its name names, or Error's. */
+function clonedErrorPrototype(runtime: Runtime, error: JsObject): JsObject {
+  const name = runtime.get(error, 'name');
+  const { errorPrototypes } = runtime.realm;
+  return typeof name === 'string' && (CLONED_ERROR_NAMES as readonly string[]).includes(name)
+    ? errorPrototypes[name as (typeof CLONED_ERROR_NAMES)[number]]
+    : errorPrototypes.Error;
+}
+
+const CLONED_ERROR_NAMES = ['Error', 'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError'] as const;
 
 function cloneArray(runtime: Runtime, source: JsArray, memory: Map<JsObject, JsObject>): JsArray {
   const array = runtime.newArray([]);

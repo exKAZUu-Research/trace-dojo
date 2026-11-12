@@ -2,7 +2,7 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineHostIteratorPrototype, newHostIterator } from './realmIterators';
 import type { Runtime } from './runtime';
-import { isCallable, JsObject, type NativeCall, type Value } from './values';
+import { isCallable, JsObject, type NativeCall, throwingHostErrors, type Value } from './values';
 
 const FLAG_GETTERS = [
   ['hasIndices', 'd'],
@@ -37,13 +37,7 @@ export function defineRegExpBuiltins(builder: RealmBuilder): void {
 
 /** Creates a regular expression object, throwing JavaScript's SyntaxError for an invalid pattern or flags. */
 export function newRegExp(runtime: Runtime, source: string, flags: string): JsObject {
-  let regexp: RegExp;
-  try {
-    regexp = new RegExp(source, flags);
-  } catch (error) {
-    if (error instanceof SyntaxError) return runtime.throwError('SyntaxError', error.message);
-    throw error;
-  }
+  const regexp = throwingHostErrors(runtime, () => new RegExp(source, flags));
   const object = runtime.newObject(runtime.realm.regExpPrototype);
   object.regexp = regexp;
   runtime.defineProperty(object, 'lastIndex', {

@@ -149,6 +149,20 @@ try {
   ).toMatchObject({ kind: 'executed', finalTurtles: [{ x: 0, y: 6, dir: 'E' }], uncaughtException: undefined });
 });
 
+test('a turtle returned as a group key stays alive while later groups are computed', () => {
+  expect(
+    executeProgram(
+      'javascript',
+      `const observer = new Turtle(1, 0);
+const groups = Map.groupBy([1, 2], (v) => {
+  if (v === 1) return new Turtle(1, 1);
+  console.log(observer.canMoveForward());
+  return 'x';
+});`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'false\n', uncaughtException: undefined });
+});
+
 test.each([
   ['an infinite loop', 'while (true) {}', { kind: 'limitExceeded', limit: 'operations' }],
   ['an infinite loop of empty statements', 'for (;;);', { kind: 'limitExceeded', limit: 'operations' }],
@@ -862,6 +876,58 @@ Promise.race([]).then(() => console.log('never'));`,
   [
     'await using with a sync disposer',
     `async function f(){ { await using x = { [Symbol.dispose](){ console.log("dispose"); return new Promise(()=>{}); } }; } console.log("after"); } f();`,
+  ],
+  [
+    'JSON revivers with source context, replacers that grow arrays, and structured clones of builtins',
+    `console.log(JSON.parse('[9007199254740993, 1.50, "a", {"x": true}]', (k, v, c) => typeof v === 'number' ? c.source : k === '' ? v : [v, c]));
+const a = [1, 2]; console.log(JSON.stringify(a, (k, v) => { if (k === '0') a.push(3); return v; }), a.length);
+const re = /ab/gi; re.lastIndex = 2; const d = new Date(0);
+const c = structuredClone({ re, d, again: d, m: new Map([[1, re]]) });
+console.log(c.re.test('AB'), c.re.lastIndex, c.re !== re, c.d === c.again, c.m.get(1) === c.re);
+class D extends Date {} class M extends Map {} class E extends RangeError {}
+console.log(structuredClone(new D(0)) instanceof D, structuredClone(new M()) instanceof M, structuredClone(new E('x')) instanceof RangeError, structuredClone(new E('x')) instanceof E);`,
+  ],
+  [
+    'Maps and Sets that churn under live iterators',
+    `const m = new Map();
+for (let i = 0; i < 20000; i++) { m.set(i, i); if (m.size > 10) m.delete(m.keys().next().value); }
+console.log(m.size, [...m.keys()].join());
+const s = new Set([1, 2, 3]); const it = s.values(); console.log(it.next().value);
+for (let i = 4; i < 40; i++) { s.add(i); s.delete(i - 3); } console.log([...it]);
+const t = new Set([1, 2, 3]); const it2 = t.values(); it2.next(); t.clear(); t.add(9); console.log([...it2]);
+const u = new Set(); for (let i = 0; i < 30; i++) u.add(i); const seen = [];
+u.forEach((x) => { seen.push(x); if (x < 25) { u.delete(x); u.delete(x + 1); } if (x === 5) u.add(100); }); console.log(seen.join(), [...u].join());
+const a = new Set([1, 2]); console.log([...a.difference({ size: 10, has(x) { if (x === 1) a.delete(2); return x === 2; }, keys() { return [][Symbol.iterator](); } })]);
+try { new Set([1, 3]).isSupersetOf({ size: 1, has() { return false; }, keys() { return { next() { return { done: false, value: 2 }; }, return() { return 1; } }; } }); } catch (e) { console.log(e.name); }
+for (const key of [Symbol.for('x'), Symbol('y')]) { try { new WeakMap().set(key, 1); console.log('accepted'); } catch (e) { console.log(e.name); } }
+console.log(Symbol.keyFor(Symbol.for('x')));`,
+  ],
+  [
+    'locale lists and invalid locale options for dates',
+    `console.log(new Date(0).toLocaleDateString(['ja-JP'], { timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric' }));
+console.log(new Date(0).toLocaleString(['de-DE'], { timeZone: 'UTC' }));
+for (const args of [['bad_locale!'], ['en-US', { timeZone: 'Nowhere/X' }]]) { try { new Date(0).toLocaleString(...args); } catch (e) { console.log(e.name); } }`,
+  ],
+  [
+    'sealed and non-extensible arrays',
+    `'use strict';
+const a = Object.seal([1, 2]); a[0] = 9;
+for (const f of [() => a.push(3), () => { delete a[1]; }, () => { a.length = 0; }, () => a.pop()]) { try { f(); } catch (e) { console.log(e.message); } }
+console.log(a, Object.isSealed(a), Object.isFrozen(a), Object.isSealed([1]));
+const b = Object.preventExtensions([1, 2, 3]); b.pop(); b.length = 4;
+for (const f of [() => { b[5] = 1; }, () => b.push(1)]) { try { f(); } catch (e) { console.log(e.message); } }
+console.log(b);
+const c = Object.freeze([1]); for (const f of [() => { c[0] = 2; }, () => c.push(2), () => { c.length = 0; }]) { try { f(); } catch (e) { console.log(e.message); } }`,
+  ],
+  [
+    'iterator helpers and wrappers after failures, and entries whose access throws',
+    `let i = 0; const it = Iterator.from({ next() { i++; if (i === 1) throw new Error('x'); return { value: i, done: false }; } }).map((x) => x);
+try { it.next(); } catch (e) { console.log(e.message); } console.log(it.next());
+const r = { value: 2, done: false, extra: 3 }; const w = Iterator.from({ next() { return r; }, return() { return r; } });
+console.log(w.next() === r, w.return() === r, [...Iterator.from({ i: 0, next() { return { value: this.i, done: this.i++ > 2 }; } })]);
+function* pairs() { try { yield { get 0() { throw new Error('bad'); }, 1: 2 }; } finally { console.log('cleanup'); } }
+try { Object.fromEntries(pairs()); } catch (e) { console.log(e.message); }
+const log = []; Object.defineProperty({}, 'x', { get enumerable() { log.push('e'); return true; }, get configurable() { log.push('c'); return true; }, get value() { log.push('v'); return 1; }, get writable() { log.push('w'); return true; } }); console.log(log.join(''));`,
   ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({

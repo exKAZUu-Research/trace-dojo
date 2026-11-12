@@ -1,5 +1,15 @@
 import { JsThrow, type Value } from './values';
 
+/** Runs `run`, closing the iterator when it throws, as the spec's IfAbruptCloseIterator does. */
+export function closingOnThrow<T>(iterator: ValueIterator, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof JsThrow) iterator.close('throw');
+    throw error;
+  }
+}
+
 /** What {@link ValueIterator.next} returns once the iteration has ended. */
 export const DONE = Symbol('done');
 

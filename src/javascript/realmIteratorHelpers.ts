@@ -38,21 +38,54 @@ export function defineIteratorHelpers(builder: RealmBuilder): void {
   // The spec makes `constructor` an accessor, so `util.inspect` names iterators after Object instead of Iterator.
   builder.getter(iteratorPrototype, 'constructor', () => iteratorConstructor);
   builder.constant(iteratorPrototype, WELL_KNOWN_SYMBOLS.toStringTag, 'Iterator');
-  const wrapperPrototype = defineClosingPrototype(builder, 'Iterator');
+  const wrapperPrototype = defineWrapperPrototype(builder);
   builder.method(iteratorConstructor, 'from', 1, ({ runtime, args }) => {
     const record = flattenable(runtime, args[0], true, 'Iterator.from');
     for (let current = record.iterator.proto; current; current = current.proto) {
       if (current === iteratorPrototype) return record.iterator;
     }
-    return newHostIterator(runtime, wrapperPrototype, {
+    const wrapper = newHostIterator(runtime, wrapperPrototype, {
       source: record.iterator,
       next: () => step(runtime, record),
       close: () => closeIterator(runtime, record),
     });
+    wrappedRecords.set(wrapper, record);
+    return wrapper;
   });
   const helperPrototype = defineClosingPrototype(builder, 'Iterator Helper');
   defineLazyHelpers(builder, helperPrototype);
   defineConsumers(builder);
+}
+
+const wrappedRecords = new WeakMap<JsObject, IteratorRecord>();
+
+/**
+ * The spec's `%WrapForValidIteratorPrototype%`, whose methods pass the wrapped iterator's results through as they are,
+ * unlike a helper's, which makes new ones.
+ */
+function defineWrapperPrototype(builder: RealmBuilder): JsObject {
+  const prototype = new JsObject(builder.realm.iteratorPrototype);
+  builder.method(prototype, 'next', 0, ({ runtime, thisValue }) => {
+    const record = recordOf(runtime, thisValue, 'next');
+    return runtime.call(record.next, record.iterator, [], runtime.currentRow);
+  });
+  builder.method(prototype, 'return', 0, ({ runtime, thisValue }) => {
+    const { iterator } = recordOf(runtime, thisValue, 'return');
+    const close = runtime.get(iterator, 'return');
+    if (close === undefined || close === null) return iteratorResult(runtime, undefined, true);
+    return runtime.call(close, iterator, [], runtime.currentRow);
+  });
+  return prototype;
+}
+
+function recordOf(runtime: Runtime, value: Value, name: string): IteratorRecord {
+  return (
+    (value instanceof JsObject && wrappedRecords.get(value)) ||
+    runtime.throwError(
+      'TypeError',
+      `Method %WrapForValidIteratorPrototype%.${name} called on incompatible receiver ${runtime.describe(value)}`
+    )
+  );
 }
 
 /** A builtin iterator prototype whose `return()` closes the iteration, as an iterator helper's does. */
@@ -173,7 +206,16 @@ function newHelper(
 ): JsObject {
   return newHostIterator(runtime, prototype, {
     source: roots,
-    next: () => (record.done ? DONE : next()),
+    next: () => {
+      if (record.done) return DONE;
+      try {
+        return next();
+      } catch (error) {
+        // A helper is a generator, which an exception completes.
+        record.done = true;
+        throw error;
+      }
+    },
     close: () => closeIterator(runtime, record),
   } satisfies HostIterator);
 }

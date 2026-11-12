@@ -39,6 +39,9 @@ export interface Realm {
   bigintPrototype: JsObject;
   promisePrototype: JsObject;
   regExpPrototype: JsObject;
+  datePrototype: JsObject;
+  mapPrototype: JsObject;
+  setPrototype: JsObject;
   /** `%IteratorPrototype%`, the parent of the builtin iterators' prototypes. */
   iteratorPrototype: JsObject;
   /**
@@ -78,6 +81,9 @@ export class RealmBuilder {
       bigintPrototype: new JsObject(objectPrototype),
       promisePrototype: new JsObject(objectPrototype),
       regExpPrototype: new JsObject(objectPrototype),
+      datePrototype: new JsObject(objectPrototype),
+      mapPrototype: new JsObject(objectPrototype),
+      setPrototype: new JsObject(objectPrototype),
       iteratorPrototype,
       hostIteratorMethods: new Set(),
       generatorPrototype: new JsObject(iteratorPrototype),
