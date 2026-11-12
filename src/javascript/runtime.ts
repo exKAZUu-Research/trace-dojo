@@ -378,7 +378,7 @@ export class Runtime {
     if (behavior.kind === 'class') {
       return this.throwError('TypeError', `Class constructor ${this.functionName(fn)} cannot be invoked without 'new'`);
     }
-    return this.evaluator.callFunction(behavior, thisValue, args, callRow);
+    return this.evaluator.callFunction(fn, behavior, thisValue, args, callRow);
   }
 
   construct(fn: Value, args: Value[], newTarget: Value = fn, callRow?: number): JsObject {
@@ -399,7 +399,7 @@ export class Runtime {
     }
     if (behavior.kind === 'class') return this.evaluator.constructClass(fn, behavior, args, target, callRow);
     const thisValue = this.newObject(this.prototypeFor(target, this.realm.objectPrototype));
-    const result = this.evaluator.callFunction(behavior, thisValue, args, callRow, target);
+    const result = this.evaluator.callFunction(fn, behavior, thisValue, args, callRow, target);
     return isObject(result) ? result : thisValue;
   }
 
@@ -415,6 +415,12 @@ export class Runtime {
     const frame = new Frame(scope, callRow, isAtomic);
     this.frames.push(frame);
     return frame;
+  }
+
+  /** Pushes the frame of a suspended generator body again to resume it. */
+  resumeFrame(frame: Frame): void {
+    if (this.frames.length >= LIMITS.maxCallDepth) this.throwError('RangeError', 'Maximum call stack size exceeded');
+    this.frames.push(frame);
   }
 
   popFrame(): void {

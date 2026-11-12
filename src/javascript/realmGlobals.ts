@@ -55,7 +55,11 @@ function tagOf(value: Value): string {
   if (value === null) return 'Null';
   if (value instanceof JsArray) return 'Array';
   if (value instanceof JsFunction) return 'Function';
-  if (value instanceof JsObject) return value.isError ? 'Error' : 'Object';
+  if (value instanceof JsObject) {
+    if (value.generator) return 'Generator';
+    if (value.regexp) return 'RegExp';
+    return value.isError ? 'Error' : 'Object';
+  }
   if (typeof value === 'string') return 'String';
   return typeof value === 'number' ? 'Number' : 'Boolean';
 }

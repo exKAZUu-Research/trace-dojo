@@ -16,6 +16,10 @@ export interface FunctionContext {
   canReturn: boolean;
   canCallSuper: boolean;
   canReferenceSuper: boolean;
+  /** Whether `yield` may appear, in the body of a generator function. */
+  isGenerator: boolean;
+  /** The `yield` expressions converted so far in this function, which tell the expressions around one apart. */
+  yieldCount: number;
   /** Whether `new.target` may appear: anywhere but outside every function, which arrow functions inherit. */
   canUseNewTarget: boolean;
   /** Labels in scope, each with whether it labels a loop. */
@@ -40,6 +44,8 @@ export function newContext(canReturn: boolean, canCallSuper: boolean, canReferen
     canCallSuper,
     canReferenceSuper,
     canUseNewTarget: true,
+    isGenerator: false,
+    yieldCount: 0,
     labels: new Map(),
     breakableDepth: 0,
     loopDepth: 0,

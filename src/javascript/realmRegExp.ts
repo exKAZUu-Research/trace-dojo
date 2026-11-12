@@ -177,13 +177,14 @@ function defineStringMethods(builder: RealmBuilder): void {
   });
   const regExpStringIteratorPrototype = new JsObject(iteratorPrototype);
   builder.method(regExpStringIteratorPrototype, 'next', 0, ({ runtime, thisValue }) => {
-    const step = thisValue instanceof JsObject ? thisValue.hostIterator : undefined;
-    if (!step)
+    const iterator = thisValue instanceof JsObject ? thisValue.hostIterator : undefined;
+    if (!iterator)
       return runtime.throwError(
         'TypeError',
         `next method called on incompatible receiver ${runtime.describe(thisValue)}`
       );
-    return iteratorResult(runtime, step());
+    const value = iterator.next();
+    return iteratorResult(runtime, value === DONE ? undefined : value, value === DONE);
   });
   method('matchAll', ({ runtime, args }, text) => {
     const pattern = args[0];
@@ -195,9 +196,11 @@ function defineStringMethods(builder: RealmBuilder): void {
     regexp.lastIndex = runtime.toNumber(runtime.get(object, 'lastIndex'));
     const matches = text.matchAll(regexp);
     const iterator = runtime.newObject(regExpStringIteratorPrototype);
-    iterator.hostIterator = () => {
-      const next = matches.next();
-      return next.done ? DONE : matchArray(runtime, next.value);
+    iterator.hostIterator = {
+      next: () => {
+        const next = matches.next();
+        return next.done ? DONE : matchArray(runtime, next.value);
+      },
     };
     return iterator;
   });
@@ -209,10 +212,10 @@ function regExpArgument(runtime: Runtime, value: Value, flags: string): RegExpOb
   return newRegExp(runtime, value === undefined ? '(?:)' : runtime.toString(value), flags) as RegExpObject;
 }
 
-export function iteratorResult(runtime: Runtime, value: Value | typeof DONE): JsObject {
+export function iteratorResult(runtime: Runtime, value: Value, done: boolean): JsObject {
   const result = runtime.newObject();
-  runtime.createDataProperty(result, 'value', value === DONE ? undefined : value);
-  runtime.createDataProperty(result, 'done', value === DONE);
+  runtime.createDataProperty(result, 'value', value);
+  runtime.createDataProperty(result, 'done', done);
   return result;
 }
 

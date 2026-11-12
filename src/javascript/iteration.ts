@@ -1,8 +1,14 @@
-import type { ArrayOps } from './arrayOps';
+import { ArrayOps } from './arrayOps';
 import type { Value } from './values';
 
 /** What {@link ValueIterator.next} returns once the iteration has ended. */
 export const DONE = Symbol('done');
+
+/** A builtin iterator's steps: the next value or {@link DONE}, and what leaving a loop early runs. */
+export interface HostIterator {
+  next: () => Value | typeof DONE;
+  close?: () => void;
+}
 
 /**
  * JavaScript's iterator over an array, a string, or a builtin iterator. An array is read at each step, so changes the
@@ -14,16 +20,16 @@ export class ValueIterator {
   private isDone = false;
 
   /**
-   * @param source An array, read by the spec's Get, values that cannot change, such as a string's code points, or the
-   * step of a builtin iterator.
+   * @param source An array, read by the spec's Get, values that cannot change, such as a string's code points, or a
+   * builtin iterator.
    */
-  constructor(private readonly source: ArrayOps | readonly Value[] | (() => Value | typeof DONE)) {}
+  constructor(private readonly source: ArrayOps | readonly Value[] | HostIterator) {}
 
   next(): Value | typeof DONE {
     const { source } = this;
     if (this.isDone) return DONE;
-    if (typeof source === 'function') {
-      const value = source();
+    if (!Array.isArray(source) && !(source instanceof ArrayOps)) {
+      const value = (source as HostIterator).next();
       if (value === DONE) this.isDone = true;
       return value;
     }
@@ -33,6 +39,14 @@ export class ValueIterator {
     }
     const index = this.index++;
     return Array.isArray(source) ? (source as readonly Value[])[index] : (source as ArrayOps).get(index);
+  }
+
+  /** Ends the iteration before it is done, as leaving a loop early does. */
+  close(): void {
+    if (this.isDone) return;
+    this.isDone = true;
+    const { source } = this;
+    if (!Array.isArray(source) && !(source instanceof ArrayOps)) (source as HostIterator).close?.();
   }
 
   /** The values not read yet, which ends the iteration. */

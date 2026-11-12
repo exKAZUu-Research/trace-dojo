@@ -1,6 +1,17 @@
-import type { Block, ClassMember, ClassNode, FunctionNode, Program, Statement, VariableDeclaration } from './ast';
+import type {
+  Block,
+  ClassMember,
+  ClassNode,
+  Expression,
+  FunctionNode,
+  Program,
+  ScopeDeclarations,
+  Statement,
+  VariableDeclaration,
+} from './ast';
 import { nameFunction, patternNames } from './evaluatorBase';
-import { defineAccessor, ExpressionEvaluator } from './expressionEvaluator';
+import { defineAccessor } from './expressionEvaluator';
+import { createGeneratorObject, GeneratorReturn, runToEnd, type Steps } from './generators';
 import { DONE, ValueIterator } from './iteration';
 import {
   defineFunctionProperties,
@@ -8,6 +19,7 @@ import {
   mergePrivate,
   privateMethodProperty,
 } from './memberProperties';
+import { StepEvaluator } from './stepEvaluator';
 import { isObjectCreation, onlyCalls, onlyCreates, storesReference } from './stepRules';
 import {
   appendAll,
@@ -31,21 +43,28 @@ type Completion = undefined | { kind: 'break' | 'continue'; label?: string } | {
 type UserBehavior = Extract<FunctionBehavior, { kind: 'user' }>;
 type ClassBehavior = Extract<FunctionBehavior, { kind: 'class' }>;
 
-export class Evaluator extends ExpressionEvaluator {
+export class Evaluator extends StepEvaluator {
   /** Runs a program in the frame the caller pushed, whose scope becomes the program's own. */
   runProgram(program: Program): void {
     this.instantiate(this.runtime.frame.scope, program.scope);
-    this.statements(program.body);
+    runToEnd(this.statements(program.body));
   }
 
   // Statements --------------------------------------------------------------------------------------------------------
+  // Statements run as host generators that yield what a generator body's `yield` yields, so that a generator object can
+  // suspend its body anywhere; outside generator bodies nothing yields, and `runToEnd` runs them in one go.
 
-  private statements(statements: Statement[]): Completion {
+  private *statements(statements: Statement[]): Steps<Completion> {
     for (const statement of statements) {
-      const completion = this.statement(statement, []);
+      const completion = yield* this.statement(statement, []);
       if (completion) return completion;
     }
     return undefined;
+  }
+
+  /** Evaluates an expression, step by step when it contains a `yield`. */
+  private *value(expression: Expression): Steps<Value> {
+    return expression.hasYield ? yield* this.evaluateSteps(expression) : this.evaluate(expression);
   }
 
   /** Records the step of binding a loop's target, whose destructuring stores the values it reads out of an object. */
@@ -55,18 +74,29 @@ export class Evaluator extends ExpressionEvaluator {
 
   // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
   // code-gauge-allow functionCognitiveComplexity 20 -- One case per statement kind, each delegating where it grows.
-  private statement(statement: Statement, labels: string[]): Completion {
+  private *statement(statement: Statement, labels: string[]): Steps<Completion> {
     const { runtime } = this;
     runtime.spend();
     switch (statement.kind) {
       case 'expression': {
-        runtime.steps.runStatement(statement.stepRow, onlyCalls(statement.expression), () =>
-          this.evaluate(statement.expression)
-        );
+        const { expression } = statement;
+        if (!expression.hasYield) {
+          runtime.steps.runStatement(statement.stepRow, onlyCalls(expression), () => this.evaluate(expression));
+          return undefined;
+        }
+        yield* this.evaluateSteps(expression);
+        runtime.steps.step(statement.stepRow);
         return undefined;
       }
       case 'declaration': {
-        runtime.steps.runStatement(statement.stepRow, onlyCreates(statement), () => this.declaration(statement));
+        if (!statement.declarators.some(({ init }) => init?.hasYield)) {
+          runtime.steps.runStatement(statement.stepRow, onlyCreates(statement), () =>
+            runToEnd(this.declaration(statement))
+          );
+          return undefined;
+        }
+        yield* this.declaration(statement);
+        runtime.steps.step(statement.stepRow);
         return undefined;
       }
       case 'function':
@@ -78,30 +108,28 @@ export class Evaluator extends ExpressionEvaluator {
         return undefined;
       }
       case 'return': {
-        return {
-          kind: 'return',
-          value: statement.value ? this.evaluate(statement.value) : undefined,
-        };
+        return { kind: 'return', value: statement.value ? yield* this.value(statement.value) : undefined };
       }
       case 'if': {
-        if (toBoolean(this.evaluate(statement.test))) return this.statement(statement.consequent, []);
-        return statement.alternate ? this.statement(statement.alternate, []) : undefined;
+        if (toBoolean(yield* this.value(statement.test))) return yield* this.statement(statement.consequent, []);
+        return statement.alternate ? yield* this.statement(statement.alternate, []) : undefined;
       }
       case 'block': {
-        return this.block(statement);
+        return yield* this.block(statement);
       }
       case 'for': {
-        return this.forStatement(statement, labels);
+        return yield* this.forStatement(statement, labels);
       }
       case 'forOf':
       case 'forIn': {
-        return this.forEachStatement(statement, labels);
+        return yield* this.forEachStatement(statement, labels);
       }
       case 'while':
       case 'doWhile': {
         for (let first = true; ; first = false) {
-          if (!(first && statement.kind === 'doWhile') && !toBoolean(this.evaluate(statement.test))) return undefined;
-          const result = this.loopBody(statement.body, labels);
+          if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.value(statement.test)))
+            return undefined;
+          const result = yield* this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
           runtime.spend();
         }
@@ -111,26 +139,53 @@ export class Evaluator extends ExpressionEvaluator {
         return { kind: statement.kind, label: statement.label };
       }
       case 'labeled': {
-        const completion = this.statement(statement.body, [...labels, statement.label]);
+        const completion = yield* this.statement(statement.body, [...labels, statement.label]);
         return completion?.kind === 'break' && completion.label === statement.label ? undefined : completion;
       }
       case 'switch': {
-        return this.switchStatement(statement);
+        return yield* this.switchStatement(statement);
       }
       case 'throw': {
-        throw new JsThrow(this.evaluate(statement.argument));
+        throw new JsThrow(yield* this.value(statement.argument));
       }
       case 'try': {
-        return this.tryStatement(statement);
+        return yield* this.tryStatement(statement);
       }
     }
   }
 
-  private block(block: Block): Completion {
-    return this.withScope(block.scope, () => this.statements(block.body));
+  /** Runs `run` in a new scope with `declarations`, or in the current one when nothing is declared. */
+  private *scoped<T>(declarations: ScopeDeclarations, run: () => Steps<T>): Steps<T> {
+    if (declarations.lexical.length === 0 && declarations.functions.length === 0 && declarations.vars.length === 0) {
+      return yield* run();
+    }
+    const frame = this.runtime.frame;
+    const outer = frame.scope;
+    frame.scope = new Scope(outer);
+    try {
+      this.instantiate(frame.scope, declarations);
+      return yield* run();
+    } finally {
+      frame.scope = outer;
+    }
   }
 
-  private declaration(declaration: VariableDeclaration): void {
+  /** Keeps `value` reachable for garbage collection while `run` computes with it. */
+  private *holding<T>(value: Value, run: () => Steps<T>): Steps<T> {
+    const { temporaries } = this.runtime.frame;
+    temporaries.push(value);
+    try {
+      return yield* run();
+    } finally {
+      temporaries.pop();
+    }
+  }
+
+  private block(block: Block): Steps<Completion> {
+    return this.scoped(block.scope, () => this.statements(block.body));
+  }
+
+  private *declaration(declaration: VariableDeclaration): Steps<void> {
     for (const { target, init } of declaration.declarators) {
       if (init === undefined) {
         // `var x;` keeps the value x has, while `let x;` initializes it; either shows x from now on.
@@ -138,13 +193,13 @@ export class Evaluator extends ExpressionEvaluator {
         else if (target.kind === 'identifier') this.revealVar(target.name);
         continue;
       }
-      this.bindPattern(target, this.evaluate(init), 'initialize');
+      this.bindPattern(target, yield* this.value(init), 'initialize');
     }
   }
 
   /** Runs a loop body, returning `'next'` to continue the loop or the completion that ends it. */
-  private loopBody(body: Statement, labels: string[]): 'next' | Completion {
-    const completion = this.statement(body, []);
+  private *loopBody(body: Statement, labels: string[]): Steps<'next' | Completion> {
+    const completion = yield* this.statement(body, []);
     if (!completion) return 'next';
     if (completion.kind === 'return') return completion;
     const isOwn = completion.label === undefined || labels.includes(completion.label);
@@ -152,39 +207,42 @@ export class Evaluator extends ExpressionEvaluator {
     return completion.kind === 'continue' ? 'next' : undefined;
   }
 
-  private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Completion {
+  private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Steps<Completion> {
     const { runtime } = this;
-    return this.withScope(statement.scope, () => {
-      const { update, stepRow, perIterationNames } = statement;
-      this.forInit(statement);
-      const frame = runtime.frame;
-      const outer = frame.scope;
-      try {
-        this.copyIterationScope(perIterationNames);
-        for (;;) {
-          if (statement.test && !toBoolean(this.evaluate(statement.test))) return;
-          const result = this.loopBody(statement.body, labels);
-          if (result !== 'next') return result;
+    return this.scoped(
+      statement.scope,
+      function* (this: Evaluator): Steps<Completion> {
+        const { update, stepRow, perIterationNames } = statement;
+        yield* this.forInit(statement);
+        const frame = runtime.frame;
+        const outer = frame.scope;
+        try {
           this.copyIterationScope(perIterationNames);
-          if (update) {
-            this.evaluate(update);
-            runtime.steps.step(stepRow);
+          for (;;) {
+            if (statement.test && !toBoolean(yield* this.value(statement.test))) return;
+            const result = yield* this.loopBody(statement.body, labels);
+            if (result !== 'next') return result;
+            this.copyIterationScope(perIterationNames);
+            if (update) {
+              yield* this.value(update);
+              runtime.steps.step(stepRow);
+            }
+            runtime.spend();
           }
-          runtime.spend();
+        } finally {
+          frame.scope = outer;
         }
-      } finally {
-        frame.scope = outer;
-      }
-    });
+      }.bind(this)
+    );
   }
 
   /** Runs the init of a `for` header, which records the header's step when it assigns something. */
-  private forInit({ init, stepRow }: Extract<Statement, { kind: 'for' }>): void {
+  private *forInit({ init, stepRow }: Extract<Statement, { kind: 'for' }>): Steps<void> {
     if (init?.kind === 'declaration') {
-      this.declaration(init);
+      yield* this.declaration(init);
       if (init.declarators.some((declarator) => declarator.init)) this.runtime.steps.step(stepRow);
     } else if (init) {
-      this.evaluate(init);
+      yield* this.value(init);
       this.runtime.steps.step(stepRow);
     }
   }
@@ -199,35 +257,51 @@ export class Evaluator extends ExpressionEvaluator {
     frame.scope = next;
   }
 
-  private forEachStatement(statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>, labels: string[]): Completion {
+  private *forEachStatement(
+    statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
+    labels: string[]
+  ): Steps<Completion> {
     const { runtime } = this;
     // The loop's let or const names are uninitialized while the iterable is evaluated, so `for (let x of x)` throws.
     const iterable =
       statement.declarationKind && statement.declarationKind !== 'var'
-        ? this.withScope(statement.scope, () => this.evaluate(statement.iterable))
-        : this.evaluate(statement.iterable);
+        ? yield* this.scoped(statement.scope, () => this.value(statement.iterable))
+        : yield* this.value(statement.iterable);
     const iterator =
       statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
     const frame = runtime.frame;
-    return runtime.hold(iterable, () => {
-      for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
-        runtime.spend();
-        const outer = frame.scope;
+    return yield* this.holding(
+      iterable,
+      function* (this: Evaluator): Steps<Completion> {
+        let isExhausted = false;
         try {
-          if (statement.declarationKind && statement.declarationKind !== 'var') {
-            frame.scope = new Scope(outer);
-            this.instantiate(frame.scope, statement.scope);
+          for (;;) {
+            const value = iterator.next();
+            if (value === DONE) {
+              isExhausted = true;
+              return;
+            }
+            runtime.spend();
+            const outer = frame.scope;
+            try {
+              if (statement.declarationKind && statement.declarationKind !== 'var') {
+                frame.scope = new Scope(outer);
+                this.instantiate(frame.scope, statement.scope);
+              }
+              this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
+              this.stepBinding(statement, value);
+              const result = yield* this.loopBody(statement.body, labels);
+              if (result !== 'next') return result;
+            } finally {
+              frame.scope = outer;
+            }
           }
-          this.bindPattern(statement.target, value, statement.declarationKind ? 'initialize' : 'assign');
-          this.stepBinding(statement, value);
-          const result = this.loopBody(statement.body, labels);
-          if (result !== 'next') return result;
         } finally {
-          frame.scope = outer;
+          // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks.
+          if (!isExhausted) iterator.close();
         }
-      }
-      return;
-    });
+      }.bind(this)
+    );
   }
 
   /** The keys `for...in` visits: enumerable string keys of the object and its prototypes, each once. */
@@ -248,39 +322,40 @@ export class Evaluator extends ExpressionEvaluator {
     return keys;
   }
 
-  private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Completion {
-    const { runtime } = this;
-    const discriminant = this.evaluate(statement.discriminant);
-    return runtime.hold(discriminant, () =>
-      this.withScope(statement.scope, () => {
-        const { cases } = statement;
-        for (const switchCase of cases.slice(this.matchingCase(statement, discriminant))) {
-          const completion = this.statements(switchCase.body);
-          if (completion?.kind === 'break' && completion.label === undefined) return;
-          if (completion) return completion;
-        }
-        return;
-      })
+  private *switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Steps<Completion> {
+    const discriminant = yield* this.value(statement.discriminant);
+    return yield* this.holding(discriminant, () =>
+      this.scoped(
+        statement.scope,
+        function* (this: Evaluator): Steps<Completion> {
+          const { cases } = statement;
+          for (const switchCase of cases.slice(yield* this.matchingCase(statement, discriminant))) {
+            const completion = yield* this.statements(switchCase.body);
+            if (completion?.kind === 'break' && completion.label === undefined) return;
+            if (completion) return completion;
+          }
+          return;
+        }.bind(this)
+      )
     );
   }
 
   /** The index of the case to start from: the first whose value is strictly equal, else the default, else none. */
-  private matchingCase({ cases }: Extract<Statement, { kind: 'switch' }>, discriminant: Value): number {
-    const index = cases.findIndex(
-      (switchCase) => switchCase.test !== undefined && this.evaluate(switchCase.test) === discriminant
-    );
-    if (index !== -1) return index;
+  private *matchingCase({ cases }: Extract<Statement, { kind: 'switch' }>, discriminant: Value): Steps<number> {
+    for (const [index, switchCase] of cases.entries()) {
+      if (switchCase.test !== undefined && (yield* this.value(switchCase.test)) === discriminant) return index;
+    }
     const defaultIndex = cases.findIndex((switchCase) => switchCase.test === undefined);
     return defaultIndex === -1 ? cases.length : defaultIndex;
   }
 
-  private tryStatement(statement: Extract<Statement, { kind: 'try' }>): Completion {
+  private *tryStatement(statement: Extract<Statement, { kind: 'try' }>): Steps<Completion> {
     const { handler, finalizer } = statement;
-    let outcome = this.catchThrow(() => this.block(statement.block));
+    let outcome = yield* this.catchThrow(() => this.block(statement.block));
     if (outcome.thrown && handler) {
       const { value } = outcome.thrown;
-      outcome = this.catchThrow(() =>
-        this.withScope(handler.scope, () => {
+      outcome = yield* this.catchThrow(() =>
+        this.scoped(handler.scope, () => {
           if (handler.param) this.bindPattern(handler.param, value, 'initialize');
           return this.block(handler.body);
         })
@@ -293,18 +368,22 @@ export class Evaluator extends ExpressionEvaluator {
         : outcome.completion?.kind === 'return'
           ? outcome.completion.value
           : undefined;
-      const finalCompletion = this.runtime.hold(delayed, () => this.block(finalizer));
+      const finalCompletion = yield* this.holding(delayed, () => this.block(finalizer));
       if (finalCompletion) return finalCompletion;
     }
     if (outcome.thrown) throw outcome.thrown;
     return outcome.completion;
   }
 
-  /** Runs `run`, catching the JavaScript exception it throws; limits and host errors still propagate. */
-  private catchThrow(run: () => Completion): { completion?: Completion; thrown?: JsThrow } {
+  /**
+   * Runs `run`, catching the JavaScript exception it throws; limits and host errors still propagate. A generator's
+   * `return()` resuming it inside `run` completes it as a `return` statement would, so that finalizers run.
+   */
+  private *catchThrow(run: () => Steps<Completion>): Steps<{ completion?: Completion; thrown?: JsThrow }> {
     try {
-      return { completion: run() };
+      return { completion: yield* run() };
     } catch (error) {
+      if (error instanceof GeneratorReturn) return { completion: { kind: 'return', value: error.value } };
       if (!(error instanceof JsThrow)) throw error;
       return { thrown: error };
     }
@@ -325,7 +404,10 @@ export class Evaluator extends ExpressionEvaluator {
     });
     if (node.bindsOwnName) closure.bindings.set(node.name, { value: fn, isMutable: false });
     defineFunctionProperties(fn, node.name, expectedArgumentCount(node));
-    if (node.kind === 'normal') {
+    if (node.isGenerator) {
+      const prototype = runtime.newObject(runtime.realm.generatorPrototype);
+      fn.properties.set('prototype', { value: prototype, writable: true, enumerable: false, configurable: false });
+    } else if (node.kind === 'normal') {
       const prototype = runtime.newObject();
       prototype.properties.set('constructor', {
         value: fn,
@@ -344,6 +426,7 @@ export class Evaluator extends ExpressionEvaluator {
   }
 
   callFunction(
+    fn: JsFunction,
     behavior: UserBehavior,
     thisValue: Value,
     args: Value[],
@@ -364,7 +447,10 @@ export class Evaluator extends ExpressionEvaluator {
       this.bindParameters(node, args);
       if (!Array.isArray(node.body)) return this.evaluate(node.body);
       this.instantiate(scope, node.scope);
-      const completion = this.statements(node.body);
+      if (node.isGenerator) {
+        return createGeneratorObject(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.statements(node.body));
+      }
+      const completion = runToEnd(this.statements(node.body));
       return completion?.kind === 'return' ? completion.value : undefined;
     } finally {
       runtime.popFrame();
@@ -508,7 +594,7 @@ export class Evaluator extends ExpressionEvaluator {
   private runStaticBlock(block: Extract<ClassMember, { kind: 'staticBlock' }>, scope: Scope): void {
     this.inScope(scope, () => {
       this.instantiate(scope, block.scope);
-      this.statements(block.body);
+      runToEnd(this.statements(block.body));
     });
   }
 
@@ -603,7 +689,7 @@ export class Evaluator extends ExpressionEvaluator {
       if (ctor) {
         this.bindParameters(ctor, args);
         this.instantiate(scope, ctor.scope);
-        const completion = this.statements(ctor.body as Statement[]);
+        const completion = runToEnd(this.statements(ctor.body as Statement[]));
         if (completion?.kind === 'return') result = completion.value;
       } else if (behavior.isDerived) {
         this.superCall(args, undefined);

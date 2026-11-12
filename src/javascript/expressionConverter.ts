@@ -47,6 +47,12 @@ export abstract class ExpressionConverter extends ConverterBase {
       fn: this.functionNode(node, 'normal'),
       row: rowOf(node),
     }),
+    generator_function: (node) => ({
+      kind: 'functionExpression',
+      fn: this.functionNode(node, 'normal'),
+      row: rowOf(node),
+    }),
+    yield_expression: (node) => this.yieldExpression(node),
     arrow_function: (node) => ({
       kind: 'functionExpression',
       fn: this.functionNode(node, 'arrow'),
@@ -88,8 +94,23 @@ export abstract class ExpressionConverter extends ConverterBase {
 
   expression(node: Node): Expression {
     const convert = this.expressionConverters[node.type] as ExpressionConverterFunction | undefined;
-    if (convert) return convert(node);
-    return unsupported(node, unsupportedFeatures[node.type] ?? `式「${node.type}」`);
+    if (!convert) return unsupported(node, unsupportedFeatures[node.type] ?? `式「${node.type}」`);
+    const { context } = this;
+    const yieldsBefore = context.yieldCount;
+    const expression = convert(node);
+    if (context.yieldCount !== yieldsBefore) {
+      expression.hasYield = true;
+      if (!canYieldIn(expression)) unsupported(node, 'この位置の yield ');
+    }
+    return expression;
+  }
+
+  private yieldExpression(node: Node): Expression {
+    if (!this.context.isGenerator) fail(node, 'yield はジェネレータ関数の中にしか書けません。');
+    const argumentNode = namedChildren(node).at(0);
+    const argument = argumentNode ? this.expression(argumentNode) : undefined;
+    this.context.yieldCount++;
+    return { kind: 'yield', argument, delegate: node.children.some((child) => child?.type === '*'), row: rowOf(node) };
   }
 
   private metaProperty(node: Node): Expression {
@@ -396,10 +417,12 @@ export abstract class ExpressionConverter extends ConverterBase {
       // An object or array literal used as a pattern spells defaults as assignments.
       case 'assignment_expression': {
         const target = this.pattern(field(node, 'left'), leaf);
+        const value = this.expression(field(node, 'right'));
+        if (value.hasYield) unsupported(node, '分割代入の初期値の yield ');
         return {
           kind: 'default',
           target,
-          value: this.expression(field(node, 'right')),
+          value,
           row: rowOf(node),
         };
       }
@@ -464,6 +487,51 @@ export abstract class ExpressionConverter extends ConverterBase {
     }
     return { kind: 'objectPattern', properties, rest, row: rowOf(node) };
   }
+}
+
+/**
+ * Whether a generator can evaluate an expression containing a `yield` step by step: the parts of the expression that
+ * hold the `yield` must be evaluated in order without a callback, as operands and arguments are, but destructuring
+ * defaults and object literal members are not.
+ */
+function canYieldIn(expression: Expression): boolean {
+  switch (expression.kind) {
+    case 'yield':
+    case 'parenthesized':
+    case 'sequence':
+    case 'binary':
+    case 'logical':
+    case 'conditional':
+    case 'unary':
+    case 'template':
+    case 'array': {
+      return true;
+    }
+    case 'assign': {
+      return !patternHasYield(expression.target);
+    }
+    case 'call': {
+      return !expression.optional && expression.callee.kind !== 'super' && !expression.callee.hasYield;
+    }
+    case 'new': {
+      return !expression.callee.hasYield;
+    }
+    case 'member': {
+      return !expression.optional;
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** Whether evaluating an assignment target runs a `yield`, which a destructuring default never may. */
+function patternHasYield(pattern: Pattern): boolean {
+  if (pattern.kind !== 'member') return false;
+  return (
+    (pattern.object.kind !== 'super' && pattern.object.hasYield === true) ||
+    (pattern.property.kind === 'computed' && pattern.property.expression.hasYield === true)
+  );
 }
 
 /** Converts a regular expression literal, rejecting a pattern or flags that JavaScript rejects. */

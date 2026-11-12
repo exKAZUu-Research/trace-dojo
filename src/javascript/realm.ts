@@ -1,3 +1,4 @@
+import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
 import { defineArrayBuiltins } from './realmArrays';
 import { defineGlobalBuiltins } from './realmGlobals';
@@ -20,6 +21,8 @@ export interface Realm {
   regExpPrototype: JsObject;
   /** `%IteratorPrototype%`, the parent of the builtin iterators' prototypes. */
   iteratorPrototype: JsObject;
+  /** `%GeneratorPrototype%`, with the methods every generator object has. */
+  generatorPrototype: JsObject;
   errorPrototypes: Record<ErrorName, JsObject>;
   /** The scope of the builtin globals, which encloses the program's own scope. */
   globals: Scope;
@@ -33,6 +36,7 @@ export class RealmBuilder {
     // oxlint-disable-next-line unicorn/no-null -- Object.prototype ends every prototype chain.
     const objectPrototype = new JsObject(null);
     const errorPrototype = new JsObject(objectPrototype);
+    const iteratorPrototype = new JsObject(objectPrototype);
     this.realm = {
       objectPrototype,
       functionPrototype: new JsObject(objectPrototype),
@@ -41,7 +45,8 @@ export class RealmBuilder {
       numberPrototype: new JsObject(objectPrototype),
       booleanPrototype: new JsObject(objectPrototype),
       regExpPrototype: new JsObject(objectPrototype),
-      iteratorPrototype: new JsObject(objectPrototype),
+      iteratorPrototype,
+      generatorPrototype: new JsObject(iteratorPrototype),
       errorPrototypes: {
         Error: errorPrototype,
         TypeError: new JsObject(errorPrototype),
@@ -127,5 +132,6 @@ export function createRealm(runtime: Runtime): Realm {
   defineArrayBuiltins(builder);
   defineStringBuiltins(builder);
   defineRegExpBuiltins(builder);
+  defineGeneratorBuiltins(builder);
   return builder.realm;
 }

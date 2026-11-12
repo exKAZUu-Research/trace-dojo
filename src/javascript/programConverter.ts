@@ -51,10 +51,8 @@ export class ProgramConverter extends ExpressionConverter {
       }),
     lexical_declaration: (node) => this.declaration(node, true),
     variable_declaration: (node) => this.declaration(node, true),
-    function_declaration: (node) => {
-      this.declareFunction(node, this.functionNode(node, 'normal'));
-      return { kind: 'function', row: rowOf(node) };
-    },
+    function_declaration: (node) => this.functionDeclaration(node),
+    generator_function_declaration: (node) => this.functionDeclaration(node),
     class_declaration: (node) => {
       const name = field(node, 'name').text;
       this.declareLexical(node, name, false);
@@ -141,6 +139,11 @@ export class ProgramConverter extends ExpressionConverter {
       scope,
       row: rowOf(node),
     }));
+  }
+
+  private functionDeclaration(node: Node): Statement {
+    this.declareFunction(node, this.functionNode(node, 'normal'));
+    return { kind: 'function', row: rowOf(node) };
   }
 
   private returnStatement(node: Node): Statement {
@@ -323,7 +326,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   functionNode(node: Node, kind: FunctionKind, name = node.childForFieldName('name')?.text ?? ''): FunctionNode {
     if (hasChild(node, 'async')) unsupported(node, 'async 関数');
-    if (hasChild(node, '*')) unsupported(node, 'ジェネレータ関数');
+    const isGenerator = hasChild(node, '*');
     const bodyNode = field(node, 'body');
     const outer = this.context;
     const isArrow = kind === 'arrow';
@@ -336,6 +339,7 @@ export class ProgramConverter extends ExpressionConverter {
       context.argumentsUse = outer.argumentsUse;
       context.canUseNewTarget = outer.canUseNewTarget;
     }
+    context.isGenerator = isGenerator;
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {
@@ -351,6 +355,7 @@ export class ProgramConverter extends ExpressionConverter {
           params,
           rest,
           bindsOwnName,
+          isGenerator,
           usesArguments,
           body,
           scope,

@@ -34,6 +34,11 @@ function pushObjectReferences(pending: unknown[], object: JsObject): number {
   pending.push(object.proto);
   for (const property of object.properties.values()) pushProperty(pending, property);
   for (const property of object.privateMembers?.values() ?? []) pushProperty(pending, property);
+  if (object.generator) {
+    const { frame } = object.generator;
+    pending.push(frame.scope);
+    for (const value of frame.temporaries) pending.push(value);
+  }
   if (object instanceof JsFunction) {
     if (object.behavior.kind !== 'native') pending.push(object.behavior.scope, object.behavior.homeObject);
     for (const value of object.captured) pending.push(value);

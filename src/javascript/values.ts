@@ -1,6 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassNode, FunctionNode } from './ast';
-import type { DONE } from './iteration';
+import type { GeneratorState } from './generators';
+import type { HostIterator } from './iteration';
 import type { Runtime } from './runtime';
 
 /** A JavaScript value: primitives are the host's own, objects are interpreter objects. */
@@ -47,8 +48,10 @@ export class JsObject {
   isError = false;
   /** Set by the RegExp constructor and regular expression literals; never run itself, since it keeps no lastIndex. */
   regexp?: RegExp;
-  /** Set on a builtin iterator, such as the one `matchAll` returns, whose `next()` and loops step through it. */
-  hostIterator?: () => Value | typeof DONE;
+  /** Set on a builtin iterator, such as a generator, which loops and spreads step through and close early. */
+  hostIterator?: HostIterator;
+  /** Set on a generator object. */
+  generator?: GeneratorState;
 
   constructor(public proto: JsObject | null) {}
 }
@@ -132,7 +135,7 @@ export class JsFunction extends JsObject {
     const { behavior } = this;
     if (behavior.kind === 'native') return behavior.isConstructor;
     if (behavior.kind === 'class') return true;
-    return behavior.node.kind === 'normal';
+    return behavior.node.kind === 'normal' && !behavior.node.isGenerator;
   }
 }
 

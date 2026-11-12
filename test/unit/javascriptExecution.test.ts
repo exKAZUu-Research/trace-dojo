@@ -59,7 +59,12 @@ test.each([
   ],
   ['a declaration as the body of if', 'if (true) let a = 1;', 0, '宣言を書くには { } で囲んでください。'],
   ['an async function', 'async function f() {}', 0, 'async 関数は、この採点環境では使えません。'],
-  ['a generator', 'function* f() {}', 0, 'ジェネレータ関数は、この採点環境では使えません。'],
+  [
+    'a yield in a destructuring default',
+    'function* f() {\n  const [a = yield] = [];\n}',
+    1,
+    '分割代入の初期値の yield は、この採点環境では使えません。',
+  ],
   ['an invalid regular expression', 'const r = /(/;', 0, '正規表現の書き方に誤りがあります。'],
   ['invalid regular expression flags', 'const r = /a/gg;', 0, '正規表現の書き方に誤りがあります。'],
   [
@@ -99,6 +104,12 @@ test.each([
   ['a thrown value', "throw 'stop';", 'stop'],
   ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Error: bad'],
   ['infinite recursion', 'function f() { return f(); }\nf();', 'RangeError: Maximum call stack size exceeded'],
+  ['constructing a generator', 'function* f() {}\nnew f();', 'TypeError: f is not a constructor'],
+  [
+    'resuming a running generator',
+    'const g = (function* () { g.next(); yield 1; })();\ng.next();',
+    'TypeError: Generator is already running',
+  ],
   [
     'a turtle method called on another object',
     'const forward = new Turtle().forward;\nforward.call({});',

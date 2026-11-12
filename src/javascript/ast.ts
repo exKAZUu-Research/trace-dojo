@@ -97,6 +97,8 @@ export interface FunctionNode extends Span {
   rest?: Pattern;
   /** Whether a named function expression sees its own name, which is then a binding of its own. */
   bindsOwnName: boolean;
+  /** Whether calling the function creates a generator, which runs the body as its `next()` asks. */
+  isGenerator: boolean;
   /** Whether the body (or an arrow function in it) reads `arguments`, which the call then creates. */
   usesArguments: boolean;
   body: Statement[] | Expression;
@@ -140,8 +142,10 @@ export type ObjectMember =
 
 export type Argument = Expression | { kind: 'spread'; argument: Expression };
 
-export type Expression = Span &
-  (
+export type Expression = Span & {
+  /** Whether a `yield` runs while evaluating this expression, which a generator then evaluates step by step. */
+  hasYield?: boolean;
+} & (
     | { kind: 'literal'; value: undefined | null | boolean | number | string }
     | { kind: 'template'; strings: string[]; expressions: Expression[] }
     /**
@@ -177,6 +181,7 @@ export type Expression = Span &
     | { kind: 'sequence'; expressions: Expression[] }
     /** Ends an optional chain, as parentheses do. */
     | { kind: 'parenthesized'; expression: Expression }
+    | { kind: 'yield'; argument?: Expression; delegate: boolean }
   );
 
 export interface SuperReference extends Span {

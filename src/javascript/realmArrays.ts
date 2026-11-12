@@ -3,7 +3,7 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineArrayIterations } from './realmArrayIterations';
 import type { Runtime } from './runtime';
-import { isCallable, JsArray, type NativeCall, type Value } from './values';
+import { isCallable, JsArray, JsObject, type NativeCall, type Value } from './values';
 
 /**
  * Defines Array and Array.prototype. Each method follows its algorithm in the ECMAScript specification step by step,
@@ -55,7 +55,11 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
   return buildArray(runtime, (result) => {
     const add = (value: Value, index: number): void =>
       result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
-    if (source instanceof JsArray || typeof source === 'string') {
+    if (
+      source instanceof JsArray ||
+      typeof source === 'string' ||
+      (source instanceof JsObject && source.hostIterator)
+    ) {
       // Each value is read just before its mapper runs, as JavaScript's iteration does.
       const iterator = runtime.iterator(source);
       for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next()) add(value, index);

@@ -293,7 +293,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   /** Evaluates a callee with the `this` a call passes, which is the object of a (parenthesized) member. */
-  private callee(callee: Expression): { fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT {
+  protected callee(callee: Expression): { fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT {
     // Parentheses keep a method's receiver but end an optional chain, so `(a?.b)()` calls whatever `a?.b` gave.
     let target = callee;
     while (target.kind === 'parenthesized') target = target.expression;
@@ -398,21 +398,34 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case 'delete': {
         return this.deleteExpression(argument);
       }
+      default: {
+        return this.unaryValue(operator, this.evaluate(argument));
+      }
+    }
+  }
+
+  /** Applies a unary operator other than `delete` to its operand's value. */
+  protected unaryValue(operator: string, value: Value): Value {
+    const { runtime } = this;
+    switch (operator) {
+      case 'typeof': {
+        return runtime.typeOf(value);
+      }
+      case 'delete':
       case 'void': {
-        this.evaluate(argument);
-        return undefined;
+        return operator === 'delete' ? true : undefined;
       }
       case '!': {
-        return !toBoolean(this.evaluate(argument));
+        return !toBoolean(value);
       }
       case '-': {
-        return -runtime.toNumber(this.evaluate(argument));
+        return -runtime.toNumber(value);
       }
       case '+': {
-        return runtime.toNumber(this.evaluate(argument));
+        return runtime.toNumber(value);
       }
       case '~': {
-        return ~runtime.toNumber(this.evaluate(argument));
+        return ~runtime.toNumber(value);
       }
       default: {
         throw new Error(`Unknown unary operator: ${operator}`);
@@ -473,12 +486,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
 
 type LogicalOperator = '&&' | '||' | '??';
 
-function isLogicalOperator(operator: string): operator is LogicalOperator {
+export function isLogicalOperator(operator: string): operator is LogicalOperator {
   return operator === '&&' || operator === '||' || operator === '??';
 }
 
 /** Whether a logical operator yields its left operand without evaluating its right one. */
-function shortCircuits(operator: LogicalOperator, left: Value): boolean {
+export function shortCircuits(operator: LogicalOperator, left: Value): boolean {
   if (operator === '&&') return !toBoolean(left);
   if (operator === '||') return toBoolean(left);
   return left !== undefined && left !== null;
