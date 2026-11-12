@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 673 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 675 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -502,7 +502,12 @@ export class ProgramConverter extends ExpressionConverter {
     if (hasToken(node, 'async')) unsupported(node, 'async def');
     if (node.childForFieldName('type_parameters')) unsupported(node, '型引数');
     const name = this.mangle(field(node, 'name').text);
-    const isMethod = this.context.scope.info.kind === 'class';
+    // A static or class method has no instance to show as Java's `this`.
+    const isMethod =
+      this.context.scope.info.kind === 'class' &&
+      !decorators.some(
+        (decorator) => decorator.kind === 'name' && ['staticmethod', 'classmethod'].includes(decorator.name)
+      );
     const fn = this.newFunction(node, name, `${this.context.qualifiedPrefix}${name}`);
     fn.decorators = decorators;
     fn.isMethod = isMethod;
@@ -618,6 +623,8 @@ export class ProgramConverter extends ExpressionConverter {
         ? this.expression(subjects[0])
         : { kind: 'tuple', elements: subjects.map((child) => this.expression(child)), row };
     const caseNodes = fieldNodes(field(node, 'body'), 'alternative');
+    // The parser moves a body without case clauses out of the match, which CPython refuses as invalid syntax.
+    if (caseNodes.length === 0) fail(row, 'match 文の中には、case を1つ以上書いてください。');
     const cases: MatchCase[] = caseNodes.map((caseNode, index) => {
       const patternNodes = namedChildren(caseNode).filter((child) => child.type === 'case_pattern');
       const caseRow = rowOf(caseNode);

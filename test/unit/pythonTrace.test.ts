@@ -288,3 +288,42 @@ test.each([
 ])('a model program with %s is rejected', (_, program, message) => {
   expect(() => traceProgram('python', program, program)).toThrow(message);
 });
+
+test("a static method shows its parameters' fields no more than Java's static method does", () => {
+  const python = `class Point:
+    def __init__(self):
+        self.x = 3
+    @staticmethod
+    def show(p):
+        y = 1
+    @classmethod
+    def make(cls):
+        z = 2
+Point.show(Point())
+Point.make()`;
+  const java = `public class Main {
+  static class Point {
+    int x;
+    Point() {
+      this.x = 3;
+    }
+    static void show(Point p) {
+      int y = 1;
+    }
+    static void make() {
+      int z = 2;
+    }
+  }
+  public static void main(String[] args) {
+    Point.show(new Point());
+    Point.make();
+  }
+}`;
+  expect(varsOf('python', python)).toEqual(varsOf('java', java));
+});
+
+function varsOf(language: 'java' | 'python', program: string): unknown[] {
+  return traceProgram(language, program, program).traceItems.map(({ vars }) =>
+    Object.fromEntries(Object.entries(vars).map(([name, value]) => [name.replace(/^self\./, 'this.'), value]))
+  );
+}
