@@ -446,14 +446,15 @@ export function restrictToImmutable(
   cls.constructors = [];
   for (const method of cls.methods) {
     if (!MUTATORS.has(method.name)) continue;
-    const original = method.native;
     const isRemoval = method.name === 'clear' || (method.name === 'remove' && method.parameterTypes[0] !== INT);
+    // A removal that finds nothing changes nothing, not even the modCount its iterators check.
+    const unchanged = method.returnType === BOOLEAN ? false : undefined;
     method.native =
-      removesIfPresent && isRemoval && original
+      removesIfPresent && isRemoval
         ? (frame, receiver, args) =>
             removesAny(frame, receiver, method.name, args)
               ? throwBuiltin(frame, 'UnsupportedOperationException')
-              : original(frame, receiver, args)
+              : unchanged
         : (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
   }
   return cls;

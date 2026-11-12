@@ -1359,6 +1359,32 @@ class Main {
   }
 });
 
+test("Java's no-op removals from Collections' sets and maps keep their iterators valid, and removeIf rejects a null predicate, as the JDK does", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    Set<Integer> s = Collections.emptySet(); Iterator<Integer> i = s.iterator(); s.clear(); s.remove(1);
+    t("set", () -> i.next());
+    Map<Integer, Integer> m = Collections.emptyMap(); Iterator<Integer> k = m.keySet().iterator(); m.clear(); m.remove(1);
+    t("map", () -> k.next());
+    Set<Integer> one = Collections.singleton(1); Iterator<Integer> j = one.iterator(); one.remove(2);
+    t("one", () -> System.out.println(j.next()));
+    t("nullEmpty", () -> Collections.<Integer>emptyList().removeIf(null));
+    t("nullSet", () -> Collections.<Integer>emptySet().removeIf(null));
+    t("nullCopies", () -> Collections.nCopies(0, 1).removeIf(null));
+    t("nullArray", () -> new ArrayList<Integer>().removeIf(null));
+  }
+}`,
+      'set java.util.NoSuchElementException\nmap java.util.NoSuchElementException\n1\none ok\nnullEmpty java.lang.NullPointerException\nnullSet java.lang.NullPointerException\nnullCopies java.lang.NullPointerException\nnullArray java.lang.NullPointerException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
