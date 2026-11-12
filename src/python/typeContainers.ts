@@ -124,10 +124,15 @@ method(listClass, 'remove', 'one', 1, 1, (self, [item]) => {
   items.splice(index, 1);
   return None;
 });
+const MAX_SSIZE = (1n << 63n) - 1n;
 method(listClass, 'pop', 'expected', 0, 1, (self, [index]) => {
+  // Argument clinic converts the index to a Py_ssize_t before list_pop_impl looks at the list.
+  let position = index === undefined ? -1n : toIndex(index);
+  if (position > MAX_SSIZE || position < -MAX_SSIZE - 1n) {
+    throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
+  }
   const items = listOf(self).editableItems;
   if (items.length === 0) throw pyError('IndexError', 'pop from empty list');
-  let position = index === undefined ? -1n : toIndex(index);
   if (position < 0n) position += BigInt(items.length);
   if (position < 0n || position >= BigInt(items.length)) throw pyError('IndexError', 'pop index out of range');
   return items.splice(Number(position), 1)[0];
