@@ -17,6 +17,7 @@ import {
   toIndex,
 } from './numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial } from './objects';
+import { currentRuntime } from './runtimeContext';
 import { strRepr } from './strings';
 import {
   boolClass,
@@ -114,6 +115,10 @@ export function roundInt(value: bigint, digits: PyValue | undefined): bigint {
   if (digits === undefined || digits === None) return value;
   const places = toIndex(digits);
   if (places >= 0n) return value;
+  const magnitude = value < 0n ? -value : value;
+  // A value with fewer digits than the rounding unit's zeros rounds to zero, which needs no huge power of ten.
+  if (BigInt(magnitude.toString(16).length * 4) * 30_103n < -places * 100_000n - 100_000n) return 0n;
+  currentRuntime().chargeBits(-places * 4n);
   const unit = 10n ** -places;
   const remainder = ((value % unit) + unit) % unit;
   const down = value - remainder;

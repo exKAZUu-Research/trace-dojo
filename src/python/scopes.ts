@@ -81,7 +81,11 @@ function checkNonlocals(scope: ScopeBuilder): void {
 /** The nearest enclosing function that owns `name`, skipping class bodies, which nested functions do not see. */
 function ownerOf(scope: ScopeBuilder | undefined, name: string): ScopeBuilder | undefined {
   for (let current = scope; current; current = current.parent) {
-    if (current.info.kind === 'class') continue;
+    // A class body owns the implicit `__class__` cell its methods read, and no other name nested functions see.
+    if (current.info.kind === 'class') {
+      if (name === '__class__') return current;
+      continue;
+    }
     if (current.info.kind === 'module') return undefined;
     if (current.declarations.get(name) === 'global') return undefined;
     if (current.owns(name)) return current;

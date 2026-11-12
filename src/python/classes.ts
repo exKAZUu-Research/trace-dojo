@@ -117,6 +117,7 @@ function runClassBody(
   const runtime = currentRuntime();
   const cells = new Map<string, PyCell>();
   for (const name of def.scope.frees) cells.set(name, frame.cells.get(name) ?? new PyCell());
+  cells.set('__class__', classCell);
   const body = new Frame('class', namespace, cells, frame.globals, undefined, false, def.scope, undefined, classCell);
   runtime.pushFrame(body);
   try {
