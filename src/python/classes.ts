@@ -49,11 +49,28 @@ const FORBIDDEN_CLASS_ATTRIBUTES = [
   '__set_name__',
 ];
 
-/** Runs a class statement: evaluates the bases, runs the body in a namespace, and creates the class. */
-// code-gauge-allow functionNcss 35 -- Follows the steps of a class statement.
+/**
+ * Runs a class statement: evaluates the decorators and bases, runs the body in a namespace, and creates the class. The
+ * defining frame holds the decorators and bases as temporaries until the class is decorated, so that a step taken
+ * meanwhile still sees the turtles they reference.
+ */
 export function createClass(evaluator: Evaluator, def: ClassDef, frame: Frame): PyValue {
+  const length = frame.temporaries.length;
+  try {
+    return buildClass(evaluator, def, frame);
+  } finally {
+    frame.temporaries.length = length;
+  }
+}
+
+// code-gauge-allow functionNcss 38 -- Follows the steps of a class statement.
+function buildClass(evaluator: Evaluator, def: ClassDef, frame: Frame): PyValue {
   const runtime = currentRuntime();
-  const decorators = def.decorators.map((decorator) => evaluator.evaluate(decorator, frame));
+  const decorators = def.decorators.map((decorator) => {
+    const value = evaluator.evaluate(decorator, frame);
+    frame.temporaries.push(value);
+    return value;
+  });
   const { bases, hasAbcMetaclass, boundary } = evaluateClassArguments(evaluator, def, frame);
   const effectiveBases = bases.length > 0 ? bases : [objectClass];
   checkLayout(effectiveBases);
@@ -146,7 +163,11 @@ function evaluateClassArguments(
     if (isAbcMetaclass(evaluator, argument, frame)) hasAbcMetaclass = true;
     else if (argument.kind === 'keyword' && argument.name === 'boundary' && bases.some((base) => base.flags.isEnum)) {
       boundary = evaluator.evaluate(argument.value, frame);
-    } else bases.push(evaluateBase(evaluator, def, argument, frame));
+    } else {
+      const base = evaluateBase(evaluator, def, argument, frame);
+      frame.temporaries.push(base);
+      bases.push(base);
+    }
   }
   return { bases, hasAbcMetaclass, boundary };
 }

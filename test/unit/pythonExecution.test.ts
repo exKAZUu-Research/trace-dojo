@@ -427,12 +427,19 @@ test.each([
   ['a default', 'def draw(t=Turtle(), count=n()):\n    t.forward()\ndraw()'],
   ['a keyword-only default', 'def draw(*, t=Turtle(), count=n()):\n    t.forward()\ndraw()'],
   [
+    'a class decorator argument',
+    'def keep(t):\n    def deco(c):\n        c.t = t\n        return c\n    return deco\n@keep(Turtle())\n@keep(n())\nclass C:\n    x = n()\nC.t.forward()',
+  ],
+  [
     'a decorator argument',
     'def keep(t):\n    def deco(f):\n        f.t = t\n        return f\n    return deco\n@keep(Turtle())\n@keep(n())\ndef g():\n    pass\ng.t.forward()',
   ],
-])('a turtle created for %s stays on every step while later defaults and decorators run', (_name, body) => {
-  const program = `def n():\n    x = 2\n    return x\n${body}`;
-  const trace = traceProgram('python', program, program);
-  expect(trace.traceItems.slice(1).map(({ turtles }) => turtles.length)).not.toContain(0);
-  expect(trace.finalTurtles).toHaveLength(1);
-});
+])(
+  'a turtle created for %s stays on every step while later defaults, decorators, and class bodies run',
+  (_name, body) => {
+    const program = `def n():\n    x = 2\n    return x\n${body}`;
+    const trace = traceProgram('python', program, program);
+    expect(trace.traceItems.slice(1).map(({ turtles }) => turtles.length)).not.toContain(0);
+    expect(trace.finalTurtles).toHaveLength(1);
+  }
+);
