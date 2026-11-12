@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 656 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 660 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
 import { floatPower } from './floatPower';
@@ -227,26 +227,16 @@ function inplaceSet(operator: BinaryOperator, left: PySet, right: PySet): PyValu
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows the order in which CPython tries an operator's methods.
 function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue, isInplace: boolean): PyValue {
   if (operator === '*' && (isBuiltinSequence(left) || isBuiltinSequence(right))) {
     return dispatchRepeat(left, right, isInplace);
   }
   const [name, reflected] = SPECIAL_NAMES[operator];
-  const leftClass = classOf(left);
-  const rightClass = classOf(right);
   const callLeft = binarySlot(operator, left, right, 'left', name);
   const callRight = asksReflected(operator, left, right, isInplace)
     ? binarySlot(operator, left, right, 'right', reflected)
     : undefined;
-  // A subclass that overrides the reflected method gets the first chance, and so does any reflected method before
-  // a sequence concatenates or repeats, which is not a numeric operator in CPython and raises where the operator
-  // must go on.
-  const isSequenceOperation =
-    (operator === '+' && isBuiltinSequence(left)) ||
-    ((operator === '+' || operator === '*') && left instanceof PyDeque);
-  const isSubclass = rightClass.isSubclassOf(leftClass) && rightClass !== leftClass;
-  if (callRight !== undefined && (isSequenceOperation || isSubclass)) {
+  if (callRight !== undefined && asksReflectedFirst(operator, left, right, reflected)) {
     const result = callRight();
     if (result !== NotImplemented) return result;
     return callLeft === undefined ? NotImplemented : callLeft();
@@ -256,6 +246,36 @@ function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue,
     if (result !== NotImplemented) return result;
   }
   return callRight === undefined ? NotImplemented : callRight();
+}
+
+/**
+ * Whether the right operand's reflected method gets the first chance: a subclass's that overrides the base's, and any
+ * before a sequence concatenates or repeats, which is not a numeric operator in CPython and raises where the operator
+ * must go on.
+ */
+function asksReflectedFirst(operator: BinaryOperator, left: PyValue, right: PyValue, reflected: string): boolean {
+  const isSequenceOperation =
+    (operator === '+' && isBuiltinSequence(left)) ||
+    ((operator === '+' || operator === '*') && left instanceof PyDeque);
+  if (isSequenceOperation) return true;
+  const leftClass = classOf(left);
+  const rightClass = classOf(right);
+  return (
+    rightClass !== leftClass &&
+    rightClass.isSubclassOf(leftClass) &&
+    overridesReflected(leftClass, rightClass, reflected)
+  );
+}
+
+/**
+ * Whether a subclass's reflected method differs from the base's, which gives it the first call. A builtin base has a
+ * native slot that a class's method always differs from; between classes, slot_nb_* asks method_is_overloaded.
+ */
+function overridesReflected(leftClass: PyClass, rightClass: PyClass, reflected: string): boolean {
+  if (leftClass.isBuiltin) return true;
+  const right = rightClass.lookup(reflected);
+  if (right === undefined) return false;
+  return leftClass.lookup(reflected) !== right;
 }
 
 function asksReflected(operator: BinaryOperator, left: PyValue, right: PyValue, isInplace: boolean): boolean {
