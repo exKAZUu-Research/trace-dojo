@@ -725,9 +725,9 @@ function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
   if (isUserObject(left) || isUserObject(right)) return undefined;
   if (left instanceof PyComplex || right instanceof PyComplex) {
     if (!isComplexOperand(left) || !isComplexOperand(right)) return false;
-    const a = toComplexParts(left);
-    const b = toComplexParts(right);
-    return a[0] === b[0] && a[1] === b[1];
+    if (!(left instanceof PyComplex)) return complexEqualsReal(right as PyComplex, left);
+    if (!(right instanceof PyComplex)) return complexEqualsReal(left, right);
+    return left.real === right.real && left.imag === right.imag;
   }
   if (typeof left === 'string' || typeof right === 'string' || isNumeric(left) || isNumeric(right)) return false;
   if (left instanceof PyRange && right instanceof PyRange) return rangesEqual(left, right);
@@ -773,9 +773,12 @@ function sameSequenceKind(left: PyList | PyTuple, right: PyList | PyTuple): bool
   return left instanceof PyList === right instanceof PyList;
 }
 
-function toComplexParts(value: PyValue): [number, number] {
-  if (value instanceof PyComplex) return [value.real, value.imag];
-  return [asFloat(value as Numeric), 0];
+/** Whether a complex number equals an int, bool, or float, comparing an int exactly as int and float compare. */
+function complexEqualsReal(complex: PyComplex, real: PyValue): boolean {
+  if (complex.imag !== 0 || Number.isNaN(complex.real)) return false;
+  const other = typeof real === 'boolean' ? Number(real) : (real as bigint | number);
+  // JavaScript compares a bigint with a number by their exact values.
+  return !(complex.real < other) && !(complex.real > other);
 }
 
 function rangesEqual(left: PyRange, right: PyRange): boolean {
