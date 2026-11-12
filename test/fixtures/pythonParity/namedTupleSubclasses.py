@@ -65,3 +65,38 @@ plain = Point._make([1, 2])
 got = [replaced.label, replaced.__dict__, made.label, repr(replaced), hasattr(plain, '__dict__')]
 if got != ['A', {'label': 'A'}, 'B', 'NamedPoint(x=3, y=2)', False]:
     raise AssertionError(got)
+
+# A subclass's own properties run their setters and deleters; the generated fields stay read-only.
+One1 = namedtuple('One1', 'x')
+
+
+class Labeled(One1):
+    @property
+    def label(self):
+        return self._label
+
+    @label.setter
+    def label(self, value):
+        self._label = value * 2
+
+    @label.deleter
+    def label(self):
+        self._label = 'gone'
+
+    @property
+    def fixed(self):
+        return 1
+
+
+labeled = Labeled(1)
+labeled.label = 'A'
+got = [labeled.label]
+del labeled.label
+got.append(labeled.label)
+for call in [lambda: setattr(labeled, 'fixed', 2), lambda: delattr(labeled, 'fixed'), lambda: setattr(labeled, 'x', 2), lambda: delattr(labeled, 'x')]:
+    try:
+        call()
+    except AttributeError as error:
+        got.append(str(error))
+if got != ['AA', 'gone', "property 'fixed' of 'Labeled' object has no setter", "property 'fixed' of 'Labeled' object has no deleter", "can't set attribute", "can't delete attribute"]:
+    raise AssertionError(got)

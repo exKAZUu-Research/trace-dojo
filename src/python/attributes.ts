@@ -153,8 +153,6 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
   return undefined;
 }
 
-// code-gauge-allow functionNcss 36 -- Follows the rules of attribute assignment for each kind of object.
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows the rules of attribute assignment for each kind of object.
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
   currentRuntime().spend();
   if (target instanceof PyInstance) {
@@ -188,7 +186,18 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
     target.dict.set(name, value);
     return;
   }
+  setNativeObjectAttribute(target, name, value, descriptor);
+}
+
+/** Sets an attribute of a native object that is not an instance: a namedtuple's, an opaque value's, or a builtin's. */
+function setNativeObjectAttribute(
+  target: PyValue,
+  name: string,
+  value: PyValue,
+  descriptor: PyValue | undefined
+): void {
   if (isNamedTupleField(descriptor)) throw pyError('AttributeError', "can't set attribute");
+  if (isProperty(descriptor)) return setProperty(descriptor, target, name, value);
   const ownAttributes = ownAttributesOf(target);
   if (ownAttributes) {
     ownAttributes.set(name, value);
@@ -200,9 +209,35 @@ export function setAttribute(target: PyValue, name: string, value: PyValue): voi
   throw noDictError(target, name);
 }
 
-/** Whether a class attribute of a builtin value is a namedtuple field, the only property such a value has. */
+/** Whether a class attribute is a field namedtuple made, a property whose getter is a builtin `getter`. */
 function isNamedTupleField(attribute: PyValue | undefined): boolean {
+  return isProperty(attribute) && attribute.fn instanceof PyBuiltinFunction && attribute.fn.cls.name === 'getter';
+}
+
+function isProperty(attribute: PyValue | undefined): attribute is PyDescriptor {
   return attribute instanceof PyDescriptor && attribute.cls === propertyClass;
+}
+
+/** Sets an attribute through a property's setter, as `property.__set__` does. */
+function setProperty(property: PyDescriptor, target: PyValue, name: string, value: PyValue): void {
+  if (property.setter === undefined || property.setter === None) {
+    throw pyError(
+      'AttributeError',
+      `property '${propertyName(property, name)}' of '${typeName(target)}' object has no setter`
+    );
+  }
+  callValue(property.setter, [target, value]);
+}
+
+/** Deletes an attribute through a property's deleter, as `property.__delete__` does. */
+function deleteProperty(property: PyDescriptor, target: PyValue, name: string): void {
+  if (property.deleter === undefined || property.deleter === None) {
+    throw pyError(
+      'AttributeError',
+      `property '${propertyName(property, name)}' of '${typeName(target)}' object has no deleter`
+    );
+  }
+  callValue(property.deleter, [target]);
 }
 
 /** Stores an instance attribute, honoring properties and the special attributes of exceptions. */
@@ -213,14 +248,8 @@ export function setInstanceAttribute(target: PyInstance, name: string, value: Py
     writeDescriptor(attribute, target, value);
     return;
   }
-  if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
-    if (attribute.setter === undefined || attribute.setter === None) {
-      throw pyError(
-        'AttributeError',
-        `property '${propertyName(attribute, name)}' of '${cls.name}' object has no setter`
-      );
-    }
-    callValue(attribute.setter, [target, value]);
+  if (isProperty(attribute)) {
+    setProperty(attribute, target, name, value);
     return;
   }
   if (target.enumValue !== undefined) {
@@ -252,7 +281,6 @@ function noDictError(target: PyValue, name: string): Error {
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Follows the rules of attribute deletion for each kind of object.
-// code-gauge-allow functionNcss 39 -- Follows the rules of attribute deletion for each kind of object.
 export function deleteAttribute(target: PyValue, name: string): void {
   if (target instanceof PyInstance) {
     const custom = target.cls.isBuiltin ? undefined : lookupSpecial(target, '__delattr__');
@@ -282,7 +310,13 @@ export function deleteAttribute(target: PyValue, name: string): void {
   }
   const descriptor = classOf(target).lookup(name);
   if (isDataDescriptor(descriptor)) return deleteDescriptor(descriptor, target);
+  deleteNativeObjectAttribute(target, name, descriptor);
+}
+
+/** Deletes an attribute of a native object that is not an instance, as {@link setNativeObjectAttribute} sets one. */
+function deleteNativeObjectAttribute(target: PyValue, name: string, descriptor: PyValue | undefined): void {
   if (isNamedTupleField(descriptor)) throw pyError('AttributeError', "can't delete attribute");
+  if (isProperty(descriptor)) return deleteProperty(descriptor, target, name);
   const ownAttributes = ownAttributesOf(target);
   if (ownAttributes) {
     if (!ownAttributes.delete(name)) throw attributeError(target, name);
@@ -297,14 +331,8 @@ export function deleteAttribute(target: PyValue, name: string): void {
 /** Deletes an instance attribute, honoring properties, as `object.__delattr__` does. */
 export function deleteInstanceAttribute(target: PyInstance, name: string): void {
   const attribute = target.cls.lookup(name);
-  if (attribute instanceof PyDescriptor && attribute.cls === propertyClass) {
-    if (attribute.deleter === undefined || attribute.deleter === None) {
-      throw pyError(
-        'AttributeError',
-        `property '${propertyName(attribute, name)}' of '${target.cls.name}' object has no deleter`
-      );
-    }
-    callValue(attribute.deleter, [target]);
+  if (isProperty(attribute)) {
+    deleteProperty(attribute, target, name);
     return;
   }
   if (!target.dict.delete(name)) throw attributeError(target, name);
