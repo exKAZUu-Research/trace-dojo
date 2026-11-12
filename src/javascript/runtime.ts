@@ -431,8 +431,11 @@ export class Runtime {
     if (!isCallable(fn)) return this.throwError('TypeError', `${this.describe(fn)} is not a function`);
     this.spend();
     const { behavior } = fn;
-    if (behavior.kind === 'native')
-      return behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
+    if (behavior.kind === 'native') {
+      return this.holdingAll([fn, thisValue, ...args], () =>
+        behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow })
+      );
+    }
     if (behavior.kind === 'class') {
       return this.throwError('TypeError', `Class constructor ${this.functionName(fn)} cannot be invoked without 'new'`);
     }
@@ -447,13 +450,9 @@ export class Runtime {
     const target = newTarget as JsFunction;
     const { behavior } = fn;
     if (behavior.kind === 'native') {
-      return behavior.run({
-        runtime: this,
-        thisValue: undefined,
-        args,
-        newTarget: target,
-        callRow,
-      }) as JsObject;
+      return this.holdingAll([fn, ...args], () =>
+        behavior.run({ runtime: this, thisValue: undefined, args, newTarget: target, callRow })
+      ) as JsObject;
     }
     if (behavior.kind === 'class') return this.evaluator.constructClass(fn, behavior, args, target, callRow);
     const thisValue = this.newObject(this.prototypeFor(target, this.realm.objectPrototype));
@@ -484,6 +483,21 @@ export class Runtime {
   popFrame(): void {
     const frame = this.frames.pop();
     if (frame?.isAtomic) this.steps.completeAtomicCall();
+  }
+
+  /**
+   * Keeps a builtin's receiver and arguments reachable while it runs, since it may call the program's code before it
+   * has stored them anywhere else.
+   */
+  private holdingAll<T>(values: Value[], run: () => T): T {
+    const { temporaries } = this.frame;
+    const held = temporaries.length;
+    appendAll(temporaries, values);
+    try {
+      return run();
+    } finally {
+      temporaries.length = held;
+    }
   }
 
   /** Keeps `value` reachable for garbage collection while `run` computes with it. */
