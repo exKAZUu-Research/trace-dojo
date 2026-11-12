@@ -4,6 +4,7 @@ import { deriveGroup, makeExceptionGroup, splitGroup } from './exceptionGroups';
 import { callValue, isTruthy, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import {
+  addNote,
   argumentTypeName,
   baseExceptionClass,
   defineMethod,
@@ -75,13 +76,10 @@ method(baseExceptionClass, '__repr__', 'none', 0, 0, (self) => {
 });
 method(baseExceptionClass, 'add_note', 'one', 1, 1, (self, [note]) => {
   if (typeof note !== 'string') throw typeError(`add_note() argument must be str, not ${argumentTypeName(note)}`);
-  const state = instanceOf(self).exception;
-  if (!state) return None;
-  state.notes ??= newList([]);
-  if (!(state.notes instanceof PyList)) throw typeError('Cannot add note: __notes__ is not a list');
-  state.notes.append(note);
+  addNote(instanceOf(self), note);
   return None;
 });
+
 method(baseExceptionClass, 'with_traceback', 'one', 1, 1, (self) => self);
 
 /** `str()` of an exception, as BaseException and the builtin exceptions that override it define it. */

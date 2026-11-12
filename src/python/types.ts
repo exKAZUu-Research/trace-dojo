@@ -254,6 +254,15 @@ export function valueError(message: string): PyError {
 
 // Containers --------------------------------------------------------------------------------------------------------
 
+/** BaseException.add_note on an exception, which the interpreter also calls as CPython's _PyErr_FormatNote does. */
+export function addNote(exception: PyInstance, note: string): void {
+  const state = exception.exception;
+  if (!state) return;
+  state.notes ??= newList([]);
+  if (!(state.notes instanceof PyList)) throw typeError('Cannot add note: __notes__ is not a list');
+  state.notes.append(note);
+}
+
 export function newList(items: PyValue[]): PyList {
   return new PyList(listClass, items);
 }

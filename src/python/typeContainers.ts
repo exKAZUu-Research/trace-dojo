@@ -29,11 +29,13 @@ import { SetTable } from './setTable';
 import { StringBuilder } from './stringBuilder';
 import { timsort } from './timsort';
 import {
+  addNote,
   defineMethod,
   dictClass,
   dictItemsClass,
   dictKeysClass,
   dictValuesClass,
+  exceptionClassNamed,
   frozensetClass,
   iteratorClass,
   listClass,
@@ -52,6 +54,7 @@ import {
   type Kwargs,
   PyDict,
   PyDictView,
+  PyError,
   PyIterator,
   PyList,
   type PyObject,
@@ -363,11 +366,23 @@ export function updateDict(dict: PyDict, source: PyValue): void {
   let index = 0;
   for (let item = next(); item !== DONE; item = next(), index++) {
     runtime.spend();
-    const pair = toArray(item, 'object is not iterable');
+    const pair = updatePair(item, index);
     if (pair.length !== 2) {
       throw valueError(`dictionary update sequence element #${index} has length ${pair.length}; 2 is required`);
     }
     dict.store.set(pair[0], pair[1]);
+  }
+}
+
+/** An element of a dict's update sequence as a sequence, failing as dict_merge_from_seq2's PySequence_Fast does. */
+function updatePair(item: PyValue, index: number): PyValue[] {
+  try {
+    return toArray(item, 'object is not iterable');
+  } catch (error) {
+    if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError'))) {
+      addNote(error.exception, `Cannot convert dictionary update sequence element #${index} to a sequence`);
+    }
+    throw error;
   }
 }
 
