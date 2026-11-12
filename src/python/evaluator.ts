@@ -415,7 +415,7 @@ export class Evaluator extends ExpressionEvaluator {
       ({ completion, pending } = yield* this.guarded(statement.orelse, frame));
     }
     if (statement.finalbody.length > 0) {
-      const finalCompletion = yield* this.finallyBlock(statement.finalbody, pending, frame);
+      const finalCompletion = yield* this.finallyBlock(statement.finalbody, pending, completion, frame);
       if (finalCompletion) return finalCompletion;
     }
     if (pending) throw pending;
@@ -449,8 +449,15 @@ export class Evaluator extends ExpressionEvaluator {
     }
   }
 
-  private *finallyBlock(finalbody: Statement[], pending: PyError | undefined, frame: Frame): Execution {
+  /** Runs a finally block, holding the exception or the returned value it delays until it ends. */
+  private *finallyBlock(
+    finalbody: Statement[],
+    pending: PyError | undefined,
+    completion: Completion,
+    frame: Frame
+  ): Execution {
     const length = frame.temporaries.length;
+    if (typeof completion === 'object') frame.temporaries.push(completion.value);
     if (pending) {
       frame.temporaries.push(pending.exception);
       this.handling.push(pending.exception);
@@ -544,7 +551,7 @@ export class Evaluator extends ExpressionEvaluator {
 
   // With ----------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 39 -- Follows the protocol of the with statement.
+  // code-gauge-allow functionNcss 41 -- Follows the protocol of the with statement.
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
     const { runtime } = this;
@@ -590,6 +597,8 @@ export class Evaluator extends ExpressionEvaluator {
         return undefined;
       }
       runtime.currentRow = statement.row;
+      // The value the body returns stays reachable while __exit__ runs.
+      if (typeof completion === 'object') frame.temporaries.push(completion.value);
       callValue(bindValue(exit, manager), [None, None, None]);
       return completion;
     } finally {

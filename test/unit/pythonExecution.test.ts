@@ -514,3 +514,17 @@ test('a run reports what the program prints, leaves standard error empty, and ke
     finalFiles: { 'data.txt': 'x' },
   });
 });
+
+test.each([
+  ['a finally block', 'def make():\n    try:\n        return Turtle()\n    finally:\n        x = 1'],
+  [
+    "a context manager's __exit__",
+    'class C:\n    def __enter__(self):\n        return self\n    def __exit__(self, *a):\n        y = 2\n        return False\ndef make():\n    with C():\n        return Turtle()',
+  ],
+])('a turtle returned through %s stays while it runs', (_name, factory) => {
+  const program = `${factory}\nt = make()\nt.forward()`;
+  const trace = traceProgram('python', program, program);
+  const counts = trace.traceItems.map(({ turtles }) => turtles.length);
+  expect(counts.slice(counts.indexOf(1))).not.toContain(0);
+  expect(trace.finalTurtles).toHaveLength(1);
+});
