@@ -14,7 +14,17 @@ import { keyError } from './items';
 import { importModule } from './modules';
 import { systemExitError } from './modules/sys';
 import { DEFAULT_MAX_STR_DIGITS } from './numbers';
-import { bindValue, callValue, getIterator, isTruthy, lookupSpecial, newSuper, setAttribute, toArray } from './objects';
+import {
+  bindValue,
+  callValue,
+  getIterator,
+  isExceptionOf,
+  isTruthy,
+  lookupSpecial,
+  newSuper,
+  setAttribute,
+  toArray,
+} from './objects';
 import { withoutCharge } from './runtimeContext';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
@@ -37,6 +47,7 @@ import {
 import { UnsupportedFeatureError } from './unsupported';
 import {
   DONE,
+  type ExceptionState,
   type Kwargs,
   ownAttributesOf,
   PyCell,
@@ -271,8 +282,14 @@ export class Runtime {
       return result.value;
     } catch (error) {
       generator.finished = true;
-      if (error instanceof PyError && error.exception.cls.name === 'StopIteration') {
-        throw pyError('RuntimeError', 'generator raised StopIteration');
+      if (isExceptionOf(error, 'StopIteration')) {
+        // As CPython's gen_send_ex does, the StopIteration is the cause of the RuntimeError that replaces it.
+        const replaced = pyError('RuntimeError', 'generator raised StopIteration');
+        const state = replaced.exception.exception as ExceptionState;
+        state.cause = (error as PyError).exception;
+        state.context = (error as PyError).exception;
+        state.suppressContext = true;
+        throw replaced;
       }
       throw error;
     } finally {

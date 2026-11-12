@@ -421,7 +421,7 @@ function iterateSequence(value: PyValue): NextFunction {
     try {
       return getItemOf(value, index++);
     } catch (error) {
-      if (error instanceof PyError && ['IndexError', 'StopIteration'].includes(error.exception.cls.name)) {
+      if (isExceptionOf(error, 'IndexError') || isExceptionOf(error, 'StopIteration')) {
         finished = true;
         return DONE;
       }
@@ -456,6 +456,11 @@ export function checkDictUnchanged(dict: PyDict, size: number, version: number):
   } else if (dict.store.size !== size) {
     throw pyError('RuntimeError', 'dictionary changed size during iteration');
   }
+}
+
+/** Whether an error is a Python exception of the builtin class `name` or of a class derived from it. */
+export function isExceptionOf(error: unknown, name: string): boolean {
+  return error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed(name));
 }
 
 /** All the items an iterable yields, with `notIterable` as the message for a value that gives no iterator. */

@@ -4,6 +4,7 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { Module } from './ast';
 import { describeException } from './describe';
+import { isExceptionOf } from './objects';
 import { parsePython } from './parse';
 import { Frame, hostRefusal, Runtime } from './runtime';
 import { withRuntime } from './runtimeContext';
@@ -71,6 +72,6 @@ function describeUncaught(error: unknown): string | undefined {
   if (error instanceof UnsupportedFeatureError) return error.message;
   const raised = hostRefusal(error) ?? error;
   if (!(raised instanceof PyError)) throw raised;
-  if (raised.exception.cls.name === 'SystemExit' && raised.exception.cls.isBuiltin) return undefined;
+  if (isExceptionOf(raised, 'SystemExit')) return undefined;
   return describeException(raised.exception);
 }

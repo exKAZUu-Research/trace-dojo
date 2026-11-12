@@ -97,6 +97,17 @@ test.each([
   expect(executeProgram('python', source)).toMatchObject({ kind: 'executed', uncaughtException: description });
 });
 
+test.each([
+  ['SystemExit', 'print("hi")\nraise SystemExit(3)'],
+  ['a subclass of SystemExit', 'class MyExit(SystemExit):\n    pass\nprint("hi")\nraise MyExit(3)'],
+])('%s ends the program quietly', (_name, source) => {
+  expect(executeProgram('python', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'hi\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('a class defined in a function captures the variables of the function in its body, methods, and nested classes', () => {
   const program = `def outer():
     x = 7
