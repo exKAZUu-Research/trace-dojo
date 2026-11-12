@@ -27,13 +27,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     const { runtime } = this;
     switch (expression.kind) {
       case 'yield': {
-        const value = expression.argument ? yield* this.evaluateSteps(expression.argument) : undefined;
-        if (expression.delegate) return yield* delegateYield(this.runtime, value, expression.isAsync);
-        if (!expression.isAsync) return resumedValue(yield value);
-        // An async generator awaits the value it yields, and the value `return()` resumes it with.
-        const resume = yield resumedValue(yield new Awaiting(value));
-        if (resume.kind === 'return') throw new GeneratorReturn(resumedValue(yield new Awaiting(resume.value)));
-        return resumedValue(resume);
+        return yield* this.yieldSteps(expression);
       }
       case 'await': {
         return resumedValue(yield new Awaiting(yield* this.evaluateSteps(expression.argument)));
@@ -64,22 +58,10 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
           : yield* this.evaluateSteps(expression.alternate);
       }
       case 'unary': {
-        let target = expression.argument;
-        while (target.kind === 'parenthesized') target = target.expression;
-        if (expression.operator === 'delete' && target.kind === 'member') {
-          return this.deleteReference(yield* this.referenceSteps(target));
-        }
-        return this.unaryValue(expression.operator, yield* this.evaluateSteps(expression.argument));
+        return yield* this.unarySteps(expression);
       }
       case 'template': {
-        // Each substitution becomes a string before the next one is evaluated, as in JavaScript.
-        let text = expression.strings[0];
-        for (const [index, substitution] of expression.expressions.entries()) {
-          const part = runtime.toString(yield* this.evaluateSteps(substitution)) + expression.strings[index + 1];
-          runtime.extendString(text.length + part.length, part.length);
-          text += part;
-        }
-        return text;
+        return yield* this.templateSteps(expression);
       }
       case 'array': {
         return runtime.newArray(yield* this.elementSteps(expression.elements));
@@ -99,19 +81,54 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         return value === SHORT_CIRCUIT ? undefined : value;
       }
       case 'new': {
-        const constructor = yield* this.evaluateSteps(expression.callee);
-        const args = yield* this.holdingSteps([constructor], () => this.argumentSteps(expression.args));
-        if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
-          return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
-        }
-        return this.holdWhile([constructor, ...args], () =>
-          runtime.construct(constructor, args, constructor, expression.row)
-        );
+        return yield* this.newSteps(expression);
       }
       default: {
         throw new Error(`A yield in an unsupported expression: ${expression.kind}`);
       }
     }
+  }
+  private *yieldSteps(expression: Extract<Expression, { kind: 'yield' }>): Steps<Value> {
+    const value = expression.argument ? yield* this.evaluateSteps(expression.argument) : undefined;
+    if (expression.delegate) return yield* delegateYield(this.runtime, value, expression.isAsync);
+    if (!expression.isAsync) return resumedValue(yield value);
+    // An async generator awaits the value it yields, and the value `return()` resumes it with.
+    const resume = yield resumedValue(yield new Awaiting(value));
+    if (resume.kind === 'return') throw new GeneratorReturn(resumedValue(yield new Awaiting(resume.value)));
+    return resumedValue(resume);
+  }
+
+  private *unarySteps(expression: Extract<Expression, { kind: 'unary' }>): Steps<Value> {
+    let target = expression.argument;
+    while (target.kind === 'parenthesized') target = target.expression;
+    if (expression.operator === 'delete' && target.kind === 'member') {
+      return this.deleteReference(yield* this.referenceSteps(target));
+    }
+    return this.unaryValue(expression.operator, yield* this.evaluateSteps(expression.argument));
+  }
+
+  /** Converts each substitution to a string before the next one is evaluated, as JavaScript does. */
+  private *templateSteps(expression: Extract<Expression, { kind: 'template' }>): Steps<Value> {
+    const { runtime } = this;
+    let text = expression.strings[0];
+    for (const [index, substitution] of expression.expressions.entries()) {
+      const part = runtime.toString(yield* this.evaluateSteps(substitution)) + expression.strings[index + 1];
+      runtime.extendString(text.length + part.length, part.length);
+      text += part;
+    }
+    return text;
+  }
+
+  private *newSteps(expression: Extract<Expression, { kind: 'new' }>): Steps<Value> {
+    const { runtime } = this;
+    const constructor = yield* this.evaluateSteps(expression.callee);
+    const args = yield* this.holdingSteps([constructor], () => this.argumentSteps(expression.args));
+    if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
+      return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
+    }
+    return this.holdWhile([constructor, ...args], () =>
+      runtime.construct(constructor, args, constructor, expression.row)
+    );
   }
 
   private *argumentSteps(args: Argument[]): Steps<Value[]> {
@@ -146,7 +163,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     }
   }
 
-  private *holdingSteps<T>(values: Value[], run: () => Steps<T>): Steps<T> {
+  protected *holdingSteps<T>(values: Value[], run: () => Steps<T>): Steps<T> {
     const { temporaries } = this.runtime.frame;
     const held = temporaries.length;
     appendAll(temporaries, values);

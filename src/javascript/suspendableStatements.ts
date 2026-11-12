@@ -15,7 +15,17 @@ import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import { StepEvaluator } from './stepEvaluator';
 import { onlyCalls, onlyCreates, storesReference } from './stepRules';
-import { type Binding, isCallable, isObject, JsObject, JsThrow, Scope, toBoolean, type Value } from './values';
+import {
+  type Binding,
+  type Disposable as DisposableRecord,
+  isCallable,
+  isObject,
+  JsObject,
+  JsThrow,
+  Scope,
+  toBoolean,
+  type Value,
+} from './values';
 
 export type Completion = undefined | { kind: 'break' | 'continue'; label?: string } | { kind: 'return'; value: Value };
 
@@ -178,7 +188,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     let needsAwait = false;
     let hasAwaited = false;
     for (let disposable = disposables.pop(); disposable; disposable = disposables.pop()) {
-      const { value, method, isAsync } = disposable;
+      const { method, isAsync } = disposable;
       if (!isAsync && needsAwait && !hasAwaited) {
         yield new Awaiting(undefined);
         needsAwait = false;
@@ -188,23 +198,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         continue;
       }
       try {
-        let disposed: Value;
-        try {
-          disposed = runtime.call(method, value, []);
-        } catch (error) {
-          // A Symbol.dispose fallback of `await using` runs wrapped in an async function, so its throw is awaited too.
-          if (isAsync && !disposable.awaitsResult && error instanceof JsThrow) {
-            hasAwaited = true;
-            temporaries.push(error.value);
-            yield new Awaiting(undefined);
-            temporaries.pop();
-          }
-          throw error;
-        }
-        if (isAsync) {
-          hasAwaited = true;
-          resumedValue(yield new Awaiting(disposable.awaitsResult ? disposed : undefined));
-        }
+        if (yield* this.disposeSteps(disposable, method)) hasAwaited = true;
       } catch (error) {
         if (!(error instanceof JsThrow)) throw error;
         completion =
@@ -217,6 +211,28 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     scope.disposables = undefined;
     if (completion) throw completion;
     return result as T;
+  }
+
+  /**
+   * Calls one disposer, awaiting its result under `await using`, and returns whether it awaited. A `Symbol.dispose`
+   * fallback of `await using` runs wrapped in an async function, so its throw is awaited too before it propagates.
+   */
+  private *disposeSteps(disposable: DisposableRecord, method: Value): Steps<boolean> {
+    const { runtime } = this;
+    const { value, isAsync, awaitsResult } = disposable;
+    let disposed: Value;
+    try {
+      disposed = runtime.call(method, value, []);
+    } catch (error) {
+      if (!isAsync || awaitsResult || !(error instanceof JsThrow)) throw error;
+      yield* this.holdingSteps([error.value], function* () {
+        yield new Awaiting(undefined);
+      });
+      throw error;
+    }
+    if (!isAsync) return false;
+    resumedValue(yield new Awaiting(awaitsResult ? disposed : undefined));
+    return true;
   }
 
   /** Records a value a `using` declaration declares in the current scope, which disposes of it when it ends. */

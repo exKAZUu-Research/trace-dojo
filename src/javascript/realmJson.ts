@@ -554,30 +554,36 @@ function structuredClone(runtime: Runtime, value: Value, memory: Map<JsObject, J
   const copy = runtime.newObject(prototype);
   memory.set(value, copy);
   return runtime.hold(copy, () => {
-    if (collection) {
-      const state = new CollectionState(collection.kind);
-      copy.collection = state;
-      for (const entry of collection.liveEntries(runtime)) {
-        const key = structuredClone(runtime, entry.key, memory);
-        state.set(
-          runtime,
-          key,
-          runtime.hold(key, () => structuredClone(runtime, entry.value, memory))
-        );
-      }
-    } else if (value.isError) {
-      copy.isError = true;
-      for (const key of ['message', 'cause']) {
-        const property = value.properties.get(key);
-        if (property && !isAccessor(property)) {
-          copy.properties.set(key, { ...property, value: structuredClone(runtime, property.value, memory) });
-        }
-      }
-    } else {
-      copyOwnProperties(runtime, value, copy, memory);
-    }
+    copyContents(runtime, value, copy, memory);
     return copy;
   });
+}
+
+/** Clones into `copy` what `value` holds: a collection's entries, an error's message and cause, or its properties. */
+function copyContents(runtime: Runtime, value: JsObject, copy: JsObject, memory: Map<JsObject, JsObject>): void {
+  const { collection } = value;
+  if (collection) {
+    const state = new CollectionState(collection.kind);
+    copy.collection = state;
+    for (const entry of collection.liveEntries(runtime)) {
+      const key = structuredClone(runtime, entry.key, memory);
+      state.set(
+        runtime,
+        key,
+        runtime.hold(key, () => structuredClone(runtime, entry.value, memory))
+      );
+    }
+  } else if (value.isError) {
+    copy.isError = true;
+    for (const key of ['message', 'cause']) {
+      const property = value.properties.get(key);
+      if (property && !isAccessor(property)) {
+        copy.properties.set(key, { ...property, value: structuredClone(runtime, property.value, memory) });
+      }
+    }
+  } else {
+    copyOwnProperties(runtime, value, copy, memory);
+  }
 }
 
 /** The prototype of an error's clone, which is that of the standard error its name names, or Error's. */
