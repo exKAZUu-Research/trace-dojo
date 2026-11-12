@@ -434,9 +434,10 @@ export class VirtualFileSystem {
     const raw = absolute.split('/');
     const components = raw.filter((name) => name !== '');
     this.budget.spend(components.length);
-    const last = raw.at(-1);
+    // The last name decides the dots, which trailing slashes do not change.
+    const last = components.at(-1);
     const dots = last === '.' || last === '..' ? last : undefined;
-    return { components, namesDirectory: last === '' || dots !== undefined, dots };
+    return { components, namesDirectory: raw.at(-1) === '' || dots !== undefined, dots };
   }
 }
 

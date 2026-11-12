@@ -455,6 +455,8 @@ test.each([
   ["require('fs').readFileSync('')", "Error: ENOENT: no such file or directory, open ''"],
   ["require('fs').mkdirSync('new/.')", "Error: ENOENT: no such file or directory, mkdir 'new/.'"],
   ["require('fs').mkdirSync('new/./')", "Error: ENOENT: no such file or directory, mkdir 'new/./'"],
+  ["require('fs').rmdirSync('d/./')", "Error: EINVAL: invalid argument, rmdir 'd/./'"],
+  ["require('fs').renameSync('d/./', 'e')", "Error: EINVAL: invalid argument, rename 'd/./' -> 'e'"],
   ["require('fs').rmdirSync('d/.')", "Error: EINVAL: invalid argument, rmdir 'd/.'"],
   ["require('fs').renameSync('d/.', 'e')", "Error: EINVAL: invalid argument, rename 'd/.' -> 'e'"],
   ["if (require('fs').existsSync('')) throw new Error('exists');", undefined],
