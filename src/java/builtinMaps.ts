@@ -370,8 +370,9 @@ function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo
     const { entries } = storeOf(receiver);
     return (
       entries.length === other.store.entries.length &&
+      // AbstractMap.equals reads each key through the other map's get, which an access-ordered map records.
       entries.every((entry) => {
-        const found = findEntry(frame, other, entry.key);
+        const found = accessedEntry(frame, other, entry.key);
         return found !== undefined && javaEquals(frame, entry.value, found.value);
       })
     );

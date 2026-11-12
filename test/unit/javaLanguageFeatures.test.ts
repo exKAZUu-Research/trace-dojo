@@ -1194,6 +1194,33 @@ class Main<T> {
   }
 });
 
+test("Java's access-ordered maps record reads through unmodifiable wrappers and map equality, as the JDK does", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  public static void main(String[] args) {
+    Map<Integer, Integer> cache = new LinkedHashMap<>(16, 0.75f, true);
+    cache.put(1, 1); cache.put(2, 2); cache.put(3, 3);
+    Map<Integer, Integer> view = Collections.unmodifiableMap(cache);
+    view.get(1); System.out.println(cache);
+    view.getOrDefault(2, 0); System.out.println(cache);
+    Map<Integer, Integer> expected = new LinkedHashMap<>();
+    expected.put(1, 1); expected.put(2, 2); expected.put(3, 3);
+    System.out.println(expected.equals(cache) + " " + cache);
+    Map<Integer, Integer> other = new LinkedHashMap<>(); other.put(3, 3); other.put(9, 9);
+    System.out.println(other.equals(cache) + " " + cache);
+    Iterator<Integer> it = cache.keySet().iterator(); view.get(1);
+    try { it.next(); System.out.println("no CME"); } catch (ConcurrentModificationException e) { System.out.println("CME"); }
+  }
+}`,
+      '{2=2, 3=3, 1=1}\n{3=3, 1=1, 2=2}\ntrue {1=1, 2=2, 3=3}\nfalse {1=1, 2=2, 3=3}\nCME\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
