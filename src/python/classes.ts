@@ -15,8 +15,10 @@ import { type Kwargs, PyCell, PyClass, PyInstance, PyOpaque, type PyValue } from
 const attributeDescriptorClass = builtinClass('getset_descriptor');
 method(attributeDescriptorClass, '__repr__', 'none', 0, 0, (self) => (self as PyOpaque).text);
 
-/** Computes the C3 linearization of a class, raising TypeError when its bases admit none. */
+/** Computes the C3 linearization of a class, raising TypeError when a base repeats or its bases admit none. */
 export function computeMro(cls: PyClass): PyClass[] {
+  const duplicate = cls.bases.find((base, index) => cls.bases.includes(base, index + 1));
+  if (duplicate) throw typeError(`duplicate base class ${duplicate.name}`);
   const sequences = [...cls.bases.map((base) => [...base.mro]), [...cls.bases]];
   const result: PyClass[] = [cls];
   for (;;) {
