@@ -265,6 +265,10 @@ test.each([
     'a = "a" + "x" * 9999\nb = "b" + "x" * 9999\nx = sorted([a, b] * 5000)',
   ],
   [
+    'sorting long strings outside the BMP that differ at their first character',
+    'a = "a" + "😀" * 5000\nb = "b" + "😀" * 5000\nx = sorted([a, b] * 5000)',
+  ],
+  [
     'peeking and draining a deque',
     'from collections import deque\nq = deque(range(50000))\ns = 0\nwhile q:\n    s += q[0]\n    q.popleft()',
   ],

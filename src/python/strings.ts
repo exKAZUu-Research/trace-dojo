@@ -1,4 +1,4 @@
-import { chargeScan, chargeStep } from './runtimeContext';
+import { chargeStep } from './runtimeContext';
 
 /** Python strings are sequences of code points, while JavaScript strings are UTF-16; these helpers bridge the two. */
 
@@ -42,36 +42,26 @@ export function sliceStr(text: string, start: number, stop: number, step: number
   return result;
 }
 
-/** Compares strings by code point, as Python does, rather than by UTF-16 code unit. */
+/**
+ * Compares strings by code point, as Python does, rather than by UTF-16 code unit, walking both from the start and
+ * charging the code points it examines.
+ */
 export function compareStr(a: string, b: string): number {
   // Equal strings are often the same host string, which compares at once; one step still lets the clock check catch
-  // equal copies, whose comparison scans them. Unequal strings are charged for the scan.
+  // equal copies, whose comparison scans them.
   if (a === b) {
     chargeStep();
     return 0;
   }
-  if (!hasSurrogates(a) && !hasSurrogates(b)) return compareUnits(a, b);
-  chargeScan(Math.min(a.length, b.length));
-  const left = iterStr(a);
-  const right = iterStr(b);
-  for (let index = 0; index < Math.min(left.length, right.length); index++) {
-    const difference = (left[index].codePointAt(0) as number) - (right[index].codePointAt(0) as number);
-    if (difference !== 0) return difference;
-  }
-  return left.length - right.length;
-}
-
-/** Compares strings without surrogates, where code points are code units, charging the units it examines. */
-function compareUnits(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
   let index = 0;
-  while (index < length && a.codePointAt(index) === b.codePointAt(index)) {
-    if ((index & 63) === 0) chargeStep();
-    index++;
+  for (let steps = 0; index < a.length && index < b.length; steps++) {
+    if ((steps & 63) === 0) chargeStep();
+    const left = a.codePointAt(index) as number;
+    const right = b.codePointAt(index) as number;
+    if (left !== right) return left - right;
+    index += left > 0xff_ff ? 2 : 1;
   }
-  chargeStep();
-  if (index < length) return (a.codePointAt(index) as number) - (b.codePointAt(index) as number);
-  return a.length - b.length;
+  return (index < a.length ? 1 : 0) - (index < b.length ? 1 : 0);
 }
 
 const NON_PRINTABLE = /[\p{C}\p{Z}]/u;

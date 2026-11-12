@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 656 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 659 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -638,12 +638,15 @@ export class ProgramConverter extends ExpressionConverter {
     return { kind: 'match', subject, cases, row };
   }
 
-  // code-gauge-allow functionNcss 57 -- One case per kind of pattern node.
+  // code-gauge-allow functionNcss 58 -- One case per kind of pattern node.
   // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of pattern node.
   private pattern(node: Node, names: Set<string>): Pattern {
     const row = rowOf(node);
     const named = namedChildren(node);
     switch (node.type) {
+      // The grammar leaves a bare wildcard in an or-pattern or a keyword pattern as an anonymous token, which has no
+      // children, as a wildcard case pattern has none.
+      case '_':
       case 'case_pattern': {
         if (named.length === 0) return { kind: 'capture', row };
         if (children(node).some((child) => child.type === '-')) return this.negativeLiteral(named[0], row);
@@ -773,7 +776,7 @@ export class ProgramConverter extends ExpressionConverter {
     for (const argument of argumentNodes) {
       const inner = argument.type === 'case_pattern' ? namedChildren(argument)[0] : argument;
       if (inner?.type === 'keyword_pattern') {
-        const [keywordNode, valueNode] = namedChildren(inner);
+        const [keywordNode, valueNode] = patternChildren(inner);
         if (keywords.includes(keywordNode.text))
           fail(rowOf(inner), `クラスのパターンで、${keywordNode.text} を2回書いています。`);
         keywords.push(keywordNode.text);
@@ -800,7 +803,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Checks the rules CPython applies to the alternatives of an or-pattern.
   private orPattern(node: Node, names: Set<string>): Pattern {
-    const alternatives = namedChildren(node);
+    const alternatives = patternChildren(node);
     const signs = new Map<number, Node>();
     // The sign of a negative number is a child of its own, before the number.
     for (const [index, child] of children(node).entries()) {
@@ -959,6 +962,11 @@ function starIndexOf(patterns: Pattern[], row: number): number | undefined {
   const indexes = patterns.flatMap((pattern, index) => (pattern.kind === 'star' ? [index] : []));
   if (indexes.length > 1) fail(row, 'シーケンスのパターンには、* を1つしか書けません。');
   return indexes[0];
+}
+
+/** The named children of a pattern node and the anonymous `_` tokens among them, which are wildcards. */
+function patternChildren(node: Node): Node[] {
+  return children(node).filter((child) => child.isNamed || child.type === '_');
 }
 
 function isIrrefutable(pattern: Pattern): boolean {
