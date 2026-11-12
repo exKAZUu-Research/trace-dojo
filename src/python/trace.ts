@@ -235,16 +235,24 @@ function addAttributeNodes(entries: Record<string, DisplayNode>, instance: PyIns
  */
 function keyLabels(keys: PyValue[]): string[] {
   const texts = keys.map(keyText);
+  const textCounts = countsOf(texts);
   const typed = keys.map((key, index) =>
-    typeof key === 'string' && isShared(texts, index) ? strRepr(key) : texts[index]
+    typeof key === 'string' && (textCounts.get(texts[index]) ?? 0) > 1 ? strRepr(key) : texts[index]
   );
-  return typed.map((label, index) =>
-    isShared(typed, index) ? `${label} (${typed.slice(0, index + 1).filter((other) => other === label).length})` : label
-  );
+  const typedCounts = countsOf(typed);
+  const seen = new Map<string, number>();
+  return typed.map((label) => {
+    if ((typedCounts.get(label) ?? 0) === 1) return label;
+    const position = (seen.get(label) ?? 0) + 1;
+    seen.set(label, position);
+    return `${label} (${position})`;
+  });
 }
 
-function isShared(labels: string[], index: number): boolean {
-  return labels.indexOf(labels[index]) !== labels.lastIndexOf(labels[index]);
+function countsOf(labels: string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1);
+  return counts;
 }
 
 /** A dict key as text, without running any of the program's own methods. */

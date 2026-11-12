@@ -256,6 +256,13 @@ test.each([
   expect(node?.kind === 'object' && Object.keys(node.entries)).toEqual(labels);
 });
 
+test('a dict of many keys is traced in time', () => {
+  // Labeling each key by scanning all the others takes seconds for this dict, beyond the test's timeout.
+  const program = 'd = {i: i for i in range(30000)}\nx = 1';
+  const node = traceProgram('python', program, program).traceItems.at(-1)?.referenceVars.d;
+  expect(node?.kind === 'object' ? Object.keys(node.entries) : []).toHaveLength(30_000);
+});
+
 test.each([
   ['a for loop', 'for t in Pair():\n    t.forward()'],
   ['a list comprehension', 'moved = [move(t) for t in Pair()]'],
