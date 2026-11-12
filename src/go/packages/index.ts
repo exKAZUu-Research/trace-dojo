@@ -6,6 +6,7 @@ import { BYTES_PACKAGE } from './bytes';
 import { CMPLX_PACKAGE } from './cmplx';
 import { CMP_PACKAGE, MAPS_PACKAGE, SLICES_PACKAGE, SORT_PACKAGE } from './collections';
 import { HEAP_PACKAGE, LIST_PACKAGE, RING_PACKAGE } from './containers';
+import { BASE64_PACKAGE, BINARY_PACKAGE, CRC32_PACKAGE, HEX_PACKAGE, MD5_PACKAGE, SHA256_PACKAGE } from './encodings';
 import { ERRORS_PACKAGE } from './errors';
 import { FMT_PACKAGE } from './fmt';
 import { IO_PACKAGE } from './io';
@@ -24,7 +25,13 @@ import { UNICODE_PACKAGE, UTF8_PACKAGE } from './unicode';
 
 const PACKAGES = new Map<string, GoPackage>(
   [
+    BASE64_PACKAGE,
     BIG_PACKAGE,
+    BINARY_PACKAGE,
+    CRC32_PACKAGE,
+    HEX_PACKAGE,
+    MD5_PACKAGE,
+    SHA256_PACKAGE,
     BITS_PACKAGE,
     BUFIO_PACKAGE,
     BYTES_PACKAGE,
