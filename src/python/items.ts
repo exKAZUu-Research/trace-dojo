@@ -116,6 +116,9 @@ function stringItem(text: string, key: PyValue): string {
     const length = strLength(text);
     const { start, step, count } = sliceIndices(key, length);
     if (count <= 0) return '';
+    // A slice of the whole string is the string itself, as CPython returns it.
+    if (step === 1 && count === length) return text;
+    currentRuntime().buildString(count);
     const stop = start + step * count;
     return sliceStr(text, start, step > 0 ? Math.min(stop, length) : stop, step);
   }

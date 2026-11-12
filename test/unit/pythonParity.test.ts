@@ -354,6 +354,14 @@ test.each(['startswith', 'endswith'])('str.%s of a short candidate is charged fo
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test.each(['s[::-1]', 's[::2]', 's[1:]'])(
+  'slicing a long text, %s, over and over ends at the operation limit',
+  (slice) => {
+    const program = `s = 'a' * 500000\nfor i in range(300):\n    v = ${slice}`;
+    expect(executeOnStillClock(program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
 test('str.splitlines over a long text over and over ends at the operation limit', () => {
   const program = `s = 'x' * 1000000\nfor i in range(70):\n    s.splitlines()`;
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
