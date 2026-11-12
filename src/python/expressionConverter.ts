@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 519 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 535 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -16,6 +16,7 @@ import type {
   Parameter,
   Target,
 } from './ast';
+import { BITWISE_PRECEDENCE, groupBitwise } from './bitwisePrecedence';
 import {
   children,
   decodeEscapes,
@@ -54,6 +55,7 @@ interface ParameterOrder {
 }
 
 /** Converts expressions, targets, and parameters, registering the names they use and bind in their scopes. */
+
 export abstract class ExpressionConverter {
   protected context: Context;
 
@@ -230,6 +232,7 @@ export abstract class ExpressionConverter {
   private binaryOperator(node: Node): Expression {
     const operator = field(node, 'operator').type;
     if (!BINARY_OPERATORS.has(operator)) fail(rowOf(node), `演算子 ${operator} は Python 3 では使えません。`);
+    if (operator in BITWISE_PRECEDENCE) return this.bitwiseChain(node);
     return {
       kind: 'binary',
       operator: operator as BinaryOperator,
@@ -237,6 +240,27 @@ export abstract class ExpressionConverter {
       right: this.expression(field(node, 'right')),
       row: rowOf(node),
     };
+  }
+
+  /**
+   * Converts a chain of `|`, `^`, and `&` with Python's precedence (`&` binds tighter than `^`), which the grammar has
+   * the other way round for `&` and `^`: the chain is read in source order and grouped again.
+   */
+  private bitwiseChain(node: Node): Expression {
+    const operands: Expression[] = [];
+    const operators: Node[] = [];
+    const collect = (part: Node): void => {
+      const operator = part.type === 'binary_operator' ? field(part, 'operator') : undefined;
+      if (!operator || !(operator.type in BITWISE_PRECEDENCE)) {
+        operands.push(this.expression(part));
+        return;
+      }
+      collect(field(part, 'left'));
+      operators.push(operator);
+      collect(field(part, 'right'));
+    };
+    collect(node);
+    return groupBitwise(operands, operators);
   }
 
   private comparison(node: Node): Expression {
