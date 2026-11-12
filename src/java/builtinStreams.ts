@@ -2,9 +2,9 @@ import { fitsElement, runtimeClassNameOf } from './builtinClass';
 import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
 import { sortedValues } from './builtinCollectionSupport';
 import { type CollectorFunctions, collectors, defineCollectors } from './builtinCollectors';
-import { defineDoubleStreamOperations } from './builtinDoubleStreams';
 import { callFunction, type Functions } from './builtinFunctions';
 import { createOptional, defineOptionals, type Optionals, stateOf as optionalState } from './builtinOptionals';
+import { definePrimitiveStreamOperations } from './builtinPrimitiveStreams';
 import {
   classType,
   closeStream,
@@ -58,9 +58,11 @@ export function defineStreams(
 export interface StreamTypes {
   stream: ClassInfo;
   intStream: ClassInfo;
+  longStream: ClassInfo;
   doubleStream: ClassInfo;
   streamImpl: ClassInfo;
   intStreamImpl: ClassInfo;
+  longStreamImpl: ClassInfo;
   doubleStreamImpl: ClassInfo;
 }
 
@@ -83,6 +85,7 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
   const { registry, objectType, wrappers } = context;
   const stream = defineInterface(registry, 'Stream', 'java.util.stream');
   const intStream = defineInterface(registry, 'IntStream', 'java.util.stream');
+  const longStream = defineInterface(registry, 'LongStream', 'java.util.stream');
   const doubleStream = defineInterface(registry, 'DoubleStream', 'java.util.stream');
   const t = typeVariable('T', objectType);
   stream.typeParameters = [t];
@@ -90,9 +93,10 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
   streamImpl.typeParameters = [typeVariable('T', objectType)];
   streamImpl.interfaces = [stream];
   streamImpl.supertypes.push(classType(stream, variableType(streamImpl.typeParameters[0])));
-  const [intStreamImpl, doubleStreamImpl] = (
+  const [intStreamImpl, longStreamImpl, doubleStreamImpl] = (
     [
       ['IntPipeline', intStream],
+      ['LongPipeline', longStream],
       ['DoublePipeline', doubleStream],
     ] as const
   ).map(([name, iface]) => {
@@ -101,8 +105,17 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
     impl.supertypes.push(iface.type as ClassType);
     return impl;
   });
-  const types = { stream, intStream, doubleStream, streamImpl, intStreamImpl, doubleStreamImpl };
-  defineClosing(context, [stream, intStream, doubleStream]);
+  const types = {
+    stream,
+    intStream,
+    longStream,
+    doubleStream,
+    streamImpl,
+    intStreamImpl,
+    longStreamImpl,
+    doubleStreamImpl,
+  };
+  defineClosing(context, [stream, intStream, longStream, doubleStream]);
   const tType = variableType(t);
   for (const kind of [
     streamKind(context, optionals, { cls: stream, impl: streamImpl, element: tType, self: classType(stream, tType) }),
@@ -111,6 +124,12 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
       impl: intStreamImpl,
       element: INT,
       self: intStream.type as ClassType,
+    }),
+    streamKind(context, optionals, {
+      cls: longStream,
+      impl: longStreamImpl,
+      element: LONG,
+      self: longStream.type as ClassType,
     }),
     streamKind(context, optionals, {
       cls: doubleStream,
@@ -124,7 +143,7 @@ function defineStreamTypes(context: Context, optionals: Optionals, collector: Cl
   }
   defineReferenceOperations(context, types, tType, collector);
   defineIntStreamOperations(context, types, optionals, wrappers.byKind.get('int') as ClassInfo);
-  defineDoubleStreamOperations(context, types, optionals);
+  definePrimitiveStreamOperations(context, types, optionals);
   return types;
 }
 
@@ -133,7 +152,7 @@ interface StreamKind {
   cls: ClassInfo;
   impl: ClassInfo;
   /** The prefix of a primitive stream's functional interfaces, which its elements' type names. */
-  primitive: 'Int' | 'Double' | undefined;
+  primitive: 'Int' | 'Long' | 'Double' | undefined;
   self: ClassType;
   predicate: ClassInfo;
   predicateType: JavaType;
@@ -149,12 +168,18 @@ interface StreamKind {
   orderParameters: JavaType[];
 }
 
+const PRIMITIVES = [
+  { name: 'Int', type: INT },
+  { name: 'Long', type: LONG },
+  { name: 'Double', type: DOUBLE },
+] as const;
+
 function streamKind(
   context: Context,
   optionals: Optionals,
   { cls, impl, element, self }: { cls: ClassInfo; impl: ClassInfo; element: JavaType; self: ClassType }
 ): StreamKind {
-  const primitive = element === INT ? 'Int' : element === DOUBLE ? 'Double' : undefined;
+  const primitive = PRIMITIVES.find((candidate) => candidate.type === element)?.name;
   const { fn } = context;
   const predicate = fn(`${primitive ?? ''}Predicate`);
   const consumer = fn(`${primitive ?? ''}Consumer`);
@@ -178,7 +203,9 @@ function streamKind(
       orderParameters: [classType(comparator, superOf(element))],
     };
   }
-  const optionalClass = primitive === 'Int' ? optionals.optionalInt : optionals.optionalDouble;
+  const optionalClass = { Int: optionals.optionalInt, Long: optionals.optionalLong, Double: optionals.optionalDouble }[
+    primitive
+  ];
   return {
     cls,
     impl,
@@ -372,7 +399,7 @@ function extremeOf(frame: Frame, kind: StreamKind, receiver: Value, order: Value
       continue;
     }
     const difference = kind.primitive
-      ? (value as number) - (best as number)
+      ? compareValues(value, best)
       : found
         ? (callFunction(frame, kind.comparator, order, [value, best]) as number)
         : 0;

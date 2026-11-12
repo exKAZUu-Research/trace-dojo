@@ -168,10 +168,17 @@ export function defineFunctions(
   defineFunctional(context, 'IntBinaryOperator', pkg, [], 'applyAsInt', () => [[INT, INT], INT]);
   defineFunctional(context, 'IntConsumer', pkg, [], 'accept', () => [[INT], VOID]);
   defineFunctional(context, 'DoubleUnaryOperator', pkg, [], 'applyAsDouble', () => [[DOUBLE], DOUBLE]);
-  defineFunctional(context, 'DoubleConsumer', pkg, [], 'accept', () => [[DOUBLE], VOID]);
-  defineFunctional(context, 'DoubleFunction', pkg, ['R'], 'apply', (r) => [[DOUBLE], r]);
-  defineFunctional(context, 'IntToDoubleFunction', pkg, [], 'applyAsDouble', () => [[INT], DOUBLE]);
-  defineFunctional(context, 'DoubleToIntFunction', pkg, [], 'applyAsInt', () => [[DOUBLE], INT]);
+  defineFunctional(context, 'LongUnaryOperator', pkg, [], 'applyAsLong', () => [[LONG], LONG]);
+  defineFunctional(context, 'LongBinaryOperator', pkg, [], 'applyAsLong', () => [[LONG, LONG], LONG]);
+  for (const [prefix, type] of [
+    ['Long', LONG],
+    ['Double', DOUBLE],
+  ] as const) {
+    defineFunctional(context, `${prefix}Consumer`, pkg, [], 'accept', () => [[type], VOID]);
+    defineFunctional(context, `${prefix}Function`, pkg, ['R'], 'apply', (r) => [[type], r]);
+    defineFunctional(context, `IntTo${prefix}Function`, pkg, [], `applyAs${prefix}`, () => [[INT], type]);
+    defineFunctional(context, `${prefix}ToIntFunction`, pkg, [], 'applyAsInt', () => [[type], INT]);
+  }
   defineFunctional(context, 'DoubleBinaryOperator', pkg, [], 'applyAsDouble', () => [[DOUBLE, DOUBLE], DOUBLE]);
   const unary = defineInterface(registry, 'UnaryOperator', pkg);
   const [unaryT] = addTypeParameters(unary, ['T'], context.objectType);

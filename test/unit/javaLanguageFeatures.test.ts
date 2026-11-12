@@ -546,6 +546,31 @@ public class Main {
   });
 });
 
+test("Java's LongStream ranges, maps, and sums longs with Java's wrapping arithmetic", () => {
+  const program = `import java.util.*;
+import java.util.stream.*;
+public class Main {
+  public static void main(String[] args) {
+    System.out.println(LongStream.rangeClosed(1, 20).reduce(1, (x, y) -> x * y));
+    System.out.println(LongStream.rangeClosed(1, 21).reduce(1, (x, y) -> x * y));
+    System.out.println(LongStream.range(0, 5).sum() + " " + LongStream.range(5, 0).count() + " " + LongStream.of(Long.MAX_VALUE, 1).sum());
+    System.out.println(LongStream.of(3, 1, 2).sorted().boxed().toList() + " " + LongStream.of(4, 9).max() + " " + LongStream.of().min() + " " + LongStream.of(1, 2).average());
+    System.out.println(Stream.of("a", "bbb").mapToLong(String::length).sum() + " " + IntStream.of(1, 2).mapToLong(i -> i * 10_000_000_000L).sum() + " " + IntStream.range(0, 3).asLongStream().boxed().toList());
+    long[] arr = {5, 6};
+    System.out.println(Arrays.stream(arr).map(x -> x * x).filter(x -> x > 25).findFirst() + " " + Arrays.toString(LongStream.of(7, 7, 8).distinct().toArray()) + " " + LongStream.of(2, 3).mapToObj(Long::toString).collect(Collectors.joining("-")));
+    System.out.println(LongStream.of(1, 2, 3).mapToInt(x -> (int) x * 2).sum() + " " + LongStream.rangeClosed(1, 3).anyMatch(x -> x == 3) + " " + LongStream.of(10).limit(1).skip(0).count());
+    LongStream.of(1, 2).forEach(x -> System.out.print(x + ","));
+    System.out.println();
+    System.out.println(DoubleStream.of(1, 2).mapToInt(x -> (int) x).sum() + " " + IntStream.of(1).asDoubleStream().sum());
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '2432902008176640000\n-4249290049419214848\n10 0 -9223372036854775808\n[1, 2, 3] OptionalLong[9] OptionalLong.empty OptionalDouble[1.5]\n4 30000000000 [0, 1, 2]\nOptionalLong[36] [7, 8] 2-3\n12 true 1\n1,2,\n3 1.0\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

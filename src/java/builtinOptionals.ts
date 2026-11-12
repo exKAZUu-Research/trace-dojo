@@ -21,6 +21,7 @@ import { JavaObject, type Value } from './values';
 export interface Optionals {
   optional: ClassInfo;
   optionalInt: ClassInfo;
+  optionalLong: ClassInfo;
   optionalDouble: ClassInfo;
 }
 
@@ -125,6 +126,7 @@ export function defineOptionals(context: Context): Optionals {
   return {
     optional,
     optionalInt: registry.classes.get('OptionalInt') as ClassInfo,
+    optionalLong: registry.classes.get('OptionalLong') as ClassInfo,
     optionalDouble: registry.classes.get('OptionalDouble') as ClassInfo,
   };
 }
