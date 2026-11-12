@@ -38,6 +38,10 @@ export interface Modifiers {
   isDefault: boolean;
   /** Whether `@Override` is written, which requires the method to override another. */
   hasOverride?: boolean;
+  /** Whether `@FunctionalInterface` is written, which requires the interface to be functional. */
+  hasFunctionalInterface?: boolean;
+  /** Whether `@SafeVarargs` is written, which requires a variable arity method that cannot be overridden. */
+  hasSafeVarargs?: boolean;
   /** `sealed`, which limits the direct subclasses to those `permits` lists, or `non-sealed`, which lifts the limit. */
   sealing?: 'sealed' | 'non-sealed';
   access: 'public' | 'protected' | 'private' | 'package';

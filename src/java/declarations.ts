@@ -7,6 +7,7 @@ import type {
   Modifiers,
   TypeSyntax,
 } from './ast';
+import { functionalMethodOf } from './builtinFunctions';
 import { sameParameters, superclassesOf } from './compilerBase';
 import { LambdaCompiler } from './lambdaCompiler';
 import { findImplementation, throwBuiltin } from './runtime';
@@ -404,6 +405,10 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     if (cls.methods.some((other) => other.name === method.name && sameParameters(other, method))) {
       this.error(member, `メソッド ${member.name} はすでに定義されています。`);
     }
+    this.checkSafeVarargs(
+      member,
+      method.isVarargs === true && (modifiers.isStatic || modifiers.isFinal || modifiers.access === 'private')
+    );
     this.checkOverride(cls, method, member);
     // A record's accessor may carry `@Override` though it overrides nothing (JLS 9.6.4.4).
     const isAccessor =
@@ -477,10 +482,21 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
       isAbstract: false,
       isConstructor: true,
     };
+    this.checkSafeVarargs(member, constructor.isVarargs === true);
     if (cls.constructors.some((other) => sameParameters(other, constructor))) {
       this.error(member, `コンストラクタ ${cls.name} はすでに定義されています。`);
     }
     cls.constructors.push(constructor);
+  }
+
+  /** Rejects `@SafeVarargs` on a method or constructor that is not of variable arity or may be overridden. */
+  protected checkSafeVarargs(member: MethodDeclaration | ConstructorDeclaration, isApplicable: boolean): void {
+    if (member.modifiers.hasSafeVarargs && !isApplicable) {
+      this.error(
+        member,
+        '@SafeVarargs は、可変長引数を持つ static・final・private のメソッドか、可変長引数を持つコンストラクタにしか付けられません。'
+      );
+    }
   }
 
   /** What a method's and a constructor's declarations give alike. */
@@ -585,6 +601,14 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
 
   protected checkAbstractMethods(cls: ClassInfo): void {
     this.checkInheritedDefaults(cls);
+    const declaration = cls.declaration as ClassDeclaration | undefined;
+    const isFunctional = cls.kind === 'interface' && functionalMethodOf(cls, this.builtins.objectClass) !== undefined;
+    if (declaration?.modifiers.hasFunctionalInterface && !isFunctional) {
+      this.error(
+        declaration,
+        `${cls.name} は関数型インターフェースではないので、@FunctionalInterface を付けられません。`
+      );
+    }
     if (cls.isAbstract) return;
     for (const ancestor of [cls, ...superclassesOf(cls), ...superinterfacesOf(cls)]) {
       for (const method of ancestor.methods) {

@@ -60,7 +60,8 @@ function applyModifier(modifiers: Modifiers, child: Node): void {
     }
     case 'marker_annotation':
     case 'annotation': {
-      if (/^(java\.lang\.)?Override$/.test(child.childForFieldName('name')?.text ?? '')) modifiers.hasOverride = true;
+      const name = (child.childForFieldName('name')?.text ?? '').replace(/^java\.lang\./, '');
+      if (Object.hasOwn(checkedAnnotations, name)) modifiers[checkedAnnotations[name]] = true;
       break;
     }
     // The fork exposes visibility keywords and modifiers as named nodes; other tokens are punctuation.
@@ -72,6 +73,13 @@ function applyModifier(modifiers: Modifiers, child: Node): void {
 
 /** Modifiers that concern only threads and serialization, which these single-threaded programs never see. */
 const IGNORED_MODIFIERS = new Set(['transient', 'volatile', 'synchronized', 'strictfp']);
+
+/** The annotations of java.lang that javac checks, by the modifier flag that records each. */
+const checkedAnnotations: Readonly<Record<string, 'hasOverride' | 'hasFunctionalInterface' | 'hasSafeVarargs'>> = {
+  Override: 'hasOverride',
+  FunctionalInterface: 'hasFunctionalInterface',
+  SafeVarargs: 'hasSafeVarargs',
+};
 
 const keywordModifiers = {
   static: 'isStatic',

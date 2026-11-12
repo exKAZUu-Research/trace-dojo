@@ -1369,6 +1369,21 @@ const programs: [name: string, runs: boolean, source: string][] = [
     'class Text implements CharSequence {\n  public int length() { return 0; }\n}\nclass Main {\n  public static void main(String[] args) {}\n}',
   ],
   [
+    'functional-interface-annotation-on-two-methods',
+    false,
+    '@FunctionalInterface interface Two { void a(); void b(); }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'safe-varargs-on-an-overridable-method',
+    false,
+    'class Main {\n  @SafeVarargs <T> void f(T... xs) {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
+    'safe-varargs-on-static-final-and-private-methods',
+    true,
+    'class Main {\n  @SafeVarargs static <T> void f(T... xs) {}\n  @SafeVarargs final <T> void g(T... xs) {}\n  @SafeVarargs private <T> void h(T... xs) {}\n  @SafeVarargs <T> Main(T... xs) {}\n  public static void main(String[] args) {}\n}',
+  ],
+  [
     'annotation-without-targets-on-a-type-use',
     false,
     '@interface Mark {}\nclass Main {\n  public static void main(String[] args) {\n    int @Mark [] values = {};\n  }\n}',
