@@ -40,7 +40,13 @@ interface StreamState {
   source: Source;
   isUsed: boolean;
   size?: () => bigint;
+  /** The pipeline the stream belongs to, which closing the stream that started it closes. */
+  pipeline: { isClosed: boolean };
+  /** Whether the stream started its pipeline, as a stream of a collection or a file does. */
+  isSource: boolean;
 }
+
+const CLOSED_MESSAGE = 'stream has already been operated upon or closed';
 
 const sources = new WeakMap<JavaObject, StreamState>();
 
@@ -57,7 +63,18 @@ export function createStream(
   size?: () => bigint
 ): JavaObject {
   const object = frame.runtime.allocateObject(frame, cls);
-  sources.set(object, { source, isUsed: false, size });
+  const state: StreamState = {
+    // A pipeline whose source was closed fails when it is consumed, as the JDK's does.
+    source: () => {
+      if (state.pipeline.isClosed) throwBuiltin(frame, 'IllegalStateException', CLOSED_MESSAGE);
+      return source();
+    },
+    isUsed: false,
+    size,
+    pipeline: { isClosed: false },
+    isSource: true,
+  };
+  sources.set(object, state);
   object.retained = retained;
   return object;
 }
@@ -70,9 +87,16 @@ export function take(frame: Frame, receiver: Value): Iterator<Value> {
 /** Marks a stream as operated upon, returning its source for a later stage to traverse when it is consumed. */
 export function claim(frame: Frame, receiver: Value): Source {
   const state = sources.get(receiver as JavaObject) as StreamState;
-  if (state.isUsed) throwBuiltin(frame, 'IllegalStateException', 'stream has already been operated upon or closed');
+  if (state.isUsed) throwBuiltin(frame, 'IllegalStateException', CLOSED_MESSAGE);
   state.isUsed = true;
   return state.source;
+}
+
+/** Closes a stream, after which no stage may take it, and closes its pipeline when it started it. */
+export function closeStream(receiver: Value): void {
+  const state = sources.get(receiver as JavaObject) as StreamState;
+  state.isUsed = true;
+  if (state.isSource) state.pipeline.isClosed = true;
 }
 
 export function* iterate(iterator: Iterator<Value>): Generator<Value> {
@@ -98,7 +122,13 @@ export function op(
   const method = addMethod(cls, name, parameterTypes, returnType, false, (frame, receiver, args) => {
     if (required.some((index) => args[index] === undefined)) throwBuiltin(frame, 'NullPointerException');
     const result = native(frame, receiver, args);
-    if (result instanceof JavaObject && sources.has(result)) result.retained?.push(...args);
+    const state = result instanceof JavaObject && result !== receiver ? sources.get(result) : undefined;
+    if (state) {
+      (result as JavaObject).retained?.push(...args);
+      // A stage an operation returns belongs to the pipeline of the stream it was called on.
+      state.pipeline = sources.get(receiver as JavaObject)?.pipeline ?? state.pipeline;
+      state.isSource = false;
+    }
     return result;
   });
   method.typeParameters = typeParameters;
@@ -127,8 +157,9 @@ export function derive(
  * stages, such as `map` and `peek`, keep the size, and counts the elements otherwise.
  */
 export function countOf(frame: Frame, receiver: Value): bigint {
-  const { size } = sources.get(receiver as JavaObject) as StreamState;
+  const { size, pipeline } = sources.get(receiver as JavaObject) as StreamState;
   const items = claim(frame, receiver);
+  if (pipeline.isClosed) throwBuiltin(frame, 'IllegalStateException', CLOSED_MESSAGE);
   if (size) return size();
   let count = 0n;
   const iterator = items();

@@ -19,6 +19,9 @@ keep.forward();`
     finalBoard: ['.......', '.GG....', '.......', '.......', '....Y..', '....Y..', '.......'].join('\n'),
     finalTurtles: [{ x: 2, y: 1, color: 'G', dir: 'E' }],
     uncaughtException: undefined,
+    stdout: '',
+    stderr: '',
+    finalFiles: {},
   });
 });
 

@@ -1,4 +1,6 @@
+// code-gauge-allow-file fileNcss 401 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { ArrayOps } from './arrayOps';
@@ -46,6 +48,7 @@ type Primitive = undefined | null | boolean | number | string;
 export class Runtime {
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
+  readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   readonly realm: Realm;
   /**
@@ -57,7 +60,8 @@ export class Runtime {
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
 
-  constructor() {
+  constructor(input?: ProgramInput) {
+    this.io = new ProgramIO(this.budget, input);
     this.realm = createRealm(this);
     this.evaluator = new Evaluator(this);
   }

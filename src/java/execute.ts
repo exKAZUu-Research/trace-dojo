@@ -1,12 +1,13 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { parseJava } from './parse';
 import { Frame, JavaThrow, ProgramExit, Runtime } from './runtime';
 import { JavaArray } from './values';
 
-export function executeJavaProgram(source: string): ProgramExecution {
+export function executeJavaProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
   try {
     compiled = compileProgram(parseJava(source));
@@ -15,7 +16,7 @@ export function executeJavaProgram(source: string): ProgramExecution {
     throw error;
   }
   try {
-    return { kind: 'executed', ...runProgram(new Runtime(compiled.builtins), compiled) };
+    return { kind: 'executed', ...runProgram(new Runtime(compiled.builtins, input), compiled) };
   } catch (error) {
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
@@ -42,7 +43,7 @@ export function runProgram(
     finalTurtles = runtime.world.turtleTraces();
   };
   const uncaughtException = runMain(runtime, program);
-  return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException };
+  return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException, ...runtime.io.output() };
 }
 
 function runMain(runtime: Runtime, program: CompiledProgram): string | undefined {

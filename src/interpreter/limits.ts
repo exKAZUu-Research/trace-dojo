@@ -1,6 +1,6 @@
 /** Stops a program that exceeds a limit the learner cannot catch. */
 export class ExecutionLimitError extends Error {
-  constructor(readonly limit: 'operations' | 'time' | 'output' | 'trace') {
+  constructor(readonly limit: 'operations' | 'time' | 'output' | 'storage' | 'trace') {
     super(`Execution limit exceeded: ${limit}`);
     this.name = 'ExecutionLimitError';
   }
@@ -15,15 +15,17 @@ export const LIMITS = {
   maxSlots: 1_000_000,
   /** The length of one string built while running; building strings also costs operations, which bounds the rest. */
   maxStringLength: 1_000_000,
+  /** The total length of what a run writes to standard output and standard error. */
   maxOutputLength: 100_000,
+  /** The total length of what a run writes to files, including its input files. */
+  maxStoredLength: 1_000_000,
 };
 // An operation may stand for a slow native call (e.g., a search of a long list), so a larger interval lets a program
 // of such calls run seconds past the deadline.
 const OPERATIONS_PER_CLOCK_CHECK = 16;
 
-/** Counts the operations and output of one run against {@link LIMITS}. */
+/** Counts the operations of one run against {@link LIMITS}. */
 export class ExecutionBudget {
-  output = '';
   private operations = 0;
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
   private readonly deadline = performance.now() + LIMITS.maxMilliseconds;
@@ -37,11 +39,6 @@ export class ExecutionBudget {
     if (cost === 1 && this.operations < this.nextClockCheck) return;
     this.nextClockCheck = this.operations + OPERATIONS_PER_CLOCK_CHECK;
     if (performance.now() > this.deadline) throw new ExecutionLimitError('time');
-  }
-
-  print(text: string): void {
-    this.output += text;
-    if (this.output.length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
   }
 }
 

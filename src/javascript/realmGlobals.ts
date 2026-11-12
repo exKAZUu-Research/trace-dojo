@@ -335,10 +335,17 @@ function defineMath(builder: RealmBuilder): void {
 
 function defineConsole(builder: RealmBuilder): void {
   const console = builder.namespace('console');
-  for (const name of ['log', 'info', 'warn', 'error', 'debug']) {
+  // Node.js writes warnings and errors to standard error.
+  for (const [name, stream] of [
+    ['log', 'stdout'],
+    ['info', 'stdout'],
+    ['debug', 'stdout'],
+    ['warn', 'stderr'],
+    ['error', 'stderr'],
+  ] as const) {
     builder.method(console, name, 0, ({ runtime, args }) => {
       const budget = new OutputBudget();
-      runtime.budget.print(`${args.map((value) => inspect(runtime, value, budget)).join(' ')}\n`);
+      runtime.io[stream].write(`${args.map((value) => inspect(runtime, value, budget)).join(' ')}\n`);
       return;
     });
   }
