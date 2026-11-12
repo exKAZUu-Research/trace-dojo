@@ -21,6 +21,7 @@ import {
   updateTable,
 } from './setOperations';
 import { SetTable } from './setTable';
+import { timsort } from './timsort';
 import {
   defineMethod,
   dictClass,
@@ -185,42 +186,49 @@ function sequenceIndex(
 
 /** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
 export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
-  const original = list.items;
-  const keys = key === None ? original : original.map((item) => callValue(key, [item]));
-  const indices = original.map((_, index) => index);
-  if (reverse) indices.reverse();
-  list.items = [];
-  const runtime = currentRuntime();
+  const items = list.items;
+  let modified = false;
+  // CPython also reports a list that was filled and emptied again during the sort, which the final length hides.
+  const itemsDuringSort = new Proxy<PyValue[]>([], {
+    set(target, property, value: unknown) {
+      if (property !== 'length') modified = true;
+      return Reflect.set(target, property, value);
+    },
+  });
+  list.items = itemsDuringSort;
   try {
-    const sorted = mergeSort(indices, (a, b) => {
-      runtime.spend();
-      return lessThan(keys[a], keys[b]);
-    });
-    if (reverse) sorted.reverse();
-    if (list.items.length > 0) throw valueError('list modified during sort');
-    list.items = sorted.map((index) => original[index]);
-  } catch (error) {
-    if (list.items.length === 0) list.items = original;
-    throw error;
+    sortDetachedItems(items, key, reverse);
+    modified ||= list.items !== itemsDuringSort;
+  } finally {
+    list.items = items;
   }
+  if (modified) throw valueError('list modified during sort');
 }
 
-/** A stable merge sort that only asks whether one item is less than another, as Python's sort does. */
-function mergeSort(items: number[], less: (a: number, b: number) => boolean): number[] {
-  if (items.length <= 1) return items;
-  const middle = items.length >> 1;
-  const left = mergeSort(items.slice(0, middle), less);
-  const right = mergeSort(items.slice(middle), less);
-  const result: number[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < left.length && j < right.length) {
-    if (less(right[j], left[i])) result.push(right[j++]);
-    else result.push(left[i++]);
+function sortDetachedItems(items: PyValue[], key: PyValue, reverse: boolean): void {
+  const runtime = currentRuntime();
+  const charged =
+    <T>(less: (left: T, right: T) => boolean) =>
+    (left: T, right: T): boolean => {
+      runtime.spend();
+      return less(left, right);
+    };
+  if (key === None) {
+    timsort(items, charged(lessThan), reverse);
+    return;
   }
-  while (i < left.length) result.push(left[i++]);
-  while (j < right.length) result.push(right[j++]);
-  return result;
+  const keys = items.map((item) => callValue(key, [item]));
+  const values = [...items];
+  const order = items.map((_, index) => index);
+  try {
+    timsort(
+      order,
+      charged((left: number, right: number) => lessThan(keys[left], keys[right])),
+      reverse
+    );
+  } finally {
+    for (const [index, source] of order.entries()) items[index] = values[source];
+  }
 }
 
 function reversedIterator(sequence: PyList | PyTuple, name: string): PyIterator {
