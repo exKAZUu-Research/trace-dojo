@@ -24,6 +24,10 @@ export function chargeStep(): void {
  * Charges the running program for slots of storage it creates, wherever the storage comes from; see
  * {@link chargeStep}.
  */
+export function chargeScan(length: number): void {
+  current?.scan(length);
+}
+
 export function chargeSlots(count: number): void {
   current?.allocate(count);
 }

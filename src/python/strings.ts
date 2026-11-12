@@ -1,3 +1,5 @@
+import { chargeScan } from './runtimeContext';
+
 /** Python strings are sequences of code points, while JavaScript strings are UTF-16; these helpers bridge the two. */
 
 const SURROGATE = /[\uD800-\uDFFF]/;
@@ -42,6 +44,7 @@ export function sliceStr(text: string, start: number, stop: number, step: number
 
 /** Compares strings by code point, as Python does, rather than by UTF-16 code unit. */
 export function compareStr(a: string, b: string): number {
+  chargeScan(Math.min(a.length, b.length));
   if (a === b) return 0;
   if (!hasSurrogates(a) && !hasSurrogates(b)) return a < b ? -1 : 1;
   const left = iterStr(a);

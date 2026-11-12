@@ -265,7 +265,7 @@ function bisectRight(items: PyValue[], value: PyValue): number {
   return low;
 }
 
-// code-gauge-allow functionNcss 40 -- Follows random.choices with and without weights.
+// code-gauge-allow functionNcss 41 -- Follows random.choices with and without weights.
 // code-gauge-allow functionCognitiveComplexity 17 -- Follows random.choices with and without weights.
 function choices(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
   const population = argument(args, kwargs, 0, 'population') as PyValue;
@@ -277,8 +277,10 @@ function choices(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): P
   if (cumulative === None) {
     if (weights === None) {
       currentRuntime().ensureRoom(k);
-      for (let index = 0; index < k; index++)
+      for (let index = 0; index < k; index++) {
+        currentRuntime().spend();
         result.push(getItem(population, BigInt(Math.floor(generator.random() * n))));
+      }
       return newList(result);
     }
     let total: PyValue = 0n;

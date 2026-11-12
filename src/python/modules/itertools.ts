@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 402 -- The iterators of itertools and their shared helpers belong together.
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
@@ -382,19 +383,20 @@ function islice(args: PyValue[], kwargs: Kwargs): PyValue {
   if (step === 0) throw valueError('Step for islice() must be a positive integer or None.');
   let position = 0;
   let nextIndex = start;
+  // Transcribes islice_next: the items before the next index are consumed even when the stop ends the slice there.
   return iteratorOf(
     'islice',
     () => {
-      for (;;) {
-        if (stop !== undefined && nextIndex >= stop) return DONE;
-        const item = next();
-        if (item === DONE) return DONE;
+      for (; position < nextIndex; position++) {
         currentRuntime().spend();
-        if (position++ === nextIndex) {
-          nextIndex += step;
-          return item;
-        }
+        if (next() === DONE) return DONE;
       }
+      if (stop !== undefined && position >= stop) return DONE;
+      const item = next();
+      if (item === DONE) return DONE;
+      position++;
+      nextIndex = stop === undefined ? nextIndex + step : Math.min(nextIndex + step, stop);
+      return item;
     },
     () => [held]
   );
