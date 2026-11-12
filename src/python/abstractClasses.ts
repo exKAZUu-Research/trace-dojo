@@ -2,7 +2,7 @@ import { applyCollectionFlags, registerCollectionKind } from './matching';
 import { bindValue, callValue, getAttributeOrUndefined, isTruthy } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { builtinClass, newSet, None, NotImplemented, pyError, typeClass, typeError } from './types';
-import { PyClass, PyFunction, PySet, type PyValue } from './values';
+import { PyClass, PySet, type PyValue } from './values';
 
 /**
  * Abstract base classes as `abc.ABCMeta` makes them, for the classes of collections.abc and their subclasses: they
@@ -43,7 +43,6 @@ function abstractMethodsOf(cls: PyClass): string[] {
 }
 
 function isAbstractMethod(value: PyValue): boolean {
-  if (value instanceof PyFunction) return value.dict.get('__isabstractmethod__') === true;
   const flag = typeof value === 'object' ? getAttributeOrUndefined(value, '__isabstractmethod__') : undefined;
   return flag !== undefined && isTruthy(flag);
 }

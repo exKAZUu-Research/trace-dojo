@@ -9,7 +9,7 @@ import { defineGetSet, defineUnsupportedAttributes } from './descriptors';
 import { deleteItem, setItem, sliceIndices } from './items';
 import { mappingProxyClass, newMappingProxy } from './mappingProxy';
 import { exactBinary, scaleToFloat, toIndex } from './numbers';
-import { bindValue, callValue, getAttribute, isCallable, toArray } from './objects';
+import { bindValue, callValue, getAttribute, isCallable, isTruthy, toArray } from './objects';
 import { binaryOp, inplaceOp, nativeBinaryOperation, unaryOp } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { newGenericAlias } from './typeHints';
@@ -196,7 +196,7 @@ function intFromBytes(cls: PyValue, args: PyValue[], kwargs: Map<string, PyValue
   // One hex literal builds the integer in linear time, where shifting a growing integer per byte is quadratic.
   let result =
     bytes.length === 0 ? 0n : BigInt(`0x${bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')}`);
-  if (signed === true && bytes.length > 0 && (bytes[0] & 0x80n) !== 0n) result -= 1n << BigInt(bytes.length * 8);
+  if (isTruthy(signed) && bytes.length > 0 && (bytes[0] & 0x80n) !== 0n) result -= 1n << BigInt(bytes.length * 8);
   return cls === intClass || cls === boolClass
     ? cls === boolClass
       ? result !== 0n
@@ -666,7 +666,8 @@ method(propertyClass, '__delete__', 'one', 1, 1, (self, [instance]) => {
 method(propertyClass, '__set_name__', 'expected', 2, 2, () => None);
 
 function isAbstract(value: PyValue | undefined): boolean {
-  return value instanceof PyFunction && value.dict.get('__isabstractmethod__') === true;
+  const flag = value instanceof PyFunction ? value.dict.get('__isabstractmethod__') : undefined;
+  return flag !== undefined && isTruthy(flag);
 }
 
 for (const cls of [staticmethodClass, classmethodClass]) {
