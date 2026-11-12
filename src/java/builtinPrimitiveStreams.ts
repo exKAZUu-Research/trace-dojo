@@ -37,7 +37,7 @@ interface PrimitiveStream {
 
 /**
  * The operations only `LongStream` and `DoubleStream` have, the operations of other streams that give one, and their
- * sources: `of`, `Arrays.stream` of an array, and `LongStream.range`.
+ * sources: `of`, `empty`, `Arrays.stream` of an array, and `LongStream.range`.
  */
 export function definePrimitiveStreamOperations(context: Context, types: StreamTypes, optionals: Optionals): void {
   const streams: PrimitiveStream[] = [
@@ -179,6 +179,15 @@ function defineArraySources(context: Context, { element, cls, impl }: PrimitiveS
     );
   };
   addMethod(cls, 'of', [arrayType], cls.type, true, (frame, _, [array]) => fromArray(frame, array)).isVarargs = true;
+  addMethod(cls, 'empty', [], cls.type, true, (frame) =>
+    createStream(
+      frame,
+      impl,
+      () => [][Symbol.iterator](),
+      [],
+      () => 0n
+    )
+  );
   const arraysClass = context.registry.classes.get('Arrays') as ClassInfo;
   addMethod(arraysClass, 'stream', [arrayType], cls.type, true, (frame, _, [array]) => fromArray(frame, array));
 }

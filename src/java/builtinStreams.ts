@@ -48,7 +48,11 @@ export function defineStreams(
   defineSummaryStatistics(context);
   const collector = defineCollectors(context);
   const streams = defineStreamTypes(context, optional, collector);
-  defineStatisticsOperations(context, streams.intStream, streams.doubleStream);
+  defineStatisticsOperations(context, {
+    Int: streams.intStream,
+    Long: streams.longStream,
+    Double: streams.doubleStream,
+  });
   defineSources(context, streams);
   defineStringStreams(context, streams);
   defineGeneratedStreams(context, streams);
@@ -784,6 +788,25 @@ function defineSources(context: Context, streams: StreamTypes): void {
   );
   of.typeParameters = [ofVariable];
   of.isVarargs = true;
+  const emptyVariable = typeVariable('T', objectType);
+  addMethod(stream, 'empty', [], classType(stream, variableType(emptyVariable)), true, (frame) =>
+    createStream(
+      frame,
+      streamImpl,
+      () => [][Symbol.iterator](),
+      [],
+      () => 0n
+    )
+  ).typeParameters = [emptyVariable];
+  addMethod(intStream, 'empty', [], intStream.type, true, (frame) =>
+    createStream(
+      frame,
+      intStreamImpl,
+      () => [][Symbol.iterator](),
+      [],
+      () => 0n
+    )
+  );
   for (const [name, isClosed] of [
     ['range', false],
     ['rangeClosed', true],

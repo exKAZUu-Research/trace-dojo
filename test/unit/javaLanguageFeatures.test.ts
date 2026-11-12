@@ -571,6 +571,50 @@ public class Main {
   });
 });
 
+test('Java collects longs with summingLong, averagingLong, and LongSummaryStatistics as the JDK does', () => {
+  const program = `import java.util.*;
+import java.util.stream.*;
+public class Main {
+  record P(String n, long a) {}
+  public static void main(String[] args) {
+    List<P> ps = List.of(new P("x", 3_000_000_000L), new P("y", 5), new P("z", -2));
+    System.out.println(ps.stream().mapToLong(P::a).sum() + " " + ps.stream().collect(Collectors.summingLong(P::a)) + " " + ps.stream().collect(Collectors.averagingLong(P::a)));
+    System.out.println(ps.stream().collect(Collectors.summarizingLong(P::a)));
+    System.out.println(Stream.<P>empty().collect(Collectors.averagingLong(P::a)) + " " + Stream.of(Long.MAX_VALUE, 1L).collect(Collectors.summingLong(x -> x)));
+    LongSummaryStatistics ls = LongStream.of(4, 9, -1).summaryStatistics();
+    ls.accept(7); ls.accept(10L);
+    System.out.println(ls + " " + ls.getMin() + " " + ls.getMax() + " " + ls.getSum() + " " + ls.getAverage());
+    LongSummaryStatistics empty = new LongSummaryStatistics();
+    System.out.println(empty + " " + empty.getMin() + " " + empty.getMax());
+    empty.combine(ls);
+    System.out.println(empty.getCount() + " " + empty.getSum());
+    System.out.println(IntStream.of(Integer.MAX_VALUE, Integer.MAX_VALUE).summaryStatistics().getSum() + " " + Stream.of(1, 2).collect(Collectors.summarizingInt(x -> x)).getMax());
+    System.out.println(Stream.of(1.5).collect(Collectors.summarizingDouble(x -> x)));
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '3000000003 3000000003 1.000000001E9\nLongSummaryStatistics{count=3, sum=3000000003, min=-2, average=1000000001.000000, max=3000000000}\n0.0 -9223372036854775808\nLongSummaryStatistics{count=5, sum=29, min=-1, average=5.800000, max=10} -1 10 29 5.8\nLongSummaryStatistics{count=0, sum=0, min=9223372036854775807, average=0.000000, max=-9223372036854775808} 9223372036854775807 -9223372036854775808\n5 29\n4294967294 2\nDoubleSummaryStatistics{count=1, sum=1.500000, min=1.500000, average=1.500000, max=1.500000}\n',
+  });
+});
+
+test('Java creates empty streams of objects and of each primitive type', () => {
+  const program = `import java.util.*;
+import java.util.stream.*;
+public class Main {
+  public static void main(String[] args) {
+    System.out.println(Stream.empty().count() + " " + IntStream.empty().sum() + " " + LongStream.empty().max() + " " + DoubleStream.empty().average() + " " + Stream.<String>empty().findFirst());
+    Stream<Integer> s = Stream.empty();
+    System.out.println(s.map(x -> x + 1).toList());
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 0 OptionalLong.empty OptionalDouble.empty Optional.empty\n[]\n',
+  });
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });

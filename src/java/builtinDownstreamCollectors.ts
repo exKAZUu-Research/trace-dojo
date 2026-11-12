@@ -154,7 +154,7 @@ export function defineDownstreamCollectors(
   );
 }
 
-/** `summingInt`, `summingDouble`, `averagingInt`, and `averagingDouble`, which read a number from each element. */
+/** The summing, averaging, and summarizing collectors, which read a number from each element. */
 function defineNumericCollectors(
   context: Context,
   define: (
@@ -200,16 +200,43 @@ function defineNumericCollectors(
         })
     );
   }
-  for (const [name, iface, isInt] of [
-    ['summarizingInt', 'ToIntFunction', true],
-    ['summarizingDouble', 'ToDoubleFunction', false],
+  const longClass = wrappers.byKind.get('long') as ClassInfo;
+  for (const [name, average] of [
+    ['summingLong', false],
+    ['averagingLong', true],
   ] as const) {
-    const statisticsClass = fn(isInt ? 'IntSummaryStatistics' : 'DoubleSummaryStatistics');
     define(
       name,
       ['T'],
-      ([t]) => ({ parameters: [classType(fn(iface), superOf(t))], result: collectorOf(t, ANY, statisticsClass.type) }),
-      (frame, _, [mapper]) => create(frame, statisticsCollector(statisticsClass, isInt, fn(iface), mapper))
+      ([t]) => ({
+        parameters: [classType(fn('ToLongFunction'), superOf(t))],
+        result: collectorOf(t, ANY, (average ? doubleClass : longClass).type),
+      }),
+      (frame, _, [mapper]) =>
+        create(frame, {
+          supply: () => ({ sum: 0n, count: 0 }),
+          accumulate: (accumulateFrame, container, value) => {
+            const state = container as { sum: bigint; count: number };
+            const number = callFunction(accumulateFrame, fn('ToLongFunction'), mapper, [value]) as bigint;
+            state.sum = BigInt.asIntN(64, state.sum + number);
+            state.count++;
+          },
+          finish: (finishFrame, container) => {
+            const { sum, count } = container as { sum: bigint; count: number };
+            if (!average) return box(finishFrame, longClass, sum);
+            return box(finishFrame, doubleClass, count === 0 ? 0 : Number(sum) / count);
+          },
+        })
+    );
+  }
+  for (const kind of ['Int', 'Long', 'Double'] as const) {
+    const statisticsClass = fn(`${kind}SummaryStatistics`);
+    const iface = fn(`To${kind}Function`);
+    define(
+      `summarizing${kind}`,
+      ['T'],
+      ([t]) => ({ parameters: [classType(iface, superOf(t))], result: collectorOf(t, ANY, statisticsClass.type) }),
+      (frame, _, [mapper]) => create(frame, statisticsCollector(statisticsClass, kind, iface, mapper))
     );
   }
 }
