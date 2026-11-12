@@ -1,11 +1,22 @@
 import { pythonFunction } from '../define';
 import { DictStore } from '../dictStore';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
-import { bindValue, callValue, lookupSpecial } from '../objects';
+import { bindValue, callValue, getAttribute, lookupSpecial, toArray } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { SetTable } from '../setTable';
 import { classOf, exceptionClassNamed, newDict, newTuple, typeError } from '../types';
-import { type Kwargs, PyDeque, PyDict, PyInstance, PyList, PySet, PyTuple, type PyValue } from '../values';
+import {
+  type AttributeMap,
+  type Kwargs,
+  type PyClass,
+  PyDeque,
+  PyDict,
+  PyInstance,
+  PyList,
+  PySet,
+  PyTuple,
+  type PyValue,
+} from '../values';
 import { builtinClassWithBase } from './moduleClasses';
 
 /** `copy.copy`: a new container or instance holding the same items. */
@@ -21,6 +32,7 @@ function shallowCopy(value: PyValue): PyValue {
   }
   if (value instanceof PySet) return new PySet(value.cls, value.table.copy());
   if (value instanceof PyDeque) return new PyDeque(value.cls, [...value.items], value.maxlen);
+  if (value instanceof PyTuple && !value.cls.isBuiltin) return reconstructTuple(value, (item) => item);
   if (value instanceof PyInstance && !value.cls.isBuiltin && !value.turtle) {
     const copy = new PyInstance(value.cls);
     for (const [key, item] of value.dict) copy.dict.set(key, item);
@@ -84,6 +96,7 @@ function deepCopy(value: PyValue, memo: PyDict): PyValue {
 }
 
 function deepCopyTuple(value: PyTuple, id: bigint, memo: PyDict): PyValue {
+  if (!value.cls.isBuiltin) return reconstructTuple(value, (item) => deepCopy(item, memo), { memo, id });
   const items = value.items.map((item) => deepCopy(item, memo));
   // Copying the items has copied the tuple itself when one of them refers back to it.
   const copied = memo.store.get(id);
@@ -95,6 +108,42 @@ function deepCopyTuple(value: PyTuple, id: bigint, memo: PyDict): PyValue {
       : new PyTuple(value.cls, items);
   memo.store.set(id, copy);
   return copy;
+}
+
+/**
+ * Copies a namedtuple or an instance of its subclass as copy._reconstruct does with what `__reduce_ex__(4)` gives: a
+ * new instance from `cls.__new__(cls, *self.__getnewargs__())`, then its `__dict__`, both copied by `copyItem`.
+ */
+function reconstructTuple(
+  value: PyTuple,
+  copyItem: (item: PyValue) => PyValue,
+  deep?: { memo: PyDict; id: bigint }
+): PyTuple {
+  const newArgs = toArray(callValue(getAttribute(value, '__getnewargs__'), [])).map((item) => copyItem(item));
+  const construct = value.cls.mro.find((cls) => cls.construct)?.construct as NonNullable<PyClass['construct']>;
+  const copy = construct(value.cls, newArgs, undefined) as PyTuple;
+  if (deep) deep.memo.store.set(deep.id, copy);
+  const state = value.attributes && (deep ? deepCopiedState(value.attributes, deep.memo) : value.attributes);
+  for (const [key, item] of state ?? []) copy.attributes?.set(key, item);
+  return copy;
+}
+
+/** The deep copies of the `__dict__`s a deepcopy call has copied, by memo, which CPython finds through the memo. */
+const copiedStates = new WeakMap<PyDict, Map<AttributeMap, Map<string, PyValue>>>();
+
+/** A deep copy of a `__dict__`, made once per deepcopy call as copying the dict itself would be. */
+function deepCopiedState(attributes: AttributeMap, memo: PyDict): Map<string, PyValue> {
+  let states = copiedStates.get(memo);
+  if (!states) {
+    states = new Map();
+    copiedStates.set(memo, states);
+  }
+  const known = states.get(attributes);
+  if (known) return known;
+  const state = new Map<string, PyValue>();
+  states.set(attributes, state);
+  for (const [key, item] of attributes) state.set(key, deepCopy(item, memo));
+  return state;
 }
 
 const copyErrorClass = builtinClassWithBase('Error', exceptionClassNamed('Exception'), 'copy');
