@@ -1,6 +1,8 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
+import { DictStore } from './dictStore';
 import {
   PyBoundMethod,
+  PyBuiltinFunction,
   PyCell,
   PyClass,
   PyDeque,
@@ -14,12 +16,13 @@ import {
   PyList,
   PyModule,
   PyObject,
+  PyOpaque,
   PySet,
   PyTuple,
 } from './values';
 
 /** Finds the turtles that `roots` reach, with the number of items scanned to find them. */
-// code-gauge-allow duplicateLines 18 -- Each language's runtime walks its own object model, so the loops cannot share code.
+// code-gauge-allow duplicateLines 19 -- Each language's runtime walks its own object model, so the loops cannot share code.
 export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleState>; scanned: number } {
   const reached = new Set<TurtleState>();
   const visited = new Set<object>();
@@ -27,9 +30,13 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
   let scanned = 0;
   while (pending.length > 0) {
     const item = pending.pop();
-    if (!(item instanceof PyObject || item instanceof PyCell) || visited.has(item)) continue;
+    if (typeof item !== 'object' || item === null || visited.has(item)) continue;
     visited.add(item);
     scanned++;
+    if (!(item instanceof PyObject || item instanceof PyCell)) {
+      pushNativeData(pending, item);
+      continue;
+    }
     if (item instanceof PyCell) {
       pending.push(item.value);
       continue;
@@ -40,8 +47,8 @@ export function findReachableTurtles(roots: unknown[]): { reached: Set<TurtleSta
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionNcss 38 -- One case per kind of object that refers to others.
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss 44 -- One case per kind of object that refers to others.
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);
@@ -69,6 +76,8 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
   }
   if (object instanceof PyClass || object instanceof PyModule) return pushNamespaceReferences(pending, object);
   if (object instanceof PyBoundMethod) pending.push(object.self, object.fn);
+  else if (object instanceof PyBuiltinFunction) pending.push(object.self);
+  else if (object instanceof PyOpaque) pending.push(object.data, object.attributes);
   else if (object instanceof PyDescriptor) pending.push(object.fn, object.setter, object.deleter);
   else if (object instanceof PyDictView) pending.push(object.dict);
   else if (object instanceof PyIterator || object instanceof PyGenerator) pushAll(pending, object.holds());
@@ -87,8 +96,19 @@ function pushInstanceReferences(pending: unknown[], instance: PyInstance, reache
 function pushNamespaceReferences(pending: unknown[], object: PyClass | PyModule): number {
   if (object instanceof PyClass && object.isBuiltin) return 0;
   pushAll(pending, object.dict.values());
-  if (object instanceof PyClass) pushAll(pending, object.enumMembers ?? []);
+  if (object instanceof PyClass) {
+    pushAll(pending, object.enumMembers ?? []);
+    pushAll(pending, object.bases);
+  }
   return object.dict.size;
+}
+
+/** Pushes what the native state of a builtin object holds: the items of its arrays, maps, sets, and records. */
+function pushNativeData(pending: unknown[], data: object): void {
+  if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
+  else if (data instanceof Map) for (const [key, value] of data) pending.push(key, value);
+  else if (data instanceof DictStore) for (const entry of data.ordered()) pending.push(entry.key, entry.value);
+  else if (Object.getPrototypeOf(data) === Object.prototype) pushAll(pending, Object.values(data));
 }
 
 /** Pushes values one by one: spreading a large array into push() exceeds the engine's argument limit. */

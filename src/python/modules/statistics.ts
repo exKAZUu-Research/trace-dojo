@@ -1,8 +1,10 @@
 import { builtin } from '../define';
+import { type DictEntry, DictStore } from '../dictStore';
+import { pyHash } from '../hashing';
 import { registerModule } from '../modules';
 import { exactBinary, intToFloat, scaleToFloat } from '../numbers';
 import { toArray } from '../objects';
-import { binaryOp, equals, lessThan } from '../operators';
+import { binaryOp, lessThan } from '../operators';
 import { exceptionClassNamed, newException, typeError, typeName } from '../types';
 import { PyError, type PyValue } from '../values';
 import { builtinClassWithBase } from './moduleClasses';
@@ -78,15 +80,14 @@ function median([data]: PyValue[]): PyValue {
 function mode([data]: PyValue[]): PyValue {
   const items = toArray(data);
   if (items.length === 0) throw statisticsError('no mode for empty data');
-  const counts: { value: PyValue; count: number }[] = [];
+  const counts = new DictStore();
   for (const item of items) {
-    const entry = counts.find((each) => equals(each.value, item));
-    if (entry) entry.count++;
-    else counts.push({ value: item, count: 1 });
+    const hash = pyHash(item);
+    counts.set(item, ((counts.lookup(item, hash)?.value as bigint | undefined) ?? 0n) + 1n, hash);
   }
-  let best = counts[0];
-  for (const entry of counts) if (entry.count > best.count) best = entry;
-  return best.value;
+  let best = counts.first() as DictEntry;
+  for (const entry of counts.ordered()) if ((entry.value as bigint) > (best.value as bigint)) best = entry;
+  return best.key;
 }
 
 registerModule(

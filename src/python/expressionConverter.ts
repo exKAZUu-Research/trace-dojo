@@ -38,6 +38,8 @@ export interface Context {
   inLoop: boolean;
   /** Whether a `break`, `continue`, or `return` here would leave an `except*` block. */
   inExceptStar: boolean;
+  /** Whether a loop of the except* clause encloses the statement, so that break and continue stay inside the clause. */
+  inLoopOfExceptStar: boolean;
   /** The function being converted, which `super` and `__class__` mark. */
   fn?: FunctionDef;
 }
@@ -59,7 +61,13 @@ export abstract class ExpressionConverter {
     protected readonly source: string,
     module: ScopeBuilder
   ) {
-    this.context = { scope: module, qualifiedPrefix: '', inLoop: false, inExceptStar: false };
+    this.context = {
+      scope: module,
+      qualifiedPrefix: '',
+      inLoop: false,
+      inExceptStar: false,
+      inLoopOfExceptStar: false,
+    };
   }
 
   protected abstract functionBody(node: Node, fn: FunctionDef): void;
@@ -536,6 +544,7 @@ export abstract class ExpressionConverter {
       qualifiedPrefix: `${fn.qualifiedName}.<locals>.`,
       inLoop: false,
       inExceptStar: false,
+      inLoopOfExceptStar: false,
       fn,
     };
     try {
@@ -577,9 +586,8 @@ export abstract class ExpressionConverter {
       checkParameterOrder(parameter, params, order, row);
       params.push(parameter);
     }
-    const last = params.at(-1);
-    const endsAfterStar = last && ['keywordOnly', 'varArgs', 'varKeywords'].includes(last.kind);
-    if (order.sawStar && !endsAfterStar && !params.some((param) => param.kind === 'varArgs')) {
+    const hasNamedAfterStar = params.some((param) => param.kind === 'keywordOnly' || param.kind === 'varArgs');
+    if (order.sawStar && !hasNamedAfterStar) {
       fail(rowOf(node), '* の後には、名前で渡す引数が必要です。');
     }
     return params;

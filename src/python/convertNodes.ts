@@ -6,12 +6,13 @@ export function rowOf(node: Node): number {
   return node.startPosition.row;
 }
 
+/** The named children except extras: comments and backslash line continuations, which may appear anywhere. */
 export function namedChildren(node: Node): Node[] {
-  return node.namedChildren.filter((child): child is Node => child !== null && child.type !== 'comment');
+  return node.namedChildren.filter((child): child is Node => child !== null && !child.isExtra);
 }
 
 export function children(node: Node): Node[] {
-  return node.children.filter((child): child is Node => child !== null && child.type !== 'comment');
+  return node.children.filter((child): child is Node => child !== null && !child.isExtra);
 }
 
 export function field(node: Node, name: string): Node {
@@ -22,6 +23,23 @@ export function field(node: Node, name: string): Node {
 
 export function fieldNodes(node: Node, name: string): Node[] {
   return node.childrenForFieldName(name).filter((child): child is Node => child !== null);
+}
+
+const CLAUSE_TYPES = new Set(['elif_clause', 'else_clause', 'except_clause', 'finally_clause']);
+
+/**
+ * Rejects a clause of a compound statement that follows the previous body on its line, as in
+ * `if x: a(); else: b()`, which the grammar accepts and CPython does not.
+ */
+export function checkClauseLines(node: Node): void {
+  const all = children(node);
+  for (const [index, clause] of all.entries()) {
+    if (!CLAUSE_TYPES.has(clause.type)) continue;
+    const previous = all[index - 1];
+    if (previous.endPosition.row === clause.startPosition.row && previous.endPosition.column > 0) {
+      fail(rowOf(clause), `${clause.text.split(/[\s:]/, 1)[0]} は、行の先頭に書いてください。`);
+    }
+  }
 }
 
 export function hasToken(node: Node, token: string): boolean {

@@ -71,7 +71,11 @@ export const enumerateClass = builtinClass('enumerate');
 enumerateClass.construct = (cls, args, kwargs) => {
   const iterable = argument(args, kwargs, 0, 'iterable');
   if (iterable === undefined) throw typeError("enumerate() missing required argument 'iterable'");
-  checkArgs({ qualified: 'enumerate', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'start'] }, args, kwargs);
+  checkArgs(
+    { qualified: 'enumerate', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'start'], named: 2 },
+    args,
+    kwargs
+  );
   let index = toIndex(argument(args, kwargs, 1, 'start') ?? 0n);
   const next = iterate(iterable);
   return new PyIterator(
@@ -378,7 +382,11 @@ function modInverse(value: bigint, modulus: bigint): bigint {
 }
 
 function round(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'round', min: 1, max: 2, style: 'takes', keywords: ['number', 'ndigits'] }, args, kwargs);
+  checkArgs(
+    { qualified: 'round', min: 1, max: 2, style: 'takes', keywords: ['number', 'ndigits'], named: 2 },
+    args,
+    kwargs
+  );
   const value = argument(args, kwargs, 0, 'number') as PyValue;
   const digits = argument(args, kwargs, 1, 'ndigits');
   if (typeof value === 'bigint' || typeof value === 'boolean') return roundInt(BigInt(value), digits);
@@ -593,7 +601,7 @@ export function createBuiltins(): Map<string, PyValue> {
       builtin('print', 'expected', 0, Number.POSITIVE_INFINITY, print, { keywords: ['sep', 'end', 'file', 'flush'] }),
     ],
     ['repr', one('repr', ([value]) => pyRepr(value))],
-    ['round', builtin('round', 'takes', 1, 2, round, { keywords: ['number', 'ndigits'] })],
+    ['round', builtin('round', 'takes', 1, 2, round, { keywords: ['number', 'ndigits'], named: 2 })],
     [
       'setattr',
       builtin('setattr', 'expected', 3, 3, ([object, name, value]) => {

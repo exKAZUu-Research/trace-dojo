@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 582 -- The statement evaluator keeps one method per kind of statement together.
+// code-gauge-allow-file fileNcss 588 -- The statement evaluator keeps one method per kind of statement together.
 import type { ExceptHandler, Expression, MatchCase, Pattern, Statement, Target } from './ast';
 import { createClass } from './classes';
 import { pyRepr } from './conversions';
@@ -50,6 +50,18 @@ export class Evaluator extends ExpressionEvaluator {
 
   constructor(runtime: Runtime) {
     super(runtime);
+  }
+
+  /** Puts back the exceptions a generator was handling when it last yielded, returning the depth below them. */
+  resumeHandling(handled: PyInstance[]): number {
+    const depth = this.handling.length;
+    this.handling.push(...handled);
+    return depth;
+  }
+
+  /** Takes off the exceptions a generator is handling as it yields, so that its caller does not see them. */
+  suspendHandling(depth: number): PyInstance[] {
+    return this.handling.splice(depth);
   }
 
   runFunction(fn: PyFunction, frame: Frame): PyValue {

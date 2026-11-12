@@ -76,10 +76,16 @@ function isAlpha(char: string): boolean {
 
 const asStr = (self: PyValue): string => self as string;
 
-function expectStr(value: PyValue, what: string): string {
-  if (typeof value !== 'string') throw typeError(`${what} must be str, not ${typeName(value)}`);
+/** Checks that an argument is a str, raising the TypeError whose text `message` makes from the argument's type. */
+function expectStr(value: PyValue, message: (type: string) => string): string {
+  if (typeof value !== 'string') throw typeError(message(typeName(value)));
   return value;
 }
+
+const mustBeStr =
+  (what: string) =>
+  (type: string): string =>
+    `${what} must be str, not ${type}`;
 
 function every(text: string, test: (char: string) => boolean): boolean {
   const chars = iterStr(text);
@@ -96,10 +102,12 @@ method(strClass, '__len__', 'none', 0, 0, (self) => BigInt(strLength(asStr(self)
 method(strClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
 method(strClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
 method(strClass, '__contains__', 'one', 1, 1, (self, [item]) =>
-  asStr(self).includes(expectStr(item, "'in <string>' requires string as left operand, not"))
+  asStr(self).includes(expectStr(item, (type) => `'in <string>' requires string as left operand, not ${type}`))
 );
 method(strClass, '__mod__', 'one', 1, 1, (self, [value]) => formatPercent(asStr(self), value));
-method(strClass, '__format__', 'one', 1, 1, (self, [spec]) => pyFormat(self, expectStr(spec, 'format spec')));
+method(strClass, '__format__', 'one', 1, 1, (self, [spec]) =>
+  pyFormat(self, expectStr(spec, mustBeStr('__format__() argument')))
+);
 
 // Case --------------------------------------------------------------------------------------------------------------
 
@@ -183,14 +191,14 @@ for (const [name, fromEnd, raises] of [
   ['rindex', true, true],
 ] as const) {
   method(strClass, name, 'expected', 1, 3, (self, [sub, start, end]) => {
-    const index = findIn(asStr(self), expectStr(sub, `${name}() argument 1`), start, end, fromEnd);
+    const index = findIn(asStr(self), expectStr(sub, mustBeStr(`${name}() argument 1`)), start, end, fromEnd);
     if (index === -1 && raises) throw valueError('substring not found');
     return BigInt(index);
   });
 }
 
 method(strClass, 'count', 'expected', 1, 3, (self, [sub, start, end]) => {
-  const needle = expectStr(sub, 'count() argument 1');
+  const needle = expectStr(sub, mustBeStr('count() argument 1'));
   const { points, from, to } = bounds(asStr(self), start, end);
   currentRuntime().scan(points.length);
   if (needle === '') return BigInt(to - from + 1);
@@ -259,7 +267,7 @@ for (const [name, fromEnd] of [
       const text = asStr(self);
       currentRuntime().scan(text.length);
       if (sep === None) return newList(splitWhitespace(text, limit, fromEnd));
-      const separator = expectStr(sep, 'must be str or None, not');
+      const separator = expectStr(sep, (type) => `must be str or None, not ${type}`);
       if (separator === '') throw valueError('empty separator');
       const parts = text.split(separator);
       if (limit < 0 || parts.length - 1 <= limit) return newList(parts);
@@ -315,7 +323,7 @@ for (const [name, fromEnd] of [
 ] as const) {
   method(strClass, name, 'one', 1, 1, (self, [sep]) => {
     const text = asStr(self);
-    const separator = expectStr(sep, 'must be str, not');
+    const separator = expectStr(sep, (type) => `must be str, not ${type}`);
     if (separator === '') throw valueError('empty separator');
     const index = fromEnd ? text.lastIndexOf(separator) : text.indexOf(separator);
     if (index === -1) return newTuple(fromEnd ? ['', '', text] : [text, '', '']);
@@ -338,7 +346,7 @@ for (const [name, left, right] of [
         : (
             (set: Set<string>) => (char: string) =>
               set.has(char)
-          )(new Set(iterStr(expectStr(chars, `${name} arg must be None or str, not`))));
+          )(new Set(iterStr(expectStr(chars, () => `${name} arg must be None or str`))));
     let start = 0;
     let end = points.length;
     if (left) while (start < end && strip(points[start])) start++;
@@ -355,7 +363,10 @@ for (const [name, place] of [
   method(strClass, name, 'expected', 1, 2, (self, [width, fill]) => {
     const text = asStr(self);
     const target = Number(toIndex(width));
-    const fillChar = fill === undefined ? ' ' : expectStr(fill, `${name}() argument 2`);
+    const fillChar =
+      fill === undefined
+        ? ' '
+        : expectStr(fill, (type) => `The fill character must be a unicode character, not ${type}`);
     if (iterStr(fillChar).length !== 1) throw typeError('The fill character must be exactly one character long');
     const length = strLength(text);
     const missing = target - length;
@@ -415,8 +426,8 @@ method(
   3,
   (self, args, kwargs) => {
     const text = asStr(self);
-    const old = expectStr(args[0], 'replace() argument 1');
-    const replacement = expectStr(args[1], 'replace() argument 2');
+    const old = expectStr(args[0], mustBeStr('replace() argument 1'));
+    const replacement = expectStr(args[1], mustBeStr('replace() argument 2'));
     let count = Number(toIndex(argument(args, kwargs, 2, 'count') ?? -1n));
     if (count < 0) count = Number.POSITIVE_INFINITY;
     let result = '';
@@ -450,12 +461,12 @@ method(
 
 method(strClass, 'removeprefix', 'one', 1, 1, (self, [prefix]) => {
   const text = asStr(self);
-  const value = expectStr(prefix, 'removeprefix() argument');
+  const value = expectStr(prefix, mustBeStr('removeprefix() argument'));
   return value !== '' && text.startsWith(value) ? text.slice(value.length) : text;
 });
 method(strClass, 'removesuffix', 'one', 1, 1, (self, [suffix]) => {
   const text = asStr(self);
-  const value = expectStr(suffix, 'removesuffix() argument');
+  const value = expectStr(suffix, mustBeStr('removesuffix() argument'));
   return value !== '' && text.endsWith(value) ? text.slice(0, -value.length) : text;
 });
 
@@ -506,13 +517,15 @@ function makeTranslation(args: PyValue[]): PyDict {
     }
     return table;
   }
-  const from = iterStr(expectStr(args[0], 'maketrans() argument 1'));
-  const to = iterStr(expectStr(args[1], 'maketrans() argument 2'));
+  const from = iterStr(
+    expectStr(args[0], () => 'first maketrans argument must be a string if there is a second argument')
+  );
+  const to = iterStr(expectStr(args[1], mustBeStr('maketrans() argument 2')));
   if (from.length !== to.length) throw valueError('the first two maketrans arguments must have equal length');
   for (const [index, char] of from.entries())
     table.store.set(BigInt(char.codePointAt(0) as number), BigInt(to[index].codePointAt(0) as number));
   if (args[2] !== undefined)
-    for (const char of iterStr(expectStr(args[2], 'maketrans() argument 3')))
+    for (const char of iterStr(expectStr(args[2], mustBeStr('maketrans() argument 3'))))
       table.store.set(BigInt(char.codePointAt(0) as number), None);
   return table;
 }

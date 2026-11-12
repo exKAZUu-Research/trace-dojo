@@ -17,7 +17,16 @@ import type {
   Target,
   WithItem,
 } from './ast';
-import { children, field, fieldNodes, hasToken, namedChildren, rowOf, unsupported } from './convertNodes';
+import {
+  checkClauseLines,
+  children,
+  field,
+  fieldNodes,
+  hasToken,
+  namedChildren,
+  rowOf,
+  unsupported,
+} from './convertNodes';
 import { ExpressionConverter } from './expressionConverter';
 import { isSupportedModule, unsupportedModuleFeature } from './moduleNames';
 import { fail, resolveScopes, ScopeBuilder } from './scopes';
@@ -81,9 +90,10 @@ export class ProgramConverter extends ExpressionConverter {
     }
   }
 
-  // code-gauge-allow functionNcss 55 -- One case per kind of statement node, each delegating where it grows.
+  // code-gauge-allow functionNcss 56 -- One case per kind of statement node, each delegating where it grows.
   private statement(node: Node): Statement[] {
     const row = rowOf(node);
+    checkClauseLines(node);
     switch (node.type) {
       case 'expression_statement': {
         return [this.expressionStatement(node)];
@@ -169,7 +179,9 @@ export class ProgramConverter extends ExpressionConverter {
     const row = rowOf(node);
     const word = node.type === 'break_statement' ? 'break' : 'continue';
     if (!this.context.inLoop) fail(row, `${word} 文はループの中にしか書けません。`);
-    if (this.context.inExceptStar) fail(row, `except* の中には ${word} 文を書けません。`);
+    if (this.context.inExceptStar && !this.context.inLoopOfExceptStar) {
+      fail(row, `except* の中には ${word} 文を書けません。`);
+    }
     return { kind: word, row };
   }
 
@@ -365,7 +377,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   private loopBody(node: Node): Statement[] {
     const outer = this.context;
-    this.context = { ...outer, inLoop: true, inExceptStar: false };
+    this.context = { ...outer, inLoop: true, inLoopOfExceptStar: outer.inExceptStar };
     try {
       return this.nestedBlock(node, () => this.body(node));
     } finally {
@@ -444,7 +456,7 @@ export class ProgramConverter extends ExpressionConverter {
     const name = aliasNode ? this.bindName(aliasNode) : undefined;
     const blockNode = namedChildren(handler).find((child) => child.type === 'block') as Node;
     const outer = this.context;
-    this.context = { ...outer, inExceptStar: isGroup || outer.inExceptStar };
+    this.context = isGroup ? { ...outer, inExceptStar: true, inLoopOfExceptStar: false } : outer;
     try {
       return { types, name, body: this.body(blockNode), row };
     } finally {
@@ -534,6 +546,7 @@ export class ProgramConverter extends ExpressionConverter {
       qualifiedPrefix: `${qualifiedName}.`,
       inLoop: false,
       inExceptStar: false,
+      inLoopOfExceptStar: false,
     };
     let body: Statement[];
     try {

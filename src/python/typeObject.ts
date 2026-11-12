@@ -137,7 +137,9 @@ method(typeClass, '__repr__', 'none', 0, 0, (self) => {
   return `<class '${module}${cls.qualifiedName}'>`;
 });
 method(typeClass, 'mro', 'none', 0, 0, (self) => currentRuntime().listOf([...(self as PyClass).mro]));
-method(typeClass, '__subclasses__', 'none', 0, 0, (self) => currentRuntime().listOf([...(self as PyClass).subclasses]));
+method(typeClass, '__subclasses__', 'none', 0, 0, (self) =>
+  currentRuntime().listOf([...currentRuntime().subclassesOf(self as PyClass)])
+);
 method(typeClass, '__instancecheck__', 'one', 1, 1, (self, [value]) => classOf(value).isSubclassOf(self as PyClass));
 method(
   typeClass,

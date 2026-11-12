@@ -173,7 +173,8 @@ function newClassFromNamespace(
   cls.isBaseType = true;
   cls.module = module;
   cls.mro = computeMro(cls);
-  for (const base of bases) base.subclasses.push(cls);
+  const runtime = currentRuntime();
+  for (const base of bases) runtime.subclassesOf(base).push(cls);
   cls.layout = { base: layoutOf(bases) };
   if (!namespace.has('__doc__')) namespace.set('__doc__', None);
   if (bases.every((base) => base.isBuiltin)) {

@@ -40,6 +40,7 @@ function asType(fn: PyBuiltinFunction): PyClass {
 // itertools.tee -------------------------------------------------------------------------------------------------------
 
 interface TeeBuffer {
+  source: PyValue;
   next: NextFunction;
   items: PyValue[];
   done: boolean;
@@ -61,7 +62,7 @@ function newTee(buffer: TeeBuffer, position: number): PyIterator {
       }
       return buffer.items[index++];
     },
-    () => buffer.items
+    () => [buffer.source, ...buffer.items]
   );
   teeStates.set(iterator, () => newTee(buffer, index));
   return iterator;
@@ -75,18 +76,24 @@ function tee(args: PyValue[]): PyValue {
   if (count < 0n) throw valueError('n must be >= 0');
   if (count === 0n) return newTuple([]);
   const copyOf = iterable instanceof PyIterator ? teeStates.get(iterable) : undefined;
-  const first = copyOf ? copyOf() : newTee({ next: iterate(iterable), items: [], done: false }, 0);
+  const first = copyOf ? copyOf() : newTee({ source: iterable, next: iterate(iterable), items: [], done: false }, 0);
   const copies: PyValue[] = [first];
   while (copies.length < Number(count)) copies.push((teeStates.get(first) as () => PyIterator)());
   return newTuple(copies);
 }
 
-function fromArray(name: string, items: PyValue[]): PyIterator {
-  let index = 0;
+/** An iterator that makes each tuple only when it is asked for, as the combinatoric iterators of CPython do. */
+function lazily(name: string, tuples: Generator<PyValue[]>, pools: PyValue[][]): PyIterator {
+  const runtime = currentRuntime();
   return iteratorOf(
     name,
-    () => (index < items.length ? items[index++] : DONE),
-    () => items
+    () => {
+      const result = tuples.next();
+      if (result.done) return DONE;
+      runtime.allocate(result.value.length + 1);
+      return newTuple(result.value);
+    },
+    () => pools
   );
 }
 
@@ -126,12 +133,16 @@ function cycle([iterable]: PyValue[]): PyValue {
       index = (index + 1) % saved.length;
       return item;
     },
-    () => saved
+    () => [iterable, ...saved]
   );
 }
 
 function repeat(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'repeat', min: 1, max: 2, style: 'takes', keywords: ['object', 'times'] }, args, kwargs);
+  checkArgs(
+    { qualified: 'repeat', min: 1, max: 2, style: 'takes', keywords: ['object', 'times'], named: 2 },
+    args,
+    kwargs
+  );
   const object = argument(args, kwargs, 0, 'object') as PyValue;
   const times = argument(args, kwargs, 1, 'times');
   let remaining = times === undefined ? -1n : toIndex(times);
@@ -148,11 +159,12 @@ function repeat(args: PyValue[], kwargs: Kwargs): PyValue {
 
 function accumulate(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
-    { qualified: 'accumulate', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'func', 'initial'] },
+    { qualified: 'accumulate', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'func', 'initial'], named: 2 },
     args,
     kwargs
   );
-  const next = iterate(argument(args, kwargs, 0, 'iterable') as PyValue);
+  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
+  const next = iterate(iterable);
   const fn = argument(args, kwargs, 1, 'func') ?? None;
   const initial = kwargs?.get('initial') ?? None;
   let total: PyValue | undefined = initial === None ? undefined : initial;
@@ -169,7 +181,7 @@ function accumulate(args: PyValue[], kwargs: Kwargs): PyValue {
       total = total === undefined ? item : fn === None ? binaryOp('+', total, item) : callValue(fn, [total, item]);
       return total;
     },
-    () => (total === undefined ? [] : [total])
+    () => [iterable, fn, total]
   );
 }
 
@@ -207,19 +219,18 @@ function chainOf(nextIterable: NextFunction, holds: () => Iterable<unknown>): Py
 }
 
 // code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the index loop of itertools.combinations.
-function combinations(pool: PyValue[], r: number, withReplacement: boolean): PyValue[] {
-  const results: PyValue[] = [];
+function* combinations(pool: PyValue[], r: number, withReplacement: boolean): Generator<PyValue[]> {
   const n = pool.length;
-  if (!withReplacement && r > n) return results;
-  if (withReplacement && n === 0 && r > 0) return results;
+  if (!withReplacement && r > n) return;
+  if (withReplacement && n === 0 && r > 0) return;
   const indices = withReplacement ? Array.from({ length: r }, () => 0) : Array.from({ length: r }, (_, index) => index);
   const runtime = currentRuntime();
-  results.push(newTuple(indices.map((index) => pool[index])));
+  yield indices.map((index) => pool[index]);
   for (;;) {
     runtime.spend();
     let i = r - 1;
     while (i >= 0 && indices[i] === (withReplacement ? n - 1 : i + n - r)) i--;
-    if (i < 0) return results;
+    if (i < 0) return;
     if (withReplacement) {
       const value = indices[i] + 1;
       for (let j = i; j < r; j++) indices[j] = value;
@@ -227,18 +238,16 @@ function combinations(pool: PyValue[], r: number, withReplacement: boolean): PyV
       indices[i]++;
       for (let j = i + 1; j < r; j++) indices[j] = indices[j - 1] + 1;
     }
-    runtime.allocate(r);
-    results.push(newTuple(indices.map((index) => pool[index])));
+    yield indices.map((index) => pool[index]);
   }
 }
 
-function permutations(pool: PyValue[], r: number): PyValue[] {
+function* permutations(pool: PyValue[], r: number): Generator<PyValue[]> {
   const n = pool.length;
-  const results: PyValue[] = [];
-  if (r > n) return results;
+  if (r > n) return;
   const indices = Array.from({ length: n }, (_, index) => index);
   const cycles = Array.from({ length: r }, (_, index) => n - index);
-  results.push(newTuple(indices.slice(0, r).map((index) => pool[index])));
+  yield indices.slice(0, r).map((index) => pool[index]);
   const runtime = currentRuntime();
   while (n > 0) {
     let found = false;
@@ -251,15 +260,13 @@ function permutations(pool: PyValue[], r: number): PyValue[] {
       } else {
         const j = cycles[i];
         [indices[i], indices[n - j]] = [indices[n - j], indices[i]];
-        runtime.allocate(r);
-        results.push(newTuple(indices.slice(0, r).map((index) => pool[index])));
+        yield indices.slice(0, r).map((index) => pool[index]);
         found = true;
         break;
       }
     }
-    if (!found) return results;
+    if (!found) return;
   }
-  return results;
 }
 
 function product(args: PyValue[], kwargs: Kwargs): PyValue {
@@ -270,30 +277,36 @@ function product(args: PyValue[], kwargs: Kwargs): PyValue {
   );
   const times = Number(toIndex(kwargs?.get('repeat') ?? 1n));
   if (times < 0) throw valueError('repeat argument cannot be negative');
+  const sources = args.map((iterable) => toArray(iterable));
   const pools: PyValue[][] = [];
-  for (let index = 0; index < times; index++) for (const iterable of args) pools.push(toArray(iterable));
-  let results: PyValue[][] = [[]];
+  for (let index = 0; index < times; index++) pools.push(...sources);
+  return lazily('product', productOf(pools), pools);
+}
+
+/** The tuples of the product in order, the last pool advancing fastest. */
+function* productOf(pools: PyValue[][]): Generator<PyValue[]> {
+  if (pools.some((pool) => pool.length === 0)) return;
+  const indices = pools.map(() => 0);
   const runtime = currentRuntime();
-  for (const pool of pools) {
-    const next: PyValue[][] = [];
-    for (const result of results)
-      for (const item of pool) {
-        runtime.spend();
-        next.push([...result, item]);
-      }
-    results = next;
+  for (;;) {
+    yield indices.map((index, position) => pools[position][index]);
+    runtime.spend();
+    let position = pools.length - 1;
+    while (position >= 0 && indices[position] === pools[position].length - 1) indices[position--] = 0;
+    if (position < 0) return;
+    indices[position]++;
   }
-  runtime.allocate(results.length);
-  return fromArray(
-    'product',
-    results.map((items) => newTuple(items))
-  );
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows itertools.groupby, whose groups share one underlying iterator.
 function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'groupby', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'key'] }, args, kwargs);
-  const next = iterate(argument(args, kwargs, 0, 'iterable') as PyValue);
+  checkArgs(
+    { qualified: 'groupby', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'key'], named: 2 },
+    args,
+    kwargs
+  );
+  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
+  const next = iterate(iterable);
   const keyFn = argument(args, kwargs, 1, 'key') ?? None;
   let pending: PyValue | typeof DONE | undefined;
   let pendingKey: PyValue | undefined;
@@ -319,11 +332,11 @@ function groupby(args: PyValue[], kwargs: Kwargs): PyValue {
           advance();
           return item;
         },
-        () => []
+        () => [iterable, pending]
       );
       return newTuple([groupKey, group]);
     },
-    () => []
+    () => [iterable, keyFn, pending, pendingKey]
   );
 }
 
@@ -426,12 +439,13 @@ function filtering(
 
 function batched(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
-    { qualified: 'batched', min: 2, max: 2, style: 'takes', keywords: ['iterable', 'n', 'strict'] },
+    { qualified: 'batched', min: 2, max: 2, style: 'takes', keywords: ['iterable', 'n', 'strict'], named: 2 },
     args,
     kwargs
   );
-  const next = iterate(args[0]);
-  const size = Number(toIndex(args[1]));
+  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
+  const next = iterate(iterable);
+  const size = Number(toIndex(argument(args, kwargs, 1, 'n') as PyValue));
   if (size < 1) throw valueError('n must be at least one');
   const strict = isTruthy(kwargs?.get('strict') ?? false);
   return iteratorOf(
@@ -447,7 +461,7 @@ function batched(args: PyValue[], kwargs: Kwargs): PyValue {
       if (strict && items.length < size) throw valueError('batched(): incomplete batch');
       return newTuple(items);
     },
-    () => [args[0]]
+    () => [iterable]
   );
 }
 
@@ -472,18 +486,21 @@ registerModule('itertools', () => {
   return new Map<string, PyValue>([
     ['count', asType(builtin('count', 'takes', 0, 2, count, { keywords: ['start', 'step'] }))],
     ['cycle', asType(builtin('cycle', 'expected', 1, 1, cycle))],
-    ['repeat', asType(builtin('repeat', 'takes', 1, 2, repeat, { keywords: ['object', 'times'] }))],
+    ['repeat', asType(builtin('repeat', 'takes', 1, 2, repeat, { keywords: ['object', 'times'], named: 2 }))],
     [
       'accumulate',
-      asType(builtin('accumulate', 'takes', 1, 2, accumulate, { keywords: ['iterable', 'func', 'initial'] })),
+      asType(builtin('accumulate', 'takes', 1, 2, accumulate, { keywords: ['iterable', 'func', 'initial'], named: 2 })),
     ],
     ['chain', chainClass],
     ['tee', builtin('tee', 'expected', 1, 2, tee)],
     ['combinations', asType(combinationsBuiltin('combinations', false))],
     ['combinations_with_replacement', asType(combinationsBuiltin('combinations_with_replacement', true))],
-    ['permutations', asType(builtin('permutations', 'takes', 1, 2, permutationsOf, { keywords: ['iterable', 'r'] }))],
+    [
+      'permutations',
+      asType(builtin('permutations', 'takes', 1, 2, permutationsOf, { keywords: ['iterable', 'r'], named: 2 })),
+    ],
     ['product', asType(builtin('product', 'takes', 0, Number.POSITIVE_INFINITY, product, { keywords: ['repeat'] }))],
-    ['groupby', asType(builtin('groupby', 'takes', 1, 2, groupby, { keywords: ['iterable', 'key'] }))],
+    ['groupby', asType(builtin('groupby', 'takes', 1, 2, groupby, { keywords: ['iterable', 'key'], named: 2 }))],
     ['islice', asType(builtin('islice', 'expected', 2, 4, islice))],
     [
       'zip_longest',
@@ -496,9 +513,12 @@ registerModule('itertools', () => {
       'filterfalse',
       asType(filtering('filterfalse', (fn, item) => !isTruthy(fn === None ? item : callValue(fn, [item])))),
     ],
-    ['compress', asType(builtin('compress', 'takes', 2, 2, compress, { keywords: ['data', 'selectors'] }))],
+    ['compress', asType(builtin('compress', 'takes', 2, 2, compress, { keywords: ['data', 'selectors'], named: 2 }))],
     ['pairwise', asType(builtin('pairwise', 'one', 1, 1, pairwise))],
-    ['batched', asType(builtin('batched', 'takes', 2, 2, batched, { keywords: ['iterable', 'n', 'strict'] }))],
+    [
+      'batched',
+      asType(builtin('batched', 'takes', 2, 2, batched, { keywords: ['iterable', 'n', 'strict'], named: 2 })),
+    ],
   ]);
 });
 
@@ -508,22 +528,17 @@ function combinationsBuiltin(name: string, withReplacement: boolean): PyBuiltinF
     'takes',
     2,
     2,
-    (args, kwargs) =>
-      fromArray(
-        name,
-        combinations(
-          toArray(argument(args, kwargs, 0, 'iterable') as PyValue),
-          sizeOf(argument(args, kwargs, 1, 'r'), 0),
-          withReplacement
-        )
-      ),
-    { keywords: ['iterable', 'r'] }
+    (args, kwargs) => {
+      const pool = toArray(argument(args, kwargs, 0, 'iterable') as PyValue);
+      return lazily(name, combinations(pool, sizeOf(argument(args, kwargs, 1, 'r'), 0), withReplacement), [pool]);
+    },
+    { keywords: ['iterable', 'r'], named: 2 }
   );
 }
 
 function permutationsOf(args: PyValue[], kwargs: Kwargs): PyIterator {
   const pool = toArray(argument(args, kwargs, 0, 'iterable') as PyValue);
-  return fromArray('permutations', permutations(pool, sizeOf(argument(args, kwargs, 1, 'r'), pool.length)));
+  return lazily('permutations', permutations(pool, sizeOf(argument(args, kwargs, 1, 'r'), pool.length)), [pool]);
 }
 
 function starmap([fn, iterable]: PyValue[]): PyIterator {
@@ -544,7 +559,9 @@ function keepAfterDropping(fn: PyValue, item: PyValue, state: { dropping: boolea
   return true;
 }
 
-function compress([data, selectors]: PyValue[]): PyIterator {
+function compress(args: PyValue[], kwargs: Kwargs): PyIterator {
+  const data = argument(args, kwargs, 0, 'data') as PyValue;
+  const selectors = argument(args, kwargs, 1, 'selectors') as PyValue;
   const nextData = iterate(data);
   const nextSelector = iterate(selectors);
   return iteratorOf(

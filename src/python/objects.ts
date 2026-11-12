@@ -145,11 +145,21 @@ export function attributeError(value: PyValue, name: string): PyError {
 
 /** Reads `value.name`, raising AttributeError when it is missing. */
 export function getAttribute(value: PyValue, name: string): PyValue {
-  const found = findAttribute(value, name);
-  if (found !== undefined) return found;
   const getattr = value instanceof PyClass ? undefined : lookupSpecial(value, '__getattr__');
+  let found: PyValue | undefined;
+  try {
+    found = findAttribute(value, name);
+  } catch (error) {
+    // A descriptor that raises AttributeError reports the attribute as missing, so `__getattr__` still applies.
+    if (getattr === undefined || !isAttributeError(error)) throw error;
+  }
+  if (found !== undefined) return found;
   if (getattr !== undefined) return callValue(bindValue(getattr, value), [name]);
   throw attributeError(value, name);
+}
+
+function isAttributeError(error: unknown): boolean {
+  return error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('AttributeError'));
 }
 
 /** Reads `value.name`, or returns undefined when it is missing. */
@@ -157,7 +167,7 @@ export function getAttributeOrUndefined(value: PyValue, name: string): PyValue |
   try {
     return getAttribute(value, name);
   } catch (error) {
-    if (error instanceof PyError && error.exception.cls.name === 'AttributeError') return undefined;
+    if (isAttributeError(error)) return undefined;
     throw error;
   }
 }

@@ -153,6 +153,92 @@ if str(out) != expected:
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+// CPython 3.14.10 runs this program without raising.
+test('limits, generators, copies, views, and builtin argument handling follow CPython', () => {
+  const program = `import bisect
+import copy
+import itertools
+import statistics
+out = []
+out.append([[] * 1000000000000, statistics.mode(range(30000)), hash(float('5e-324'))])
+def handler():
+    try:
+        raise ValueError('inside')
+    except ValueError:
+        yield 1
+suspended = handler()
+next(suspended)
+try:
+    raise
+except RuntimeError as e:
+    out.append(str(e))
+class Item:
+    pass
+item = Item()
+item.values = [1]
+next(iter(copy.deepcopy({item}))).values.append(2)
+cycle = []
+pair = (cycle,)
+cycle.append(pair)
+copied = copy.deepcopy(pair)
+out.append([item.values, copied[0][0] is copied])
+out.append([{'x': 1}.keys() == {'x': 2}.keys(), {'x': 1}.items() == {('x', 1)}, {'x': 1}.items() == {'x': 2}.items()])
+out.append([list(enumerate(iterable=['a'])), bisect.bisect_left(a=[1, 2], x=2)])
+total = sum([1, \\
+    2])
+out.append(total)
+class Fallback:
+    @property
+    def missing(self):
+        raise AttributeError()
+    def __getattr__(self, name):
+        return 7
+out.append(Fallback().missing)
+out.append([next(itertools.permutations(range(9))), next(itertools.product(range(1000), range(1000)))])
+class Times:
+    def __rmul__(self, other):
+        return 'rmul'
+out.append([1, 2] * Times())
+for bad in [lambda: 'a' * 1.5, lambda: 'abc'.split(1), lambda: 'abc'.strip(1), lambda: bisect.bisect_left(x=2)]:
+    try:
+        bad()
+    except TypeError as e:
+        out.append(str(e))
+expected = "[[[], 0, 16777216], 'No active exception to reraise', [[1], True], [True, True, False], [[(0, 'a')], 1], 3, 7, [(0, 1, 2, 3, 4, 5, 6, 7, 8), (0, 0)], 'rmul', \\"can't multiply sequence by non-int of type 'float'\\", 'must be str or None, not int', 'strip arg must be None or str', \\"bisect_left() missing required argument 'a' (pos 1)\\"]"
+if str(out) != expected:
+    raise ValueError(str(out))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test('a turtle stays while a class attribute, a bound method, or a library object reaches it', () => {
+  const program = `import functools
+class Base:
+    kept = Turtle(0, 0)
+class Derived(Base):
+    pass
+del Base
+move = Turtle(1, 0).forward
+step = functools.partial(Turtle.forward, Turtle(2, 0))
+move()
+step()
+Derived.kept.forward()`;
+  expect(executeProgram('python', program)).toMatchObject({
+    finalTurtles: [
+      { x: 0, y: 1, color: '#', dir: 'N' },
+      { x: 1, y: 1, color: '#', dir: 'N' },
+      { x: 2, y: 1, color: '#', dir: 'N' },
+    ],
+  });
+});
+
+test('a run does not see the classes an earlier run defined', () => {
+  executeProgram('python', 'class Leaked:\n    pass');
+  const program = `names = [cls.__name__ for cls in object.__subclasses__()]
+if 'Leaked' in names:
+    raise ValueError(str(names))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('sys.exit ends the program without an uncaught exception', () => {
   expect(executeProgram('python', 'import sys\nsys.exit(3)\nraise ValueError')).toMatchObject({
     kind: 'executed',
@@ -169,6 +255,13 @@ test.each([
   ['a capture pattern before another case', 'match 1:\n    case x:\n        pass\n    case 2:\n        pass', 1],
   ['nonlocal at module level', 'nonlocal x', 0],
   ['a try without except or finally', 'try:\n    pass\nelse:\n    pass', 0],
+  ['an else clause after a statement on its line', 'if True: x = 1; else: x = 2', 0],
+  ['a bare * followed only by **kwargs', 'def f(*, **kwargs):\n    pass', 0],
+  [
+    'return in a loop of an except* clause',
+    'def f():\n    try:\n        pass\n    except* ValueError:\n        for i in range(1):\n            return 2',
+    5,
+  ],
   ['a type hint on a name declared global', 'def f():\n    global x\n    x: int = 1', 2],
   ['a Python 2 print statement', "print 'x'", 0],
   ['a conditional expression, which this grader does not support', 'x = 1 if True else 2', 0],

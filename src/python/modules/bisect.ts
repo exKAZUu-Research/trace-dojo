@@ -15,7 +15,7 @@ function bounds(
   kwargs: Kwargs,
   name: string
 ): { a: PyValue; x: PyValue; lo: number; hi: number; key: PyValue } {
-  checkArgs({ qualified: name, min: 2, max: 4, style: 'takes', keywords: KEYWORDS }, args, kwargs);
+  checkArgs({ qualified: name, min: 2, max: 4, style: 'takes', keywords: KEYWORDS, named: 4 }, args, kwargs);
   const a = argument(args, kwargs, 0, 'a') as PyValue;
   const x = argument(args, kwargs, 1, 'x') as PyValue;
   const lo = Number(toIndex(argument(args, kwargs, 2, 'lo') ?? 0n));
@@ -49,9 +49,10 @@ function search(args: PyValue[], kwargs: Kwargs, name: string, right: boolean): 
 function insort(right: boolean, name: string): (args: PyValue[], kwargs: Kwargs) => PyValue {
   return (args, kwargs) => {
     const { a, x, key } = bounds(args, kwargs, name);
-    const searchArgs = [...args];
-    searchArgs[1] = key === None ? x : callValue(key, [x]);
-    const index = search(searchArgs, kwargs, name, right);
+    const others = new Map(kwargs);
+    others.delete('a');
+    others.delete('x');
+    const index = search([a, key === None ? x : callValue(key, [x]), ...args.slice(2)], others, name, right);
     if (a instanceof PyList) a.items.splice(index, 0, x);
     else callValue(getAttribute(a, 'insert'), [BigInt(index), x]);
     return None;
@@ -65,7 +66,7 @@ registerModule('bisect', () => {
     2,
     4,
     (args, kwargs) => BigInt(search(args, kwargs, 'bisect_left', false)),
-    { keywords: KEYWORDS }
+    { keywords: KEYWORDS, named: 4 }
   );
   const right = builtin(
     'bisect_right',
@@ -73,10 +74,16 @@ registerModule('bisect', () => {
     2,
     4,
     (args, kwargs) => BigInt(search(args, kwargs, 'bisect_right', true)),
-    { keywords: KEYWORDS }
+    { keywords: KEYWORDS, named: 4 }
   );
-  const insortLeft = builtin('insort_left', 'takes', 2, 4, insort(false, 'insort_left'), { keywords: KEYWORDS });
-  const insortRight = builtin('insort_right', 'takes', 2, 4, insort(true, 'insort_right'), { keywords: KEYWORDS });
+  const insortLeft = builtin('insort_left', 'takes', 2, 4, insort(false, 'insort_left'), {
+    keywords: KEYWORDS,
+    named: 4,
+  });
+  const insortRight = builtin('insort_right', 'takes', 2, 4, insort(true, 'insort_right'), {
+    keywords: KEYWORDS,
+    named: 4,
+  });
   return new Map<string, PyValue>([
     ['bisect_left', left],
     ['bisect_right', right],

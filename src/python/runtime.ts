@@ -63,6 +63,8 @@ export class Runtime {
   readonly modules = new Map<string, PyModule>();
   readonly evaluator: Evaluator;
   private row: number | undefined;
+  /** The classes this run defined, by base class: builtin classes outlive a run, so they cannot hold them. */
+  private readonly subclasses = new Map<PyClass, PyClass[]>();
   private allocatedSlots = 0;
   private reprDepth = 0;
 
@@ -170,6 +172,7 @@ export class Runtime {
 
   private newGenerator(fn: PyFunction, frame: Frame): PyGenerator {
     const body = this.evaluator.runGenerator(fn, frame);
+    let handled: PyInstance[] = [];
     const generator: PyGenerator = new PyGenerator(
       generatorClass,
       fn.name,
@@ -177,13 +180,20 @@ export class Runtime {
       () => {
         if (fn.def.row !== LIBRARY_ROW) frame.callRow = this.currentRow;
         this.pushFrame(frame);
+        const depth = this.evaluator.resumeHandling(handled);
         try {
           return this.guardRecursion(() => body.next());
         } finally {
+          handled = this.evaluator.suspendHandling(depth);
           this.popFrame();
         }
       },
-      () => [...frame.locals.values(), ...[...frame.cells.values()].map((cell) => cell.value), ...frame.temporaries]
+      () => [
+        ...frame.locals.values(),
+        ...[...frame.cells.values()].map((cell) => cell.value),
+        ...frame.temporaries,
+        ...handled,
+      ]
     );
     return generator;
   }
@@ -365,6 +375,16 @@ export class Runtime {
     const selfClass = self instanceof PyClass && self.isSubclassOf(cls) ? self : classOf(self);
     if (!selfClass.isSubclassOf(cls)) throw typeError('super(type, obj): obj must be an instance or subtype of type');
     return new PySuper(superClass, cls, self, selfClass);
+  }
+
+  /** The classes defined with `cls` as a base, for `__subclasses__()`. */
+  subclassesOf(cls: PyClass): PyClass[] {
+    let subclasses = this.subclasses.get(cls);
+    if (!subclasses) {
+      subclasses = [];
+      this.subclasses.set(cls, subclasses);
+    }
+    return subclasses;
   }
 
   /** The object `print` writes to for `sys.stdout` or `sys.stderr`. */

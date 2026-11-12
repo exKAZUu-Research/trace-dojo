@@ -1,13 +1,13 @@
-// code-gauge-allow-file fileNcss 513 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 538 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
-import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, trueDivideInt } from './numbers';
+import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, toIndex, trueDivideInt } from './numbers';
 import { bindValue, callValue, iterate, lookupSpecial } from './objects';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
 import { dictViewBinary, isSetLikeView } from './setOperations';
 import { compareStr, strLength } from './strings';
-import { classOf, dictClass, newList, newSet, newTuple, NotImplemented, pyError, typeError, typeName } from './types';
+import { classOf, dictClass, newList, newTuple, NotImplemented, pyError, typeError, typeName } from './types';
 import {
   DONE,
   PyComplex,
@@ -114,6 +114,7 @@ function mappingItems(value: PyValue): [PyValue, PyValue][] {
 }
 
 function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
+  if (operator === '*' && (isBuiltinSequence(left) || isBuiltinSequence(right))) return dispatchRepeat(left, right);
   const [name, reflected] = SPECIAL_NAMES[operator];
   const leftClass = classOf(left);
   const rightClass = classOf(right);
@@ -131,6 +132,26 @@ function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue)
   }
   if (rightMethod !== undefined) return callValue(bindValue(rightMethod, right), [left]);
   return NotImplemented;
+}
+
+/**
+ * `sequence * other` where the native operation did not apply: the other operand's method decides, then its
+ * `__index__`. The sequence's own `__mul__` is not asked, because it raises where the operator must go on.
+ */
+function dispatchRepeat(left: PyValue, right: PyValue): PyValue {
+  const [sequence, other] = isBuiltinSequence(left) ? [left, right] : [right, left];
+  if (isBuiltinSequence(other)) return NotImplemented;
+  const method = lookupSpecial(other, sequence === left ? '__rmul__' : '__mul__');
+  if (method !== undefined) {
+    const result = callValue(bindValue(method, other), [sequence]);
+    if (result !== NotImplemented) return result;
+  }
+  if (lookupSpecial(other, '__index__') === undefined) return NotImplemented;
+  return nativeBinary('*', sequence, toIndex(other));
+}
+
+function isBuiltinSequence(value: PyValue): boolean {
+  return typeof value === 'string' || (isSequence(value) && value.cls.isBuiltin);
 }
 
 function binaryTypeError(operator: BinaryOperator, left: PyValue, right: PyValue): Error {
@@ -232,7 +253,7 @@ function repeatString(text: string, count: bigint | boolean): string {
 }
 
 function repeatSequence(sequence: PyList | PyTuple, count: bigint | boolean): PyValue {
-  const times = Math.max(repeatCount(count, sequence), 0);
+  const times = sequence.items.length === 0 ? 0 : Math.max(repeatCount(count, sequence), 0);
   currentRuntime().allocate(sequence.items.length * times);
   const items: PyValue[] = [];
   for (let index = 0; index < times; index++) items.push(...sequence.items);
@@ -540,15 +561,27 @@ function mappingEquals(left: PyValue, right: PyValue): boolean | undefined {
     if (hasOwnEquality(left) || hasOwnEquality(right)) return undefined;
     return dictsEqual(left, right);
   }
-  if (left instanceof PyDictView && right instanceof PyDictView) {
-    return left.view !== 'values' && left.view === right.view && dictsEqual(left.dict, right.dict);
-  }
-  if (left instanceof PyDictView && left.view === 'keys' && right instanceof PySet) {
-    return compareSets('==', newSet(iterateAll(left)), right);
-  }
+  if (left instanceof PyDictView || right instanceof PyDictView) return viewEquals(left, right);
   // Opaque builtins such as type hints compare with their own __eq__.
   if (left instanceof PyOpaque || right instanceof PyOpaque) return left === right ? true : undefined;
   return left === right;
+}
+
+/** Equality with a dict view: keys and items views compare as sets with each other and with sets, values views by identity. */
+function viewEquals(left: PyValue, right: PyValue): boolean {
+  if (left === right) return true;
+  if (!isSetLike(left) || !isSetLike(right)) return false;
+  const [view, other] = left instanceof PyDictView ? [left, right] : [right as PyDictView, left];
+  const items = iterateAll(view);
+  const size = other instanceof PySet ? other.table.keys().length : other.dict.store.ordered().length;
+  return (
+    items.length === size &&
+    items.every((item) => (other instanceof PySet ? other.table.has(item) : viewContains(other, item)))
+  );
+}
+
+function isSetLike(value: PyValue): value is PyDictView | PySet {
+  return value instanceof PySet || isSetLikeView(value);
 }
 
 function hasOwnEquality(dict: PyDict): boolean {

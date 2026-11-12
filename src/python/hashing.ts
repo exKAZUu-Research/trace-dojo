@@ -55,8 +55,11 @@ export function hashFloat(value: number): bigint {
 /** Splits a finite nonzero number into a mantissa in [0.5, 1) and a power of two, as C's frexp does. */
 export function frexp(value: number): { mantissa: number; exponent: number } {
   if (value === 0 || !Number.isFinite(value)) return { mantissa: value, exponent: 0 };
-  let exponent = Math.max(-1073, Math.floor(Math.log2(Math.abs(value))) + 1);
-  let mantissa = value * 2 ** -exponent;
+  // A subnormal is scaled up first: the power of two that normalizes it directly is not a finite number.
+  const isSubnormal = Math.abs(value) < 2 ** -1022;
+  const scaled = isSubnormal ? value * 2 ** 54 : value;
+  let exponent = Math.floor(Math.log2(Math.abs(scaled))) + 1;
+  let mantissa = scaled * 2 ** -exponent;
   while (Math.abs(mantissa) < 0.5) {
     mantissa *= 2;
     exponent--;
@@ -65,7 +68,7 @@ export function frexp(value: number): { mantissa: number; exponent: number } {
     mantissa /= 2;
     exponent++;
   }
-  return { mantissa, exponent };
+  return { mantissa, exponent: isSubnormal ? exponent - 54 : exponent };
 }
 
 function hashTuple(items: readonly PyValue[]): bigint {

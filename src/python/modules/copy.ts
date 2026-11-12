@@ -3,6 +3,7 @@ import { DictStore } from '../dictStore';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { bindValue, callValue, lookupSpecial } from '../objects';
 import { currentRuntime } from '../runtimeContext';
+import { SetTable } from '../setTable';
 import { classOf, exceptionClassNamed, nativeFunction, newDict, newTuple, typeError } from '../types';
 import { type Kwargs, PyDeque, PyDict, PyInstance, PyList, PySet, PyTuple, type PyValue } from '../values';
 import { builtinClassWithBase } from './moduleClasses';
@@ -33,8 +34,8 @@ function shallowCopy(value: PyValue): PyValue {
  * `copy.deepcopy`: copies containers and instances recursively, sharing what the original shares. `memo` maps the
  * `id()` of each copied object to its copy, as a program's `__deepcopy__` reads and fills it.
  */
-// code-gauge-allow functionNcss 49 -- One case per kind of container copy.deepcopy copies.
-// code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of container copy.deepcopy copies.
+// code-gauge-allow functionNcss 48 -- One case per kind of container copy.deepcopy copies.
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of container copy.deepcopy copies.
 function deepCopy(value: PyValue, memo: PyDict): PyValue {
   if (typeof value !== 'object') return value;
   const runtime = currentRuntime();
@@ -54,16 +55,7 @@ function deepCopy(value: PyValue, memo: PyDict): PyValue {
     for (const item of value.items) copy.items.push(deepCopy(item, memo));
     return copy;
   }
-  if (value instanceof PyTuple) {
-    const items = value.items.map((item) => deepCopy(item, memo));
-    const copy = items.every((item, index) => item === value.items[index])
-      ? value
-      : value.cls.isBuiltin
-        ? newTuple(items)
-        : new PyTuple(value.cls, items);
-    memo.store.set(id, copy);
-    return copy;
-  }
+  if (value instanceof PyTuple) return deepCopyTuple(value, id, memo);
   if (value instanceof PyDict) {
     const copy = new PyDict(value.cls, new DictStore(value.store.plainWrites), value.defaultFactory);
     memo.store.set(id, copy);
@@ -71,8 +63,9 @@ function deepCopy(value: PyValue, memo: PyDict): PyValue {
     return copy;
   }
   if (value instanceof PySet) {
-    const copy = new PySet(value.cls, value.table.copy());
+    const copy = new PySet(value.cls, new SetTable());
     memo.store.set(id, copy);
+    for (const key of value.table.keys()) copy.table.add(deepCopy(key, memo));
     return copy;
   }
   if (value instanceof PyDeque) {
@@ -88,6 +81,20 @@ function deepCopy(value: PyValue, memo: PyDict): PyValue {
     return copy;
   }
   return value;
+}
+
+function deepCopyTuple(value: PyTuple, id: bigint, memo: PyDict): PyValue {
+  const items = value.items.map((item) => deepCopy(item, memo));
+  // Copying the items has copied the tuple itself when one of them refers back to it.
+  const copied = memo.store.get(id);
+  if (copied !== undefined) return copied;
+  const copy = items.every((item, index) => item === value.items[index])
+    ? value
+    : value.cls.isBuiltin
+      ? newTuple(items)
+      : new PyTuple(value.cls, items);
+  memo.store.set(id, copy);
+  return copy;
 }
 
 const copyErrorClass = builtinClassWithBase('Error', exceptionClassNamed('Exception'), 'copy');

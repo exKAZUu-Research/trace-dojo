@@ -4,6 +4,8 @@ import type { Kwargs, NativeBinding, PyBuiltinFunction, PyClass, PyValue } from 
 
 interface Options {
   keywords?: readonly string[];
+  /** How many of the first `keywords` name the positional parameters in order. */
+  named?: number;
   /** The name in `expected` and `takes` messages, when it differs from the method's name. */
   short?: string;
   binding?: NativeBinding;
@@ -27,6 +29,7 @@ export function method(
     max,
     style,
     keywords: options.keywords,
+    named: options.named,
   };
   defineMethod(
     cls,
@@ -50,7 +53,15 @@ export function builtin(
   run: (args: PyValue[], kwargs: Kwargs) => PyValue,
   options: Options & { owner?: string } = {}
 ): PyBuiltinFunction {
-  const spec = { qualified: name, short: options.short ?? name, min, max, style, keywords: options.keywords };
+  const spec = {
+    qualified: name,
+    short: options.short ?? name,
+    min,
+    max,
+    style,
+    keywords: options.keywords,
+    named: options.named,
+  };
   return nativeFunction(
     name,
     (args, kwargs) => {

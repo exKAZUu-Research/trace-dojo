@@ -295,10 +295,13 @@ for (const cls of [listClass, tupleClass]) {
 }
 method(tupleClass, '__getnewargs__', 'none', 0, 0, (self) => newTuple([...(self as PyTuple).items]));
 method(listClass, '__iadd__', 'one', 1, 1, (self, [other]) => inplaceOp('+', self, other));
-method(listClass, '__imul__', 'one', 1, 1, (self, [count]) => {
-  if (!isInt(count)) throw typeError(`can't multiply sequence by non-int of type '${typeName(count)}'`);
-  return inplaceOp('*', self, count);
-});
+method(listClass, '__imul__', 'one', 1, 1, (self, [count]) =>
+  inplaceOp(
+    '*',
+    self,
+    toIndex(count, (value) => `'${typeName(value)}' object cannot be interpreted as an integer`)
+  )
+);
 method(listClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   setItem(self, key, value);
   return None;

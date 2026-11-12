@@ -18,6 +18,8 @@ export interface ArgSpec {
   style: ArgStyle;
   /** The keyword arguments the builtin accepts, which it reads itself. */
   keywords?: readonly string[];
+  /** How many of the first `keywords` name the positional parameters in order, which may be passed either way. */
+  named?: number;
 }
 
 const plural = (count: number): string => (count === 1 ? '' : 's');
@@ -27,15 +29,15 @@ const plural = (count: number): string => (count === 1 ? '' : 's');
 export function checkArgs(spec: ArgSpec, args: readonly PyValue[], kwargs: Kwargs): void {
   const { qualified, min, max, style } = spec;
   const short = spec.short ?? qualified.split('.').at(-1) ?? qualified;
-  if (kwargs && kwargs.size > 0) {
-    const accepted = spec.keywords ?? [];
-    if (accepted.length === 0) throw typeError(`${qualified}() takes no keyword arguments`);
-    for (const key of kwargs.keys()) {
-      if (!accepted.includes(key)) throw typeError(`${short}() got an unexpected keyword argument '${key}'`);
-    }
+  const accepted = spec.keywords ?? [];
+  if (kwargs && kwargs.size > 0 && accepted.length === 0) throw typeError(`${qualified}() takes no keyword arguments`);
+  for (const key of kwargs?.keys() ?? []) {
+    if (!accepted.includes(key)) throw typeError(`${short}() got an unexpected keyword argument '${key}'`);
   }
   const count = args.length;
-  if (count >= min && count <= max) return;
+  const named = spec.named ?? 0;
+  checkNamed(short, accepted.slice(0, named), min, args, kwargs);
+  if (count <= max && (count >= min || min <= named)) return;
   switch (style) {
     case 'one': {
       throw typeError(`${qualified}() takes exactly one argument (${count} given)`);
@@ -51,6 +53,25 @@ export function checkArgs(spec: ArgSpec, args: readonly PyValue[], kwargs: Kwarg
     default: {
       if (count > max) throw typeError(`${short}() takes at most ${max} argument${plural(max)} (${count} given)`);
       throw typeError(`${short}() takes at least ${min} positional argument${plural(min)} (${count} given)`);
+    }
+  }
+}
+
+/** Checks parameters that may be passed by position or by name: each once, and the required ones at all. */
+function checkNamed(
+  short: string,
+  names: readonly string[],
+  min: number,
+  args: readonly PyValue[],
+  kwargs: Kwargs
+): void {
+  for (const [index, name] of names.entries()) {
+    const isNamed = kwargs?.has(name) ?? false;
+    if (index < args.length && isNamed) {
+      throw typeError(`argument for ${short}() given by name ('${name}') and position (${index + 1})`);
+    }
+    if (index >= args.length && index < min && !isNamed) {
+      throw typeError(`${short}() missing required argument '${name}' (pos ${index + 1})`);
     }
   }
 }

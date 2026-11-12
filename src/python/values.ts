@@ -91,8 +91,6 @@ export class PyClass extends PyObject {
   subclassCheck?: (self: PyValue, cls: PyClass, caller: 'isinstance' | 'issubclass') => boolean;
   /** The state `abc.ABCMeta` keeps for an abstract base class: the classes registered as its virtual subclasses. */
   abc?: { registry: PyClass[] };
-  /** The classes the program and library code define with this class as a base, for `__subclasses__()`. */
-  readonly subclasses: PyClass[] = [];
   definition?: ClassDef;
 
   constructor(

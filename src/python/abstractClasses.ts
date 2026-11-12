@@ -1,4 +1,5 @@
 import { bindValue, callValue, getAttributeOrUndefined, isTruthy } from './objects';
+import { currentRuntime } from './runtimeContext';
 import { builtinClass, newSet, None, NotImplemented, pyError, typeClass, typeError } from './types';
 import { PyClass, PyFunction, PySet, type PyValue } from './values';
 
@@ -63,7 +64,9 @@ export function abstractSubclassCheck(
   if (cls.mro.includes(abc)) return true;
   const registry = abc.abc?.registry ?? [];
   if (registry.some((registered) => isSubclass(cls, registered))) return true;
-  return abc.subclasses.some((subclass) => isSubclass(cls, subclass));
+  return currentRuntime()
+    .subclassesOf(abc)
+    .some((subclass) => isSubclass(cls, subclass));
 }
 
 let invalidationCount = 0;

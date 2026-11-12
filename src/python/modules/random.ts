@@ -261,7 +261,14 @@ function bisectRight(items: PyValue[], value: PyValue): number {
 // code-gauge-allow functionCognitiveComplexity 17 -- Follows random.choices with and without weights.
 function choices(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs(
-    { qualified: 'choices', min: 1, max: 2, style: 'takes', keywords: ['population', 'weights', 'cum_weights', 'k'] },
+    {
+      qualified: 'choices',
+      min: 1,
+      max: 2,
+      style: 'takes',
+      keywords: ['population', 'weights', 'cum_weights', 'k'],
+      named: 2,
+    },
     args,
     kwargs
   );
@@ -331,7 +338,11 @@ type RandomMethod = (generator: MersenneTwister, args: PyValue[], kwargs: Kwargs
 const generatorOf = (self: PyValue): MersenneTwister => (self as PyOpaque).data as MersenneTwister;
 
 /** The methods of Random, which the module's functions also are, bound to the hidden instance. */
-const RANDOM_METHODS: [string, { style: ArgStyle; min: number; max: number; keywords?: string[] }, RandomMethod][] = [
+const RANDOM_METHODS: [
+  string,
+  { style: ArgStyle; min: number; max: number; keywords?: string[]; named?: number },
+  RandomMethod,
+][] = [
   ['seed', { style: 'takes', min: 0, max: 2, keywords: ['a', 'version'] }, seedMethod],
   ['random', { style: 'none', min: 0, max: 0 }, (generator) => generator.random()],
   ['getrandbits', { style: 'one', min: 1, max: 1 }, (generator, [bits]) => getrandbits(generator, bits)],
@@ -340,13 +351,13 @@ const RANDOM_METHODS: [string, { style: ArgStyle; min: number; max: number; keyw
   ['choice', { style: 'one', min: 1, max: 1 }, (generator, [sequence]) => choice(generator, sequence)],
   [
     'choices',
-    { style: 'takes', min: 1, max: 2, keywords: ['population', 'weights', 'cum_weights', 'k'] },
+    { style: 'takes', min: 1, max: 2, keywords: ['population', 'weights', 'cum_weights', 'k'], named: 2 },
     (generator, args, kwargs) => choices(generator, args, kwargs),
   ],
   ['shuffle', { style: 'one', min: 1, max: 1 }, (generator, [list]) => shuffle(generator, list)],
   [
     'sample',
-    { style: 'takes', min: 1, max: 2, keywords: ['population', 'k', 'counts'] },
+    { style: 'takes', min: 1, max: 2, keywords: ['population', 'k', 'counts'], named: 2 },
     (generator, args, kwargs) => sample(generator, args, kwargs),
   ],
   [
@@ -382,7 +393,7 @@ const RANDOM_METHODS: [string, { style: ArgStyle; min: number; max: number; keyw
   ],
   [
     'lognormvariate',
-    { style: 'takes', min: 2, max: 2, keywords: ['mu', 'sigma'] },
+    { style: 'takes', min: 2, max: 2, keywords: ['mu', 'sigma'], named: 2 },
     (generator, args, kwargs) => lognormvariate(generator, ...muSigma(args, kwargs)),
   ],
   [
@@ -392,28 +403,28 @@ const RANDOM_METHODS: [string, { style: ArgStyle; min: number; max: number; keyw
   ],
   [
     'vonmisesvariate',
-    { style: 'takes', min: 2, max: 2, keywords: ['mu', 'kappa'] },
-    (generator, [mu, kappa]) => vonmisesvariate(generator, realArgument(mu), realArgument(kappa)),
+    { style: 'takes', min: 2, max: 2, keywords: ['mu', 'kappa'], named: 2 },
+    (generator, args, kwargs) => vonmisesvariate(generator, ...realArguments(args, kwargs, 'mu', 'kappa')),
   ],
   [
     'gammavariate',
-    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'] },
-    (generator, [alpha, beta]) => gammavariate(generator, realArgument(alpha), realArgument(beta)),
+    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'], named: 2 },
+    (generator, args, kwargs) => gammavariate(generator, ...realArguments(args, kwargs, 'alpha', 'beta')),
   ],
   [
     'betavariate',
-    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'] },
-    (generator, [alpha, beta]) => betavariate(generator, realArgument(alpha), realArgument(beta)),
+    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'], named: 2 },
+    (generator, args, kwargs) => betavariate(generator, ...realArguments(args, kwargs, 'alpha', 'beta')),
   ],
   [
     'paretovariate',
-    { style: 'takes', min: 1, max: 1, keywords: ['alpha'] },
-    (generator, [alpha]) => paretovariate(generator, realArgument(alpha)),
+    { style: 'takes', min: 1, max: 1, keywords: ['alpha'], named: 1 },
+    (generator, args, kwargs) => paretovariate(generator, realArgument(argument(args, kwargs, 0, 'alpha') as PyValue)),
   ],
   [
     'weibullvariate',
-    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'] },
-    (generator, [alpha, beta]) => weibullvariate(generator, realArgument(alpha), realArgument(beta)),
+    { style: 'takes', min: 2, max: 2, keywords: ['alpha', 'beta'], named: 2 },
+    (generator, args, kwargs) => weibullvariate(generator, ...realArguments(args, kwargs, 'alpha', 'beta')),
   ],
   [
     'binomialvariate',
@@ -433,12 +444,18 @@ for (const [name, spec, run] of RANDOM_METHODS) {
     spec.min,
     spec.max,
     (self, args, kwargs) => run(generatorOf(self), args, kwargs),
-    {
-      keywords: spec.keywords,
-    }
+    { keywords: spec.keywords, named: spec.named }
   );
 }
 defineUnsupportedAttributes(randomClass, { randbytes: 'random.randbytes()（bytes 型）' });
+
+/** Two required real arguments, each passed by position or by name. */
+function realArguments(args: PyValue[], kwargs: Kwargs, first: string, second: string): [number, number] {
+  return [
+    realArgument(argument(args, kwargs, 0, first) as PyValue),
+    realArgument(argument(args, kwargs, 1, second) as PyValue),
+  ];
+}
 
 function muSigma(args: PyValue[], kwargs: Kwargs): [number, number] {
   return [realArgument(argument(args, kwargs, 0, 'mu') ?? 0), realArgument(argument(args, kwargs, 1, 'sigma') ?? 1)];
