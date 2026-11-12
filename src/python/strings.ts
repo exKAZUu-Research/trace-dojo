@@ -14,6 +14,8 @@ const STRIDE = 64;
 /** What scanning a long string found: its length in code points and, when it holds surrogates, where they lie. */
 interface Scan {
   length: number;
+  /** The string's hash, once a program hashed it. */
+  hash?: bigint;
   /** The UTF-16 offset of every STRIDE-th code point, for a string holding surrogates. */
   offsets?: Int32Array;
 }
@@ -73,6 +75,14 @@ function unitOffset(text: string, offsets: Int32Array, index: number): number {
   let offset = offsets[Math.floor(index / STRIDE)] ?? text.length;
   for (let step = index % STRIDE; step > 0; step--) offset += (text.codePointAt(offset) as number) > 0xff_ff ? 2 : 1;
   return offset;
+}
+
+/** A string's hash, computed by `compute` once for a long string read again and again, and each time for a short one. */
+export function rememberedHash(text: string, compute: () => bigint): bigint {
+  if (text.length < CACHED_LENGTH) return compute();
+  const scan = scanOf(text);
+  scan.hash ??= compute();
+  return scan.hash;
 }
 
 export function strLength(text: string): number {

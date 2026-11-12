@@ -349,6 +349,11 @@ test.each([
   expect(executeOnStillClock(program(failing))).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test.each(['startswith', 'endswith'])('str.%s of a short candidate is charged for the candidate only', (method) => {
+  const program = `s = 'a' * 500000\nfor i in range(10000):\n    v = s.${method}('a')`;
+  expect(executeOnStillClock(program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test('str.splitlines over a long text over and over ends at the operation limit', () => {
   const program = `s = 'x' * 1000000\nfor i in range(70):\n    s.splitlines()`;
   expect(executeOnStillClock(program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
@@ -367,6 +372,8 @@ test.each([
   ['an item', "'a' * 500000", 's[0]'],
   ['the length of a text outside the BMP', "'😀' * 500000", 'len(s)'],
   ['an item of a text outside the BMP', "'😀' * 500000", 's[-1]'],
+  ['the hash', "'a' * 500000", 'hash(s)'],
+  ['a dict entry', "'a' * 500000", '{s: 1}.get(s)'],
 ])('%s of a long unchanged text read over and over is found without scanning it each time', (_name, text, read) => {
   // Scanning the text each time would take far longer than the time limit; reading it takes milliseconds.
   const program = `s = ${text}\nfor i in range(10000):\n    n = ${read}`;

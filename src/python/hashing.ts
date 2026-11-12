@@ -1,6 +1,7 @@
 import { pyStr } from './conversions';
 import { callSpecial, lookupSpecial, overridesBuiltin } from './objects';
-import { chargeStep } from './runtimeContext';
+import { chargeScan, chargeStep } from './runtimeContext';
+import { rememberedHash } from './strings';
 import { exceptionClassNamed, None, typeError, typeName } from './types';
 import { PyComplex, PyError, type PyObject, PySet, PyTuple, type PyValue } from './values';
 
@@ -108,6 +109,11 @@ function hashFrozenset(set: PySet): bigint {
  * on its values or on the order of a set of strings.
  */
 function hashString(value: string): bigint {
+  return rememberedHash(value, () => computeStringHash(value));
+}
+
+function computeStringHash(value: string): bigint {
+  chargeScan(value.length);
   let high = 0x81_1c_9d_c5;
   let low = 0x01_00_01_93;
   for (let index = 0; index < value.length; index++) {
