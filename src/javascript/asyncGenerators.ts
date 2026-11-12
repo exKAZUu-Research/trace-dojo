@@ -176,32 +176,35 @@ export class AwaitingIterator implements LoopIterator {
     this.roots = [iteration.iterator, iteration.nextMethod];
   }
 
+  /** Takes one step; any failure, of `next`, of its promise, or of reading its result, ends the iteration unclosed. */
   *next(): Steps<Value | typeof DONE> {
-    const { runtime } = this;
     if (this.isDone) return DONE;
-    let result: Value;
     try {
-      result = resumedValue(yield new Awaiting(this.iteration.next()));
+      const { runtime } = this;
+      const result = resumedValue(yield new Awaiting(this.iteration.next()));
+      if (!isObject(result)) {
+        return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
+      }
+      if (!toBoolean(runtime.get(result, 'done'))) return runtime.get(result, 'value');
+      this.isDone = true;
+      return DONE;
     } catch (error) {
       this.isDone = true;
       throw error;
     }
-    if (!isObject(result)) {
-      this.isDone = true;
-      return runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
-    }
-    if (!toBoolean(runtime.get(result, 'done'))) return runtime.get(result, 'value');
-    this.isDone = true;
-    return DONE;
   }
 
+  /**
+   * Closes the iteration early. Any failure while closing, from looking up `return` to checking its result, gives way
+   * to the exception that ended a loop by throwing.
+   */
   *close(completion: 'normal' | 'throw'): Steps<void> {
-    const { runtime } = this;
     if (this.isDone) return;
     this.isDone = true;
-    const close = this.iteration.return;
-    if (!close) return;
     try {
+      const { runtime } = this;
+      const close = this.iteration.return;
+      if (!close) return;
       const result = resumedValue(yield new Awaiting(close()));
       if (!isObject(result))
         runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);

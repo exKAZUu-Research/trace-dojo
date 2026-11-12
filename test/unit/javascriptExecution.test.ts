@@ -1039,6 +1039,12 @@ class A { static [Symbol.hasInstance](x) { return x === 5; } } console.log(5 ins
 for (const r of [2, {}, null]) { try { 1 instanceof r; } catch (e) { console.log(e.message); } }
 console.log(Function.prototype[Symbol.hasInstance].call(Array, []), typeof Symbol.hasInstance);`,
   ],
+  [
+    'failing result getters and return lookups under for await',
+    `async function f() { const it = { [Symbol.asyncIterator]() { return this; }, next() { return Promise.resolve({ value: 1, done: false }); }, get return() { throw Error('close'); } }; try { for await (const x of it) { throw Error('body'); } } catch (e) { console.log(e.message); } }
+async function g() { const it = { [Symbol.asyncIterator]() { return this; }, next() { return Promise.resolve({ get done() { throw Error('next'); } }); }, return() { console.log('closed'); return Promise.resolve({}); } }; try { for await (const x of it) {} } catch (e) { console.log(e.message); } }
+f().then(g);`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
