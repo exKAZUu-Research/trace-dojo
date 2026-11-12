@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 407 -- The builtin functions and their namespace belong together.
 import { abstractSubclassCheck } from './abstractClasses';
 import { complexAbs } from './complexNumbers';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
@@ -31,6 +32,7 @@ import { currentRuntime } from './runtimeContext';
 import { iterStr, strLength } from './strings';
 import { turtleClass } from './turtle';
 import { sortList } from './typeContainers';
+import { unionClass } from './typeHints';
 import { roundFloat, roundInt } from './typeNumbers';
 import { defineIteratorClass, nextValue } from './typeObject';
 import {
@@ -68,7 +70,18 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, type Kwargs, PyClass, PyComplex, PyDict, PyIterator, PyObject, PyTuple, type PyValue } from './values';
+import {
+  DONE,
+  type Kwargs,
+  PyClass,
+  PyComplex,
+  PyDict,
+  PyIterator,
+  PyObject,
+  PyOpaque,
+  PyTuple,
+  type PyValue,
+} from './values';
 
 // Iterator classes --------------------------------------------------------------------------------------------------
 
@@ -448,10 +461,18 @@ function ord([value]: PyValue[]): PyValue {
 /** Whether `value` is an instance of `classInfo`, a class, a tuple of them, or a union. */
 export function isInstance(value: PyValue, classInfo: PyValue, name = 'isinstance'): boolean {
   if (classInfo instanceof PyClass) return isSubclassOfClass(classOf(value), classInfo);
-  if (classInfo instanceof PyTuple) return classInfo.items.some((item) => isInstance(value, item, name));
+  const members = classInfoMembers(classInfo);
+  if (members) return members.some((item) => isInstance(value, item, name));
   const check = classInfo instanceof PyObject ? classInfo.cls.subclassCheck : undefined;
   if (check) return check(classInfo, classOf(value), 'isinstance');
   throw typeError(`${name}() arg 2 must be a type, a tuple of types, or a union`);
+}
+
+/** The classes a tuple or a union stands for, which CPython's isinstance and issubclass check in order. */
+function classInfoMembers(classInfo: PyValue): readonly PyValue[] | undefined {
+  if (classInfo instanceof PyTuple) return classInfo.items;
+  if (classInfo instanceof PyOpaque && classInfo.cls === unionClass) return classInfo.data as PyValue[];
+  return undefined;
 }
 
 /** `issubclass(cls, classInfo)`, which an abstract base class decides with its own rules. */
@@ -461,11 +482,12 @@ export function isSubclassOfClass(cls: PyClass, classInfo: PyClass): boolean {
 }
 
 function isSubclass(cls: PyValue, classInfo: PyValue): boolean {
-  if ((classInfo instanceof PyClass || classInfo instanceof PyTuple) && !(cls instanceof PyClass)) {
+  const members = classInfoMembers(classInfo);
+  if ((classInfo instanceof PyClass || members) && !(cls instanceof PyClass)) {
     throw typeError('issubclass() arg 1 must be a class');
   }
   if (classInfo instanceof PyClass) return isSubclassOfClass(cls as PyClass, classInfo);
-  if (classInfo instanceof PyTuple) return classInfo.items.some((item) => isSubclass(cls, item));
+  if (members) return members.some((item) => isSubclass(cls, item));
   const check = classInfo instanceof PyObject ? classInfo.cls.subclassCheck : undefined;
   if (check) {
     if (!(cls instanceof PyClass)) throw typeError('issubclass() arg 1 must be a class');
