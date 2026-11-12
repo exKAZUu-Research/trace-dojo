@@ -1,6 +1,14 @@
-import { expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
+
+// The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
+beforeEach(() => {
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 test('a program that draws reports its final board and the turtles still reachable', () => {
   const execution = executeProgram(
@@ -339,9 +347,9 @@ test.each([
     { kind: 'limitExceeded' },
   ],
 ])('%s ends within the limits', (_, source, expected) => {
-  const startedAt = performance.now();
+  const startedAt = Date.now();
   expect(executeProgram('python', source)).toMatchObject(expected);
-  expect(performance.now() - startedAt).toBeLessThan(5000);
+  expect(Date.now() - startedAt).toBeLessThan(5000);
 });
 
 // CPython 3.14.10 gives these values; the library code written in Python (dataclasses, functools, collections, json)

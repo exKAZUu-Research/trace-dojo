@@ -1,7 +1,15 @@
-import { expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { traceProgram } from '../../src/interpreter/program';
 import type { TraceItem } from '../../src/problems/trace';
+
+// The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
+beforeEach(() => {
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** The programs of the two languages place their statements on different lines, so their steps compare without them. */
 const withoutLines = (items: TraceItem[]): unknown[] =>
