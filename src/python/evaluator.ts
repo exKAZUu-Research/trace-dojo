@@ -845,20 +845,29 @@ function toException(value: PyValue, message: string): PyInstance {
 }
 
 function matchesExceptionTypes(exception: PyInstance, types: PyValue): boolean {
-  if (types instanceof PyTuple) return types.items.some((type) => matchesExceptionTypes(exception, type));
-  if (!(types instanceof PyClass) || !types.isSubclassOf(baseExceptionClass)) {
-    throw typeError('catching classes that do not inherit from BaseException is not allowed');
-  }
-  return exception.cls.isSubclassOf(types);
+  return exceptionTypes(types).some((type) => exception.cls.isSubclassOf(type));
 }
 
 function checkExceptStarTypes(types: PyValue): void {
-  const list = types instanceof PyTuple ? types.items : [types];
-  for (const type of list) {
-    if (type instanceof PyClass && type.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) {
+  for (const type of exceptionTypes(types)) {
+    if (type.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) {
       throw typeError('catching ExceptionGroup with except* is not allowed. Use except instead.');
     }
   }
+}
+
+/**
+ * The classes an `except` clause names, every one checked before any is matched, as CPython's
+ * check_except_type_valid does: a tuple's members must be exception classes themselves, not nested tuples.
+ */
+function exceptionTypes(types: PyValue): PyClass[] {
+  const list = types instanceof PyTuple ? types.items : [types];
+  return list.map((type) => {
+    if (!(type instanceof PyClass) || !type.isSubclassOf(baseExceptionClass)) {
+      throw typeError('catching classes that do not inherit from BaseException is not allowed');
+    }
+    return type;
+  });
 }
 
 function mappingGet(mapping: PyValue, key: PyValue): PyValue | undefined {
