@@ -353,6 +353,9 @@ export class ProgramConverter extends ExpressionConverter {
     if (kind === 'classConstructor' && (isAsync || isGenerator)) {
       fail(node, 'constructor には async や * を付けられません。');
     }
+    if ((kind === 'getter' || kind === 'setter') && (isAsync || isGenerator)) {
+      fail(node, 'get や set には async や * を付けられません。');
+    }
     const bodyNode = field(node, 'body');
     const outer = this.context;
     const isArrow = kind === 'arrow';
