@@ -58,6 +58,65 @@ function abs(value: Complex): number {
   return hypot(value.re, value.im);
 }
 
+// Transcribed from Go's math/cmplx, with the fused multiply-adds of arm64 ------------------------------------------
+
+const phase = (value: Complex): number => goMath.atan2(value.im, value.re);
+
+function exp(value: Complex): Complex {
+  const { re, im } = value;
+  if (re === Infinity || re === -Infinity) {
+    if (re > 0 && im === 0) return value;
+    if (!Number.isFinite(im))
+      return re < 0
+        ? new Complex(0, Object.is(Math.sign(im), -0) || im < 0 ? -0 : 0)
+        : new Complex(Infinity, Number.NaN);
+  } else if (Number.isNaN(re) && im === 0) {
+    return new Complex(Number.NaN, im);
+  }
+  const r = goMath.exp(re);
+  return new Complex(r * goMath.cos(im), r * goMath.sin(im));
+}
+
+const log = (value: Complex): Complex => new Complex(goMath.log(abs(value)), phase(value));
+
+/** math.Log10E, which Go computes exactly before rounding it. */
+const LOG10E = 0.43429448190325182765112891891660508229439700580366656611445378;
+
+function log10(value: Complex): Complex {
+  const z = log(value);
+  return new Complex(LOG10E * z.re, LOG10E * z.im);
+}
+
+const isNaNComplex = (value: Complex): boolean => {
+  if (!Number.isFinite(value.re) && !Number.isNaN(value.re)) return false;
+  if (!Number.isFinite(value.im) && !Number.isNaN(value.im)) return false;
+  return Number.isNaN(value.re) || Number.isNaN(value.im);
+};
+
+function pow(x: Complex, y: Complex): Complex {
+  if (x.re === 0 && x.im === 0) {
+    if (isNaNComplex(y)) return new Complex(Number.NaN, Number.NaN);
+    if (y.re === 0) return new Complex(1, 0);
+    if (y.re < 0) return y.im === 0 ? new Complex(Infinity, 0) : new Complex(Infinity, Infinity);
+    if (y.re > 0) return new Complex(0, 0);
+  }
+  const modulus = abs(x);
+  if (modulus === 0) return new Complex(0, 0);
+  let r = goMath.pow(modulus, y.re);
+  const arg = phase(x);
+  let theta = y.re * arg;
+  if (y.im !== 0) {
+    r *= goMath.exp(-y.im * arg);
+    // theta += imag(y) * math.Log(modulus), which Go's compiler fuses on arm64.
+    theta = fma(y.im, goMath.log(modulus), theta);
+  }
+  return new Complex(r * goMath.cos(theta), r * goMath.sin(theta));
+}
+
+function rect(r: number, theta: number): Complex {
+  return new Complex(r * goMath.cos(theta), r * goMath.sin(theta));
+}
+
 const members: Record<string, Entity> = {
   Sqrt: nativeFunction('Sqrt', fn([C], [C]), ([value]) => sqrt(value as Complex)),
   Abs: nativeFunction('Abs', fn([C], [FLOAT64]), ([value]) => abs(value as Complex)),
@@ -72,15 +131,23 @@ const members: Record<string, Entity> = {
     return Number.isNaN(re) || Number.isNaN(im);
   }),
   Inf: nativeFunction('Inf', fn([], [C]), () => new Complex(Infinity, Infinity)),
+  NaN: nativeFunction('NaN', fn([], [C]), () => new Complex(Number.NaN, Number.NaN)),
+  IsInf: nativeFunction('IsInf', fn([C], [BOOL]), ([value]) => {
+    const { re, im } = value as Complex;
+    return re === Infinity || re === -Infinity || im === Infinity || im === -Infinity;
+  }),
+  Exp: nativeFunction('Exp', fn([C], [C]), ([value]) => exp(value as Complex)),
+  Log: nativeFunction('Log', fn([C], [C]), ([value]) => log(value as Complex)),
+  Log10: nativeFunction('Log10', fn([C], [C]), ([value]) => log10(value as Complex)),
+  Pow: nativeFunction('Pow', fn([C, C], [C]), ([x, y]) => pow(x as Complex, y as Complex)),
+  Polar: nativeFunction('Polar', fn([C], [FLOAT64, FLOAT64]), ([value]) => [
+    abs(value as Complex),
+    phase(value as Complex),
+  ]),
+  Rect: nativeFunction('Rect', fn([FLOAT64, FLOAT64], [C]), ([r, theta]) => rect(r as number, theta as number)),
 };
 
 export const CMPLX_PACKAGE = definePackage('math/cmplx', members, [
-  'Exp',
-  'Log',
-  'Log10',
-  'Pow',
-  'Polar',
-  'Rect',
   'Sin',
   'Cos',
   'Tan',
@@ -94,6 +161,4 @@ export const CMPLX_PACKAGE = definePackage('math/cmplx', members, [
   'Acosh',
   'Atanh',
   'Cot',
-  'IsInf',
-  'NaN',
 ]);
