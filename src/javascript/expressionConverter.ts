@@ -544,7 +544,7 @@ function canSuspendIn(expression: Expression): boolean {
 }
 
 /** Whether assigning to a pattern suspends, at a `yield` or an `await` in a member it assigns to or in a key. */
-function patternSuspends(pattern: Pattern): boolean {
+export function patternSuspends(pattern: Pattern): boolean {
   switch (pattern.kind) {
     case 'identifier': {
       return false;

@@ -3,6 +3,7 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineArrayCopies } from './realmArrayCopies';
 import { defineArrayIterations } from './realmArrayIterations';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import { isCallable, JsArray, JsThrow, type NativeCall, type Value } from './values';
 
@@ -57,9 +58,11 @@ function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
   return buildArray(runtime, (result) => {
     const add = (value: Value, index: number): void =>
       result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
-    if (runtime.isIterable(source)) {
+    const method =
+      source === undefined || source === null ? undefined : runtime.get(source, WELL_KNOWN_SYMBOLS.iterator);
+    if (method !== undefined && method !== null) {
       // Each value is read just before its mapper runs, as JavaScript's iteration does.
-      const iterator = runtime.iterator(source);
+      const iterator = runtime.iterator(source, method);
       try {
         for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
           add(value, index);

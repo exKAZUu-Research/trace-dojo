@@ -564,34 +564,35 @@ export class Runtime {
 
   /** The iterator that `for...of`, spread, and array destructuring use: over an array, or a string's code points. */
   /**
-   * The iterator of a value, from its `Symbol.iterator` method. A builtin iterator whose `next` and `return` are still
-   * the builtin ones is stepped through directly, which reads an array at each step as its iterator does.
+   * The iterator of a value, from its `Symbol.iterator` method, which a caller that has already read it passes. A
+   * builtin iterator whose `next` is still the builtin one is stepped through directly, reading an array at each step as
+   * its iterator does; its `return` is looked up only when a loop closes it.
    */
-  iterator(value: Value): ValueIterator {
-    const method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator);
+  iterator(
+    value: Value,
+    method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator)
+  ): ValueIterator {
     if (!isCallable(method)) return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
     const iterator = this.call(method, value, [], this.currentRow);
     if (!isObject(iterator))
       return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
-    if (iterator.hostIterator && this.hasBuiltinIteratorMethods(iterator))
-      return new ValueIterator(iterator.hostIterator);
-    return new ValueIterator(this.protocolIteration(iterator));
-  }
-
-  private hasBuiltinIteratorMethods(iterator: JsObject): boolean {
-    const { hostIteratorMethods } = this.realm;
     const next = this.get(iterator, 'next');
-    const close = this.get(iterator, 'return');
-    return (
-      next instanceof JsFunction &&
-      hostIteratorMethods.has(next) &&
-      (close === undefined || (close instanceof JsFunction && hostIteratorMethods.has(close)))
-    );
+    const { hostIterator } = iterator;
+    if (!hostIterator || !(next instanceof JsFunction) || !this.realm.hostIteratorMethods.has(next)) {
+      return new ValueIterator(this.protocolIteration(iterator, next));
+    }
+    return new ValueIterator({
+      next: () => hostIterator.next(),
+      close: () => {
+        const close = this.get(iterator, 'return');
+        if (close instanceof JsFunction && this.realm.hostIteratorMethods.has(close)) hostIterator.close?.();
+        else if (close !== undefined && close !== null) this.callReturn(iterator, close);
+      },
+    });
   }
 
   /** Steps through an iterator object by calling its `next()`, and its `return()` when a loop leaves it early. */
-  private protocolIteration(iterator: JsObject): HostIterator {
-    const next = this.get(iterator, 'next');
+  private protocolIteration(iterator: JsObject, next: Value): HostIterator {
     return {
       next: () => {
         const result = this.call(next, iterator, [], this.currentRow);
@@ -601,18 +602,14 @@ export class Runtime {
       },
       close: () => {
         const close = this.get(iterator, 'return');
-        if (close === undefined || close === null) return;
-        const result = this.call(close, iterator, [], this.currentRow);
-        if (!isObject(result))
-          this.throwError('TypeError', `Iterator result ${this.describe(result)} is not an object`);
+        if (close !== undefined && close !== null) this.callReturn(iterator, close);
       },
     };
   }
 
-  /** Whether a value has a `Symbol.iterator` method, which iterating it calls. */
-  isIterable(value: Value): boolean {
-    if (value === undefined || value === null) return false;
-    return isCallable(this.get(value, WELL_KNOWN_SYMBOLS.iterator));
+  private callReturn(iterator: JsObject, close: Value): void {
+    const result = this.call(close, iterator, [], this.currentRow);
+    if (!isObject(result)) this.throwError('TypeError', `Iterator result ${this.describe(result)} is not an object`);
   }
 
   /** All the values an iterable yields, as spread reads them. */

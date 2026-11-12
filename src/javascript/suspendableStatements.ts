@@ -15,9 +15,12 @@ import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import { StepEvaluator } from './stepEvaluator';
 import { onlyCalls, onlyCreates, storesReference } from './stepRules';
-import { type Binding, isCallable, isObject, type JsObject, JsThrow, Scope, toBoolean, type Value } from './values';
+import { type Binding, isCallable, isObject, JsObject, JsThrow, Scope, toBoolean, type Value } from './values';
 
 export type Completion = undefined | { kind: 'break' | 'continue'; label?: string } | { kind: 'return'; value: Value };
+
+/** What running code in a scope gives: a statement's completion, a loop body's `'next'`, or an expression's value. */
+export type Outcome = Completion | 'next' | Value;
 
 /**
  * Runs the statements of generator and async function bodies as host generators, which suspend at each `yield` and
@@ -128,7 +131,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
   }
 
   /** Runs `run` in a new scope with `declarations`, or in the current one when nothing is declared. */
-  private *scopedSteps<T>(declarations: ScopeDeclarations, run: () => Steps<T>): Steps<T> {
+  private *scopedSteps<T extends Outcome>(declarations: ScopeDeclarations, run: () => Steps<T>): Steps<T> {
     if (declarations.lexical.length === 0 && declarations.functions.length === 0 && declarations.vars.length === 0) {
       return yield* run();
     }
@@ -154,7 +157,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
    * Runs `run`, then disposes of the values the `using` declarations in the current scope declared, the last first. An
    * error a disposal throws suppresses the error before it, which a SuppressedError then holds.
    */
-  private *disposingSteps<T>(run: () => Steps<T>): Steps<T> {
+  private *disposingSteps<T extends Outcome>(run: () => Steps<T>): Steps<T> {
     const { runtime } = this;
     const scope = runtime.frame.scope;
     let result: T | undefined;
@@ -167,6 +170,10 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     }
     const disposables = scope.disposables ?? [];
     scope.disposables = undefined;
+    // The value the scope returns or throws stays reachable while the disposers run.
+    const { temporaries } = runtime.frame;
+    const held = temporaries.length;
+    temporaries.push(pendingValue(result, completion));
     for (const { value, method, isAsync, awaitsResult } of disposables.toReversed()) {
       try {
         const disposed = method ? runtime.call(method, value, []) : undefined;
@@ -177,6 +184,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
           completion instanceof JsThrow ? new JsThrow(suppressedError(runtime, error.value, completion.value)) : error;
       }
     }
+    temporaries.length = held;
     if (completion) throw completion;
     return result as T;
   }
@@ -231,8 +239,9 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
 
   /** Initializes the variables a declaration declares, recording the value of a `using` one for disposal. */
   protected bindDeclared(target: Pattern, value: Value, kind: DeclarationKind): void {
-    this.bindPattern(target, value, 'initialize');
+    // A `using` declaration gets its value's disposal method while its variable is still uninitialized.
     if (kind === 'using' || kind === 'await using') this.addDisposable(value, kind);
+    this.bindPattern(target, value, 'initialize');
   }
 
   /** Runs a loop body, returning `'next'` to continue the loop or the completion that ends it. */
@@ -323,6 +332,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     const frame = runtime.frame;
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
+    let pending: Value;
     try {
       for (;;) {
         const value = yield* iterator.next();
@@ -345,17 +355,24 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
             return this.loopBodySteps(statement.body, labels);
           };
           const result = yield* statement.scope.disposes ? this.disposingSteps(iteration) : iteration();
-          if (result !== 'next') return result;
+          if (result !== 'next') {
+            pending = pendingValue(result);
+            return result;
+          }
         } finally {
           frame.scope = outer;
         }
       }
     } catch (error) {
-      if (error instanceof JsThrow) completion = 'throw';
+      if (error instanceof JsThrow) {
+        completion = 'throw';
+        pending = error.value;
+      }
       throw error;
     } finally {
-      // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks.
-      if (!isExhausted) yield* iterator.close(completion);
+      // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks, while the value the loop
+      // returns or throws stays reachable.
+      if (!isExhausted) yield* this.holdingValue(pending, () => iterator.close(completion));
     }
   }
 
@@ -468,4 +485,14 @@ export function suppressedError(runtime: Runtime, error: Value, suppressed: Valu
     runtime.defineProperty(object, key, { value, writable: true, enumerable: false, configurable: true });
   }
   return object;
+}
+
+/** The value a completing scope or loop returns or throws, which must stay reachable while cleanup code runs. */
+export function pendingValue(result: Outcome, thrown?: { value: Value }): Value {
+  if (thrown) return thrown.value;
+  return isCompletion(result) && result.kind === 'return' ? result.value : undefined;
+}
+
+function isCompletion(value: Outcome): value is Exclude<Completion, undefined> {
+  return typeof value === 'object' && value !== null && !(value instanceof JsObject) && 'kind' in value;
 }

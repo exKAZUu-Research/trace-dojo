@@ -38,6 +38,8 @@ function pushObjectReferences(pending: unknown[], object: JsObject): number {
   pending.push(object.proto);
   for (const property of object.properties.values()) pushProperty(pending, property);
   for (const property of object.privateMembers?.values() ?? []) pushProperty(pending, property);
+  // An async generator's queued calls keep what they resume it with until it answers them.
+  for (const { resume, promise } of object.asyncGenerator?.queue ?? []) pending.push(resume.value, promise);
   const suspended = object.generator ?? object.asyncGenerator;
   if (suspended) {
     const { frame } = suspended;

@@ -35,7 +35,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     return value === SHORT_CIRCUIT ? undefined : value;
   }
 
-  private evaluateChain(expression: Expression): ChainValue {
+  protected evaluateChain(expression: Expression): ChainValue {
     const { runtime } = this;
     const outerRow = runtime.currentRow;
     runtime.currentRow = expression.row;

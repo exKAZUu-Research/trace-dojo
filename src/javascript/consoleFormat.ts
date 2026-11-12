@@ -1,4 +1,4 @@
-import { formatNumber, inspect, OutputBudget } from './inspect';
+import { formatNumber, inspect, inspectValue, OutputBudget } from './inspect';
 import { jsonStringify } from './realmJson';
 import type { Runtime } from './runtime';
 import { isAccessor, JsFunction, JsObject, JsThrow, type Value } from './values';
@@ -59,7 +59,7 @@ function formatFormatString(
 function formatPlaceholder(runtime: Runtime, kind: string, value: Value, budget: OutputBudget): string | undefined {
   if (kind === 'o' || kind === 'O') {
     // Node.js's `%o` also shows hidden properties, which this leaves out.
-    return inspect(runtime, value, budget, kind === 'o' ? 4 : undefined);
+    return inspectValue(runtime, value, budget, kind === 'o' ? 4 : undefined);
   }
   if (kind === 's' && value instanceof JsObject && !(value instanceof JsFunction) && hasBuiltinToString(value)) {
     return inspect(runtime, value, budget, 0);

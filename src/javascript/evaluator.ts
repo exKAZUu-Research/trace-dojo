@@ -21,7 +21,13 @@ import {
 } from './memberProperties';
 import { startAsyncFunction } from './promises';
 import { isObjectCreation, onlyCalls, onlyCreates } from './stepRules';
-import { type Completion, suppressedError, SuspendableStatementEvaluator } from './suspendableStatements';
+import {
+  type Completion,
+  type Outcome,
+  pendingValue,
+  suppressedError,
+  SuspendableStatementEvaluator,
+} from './suspendableStatements';
 import {
   appendAll,
   type ClassField,
@@ -132,7 +138,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
   }
 
   /** Runs `run` in a new scope with `declarations`, disposing of what its `using` declarations declared. */
-  private scoped<T>(declarations: ScopeDeclarations, run: () => T): T {
+  private scoped<T extends Outcome>(declarations: ScopeDeclarations, run: () => T): T {
     return this.withScope(declarations, () => (declarations.disposes ? this.disposing(run) : run()));
   }
 
@@ -145,7 +151,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
    * Runs `run`, then disposes of the values the `using` declarations in the current scope declared, the last first. An
    * error a disposal throws suppresses the error before it, which a SuppressedError then holds.
    */
-  private disposing<T>(run: () => T): T {
+  private disposing<T extends Outcome>(run: () => T): T {
     const { runtime } = this;
     const scope = runtime.frame.scope;
     let result: T | undefined;
@@ -158,14 +164,17 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
     const disposables = scope.disposables ?? [];
     scope.disposables = undefined;
-    for (const { value, method } of disposables.toReversed()) {
-      try {
-        if (method) runtime.call(method, value, []);
-      } catch (error) {
-        if (!(error instanceof JsThrow)) throw error;
-        thrown = thrown ? new JsThrow(suppressedError(runtime, error.value, thrown.value)) : error;
+    // The value the scope returns or throws stays reachable while the disposers run.
+    runtime.hold(pendingValue(result, thrown), () => {
+      for (const { value, method } of disposables.toReversed()) {
+        try {
+          if (method) runtime.call(method, value, []);
+        } catch (error) {
+          if (!(error instanceof JsThrow)) throw error;
+          thrown = thrown ? new JsThrow(suppressedError(runtime, error.value, thrown.value)) : error;
+        }
       }
-    }
+    });
     if (thrown) throw thrown;
     return result as T;
   }
@@ -254,6 +263,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     const frame = runtime.frame;
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
+    let pending: Value;
     try {
       for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
         runtime.spend();
@@ -271,7 +281,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
             return this.loopBody(statement.body, labels);
           };
           const result = statement.scope.disposes ? this.disposing(iteration) : iteration();
-          if (result !== 'next') return result;
+          if (result !== 'next') {
+            pending = pendingValue(result);
+            return result;
+          }
         } finally {
           frame.scope = outer;
         }
@@ -279,11 +292,15 @@ export class Evaluator extends SuspendableStatementEvaluator {
       isExhausted = true;
       return undefined;
     } catch (error) {
-      if (error instanceof JsThrow) completion = 'throw';
+      if (error instanceof JsThrow) {
+        completion = 'throw';
+        pending = error.value;
+      }
       throw error;
     } finally {
-      // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks.
-      if (!isExhausted) iterator.close(completion);
+      // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks, while the value the loop
+      // returns or throws stays reachable.
+      if (!isExhausted) runtime.hold(pending, () => iterator.close(completion));
     }
   }
 

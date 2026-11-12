@@ -169,7 +169,8 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   private *chainSteps(expression: Expression): Steps<Value | typeof SHORT_CIRCUIT> {
     if (expression.kind === 'member' && expression.suspends) return yield* this.memberSteps(expression);
     if (expression.kind === 'call' && expression.suspends) return yield* this.callSteps(expression);
-    return yield* this.evaluateSteps(expression);
+    // A link that does not suspend still carries the chain's short-circuit, as the synchronous chain does.
+    return expression.suspends ? yield* this.evaluateSteps(expression) : this.evaluateChain(expression);
   }
 
   /** Reads a member whose object or key suspends, which short-circuits the rest of its optional chain on nullish. */

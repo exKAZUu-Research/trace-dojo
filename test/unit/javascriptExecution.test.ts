@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 
 import { expect, test } from 'vitest';
 
@@ -85,6 +85,12 @@ test.each([
   [
     'yield in the key of a class declaration',
     'function* g() {\n  class C {\n    [yield 1]() {}\n  }\n}',
+    1,
+    'この位置の yield や await は、この採点環境では使えません。',
+  ],
+  [
+    'await in the target of a for-of loop',
+    'async function f(o) {\n  for (o[await 1] of [5]);\n}',
     1,
     'この位置の yield や await は、この採点環境では使えません。',
   ],
@@ -389,7 +395,7 @@ test.each([
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: runOnNode(source),
+    ...runOnNode(source),
   });
 });
 
@@ -900,16 +906,25 @@ Promise.race([]).then(() => console.log('never'));`,
 })();
 const t = (s) => [s[0] === undefined, s.raw[0]]; console.log(t\`\\u{FFFFFFFF}\`, t\`\\u{10FFFF}\`);`,
   ],
+  [
+    'iterator return getters, using bindings, chains, and match indices',
+    `console.log('%o %O', 'x', 'y');
+const it = [1, 2].values(); Object.defineProperty(it, 'return', { get() { console.log('get return'); return undefined; } }); console.log([...it]);
+try { { using x = { get [Symbol.dispose]() { console.log(typeof x); return () => {}; } }; } } catch (e) { console.log(e.constructor.name); }
+(async () => { let o; console.log(o?.a[await 1].b); })();
+const m = /(?<x>a)/d.exec('a'); console.log(m.indices.groups.x === m.indices[1]);`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: runOnNode(source),
+    ...runOnNode(source),
   });
 });
 
 /** What Node.js prints for a script, without the colors that a FORCE_COLOR in the environment (as on CI) adds. */
-function runOnNode(source: string): string {
+function runOnNode(source: string): { stdout: string; stderr: string } {
   const { FORCE_COLOR: _, ...env } = process.env;
-  return execFileSync('node', ['-e', source], { encoding: 'utf8', env: { ...env, NO_COLOR: '1' } });
+  const { stdout, stderr } = spawnSync('node', ['-e', source], { encoding: 'utf8', env: { ...env, NO_COLOR: '1' } });
+  return { stdout, stderr };
 }

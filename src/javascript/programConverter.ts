@@ -29,7 +29,7 @@ import {
   unsupported,
   unsupportedFeatures,
 } from './convertNodes';
-import { ExpressionConverter } from './expressionConverter';
+import { ExpressionConverter, patternSuspends } from './expressionConverter';
 import { isConstantExpression } from './stepRules';
 
 type StatementConverter = (node: Node) => Statement;
@@ -218,7 +218,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   private forInit(initNode: Node | null): VariableDeclaration | Expression | undefined {
     if (!initNode?.isNamed || initNode.type === 'empty_statement') return undefined;
-    if (initNode.type === 'lexical_declaration' || initNode.type === 'variable_declaration') {
+    if (['lexical_declaration', 'variable_declaration', 'using_declaration'].includes(initNode.type)) {
       return this.declaration(initNode, false);
     }
     return this.expression(initNode.type === 'expression_statement' ? namedChildren(initNode)[0] : initNode);
@@ -234,6 +234,8 @@ export class ProgramConverter extends ExpressionConverter {
       const target = declarationKind
         ? this.bindingPattern(leftNode, (identifier, name) => this.declareVariable(identifier, name, declarationKind))
         : this.assignmentTarget(leftNode);
+      // A loop binds its target in one go, as a destructuring assignment does.
+      if (patternSuspends(target)) unsupported(leftNode, 'この位置の yield や await ');
       return {
         kind: field(header, 'operator').text === 'of' ? 'forOf' : 'forIn',
         isAwait,

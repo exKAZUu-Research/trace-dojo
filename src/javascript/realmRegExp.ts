@@ -123,17 +123,25 @@ function matchArray(runtime: Runtime, match: RegExpExecArray): JsObject {
   runtime.createDataProperty(array, 'input', match.input);
   runtime.createDataProperty(array, 'groups', groupsObject(runtime, match.groups));
   if (match.indices) {
-    const indices = runtime.newArray(
-      match.indices.map((pair) => (pair ? runtime.newArray([pair[0], pair[1]]) : undefined))
-    );
+    // A named group's pair is the same array as its numbered one, as the host's pairs are.
+    const pairs = new Map<[number, number], JsObject>();
+    const pairOf = (pair: [number, number] | undefined): JsObject | undefined => {
+      if (!pair) return undefined;
+      let converted = pairs.get(pair);
+      if (!converted) {
+        converted = runtime.newArray([pair[0], pair[1]]);
+        pairs.set(pair, converted);
+      }
+      return converted;
+    };
+    const indices = runtime.newArray(match.indices.map((pair) => pairOf(pair)));
     const { groups } = match.indices;
     runtime.createDataProperty(
       indices,
       'groups',
       groupsObject(
         runtime,
-        groups &&
-          Object.fromEntries(Object.entries(groups).map(([name, pair]) => [name, pair && runtime.newArray([...pair])]))
+        groups && Object.fromEntries(Object.entries(groups).map(([name, pair]) => [name, pairOf(pair)]))
       )
     );
     runtime.createDataProperty(array, 'indices', indices);
@@ -243,7 +251,7 @@ export function replaceWithRegExp(
               callRow
             )
           )
-        : substitution(template, matched, text, match.index, captures, match.groups);
+        : substitution(runtime, template, matched, text, match.index, captures, match.groups);
     const part = text.slice(position, match.index) + inserted;
     runtime.extendString(result.length + part.length, part.length);
     result += part;
@@ -256,6 +264,7 @@ export function replaceWithRegExp(
 
 /** Expands a replacement template for one match as the spec's GetSubstitution does: `$&`, `$1`, `$<name>`, and so on. */
 function substitution(
+  runtime: Runtime,
   template: string,
   matched: string,
   text: string,
@@ -264,20 +273,23 @@ function substitution(
   groups: Record<string, string | undefined> | undefined
 ): string {
   let result = '';
-  for (let index = 0; index < template.length; index++) {
-    const character = template[index];
-    const next = template[index + 1] as string | undefined;
-    if (character !== '$' || next === undefined) {
-      result += character;
+  // Each piece is charged before it is appended, so a template repeating a long expansion stays within the limit.
+  const append = (piece: string): void => {
+    runtime.extendString(result.length + piece.length, piece.length);
+    result += piece;
+  };
+  let index = 0;
+  while (index < template.length) {
+    const dollar = template.indexOf('$', index);
+    if (dollar !== index) {
+      const end = dollar === -1 ? template.length : dollar;
+      append(template.slice(index, end));
+      index = end;
       continue;
     }
     const expansion = dollarExpansion(template, index, matched, text, position, captures, groups);
-    if (expansion) {
-      result += expansion.text;
-      index += expansion.length - 1;
-    } else {
-      result += '$';
-    }
+    append(expansion ? expansion.text : '$');
+    index += expansion ? expansion.length : 1;
   }
   return result;
 }
