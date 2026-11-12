@@ -78,6 +78,8 @@ export function pathTextOf(frame: Frame, value: Value): string {
 export interface ReadSource {
   /** The text being read, which throws `IOException` once the source is closed. */
   reader(frame: Frame): TextReader;
+  /** Whether a read would not block, which `Reader.ready` tells. */
+  isReady(frame: Frame): boolean;
   close(frame: Frame): void;
 }
 
@@ -93,7 +95,19 @@ export function readSourceOf(frame: Frame, value: Value): ReadSource {
 export class TextSource implements ReadSource {
   private isClosed = false;
 
-  constructor(private readonly text: TextReader) {}
+  /**
+   * @param isAlwaysReady Whether the source is ready even at its end, as a `StringReader` is, unlike a file, which is
+   * ready while bytes remain to read.
+   */
+  constructor(
+    private readonly text: TextReader,
+    private readonly isAlwaysReady = false
+  ) {}
+
+  isReady(frame: Frame): boolean {
+    const text = this.reader(frame);
+    return this.isAlwaysReady || !text.isAtEnd;
+  }
 
   reader(frame: Frame): TextReader {
     if (this.isClosed) throwBuiltin(frame, 'IOException', 'Stream closed');
@@ -112,6 +126,7 @@ export const STANDARD_INPUT: ReadSource = {
     if (stdin.isClosed) throwBuiltin(frame, 'IOException', 'Stream closed');
     return stdin.reader;
   },
+  isReady: (frame) => !STANDARD_INPUT.reader(frame).isAtEnd,
   close: (frame) => {
     frame.runtime.io.stdin.isClosed = true;
   },

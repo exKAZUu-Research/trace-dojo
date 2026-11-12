@@ -199,6 +199,8 @@ interface Location {
   name: string;
   node: FileSystemNode | undefined;
   names: string[];
+  /** Whether the path must name a directory, as one ending with `/`, `.`, or `..` does. */
+  namesDirectory: boolean;
 }
 
 /** A directory that a walk down a path has entered, with its name in its parent. */
@@ -240,9 +242,9 @@ export class VirtualFileSystem {
   }
 
   open(path: string, mode: OpenMode): FileHandle {
-    const { parent, name, node: existing } = this.locate(path);
+    const { parent, name, node: existing, namesDirectory } = this.locate(path);
     if (existing && mode.create === 'exclusive') throw new FileSystemError('EEXIST', path);
-    if (existing?.kind === 'directory' || name === '') throw new FileSystemError('EISDIR', path);
+    if (existing?.kind === 'directory' || name === '' || namesDirectory) throw new FileSystemError('EISDIR', path);
     if (!existing && mode.create === 'never') throw new FileSystemError('ENOENT', path);
     const node = existing ?? new FileNode();
     parent.children.set(name, node);
@@ -274,7 +276,7 @@ export class VirtualFileSystem {
       parent.children.set(name, new DirectoryNode());
       return `/${names.join('/')}`;
     }
-    const components = this.componentsOf(path);
+    const { components } = this.componentsOf(path);
     const steps: Step[] = [{ directory: this.root, name: '' }];
     let firstCreated: string | undefined;
     for (const [index, name] of components.entries()) {
@@ -328,6 +330,7 @@ export class VirtualFileSystem {
     }
     const { node } = source;
     const existing = target.node;
+    if (node.kind === 'file' && target.namesDirectory) throw new FileSystemError('ENOTDIR', to);
     if (existing === node) return;
     const conflict = existing ? replacementConflictOf(node, existing) : undefined;
     if (conflict) throw new FileSystemError(conflict, to);
@@ -368,7 +371,7 @@ export class VirtualFileSystem {
    * failing when a directory on the way is missing or is a file.
    */
   private locate(path: string): Location {
-    const components = this.componentsOf(path);
+    const { components, namesDirectory } = this.componentsOf(path);
     const last = components.pop();
     const steps: Step[] = [{ directory: this.root, name: '' }];
     for (const name of components) this.enter(steps, name, path);
@@ -377,10 +380,12 @@ export class VirtualFileSystem {
     if (last === undefined || last === '..') {
       // The path names a directory it walked through, as `a/..` names the directory holding `a`.
       const { directory, name } = steps.at(-1) as Step;
-      return { parent: steps.at(-2)?.directory ?? this.root, name, node: directory, names };
+      return { parent: steps.at(-2)?.directory ?? this.root, name, node: directory, names, namesDirectory };
     }
     const parent = (steps.at(-1) as Step).directory;
-    return { parent, name: last, node: parent.children.get(last), names: [...names, last] };
+    const node = parent.children.get(last);
+    if (namesDirectory && node?.kind === 'file') throw new FileSystemError('ENOTDIR', path);
+    return { parent, name: last, node, names: [...names, last], namesDirectory };
   }
 
   /** Enters the directory a name names, or with `..` leaves the current one, which the root never does. */
@@ -396,15 +401,17 @@ export class VirtualFileSystem {
   }
 
   /**
-   * The names of a path from the root, keeping `..` for the walk to resolve, while charging the run for reading the
-   * path and walking its names.
+   * The names of a path from the root, keeping `..` for the walk to resolve, and whether the path must name a
+   * directory, while charging the run for reading the path and walking its names.
    */
-  private componentsOf(path: string): string[] {
+  private componentsOf(path: string): { components: string[]; namesDirectory: boolean } {
     this.budget.spend(Math.ceil((path.length + 1) / 16));
     const absolute = path.startsWith('/') ? path : `${WORKING_DIRECTORY}/${path}`;
-    const components = absolute.split('/').filter((name) => name !== '' && name !== '.');
+    const raw = absolute.split('/');
+    const components = raw.filter((name) => name !== '' && name !== '.');
     this.budget.spend(components.length);
-    return components;
+    const last = raw.at(-1);
+    return { components, namesDirectory: last === '' || last === '.' || last === '..' };
   }
 }
 

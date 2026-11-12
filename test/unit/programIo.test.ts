@@ -248,6 +248,12 @@ test.each([
     'java.nio.file.NoSuchFileException: missing/y\njava.nio.file.NoSuchFileException: missing/y\n',
   ],
   [
+    'the readiness of readers at their end',
+    'StringReader r = new StringReader("a"); r.read(); BufferedReader f = new BufferedReader(new FileReader("x")); f.readLine(); System.out.println(r.ready() + " " + new BufferedReader(new StringReader("")).ready() + " " + f.ready());',
+    { x: 'old' },
+    'true true false\n',
+  ],
+  [
     'directories made again',
     'System.out.println(new File("d/e").mkdirs() + " " + new File("d/e").mkdirs());',
     {},
@@ -370,6 +376,10 @@ test.each([
     "require('fs').readFileSync('missing/../d/f.txt')",
     "Error: ENOENT: no such file or directory, open 'missing/../d/f.txt'",
   ],
+  ["require('fs').writeFileSync('d/f.txt/.', 'x')", "Error: ENOTDIR: not a directory, open 'd/f.txt/.'"],
+  ["require('fs').writeFileSync('d/f.txt/', 'x')", "Error: ENOTDIR: not a directory, open 'd/f.txt/'"],
+  ["require('fs').writeFileSync('new/', 'x')", "Error: EISDIR: illegal operation on a directory, open 'new/'"],
+  ["require('fs').renameSync('d/f.txt', 'g/')", "Error: ENOTDIR: not a directory, rename 'd/f.txt' -> 'g/'"],
   ["require('fs').readFileSync('d/f.txt/../f.txt')", "Error: ENOTDIR: not a directory, open 'd/f.txt/../f.txt'"],
   ["require('fs').writeFileSync('d/f.txt', 'x', { flag: 'wx' })", "Error: EEXIST: file already exists, open 'd/f.txt'"],
   [

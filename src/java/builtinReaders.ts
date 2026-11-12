@@ -46,7 +46,7 @@ export function defineReaders(context: IOContext, closeable: ClassInfo): void {
   const stringReader = context.registry.define('StringReader', reader, 'java.io');
   addConstructor(stringReader, [context.stringType], (frame, receiver, [text]) => {
     if (!(text instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
-    readSources.set(receiver as JavaObject, new TextSource(frame.runtime.io.textReader(text.value)));
+    readSources.set(receiver as JavaObject, new TextSource(frame.runtime.io.textReader(text.value), true));
   });
   // StringReader's close throws no IOException, though its reads still declare one.
   addMethod(stringReader, 'close', [], VOID, false, (frame, receiver) => {
@@ -134,7 +134,7 @@ function defineReaderMethods(context: IOContext, reader: ClassInfo): void {
   );
   throwsIO(
     context,
-    addMethod(reader, 'ready', [], BOOLEAN, false, (frame, receiver) => !textOf(frame, receiver).isAtEnd)
+    addMethod(reader, 'ready', [], BOOLEAN, false, (frame, receiver) => readSourceOf(frame, receiver).isReady(frame))
   );
   throwsIO(
     context,
