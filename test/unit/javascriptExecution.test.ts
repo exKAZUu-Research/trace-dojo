@@ -1003,6 +1003,11 @@ console.log(Object.keys({ ...src }).length, Object.getOwnPropertySymbols({ ...sr
 console.log(new Date(0).toLocaleDateString([, 'ja-JP'], { timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric' }));
 let x = {}; for (let i = 0; i < 10000; i++) x = { x }; try { structuredClone(x); console.log('ok'); } catch (e) { console.log(e.name); }`,
   ],
+  [
+    'accessor names and duplicate JSON keys',
+    `const k="x", s=Symbol("y"); const o={get [k](){return 1}, set [s](v){}}; console.log(Object.getOwnPropertyDescriptor(o,"x").get.name, Object.getOwnPropertyDescriptor(o,s).set.name); class C { get [k]() {} static set [s](v) {} } console.log(Object.getOwnPropertyDescriptor(C.prototype,"x").get.name, Object.getOwnPropertyDescriptor(C,s).set.name); (async()=>{ const p={get [await "x"](){return 1}, set [await s](v){}}; console.log(Object.getOwnPropertyDescriptor(p,"x").get.name, Object.getOwnPropertyDescriptor(p,s).set.name); })()
+JSON.parse('{"b":0,"a":1,"a":{}}',function(k,v,c){if(k==='b')this.a=1;if(k==='a')console.log(c.source);return v});`,
+  ],
 ])('a program using %s runs as Node.js runs it', (_, source) => {
   expect(executeProgram('javascript', source)).toMatchObject({
     kind: 'executed',

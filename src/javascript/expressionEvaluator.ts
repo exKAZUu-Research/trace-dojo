@@ -689,5 +689,13 @@ export function defineAccessor(
     existing && isAccessor(existing) ? existing : { get: undefined, set: undefined, enumerable, configurable: true };
   if (kind === 'getter') accessor.get = fn;
   else accessor.set = fn;
+  // An accessor is named after its key with a `get` or `set` prefix, a symbol key by its description in brackets.
+  const keyText = typeof key === 'string' ? key : key.description === undefined ? '' : `[${key.description}]`;
+  fn.properties.set('name', {
+    value: `${kind === 'getter' ? 'get' : 'set'} ${keyText}`,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
   runtime.defineProperty(object, key, accessor);
 }
