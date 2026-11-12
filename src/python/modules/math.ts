@@ -9,7 +9,7 @@ import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
 import type { Kwargs, PyValue } from '../values';
-import { fma } from './mathFma';
+import { fma, fusedMultiplyAdd } from './mathFma';
 import { fsum } from './mathFsum';
 import { type GammaResult, lgamma, tgamma } from './mathGamma';
 import { sumprod } from './mathSumprod';
@@ -66,24 +66,36 @@ const finiteCheck = (x: number): Error | undefined =>
   Number.isFinite(x) || Number.isNaN(x) ? undefined : valueError(`expected a finite input, got ${floatRepr(x)}`);
 
 /** The natural logarithm of an int too large for a float, from its bit length. */
-function logOfInt(value: bigint): number {
-  const bits = value.toString(2).length;
-  if (bits <= 1000) return Math.log(Number(value));
-  const shift = BigInt(bits - 60);
-  return Math.log(Number(value >> shift)) + Number(shift) * Math.LN2;
-}
-
-function logOf(value: PyValue, base: (x: number) => number): number {
+function logOf(value: PyValue, func: (x: number) => number): number {
   if (typeof value === 'bigint' || typeof value === 'boolean') {
     if (BigInt(value) <= 0n) throw valueError('expected a positive input');
-    return base(logOfInt(BigInt(value)));
+    return logOfInt(BigInt(value), func);
   }
   const x = realArgument(value);
   if (!(x > 0)) {
     if (Number.isNaN(x)) return x;
     throw valueError(`expected a positive input, got ${floatRepr(x)}`);
   }
-  return base(Math.log(x));
+  return func(x);
+}
+
+/** loghelper's int path: an int too large for a float is split as x * 2**e, whose log is log(x) + log(2) * e. */
+function logOfInt(value: bigint, func: (x: number) => number): number {
+  const x = Number(value);
+  if (Number.isFinite(x)) return func(x);
+  const { mantissa, exponent } = frexpInt(value);
+  // The reference CPython's compiler fuses `func(x) + func(2.0) * e` into one fma.
+  return fusedMultiplyAdd(func(2), exponent, func(mantissa));
+}
+
+/** _PyLong_Frexp: a positive int as a mantissa in [0.5, 1) rounded half-even to 53 bits, times 2**exponent. */
+function frexpInt(value: bigint): { mantissa: number; exponent: number } {
+  const bits = value.toString(2).length;
+  // Two guard bits and a sticky bit let the conversion to a float round the kept bits once, as the whole value would.
+  const shift = BigInt(bits - 55);
+  const sticky = (value & ((1n << shift) - 1n)) === 0n ? 0n : 1n;
+  const mantissa = Number((value >> shift) | sticky) * 2 ** -55;
+  return mantissa === 1 ? { mantissa: 0.5, exponent: bits + 1 } : { mantissa, exponent: bits };
 }
 
 function integerArgument(value: PyValue): bigint {
@@ -361,8 +373,8 @@ registerModule('math', () => {
     ['exp2', floatFunction('exp2', (x) => floatPower(2, x))],
     ['expm1', floatFunction('expm1', Math.expm1)],
     ['log', builtin('log', 'expected', 1, 2, ([value, base]) => log(value, base))],
-    ['log2', builtin('log2', 'one', 1, 1, ([value]) => log2Of(value))],
-    ['log10', builtin('log10', 'one', 1, 1, ([value]) => log10Of(value))],
+    ['log2', builtin('log2', 'one', 1, 1, ([value]) => logOf(value, Math.log2))],
+    ['log10', builtin('log10', 'one', 1, 1, ([value]) => logOf(value, Math.log10))],
     [
       'log1p',
       floatFunction('log1p', Math.log1p, (x) =>
@@ -438,9 +450,9 @@ function sqrt(x: number): number {
 }
 
 function log(value: PyValue, base: PyValue | undefined): number {
-  const numerator = logOf(value, (x) => x);
+  const numerator = logOf(value, Math.log);
   if (base === undefined) return numerator;
-  const denominator = logOf(base, (x) => x);
+  const denominator = logOf(base, Math.log);
   if (denominator === 0) throw pyError('ZeroDivisionError', 'division by zero');
   return numerator / denominator;
 }
@@ -489,30 +501,6 @@ function ldexp(x: number, exponent: PyValue): number {
   const result = x * 2 ** half * 2 ** (power - half);
   if (!Number.isFinite(result) && Number.isFinite(x)) throw rangeError();
   return result;
-}
-
-function log2Of(value: PyValue): number {
-  if (typeof value === 'number' && value > 0) return Math.log2(value);
-  if (
-    (typeof value === 'bigint' || typeof value === 'boolean') &&
-    BigInt(value) > 0n &&
-    BigInt(value).toString(2).length <= 1000
-  ) {
-    return Math.log2(Number(value));
-  }
-  return logOf(value, (x) => x / Math.LN2);
-}
-
-function log10Of(value: PyValue): number {
-  if (typeof value === 'number' && value > 0) return Math.log10(value);
-  if (
-    (typeof value === 'bigint' || typeof value === 'boolean') &&
-    BigInt(value) > 0n &&
-    BigInt(value).toString(2).length <= 1000
-  ) {
-    return Math.log10(Number(value));
-  }
-  return logOf(value, (x) => x / Math.LN10);
 }
 
 export { argument, isTruthy };
