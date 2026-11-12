@@ -64,6 +64,31 @@ const META_ANNOTATIONS: Readonly<Record<string, AnnotationInterface>> = {
   Native: { targets: ['FIELD'], elements: {} },
 };
 
+/** The contexts of the declarations whose modifiers an annotation may be among, by their nodes' types. */
+const DECLARATION_OWNERS: Readonly<Record<string, readonly ElementType[]>> = {
+  class_declaration: ['TYPE'],
+  interface_declaration: ['TYPE'],
+  enum_declaration: ['TYPE'],
+  record_declaration: ['TYPE'],
+  annotation_type_declaration: ['TYPE', 'ANNOTATION_TYPE'],
+  method_declaration: ['METHOD', 'TYPE_USE'],
+  annotation_type_element_declaration: ['METHOD', 'TYPE_USE'],
+  constructor_declaration: ['CONSTRUCTOR'],
+  compact_constructor_declaration: ['CONSTRUCTOR'],
+  enum_constant: ['FIELD'],
+  field_declaration: ['FIELD', 'TYPE_USE'],
+  constant_declaration: ['FIELD', 'TYPE_USE'],
+  formal_parameter: ['PARAMETER', 'TYPE_USE'],
+  spread_parameter: ['PARAMETER', 'TYPE_USE'],
+  catch_formal_parameter: ['PARAMETER', 'TYPE_USE'],
+  local_variable_declaration: ['LOCAL_VARIABLE', 'TYPE_USE'],
+  resource: ['LOCAL_VARIABLE', 'TYPE_USE'],
+  enhanced_for_statement: ['LOCAL_VARIABLE', 'TYPE_USE'],
+  instanceof_expression: ['LOCAL_VARIABLE', 'TYPE_USE'],
+  record_component: ['RECORD_COMPONENT', 'FIELD', 'METHOD', 'PARAMETER', 'TYPE_USE'],
+  type_parameter: ['TYPE_PARAMETER', 'TYPE_USE'],
+};
+
 /**
  * Rejects an annotation that names no annotation interface, one not applicable where it is written, or one whose
  * elements are not those its interface declares. These programs ignore annotations otherwise, so the interfaces are
@@ -80,25 +105,36 @@ export function checkAnnotations(root: Node, imports: readonly ImportDeclaration
     for (const child of namedChildren(node)) visit(child);
   };
   visit(root);
-  const imported = new Set(
-    imports
-      .filter((declaration) => !declaration.isStatic && declaration.names.join('.').startsWith('java.lang.annotation'))
-      .flatMap((declaration) => (declaration.isWildcard ? Object.keys(META_ANNOTATIONS) : declaration.names.slice(-1)))
-  );
+  const imported = importedMetaAnnotations(imports);
   const written = new Set<string>();
   for (const use of uses) {
     const name = (use.childForFieldName('name')?.text ?? '').replaceAll(/\s/g, '');
     const annotation = annotationInterfaceOf(name, declared, imported);
     if (!annotation) throw annotationError(use, `この採点環境には、アノテーション ${name} がありません。`);
     const place = `${use.parent?.startIndex}:${name.split('.').at(-1)}`;
-    if (written.has(place) && !annotation.isRepeatable)
+    if (written.has(place) && !annotation.isRepeatable) {
       throw annotationError(use, `アノテーション @${name} は同じ場所に 2 回付けられません。`);
-    written.add(place);
-    if (!contextsOf(use).some((context) => annotation.targets.includes(context))) {
-      throw annotationError(use, `アノテーション @${name} はここには付けられません。`);
     }
-    checkElements(use, name, annotation.elements);
+    written.add(place);
+    checkPlacement(use, name, annotation);
   }
+}
+
+/** The names of the annotation interfaces of java.lang.annotation that the imports bring in. */
+function importedMetaAnnotations(imports: readonly ImportDeclaration[]): ReadonlySet<string> {
+  return new Set(
+    imports
+      .filter((declaration) => !declaration.isStatic && declaration.names.join('.').startsWith('java.lang.annotation'))
+      .flatMap((declaration) => (declaration.isWildcard ? Object.keys(META_ANNOTATIONS) : declaration.names.slice(-1)))
+  );
+}
+
+/** Rejects an annotation written where its interface's targets do not allow, or with elements it does not declare. */
+function checkPlacement(use: Node, name: string, annotation: AnnotationInterface): void {
+  if (!contextsOf(use).some((context) => annotation.targets.includes(context))) {
+    throw annotationError(use, `アノテーション @${name} はここには付けられません。`);
+  }
+  checkElements(use, name, annotation.elements);
 }
 
 /** A declared annotation interface: the contexts its `@Target` lists, or every declaration context, and its elements. */
@@ -161,54 +197,8 @@ function checkElements(use: Node, name: string, elements: Readonly<Record<string
 /** The contexts an annotation written at `use` applies to: its declaration's kind, and the declared type's use. */
 function contextsOf(use: Node): readonly ElementType[] {
   const owner = use.parent?.type === 'modifiers' ? use.parent.parent : use.parent;
-  switch (owner?.type) {
-    case 'class_declaration':
-    case 'interface_declaration':
-    case 'enum_declaration':
-    case 'record_declaration': {
-      return ['TYPE'];
-    }
-    case 'annotation_type_declaration': {
-      return ['TYPE', 'ANNOTATION_TYPE'];
-    }
-    case 'method_declaration': {
-      return owner.childForFieldName('type')?.type === 'void_type' ? ['METHOD'] : ['METHOD', 'TYPE_USE'];
-    }
-    case 'annotation_type_element_declaration': {
-      return ['METHOD', 'TYPE_USE'];
-    }
-    case 'constructor_declaration':
-    case 'compact_constructor_declaration': {
-      return ['CONSTRUCTOR'];
-    }
-    case 'enum_constant': {
-      return ['FIELD'];
-    }
-    case 'field_declaration':
-    case 'constant_declaration': {
-      return ['FIELD', 'TYPE_USE'];
-    }
-    case 'formal_parameter':
-    case 'spread_parameter':
-    case 'catch_formal_parameter': {
-      return ['PARAMETER', 'TYPE_USE'];
-    }
-    case 'local_variable_declaration':
-    case 'resource':
-    case 'enhanced_for_statement':
-    case 'instanceof_expression': {
-      return ['LOCAL_VARIABLE', 'TYPE_USE'];
-    }
-    case 'record_component': {
-      return ['RECORD_COMPONENT', 'FIELD', 'METHOD', 'PARAMETER', 'TYPE_USE'];
-    }
-    case 'type_parameter': {
-      return ['TYPE_PARAMETER', 'TYPE_USE'];
-    }
-    default: {
-      return ['TYPE_USE'];
-    }
-  }
+  if (owner?.type === 'method_declaration' && owner.childForFieldName('type')?.type === 'void_type') return ['METHOD'];
+  return (owner && DECLARATION_OWNERS[owner.type]) ?? ['TYPE_USE'];
 }
 
 function annotationError(use: Node, message: string): CompileError {

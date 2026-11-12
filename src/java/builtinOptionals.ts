@@ -51,7 +51,6 @@ function get(frame: Frame, receiver: Value): Value {
   return state.value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One registration per builtin method, each a small native.
 // code-gauge-allow functionNcss 48 -- One registration per builtin method, each a small native.
 export function defineOptionals(context: Context): Optionals {
   const { registry, objectType } = context;

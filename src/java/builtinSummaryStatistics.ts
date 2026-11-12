@@ -1,5 +1,4 @@
 import { type CollectorFunctions } from './builtinCollectors';
-import { addWithCompensation, compensatedSum, type NumericSum } from './builtinDownstreamCollectors';
 import { callFunction } from './builtinFunctions';
 import { type Context, iterate, op, take } from './builtinStreamSupport';
 import { addConstructor, addMethod, newString } from './builtinSupport';
@@ -11,6 +10,14 @@ import { JavaObject, JavaString, type Value } from './values';
 
 /** The element types of the summary statistics, by the prefix of their classes' names. */
 export type StatisticsKind = 'Int' | 'Long' | 'Double';
+
+/** A running sum, of doubles with the compensation for lost low-order bits that the JDK's Kahan summation keeps. */
+export interface NumericSum {
+  sum: number;
+  compensation: number;
+  simpleSum: number;
+  count: number;
+}
 
 /** What a summary statistics object has seen. */
 interface Statistics {
@@ -94,19 +101,28 @@ export function defineStatisticsOperations(context: Context, streams: Record<Sta
   }
 }
 
-/** The collector `summarizingInt`, `summarizingLong`, or `summarizingDouble` makes of `mapper`, of `iface`. */
-export function statisticsCollector(
-  cls: ClassInfo,
-  kind: StatisticsKind,
-  iface: ClassInfo,
-  mapper: Value
+/**
+ * The collector `summarizingInt`, `summingInt`, or `averagingInt` and their siblings for longs and doubles make of
+ * `mapper`, a function of `iface`: each summarizes the values, as the JDK's sum and average them alike.
+ */
+export function numericCollector(
+  { cls, kind, iface }: { cls: ClassInfo; kind: StatisticsKind; iface: ClassInfo },
+  mapper: Value,
+  operation: 'summing' | 'averaging' | 'summarizing',
+  resultClass: ClassInfo
 ): CollectorFunctions {
   return {
     supply: (frame) => createStatistics(frame, cls, kind),
     accumulate: (frame, container, value) => {
       accept(statisticsOf(container as Value), callFunction(frame, iface, mapper, [value]));
     },
-    finish: (_, container) => container as Value,
+    finish: (frame, container) => {
+      if (operation === 'summarizing') return container as Value;
+      const state = statisticsOf(container as Value);
+      if (operation === 'averaging') return box(frame, resultClass, averageOf(state));
+      // summingInt adds in an int, which wraps around at 32 bits.
+      return box(frame, resultClass, kind === 'Int' ? Number(BigInt.asIntN(32, state.integerSum)) : sumOf(state));
+    },
   };
 }
 
@@ -173,4 +189,21 @@ function sumOf(state: Statistics): Value {
 function averageOf(state: Statistics): number {
   if (state.total.count === 0) return 0;
   return (state.kind === 'Double' ? compensatedSum(state.total) : Number(state.integerSum)) / state.total.count;
+}
+
+/** Adds as `Collectors.sumWithCompensation` does. */
+export function addWithCompensation(state: NumericSum, value: number): void {
+  const corrected = value - state.compensation;
+  const sum = state.sum + corrected;
+  state.compensation = sum - state.sum - corrected;
+  state.sum = sum;
+  state.simpleSum += value;
+}
+
+/** The sum as `Collectors.computeFinalSum` gives it, which keeps an infinite sum that the compensation makes NaN. */
+export function compensatedSum(state: NumericSum): number {
+  const sum = state.sum - state.compensation;
+  return Number.isNaN(sum) && !Number.isFinite(state.simpleSum) && !Number.isNaN(state.simpleSum)
+    ? state.simpleSum
+    : sum;
 }

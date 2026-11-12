@@ -151,35 +151,8 @@ export function defineFunctions(
   const toInt = defineFunctional(context, 'ToIntFunction', pkg, ['T'], 'applyAsInt', (t) => [[t], INT]);
   const toDouble = defineFunctional(context, 'ToDoubleFunction', pkg, ['T'], 'applyAsDouble', (t) => [[t], DOUBLE]);
   const toLong = defineFunctional(context, 'ToLongFunction', pkg, ['T'], 'applyAsLong', (t) => [[t], LONG]);
-  defineFunctional(context, 'IntFunction', pkg, ['R'], 'apply', (r) => [[INT], r]);
-  for (const [prefix, type] of [
-    ['Int', INT],
-    ['Long', LONG],
-    ['Double', DOUBLE],
-  ] as const) {
-    definePredicateDefaults(
-      defineFunctional(context, `${prefix}Predicate`, pkg, [], 'test', () => [[type], BOOLEAN]).cls
-    );
-    defineFunctional(context, `${prefix}Supplier`, pkg, [], `getAs${prefix}`, () => [[], type]);
-    defineFunctional(context, `Obj${prefix}Consumer`, pkg, ['T'], 'accept', (t) => [[t, type], VOID]);
-  }
+  definePrimitiveFunctions(context, pkg);
   defineFunctional(context, 'BooleanSupplier', pkg, [], 'getAsBoolean', () => [[], BOOLEAN]);
-  defineFunctional(context, 'IntUnaryOperator', pkg, [], 'applyAsInt', () => [[INT], INT]);
-  defineFunctional(context, 'IntBinaryOperator', pkg, [], 'applyAsInt', () => [[INT, INT], INT]);
-  defineFunctional(context, 'IntConsumer', pkg, [], 'accept', () => [[INT], VOID]);
-  defineFunctional(context, 'DoubleUnaryOperator', pkg, [], 'applyAsDouble', () => [[DOUBLE], DOUBLE]);
-  defineFunctional(context, 'LongUnaryOperator', pkg, [], 'applyAsLong', () => [[LONG], LONG]);
-  defineFunctional(context, 'LongBinaryOperator', pkg, [], 'applyAsLong', () => [[LONG, LONG], LONG]);
-  for (const [prefix, type] of [
-    ['Long', LONG],
-    ['Double', DOUBLE],
-  ] as const) {
-    defineFunctional(context, `${prefix}Consumer`, pkg, [], 'accept', () => [[type], VOID]);
-    defineFunctional(context, `${prefix}Function`, pkg, ['R'], 'apply', (r) => [[type], r]);
-    defineFunctional(context, `IntTo${prefix}Function`, pkg, [], `applyAs${prefix}`, () => [[INT], type]);
-    defineFunctional(context, `${prefix}ToIntFunction`, pkg, [], 'applyAsInt', () => [[type], INT]);
-  }
-  defineFunctional(context, 'DoubleBinaryOperator', pkg, [], 'applyAsDouble', () => [[DOUBLE, DOUBLE], DOUBLE]);
   const unary = defineInterface(registry, 'UnaryOperator', pkg);
   const [unaryT] = addTypeParameters(unary, ['T'], context.objectType);
   addInterface(unary, classType(fn.cls, unaryT, unaryT));
@@ -214,6 +187,31 @@ export function defineFunctions(
     biFunction: biFunction.cls,
   });
   return { comparatorClass: comparator };
+}
+
+/**
+ * The functional interfaces of `int`, `long`, and `double` values, such as `IntPredicate`, `LongFunction`, and
+ * `IntToDoubleFunction`, with the defaults of their predicates.
+ */
+function definePrimitiveFunctions(context: Context, pkg: string): void {
+  for (const [prefix, type] of [
+    ['Int', INT],
+    ['Long', LONG],
+    ['Double', DOUBLE],
+  ] as const) {
+    definePredicateDefaults(
+      defineFunctional(context, `${prefix}Predicate`, pkg, [], 'test', () => [[type], BOOLEAN]).cls
+    );
+    defineFunctional(context, `${prefix}Supplier`, pkg, [], `getAs${prefix}`, () => [[], type]);
+    defineFunctional(context, `${prefix}Consumer`, pkg, [], 'accept', () => [[type], VOID]);
+    defineFunctional(context, `Obj${prefix}Consumer`, pkg, ['T'], 'accept', (t) => [[t, type], VOID]);
+    defineFunctional(context, `${prefix}Function`, pkg, ['R'], 'apply', (r) => [[type], r]);
+    defineFunctional(context, `${prefix}UnaryOperator`, pkg, [], `applyAs${prefix}`, () => [[type], type]);
+    defineFunctional(context, `${prefix}BinaryOperator`, pkg, [], `applyAs${prefix}`, () => [[type, type], type]);
+    if (prefix === 'Int') continue;
+    defineFunctional(context, `IntTo${prefix}Function`, pkg, [], `applyAs${prefix}`, () => [[INT], type]);
+    defineFunctional(context, `${prefix}ToIntFunction`, pkg, [], 'applyAsInt', () => [[type], INT]);
+  }
 }
 
 /** `Map.Entry.comparingByKey` and `comparingByValue`, which order entries by their keys' or values' natural order. */

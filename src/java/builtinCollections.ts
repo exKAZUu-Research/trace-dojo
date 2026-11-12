@@ -123,6 +123,59 @@ export function defineCollections(
   defineListClasses(context, lists, dequeClass);
   defineArrayDeque(context, lists, dequeClass);
   const priorityQueue = definePriorityQueue(context, lists, registry.classes.get('Queue') as ClassInfo);
+  const restrictedLists = defineRestrictedLists(context, lists);
+  const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
+  // A map's key and entry sets compare and hash as sets; its values, a plain collection, keep identity.
+  defineSetEquality(snapshotSet, context, setClass);
+  linkOverrides(snapshotSet);
+  const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
+  const unmodifiableViewSet = defineUnmodifiableViewSet(context, setClass, itrClass);
+  const immutableSet = defineSets(context, setClass, collectionClass, itrClass);
+  const { mapClass, immutableMap } = defineHashMap(context, {
+    setClass,
+    collectionClass,
+    snapshotSet,
+    snapshotCollection,
+  });
+  return {
+    iterableClass,
+    iteratorClass,
+    iterator,
+    hasNext,
+    next,
+    listClass,
+    collectionClass,
+    setClass,
+    mapClass,
+    immutableMap,
+    immutableSet,
+    unmodifiableViewSet,
+    ...restrictedLists,
+    sortedClasses: [
+      ...['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
+      priorityQueue,
+    ],
+  };
+}
+
+/**
+ * The lists that reject changes: those `List.of`, `Collections.emptyList`, `singletonList`, `nCopies`, and
+ * `unmodifiableList` return, and the fixed-size list of `Arrays.asList`.
+ */
+function defineRestrictedLists(
+  context: Context,
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo }
+): Pick<
+  Collections,
+  | 'immutableList'
+  | 'pairList'
+  | 'emptyList'
+  | 'singletonList'
+  | 'copiesList'
+  | 'unmodifiableList'
+  | 'unmodifiableRandomAccessList'
+  | 'fixedSizeList'
+> {
   const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
   const pairList = defineRestrictedList(context, 'List12', lists, () => true);
   const emptyList = defineRestrictedList(context, 'EmptyList', lists, () => true, 'Collections$');
@@ -151,33 +204,8 @@ export function defineCollections(
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
   fixedSizeClasses.add(fixedSizeList);
   defaultRemoveClasses.add(fixedSizeList);
-  defineIndexFailures({ immutableList, pairList, emptyList, singletonList, fixedSizeList }, registry);
-  const snapshotSet = defineSnapshot(context, 'Set', setClass, itrClass);
-  // A map's key and entry sets compare and hash as sets; its values, a plain collection, keep identity.
-  defineSetEquality(snapshotSet, context, setClass);
-  linkOverrides(snapshotSet);
-  const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
-  const unmodifiableViewSet = defineUnmodifiableViewSet(context, setClass, itrClass);
-  const immutableSet = defineSets(context, setClass, collectionClass, itrClass);
-  const { mapClass, immutableMap } = defineHashMap(context, {
-    setClass,
-    collectionClass,
-    snapshotSet,
-    snapshotCollection,
-  });
+  defineIndexFailures({ immutableList, pairList, emptyList, singletonList, fixedSizeList }, context.registry);
   return {
-    iterableClass,
-    iteratorClass,
-    iterator,
-    hasNext,
-    next,
-    listClass,
-    collectionClass,
-    setClass,
-    mapClass,
-    immutableMap,
-    immutableSet,
-    unmodifiableViewSet,
     immutableList,
     pairList,
     emptyList,
@@ -186,10 +214,6 @@ export function defineCollections(
     unmodifiableList,
     unmodifiableRandomAccessList,
     fixedSizeList,
-    sortedClasses: [
-      ...['TreeMap', 'TreeSet'].map((name) => context.registry.classes.get(name) as ClassInfo),
-      priorityQueue,
-    ],
   };
 }
 

@@ -6,6 +6,7 @@ import { callFunction, type Functions } from './builtinFunctions';
 import { createOptional, defineOptionals, type Optionals, stateOf as optionalState } from './builtinOptionals';
 import { definePrimitiveStreamOperations } from './builtinPrimitiveStreams';
 import {
+  arrayStream,
   classType,
   closeStream,
   type Context,
@@ -396,25 +397,23 @@ function extremeOf(frame: Frame, kind: StreamKind, receiver: Value, order: Value
   let best: Value;
   let found = false;
   for (const value of iterate(take(frame, receiver))) {
-    if (kind.primitive === 'Double') {
-      // DoubleStream reduces with Math.max or Math.min, which give NaN for any NaN and order -0.0 below 0.0.
-      best = found ? (sign > 0 ? Math.max : Math.min)(best as number, value as number) : value;
-      found = true;
-      continue;
-    }
-    const difference = kind.primitive
-      ? compareValues(value, best)
-      : found
-        ? (callFunction(frame, kind.comparator, order, [value, best]) as number)
-        : 0;
-    if (!found || difference * sign > 0) best = value;
+    best = found ? better(frame, kind, order, sign, value, best) : value;
     found = true;
   }
   return createOptional(frame, kind.optionalClass, best, found);
 }
 
+/** The greater (`sign` 1) or lesser (-1) of `value` and `best`, which wins ties. */
+function better(frame: Frame, kind: StreamKind, order: Value, sign: number, value: Value, best: Value): Value {
+  // DoubleStream reduces with Math.max or Math.min, which give NaN for any NaN and order -0.0 below 0.0.
+  if (kind.primitive === 'Double') return (sign > 0 ? Math.max : Math.min)(best as number, value as number);
+  const difference = kind.primitive
+    ? compareValues(value, best)
+    : (callFunction(frame, kind.comparator, order, [value, best]) as number);
+  return difference * sign > 0 ? value : best;
+}
+
 /** The operations only a `Stream` of objects has: mapping, sorting with a comparator, reducing, and collecting. */
-// code-gauge-allow functionNcss 33 -- One registration per builtin method, each a small native.
 function defineReferenceOperations(context: Context, types: StreamTypes, tType: JavaType, collector: ClassInfo): void {
   const { objectType, collections, fn } = context;
   const { stream, streamImpl, intStream, intStreamImpl } = types;
@@ -743,11 +742,9 @@ function defineOptionalStream(context: Context, { stream, streamImpl }: StreamTy
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One registration per stream source, each a small native.
-// code-gauge-allow functionNcss 39 -- One registration per builtin method, each a small native.
 function defineSources(context: Context, streams: StreamTypes): void {
   const { registry, objectType, collections } = context;
-  const { stream, intStream, streamImpl, intStreamImpl } = streams;
+  const { stream, streamImpl } = streams;
   defineOptionalStream(context, streams);
   const [collectionE] = collections.collectionClass.typeParameters;
   addMethod(
@@ -798,82 +795,15 @@ function defineSources(context: Context, streams: StreamTypes): void {
       () => 0n
     )
   ).typeParameters = [emptyVariable];
-  addMethod(intStream, 'empty', [], intStream.type, true, (frame) =>
-    createStream(
-      frame,
-      intStreamImpl,
-      () => [][Symbol.iterator](),
-      [],
-      () => 0n
-    )
-  );
-  for (const [name, isClosed] of [
-    ['range', false],
-    ['rangeClosed', true],
-  ] as const) {
-    addMethod(intStream, name, [INT, INT], intStream.type, true, (frame, _, [start, end]) =>
-      createStream(
-        frame,
-        intStreamImpl,
-        function* () {
-          const last = (end as number) - (isClosed ? 0 : 1);
-          for (let value = start as number; value <= last; value++) {
-            frame.runtime.spend();
-            yield value;
-          }
-        },
-        [],
-        () => BigInt(Math.max(0, (end as number) - (start as number) + (isClosed ? 1 : 0)))
-      )
-    );
-  }
-  const intOf = addMethod(
-    intStream,
-    'of',
-    [{ kind: 'array', element: INT }],
-    intStream.type,
-    true,
-    (frame, _, [array]) => {
-      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-      const { values } = array;
-      return createStream(
-        frame,
-        intStreamImpl,
-        () => values[Symbol.iterator](),
-        [],
-        () => BigInt(values.length)
-      );
-    }
-  );
-  intOf.isVarargs = true;
   const arraysClass = registry.classes.get('Arrays') as ClassInfo;
-  addMethod(arraysClass, 'stream', [{ kind: 'array', element: INT }], intStream.type, true, (frame, _, [array]) => {
-    if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-    return createStream(
-      frame,
-      intStreamImpl,
-      () => [...array.values][Symbol.iterator](),
-      [],
-      () => BigInt(array.values.length)
-    );
-  });
   const arrayVariable = typeVariable('T', objectType);
-  const arrayStream = addMethod(
+  const arrayStreamMethod = addMethod(
     arraysClass,
     'stream',
     [{ kind: 'array', element: variableType(arrayVariable) }],
     classType(stream, variableType(arrayVariable)),
     true,
-    (frame, _, [array]) => {
-      if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-      return createStream(
-        frame,
-        streamImpl,
-        () => [...array.values][Symbol.iterator](),
-        [array],
-        () => BigInt(array.values.length)
-      );
-    }
+    (frame, _, [array]) => arrayStream(frame, streamImpl, array, [array])
   );
-  arrayStream.typeParameters = [arrayVariable];
+  arrayStreamMethod.typeParameters = [arrayVariable];
 }

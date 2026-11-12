@@ -313,14 +313,22 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
     exception.message = newString(frame, stringify(frame, detail, objectClass.type));
     if (detail instanceof JavaObject && frame.runtime.isInstance(detail, throwableClass)) exception.cause = detail;
   });
-  const linkage = defineThrowable('LinkageError', errorClass);
+  defineLinkageErrors(defineThrowable('LinkageError', errorClass), defineThrowable, throwableClass);
+  return throwableClass;
+}
+
+/** The errors of linking and initializing classes, of which `ExceptionInInitializerError` takes its cause alone. */
+function defineLinkageErrors(
+  linkage: ClassInfo,
+  defineThrowable: (name: string, superclass: ClassInfo) => ClassInfo,
+  throwableClass: ClassInfo
+): void {
   defineThrowable('AbstractMethodError', defineThrowable('IncompatibleClassChangeError', linkage));
   defineThrowable('NoClassDefFoundError', linkage);
   const initializerError = defineThrowable('ExceptionInInitializerError', linkage);
   addConstructor(initializerError, [throwableClass.type], (_, receiver, [thrown]) => {
     (receiver as JavaObject).cause = thrown as JavaObject | undefined;
   });
-  return throwableClass;
 }
 
 /** The exception and its causes, which a stack trace lists, each on a line of its own. */

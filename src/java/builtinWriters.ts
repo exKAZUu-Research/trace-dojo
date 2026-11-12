@@ -88,7 +88,6 @@ function sinkWrite(frame: Frame, receiver: Value, text: string, kind: WriteKind)
  * Defines `write` and `append` on a writer class, and `flush` and `close` with `withFlushAndClose`, each passed to
  * `declare`, which subclasses that narrow the methods' throws clauses redefine.
  */
-// code-gauge-allow functionNcss 36 -- One registration per builtin method, each a small native.
 function defineWriterMethods(
   cls: ClassInfo,
   context: IOContext,
@@ -98,7 +97,6 @@ function defineWriterMethods(
   overrides: (name: string, parameterTypes: JavaType[]) => boolean = () => true
 ): void {
   const { stringType } = context;
-  const charSequence = classOf(context, 'CharSequence');
   const add = (name: string, parameterTypes: JavaType[], returnType: JavaType, native: NativeMethod): void => {
     if (overrides(name, parameterTypes)) declare(addMethod(cls, name, parameterTypes, returnType, false, native));
   };
@@ -121,26 +119,36 @@ function defineWriterMethods(
     if (!(array instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
     write(frame, receiver, sliceChecked(frame, charsOf(frame, array), offset as number, length as number), 'chars');
   });
-  add('append', [CHAR], cls.type, (frame, receiver, [code]) => {
-    write(frame, receiver, charToString(code as number), 'char');
-    return receiver;
-  });
-  add('append', [charSequence.type], cls.type, (frame, receiver, [value]) => {
-    write(frame, receiver, charSequenceText(frame, value), 'string');
-    return receiver;
-  });
-  add('append', [charSequence.type, INT, INT], cls.type, (frame, receiver, [value, start, end]) => {
-    const sequence = value ?? new JavaString('null');
-    const part = frame.runtime.invokeVirtual(frame, charSequence, 'subSequence', sequence, [start, end]);
-    write(frame, receiver, charSequenceText(frame, part), 'string');
-    return receiver;
-  });
+  defineAppends(classOf(context, 'CharSequence'), cls.type, add, write);
   if (!withFlushAndClose) return;
   add('flush', [], VOID, (frame, receiver) => {
     sinkOf(frame, receiver).flush(frame);
   });
   add('close', [], VOID, (frame, receiver) => {
     sinkOf(frame, receiver).close(frame);
+  });
+}
+
+/** The `append` methods of `Appendable`, which write a char or a `CharSequence` and return the writer. */
+function defineAppends(
+  charSequence: ClassInfo,
+  writerType: JavaType,
+  add: (name: string, parameterTypes: JavaType[], returnType: JavaType, native: NativeMethod) => void,
+  write: WriteText
+): void {
+  add('append', [CHAR], writerType, (frame, receiver, [code]) => {
+    write(frame, receiver, charToString(code as number), 'char');
+    return receiver;
+  });
+  add('append', [charSequence.type], writerType, (frame, receiver, [value]) => {
+    write(frame, receiver, charSequenceText(frame, value), 'string');
+    return receiver;
+  });
+  add('append', [charSequence.type, INT, INT], writerType, (frame, receiver, [value, start, end]) => {
+    const sequence = value ?? new JavaString('null');
+    const part = frame.runtime.invokeVirtual(frame, charSequence, 'subSequence', sequence, [start, end]);
+    write(frame, receiver, charSequenceText(frame, part), 'string');
+    return receiver;
   });
 }
 

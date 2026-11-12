@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 418 -- One compiler of the expressions, whose operators, casts, and literals share its conversions.
 import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span, TypeSyntax } from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {

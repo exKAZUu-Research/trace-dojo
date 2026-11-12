@@ -144,23 +144,28 @@ export class Runtime {
     for (const field of cls.staticFields) values[field.slot] = field.constant ?? defaultValue(field.type);
     this.staticValues.set(cls, values);
     try {
-      if (cls.initializeStatics) {
-        const initializerFrame = this.pushFrame(frame, undefined, [], undefined, undefined);
-        try {
-          cls.initializeStatics(initializerFrame);
-        } finally {
-          this.popFrame();
-        }
-      }
+      if (cls.initializeStatics) this.runStaticInitializers(frame, cls, cls.initializeStatics);
+    } finally {
+      this.initializingClasses.delete(cls);
+    }
+  }
+
+  /**
+   * Runs a class's static initializers, after whose failure the class is erroneous: an Error propagates as it is, and
+   * another exception is wrapped in `ExceptionInInitializerError` (JLS 12.4.2).
+   */
+  private runStaticInitializers(frame: Frame, cls: ClassInfo, initializeStatics: (frame: Frame) => void): void {
+    const initializerFrame = this.pushFrame(frame, undefined, [], undefined, undefined);
+    try {
+      initializeStatics(initializerFrame);
     } catch (error) {
       if (!(error instanceof JavaThrow)) throw error;
       this.erroneousClasses.set(cls, error.value);
       this.staticValues.delete(cls);
-      // An Error propagates as it is; another exception is wrapped (JLS 12.4.2).
       if (this.isInstance(error.value, this.builtins.classes.get('Error') as ClassInfo)) throw error;
       throwBuiltin(frame, 'ExceptionInInitializerError', undefined, error.value);
     } finally {
-      this.initializingClasses.delete(cls);
+      this.popFrame();
     }
   }
 

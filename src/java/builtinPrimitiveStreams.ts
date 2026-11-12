@@ -1,8 +1,8 @@
-import { addWithCompensation, compensatedSum, type NumericSum } from './builtinDownstreamCollectors';
 import { callFunction } from './builtinFunctions';
 import { createOptional, type Optionals } from './builtinOptionals';
 import { mapped, type StreamTypes } from './builtinStreams';
 import {
+  arrayStream,
   classType,
   type Context,
   createStream,
@@ -15,10 +15,11 @@ import {
   typeVariable,
   variableType,
 } from './builtinStreamSupport';
+import { addWithCompensation, compensatedSum, type NumericSum } from './builtinSummaryStatistics';
 import { addMethod } from './builtinSupport';
 import { box } from './builtinWrappers';
-import { type Frame, throwBuiltin } from './runtime';
-import { type ClassInfo, DOUBLE, type JavaType, LONG } from './types';
+import { type Frame } from './runtime';
+import { type ClassInfo, DOUBLE, INT, type JavaType, LONG } from './types';
 import { JavaArray, type Value } from './values';
 
 /** What the operations of `LongStream` and `DoubleStream` differ in. */
@@ -36,8 +37,8 @@ interface PrimitiveStream {
 }
 
 /**
- * The operations only `LongStream` and `DoubleStream` have, the operations of other streams that give one, and their
- * sources: `of`, `empty`, `Arrays.stream` of an array, and `LongStream.range`.
+ * The operations only `LongStream` and `DoubleStream` have, the operations of other streams that give one, and the
+ * primitive streams' sources: `of`, `empty`, `Arrays.stream` of an array, and `LongStream.range`.
  */
 export function definePrimitiveStreamOperations(context: Context, types: StreamTypes, optionals: Optionals): void {
   const streams: PrimitiveStream[] = [
@@ -71,7 +72,9 @@ export function definePrimitiveStreamOperations(context: Context, types: StreamT
     defineConversions(context, types, primitive);
     defineArraySources(context, primitive);
   }
-  defineLongRanges(types.longStream, types.longStreamImpl);
+  defineArraySources(context, { element: INT, cls: types.intStream, impl: types.intStreamImpl });
+  defineRanges(types.intStream, types.intStreamImpl, false);
+  defineRanges(types.longStream, types.longStreamImpl, true);
 }
 
 function definePrimitiveOperations(
@@ -166,19 +169,15 @@ function mapTo(context: Context, impl: ClassInfo, iface: string) {
     derive(impl, receiver, frame, (items) => mapped(frame, items, context.fn(iface), mapper), true);
 }
 
-function defineArraySources(context: Context, { element, cls, impl }: PrimitiveStream): void {
+/** `of`, `empty`, and `Arrays.stream` of a primitive stream. */
+function defineArraySources(
+  context: Context,
+  { element, cls, impl }: Pick<PrimitiveStream, 'element' | 'cls' | 'impl'>
+): void {
   const arrayType: JavaType = { kind: 'array', element };
-  const fromArray = (frame: Frame, array: Value): Value => {
-    if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
-    return createStream(
-      frame,
-      impl,
-      () => [...array.values][Symbol.iterator](),
-      [],
-      () => BigInt(array.values.length)
-    );
-  };
-  addMethod(cls, 'of', [arrayType], cls.type, true, (frame, _, [array]) => fromArray(frame, array)).isVarargs = true;
+  addMethod(cls, 'of', [arrayType], cls.type, true, (frame, _, [array]) =>
+    arrayStream(frame, impl, array)
+  ).isVarargs = true;
   addMethod(cls, 'empty', [], cls.type, true, (frame) =>
     createStream(
       frame,
@@ -189,29 +188,35 @@ function defineArraySources(context: Context, { element, cls, impl }: PrimitiveS
     )
   );
   const arraysClass = context.registry.classes.get('Arrays') as ClassInfo;
-  addMethod(arraysClass, 'stream', [arrayType], cls.type, true, (frame, _, [array]) => fromArray(frame, array));
+  addMethod(arraysClass, 'stream', [arrayType], cls.type, true, (frame, _, [array]) => arrayStream(frame, impl, array));
 }
 
-function defineLongRanges(longStream: ClassInfo, longStreamImpl: ClassInfo): void {
+/** `range` and `rangeClosed` of `IntStream` (`isLong` false) and `LongStream`, which count up one by one. */
+function defineRanges(cls: ClassInfo, impl: ClassInfo, isLong: boolean): void {
+  const element = isLong ? LONG : INT;
   for (const [name, isClosed] of [
     ['range', false],
     ['rangeClosed', true],
   ] as const) {
-    addMethod(longStream, name, [LONG, LONG], longStream.type, true, (frame, _, [start, end]) => {
-      const last = (end as bigint) - (isClosed ? 0n : 1n);
+    addMethod(cls, name, [element, element], cls.type, true, (frame, _, [start, end]) => {
+      const first = BigInt(start as number | bigint);
+      const last = BigInt(end as number | bigint) - (isClosed ? 0n : 1n);
+      const size = last >= first ? last - first + 1n : 0n;
       return createStream(
         frame,
-        longStreamImpl,
-        function* () {
-          for (let value = start as bigint; value <= last; value++) {
-            frame.runtime.spend();
-            yield value;
-          }
-        },
+        impl,
+        () => counted(frame, first, last, isLong),
         [],
-        () => (last >= (start as bigint) ? last - (start as bigint) + 1n : 0n)
+        () => size
       );
     });
+  }
+}
+
+function* counted(frame: Frame, first: bigint, last: bigint, isLong: boolean): Generator<Value> {
+  for (let value = first; value <= last; value++) {
+    frame.runtime.spend();
+    yield isLong ? value : Number(value);
   }
 }
 

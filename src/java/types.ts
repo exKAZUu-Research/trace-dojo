@@ -463,7 +463,6 @@ export function typeName(type: JavaType): string {
  * Whether a value of `from` converts to `to` by identity, primitive widening, or reference widening, the
  * conversions that method invocation allows without boxing.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of type, following JLS 5.1.
 export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo): boolean {
   if (sameType(from, to)) return true;
   if (isNumeric(from)) return isNumeric(to) && isNumericWidening(from.kind, to.kind);
@@ -475,12 +474,18 @@ export function isWidening(from: JavaType, to: JavaType, objectClass: ClassInfo)
   }
   if (to.kind !== 'class' && to.kind !== 'array') return false;
   if (from.kind === 'class') return to.kind === 'class' && isClassWidening(from, to, objectClass);
-  if (from.kind === 'array') {
-    if (to.kind === 'class') return to.cls === objectClass || arrayInterfaces.has(to.cls);
-    if (isPrimitive(from.element) || isPrimitive(to.element)) return sameType(from.element, to.element);
-    return isWidening(from.element, to.element, objectClass);
-  }
-  return false;
+  return from.kind === 'array' && isArrayWidening(from, to, objectClass);
+}
+
+/** Whether an array type widens to `Object`, an interface every array implements, or an array of a supertype. */
+function isArrayWidening(
+  from: Extract<JavaType, { kind: 'array' }>,
+  to: Extract<JavaType, { kind: 'class' | 'array' }>,
+  objectClass: ClassInfo
+): boolean {
+  if (to.kind === 'class') return to.cls === objectClass || arrayInterfaces.has(to.cls);
+  if (isPrimitive(from.element) || isPrimitive(to.element)) return sameType(from.element, to.element);
+  return isWidening(from.element, to.element, objectClass);
 }
 
 /** The interfaces every array type implements, `Cloneable` and `Serializable` (JLS 4.10.3). */

@@ -444,8 +444,6 @@ export abstract class LambdaCompiler extends PatternCompiler {
    * arguments or, failing that, an instance method on the first argument; `expression::method` calls it on the value;
    * `Type::new` creates an object or an array.
    */
-  // code-gauge-allow functionCognitiveComplexity 21 -- One case per form of method reference.
-  // code-gauge-allow functionNcss 33 -- One case per form of method reference.
   protected expandMethodReference(
     context: MethodContext,
     reference: MethodReference,
@@ -466,41 +464,10 @@ export abstract class LambdaCompiler extends PatternCompiler {
       referenceLambdas.add(lambda);
       return lambda;
     };
+    const direct = this.directReferenceBody(reference, args, span);
+    if (direct) return lambdaOf(direct);
     const { target } = reference;
-    if ('super' in target) {
-      return lambdaOf({
-        kind: 'call',
-        object: 'super',
-        superQualifier: target.super,
-        name: reference.name,
-        args,
-        typeArgs: reference.typeArgs,
-        ...span,
-      });
-    }
     const targetType = 'type' in target ? target.type : undefined;
-    if (reference.name === 'new') {
-      if (!targetType) {
-        const named = 'expression' in target ? expressionAsType(target.expression) : undefined;
-        if (!named) return this.error(reference, 'new のメソッド参照には型を書いてください。');
-        return lambdaOf({ kind: 'new', type: named, args, ...span });
-      }
-      if (targetType.kind === 'array') {
-        return lambdaOf({
-          kind: 'newArray',
-          elementType: targetType.element,
-          dimensionLengths: args,
-          extraDimensions: 0,
-          initializer: undefined,
-          ...span,
-        });
-      }
-      return lambdaOf({ kind: 'new', type: targetType, args, ...span });
-    }
-    // An array type names no static methods, so `int[]::clone` calls the method on the first argument.
-    if (targetType?.kind === 'array' && args.length > 0) {
-      return lambdaOf({ kind: 'call', object: args[0], name: reference.name, args: args.slice(1), ...span });
-    }
     const receiver = referenceReceiver(reference, span, receiverLocal);
     const isTypeName = targetType !== undefined || this.namesType(context, receiver);
     const staticForm = lambdaOf({
@@ -530,6 +497,37 @@ export abstract class LambdaCompiler extends PatternCompiler {
         ...span,
       });
     }
+  }
+
+  /**
+   * The body of a reference whose form alone decides what it calls: `super::method` and `Type.super::method`,
+   * `Type::new` and `int[]::new`, and a method of an array type such as `int[]::clone`, which names no static methods
+   * and so calls the method on the first argument.
+   */
+  protected directReferenceBody(reference: MethodReference, args: Expression[], span: Span): Expression | undefined {
+    const { target, name, typeArgs } = reference;
+    if ('super' in target) {
+      return { kind: 'call', object: 'super', superQualifier: target.super, name, args, typeArgs, ...span };
+    }
+    const targetType = 'type' in target ? target.type : undefined;
+    if (name !== 'new') {
+      if (targetType?.kind !== 'array' || args.length === 0) return;
+      return { kind: 'call', object: args[0], name, args: args.slice(1), ...span };
+    }
+    if (!targetType) {
+      const named = 'expression' in target ? expressionAsType(target.expression) : undefined;
+      if (!named) return this.error(reference, 'new のメソッド参照には型を書いてください。');
+      return { kind: 'new', type: named, args, ...span };
+    }
+    if (targetType.kind !== 'array') return { kind: 'new', type: targetType, args, ...span };
+    return {
+      kind: 'newArray',
+      elementType: targetType.element,
+      dimensionLengths: args,
+      extraDimensions: 0,
+      initializer: undefined,
+      ...span,
+    };
   }
 
   /**

@@ -294,11 +294,7 @@ function defineCollectionViews(
   generic(['T'], (t) =>
     addMethod(cls, 'unmodifiableList', [readOnly(listClass, t)], classOf(listClass, t), true, (frame, _, [list]) =>
       wrap(
-        createList(
-          frame,
-          isRandomAccess(list as JavaObject) ? collections.unmodifiableRandomAccessList : collections.unmodifiableList,
-          itemsOf(frame, list)
-        ),
+        createList(frame, unmodifiableListClass(collections, list as JavaObject), itemsOf(frame, list)),
         list as JavaObject
       )
     )
@@ -351,11 +347,16 @@ function wrap(view: JavaObject, source: JavaObject): JavaObject {
   return view;
 }
 
-/** Whether a list implements `RandomAccess`, as every list of the JDK's here but `LinkedList` does. */
-function isRandomAccess(list: JavaObject): boolean {
+/**
+ * The class of `Collections.unmodifiableList` of `list`, which tells the lists that implement `RandomAccess`, as every
+ * list of the JDK's here but `LinkedList` does, from the others.
+ */
+function unmodifiableListClass(collections: Collections, list: JavaObject): ClassInfo {
   let cls = list.cls;
   while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
-  return cls.name !== 'LinkedList' && cls.name !== 'Object';
+  return cls.name === 'LinkedList' || cls.name === 'Object'
+    ? collections.unmodifiableList
+    : collections.unmodifiableRandomAccessList;
 }
 
 /** The class of the list `List.of` and `List.copyOf` return, which the JDK picks by the number of elements. */
@@ -563,6 +564,7 @@ function defineListUtilities(cls: ClassInfo, collections: Collections): void {
     }
   );
   fill.typeParameters = [t];
+  defineCopy(cls, collections, t.bounds);
   addMethod(cls, 'rotate', [anyOf(collections.listClass), INT], VOID, true, (frame, _, [list, distance]) => {
     const values = elementsOf(frame, list);
     const size = values.length;
@@ -585,6 +587,34 @@ function defineListUtilities(cls: ClassInfo, collections: Collections): void {
       );
     }
   );
+}
+
+/** `Collections.copy`, which sets the first elements of a list to another's, as many as fit. */
+function defineCopy(cls: ClassInfo, collections: Collections, bounds: JavaType[]): void {
+  const copied: TypeVariable = { name: 'T', bounds };
+  const copy = addMethod(
+    cls,
+    'copy',
+    [
+      {
+        kind: 'class',
+        cls: collections.listClass,
+        args: [{ kind: 'wildcard', bound: { kind: 'typeVar', variable: copied }, isSuper: true }],
+      },
+      readOnly(collections.listClass, { kind: 'typeVar', variable: copied }),
+    ],
+    VOID,
+    true,
+    (frame, _, [dest, src]) => {
+      const values = itemsOf(frame, src);
+      const size = frame.runtime.invokeVirtual(frame, collections.collectionClass, 'size', dest, []) as number;
+      if (values.length > size) throwBuiltin(frame, 'IndexOutOfBoundsException', 'Source does not fit in dest');
+      for (const [index, value] of values.entries()) {
+        frame.runtime.invokeVirtual(frame, collections.listClass, 'set', dest, [index, value]);
+      }
+    }
+  );
+  copy.typeParameters = [copied];
 }
 
 function anyOf(owner: ClassInfo): ClassType {
@@ -720,27 +750,6 @@ function defineCollectionsClass(
         }
       }
       [values[i as number], values[j as number]] = [values[j as number], values[i as number]];
-    }
-  );
-  addGenericStatic(
-    cls,
-    'copy',
-    ['T'],
-    objectType,
-    (element) => ({
-      parameterTypes: [
-        classOf(collections.listClass, { kind: 'wildcard', bound: element, isSuper: true }),
-        readOnly(collections.listClass, element),
-      ],
-      returnType: VOID,
-    }),
-    (frame, _, [dest, src]) => {
-      const values = itemsOf(frame, src);
-      const size = frame.runtime.invokeVirtual(frame, collections.collectionClass, 'size', dest, []) as number;
-      if (values.length > size) throwBuiltin(frame, 'IndexOutOfBoundsException', 'Source does not fit in dest');
-      for (const [index, value] of values.entries()) {
-        frame.runtime.invokeVirtual(frame, collections.listClass, 'set', dest, [index, value]);
-      }
     }
   );
   addGenericStatic(
