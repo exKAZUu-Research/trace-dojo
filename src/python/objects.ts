@@ -431,11 +431,11 @@ function iterateSequence(value: PyValue): NextFunction {
 
 function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunction {
   const { store } = dict;
-  const size = store.size;
+  const { size, version } = store;
   const entries = store.liveEntries();
   const runtime = currentRuntime();
   return () => {
-    if (store.size !== size) throw pyError('RuntimeError', 'dictionary changed size during iteration');
+    checkDictUnchanged(dict, size, version);
     const next = entries.next();
     if (next.done) return DONE;
     const entry = next.value;
@@ -443,6 +443,18 @@ function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunct
     if (view === 'values') return entry.value;
     return runtime.tuple([entry.key, entry.value]);
   };
+}
+
+/**
+ * Refuses to go on iterating a dict that changed since the iterator began: a dict whose size changed, or an
+ * OrderedDict that gained, lost, or moved an entry, as CPython's odict iterator checks the dict's state.
+ */
+export function checkDictUnchanged(dict: PyDict, size: number, version: number): void {
+  if (dict.cls.flags.isOrderedDict) {
+    if (dict.store.version !== version) throw pyError('RuntimeError', 'OrderedDict mutated during iteration');
+  } else if (dict.store.size !== size) {
+    throw pyError('RuntimeError', 'dictionary changed size during iteration');
+  }
 }
 
 /** All the items an iterable yields, with `notIterable` as the message for a value that gives no iterator. */
