@@ -64,6 +64,18 @@ test.each([
     'false false false\n\u{1D7D9}\n',
   ],
   [
+    'scanners made for each read, which take the lines they read ahead',
+    'for (int i = 0; i < 3; i++) { Scanner sc = new Scanner(System.in); System.out.println(sc.hasNextInt() ? sc.nextInt() : -1); }',
+    '1 2\n3\n',
+    '1\n3\n-1\n',
+  ],
+  [
+    'a scanner and a reader of the same input',
+    'Scanner sc = new Scanner(System.in); int n = sc.nextInt(); BufferedReader br = new BufferedReader(new InputStreamReader(System.in)); System.out.println(n + " " + br.readLine() + " " + sc.nextLine());',
+    '1 a\nb\n',
+    '1 b  a\n',
+  ],
+  [
     'lines from a BufferedReader',
     'BufferedReader br = new BufferedReader(new InputStreamReader(System.in)); String line; while ((line = br.readLine()) != null) System.out.println("[" + line + "]");',
     'x\r\ny\n\nz',
@@ -296,6 +308,20 @@ test.each([
 test('an unclosed FileWriter keeps only the full buffers it passed on', () => {
   const execution = executeProgram('java', main('FileWriter w = new FileWriter("a.txt"); w.write("x".repeat(8193));'));
   expect(execution).toMatchObject({ kind: 'executed', finalFiles: { 'a.txt': 'x'.repeat(8192) } });
+});
+
+test('an unclosed FileWriter keeps an exactly full buffer to itself', () => {
+  const execution = executeProgram('java', main('FileWriter w = new FileWriter("a.txt"); w.write("x".repeat(8192));'));
+  expect(execution).toMatchObject({ kind: 'executed', finalFiles: { 'a.txt': '' } });
+});
+
+test('writes to a file deleted while open count toward the storage limit', () => {
+  expect(
+    runJava(
+      'String text = Files.readString(Path.of("data")); Files.delete(Path.of("data")); FileWriter w = new FileWriter("a"); Files.writeString(Path.of("a"), text); Files.delete(Path.of("a")); w.write(text); w.flush(); Files.writeString(Path.of("b"), text);',
+      { files: { data: 'x'.repeat(600_000) } }
+    )
+  ).toEqual({ kind: 'limitExceeded', limit: 'storage' });
 });
 
 test('the storage limit counts the files that exist, not the files deleted or replaced', () => {

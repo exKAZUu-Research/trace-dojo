@@ -173,9 +173,9 @@ export class BufferedSink implements Sink {
   ) {}
 
   /**
-   * Fills the buffer, passing on each full buffer and keeping the rest, as `BufferedWriter.write(String)` does. A
-   * `BufferedWriter` passes on an array as large as its buffer at once and makes room for a smaller one, and passes on
-   * a full buffer only before the next char.
+   * Fills the buffer, passing on each full buffer and keeping the rest: an encoder once more text comes, and a
+   * `BufferedWriter` as soon as a string fills it. A `BufferedWriter` passes on an array as large as its buffer at
+   * once, makes room for a smaller one, and passes on a full buffer only before the next char.
    */
   write(frame: Frame, text: string, kind: WriteKind = 'string'): void {
     this.ensureOpen(frame);
@@ -196,10 +196,12 @@ export class BufferedSink implements Sink {
       return;
     }
     for (let offset = 0; offset < text.length;) {
+      // An encoder passes on a full buffer only when more text comes, though a BufferedWriter does once it fills.
+      if (this.pending.length >= this.capacity) this.drain(frame);
       const end = offset + this.capacity - this.pending.length;
       this.pending += text.slice(offset, end);
       offset = end;
-      if (this.pending.length >= this.capacity) this.drain(frame);
+      if (this.isBufferedWriter && this.pending.length >= this.capacity) this.drain(frame);
     }
   }
 

@@ -29,9 +29,16 @@ const DECIMAL =
   /^[+-]?(?:(?:(?:\p{Nd}+|\p{Nd}{1,3}(?:,\p{Nd}{3})+)(?:\.\p{Nd}*)?|\.\p{Nd}+)(?:[eE][+-]?\p{Nd}+)?|NaN|Infinity)$/u;
 const BOOLEAN_TOKEN = /^(?:true|false)$/i;
 
+/**
+ * A scanner's source and the input it has read from it, as Java's scanner reads ahead into a buffer of its own. It
+ * reads a line at a time, as from a console where each line arrives when it is entered, so that a line one scanner
+ * has read is gone for another scanner of the same input.
+ */
 interface ScannerState {
   source: ReadSource;
   isClosed: boolean;
+  buffer: string;
+  position: number;
 }
 
 const scannerStates = new WeakMap<JavaObject, ScannerState>();
@@ -48,14 +55,13 @@ export function defineScanner(context: IOContext, closeable: ClassInfo): void {
   defineScannerConstructors(context, scanner);
   defineTokenMethods(context, scanner);
   addMethod(scanner, 'nextLine', [], context.stringType, false, (frame, receiver) => {
-    const text = textOf(frame, receiver);
-    const line = text ? readLine(frame, text) : undefined;
+    const line = readLine(frame, stateOf(frame, receiver));
     if (line === undefined) return throwBuiltin(frame, 'NoSuchElementException', 'No line found');
     return newString(frame, line);
   });
   addMethod(scanner, 'hasNextLine', [], BOOLEAN, false, (frame, receiver) => {
-    const text = textOf(frame, receiver);
-    return text !== undefined && !text.isAtEnd;
+    const state = stateOf(frame, receiver);
+    return state.position < state.buffer.length || readAhead(frame, state);
   });
   addMethod(scanner, 'close', [], VOID, false, (frame, receiver) => {
     const state = scannerStates.get(receiver as JavaObject) as ScannerState;
@@ -87,7 +93,7 @@ function defineScannerConstructors(context: IOContext, scanner: ClassInfo): void
 }
 
 function create(receiver: Value, source: ReadSource): void {
-  scannerStates.set(receiver as JavaObject, { source, isClosed: false });
+  scannerStates.set(receiver as JavaObject, { source, isClosed: false, buffer: '', position: 0 });
 }
 
 function defineTokenMethods(context: IOContext, scanner: ClassInfo): void {
@@ -168,35 +174,57 @@ function asciiDigitsOf(token: string): string {
     .replaceAll(/\p{Nd}/gu, (digit) => String(decimalDigitValue(digit.codePointAt(0) as number)));
 }
 
-/**
- * The text a scanner reads, or `undefined` once its source is closed, which a scanner treats as the end of input.
- */
-function textOf(frame: Frame, receiver: Value): TextReader | undefined {
+function stateOf(frame: Frame, receiver: Value): ScannerState {
   const state = scannerStates.get(receiver as JavaObject) as ScannerState;
   if (state.isClosed) return throwBuiltin(frame, 'IllegalStateException', 'Scanner closed');
+  return state;
+}
+
+/**
+ * Reads the next line of the source, with its terminator, into the scanner's buffer, telling whether any input
+ * remained; a closed source has none, as Java's scanner takes it for the end of input.
+ */
+function readAhead(frame: Frame, state: ScannerState): boolean {
+  let reader: TextReader;
   try {
-    return state.source.reader(frame);
+    reader = state.source.reader(frame);
   } catch (error) {
-    if (error instanceof JavaThrow) return undefined;
+    if (error instanceof JavaThrow) return false;
     throw error;
+  }
+  if (reader.isAtEnd) return false;
+  const { text, position } = reader;
+  const terminator = /\r\n|[\n\r]/g;
+  terminator.lastIndex = position;
+  const end = terminator.test(text) ? terminator.lastIndex : text.length;
+  reader.position = end;
+  const line = text.slice(position, end);
+  state.buffer = `${state.buffer.slice(state.position)}${line}`;
+  state.position = 0;
+  frame.runtime.allocateString(frame, state.buffer.length, line.length);
+  return true;
+}
+
+/**
+ * Where the next token starts and ends in the buffer, reading ahead until the token ends before the buffer does or
+ * the input ends; an empty token means that only whitespace remains.
+ */
+function tokenBounds(frame: Frame, state: ScannerState): { start: number; end: number } {
+  for (;;) {
+    const { buffer, position } = state;
+    let start = position;
+    while (start < buffer.length && WHITESPACE.test(buffer[start])) start++;
+    let end = start;
+    while (end < buffer.length && !WHITESPACE.test(buffer[end])) end++;
+    frame.runtime.scanString(end - position);
+    if (end < buffer.length || !readAhead(frame, state)) return { start: start - position, end: end - position };
   }
 }
 
-/** Where the next token starts and ends, which is an empty token when only whitespace remains. */
-function tokenBounds(frame: Frame, text: TextReader): { start: number; end: number } {
-  const { text: source, position } = text;
-  let start = position;
-  while (start < source.length && WHITESPACE.test(source[start])) start++;
-  let end = start;
-  while (end < source.length && !WHITESPACE.test(source[end])) end++;
-  frame.runtime.scanString(end - position);
-  return { start, end };
-}
-
 function peekToken(frame: Frame, receiver: Value): string | undefined {
-  const text = textOf(frame, receiver);
-  const bounds = text && tokenBounds(frame, text);
-  return bounds && bounds.start < bounds.end ? text.text.slice(bounds.start, bounds.end) : undefined;
+  const state = stateOf(frame, receiver);
+  const { start, end } = tokenBounds(frame, state);
+  return start < end ? state.buffer.slice(state.position + start, state.position + end) : undefined;
 }
 
 /**
@@ -204,24 +232,31 @@ function peekToken(frame: Frame, receiver: Value): string | undefined {
  * though a token `parse` throws for stays unread for the next call.
  */
 function takeToken(frame: Frame, receiver: Value, parse: (token: string) => Value): Value {
-  const text = textOf(frame, receiver);
-  if (!text) return throwBuiltin(frame, 'NoSuchElementException');
-  const bounds = tokenBounds(frame, text);
-  text.position = bounds.start;
-  if (bounds.start === bounds.end) return throwBuiltin(frame, 'NoSuchElementException');
-  const value = parse(text.text.slice(bounds.start, bounds.end));
-  text.position = bounds.end;
+  const state = stateOf(frame, receiver);
+  const { start, end } = tokenBounds(frame, state);
+  const base = state.position;
+  state.position = base + start;
+  if (start === end) return throwBuiltin(frame, 'NoSuchElementException');
+  const value = parse(state.buffer.slice(base + start, base + end));
+  state.position = base + end;
   return value;
 }
 
 /** Reads the rest of the line, consuming its terminator, or `undefined` at the end of input. */
-function readLine(frame: Frame, text: TextReader): string | undefined {
-  if (text.isAtEnd) return undefined;
-  LINE_TERMINATOR.lastIndex = text.position;
-  const terminator = LINE_TERMINATOR.exec(text.text);
-  const end = terminator ? terminator.index : text.text.length;
-  const line = text.text.slice(text.position, end);
-  frame.runtime.scanString(end - text.position + 1);
-  text.position = terminator ? end + terminator[0].length : end;
-  return line;
+function readLine(frame: Frame, state: ScannerState): string | undefined {
+  for (;;) {
+    LINE_TERMINATOR.lastIndex = state.position;
+    const terminator = LINE_TERMINATOR.exec(state.buffer);
+    // A terminator at the buffer's end may be a `\r` whose `\n` the next line brings.
+    const isComplete =
+      terminator && (terminator.index + terminator[0].length < state.buffer.length || terminator[0] !== '\r');
+    if (isComplete || !readAhead(frame, state)) {
+      if (state.position >= state.buffer.length) return undefined;
+      const end = terminator ? terminator.index : state.buffer.length;
+      const line = state.buffer.slice(state.position, end);
+      frame.runtime.scanString(end - state.position + 1);
+      state.position = terminator ? end + terminator[0].length : end;
+      return line;
+    }
+  }
 }

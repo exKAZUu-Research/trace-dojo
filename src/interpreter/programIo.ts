@@ -162,6 +162,8 @@ export interface OpenMode {
 class FileNode {
   readonly kind = 'file';
   content = '';
+  /** Whether a path names the file, whose contents then count as stored; a deleted file counts only what is written. */
+  isLinked = true;
 }
 
 class DirectoryNode {
@@ -217,7 +219,7 @@ interface Step {
  */
 export class VirtualFileSystem {
   private readonly root = new DirectoryNode();
-  /** The total length of the files' contents and of what the program writes to files it deleted while open. */
+  /** The total length of the files' contents and of all the program writes to files it deleted while open. */
   private storedLength = 0;
 
   constructor(private readonly budget: ExecutionBudget) {}
@@ -262,7 +264,8 @@ export class VirtualFileSystem {
     // Writing past the end, as a handle may after another truncates the file, leaves a gap of NUL characters.
     const content = node.content.padEnd(text === '' ? 0 : position, '\0');
     const updated = `${content.slice(0, position)}${text}${content.slice(position + text.length)}`;
-    this.storedLength += updated.length - node.content.length;
+    const gap = Math.max(position - node.content.length, 0);
+    this.storedLength += node.isLinked ? updated.length - node.content.length : text.length + gap;
     if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
     node.content = updated;
   }
@@ -367,7 +370,9 @@ export class VirtualFileSystem {
 
   /** Stops counting the contents of a file that no path names, though a handle may still write to it. */
   private release(node: FileSystemNode): void {
-    if (node.kind === 'file') this.storedLength -= node.content.length;
+    if (node.kind !== 'file') return;
+    this.storedLength -= node.content.length;
+    node.isLinked = false;
   }
 
   private fileNodeOf(path: string): FileNode {
