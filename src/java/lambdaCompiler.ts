@@ -321,6 +321,9 @@ export abstract class LambdaCompiler extends PatternCompiler {
     // The target type decides what the other arguments leave open before the lambdas, whose parameters may need it.
     if (targetType && !isPrimitive(targetType)) inferFromTarget(this.builtins, method, targetType, bindings);
     this.inferFromPendingArguments(context, method, args, expressions, bindings);
+    // A primitive target, boxed, decides only what the lambdas leave open, as a lambda that only throws does.
+    const boxedTarget = targetType && isPrimitive(targetType) && boxedTypeOf(this.builtins.wrappers, targetType);
+    if (boxedTarget) inferFromTarget(this.builtins, method, boxedTarget, bindings);
     return bindings;
   }
 

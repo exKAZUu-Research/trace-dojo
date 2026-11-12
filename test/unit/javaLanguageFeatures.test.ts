@@ -664,6 +664,45 @@ public class Main {
   });
 });
 
+test('Java infers what a lambda that only throws leaves open from the primitive type its result is assigned to', () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.function.*;
+public class Main {
+  static <T> T timed(Supplier<T> s) { return s.get(); }
+  static void timed(Runnable r) { r.run(); }
+  public static void main(String[] args) {
+    try { int r = timed(() -> { throw new RuntimeException("x"); }); } catch (RuntimeException e) { System.out.println(e.getMessage()); }
+    String s = timed(() -> "v"); System.out.println(s);
+    timed(() -> System.out.println("run"));
+  }
+}`,
+      'x\nv\nrun\n',
+    ],
+    [
+      `import java.util.*;
+import java.util.function.*;
+public class Main {
+  static <T> T get(Supplier<T> s) { return s.get(); }
+  static <T, R> R apply(Function<T, R> f, T t) { return f.apply(t); }
+  public static void main(String[] args) {
+    long a = get(() -> 5);
+    double b = get(() -> 2);
+    int c = apply(s -> s.length(), "four");
+    try { int e = get(() -> { throw new IllegalStateException("thrown"); }); } catch (IllegalStateException e) { System.out.println(e.getMessage()); }
+    try { boolean f = get(() -> { throw new RuntimeException("bool"); }); } catch (RuntimeException e) { System.out.println(e.getMessage()); }
+    System.out.println(a + " " + b + " " + c);
+    int sum = List.of(1, 2, 3).stream().reduce(0, (x, y) -> x + y);
+    System.out.println(sum);
+  }
+}`,
+      'thrown\nbool\n5 2.0 4\n6\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
