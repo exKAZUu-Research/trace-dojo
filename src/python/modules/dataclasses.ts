@@ -10,45 +10,7 @@ import { newDict, None, typeError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyClass, type PyDict, type PyValue } from '../values';
 import { DATACLASSES_SOURCE } from './dataclassesSource';
-
-/** Python's keywords, which `make_dataclass` rejects as field names. */
-const KEYWORDS = new Set([
-  'False',
-  'None',
-  'True',
-  'and',
-  'as',
-  'assert',
-  'async',
-  'await',
-  'break',
-  'class',
-  'continue',
-  'def',
-  'del',
-  'elif',
-  'else',
-  'except',
-  'finally',
-  'for',
-  'from',
-  'global',
-  'if',
-  'import',
-  'in',
-  'is',
-  'lambda',
-  'nonlocal',
-  'not',
-  'or',
-  'pass',
-  'raise',
-  'return',
-  'try',
-  'while',
-  'with',
-  'yield',
-]);
+import { PYTHON_KEYWORDS } from './keywords';
 
 registerModule('dataclasses', () => runLibrarySource('dataclasses', DATACLASSES_SOURCE, nativeHelpers()));
 
@@ -82,7 +44,7 @@ function nativeHelpers(): Map<string, PyValue> {
         return None;
       }),
     ],
-    ['_iskeyword', builtin('_iskeyword', 'one', 1, 1, ([name]) => KEYWORDS.has(name as string))],
+    ['_iskeyword', builtin('_iskeyword', 'one', 1, 1, ([name]) => PYTHON_KEYWORDS.has(name as string))],
     [
       '_new_class',
       builtin('_new_class', 'expected', 4, 4, ([name, bases, namespace, module]) => {

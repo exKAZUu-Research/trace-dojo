@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 546 -- The methods and attributes of the builtin types it defines belong together.
-import { pyRepr } from '../conversions';
+// code-gauge-allow-file fileNcss 557 -- The methods and attributes of the builtin types it defines belong together.
+import { pyRepr, pyStr } from '../conversions';
 import { method, pythonFunction, pythonMethod } from '../define';
 import { defineGetSet } from '../descriptors';
 import { DictStore } from '../dictStore';
@@ -56,6 +56,7 @@ import {
   type PyValue,
 } from '../values';
 import { COLLECTIONS_SOURCE } from './collectionsSource';
+import { PYTHON_KEYWORDS } from './keywords';
 
 // deque -------------------------------------------------------------------------------------------------------------
 
@@ -711,27 +712,13 @@ function unionLike(like: PyDict, first: PyDict, second: PyDict): PyDict {
 
 // namedtuple --------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 36 -- Follows collections.namedtuple's argument handling.
 function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
-  const typename = argument(args, kwargs, 0, 'typename');
-  const fieldNames = argument(args, kwargs, 1, 'field_names');
-  if (typeof typename !== 'string') throw typeError('namedtuple() typename must be a string');
-  const fields =
-    typeof fieldNames === 'string'
-      ? fieldNames.replaceAll(',', ' ').split(/\s+/).filter(Boolean)
-      : toArray(fieldNames ?? None).map(String);
-  for (const name of [typename, ...fields]) {
-    if (!/^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(name)) {
-      throw valueError(`Type names and field names must be valid identifiers: ${pyRepr(name)}`);
-    }
-    if (name.startsWith('_') && name !== typename)
-      throw valueError(`Field names cannot start with an underscore: ${pyRepr(name)}`);
-  }
-  const seen = new Set<string>();
-  for (const name of fields) {
-    if (seen.has(name)) throw valueError(`Encountered duplicate field name: ${pyRepr(name)}`);
-    seen.add(name);
-  }
+  const typename = pyStr(argument(args, kwargs, 0, 'typename') as PyValue);
+  const fields = namedTupleFields(
+    argument(args, kwargs, 1, 'field_names') as PyValue,
+    isTruthy(kwargs?.get('rename') ?? false)
+  );
+  checkNamedTupleNames(typename, fields, isTruthy(kwargs?.get('rename') ?? false));
   const defaults = toArray(kwargs?.get('defaults') ?? newTuple([]));
   if (defaults.length > fields.length) throw typeError('Got more default values than field names');
   const cls = new PyClass(typename, [tupleClass], typeClass);
@@ -760,6 +747,40 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyValue {
     );
   }
   return cls;
+}
+
+/** The field names of a namedtuple, with `rename` replacing each unusable or repeated name by `_<index>`. */
+function namedTupleFields(fieldNames: PyValue, rename: boolean): string[] {
+  const fields =
+    typeof fieldNames === 'string'
+      ? fieldNames.replaceAll(',', ' ').split(/\s+/).filter(Boolean)
+      : toArray(fieldNames).map(pyStr);
+  if (!rename) return fields;
+  const seen = new Set<string>();
+  return fields.map((name, index) => {
+    const isUnusable = !isIdentifier(name) || PYTHON_KEYWORDS.has(name) || name.startsWith('_') || seen.has(name);
+    seen.add(name);
+    return isUnusable ? `_${index}` : name;
+  });
+}
+
+/** Checks the names of a namedtuple as collections.namedtuple does, in its order. */
+function checkNamedTupleNames(typename: string, fields: string[], rename: boolean): void {
+  for (const name of [typename, ...fields]) {
+    if (!isIdentifier(name)) throw valueError(`Type names and field names must be valid identifiers: ${pyRepr(name)}`);
+    if (PYTHON_KEYWORDS.has(name)) throw valueError(`Type names and field names cannot be a keyword: ${pyRepr(name)}`);
+  }
+  const seen = new Set<string>();
+  for (const name of fields) {
+    if (name.startsWith('_') && !rename)
+      throw valueError(`Field names cannot start with an underscore: ${pyRepr(name)}`);
+    if (seen.has(name)) throw valueError(`Encountered duplicate field name: ${pyRepr(name)}`);
+    seen.add(name);
+  }
+}
+
+function isIdentifier(name: string): boolean {
+  return /^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(name);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Follows how a namedtuple binds positional and keyword arguments to its fields.
