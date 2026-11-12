@@ -104,6 +104,7 @@ type Scalar = TraceItemVariable[string];
 
 function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR {
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'bigint' || typeof value === 'symbol') return displayedPrimitive(value);
   if (!(value instanceof JsArray) || seen.has(value)) return NOT_SCALAR;
   seen.add(value);
   const items: Scalar[] = [];
@@ -129,6 +130,8 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
     return { kind: 'value', value };
+  if (typeof value === 'bigint' || typeof value === 'symbol')
+    return { kind: 'value', value: displayedPrimitive(value) };
   if (value instanceof JsFunction || seen.has(value)) return undefined;
   if (value.turtle) {
     if (!value.turtle.isAlive) return undefined;
@@ -176,7 +179,12 @@ function displayedEntries(object: JsObject): [string, Value][] {
   const message = object.isError ? object.properties.get('message') : undefined;
   if (message && !isAccessor(message)) entries.push(['message', message.value]);
   for (const [key, property] of object.properties) {
-    if (property.enumerable && !isAccessor(property) && !(property.value instanceof JsFunction))
+    if (
+      typeof key === 'string' &&
+      property.enumerable &&
+      !isAccessor(property) &&
+      !(property.value instanceof JsFunction)
+    )
       entries.push([key, property.value]);
   }
   const fields = [...(object.privateMembers ?? [])].filter(
@@ -185,4 +193,10 @@ function displayedEntries(object: JsObject): [string, Value][] {
   const labels = privateLabels(fields.map(([key]) => key));
   for (const [index, [, property]] of fields.entries()) entries.push([labels[index], (property as DataProperty).value]);
   return entries;
+}
+
+/** A BigInt as the number it equals while that is exact, else its digits; a symbol as its description text. */
+function displayedPrimitive(value: bigint | symbol): number | string {
+  if (typeof value === 'symbol') return value.toString();
+  return Number.isSafeInteger(Number(value)) ? Number(value) : String(value);
 }

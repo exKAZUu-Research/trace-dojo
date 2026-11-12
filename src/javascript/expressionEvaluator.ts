@@ -1,9 +1,13 @@
+import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
+import { newRegExp } from './realmRegExp';
+import type { Runtime } from './runtime';
 import {
   type AccessorProperty,
   appendAll,
   type Element,
+  freeze,
   HOLE,
   isAccessor,
   isCallable,
@@ -11,6 +15,7 @@ import {
   type JsArray,
   JsFunction,
   type JsObject,
+  type Key,
   toBoolean,
   type Value,
 } from './values';
@@ -18,6 +23,9 @@ import {
 type ChainValue = Value | typeof SHORT_CIRCUIT;
 
 export abstract class ExpressionEvaluator extends EvaluatorBase {
+  /** The strings array of each tagged template site, which every evaluation of the site passes to its tag. */
+  private readonly templateObjects = new WeakMap<Expression, JsArray>();
+
   abstract evaluateClass(cls: ClassNode): JsFunction;
 
   abstract superCall(args: Value[], callRow: number): JsObject;
@@ -27,7 +35,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     return value === SHORT_CIRCUIT ? undefined : value;
   }
 
-  private evaluateChain(expression: Expression): ChainValue {
+  protected evaluateChain(expression: Expression): ChainValue {
     const { runtime } = this;
     const outerRow = runtime.currentRow;
     runtime.currentRow = expression.row;
@@ -48,11 +56,20 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case 'template': {
         return this.template(expression.strings, expression.expressions);
       }
+      case 'regex': {
+        return newRegExp(runtime, expression.pattern, expression.flags);
+      }
+      case 'templateObject': {
+        return this.templateObject(expression);
+      }
       case 'identifier': {
         return this.readVariable(expression.name);
       }
       case 'this': {
         return this.thisValue();
+      }
+      case 'newTarget': {
+        return this.functionFrame()?.newTarget;
       }
       case 'array': {
         return this.arrayLiteral(expression.elements);
@@ -79,22 +96,16 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return this.assign(expression);
       }
       case 'update': {
-        const reference = this.reference(expression.target);
-        const oldValue = runtime.toNumber(this.getReference(reference));
-        const newValue = expression.operator === '++' ? oldValue + 1 : oldValue - 1;
-        this.putReference(reference, newValue);
-        return expression.prefix ? newValue : oldValue;
+        return this.update(expression);
       }
       case 'unary': {
         return this.unary(expression.operator, expression.argument);
       }
       case 'binary': {
-        const left = this.evaluate(expression.left);
-        // Both operands stay reachable while the operator's conversions may run the program's code.
-        return runtime.hold(left, () => {
-          const right = this.evaluate(expression.right);
-          return runtime.hold(right, () => this.binary(expression.operator, left, right));
-        });
+        return this.binaryExpression(expression);
+      }
+      case 'privateIn': {
+        return this.hasPrivate(expression.name, this.evaluate(expression.right));
       }
       case 'logical': {
         const left = this.evaluate(expression.left);
@@ -113,7 +124,47 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case 'parenthesized': {
         return this.evaluate(expression.expression);
       }
+      case 'yield':
+      case 'await': {
+        // The converter lets these appear only where evaluateSteps evaluates them.
+        throw new Error(`A ${expression.kind} reached the synchronous evaluator`);
+      }
     }
+  }
+  private update(expression: Extract<Expression, { kind: 'update' }>): Value {
+    const { runtime } = this;
+    const reference = this.reference(expression.target);
+    const oldValue = runtime.toNumeric(this.getReference(reference));
+    const newValue = arithmetic(
+      runtime,
+      expression.operator === '++' ? '+' : '-',
+      oldValue,
+      typeof oldValue === 'bigint' ? 1n : 1
+    );
+    this.putReference(reference, newValue);
+    return expression.prefix ? newValue : oldValue;
+  }
+
+  private binaryExpression(expression: Extract<Expression, { kind: 'binary' }>): Value {
+    const { runtime } = this;
+    const left = this.evaluate(expression.left);
+    // Both operands stay reachable while the operator's conversions may run the program's code.
+    return runtime.hold(left, () => {
+      const right = this.evaluate(expression.right);
+      return runtime.hold(right, () => this.binary(expression.operator, left, right));
+    });
+  }
+
+  /** Tests `#name in object`, whether the object has the private member. */
+  protected hasPrivate(name: string, object: Value): boolean {
+    const { runtime } = this;
+    if (!isObject(object)) {
+      return runtime.throwError(
+        'TypeError',
+        `Cannot use 'in' operator to search for '${name}' in ${runtime.describe(object)}`
+      );
+    }
+    return object.privateMembers?.has(this.privateKey(name)) ?? false;
   }
 
   private template(strings: string[], expressions: Expression[]): string {
@@ -125,6 +176,24 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       text += part;
     }
     return text;
+  }
+
+  private templateObject(expression: Extract<Expression, { kind: 'templateObject' }>): JsArray {
+    const { runtime } = this;
+    let strings = this.templateObjects.get(expression);
+    if (strings) return strings;
+    const raw = runtime.newArray([...expression.raw]);
+    freeze(raw);
+    strings = runtime.newArray([...expression.cooked]);
+    runtime.defineProperty(strings, 'raw', {
+      value: raw,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    freeze(strings);
+    this.templateObjects.set(expression, strings);
+    return strings;
   }
 
   evaluateArguments(args: Argument[]): Value[] {
@@ -172,10 +241,15 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     return object;
   }
 
-  private defineObjectMember(object: JsObject, member: ObjectMember): void {
+  protected defineObjectMember(object: JsObject, member: ObjectMember): void {
     const { runtime } = this;
     if (member.kind === 'spread') {
       this.copyDataProperties(object, this.evaluate(member.argument));
+      return;
+    }
+    if (member.kind === 'prototype') {
+      const prototype = this.evaluate(member.value);
+      if (prototype === null || isObject(prototype)) object.proto = prototype;
       return;
     }
     const key = this.propertyKey(member.key);
@@ -199,7 +273,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     runtime.createDataProperty(object, key, value);
   }
 
-  private copyDataProperties(target: JsObject, source: Value): void {
+  protected copyDataProperties(target: JsObject, source: Value): void {
     const { runtime } = this;
     if (source === undefined || source === null) return;
     if (typeof source === 'string') {
@@ -210,8 +284,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       return;
     }
     if (!isObject(source)) return;
-    for (const key of runtime.ownEnumerableKeys(source))
-      runtime.createDataProperty(target, key, runtime.get(source, key));
+    runtime.forEachOwnEnumerable(source, (key) => runtime.createDataProperty(target, key, runtime.get(source, key)));
   }
 
   private member(expression: Extract<Expression, { kind: 'member' }>): ChainValue {
@@ -237,12 +310,13 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
-    if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(fn, thisValue);
     try {
+      // The arguments are evaluated before the callee is checked, as in JavaScript.
       const args = this.evaluateArguments(expression.args);
+      if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
       appendAll(temporaries, args);
       return runtime.call(fn, thisValue, args, expression.row);
     } finally {
@@ -251,7 +325,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   /** Evaluates a callee with the `this` a call passes, which is the object of a (parenthesized) member. */
-  private callee(callee: Expression): { fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT {
+  protected callee(callee: Expression): { fn: Value; thisValue: Value } | typeof SHORT_CIRCUIT {
     // Parentheses keep a method's receiver but end an optional chain, so `(a?.b)()` calls whatever `a?.b` gave.
     let target = callee;
     while (target.kind === 'parenthesized') target = target.expression;
@@ -282,14 +356,15 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   private newExpression(expression: Extract<Expression, { kind: 'new' }>): Value {
     const { runtime } = this;
     const constructor = this.evaluate(expression.callee);
-    if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
-      return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
-    }
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(constructor);
     try {
+      // The arguments are evaluated before the callee is checked, as in JavaScript.
       const args = this.evaluateArguments(expression.args);
+      if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
+        return runtime.throwError('TypeError', `${expression.calleeText} is not a constructor`);
+      }
       appendAll(temporaries, args);
       return runtime.construct(constructor, args, constructor, expression.row);
     } finally {
@@ -330,7 +405,6 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   private deleteExpression(argument: Expression): boolean {
-    const { runtime } = this;
     // Parentheses around the whole operand do not end an optional chain inside it.
     let target = argument;
     while (target.kind === 'parenthesized') target = target.expression;
@@ -338,8 +412,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       this.evaluate(argument);
       return true;
     }
-    // An optional chain that meets null or undefined deletes nothing, which succeeds.
-    const reference = this.calleeReference(target);
+    return this.deleteReference(this.calleeReference(target));
+  }
+
+  /** Deletes what a member refers to; an optional chain that met null or undefined deletes nothing, which succeeds. */
+  protected deleteReference(reference: Reference | typeof SHORT_CIRCUIT): boolean {
+    const { runtime } = this;
     if (reference === SHORT_CIRCUIT) return true;
     if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
     if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');
@@ -356,21 +434,36 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case 'delete': {
         return this.deleteExpression(argument);
       }
+      default: {
+        return this.unaryValue(operator, this.evaluate(argument));
+      }
+    }
+  }
+
+  /** Applies a unary operator other than `delete` to its operand's value. */
+  protected unaryValue(operator: string, value: Value): Value {
+    const { runtime } = this;
+    switch (operator) {
+      case 'typeof': {
+        return runtime.typeOf(value);
+      }
+      case 'delete':
       case 'void': {
-        this.evaluate(argument);
-        return undefined;
+        return operator === 'delete' ? true : undefined;
       }
       case '!': {
-        return !toBoolean(this.evaluate(argument));
+        return !toBoolean(value);
       }
       case '-': {
-        return -runtime.toNumber(this.evaluate(argument));
+        const numeric = runtime.toNumeric(value);
+        return -numeric;
       }
       case '+': {
-        return runtime.toNumber(this.evaluate(argument));
+        return runtime.toNumber(value);
       }
       case '~': {
-        return ~runtime.toNumber(this.evaluate(argument));
+        const numeric = runtime.toNumeric(value);
+        return ~numeric;
       }
       default: {
         throw new Error(`Unknown unary operator: ${operator}`);
@@ -386,11 +479,11 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         const leftPrimitive = runtime.toPrimitive(left, 'default');
         const rightPrimitive = runtime.toPrimitive(right, 'default');
         if (typeof leftPrimitive === 'string' || typeof rightPrimitive === 'string') {
-          const text = String(leftPrimitive) + String(rightPrimitive);
+          const text = runtime.toString(leftPrimitive) + runtime.toString(rightPrimitive);
           runtime.buildString(text.length);
           return text;
         }
-        return Number(leftPrimitive) + Number(rightPrimitive);
+        return arithmetic(runtime, '+', runtime.toNumeric(leftPrimitive), runtime.toNumeric(rightPrimitive));
       }
       case '===': {
         return left === right;
@@ -408,7 +501,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       case '>':
       case '<=':
       case '>=': {
-        return compare(operator, runtime.toPrimitive(left, 'number'), runtime.toPrimitive(right, 'number'));
+        const leftPrimitive = runtime.toPrimitive(left, 'number');
+        const rightPrimitive = runtime.toPrimitive(right, 'number');
+        // Comparing a symbol converts it to a number, which throws.
+        for (const primitive of [leftPrimitive, rightPrimitive])
+          if (typeof primitive === 'symbol') runtime.toNumber(primitive);
+        return compare(operator, leftPrimitive, rightPrimitive);
       }
       case 'instanceof': {
         return runtime.instanceOf(left, right);
@@ -417,13 +515,14 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         if (!isObject(right)) {
           return runtime.throwError(
             'TypeError',
-            `Cannot use 'in' operator to search for '${runtime.toPropertyKey(left)}' in ${runtime.describe(right)}`
+            `Cannot use 'in' operator to search for '${String(runtime.toPropertyKey(left))}' in ${runtime.describe(right)}`
           );
         }
         return runtime.hasProperty(right, runtime.toPropertyKey(left));
       }
       default: {
-        return arithmetic(operator, runtime.toNumber(left), runtime.toNumber(right));
+        const leftNumeric = runtime.toNumeric(left);
+        return arithmetic(runtime, operator, leftNumeric, runtime.toNumeric(right));
       }
     }
   }
@@ -431,18 +530,18 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
 
 type LogicalOperator = '&&' | '||' | '??';
 
-function isLogicalOperator(operator: string): operator is LogicalOperator {
+export function isLogicalOperator(operator: string): operator is LogicalOperator {
   return operator === '&&' || operator === '||' || operator === '??';
 }
 
 /** Whether a logical operator yields its left operand without evaluating its right one. */
-function shortCircuits(operator: LogicalOperator, left: Value): boolean {
+export function shortCircuits(operator: LogicalOperator, left: Value): boolean {
   if (operator === '&&') return !toBoolean(left);
   if (operator === '||') return toBoolean(left);
   return left !== undefined && left !== null;
 }
 
-type Primitive = undefined | null | boolean | number | string;
+type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 
 /** Compares primitives with the host's operators, which follow JavaScript's rules for them. */
 function compare(operator: '<' | '>' | '<=' | '>=', left: Primitive, right: Primitive): boolean {
@@ -464,8 +563,88 @@ function compare(operator: '<' | '>' | '<=' | '>=', left: Primitive, right: Prim
   }
 }
 
-function arithmetic(operator: string, left: number, right: number): number {
+/**
+ * Applies an arithmetic or bitwise operator to two numbers or two BigInts; mixing them is a TypeError, as are the
+ * operations BigInts lack.
+ */
+function arithmetic(
+  runtime: Runtime,
+  operator: string,
+  left: number | bigint,
+  right: number | bigint
+): number | bigint {
+  if (typeof left === 'bigint' || typeof right === 'bigint') {
+    if (typeof left !== 'bigint' || typeof right !== 'bigint') {
+      return runtime.throwError('TypeError', 'Cannot mix BigInt and other types, use explicit conversions');
+    }
+    return bigintArithmetic(runtime, operator, left, right);
+  }
+  return numberArithmetic(operator, left, right);
+}
+
+// code-gauge-allow functionNcss 40 -- One case per operator, as for numbers.
+function bigintArithmetic(runtime: Runtime, operator: string, left: bigint, right: bigint): bigint {
   switch (operator) {
+    case '+': {
+      return left + right;
+    }
+    case '-': {
+      return left - right;
+    }
+    case '*': {
+      chargeBigInt(runtime, bitLength(left) + bitLength(right));
+      return left * right;
+    }
+    case '/':
+    case '%': {
+      if (right === 0n) return runtime.throwError('RangeError', 'Division by zero');
+      return operator === '/' ? left / right : left % right;
+    }
+    case '**': {
+      if (right < 0n) return runtime.throwError('RangeError', 'Exponent must be positive');
+      if (left !== 0n && left !== 1n && left !== -1n) chargeBigInt(runtime, Number(right) * bitLength(left));
+      return left ** right;
+    }
+    case '&': {
+      return left & right;
+    }
+    case '|': {
+      return left | right;
+    }
+    case '^': {
+      return left ^ right;
+    }
+    case '<<':
+    case '>>': {
+      // A shift by a negative amount shifts the other way.
+      const shift = operator === '<<' ? right : -right;
+      if (shift > 0n && left !== 0n) chargeBigInt(runtime, bitLength(left) + Number(shift));
+      return shift >= 0n ? left << shift : left >> -shift;
+    }
+    case '>>>': {
+      return runtime.throwError('TypeError', 'BigInts have no unsigned right shift, use >> instead');
+    }
+    default: {
+      throw new Error(`Unknown binary operator: ${operator}`);
+    }
+  }
+}
+
+/** Charges for a BigInt result of `bits` bits, which the host would otherwise build at any size. */
+export function chargeBigInt(runtime: Runtime, bits: number): void {
+  if (bits > LIMITS.maxStringLength) runtime.throwError('RangeError', 'Maximum BigInt size exceeded');
+  runtime.spend(Math.ceil(bits / 64));
+}
+
+export function bitLength(value: bigint): number {
+  return (value < 0n ? -value : value).toString(2).length;
+}
+
+function numberArithmetic(operator: string, left: number, right: number): number {
+  switch (operator) {
+    case '+': {
+      return left + right;
+    }
     case '-': {
       return left - right;
     }
@@ -509,7 +688,7 @@ function arithmetic(operator: string, left: number, right: number): number {
 export function defineAccessor(
   runtime: EvaluatorBase['runtime'],
   object: JsObject,
-  key: string,
+  key: Key,
   kind: 'getter' | 'setter',
   fn: JsFunction,
   enumerable: boolean
@@ -519,5 +698,13 @@ export function defineAccessor(
     existing && isAccessor(existing) ? existing : { get: undefined, set: undefined, enumerable, configurable: true };
   if (kind === 'getter') accessor.get = fn;
   else accessor.set = fn;
+  // An accessor is named after its key with a `get` or `set` prefix, a symbol key by its description in brackets.
+  const keyText = typeof key === 'string' ? key : key.description === undefined ? '' : `[${key.description}]`;
+  fn.properties.set('name', {
+    value: `${kind === 'getter' ? 'get' : 'set'} ${keyText}`,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
   runtime.defineProperty(object, key, accessor);
 }

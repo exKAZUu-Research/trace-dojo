@@ -1,7 +1,17 @@
 import type { Expression, FunctionNode, MemberExpression, Pattern, PropertyName, ScopeDeclarations } from './ast';
 import { DONE } from './iteration';
 import type { Runtime } from './runtime';
-import { type FunctionFrame, isObject, JsFunction, type JsObject, Scope, UNINITIALIZED, type Value } from './values';
+import {
+  type FunctionFrame,
+  isObject,
+  JsFunction,
+  type JsObject,
+  JsThrow,
+  type Key,
+  Scope,
+  UNINITIALIZED,
+  type Value,
+} from './values';
 
 /** How a pattern stores the values it destructures. */
 export type BindingMode =
@@ -12,9 +22,9 @@ export type BindingMode =
 
 export type Reference =
   | { kind: 'binding'; name: string }
-  | { kind: 'property'; base: Value; key: string }
+  | { kind: 'property'; base: Value; key: Key }
   | { kind: 'private'; base: Value; name: string }
-  | { kind: 'super'; key: string; thisValue: Value };
+  | { kind: 'super'; key: Key; thisValue: Value };
 
 /** Ends an optional chain whose object was null or undefined. */
 export const SHORT_CIRCUIT = Symbol('shortCircuit');
@@ -32,14 +42,20 @@ export abstract class EvaluatorBase {
   instantiate(scope: Scope, declarations: ScopeDeclarations): void {
     const { runtime } = this;
     runtime.allocate(declarations.order.length);
-    const lexical = new Map(declarations.lexical.map(({ name, isConst }) => [name, isConst]));
+    const lexical = new Map(declarations.lexical.map(({ name, kind }) => [name, kind]));
     // The last declaration of a function with a repeated name wins.
     const functions = new Map(declarations.functions.map((fn) => [fn.name, fn]));
     for (const name of declarations.order) {
       const fn = functions.get(name);
-      const isConst = lexical.get(name);
       if (fn) scope.bindings.set(name, { value: this.createFunction(fn, scope), isMutable: true });
-      else if (isConst !== undefined) scope.bindings.set(name, { value: UNINITIALIZED, isMutable: !isConst });
+      else if (lexical.has(name)) {
+        const kind = lexical.get(name);
+        scope.bindings.set(name, {
+          value: UNINITIALIZED,
+          isMutable: kind === undefined,
+          ...(kind === 'using' || kind === 'await using' ? { immutableKind: kind } : {}),
+        });
+      }
       // A parameter of the same name keeps its value.
       else if (!scope.bindings.has(name))
         scope.bindings.set(name, { value: undefined, isMutable: true, isHoisted: true });
@@ -111,7 +127,9 @@ export abstract class EvaluatorBase {
     }
     if (binding.value === UNINITIALIZED)
       runtime.throwError('ReferenceError', `Cannot access '${name}' before initialization`);
-    if (!binding.isMutable) runtime.throwError('TypeError', 'Assignment to constant variable.');
+    if (!binding.isMutable) {
+      runtime.throwError('TypeError', `Assignment to ${binding.immutableKind ?? 'constant'} variable.`);
+    }
     binding.value = value;
     binding.isHoisted = false;
   }
@@ -156,7 +174,7 @@ export abstract class EvaluatorBase {
     });
   }
 
-  propertyKey(name: PropertyName): string {
+  propertyKey(name: PropertyName): Key {
     if (name.kind === 'key') return name.key;
     if (name.kind === 'private') return this.privateKey(name.name);
     return this.runtime.toPropertyKey(this.evaluate(name.expression));
@@ -258,11 +276,18 @@ export abstract class EvaluatorBase {
     const { runtime } = this;
     // Each binding reads the next value just before it runs, since an earlier default or target may change the array.
     const iterator = runtime.iterator(value);
-    for (const element of pattern.elements) {
-      const next = iterator.next();
-      if (element) this.bindPattern(element, next === DONE ? undefined : next, mode);
+    try {
+      for (const element of pattern.elements) {
+        const next = iterator.next();
+        if (element) this.bindPattern(element, next === DONE ? undefined : next, mode);
+      }
+      if (pattern.rest) this.bindPattern(pattern.rest, runtime.newArray(iterator.rest()), mode);
+    } catch (error) {
+      if (error instanceof JsThrow) iterator.close('throw');
+      throw error;
     }
-    if (pattern.rest) this.bindPattern(pattern.rest, runtime.newArray(iterator.rest()), mode);
+    // A destructuring that needs fewer values than the iterator has closes it, as a loop left early does.
+    iterator.close();
   }
 
   private bindObjectPattern(
@@ -270,7 +295,7 @@ export abstract class EvaluatorBase {
     value: Value,
     mode: BindingMode
   ): void {
-    const used = new Set<string>();
+    const used = new Set<Key>();
     for (const property of pattern.properties) {
       const key = this.propertyKey(property.key);
       used.add(key);
@@ -279,7 +304,7 @@ export abstract class EvaluatorBase {
     if (pattern.rest) this.bindPattern(pattern.rest, this.restObject(value, used), mode);
   }
 
-  private restObject(value: Value, used: Set<string>): JsObject {
+  private restObject(value: Value, used: Set<Key>): JsObject {
     const { runtime } = this;
     const rest = runtime.newObject();
     // A string's characters are its own properties.
@@ -287,18 +312,20 @@ export abstract class EvaluatorBase {
     if (!isObject(source)) return rest;
     // Held while getters run, so the turtles copied so far stay reachable.
     return runtime.hold(rest, () => {
-      for (const key of runtime.ownEnumerableKeys(source)) {
+      runtime.forEachOwnEnumerable(source, (key) => {
         if (!used.has(key)) runtime.createDataProperty(rest, key, runtime.get(source, key));
-      }
+      });
       return rest;
     });
   }
 }
 
 /** Names a function by the variable or parameter default it was assigned to when it has no name yet. */
-export function nameFunction(runtime: Runtime, fn: JsFunction, name: string): void {
+export function nameFunction(runtime: Runtime, fn: JsFunction, name: Key): void {
   if (runtime.functionName(fn) !== '' || fn.behavior.kind === 'native') return;
-  fn.properties.set('name', { value: name, writable: false, enumerable: false, configurable: true });
+  // A function named by a symbol key takes the symbol's description in brackets.
+  const text = typeof name === 'string' ? name : name.description === undefined ? '' : `[${name.description}]`;
+  fn.properties.set('name', { value: text, writable: false, enumerable: false, configurable: true });
 }
 
 /** The variables a pattern declares, in order. */

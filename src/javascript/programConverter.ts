@@ -15,7 +15,7 @@ import type {
   Statement,
   VariableDeclaration,
 } from './ast';
-import { newContext } from './converterBase';
+import { initializerContext, newContext } from './converterBase';
 import {
   accessorOf,
   fail,
@@ -29,13 +29,19 @@ import {
   unsupported,
   unsupportedFeatures,
 } from './convertNodes';
-import { ExpressionConverter } from './expressionConverter';
+import { ExpressionConverter, patternSuspends } from './expressionConverter';
 import { isConstantExpression } from './stepRules';
 
 type StatementConverter = (node: Node) => Statement;
 
 const loopTypes = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement']);
-const declarationTypes = new Set(['lexical_declaration', 'class_declaration', 'function_declaration']);
+const declarationTypes = new Set([
+  'lexical_declaration',
+  'using_declaration',
+  'class_declaration',
+  'function_declaration',
+  'generator_function_declaration',
+]);
 
 /** Converts a tree-sitter tree to the AST, settling scopes, steps, and early errors. */
 export class ProgramConverter extends ExpressionConverter {
@@ -50,15 +56,18 @@ export class ProgramConverter extends ExpressionConverter {
         row: rowOf(node),
       }),
     lexical_declaration: (node) => this.declaration(node, true),
+    using_declaration: (node) => this.declaration(node, true),
     variable_declaration: (node) => this.declaration(node, true),
-    function_declaration: (node) => {
-      this.declareFunction(node, this.functionNode(node, 'normal'));
-      return { kind: 'function', row: rowOf(node) };
-    },
+    function_declaration: (node) => this.functionDeclaration(node),
+    generator_function_declaration: (node) => this.functionDeclaration(node),
     class_declaration: (node) => {
       const name = field(node, 'name').text;
-      this.declareLexical(node, name, false);
-      return { kind: 'class', cls: this.classNode(node, name), row: rowOf(node) };
+      this.declareLexical(node, name);
+      const suspensionsBefore = this.context.suspensionCount;
+      const cls = this.classNode(node, name);
+      // A class evaluates its heritage and keys in one go, as a class expression does.
+      if (this.context.suspensionCount !== suspensionsBefore) unsupported(node, 'この位置の yield や await ');
+      return { kind: 'class', cls, row: rowOf(node) };
     },
     return_statement: (node) => this.returnStatement(node),
     if_statement: (node) => {
@@ -92,14 +101,21 @@ export class ProgramConverter extends ExpressionConverter {
     continue_statement: (node) => this.jump(node, 'continue'),
     labeled_statement: (node) => this.labeled(node),
     switch_statement: (node) => this.switchStatement(node),
-    throw_statement: (node) => ({ kind: 'throw', argument: this.expression(namedChildren(node)[0]), row: rowOf(node) }),
+    throw_statement: (node) => ({
+      kind: 'throw',
+      argument: this.expression(namedChildren(node)[0]),
+      row: rowOf(node),
+    }),
     try_statement: (node) => this.tryStatement(node),
     empty_statement: (node) => ({ kind: 'empty', row: rowOf(node) }),
+    debugger_statement: (node) => ({ kind: 'empty', row: rowOf(node) }),
   };
 
   convert(root: Node): Program {
     const scope = this.pushScope(true);
-    const body = this.statementList(namedChildren(root).filter((child) => child.type !== 'hash_bang_line'));
+    const statements = namedChildren(root).filter((child) => child.type !== 'hash_bang_line');
+    rejectUsingIn(statements, 'using 宣言はプログラムの一番外側には書けません。');
+    const body = this.statementList(statements);
     this.popScope();
     this.assignAtomicAnnotations();
     return { body, scope };
@@ -138,15 +154,24 @@ export class ProgramConverter extends ExpressionConverter {
     }));
   }
 
+  private functionDeclaration(node: Node): Statement {
+    this.declareFunction(node, this.functionNode(node, 'normal'));
+    return { kind: 'function', row: rowOf(node) };
+  }
+
   private returnStatement(node: Node): Statement {
     if (!this.context.canReturn) fail(node, 'return 文は関数の中にしか書けません。');
     const valueNode = namedChildren(node).at(0);
-    return { kind: 'return', value: valueNode ? this.expression(valueNode) : undefined, row: rowOf(node) };
+    return {
+      kind: 'return',
+      value: valueNode ? this.expression(valueNode) : undefined,
+      awaitsValue: this.context.isAsyncGenerator,
+      row: rowOf(node),
+    };
   }
 
   private declaration(node: Node, recordsStep: boolean): VariableDeclaration {
-    const declarationKind: DeclarationKind =
-      node.type === 'variable_declaration' ? 'var' : (field(node, 'kind').text as DeclarationKind);
+    const declarationKind = declarationKindOf(node);
     const declarators = namedChildren(node).map((declarator) => {
       const valueNode = declarator.childForFieldName('value');
       const target = this.bindingPattern(field(declarator, 'name'), (identifier, name) =>
@@ -156,7 +181,12 @@ export class ProgramConverter extends ExpressionConverter {
       if (!valueNode && target.kind !== 'identifier') fail(declarator, '分割代入には初期値が必要です。');
       return { target, init: valueNode ? this.namedValue(valueNode, target) : undefined };
     });
-    const declaration: VariableDeclaration = { kind: 'declaration', declarationKind, declarators, row: rowOf(node) };
+    const declaration: VariableDeclaration = {
+      kind: 'declaration',
+      declarationKind,
+      declarators,
+      row: rowOf(node),
+    };
     // A declaration without an initializer assigns nothing that learners could answer, so it records no step.
     if (recordsStep && declarators.some((declarator) => declarator.init)) this.steppable(node, declaration);
     return declaration;
@@ -189,7 +219,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   private forInit(initNode: Node | null): VariableDeclaration | Expression | undefined {
     if (!initNode?.isNamed || initNode.type === 'empty_statement') return undefined;
-    if (initNode.type === 'lexical_declaration' || initNode.type === 'variable_declaration') {
+    if (['lexical_declaration', 'variable_declaration', 'using_declaration'].includes(initNode.type)) {
       return this.declaration(initNode, false);
     }
     return this.expression(initNode.type === 'expression_statement' ? namedChildren(initNode)[0] : initNode);
@@ -197,16 +227,21 @@ export class ProgramConverter extends ExpressionConverter {
 
   private forInStatement(node: Node): Statement {
     const header = field(node, 'header');
-    if (hasChild(header, 'await')) unsupported(node, 'for await 文');
+    const isAwait = hasChild(node, 'await');
+    const isOf = field(header, 'operator').text === 'of';
+    if (isAwait && !isOf) fail(field(header, 'operator'), 'for await には in ではなく of を書きます。');
     if (header.childForFieldName('value')) fail(node, 'for-in 文の変数には初期値を書けません。');
-    const declarationKind = header.childForFieldName('kind')?.text as DeclarationKind | undefined;
+    const declarationKind = header.childForFieldName('kind') ? declarationKindOf(header) : undefined;
     return this.withScope((scope) => {
       const leftNode = field(header, 'left');
       const target = declarationKind
         ? this.bindingPattern(leftNode, (identifier, name) => this.declareVariable(identifier, name, declarationKind))
         : this.assignmentTarget(leftNode);
+      // A loop binds its target in one go, as a destructuring assignment does.
+      if (patternSuspends(target)) unsupported(leftNode, 'この位置の yield や await ');
       return {
-        kind: field(header, 'operator').text === 'of' ? 'forOf' : 'forIn',
+        kind: isOf ? 'forOf' : 'forIn',
+        isAwait,
         declarationKind,
         target,
         iterable: this.expression(field(header, 'right')),
@@ -279,12 +314,17 @@ export class ProgramConverter extends ExpressionConverter {
           const valueNode = caseNode.childForFieldName('value');
           return {
             test: valueNode ? this.expression(valueNode) : undefined,
-            body: this.statementList(caseNode.childrenForFieldName('body').filter(isPresent)),
+            body: this.caseBody(caseNode.childrenForFieldName('body').filter(isPresent)),
           };
         });
         return { kind: 'switch', discriminant, cases, scope, row: rowOf(node) };
       })
     );
+  }
+
+  private caseBody(statements: Node[]): Statement[] {
+    rejectUsingIn(statements, 'using 宣言は case の中に直接は書けません。{ } で囲んでください。');
+    return this.statementList(statements);
   }
 
   private tryStatement(node: Node): Statement {
@@ -296,7 +336,7 @@ export class ProgramConverter extends ExpressionConverter {
       handler = this.withScope((scope) => {
         const parameterNode = handlerNode.childForFieldName('parameter');
         const param = parameterNode
-          ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name, false))
+          ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name))
           : undefined;
         return { param, body: this.block(field(handlerNode, 'body')), scope };
       });
@@ -308,8 +348,14 @@ export class ProgramConverter extends ExpressionConverter {
   // Functions and classes -------------------------------------------------------------------------------------------
 
   functionNode(node: Node, kind: FunctionKind, name = node.childForFieldName('name')?.text ?? ''): FunctionNode {
-    if (hasChild(node, 'async')) unsupported(node, 'async 関数');
-    if (hasChild(node, '*')) unsupported(node, 'ジェネレータ関数');
+    const isGenerator = hasChild(node, '*');
+    const isAsync = hasChild(node, 'async');
+    if (kind === 'classConstructor' && (isAsync || isGenerator)) {
+      fail(node, 'constructor には async や * を付けられません。');
+    }
+    if ((kind === 'getter' || kind === 'setter') && (isAsync || isGenerator)) {
+      fail(node, 'get や set には async や * を付けられません。');
+    }
     const bodyNode = field(node, 'body');
     const outer = this.context;
     const isArrow = kind === 'arrow';
@@ -318,14 +364,22 @@ export class ProgramConverter extends ExpressionConverter {
       isArrow ? outer.canCallSuper : kind === 'classConstructor' && this.derivedConstructor,
       isArrow ? outer.canReferenceSuper : kind !== 'normal'
     );
-    if (isArrow) context.argumentsUse = outer.argumentsUse;
+    if (isArrow) {
+      context.argumentsUse = outer.argumentsUse;
+      context.canUseNewTarget = outer.canUseNewTarget;
+    }
+    context.isAsync = isAsync;
+    context.isAsyncGenerator = isAsync && isGenerator;
+    context.isGenerator = isGenerator;
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {
         const { params, rest } = this.parameters(node, kind);
         const body =
           bodyNode.type === 'statement_block' ? this.statementList(namedChildren(bodyNode)) : this.expression(bodyNode);
-        const bindsOwnName = node.type === 'function_expression' && node.childForFieldName('name') !== null;
+        const bindsOwnName =
+          (node.type === 'function_expression' || node.type === 'generator_function') &&
+          node.childForFieldName('name') !== null;
         // Only an arrow function's own uses are its enclosing function's; a function's own uses get its arguments.
         const usesArguments = !isArrow && context.argumentsUse.isUsed;
         const fn: FunctionNode = {
@@ -334,6 +388,8 @@ export class ProgramConverter extends ExpressionConverter {
           params,
           rest,
           bindsOwnName,
+          isGenerator,
+          isAsync,
           usesArguments,
           body,
           scope,
@@ -402,17 +458,41 @@ export class ProgramConverter extends ExpressionConverter {
       checkMemberName(member, key, isStatic, true);
       const valueNode = member.childForFieldName('value');
       // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
-      const value = valueNode
-        ? this.withContext(newContext(false, false, true), () => this.expression(valueNode))
-        : undefined;
+      const value = valueNode ? this.withContext(initializerContext(), () => this.expression(valueNode)) : undefined;
       const fieldMember: ClassMember = { kind: 'field', isStatic, key, value, row: rowOf(member) };
       // As in Java, a static field's constant initializer records no step: it changes nothing learners see.
       const recordsStep = value !== undefined && !(isStatic && isConstantExpression(value));
       return recordsStep ? this.steppable(member, fieldMember) : fieldMember;
     }
-    if (member.type === 'class_static_block') return unsupported(member, 'static ブロック');
+    if (member.type === 'class_static_block') return this.staticBlock(member);
     return unsupported(member, `クラスの中の「${member.type}」`);
   }
+
+  /** Converts a static block, whose body runs like a method's with the class as `this` and keeps its `var`s. */
+  private staticBlock(member: Node): ClassMember {
+    return this.withContext(initializerContext(), () => {
+      const scope = this.pushScope(true);
+      try {
+        const body = this.statementList(namedChildren(field(member, 'body')));
+        return { kind: 'staticBlock', body, scope, row: rowOf(member) };
+      } finally {
+        this.popScope();
+      }
+    });
+  }
+}
+
+/** Rejects a `using` declaration among statements that JavaScript does not let one appear in directly. */
+function rejectUsingIn(statements: Node[], message: string): void {
+  const usingDeclaration = statements.find((statement) => statement.type === 'using_declaration');
+  if (usingDeclaration) fail(usingDeclaration, message);
+}
+
+/** The kind of a declaration, or of the declaration in a `for...of` header. */
+function declarationKindOf(node: Node): DeclarationKind {
+  if (node.type === 'variable_declaration') return 'var';
+  if (hasChild(node, 'using')) return hasChild(node, 'await') ? 'await using' : 'using';
+  return field(node, 'kind').text as DeclarationKind;
 }
 
 /** Whether a `for` header assigns something, which its step shows: an init with a value or an update. */

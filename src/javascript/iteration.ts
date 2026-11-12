@@ -1,34 +1,111 @@
-import type { ArrayOps } from './arrayOps';
-import type { Value } from './values';
+import { JsThrow, type Value } from './values';
+
+/** Runs `run`, closing the iterator when it throws, as the spec's IfAbruptCloseIterator does. */
+export function closingOnThrow<T>(iterator: ValueIterator, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof JsThrow) iterator.close('throw');
+    throw error;
+  }
+}
 
 /** What {@link ValueIterator.next} returns once the iteration has ended. */
 export const DONE = Symbol('done');
 
+/** A builtin iterator's steps: the next value or {@link DONE}, and what leaving a loop early runs. */
+export interface HostIterator {
+  next: () => Value | typeof DONE;
+  close?: () => void;
+  /** The object the iteration reads, which garbage collection must keep alive with the iterator. */
+  source?: Value;
+}
+
+/** Steps a builtin iterator, which stays done once it is, so what it read is then no longer reachable through it. */
+export function stepHostIterator(iteration: HostIterator): Value | typeof DONE {
+  const value = iteration.next();
+  if (value === DONE) iteration.source = undefined;
+  return value;
+}
+
 /**
- * JavaScript's iterator over an array or a string. An array is read at each step, so changes the loop body makes are
- * seen, and once the iterator has passed the end it stays done even if the array grows, as an array iterator does.
+ * An iteration a loop, a spread, or a destructuring steps through: a builtin iterator, or fixed values such as the
+ * keys `for...in` visits. Once it has ended, it stays done.
  */
 export class ValueIterator {
   private index = 0;
-  private isDone = false;
+  private done = false;
 
-  /** @param source An array, read by the spec's Get, or values that cannot change, such as a string's code points. */
-  constructor(private readonly source: ArrayOps | readonly Value[]) {}
+  /** The values {@link rest} has taken so far, which stay reachable with the roots while it takes the others. */
+  private collected: Value[] = [];
+
+  /**
+   * @param iterationRoots The iterator object and the `next` method read from it, which garbage collection keeps
+   * reachable until the iteration ends.
+   * @param onEnd Called once when the iteration ends, by running out, failing, or closing.
+   */
+  constructor(
+    private readonly source: readonly Value[] | HostIterator,
+    private readonly iterationRoots: readonly Value[] = [],
+    private readonly onEnd?: () => void
+  ) {}
+
+  get roots(): readonly Value[] {
+    return this.collected.length === 0 ? this.iterationRoots : [...this.iterationRoots, ...this.collected];
+  }
+
+  private get isDone(): boolean {
+    return this.done;
+  }
+
+  private set isDone(done: boolean) {
+    if (done && !this.done) this.onEnd?.();
+    this.done = done;
+  }
 
   next(): Value | typeof DONE {
     const { source } = this;
-    if (this.isDone || this.index >= source.length) {
+    if (this.isDone) return DONE;
+    if (!Array.isArray(source)) {
+      let value: Value | typeof DONE;
+      try {
+        value = (source as HostIterator).next();
+      } catch (error) {
+        // An iterator whose step failed is done, and closing it calls nothing.
+        this.isDone = true;
+        throw error;
+      }
+      if (value === DONE) this.isDone = true;
+      return value;
+    }
+    if (this.index >= source.length) {
       this.isDone = true;
       return DONE;
     }
-    const index = this.index++;
-    return Array.isArray(source) ? (source as readonly Value[])[index] : (source as ArrayOps).get(index);
+    return (source as readonly Value[])[this.index++];
+  }
+
+  /**
+   * Ends the iteration before it is done, as leaving a loop or a destructuring early does. After an exception, an
+   * error from closing is discarded, so the exception that ended the iteration propagates.
+   */
+  close(completion: 'normal' | 'throw' = 'normal'): void {
+    if (this.isDone) return;
+    this.isDone = true;
+    const { source } = this;
+    if (Array.isArray(source)) return;
+    try {
+      (source as HostIterator).close?.();
+    } catch (error) {
+      if (completion === 'normal' || !(error instanceof JsThrow)) throw error;
+    }
   }
 
   /** The values not read yet, which ends the iteration. */
   rest(): Value[] {
-    const values: Value[] = [];
+    const values = this.collected;
     for (let value = this.next(); value !== DONE; value = this.next()) values.push(value);
+    this.collected = [];
     return values;
   }
 }

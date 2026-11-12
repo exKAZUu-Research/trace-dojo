@@ -79,16 +79,9 @@ export function unsupported(node: Node, feature: string): never {
 
 /** Features learners may write that the interpreter rejects, by node type. */
 export const unsupportedFeatures: Record<string, string> = {
-  generator_function_declaration: 'ジェネレータ関数',
   import_statement: 'import や export ',
   export_statement: 'import や export ',
   with_statement: 'with 文',
-  debugger_statement: 'debugger 文',
-  using_declaration: 'using 宣言',
-  regex: '正規表現',
-  await_expression: 'await ',
-  yield_expression: 'ジェネレータ',
-  generator_function: 'ジェネレータ',
   jsx_element: 'JSX ',
   jsx_self_closing_element: 'JSX ',
 };

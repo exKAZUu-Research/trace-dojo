@@ -1,9 +1,18 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassNode, FunctionNode } from './ast';
+import type { AsyncGeneratorState } from './asyncGenerators';
+import type { GeneratorState } from './generators';
+import type { HostIterator } from './iteration';
+import type { PromiseState } from './promises';
+import type { ErrorName } from './realm';
+import type { CollectionState } from './realmCollections';
 import type { Runtime } from './runtime';
 
-/** A JavaScript value: primitives are the host's own, objects are interpreter objects. */
-export type Value = undefined | null | boolean | number | string | JsObject;
+/** A JavaScript value: primitives are the host's own, BigInts and symbols included, while objects are interpreter objects. */
+export type Value = undefined | null | boolean | number | bigint | string | symbol | JsObject;
+
+/** A property key, which JavaScript converts every other value to a string to make. */
+export type Key = string | symbol;
 
 export interface DataProperty {
   value: Value;
@@ -25,8 +34,18 @@ export function isAccessor(property: Property): property is AccessorProperty {
   return !('value' in property);
 }
 
+/** Makes an object's properties read-only and stops it from gaining new ones, as `Object.freeze` does. */
+export function freeze(object: JsObject): void {
+  if (object instanceof JsArray) object.frozen = object.sealed = true;
+  object.extensible = false;
+  for (const property of object.properties.values()) {
+    property.configurable = false;
+    if (!isAccessor(property)) property.writable = false;
+  }
+}
+
 export class JsObject {
-  readonly properties = new Map<string, Property>();
+  readonly properties = new Map<Key, Property>();
   /** `#name` fields, methods, and accessors, keyed by the identity of the class's private name. */
   privateMembers?: Map<string, Property>;
   extensible = true;
@@ -34,6 +53,18 @@ export class JsObject {
   turtle?: TurtleState;
   /** Set by the builtin Error constructors, which `Error.prototype.toString` and stack traces rely on. */
   isError = false;
+  /** Set by the RegExp constructor and regular expression literals; never run itself, since it keeps no lastIndex. */
+  regexp?: RegExp;
+  /** Set on a builtin iterator, such as a generator, which loops and spreads step through and close early. */
+  hostIterator?: HostIterator;
+  /** Set on a generator object. */
+  generator?: GeneratorState;
+  /** Set on an async generator object. */
+  asyncGenerator?: AsyncGeneratorState;
+  /** Set on a promise. */
+  promise?: PromiseState;
+  /** Set on a Map, Set, WeakMap, or WeakSet. */
+  collection?: CollectionState;
 
   constructor(public proto: JsObject | null) {}
 }
@@ -47,7 +78,9 @@ export function valueOfElement(element: Element): Value {
 }
 
 export class JsArray extends JsObject {
-  /** Set by Object.freeze, which leaves the elements and the length read-only. */
+  /** Set by Object.seal and Object.freeze, which make the elements non-configurable. */
+  sealed = false;
+  /** Set by Object.freeze, which also leaves the elements and the length read-only. */
   frozen = false;
 
   constructor(
@@ -92,7 +125,7 @@ export type FunctionBehavior =
     };
 
 export interface ClassField {
-  key: string;
+  key: Key;
   isPrivate: boolean;
   initialize: ((thisValue: JsObject) => Value) | undefined;
   stepRow: number | undefined;
@@ -117,7 +150,7 @@ export class JsFunction extends JsObject {
     const { behavior } = this;
     if (behavior.kind === 'native') return behavior.isConstructor;
     if (behavior.kind === 'class') return true;
-    return behavior.node.kind === 'normal';
+    return behavior.node.kind === 'normal' && !behavior.node.isGenerator && !behavior.node.isAsync;
   }
 }
 
@@ -127,6 +160,8 @@ export const UNINITIALIZED = Symbol('uninitialized');
 export interface Binding {
   value: Value | typeof UNINITIALIZED;
   isMutable: boolean;
+  /** What the TypeError of an assignment to an immutable binding calls it, `constant` unless set. */
+  immutableKind?: 'using' | 'await using';
   /** Set on a `var` whose declaration has not run yet, which learners do not see as a variable. */
   isHoisted?: boolean;
 }
@@ -141,8 +176,20 @@ export interface FunctionFrame {
   newTarget: JsFunction | undefined;
 }
 
+/** A value a `using` declaration declared, with the method that disposes of it when its scope ends. */
+export interface Disposable {
+  value: Value;
+  method: JsFunction | undefined;
+  /** Whether disposal awaits, as an `await using` does even for a sync `Symbol.dispose` or a null value. */
+  isAsync: boolean;
+  /** Whether disposal awaits what the method returns, which only a `Symbol.asyncDispose` method's result is. */
+  awaitsResult: boolean;
+}
+
 export class Scope {
   readonly bindings = new Map<string, Binding>();
+  /** The values `using` declarations in this scope declared, in order. */
+  disposables?: Disposable[];
 
   constructor(
     readonly parent: Scope | undefined,
@@ -164,6 +211,18 @@ export class Scope {
 /** Thrown through the host stack to carry a JavaScript exception. */
 export class JsThrow {
   constructor(readonly value: Value) {}
+}
+
+/** Runs a host builtin on a program's arguments, throwing its SyntaxError, RangeError, or TypeError as JavaScript's. */
+export function throwingHostErrors<T>(runtime: Runtime, run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    for (const type of [SyntaxError, RangeError, TypeError]) {
+      if (error instanceof type) return runtime.throwError(type.name as ErrorName, error.message);
+    }
+    throw error;
+  }
 }
 
 export function isObject(value: Value): value is JsObject {
@@ -196,8 +255,17 @@ export function privateClassOf(key: string): string {
   return key.split('\0')[1];
 }
 
+/**
+ * What a private key names: a field, or a method or accessor of the instances or of the class itself, whose absence
+ * JavaScript reports differently.
+ */
+export function privateBrandOf(key: string): 'field' | 'instance' | 'static' {
+  return key.split('\0')[3] as 'field' | 'instance' | 'static';
+}
+
 /** Whether a property key is an array index. */
-export function arrayIndexOf(key: string): number | undefined {
+export function arrayIndexOf(key: Key): number | undefined {
+  if (typeof key !== 'string') return undefined;
   if (!/^(?:0|[1-9]\d*)$/.test(key)) return undefined;
   const index = Number(key);
   return index < 2 ** 32 - 1 ? index : undefined;
