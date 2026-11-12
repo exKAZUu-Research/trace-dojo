@@ -1,5 +1,6 @@
 import { createDynamicClass } from '../classes';
 import { builtin } from '../define';
+import { forwardRefAnnotations } from '../forwardRefs';
 import { runLibrarySource } from '../librarySource';
 import { mappingProxyClass } from '../mappingProxy';
 import { importModule, registerModule } from '../modules';
@@ -29,7 +30,9 @@ function nativeHelpers(): Map<string, PyValue> {
     ['_module_namespace', builtin('_module_namespace', 'one', 1, 1, ([name]) => moduleNamespace(name as string))],
     [
       '_get_annotations',
-      builtin('_get_annotations', 'one', 1, 1, ([cls]) => newDict(currentRuntime().classAnnotations(cls as PyClass))),
+      builtin('_get_annotations', 'one', 1, 1, ([cls]) =>
+        newDict(forwardRefAnnotations(currentRuntime(), cls as PyClass))
+      ),
     ],
     [
       '_set_annotations',

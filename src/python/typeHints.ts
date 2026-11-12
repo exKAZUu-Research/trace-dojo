@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 418 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 422 -- The methods and attributes of the builtin types it defines belong together.
 import { isSubclassOfClass } from './builtins';
 import { pyRepr } from './conversions';
 import { method } from './define';
@@ -181,7 +181,7 @@ function convertNone(value: PyValue): PyValue {
 /** `typing._type_convert`: None is NoneType and a string is a forward reference. */
 function typeConvert(value: PyValue): PyValue {
   if (value === None) return noneClass;
-  if (typeof value === 'string') return new PyOpaque(forwardRefClass, value);
+  if (typeof value === 'string') return newForwardRef(value);
   return value;
 }
 
@@ -655,7 +655,17 @@ export function unionGetItem(key: PyValue): PyValue {
 
 // ForwardRef --------------------------------------------------------------------------------------------------------
 
-method(forwardRefClass, '__repr__', 'none', 0, 0, (self) => `ForwardRef(${pyRepr((self as PyOpaque).text)})`);
+/** A forward reference to `text`, which an annotation of `owner`'s body read as FORWARDREF names. */
+export function newForwardRef(text: string, owner?: PyClass): PyOpaque {
+  return new PyOpaque(forwardRefClass, text, owner);
+}
+
+method(forwardRefClass, '__repr__', 'none', 0, 0, (self) => {
+  const { text, data: owner } = self as PyOpaque;
+  return owner === undefined
+    ? `ForwardRef(${pyRepr(text)})`
+    : `ForwardRef(${pyRepr(text)}, is_class=True, owner=${pyRepr(owner as PyClass)})`;
+});
 method(forwardRefClass, '__eq__', 'one', 1, 1, (self, [other]) =>
   other instanceof PyOpaque && other.cls === forwardRefClass ? other.text === (self as PyOpaque).text : NotImplemented
 );

@@ -25,6 +25,7 @@ import { binaryOp, compareOp, unaryOp } from './operators';
 import type { Runtime } from './runtime';
 import { currentRuntime, withoutCharge } from './runtimeContext';
 import { addToTable, updateTable } from './setOperations';
+import { newForwardRef } from './typeHints';
 import {
   dictClass,
   functionClass,
@@ -231,8 +232,7 @@ export class ExpressionEvaluator {
       }
       case 'name': {
         const value = frame.locals.get(name) ?? frame.globals.get(name) ?? this.runtime.builtins.get(name);
-        if (value === undefined) throw this.nameError(`name '${name}' is not defined`, name, frame);
-        return value;
+        return value ?? this.missingName(name, frame);
       }
       case 'classCell': {
         const value = frame.locals.get(name) ?? frame.cells.get(name)?.value;
@@ -247,10 +247,16 @@ export class ExpressionEvaluator {
       }
       default: {
         const value = frame.globals.get(name) ?? this.runtime.builtins.get(name);
-        if (value === undefined) throw this.nameError(`name '${name}' is not defined`, name, frame);
-        return value;
+        return value ?? this.missingName(name, frame);
       }
     }
+  }
+
+  /** An undefined name: a forward reference in a class body whose annotations are read as FORWARDREF, else NameError. */
+  private missingName(name: string, frame: Frame): PyValue {
+    const owner = this.runtime.forwardRefOwner;
+    if (owner && frame.kind === 'class') return newForwardRef(name, owner);
+    throw this.nameError(`name '${name}' is not defined`, name, frame);
   }
 
   private nameError(message: string, name: string, frame: Frame): PyError {

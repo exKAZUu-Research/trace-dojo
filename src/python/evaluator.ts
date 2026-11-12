@@ -306,7 +306,7 @@ export class Evaluator extends ExpressionEvaluator {
   private annotate(statement: Extract<Statement, { kind: 'annotatedAssign' }>, frame: Frame): void {
     if (frame.kind === 'function' || statement.target.kind !== 'name') return;
     const { annotation } = statement;
-    frame.annotations.push([statement.target.name, () => this.evaluate(annotation, frame)]);
+    frame.annotations.push([statement.target.name, () => this.evaluate(annotation, frame), annotation]);
   }
 
   // code-gauge-allow functionNcss 33 -- One case per kind of compound statement.

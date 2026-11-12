@@ -6,7 +6,7 @@ import { createBuiltins } from './builtins';
 import { bindArguments } from './calls';
 import { instantiate } from './classes';
 import { Evaluator } from './evaluator';
-import { Frame } from './frame';
+import { type AnnotationThunk, Frame } from './frame';
 import { findReachableTurtles } from './garbageCollection';
 import { pyHash } from './hashing';
 import { keyError } from './items';
@@ -338,7 +338,19 @@ export class Runtime {
     return this.builtinsModuleValue;
   }
   /** The annotations of each class body, evaluated when the program reads `__annotations__` or `@dataclass` does. */
-  readonly classAnnotationThunks = new Map<PyClass, [string, () => PyValue][]>();
+  readonly classAnnotationThunks = new Map<PyClass, AnnotationThunk[]>();
+  /** The class whose annotations are being read in the FORWARDREF format, in which undefined names are forward references. */
+  forwardRefOwner: PyClass | undefined;
+
+  withForwardRefOwner<T>(owner: PyClass, run: () => T): T {
+    const outer = this.forwardRefOwner;
+    this.forwardRefOwner = owner;
+    try {
+      return run();
+    } finally {
+      this.forwardRefOwner = outer;
+    }
+  }
   private readonly streams = new Map<string, PyValue>();
 
   /** The entries of a class's `__annotations__`, which `@dataclass` and `get_type_hints()` read as a program does. */
