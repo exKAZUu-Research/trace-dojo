@@ -1,4 +1,4 @@
-import { DONE, type HostIterator, type ValueIterator } from './iteration';
+import { closingOnThrow, DONE, type HostIterator, ValueIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineHostIteratorPrototype, newHostIterator, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
@@ -8,7 +8,6 @@ import {
   isObject,
   JsFunction,
   JsObject,
-  JsThrow,
   type NativeCall,
   toBoolean,
   type Value,
@@ -23,18 +22,33 @@ export interface CollectionEntry {
 }
 
 /**
- * The spec's `[[MapData]]` or `[[SetData]]`: entries in insertion order, where deleting an entry empties its slot
- * instead of removing it, so that iterators and `forEach`, which walk the slots by index, see later changes as the
- * spec's do.
+ * The slots of a collection, in insertion order, where deleting an entry empties its slot. Compacting the collection
+ * moves its live entries to a successor table, and the cursors still on this one follow them there.
+ */
+class SlotTable {
+  readonly entries: (CollectionEntry | undefined)[] = [];
+  successor?: SlotTable;
+  /** The emptied slots that the move to the successor dropped, ascending; undefined when `clear` dropped them all. */
+  droppedSlots?: number[];
+}
+
+/**
+ * The spec's `[[MapData]]` or `[[SetData]]`. Iterators and `forEach` walk its slots through {@link SlotCursor}s, so they
+ * see later additions and skip later deletions as the spec's do. Once emptied slots outnumber the live ones, the entries
+ * are compacted, as V8's OrderedHashTable does on rehashing, so that a collection that churns stays cheap to iterate.
  */
 export class CollectionState {
-  readonly entries: (CollectionEntry | undefined)[] = [];
   readonly isWeak: boolean;
+  private table = new SlotTable();
   /** The slot of each live key, which the host's Map finds by SameValueZero as JavaScript's does. */
   private readonly slots = new Map<Value, number>();
 
   constructor(readonly kind: CollectionKind) {
     this.isWeak = kind === 'WeakMap' || kind === 'WeakSet';
+  }
+
+  get entries(): readonly (CollectionEntry | undefined)[] {
+    return this.table.entries;
   }
 
   get size(): number {
@@ -47,7 +61,7 @@ export class CollectionState {
 
   entryOf(key: Value): CollectionEntry | undefined {
     const slot = this.slots.get(key);
-    return slot === undefined ? undefined : this.entries[slot];
+    return slot === undefined ? undefined : this.table.entries[slot];
   }
 
   set(runtime: Runtime, key: Value, value: Value): void {
@@ -57,63 +71,133 @@ export class CollectionState {
       return;
     }
     runtime.allocate(1);
-    this.slots.set(key, this.entries.length);
-    this.entries.push({ key: Object.is(key, -0) ? 0 : key, value });
+    this.slots.set(key, this.table.entries.length);
+    this.table.entries.push({ key: Object.is(key, -0) ? 0 : key, value });
   }
 
   delete(key: Value): boolean {
     const slot = this.slots.get(key);
     if (slot === undefined) return false;
     this.slots.delete(key);
-    this.entries[slot] = undefined;
+    this.table.entries[slot] = undefined;
+    const emptied = this.table.entries.length - this.size;
+    if (emptied > MIN_SLOTS_TO_COMPACT && emptied > this.size) this.compact();
     return true;
   }
 
   clear(): void {
-    for (const slot of this.slots.values()) this.entries[slot] = undefined;
     this.slots.clear();
+    this.moveTo(new SlotTable(), undefined);
   }
 
-  /** The live entries from slot `start` on, charged as one scan. */
-  liveEntries(runtime: Runtime, start = 0): CollectionEntry[] {
-    runtime.scan(this.entries.length - start);
-    const live: CollectionEntry[] = [];
-    for (let slot = start; slot < this.entries.length; slot++) {
-      const entry = this.entries[slot];
-      if (entry) live.push(entry);
-    }
-    return live;
+  /** A cursor at the first slot, which visits the live entries in order. */
+  cursor(): SlotCursor {
+    return new SlotCursor(this.table);
   }
+
+  /** The live entries, charged as one scan. */
+  liveEntries(runtime: Runtime): CollectionEntry[] {
+    return this.cursor().rest(runtime);
+  }
+
+  private compact(): void {
+    const next = new SlotTable();
+    const dropped: number[] = [];
+    for (const [slot, entry] of this.table.entries.entries()) {
+      if (!entry) {
+        dropped.push(slot);
+        continue;
+      }
+      this.slots.set(entry.key, next.entries.length);
+      next.entries.push(entry);
+    }
+    this.moveTo(next, dropped);
+  }
+
+  private moveTo(next: SlotTable, droppedSlots: number[] | undefined): void {
+    this.table.successor = next;
+    this.table.droppedSlots = droppedSlots;
+    this.table = next;
+  }
+}
+
+const MIN_SLOTS_TO_COMPACT = 8;
+
+/** A position in a collection's slots, which follows the entries when the collection compacts or clears them. */
+class SlotCursor {
+  private position = 0;
+
+  constructor(private table: SlotTable) {}
+
+  /** The next live entry, or undefined at the end, charging the slots passed over as one scan. */
+  next(runtime: Runtime): CollectionEntry | undefined {
+    this.follow();
+    const { entries } = this.table;
+    const start = this.position;
+    let entry: CollectionEntry | undefined;
+    while (!entry && this.position < entries.length) entry = entries[this.position++];
+    runtime.scan(this.position - start);
+    return entry;
+  }
+
+  /** The live entries from the cursor on, without advancing it. */
+  rest(runtime: Runtime): CollectionEntry[] {
+    this.follow();
+    const { entries } = this.table;
+    runtime.scan(entries.length - this.position);
+    return entries.slice(this.position).filter((entry) => entry !== undefined);
+  }
+
+  private follow(): void {
+    for (let { successor, droppedSlots } = this.table; successor; { successor, droppedSlots } = this.table) {
+      this.position = droppedSlots ? this.position - countBelow(droppedSlots, this.position) : 0;
+      this.table = successor;
+    }
+  }
+}
+
+/** The number of items of an ascending list that are less than `limit`. */
+function countBelow(sorted: readonly number[], limit: number): number {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (sorted[middle] < limit) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }
 
 export type CollectionIteratorKind = 'keys' | 'values' | 'entries';
 
 /** A Map or Set iterator, which `util.inspect` previews without advancing it. */
 export class CollectionIterator implements HostIterator {
-  /** The next slot to visit, or Infinity once done, after which the iterator ignores later additions. */
-  position = 0;
+  /** Undefined once done, after which the iterator ignores later additions. */
+  private cursor: SlotCursor | undefined;
 
   constructor(
     private readonly runtime: Runtime,
     readonly source: JsObject,
     readonly state: CollectionState,
     readonly kind: CollectionIteratorKind
-  ) {}
+  ) {
+    this.cursor = state.cursor();
+  }
 
   next(): Value | typeof DONE {
-    const { entries } = this.state;
-    const start = this.position;
-    while (this.position < entries.length) {
-      const entry = entries[this.position++];
-      if (!entry) continue;
-      this.runtime.scan(this.position - start);
-      if (this.kind === 'keys') return entry.key;
-      if (this.kind === 'values') return entry.value;
-      return this.runtime.newArray([entry.key, entry.value]);
+    const entry = this.cursor?.next(this.runtime);
+    if (!entry) {
+      this.cursor = undefined;
+      return DONE;
     }
-    this.runtime.scan(this.position - start);
-    this.position = Number.POSITIVE_INFINITY;
-    return DONE;
+    if (this.kind === 'keys') return entry.key;
+    if (this.kind === 'values') return entry.value;
+    return this.runtime.newArray([entry.key, entry.value]);
+  }
+
+  /** The entries the iterator has yet to visit. */
+  remainingEntries(): CollectionEntry[] {
+    return this.cursor?.rest(this.runtime) ?? [];
   }
 }
 
@@ -129,9 +213,9 @@ export function defineCollectionBuiltins(builder: RealmBuilder): void {
 function defineCollectionClass(
   builder: RealmBuilder,
   kind: CollectionKind,
-  adderName: 'set' | 'add'
+  adderName: 'set' | 'add',
+  prototype = new JsObject(builder.realm.objectPrototype)
 ): { prototype: JsObject; constructor: JsFunction } {
-  const prototype = new JsObject(builder.realm.objectPrototype);
   const isMap = adderName === 'set';
   const constructor = builder.defineClass(kind, 0, prototype, ({ runtime, args, newTarget, callRow }) => {
     if (!newTarget) return runtime.throwError('TypeError', `Constructor ${kind} requires 'new'`);
@@ -167,22 +251,6 @@ function defineCollectionClass(
   });
   builder.constant(prototype, WELL_KNOWN_SYMBOLS.toStringTag, kind);
   return { prototype, constructor };
-}
-
-/** Runs `run`, closing the iterator when it throws, as the spec's IfAbruptCloseIterator does. */
-function closingOnThrow(iterator: ValueIterator, run: () => void): void {
-  try {
-    run();
-  } catch (error) {
-    if (error instanceof JsThrow) {
-      try {
-        iterator.close();
-      } catch {
-        // The first exception wins over one that closing the iterator throws.
-      }
-    }
-    throw error;
-  }
 }
 
 function primitiveText(value: Exclude<Value, JsObject>): string {
@@ -257,11 +325,10 @@ function defineIterators(
 function forEachEntry({ runtime, args, callRow }: NativeCall, state: CollectionState, collection: JsObject): Value {
   const [callback, thisArg] = args;
   if (!isCallable(callback)) runtime.throwError('TypeError', `${runtime.describe(callback)} is not a function`);
-  // The slots are read by index so that entries the callback adds are visited and the ones it deletes are not.
-  for (let slot = 0; slot < state.entries.length; slot++) {
-    const entry = state.entries[slot];
+  const cursor = state.cursor();
+  for (let entry = cursor.next(runtime); entry; entry = cursor.next(runtime)) {
     runtime.spend();
-    if (entry) runtime.call(callback, thisArg, [entry.value, entry.key, collection], callRow);
+    runtime.call(callback, thisArg, [entry.value, entry.key, collection], callRow);
   }
   return undefined;
 }
@@ -278,7 +345,7 @@ function defineSizeAndClear(builder: RealmBuilder, prototype: JsObject, kind: 'M
 }
 
 function defineMap(builder: RealmBuilder): void {
-  const { prototype, constructor } = defineCollectionClass(builder, 'Map', 'set');
+  const { prototype, constructor } = defineCollectionClass(builder, 'Map', 'set', builder.realm.mapPrototype);
   collectionMethod(builder, prototype, 'Map', 'get', 1, ({ args }, state) => state.entryOf(args[0])?.value);
   collectionMethod(builder, prototype, 'Map', 'set', 2, ({ runtime, args }, state, map) => {
     state.set(runtime, args[0], args[1]);
@@ -310,7 +377,7 @@ function defineMap(builder: RealmBuilder): void {
 
 /**
  * The spec's GroupBy: the values of `items` grouped by the key `callback` gives each, in the order the keys first
- * appear. The values are held while the callback runs, so the turtles among them stay alive.
+ * appear. The values and keys are held while the callback runs, so the turtles among them stay alive.
  */
 export function groupBy(
   runtime: Runtime,
@@ -334,6 +401,8 @@ export function groupBy(
         if (!group) {
           group = [];
           groups.set(key, group);
+          held.elements.push(key);
+          runtime.allocate(1);
         }
         group.push(value);
       }
@@ -343,7 +412,7 @@ export function groupBy(
 }
 
 function defineSet(builder: RealmBuilder): void {
-  const { prototype } = defineCollectionClass(builder, 'Set', 'add');
+  const { prototype } = defineCollectionClass(builder, 'Set', 'add', builder.realm.setPrototype);
   collectionMethod(builder, prototype, 'Set', 'add', 1, ({ runtime, args }, state, set) => {
     if (!state.has(args[0])) state.set(runtime, args[0], Object.is(args[0], -0) ? 0 : args[0]);
     return set;
@@ -394,28 +463,23 @@ function forEachKey(
   callRow: number | undefined,
   visit: (key: Value) => boolean
 ): void {
-  const iterator = runtime.call(record.keys, record.set, [], callRow);
-  if (!isObject(iterator)) runtime.throwError('TypeError', 'Result of the keys method is not an object');
-  const next = runtime.get(iterator, 'next');
-  for (;;) {
-    const result = runtime.call(next, iterator, [], callRow);
-    if (!isObject(result))
-      runtime.throwError('TypeError', `Iterator result ${runtime.describe(result)} is not an object`);
-    if (toBoolean(runtime.get(result, 'done'))) return;
-    const value = runtime.get(result, 'value');
-    if (visit(Object.is(value, -0) ? 0 : value)) continue;
-    const close = runtime.get(iterator, 'return');
-    if (close !== undefined && close !== null) runtime.call(close, iterator, [], callRow);
-    return;
+  const keys = runtime.call(record.keys, record.set, [], callRow);
+  if (!isObject(keys)) runtime.throwError('TypeError', 'Result of the keys method is not an object');
+  const iterator = new ValueIterator(runtime.protocolIteration(keys));
+  for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
+    if (!visit(Object.is(value, -0) ? 0 : value)) {
+      iterator.close();
+      return;
+    }
   }
 }
 
-/** Visits a set's entries by slot, as the spec's loops over `O.[[SetData]]` do, until `visit` returns false. */
+/** Visits a set's entries in order, as the spec's loops over `[[SetData]]` do, until `visit` returns false. */
 function forEachOwn(runtime: Runtime, state: CollectionState, visit: (key: Value) => boolean): void {
-  for (let slot = 0; slot < state.entries.length; slot++) {
+  const cursor = state.cursor();
+  for (let entry = cursor.next(runtime); entry; entry = cursor.next(runtime)) {
     runtime.spend();
-    const entry = state.entries[slot];
-    if (entry && !visit(entry.key)) return;
+    if (!visit(entry.key)) return;
   }
 }
 
@@ -478,7 +542,7 @@ function defineSetCombinations(algebra: SetAlgebra, newSet: NewSet): void {
     const result = newSet(call.runtime, state);
     call.runtime.hold(result.set, () => {
       if (state.size <= record.size) {
-        forEachOwn(call.runtime, state, (key) => {
+        forEachOwn(call.runtime, result.state, (key) => {
           if (calls(call, record, key)) result.state.delete(key);
           return true;
         });

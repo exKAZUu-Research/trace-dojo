@@ -1,8 +1,9 @@
-import { DONE } from './iteration';
+import { closingOnThrow, DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { groupBy } from './realmCollections';
 import type { Runtime } from './runtime';
 import {
+  HOLE,
   isAccessor,
   isCallable,
   isObject,
@@ -61,14 +62,15 @@ function fromEntries(runtime: Runtime, args: Value[]): Value {
   const object = runtime.newObject();
   runtime.hold(object, () => {
     const iterator = runtime.iterator(args[0]);
-    for (let entry = iterator.next(); entry !== DONE; entry = iterator.next()) {
-      if (!isObject(entry)) {
-        iterator.close();
-        runtime.throwError('TypeError', `Iterator value ${primitiveText(entry)} is not an entry object`);
+    closingOnThrow(iterator, () => {
+      for (let entry = iterator.next(); entry !== DONE; entry = iterator.next()) {
+        if (!isObject(entry)) {
+          runtime.throwError('TypeError', `Iterator value ${primitiveText(entry)} is not an entry object`);
+        }
+        const key = runtime.toPropertyKey(runtime.get(entry, '0'));
+        runtime.createDataProperty(object, key, runtime.get(entry, '1'));
       }
-      const key = runtime.toPropertyKey(runtime.get(entry, '0'));
-      runtime.createDataProperty(object, key, runtime.get(entry, '1'));
-    }
+    });
   });
   return object;
 }
@@ -125,6 +127,7 @@ function defineIntegrity(method: ObjectMethod): void {
     const [object] = args;
     if (!isObject(object)) return object;
     object.extensible = false;
+    if (object instanceof JsArray) object.sealed = true;
     for (const property of object.properties.values()) property.configurable = false;
     return object;
   });
@@ -173,7 +176,8 @@ function ownPropertyNames(runtime: Runtime, object: JsObject): string[] {
 function isLocked(value: Value, frozen: boolean): boolean {
   if (!isObject(value)) return true;
   if (value.extensible) return false;
-  if (value instanceof JsArray && !value.frozen && value.elements.length > 0) return false;
+  if (value instanceof JsArray && !(frozen ? value.frozen : value.sealed) && value.elements.some((e) => e !== HOLE))
+    return false;
   for (const property of value.properties.values()) {
     if (property.configurable) return false;
     if (frozen && !isAccessor(property) && property.writable) return false;
@@ -197,10 +201,11 @@ function toPropertyDescriptor(runtime: Runtime, value: Value): Descriptor {
   if (!isObject(value))
     return runtime.throwError('TypeError', `Property description must be an object: ${runtime.describe(value)}`);
   const descriptor: Descriptor = {};
-  for (const field of ['enumerable', 'configurable', 'writable'] as const) {
+  for (const field of ['enumerable', 'configurable'] as const) {
     if (runtime.hasProperty(value, field)) descriptor[field] = toBoolean(runtime.get(value, field));
   }
   if (runtime.hasProperty(value, 'value')) descriptor.value = runtime.get(value, 'value');
+  if (runtime.hasProperty(value, 'writable')) descriptor.writable = toBoolean(runtime.get(value, 'writable'));
   for (const field of ['get', 'set'] as const) {
     if (!runtime.hasProperty(value, field)) continue;
     const accessor = runtime.get(value, field);

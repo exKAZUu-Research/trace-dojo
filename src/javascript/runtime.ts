@@ -141,17 +141,16 @@ export class Runtime {
       if (key === 'length')
         return {
           value: object.elements.length,
-          writable: true,
+          writable: !object.frozen,
           enumerable: false,
           configurable: false,
         };
       const index = arrayIndexOf(key);
       if (index !== undefined) {
         const element = index < object.elements.length ? object.elements[index] : HOLE;
-        const isMutable = !object.frozen;
         return element === HOLE
           ? undefined
-          : { value: element, writable: isMutable, enumerable: true, configurable: isMutable };
+          : { value: element, writable: !object.frozen, enumerable: true, configurable: !object.sealed };
       }
     }
     return object.properties.get(key);
@@ -251,25 +250,39 @@ export class Runtime {
     return undefined;
   }
 
-  /** The elements of an array a builtin or an assignment is about to change, which a frozen array refuses. */
-  mutableElements(array: JsArray): Element[] {
-    if (array.frozen) this.throwError('TypeError', 'Cannot modify a frozen array');
-    return array.elements;
-  }
-
+  /** Assigns an element, which a frozen array refuses and a non-extensible one refuses where it has none. */
   setElement(array: JsArray, index: number, value: Value): void {
-    const elements = this.mutableElements(array);
+    const { elements } = array;
+    if (index >= elements.length || elements[index] === HOLE) {
+      if (!array.extensible) this.throwError('TypeError', `Cannot add property ${index}, object is not extensible`);
+    } else if (array.frozen) {
+      this.throwError('TypeError', `Cannot assign to read only property '${index}' of object '[object Array]'`);
+    }
     if (index >= elements.length) this.grow(array, index + 1);
     elements[index] = value;
   }
 
+  /** The spec's ArraySetLength, which stops shrinking at the last element a sealed array cannot delete. */
   setLength(array: JsArray, value: Value): void {
     const length = this.toNumber(value);
     if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
       this.throwError('RangeError', 'Invalid array length');
-    const elements = this.mutableElements(array);
-    if (length < elements.length) elements.length = length;
-    else this.grow(array, length);
+    const { elements } = array;
+    if (array.frozen) {
+      this.throwError('TypeError', "Cannot assign to read only property 'length' of object '[object Array]'");
+    }
+    if (length >= elements.length) {
+      this.grow(array, length);
+      return;
+    }
+    if (array.sealed) {
+      const last = elements.findLastIndex((element, index) => index >= length && element !== HOLE);
+      if (last !== -1) {
+        elements.length = last + 1;
+        this.throwError('TypeError', `Cannot delete property '${last}' of [object Array]`);
+      }
+    }
+    elements.length = length;
   }
 
   private grow(array: JsArray, length: number): void {
@@ -303,9 +316,10 @@ export class Runtime {
     if (!(target instanceof JsObject)) return true;
     if (target instanceof JsArray) {
       const index = arrayIndexOf(key);
-      // Deleting a hole changes nothing, which a frozen array allows.
+      // Deleting a hole changes nothing, which a sealed array allows.
       if (index !== undefined && index < target.elements.length && target.elements[index] !== HOLE) {
-        this.mutableElements(target)[index] = HOLE;
+        if (target.sealed) this.throwError('TypeError', `Cannot delete property '${index}' of [object Array]`);
+        target.elements[index] = HOLE;
       }
       if (index !== undefined) return true;
     }
@@ -592,7 +606,7 @@ export class Runtime {
   }
 
   /** Steps through an iterator object by calling its `next()`, and its `return()` when a loop leaves it early. */
-  private protocolIteration(iterator: JsObject, next: Value): HostIterator {
+  protocolIteration(iterator: JsObject, next: Value = this.get(iterator, 'next')): HostIterator {
     return {
       next: () => {
         const result = this.call(next, iterator, [], this.currentRow);
