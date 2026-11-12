@@ -363,11 +363,11 @@ function convertUpdate(node: Node): Expression {
 }
 
 function convertCast(node: Node): Expression {
-  const types = node.childrenForFieldName('type');
-  if (types.length !== 1) unsupported(node, '交差型へのキャスト');
+  const [type, ...additionalBounds] = node.childrenForFieldName('type').map((child) => convertType(child));
   return {
     kind: 'cast',
-    type: convertType(types[0]),
+    type,
+    ...(additionalBounds.length > 0 && { additionalBounds }),
     value: convertExpression(field(node, 'value')),
     ...span(node),
   };

@@ -503,6 +503,8 @@ export interface Conditional extends Span {
 export interface Cast extends Span {
   kind: 'cast';
   type: TypeSyntax;
+  /** The interfaces after `&` in a cast to an intersection type, as in `(Runnable & Serializable) () -> {}`. */
+  additionalBounds?: TypeSyntax[];
   value: Expression;
 }
 
