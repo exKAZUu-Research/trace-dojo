@@ -3,7 +3,7 @@ import { pyRepr, pyStr } from '../conversions';
 import { pythonFunction, pythonMethod } from '../define';
 import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { argument } from '../nativeArgs';
-import { callValue, getAttribute, isTruthy, iterate, toArray } from '../objects';
+import { callValue, exactLength, getAttribute, isTruthy, iterate, toArray } from '../objects';
 import { PYTHON_WHITESPACE } from '../strings';
 import { containerRepr } from '../typeContainers';
 import {
@@ -200,10 +200,12 @@ function leadingItems(tuple: PyTuple, count: number): PyValue[] {
 
 /** Transcribes `_make` of collections.namedtuple, which builds the tuple without calling the class. */
 function makeNamedTuple(cls: PyClass, iterable: PyValue): PyTuple {
-  const items = toArray(iterable);
-  const count = (cls.lookup('_fields') as PyTuple).items.length;
-  if (items.length !== count) throw typeError(`Expected ${count} arguments, got ${items.length}`);
-  return namedTupleInstance(cls, items);
+  const result = namedTupleInstance(cls, toArray(iterable));
+  const count = BigInt((cls.lookup('_fields') as PyTuple).items.length);
+  // `len()` of the result, which a subclass's __len__ answers.
+  const length = exactLength(result);
+  if (length !== count) throw typeError(`Expected ${count} arguments, got ${exactLength(result)}`);
+  return result;
 }
 
 /**

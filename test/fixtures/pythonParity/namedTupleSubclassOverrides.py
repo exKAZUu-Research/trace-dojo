@@ -58,3 +58,20 @@ class Counting(Base):
 got = [Counting(1, 2)._asdict(), Counting(1, 2)._replace(ok=7)]
 if got != [{'ok': 0, 'value': 1}, Counting(7, 1)]:
     raise AssertionError(got)
+
+# _make checks len() of the tuple it built, which a subclass's __len__ answers.
+
+
+class Long(Base):
+    def __len__(self):
+        return 8
+
+
+got = []
+for call in [lambda: Short._make([1, 2]), lambda: Long(1, 2)._replace(ok=7), lambda: Base._make([1])]:
+    try:
+        call()
+    except TypeError as error:
+        got.append(str(error))
+if got != ['Expected 2 arguments, got 1', 'Expected 2 arguments, got 8', 'Expected 2 arguments, got 1'] or Base._make([1, 2]) != Base(1, 2):
+    raise AssertionError(got)
