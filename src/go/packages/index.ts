@@ -7,6 +7,7 @@ import { HEAP_PACKAGE, LIST_PACKAGE } from './containers';
 import { ERRORS_PACKAGE } from './errors';
 import { FMT_PACKAGE } from './fmt';
 import { IO_PACKAGE } from './io';
+import { ITER_PACKAGE } from './iter';
 import { MATH_PACKAGE } from './math';
 import { COLOR_PACKAGE, IMAGE_PACKAGE, RUNTIME_PACKAGE } from './misc';
 import { OS_PACKAGE } from './os';
@@ -34,6 +35,7 @@ const PACKAGES = new Map<string, GoPackage>(
     ERRORS_PACKAGE,
     FMT_PACKAGE,
     IO_PACKAGE,
+    ITER_PACKAGE,
     MAPS_PACKAGE,
     MATH_PACKAGE,
     OS_PACKAGE,

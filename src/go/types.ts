@@ -155,6 +155,8 @@ export interface NamedType {
   span?: Span;
   /** Methods of a library type that this environment does not provide, which are rejected rather than undefined. */
   unsupported?: ReadonlySet<string>;
+  /** Instantiates a generic library type, which the program's generic code may instantiate with its own types. */
+  instantiateLibrary?: (args: Type[]) => NamedType;
 }
 
 export type Type =

@@ -52,7 +52,6 @@ import {
   isBasic,
   isBoolean,
   isComparable,
-  isComplex,
   isFloat,
   isInteger,
   isInterface,
@@ -73,18 +72,18 @@ import {
 import {
   Cell,
   type Channel,
-  Complex,
   copyValue,
   GoArray,
   type GoFunc,
   type GoMap,
-  GoStruct,
+  type GoStruct,
   Iface,
   Pointer,
   Slice,
   SliceArrayPointer,
   type Value,
 } from './values';
+import { zeroValueOf } from './zero';
 
 /** Compiles expressions, checking their types as Go's compiler does. */
 export abstract class ExpressionCompiler extends CompilerBase {
@@ -1586,29 +1585,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Creates the zero value of a type each time it is called, since structs and arrays are mutable. */
   protected zeroOf(type: Type): () => Value {
-    const under = underlying(type);
-    switch (under.kind) {
-      case 'basic': {
-        if (isBoolean(under)) return () => false;
-        if (isString(under)) return () => '';
-        if (isInteger(under)) return () => 0n;
-        if (isFloat(under)) return () => 0;
-        if (isComplex(under)) return () => new Complex(0, 0);
-        return () => {};
-      }
-      case 'struct': {
-        const zeros = under.fields.map((field) => this.zeroOf(field.type));
-        return () => new GoStruct(zeros.map((zero) => zero()));
-      }
-      case 'array': {
-        const zero = this.zeroOf(under.element);
-        const { length } = under;
-        return () => new GoArray(Array.from({ length }, zero));
-      }
-      default: {
-        return () => {};
-      }
-    }
+    return zeroValueOf(type);
   }
 
   /** The value of a constant expression of integer type, for array lengths and literal keys. */

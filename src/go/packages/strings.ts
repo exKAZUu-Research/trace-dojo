@@ -5,8 +5,9 @@ import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from '../literals';
 import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { GoPanic } from '../runtime';
 import { BASIC, ERROR_TYPE, funcType, pointerTo, RUNE, sliceOf } from '../types';
-import { Cell, GoStruct, Pointer, type Value } from '../values';
+import { Cell, GoFunc, GoStruct, Pointer, type Value } from '../values';
 import { EOF } from './io';
+import { seqOf } from './iter';
 import { BOOL, bytesOf, callFunction, INT, sliceOfValues, sliceValues, spendFor, STRING } from './support';
 import { isSpace, mapRunes, toLower, toTitle, toUpper } from './unicodeSupport';
 
@@ -59,6 +60,30 @@ function split(s: string, sep: string, after: boolean, limit: number): string[] 
   }
   pieces.push(s.slice(start));
   return pieces;
+}
+
+/** An iterator over strings computed in advance, which stops when the yield function returns false. */
+function sequence(pieces: string[]): GoFunc {
+  return new GoFunc(([yieldFunction]) => {
+    for (const piece of pieces) if (callFunction(yieldFunction, [piece]) === false) break;
+    return;
+  });
+}
+
+/** `strings.Lines`: the lines of a text, each with its newline, the last one without when the text lacks one. */
+function lines(s: string): string[] {
+  const result: string[] = [];
+  let start = 0;
+  while (start < s.length) {
+    const end = s.indexOf('\n', start);
+    if (end === -1) {
+      result.push(s.slice(start));
+      break;
+    }
+    result.push(s.slice(start, end + 1));
+    start = end + 1;
+  }
+  return result;
 }
 
 function fields(s: string, isSeparator: (rune: number) => boolean): string[] {
@@ -479,6 +504,19 @@ const members: Record<string, Entity> = {
     fn([STRING], [pointerTo(READER)]),
     ([s]) => new Pointer(new Cell(new GoStruct([], { text: s as string, offset: 0 })), 'v')
   ),
+  SplitSeq: nativeFunction('SplitSeq', fn([STRING, STRING], [seqOf(STRING)]), ([s, sep]) =>
+    sequence(split(s as string, sep as string, false, -1))
+  ),
+  SplitAfterSeq: nativeFunction('SplitAfterSeq', fn([STRING, STRING], [seqOf(STRING)]), ([s, sep]) =>
+    sequence(split(s as string, sep as string, true, -1))
+  ),
+  FieldsSeq: nativeFunction('FieldsSeq', fn([STRING], [seqOf(STRING)]), ([s]) =>
+    sequence(fields(s as string, isSpace))
+  ),
+  FieldsFuncSeq: nativeFunction('FieldsFuncSeq', fn([STRING, RUNE_PREDICATE], [seqOf(STRING)]), ([s, predicate]) =>
+    sequence(fields(s as string, (rune) => callFunction(predicate, [BigInt(rune)]) === true))
+  ),
+  Lines: nativeFunction('Lines', fn([STRING], [seqOf(STRING)]), ([s]) => sequence(lines(s as string))),
   Split: nativeFunction(
     'Split',
     fn([STRING, STRING], [STRINGS]),
@@ -576,5 +614,5 @@ const members: Record<string, Entity> = {
 export const STRINGS_PACKAGE = definePackage(
   'strings',
   members,
-  ['NewReader', 'Lines', 'SplitSeq', 'SplitAfterSeq', 'FieldsSeq', 'FieldsFuncSeq'].filter((name) => !(name in members))
+  ['NewReader'].filter((name) => !(name in members))
 );

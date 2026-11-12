@@ -20,7 +20,6 @@ import {
   BASIC,
   COMPARABLE,
   EMPTY_INTERFACE,
-  type FuncType,
   funcType,
   type InterfaceType,
   isFloat,
@@ -32,6 +31,7 @@ import {
   underlying,
 } from '../types';
 import { Cell, copyValue, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { seq2Of, seqOf } from './iter';
 import { pdqsort, type SortData, stableSort } from './sorting';
 import { BOOL, callFunction, callMethod, FLOAT64, INT, sliceValues, spendFor, STRING } from './support';
 
@@ -358,8 +358,7 @@ function cloneSlice(value: Value, element: Type): Value {
   return newSlice(values);
 }
 
-const SEQ_YIELD = (element: Type): FuncType => funcType([element], [BASIC.bool]);
-const SEQ = (element: Type): FuncType => funcType([SEQ_YIELD(element)], []);
+const SEQ = (element: Type): Type => seqOf(element);
 
 /** Collects the values an iterator yields, by calling it with a yield function that accepts every value. */
 function collect(seq: Value): Value[] {
@@ -724,8 +723,7 @@ function deleteRange(slice: Value, from: number, to: number, types: Type[]): Val
   return overwrite(current, kept, types);
 }
 
-const SEQ2_YIELD = (key: Type, value: Type): FuncType => funcType([key, value], [BASIC.bool]);
-const SEQ2 = (key: Type, value: Type): FuncType => funcType([SEQ2_YIELD(key, value)], []);
+const SEQ2 = (key: Type, value: Type): Type => seq2Of(key, value);
 
 /** Collects the pairs an iterator of pairs yields. */
 function collectPairs(seq: Value): [Value, Value][] {

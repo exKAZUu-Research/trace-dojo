@@ -351,6 +351,7 @@ export class ProgramCompiler extends StatementCompiler {
   private readonly instances = new Map<TypeEntity, Map<string, NamedType>>();
 
   protected instantiateNamed(named: NamedType, args: Type[]): NamedType {
+    if (named.instantiateLibrary) return named.instantiateLibrary(args);
     const entity = [...this.typeStates.keys()].find((candidate) => candidate.type === named);
     if (!entity?.generic) return named;
     return entity.generic.instantiate(args, named.span ?? { row: 0, column: 0 });
@@ -1050,8 +1051,11 @@ function containsTypeParams(type: Type): boolean {
   return false;
 }
 
-/** Packages whose functions block, which only programs run by the scheduler can call. */
-const BLOCKING_PACKAGES = new Set(['sync', 'time']);
+/**
+ * Packages whose functions block, which only programs run by the scheduler can call; iter's Pull suspends the
+ * iterator it runs, which needs the statements that can wait too.
+ */
+const BLOCKING_PACKAGES = new Set(['sync', 'time', 'iter']);
 
 /**
  * Whether a program uses goroutines, channels, or packages that block, which compiles its statements so that they can

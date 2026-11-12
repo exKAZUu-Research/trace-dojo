@@ -1,4 +1,5 @@
 import type { Entity, FuncEntity, GoPackage } from './entities';
+import { containsTypeParam } from './generics';
 import { type Runtime, runToEnd, type Suspending } from './runtime';
 import {
   type FuncType,
@@ -8,6 +9,7 @@ import {
   type NamedType,
   type Type,
   type TypeParamType,
+  typeString,
 } from './types';
 import { GoFunc, type Value } from './values';
 
@@ -104,6 +106,42 @@ export function definePackage(path: string, members: Record<string, Entity>, uns
 
 export function fn(params: Type[], results: Type[], variadic = false): FuncType {
   return funcType(params, results, variadic);
+}
+
+/**
+ * A generic library type, such as `iter.Seq[V]`: its entity, and its instances, one per list of type arguments, whose
+ * underlying types `underlyingOf` gives.
+ */
+export function genericNamedType(
+  pkg: string,
+  name: string,
+  typeParams: TypeParamType[],
+  underlyingOf: (args: Type[]) => Type
+): { entity: Entity; instance: (args: Type[]) => NamedType } {
+  const shell: NamedType = { kind: 'named', name, pkg, underlying: underlyingOf(typeParams), methods: [], typeParams };
+  const cache = new Map<string, NamedType>();
+  const instance = (args: Type[]): NamedType => {
+    const make = (): NamedType => ({
+      kind: 'named',
+      name,
+      pkg,
+      underlying: underlyingOf(args),
+      methods: [],
+      typeArgs: args,
+      origin: shell,
+    });
+    // Instances over type parameters stay apart, as parameters of the same name may differ.
+    if (args.some((arg) => containsTypeParam(arg))) return make();
+    const key = args.map((arg) => typeString(arg)).join(',');
+    let found = cache.get(key);
+    if (!found) {
+      found = make();
+      cache.set(key, found);
+    }
+    return found;
+  };
+  shell.instantiateLibrary = instance;
+  return { entity: { kind: 'type', name, type: shell, generic: { typeParams, instantiate: instance } }, instance };
 }
 
 export function typeEntity(type: NamedType): Entity {

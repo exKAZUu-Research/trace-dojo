@@ -417,7 +417,9 @@ for (const [name, signature, impl] of mapMethods) {
 }
 /** `m.Range(f)`: calls f for each entry in the order stored, until f returns false. */
 addBlockingMethod(SYNC_MAP, 'Range', fn([fn([ANY, ANY], [BOOL])], []), function* (receiver, [visit]) {
-  for (const entry of [...mapOf(receiver).entries]) {
+  // The entries stored when Range began, of which the deleted ones are skipped.
+  const snapshot = [...mapOf(receiver).entries];
+  for (const entry of snapshot) {
     if (!mapOf(receiver).entries.includes(entry)) continue;
     if ((yield* callFunction(visit, [entry.key, entry.value])) === false) break;
   }
