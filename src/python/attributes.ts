@@ -150,6 +150,7 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
   const state = instance.exception;
   if (name === 'exceptions') return state?.exceptions;
   if (name === 'message') return state?.message;
+  if (name === '__notes__') return state?.notes;
   return undefined;
 }
 
@@ -253,7 +254,12 @@ export function setInstanceAttribute(target: PyInstance, name: string, value: Py
     return;
   }
   if (target.enumValue !== undefined) {
-    throw pyError('AttributeError', `cannot set '${name}' attribute of enum member`);
+    // Enum's `name` and `value` are data descriptors refusing writes; `_value_` is where `value` reads from.
+    if (isEnumMemberProperty(name)) throw pyError('AttributeError', `<enum 'Enum'> cannot set attribute '${name}'`);
+    if (name === '_value_') {
+      target.enumValue = value;
+      return;
+    }
   }
   const state = target.exception;
   if (state && name === '__notes__') {
@@ -335,8 +341,13 @@ export function deleteInstanceAttribute(target: PyInstance, name: string): void 
     deleteProperty(attribute, target, name);
     return;
   }
+  if (target.enumValue !== undefined && isEnumMemberProperty(name)) {
+    throw pyError('AttributeError', `<enum 'Enum'> cannot delete attribute '${name}'`);
+  }
   if (!target.dict.delete(name)) throw attributeError(target, name);
 }
+
+const isEnumMemberProperty = (name: string): boolean => name === 'name' || name === 'value';
 
 /** Sets a class attribute, of which `__module__`, `__name__`, and `__qualname__` are the class's own data. */
 function setClassAttribute(cls: PyClass, name: string, value: PyValue): void {
