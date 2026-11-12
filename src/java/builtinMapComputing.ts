@@ -68,8 +68,10 @@ function defineMapReplaceAll(mapClass: ClassInfo, functions: ComputeFunctions, m
   const functionType = classType(functions.biFunction, superOf(mapK), superOf(mapV), extendsOf(mapV));
   addMethod(mapClass, 'replaceAll', [functionType], VOID, false, (frame, receiver, [fn]) => {
     if (fn === undefined) throwBuiltin(frame, 'NullPointerException');
-    checkModifiable(frame, receiver, false);
     const map = receiver as JavaObject;
+    // Collections.emptyMap overrides replaceAll to do nothing, unlike the other unmodifiable maps.
+    if (map.cls.isBuiltin && map.cls.name === 'EmptyMap') return;
+    checkModifiable(frame, receiver, false);
     const store = map.store;
     if (!store) return throwBuiltin(frame, 'UnsupportedOperationException');
     const apply = (entry: HashEntry): void => {

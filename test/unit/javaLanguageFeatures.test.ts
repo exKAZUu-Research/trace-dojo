@@ -1646,6 +1646,26 @@ class Main {
   }
 });
 
+test("Java's Collections.emptyMap accepts replaceAll as a no-op, as the JDK's does", () => {
+  for (const [program, stdout] of [
+    [
+      `import java.util.*;
+class Main {
+  static void t(String label, Runnable r) { try { r.run(); System.out.println(label + " ok"); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  public static void main(String[] args) {
+    t("empty", () -> Collections.<Integer, Integer>emptyMap().replaceAll((k, v) -> v));
+    t("emptyNull", () -> Collections.<Integer, Integer>emptyMap().replaceAll(null));
+    t("single", () -> Collections.singletonMap(1, 1).replaceAll((k, v) -> v));
+    t("of", () -> Map.<Integer, Integer>of().replaceAll((k, v) -> v));
+  }
+}`,
+      'empty ok\nemptyNull java.lang.NullPointerException\nsingle java.lang.UnsupportedOperationException\nof java.lang.UnsupportedOperationException\n',
+    ],
+  ]) {
+    expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout });
+  }
+});
+
 test('Java concatenates numbers and characters onto a String with +=', () => {
   expect(finalVarsOf('String s = "x"; s += 1 + 2; s += \'c\'; s += 1.5;')).toEqual({ s: 'x3c1.5' });
 });
