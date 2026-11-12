@@ -14,7 +14,6 @@ import {
   newTuple,
   None,
   typeError,
-  typeName,
 } from './types';
 import { type ExceptionState, type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
 
@@ -106,7 +105,9 @@ function constructGroup(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyInstan
   if (args.length !== 2)
     throw typeError(`BaseExceptionGroup.__new__() takes exactly 2 arguments (${args.length} given)`);
   const [message, sequence] = args;
-  if (typeof message !== 'string') throw typeError(`argument 1 must be str, not ${typeName(message)}`);
+  if (typeof message !== 'string') {
+    throw typeError(`BaseExceptionGroup.__new__() argument 1 must be str, not ${argumentTypeName(message)}`);
+  }
   if (!(sequence instanceof PyList || sequence instanceof PyTuple)) {
     throw typeError('second argument (exceptions) must be a sequence');
   }

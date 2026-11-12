@@ -5,7 +5,7 @@ import { registerModule, registerUnsupportedAttributes } from '../modules';
 import { argument } from '../nativeArgs';
 import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
-import { None, pyError, typeError, typeName } from '../types';
+import { argumentTypeName, None, pyError, typeError } from '../types';
 import { PyList, type PyValue } from '../values';
 
 const builtin = moduleBuiltin('_heapq');
@@ -13,7 +13,7 @@ const builtin = moduleBuiltin('_heapq');
 /** The items of a heap argument, which argument clinic checks is a list, naming the function. */
 function heapOf(value: PyValue, name: string, onlyArgument: boolean): PyValue[] {
   if (!(value instanceof PyList)) {
-    throw typeError(`${name}() argument${onlyArgument ? '' : ' 1'} must be list, not ${typeName(value)}`);
+    throw typeError(`${name}() argument${onlyArgument ? '' : ' 1'} must be list, not ${argumentTypeName(value)}`);
   }
   return value.editableItems;
 }
