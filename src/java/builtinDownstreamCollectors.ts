@@ -1,5 +1,5 @@
 import { findEntry, putEntry } from './builtinCollections';
-import { type CollectorFunctions, collectors } from './builtinCollectors';
+import { type CollectorFunctions, collectors, retainingArguments } from './builtinCollectors';
 import { callFunction } from './builtinFunctions';
 import { createStore } from './builtinMaps';
 import { classType, type Context, extendsOf, superOf, typeVariable, variableType } from './builtinStreamSupport';
@@ -43,7 +43,7 @@ export function defineDownstreamCollectors(
   ): void => {
     const [declared, types] = variables(...names);
     const { parameters, result } = signature(types);
-    addMethod(collectorsClass, name, parameters, result, true, native).typeParameters = declared;
+    addMethod(collectorsClass, name, parameters, result, true, retainingArguments(native)).typeParameters = declared;
   };
   const collectorOf = (t: JavaType, a: JavaType, r: JavaType): JavaType => classType(collector, t, a, r);
   const mapOf = (key: JavaType, value: JavaType): JavaType => classType(collections.mapClass, key, value);

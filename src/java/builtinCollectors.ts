@@ -15,7 +15,7 @@ import {
   type NativeMethod,
   type WildcardType,
 } from './types';
-import { HashStore, type JavaObject, type JavaString, type Value } from './values';
+import { HashStore, JavaObject, type JavaString, type Value } from './values';
 
 function textOf(value: Value): string {
   return (value as JavaString | undefined)?.value ?? '';
@@ -53,7 +53,14 @@ export function defineCollectors(context: Context): ClassInfo {
     native: NativeMethod
   ): void => {
     const t = typeVariable('T', objectType);
-    const method = addMethod(collectorsClass, name, parameters(variableType(t)), result(variableType(t)), true, native);
+    const method = addMethod(
+      collectorsClass,
+      name,
+      parameters(variableType(t)),
+      result(variableType(t)),
+      true,
+      retainingArguments(native)
+    );
     method.typeParameters = [t];
   };
   const wildcard: WildcardType = { kind: 'wildcard', bound: undefined, isSuper: false };
@@ -216,4 +223,16 @@ function newHashSet(frame: Frame, values: Value[]): JavaObject {
     if (isNew) set.store.add({ key: value, value: undefined, hash });
   }
   return set;
+}
+
+/**
+ * A factory of collectors whose collector keeps the objects it was made from alive, the functions and downstream
+ * collectors its closures call, as their captured turtles must stay while the collector can still run.
+ */
+export function retainingArguments(native: NativeMethod): NativeMethod {
+  return (frame, receiver, args) => {
+    const collector = native(frame, receiver, args);
+    if (collector instanceof JavaObject) collector.retained = args.filter((arg) => arg instanceof JavaObject);
+    return collector;
+  };
 }

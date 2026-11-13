@@ -1699,6 +1699,16 @@ test.each([
     'static java.util.stream.Stream<Integer> make() { Turtle t = new Turtle(); return java.util.stream.Stream.of(1).map(v -> { t.前に進む(); return v; }); }',
   ],
   [
+    'a collector',
+    'java.util.stream.Collector<Integer, ?, LongSummaryStatistics> c = make(); int done = 1;',
+    'static java.util.stream.Collector<Integer, ?, LongSummaryStatistics> make() { Turtle t = new Turtle(); return java.util.stream.Collectors.summarizingLong(x -> { t.前に進む(); return x; }); }',
+  ],
+  [
+    'a downstream collector',
+    'java.util.stream.Collector<Integer, ?, Map<Integer, List<Integer>>> c = make(); int done = 1;',
+    'static java.util.stream.Collector<Integer, ?, Map<Integer, List<Integer>>> make() { Turtle t = new Turtle(); return java.util.stream.Collectors.groupingBy(x -> x, java.util.stream.Collectors.mapping(x -> { t.前に進む(); return x; }, java.util.stream.Collectors.toList())); }',
+  ],
+  [
     "a map's view",
     'Collection<Integer> v = make(); int done = 1;',
     'static Collection<Integer> make() { Map<Turtle, Integer> m = new HashMap<>(); m.put(new Turtle(), 1); return m.values(); }',
