@@ -613,8 +613,13 @@ export class Printer {
   }
 
   /** Pads to the width with spaces, or zeros when the 0 flag asks, counting runes. */
+  /** Go's writePadding: zeros with the 0 flag unless the - flag pads on the right, spaces otherwise. */
+  private padding(count: number): string {
+    return (this.flags.zero && !this.flags.minus ? '0' : ' ').repeat(count);
+  }
+
   private pad(text: string): void {
-    const { width, minus, zero } = this.flags;
+    const { width, minus } = this.flags;
     if (width === undefined || width === 0) {
       this.buffer += text;
       return;
@@ -624,7 +629,7 @@ export class Printer {
       this.buffer += text;
       return;
     }
-    const padding = (zero && !minus ? '0' : ' ').repeat(count);
+    const padding = this.padding(count);
     this.buffer += minus ? text + padding : padding + text;
   }
 
@@ -777,10 +782,6 @@ export class Printer {
         return;
       }
     }
-    if (this.flags.sharpV) {
-      format = 'g';
-      precision = -1;
-    }
     let num = formatFloat(value, format, precision, size);
     if (num[0] !== '-' && num[0] !== '+') num = `+${num}`;
     if (this.flags.space && num[0] === '+' && !this.flags.plus) num = ` ${num.slice(1)}`;
@@ -903,11 +904,11 @@ export class Printer {
         width += 2;
       }
     } else {
-      if (this.flags.width !== undefined) this.buffer += ' '.repeat(this.flags.width);
+      if (this.flags.width !== undefined) this.buffer += this.padding(this.flags.width);
       return;
     }
     const { width: fieldWidth, minus } = this.flags;
-    if (fieldWidth !== undefined && fieldWidth > width && !minus) this.buffer += ' '.repeat(fieldWidth - width);
+    if (fieldWidth !== undefined && fieldWidth > width && !minus) this.buffer += this.padding(fieldWidth - width);
     let result = '';
     if (this.flags.sharp) result += `0${digits[16]}`;
     for (let index = 0; index < length; index++) {
@@ -919,7 +920,7 @@ export class Printer {
       result += digits[byte >> 4] + digits[byte & 0xf];
     }
     this.buffer += result;
-    if (fieldWidth !== undefined && fieldWidth > width && minus) this.buffer += ' '.repeat(fieldWidth - width);
+    if (fieldWidth !== undefined && fieldWidth > width && minus) this.buffer += this.padding(fieldWidth - width);
   }
 
   private fmtPointer(value: Value, type: Type, verb: string): void {

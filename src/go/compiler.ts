@@ -18,7 +18,7 @@ import { mapKeyOf } from './equality';
 import { containsTypeParam, substitute } from './generics';
 import { currentRuntime } from './native';
 import { lookupPackage } from './packages/index';
-import { evaluateAll, type FunctionInfo, type LocalInfo, type StackBuffers } from './runtime';
+import { type Eval, evaluateAll, type Frame, type FunctionInfo, type LocalInfo, type StackBuffers } from './runtime';
 import { Scope } from './scope';
 import { STANDARD_PACKAGES } from './standardPackages';
 import { declareValue, StatementCompiler } from './statementCompiler';
@@ -864,29 +864,43 @@ export class ProgramCompiler extends StatementCompiler {
         for (const variable of variables) this.globalZeros[variable.slot] = this.zeroOf(variable.type);
         return;
       }
+      // Go initializes each variable of `var a, b = x, f()` on its own, in order; only a call with several results
+      // initializes its variables together.
+      const separate = spec.values.length === variables.length;
+      const units = separate
+        ? spec.values.map((value, index) => ({ values: [value], variables: [variables[index]] }))
+        : [{ values: spec.values, variables }];
       const types: Type[] = [];
-      const { result: values, run: ordered } = this.hoistingCalls(() =>
-        this.rightSide(spec, spec.values, variables.length, () => declaredType, types)
-      );
+      const compiled = units.map((unit) => {
+        const unitTypes: Type[] = [];
+        const { result: values, run: ordered } = this.hoistingCalls(() =>
+          this.rightSide(spec, unit.values, unit.variables.length, () => declaredType, unitTypes)
+        );
+        types.push(...unitTypes);
+        return { values, ordered, variables: unit.variables };
+      });
       for (const [index, variable] of variables.entries()) {
         if (!declaredType) variable.type = types[index] ?? BASIC.invalid;
         if (isUntyped(variable.type))
           this.error(variable.span, `${variable.name} の型を決められません（nil には型がありません）。`);
         this.globalZeros[variable.slot] = this.zeroOf(variable.type);
       }
-      if (!values) return;
+      if (compiled.some((unit) => !unit.values)) return;
       const isConstant = spec.values.every((value) => this.isConstantExpression(value));
       const row = this.trace && !isConstant ? spec.row : undefined;
       const createsObjects = spec.values.every((value) => this.createsObject(value));
-      const run = (frame: Parameters<(typeof values)[0]>[0]): void => {
-        const evaluate = (): void =>
-          ordered(frame, () => {
-            const evaluated = evaluateAll(frame, values);
-            for (const [index, variable] of variables.entries()) {
-              const cell = frame.runtime.globals[variable.slot];
-              cell.v = writeInPlace(cell.v, evaluated[index]);
-            }
-          });
+      const run = (frame: Frame): void => {
+        const evaluate = (): void => {
+          for (const unit of compiled) {
+            unit.ordered(frame, () => {
+              const evaluated = evaluateAll(frame, unit.values as Eval[]);
+              for (const [index, variable] of unit.variables.entries()) {
+                const cell = frame.runtime.globals[variable.slot];
+                cell.v = writeInPlace(cell.v, evaluated[index]);
+              }
+            });
+          }
+        };
         if (row === undefined) evaluate();
         else frame.runtime.steps.runStatement(row, createsObjects, evaluate);
       };
