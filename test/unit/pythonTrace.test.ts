@@ -186,7 +186,7 @@ p = pairwise(gen())
 first = next(p)[0]
 second = next(p)[1]
 second.forward()`,
-    expected: ['', '', '0,0 1,0', '0,0 2,0', '0,0 2,1'],
+    expected: ['', '', '0,0', '0,0 1,0', '0,0 1,0', '0,0 2,0', '0,0 2,1'],
   },
 ])('a turtle that only $name reaches stays visible', ({ program, expected }) => {
   const trace = traceProgram('python', program, program);
@@ -409,3 +409,29 @@ function varsOf(language: 'java' | 'python', program: string): unknown[] {
     Object.fromEntries(Object.entries(vars).map(([name, value]) => [name.replace(/^self\./, 'this.'), value]))
   );
 }
+
+test('bare yield statements record a step on resumption like JavaScript generators', () => {
+  const python = `def gen():
+    a = 1
+    yield a
+    b = 2
+    yield b
+
+g = gen()
+x = next(g)
+y = next(g)
+print(x, y)`;
+  const javascript = `function* gen() {
+  let a = 1;
+  yield a;
+  let b = 2;
+  yield b;
+}
+const g = gen();
+const x = g.next().value;
+const y = g.next().value;
+console.log(x, y);`;
+  const lines = traceProgram('python', python, python).traceItems.map(({ line }) => line);
+  expect(lines).toEqual([0, 7, 2, 8, 3, 4, 9, 10]);
+  expect(lines).toEqual(traceProgram('javascript', javascript, javascript).traceItems.map(({ line }) => line));
+});

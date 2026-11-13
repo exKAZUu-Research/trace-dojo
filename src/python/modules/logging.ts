@@ -15,16 +15,7 @@ import threading
 import time
 import weakref
 
-__all__ = ['BASIC_FORMAT', 'CRITICAL', 'DEBUG', 'ERROR',
-           'FATAL', 'Filter', 'Formatter', 'Handler', 'INFO',
-           'LogRecord', 'Logger', 'LoggerAdapter', 'NOTSET', 'NullHandler',
-           'StreamHandler', 'WARN', 'WARNING', 'addLevelName', 'basicConfig',
-           'critical', 'debug', 'disable', 'error',
-           'exception', 'fatal', 'getLevelName', 'getLogger', 'getLoggerClass',
-           'info', 'log', 'makeLogRecord', 'setLoggerClass', 'shutdown',
-           'warn', 'warning', 'getLogRecordFactory', 'setLogRecordFactory',
-           'lastResort', 'raiseExceptions', 'getLevelNamesMapping',
-           'getHandlerByName', 'getHandlerNames']
+__all__ = ["BASIC_FORMAT", "BufferingFormatter", "CRITICAL", "DEBUG", "ERROR", "FATAL", "FileHandler", "Filter", "Formatter", "Handler", "INFO", "LogRecord", "Logger", "LoggerAdapter", "NOTSET", "NullHandler", "StreamHandler", "WARN", "WARNING", "addLevelName", "basicConfig", "captureWarnings", "critical", "debug", "disable", "error", "exception", "fatal", "getLevelName", "getLogger", "getLoggerClass", "info", "log", "makeLogRecord", "setLoggerClass", "shutdown", "warn", "warning", "getLogRecordFactory", "setLogRecordFactory", "lastResort", "raiseExceptions", "getLevelNamesMapping", "getHandlerByName", "getHandlerNames"]
 
 raiseExceptions = True
 logThreads = True
@@ -1098,64 +1089,6 @@ from types import GenericAlias
 
 currentframe = lambda: sys._getframe(1)
 
-
-class BufferingFormatter(object):
-    """
-    A formatter suitable for formatting a number of records.
-    """
-    def __init__(self, linefmt=None):
-        """
-        Optionally specify a formatter which will be used to format each
-        individual record.
-        """
-        if linefmt:
-            self.linefmt = linefmt
-        else:
-            self.linefmt = _defaultFormatter
-
-    def formatHeader(self, records):
-        """
-        Return the header string for the specified records.
-        """
-        return ""
-
-    def formatFooter(self, records):
-        """
-        Return the footer string for the specified records.
-        """
-        return ""
-
-    def format(self, records):
-        """
-        Format the specified records and return the result as a string.
-        """
-        rv = ""
-        if len(records) > 0:
-            rv = rv + self.formatHeader(records)
-            for record in records:
-                rv = rv + self.linefmt.format(record)
-            rv = rv + self.formatFooter(records)
-        return rv
-
-
-class PlaceHolder(object):
-    """
-    PlaceHolder instances are used in the Manager logger hierarchy to take
-    the place of nodes for which no loggers have been defined. This class is
-    intended for internal use only and not as part of the public API.
-    """
-    def __init__(self, alogger):
-        """
-        Initialize with the specified logger being a child of this placeholder.
-        """
-        self.loggerMap = { alogger : None }
-
-    def append(self, alogger):
-        """
-        Add the specified logger as a child of this placeholder.
-        """
-        if alogger not in self.loggerMap:
-            self.loggerMap[alogger] = None
 `;
 
 registerSourceModule(

@@ -50,6 +50,13 @@ export function checkNamespaceListing(value: PyValue, listing: string): void {
   if (differing) throw listingError(listing, differing);
 }
 
+export function checkStarNamespace(module: PyModule): void {
+  if (!enforced || currentRuntime().inLibraryCode()) return;
+  const [missing, extra] = NAMESPACE_DIFFERENCES.modules[module.name] ?? [[], []];
+  if ([...missing, ...extra].some((name) => !name.startsWith('_')))
+    throw listingError('from ... import *', module.name);
+}
+
 /**
  * Raises the unsupported error for `dir(value)` or `help(value)` when a namespace they show differs from CPython's:
  * the module's, or the class's and its bases'.

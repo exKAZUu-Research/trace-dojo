@@ -17,6 +17,7 @@ defineMethod(unavailableType, '__repr__', () => {
 });
 
 const OPERATIONS = [
+  '__call__',
   '__repr__',
   '__str__',
   '__format__',

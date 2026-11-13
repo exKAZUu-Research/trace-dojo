@@ -12,11 +12,12 @@ import { toIndex } from './numbers';
 import {
   builtinIterator,
   callValue,
+  getAttributeOrUndefined,
   getItem,
   getIterator,
   isTruthy,
   iterate,
-  lookupSpecial,
+  setItem,
   toArray,
   withRemaining,
 } from './objects';
@@ -427,7 +428,7 @@ function updateFromArguments(qualified: string, dict: PyDict, args: PyValue[], k
 
 export function updateDict(dict: PyDict, source: PyValue): void {
   const runtime = currentRuntime();
-  if (source instanceof PyDict || lookupSpecial(source, 'keys') !== undefined) {
+  if (source instanceof PyDict || getAttributeOrUndefined(source, 'keys') !== undefined) {
     for (const [key, value] of mappingEntries(source)) {
       runtime.spend();
       dict.store.set(key, value);
@@ -532,8 +533,11 @@ method(
   1,
   2,
   (cls, [iterable, value]) => {
-    const dict = callValue(cls, []) as PyDict;
-    for (const key of toArray(iterable)) dict.store.set(key, value ?? None);
+    const dict = callValue(cls, []);
+    for (const key of toArray(iterable)) {
+      if (dict instanceof PyDict && dict.cls === dictClass) dict.store.set(key, value ?? None);
+      else setItem(dict, key, value ?? None);
+    }
     return dict;
   },
   { binding: 'class' }

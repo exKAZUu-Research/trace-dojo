@@ -10,8 +10,7 @@ import collections.abc
 import sys
 import textwrap
 
-__all__ = ['print_exc', 'format_exception', 'format_exception_only', 'print_exception', 'print_stack',
-           'clear_frames', 'TracebackException']
+__all__ = ["extract_stack", "extract_tb", "format_exception", "format_exception_only", "format_list", "format_stack", "format_tb", "print_exc", "format_exc", "print_exception", "print_last", "print_stack", "print_tb", "clear_frames", "FrameSummary", "StackSummary", "TracebackException", "walk_stack", "walk_tb", "print_list"]
 
 _sentinel = object()
 

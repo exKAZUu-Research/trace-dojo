@@ -279,8 +279,7 @@ export class ProgramConverter extends ExpressionConverter {
         return this.augmentedAssignment(node, inner);
       }
       case 'yield': {
-        // A `yield` statement records no step: the step of the code that resumes the generator shows its effect.
-        return { kind: 'expression', expression: this.yieldExpression(inner), row };
+        return { kind: 'expression', expression: this.yieldExpression(inner), stepRow: this.stepRowOf(node), row };
       }
       case 'named_expression': {
         return fail(row, '代入式（:=）を文として書くときは、( ) で囲んでください。');

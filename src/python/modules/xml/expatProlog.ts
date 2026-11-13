@@ -31,7 +31,9 @@ export abstract class ExpatProlog extends ExpatBase {
 
   protected prologProcessor(start: number, end: number): number {
     const [tok, next] =
-      start === 0 && this.input.cs[0] === 0xfe_ff ? [TOK.BOM, 1] : this.tokenizer.prologTok(start, end);
+      start === 0 && this.input.cs[0] === 0xfe_ff
+        ? [TOK.BOM, 1]
+        : this.scanToken(this.tokenizer, 'prologTok', start, end, false);
     return this.doProlog(start, end, tok, next);
   }
 
@@ -50,7 +52,6 @@ export abstract class ExpatProlog extends ExpatBase {
         if (tok !== -TOK.PROLOG_S) next = end;
         tok = -tok;
       }
-      this.accountToken(inEntity, next - s);
       const role = this.prologState.role(tok, this.text(tz, s, next));
       if (role === 'INSTANCE_START') {
         if (this.foreignDTD) this.dtd.hasParamEntityRefs = true;
@@ -61,7 +62,7 @@ export abstract class ExpatProlog extends ExpatBase {
       if (handleDefault && this.handlers.default) this.reportDefault(tz, s, next);
       if (role === 'XML_DECL') end = this.input.cs.length;
       s = next;
-      [tok, next] = tz.prologTok(s, end);
+      [tok, next] = this.scanToken(tz, 'prologTok', s, end, inEntity);
     }
   }
 

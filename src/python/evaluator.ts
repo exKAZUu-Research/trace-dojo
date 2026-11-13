@@ -23,7 +23,7 @@ import { addArgument, type CallArguments } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import { isRegisteredModule } from './modules';
-import { checkExtraName, checkNamespaceListing, missingNamespaceName } from './namespaceDifferences';
+import { checkExtraName, checkStarNamespace, missingNamespaceName } from './namespaceDifferences';
 import {
   bindValue,
   callValue,
@@ -55,7 +55,6 @@ import {
   exceptionClassNamed,
   fullyQualifiedName,
   isInstanceOf,
-  nativeFunction,
   newDict,
   newException,
   newList,
@@ -66,6 +65,7 @@ import {
   typeError,
   typeName,
 } from './types';
+import { unavailableValue } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
 import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyModule, PyTuple, type PyValue } from './values';
 import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
@@ -282,7 +282,10 @@ export class Evaluator extends AsyncEvaluator {
       this.importFrom(statement, frame);
     } else if (statement.kind === 'importStar') {
       const module = runtime.resolveImport(statement.module);
-      for (const [name, value] of starNames(module)) frame.locals.set(name, value);
+      for (const [name, value] of starNames(module, (name) =>
+        module instanceof PyModule ? this.moduleName(module, statement.module, name, true) : getAttribute(module, name)
+      ))
+        frame.locals.set(name, value);
     } else {
       for (const { module, binding, bindsModule } of statement.names) {
         const imported = runtime.resolveImport(module);
@@ -312,9 +315,12 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   /** The value `from module import name` binds from a module, or undefined when it has no such name. */
-  private moduleName(module: PyModule, moduleName: string, name: string): PyValue | undefined {
+  private moduleName(module: PyModule, moduleName: string, name: string, deferred = false): PyValue | undefined {
     const feature = module.unsupported.get(name);
-    if (feature !== undefined) throw new UnsupportedFeatureError(feature);
+    if (feature !== undefined) {
+      if (deferred) return unavailableValue(feature);
+      throw new UnsupportedFeatureError(feature);
+    }
     checkExtraName(module, name);
     // As in CPython, a name a package lacks may be a submodule, which importing it adds to the package.
     const submodule = `${moduleName}.${name}`;
@@ -494,6 +500,7 @@ export class Evaluator extends AsyncEvaluator {
     if (expression.kind === 'yield' && !expression.value?.suspends) {
       const value = expression.value ? this.evaluate(expression.value, frame) : None;
       yield frame.scope.isAsync ? asyncYield(value) : value;
+      this.runtime.steps.step(statement.stepRow);
       return undefined;
     }
     return yield* this.suspendingStatement(statement, frame);
@@ -1360,7 +1367,7 @@ const SELF_MATCHING = new Set([
 ]);
 
 /** The names `from module import *` binds: those of the module's `__all__`, or its public names without one. */
-function starNames(module: PyValue): [string, PyValue][] {
+function starNames(module: PyValue, resolve: (name: string) => PyValue | undefined): [string, PyValue][] {
   const all = getAttributeOrUndefined(module, '__all__');
   if (all === undefined) {
     if (!(module instanceof PyModule)) {
@@ -1368,7 +1375,7 @@ function starNames(module: PyValue): [string, PyValue][] {
         .filter((name): name is string => typeof name === 'string' && !name.startsWith('_'))
         .map((name) => [name, getAttribute(module, name)]);
     }
-    checkNamespaceListing(module, 'from ... import *');
+    checkStarNamespace(module);
     return [...module.dict].filter(([name]) => !name.startsWith('_'));
   }
   return toArray(all).map((name) => {
@@ -1376,15 +1383,8 @@ function starNames(module: PyValue): [string, PyValue][] {
       const owner = module instanceof PyModule ? module.name : pyStr(getAttribute(module, '__name__'));
       throw typeError(`Item in ${owner}.__all__ must be str, not ${typeName(name)}`);
     }
-    // A name this grader does not support is bound all the same, failing when the program uses it.
-    const feature = module instanceof PyModule ? module.unsupported.get(name) : undefined;
-    if (feature === undefined) return [name, getAttribute(module, name)];
-    return [
-      name,
-      nativeFunction(name, () => {
-        throw new UnsupportedFeatureError(feature);
-      }),
-    ];
+    const value = resolve(name);
+    return [name, value ?? getAttribute(module, name)];
   });
 }
 

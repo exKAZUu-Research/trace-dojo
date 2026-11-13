@@ -1,8 +1,8 @@
 import { pyStr } from './conversions';
 import type { Frame } from './frame';
-import { bindValue, callValue, getAttributeOrUndefined, getItem, lookupSpecial, toArray } from './objects';
+import { callValue, getAttributeOrUndefined, getItem, toArray } from './objects';
 import { equals } from './operators';
-import { None, typeError, typeName } from './types';
+import { dictClass, None, typeError, typeName } from './types';
 import { type Kwargs, PyDict, type PyError, type PyValue } from './values';
 
 /**
@@ -22,7 +22,7 @@ export class KeywordArguments {
   }
 
   merge(mapping: PyValue, frame: Frame): void {
-    if (lookupSpecial(mapping, 'keys') === undefined) {
+    if (getAttributeOrUndefined(mapping, 'keys') === undefined) {
       throw typeError(`${functionStr(this.callee)} argument after ** must be a mapping, not ${typeName(mapping)}`);
     }
     for (const [key, value] of mappingEntries(mapping)) {
@@ -54,8 +54,9 @@ export function functionStr(callee: PyValue): string {
 
 /** The key-value pairs of a mapping, read through `keys()` and indexing for mappings that are not dicts. */
 export function mappingEntries(mapping: PyValue): [PyValue, PyValue][] {
-  if (mapping instanceof PyDict) return mapping.store.ordered().map((entry) => [entry.key, entry.value]);
-  const keys = lookupSpecial(mapping, 'keys');
+  if (mapping instanceof PyDict && mapping.cls.lookup('__iter__') === dictClass.lookup('__iter__'))
+    return mapping.store.ordered().map((entry) => [entry.key, entry.value]);
+  const keys = getAttributeOrUndefined(mapping, 'keys');
   if (keys === undefined) throw typeError(`'${typeName(mapping)}' object is not a mapping`);
-  return toArray(callValue(bindValue(keys, mapping), [])).map((key) => [key, getItem(mapping, key)]);
+  return toArray(callValue(keys, [])).map((key) => [key, getItem(mapping, key)]);
 }

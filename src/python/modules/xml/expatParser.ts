@@ -173,19 +173,18 @@ export class ExpatParser extends ExpatProlog {
     internal: boolean
   ): number {
     const run: ContentRun = { tz, startTagLevel, end, haveMore, internal };
-    let [tok, next] = tz.contentTok(s, end);
+    let [tok, next] = this.scanToken(tz, 'contentTok', s, end, internal);
     for (;;) {
       if (!internal) {
         this.eventPtr = s;
         this.eventEndPtr = next;
       }
       if (tok <= 0) return this.contentEnd(run, tok, s, next);
-      this.accountToken(internal, next - s);
       const after = this.contentToken(run, tok, s, next);
       if (typeof after !== 'number') return after.result;
       s = after;
       if (!internal) this.eventPtr = s;
-      [tok, next] = tz.contentTok(s, end);
+      [tok, next] = this.scanToken(tz, 'contentTok', s, end, internal);
     }
   }
 
@@ -424,7 +423,7 @@ export class ExpatParser extends ExpatProlog {
     const h = this.handlers;
     if (!internal) this.eventPtr = s;
     for (;;) {
-      const [tok, next] = tz.cdataSectionTok(s, end);
+      const [tok, next] = this.scanToken(tz, 'cdataSectionTok', s, end, internal);
       if (!internal) this.eventEndPtr = next;
       switch (tok) {
         case TOK.CDATA_SECT_CLOSE: {
@@ -464,7 +463,7 @@ export class ExpatParser extends ExpatProlog {
     this.processor = 'epilog';
     this.eventPtr = s;
     for (;;) {
-      const [tok, next] = this.tokenizer.prologTok(s, end);
+      const [tok, next] = this.scanToken(this.tokenizer, 'prologTok', s, end, false);
       this.eventEndPtr = next;
       switch (tok) {
         case -TOK.PROLOG_S: {

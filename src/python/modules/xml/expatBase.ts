@@ -96,6 +96,7 @@ export abstract class ExpatBase {
   /** The characters of the document and of entity text parsed so far, which expat's protection compares. */
   private directChars = 0;
   private expandedChars = 0;
+  private readonly accountedThrough = new WeakMap<Tokenizer, number>();
 
   // The declaration being parsed in the DTD.
   protected doctypeName: string | undefined;
@@ -316,6 +317,24 @@ export abstract class ExpatBase {
     return String.fromCodePoint(...pool);
   }
 
+  protected scanToken(
+    tokenizer: Tokenizer,
+    kind: 'contentTok' | 'cdataSectionTok' | 'prologTok' | 'attributeValueTok',
+    start: number,
+    end: number,
+    internal: boolean
+  ): [number, number] {
+    const scanned = tokenizer[kind](start, end);
+    const [token, next] = scanned;
+    const trailing = token === TOK.TRAILING_CR || token === TOK.TRAILING_RSQB || token === -TOK.PROLOG_S;
+    if (token > 0 || (trailing && (internal || this.finalBuffer || kind === 'attributeValueTok'))) {
+      const through = this.accountedThrough.get(tokenizer) ?? 0;
+      this.accountToken(internal, Math.max(0, next - Math.max(start, through)));
+      this.accountedThrough.set(tokenizer, Math.max(through, next));
+    }
+    return scanned;
+  }
+
   /**
    * Charges a complete token, and refuses one of entity text once expansion has made the parsed text more than 100
    * times the document parsed so far past 8 MiB, as expat's default protection against amplification does.
@@ -345,9 +364,8 @@ export abstract class ExpatBase {
   ): void {
     const value: AttributeValue = { tz, isCdata, pool, internal, inProlog };
     for (;;) {
-      const [tok, next] = tz.attributeValueTok(ptr, end);
+      const [tok, next] = this.scanToken(tz, 'attributeValueTok', ptr, end, internal);
       if (tok === TOK.NONE) return;
-      this.accountToken(internal, next - ptr);
       currentRuntime().ensureStringFits(pool.length + next - ptr);
       this.attributeValueToken(value, tok, ptr, next);
       ptr = tok === TOK.TRAILING_CR ? ptr + 1 : next;

@@ -36,3 +36,35 @@ print(''.join(seen), p.CurrentByteIndex)`;
     });
   }
 );
+
+test.each([false, true])('CDATA entity expansion obeys amplification limits for text and bytes (bytes=%s)', (bytes) => {
+  const program = `import xml.parsers.expat as expat
+p = expat.ParserCreate()
+p.CharacterDataHandler = lambda text: None
+doc = '<!DOCTYPE r [<!ENTITY a "<![CDATA[' + 'x'*50000 + ']]>">]><r>' + '&a;'*200 + '</r>'
+try: p.Parse(${bytes ? "doc.encode('utf-8')" : 'doc'}, True)
+except expat.ExpatError as error: print(error)`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'limit on input amplification factor (from DTD and entities) breached: line 1, column 50542\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('CDATA accounting is stable when its delimiters cross parse chunks', () => {
+  const program = `import xml.parsers.expat as expat
+for split in range(1, 20):
+    parser = expat.ParserCreate()
+    seen = []
+    parser.CharacterDataHandler = seen.append
+    source = '<r><![CDATA[hello\\nworld]]></r>'
+    for index in range(0, len(source), split): parser.Parse(source[index:index+split], False)
+    parser.Parse('', True)
+    assert ''.join(seen) == 'hello\\nworld'
+print('chunks')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'chunks\n',
+    uncaughtException: undefined,
+  });
+});

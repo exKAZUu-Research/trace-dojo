@@ -616,7 +616,8 @@ registerModuleAll('re', [
   'S',
   'X',
   'U',
-  'ascii',
+  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- This is re's uppercase flag name, not an encoding identifier.
+  'ASCII',
   'IGNORECASE',
   'LOCALE',
   'MULTILINE',
