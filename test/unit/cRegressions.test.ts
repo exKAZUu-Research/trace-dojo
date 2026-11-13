@@ -1055,3 +1055,26 @@ test.each(['isascii', 'isalpha', 'digittoint'])('SDK inline definitions reject e
     'compileError'
   );
 });
+
+test('postfix updates bind before unary operators in values, members and pointers', () => {
+  const source = `#include <stdio.h>
+struct S{int x;};int main(void){int b=3;int a=-b++;int c=!b--;int d=~b++;int e=+b++;struct S s={7};struct S*p=&s;int f=-s.x++;int g=-p->x--;printf("%d %d %d %d %d %d %d %d\\n",a,b,c,d,e,f,g,s.x);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '-3 5 0 -4 4 -7 -8 7\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('c', 'int main(void){int x=1;(-x)++;}').kind).toBe('compileError');
+});
+
+test('float powers retain Apple rounding near halfway results', () => {
+  const source = `#include <stdio.h>
+#include <math.h>
+int main(void){for(int k=0;k<8;k++){volatile float x=1+(2*k+1)/8388608.0f;volatile float y=0.5f;printf("%a %a\\n",powf(x,y),sqrtf(x));}}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '0x1.000002p+0 0x1p+0\n0x1.000004p+0 0x1.000002p+0\n0x1.000006p+0 0x1.000004p+0\n0x1.000008p+0 0x1.000006p+0\n0x1.00000ap+0 0x1.000008p+0\n0x1.00000cp+0 0x1.00000ap+0\n0x1.00000ep+0 0x1.00000cp+0\n0x1.00001p+0 0x1.00000ep+0\n',
+    uncaughtException: undefined,
+  });
+});

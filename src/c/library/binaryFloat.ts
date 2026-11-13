@@ -1,6 +1,22 @@
 const DOUBLE_FORMAT = { bits: 53, minimum: -1022, maximum: 1023 };
 const FLOAT_FORMAT = { bits: 24, minimum: -126, maximum: 127 };
 
+export function fma(x: number, y: number, z: number, isFloat = false): number {
+  if (![x, y, z].every(Number.isFinite)) return x * y + z;
+  const a = exactParts(Math.abs(x));
+  const b = exactParts(Math.abs(y));
+  const c = exactParts(Math.abs(z));
+  const productExponent = a.exponent + b.exponent;
+  const exponent = Math.min(productExponent, c.exponent);
+  const product = a.mantissa * b.mantissa * BigInt(Math.sign(x) * Math.sign(y));
+  const addend = c.mantissa * BigInt(Math.sign(z));
+  const sum = (product << BigInt(productExponent - exponent)) + (addend << BigInt(c.exponent - exponent));
+  if (sum === 0n) return x * y === 0 && z === 0 ? x * y + z : 0;
+  const negative = sum < 0n;
+  const rounded = roundBinary(negative ? -sum : sum, 1n, exponent, isFloat);
+  return negative ? -rounded : rounded;
+}
+
 export function exactParts(value: number): { mantissa: bigint; exponent: number } {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value);

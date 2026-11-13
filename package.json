@@ -68,7 +68,7 @@
     "@trpc/server": "11.22.1",
     "@willbooster/shared-lib": "11.1.0",
     "@willbooster/shared-lib-react": "6.3.0",
-    "@willbooster/tree-sitter-c": "37.0.0",
+    "@willbooster/tree-sitter-c": "38.0.0",
     "@willbooster/tree-sitter-java": "34.0.0",
     "@willbooster/tree-sitter-javascript": "25.0.0",
     "@willbooster/tree-sitter-python": "19.0.0",

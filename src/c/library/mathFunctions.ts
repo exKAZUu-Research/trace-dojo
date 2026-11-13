@@ -3,7 +3,8 @@ import { CRuntimeError } from '../errors';
 import { constantOperand, type SpecialCall } from '../expressionCompiler';
 import type { NativeFunction, Runtime } from '../runtime';
 import { INT } from '../types';
-import { exactParts, roundBinary, roundSquareRoot } from './binaryFloat';
+import { appleFloatPower } from './appleFloatPower';
+import { exactParts, fma, roundBinary, roundSquareRoot } from './binaryFloat';
 import { precisePower } from './precisePower';
 import { asAddress, asNumber, writeBytes } from './support';
 
@@ -64,12 +65,12 @@ const UNARY: Record<string, (x: number) => number> = {
 };
 
 // code-gauge-allow functionCognitiveComplexity 18 -- C special values, exact powers, and fractional modes require distinct rounding paths.
-function pow(x: number, y: number, isFloat = false): number {
+function pow(x: number, y: number): number {
   if (x === 1 || y === 0 || (x === -1 && !Number.isFinite(y) && !Number.isNaN(y))) return 1;
   if (!Number.isFinite(x) || !Number.isFinite(y) || x === 0) return x ** y;
   const n = Math.abs(y);
   if (!Number.isInteger(y * 2)) return x ** y;
-  if (n > 1024) return precisePower(x, y, isFloat);
+  if (n > 1024) return precisePower(x, y);
   if (x < 0 && !Number.isInteger(y)) return Number.NaN;
   const { mantissa, exponent } = exactParts(Math.abs(x));
   const half = !Number.isInteger(y);
@@ -77,11 +78,11 @@ function pow(x: number, y: number, isFloat = false): number {
   const binaryExponent = exponent * (half ? n * 2 : n);
   const rounded = half
     ? y > 0
-      ? roundSquareRoot(power, 1n, binaryExponent, isFloat)
-      : roundSquareRoot(1n, power, -binaryExponent, isFloat)
+      ? roundSquareRoot(power, 1n, binaryExponent)
+      : roundSquareRoot(1n, power, -binaryExponent)
     : y > 0
-      ? roundBinary(power, 1n, binaryExponent, isFloat)
-      : roundBinary(1n, power, -binaryExponent, isFloat);
+      ? roundBinary(power, 1n, binaryExponent)
+      : roundBinary(1n, power, -binaryExponent);
   return x < 0 && n % 2 === 1 ? -rounded : rounded;
 }
 
@@ -176,22 +177,6 @@ function ldexp(x: number, exponent: number, isFloat = false): number {
   if (x === 0 || !Number.isFinite(x)) return x;
   const parts = exactParts(Math.abs(x));
   return Math.sign(x) * roundBinary(parts.mantissa, 1n, parts.exponent + exponent, isFloat);
-}
-
-function fma(x: number, y: number, z: number, isFloat = false): number {
-  if (![x, y, z].every(Number.isFinite)) return x * y + z;
-  const a = exactParts(Math.abs(x));
-  const b = exactParts(Math.abs(y));
-  const c = exactParts(Math.abs(z));
-  const productExponent = a.exponent + b.exponent;
-  const exponent = Math.min(productExponent, c.exponent);
-  const product = a.mantissa * b.mantissa * BigInt(Math.sign(x) * Math.sign(y));
-  const addend = c.mantissa * BigInt(Math.sign(z));
-  const sum = (product << BigInt(productExponent - exponent)) + (addend << BigInt(c.exponent - exponent));
-  if (sum === 0n) return x * y === 0 && z === 0 ? x * y + z : 0;
-  const negative = sum < 0n;
-  const rounded = roundBinary(negative ? -sum : sum, 1n, exponent, isFloat);
-  return negative ? -rounded : rounded;
 }
 
 function toLong(value: number): bigint {
@@ -378,4 +363,4 @@ CTYPE_FUNCTIONS.toupper = (_runtime, [c]) => {
   return value >= 0x61 && value <= 0x7a ? value - 32 : value;
 };
 
-MATH_FUNCTIONS.powf = (_runtime, [x, y]) => pow(x as number, y as number, true);
+MATH_FUNCTIONS.powf = (_runtime, [x, y]) => appleFloatPower(x as number, y as number);
