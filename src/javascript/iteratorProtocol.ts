@@ -180,7 +180,8 @@ function iterationOf(
   iterator: JsObject,
   adapt: (step: () => Value, method: 'next' | 'return' | 'throw') => Value = (step) => step()
 ): ProtocolIteration {
-  const next = runtime.get(iterator, 'next');
+  // The iterator stays reachable while the program's code reads its `next`, before anything roots the iteration.
+  const next = runtime.hold(iterator, () => runtime.get(iterator, 'next'));
   const method = (name: 'return' | 'throw'): ((...args: Value[]) => Value) | undefined => {
     const fn = runtime.get(iterator, name);
     if (fn === undefined || fn === null) return undefined;

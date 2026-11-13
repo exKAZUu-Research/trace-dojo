@@ -263,6 +263,12 @@ const result = Object.create(null, props);`,
     'false\n',
   ],
   [
+    'for await keeps its iterator while reading next',
+    `const source = { [Symbol.asyncIterator]() { return Object.defineProperty({ t: new Turtle(1, 1) }, 'next', { get: () => { console.log(observer.canMoveForward()); return () => Promise.resolve({ done: true }); } }); } };
+(async () => { for await (const x of source); })();`,
+    'false\n',
+  ],
+  [
     'a spread keeps its iterable while making its iterator',
     `const out = [...{ t: new Turtle(1, 1), [Symbol.iterator]: () => { console.log(observer.canMoveForward()); return [][Symbol.iterator](); } }];`,
     'false\n',
