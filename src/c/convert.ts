@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 655 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
+// code-gauge-allow-file fileNcss 668 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -103,6 +103,7 @@ export interface HeaderDeclarations {
 
 /** Converts tree-sitter's tree of a translation unit into the interpreter's syntax tree. */
 export class Converter {
+  private readonly recoveredCasts = new WeakSet<Expression>();
   private scope: NameScope;
   private headers: readonly HeaderDeclarations[] = [];
   private nextHeader = 0;
@@ -796,7 +797,7 @@ export class Converter {
 
   // Expressions -----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 52 -- One case per C expression kind; helpers already isolate the nontrivial forms.
+  // code-gauge-allow functionNcss 56 -- One case per C expression kind; helpers already isolate the nontrivial forms.
   private expression(node: Node): Expression {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
@@ -855,13 +856,16 @@ export class Converter {
       case 'update_expression': {
         const operator = field(node, 'operator');
         const argument = field(node, 'argument');
-        return {
+        const operand = this.expression(argument);
+        const prefix = operator.startIndex < argument.startIndex;
+        const build = (value: Expression): Expression => ({
           kind: 'update',
           operator: operator.type as '++' | '--',
-          prefix: operator.startIndex < argument.startIndex,
-          operand: this.expression(argument),
+          prefix,
+          operand: value,
           row,
-        };
+        });
+        return prefix ? build(operand) : this.postfix(operand, build);
       }
       case 'cast_expression': {
         return {
@@ -889,21 +893,22 @@ export class Converter {
         return this.call(node);
       }
       case 'subscript_expression': {
-        return {
+        const index = this.expression(field(node, 'index'));
+        return this.postfix(this.expression(field(node, 'argument')), (array) => ({
           kind: 'subscript',
-          array: this.expression(field(node, 'argument')),
-          index: this.expression(field(node, 'index')),
+          array,
+          index,
           row,
-        };
+        }));
       }
       case 'field_expression': {
-        return {
+        return this.postfix(this.expression(field(node, 'argument')), (object) => ({
           kind: 'member',
-          object: this.expression(field(node, 'argument')),
+          object,
           field: field(node, 'field').text,
           arrow: field(node, 'operator').type === '->',
           row,
-        };
+        }));
       }
       case 'offsetof_expression': {
         return {
@@ -944,7 +949,7 @@ export class Converter {
     if (type) return { kind: 'sizeofType', typeName: this.typeName(type), row };
     const value = field(node, 'value');
     const text = value.text;
-    const inner = text.startsWith('(') && text.endsWith(')') ? text.slice(1, -1).trim() : '';
+    const inner = value.type === 'parenthesized_expression' ? text.slice(1, -1).trim() : '';
     const leading = this.leadingType(inner, row);
     if (leading) {
       const source = '\n'.repeat(row) + `int __trace_size = sizeof(int${inner.slice(leading.length)});`;
@@ -956,9 +961,9 @@ export class Converter {
         return { kind: 'sizeofType', typeName, row };
       });
     }
-    if (value.type === 'cast_expression')
-      throw new CompileError([{ row, message: 'sizeof の型や式を括弧で正しく囲んでください。' }]);
     const operand = this.expression(value);
+    if (operand.kind === 'cast')
+      throw new CompileError([{ row, message: 'sizeof の型や式を括弧で正しく囲んでください。' }]);
     const typeName = this.parenthesizedTypeName(operand);
     return typeName ? { kind: 'sizeofType', typeName, row } : { kind: 'sizeofExpression', operand, row };
   }
@@ -1019,9 +1024,23 @@ export class Converter {
       if (args.length === 0) throw new CompileError([{ row, message: '式の書き方に誤りがあります。' }]);
       let operand = args[0];
       for (const right of args.slice(1)) operand = { kind: 'comma', left: operand, right, row };
-      return { kind: 'cast', typeName: castType, operand: { kind: 'paren', expression: operand, row }, row };
+      const cast: Expression = {
+        kind: 'cast',
+        typeName: castType,
+        operand: { kind: 'paren', expression: operand, row },
+        row,
+      };
+      this.recoveredCasts.add(cast);
+      return cast;
     }
-    return { kind: 'call', callee, args, row };
+    return this.postfix(callee, (target) => ({ kind: 'call', callee: target, args, row }));
+  }
+
+  private postfix(operand: Expression, build: (operand: Expression) => Expression): Expression {
+    if (operand.kind !== 'cast' || !this.recoveredCasts.has(operand)) return build(operand);
+    const cast: Expression = { ...operand, operand: build(operand.operand) };
+    this.recoveredCasts.add(cast);
+    return cast;
   }
 
   private checkUnsupported(node: Node): void {

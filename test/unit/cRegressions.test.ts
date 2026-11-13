@@ -1196,3 +1196,31 @@ test.each(['object', 'function'])('macro expansion obeys the operation budget: %
   const source = `${definitions.join('\n')}\n#define M24${form === 'function' ? '(x) x' : ' 1'}\nint main(void){int x=M0${form === 'function' ? '(1)' : ''};}`;
   expect(executeProgram('c', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test.each(['sizeof(Node)(n)', 'sizeof(Node)(n)(n)', 'sizeof(Node)(a)[0]'])(
+  'sizeof cannot silently discard a typedef postfix operand: %s',
+  (expression) => {
+    expect(executeProgram('c', `typedef char Node;int main(void){int n=2,a[2];long size=${expression};}`).kind).toBe(
+      'compileError'
+    );
+  }
+);
+
+test.each([
+  ['(T)(b)++', '4 5'],
+  ['(T)(a)[0]++', '1 4'],
+  ['(T)(p)->x', '7 4'],
+  ['(T)(s).x', '7 4'],
+  ['(T)(a)[1]', '2 4'],
+  ['(T)(f)(3)', '6 4'],
+  ['((T)(b))++', undefined],
+])('postfix chains bind inside recovered typedef casts: %s', (expression, expected) => {
+  const result = executeProgram(
+    'c',
+    `#include <stdio.h>
+typedef long T;struct S{int x;};int f(int n){return n*2;}
+int main(void){int b=4,a[2]={1,2};struct S s={7},*p=&s;long r=${expression};printf("%ld %d",r,b);}`
+  );
+  if (expected === undefined) expect(result.kind).toBe('compileError');
+  else expect(result).toMatchObject({ kind: 'executed', stdout: expected, uncaughtException: undefined });
+});
