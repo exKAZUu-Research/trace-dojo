@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 529 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 535 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -490,6 +490,14 @@ export class Runtime {
   }
 
   /** The prototype of an object that `new` creates for `newTarget`. */
+  /** What String, Number, or Boolean returns: the primitive when called, and its box when constructed with `new`. */
+  primitiveOrBox(value: string | number | boolean, newTarget: JsFunction | undefined): Value {
+    if (!newTarget) return value;
+    const box = this.toObject(value);
+    box.proto = this.prototypeFor(newTarget, box.proto ?? this.realm.objectPrototype);
+    return box;
+  }
+
   prototypeFor(newTarget: JsFunction | undefined, fallback: JsObject): JsObject {
     if (!newTarget) return fallback;
     const prototype = this.get(newTarget, 'prototype');

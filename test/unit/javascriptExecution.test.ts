@@ -736,6 +736,15 @@ function* g() { const o = { a: 1 }; o[yield 'key']++; console.log(o.a); }
 h().then(() => { const it = g(); it.next(); it.next('a'); });`,
   ],
   [
+    'primitive wrapper constructors',
+    `const n = new Number(1), s = new String('ab'), b = new Boolean(false);
+console.log(typeof n, typeof s, n, s, b, n + 1, s + 'c', b ? 'truthy' : 'falsy', s.length, n instanceof Number, new Number(), new String());
+class N extends Number { twice() { return this * 2; } } const x = new N(4); console.log(x, x.twice(), x instanceof N);
+for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0), () => new Symbol()]) {
+  try { console.log(f()); } catch (e) { console.log(e.name, e.message); }
+}`,
+  ],
+  [
     'busy-waiting on the clock',
     `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
 function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');

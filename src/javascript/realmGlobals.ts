@@ -256,18 +256,7 @@ function createAggregateError(call: NativeCall, prototype: JsObject): JsObject {
 // code-gauge-allow functionNcss 33 -- Lists the builtin methods, each a small closure of its own.
 function defineNumber(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
-  const numberConstructor = builder.defineClass(
-    'Number',
-    1,
-    numberPrototype,
-    ({ runtime, args }) => {
-      if (args.length === 0) return 0;
-      // Number converts a BigInt, which the implicit conversion of arithmetic rejects.
-      const numeric = runtime.toNumeric(args[0]);
-      return typeof numeric === 'bigint' ? Number(numeric) : numeric;
-    },
-    false
-  );
+  const numberConstructor = builder.defineClass('Number', 1, numberPrototype, constructNumber);
   for (const [name, value] of [
     ['MAX_SAFE_INTEGER', Number.MAX_SAFE_INTEGER],
     ['MIN_SAFE_INTEGER', Number.MIN_SAFE_INTEGER],
@@ -348,6 +337,12 @@ function defineNumberFormats(builder: RealmBuilder): void {
   });
 }
 
+function constructNumber({ runtime, args, newTarget }: NativeCall): Value {
+  // Number converts a BigInt, which the implicit conversion of arithmetic rejects.
+  const numeric = args.length === 0 ? 0 : runtime.toNumeric(args[0]);
+  return runtime.primitiveOrBox(typeof numeric === 'bigint' ? Number(numeric) : numeric, newTarget);
+}
+
 function thisNumber(runtime: Runtime, value: Value): number {
   const primitive = unboxed(value);
   if (typeof primitive !== 'number') return runtime.throwError('TypeError', 'This method requires a number');
@@ -362,7 +357,9 @@ function thisBoolean(runtime: Runtime, value: Value): boolean {
 
 function defineBoolean(builder: RealmBuilder): void {
   const { booleanPrototype } = builder.realm;
-  builder.defineClass('Boolean', 1, booleanPrototype, ({ args }) => toBoolean(args[0]), false);
+  builder.defineClass('Boolean', 1, booleanPrototype, ({ runtime, args, newTarget }) =>
+    runtime.primitiveOrBox(toBoolean(args[0]), newTarget)
+  );
   builder.method(booleanPrototype, 'toString', 0, ({ runtime, thisValue }) => String(thisBoolean(runtime, thisValue)));
   builder.method(booleanPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisBoolean(runtime, thisValue));
 }
