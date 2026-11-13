@@ -4,6 +4,7 @@ import { callDynamic } from '../methods';
 import { currentRuntime } from '../native';
 import { GoPanic } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
+import { appendValues } from '../sliceOps';
 import { ANY, BASIC, ERROR_TYPE, sliceOf, type Type } from '../types';
 import { copyValue, GoFunc, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 
@@ -58,6 +59,19 @@ export function bytesOf(value: Value): string {
 
 export function byteSlice(bytes: string): Slice {
   return sliceOfValues(Array.from(bytes, (char) => BigInt(char.charCodeAt(0))));
+}
+
+/** `append(slice, bytes...)` for a []byte, which writes into spare capacity and grows as Go's append does. */
+export function appendBytes(slice: Value, bytes: string): Slice | undefined {
+  const runtime = currentRuntime();
+  spendFor(bytes.length);
+  return appendValues(
+    slice as Slice | undefined,
+    Array.from(bytes, (char) => BigInt(char.charCodeAt(0))),
+    BASIC.uint8,
+    () => 0n,
+    (count) => runtime.allocate(count)
+  );
 }
 
 /** Calls a function value from the library, as `sort.Slice` calls its less function. */

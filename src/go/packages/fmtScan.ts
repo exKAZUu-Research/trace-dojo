@@ -7,7 +7,7 @@ import { nilPointerPanic } from '../runtimeErrors';
 import { type BasicKind, integerBits, typeString, underlying } from '../types';
 import { Complex, Iface, Pointer, Slice, type Value } from '../values';
 import { EOF, ERR_UNEXPECTED_EOF, IO_RUNE_SCANNER, sameError } from './io';
-import { parseFloat, parseInt, parseUint, renamed, unquote } from './strconv';
+import { parseFloat, parseInt, parseUint, renamed, unquoteLiteral } from './strconv';
 import { callMethod } from './support';
 import { fullRune } from './unicode';
 
@@ -539,7 +539,7 @@ class ScanState {
         if (rune === 0x5c) this.writeRune(this.mustReadRune());
         else if (rune === 0x22) break;
       }
-      const [result, error] = unquote(this.buf);
+      const [result, error] = unquoteLiteral(this.buf);
       if (error !== undefined) throw new ScanStop(error);
       return result;
     }

@@ -202,6 +202,10 @@ function sliceType(name: string, element: Type, isLess: (a: Value, b: Value) => 
     sortSlice(receiver, isLess);
     return;
   });
+  addMethod(type, 'Search', fn([element], [INT]), (receiver, [target]) => {
+    const slice = receiver as Slice | undefined;
+    return BigInt(search(slice?.length ?? 0, (index) => ((slice as Slice).get(index) as bigint) >= (target as bigint)));
+  });
   return type;
 }
 
@@ -902,6 +906,28 @@ Object.assign(slicesMembers, {
           const x = sliceValues(a);
           const y = sliceValues(b);
           return x.length === y.length && x.every((value, index) => callFunction(eq, [value, y[index]]) === true);
+        }
+    );
+  })(),
+  CompareFunc: (() => {
+    const [s1, e1] = sliceParams(EMPTY_INTERFACE);
+    const [s2, e2] = sliceParams(EMPTY_INTERFACE);
+    return genericFunction(
+      'CompareFunc',
+      [s1, s2, e1, e2],
+      funcType([s1, s2, funcType([e1, e2], [INT])], [INT]),
+      () =>
+        ([a, b, cmp]) => {
+          const x = a as Slice | undefined;
+          const y = b as Slice | undefined;
+          const xLength = x?.length ?? 0;
+          const yLength = y?.length ?? 0;
+          for (let index = 0; index < xLength; index++) {
+            if (index >= yLength) return 1n;
+            const order = callFunction(cmp, [(x as Slice).get(index), (y as Slice).get(index)]) as bigint;
+            if (order !== 0n) return order;
+          }
+          return xLength < yLength ? -1n : 0n;
         }
     );
   })(),
