@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 579 -- Declaration and initializer compilation share symbol and type state; splitting the phase would only distribute that state across modules.
+// code-gauge-allow-file fileNcss 585 -- Declaration and initializer compilation share symbol and type state; splitting the phase would only distribute that state across modules.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -50,7 +50,7 @@ import { unsupported } from './unsupported';
 export type LibraryEntry = (
   | { kind: 'native'; run: NonNullable<FunctionInfo['native']>; special?: SpecialCall }
   | { kind: 'unsupported'; feature: string }
-) & { canDefine?: boolean; isPlaceholder?: boolean };
+) & { canDefine?: boolean };
 
 export interface CompiledProgram {
   globals: GlobalInfo[];
@@ -68,6 +68,7 @@ interface LocalPart {
 }
 
 export class Compiler extends StatementCompiler {
+  private readonly linkage = new Map<string, Entity>();
   private readonly usedAtomicRows = new Set<number>();
   constructor(
     options: CompileOptions,
@@ -76,23 +77,27 @@ export class Compiler extends StatementCompiler {
     super(options);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keep final entry-point, unresolved-symbol, and annotation validation together at the translation-unit boundary.
   compile(unit: TranslationUnit): CompiledProgram {
     for (const item of unit.items) this.externalDeclaration(item);
     const main = this.scope.ordinary.get('main');
     if (main?.kind !== 'function' || !main.fn.isDefined)
       this.error(0, 'main 関数がありません（int main(void) { ... } を書いてください）。');
     for (const fn of this.functions) this.checkFunctionDefinition(fn);
-    for (const global of this.globals) {
-      if (!global.isDefined && global.header === undefined && global.referencedAt !== undefined)
-        this.error(global.referencedAt, `変数「${global.name}」は宣言されていますが、定義されていません。`);
-      if (global.isDefined && global.type.kind === 'array' && global.type.length === undefined)
-        global.type = { ...global.type, length: 1 };
-    }
+    for (const global of this.globals) this.completeGlobal(global);
     for (const row of this.options.trace?.atomicAnnotations.keys() ?? []) {
       if (!this.usedAtomicRows.has(row)) this.error(row, misplacedAtomicMessage);
     }
     return { globals: this.globals, functions: this.functions, strings: this.strings, main: main.fn };
+  }
+
+  private completeGlobal(global: GlobalInfo): void {
+    if (!global.isDefined && global.header === undefined) global.isShown = false;
+    if (!global.isDefined && global.header === undefined && global.referencedAt !== undefined)
+      this.error(global.referencedAt, `変数「${global.name}」は宣言されていますが、定義されていません。`);
+    if (global.isDefined && global.type.kind === 'array' && global.type.length === undefined)
+      global.type = { ...global.type, length: 1 };
+    if (global.type.kind === 'void' || (global.isDefined && !isComplete(global.type)))
+      this.error(global.row, `変数「${global.name}」の型（${typeName(global.type)}）の中身が定義されていません。`);
   }
 
   private checkFunctionDefinition(fn: FunctionInfo): void {
@@ -111,7 +116,7 @@ export class Compiler extends StatementCompiler {
     if (!this.isUnevaluated) fn.referencedAt ??= row;
     if (fn.header === undefined) return;
     const entry = this.library(fn.name);
-    if (entry?.kind === 'unsupported' && (!entry.canDefine || fn.hasPlaceholderType)) unsupported(row, entry.feature);
+    if (entry?.kind === 'unsupported' && !entry.canDefine) unsupported(row, entry.feature);
   }
 
   private externalDeclaration(item: ExternalDeclaration): void {
@@ -170,13 +175,9 @@ export class Compiler extends StatementCompiler {
       looked?.kind === 'function' && looked.fn.header === TURTLE_HEADER_NAME && header !== TURTLE_HEADER_NAME;
     const existing = isTurtleBuiltin ? undefined : looked;
     const entry = header === undefined ? undefined : this.library(name);
+    if (existing?.kind === 'function' && isStatic && !existing.fn.isStatic && header === undefined)
+      this.error(row, `関数「${name}」は外部リンケージで宣言されているので static にできません。`);
     if (existing && existing.kind === 'function') {
-      if (entry?.isPlaceholder) return existing.fn;
-      if (existing.fn.hasPlaceholderType) {
-        existing.fn.type = type;
-        existing.type = type;
-        existing.fn.hasPlaceholderType = false;
-      }
       if (!compatible(existing.type, type)) {
         this.error(row, `関数「${name}」の型が、前の宣言（${typeName(existing.type)}）と合いません。`);
       }
@@ -205,14 +206,12 @@ export class Compiler extends StatementCompiler {
       isAtomic: false,
       ...(header === undefined ? {} : { header }),
     };
-    if (header !== undefined) {
-      info.hasPlaceholderType = entry?.isPlaceholder;
-      if (entry?.kind === 'native') info.native = entry.run;
-    }
+    if (header !== undefined && entry?.kind === 'native') info.native = entry.run;
     this.functions.push(info);
     const entity = { kind: 'function' as const, fn: info, type };
     this.scope.ordinary.set(name, entity);
-    this.fileScope.ordinary.set(name, entity);
+    this.linkage.set(name, entity);
+    if (this.scope === this.fileScope) this.fileScope.ordinary.set(name, entity);
     return info;
   }
 
@@ -223,11 +222,11 @@ export class Compiler extends StatementCompiler {
   }
 
   private findFileScope(name: string): ReturnType<typeof this.scope.lookup> {
-    return this.fileScope.ordinary.get(name);
+    return this.linkage.get(name);
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- C's rules for tentative definitions and redeclarations.
-  // code-gauge-allow functionNcss 35 -- Tentative definitions, composite types, and initializers update one symbol; separating branches would split that invariant.
+  // code-gauge-allow functionNcss 37 -- Tentative definitions, composite types, and initializers update one symbol; separating branches would split that invariant.
   private declareGlobal(
     name: string,
     declaredType: CType,
@@ -240,7 +239,8 @@ export class Compiler extends StatementCompiler {
     if (init && storage === 'extern' && this.fn) this.error(row, '関数の中の extern の変数には、初期値を書けません。');
     if (init && type.kind === 'array' && type.length === undefined)
       type = { ...type, length: this.initializerLength(type, init) };
-    const existing = this.fileScope.ordinary.get(name);
+    const existing =
+      (this.scope === this.fileScope ? this.scope.ordinary.get(name) : undefined) ?? this.linkage.get(name);
     if (existing) {
       if (existing.kind !== 'global') this.error(row, `「${name}」が2回宣言されています。`);
       if (!compatible(existing.type, type)) {
@@ -269,7 +269,8 @@ export class Compiler extends StatementCompiler {
     };
     this.globals.push(global);
     const entity: Extract<Entity, { kind: 'global' }> = { kind: 'global', global, type };
-    this.fileScope.ordinary.set(name, entity);
+    this.linkage.set(name, entity);
+    if (this.scope === this.fileScope) this.fileScope.ordinary.set(name, entity);
     this.scope.ordinary.set(name, entity);
     if (init) {
       entity.constantBytes = this.constantString(type, init);
@@ -407,12 +408,12 @@ export class Compiler extends StatementCompiler {
     const base = this.baseType(specifiers);
     const parts: LocalPart[] = [];
     for (const declarator of declaration.declarators) {
-      const part = this.localDeclarator(specifiers.storage, base, declarator);
+      const part = this.localDeclarator(specifiers.storage, base, declarator, declaration.fromHeader);
       if (part) parts.push(part);
     }
     const step = parts.some((part) => part.initializes) ? this.stepRow(row) : undefined;
     const run = (frame: Frame): void => {
-      for (const part of parts) part.run(frame);
+      for (const part of parts) frame.runtime.fullExpression(() => part.run(frame));
     };
     const exec: Exec =
       step === undefined
@@ -427,34 +428,33 @@ export class Compiler extends StatementCompiler {
     return this.withVisibility({ exec, labels: new Set() });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Storage-class and declarator rules must be checked before allocating a local; keep those alternatives together.
   // code-gauge-allow functionNcss 33 -- Storage-class and declarator rules must be checked before allocating a local; keep those alternatives together.
   private localDeclarator(
     storage: StorageClass | undefined,
     base: CType,
-    declarator: InitDeclarator
+    declarator: InitDeclarator,
+    header?: string
   ): LocalPart | undefined {
     const declared = this.declaredType(base, declarator.declarator);
     const { name } = declared;
     let { type } = declared;
     if (name === undefined) this.error(declared.row, '宣言する名前を書いてください。');
     if (storage === 'typedef') {
-      if (this.scope.ordinary.has(name)) this.error(declared.row, `「${name}」が2回宣言されています。`);
-      this.scope.ordinary.set(name, { kind: 'typedef', type });
+      this.declareTypedef(name, type, declared.row);
       return undefined;
     }
     if (type.kind === 'function') {
       if (storage === 'static') this.error(declared.row, '関数の中では、static の関数は宣言できません。');
-      this.declareFunction(name, type, declared.row, false, undefined);
+      this.declareFunction(name, type, declared.row, false, header);
       return undefined;
     }
-    if (this.scope.ordinary.has(name)) this.error(declared.row, `「${name}」が2回宣言されています。`);
     const { init } = declarator;
     if (storage === 'extern') {
       if (init) this.error(declared.row, '関数の中の extern の変数には、初期値を書けません。');
-      this.externLocal(name, type, declared.row);
+      this.externLocal(name, type, declared.row, header);
       return undefined;
     }
+    if (this.scope.ordinary.has(name)) this.error(declared.row, `「${name}」が2回宣言されています。`);
     if (init && type.kind === 'array' && type.length === undefined)
       type = { ...type, length: this.initializerLength(type, init) };
     if (type.kind === 'void') this.error(declared.row, `変数「${name}」の型に void は使えません。`);
@@ -464,8 +464,10 @@ export class Compiler extends StatementCompiler {
     return this.automaticLocal(name, type, declared.row, init, storage === 'register');
   }
 
-  private externLocal(name: string, type: CType, row: number): void {
-    const global = this.declareGlobal(name, type, row, 'extern', undefined, undefined);
+  private externLocal(name: string, type: CType, row: number, header?: string): void {
+    const existing = this.scope.ordinary.get(name);
+    if (existing && existing.kind !== 'global') this.error(row, `「${name}」が2回宣言されています。`);
+    const global = this.declareGlobal(name, type, row, 'extern', undefined, header);
     this.scope.ordinary.set(name, { kind: 'global', global, type: global.type });
   }
 

@@ -102,6 +102,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         if (entity.kind === 'local') locals.push(entity.local);
       }
     }
+    locals.sort((a, b) => a.index - b.index);
     return {
       ...compiled,
       exec: (frame, entry) => {
@@ -213,7 +214,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (step === undefined) {
       return {
         exec: (frame) => {
-          effect(frame);
+          frame.runtime.fullExpression(() => effect(frame));
           return Completion.Normal;
         },
         labels: NO_LABELS,
@@ -222,7 +223,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const onlyCalls = operand.isCall === true;
     return {
       exec: (frame) => {
-        frame.runtime.steps.runStatement(step, onlyCalls, () => effect(frame));
+        frame.runtime.steps.runStatement(step, onlyCalls, () => frame.runtime.fullExpression(() => effect(frame)));
         return Completion.Normal;
       },
       labels: NO_LABELS,
@@ -254,7 +255,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Loop entry labels and condition/step timing must remain coordinated with completion handling.
-  // code-gauge-allow duplicateLines 16 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
+  // code-gauge-allow duplicateLines 19 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
   private whileStatement(statement: Extract<Statement, { kind: 'while' }>): Compiled {
     const condition = this.condition(statement.condition, 'while 文');
     const body = this.loopBody(statement.body);
@@ -275,7 +276,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return { exec, labels: body.labels };
   }
 
-  // code-gauge-allow duplicateLines 16 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
+  // code-gauge-allow duplicateLines 19 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
   private doWhileStatement(statement: Extract<Statement, { kind: 'doWhile' }>): Compiled {
     const body = this.loopBody(statement.body);
     const condition = this.condition(statement.condition, 'do while 文');
@@ -311,7 +312,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       let enter = entry;
       try {
         if (enter === undefined && init) {
-          init(frame);
+          frame.runtime.fullExpression(() => init(frame));
           steps.step(row);
         }
         for (;;) {
@@ -324,7 +325,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           if (completion === Completion.Break) return Completion.Normal;
           if (completion !== Completion.Normal && completion !== Completion.Continue) return completion;
           if (updateEffect) {
-            updateEffect(frame);
+            frame.runtime.fullExpression(() => updateEffect(frame));
             steps.step(row);
           }
         }
@@ -381,7 +382,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const exec: Exec = (frame, entry) => {
       let label = entry;
       if (label === undefined) {
-        const selected = value(frame) as Scalar;
+        const selected = frame.runtime.fullExpression(() => value(frame)) as Scalar;
         label = cases.get(String(selected)) ?? defaultLabel;
         if (label === undefined) return Completion.Normal;
       }
@@ -439,7 +440,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const effect = operand.effect ?? operand.value;
       return {
         exec: (frame) => {
-          effect(frame);
+          frame.runtime.fullExpression(() => effect(frame));
           return Completion.Return;
         },
         labels: NO_LABELS,
@@ -448,7 +449,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const value = this.convertForAssignment(operand, returnType, 'return', row);
     return {
       exec: (frame) => {
-        const result = evaluate(value, frame);
+        const result = frame.runtime.fullExpression(() => evaluate(value, frame));
         frame.returnValue = result.value;
         frame.returnRange = result.range;
         return Completion.Return;

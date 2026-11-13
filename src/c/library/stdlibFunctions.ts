@@ -2,18 +2,27 @@ import type { Scalar, Value } from '../arith';
 import { CRuntimeError, ProgramAbort, ProgramExit } from '../errors';
 import type { NativeFunction, Runtime } from '../runtime';
 import { type CType, pointerTo, VOID } from '../types';
+import { ERROR_NUMBERS } from './appleErrno';
 import { isExactFloatPrefix, parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
 import { qsort } from './sorting';
 import { asAddress, asNumber, asSize, readCString, readRaw, writeBytes } from './support';
 
-export const ERANGE = 34;
+export const ERANGE = ERROR_NUMBERS.ERANGE;
 
 const VOID_POINTER = pointerTo(VOID);
 
-function malloc(runtime: Runtime, size: number): number {
+function malloc(runtime: Runtime, size: number, alignment = 16): number {
   // macOS returns NULL for a size it cannot allocate, and a unique pointer for size 0.
-  if (!Number.isSafeInteger(size) || size > 0x7f_ff_ff_ff || !runtime.reserve(size)) return 0;
-  const block = runtime.memory.allocate(size, 'heap');
+  if (
+    !Number.isSafeInteger(size) ||
+    size > 0x7f_ff_ff_ff ||
+    !runtime.memory.canAllocateHeap(size, alignment) ||
+    !runtime.reserve(size)
+  ) {
+    runtime.errno = ERROR_NUMBERS.ENOMEM;
+    return 0;
+  }
+  const block = runtime.memory.allocate(size, 'heap', alignment);
   return block.base;
 }
 
@@ -66,7 +75,7 @@ function strtoInteger(bits: 32 | 64, signed: boolean, wide: boolean): NativeFunc
   return (runtime, [text, end, base]) => {
     const bytes = readCString(runtime, asAddress(text));
     const parsed = parseIntegerPrefix(bytes, asNumber(base));
-    if (parsed.length === 0) setErrno(runtime, 22);
+    if (parsed.length === 0) setErrno(runtime, ERROR_NUMBERS.EINVAL);
     let value = parsed.value;
     const min = signed ? -(1n << BigInt(bits - 1)) : 0n;
     const max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
@@ -160,9 +169,24 @@ export function exitProgram(runtime: Runtime, status: number, row: number): neve
   throw new ProgramExit(status);
 }
 
+function legacyConversion(convert: NativeFunction, narrow = false): NativeFunction {
+  return (runtime, [text], types, row) => {
+    const value = convert(runtime, [text, 0, 10], types, row);
+    return narrow ? Number(BigInt.asIntN(32, value as bigint)) : value;
+  };
+}
+
 export const STDLIB_FUNCTIONS: Record<string, NativeFunction> = {
   malloc: (runtime, [size]) => malloc(runtime, asSize(size)),
-  aligned_alloc: (runtime, [, size]) => malloc(runtime, asSize(size)),
+  aligned_alloc: (runtime, [align, size]) => {
+    const alignment = asSize(align);
+    const length = asSize(size);
+    if (alignment < 8 || !Number.isInteger(Math.log2(alignment)) || length % alignment !== 0) {
+      runtime.errno = ERROR_NUMBERS.EINVAL;
+      return 0;
+    }
+    return malloc(runtime, length, alignment);
+  },
   calloc: (runtime, [count, size]) => {
     const total = asSize(count) * asSize(size);
     const address = malloc(runtime, total);
@@ -205,10 +229,9 @@ export const STDLIB_FUNCTIONS: Record<string, NativeFunction> = {
     const { quotient, remainder } = divide(x as bigint, y as bigint, 64);
     return quotientRemainder(quotient, remainder, 8);
   },
-  atoi: (runtime, [text]) =>
-    Number(BigInt.asIntN(32, parseIntegerPrefix(readCString(runtime, asAddress(text)), 10).value)),
-  atol: (runtime, [text]) => BigInt.asIntN(64, parseIntegerPrefix(readCString(runtime, asAddress(text)), 10).value),
-  atof: (runtime, [text]) => parseFloatPrefix(readCString(runtime, asAddress(text))).value,
+  atoi: legacyConversion(strtoInteger(64, true, true), true),
+  atol: legacyConversion(strtoInteger(64, true, true)),
+  atof: legacyConversion(strtoFloat(false)),
   strtol: strtoInteger(64, true, true),
   strtoul: strtoInteger(64, false, true),
   strtoll: strtoInteger(64, true, true),

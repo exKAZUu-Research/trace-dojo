@@ -69,7 +69,7 @@ export function parseFloatPrefix(
     sign = bytes[index] === 0x2d ? -1 : 1;
     index++;
   }
-  const rest = String.fromCodePoint(...bytes.subarray(index, limit)).toLowerCase();
+  const rest = new TextDecoder('latin1').decode(bytes.subarray(index, limit)).toLowerCase();
   if (rest.startsWith('inf')) {
     const length = rest.startsWith('infinity') ? 8 : 3;
     return {

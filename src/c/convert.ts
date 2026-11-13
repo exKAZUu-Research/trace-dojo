@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 641 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
+// code-gauge-allow-file fileNcss 652 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -22,6 +22,7 @@ import {
   type TypeSpecifier,
 } from './ast';
 import { unsupported } from './unsupported';
+import { validateSyntax } from './validateSyntax';
 
 /** What learners call the syntax that the converter leaves out, by tree-sitter's node type. */
 const UNSUPPORTED_NODES: Record<string, string> = {
@@ -103,6 +104,8 @@ export interface HeaderDeclarations {
 /** Converts tree-sitter's tree of a translation unit into the interpreter's syntax tree. */
 export class Converter {
   private scope: NameScope;
+  private headers: readonly HeaderDeclarations[] = [];
+  private nextHeader = 0;
 
   constructor(
     builtinTypedefs: readonly string[],
@@ -113,30 +116,37 @@ export class Converter {
     for (const name of builtinTypedefs) this.scope.declare(name, 'type');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Header declarations must become visible in row order during conversion; retain the single ordered traversal.
   convertUnit(root: Node, headers: readonly HeaderDeclarations[] = []): ExternalDeclaration[] {
+    validateSyntax(root);
     const items: ExternalDeclaration[] = [];
-    let nextHeader = 0;
-    const declareHeadersBefore = (row: number): void => {
-      while (nextHeader < headers.length && headers[nextHeader].row <= row) {
-        const header = headers[nextHeader++];
-        for (const name of header.typedefNames) this.scope.declare(name, 'type');
-        for (const item of header.items) {
-          for (const declarator of item.declarators) {
-            const name = declaredName(declarator.declarator);
-            if (name) this.scope.declare(name, item.specifiers.storage === 'typedef' ? 'type' : 'value');
-          }
-          items.push(item);
-        }
-      }
-    };
+    this.headers = headers;
+    this.nextHeader = 0;
     for (const child of namedChildren(root)) {
       if (child.type === 'comment') continue;
-      declareHeadersBefore(child.startPosition.row);
+      items.push(...this.headersBefore(child.startPosition.row));
       items.push(...this.externalDeclaration(child));
     }
-    declareHeadersBefore(Number.POSITIVE_INFINITY);
+    items.push(...this.headersBefore(Number.POSITIVE_INFINITY));
     return items;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 21 -- Header cursor, lexical names, and declarations must advance together in source order.
+  private headersBefore(row: number, inBlock = false): Declaration[] {
+    const declarations: Declaration[] = [];
+    while (this.nextHeader < this.headers.length && this.headers[this.nextHeader].row <= row) {
+      const header = this.headers[this.nextHeader++];
+      if (inBlock && ['stdio.h', 'stdlib.h', 'ctype.h', 'math.h'].includes(header.name))
+        throw new CompileError([{ row: header.row, message: `<${header.name}> は関数の外で読み込んでください。` }]);
+      for (const name of header.typedefNames) this.scope.declare(name, 'type');
+      for (const item of header.items) {
+        for (const declarator of item.declarators) {
+          const name = declaredName(declarator.declarator);
+          if (name) this.scope.declare(name, item.specifiers.storage === 'typedef' ? 'type' : 'value');
+        }
+        declarations.push(item);
+      }
+    }
+    return declarations;
   }
 
   private externalDeclaration(node: Node): ExternalDeclaration[] {
@@ -539,8 +549,10 @@ export class Converter {
       const items: (Statement | Declaration)[] = [];
       for (const child of namedChildren(node)) {
         if (child.type === 'comment') continue;
+        items.push(...this.headersBefore(child.startPosition.row, true));
         items.push(...this.blockItem(child));
       }
+      items.push(...this.headersBefore(node.endPosition.row, true));
       return { kind: 'compound', items, row: node.startPosition.row };
     } finally {
       this.scope = outer;

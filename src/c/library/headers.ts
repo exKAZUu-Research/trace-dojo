@@ -1,6 +1,7 @@
 import type { HeaderLookup } from '../preprocessor';
 import { unsupportedMessage } from '../unsupported';
-import { PLATFORM_HEADER_FUNCTIONS } from './platformHeaderFunctions';
+import { ERRNO_HEADER } from './appleErrno';
+import { PLATFORM_DECLARATIONS, PLATFORM_MACROS, PLATFORM_UNMODELED } from './platformHeaders';
 
 /** The interpreter's own declarations, which every program sees without including anything. */
 export const TURTLE_HEADER = `
@@ -549,21 +550,7 @@ const ASSERT = `
 void __assert_rtn(const char *expression, int line);
 `;
 
-const ERRNO = `
-extern int errno;
-#define EPERM 1
-#define ENOENT 2
-#define EINTR 4
-#define EIO 5
-#define ENOMEM 12
-#define EACCES 13
-#define EEXIST 17
-#define EINVAL 22
-#define ENOSPC 28
-#define EDOM 33
-#define ERANGE 34
-#define EILSEQ 92
-`;
+const ERRNO = ERRNO_HEADER;
 
 const ISO646 = `
 #define and &&
@@ -622,8 +609,9 @@ const UNSUPPORTED_HEADERS: Record<string, string> = {
 export const lookupHeader: HeaderLookup = (name, quoted) => {
   const text = HEADERS[name];
   if (text !== undefined) {
-    const extensions = PLATFORM_HEADER_FUNCTIONS[name] ?? [];
-    return { text: `${text}\n${extensions.map((functionName) => `int ${functionName}();`).join('\n')}` };
+    const declarations = PLATFORM_DECLARATIONS[name] ?? '';
+    const excluded = (PLATFORM_UNMODELED[name] ?? []).map((fn) => `int ${fn}();`).join('\n');
+    return { text: `${text}\n${declarations}\n${excluded}\n${PLATFORM_MACROS[name] ?? ''}` };
   }
   const feature = UNSUPPORTED_HEADERS[name];
   if (feature) return { refusal: unsupportedMessage(feature) };

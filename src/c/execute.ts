@@ -74,7 +74,8 @@ function setUp(runtime: Runtime, program: CompiledProgram): void {
   }
   runtime.literals = program.strings.map((bytes) => runtime.stringLiteral(bytes));
   runtime.globals = program.globals.map((global) => {
-    const block = runtime.allocate(Math.max(sizeOf(global.type), 1), 'data');
+    const hasStorage = global.isDefined || global.header !== undefined;
+    const block = runtime.allocate(hasStorage ? Math.max(sizeOf(global.type), 1) : 0, 'data');
     block.initialized.fill(255);
     block.type = global.type;
     block.name = global.name;

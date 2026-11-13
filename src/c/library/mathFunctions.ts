@@ -1,9 +1,10 @@
 import type { Scalar } from '../arith';
 import { CRuntimeError } from '../errors';
-import type { SpecialCall } from '../expressionCompiler';
+import { constantOperand, type SpecialCall } from '../expressionCompiler';
 import type { NativeFunction, Runtime } from '../runtime';
 import { INT } from '../types';
-import { exactParts, roundBinary } from './binaryFloat';
+import { exactParts, roundBinary, roundSquareRoot } from './binaryFloat';
+import { precisePower } from './precisePower';
 import { asAddress, asNumber, writeBytes } from './support';
 
 /** Rounds half away from zero, as C's `round` does. */
@@ -26,11 +27,8 @@ function roundHalfEven(x: number): number {
   return rounded === 0 ? (x < 0 || Object.is(x, -0) ? -0 : 0) : rounded;
 }
 
-/** 2^x, exact for integers and correctly rounded for halves (via sqrt), where JavaScript's ** may miss the last bit. */
 function exp2(x: number): number {
-  if (Number.isInteger(x)) return pow(2, x);
-  if (Number.isInteger(x * 2) && Math.abs(x) < 1000) return Math.sqrt(pow(2, x * 2));
-  return 2 ** x;
+  return pow(2, x);
 }
 
 const UNARY: Record<string, (x: number) => number> = {
@@ -65,18 +63,26 @@ const UNARY: Record<string, (x: number) => number> = {
   nearbyint: roundHalfEven,
 };
 
-/** x^y, correctly rounded when y is an integer, as macOS's pow is; JavaScript's ** may differ in the last bit. */
-function pow(x: number, y: number): number {
-  if (x === 1 || y === 0) return 1;
-  if (!Number.isInteger(y) || Math.abs(y) > 1024 || !Number.isFinite(x) || x === 0) return x ** y;
-  const { mantissa, exponent } = exactParts(Math.abs(x));
+// code-gauge-allow functionCognitiveComplexity 18 -- C special values, exact powers, and fractional modes require distinct rounding paths.
+function pow(x: number, y: number, isFloat = false): number {
+  if (x === 1 || y === 0 || (x === -1 && !Number.isFinite(y) && !Number.isNaN(y))) return 1;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x === 0) return x ** y;
   const n = Math.abs(y);
-  const negative = x < 0 && n % 2 === 1;
-  // |x|^n = mantissa^n * 2^(exponent * n)
-  const numerator = mantissa ** BigInt(n);
-  const power = exponent * n;
-  const magnitude = y > 0 ? roundBinary(numerator, 1n, power) : roundBinary(1n, numerator, -power);
-  return negative ? -magnitude : magnitude;
+  if (!Number.isInteger(y * 2)) return x ** y;
+  if (n > 1024) return precisePower(x, y, isFloat);
+  if (x < 0 && !Number.isInteger(y)) return Number.NaN;
+  const { mantissa, exponent } = exactParts(Math.abs(x));
+  const half = !Number.isInteger(y);
+  const power = mantissa ** BigInt(half ? n * 2 : n);
+  const binaryExponent = exponent * (half ? n * 2 : n);
+  const rounded = half
+    ? y > 0
+      ? roundSquareRoot(power, 1n, binaryExponent, isFloat)
+      : roundSquareRoot(1n, power, -binaryExponent, isFloat)
+    : y > 0
+      ? roundBinary(power, 1n, binaryExponent, isFloat)
+      : roundBinary(1n, power, -binaryExponent, isFloat);
+  return x < 0 && n % 2 === 1 ? -rounded : rounded;
 }
 
 function remainderParts(x: number, y: number): { value: number; quotient: number } {
@@ -213,6 +219,24 @@ export const classificationCall: SpecialCall = (compiler, call, fn) => {
       return fn.name === '__builtin_isnormal' ? (classification === 4 ? 1 : 0) : classification;
     },
   };
+};
+
+const BUILTIN_CONSTANTS: Record<string, number> = {
+  __builtin_huge_val: Number.POSITIVE_INFINITY,
+  __builtin_huge_valf: Number.POSITIVE_INFINITY,
+  __builtin_inff: Number.POSITIVE_INFINITY,
+  __builtin_nanf: Number.NaN,
+};
+export const constantCall: SpecialCall = (compiler, call, fn) => {
+  compiler.arguments(fn.type, call.args, call.row, fn.name);
+  if (
+    call.args.some((argument) => {
+      const operand = compiler.rvalue(argument);
+      return operand.constant === undefined && !operand.isAddressConstant;
+    })
+  )
+    return;
+  return { ...constantOperand(fn.type.ret, BUILTIN_CONSTANTS[fn.name]), isCall: true };
 };
 
 export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
@@ -353,3 +377,5 @@ CTYPE_FUNCTIONS.toupper = (_runtime, [c]) => {
   const value = asNumber(c);
   return value >= 0x61 && value <= 0x7a ? value - 32 : value;
 };
+
+MATH_FUNCTIONS.powf = (_runtime, [x, y]) => pow(x as number, y as number, true);

@@ -149,7 +149,6 @@ class Scanner {
   private assigned = 0;
   private argument = 0;
   private index = 0;
-  private converted = false;
 
   constructor(
     private readonly runtime: Runtime,
@@ -242,7 +241,6 @@ class Scanner {
     const parsed = parseIntegerPrefix(this.input.subarray(this.position), base, limit);
     if (parsed.length === 0) return this.assigned;
     this.position += parsed.length;
-    this.converted = true;
     if (!suppress) {
       const target = scanTarget(conversion, length);
       const pointer = this.nextPointer(target);
@@ -259,7 +257,6 @@ class Scanner {
     const parsed = parseFloatPrefix(this.input.subarray(this.position), limit);
     if (parsed.length === 0) return this.assigned;
     this.position += parsed.length;
-    this.converted = true;
     if (!suppress) {
       const target = scanTarget(conversion, length);
       storerOf(target)(
@@ -286,7 +283,6 @@ class Scanner {
       this.position++;
     }
     if (this.position === start) return this.assigned;
-    this.converted = true;
     if (!suppress) {
       const bytes = input.subarray(start, this.position);
       writeBytes(this.runtime, this.nextPointer(CHAR), conversion === 'c' ? bytes : Uint8Array.from([...bytes, 0]));
@@ -342,6 +338,6 @@ class Scanner {
   }
 
   private inputFailure(): number {
-    return this.converted || this.assigned > 0 ? this.assigned : -1;
+    return this.assigned > 0 ? this.assigned : -1;
   }
 }

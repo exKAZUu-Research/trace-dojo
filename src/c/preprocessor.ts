@@ -12,6 +12,7 @@ interface Macro {
   body: PPToken[];
   /** Whether a header the program includes defined the macro, which may use features learners cannot. */
   fromHeader: boolean;
+  dynamic?: 'line' | 'file';
 }
 
 /** A standard header, written as C source the preprocessor reads when a program includes it. */
@@ -86,6 +87,8 @@ class Preprocessor {
         fromHeader: true,
       });
     }
+    this.macros.set('__LINE__', { name: '__LINE__', body: [], variadic: false, fromHeader: true, dynamic: 'line' });
+    this.macros.set('__FILE__', { name: '__FILE__', body: [], variadic: false, fromHeader: true, dynamic: 'file' });
   }
 
   run(source: string): PreprocessedSource {
@@ -266,7 +269,7 @@ class Preprocessor {
     this.macros.set(name, { name, params, variadic, body, fromHeader: this.inHeader });
   }
 
-  // code-gauge-allow functionNcss 34 -- Include expansion, lookup, declarations, and source rows form one ordered header operation.
+  // code-gauge-allow functionNcss 36 -- Include expansion, lookup, declarations, and source rows form one ordered header operation.
   private include(tokens: PPToken[], row: number): void {
     let target = tokens;
     if (target[0]?.kind !== 'string' && target[0]?.text !== '<') target = this.expand(target);
@@ -284,8 +287,9 @@ class Preprocessor {
     }
     const found = this.lookup(name, quoted);
     if ('refusal' in found) throw new CompileError([{ row, message: found.refusal }]);
-    if (this.included.has(name)) return;
+    if (name !== 'assert.h' && this.included.has(name)) return;
     this.included.add(name);
+    if (name === 'assert.h') this.macros.delete('assert');
     const declarations: string[] = [];
     const wasInHeader = this.inHeader;
     this.inHeader = true;
@@ -341,8 +345,7 @@ class Preprocessor {
   // Expansion -----------------------------------------------------------------------------------------------------
 
   /** Expands the macros in a list of tokens, as C's rescanning with hide sets does. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Macro recursion, hide sets, and argument substitution share the token worklist.
-  // code-gauge-allow functionNcss 33 -- Macro recursion, hide sets, and argument substitution share the token worklist.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Macro recursion, hide sets, and argument substitution share the token worklist.
   private expand(input: PPToken[]): PPToken[] {
     const output: PPToken[] = [];
     const queue = [...input];
@@ -350,12 +353,12 @@ class Preprocessor {
     while (index < queue.length) {
       const token = queue[index++];
       const macro = token.kind === 'identifier' ? this.macros.get(token.text) : undefined;
-      if (token.kind === 'identifier' && token.text === '__LINE__' && !token.hide?.has('__LINE__')) {
-        output.push({ ...token, kind: 'number', text: String(token.row + 1) });
-        continue;
-      }
-      if (token.kind === 'identifier' && token.text === '__FILE__') {
-        output.push({ ...token, kind: 'string', text: JSON.stringify(FILE_NAME) });
+      if (macro?.dynamic && !token.hide?.has(macro.name)) {
+        output.push({
+          ...token,
+          kind: macro.dynamic === 'line' ? 'number' : 'string',
+          text: macro.dynamic === 'line' ? String(token.row + 1) : JSON.stringify(FILE_NAME),
+        });
         continue;
       }
       if (token.kind === 'identifier' && (token.text === '__DATE__' || token.text === '__TIME__')) {
@@ -425,6 +428,7 @@ class Preprocessor {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- C's substitution rules for #, ##, and arguments.
+  // code-gauge-allow functionNcss 32 -- Stringification, argument prescan, placemarkers and rescan hide sets form one ordered substitution pass.
   private substitute(macro: Macro, args: PPToken[][], hide: ReadonlySet<string>, call: PPToken): PPToken[] {
     const params = macro.variadic ? [...(macro.params ?? []), '__VA_ARGS__'] : (macro.params ?? []);
     const argumentOf = (token: PPToken | undefined): PPToken[] | undefined => {
@@ -432,7 +436,7 @@ class Preprocessor {
       const position = params.indexOf(token.text);
       return position === -1 ? undefined : args[position];
     };
-    const result: PPToken[] = [];
+    const result: (PPToken | undefined)[] = [];
     const body = macro.body;
     for (let index = 0; index < body.length; index++) {
       const token = body[index];
@@ -447,23 +451,22 @@ class Preprocessor {
       if (token.text === '##') continue;
       const arg = argumentOf(token);
       const copies = arg
-        ? (pastesNext || pastedPrevious ? arg : this.expand(arg)).map((item, position) => ({
-            ...item,
-            row: call.row,
-            space: position === 0 ? token.space : item.space,
-          }))
+        ? copyArgument(pastesNext || pastedPrevious ? arg : this.expand(arg), call.row, token.space)
         : [{ ...token, row: call.row }];
-      if (pastedPrevious && result.length > 0 && copies.length > 0) {
-        result.push(paste(result.pop() as PPToken, copies[0], call.row), ...copies.slice(1));
-      } else {
-        result.push(...copies);
-      }
+      if (pastedPrevious) {
+        const previous = result.pop();
+        const next = copies[0];
+        result.push(previous && next ? paste(previous, next, call.row) : (previous ?? next), ...copies.slice(1));
+      } else if (copies.length === 0 && pastesNext) result.push(undefined);
+      else result.push(...copies);
     }
-    return result.map((token, position) => ({
-      ...token,
-      space: position === 0 ? call.space : token.space,
-      hide: new Set([...(token.hide ?? []), ...hide]),
-    }));
+    return result
+      .filter((token): token is PPToken => token !== undefined)
+      .map((token, position) => ({
+        ...token,
+        space: position === 0 ? call.space : token.space,
+        hide: new Set([...(token.hide ?? []), ...hide]),
+      }));
   }
 }
 
@@ -534,4 +537,8 @@ function paste(left: PPToken, right: PPToken, row: number): PPToken {
 function rejectTrigraphs(tokens: PPToken[]): void {
   const token = tokens.find((item) => item.hasTrigraph);
   if (token) unsupported(token.row, 'トライグラフ');
+}
+
+function copyArgument(tokens: PPToken[], row: number, space: boolean): PPToken[] {
+  return tokens.map((token, index) => ({ ...token, row, space: index === 0 ? space : token.space }));
 }

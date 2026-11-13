@@ -66,7 +66,7 @@ export class Memory {
   private stackBytes = 0;
   private lastFound?: Allocation;
 
-  allocate(size: number, region: Region): Allocation {
+  allocate(size: number, region: Region, alignment = 16): Allocation {
     let base: number;
     if (region === 'stack') {
       this.stackBytes += size;
@@ -75,7 +75,7 @@ export class Memory {
       this.next.stack -= Math.ceil((size + GUARD) / 16) * 16;
       base = this.next.stack;
     } else {
-      base = this.next[region];
+      base = this.alignedBase(region, alignment);
       this.next[region] = base + Math.ceil((Math.max(size, 1) + GUARD) / 16) * 16;
     }
     const allocation = new Allocation(base, size, region);
@@ -83,6 +83,15 @@ export class Memory {
     if (region === 'stack') this.live.stack.unshift(allocation);
     else this.live[region].push(allocation);
     return allocation;
+  }
+
+  canAllocateHeap(size: number, alignment: number): boolean {
+    return Number.isSafeInteger(this.alignedBase('heap', alignment) + Math.max(size, 1) + GUARD);
+  }
+
+  private alignedBase(region: Region, alignment: number): number {
+    const unit = Math.max(16, alignment);
+    return Math.ceil(this.next[region] / unit) * unit;
   }
 
   /** Ends the lifetime of a block: a returned function's variable, or a block that `free` releases. */

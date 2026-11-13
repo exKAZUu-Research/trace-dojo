@@ -27,7 +27,6 @@ import {
   pointerEvaluator,
   replacePointerRanges,
   resultOperand,
-  slicePointerRanges,
 } from './pointerBounds';
 import { type Frame, type FunctionInfo, loaderOf, loadRecord, storeRecord, storeValue } from './runtime';
 import {
@@ -58,6 +57,7 @@ import {
   typeName,
   unqualified,
   VOID,
+  withQualifiers,
 } from './types';
 import { unsupported } from './unsupported';
 
@@ -376,7 +376,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       operator === '&&'
         ? (frame: Frame): Value => (a(frame) && b(frame) ? 1 : 0)
         : (frame: Frame): Value => (a(frame) || b(frame) ? 1 : 0);
-    const constant = logicalConstant(operator, left.constant, right.constant, value);
+    const constant = logicalConstant(operator, left.constant, right.constant);
     return { type: INT, value, ...(constant === undefined ? {} : { constant }) };
   }
 
@@ -389,7 +389,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
     const a = this.converted(left, operation.left);
     const b = this.converted(right, operation.right);
-    return foldBinary(operation.type, (frame) => operation.run(a(frame) as Scalar, b(frame) as Scalar), left, right);
+    return foldBinary(
+      operation.type,
+      (frame) => operation.run(a(frame) as Scalar, b(frame) as Scalar),
+      left,
+      right,
+      () =>
+        operation.run(
+          convertScalar(left.constant!, left.type, operation.left),
+          convertScalar(right.constant!, right.type, operation.right)
+        )
+    );
   }
 
   private arithmeticOperation(
@@ -517,21 +527,36 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (operator === '!') {
       this.requireScalar(operand, row, '!');
       const truth = this.truthOf(operand);
-      return fold(INT, (frame) => (truth(frame) ? 0 : 1), operand);
+      return fold(
+        INT,
+        (frame) => (truth(frame) ? 0 : 1),
+        operand,
+        () => (isZero(operand.constant!) ? 1 : 0)
+      );
     }
     if (operator === '~') {
       if (type.kind !== 'int') this.error(row, `「~」は整数にしか使えません（${typeName(type)}）。`);
       const promoted = promote(type);
       const value = this.converted(operand, promoted);
       const operation = complement(promoted);
-      return fold(promoted, (frame) => operation(value(frame) as Scalar), operand);
+      return fold(
+        promoted,
+        (frame) => operation(value(frame) as Scalar),
+        operand,
+        () => operation(convertScalar(operand.constant!, type, promoted))
+      );
     }
     if (!isArithmetic(type)) this.error(row, `「${operator}」は数にしか使えません（${typeName(type)}）。`);
     const promoted = type.kind === 'int' ? promote(type) : unqualified(type);
     const value = this.converted(operand, promoted);
-    if (operator === '+') return fold(promoted, value, operand);
+    if (operator === '+') return fold(promoted, value, operand, () => convertScalar(operand.constant!, type, promoted));
     const operation = negate(promoted);
-    return fold(promoted, (frame) => operation(value(frame) as Scalar), operand);
+    return fold(
+      promoted,
+      (frame) => operation(value(frame) as Scalar),
+      operand,
+      () => operation(convertScalar(operand.constant!, type, promoted))
+    );
   }
 
   dereference(operand: Operand, row: number): Operand {
@@ -961,33 +986,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(row, `「${typeName(recordType)}」は中身が定義されていないので、メンバを使えません。`);
     const field = info.field(name);
     if (!field) this.error(row, `「${typeName(unqualified(recordType))}」にはメンバ「${name}」がありません。`);
-    const fieldType = isConstQualified(recordType) ? { ...field.type, isConst: true } : field.type;
-    if (!address) {
-      // A member of a struct value, such as a function's result, which is no lvalue.
-      const value = object.value;
-      const offset = field.offset;
-      const size = sizeOf(field.type);
-      const temporary = (frame: Frame): Value => {
-        const record = value(frame) as RecordValue;
-        if (field.bitWidth !== undefined)
-          return readBits(record, offset, field.bitOffset ?? 0, field.bitWidth, field.type as IntType);
-        return readFromBytes(record, offset, size, field.type);
-      };
-      return {
-        type: fieldType as CType,
-        value: temporary,
-        bitWidth: field.bitWidth,
-        pointer:
-          fieldType.kind === 'pointer'
-            ? (frame) => {
-                const record = value(frame) as RecordValue;
-                const address = readFromBytes(record, offset, size, field.type) as number;
-                const range = record.pointerRanges?.get(offset);
-                return pointerAt(frame, address, fieldType.to, range);
-              }
-            : undefined,
-      };
-    }
+    const fieldType = isConstQualified(recordType)
+      ? withQualifiers(field.type, true, recordType.isVolatile === true)
+      : field.type;
+    const isTemporary = address === undefined;
+    address ??= (frame) => frame.runtime.materialize(object.value(frame) as RecordValue, recordType).base;
     const base = address;
     const offset = field.offset;
     if (field.bitWidth !== undefined) {
@@ -997,19 +1000,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
         field.bitOffset ?? 0,
         field.bitWidth
       );
-      return { ...operand, lvalue: { ...operand.lvalue!, local: !arrow ? object.lvalue?.local : undefined } };
+      return {
+        ...operand,
+        lvalue: isTemporary ? undefined : { ...operand.lvalue!, local: !arrow ? object.lvalue?.local : undefined },
+      };
     }
     const operand = this.memoryOperand(fieldType as CType, (frame) => base(frame) + offset);
     const isStatic = !arrow && object.lvalue?.isStatic === true;
     return {
       ...operand,
       isAddressConstant: isStatic && fieldType.kind === 'array',
-      lvalue: {
-        ...(operand.lvalue as LValue),
-        isStatic,
-        local: !arrow ? object.lvalue?.local : undefined,
-        isRegister: !arrow && object.lvalue?.isRegister,
-      },
+      lvalue: isTemporary
+        ? undefined
+        : {
+            ...(operand.lvalue as LValue),
+            isStatic,
+            local: !arrow ? object.lvalue?.local : undefined,
+            isRegister: !arrow && object.lvalue?.isRegister,
+          },
     };
   }
 
@@ -1117,7 +1125,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (!isScalar(operand.type)) {
       this.error(expression.row, `${what}の条件には、数かポインタを書いてください（${typeName(operand.type)}）。`);
     }
-    return this.truthOf(operand);
+    const truth = this.truthOf(operand);
+    return (frame) => frame.runtime.fullExpression(() => truth(frame));
   }
 
   protected requireModifiable(operand: Operand, row: number, operator: string): void {
@@ -1174,10 +1183,10 @@ export function constantOperand(type: CType, value: Scalar): Operand {
   return { type, value: () => value, constant: value };
 }
 
-function fold(type: CType, value: (frame: Frame) => Value, operand: Operand): Operand {
+function fold(type: CType, value: (frame: Frame) => Value, operand: Operand, compute: () => Scalar): Operand {
   if (operand.constant === undefined) return { type, value };
   try {
-    const constant = value({} as Frame) as Scalar;
+    const constant = compute();
     return { type, value: () => constant, constant };
   } catch (error) {
     if (error instanceof CRuntimeError) return { type, value };
@@ -1185,10 +1194,16 @@ function fold(type: CType, value: (frame: Frame) => Value, operand: Operand): Op
   }
 }
 
-function foldBinary(type: CType, value: (frame: Frame) => Value, left: Operand, right: Operand): Operand {
+function foldBinary(
+  type: CType,
+  value: (frame: Frame) => Value,
+  left: Operand,
+  right: Operand,
+  compute: () => Scalar
+): Operand {
   if (left.constant === undefined || right.constant === undefined) return { type, value };
   try {
-    const constant = value({} as Frame) as Scalar;
+    const constant = compute();
     return { type, value: () => constant, constant };
   } catch (error) {
     if (error instanceof CRuntimeError) return { type, value };
@@ -1199,12 +1214,11 @@ function foldBinary(type: CType, value: (frame: Frame) => Value, left: Operand, 
 function logicalConstant(
   operator: '&&' | '||',
   left: Scalar | undefined,
-  right: Scalar | undefined,
-  value: (frame: Frame) => Value
+  right: Scalar | undefined
 ): number | undefined {
   if (left === undefined) return undefined;
   if (operator === '&&' ? isZero(left) : !isZero(left)) return operator === '&&' ? 0 : 1;
-  return right === undefined ? undefined : (value({} as Frame) as number);
+  return right === undefined ? undefined : isZero(right) ? 0 : 1;
 }
 
 export function isNullConstant(operand: Operand): boolean {
@@ -1266,21 +1280,6 @@ export function writeBits(record: RecordValue, offset: number, bitOffset: number
     bytes[offset + index] = Number((raw >> BigInt(index * 8)) & 0xffn);
     initialized[offset + index] |= Number((mask >> BigInt(index * 8)) & 255n);
   }
-}
-
-function readFromBytes(record: RecordValue, offset: number, size: number, type: CType): Value {
-  if (type.kind === 'record') {
-    return {
-      pointerRanges: slicePointerRanges(record.pointerRanges, offset, size),
-      bytes: record.bytes.slice(offset, offset + size),
-      initialized: record.initialized.slice(offset, offset + size),
-    };
-  }
-  for (let index = offset; index < offset + size; index++) {
-    if (record.initialized[index] !== 255) throw new CRuntimeError('uninitialized');
-  }
-  const view = new DataView(record.bytes.buffer, record.bytes.byteOffset);
-  return readScalar(view, offset, type);
 }
 
 export function readScalar(view: DataView, offset: number, type: CType): Scalar {

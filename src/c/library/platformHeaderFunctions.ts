@@ -1,4 +1,3 @@
-// These Apple C17 header names are rejected before signature validation; declarations need only expose their names.
 export const PLATFORM_HEADER_FUNCTIONS: Record<string, readonly string[]> = {
   'stdio.h': [
     '__snprintf_chk',

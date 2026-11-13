@@ -78,6 +78,7 @@
     "codemirror": "6.0.2",
     "csv-parse": "7.0.3",
     "dayjs": "1.11.23",
+    "decimal.js": "10.6.0",
     "drizzle-kit": "1.0.0-rc.5",
     "drizzle-orm": "1.0.0-rc.5",
     "fast-deep-equal": "3.1.3",

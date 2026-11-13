@@ -1,7 +1,9 @@
+import { convertScalar } from '../arith';
 import { CRuntimeError } from '../errors';
 import type { SpecialCall } from '../expressionCompiler';
 import type { NativeFunction, Runtime } from '../runtime';
-import { INT } from '../types';
+import { INT, SIZE_T } from '../types';
+import { errorMessage } from './appleErrno';
 import { asAddress, asNumber, asSize, cString, readBytes, readCString, readRaw, writeBytes } from './support';
 
 function checkOverlap(destination: number, source: number, size: number, sourceSize = size): void {
@@ -19,26 +21,7 @@ function compareBytes(a: Uint8Array, b: Uint8Array, length: number): number {
   return 0;
 }
 
-/** macOS's messages for the error numbers that programs commonly see. */
-const ERROR_MESSAGES: Record<number, string> = {
-  0: 'Undefined error: 0',
-  1: 'Operation not permitted',
-  2: 'No such file or directory',
-  4: 'Interrupted system call',
-  5: 'Input/output error',
-  12: 'Cannot allocate memory',
-  13: 'Permission denied',
-  17: 'File exists',
-  22: 'Invalid argument',
-  28: 'No space left on device',
-  33: 'Numerical argument out of domain',
-  34: 'Result too large',
-  92: 'Illegal byte sequence',
-};
-
-export function errorMessage(error: number): string {
-  return ERROR_MESSAGES[error] ?? `Unknown error: ${error}`;
-}
+export { errorMessage } from './appleErrno';
 
 function duplicate(runtime: Runtime, bytes: Uint8Array): number {
   const size = bytes.length + 1;
@@ -57,16 +40,17 @@ function span(bytes: Uint8Array, set: Uint8Array, inSet: boolean): number {
   return index;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Constant-folding eligibility and safe comparison bounds must agree before bypassing the runtime call.
+// code-gauge-allow functionCognitiveComplexity 20 -- Constant-folding eligibility and safe comparison bounds must agree before bypassing the runtime call.
 export const comparisonCall: SpecialCall = (compiler, call, fn) => {
   const count = fn.name === 'strcmp' ? 2 : 3;
   if (call.args.length !== count) return;
+  compiler.arguments(fn.type, call.args, call.row, fn.name);
   const operands = call.args.map((argument) => compiler.rvalue(argument));
   const [a, b] = operands.map((operand) => operand.constantBytes);
   if (!a || !b) return;
   const n = count === 2 ? Math.max(a.length, b.length) : operands[2].constant;
   if (n === undefined || Number(n) < 0) return;
-  const length = Number(n);
+  const length = Number(count === 2 ? n : convertScalar(n, operands[2].type, SIZE_T));
   if (fn.name === 'memcmp' && (length > a.length || length > b.length)) return;
   if (fn.name !== 'memcmp' && (!a.includes(0) || !b.includes(0))) return;
   let result = 0;
@@ -82,6 +66,31 @@ export const comparisonCall: SpecialCall = (compiler, call, fn) => {
   return { type: INT, value: () => result, constant: result, isCall: true };
 };
 
+function validateWrite(runtime: Runtime, address: number, size: number): void {
+  if (size === 0) return;
+  const block = runtime.memory.locate(address, size);
+  if (block.isReadOnly) throw new CRuntimeError('readOnly');
+  runtime.spend(Math.ceil(size / 64));
+}
+
+function findBytes(runtime: Runtime, text: Uint8Array, pattern: Uint8Array): number {
+  if (pattern.length === 0) return 0;
+  const prefix = new Uint32Array(pattern.length);
+  for (let i = 1, j = 0; i < pattern.length; i++) {
+    runtime.spend();
+    while (j && pattern[i] !== pattern[j]) j = prefix[j - 1];
+    if (pattern[i] === pattern[j]) j++;
+    prefix[i] = j;
+  }
+  for (let i = 0, j = 0; i < text.length; i++) {
+    runtime.spend();
+    while (j && text[i] !== pattern[j]) j = prefix[j - 1];
+    if (text[i] === pattern[j]) j++;
+    if (j === pattern.length) return i + 1 - j;
+  }
+  return -1;
+}
+
 export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
   strlen: (runtime, [s]) => BigInt(readCString(runtime, asAddress(s)).length),
   strcpy: (runtime, [destination, source]) => {
@@ -94,6 +103,7 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
     const n = asSize(count);
     const bytes = readCString(runtime, asAddress(source), n);
     checkOverlap(asAddress(destination), asAddress(source), n, Math.min(bytes.length + 1, n));
+    validateWrite(runtime, asAddress(destination), n);
     const result = new Uint8Array(n);
     result.set(bytes);
     writeBytes(runtime, asAddress(destination), result);
@@ -146,10 +156,8 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
   strstr: (runtime, [haystack, needle]) => {
     const text = readCString(runtime, asAddress(haystack));
     const pattern = readCString(runtime, asAddress(needle));
-    for (let index = 0; index + pattern.length <= text.length; index++) {
-      if (pattern.every((byte, offset) => text[index + offset] === byte)) return asAddress(haystack) + index;
-    }
-    return 0;
+    const index = findBytes(runtime, text, pattern);
+    return index < 0 ? 0 : asAddress(haystack) + index;
   },
   strtok: (runtime, [s, separators]) => {
     let address = asAddress(s);
@@ -203,7 +211,9 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
     return destination;
   },
   memset: (runtime, [s, c, count]) => {
-    writeBytes(runtime, asAddress(s), new Uint8Array(asSize(count)).fill(asNumber(c) & 0xff));
+    const n = asSize(count);
+    validateWrite(runtime, asAddress(s), n);
+    writeBytes(runtime, asAddress(s), new Uint8Array(n).fill(asNumber(c) & 0xff));
     return s;
   },
   memcmp: (runtime, [a, b, count]) => {

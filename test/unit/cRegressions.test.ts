@@ -686,3 +686,241 @@ size_t strnlen(const char*s,size_t n);size_t length(const char*s){return strnlen
 int main(void){printf("%zu\\n",length("abc"));}`;
   expect(executeProgram('c', source)).toMatchObject({ kind: 'executed', stdout: '2\n', uncaughtException: undefined });
 });
+
+test.each(['x == 1 || y = 5', '-x = 3', 'x + y = 4', 'x ? y : x = 7', '(int)x = 4', '~x = 9', 'x == y = 9'])(
+  'unparenthesized assignment cannot replace a higher-precedence operand: %s',
+  (expression) => {
+    expect(executeProgram('c', `int main(void){int x=1,y=2;int z=${expression};}`).kind).toBe('compileError');
+  }
+);
+
+test.each([
+  'cosnt int N=5;',
+  'unsigned1 int g;',
+  'foo int f(void){return 1;}',
+  'int f(cosnt int a){return a;}',
+  'struct S{cosnt int a;};',
+  'int a;int *h p=&a;',
+  'int f(int a,int b)a{return a+b;}',
+  'int f(int x){return x;}int x=f(1,);',
+])('unexpanded grammar recovery syntax is rejected: %s', (declaration) => {
+  expect(executeProgram('c', `${declaration}\nint main(void){}`).kind).toBe('compileError');
+});
+
+test.each([
+  'static long random(void){return 7;}',
+  'int fileno(int x){return x;}',
+  'char *index(int x){return 0;}',
+  'int getline(void){return 4;}',
+  'size_t strlcpy(char*d,const char*s,size_t n){return n;}',
+  'void bzero(void*p,size_t n){}',
+])('SDK prototypes, linkage and fortify macros reject incompatible definitions: %s', (definition) => {
+  expect(
+    executeProgram('c', `#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n${definition}\nint main(void){}`)
+      .kind
+  ).toBe('compileError');
+});
+
+test('undefining a fortify macro permits a compatible learner definition', () => {
+  const source = `#include <stdio.h>
+#include <string.h>
+#undef strlcpy
+size_t strlcpy(char*d,const char*s,size_t n){return n;}
+int main(void){char b[4];printf("%zu\\n",strlcpy(b,"x",sizeof b));}`;
+  expect(executeProgram('c', source)).toMatchObject({ kind: 'executed', stdout: '4\n', uncaughtException: undefined });
+});
+
+test.each(['void x;', 'struct P p;'])('incomplete file-scope objects are rejected: %s', (declaration) => {
+  expect(executeProgram('c', `${declaration}int main(void){}`).kind).toBe('compileError');
+});
+
+test('compatible local extern and typedef declarations can repeat', () => {
+  expect(
+    executeProgram('c', 'int x;int main(void){extern int x;extern int x;typedef int T;typedef int T;T n=1;x=n;}')
+  ).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test('block includes introduce typedefs locally without leaking them to later functions', () => {
+  expect(executeProgram('c', 'int main(void){\n#include <stddef.h>\nsize_t n=1;return (int)n-1;}')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+  expect(
+    executeProgram('c', 'void f(void){\n#include <stddef.h>\nsize_t n=1;}\nint main(void){size_t n=1;}').kind
+  ).toBe('compileError');
+});
+
+test('extern function declarations retain linkage without leaking lexical visibility', () => {
+  expect(executeProgram('c', 'void f(void){int g(void);}int main(void){return g();}int g(void){return 0;}').kind).toBe(
+    'compileError'
+  );
+  expect(
+    executeProgram('c', 'void f(void){int g(void);}int g(void){return 0;}int main(void){return g();}')
+  ).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test('nested C variables retain Java declaration ordering', () => {
+  const source = `int main(void){
+ int x=4;
+ for(int i=0;i<1;i++){
+  int t=i;
+  x+=t;
+ }
+}`;
+  const trace = traceProgram('c', source, source);
+  expect(Object.keys(trace.traceItems.find((item) => item.line === 5)!.vars)).toEqual(['x', 'i', 't']);
+});
+
+test.each(['s.a[0]=3;', 'const struct S*p=&s;p->a[0]=3;'])(
+  'const array members retain element qualification: %s',
+  (write) => {
+    expect(executeProgram('c', `struct S{int a[2];};int main(void){const struct S s={{1,2}};${write}}`).kind).toBe(
+      'compileError'
+    );
+  }
+);
+
+test('constant folding reads scalar metadata without accessing runtime frames', () => {
+  const source = `#include <stdio.h>
+const int g=2;int main(void){const int n=1;printf("%d %d %d %d %d %d\\n",!n,n&&2,n||2,-g,~n,n+g);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 1 1 -2 -2 3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('math constants initialize static objects and half exponents round without intermediate limits', () => {
+  const source = `#include <stdio.h>
+#include <math.h>
+double a=HUGE_VAL;float b=INFINITY;double c=NAN;int main(void){printf("%g %g %g\\n",a,b,c);printf("%.17g %.17g %.17g %.17g\\n",exp2(600.5),exp2(-600.5),pow(2,-0.5),pow(3,-0.5));}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'inf inf nan\n5.8683011947898095e+180 1.7040706787304193e-181 0.70710678118654757 0.57735026918962573\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('suppressed sscanf fields do not count as assignments before input failure', () => {
+  const source = `#include <stdio.h>
+int main(void){int a;char c;printf("%d %d %d %d\\n",sscanf("5","%*s %d",&a),sscanf("5 x","%*d x %d",&a),sscanf("-5","%*d%c",&c),sscanf("-5 x","%*d %d",&a));}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '-1 -1 -1 0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('folded string comparisons apply parameter conversions', () => {
+  const source = `#include <stdio.h>
+#include <string.h>
+int main(void){printf("%d %d\\n",strncmp("aa","ab",1.5),memcmp("aa","ab",1.5));}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['memset(a,0,-1);', 'strncpy(a,"x",-1);'])(
+  'oversized library writes fail within modeled memory: %s',
+  (write) => {
+    const result = executeProgram('c', `#include <string.h>\nint main(void){char a[4];${write}}`);
+    expect(result).toMatchObject({ kind: 'executed' });
+    expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+  }
+);
+
+test('aligned allocations honor alignment and reject invalid argument combinations', () => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <errno.h>
+int main(void){for(int i=0;i<2;i++){void*p=aligned_alloc(64,64);void*q=aligned_alloc(128,128);printf("%lu %lu\\n",(unsigned long)((uintptr_t)p%64),(unsigned long)((uintptr_t)q%128));free(p);free(q);}errno=0;void*p=aligned_alloc(3,64);printf("%d %d\\n",p==0,errno);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 0\n0 0\n1 22\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('assert inclusion tracks NDEBUG changes and predefined macros share definition lookup', () => {
+  const source = `#include <assert.h>
+#define NDEBUG
+#include <assert.h>
+#include <stdio.h>
+#if defined(__FILE__) && defined(__LINE__)
+#define N 1
+#else
+#define N 0
+#endif
+int main(void){assert(0);printf("%d\\n",N);}`;
+  expect(executeProgram('c', source)).toMatchObject({ kind: 'executed', stdout: '1\n', uncaughtException: undefined });
+});
+
+test('empty pasted arguments preserve neighboring tokens across chains', () => {
+  const source = `#include <stdio.h>
+#define DECL(prefix,name) int prefix ## name
+#define F(x) 100 + x ## 1
+#define JOIN(a,b,c) a ## b ## c
+int main(void){DECL(,x)=7;int JOIN(,y,)=9;printf("%d %d %d\\n",x,y,F());}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '7 9 101\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('substring scans spend the run budget across long repetitive inputs', () => {
+  const source = `#include <string.h>
+int main(void){char text[60000],pattern[30000];memset(text,97,sizeof text);memset(pattern,97,sizeof pattern);text[59999]=0;pattern[29998]=98;pattern[29999]=0;for(int i=0;i<20;i++)strstr(text,pattern);}`;
+  expect(executeProgram('c', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('large numeric strings decode without host argument-stack growth', () => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+int main(void){char a[1000000];memset(a,32,sizeof a);a[0]=49;a[999999]=0;printf("%.0f\\n",strtod(a,0));}`;
+  expect(executeProgram('c', source)).toMatchObject({ kind: 'executed', stdout: '1\n', uncaughtException: undefined });
+});
+
+test('legacy conversions share platform failure classification without changing successful parsing', () => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+int main(void){errno=0;int i=atoi("abc");printf("%d %d ",i,errno);errno=0;long n=atol(" ");printf("%ld %d ",n,errno);errno=0;double f=atof("1e999");printf("%g %d ",f,errno);printf("%d %ld %.1f\\n",atoi("42x"),atol("42x"),atof("3.5x"));}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 22 0 22 inf 34 42 42 3.5\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('temporary record array members share full-expression memory semantics', () => {
+  const source = `#include <stdio.h>
+struct S{int a[2];char s[3];};struct S make(void){struct S x={{1,2},"hi"};return x;}int sum(const int*a){return a[0]+a[1];}
+int main(void){struct S x=make();printf("%d %d %s\\n",make().a[0],sum(make().a),(1?x:x).s);if(make().a[1]==2)puts("yes");for(int i=0;i<make().a[0];i++)printf("%d\\n",i);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 3 hi\nyes\n0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('a pointer to a temporary array expires after its initializer full expression', () => {
+  const source = `struct S{int a[2];};struct S make(void){struct S s={{1,2}};return s;}int main(void){int*p=make().a;return p[0];}`;
+  const result = executeProgram('c', source);
+  expect(result).toMatchObject({ kind: 'executed' });
+  expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+});
+
+test('unevaluated extern declarations do not allocate their declared storage', () => {
+  const source = `#include <stdio.h>
+extern int a[10000000];int main(void){printf("%zu\\n",sizeof a);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '40000000\n',
+    uncaughtException: undefined,
+  });
+});

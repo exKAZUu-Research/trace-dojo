@@ -2,8 +2,9 @@ import type { LibraryEntry } from '../compiler';
 import { ProgramAbort } from '../errors';
 import { FILE_NAME } from '../preprocessor';
 import type { NativeFunction } from '../runtime';
-import { classificationCall, CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
+import { classificationCall, constantCall, CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
 import { PLATFORM_HEADER_FUNCTIONS } from './platformHeaderFunctions';
+import { PLATFORM_UNMODELED } from './platformHeaders';
 import { STDIO_FUNCTIONS } from './stdioFunctions';
 import { STDLIB_FUNCTIONS } from './stdlibFunctions';
 import { comparisonCall, STRING_FUNCTIONS } from './stringFunctions';
@@ -102,9 +103,14 @@ const NATIVES: Record<string, NativeFunction> = {
 };
 
 const PLATFORM_FUNCTIONS = new Set(Object.values(PLATFORM_HEADER_FUNCTIONS).flat());
+const UNMODELED = new Set(Object.values(PLATFORM_UNMODELED).flat());
 const EXTENSIONS = new Set([...PLATFORM_FUNCTIONS, 'strdup', 'strndup', ...EXTENSION_NAMES]);
 
 const SPECIAL_CALLS = {
+  __builtin_huge_val: constantCall,
+  __builtin_huge_valf: constantCall,
+  __builtin_inff: constantCall,
+  __builtin_nanf: constantCall,
   strcmp: comparisonCall,
   strncmp: comparisonCall,
   memcmp: comparisonCall,
@@ -116,17 +122,19 @@ const SPECIAL_CALLS = {
 
 /** The interpreter's implementation of a library function, or why it leaves the function out. */
 export function libraryEntry(name: string): LibraryEntry | undefined {
+  if (name.startsWith('__trace_platform_'))
+    return { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name.slice('__trace_platform_'.length)}）` };
   const feature = UNSUPPORTED[name];
-  if (feature) return { kind: 'unsupported', feature, canDefine: EXTENSIONS.has(name) };
+  if (feature) return { kind: 'unsupported', feature, canDefine: EXTENSIONS.has(name) && !UNMODELED.has(name) };
   const run = NATIVES[name];
   if (!run)
     return PLATFORM_FUNCTIONS.has(name)
-      ? { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name}）`, canDefine: true, isPlaceholder: true }
+      ? { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name}）`, canDefine: !UNMODELED.has(name) }
       : undefined;
   return {
     kind: 'native',
     run,
-    canDefine: EXTENSIONS.has(name),
+    canDefine: EXTENSIONS.has(name) && !UNMODELED.has(name),
     ...(name in SPECIAL_CALLS ? { special: SPECIAL_CALLS[name as keyof typeof SPECIAL_CALLS] } : {}),
   };
 }

@@ -61,7 +61,6 @@ export interface FunctionInfo {
   row: number;
   isDefined: boolean;
   isStatic: boolean;
-  hasPlaceholderType?: boolean;
   body?: Exec;
   native?: NativeFunction;
   locals: LocalInfo[];
@@ -159,6 +158,7 @@ export class Runtime implements TracedRuntime<Frame> {
     this.fallbackErrno = value;
     if (this.errnoAddress !== undefined) storerOf({ kind: 'int', name: 'int' })(this, this.errnoAddress, value);
   }
+  private readonly temporaryScopes: Allocation[][] = [];
   private allocatedSlots = 0;
 
   constructor(input?: ProgramInput) {
@@ -195,6 +195,28 @@ export class Runtime implements TracedRuntime<Frame> {
   allocate(size: number, region: 'data' | 'heap' | 'stack' | 'text'): Allocation {
     if (!this.reserve(size)) throw new CRuntimeError('custom', 'メモリを確保しすぎました。');
     return this.memory.allocate(size, region);
+  }
+
+  fullExpression<T>(run: () => T): T {
+    const temporaries: Allocation[] = [];
+    this.temporaryScopes.push(temporaries);
+    try {
+      return run();
+    } finally {
+      this.temporaryScopes.pop();
+      for (const block of temporaries) this.memory.release(block);
+    }
+  }
+
+  materialize(value: RecordValue, type: CType): Allocation {
+    const temporaries = this.temporaryScopes.at(-1);
+    if (!temporaries) throw new Error('A record temporary requires a full-expression lifetime');
+    const block = this.allocate(value.bytes.length, 'stack');
+    block.type = type;
+    storeRecord(this, block.base, value);
+    block.isReadOnly = true;
+    temporaries.push(block);
+    return block;
   }
 
   /** The block of a string literal, which identical literals share, as clang merges them. */
