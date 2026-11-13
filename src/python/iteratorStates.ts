@@ -7,7 +7,8 @@ type NextFunction = () => PyValue | typeof DONE;
 
 /** How a native iterator reduces, and, for one CPython's `__setstate__` moves, how a state moves it. */
 export interface IteratorState {
-  reduce: () => PyValue;
+  reduce?: () => PyValue;
+  holds?: () => PyValue[];
   setState?: (index: bigint) => void;
 }
 

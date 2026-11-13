@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 536 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 555 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -13,8 +13,9 @@ import {
   isThreadLocal,
   ownDict,
 } from './descriptors';
+import { DictItemTuple, dictItemValue } from './dictItemTuple';
 import { getItem as getItemOf } from './items';
-import { clamp, reduction, withState } from './iteratorStates';
+import { clamp, reduction, stateOf, withState } from './iteratorStates';
 import { completeNamespace } from './modules/moduleLayout';
 import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict } from './namespaces';
@@ -411,11 +412,7 @@ export function iterateEach(iterables: PyValue[]): { nexts: NextFunction[]; held
  * iterator built on the iteration must report as held: the iterator object that `__iter__` returned, or the value.
  */
 export function iterateHeld(value: PyValue): { next: NextFunction; held: PyValue } {
-  const next = iterateBuiltin(value);
-  if (next) return { next, held: value };
-  const iter = lookupSpecial(value, '__iter__');
-  if (iter === undefined || iter === None) return { next: iterateByProtocol(value), held: value };
-  const iterator = callValue(bindValue(iter, value), []);
+  const iterator = getIterator(value);
   return { next: nextOf(iterator), held: iterator };
 }
 
@@ -457,21 +454,24 @@ export function remainingOf(next: NextFunction): number | undefined {
   return remainingCounts.get(next)?.();
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The iterator, its reduction, and its __setstate__ share its position.
+// code-gauge-allow functionCognitiveComplexity 18 -- The iterator, its reduction, and its __setstate__ share its position.
 function iterateItems(sequence: PyList | PyTuple): NextFunction {
   let index = 0;
   // As in CPython, an iterator that reached the end stays there, even if the sequence grows.
   let exhausted = false;
+  let retained = true;
   const next = withRemaining(
     () => {
       if (!exhausted && index < sequence.items.length) return sequence.items[index++];
       exhausted = true;
+      retained = false;
       return DONE;
     },
     () => (exhausted ? 0 : Math.max(sequence.items.length - index, 0))
   );
   const isTuple = sequence instanceof PyTuple;
   return withState(next, {
+    holds: () => (retained ? [sequence] : []),
     reduce: () =>
       exhausted
         ? reduction('iter', [isTuple ? newTuple([]) : newList([])])
@@ -521,6 +521,7 @@ export function iterateByIndex(
     () => (exhausted ? 0 : Math.max(length() - index, 0))
   );
   return withState(next, {
+    holds: () => (exhausted ? [] : [sequence]),
     reduce: () => (exhausted ? reduction('iter', [empty]) : reduction('iter', [sequence], BigInt(index))),
     setState: (state) => {
       if (!exhausted) index = clamp(state, 0, length());
@@ -558,11 +559,14 @@ function iterateSet(set: PySet): NextFunction {
   const size = table.size;
   const entries = table.entries();
   let consumed = 0;
+  let exhausted = false;
   const next: NextFunction = () => {
+    if (exhausted) return DONE;
     if (table.version !== version) throw pyError('RuntimeError', 'Set changed size during iteration');
     const step = entries.next();
     if (step.done) {
       consumed = size;
+      exhausted = true;
       return DONE;
     }
     consumed++;
@@ -572,6 +576,7 @@ function iterateSet(set: PySet): NextFunction {
   return withState(
     withRemaining(next, () => (table.version === version ? size - consumed : 0)),
     {
+      holds: () => (exhausted ? [] : [set]),
       reduce: () => reduction('iter', [newList(consumed >= size ? [] : remainingItems())]),
     }
   );
@@ -636,13 +641,16 @@ export function nextOf(iterator: PyValue): NextFunction {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Indexing, terminal exceptions and cursor restoration share sequence iterator state.
 function iterateSequence(value: PyValue): NextFunction {
   let index = 0n;
   let finished = false;
-  return () => {
+  const next: NextFunction = () => {
     if (finished) return DONE;
     try {
-      return getItemOf(value, index++);
+      const result = getItemOf(value, index);
+      index++;
+      return result;
     } catch (error) {
       if (error instanceof PyError && (isExceptionOf(error, 'IndexError') || isExceptionOf(error, 'StopIteration'))) {
         finished = true;
@@ -652,6 +660,13 @@ function iterateSequence(value: PyValue): NextFunction {
       throw error;
     }
   };
+  return withState(next, {
+    holds: () => (finished ? [] : [value]),
+    reduce: () => (finished ? reduction('iter', [newTuple([])]) : reduction('iter', [value], index)),
+    setState: (state) => {
+      if (!finished) index = state < 0n ? 0n : state;
+    },
+  });
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- The iterator, its size check, and its reduction share its position.
@@ -659,31 +674,31 @@ function iterateDict(dict: PyDict, view: 'keys' | 'values' | 'items'): NextFunct
   const { store } = dict;
   const { size, version } = store;
   const entries = store.liveEntries();
-  const runtime = currentRuntime();
   let consumed = 0;
+  let exhausted = false;
+  const cached = view === 'items' ? new DictItemTuple() : undefined;
   const remainingItems = (): PyValue[] =>
-    [...store.liveEntries()]
-      .slice(consumed)
-      .map((entry) =>
-        view === 'keys' ? entry.key : view === 'values' ? entry.value : runtime.tuple([entry.key, entry.value])
-      );
+    [...store.liveEntries()].slice(consumed).map((entry) => dictItemValue(entry, view));
   const next = withRemaining(
     () => {
+      if (exhausted) return DONE;
       checkDictUnchanged(dict, size, version);
       const step = entries.next();
       if (step.done) {
         consumed = size;
+        exhausted = true;
         return DONE;
       }
       consumed++;
       const entry = step.value;
-      if (view === 'keys') return entry.key;
-      if (view === 'values') return entry.value;
-      return runtime.tuple([entry.key, entry.value]);
+      return cached?.item(entry) ?? dictItemValue(entry, view);
     },
     () => (store.size === size && (!dict.cls.flags.isOrderedDict || store.version === version) ? size - consumed : 0)
   );
-  return withState(next, { reduce: () => reduction('iter', [newList(consumed >= size ? [] : remainingItems())]) });
+  return withState(next, {
+    holds: () => [...(exhausted ? [] : [dict]), ...(cached?.holds() ?? [])],
+    reduce: () => reduction('iter', [newList(consumed >= size ? [] : remainingItems())]),
+  });
 }
 
 /**
@@ -713,6 +728,7 @@ export function toArray(value: PyValue, notIterable?: string): PyValue[] {
   const runtime = currentRuntime();
   // The items taken so far are only here while the iterator runs Python code.
   return runtime.runNative(() => {
+    runtime.handToNative(items);
     for (let item = next(); item !== DONE; item = next()) {
       runtime.spend();
       items.push(item);
@@ -735,13 +751,33 @@ export function getIterator(value: PyValue): PyValue {
     return iterator;
   }
   const next = iterate(value);
-  return new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
+  return nativeIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
 }
 
 /** The iterator the `__iter__` of a builtin iterable returns, which iterates it natively whatever its class. */
 export function builtinIterator(value: PyValue): PyValue {
   const next = builtinIterateRaw(value) ?? iterate(value);
-  return new PyIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
+  return nativeIterator(iteratorClass(iteratorNameOf(value)), next, () => [value]);
+}
+
+export function nativeIterator(cls: PyClass, next: NextFunction, fallback: () => PyValue[]): PyIterator {
+  const state = stateOf(next);
+  const holds = state?.holds ?? fallback;
+  const advance = withRemaining(
+    () => {
+      const before = holds();
+      const value = next();
+      const retained = new Set(holds());
+      currentRuntime().finalizer.release(
+        before.filter((item) => !retained.has(item)),
+        value === DONE ? [] : [value]
+      );
+      return value;
+    },
+    () => remainingOf(next) ?? 0
+  );
+  if (state) withState(advance, state);
+  return new PyIterator(cls, advance, holds);
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per builtin iterable.

@@ -171,6 +171,7 @@ export class GeneratorFinalizer {
    */
   private localGarbage(order: object[], candidates: Set<object>, held: unknown[]): Set<object> | undefined {
     const { locals } = this;
+    if (this.runtime.heldByNative().length > 0) return undefined;
     if (![...candidates].every((object) => locals.isLocal(object))) return undefined;
     // Freeing an object that is not local calls the callbacks of its weak references, which only a walk tells.
     if (hasWeakCallbacks(this.runtime) && !order.every((object) => locals.isLocalOrBound(object))) return undefined;
@@ -471,6 +472,7 @@ export class GeneratorFinalizer {
       ...this.freeing.filter((set) => set !== excluded).flatMap((set) => [...set]),
       ...runtime.evaluator.handledExceptions,
       ...runtime.modules.values(),
+      runtime.heldByNative(),
     ];
     for (const frame of runtime.frames) pushAll(roots, frameReferences(frame));
     pushAll(roots, hostRoots(runtime));

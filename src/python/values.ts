@@ -7,6 +7,7 @@ import {
   chargeScan,
   chargeSlots,
   chargeStep,
+  recordNativeAllocation,
   refuseOversizedString,
   trackFinalizable,
 } from './runtimeContext';
@@ -39,6 +40,7 @@ export class PyObject {
     // Every object a program makes costs a slot here, and what it holds is charged where the storage grows, so that
     // no kind of object can be retained outside the slot limit.
     chargeSlots(1);
+    recordNativeAllocation(this);
     if (cls?.flags.definesDel) trackFinalizable(this);
   }
 

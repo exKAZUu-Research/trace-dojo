@@ -39,6 +39,10 @@ export function chargeSlots(count: number): void {
   current?.allocate(count);
 }
 
+export function recordNativeAllocation(value: PyObject): void {
+  current?.handToNative(value);
+}
+
 /** Tracks a new object of a class that defines `__del__`, whose freeing the running program's finalizer watches. */
 export function trackFinalizable(object: PyObject): void {
   current?.finalizer.track(object);

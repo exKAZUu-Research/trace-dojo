@@ -31,6 +31,7 @@ import type { ProgramSource } from './programSource';
 import { withoutCharge } from './runtimeContext';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
+import { TemporaryScope } from './temporaryScope';
 import { DEFAULT_SWITCH_INTERVAL, type Scheduler } from './threads';
 import { frameReferences, noteUnwinding, setFrameGenerator } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
@@ -689,14 +690,16 @@ export class Runtime {
    * returns, and its own result passes on to the native code that called it.
    */
   runNative<T>(run: () => T): T {
-    const roots = this.nativeRoots.length;
+    const scope = new TemporaryScope(this.nativeRoots);
     this.nativeCalls++;
     let result: T;
     try {
-      result = run();
+      result = scope.keep(run());
+    } catch (error) {
+      throw scope.capture(error);
     } finally {
       this.nativeCalls--;
-      this.nativeRoots.length = roots;
+      scope.release();
     }
     this.handToNative(result);
     return result;
@@ -715,10 +718,15 @@ export class Runtime {
     this.world.retain((turtle) => reached.has(turtle));
   }
 
+  heldByNative(): readonly unknown[] {
+    return this.nativeRoots;
+  }
+
   /** The objects that variables, objects, or pending values still reach, which reference counting would keep. */
-  reachableObjects(inFlight: unknown[] = []): Set<object> {
+  reachableObjects(inFlight: unknown[] = [], targets?: ReadonlySet<object>): Set<object> {
+    if (targets?.size && [...targets].every((target) => this.nativeRoots.includes(target))) return new Set(targets);
     const roots = [...inFlight, ...this.evaluator.handledExceptions, ...this.modules.values(), ...this.roots()];
-    const visited = findReachableObjects(roots);
+    const visited = findReachableObjects(roots, targets);
     this.spend(Math.ceil(visited.size / 64));
     return visited;
   }

@@ -355,15 +355,14 @@ function holderOf(value: PyObject): unknown {
 
 /** Whether a local object still holds `object`, which it held when it became its owner. */
 function holds(owner: PyObject, object: object): boolean {
-  if (owner instanceof PyList || owner instanceof PyTuple) return owner.items.includes(object as PyValue);
-  if (owner instanceof PyDict) {
-    for (const entry of owner.store.liveEntries()) if (entry.value === object || entry.key === object) return true;
-    return false;
-  }
-  if (owner instanceof PyInstance) {
-    for (const value of owner.dict.values()) if (value === object) return true;
-    return false;
-  }
+  if (owner.cls === object) return true;
+  if ((owner instanceof PyList || owner instanceof PyTuple) && owner.items.includes(object as PyValue)) return true;
+  if (
+    owner instanceof PyDict &&
+    owner.store.liveEntries().some((entry) => entry.value === object || entry.key === object)
+  )
+    return true;
+  if (owner instanceof PyInstance && owner.dict.values().some((value) => value === object)) return true;
   return referencesOf(owner).includes(object);
 }
 

@@ -16,7 +16,16 @@ import { defineNew } from './instances';
 import { sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { bindValue, callValue, isTruthy, iterate, iterateByIndex, iterateOr, lookupSpecial } from './objects';
+import {
+  bindValue,
+  callValue,
+  isTruthy,
+  iterate,
+  iterateByIndex,
+  iterateOr,
+  lookupSpecial,
+  nativeIterator,
+} from './objects';
 import { currentRuntime } from './runtimeContext';
 import { readInteger, writeInteger } from './structCodes';
 import {
@@ -34,7 +43,7 @@ import {
   unbox,
   valueError,
 } from './types';
-import { DONE, type Kwargs, PyIterator, PyList, PySlice, PyTuple, type PyValue } from './values';
+import { DONE, type Kwargs, type PyIterator, PyList, PySlice, PyTuple, type PyValue } from './values';
 
 // Construction ------------------------------------------------------------------------------------------------------
 
@@ -236,7 +245,7 @@ function bytesIterator(self: PyBytes): PyIterator {
     (index) => BigInt(self.data[index] as number),
     newTuple([])
   );
-  return new PyIterator(iteratorClass(self.isMutable ? 'bytearray_iterator' : 'bytes_iterator'), next, () => [self]);
+  return nativeIterator(iteratorClass(self.isMutable ? 'bytearray_iterator' : 'bytes_iterator'), next, () => [self]);
 }
 
 /** `item in data`, for an int byte value or a bytes-like subsequence. */

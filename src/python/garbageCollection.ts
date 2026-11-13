@@ -185,7 +185,8 @@ function collectorReferences(node: object): object[] {
   if (Array.isArray(node)) return node.filter(isCollectorNode);
   if (node instanceof Map) return [...node].flat().filter(isCollectorNode);
   if (node instanceof PyModule) return [node.dict];
-  if (node instanceof PyClass && !node.isBuiltin) return [node.dict, node.mro, node.bases, node.enumMembers ?? []];
+  if (node instanceof PyClass && !node.isBuiltin)
+    return [node.dict, node.mro, node.bases, node.enumMembers ?? [], ...(!node.cls.isBuiltin ? [node.cls] : [])];
   if (node instanceof PyFunction) {
     const annotations = functionAnnotationReferences(node);
     if (node instanceof PyAnnotateFunction) pushAll(annotations, annotationReferences(node.annotations()));
@@ -218,7 +219,9 @@ function pushChildren(pending: unknown[], item: PyObject | PyCell, turtles: Set<
     return 0;
   }
   pushOwnedFields(pending, item);
-  return pushReferences(pending, item, turtles);
+  const size = pushReferences(pending, item, turtles);
+  if (!item.cls.isBuiltin || item instanceof PyInstance) pending.push(item.cls);
+  return size;
 }
 
 /**
@@ -262,7 +265,6 @@ function walk(
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);
-    if (!object.cls.isBuiltin) pending.push(object.cls);
     return object.items.length;
   }
   if (object instanceof PyDict) {
@@ -299,7 +301,6 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
 
 /** Pushes what a native object refers to: a weak reference keeps its callback alive, but not its referent. */
 function pushOpaqueReferences(pending: unknown[], object: PyOpaque): void {
-  if (!object.cls.isBuiltin) pending.push(object.cls);
   if (object.cls.mro.some((cls) => cls.name === 'ReferenceType' && cls.module === 'weakref')) {
     const callback = (object.data as { callback?: unknown } | undefined)?.callback;
     if (callback !== undefined) pending.push(callback);
@@ -324,7 +325,7 @@ function pushFunctionReferences(pending: unknown[], fn: PyFunction): number {
 function pushInstanceReferences(pending: unknown[], instance: PyInstance, reached: Set<TurtleState>): number {
   if (instance.turtle?.isAlive) reached.add(instance.turtle);
   pushAll(pending, instance.dict.values());
-  pending.push(instance.cls, instance.enumValue);
+  pending.push(instance.enumValue);
   const state = instance.exception;
   if (state) {
     pending.push(state.args, state.cause, state.context, state.exceptions, state.traceback);

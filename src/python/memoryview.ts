@@ -4,9 +4,10 @@ import { addressOf } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
 import { sliceIndices } from './items';
+import { withState } from './iteratorStates';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { bindValue, callValue, lookupSpecial } from './objects';
+import { bindValue, callValue, lookupSpecial, nativeIterator } from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { NATIVE_CODES, readFloat, readInteger, writeFloat, writeInteger } from './structCodes';
@@ -26,7 +27,7 @@ import {
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, PyDescriptor, PyIterator, PyList, type PyObject, PySlice, PyTuple, type PyValue } from './values';
+import { DONE, PyDescriptor, PyList, type PyObject, PySlice, PyTuple, type PyValue } from './values';
 
 memoryviewClass.construct = (_cls, args, kwargs) => {
   checkArgs({ qualified: 'memoryview', min: 1, max: 1, style: 'takes', keywords: ['object'] }, args, kwargs);
@@ -254,11 +255,16 @@ method(memoryviewClass, '__iter__', 'none', 0, 0, (self) => {
   const view = asView(self);
   if (view.shape) throw subViewsNotImplemented();
   let index = 0;
-  return new PyIterator(
-    iteratorClass('memory_iterator'),
-    () => (index < view.count ? readItem(view, index++) : DONE),
-    () => [view]
+  let exhausted = false;
+  const next = withState(
+    () => {
+      if (!exhausted && index < view.count) return readItem(view, index++);
+      exhausted = true;
+      return DONE;
+    },
+    { holds: () => (exhausted ? [] : [view]) }
   );
+  return nativeIterator(iteratorClass('memory_iterator'), next, () => [view]);
 });
 
 method(memoryviewClass, 'tolist', 'none', 0, 0, (self) => {

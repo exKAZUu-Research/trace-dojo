@@ -1,7 +1,7 @@
 import { pushAll } from './arrays';
 import { nativeReferences } from './garbageCollection';
 import { currentRuntime } from './runtimeContext';
-import { PyError, type PyInstance, PyObject, type PyValue } from './values';
+import { PyError, type PyInstance, PyObject } from './values';
 
 export class TemporaryScope {
   readonly length: number;
@@ -11,7 +11,7 @@ export class TemporaryScope {
   private aborted = false;
 
   constructor(
-    private readonly values: PyValue[],
+    private readonly values: unknown[],
     private readonly transferred?: (result: unknown) => unknown[]
   ) {
     this.length = values.length;

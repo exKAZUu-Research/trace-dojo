@@ -456,7 +456,7 @@ export function defineIteratorClass(cls: PyClass): void {
   if (REDUCED_ITERATORS.has(cls.typeName ?? cls.name)) {
     method(cls, '__reduce__', 'none', 0, 0, (self) => {
       const state = stateOf((self as PyIterator).next);
-      if (!state) throw new UnsupportedFeatureError('イテレータの pickle');
+      if (!state?.reduce) throw new UnsupportedFeatureError('イテレータの pickle');
       return state.reduce();
     });
   }
