@@ -1466,13 +1466,18 @@ async function g() { try { { await using a = null; await using b = { [Symbol.dis
 f(); queueMicrotask(() => console.log('micro'));
 setTimeout(() => { g(); queueMicrotask(() => console.log('micro2')); }, 0);`,
   ],
-])('a program using %s runs as Node.js runs it', (_, source) => {
-  expect(executeProgram('javascript', source)).toMatchObject({
-    kind: 'executed',
-    uncaughtException: undefined,
-    ...runOnNode(source),
-  });
-});
+  // The busy waits run on Node.js in real time, seconds in all, so the cases get more than the default five seconds.
+])(
+  'a program using %s runs as Node.js runs it',
+  (_, source) => {
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      ...runOnNode(source),
+    });
+  },
+  30_000
+);
 
 /** What Node.js prints for a script, without the colors that a FORCE_COLOR in the environment (as on CI) adds. */
 function runOnNode(source: string): { stdout: string; stderr: string } {
