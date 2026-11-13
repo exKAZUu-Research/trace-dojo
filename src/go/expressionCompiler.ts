@@ -37,6 +37,7 @@ import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeL
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
 import { moveToHeap, sizeOf } from './sliceOps';
 import { sliceMode, type SliceTracking, type SliceUse } from './slicePass';
+import { reachingValue } from './ssaValues';
 import {
   BASIC,
   type BasicKind,
@@ -448,7 +449,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
         mode: 'variable',
         type: entity.type,
         span,
+        ...(this.inAllocatedSlice ? {} : this.reachingOperand(entity)),
         variable: { markUsed },
+        ssaVariable: entity,
         eval: (frame) => frame.runtime.globals[slot].v,
         prepareStore,
         store: (frame, value) => prepareStore(frame)(value),
@@ -456,22 +459,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       };
     }
     if (entity.owner === this.fn) {
-      const factors = entity.productFactors;
       return {
         mode: 'variable',
         type: entity.type,
         span,
-        product: factors && {
-          left: (frame) => frame.locals[factors.left] as Value,
-          right: (frame) => frame.locals[factors.right] as Value,
-          enabled: () => !entity.boxed && !entity.writes,
-          constant: entity.definedAsConstant,
-          source: factors.source,
-        },
-        ssaConstant:
-          entity.definedAsConstant &&
-          ((frame) => !entity.boxed && !entity.writes && (entity.definedAsConstant as SsaConstant)(frame)),
+        ...this.reachingOperand(entity),
         variable: { markUsed, entity },
+        ssaVariable: entity,
         backingVars: [entity],
         addressStorage: { backingVars: [entity] },
         ssaRoot: entity,
@@ -509,6 +503,22 @@ export abstract class ExpressionCompiler extends CompilerBase {
       prepareStore,
       store: (frame, value) => prepareStore(frame)(value),
       addressOf: () => (frame) => new Pointer(frame.cells[index], 'v'),
+    };
+  }
+
+  /** What Go's SSA form knows of a variable's value at this use, from the definition that reaches it. */
+  private reachingOperand(entity: VarEntity): Pick<Operand, 'product' | 'ssaConstant' | 'ssaVersion'> {
+    const { constant, factors, version } = reachingValue(this.fn, entity);
+    return {
+      product: factors && {
+        left: (frame) => frame.locals[factors.left] as Value,
+        right: (frame) => frame.locals[factors.right] as Value,
+        enabled: factors.enabled,
+        constant,
+        source: factors.source,
+      },
+      ssaConstant: constant,
+      ssaVersion: version,
     };
   }
 
@@ -2187,10 +2197,10 @@ function constantly(value: Value): () => Value {
   return () => value;
 }
 
-/** What tells apart the factors of products, for finding the same product again: a variable or a constant. */
+/** What tells apart the factors of products, for finding the same product again: a variable's definition or a constant. */
 function productKeyOf(operand: Operand): string | undefined {
   const entity = operand.variable?.entity;
-  if (entity && operand.type === entity.type) return `v${entity.slot}:${entity.name}`;
+  if (entity && operand.type === entity.type) return `v${entity.slot}:${entity.name}:${operand.ssaVersion}`;
   if (operand.mode === 'constant') return `c${describeConstant(operand.constant as Constant)}`;
   return undefined;
 }
@@ -2267,8 +2277,8 @@ function inlinable(fn: FunctionContext): boolean {
 }
 
 /**
- * Whether a product reaches the addition as a multiplication: through a variable only while it keeps its single
- * definition, and not when both factors are constants, which Go's compiler multiplies before the program runs.
+ * Whether a product reaches the addition as a multiplication: through a variable only where its definition reaches
+ * the use, and not when both factors are constants, which Go's compiler multiplies before the program runs.
  */
 function fuses(product: NonNullable<Operand['product']>, frame: Frame | undefined): boolean {
   const { enabled = always, constant = never } = product;

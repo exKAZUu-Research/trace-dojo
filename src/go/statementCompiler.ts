@@ -40,6 +40,7 @@ import { nilPointerPanic, panicNilValue } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
 import { sizeOf } from './sliceOps';
 import type { SliceTracking } from './slicePass';
+import { clobberMemory, define, joining, storeLocalMemory } from './ssaValues';
 import {
   ANY,
   BASIC,
@@ -244,6 +245,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (!this.isAssignable(target, statement.operand)) return () => {};
     target.variable?.markUsed();
     countWrite(target);
+    this.defineTarget(target, { type: target.type, ssaConstant: target.ssaConstant });
     if (!isNumericType(target.type)) {
       this.error(
         statement,
@@ -310,6 +312,7 @@ export abstract class StatementCompiler extends CallCompiler {
   private assignment(statement: Extract<SimpleStatement, { kind: 'assign' }>): Exec {
     const { operator, left, right } = statement;
     if (operator !== '=') return this.compoundAssignment(statement);
+    const compiled: Operand[] = [];
     const {
       result: [targets, values],
       run,
@@ -326,9 +329,10 @@ export abstract class StatementCompiler extends CallCompiler {
       };
       return [
         compiledTargets,
-        this.rightSide(statement, right, left.length, typeOf, undefined, undefined, localAt),
+        this.rightSide(statement, right, left.length, typeOf, undefined, compiled, localAt),
       ] as const;
     });
+    for (const [index, target] of targets.entries()) this.defineTarget(target, compiled[index], values, index);
     for (const [index, target] of left.entries()) {
       this.sliceAssignment(target, right.length === left.length ? right[index] : undefined);
     }
@@ -510,6 +514,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const current: Operand = { ...target, mode: 'value', eval: (frame) => frame.temporaries.at(-1) as Value };
     const combined = this.binaryOfOperands(statement, operator, current, value);
     if (this.isInvalid(combined)) return () => {};
+    this.defineTarget(target, combined);
     const result = this.assign(combined, target.type, '変数');
     const update = this.updater(target, left[0]);
     return this.withStep(
@@ -579,6 +584,7 @@ export abstract class StatementCompiler extends CallCompiler {
         }
         const operand = this.variableOperand(entity, span);
         countWrite(operand);
+        this.defineTarget(operand, compiled[index], values, index);
         if (entity.owner === this.fn) untrackSlice(entity);
         return operand.prepareStore ?? ((frame) => (value) => operand.store?.(frame, value));
       }
@@ -601,20 +607,45 @@ export abstract class StatementCompiler extends CallCompiler {
     return this.withStep(statement, exec, createsObjects);
   }
 
+  /** Records a write of an assignment's target: a definition of a variable Go's SSA form tracks, else a store. */
+  private defineTarget(
+    target: Operand | undefined,
+    value: Pick<Operand, 'type' | 'product' | 'ssaConstant'> | undefined,
+    values?: Eval[],
+    index = 0
+  ): void {
+    if (!target) return;
+    if (target.ssaVariable) this.defineFromValue(target.ssaVariable, value, values, index);
+    else if (target.ssaRoot && !target.ssaRoot.boxed) storeLocalMemory(this.fn);
+    else clobberMemory(this.fn);
+  }
+
   /**
-   * Lets uses of a variable that keeps its declared value see it as Go's SSA form does: as a constant when the value is
-   * one, and for a float product as the multiplication, keeping the factors in hidden slots so that an addition using
-   * the variable fuses it, as Go's compiler does on arm64.
+   * Lets the uses a definition of a variable reaches see the value as Go's SSA form does: as a constant when the
+   * value is one, and for a float product as the multiplication, keeping the factors in hidden slots so that an
+   * addition using the variable fuses it, as Go's compiler does on arm64.
    */
-  private defineFromValue(variable: VarEntity, operand: Operand | undefined, values: Eval[], index: number): void {
-    if (!operand) return;
-    variable.definedAsConstant = operand.ssaConstant;
-    const { product, type } = operand;
-    if (!product || !isFloat(type) || isUntyped(type) || type !== variable.type) return;
+  private defineFromValue(
+    variable: VarEntity,
+    operand: Pick<Operand, 'type' | 'product' | 'ssaConstant'> | undefined,
+    values: Eval[] | undefined,
+    index: number
+  ): void {
+    const product = operand?.product;
+    if (
+      !operand ||
+      !values ||
+      !product ||
+      !isFloat(operand.type) ||
+      isUntyped(operand.type) ||
+      operand.type !== variable.type
+    ) {
+      define(this.fn, variable, { constant: operand?.ssaConstant });
+      return;
+    }
     const left = this.hiddenSlot();
     const right = this.hiddenSlot();
-    variable.productFactors = { left, right, source: product.source };
-    const multiply = arithmetic('*', type);
+    const multiply = arithmetic('*', operand.type);
     values[index] = (frame) => {
       const x = product.left(frame);
       const y = product.right(frame);
@@ -622,6 +653,10 @@ export abstract class StatementCompiler extends CallCompiler {
       frame.locals[right] = y;
       return multiply(x, y);
     };
+    define(this.fn, variable, {
+      constant: operand.ssaConstant,
+      factors: { left, right, source: product.source, enabled: product.enabled },
+    });
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- var declarations with and without types and values.
@@ -632,6 +667,7 @@ export abstract class StatementCompiler extends CallCompiler {
       if (spec.values.length === 0) {
         const zero: () => Value = declaredType ? this.zeroOf(declaredType) : () => {};
         const variables = spec.names.map((name) => this.declareLocal(name.name, declaredType ?? BASIC.invalid, name));
+        for (const variable of variables) define(this.fn, variable, { constant: () => true });
         parts.push((frame) => {
           for (const variable of variables) declareValue(frame, variable, zero());
           return;
@@ -659,7 +695,7 @@ export abstract class StatementCompiler extends CallCompiler {
         sliceDeclaration(variable, spec.values.length === spec.names.length ? spec.values[index] : undefined);
         const holder = holders[index];
         if (holder !== 'discard') transferEscapeLinks(holder, variable);
-        if (values) this.defineFromValue(variable, compiled[index], values, index);
+        this.defineFromValue(variable, compiled[index], values, index);
         return variable;
       });
       if (!values) continue;
@@ -700,13 +736,16 @@ export abstract class StatementCompiler extends CallCompiler {
   private ifStatement(statement: Extract<Statement, { kind: 'if' }>): Exec {
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
     const condition = this.condition(statement.condition, 'if 文');
-    const consequence = this.block(statement.consequence);
     const { alternative } = statement;
-    let otherwise: Exec | undefined;
-    if (alternative) {
-      otherwise =
-        'statements' in alternative ? this.block(alternative) : this.scoped(() => this.ifStatement(alternative));
-    }
+    const [consequence, otherwise] = joining(this.fn, false, (branch) => {
+      const then = this.block(statement.consequence);
+      branch();
+      if (!alternative) return [then, undefined];
+      return [
+        then,
+        'statements' in alternative ? this.block(alternative) : this.scoped(() => this.ifStatement(alternative)),
+      ];
+    });
     return (frame) => {
       init?.(frame);
       if (condition(frame)) return consequence(frame);
@@ -734,10 +773,18 @@ export abstract class StatementCompiler extends CallCompiler {
     const loopVariables = [...this.scope.entities.values()].filter(
       (entity): entity is VarEntity => entity.kind === 'var'
     );
-    const condition = statement.condition ? this.condition(statement.condition, 'for 文') : () => true;
-    const body = this.loopBody(statement.body);
-    const post =
-      statement.post && statement.post.kind !== 'empty' ? this.simpleStatementWithoutStep(statement.post) : undefined;
+    const [condition, body, post] = joining(
+      this.fn,
+      true,
+      () =>
+        [
+          statement.condition ? this.condition(statement.condition, 'for 文') : () => true,
+          this.loopBody(statement.body),
+          statement.post && statement.post.kind !== 'empty'
+            ? this.simpleStatementWithoutStep(statement.post)
+            : undefined,
+        ] as const
+    );
     const init: Exec | undefined =
       initExec && row !== undefined
         ? (frame) => {
@@ -791,10 +838,13 @@ export abstract class StatementCompiler extends CallCompiler {
       return () => {};
     }
     const { read, keyType, valueType, iterate } = source;
-    const bind = this.rangeTargets(statement, keyType, valueType);
+    const [bind, body] = joining(
+      this.fn,
+      true,
+      () => [this.rangeTargets(statement, keyType, valueType), this.loopBody(statement.body)] as const
+    );
     const row = this.stepRow(statement);
     const storesAnswer = bind.answered;
-    const body = this.loopBody(statement.body);
     return (frame) => {
       const collection = read(frame);
       frame.temporaries.push(collection);
@@ -899,6 +949,7 @@ export abstract class StatementCompiler extends CallCompiler {
         return (frame) => (value) => declareValue(frame, variable, copy ? copyValue(value) : value);
       }
       const operand = this.assignmentTarget(target);
+      this.defineTarget(operand, undefined);
       if (!operand || this.isInvalid(operand)) return undefined;
       const localTarget = stripParens(target).kind === 'name' ? operand.variable?.entity : undefined;
       const convert = this.assign(
@@ -942,22 +993,25 @@ export abstract class StatementCompiler extends CallCompiler {
     if (defaults.length > 1) this.error(defaults[1], 'switch 文に default が2つあります。');
     const seenConstants = new Map<string, Span>();
     const fn = this.fn as FunctionContext;
-    const cases = statement.cases.map((switchCase, index) => {
-      const tests = (switchCase.values ?? []).map((value) => this.caseTest(value, tag, tagType, seenConstants));
-      const last = switchCase.body.at(-1);
-      const fallsThrough = last?.kind === 'fallthrough';
-      if (fallsThrough && index === statement.cases.length - 1) {
-        this.error(last, '最後の case では fallthrough を使えません。');
-      }
-      fn.breakDepth++;
-      let body: Exec;
-      try {
-        body = this.scoped(() => this.statements(fallsThrough ? switchCase.body.slice(0, -1) : switchCase.body));
-      } finally {
-        fn.breakDepth--;
-      }
-      return { tests, body, fallsThrough, isDefault: !switchCase.values };
-    });
+    const cases = joining(fn, false, (branch) =>
+      statement.cases.map((switchCase, index) => {
+        branch(statement.cases[index - 1]?.body.at(-1)?.kind === 'fallthrough');
+        const tests = (switchCase.values ?? []).map((value) => this.caseTest(value, tag, tagType, seenConstants));
+        const last = switchCase.body.at(-1);
+        const fallsThrough = last?.kind === 'fallthrough';
+        if (fallsThrough && index === statement.cases.length - 1) {
+          this.error(last, '最後の case では fallthrough を使えません。');
+        }
+        fn.breakDepth++;
+        let body: Exec;
+        try {
+          body = this.scoped(() => this.statements(fallsThrough ? switchCase.body.slice(0, -1) : switchCase.body));
+        } finally {
+          fn.breakDepth--;
+        }
+        return { tests, body, fallsThrough, isDefault: !switchCase.values };
+      })
+    );
     const readTag = tag && !this.isInvalid(tag) ? tag.eval : () => true;
     return (frame) => {
       init?.(frame);
@@ -1079,8 +1133,11 @@ export abstract class StatementCompiler extends CallCompiler {
     if (defaults.length > 1) this.error(defaults[1], 'switch 文に default が2つあります。');
     const bindings: VarEntity[] = [];
     const seenTypes = new Set<string>();
-    const cases = statement.cases.map((typeCase) =>
-      this.typeSwitchCase(statement, typeCase, operand.type, bindings, seenTypes)
+    const cases = joining(this.fn, false, (branch) =>
+      statement.cases.map((typeCase) => {
+        branch();
+        return this.typeSwitchCase(statement, typeCase, operand.type, bindings, seenTypes);
+      })
     );
     if (statement.binding && bindings.length > 0 && bindings.every((binding) => !binding.used)) {
       this.error(statement.binding, `宣言した変数 ${statement.binding.name} を使っていません。`);
@@ -1407,10 +1464,12 @@ export abstract class StatementCompiler extends CallCompiler {
     isAtomic: boolean
   ): FunctionContext {
     const outer = this.fn;
+    const outerInAllocatedSlice = this.inAllocatedSlice;
     const fn = this.newFunctionContext(name, outer, () => {});
     fn.info.isAtomic = isAtomic;
     if (outer && !outer.recordsSteps) fn.recordsSteps = false;
     this.fn = fn;
+    this.inAllocatedSlice = false;
     try {
       this.withScope(() => {
         if (receiver) {
@@ -1422,7 +1481,7 @@ export abstract class StatementCompiler extends CallCompiler {
           fn.params.push(this.declareParameter(parameter, type.params[index]));
         }
         for (const [index, param] of fn.params.entries())
-          param.definedAsConstant = (frame) => frame?.constantParam(index) ?? false;
+          define(fn, param, { constant: (frame) => frame?.constantParam(index) ?? false });
         fn.info.params.push(...fn.params);
         fn.results = type.results;
         fn.hasNamedResults = signature.results.some((result) => result.name !== undefined);
@@ -1431,6 +1490,7 @@ export abstract class StatementCompiler extends CallCompiler {
           if (result.name !== undefined) {
             const variable = this.declareLocal(result.name, type.results[index], result);
             variable.used = true;
+            define(fn, variable, { constant: () => true });
             markReturned(variable);
             fn.resultVariables.push(variable);
             fn.info.resultSlots.push(variable.slot);
@@ -1459,6 +1519,7 @@ export abstract class StatementCompiler extends CallCompiler {
       });
     } finally {
       this.fn = outer;
+      this.inAllocatedSlice = outerInAllocatedSlice;
     }
     return fn;
   }
@@ -1626,13 +1687,8 @@ function transferEscapeLinks(from: VarEntity, to: VarEntity): void {
   }
 }
 
-/**
- * Counts an assignment to a variable, after which its declared value may no longer reach its uses, and records a store
- * into an element as a write of its array.
- */
+/** Records a store into an element as a write of its array. */
 function countWrite(target: Operand): void {
-  const entity = target.variable?.entity;
-  if (entity && target.type === entity.type) entity.writes = (entity.writes ?? 0) + 1;
   target.onWrite?.();
 }
 

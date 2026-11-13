@@ -1,8 +1,9 @@
 import type { FunctionDeclaration, Span } from './ast';
 import type { Constant } from './constants';
-import type { SsaConstant, Storage } from './operand';
+import type { Storage } from './operand';
 import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
 import type { SliceTracking } from './slicePass';
+import type { SsaValues } from './ssaValues';
 import type { FuncType, NamedType, Type, TypeParamType } from './types';
 import type { GoFunc, Value } from './values';
 
@@ -53,17 +54,13 @@ export interface VarEntity {
   arguments?: { argument: Storage; result: VarEntity }[];
   /** How Go's slice optimization pass sees a local slice variable whose elements fit its stack buffer. */
   slice?: SliceTracking;
-  /** The number of assignments after the declaration, which decide whether the declared value reaches each use. */
-  writes?: number;
-  /**
-   * The hidden slots holding the factors of the multiplication that initialized the variable, which a later addition
-   * fuses with, as Go's compiler does through a variable whose value comes from that single definition.
-   */
-  productFactors?: { left: number; right: number; source: ProductSource };
+  /** Whether a closure refers to the variable. */
+  captured?: boolean;
+  /** Whether the program has defined the variable, and whether it assigns it after the declaration. */
+  defined?: boolean;
+  reassigned?: boolean;
   /** Whether the program takes the address of the variable or of a part of it, which keeps it out of registers. */
   addressTaken?: boolean;
-  /** Whether the declaration's value is a constant to Go's compiler. */
-  definedAsConstant?: SsaConstant;
 }
 
 export interface ConstEntity {
@@ -159,6 +156,7 @@ export interface FunctionContext {
   products: Map<string, ProductSource>;
   /** Whether each float64 addition of two products adds them, which decides how Go's compiler orders operands. */
   sumsOfProducts: (() => boolean)[];
+  ssa: SsaValues;
   loopDepth: number;
   breakDepth: number;
   recordsSteps: boolean;

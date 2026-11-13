@@ -224,7 +224,7 @@ test('an endless loop stops at the operation limit', () => {
   expect(executeProgram('go', goMain('\tfor {\n\t}'))).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
 
-// Go 1.27.3 on arm64 fuses a multiplication into the addition that uses it, also through a variable defined once,
+// Go 1.27.3 on arm64 fuses a multiplication into the addition that uses it, also through a variable it defines,
 // unless both factors are constants, which its compiler multiplies before the program runs.
 test('floating-point multiply-adds round as Go fuses them', () => {
   const program = String.raw`package main
@@ -266,8 +266,46 @@ test.each([
     '\tfmt.Println(x*x - a*b, a*b - x*x, x*x + a*b, x*x - a*b)',
     '-0.049999999999999996 0.049999999999999996 0.07 -0.049999999999999996\n',
   ],
+  // Go's SSA form folds a variable's value where the single definition reaching the use is a constant.
+  [
+    'constants assigned with =',
+    '\tvar p, q, r, s float64\n\tp, q, r, s = 0.1, 0.2, 0.3, 0.7\n\tfmt.Println(p*q - r*s)',
+    '-0.19\n',
+  ],
+  [
+    'a constant assigned after a definition',
+    '\tp := 0.0\n\tp = 0.1\n\tq := 0.2\n\tfmt.Println(p*q - 0.3*0.7)',
+    '-0.19\n',
+  ],
+  [
+    'a reassigned constant passed to an inlined call',
+    '\tw := x\n\tw = 0.1\n\tfmt.Println(f(0.3, w, 0.7) - 0.19)',
+    '-0.030000000000000027\n',
+  ],
+  [
+    'a package variable stored before an inlined call',
+    '\tg = 0.1\n\tfmt.Println(f(0.3, g, 0.7) - 0.19)',
+    '-0.030000000000000027\n',
+  ],
+  ['a package variable read in a variadic argument', '\tg = 0.3\n\tfmt.Println(g*0.7 - 0.02)', '0.18999999999999997\n'],
+  [
+    'a constant a loop reassigns',
+    '\tp := 0.1\n\tfor i := 0; i < 1; i++ {\n\t\tp = 0.3\n\t}\n\tfmt.Println(p*0.7 - 0.02)',
+    '0.18999999999999997\n',
+  ],
+  [
+    'a constant a branch reassigns',
+    '\tp := 0.1\n\tif x > 0 {\n\t\tp = 0.3\n\t}\n\tfmt.Println(p*0.7 - 0.02)',
+    '0.18999999999999997\n',
+  ],
+  [
+    'a constant a closure captures by value',
+    '\tp := 0.3\n\tk := func() float64 { return p }\n\tfmt.Println(p*0.7 - 0.02, k())',
+    '0.19 0.3\n',
+  ],
+  ['a product assigned with =', '\tvar p float64\n\tp = a * b\n\tfmt.Println(p - 0.07)', '-0.010000000000000005\n'],
 ])('%s fuses the product Go fuses', (_name, body, stdout) => {
-  const program = `package main\n\nimport "fmt"\n\nvar v = []float64{0.1, 0.2, 0.3}\n\nfunc f(p, q, r float64) float64 { return p*p + q*r }\n\nfunc main() {\n\tx, a, b := v[0], v[1], v[2]\n${body}\n}\n`;
+  const program = `package main\n\nimport "fmt"\n\nvar v = []float64{0.1, 0.2, 0.3}\nvar g float64\n\nfunc f(p, q, r float64) float64 { return p*p + q*r }\n\nfunc main() {\n\tx, a, b := v[0], v[1], v[2]\n\t_, _, _ = x, a, b\n${body}\n}\n`;
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
 });
 

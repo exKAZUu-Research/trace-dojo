@@ -35,6 +35,7 @@ import { nilPointerPanic, panicNilValue, runtimeErrorPanic } from './runtimeErro
 import { runtimePrint } from './runtimePrint';
 import { appendValues, inStackBuffer, type StackBuffer } from './sliceOps';
 import { sliceMode } from './slicePass';
+import { clobberMemory } from './ssaValues';
 import { newTurtle, TURTLE_POINTER } from './turtle';
 import {
   ANY,
@@ -75,6 +76,9 @@ const VALUE_BUILTINS = new Set([
   'NewTurtle',
 ]);
 
+/** Builtins whose call neither calls the runtime nor stores to memory. */
+const MEMORYLESS_BUILTINS = new Set(['cap', 'complex', 'imag', 'len', 'max', 'min', 'real']);
+
 export abstract class CallCompiler extends CompositeCompiler {
   // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of callee.
   protected compileCall(expression: Extract<Expression, { kind: 'call' }>): Operand {
@@ -94,11 +98,13 @@ export abstract class CallCompiler extends CompositeCompiler {
       case 'builtin': {
         const result = this.builtin(expression, callee.builtin as string);
         if (result.mode !== 'constant') this.runtimeCallCount++;
+        if (!MEMORYLESS_BUILTINS.has(callee.builtin as string)) clobberMemory(this.fn);
         return { ...result, isCall: true, pureValue: VALUE_BUILTINS.has(callee.builtin as string) } as Operand;
       }
       case 'method': {
         const result = this.methodCall(expression, callee);
         if (result.mode !== 'constant') this.runtimeCallCount++;
+        clobberMemory(this.fn);
         return { ...result, isCall: true };
       }
       case 'package': {
@@ -108,6 +114,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       default: {
         const result = this.functionCall(expression, this.asValue(callee));
         if (result.mode !== 'constant') this.runtimeCallCount++;
+        clobberMemory(this.fn);
         return { ...result, isCall: true };
       }
     }
@@ -129,7 +136,16 @@ export abstract class CallCompiler extends CompositeCompiler {
     callee?: ProgramCall
   ): ListEval | undefined {
     const { params, variadic } = signature;
-    let operands = expression.args.map((arg) => this.expression(arg));
+    const outer = this.inAllocatedSlice;
+    let operands: Operand[];
+    try {
+      operands = expression.args.map((arg, index) => {
+        this.inAllocatedSlice = variadic && index >= params.length - 1;
+        return this.expression(arg);
+      });
+    } finally {
+      this.inAllocatedSlice = outer;
+    }
     if (operands.length === 1 && operands[0].type.kind === 'tuple') {
       return this.spreadArguments(expression, operands[0], signature, name);
     }
