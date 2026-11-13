@@ -2008,3 +2008,21 @@ public class Main { static void t(String n, Supplier<Object> s) { try { System.o
       'l2 java.lang.NullPointerException\nl3 java.lang.NullPointerException\nl3last java.lang.NullPointerException\nl0 java.lang.NullPointerException\ns java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\ns1 java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmg java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmk java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmv java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmd java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\ncopy java.lang.NullPointerException\nall java.lang.NullPointerException\nsub java.lang.NullPointerException\ntoList false\ntoListSub -1\nunmod false\nempty false\nasList false\nget 1\ncontains true\n',
   });
 });
+
+test("Java's unmodifiable wrappers and sublists look null up as the collection they read does", () => {
+  const program = `import java.util.*; import java.util.function.*; import java.util.stream.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) {
+  Set<String> hs = new HashSet<>(); hs.add(null); t("uset", () -> Collections.unmodifiableSet(hs).contains(null));
+  Map<String, String> hm = new HashMap<>(); hm.put(null, "v"); t("umap", () -> Collections.unmodifiableMap(hm).get(null) + " " + Collections.unmodifiableMap(hm).containsKey(null) + " " + Collections.unmodifiableMap(hm).containsValue(null) + " " + Collections.unmodifiableMap(hm).getOrDefault(null, "d"));
+  t("ulistOf", () -> Collections.unmodifiableList(List.of(1)).contains(null)); t("ulist", () -> Collections.unmodifiableList(new ArrayList<>(Arrays.asList(1, null))).indexOf(null));
+  t("usetOf", () -> Collections.unmodifiableSet(Set.of(1)).contains(null)); t("umapOf", () -> Collections.unmodifiableMap(Map.of(1, 2)).get(null));
+  t("subUlistOf", () -> Collections.unmodifiableList(List.of(1, 2, 3)).subList(0, 2).contains(null)); t("alsub", () -> new ArrayList<>(Arrays.asList(1, null)).subList(0, 2).indexOf(null)); t("toListU", () -> Collections.unmodifiableList(Stream.of(1).toList()).contains(null));
+  t("tree", () -> new TreeMap<String, String>().containsValue(null));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'uset true\numap v true false v\nulistOf java.lang.NullPointerException\nulist 1\nusetOf java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\numapOf java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nsubUlistOf java.lang.NullPointerException\nalsub 1\ntoListU false\ntree false\n',
+  });
+});

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 472 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
+// code-gauge-allow-file fileNcss 476 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
 import { checkCopiedElement } from './arrayCopy';
 import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
@@ -216,7 +216,10 @@ function defineRestrictedLists(
   );
   immutableCollectionsLists.add(immutableList);
   immutableCollectionsLists.add(pairList);
-  for (const cls of [immutableList, pairList]) rejectNullLookups(cls, NULL_REJECTING_LIST_LOOKUPS);
+  for (const cls of [immutableList, pairList]) rejectNullLookups(cls, NULL_REJECTING_LIST_LOOKUPS, true);
+  for (const cls of [unmodifiableList, unmodifiableRandomAccessList]) {
+    rejectNullLookups(cls, NULL_REJECTING_LIST_LOOKUPS, false);
+  }
   singletonClasses.add(singletonList);
   // Arrays.asList writes through to its array, so it may set elements but not change its size.
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, 'fixedSize', 'Arrays$');
@@ -276,7 +279,11 @@ function defineSubListClasses(
   const randomAccess = defineArrayList(context, 'RandomAccessSubList', lists, 'AbstractList$RandomAccessSubList');
   const immutable = defineRestrictedList(context, 'SubList', lists, 'eager', 'ImmutableCollections$');
   immutableCollectionsLists.add(immutable);
-  rejectNullLookups(immutable, NULL_REJECTING_LIST_LOOKUPS);
+  rejectNullLookups(immutable, NULL_REJECTING_LIST_LOOKUPS, true);
+  // A view of a List.of list, or of a wrapper of one, reads that list.
+  for (const view of [subListClasses.arrayList, subListClasses.other, randomAccess]) {
+    rejectNullLookups(view, NULL_REJECTING_LIST_LOOKUPS, false);
+  }
   for (const [listClasses, view] of [
     [[registry.classes.get('ArrayList') as ClassInfo, subListClasses.arrayList], subListClasses.arrayList],
     [[registry.classes.get('Stack') as ClassInfo, subListClasses.synchronized], subListClasses.synchronized],

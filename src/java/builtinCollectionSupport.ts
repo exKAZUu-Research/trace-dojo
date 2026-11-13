@@ -308,26 +308,42 @@ export function countsEmptyClear(list: Value): boolean {
 /** The lists of `Stream.toList`, which are of `List.of`'s class but may hold and look up null. */
 export const nullTolerantLists = new WeakSet<JavaObject>();
 
+/** The classes of `ImmutableCollections`, whose lookups reject a null argument. */
+const nullRejectingClasses = new WeakSet<ClassInfo>();
+
 /**
- * Makes the lookups `names` of a class of `ImmutableCollections` throw `NullPointerException` for a null argument, as
- * those collections reject null even where they could answer, but for the lists `Stream.toList` returns; `messageOf`
+ * Makes the lookups `names` of `cls` throw `NullPointerException` for a null argument when the collection they read
+ * rejects null, as those of `ImmutableCollections` do but for the lists `Stream.toList` returns: the collection itself
+ * when `rejects`, or the one an unmodifiable wrapper or a sublist reads, whose class may be shared by both. `messageOf`
  * gives the message the JDK's implementation class of a collection's size gives.
  */
 export function rejectNullLookups(
   cls: ClassInfo,
   names: readonly string[],
+  rejects: boolean,
   messageOf: (receiver: JavaObject, name: string) => string | undefined = () => {}
 ): void {
+  if (rejects) nullRejectingClasses.add(cls);
   for (const method of cls.methods) {
     const { native, name } = method;
     if (!native || !names.includes(name) || method.parameterTypes[0]?.kind === 'int') continue;
     method.native = (frame, receiver, args) => {
-      const object = receiver as JavaObject;
-      if (args[0] === undefined && !nullTolerantLists.has(rootListOf(object))) {
-        throwBuiltin(frame, 'NullPointerException', messageOf(object, name));
+      const source = readSourceOf(receiver as JavaObject);
+      if (args[0] === undefined && nullRejectingClasses.has(source.cls) && !nullTolerantLists.has(source)) {
+        throwBuiltin(frame, 'NullPointerException', messageOf(source, name));
       }
       return native(frame, receiver, args);
     };
+  }
+}
+
+/** The collection a collection's reads reach through any nesting of unmodifiable wrappers and sublists. */
+function readSourceOf(collection: JavaObject): JavaObject {
+  let source = collection;
+  for (;;) {
+    const next = unmodifiableWrappers.has(source) || subListChecks.has(source) ? source.retained?.[0] : undefined;
+    if (!(next instanceof JavaObject)) return source;
+    source = next;
   }
 }
 

@@ -459,7 +459,12 @@ export function restrictToImmutable(
   if (!changesOnlyOnUse) {
     defaultRemoveClasses.add(cls);
     eagerlyRejectingClasses.add(cls);
-    rejectNullLookups(cls, ['contains', 'get', 'containsKey', 'containsValue', 'getOrDefault'], nullLookupMessage);
+    rejectNullLookups(
+      cls,
+      ['contains', 'get', 'containsKey', 'containsValue', 'getOrDefault'],
+      true,
+      nullLookupMessage
+    );
   }
   cls.name = name;
   cls.constructors = [];
