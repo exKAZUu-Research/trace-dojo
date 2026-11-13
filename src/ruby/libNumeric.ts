@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 678 -- The libNumeric module keeps one concern's cases together.
+// code-gauge-allow-file fileNcss 679 -- The libNumeric module keeps one concern's cases together.
 import {
   comparisonFailed,
   floatToInt,
@@ -13,6 +13,7 @@ import {
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
+import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, type RHash, type RProc, RString, RSymbol, type Value } from './objects';
@@ -99,7 +100,7 @@ function floatPow(base: number, exponent: number): Value {
   if (base < 0 && !Number.isInteger(exponent) && Number.isFinite(exponent)) {
     throw new UnsupportedFeatureError('負の数の小数乗（結果が複素数になるもの）');
   }
-  return base ** exponent;
+  return exactFloatPower(base, exponent) ?? base ** exponent;
 }
 
 // code-gauge-allow duplicateLines 18 -- Each language wires its own parser and runtime into the shared modules alike.

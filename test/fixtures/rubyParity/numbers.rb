@@ -15,3 +15,4 @@ p Integer("42"), Integer("0b11"), Integer("0o17"), Integer("017"), Integer(" 10 
 p 1.0.round(1), 0.5.round(half: :even), 1.5.round(half: :even), 2.5.round(half: :down), 25.round(-1, half: :even), 1.15.round(1), 1.25.round(1), 1.35.round(1), 2.675.round(2)
 p (1..10).sum, (1..10).step(2).to_a, 1.0.to_s, 3.0 * 1.1, 100.digits.sum, 6.0221 * 10.0**23, 9007199254740993, 0.1.to_s, -0.0
 p 255.chr, 65.chr, "A".ord + 1, 3.14.to_i, 3.99.round, -3.5.round, 3.5.floor, rand(1), [1.5, 2.5].sum, [0.1] * 3 == [0.1, 0.1, 0.1], [0.1, 0.2, 0.3].sum, [1, 2.5].sum
+p 10.0**23, 0.1**3, 1.1**-5, (-2.5)**-3, 2.0**-1074, 10.0**309, 10.0**-400, 1.5**1000, 123.456**7, 2**0.5, 10**23.0
