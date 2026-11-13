@@ -195,8 +195,8 @@ export function* eachEntry(hash: RHash, visit: (entry: HashEntry, slot: string) 
 
 /** Rebuilds the slots after keys may have changed, as `rehash` does. */
 export function rehash(hash: RHash): void {
-  if (hash.frozen) throw frozenError(hash, runToEnd(inspect(hash)));
   if (hash.iterating > 0) throw runtimeError('rehash during iteration');
+  if (hash.frozen) throw frozenError(hash, runToEnd(inspect(hash)));
   const replacement = new RHash(hash.cls);
   const held = rt().held.length;
   rt().held.push(replacement);

@@ -461,6 +461,7 @@ function bitSlice(value: bigint, start: bigint, length: bigint): bigint {
   const shifted = shift(value, -start);
   if (length < 0n) return shifted;
   if (length === 0n || shifted === 0n) return 0n;
+  if (shifted > 0n && BigInt(shifted.toString(2).length) <= length) return shifted;
   if (length > 32_000_000n) throw rangeError('shift width too big');
   chargeIntegerResult(Number(length), Number(length));
   return shifted & ((1n << length) - 1n);
@@ -990,6 +991,8 @@ sdef('Math', 'gamma', 1, function* (_self, [value]) {
 sdef('Math', 'lgamma', 1, function* (_self, [value]) {
   const number = yield* toFloat(value);
   if (number === Number.NEGATIVE_INFINITY) domainCheck('lgamma', false);
+  if (Number.isNaN(number)) return arr([Number.NaN, 1n]);
+  if (number === Number.POSITIVE_INFINITY) return arr([number, 1n]);
   if (number === 0) return arr([Number.POSITIVE_INFINITY, Object.is(number, -0) ? -1n : 1n]);
   const [logarithm, sign] = platformLogGamma(number);
   return arr([logarithm, BigInt(sign)]);

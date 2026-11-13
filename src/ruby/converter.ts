@@ -583,7 +583,15 @@ export class Converter {
     if (value.k === 'return' || value.k === 'break' || value.k === 'next' || value.k === 'retry') {
       this.fail(node, `${value.k} は値として使えません。`);
     }
-    if (value.k === 'seq' || value.k === 'begin') {
+    if (value.k === 'begin') {
+      if (value.rescues.length === 0) {
+        const last = value.body.at(-1);
+        if (last) this.checkValue(node, last.e);
+      }
+      const ensured = value.ensure?.at(-1);
+      if (ensured) this.checkValue(node, ensured.e);
+    }
+    if (value.k === 'seq') {
       const last = value.body.at(-1);
       if (last) this.checkValue(node, last.e);
     }

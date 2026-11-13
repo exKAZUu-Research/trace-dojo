@@ -51,19 +51,19 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
 
 function* writePrint(target: Value, args: Value[]): Gen<void> {
   const field = rt().globals.get('$,') ?? NIL;
-  const values = args.length > 0 ? args : [rt().globals.get('$_') ?? NIL];
+  const values = args.length > 0 ? args : [rt().frame.home.scope.vars.get('$_') ?? NIL];
   for (const [index, arg] of values.entries()) {
-    if (index > 0 && field !== NIL) yield* write(target, yield* toSValue(field));
-    yield* write(target, yield* toSValue(arg));
+    if (index > 0 && field !== NIL) yield* write(target, field);
+    yield* write(target, arg);
   }
   const record = rt().globals.get('$\\') ?? NIL;
-  if (record !== NIL) yield* write(target, yield* toSValue(record));
+  if (record !== NIL) yield* write(target, record);
 }
 
-function* write(target: Value, value: string | RString): Gen<void> {
-  const text = value instanceof RString ? value : str(value);
+function* write(target: Value, value: string | Value): Gen<void> {
+  const text = typeof value === 'string' ? str(value) : value;
   if (target instanceof RObject && (target.data === 'stdout' || target.data === 'stderr')) {
-    channel(target.data).write(text.s);
+    channel(target.data).write((text instanceof RString ? text : yield* toSValue(text)).s);
     return;
   }
   yield* callMethod(target, 'write', [text]);

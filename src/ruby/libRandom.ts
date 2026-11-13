@@ -265,6 +265,7 @@ def(
 );
 sdef('Random', 'new', [0, -1], function* (self, args, block) {
   const random = new RObject(self);
+  random.data = new MersenneTwister(BigInt(Math.floor(Math.random() * 2 ** 52)));
   const initialize = classOf(random).findMethod('initialize');
   if (initialize) yield* invoke(initialize, random, args, undefined, block, false);
   return random;

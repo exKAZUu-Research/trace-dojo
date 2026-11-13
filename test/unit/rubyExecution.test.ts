@@ -1400,3 +1400,58 @@ test('custom Hash key hashes require an Integer-convertible result', () => {
     stdout: '1\n',
   });
 });
+
+test('Hash conversion and rehash callbacks keep Ruby error boundaries', () => {
+  expect(run('class A; def to_ary = nil; end; p({a: 1}.to_h { A.new })')).toMatchObject({
+    uncaughtException: 'wrong element type A (expected array) (TypeError)',
+  });
+  expect(run('class A; def to_ary = [1]; end; p({a: 1}.to_h { A.new })')).toMatchObject({
+    uncaughtException: 'element has wrong array length (expected 2, was 1) (ArgumentError)',
+  });
+  expect(run('h = {a: 1}; h.each { h.freeze; begin; h.rehash; rescue => e; p e.class; end }')).toMatchObject({
+    stdout: 'RuntimeError\n',
+  });
+});
+
+test('Math and Integer preserve nonfinite signs and small wide bit slices', () => {
+  expect(run('p Math.lgamma(Float::INFINITY), Math.lgamma(Float::NAN)')).toMatchObject({
+    stdout: '[Infinity, 1]\n[NaN, 1]\n',
+  });
+  expect(run('p 5[0, 32000001], 5[1..32000001], (-1).fdiv(2**1075), 1.fdiv(-(2**1075))')).toMatchObject({
+    stdout: '5\n2\n-0.0\n-0.0\n',
+  });
+});
+
+test('Random subclasses retain native state without calling super', () => {
+  expect(
+    run(
+      'class R < Random; def initialize(x); @n = x; end; end; r = R.new(7); p r.seed.is_a?(Integer), r.rand.is_a?(Float)'
+    )
+  ).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+});
+
+test('print observes scoped last-line values and passes raw values to replacement writers', () => {
+  expect(run('$_ = "a"; def f; $_ = "b"; print; end; f; print')).toMatchObject({ stdout: 'ba' });
+  expect(
+    run('class W; def write(x); $v << x; end; end; $v = []; $_ = 7; $stdout = W.new; print; $stdout = STDOUT; p $v')
+  ).toMatchObject({
+    stdout: '[7]\n',
+  });
+  expect(
+    run('class W; def write(x); $v << x; end; end; $v = []; $stdout = W.new; print; $stdout = STDOUT; p $v')
+  ).toMatchObject({
+    stdout: '[nil]\n',
+  });
+  expect(run('begin; $, = 1; rescue => e; p e.class; end; print "a", "b"')).toMatchObject({ stdout: 'TypeError\nab' });
+  expect(run(String.raw`begin; $\ = 1; rescue => e; p e.class; end; print "a"`)).toMatchObject({
+    stdout: 'TypeError\na',
+  });
+});
+
+test('begin rescue and ensure enforce Ruby value-position rules', () => {
+  expect(run('def f; p(begin; return 2; rescue; 1; end); end; p f')).toMatchObject({ stdout: '2\n' });
+  expect(run('def f; p(begin; 1; ensure; return 2; end); end; p f').kind).toBe('compileError');
+  expect(run('def f; p(begin; return 2; ensure; 1; end); end; p f').kind).toBe('compileError');
+});

@@ -145,9 +145,9 @@ def('Hash', 'to_h', 0, function* (self: RHash, _args, block) {
   yield* eachEntry(self, function* (entry) {
     const result = yield* pair(block, entry.key, entry.value);
     const converted = yield* tryAry(result);
-    if (!converted || converted.items.length !== 2) {
-      throw argumentError(`element has wrong array length (expected 2, was ${converted ? converted.items.length : 1})`);
-    }
+    if (!converted) throw typeError(`wrong element type ${realClassOf(result).name} (expected array)`);
+    if (converted.items.length !== 2)
+      throw argumentError(`element has wrong array length (expected 2, was ${converted.items.length})`);
     yield* hashSet(hash, converted.items[0], converted.items[1]);
   });
   return hash;

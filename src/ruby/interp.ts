@@ -503,6 +503,7 @@ function inspectForFrozen(self: RBasic): string {
 function globalGet(name: string): Value {
   const unsupported = unsupportedGlobal(name);
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
+  if (name === '$_') return rt().frame.home.scope.vars.get(name) ?? NIL;
   return rt().globals.get(name) ?? NIL;
 }
 
@@ -531,10 +532,17 @@ const UNSUPPORTED_GLOBALS: Record<string, string> = {
 function globalSet(name: string, value: Value): void {
   const unsupported = unsupportedGlobal(name);
   if (unsupported) throw new UnsupportedFeatureError(unsupported);
+  if (name === '$_') {
+    rt().frame.home.scope.vars.set(name, value);
+    return;
+  }
   if ((name === '$stdout' || name === '$stderr') && !respondsTo(value, 'write')) {
     throw typeError(`${name} must have write method, ${realClassOf(value).name} given`);
   }
   if (name === '$/' && value !== NIL && !(value instanceof RString)) throw typeError('value of $/ must be String');
+  if ((name === '$,' || name === '$\\') && value !== NIL && !(value instanceof RString)) {
+    throw typeError(`value of ${name} must be String`);
+  }
   rt().globals.set(
     name,
     name === '$/' && value instanceof RString ? stringFromBytes(stringBytes(value), value.binary) : value

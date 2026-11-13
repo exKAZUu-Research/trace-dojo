@@ -63,6 +63,7 @@ export function bigintRatio(numerator: bigint, denominator: bigint): number {
   const remainder = scaledNumerator % scaledDenominator;
   const twice = remainder * 2n;
   if (twice > scaledDenominator || (twice === scaledDenominator && significand % 2n !== 0n)) significand++;
+  if (significand === 0n) return negative ? -0 : 0;
   return roundedDouble(negative ? -significand : significand, unitExponent);
 }
 
