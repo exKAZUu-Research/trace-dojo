@@ -930,7 +930,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_unpickler_arguments',
       ],
     ],
-    posixpath: [[], ['SEEK_SET', 'SEEK_CUR', 'SEEK_END', 'SEEK_SET', 'SEEK_CUR', 'SEEK_END']],
     pydoc: [[], ['_stand_in', '_check_class', '_unsupported', '_check_namespace', '_Unavailable', '_getmembers']],
     statistics: [[], ['_math']],
     threading: [[], ['_thread', '_start_thread', '_ExceptHookArgs', '_invoke_excepthook']],

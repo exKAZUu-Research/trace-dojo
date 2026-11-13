@@ -10,7 +10,9 @@ import { PyDict, type PyList, type PyValue } from './values';
 /** `globals()`: the dict of the calling frame's module variables, which shares them with the frame. */
 export function callerGlobals(): PyDict {
   // The calling frame may be a library module's, such as token.py building its table from its own globals.
-  return namespaceDict((currentRuntime().frames.at(-1) as Frame).globals);
+  const runtime = currentRuntime();
+  const globals = (runtime.frames.at(-1) as Frame).globals;
+  return runtime.finalizer.locals.reflected(namespaceDict(globals), globals) as PyDict;
 }
 
 /**
@@ -18,13 +20,12 @@ export function callerGlobals(): PyDict {
  * `__prepare__` mapping) the frame shares; a function's is a new snapshot on each call, as PEP 667 specifies.
  */
 export function callerLocals(): PyValue {
-  // The program can now read the frames' variables as objects.
-  currentRuntime().finalizer.locals.expose();
   const frames = programFrames();
   const frame = frames.at(-1) as Frame;
   if (frame.locals instanceof MappingNamespace) return frame.locals.mapping;
-  if (frame.kind === 'module' || frame.kind === 'class') return namespaceDict(frame.locals);
-  return newDict(localVariables(frames, frames.length - 1));
+  if (frame.kind === 'module' || frame.kind === 'class')
+    return currentRuntime().finalizer.locals.reflected(namespaceDict(frame.locals), frame.locals);
+  return currentRuntime().finalizer.locals.reflected(newDict(localVariables(frames, frames.length - 1)));
 }
 
 /**

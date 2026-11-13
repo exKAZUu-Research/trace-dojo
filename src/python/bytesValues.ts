@@ -10,6 +10,7 @@ import {
   pyError,
   typeError,
   typeName,
+  unbox,
 } from './types';
 import { type PyClass, PyError, PyObject, type PyValue } from './values';
 
@@ -204,9 +205,14 @@ export function sameKind(self: PyBytes, data: Uint8Array): PyBytes {
   return new PyBytes(self.isMutable ? bytearrayClass : bytesClass, data);
 }
 
+export function bytesPayload(value: PyValue): PyBytes {
+  return unbox(value) as PyBytes;
+}
+
 /** The bytes of a bytes-like object (bytes, bytearray, or memoryview), or undefined for any other value. */
 export function bytesLikeData(value: PyValue): Uint8Array | undefined {
-  if (value instanceof PyBytes) return value.data;
+  const payload = unbox(value);
+  if (payload instanceof PyBytes) return payload.data;
   if (value instanceof PyMemoryView) return value.toBytes();
   // A Python class implements the buffer protocol with `__buffer__` (PEP 688), as `array.array` does.
   if (value instanceof PyObject && !value.cls.isBuiltin && value.cls.lookup('__buffer__') !== undefined) {
@@ -228,7 +234,8 @@ export function requireBytesLike(value: PyValue, message = 'a bytes-like object 
 }
 
 export function isBytesLike(value: PyValue): boolean {
-  return value instanceof PyBytes || value instanceof PyMemoryView;
+  const payload = unbox(value);
+  return payload instanceof PyBytes || payload instanceof PyMemoryView;
 }
 
 /** The bytes of a string whose characters are all below U+0100, one byte per character. */

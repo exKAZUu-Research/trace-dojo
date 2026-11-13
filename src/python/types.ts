@@ -499,15 +499,14 @@ export function stringValue(value: PyValue): string | undefined {
   return typeof text === 'string' ? text : undefined;
 }
 
-/** The builtin value an instance of a subclass of int, float, or str (including IntEnum and StrEnum) stands for. */
+/** Native payloads of value subclasses and mixed-in Enum members; ordinary Enum members stay boxed. */
 export function unbox(value: PyValue): PyValue {
   if (!(value instanceof PyInstance)) return value;
   if (value.primitive !== undefined) return value.primitive;
   const { enumValue, cls } = value;
   if (enumValue !== undefined) {
-    if (typeof enumValue === 'bigint' && cls.isSubclassOf(intClass)) return enumValue;
-    if (typeof enumValue === 'number' && cls.isSubclassOf(floatClass)) return enumValue;
-    if (typeof enumValue === 'string' && cls.isSubclassOf(strClass)) return enumValue;
+    const valueClass = classOf(enumValue);
+    if (valueClass !== objectClass && cls.isSubclassOf(valueClass)) return enumValue;
   }
   return value;
 }

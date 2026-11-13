@@ -97,3 +97,37 @@ print('enum paths')`;
     uncaughtException: undefined,
   });
 });
+
+test('path operations preserve string and byte enum objects when CPython returns the original path', () => {
+  const program = `import os.path
+from enum import Enum
+class Text(str, Enum): NAME = 'name'
+class Binary(bytes, Enum): NAME = b'name'
+for path in [Text.NAME, Binary.NAME]:
+    assert os.fspath(path) is path
+    assert os.path.normcase(path) is path
+    assert os.path.join(path) is path
+    assert os.path.splitext(path)[0] is path
+    assert os.path.splitdrive(path)[1] is path
+    assert os.path.expanduser(path) is path
+    assert os.path.expandvars(path) is path
+    assert os.path.basename(path) == path[:]
+assert os.path.join(Binary.NAME, b'child') == b'name/child'
+assert os.fsencode(Binary.NAME) is Binary.NAME
+assert os.fsdecode(Binary.NAME) == 'name'
+assert repr(Binary.NAME) == "<Binary.NAME: b'name'>"
+assert bytes(Binary.NAME) == b'name'
+assert bytes.__len__(Binary.NAME) == 4
+assert Binary.NAME.upper() == b'NAME'
+assert list(Binary.NAME) == list(b'name')
+assert memoryview(Binary.NAME).tobytes() == b'name'
+import re
+assert re.search(b'n', Binary.NAME).group() == b'n'
+assert Binary.NAME == b'name' and hash(Binary.NAME) == hash(b'name')
+print('preserved')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'preserved\n',
+    uncaughtException: undefined,
+  });
+});

@@ -40,7 +40,8 @@ export function viewOf(value: PyValue, prefix = 'memoryview: '): PyMemoryView {
     value.checkReleased();
     return copyView(value, value.readonly);
   }
-  if (!(value instanceof PyBytes)) {
+  const payload = unbox(value);
+  if (!(payload instanceof PyBytes)) {
     // A Python class implements the buffer protocol with `__buffer__` (PEP 688).
     const buffer = typeof value === 'object' && !value.cls.isBuiltin ? lookupSpecial(value, '__buffer__') : undefined;
     if (buffer === undefined) throw typeError(`${prefix}a bytes-like object is required, not '${typeName(value)}'`);
@@ -51,7 +52,9 @@ export function viewOf(value: PyValue, prefix = 'memoryview: '): PyMemoryView {
     view.checkReleased();
     return copyView(view, view.readonly);
   }
-  return new PyMemoryView(value, 0, value.length, 1, 'B', 1, !value.isMutable);
+  const view = new PyMemoryView(payload, 0, payload.length, 1, 'B', 1, !payload.isMutable);
+  if (payload !== value) view.exporter = value;
+  return view;
 }
 
 const asView = (self: PyValue): PyMemoryView => {

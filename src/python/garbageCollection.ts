@@ -300,7 +300,7 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
   else if (object instanceof PySuper) pending.push(object.self, object.thisClass);
   else if (object instanceof PyDescriptor) pending.push(object.fn, object.setter, object.deleter);
   else if (object instanceof PyDictView) pending.push(object.dict);
-  else if (object instanceof PyMemoryView) pending.push(object.source);
+  else if (object instanceof PyMemoryView) pending.push(object.source, object.exporter);
   else if (object instanceof PyIterator || (object instanceof PyGenerator && !object.finished))
     pushNativeNodes(pending, [...object.holds()].toReversed());
   return 0;

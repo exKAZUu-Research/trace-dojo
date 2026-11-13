@@ -1,15 +1,13 @@
 import { newBytes, PyBytes } from '../bytesValues';
 import { decodeBytes, encodeString } from '../codecs';
-import { registerModule, registerModuleAlias, registerSharedAttributes } from '../modules';
-import { bindValue, callValue, lookupSpecial, toArray } from '../objects';
-import { lessThan } from '../operators';
-import { currentRuntime } from '../runtimeContext';
+import { registerExtraAttributes, registerModule, registerModuleAlias, setBuiltinFunctionModule } from '../modules';
+import { bindValue, callValue, lookupSpecial } from '../objects';
 import { registerSourceModule } from '../sourceModules';
-import { iterStr } from '../strings';
-import { nativeFunction, newList, None, typeError, typeName, unbox, valueError } from '../types';
-import { UnsupportedFeatureError } from '../unsupported';
-import { PyError, PyTuple, type PyValue } from '../values';
+import { nativeFunction, None, typeError, typeName, unbox } from '../types';
+import type { PyValue } from '../values';
+import { clinicFunction } from './clinicArgs';
 import { bindArguments } from './numberSupport';
+import { POSIXPATH_SOURCE } from './posixpathSource';
 
 // os ----------------------------------------------------------------------------------------------------------------
 
@@ -82,10 +80,9 @@ registerModule(
       ['SEEK_SET', 0n],
       ['SEEK_CUR', 1n],
       ['SEEK_END', 2n],
-      ['fspath', pathFunction('fspath', ['path'], 1, ([path]) => fspath(path as PyValue))],
-      ['fsencode', pathFunction('fsencode', ['filename'], 1, ([filename]) => fsencode(filename as PyValue))],
-      ['fsdecode', pathFunction('fsdecode', ['filename'], 1, ([filename]) => fsdecode(filename as PyValue))],
-      ['path', runtime.importModule('posixpath')],
+      ['fspath', osFunction('fspath', ['path'], 1, ([path]) => fspath(path as PyValue))],
+      ['fsencode', osFunction('fsencode', ['filename'], 1, ([filename]) => fsencode(filename as PyValue))],
+      ['fsdecode', osFunction('fsdecode', ['filename'], 1, ([filename]) => fsdecode(filename as PyValue))],
       ['PathLike', runtime.importModule('_os_pathlike').dict.get('PathLike') as PyValue],
     ]),
   SYSTEM_FUNCTIONS
@@ -151,272 +148,49 @@ function fspath(value: PyValue): PyValue {
 }
 
 function isPath(value: PyValue): boolean {
-  return typeof unbox(value) === 'string' || (value instanceof PyBytes && !value.isMutable);
+  const payload = unbox(value);
+  return typeof payload === 'string' || (payload instanceof PyBytes && !payload.isMutable);
 }
 
 /** `os.fsencode`: a path as bytes in the file system encoding of macOS, UTF-8 with surrogateescape. */
 function fsencode(value: PyValue): PyValue {
-  const path = unbox(fspath(value));
-  return typeof path === 'string' ? newBytes(encodeString(path, 'utf8', 'surrogateescape')) : path;
+  const path = fspath(value);
+  const payload = unbox(path);
+  return typeof payload === 'string' ? newBytes(encodeString(payload, 'utf8', 'surrogateescape')) : path;
 }
 
 /** `os.fsdecode`: a path as str, decoded as `os.fsencode` encodes it. */
 function fsdecode(value: PyValue): PyValue {
   const path = fspath(value);
-  return path instanceof PyBytes ? decodeBytes(path.data, 'utf8', 'surrogateescape') : path;
+  const payload = unbox(path);
+  return payload instanceof PyBytes ? decodeBytes(payload.data, 'utf8', 'surrogateescape') : path;
 }
 
-// posixpath ---------------------------------------------------------------------------------------------------------
-
-registerModule(
-  'posixpath',
-  () =>
-    new Map<string, PyValue>([
-      ['sep', '/'],
-      ['altsep', None],
-      ['extsep', '.'],
-      ['pathsep', ':'],
-      ['curdir', '.'],
-      ['pardir', '..'],
-      ['devnull', '/dev/null'],
-      ['SEEK_SET', 0n],
-      ['SEEK_CUR', 1n],
-      ['SEEK_END', 2n],
-      ['defpath', '/bin:/usr/bin'],
-      ['supports_unicode_filenames', true],
-      ['join', nativeFunction('join', (args, kwargs) => onPaths(() => join(args, kwargs)))],
-      ['split', pathFunction('split', ['p'], 1, ([p]) => tuple(splitPath(text(p))))],
-      ['basename', pathFunction('basename', ['p'], 1, ([p]) => splitPath(text(p))[1])],
-      ['dirname', pathFunction('dirname', ['p'], 1, ([p]) => splitPath(text(p))[0])],
-      ['splitext', pathFunction('splitext', ['p'], 1, ([p]) => tuple(splitext(text(p))))],
-      ['splitdrive', pathFunction('splitdrive', ['p'], 1, ([p]) => tuple(['', text(p)]))],
-      ['splitroot', pathFunction('splitroot', ['p'], 1, ([p]) => tuple(splitroot(text(p))))],
-      ['normpath', pathFunction('normpath', ['path'], 1, ([p]) => normpath(text(p)))],
-      ['normcase', pathFunction('normcase', ['s'], 1, ([s]) => text(s))],
-      ['isabs', pathFunction('isabs', ['s'], 1, ([s]) => text(s).startsWith('/'))],
-      ['abspath', pathFunction('abspath', ['path'], 1, ([p]) => abspath(text(p)))],
-      ['relpath', pathFunction('relpath', ['path', 'start'], 1, ([p, start]) => relpath(p as PyValue, start))],
-      ['commonprefix', pathFunction('commonprefix', ['m'], 1, ([m]) => commonprefix(m as PyValue))],
-      ['commonpath', pathFunction('commonpath', ['paths'], 1, ([paths]) => commonpath(paths as PyValue))],
-      // Only a path that names a home directory or a variable reads the environment.
-      [
-        'expanduser',
-        pathFunction('expanduser', ['path'], 1, ([p]) => withoutEnvironment(text(p), (path) => path.startsWith('~'))),
-      ],
-      [
-        'expandvars',
-        pathFunction('expandvars', ['path'], 1, ([p]) => withoutEnvironment(text(p), (path) => path.includes('$'))),
-      ],
-    ]),
-  Object.fromEntries(
-    [
-      'exists',
-      'lexists',
-      'isfile',
-      'isdir',
-      'islink',
-      'ismount',
-      'isjunction',
-      'isdevdrive',
-      'getsize',
-      'getmtime',
-      'getatime',
-      'getctime',
-      'samefile',
-      'sameopenfile',
-      'samestat',
-      'realpath',
-    ].map((name) => [name, `os.path.${name}()（ファイルシステムや環境変数を参照する関数）`])
-  )
-);
+registerSourceModule('posixpath', POSIXPATH_SOURCE);
+registerExtraAttributes('posixpath', (_runtime, namespace) => {
+  for (const [name, nativeName, parameter] of [
+    ['normpath', '_path_normpath', 'path'],
+    ['splitroot', '_path_splitroot_ex', 'p'],
+  ] as const) {
+    const implementation = namespace.get(name) as PyValue;
+    const wrapper = clinicFunction(
+      { name: nativeName, params: [parameter], positionalOnly: 0, required: 1 },
+      ([value]) => callValue(implementation, [value as PyValue])
+    );
+    setBuiltinFunctionModule(wrapper, 'posix');
+    namespace.set(name, wrapper);
+  }
+  return [];
+});
 registerModuleAlias('os.path', 'posixpath');
-registerSharedAttributes('posixpath', { ALLOW_MISSING: 'genericpath:ALLOW_MISSING' });
 
-function pathFunction(
+function osFunction(
   name: string,
   params: string[],
   required: number,
   run: (args: (PyValue | undefined)[]) => PyValue
 ): PyValue {
   return nativeFunction(name, (args, kwargs) =>
-    onPaths(() => run(bindArguments({ qualified: name, params, required, isFunction: true }, args, kwargs)))
+    run(bindArguments({ qualified: name, params, required, isFunction: true }, args, kwargs))
   );
-}
-
-/** Whether the paths of the running path function are bytes, which its str results then become; undefined before any. */
-let bytesPaths: boolean | undefined;
-
-/**
- * Runs a path function over str paths, as CPython's posixpath runs the same code over str and bytes: a bytes path is
- * read as the str of its bytes' code points, and the str results then become bytes again.
- */
-function onPaths(run: () => PyValue): PyValue {
-  const outer = bytesPaths;
-  bytesPaths = undefined;
-  try {
-    const result = run();
-    return bytesPaths ? asBytesResult(result) : result;
-  } finally {
-    bytesPaths = outer;
-  }
-}
-
-function asBytesResult(result: PyValue): PyValue {
-  if (typeof result === 'string') return newBytes(Uint8Array.from(result, (char) => char.codePointAt(0) as number));
-  if (result instanceof PyTuple) return tuple(result.items.map((item) => asBytesResult(item)));
-  return result;
-}
-
-/** The text of a path argument, with each byte of a bytes path as a code point. */
-function text(value: PyValue | undefined): string {
-  const path = fspath(value as PyValue);
-  const isBytes = path instanceof PyBytes;
-  if (bytesPaths === undefined) bytesPaths = isBytes;
-  else if (bytesPaths !== isBytes) throw typeError("Can't mix strings and bytes in path components");
-  if (path instanceof PyBytes) return Array.from(path.data, (byte) => String.fromCodePoint(byte)).join('');
-  return unbox(path) as string;
-}
-
-/** A path that `readsEnvironment` says needs no environment variable, as it is; any other is not supported. */
-function withoutEnvironment(path: string, readsEnvironment: (path: string) => boolean): string {
-  if (readsEnvironment(path))
-    throw new UnsupportedFeatureError('ホームディレクトリや環境変数を参照する os.path の展開');
-  return path;
-}
-
-function tuple(items: PyValue[]): PyValue {
-  return currentRuntime().tuple(items);
-}
-
-function join(args: PyValue[], kwargs: Map<string, PyValue> | undefined): PyValue {
-  const [first, ...rest] = bindJoin(args, kwargs);
-  const start = fspath(first);
-  let parts: PyValue[];
-  try {
-    parts = rest.map((part) => fspath(part));
-    checkArgTypes('join', [start, ...parts]);
-  } catch (error) {
-    if (error instanceof PyError && error.exception.cls.name === 'TypeError') checkArgTypes('join', [start, ...rest]);
-    throw error;
-  }
-  if (rest.length === 0) {
-    text(start);
-    return start;
-  }
-  let path = text(start);
-  for (const part of parts.map((each) => text(each))) {
-    if (part.startsWith('/') || path === '') path = part;
-    else if (path.endsWith('/')) path += part;
-    else path += `/${part}`;
-  }
-  currentRuntime().buildString(path.length);
-  return path;
-}
-
-function bindJoin(args: PyValue[], kwargs: Map<string, PyValue> | undefined): PyValue[] {
-  if (kwargs && kwargs.size > 0) {
-    throw typeError(`join() got an unexpected keyword argument '${[...kwargs.keys()][0]}'`);
-  }
-  if (args.length === 0) throw typeError("join() missing 1 required positional argument: 'a'");
-  return args;
-}
-
-/** `genericpath._check_arg_types`, which words a path component of the wrong type. */
-function checkArgTypes(name: string, values: PyValue[]): void {
-  let hasString = false;
-  let hasBytes = false;
-  for (const value of values) {
-    if (typeof unbox(value) === 'string') {
-      hasString = true;
-    } else if (isPath(value)) {
-      hasBytes = true;
-    } else {
-      throw typeError(`${name}() argument must be str, bytes, or os.PathLike object, not '${typeName(value)}'`);
-    }
-  }
-  if (hasString && hasBytes) throw typeError("Can't mix strings and bytes in path components");
-}
-
-function splitPath(path: string): [string, string] {
-  const index = path.lastIndexOf('/') + 1;
-  let head = path.slice(0, index);
-  if (head !== '' && head !== '/'.repeat(head.length)) head = head.replace(/\/+$/, '');
-  return [head, path.slice(index)];
-}
-
-function splitext(path: string): [string, string] {
-  const sepIndex = path.lastIndexOf('/');
-  const dotIndex = path.lastIndexOf('.');
-  if (dotIndex > sepIndex) {
-    for (let index = sepIndex + 1; index < dotIndex; index++) {
-      if (path[index] !== '.') return [path.slice(0, dotIndex), path.slice(dotIndex)];
-    }
-  }
-  return [path, ''];
-}
-
-function splitroot(path: string): [string, string, string] {
-  if (!path.startsWith('/')) return ['', '', path];
-  if (path[1] !== '/' || path[2] === '/') return ['', '/', path.slice(1)];
-  return ['', path.slice(0, 2), path.slice(2)];
-}
-
-function normpath(path: string): string {
-  if (path === '') return '.';
-  const initialSlashes = path.startsWith('//') && !path.startsWith('///') ? 2 : path.startsWith('/') ? 1 : 0;
-  const parts: string[] = [];
-  for (const part of path.split('/')) {
-    if (part === '' || part === '.') continue;
-    if (part !== '..' || (initialSlashes === 0 && parts.length === 0) || parts.at(-1) === '..') parts.push(part);
-    else if (parts.length > 0) parts.pop();
-  }
-  return '/'.repeat(initialSlashes) + parts.join('/') || '.';
-}
-
-/** `os.path.abspath`, which resolves a relative path against the working directory this grader does not have. */
-function abspath(path: string): string {
-  if (!path.startsWith('/')) throw new UnsupportedFeatureError('相対パスを絶対パスにすること（作業ディレクトリ）');
-  return normpath(path);
-}
-
-function relpath(pathValue: PyValue, startValue: PyValue | undefined): string {
-  const path = text(pathValue);
-  if (path === '') throw valueError('no path specified');
-  const start = startValue === undefined || startValue === None ? '.' : text(startValue);
-  const startParts = abspath(start).split('/').filter(Boolean);
-  const pathParts = abspath(path).split('/').filter(Boolean);
-  let common = 0;
-  while (common < startParts.length && common < pathParts.length && startParts[common] === pathParts[common]) common++;
-  const parts = [...Array.from({ length: startParts.length - common }, () => '..'), ...pathParts.slice(common)];
-  return parts.length === 0 ? '.' : parts.join('/');
-}
-
-function commonprefix(value: PyValue): PyValue {
-  const items = toArray(value);
-  if (items.length === 0) return '';
-  const paths = items.map((item) => text(item));
-  const sorted = paths.toSorted(pythonOrder);
-  const [first, last] = [iterStr(sorted[0]), iterStr(sorted.at(-1) as string)];
-  let index = 0;
-  while (index < first.length && first[index] === last[index]) index++;
-  return first.slice(0, index).join('');
-}
-
-function commonpath(value: PyValue): PyValue {
-  const paths = toArray(value).map((item) => text(item));
-  if (paths.length === 0) throw valueError('commonpath() arg is an empty sequence');
-  const absolute = new Set(paths.map((path) => path.startsWith('/')));
-  if (absolute.size > 1) throw valueError("Can't mix absolute and relative paths");
-  const split = paths.map((path) => path.split('/').filter((part) => part !== '' && part !== '.'));
-  const sorted = split.toSorted((a, b) => pythonOrder(newList(a), newList(b)));
-  const [first, last] = [sorted[0], sorted.at(-1) as string[]];
-  let index = 0;
-  while (index < first.length && first[index] === last[index]) index++;
-  return (absolute.has(true) ? '/' : '') + first.slice(0, index).join('/');
-}
-
-/** Orders values as Python's `<` does, as `min` and `max` would pick them. */
-function pythonOrder(a: PyValue, b: PyValue): number {
-  if (lessThan(a, b)) return -1;
-  return lessThan(b, a) ? 1 : 0;
 }

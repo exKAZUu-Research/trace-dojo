@@ -185,3 +185,31 @@ print('forwarded')`;
     uncaughtException: undefined,
   });
 });
+
+test.each(['locals()', 'vars()', 'sys._getframe()'])(
+  'reflection during item iteration preserves bounded ownership: %s',
+  (reflect) => {
+    const program = `import sys
+d = {i: [i] for i in range(9000)}
+total = 0
+for pair in d.items():
+    if pair[0] == 0: ${reflect}
+    total += pair[1][0]
+assert total == 40495500
+it = iter({1: 'one', 2: 'two', 3: 'three'}.items())
+def capture():
+    pair = next(it)
+    return locals()
+snapshot = capture()
+assert next(it) == (2, 'two')
+assert snapshot['pair'] == (1, 'one')
+snapshot.clear()
+assert next(it) == (3, 'three')
+print('reflected')`;
+    expect(executeProgram('python', program)).toMatchObject({
+      kind: 'executed',
+      stdout: 'reflected\n',
+      uncaughtException: undefined,
+    });
+  }
+);

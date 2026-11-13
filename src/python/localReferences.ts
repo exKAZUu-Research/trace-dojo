@@ -117,14 +117,17 @@ const KEEPING_ITS_OWN = new Set([
  * Expressions hand their values on by default, so a value is local only where the evaluator says it stays in the
  * frame: assigned to a name, stored in a local object, passed to a Python function, discarded, returned to the
  * expression that called the function, or used where the operation reads it and keeps nothing, such as an operand.
- * Reflection hands general objects on. Cached item tuples track frame transfers separately, so yielding one does
- * not require walking unrelated data on every item.
+ * Cached item tuples and reflected snapshots retain known frame and container ownership, so reflection and yielding
+ * do not require walking unrelated data on every item.
  */
 export class LocalReferences {
   /** Whether objects with observable ownership are being followed. */
   marking = false;
-  /** Whether the program read the frames' variables as objects, which makes every object reachable some other way. */
+  /** Whether live frame access disables general local tracking. */
   private exposed = false;
+  private readonly itemOwners = new WeakSet<PyObject>();
+  private readonly itemTupleRefs = new Set<WeakRef<PyObject>>();
+  private readonly liveNamespaces = new WeakMap<Map<string, PyValue>, PyObject>();
   private readonly itemTuples = new WeakSet<PyObject>();
   private readonly exposedFrames = new WeakSet<Frame>();
   private readonly retainedFrames = new WeakSet<Frame>();
@@ -149,6 +152,7 @@ export class LocalReferences {
   bornItemTuple(tuple: PyTuple): void {
     this.marking = true;
     this.itemTuples.add(tuple);
+    this.itemTupleRefs.add(new WeakRef(tuple));
     this.local.add(tuple);
   }
 
@@ -163,7 +167,7 @@ export class LocalReferences {
   }
 
   binding(frame: Frame, value: unknown): void {
-    if (!(value instanceof PyObject) || !this.itemTuples.has(value) || !this.retainedFrames.has(frame)) return;
+    if (!(value instanceof PyObject) || !this.tracksItemOwnership(value) || !this.retainedFrames.has(frame)) return;
     let id = this.frameIds.get(frame);
     if (id === undefined) this.frameIds.set(frame, (id = this.nextFrameId++));
     let frames = this.tupleFrames.get(value);
@@ -173,31 +177,35 @@ export class LocalReferences {
 
   canLocateItemTuple(tuple: PyTuple): boolean {
     if (!this.isLocal(tuple)) return false;
-    for (const [id, reference] of this.tupleFrames.get(tuple) ?? []) {
-      const frame = reference.deref();
-      if (!frame) {
-        this.tupleFrames.get(tuple)?.delete(id);
-        continue;
-      }
-      if (
-        this.retainedFrames.has(frame) &&
-        !this.runtime.frames.includes(frame) &&
-        nativeReferences(frame.localValues()).includes(tuple)
-      )
-        return false;
-    }
-    return true;
+    return (
+      !this.hasRetainedFrame(tuple) &&
+      !this.leadsBack(new Set([tuple]), (owner) => this.hasRetainedFrame(owner), new Set())
+    );
+  }
+
+  reflected(value: PyValue, namespace?: Map<string, PyValue>): PyValue {
+    if (!(value instanceof PyObject)) return value;
+    if (namespace && this.liveNamespaces.has(namespace)) return value;
+    this.marking = true;
+    this.local.add(value);
+    this.itemOwners.add(value);
+    if (namespace) this.liveNamespaces.set(namespace, value);
+    for (const child of referencesOf(value)) if (child instanceof PyObject) this.own(child, value);
+    return value;
   }
 
   /** Follows a container the evaluator created, holding `items`, while objects are followed. */
   bornContainer(container: PyValue, items: Iterable<PyValue>): void {
     if (!(container instanceof PyObject)) return;
     if (!this.exposed) this.local.add(container);
-    for (const item of items) this.own(item, container);
+    for (const item of items) {
+      if (item instanceof PyObject && this.tracksItemOwnership(item) && this.isLocal(item)) this.local.add(container);
+      this.own(item, container);
+    }
   }
 
   isLocal(object: object): boolean {
-    return (!this.exposed || this.itemTuples.has(object as PyObject)) && this.local.has(object as PyObject);
+    return (!this.exposed || this.tracksItemOwnership(object as PyObject)) && this.local.has(object as PyObject);
   }
 
   /** Whether an object is local, or a method bound to a local object, which only the running frames hold too. */
@@ -217,6 +225,7 @@ export class LocalReferences {
       this.escape(value);
       return;
     }
+    if (this.tracksItemOwnership(value)) this.itemOwners.add(owner);
     let owners = this.owners.get(value);
     if (!owners) {
       owners = new Set();
@@ -249,7 +258,7 @@ export class LocalReferences {
   escapeFrame(frame: Frame): void {
     if (!this.marking) return;
     for (const value of nativeReferences(frameReferences(frame))) {
-      if (value instanceof PyObject && this.itemTuples.has(value)) {
+      if (value instanceof PyObject && this.tracksItemOwnership(value)) {
         this.retainedFrames.add(frame);
         this.binding(frame, value);
       } else this.escape(value);
@@ -274,9 +283,22 @@ export class LocalReferences {
   }
 
   expose(): void {
-    for (const frame of this.runtime.frames) {
-      for (const value of nativeReferences(frame.localValues())) this.escape(value);
+    const pending: PyObject[] = [];
+    for (const reference of this.itemTupleRefs) {
+      const value = reference.deref();
+      if (value && this.isLocal(value)) pending.push(value);
+      else if (!value) this.itemTupleRefs.delete(reference);
     }
+    const visited = new Set<PyObject>();
+    while (pending.length > 0) {
+      const value = pending.pop() as PyObject;
+      if (visited.has(value)) continue;
+      visited.add(value);
+      this.itemOwners.add(value);
+      for (const owner of this.owners.get(value) ?? [])
+        if (this.isLocal(owner) && holds(owner, value)) pending.push(owner);
+    }
+    this.runtime.scan(visited.size);
     this.exposed = true;
   }
 
@@ -289,7 +311,8 @@ export class LocalReferences {
     } else if (access !== 'global') {
       return false;
     }
-    return frame.globals === this.runtime.mainGlobals;
+    const namespace = this.liveNamespaces.get(frame.globals);
+    return frame.globals === this.runtime.mainGlobals && (namespace === undefined || this.isLocal(namespace));
   }
 
   // Calls -------------------------------------------------------------------------------------------------------------
@@ -398,6 +421,28 @@ export class LocalReferences {
     for (const frame of this.runtime.frames) for (const value of nativeReferences(frameReferences(frame))) note(value);
     for (const value of hostRoots(this.runtime)) note(value);
     return direct;
+  }
+
+  private tracksItemOwnership(value: PyObject): boolean {
+    return this.itemTuples.has(value) || this.itemOwners.has(value);
+  }
+
+  private hasRetainedFrame(value: object): boolean {
+    const frames = this.tupleFrames.get(value as PyObject);
+    for (const [id, reference] of frames ?? []) {
+      const frame = reference.deref();
+      if (!frame) {
+        frames?.delete(id);
+        continue;
+      }
+      if (
+        this.retainedFrames.has(frame) &&
+        !this.runtime.frames.includes(frame) &&
+        nativeReferences(frame.localValues()).includes(value)
+      )
+        return true;
+    }
+    return false;
   }
 }
 

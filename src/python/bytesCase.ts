@@ -5,6 +5,7 @@ import {
   bytearrayClass,
   bytesClass,
   bytesLikeData,
+  bytesPayload,
   latin1Text,
   PyBytes,
   requireBytesLike,
@@ -20,7 +21,7 @@ import { None, typeError, typeName, unbox, valueError } from './types';
 import { isTitleSequence } from './unicodeCase';
 import type { PyValue } from './values';
 
-const dataOf = (self: PyValue): Uint8Array => (self as PyBytes).data;
+const dataOf = (self: PyValue): Uint8Array => bytesPayload(self).data;
 const textOfBytes = (self: PyValue): string[] => latin1Text(dataOf(self)).split('');
 
 const isUpper = (code: number): boolean => code >= 0x41 && code <= 0x5a;
@@ -35,7 +36,7 @@ function mapBytes(self: PyValue, map: (code: number, index: number, data: Uint8A
   const data = dataOf(self);
   currentRuntime().scan(data.length);
   return sameKind(
-    self as PyBytes,
+    bytesPayload(self),
     data.map((code, index) => map(code, index, data))
   );
 }
@@ -203,7 +204,7 @@ shared(
     const deleted = new Set(deleteValue === undefined ? [] : requireBytesLike(deleteValue));
     const result: number[] = [];
     for (const byte of dataOf(self)) if (!deleted.has(byte)) result.push(table ? table[byte] : byte);
-    return sameKind(self as PyBytes, Uint8Array.from(result));
+    return sameKind(bytesPayload(self), Uint8Array.from(result));
   },
   { keywords: ['delete'] }
 );

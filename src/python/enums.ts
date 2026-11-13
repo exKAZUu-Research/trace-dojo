@@ -10,6 +10,7 @@ import { currentRuntime, runningRuntime } from './runtimeContext';
 import { defineValueHash } from './slotWrappers';
 import {
   argumentTypeName,
+  bytesClass,
   classOf,
   defineMethod,
   exceptionClassNamed,
@@ -336,11 +337,11 @@ function checkMemberOrder(
 }
 
 /**
- * Gives an Enum class that mixes in `str` or `int` the reprs and comparisons of Enum, which EnumType puts before the
+ * Gives an Enum class that mixes in `str`, `int`, or `bytes` the reprs and comparisons of Enum, which EnumType puts before the
  * mixed-in type's: `repr()` shows the member, `str()` follows ReprEnum, and members equal their values.
  */
 function useEnumMethodsOverMixin(cls: PyClass): void {
-  if (!cls.isSubclassOf(strClass) && !cls.isSubclassOf(intClass)) return;
+  if (![strClass, intClass, bytesClass].some((base) => cls.isSubclassOf(base))) return;
   const reprEnum = cls.isSubclassOf(reprEnumClass);
   const methods: [string, PyClass][] = [
     ['__repr__', isFlagClass(cls) ? flagClass : enumClass],
@@ -421,6 +422,7 @@ function mixinValue(cls: PyClass, value: PyValue): PyValue {
   if (cls.isSubclassOf(strEnumClass) && typeof value !== 'string') throw typeError(`${pyRepr(value)} is not a string`);
   if (cls.isSubclassOf(intClass) && typeof value !== 'bigint') return callValue(intClass, [value]);
   if (cls.isSubclassOf(strClass) && typeof value !== 'string') return callValue(strClass, [value]);
+  if (cls.isSubclassOf(bytesClass) && !classOf(value).isSubclassOf(bytesClass)) return callValue(bytesClass, [value]);
   return value;
 }
 

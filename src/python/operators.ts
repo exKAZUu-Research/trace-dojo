@@ -33,14 +33,12 @@ import {
   classOf,
   dictClass,
   frozensetClass,
-  intClass,
   newDict,
   newList,
   newTuple,
   NotImplemented,
   objectClass,
   pyError,
-  strClass,
   tupleClass,
   typeError,
   typeName,
@@ -936,13 +934,9 @@ export function equals(left: PyValue, right: PyValue): boolean {
   return isTruthyValue(compareOp('==', left, right));
 }
 
-/** The int an IntEnum member stands for, which int operators use; any other value as it is. */
 export function intEnumValue(value: PyValue): PyValue {
   if (!(value instanceof PyInstance) || value.enumValue === undefined) return value;
-  const { enumValue, cls } = value;
-  if (typeof enumValue === 'bigint' && cls.isSubclassOf(intClass)) return enumValue;
-  if (typeof enumValue === 'string' && cls.isSubclassOf(strClass)) return enumValue;
-  return value;
+  return unbox(value);
 }
 
 /** Whether a value is a member of a Flag class, whose bitwise operators make members. */

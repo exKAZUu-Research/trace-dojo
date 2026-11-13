@@ -3,6 +3,7 @@ import {
   bytearrayClass,
   bytesClass,
   bytesLikeData,
+  bytesPayload as asBytes,
   bytesRepr,
   latin1Text,
   newBytes,
@@ -30,6 +31,7 @@ import { currentRuntime } from './runtimeContext';
 import { readInteger, writeInteger } from './structCodes';
 import {
   boolClass,
+  classOf,
   defineMethod,
   intClass,
   iteratorClass,
@@ -160,8 +162,6 @@ export function byteValue(value: PyValue, rangeMessage = 'byte must be in range(
 
 // Protocol ----------------------------------------------------------------------------------------------------------
 
-const asBytes = (self: PyValue): PyBytes => self as PyBytes;
-
 const COMPARISONS: [string, (order: number) => boolean][] = [
   ['__eq__', (order) => order === 0],
   ['__ne__', (order) => order !== 0],
@@ -177,7 +177,7 @@ for (const cls of [bytesClass, bytearrayClass]) {
   method(cls, '__str__', 'none', 0, 0, (self) => bytesRepr(asBytes(self)));
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt(asBytes(self).length));
   method(cls, '__getitem__', 'one', 1, 1, (self, [key]) => bytesItem(asBytes(self), key));
-  method(cls, '__iter__', 'none', 0, 0, (self) => bytesIterator(asBytes(self)));
+  method(cls, '__iter__', 'none', 0, 0, (self) => bytesIterator(self));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => bytesContains(asBytes(self).data, item));
   method(cls, '__add__', 'one', 1, 1, (self, [other]) => concatBytes(asBytes(self), other));
   method(cls, '__mul__', 'one', 1, 1, (self, [count]) => repeatBytes(asBytes(self), count));
@@ -193,10 +193,11 @@ for (const cls of [bytesClass, bytearrayClass]) {
   method(cls, '__rmod__', 'one', 1, 1, () => NotImplemented);
   for (const [operator, test] of COMPARISONS) {
     method(cls, operator, 'one', 1, 1, (self, [other]) => {
+      const payload = unbox(other);
       const otherData =
         name === 'bytes'
-          ? other instanceof PyBytes && !other.isMutable
-            ? other.data
+          ? payload instanceof PyBytes && !payload.isMutable
+            ? payload.data
             : undefined
           : bytesLikeData(other);
       if (otherData === undefined) return NotImplemented;
@@ -207,7 +208,7 @@ for (const cls of [bytesClass, bytearrayClass]) {
 method(bytesClass, '__hash__', 'none', 0, 0, (self) => pyHash(latin1Text(asBytes(self).data)));
 bytearrayClass.dict.set('__hash__', None);
 method(bytesClass, '__bytes__', 'none', 0, 0, (self) =>
-  asBytes(self).cls === bytesClass ? self : newBytes(new Uint8Array(asBytes(self).data))
+  classOf(self) === bytesClass ? self : newBytes(new Uint8Array(asBytes(self).data))
 );
 method(bytesClass, '__getnewargs__', 'none', 0, 0, (self) => currentRuntime().tuple([self]));
 
@@ -238,14 +239,15 @@ function bytesItem(self: PyBytes, key: PyValue): PyValue {
   return BigInt(data[Number(resolved)]);
 }
 
-function bytesIterator(self: PyBytes): PyIterator {
+function bytesIterator(self: PyValue): PyIterator {
+  const payload = asBytes(self);
   const next = iterateByIndex(
     self,
-    () => self.length,
-    (index) => BigInt(self.data[index] as number),
+    () => payload.length,
+    (index) => BigInt(payload.data[index] as number),
     newTuple([])
   );
-  return nativeIterator(iteratorClass(self.isMutable ? 'bytearray_iterator' : 'bytes_iterator'), next, () => [self]);
+  return nativeIterator(iteratorClass(payload.isMutable ? 'bytearray_iterator' : 'bytes_iterator'), next, () => [self]);
 }
 
 /** `item in data`, for an int byte value or a bytes-like subsequence. */

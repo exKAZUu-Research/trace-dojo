@@ -3,6 +3,7 @@ import {
   bytearrayClass,
   bytesClass,
   bytesLikeData,
+  bytesPayload,
   latin1Bytes,
   latin1Text,
   PyBytes,
@@ -19,9 +20,9 @@ import { newList, newTuple, None, typeError, typeName, valueError } from './type
 import { expandTabs, padText, replaceText, splitLinesOf, splitOn, splitWhitespace, stripBounds } from './typeStr';
 import { PyTuple, type PyValue } from './values';
 
-const dataOf = (self: PyValue): Uint8Array => (self as PyBytes).data;
-const textOf = (self: PyValue): string => latin1Text((self as PyBytes).data);
-const wrap = (self: PyValue, text: string): PyBytes => sameKind(self as PyBytes, latin1Bytes(text));
+const dataOf = (self: PyValue): Uint8Array => bytesPayload(self).data;
+const textOf = (self: PyValue): string => latin1Text(bytesPayload(self).data);
+const wrap = (self: PyValue, text: string): PyBytes => sameKind(bytesPayload(self), latin1Bytes(text));
 
 type MethodArgs = Parameters<typeof method> extends [unknown, ...infer Rest] ? Rest : never;
 
@@ -188,7 +189,7 @@ shared('join', 'one', 1, 1, (self, [iterable]) => {
     result.set(part, offset);
     offset += part.length;
   }
-  return sameKind(self as PyBytes, result);
+  return sameKind(bytesPayload(self), result);
 });
 
 for (const [name, fromEnd] of [
@@ -221,7 +222,7 @@ for (const [name, left, right] of [
     const data = dataOf(self);
     const stripped = chars === undefined || chars === None ? undefined : new Set(requireBytesLike(chars));
     const [start, end] = stripBounds(data, stripped ? (code) => stripped.has(code) : isSpaceByte, left, right);
-    return sameKind(self as PyBytes, data.slice(start, end));
+    return sameKind(bytesPayload(self), data.slice(start, end));
   });
 }
 
@@ -252,7 +253,7 @@ function fillByte(name: string, fill: PyValue): string {
 shared('zfill', 'one', 1, 1, (self, [width]) => {
   const text = textOf(self);
   const target = Number(toIndex(width));
-  if (text.length >= target) return sameKind(self as PyBytes, new Uint8Array(dataOf(self)));
+  if (text.length >= target) return sameKind(bytesPayload(self), new Uint8Array(dataOf(self)));
   currentRuntime().buildString(target);
   const sign = text.startsWith('+') || text.startsWith('-') ? text[0] : '';
   return wrap(self, sign + '0'.repeat(target - text.length) + text.slice(sign.length));
@@ -285,7 +286,7 @@ for (const [name, atEnd] of [
     const text = textOf(self);
     const affix = latin1Text(requireBytesLike(affixValue));
     if (affix === '' || !(atEnd ? text.endsWith(affix) : text.startsWith(affix))) {
-      return sameKind(self as PyBytes, new Uint8Array(dataOf(self)));
+      return sameKind(bytesPayload(self), new Uint8Array(dataOf(self)));
     }
     return wrap(self, atEnd ? text.slice(0, text.length - affix.length) : text.slice(affix.length));
   });
