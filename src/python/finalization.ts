@@ -10,6 +10,7 @@ import { closeGenerator } from './generators';
 import { LocalReferences } from './localReferences';
 import { bindValue, callValue } from './objects';
 import type { Runtime } from './runtime';
+import { threadRoots } from './threads';
 import { asyncGeneratorClass, None } from './types';
 import { reportUnraisable } from './unraisable';
 import { UnsupportedFeatureError } from './unsupported';
@@ -425,7 +426,7 @@ export class GeneratorFinalizer {
       for (const value of frame.temporaries) roots.push(value);
       if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
     }
-    if (runtime.threads) roots.push(...runtime.threads.roots());
+    roots.push(...threadRoots(runtime));
     return roots;
   }
 }

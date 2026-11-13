@@ -3,6 +3,7 @@ import type { Frame } from './frame';
 import { referencesOf } from './garbageCollection';
 import { plainInitOf } from './instances';
 import type { Runtime } from './runtime';
+import { threadRoots } from './threads';
 import { dictClass, listClass, setClass, tupleClass } from './types';
 import {
   PyBoundMethod,
@@ -343,7 +344,7 @@ export class LocalReferences {
       for (const cell of frame.cells.values()) note(cell.value);
       for (const value of frame.temporaries) note(value);
     }
-    if (this.runtime.threads) for (const value of this.runtime.threads.roots()) note(value);
+    for (const value of threadRoots(this.runtime)) note(value);
     return direct;
   }
 }

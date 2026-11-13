@@ -15,7 +15,6 @@ registerSharedAttributes('doctest', { IncrementalNewlineDecoder: 'io:Incremental
 registerSharedAttributes('email.parser', { TextIOWrapper: 'io:TextIOWrapper' });
 registerSharedAttributes('tokenize', { TextIOWrapper: 'io:TextIOWrapper' });
 registerSharedAttributes('numbers', { ABCMeta: 'abc:ABCMeta', abstractmethod: 'abc:abstractmethod' });
-registerSharedAttributes('concurrent.futures', { TimeoutError: 'builtins:TimeoutError' });
 registerSharedAttributes('traceback', { suppress: 'contextlib:suppress' });
 registerSharedAttributes('unittest.mock', { Format: 'annotationlib:Format', fields: 'dataclasses:fields' });
 registerSharedAttributes('statistics', {
@@ -49,7 +48,6 @@ registerExtraAttributes('io', () => [
 registerExtraAttributes('inspect', () => [
   ['__author__', newTuple(['Ka-Ping Yee <ping@lfw.org>', 'Yury Selivanov <yselivanov@sprymix.com>'])],
 ]);
-registerExtraAttributes('concurrent.futures', () => [['__author__', 'Brian Quinlan (brian@sweetapp.com)']]);
 registerExtraAttributes('traceback', () => [['BUILTIN_EXCEPTION_LIMIT', callValue(objectClass, [])]]);
 registerExtraAttributes('base64', () => [
   ['MAXLINESIZE', 76n],

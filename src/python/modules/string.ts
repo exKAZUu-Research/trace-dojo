@@ -4,8 +4,7 @@ import { registerSourceModule } from '../sourceModules';
 import { iteratorClass, newTuple, None, pyError, typeError, typeName } from '../types';
 import { DONE, PyIterator, type PyValue } from '../values';
 
-// CPython's `string` module, with natives standing in for the helpers of its `_string` module and a lookup standing in
-// for `collections.ChainMap`.
+// CPython's `string` module, with natives standing in for the helpers of its `_string` module.
 const SOURCE =
   String.raw`
 """A collection of string constants.
@@ -32,16 +31,8 @@ class _string:
     formatter_parser = _formatter_parser
     formatter_field_name_split = _formatter_field_name_split
 
+del _formatter_parser, _formatter_field_name_split
 
-class _ChainMap:
-    def __init__(self, first, second):
-        self.first = first
-        self.second = second
-
-    def __getitem__(self, key):
-        if key in self.first:
-            return self.first[key]
-        return self.second[key]
 
 # Some strings for ctype-style character classification
 whitespace = ' \t\n\r\v\f'
@@ -171,7 +162,7 @@ class Template:
         if mapping is _sentinel_dict:
             mapping = kws
         elif kws:
-            ChainMap = _ChainMap
+            from collections import ChainMap
             mapping = ChainMap(kws, mapping)
         # Helper function for .sub()
         def convert(mo):
@@ -191,7 +182,7 @@ class Template:
         if mapping is _sentinel_dict:
             mapping = kws
         elif kws:
-            ChainMap = _ChainMap
+            from collections import ChainMap
             mapping = ChainMap(kws, mapping)
         # Helper function for .sub()
         def convert(mo):

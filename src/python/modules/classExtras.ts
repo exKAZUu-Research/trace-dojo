@@ -4,7 +4,7 @@ import { registerExtraAttributes } from '../modules';
 import { callValue } from '../objects';
 import { genericAliasClass } from '../typeHints';
 import { classmethodClass, defineMethod, isInstanceOf, NotImplemented } from '../types';
-import { PyClass, PyDescriptor, PyError, type PyInstance, type PyValue } from '../values';
+import { PyClass, PyDescriptor, type PyValue } from '../values';
 
 // The class attributes CPython's library classes have that their implementations here do not define: the
 // `__module__` entry of the classes CPython creates at run time, which their instances read, and the
@@ -54,13 +54,6 @@ const ALIASES: [string, string, string, string][] = [
   ['collections', 'deque', '__copy__', 'copy'],
   ['collections', 'defaultdict', '__copy__', 'copy'],
   ['_thread', 'LockType', 'locked_lock', 'locked'],
-  ['io', 'BytesIO', 'readinto1', 'readinto'],
-];
-
-/** The C types whose `detach()` raises io.UnsupportedOperation, as in-memory streams have no buffer. */
-const UNDETACHABLE: [string, string][] = [
-  ['io', 'StringIO'],
-  ['io', 'BytesIO'],
 ];
 
 /**
@@ -76,9 +69,7 @@ const REFLECTED: [string, string, string][] = [
   ['datetime', 'timedelta', '__divmod__'],
 ];
 
-const modules = new Set(
-  [...MODULE_ENTRIES, ...GENERIC_CLASSES, ...ALIASES, ...REFLECTED, ...UNDETACHABLE].map(([module]) => module)
-);
+const modules = new Set([...MODULE_ENTRIES, ...GENERIC_CLASSES, ...ALIASES, ...REFLECTED].map(([module]) => module));
 for (const module of modules) {
   registerExtraAttributes(module, (_runtime, namespace) => {
     const classNamed = (owner: string, name: string): PyClass | undefined => {
@@ -89,7 +80,6 @@ for (const module of modules) {
     for (const [owner, name] of GENERIC_CLASSES) addClassGetItem(classNamed(owner, name));
     for (const [owner, name, alias, original] of ALIASES) addAlias(classNamed(owner, name), alias, original);
     for (const [owner, name, operator] of REFLECTED) addReflected(classNamed(owner, name), operator);
-    for (const [owner, name] of UNDETACHABLE) addDetach(classNamed(owner, name), namespace);
     return [];
   });
 }
@@ -120,11 +110,4 @@ function addReflected(cls: PyClass | undefined, operator: string): void {
   method(cls, reflected, 'one', 1, 1, (self, [other]) =>
     isInstanceOf(other, cls) ? callValue(forward, [other, self]) : NotImplemented
   );
-}
-
-function addDetach(cls: PyClass | undefined, namespace: Map<string, PyValue>): void {
-  if (!cls || cls.dict.has('detach')) return;
-  method(cls, 'detach', 'none', 0, 0, () => {
-    throw new PyError(callValue(namespace.get('UnsupportedOperation') as PyValue, ['detach']) as PyInstance);
-  });
 }

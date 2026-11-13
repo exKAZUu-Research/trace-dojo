@@ -285,7 +285,7 @@ function replaceDate(value: PyDate, args: PyValue[], kwargs: Kwargs): PyDate {
   return newDate(field('year'), field('month'), field('day'), value.cls);
 }
 
-function dateStrftime(value: PyDate, format: string): string {
+export function dateStrftime(value: PyDate, format: string): string {
   const fields = dateFields(value);
   return strftime(format, {
     ...fields,

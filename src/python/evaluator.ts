@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 930 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 973 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -15,13 +15,14 @@ import type {
 import { AsyncEvaluator } from './asyncEvaluator';
 import { mappingEntries } from './callArguments';
 import { buildClass, createClass } from './classes';
-import { pyRepr } from './conversions';
+import { pyRepr, pyStr } from './conversions';
 import { asyncYield } from './coroutines';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
 import { addArgument, type CallArguments } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import { isRegisteredModule } from './modules';
+import { checkExtraName, checkNamespaceListing, missingNamespaceName } from './namespaceDifferences';
 import {
   bindValue,
   callValue,
@@ -65,7 +66,7 @@ import {
   typeName,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, PyClass, PyError, type PyFunction, PyInstance, type PyModule, PyTuple, type PyValue } from './values';
+import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyModule, PyTuple, type PyValue } from './values';
 import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
 const NO_EXCEPTIONS: PyInstance[] = [];
@@ -274,27 +275,23 @@ export class Evaluator extends AsyncEvaluator {
     if (statement.kind === 'importFrom') {
       this.importFrom(statement, frame);
     } else if (statement.kind === 'importStar') {
-      const module = runtime.importModule(statement.module);
+      const module = runtime.resolveImport(statement.module);
       for (const [name, value] of starNames(module)) frame.locals.set(name, value);
     } else {
       for (const { module, binding, bindsModule } of statement.names) {
-        const imported = runtime.importModule(module);
-        this.storeName(binding, bindsModule ? imported : runtime.importModule(module.split('.')[0]), frame);
+        const imported = runtime.resolveImport(module);
+        this.storeName(binding, bindsModule ? imported : runtime.resolveImport(module.split('.')[0] as string), frame);
       }
     }
   }
+
   private importFrom(statement: Extract<Statement, { kind: 'importFrom' }>, frame: Frame): void {
-    const module = this.runtime.importModule(statement.module);
+    const module = this.runtime.resolveImport(statement.module);
     for (const { name, binding } of statement.names) {
-      const feature = module.unsupported.get(name);
-      if (feature !== undefined) throw new UnsupportedFeatureError(feature);
-      // As in CPython, a name a package lacks may be a submodule, which importing it adds to the package.
-      const submodule = `${statement.module}.${name}`;
       const value =
-        module.dict.get(name) ??
-        importedModule(module, name) ??
-        (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, name) : undefined) ??
-        (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
+        module instanceof PyModule
+          ? this.moduleName(module, statement.module, name)
+          : getAttributeOrUndefined(module, name);
       if (value === undefined) {
         const error = pyError(
           'ImportError',
@@ -308,7 +305,27 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
+  /** The value `from module import name` binds from a module, or undefined when it has no such name. */
+  private moduleName(module: PyModule, moduleName: string, name: string): PyValue | undefined {
+    const feature = module.unsupported.get(name);
+    if (feature !== undefined) throw new UnsupportedFeatureError(feature);
+    checkExtraName(module, name);
+    // As in CPython, a name a package lacks may be a submodule, which importing it adds to the package.
+    const submodule = `${moduleName}.${name}`;
+    const value =
+      module.dict.get(name) ??
+      importedModule(module, name) ??
+      (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, name) : undefined) ??
+      (isRegisteredModule(submodule) ? this.runtime.resolveImport(submodule) : undefined);
+    if (value === undefined && !this.runtime.inLibraryCode()) {
+      const missing = missingNamespaceName(module, name);
+      if (missing !== undefined) throw new UnsupportedFeatureError(missing);
+    }
+    return value;
+  }
+
   /** Evaluates an assignment's value, telling whether it only creates objects, whose constructors' steps show it. */
+  // code-gauge-allow duplicateLines 21 -- The synchronous and suspending paths evaluate a creation the same way.
   private evaluateCreation(expression: Expression, frame: Frame): [PyValue, boolean] {
     if (expression.kind === 'call') {
       const callee = this.evaluateValue(expression.callee, frame);
@@ -512,9 +529,15 @@ export class Evaluator extends AsyncEvaluator {
         frame.temporaries.push(held);
       }
       const read = function* (): Suspension<PyValue | typeof DONE> {
+        runtime.currentRow = statement.row;
         return next ? next() : yield* (suspendingNext as SuspendingNext)();
       };
-      for (let item = next ? next() : yield* read(); item !== DONE; item = next ? next() : yield* read()) {
+      runtime.currentRow = statement.row;
+      for (
+        let item = next ? next() : yield* read();
+        item !== DONE;
+        item = next ? ((runtime.currentRow = statement.row), next()) : yield* read()
+      ) {
         runtime.spend();
         if (runtime.threads?.shouldPreempt()) yield PREEMPTION as unknown as PyValue;
         runtime.currentRow = statement.row;
@@ -660,19 +683,60 @@ export class Evaluator extends AsyncEvaluator {
     const switches = runtime.threads?.switches;
     let onlyCalls = statement.kind === 'expression' && statement.expression.kind === 'call';
     let completion: Completion;
-    if (statement.kind === 'assign' && statement.value.kind === 'call') {
-      const { value } = statement;
-      const callee = yield* this.evaluateSuspending(value.callee, frame);
-      const result = yield* this.holding(frame, callee, this.callValueSuspending(callee, value.args, value.row, frame));
+    if (statement.kind === 'assign') {
+      const [result, created] = yield* this.evaluateCreationSuspending(statement.value, frame);
       for (const target of statement.targets)
         yield* this.holding(frame, result, this.assignSuspending(target, result, frame));
-      onlyCalls = callee instanceof PyClass && statement.targets.every(storesReference);
+      onlyCalls = created && statement.targets.every(storesReference);
+    } else if (statement.kind === 'annotatedAssign') {
+      this.annotate(statement, frame);
+      if (statement.value) {
+        const [result, created] = yield* this.evaluateCreationSuspending(statement.value, frame);
+        yield* this.holding(frame, result, this.assignSuspending(statement.target, result, frame));
+        onlyCalls = created && storesReference(statement.target);
+      }
     } else {
       completion = yield* this.suspendingStatementBody(statement, frame);
     }
     if (runtime.threads?.switches === switches) runtime.steps.finishStatement(statement.stepRow, onlyCalls, begun);
     else runtime.steps.step(statement.stepRow);
     return completion;
+  }
+
+  /** Suspending counterpart of `evaluateCreation`: evaluates an assignment's value and tells whether it only creates objects. */
+  // code-gauge-allow duplicateLines 21 -- The synchronous and suspending paths evaluate a creation the same way.
+  private *evaluateCreationSuspending(expression: Expression, frame: Frame): Suspension<[PyValue, boolean]> {
+    if (expression.kind === 'call') {
+      const callee = yield* this.evaluateSuspending(expression.callee, frame);
+      const result = yield* this.holding(
+        frame,
+        callee,
+        this.callValueSuspending(callee, expression.args, expression.row, frame)
+      );
+      return [result, callee instanceof PyClass];
+    }
+    if (
+      (expression.kind === 'list' || expression.kind === 'tuple') &&
+      expression.elements.length > 0 &&
+      expression.elements.every((element) => element.kind === 'call')
+    ) {
+      const length = frame.temporaries.length;
+      try {
+        let created = true;
+        const items: PyValue[] = [];
+        for (const element of expression.elements) {
+          const [item, isCreation] = yield* this.evaluateCreationSuspending(element as Expression, frame);
+          created &&= isCreation;
+          items.push(item);
+          frame.temporaries.push(item);
+        }
+        for (const item of items) this.runtime.finalizer.locals.escape(item);
+        return [expression.kind === 'list' ? newList(items) : newTuple(items), created];
+      } finally {
+        frame.temporaries.length = length;
+      }
+    }
+    return [yield* this.evaluateSuspending(expression, frame), false];
   }
 
   // code-gauge-allow functionNcss 45 -- One case per kind of simple statement that evaluates expressions.
@@ -961,6 +1025,7 @@ export class Evaluator extends AsyncEvaluator {
 
   // With ----------------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionNcss 33 -- Enters, runs the body, and exits with or without an exception, as a with statement does.
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
     const { runtime } = this;
@@ -989,6 +1054,7 @@ export class Evaluator extends AsyncEvaluator {
         completion = yield* this.withStatement(statement, frame, index + 1);
       } catch (error) {
         if (!(error instanceof PyError) || !entered) throw error;
+        noteCaught(error, frame);
         runtime.currentRow = statement.row;
         if (!(yield* this.exitWithException(statement, bindValue(exit, manager), error.exception))) throw error;
         return undefined;
@@ -1051,7 +1117,8 @@ export class Evaluator extends AsyncEvaluator {
     this.handling.push(exception);
     let suppresses: boolean;
     try {
-      suppresses = isTruthy(yield* this.callExit(statement, exit, [exception.cls, exception, None]));
+      const tb = exception.exception?.traceback ?? None;
+      suppresses = isTruthy(yield* this.callExit(statement, exit, [exception.cls, exception, tb]));
     } finally {
       this.handling.pop();
     }
@@ -1280,20 +1347,25 @@ const SELF_MATCHING = new Set([
   'tuple',
 ]);
 
-/**
- * Runs the statements of a frame that is no generator to their end. Only the waits of blocking operations may suspend
- * them, which the thread then makes on the host's stack.
- */
 /** The names `from module import *` binds: those of the module's `__all__`, or its public names without one. */
-function starNames(module: PyModule): [string, PyValue][] {
+function starNames(module: PyValue): [string, PyValue][] {
   const all = getAttributeOrUndefined(module, '__all__');
-  if (all === undefined) return [...module.dict].filter(([name]) => !name.startsWith('_'));
+  if (all === undefined) {
+    if (!(module instanceof PyModule)) {
+      return toArray(getAttribute(module, '__dict__'))
+        .filter((name): name is string => typeof name === 'string' && !name.startsWith('_'))
+        .map((name) => [name, getAttribute(module, name)]);
+    }
+    checkNamespaceListing(module, 'from ... import *');
+    return [...module.dict].filter(([name]) => !name.startsWith('_'));
+  }
   return toArray(all).map((name) => {
     if (typeof name !== 'string') {
-      throw typeError(`Item in ${module.name}.__all__ must be str, not ${typeName(name)}`);
+      const owner = module instanceof PyModule ? module.name : pyStr(getAttribute(module, '__name__'));
+      throw typeError(`Item in ${owner}.__all__ must be str, not ${typeName(name)}`);
     }
     // A name this grader does not support is bound all the same, failing when the program uses it.
-    const feature = module.unsupported.get(name);
+    const feature = module instanceof PyModule ? module.unsupported.get(name) : undefined;
     if (feature === undefined) return [name, getAttribute(module, name)];
     return [
       name,
@@ -1304,6 +1376,10 @@ function starNames(module: PyModule): [string, PyValue][] {
   });
 }
 
+/**
+ * Runs the statements of a frame that is no generator to their end. Only the waits of blocking operations may suspend
+ * them, which the thread then makes on the host's stack.
+ */
 function runToEnd(execution: Execution): Completion {
   for (;;) {
     const step = execution.next();

@@ -15,6 +15,7 @@ import {
   exceptionClassNamed,
   nativeFunction,
   newException,
+  newTuple,
   None,
   propertyClass,
   pyError,
@@ -43,10 +44,6 @@ unsupportedOperationClass.module = 'io';
 unsupportedOperationClass.layout = { base: 'exception' };
 unsupportedOperationClass.isBaseType = true;
 unsupportedOperationClass.construct = exceptionClassNamed('OSError').construct;
-
-function unsupportedOperation(message: string): PyError {
-  return new PyError(newException(unsupportedOperationClass, [message]));
-}
 
 /** A size argument of read() and readline(): an int, or None or a negative int for no limit. */
 function sizeArgument(value: PyValue | undefined): number {
@@ -103,14 +100,10 @@ function readLinesFrom(stream: Stream, hint: number, length: (line: PyValue) => 
 
 const streamOf = (self: PyValue): Stream => (self as PyOpaque).data as Stream;
 
-/** Defines the methods both StringIO and BytesIO have the same way. */
-// code-gauge-allow functionNcss 45 -- One small method per stream operation.
-function defineStreamMethods(cls: PyClass, itemsLength: (value: PyValue) => number): void {
+/** Defines the methods both StringIO and BytesIO have the same way; the others they inherit from `_io._IOBase`. */
+function defineStreamMethods(cls: PyClass): void {
   method(cls, 'read', 'expected', 0, 1, (self, [size]) => readFrom(streamOf(self), sizeArgument(size)));
   method(cls, 'readline', 'expected', 0, 1, (self, [size]) => readLineFrom(streamOf(self), sizeArgument(size)));
-  method(cls, 'readlines', 'expected', 0, 1, (self, [hint]) =>
-    currentRuntime().listOf(readLinesFrom(streamOf(self), sizeArgument(hint), itemsLength))
-  );
   method(cls, 'tell', 'none', 0, 0, (self) => {
     const stream = streamOf(self);
     checkOpen(stream);
@@ -126,6 +119,22 @@ function defineStreamMethods(cls: PyClass, itemsLength: (value: PyValue) => numb
       return true;
     });
   }
+  method(cls, '__next__', 'none', 0, 0, (self) => {
+    const stream = streamOf(self);
+    // A program's subclass reads its lines with its own readline, as CPython's iternext does for subclasses.
+    const line = classOf(self).isBuiltin ? readLineFrom(stream, -1) : callValue(getAttribute(self, 'readline'), []);
+    if (stream.isEmpty(line)) throw pyError('StopIteration');
+    return line;
+  });
+  method(cls, '__repr__', 'none', 0, 0, (self) => `<_io.${cls.name} object at ${addressOf(self as PyOpaque)}>`);
+  getter(cls, 'closed', (self) => streamOf(self).closed);
+}
+
+/** The methods BytesIO has of its own that StringIO inherits from `_io._IOBase`. */
+function defineBytesIOLineMethods(cls: PyClass): void {
+  method(cls, 'readlines', 'expected', 0, 1, (self, [hint]) =>
+    currentRuntime().listOf(readLinesFrom(streamOf(self), sizeArgument(hint), (line) => (line as PyBytes).length))
+  );
   method(cls, 'isatty', 'none', 0, 0, (self) => {
     checkOpen(streamOf(self));
     return false;
@@ -134,10 +143,8 @@ function defineStreamMethods(cls: PyClass, itemsLength: (value: PyValue) => numb
     checkOpen(streamOf(self));
     return None;
   });
-  method(cls, 'fileno', 'none', 0, 0, () => {
-    throw unsupportedOperation('fileno');
-  });
   method(cls, 'writelines', 'one', 1, 1, (self, [lines]) => {
+    checkOpen(streamOf(self));
     const write = getAttribute(self, 'write');
     for (const line of currentRuntime().toArray(lines)) callValue(write, [line]);
     return None;
@@ -146,24 +153,6 @@ function defineStreamMethods(cls: PyClass, itemsLength: (value: PyValue) => numb
     checkOpen(streamOf(self));
     return self;
   });
-  method(cls, '__next__', 'none', 0, 0, (self) => {
-    const stream = streamOf(self);
-    // A program's subclass reads its lines with its own readline, as CPython's iternext does for subclasses.
-    const line = classOf(self).isBuiltin ? readLineFrom(stream, -1) : callValue(getAttribute(self, 'readline'), []);
-    if (stream.isEmpty(line)) throw pyError('StopIteration');
-    return line;
-  });
-  method(cls, '__enter__', 'none', 0, 0, (self) => {
-    checkOpen(streamOf(self));
-    return self;
-  });
-  // IOBase.__exit__ calls close(), which a program's subclass may override.
-  method(cls, '__exit__', 'expected', 0, Number.POSITIVE_INFINITY, (self) => {
-    callValue(getAttribute(self, 'close'), []);
-    return None;
-  });
-  method(cls, '__repr__', 'none', 0, 0, (self) => `<_io.${cls.name} object at ${addressOf(self as PyOpaque)}>`);
-  getter(cls, 'closed', (self) => streamOf(self).closed);
 }
 
 function getter(cls: PyClass, name: string, read: (self: PyValue) => PyValue): void {
@@ -185,10 +174,7 @@ interface TextStream extends Stream {
   seen: number;
 }
 
-const stringIOClass = builtinClass('StringIO');
-stringIOClass.module = '_io';
-
-stringIOClass.construct = (cls, args, kwargs) => {
+const constructStringIO: NonNullable<PyClass['construct']> = (cls, args, kwargs) => {
   checkArgs(
     { qualified: 'StringIO', min: 0, max: 2, style: 'takes', keywords: ['initial_value', 'newline'] },
     args,
@@ -259,51 +245,55 @@ function writeText(stream: TextStream, text: string): number {
   return iterStr(text).length;
 }
 
-defineStreamMethods(stringIOClass, (line) => iterStr(line as string).length);
 const textStream = (self: PyValue): TextStream => streamOf(self) as TextStream;
 
-method(stringIOClass, 'write', 'one', 1, 1, (self, [textValue]) => {
-  const text = unbox(textValue);
-  const stream = textStream(self);
-  checkOpen(stream);
-  if (typeof text !== 'string') throw typeError(`string argument expected, got '${typeName(text)}'`);
-  return BigInt(writeText(stream, text));
-});
-method(stringIOClass, 'getvalue', 'none', 0, 0, (self) => {
-  const stream = textStream(self);
-  checkOpen(stream);
-  return stream.chars.join('');
-});
-method(stringIOClass, 'seek', 'expected', 1, 2, (self, [positionValue, whenceValue]) => {
-  const stream = textStream(self);
-  checkOpen(stream);
-  const position = Number(toIndex(positionValue));
-  const whence = Number(toIndex(whenceValue ?? 0n));
-  if (whence < 0 || whence > 2) throw valueError(`Invalid whence (${whence}, should be 0, 1 or 2)`);
-  if (whence === 0 && position < 0) throw valueError(`Negative seek position ${position}`);
-  if (whence !== 0 && position !== 0) {
-    throw new PyError(newException(exceptionClassNamed('OSError'), ["Can't do nonzero cur-relative seeks"]));
-  }
-  if (whence === 0) stream.position = position;
-  else if (whence === 2) stream.position = stream.chars.length;
-  return BigInt(stream.position);
-});
-method(stringIOClass, 'truncate', 'expected', 0, 1, (self, [sizeValue]) => {
-  const stream = textStream(self);
-  checkOpen(stream);
-  const size = sizeValue === undefined || sizeValue === None ? stream.position : Number(toIndex(sizeValue));
-  if (size < 0) throw valueError(`Negative size value ${size}`);
-  if (size < stream.chars.length) stream.chars.length = size;
-  return BigInt(size);
-});
-getter(stringIOClass, 'newlines', (self) => {
-  const names = ['\r', '\n', '\r\n'].filter((_, index) => textStream(self).seen & (1 << index));
-  if (names.length === 0) return None;
-  return names.length === 1 ? names[0] : currentRuntime().tuple(names);
-});
-getter(stringIOClass, 'line_buffering', () => false);
-getter(stringIOClass, 'encoding', () => None);
-getter(stringIOClass, 'errors', () => None);
+// code-gauge-allow functionNcss 50 -- One small method per StringIO operation.
+// code-gauge-allow functionCognitiveComplexity 25 -- One small method per StringIO operation.
+function defineStringIO(cls: PyClass): void {
+  cls.module = '_io';
+  cls.construct = constructStringIO;
+  defineStreamMethods(cls);
+  method(cls, 'write', 'one', 1, 1, (self, [textValue]) => {
+    const text = unbox(textValue);
+    const stream = textStream(self);
+    checkOpen(stream);
+    if (typeof text !== 'string') throw typeError(`string argument expected, got '${typeName(text)}'`);
+    return BigInt(writeText(stream, text));
+  });
+  method(cls, 'getvalue', 'none', 0, 0, (self) => {
+    const stream = textStream(self);
+    checkOpen(stream);
+    return stream.chars.join('');
+  });
+  method(cls, 'seek', 'expected', 1, 2, (self, [positionValue, whenceValue]) => {
+    const stream = textStream(self);
+    checkOpen(stream);
+    const position = Number(toIndex(positionValue));
+    const whence = Number(toIndex(whenceValue ?? 0n));
+    if (whence < 0 || whence > 2) throw valueError(`Invalid whence (${whence}, should be 0, 1 or 2)`);
+    if (whence === 0 && position < 0) throw valueError(`Negative seek position ${position}`);
+    if (whence !== 0 && position !== 0) {
+      throw new PyError(newException(exceptionClassNamed('OSError'), ["Can't do nonzero cur-relative seeks"]));
+    }
+    if (whence === 0) stream.position = position;
+    else if (whence === 2) stream.position = stream.chars.length;
+    return BigInt(stream.position);
+  });
+  method(cls, 'truncate', 'expected', 0, 1, (self, [sizeValue]) => {
+    const stream = textStream(self);
+    checkOpen(stream);
+    const size = sizeValue === undefined || sizeValue === None ? stream.position : Number(toIndex(sizeValue));
+    if (size < 0) throw valueError(`Negative size value ${size}`);
+    if (size < stream.chars.length) stream.chars.length = size;
+    return BigInt(size);
+  });
+  getter(cls, 'newlines', (self) => {
+    const names = ['\r', '\n', '\r\n'].filter((_, index) => textStream(self).seen & (1 << index));
+    if (names.length === 0) return None;
+    return names.length === 1 ? names[0] : currentRuntime().tuple(names);
+  });
+  getter(cls, 'line_buffering', () => false);
+}
 
 // BytesIO -----------------------------------------------------------------------------------------------------------
 
@@ -311,10 +301,7 @@ interface BinaryStream extends Stream {
   buffer: PyBytes;
 }
 
-const bytesIOClass = builtinClass('BytesIO');
-bytesIOClass.module = '_io';
-
-bytesIOClass.construct = (cls, args, kwargs) => {
+const constructBytesIO: NonNullable<PyClass['construct']> = (cls, args, kwargs) => {
   checkArgs({ qualified: 'BytesIO', min: 0, max: 1, style: 'takes', keywords: ['initial_bytes'] }, args, kwargs);
   const initial = argument(args, kwargs, 0, 'initial_bytes') ?? None;
   const data = initial === None ? new Uint8Array(0) : bytesLikeData(initial);
@@ -335,62 +322,69 @@ bytesIOClass.construct = (cls, args, kwargs) => {
   return new PyOpaque(cls, 'BytesIO', stream);
 };
 
-defineStreamMethods(bytesIOClass, (line) => (line as PyBytes).length);
 const binaryStream = (self: PyValue): BinaryStream => streamOf(self) as BinaryStream;
 
-method(bytesIOClass, 'write', 'one', 1, 1, (self, [value]) => {
-  const stream = binaryStream(self);
-  checkOpen(stream);
-  const data = bytesLikeData(value);
-  if (data === undefined) throw typeError(`a bytes-like object is required, not '${typeName(value)}'`);
-  stream.buffer.checkNoExports();
-  const { buffer, position } = stream;
-  if (buffer.length < position) buffer.splice(buffer.length, buffer.length, new Uint8Array(position - buffer.length));
-  buffer.splice(position, Math.min(buffer.length, position + data.length), new Uint8Array(data));
-  stream.position += data.length;
-  return BigInt(data.length);
-});
-method(bytesIOClass, 'read1', 'expected', 0, 1, (self, [size]) => readFrom(binaryStream(self), sizeArgument(size)));
-method(bytesIOClass, 'readinto', 'one', 1, 1, (self, [target]) => {
-  const stream = binaryStream(self);
-  if (!(target instanceof PyBytes) || !target.isMutable) {
-    throw typeError(`readinto() argument must be read-write bytes-like object, not ${typeName(target)}`);
-  }
-  const data = readFrom(stream, target.length) as PyBytes;
-  target.data.set(data.data);
-  return BigInt(data.length);
-});
-method(bytesIOClass, 'getvalue', 'none', 0, 0, (self) => {
-  const stream = binaryStream(self);
-  checkOpen(stream);
-  return newBytes(new Uint8Array(stream.buffer.data));
-});
-method(bytesIOClass, 'getbuffer', 'none', 0, 0, (self) => {
-  const stream = binaryStream(self);
-  checkOpen(stream);
-  return viewOf(stream.buffer);
-});
-method(bytesIOClass, 'seek', 'expected', 1, 2, (self, [positionValue, whenceValue]) => {
-  const stream = binaryStream(self);
-  checkOpen(stream);
-  let position = Number(toIndex(positionValue));
-  const whence = Number(toIndex(whenceValue ?? 0n));
-  if (whence < 0 || whence > 2) throw valueError(`invalid whence (${whence}, should be 0, 1 or 2)`);
-  if (whence === 0 && position < 0) throw valueError(`negative seek value ${position}`);
-  if (whence === 1) position += stream.position;
-  if (whence === 2) position += stream.buffer.length;
-  stream.position = Math.max(0, position);
-  return BigInt(stream.position);
-});
-method(bytesIOClass, 'truncate', 'expected', 0, 1, (self, [sizeValue]) => {
-  const stream = binaryStream(self);
-  checkOpen(stream);
-  const size = sizeValue === undefined || sizeValue === None ? stream.position : Number(toIndex(sizeValue));
-  if (size < 0) throw valueError(`negative size value ${size}`);
-  stream.buffer.checkNoExports();
-  if (size < stream.buffer.length) stream.buffer.splice(size, stream.buffer.length, new Uint8Array(0));
-  return BigInt(size);
-});
+// code-gauge-allow functionNcss 60 -- One small method per BytesIO operation.
+// code-gauge-allow functionCognitiveComplexity 24 -- One small method per BytesIO operation.
+function defineBytesIO(cls: PyClass): void {
+  cls.module = '_io';
+  cls.construct = constructBytesIO;
+  defineStreamMethods(cls);
+  defineBytesIOLineMethods(cls);
+  method(cls, 'write', 'one', 1, 1, (self, [value]) => {
+    const stream = binaryStream(self);
+    checkOpen(stream);
+    const data = bytesLikeData(value);
+    if (data === undefined) throw typeError(`a bytes-like object is required, not '${typeName(value)}'`);
+    stream.buffer.checkNoExports();
+    const { buffer, position } = stream;
+    if (buffer.length < position) buffer.splice(buffer.length, buffer.length, new Uint8Array(position - buffer.length));
+    buffer.splice(position, Math.min(buffer.length, position + data.length), new Uint8Array(data));
+    stream.position += data.length;
+    return BigInt(data.length);
+  });
+  method(cls, 'read1', 'expected', 0, 1, (self, [size]) => readFrom(binaryStream(self), sizeArgument(size)));
+  method(cls, 'readinto', 'one', 1, 1, (self, [target]) => {
+    const stream = binaryStream(self);
+    if (!(target instanceof PyBytes) || !target.isMutable) {
+      throw typeError(`readinto() argument must be read-write bytes-like object, not ${typeName(target)}`);
+    }
+    const data = readFrom(stream, target.length) as PyBytes;
+    target.data.set(data.data);
+    return BigInt(data.length);
+  });
+  method(cls, 'getvalue', 'none', 0, 0, (self) => {
+    const stream = binaryStream(self);
+    checkOpen(stream);
+    return newBytes(new Uint8Array(stream.buffer.data));
+  });
+  method(cls, 'getbuffer', 'none', 0, 0, (self) => {
+    const stream = binaryStream(self);
+    checkOpen(stream);
+    return viewOf(stream.buffer);
+  });
+  method(cls, 'seek', 'expected', 1, 2, (self, [positionValue, whenceValue]) => {
+    const stream = binaryStream(self);
+    checkOpen(stream);
+    let position = Number(toIndex(positionValue));
+    const whence = Number(toIndex(whenceValue ?? 0n));
+    if (whence < 0 || whence > 2) throw valueError(`invalid whence (${whence}, should be 0, 1 or 2)`);
+    if (whence === 0 && position < 0) throw valueError(`negative seek value ${position}`);
+    if (whence === 1) position += stream.position;
+    if (whence === 2) position += stream.buffer.length;
+    stream.position = Math.max(0, position);
+    return BigInt(stream.position);
+  });
+  method(cls, 'truncate', 'expected', 0, 1, (self, [sizeValue]) => {
+    const stream = binaryStream(self);
+    checkOpen(stream);
+    const size = sizeValue === undefined || sizeValue === None ? stream.position : Number(toIndex(sizeValue));
+    if (size < 0) throw valueError(`negative size value ${size}`);
+    stream.buffer.checkNoExports();
+    if (size < stream.buffer.length) stream.buffer.splice(size, stream.buffer.length, new Uint8Array(0));
+    return BigInt(size);
+  });
+}
 
 // The module --------------------------------------------------------------------------------------------------------
 
@@ -401,8 +395,17 @@ registerSourceModule(
   IO_SOURCE,
   () =>
     new Map<string, PyValue>([
-      ['StringIO', stringIOClass],
-      ['BytesIO', bytesIOClass],
+      [
+        '_stream_classes',
+        // StringIO and BytesIO derive from the run's `_io._TextIOBase` and `_io._BufferedIOBase`.
+        nativeFunction('_stream_classes', ([textBase, bufferedBase]) => {
+          const stringIO = builtinClass('StringIO', textBase as PyClass);
+          defineStringIO(stringIO);
+          const bytesIO = builtinClass('BytesIO', bufferedBase as PyClass);
+          defineBytesIO(bytesIO);
+          return newTuple([stringIO, bytesIO]);
+        }),
+      ],
       ['UnsupportedOperation', unsupportedOperationClass],
       ['SEEK_SET', 0n],
       ['SEEK_CUR', 1n],

@@ -20,9 +20,103 @@ import {
   PyBuiltinFunction,
   PyClass,
   PyFunction,
+  type PyGenerator,
   type PyInstance,
+  type PyObject,
   type PyValue,
 } from './values';
+
+export interface ThreadAsyncGenHooks {
+  finalizer: PyValue | undefined;
+  readonly started: PyGenerator[];
+  program: { firstiter: PyValue | undefined; finalizer: PyValue | undefined };
+}
+
+interface ThreadExtras {
+  context?: PyObject;
+  runningLoop?: PyValue;
+  asyncGenHooks?: ThreadAsyncGenHooks;
+  readonly localMaps: WeakRef<Map<object, Map<string, PyValue>>>[];
+}
+
+const threadExtrasMap = new WeakMap<object, ThreadExtras>();
+
+/** A key unique to the active Python thread without instantiating the scheduler in single-threaded runs. */
+export function currentThreadKey(runtime: Runtime = currentRuntime()): object {
+  const scheduler = runtime.threads;
+  return scheduler && scheduler.current !== scheduler.main ? scheduler.current : runtime;
+}
+
+function extrasOf(key: object): ThreadExtras {
+  let extras = threadExtrasMap.get(key);
+  if (!extras) {
+    extras = { localMaps: [] };
+    threadExtrasMap.set(key, extras);
+  }
+  return extras;
+}
+
+export function getThreadContext(runtime: Runtime = currentRuntime()): PyObject | undefined {
+  return threadExtrasMap.get(currentThreadKey(runtime))?.context;
+}
+
+export function setThreadContext(context: PyObject | undefined, runtime: Runtime = currentRuntime()): void {
+  extrasOf(currentThreadKey(runtime)).context = context;
+}
+
+export function getRunningLoop(runtime: Runtime = currentRuntime()): PyValue | undefined {
+  return threadExtrasMap.get(currentThreadKey(runtime))?.runningLoop;
+}
+
+export function setRunningLoop(loop: PyValue | undefined, runtime: Runtime = currentRuntime()): void {
+  extrasOf(currentThreadKey(runtime)).runningLoop = loop;
+}
+
+export function threadAsyncGenHooks(runtime: Runtime = currentRuntime()): ThreadAsyncGenHooks {
+  const extras = extrasOf(currentThreadKey(runtime));
+  extras.asyncGenHooks ??= {
+    finalizer: undefined,
+    started: [],
+    program: { firstiter: undefined, finalizer: undefined },
+  };
+  return extras.asyncGenHooks;
+}
+
+export function peekThreadAsyncGenHooks(runtime: Runtime = currentRuntime()): ThreadAsyncGenHooks | undefined {
+  return threadExtrasMap.get(currentThreadKey(runtime))?.asyncGenHooks;
+}
+
+export function registerThreadLocalMap(
+  dicts: Map<object, Map<string, PyValue>>,
+  runtime: Runtime = currentRuntime()
+): void {
+  const key = currentThreadKey(runtime);
+  if (key !== runtime) extrasOf(key).localMaps.push(new WeakRef(dicts));
+}
+
+/** The values the active and suspended threads keep reachable outside the active frame stack. */
+export function* threadRoots(runtime: Runtime): Iterable<unknown> {
+  yield* extrasRoots(runtime);
+  if (runtime.threads) {
+    for (const thread of runtime.threads.alive) {
+      if (thread !== runtime.threads.main) yield* extrasRoots(thread);
+    }
+    yield* runtime.threads.roots();
+  }
+}
+
+function* extrasRoots(key: object): Iterable<unknown> {
+  const extras = threadExtrasMap.get(key);
+  if (!extras) return;
+  if (extras.context) yield extras.context;
+  if (extras.runningLoop !== undefined) yield extras.runningLoop;
+  const hooks = extras.asyncGenHooks;
+  if (hooks) {
+    if (hooks.finalizer !== undefined) yield hooks.finalizer;
+    if (hooks.program.firstiter !== undefined) yield hooks.program.firstiter;
+    if (hooks.program.finalizer !== undefined) yield hooks.program.finalizer;
+  }
+}
 
 /**
  * What a thread waits for: until `ready()` holds, or until the virtual clock reaches `deadline`. A blocking operation
@@ -84,6 +178,8 @@ export class Scheduler {
   switches = 0;
   /** The threads not running, in the order they stopped. */
   private readonly queue: PyThreadState[] = [];
+  /** The threads waiting inside native calls, innermost last, whose waits run the other threads on the host's stack. */
+  private readonly pinnedStack: PyThreadState[] = [];
   private started = 0;
   /** The operation count of the runtime when the current thread last started running. */
   private sliceStart = 0;
@@ -111,9 +207,17 @@ export class Scheduler {
     const me = this.current;
     me.wait = request;
     me.pinned = true;
+    this.pinnedStack.push(me);
     this.queue.push(me);
     this.save(me);
     try {
+      if (
+        request === PREEMPTION &&
+        !this.queue.some((thread) => thread !== me && !thread.pinned && this.isReady(thread)) &&
+        this.queue.some((thread) => thread !== me && !thread.pinned && thread.wait?.deadline !== undefined)
+      ) {
+        this.advanceClock(me);
+      }
       for (;;) {
         this.runtime.spend();
         const next = this.pick(me);
@@ -125,6 +229,7 @@ export class Scheduler {
         this.advanceClock(me);
       }
     } finally {
+      this.pinnedStack.pop();
       me.pinned = false;
       me.wait = undefined;
       this.restore(me);
@@ -134,7 +239,12 @@ export class Scheduler {
   /** Whether the running thread has used its slice and another thread can run, at a loop's next iteration. */
   shouldPreempt(): boolean {
     if (this.alive.length < 2 || this.runtime.operations - this.sliceStart < this.sliceOperations()) return false;
-    return this.queue.some((thread) => this.isReady(thread));
+    // Of the threads waiting in native calls, only the innermost resumes when the running thread yields.
+    const resumable = (thread: PyThreadState): boolean =>
+      (!thread.pinned || thread === this.pinnedStack.at(-1)) && thread !== this.current;
+    return this.queue.some(
+      (thread) => resumable(thread) && (this.isReady(thread) || thread.wait?.deadline !== undefined)
+    );
   }
 
   /** The operations of a slice, which `sys.setswitchinterval` scales as it does CPython's switch interval. */
@@ -210,6 +320,25 @@ export class Scheduler {
   private finish(thread: PyThreadState): void {
     thread.finished = true;
     this.alive.splice(this.alive.indexOf(thread), 1);
+    const extras = threadExtrasMap.get(thread);
+    if (!extras) return;
+    threadExtrasMap.delete(thread);
+    const dropped: (PyValue | undefined)[] = [
+      extras.context,
+      extras.runningLoop,
+      extras.asyncGenHooks?.finalizer,
+      extras.asyncGenHooks?.program.firstiter,
+      extras.asyncGenHooks?.program.finalizer,
+    ];
+    for (const ref of extras.localMaps) {
+      const dicts = ref.deref();
+      const values = dicts?.get(thread);
+      if (dicts && values) {
+        dicts.delete(thread);
+        dropped.push(...values.values());
+      }
+    }
+    this.runtime.finalizer.release(dropped);
   }
 
   private save(thread: PyThreadState): void {

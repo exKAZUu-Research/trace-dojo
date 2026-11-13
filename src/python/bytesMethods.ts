@@ -3,7 +3,6 @@ import {
   bytearrayClass,
   bytesClass,
   bytesLikeData,
-  isBytesLike,
   latin1Bytes,
   latin1Text,
   PyBytes,
@@ -11,15 +10,14 @@ import {
   sameKind,
 } from './bytesValues';
 import { method } from './define';
-import { sliceIndices } from './items';
 import { argument } from './nativeArgs';
 import { toIndex } from './numbers';
 import { lookupSpecial, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { byteValue } from './typeBytes';
-import { newList, newTuple, None, sliceClass, typeError, typeName, valueError } from './types';
+import { newList, newTuple, None, typeError, typeName, valueError } from './types';
 import { expandTabs, padText, replaceText, splitLinesOf, splitOn, splitWhitespace, stripBounds } from './typeStr';
-import { PySlice, PyTuple, type PyValue } from './values';
+import { PyTuple, type PyValue } from './values';
 
 const dataOf = (self: PyValue): Uint8Array => (self as PyBytes).data;
 const textOf = (self: PyValue): string => latin1Text((self as PyBytes).data);
@@ -36,7 +34,8 @@ export function shared(...args: MethodArgs): void {
 
 /** The subsequence a search method looks for: an int byte value or a bytes-like object, as one char per byte. */
 function needleOf(sub: PyValue): string {
-  if (isBytesLike(sub)) return latin1Text(requireBytesLike(sub));
+  const data = bytesLikeData(sub);
+  if (data !== undefined) return latin1Text(data);
   if (typeof sub !== 'bigint' && typeof sub !== 'boolean' && lookupSpecial(sub, '__index__') === undefined) {
     throw typeError(`argument should be integer or bytes-like object, not '${typeName(sub)}'`);
   }
@@ -44,8 +43,20 @@ function needleOf(sub: PyValue): string {
 }
 
 function bounds(length: number, start: PyValue | undefined, end: PyValue | undefined): { from: number; to: number } {
-  const { start: from, stop } = sliceIndices(new PySlice(sliceClass, start ?? None, end ?? None, None), length);
-  return { from, to: Math.max(from, stop) };
+  const limit = BigInt(length);
+  let from = start === undefined || start === None ? 0n : toIndex(start);
+  let to = end === undefined || end === None ? limit : toIndex(end);
+  if (from < 0n) {
+    from += limit;
+    if (from < 0n) from = 0n;
+  }
+  if (to < 0n) {
+    to += limit;
+    if (to < 0n) to = 0n;
+  } else if (to > limit) {
+    to = limit;
+  }
+  return { from: from > limit ? length + 1 : Number(from), to: Number(to) };
 }
 
 function findIn(
@@ -57,7 +68,8 @@ function findIn(
 ): number {
   currentRuntime().scan(text.length);
   const { from, to } = bounds(text.length, start, end);
-  if (to - from < needle.length) return needle === '' && from <= text.length ? (fromEnd ? to : from) : -1;
+  if (from > to || to - from < needle.length) return -1;
+  if (needle === '') return fromEnd ? to : from;
   const region = text.slice(from, to);
   const index = fromEnd ? region.lastIndexOf(needle) : region.indexOf(needle);
   return index === -1 ? -1 : index + from;
@@ -81,7 +93,8 @@ shared('count', 'expected', 1, 3, (self, [sub, start, end]) => {
   const needle = needleOf(sub);
   currentRuntime().scan(text.length);
   const { from, to } = bounds(text.length, start, end);
-  if (needle === '') return from > text.length ? 0n : BigInt(to - from + 1);
+  if (from > to) return 0n;
+  if (needle === '') return BigInt(to - from + 1);
   const region = text.slice(from, to);
   let count = 0n;
   for (let index = region.indexOf(needle); index !== -1; index = region.indexOf(needle, index + needle.length)) count++;
@@ -95,14 +108,15 @@ for (const [name, atEnd] of [
   shared(name, 'expected', 1, 3, (self, [prefix, start, end]) => {
     const text = textOf(self);
     const { from, to } = bounds(text.length, start, end);
-    if (!(prefix instanceof PyTuple) && !isBytesLike(prefix)) {
+    const singleData = prefix instanceof PyTuple ? undefined : bytesLikeData(prefix);
+    if (!(prefix instanceof PyTuple) && singleData === undefined) {
       throw typeError(`${name} first arg must be bytes or a tuple of bytes, not ${typeName(prefix)}`);
     }
-    const region = text.slice(from, to);
+    const region = from > to ? '' : text.slice(from, to);
     const candidates = prefix instanceof PyTuple ? prefix.items : [prefix];
     return candidates.some((candidate) => {
-      const affix = latin1Text(requireBytesLike(candidate));
-      if (from > text.length) return false;
+      const affix = latin1Text(singleData ?? requireBytesLike(candidate));
+      if (from > to) return false;
       return atEnd ? region.endsWith(affix) : region.startsWith(affix);
     });
   });

@@ -1787,6 +1787,11 @@ def locate(path, forceload=0):
     else:
         object = builtins
     for part in parts[n:]:
+        # A module's function this grader leaves unsupported is documented by a stand-in with CPython's data.
+        stand_in = _stand_in(object, part)
+        if stand_in:
+            object = stand_in
+            continue
         try:
             object = getattr(object, part)
         except AttributeError:

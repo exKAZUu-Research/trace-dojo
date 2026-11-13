@@ -32,7 +32,7 @@ const GROUPS: [string, string][] = [
   ],
   [
     'collections io weakref',
-    '_colorize concurrent.futures dataclasses email.generator inspect logging logging.config logging.handlers pydoc tarfile traceback unittest unittest._log unittest.case unittest.loader unittest.main unittest.result unittest.runner unittest.signals unittest.suite unittest.util xml.etree.ElementInclude xml.etree.ElementTree xml.etree.cElementTree xml.sax.expatreader xml.sax.saxutils',
+    '_colorize concurrent.futures concurrent.futures._base concurrent.futures.thread dataclasses email.generator inspect logging logging.config logging.handlers pydoc tarfile traceback unittest unittest._log unittest.case unittest.loader unittest.main unittest.result unittest.runner unittest.signals unittest.suite unittest.util xml.etree.ElementInclude xml.etree.ElementTree xml.etree.cElementTree xml.sax.expatreader xml.sax.saxutils',
   ],
   ['collections numbers', 'fractions'],
   ['contextvars', 'contextvars'],

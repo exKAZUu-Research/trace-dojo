@@ -151,10 +151,9 @@ method(bytearrayClass, 'copy', 'none', 0, 0, (self) => newByteArray(new Uint8Arr
 
 method(bytearrayClass, 'resize', 'one', 1, 1, (self, [sizeValue]) => {
   const array = asArray(self);
-  const size = Number(toIndex(sizeValue));
-  if (size < 0) throw valueError(`Can only resize to positive sizes, got ${size}`);
-  if (size < array.length) array.splice(size, array.length, new Uint8Array(0));
-  else array.splice(array.length, array.length, new Uint8Array(size - array.length));
+  const size = toIndex(sizeValue);
+  if (size < 0n) throw valueError(`Can only resize to positive sizes, got ${size}`);
+  array.resize(size);
   return None;
 });
 

@@ -10,15 +10,16 @@ import {
 import { builtin } from '../define';
 import { callValue, getAttribute } from '../objects';
 import type { Runtime } from '../runtime';
-import { blockingBuiltin, schedulerOf, WaitRequest } from '../threads';
+import { blockingBuiltin, getRunningLoop, schedulerOf, setRunningLoop, WaitRequest } from '../threads';
 import { toFloat } from '../typeNumbers';
 import { generatorClass, moduleClass, newList, None } from '../types';
 import { PyGenerator, PyModule, type PyValue } from '../values';
+import { threadLocalClass } from './thread';
 
 const wokenLoops = new WeakMap<Runtime, WeakSet<object>>();
 
-// code-gauge-allow functionCognitiveComplexity 18 -- One small builtin per native part of the event loop.
-// code-gauge-allow functionNcss 39 -- One small builtin per native part of the event loop.
+// code-gauge-allow functionCognitiveComplexity 20 -- One small builtin per native part of the event loop.
+// code-gauge-allow functionNcss 43 -- One small builtin per native part of the event loop.
 export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
   const woken = wokenOf(runtime);
   const core = new PyModule(moduleClass, '_asyncio_core', new Map());
@@ -44,6 +45,18 @@ export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
   define(
     'get_ident',
     builtin('get_ident', 'none', 0, 0, () => schedulerOf(runtime).current.ident)
+  );
+  define('local', threadLocalClass);
+  define(
+    'get_running_loop',
+    builtin('get_running_loop', 'none', 0, 0, () => getRunningLoop(runtime) ?? None)
+  );
+  define(
+    'set_running_loop',
+    builtin('set_running_loop', 'one', 1, 1, ([loop]) => {
+      setRunningLoop(loop === None ? undefined : loop, runtime);
+      return None;
+    })
   );
   define(
     'thread_name',

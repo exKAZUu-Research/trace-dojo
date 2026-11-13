@@ -409,6 +409,8 @@ export class PyFunction extends PyObject {
   annotationFrame?: unknown;
   /** Whether staticmethod or classmethod wrapped this function, whose first parameter is then no instance it runs on. */
   isStaticOrClassMethod = false;
+  /** The `__builtins__` object captured from `globals` when the function was created, or `undefined` when absent. */
+  builtins: PyValue | undefined;
 
   // code-gauge-allow functionParameterCount 7 -- Each function field is set once at creation.
   constructor(
@@ -426,6 +428,7 @@ export class PyFunction extends PyObject {
     this.name = def.name;
     this.qualifiedName = def.qualifiedName;
     this.doc = def.doc;
+    this.builtins = globals.has('__builtins__') ? globals.get('__builtins__') : undefined;
   }
 }
 

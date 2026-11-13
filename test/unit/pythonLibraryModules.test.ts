@@ -220,3 +220,44 @@ g = types.FunctionType(f.__code__, {}, 'g', (5,))
 assert (g(1), g.__name__) == (6, 'g') and '__doc__' in object.__dict__ and '__doc__' in int.__dict__
 `);
 });
+
+test('imports follow sys.modules, and absent modules raise the ModuleNotFoundError library code catches', () => {
+  expectSameAsCPython(String.raw`import sys, types, importlib, io
+fake = types.ModuleType('math')
+fake.pi = 3
+sys.modules['math'] = fake
+import math as again
+assert again is fake and again.pi == 3
+del sys.modules['math']
+import math
+assert math is not fake and math.pi > 3
+sys.modules['json'] = None
+try:
+    import json
+except ModuleNotFoundError as e:
+    assert (str(e), e.name) == ('import of json halted; None in sys.modules', 'json'), (str(e), e.name)
+del sys.modules['json']
+try:
+    importlib.import_module('math.sqrt')
+except ModuleNotFoundError as e:
+    assert (str(e), e.name) == ("No module named 'math.sqrt'; 'math' is not a package", 'math.sqrt'), (str(e), e.name)
+assert repr(sys.modules['__main__']) == "<module '__main__' (<class '_frozen_importlib.BuiltinImporter'>)>"
+out = io.StringIO()
+sys.stdout, saved = out, sys.stdout
+help('math.sqrt')
+help('sys.getrefcount')
+sys.stdout = saved
+assert out.getvalue().startswith('Help on built-in function sqrt in math:\n\nmath.sqrt = sqrt(x, /)\n'), out.getvalue()
+assert 'Help on built-in function getrefcount in sys:' in out.getvalue(), out.getvalue()
+`);
+});
+
+test('argparse and optparse name a program without prog as CPython running it with -c does', () => {
+  expectSameAsCPython(String.raw`import argparse, optparse
+p = argparse.ArgumentParser()
+p.add_argument('--x')
+assert p.parse_args(['--x', '3']).x == '3'
+assert p.format_usage() == 'usage: -c [-h] [--x X]\n', p.format_usage()
+assert optparse.OptionParser().get_usage() == 'Usage: -c [options]\n'
+`);
+});

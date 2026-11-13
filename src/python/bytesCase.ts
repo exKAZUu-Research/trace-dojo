@@ -88,8 +88,7 @@ export function hexOf(data: Uint8Array, sepValue: PyValue | undefined, groupValu
   currentRuntime().buildString(data.length * 3);
   const digits = [...data].map((byte) => byte.toString(16).padStart(2, '0'));
   if (sep === undefined || sep === None) return digits.join('');
-  const separator =
-    typeof sep === 'string' ? sep : sep instanceof PyBytes ? String.fromCodePoint(...sep.data) : undefined;
+  const separator = typeof sep === 'string' ? sep : sep instanceof PyBytes ? latin1Text(sep.data) : undefined;
   if (separator === undefined) lengthOf(sep);
   if (iterStr(separator ?? '').length !== 1) throw valueError('sep must be length 1.');
   if (((separator as string).codePointAt(0) as number) >= 0x80) throw valueError('sep must be ASCII.');
@@ -141,7 +140,7 @@ function fromHex(argumentValue: PyValue): Uint8Array {
   else {
     const data = bytesLikeData(value);
     if (data === undefined) throw typeError(`fromhex() argument must be str or bytes-like, not ${typeName(value)}`);
-    text = String.fromCodePoint(...data);
+    text = latin1Text(data);
   }
   const chars = iterStr(text);
   const result: number[] = [];

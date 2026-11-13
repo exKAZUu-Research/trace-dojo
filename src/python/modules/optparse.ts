@@ -1,6 +1,6 @@
 import { registerSourceModule } from '../sourceModules';
 
-// CPython's `optparse.py`, whose default help width is the 80 columns it takes when `$COLUMNS` is unset, since environment variables are not read here. The default program name reads `sys.argv`, which stays unsupported, so programs give `prog`.
+// CPython's `optparse.py`, whose default help width is the 80 columns it takes when `$COLUMNS` is unset, since environment variables are not read here. The default program name is `-c`, the `sys.argv[0]` of CPython running a program with `-c`, since `sys.argv` stays unsupported.
 const SOURCE = String.raw`
 """A powerful, extensible, and easy-to-use option parser.
 
@@ -1527,7 +1527,7 @@ class OptionParser (OptionContainer):
 
     def get_prog_name(self):
         if self.prog is None:
-            return os.path.basename(sys.argv[0])
+            return '-c'
         else:
             return self.prog
 

@@ -186,7 +186,16 @@ export function abcRegister(cls: PyClass, subclass: PyValue, count: boolean): Py
   dataOf(cls).registry.add(sub);
   inheritCollectionKind(cls, sub);
   const state = stateOf();
-  if (count || state.countLibrary) state.token += 1;
+  if (count || state.countLibrary) {
+    state.token += 1;
+  } else {
+    // A registration that does not count leaves the token, which the import counted before the module's code ran, so
+    // the negative caches that checks filled since then, which may hold the class just registered, are cleared on
+    // their next check.
+    for (const data of state.data.values()) {
+      if (data.negativeVersion >= state.token) data.negativeVersion = state.token - 1;
+    }
+  }
   return sub;
 }
 

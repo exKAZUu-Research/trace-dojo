@@ -1,5 +1,5 @@
 import { hexOf } from '../bytesCase';
-import { bytesLikeData, latin1Bytes, newBytes } from '../bytesValues';
+import { bytesLikeData, latin1Bytes, latin1Text, newBytes } from '../bytesValues';
 import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { argument } from '../nativeArgs';
@@ -116,7 +116,7 @@ class Base64Decoder {
 export function unhexlify(value: PyValue): Uint8Array {
   const data = asciiData(value);
   if (data.length % 2 !== 0) throw binasciiError('Odd-length string');
-  const text = String.fromCodePoint(...data);
+  const text = latin1Text(data);
   if (!/^[0-9a-fA-F]*$/.test(text)) throw binasciiError('Non-hexadecimal digit found');
   return Uint8Array.from({ length: data.length / 2 }, (_, index) =>
     Number.parseInt(text.slice(index * 2, index * 2 + 2), 16)

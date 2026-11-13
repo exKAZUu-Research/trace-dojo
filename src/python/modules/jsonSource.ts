@@ -53,6 +53,10 @@ class JSONDecoder(object):
         self.parse_constant = parse_constant or _CONSTANTS.__getitem__
         self.strict = strict
         self.object_pairs_hook = object_pairs_hook
+        from json.decoder import JSONObject, JSONArray, scanstring
+        self.parse_object = JSONObject
+        self.parse_array = JSONArray
+        self.parse_string = scanstring
         self.memo = {}
         self.scan_once = _make_scanner(self)
 
@@ -395,7 +399,6 @@ def dump(obj, fp, *, skipkeys=False, ensure_ascii=True, check_circular=True,
         fp.write(chunk)
 
 
-_default_decoder = JSONDecoder(object_hook=None, object_pairs_hook=None)
 
 
 def detect_encoding(b):

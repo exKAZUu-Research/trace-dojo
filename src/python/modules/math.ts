@@ -9,7 +9,7 @@ import { bindValue, callValue, isTruthy, lookupSpecial, toArray } from '../objec
 import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
-import type { Kwargs, PyValue } from '../values';
+import { type Kwargs, PyInstance, type PyValue } from '../values';
 import { fma, fusedMultiplyAdd } from './mathFma';
 import { fsum as fsumWith } from './mathFsum';
 import { type GammaResult, lgamma, tgamma } from './mathGamma';
@@ -22,12 +22,15 @@ export function realArgument(value: PyValue): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return intToFloat(value);
   if (typeof value === 'boolean') return value ? 1 : 0;
-  const special = lookupSpecial(value, '__float__') ?? lookupSpecial(value, '__index__');
-  if (special !== undefined) {
-    const result = callValue(bindValue(special, value), []);
+  if (value instanceof PyInstance && typeof value.primitive === 'number') return value.primitive;
+  const floatSpecial = lookupSpecial(value, '__float__');
+  if (floatSpecial !== undefined) {
+    const result = callValue(bindValue(floatSpecial, value), []);
     if (typeof result === 'number') return result;
-    if (typeof result === 'bigint') return intToFloat(result);
+    if (result instanceof PyInstance && typeof result.primitive === 'number') return result.primitive;
+    throw typeError(`${typeName(value)}.__float__ returned non-float (type ${typeName(result)})`);
   }
+  if (lookupSpecial(value, '__index__') !== undefined) return intToFloat(toIndex(value));
   throw typeError(`must be real number, not ${typeName(value)}`);
 }
 

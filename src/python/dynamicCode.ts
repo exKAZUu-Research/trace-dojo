@@ -1,7 +1,7 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Module, Statement } from './ast';
 import { AttributeStore } from './attributeStore';
-import { PyBytes } from './bytesValues';
+import { bytesLikeData } from './bytesValues';
 import { MappingNamespace } from './classes';
 import { method } from './define';
 import { Frame } from './frame';
@@ -11,11 +11,13 @@ import { builtinClassWithBase } from './modules/moduleClasses';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceOf } from './namespaces';
 import { argument } from './nativeArgs';
+import { toIndex } from './numbers';
 import { callValue, getAttribute, isTruthy, lookupSpecial } from './objects';
 import { parseDynamicCode } from './parse';
 import { localVariables, programFrames } from './reflection';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
+import { checkNoNullCharacters, decodeSourceBytes } from './sourceEncoding';
 import { hideSubclass } from './subclasses';
 import { codeClass, type CodeInfo, functionCode, hasCode, noteUnwinding, registerCode } from './tracebacks';
 import {
@@ -48,24 +50,17 @@ interface Code {
   module: Module;
   mode: Mode;
   filename: string;
-}
-
-/** The `__future__` features of the code that runs in each globals, which code it compiles inherits. */
-const futureFeaturesOfGlobals = new WeakMap<Map<string, PyValue>, readonly string[]>();
-
-export function recordFutureFeatures(globals: Map<string, PyValue>, features: readonly string[]): void {
-  if (features.length > 0) futureFeaturesOfGlobals.set(globals, features);
+  optimize: number;
 }
 
 /** The features the calling code enables, which the code `exec`, `eval`, and `compile` compile inherits. */
 function inheritedFeatures(): readonly string[] {
-  const caller = programFrames().at(-1);
-  return (caller && futureFeaturesOfGlobals.get(caller.globals)) ?? [];
+  return programFrames().at(-1)?.scope.futureFeatures ?? [];
 }
 
 // Code objects ------------------------------------------------------------------------------------------------------
 
-function newCode(code: Code, flags: PyValue = 0n): PyOpaque {
+function newCode(code: Code, flags = 0n): PyOpaque {
   const info: CodeInfo = {
     name: '<module>',
     qualifiedName: '<module>',
@@ -83,8 +78,8 @@ function newCode(code: Code, flags: PyValue = 0n): PyOpaque {
  * The `co_flags` of compiled module code: the future flags compile() was given, and of the features the code enables,
  * those that change what CPython compiles.
  */
-function futureFlagsOf(code: Code, flags: PyValue): bigint {
-  let all = (typeof flags === 'bigint' ? flags : 0n) & FUTURE_MASK;
+function futureFlagsOf(code: Code, flags: bigint): bigint {
+  let all = flags & FUTURE_MASK;
   for (const [flag, feature] of FUTURE_FLAGS) {
     if (RECORDED_FEATURES.has(feature) && code.module.futureFeatures.includes(feature)) all |= flag;
   }
@@ -96,34 +91,36 @@ function futureFlagsOf(code: Code, flags: PyValue): bigint {
 export const COMPILE_KEYWORDS = ['source', 'filename', 'mode', 'flags', 'dont_inherit', 'optimize', '_feature_version'];
 
 /** `compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1)`. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Checks the arguments in the order CPython reports their errors in.
+// code-gauge-allow functionCognitiveComplexity 18 -- Checks the arguments in the order CPython reports their errors in.
 export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
   const [source, filename, mode, flags, dontInherit, optimize] = COMPILE_KEYWORDS.map((name, index) =>
     argument(args, kwargs, index, name)
   );
-  const { features, topLevelAwait, tree: treeKind } = compileFlags(flags);
   for (const [index, value] of [source, filename, mode].entries()) {
     if (value === undefined) {
       throw typeError(`compile() missing required argument '${COMPILE_KEYWORDS[index]}' (pos ${index + 1})`);
     }
   }
-  const tree = astSupport?.isTree(source as PyValue) ? (source as PyValue) : undefined;
-  if (tree !== undefined && treeKind !== undefined) return finishTree(tree, treeKind, optimize);
-  const text = tree === undefined ? sourceText(source as PyValue) : astSupport?.unparse(tree);
-  if (typeof text !== 'string') throw typeError('compile() arg 1 must be a string, bytes or AST object');
   if (typeof filename !== 'string') {
     throw typeError(`expected str, bytes or os.PathLike object, not ${typeName(filename as PyValue)}`);
   }
-  if (typeof mode !== 'string')
+  if (typeof mode !== 'string') {
     throw typeError(`compile() argument 'mode' must be str, not ${typeName(mode as PyValue)}`);
+  }
+  const { bits: flagBits, features, topLevelAwait, tree: treeKind } = compileFlags(flags);
+  const optimizeLevel = compileOptimize(optimize);
   if (mode !== 'exec' && mode !== 'eval' && mode !== 'single') {
     throw valueError("compile() mode must be 'exec', 'eval' or 'single'");
   }
+  const tree = astSupport?.isTree(source as PyValue) ? (source as PyValue) : undefined;
+  if (tree !== undefined && treeKind !== undefined) return finishTree(tree, treeKind, optimizeLevel);
+  const text = tree === undefined ? sourceText(source as PyValue, filename) : astSupport?.unparse(tree);
+  if (typeof text !== 'string') throw typeError('compile() arg 1 must be a string, bytes or AST object');
   if (treeKind !== undefined && astSupport) {
-    return finishTree(parseTree(astSupport, text, mode, filename), treeKind, optimize);
+    return finishTree(parseTree(astSupport, text, mode, filename), treeKind, optimizeLevel);
   }
   if (dontInherit === undefined || !isTruthy(dontInherit)) features.push(...inheritedFeatures());
-  return newCode(compileInput(text, mode, filename, features, flags, topLevelAwait), flags);
+  return newCode(compileInput(text, mode, filename, features, flagBits, topLevelAwait, optimizeLevel), flagBits);
 }
 
 /** `PyCF_DONT_IMPLY_DEDENT` and `PyCF_ALLOW_INCOMPLETE_INPUT`, with which `codeop` tells incomplete input. */
@@ -135,19 +132,19 @@ const ALLOW_INCOMPLETE_INPUT = 0x40_00n;
  * mode needs the newline after it, and with incomplete input allowed, text that may continue raises
  * `_IncompleteInputError`.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Applies both input flags as CPython's compiler does.
+// code-gauge-allow functionParameterCount 7 -- Carries each resolved compile() argument into compilation.
 function compileInput(
   text: string,
   mode: Mode,
   filename: string,
   features: string[],
-  flags: PyValue | undefined,
-  topLevelAwait: boolean
+  bits: bigint,
+  topLevelAwait: boolean,
+  optimize: number
 ): Code {
-  const bits = typeof flags === 'bigint' ? flags : 0n;
   const lacksNewline = (bits & DONT_IMPLY_DEDENT) !== 0n && mode === 'single' && lacksFinalNewline(text);
   try {
-    const code = compileCode(text, mode, filename, features, topLevelAwait);
+    const code = compileCode(text, mode, filename, features, topLevelAwait, optimize);
     const last = code.module.body.at(-1);
     if (lacksNewline && last !== undefined && isCompound(last)) {
       const cls = /\n[ \t]+$/.test(text) ? unshownIndentationErrorClass : unshownSyntaxErrorClass;
@@ -193,11 +190,9 @@ function isIncompleteText(text: string, mode: Mode): boolean {
 }
 
 /** The tree compile() returns: the one parsed, or, for `ast.PyCF_OPTIMIZED_AST`, the one CPython's optimizer gives. */
-function finishTree(tree: PyValue, kind: 'parsed' | 'optimized', optimize: PyValue | undefined): PyValue {
+function finishTree(tree: PyValue, kind: 'parsed' | 'optimized', optimize: number): PyValue {
   if (kind === 'parsed' || !astSupport) return tree;
-  // An optimization level of -1 is the interpreter's, which is 0 as the program runs without -O.
-  const level = typeof optimize === 'bigint' ? Number(optimize) : 0;
-  return astSupport.optimize(tree, level);
+  return astSupport.optimize(tree, optimize);
 }
 
 /** The tree `ast.parse` gives, raising the SyntaxError of text the grammar rejects. */
@@ -273,7 +268,7 @@ export function execute(args: PyValue[], kwargs: Kwargs): PyValue {
 
 /** The source, globals, and locals arguments of eval() or exec(). */
 function codeArguments(args: PyValue[], kwargs: Kwargs, name: string): [string | Code | PyFunction, PyValue, PyValue] {
-  const source = sourceText(args[0]);
+  const source = sourceText(args[0], '<string>');
   if (source === undefined) throw typeError(`${name}() arg 1 must be a string, bytes or code object`);
   return [source, argument(args, kwargs, 1, 'globals') ?? None, argument(args, kwargs, 2, 'locals') ?? None];
 }
@@ -282,10 +277,11 @@ function codeArguments(args: PyValue[], kwargs: Kwargs, name: string): [string |
  * The text of a source argument, what the code object it is compiles, the function whose code object it is, or
  * undefined for any other value.
  */
-function sourceText(value: PyValue): string | Code | PyFunction | undefined {
-  if (typeof value === 'string') return value;
-  if (value instanceof PyInstance && typeof value.primitive === 'string') return value.primitive;
-  if (value instanceof PyBytes) return new TextDecoder().decode(value.data);
+function sourceText(value: PyValue, filename: string): string | Code | PyFunction | undefined {
+  if (typeof value === 'string') return checkNoNullCharacters(value);
+  if (value instanceof PyInstance && typeof value.primitive === 'string') return checkNoNullCharacters(value.primitive);
+  const bytes = value === undefined ? undefined : bytesLikeData(value);
+  if (bytes !== undefined) return decodeSourceBytes(bytes, filename);
   if (value instanceof PyOpaque && value.cls === codeClass) {
     const { compiled, fn } = value.data as CodeInfo;
     if (fn) return fn;
@@ -326,20 +322,25 @@ const UNSUPPORTED_FLAGS: [bigint, string][] = [[0x10_00n, 'compile() の ast.PyC
  * and whether compile() returns a tree, as parsed or as optimized. The other flags change nothing the program can see.
  */
 function compileFlags(flags: PyValue | undefined): {
+  bits: bigint;
   features: string[];
   topLevelAwait: boolean;
   tree?: 'parsed' | 'optimized';
 } {
-  if (flags === undefined || flags === 0n || flags === false) return { features: [], topLevelAwait: false };
-  if (typeof flags !== 'bigint' && typeof flags !== 'boolean') {
-    throw typeError(`'${typeName(flags)}' object cannot be interpreted as an integer`);
-  }
-  const bits = BigInt(flags);
+  if (flags === undefined) return { bits: 0n, features: [], topLevelAwait: false };
+  const bits = toIndex(flags);
   if ((bits & ~KNOWN_FLAGS) !== 0n) throw valueError('compile(): unrecognised flags');
   for (const [flag, feature] of UNSUPPORTED_FLAGS) if ((bits & flag) !== 0n) throw new UnsupportedFeatureError(feature);
   const features = FUTURE_FLAGS.filter(([flag]) => (bits & flag) !== 0n).map(([, feature]) => feature);
   const tree = (bits & OPTIMIZED_AST_FLAG) !== 0n ? 'optimized' : (bits & ONLY_AST_FLAG) !== 0n ? 'parsed' : undefined;
-  return { features, topLevelAwait: (bits & TOP_LEVEL_AWAIT_FLAG) !== 0n, tree };
+  return { bits, features, topLevelAwait: (bits & TOP_LEVEL_AWAIT_FLAG) !== 0n, tree };
+}
+
+function compileOptimize(optimize: PyValue | undefined): number {
+  if (optimize === undefined) return 0;
+  const level = toIndex(optimize);
+  if (level < -1n || level > 2n) throw valueError('compile(): invalid optimize value');
+  return level === -1n ? 0 : Number(level);
 }
 
 // Compiling ---------------------------------------------------------------------------------------------------------
@@ -352,7 +353,8 @@ function compileCode(
   mode: Mode,
   filename: string,
   features: readonly string[] = [],
-  topLevelAwait = false
+  topLevelAwait = false,
+  optimize = 0
 ): Code {
   const runtime = currentRuntime();
   runtime.spend();
@@ -362,14 +364,19 @@ function compileCode(
     cache = new Map();
     parsedSources.set(runtime, cache);
   }
-  const key = `${mode} ${topLevelAwait} ${[...new Set(features)].toSorted().join(',')}\n${source}`;
+  const key = `${mode} ${topLevelAwait} ${optimize} ${[...new Set(features)].toSorted().join(',')}\n${source}`;
   let module = cache.get(key);
   if (!module) {
-    module = parseSource(source, filename, features, mode, topLevelAwait);
+    module = parseSource(source, filename, features, mode, topLevelAwait, optimize);
     checkMode(module, mode, filename);
     cache.set(key, module);
   }
-  return { module: mode === 'single' ? { ...module, body: module.body.map(markDisplays) } : module, mode, filename };
+  return {
+    module: mode === 'single' ? { ...module, body: module.body.map(markDisplays) } : module,
+    mode,
+    filename,
+    optimize,
+  };
 }
 
 /** Marks the expression statements that code compiled in 'single' mode shows, outside the functions and classes it defines. */
@@ -411,7 +418,8 @@ function parseSource(
   filename: string,
   features: readonly string[],
   mode: Mode,
-  topLevelAwait: boolean
+  topLevelAwait: boolean,
+  optimize: number
 ): Module {
   const { lines, limitError } = logicalLines(source);
   const indentationError = findIndentationError(source, lines, limitError);
@@ -422,7 +430,7 @@ function parseSource(
     throw syntaxError(cls, filename, reasonOf(indentationError.diagnostic));
   }
   try {
-    return parseDynamicCode(source, features, topLevelAwait);
+    return parseDynamicCode(source, features, topLevelAwait, optimize);
   } catch (error) {
     if (!(error instanceof CompileError)) throw error;
     const [diagnostic] = error.diagnostics;
@@ -560,7 +568,6 @@ function runIn(runtime: Runtime, code: Code, frame: Frame): PyValue {
   const [first] = module.body;
   if (mode === 'eval' && first.kind === 'expression') return runtime.evaluator.evaluate(first.expression, frame);
   if (mode === 'exec' && module.doc !== undefined) frame.locals.set('__doc__', module.doc);
-  recordFutureFeatures(frame.globals, module.futureFeatures);
   runtime.evaluator.runModule(module.body, frame);
   return None;
 }
@@ -572,7 +579,6 @@ function* runSuspending(runtime: Runtime, code: Code, frame: Frame): Generator<P
     return yield* runtime.evaluator.evaluateSuspending(first.expression, frame);
   }
   if (mode === 'exec' && module.doc !== undefined) frame.locals.set('__doc__', module.doc);
-  recordFutureFeatures(frame.globals, module.futureFeatures);
   yield* runtime.evaluator.block(module.body, frame);
   return None;
 }
@@ -618,5 +624,5 @@ function namespaceOfDict(value: PyValue): Map<string, PyValue> {
 
 /** Puts `__builtins__` into globals that lack it, as CPython does: the dict of the builtins module. */
 function checkBuiltins(runtime: Runtime, globals: Map<string, PyValue>): void {
-  if (globals.get('__builtins__') === undefined) globals.set('__builtins__', builtinsDict(runtime));
+  if (!globals.has('__builtins__')) globals.set('__builtins__', builtinsDict(runtime));
 }

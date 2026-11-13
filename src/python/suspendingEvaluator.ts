@@ -10,7 +10,7 @@ import {
 } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { delegateTo } from './generators';
-import { getAttribute, getItem, isTruthy, setAttribute, setItem } from './objects';
+import { getItem, isTruthy, setAttribute, setItem } from './objects';
 import { binaryOp, compareOp, unaryOp } from './operators';
 import { targetSuspends } from './suspension';
 import { templateLiteral } from './templateStrings';
@@ -67,7 +67,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
         return yield* this.dictSuspending(expression, frame);
       }
       case 'attribute': {
-        return getAttribute(yield* this.evaluateSuspending(expression.object, frame), expression.name);
+        return this.readAttribute(yield* this.evaluateSuspending(expression.object, frame), expression.name);
       }
       case 'subscript': {
         const object = yield* this.evaluateSuspending(expression.object, frame);

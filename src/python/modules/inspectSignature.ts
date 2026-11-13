@@ -314,7 +314,7 @@ function builtinSignature(fn: PyBuiltinFunction): Signature {
 
 /** The signature of a `functools.partial` object, as `_signature_get_partial` derives it from its function's. */
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
-// code-gauge-allow functionNcss 32 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
+// code-gauge-allow functionNcss 33 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
 function partialSignature(value: PyOpaque): Signature {
   const { fn, args, keywords } = value.data as Partial;
   const kwargs = new Map(keywords.store.ordered().map((entry) => [entry.key as string, entry.value]));

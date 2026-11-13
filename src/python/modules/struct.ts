@@ -1,4 +1,4 @@
-import { bytesLikeData, newBytes, PyBytes, PyMemoryView } from '../bytesValues';
+import { bytesLikeData, latin1Text, newBytes, PyBytes, PyMemoryView } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { viewOf } from '../memoryview';
@@ -100,7 +100,7 @@ function layoutOf(formatValue: PyValue): Layout {
   const format = unbox(formatValue);
   let text: string;
   if (typeof format === 'string') text = format;
-  else if (format instanceof PyBytes) text = String.fromCodePoint(...format.data);
+  else if (format instanceof PyBytes) text = latin1Text(format.data);
   else throw typeError(`Struct() argument 1 must be a str or bytes object, not ${typeName(format)}`);
   let layout = layouts.get(text);
   if (!layout) {
@@ -285,8 +285,11 @@ function writableBuffer(buffer: PyValue): { data: Uint8Array; start: number; len
 }
 
 function packBytes(layout: Layout, values: PyValue[]): PyValue {
-  const out = new Uint8Array(layout.size);
+  if (values.length !== layout.arity) {
+    throw structError(`pack expected ${layout.arity} items for packing (got ${values.length})`);
+  }
   currentRuntime().buildString(layout.size);
+  const out = new Uint8Array(layout.size);
   pack(layout, values, out, 0);
   return newBytes(out);
 }

@@ -31,6 +31,10 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ IMPORT_MAPPING NAME_MAPPING PYTHON2_EXCEPTIONS MULTIPROCESSING_EXCEPTIONS REVERSE_IMPORT_MAPPING REVERSE_NAME_MAPPING PYTHON3_OSERROR_EXCEPTIONS PYTHON3_IMPORTERROR_EXCEPTIONS',
   },
+  _contextvars: {
+    kind: 'builtin',
+    names: '__name__ __doc__ __package__ __loader__ __spec__ copy_context Context ContextVar Token',
+  },
   _csv: {
     kind: 'builtin',
     names:
@@ -393,6 +397,34 @@ export const MODULE_LAYOUTS: Readonly<Record<string, ModuleLayout>> = {
     names:
       '__name__ __doc__ __package__ __loader__ __spec__ __path__ __file__ __cached__ __builtins__ __author__ _base FIRST_COMPLETED FIRST_EXCEPTION ALL_COMPLETED CancelledError TimeoutError InvalidStateError BrokenExecutor Future Executor wait as_completed __all__ _interpreters __dir__ __getattr__',
     owners: { wait: 'concurrent.futures._base', as_completed: 'concurrent.futures._base' },
+  },
+  'concurrent.futures._base': {
+    kind: 'source',
+    doc: false,
+    imports: {
+      collections: 'collections',
+      logging: 'logging',
+      threading: 'threading',
+      time: 'time',
+      types: 'types',
+      weakref: 'weakref',
+    },
+    names:
+      '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __author__ collections logging threading time types weakref islice FIRST_COMPLETED FIRST_EXCEPTION ALL_COMPLETED _AS_COMPLETED PENDING RUNNING CANCELLED CANCELLED_AND_NOTIFIED FINISHED _STATE_TO_DESCRIPTION_MAP LOGGER Error CancelledError TimeoutError InvalidStateError _Waiter _AsCompletedWaiter _FirstCompletedWaiter _AllCompletedWaiter _AcquireFutures _create_and_install_waiters _yield_finished_futures as_completed DoneAndNotDoneFutures wait _result_or_cancel Future Executor BrokenExecutor',
+  },
+  'concurrent.futures.thread': {
+    kind: 'source',
+    imports: {
+      _base: 'concurrent.futures._base',
+      itertools: 'itertools',
+      os: 'os',
+      queue: 'queue',
+      threading: 'threading',
+      types: 'types',
+      weakref: 'weakref',
+    },
+    names:
+      '__name__ __doc__ __package__ __loader__ __spec__ __file__ __cached__ __builtins__ __author__ _base itertools queue threading types weakref os _threads_queues _shutdown _global_shutdown_lock _python_exit WorkerContext _WorkItem _worker BrokenThreadPool ThreadPoolExecutor',
   },
   configparser: {
     kind: 'source',

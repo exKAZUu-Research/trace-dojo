@@ -7,7 +7,7 @@ import {
   setInstanceAttribute,
   typeData,
 } from './attributes';
-import { typeNewFromArguments } from './classes';
+import { computeMro, typeNewFromArguments } from './classes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { callGetter, descriptorGetter } from './descriptors';
@@ -26,7 +26,6 @@ import {
   getAttribute,
   isCallable,
   lookupSpecial,
-  nextOf,
   remainingOf,
 } from './objects';
 import { sizeWithoutHeader } from './objectSizes';
@@ -86,7 +85,7 @@ import {
   PyDescriptor,
   PyFunction,
   PyInstance,
-  type PyIterator,
+  PyIterator,
   type PyModule,
   PyObject,
   PySlice,
@@ -219,7 +218,10 @@ method(typeClass, '__repr__', 'none', 0, 0, (self) => {
   const module = cls.module === 'builtins' ? '' : `${cls.module}.`;
   return `<class '${module}${cls.qualifiedName}'>`;
 });
-method(typeClass, 'mro', 'none', 0, 0, (self) => currentRuntime().listOf([...(self as PyClass).mro]));
+method(typeClass, 'mro', 'none', 0, 0, (self) => {
+  const cls = self as PyClass;
+  return currentRuntime().listOf(cls.isBuiltin ? [...cls.mro] : computeMro(cls));
+});
 method(typeClass, '__subclasses__', 'none', 0, 0, (self) => {
   // CPython's object has every type it defines inside as a subclass, which this grader's types are not.
   if (self === objectClass)
@@ -420,9 +422,14 @@ function nativeIdentity(run: object): bigint {
 /** `next(iterator)`, raising StopIteration at the end, with the return value of a generator. */
 export function nextValue(iterator: PyValue): PyValue {
   if (isIteratorGenerator(iterator)) return generatorNext(iterator, { value: None });
-  const value = nextOf(iterator)();
-  if (value === DONE) throw pyError('StopIteration');
-  return value;
+  if (iterator instanceof PyIterator) {
+    const value = iterator.next();
+    if (value === DONE) throw pyError('StopIteration');
+    return value;
+  }
+  const next = lookupSpecial(iterator, '__next__');
+  if (next === undefined) throw typeError(`'${typeName(iterator)}' object is not an iterator`);
+  return callValue(bindValue(next, iterator), []);
 }
 
 /** Gives every native iterator class the iterator protocol and a repr. */

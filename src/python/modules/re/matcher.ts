@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 543 -- Transcribes one C file of CPython, Modules/_sre/sre_lib.h.
+// code-gauge-allow-file fileNcss 553 -- Transcribes one C file of CPython, Modules/_sre/sre_lib.h.
 // A transcription of CPython's `_sre` matcher (Modules/_sre/sre_lib.h): a backtracking machine whose contexts live on
 // an explicit stack, so that deep backtracking needs no host recursion. Each context is a generator that yields the
 // context it calls and receives whether that context matched.
@@ -144,6 +144,7 @@ export class Matcher {
     }
     while (!matched && ptr < end) {
       ptr++;
+      this.budget.charge(1);
       if (skip(ptr)) continue;
       state.reset();
       state.start = ptr;
@@ -337,7 +338,16 @@ export class Matcher {
 
   private inCharset(index: number, char: number): boolean {
     const charset = this.charsets[index];
-    const found = charset.lowered?.has(char) === true || charset.items.some((item) => charsetItemHas(item, char));
+    let found = charset.lowered?.has(char) === true || charset.literals?.has(char) === true;
+    if (!found) {
+      for (let i = 0; i < charset.items.length; i++) {
+        if ((i & 7) === 0) this.budget.charge(1);
+        if (charsetItemHas(charset.items[i], char)) {
+          found = true;
+          break;
+        }
+      }
+    }
     return found !== charset.negate;
   }
 
@@ -377,8 +387,11 @@ export class Matcher {
     let end = state.end;
     if (maxcount < end - start && maxcount !== MAXREPEAT) end = start + maxcount;
     let ptr = start;
-    while (ptr < end && this.single(pc, state.text[ptr])) ptr++;
-    this.budget.charge(Math.ceil((ptr - start) / 16));
+    while (ptr < end && this.single(pc, state.text[ptr])) {
+      ptr++;
+      if (((ptr - start) & 15) === 0) this.budget.charge(1);
+    }
+    this.budget.charge(1);
     return ptr - start;
   }
 

@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 760 -- The expression evaluator keeps one method per kind of expression together.
+import { functionAnnotationReferences } from './annotations';
+// code-gauge-allow-file fileNcss 794 -- The expression evaluator keeps one method per kind of expression together.
 import { pushAll } from './arrays';
 import type {
   Argument,
@@ -14,10 +15,10 @@ import type {
 import { functionStr, KeywordArguments, mappingEntries } from './callArguments';
 import { constantValue, foldConstants } from './constantFolding';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
+import { peekOwnDict } from './descriptors';
 import { Frame } from './frame';
 import { referencesOf } from './garbageCollection';
 import { programAttribute } from './namespaceDifferences';
-import { namespaceOf } from './namespaces';
 import {
   callValue,
   deleteAttribute,
@@ -169,11 +170,15 @@ export class ExpressionEvaluator {
   }
 
   private attribute(expression: Extract<Expression, { kind: 'attribute' }>, frame: Frame): PyValue {
-    const object = this.evaluateValue(expression.object, frame);
+    return this.readAttribute(this.evaluateValue(expression.object, frame), expression.name);
+  }
+
+  /** `object.name` in a program's code. */
+  protected readAttribute(object: PyValue, name: string): PyValue {
     // An object's `__dict__` holds its attributes outside it.
     const { locals } = this.runtime.finalizer;
-    if (locals.marking && expression.name === '__dict__') locals.escape(object);
-    return programAttribute(object, expression.name);
+    if (locals.marking && name === '__dict__') locals.escape(object);
+    return programAttribute(object, name);
   }
 
   private subscript(expression: Extract<Expression, { kind: 'subscript' }>, frame: Frame): PyValue {
@@ -307,7 +312,7 @@ export class ExpressionEvaluator {
         return value;
       }
       case 'name': {
-        const value = frame.locals.get(name) ?? frame.globals.get(name) ?? this.builtinsOf(frame).get(name);
+        const value = frame.locals.get(name) ?? frame.globals.get(name) ?? this.lookupBuiltin(name, frame);
         if (value === undefined) throw this.nameError(`name '${name}' is not defined`, name, frame);
         return value;
       }
@@ -323,19 +328,38 @@ export class ExpressionEvaluator {
         return value;
       }
       default: {
-        const value = frame.globals.get(name) ?? this.builtinsOf(frame).get(name) ?? classCellOf(name, frame);
+        const value = frame.globals.get(name) ?? this.lookupBuiltin(name, frame) ?? classCellOf(name, frame);
         if (value === undefined) throw this.nameError(`name '${name}' is not defined`, name, frame);
         return value;
       }
     }
   }
 
-  /** The builtins a frame's names fall back to: those its globals' `__builtins__` holds, as in CPython. */
-  private builtinsOf(frame: Frame): Map<string, PyValue> {
-    const builtins = frame.globals.get('__builtins__');
-    if (builtins instanceof PyModule) return builtins.dict;
-    if (builtins instanceof PyDict) return namespaceOf(builtins);
-    return this.runtime.builtins;
+  /** Looks up `name` in the `__builtins__` object captured by `frame`, subscripting non-dict values as CPython does. */
+  private lookupBuiltin(name: string, frame: Frame): PyValue | undefined {
+    const { builtins } = frame;
+    if (builtins === undefined) return this.runtime.builtins.get(name);
+    if (builtins instanceof PyModule) return builtins.dict.get(name);
+    if (builtins instanceof PyDict && builtins.cls === dictClass) return builtins.store.get(name);
+    try {
+      return getItem(builtins, name);
+    } catch (error) {
+      if (this.runtime.isLookupError(error)) return undefined;
+      throw error;
+    }
+  }
+
+  private builtinNames(frame: Frame): Iterable<string> {
+    const { builtins } = frame;
+    if (builtins === undefined) return this.runtime.builtins.keys();
+    if (builtins instanceof PyModule) return builtins.dict.keys();
+    if (builtins instanceof PyDict && builtins.cls === dictClass) {
+      return builtins.store
+        .ordered()
+        .map((entry) => entry.key)
+        .filter((key): key is string => typeof key === 'string');
+    }
+    return [];
   }
 
   private nameError(message: string, name: string, frame: Frame): PyError {
@@ -348,7 +372,7 @@ export class ExpressionEvaluator {
         ...frame.locals.keys(),
         ...[...frame.cells.entries()].filter(([, cell]) => cell.value !== undefined).map(([key]) => key),
         ...(frame.globals === frame.locals ? [] : frame.globals.keys()),
-        ...this.runtime.builtins.keys(),
+        ...this.builtinNames(frame),
       ];
       state.selfValue = frame.kind === 'function' ? frame.locals.get('self') : undefined;
     }
@@ -552,7 +576,10 @@ export class ExpressionEvaluator {
   private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): PyValue | undefined {
     if (this.runtime.finalizer.pending.size === 0) return undefined;
     if (isAttribute) {
-      return object instanceof PyInstance || object instanceof PyClass ? object.dict.get(key as string) : undefined;
+      if (object instanceof PyInstance || object instanceof PyClass) return object.dict.get(key as string);
+      return object instanceof PyObject
+        ? (peekOwnDict(object)?.get(key as string) ?? object.slotValues?.get(key as string))
+        : undefined;
     }
     if (object instanceof PyList && typeof key === 'bigint') {
       const { items } = object;
@@ -762,8 +789,6 @@ export class ExpressionEvaluator {
    * Creates a function object, evaluating its defaults in the defining frame unless `defaultValues` gives the values of
    * the parameters' defaults in order, and holding evaluated defaults as temporaries until the function exists.
    */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Sets each attribute a new function object carries.
-  // code-gauge-allow functionNcss 33 -- Sets each attribute a new function object carries.
   createFunction(
     def: FunctionDef,
     frame: Frame,
@@ -780,38 +805,29 @@ export class ExpressionEvaluator {
           frame.temporaries.push(value);
           return [value];
         });
-      const defaults: PyValue[] = [];
-      const keywordDefaults = new Map<string, PyValue>();
-      let index = 0;
-      for (const param of def.params) {
-        if (!param.default) continue;
-        const value = resolvedDefaults[index++];
-        if (param.kind === 'keywordOnly') keywordDefaults.set(param.name, value);
-        else defaults.push(value);
-      }
-      const closure = new Map<string, PyCell>();
-      for (const name of def.scope.frees) {
-        let cell = frame.cells.get(name);
-        if (!cell) {
-          cell = new PyCell();
-          frame.cells.set(name, cell);
-        }
-        closure.set(name, cell);
-      }
+      const [defaults, keywordDefaults] = splitDefaults(def, resolvedDefaults);
       const fn = new PyFunction(
         functionClass,
         def,
         frame.globals,
-        closure,
+        closureOf(def, frame),
         defaults,
         keywordDefaults,
         def.usesClassCell ? frame.classCell : undefined
       );
       fn.module = frame.globals.get('__name__') ?? None;
       if (typeParams) fn.typeParams = typeParams;
-      if (def.returns || def.params.some((param) => param.annotation)) fn.annotationFrame = frame;
+      if (def.returns || def.params.some((param) => param.annotation)) this.keepAnnotationFrame(fn, frame);
       return this.decorate(fn, decorators);
     });
+  }
+
+  /** Makes a function's annotations evaluate in its defining frame, whose values they refer to then escape. */
+  private keepAnnotationFrame(fn: PyFunction, frame: Frame): void {
+    fn.annotationFrame = frame;
+    const { locals } = this.runtime.finalizer;
+    if (!locals.marking) return;
+    for (const ref of functionAnnotationReferences(fn)) locals.escape(ref instanceof PyCell ? ref.value : ref);
   }
 
   private decorate(fn: PyFunction, decorators: PyValue[]): PyValue {
@@ -842,6 +858,7 @@ export class ExpressionEvaluator {
         '<genexpr>',
         expression.qualifiedName ?? '<genexpr>',
         (input) => {
+          inner.callRow = runtime.currentRow;
           runtime.pushFrame(inner);
           try {
             return input.error ? body.throw(input.error) : body.next();
@@ -918,8 +935,10 @@ export class ExpressionEvaluator {
       cells.set(name, cell);
     }
     for (const name of scope.cells) cells.set(name, new PyCell());
-    const callRow = kind === 'function' ? frame.callRow : undefined;
-    return new Frame(kind, new Map(), cells, frame.globals, callRow, false, scope, frame.fn, frame.classCell);
+    const callRow = kind === 'function' ? frame.callRow : this.runtime.currentRow;
+    const inner = new Frame(kind, new Map(), cells, frame.globals, callRow, false, scope, frame.fn, frame.classCell);
+    inner.builtins = frame.builtins;
+    return inner;
   }
 
   /** Runs the clauses of a comprehension, yielding each element, or storing each pair through `store`. */
@@ -1183,4 +1202,32 @@ function builtinMethodOwner(callee: PyValue): PyValue | undefined {
   if (callee instanceof PyBuiltinFunction) return callee.self;
   if (callee instanceof PyBoundMethod && !(callee.fn instanceof PyFunction)) return callee.self;
   return undefined;
+}
+
+/** A function's positional defaults and its keyword-only defaults, from the values of its parameters' defaults. */
+function splitDefaults(def: FunctionDef, values: PyValue[]): [PyValue[], Map<string, PyValue>] {
+  const defaults: PyValue[] = [];
+  const keywordDefaults = new Map<string, PyValue>();
+  let index = 0;
+  for (const param of def.params) {
+    if (!param.default) continue;
+    const value = values[index++] as PyValue;
+    if (param.kind === 'keywordOnly') keywordDefaults.set(param.name, value);
+    else defaults.push(value);
+  }
+  return [defaults, keywordDefaults];
+}
+
+/** The cells of the defining frame a new function closes over, which the frame creates for the names it lacks. */
+function closureOf(def: FunctionDef, frame: Frame): Map<string, PyCell> {
+  const closure = new Map<string, PyCell>();
+  for (const name of def.scope.frees) {
+    let cell = frame.cells.get(name);
+    if (!cell) {
+      cell = new PyCell();
+      frame.cells.set(name, cell);
+    }
+    closure.set(name, cell);
+  }
+  return closure;
 }

@@ -125,6 +125,7 @@ function hashString(value: string): bigint {
 }
 
 function computeStringHash(value: string): bigint {
+  if (value.length === 0) return 0n;
   chargeScan(value.length);
   let high = 0x81_1c_9d_c5;
   let low = 0x01_00_01_93;

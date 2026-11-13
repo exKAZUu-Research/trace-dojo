@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 501 -- Transcribes the methods of _pydecimal that belong together.
+// code-gauge-allow-file fileNcss 507 -- Transcribes the methods of _pydecimal that belong together.
 import { currentRuntime } from '../runtimeContext';
 import { times } from './decimalArithmetic';
 import { type DecimalContext, etiny } from './decimalContext';
@@ -41,6 +41,9 @@ function divNearest(a: bigint, b: bigint): bigint {
 }
 
 function floorDiv(a: bigint, b: bigint): bigint {
+  const runtime = currentRuntime();
+  runtime.chargeBigint(a, b);
+  runtime.spend();
   const q = a / b;
   return a % b !== 0n && a < 0n !== b < 0n ? q - 1n : q;
 }
@@ -69,14 +72,14 @@ function ilog(x: bigint, m: bigint, l = 8): bigint {
   let r = 0;
   const bigL = BigInt(l);
   while ((r <= l && absolute(y) << (bigL - BigInt(r)) >= m) || (r > l && absolute(y) >> (BigInt(r) - bigL) >= m)) {
-    y = divNearest((m * y) << 1n, m + sqrtNearest(m * (m + rshiftNearest(y, r)), m));
+    y = divNearest(multiply(m, y) << 1n, m + sqrtNearest(multiply(m, m + rshiftNearest(y, r)), m));
     r += 1;
   }
   const t = -Math.floor((-10 * decimalLength(m)) / (3 * l));
   const yShift = rshiftNearest(y, r);
   let w = divNearest(m, BigInt(t));
-  for (let k = t - 1; k > 0; k--) w = divNearest(m, BigInt(k)) - divNearest(yShift * w, m);
-  return divNearest(w * y, m);
+  for (let k = t - 1; k > 0; k--) w = divNearest(m, BigInt(k)) - divNearest(multiply(yShift, w), m);
+  return divNearest(multiply(w, y), m);
 }
 
 let log10Digits = '23025850929940456840179914546843642076011014886';
@@ -139,10 +142,10 @@ function iexp(x: bigint, m: bigint, l = 8): bigint {
   const t = -Math.floor((-10 * decimalLength(m)) / (3 * l));
   let y = divNearest(x, BigInt(t));
   let mShift = m << BigInt(r);
-  for (let i = t - 1; i > 0; i--) y = divNearest(x * (mShift + y), mShift * BigInt(i));
+  for (let i = t - 1; i > 0; i--) y = divNearest(multiply(x, mShift + y), mShift * BigInt(i));
   for (let k = r - 1; k >= 0; k--) {
     mShift = m << BigInt(k + 2);
-    y = divNearest(y * (y + mShift), mShift);
+    y = divNearest(multiply(y, y + mShift), mShift);
   }
   return m + y;
 }
@@ -187,6 +190,7 @@ function untilUnambiguous(
 ): [bigint, number] {
   let places = start;
   for (;;) {
+    currentRuntime().spend();
     const coefficient = compute(places);
     const magnitude = coefficient < 0n ? -coefficient : coefficient;
     const digits = decimalLength(magnitude) - p - 1;
@@ -443,7 +447,7 @@ function lshiftExact(n: bigint, e: number): bigint | undefined {
 
 /** The exact value of x ** y when it has at most p digits, or undefined, as `Decimal._power_exact` decides. */
 // code-gauge-allow functionCognitiveComplexity 27 -- Transcribes _pydecimal's algorithm of the same name.
-// code-gauge-allow functionNcss 49 -- Transcribes _pydecimal's algorithm of the same name.
+// code-gauge-allow functionNcss 50 -- Transcribes _pydecimal's algorithm of the same name.
 function powerExact(self: FiniteDec, other: FiniteDec, p: number): Dec | undefined {
   let [xc, xe] = stripTens(BigInt(self.int), self.exp);
   const [yc, ye] = stripTens(BigInt(other.int), other.exp);
@@ -479,6 +483,7 @@ function powerExact(self: FiniteDec, other: FiniteDec, p: number): Dec | undefin
     xc = root;
   }
   if (xc > 1n && m > BigInt(Math.floor((p * 100) / log10LowerBound(xc)))) return undefined;
+  currentRuntime().chargeBits(BigInt(bitLength(xc)) * m);
   xc **= m;
   xe *= Number(m);
   const text = xc.toString();
@@ -496,6 +501,7 @@ function integerRoot(xc: bigint, n: bigint): bigint | undefined {
   let q: bigint;
   let r: bigint;
   for (;;) {
+    currentRuntime().chargeBits(BigInt(bitLength(a)) * n);
     const divisor = a ** (n - 1n);
     q = xc / divisor;
     r = xc % divisor;

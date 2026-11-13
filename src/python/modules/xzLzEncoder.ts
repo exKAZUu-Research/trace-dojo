@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 422 -- Transcribes liblzma 5.8.4 C sources together, which read best side by side with them.
+// code-gauge-allow-file fileNcss 460 -- Transcribes liblzma 5.8.4 C sources together, which read best side by side with them.
 // The LZ encoder of liblzma 5.8.4 (`lz_encoder.c`, `lz_encoder_mf.c`): the window that the filters before it fill, and
-// its hash chain and binary tree match finders. The window and the tree grow as they are used rather than being
-// allocated at their full size, which changes nothing that can be observed.
+// its hash chain and binary tree match finders. The window, hash table, and tree grow as they are used rather than being
+// allocated at their full size, charging the runtime budget before each host allocation.
+import { currentRuntime } from '../runtimeContext';
 import { CRC32_TABLE } from './xzCheck';
 import {
   type Coder,
@@ -51,6 +52,40 @@ function memcmplen(buf: Uint8Array, a: number, b: number, start: number, limit: 
   return len;
 }
 
+const HASH_PAGE_SHIFT = 10;
+const HASH_PAGE_SIZE = 1 << HASH_PAGE_SHIFT;
+const HASH_PAGE_MASK = HASH_PAGE_SIZE - 1;
+
+function chargeBytes(bytes: number): void {
+  if (bytes > 0) currentRuntime().allocate(Math.ceil(bytes / 8));
+}
+
+/** A `Uint32Array` hash table allocated in 1024-entry pages on first write so large `dict_size` tables stay sparse. */
+class SparseHash {
+  private readonly pages = new Map<number, Uint32Array>();
+
+  get(index: number): number {
+    return this.pages.get(index >>> HASH_PAGE_SHIFT)?.[index & HASH_PAGE_MASK] ?? 0;
+  }
+
+  set(index: number, value: number): void {
+    const pageIndex = index >>> HASH_PAGE_SHIFT;
+    let page = this.pages.get(pageIndex);
+    if (!page) {
+      chargeBytes(HASH_PAGE_SIZE * 4);
+      page = new Uint32Array(HASH_PAGE_SIZE);
+      this.pages.set(pageIndex, page);
+    }
+    page[index & HASH_PAGE_MASK] = value;
+  }
+
+  normalize(subvalue: number): void {
+    for (const page of this.pages.values()) {
+      for (let i = 0; i < page.length; i++) page[i] = page[i] <= subvalue ? 0 : page[i] - subvalue;
+    }
+  }
+}
+
 /** `lzma_mf`. */
 export class MatchFinder {
   buffer = new Uint8Array(0);
@@ -63,7 +98,7 @@ export class MatchFinder {
   readLimit = 0;
   writePos = 0;
   pending = 0;
-  hash = new Uint32Array(0);
+  hash = new SparseHash();
   son = new Uint32Array(0);
   cyclicPos = 0;
   cyclicSize = 0;
@@ -124,15 +159,18 @@ export class MatchFinder {
 
   /** `lz_encoder_init`, without a preset dictionary. */
   init(): void {
-    this.buffer = new Uint8Array(Math.min(this.size, 1 << 16) + MEMCMPLEN_EXTRA);
+    const initialBuffer = Math.min(this.size, 1 << 14) + MEMCMPLEN_EXTRA;
+    const initialSon = Math.min(this.sonsCount, 1 << 12);
+    chargeBytes(initialBuffer + initialSon * 4);
+    this.buffer = new Uint8Array(initialBuffer);
     this.offset = this.cyclicSize;
     this.readPos = 0;
     this.readAhead = 0;
     this.readLimit = 0;
     this.writePos = 0;
     this.pending = 0;
-    this.hash = new Uint32Array(this.hashCount);
-    this.son = new Uint32Array(Math.min(this.sonsCount, 1 << 16));
+    this.hash = new SparseHash();
+    this.son = new Uint32Array(initialSon);
     this.cyclicPos = 0;
     this.action = LZMA_RUN;
   }
@@ -144,7 +182,9 @@ export class MatchFinder {
   /** Grows the window so that `end` and the zeroed bytes after it fit. */
   reserve(end: number): void {
     if (end + MEMCMPLEN_EXTRA <= this.buffer.length) return;
-    const grown = new Uint8Array(Math.min(Math.max(end, this.buffer.length * 2), this.size) + MEMCMPLEN_EXTRA);
+    const nextLength = Math.min(Math.max(end, this.buffer.length * 2), this.size) + MEMCMPLEN_EXTRA;
+    chargeBytes(nextLength - this.buffer.length);
+    const grown = new Uint8Array(nextLength);
     grown.set(this.buffer.subarray(0, this.writePos));
     this.buffer = grown;
   }
@@ -201,8 +241,8 @@ export class MatchFinder {
 
   private bt2Find(lenLimit: number, pos: number, cur: number): number {
     const hashValue = this.buffer[cur] | (this.buffer[cur + 1] << 8);
-    const curMatch = this.hash[hashValue];
-    this.hash[hashValue] = pos;
+    const curMatch = this.hash.get(hashValue);
+    this.hash.set(hashValue, pos);
     return this.chainFind(true, lenLimit, pos, cur, curMatch, 0, 1);
   }
 
@@ -211,10 +251,10 @@ export class MatchFinder {
     const temp = CRC32_TABLE[buffer[cur]] ^ buffer[cur + 1];
     const hash2Value = temp & HASH_2_MASK;
     const hashValue = (temp ^ (buffer[cur + 2] << 8)) & this.hashMask;
-    const delta2 = (pos - hash[hash2Value]) >>> 0;
-    const curMatch = hash[FIX_3_HASH_SIZE + hashValue];
-    hash[hash2Value] = pos;
-    hash[FIX_3_HASH_SIZE + hashValue] = pos;
+    const delta2 = (pos - hash.get(hash2Value)) >>> 0;
+    const curMatch = hash.get(FIX_3_HASH_SIZE + hashValue);
+    hash.set(hash2Value, pos);
+    hash.set(FIX_3_HASH_SIZE + hashValue, pos);
     let lenBest = 2;
     let count = 0;
     if (delta2 < this.cyclicSize && buffer[cur - delta2] === buffer[cur]) {
@@ -236,12 +276,12 @@ export class MatchFinder {
     const hash2Value = temp & HASH_2_MASK;
     const hash3Value = (temp ^ (buffer[cur + 2] << 8)) & HASH_3_MASK;
     const hashValue = (temp ^ (buffer[cur + 2] << 8) ^ (CRC32_TABLE[buffer[cur + 3]] << 5)) & this.hashMask;
-    let delta2 = (pos - hash[hash2Value]) >>> 0;
-    const delta3 = (pos - hash[FIX_3_HASH_SIZE + hash3Value]) >>> 0;
-    const curMatch = hash[FIX_4_HASH_SIZE + hashValue];
-    hash[hash2Value] = pos;
-    hash[FIX_3_HASH_SIZE + hash3Value] = pos;
-    hash[FIX_4_HASH_SIZE + hashValue] = pos;
+    let delta2 = (pos - hash.get(hash2Value)) >>> 0;
+    const delta3 = (pos - hash.get(FIX_3_HASH_SIZE + hash3Value)) >>> 0;
+    const curMatch = hash.get(FIX_4_HASH_SIZE + hashValue);
+    hash.set(hash2Value, pos);
+    hash.set(FIX_3_HASH_SIZE + hash3Value, pos);
+    hash.set(FIX_4_HASH_SIZE + hashValue, pos);
     let lenBest = 1;
     let count = 0;
     if (delta2 < this.cyclicSize && buffer[cur - delta2] === buffer[cur]) {
@@ -309,20 +349,20 @@ export class MatchFinder {
     let curMatch: number;
     if (hashBytes === 2) {
       const hashValue = buffer[cur] | (buffer[cur + 1] << 8);
-      curMatch = hash[hashValue];
-      hash[hashValue] = pos;
+      curMatch = hash.get(hashValue);
+      hash.set(hashValue, pos);
     } else {
       const temp = CRC32_TABLE[buffer[cur]] ^ buffer[cur + 1];
-      hash[temp & HASH_2_MASK] = pos;
+      hash.set(temp & HASH_2_MASK, pos);
       if (hashBytes === 3) {
         const hashValue = (temp ^ (buffer[cur + 2] << 8)) & this.hashMask;
-        curMatch = hash[FIX_3_HASH_SIZE + hashValue];
-        hash[FIX_3_HASH_SIZE + hashValue] = pos;
+        curMatch = hash.get(FIX_3_HASH_SIZE + hashValue);
+        hash.set(FIX_3_HASH_SIZE + hashValue, pos);
       } else {
-        hash[FIX_3_HASH_SIZE + ((temp ^ (buffer[cur + 2] << 8)) & HASH_3_MASK)] = pos;
+        hash.set(FIX_3_HASH_SIZE + ((temp ^ (buffer[cur + 2] << 8)) & HASH_3_MASK), pos);
         const hashValue = (temp ^ (buffer[cur + 2] << 8) ^ (CRC32_TABLE[buffer[cur + 3]] << 5)) & this.hashMask;
-        curMatch = hash[FIX_4_HASH_SIZE + hashValue];
-        hash[FIX_4_HASH_SIZE + hashValue] = pos;
+        curMatch = hash.get(FIX_4_HASH_SIZE + hashValue);
+        hash.set(FIX_4_HASH_SIZE + hashValue, pos);
       }
     }
     this.chainSkip(isBt, lenLimit, pos, cur, curMatch);
@@ -461,7 +501,9 @@ export class MatchFinder {
   private reserveSon(): void {
     const end = (this.kind & 0x10 ? this.cyclicPos * 2 + 2 : this.cyclicPos + 1) + 1;
     if (end <= this.son.length) return;
-    const grown = new Uint32Array(Math.min(Math.max(end, this.son.length * 2), this.sonsCount));
+    const nextLength = Math.min(Math.max(end, this.son.length * 2), this.sonsCount);
+    chargeBytes((nextLength - this.son.length) * 4);
+    const grown = new Uint32Array(nextLength);
     grown.set(this.son);
     this.son = grown;
   }
@@ -479,9 +521,8 @@ export class MatchFinder {
 
   private normalize(): void {
     const subvalue = UINT32_MAX - this.cyclicSize;
-    for (const table of [this.hash, this.son]) {
-      for (let i = 0; i < table.length; i++) table[i] = table[i] <= subvalue ? 0 : table[i] - subvalue;
-    }
+    this.hash.normalize(subvalue);
+    for (let i = 0; i < this.son.length; i++) this.son[i] = this.son[i] <= subvalue ? 0 : this.son[i] - subvalue;
     this.offset -= subvalue;
   }
 }

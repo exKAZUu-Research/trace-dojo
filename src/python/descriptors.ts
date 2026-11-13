@@ -2,7 +2,7 @@
 // PyInstance, and `__getattribute__`.
 import { bindValue, callValue, lookupSpecial } from './objects';
 import { instancesHaveDict } from './slots';
-import { classOf, objectClass, pyError } from './types';
+import { classOf, isNativeMethod, objectClass, pyError } from './types';
 import { AttributeMap, type PyClass, PyError, PyFunction, PyInstance, PyObject, type PyValue } from './values';
 
 /** The builtin classes whose objects are data descriptors, which take attributes over instance dicts. */
@@ -46,8 +46,38 @@ export const builtinClassesWithDict = new Set<PyClass>();
 /** The C types written in Python here (see makeCType), whose CPython objects hold fields beyond a dict. */
 export const fieldedCTypes = new WeakSet<PyClass>();
 
+interface ThreadLocalAccess {
+  isThreadLocal: (value: PyObject) => boolean;
+  ensureDict: (value: PyObject) => Map<string, PyValue>;
+  peekDict: (value: PyObject) => Map<string, PyValue> | undefined;
+}
+
+let threadLocalAccess: ThreadLocalAccess | undefined;
+
+export function registerThreadLocalAccess(access: ThreadLocalAccess): void {
+  threadLocalAccess = access;
+}
+
+export function isThreadLocal(value: PyValue): boolean {
+  return value instanceof PyObject && threadLocalAccess?.isThreadLocal(value) === true;
+}
+
+export function ensureThreadLocalDict(value: PyValue): Map<string, PyValue> | undefined {
+  return value instanceof PyObject && threadLocalAccess?.isThreadLocal(value)
+    ? threadLocalAccess.ensureDict(value)
+    : undefined;
+}
+
+export function peekOwnDict(value: PyObject): Map<string, PyValue> | undefined {
+  if (threadLocalAccess?.isThreadLocal(value)) return threadLocalAccess.peekDict(value);
+  if (value instanceof PyInstance) return value.cls.slotNames === undefined ? value.dict : undefined;
+  if (value instanceof PyFunction) return value.dict;
+  return value.instanceDict;
+}
+
 /** The dictionary of an object's own attributes, or undefined for an object without one. */
 export function ownDict(value: PyValue): Map<string, PyValue> | undefined {
+  if (value instanceof PyObject && threadLocalAccess?.isThreadLocal(value)) return threadLocalAccess.peekDict(value);
   if (value instanceof PyInstance) return value.cls.slotNames === undefined ? value.dict : undefined;
   if (typeof value !== 'object') return undefined;
   if (value instanceof PyFunction) return value.dict;
@@ -69,7 +99,10 @@ export function customGetattribute(value: PyValue): PyValue | undefined {
   const cls = classOf(value);
   if (cls.isBuiltin || !(cls.flags.definesGetattribute || getattributeAssigned)) return undefined;
   const method = cls.lookup('__getattribute__');
-  return method === objectClass.dict.get('__getattribute__') ? undefined : method;
+  return method === objectClass.dict.get('__getattribute__') ||
+    (isNativeMethod(method) && (method as { name?: string }).name === '__getattribute__')
+    ? undefined
+    : method;
 }
 
 /** Reads an attribute with a program's `__getattribute__`, falling back to its `__getattr__` on AttributeError. */

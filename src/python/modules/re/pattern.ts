@@ -155,7 +155,9 @@ export function compileRegex(sourceValue: PyValue, flags: number, printsDebug = 
     const program = compilePattern(parsed, allFlags);
     const runtime = currentRuntime();
     runtime.scan(source.length + program.code.length);
-    for (const charset of program.charsets) runtime.scan(charset.lowered?.size ?? 0);
+    for (const charset of program.charsets) {
+      runtime.scan((charset.lowered?.size ?? 0) + (charset.literals?.size ?? 0) + charset.items.length);
+    }
     const { groups, groupdict } = parsed.state;
     return new PatternObject(source, allFlags, program, groups - 1, groupdict, sourceValue, isBytes);
   } catch (error) {
@@ -424,8 +426,16 @@ defineMethod(patternClass, '__eq__', (self, [other]) => {
   const pattern = asPattern(self);
   return (
     pattern === other ||
-    (pattern.flags === other.flags && pattern.source === other.source && pattern.isBytes === other.isBytes)
+    (pattern.source !== undefined &&
+      pattern.flags === other.flags &&
+      pattern.source === other.source &&
+      pattern.isBytes === other.isBytes)
   );
+});
+defineMethod(patternClass, '__hash__', (self) => {
+  const pattern = asPattern(self);
+  if (pattern.source === undefined) return currentRuntime().hashOf(BigInt(pattern.identity));
+  return currentRuntime().hashOf(newTuple([pattern.source, pattern.isBytes ?? false, BigInt(pattern.flags)]));
 });
 defineMethod(patternClass, '__copy__', (self) => self);
 defineMethod(patternClass, '__deepcopy__', (self) => self);

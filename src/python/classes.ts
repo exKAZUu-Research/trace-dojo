@@ -1,4 +1,11 @@
-import { annotationClosure, classAnnotationLists, implicitlyWrapped, newAnnotate } from './annotations';
+// code-gauge-allow-file fileNcss 421 -- Class creation, its MRO, and its slots follow CPython's type creation together.
+import {
+  annotationClosure,
+  annotationReferences,
+  classAnnotationLists,
+  implicitlyWrapped,
+  newAnnotate,
+} from './annotations';
 import type { ClassDef } from './ast';
 import { defineAttribute, PyAttribute } from './attributeDescriptors';
 import { INSTANCE_ATTRIBUTE_DOCS } from './builtinDocs';
@@ -15,8 +22,10 @@ import {
   getAttribute,
   getAttributeOrUndefined,
   getItem,
+  lengthOf,
   lookupSpecial,
   setItem,
+  toArray,
 } from './objects';
 import { firstRowOf } from './programSource';
 import { currentRuntime } from './runtimeContext';
@@ -159,8 +168,12 @@ function addClassAnnotate(
   namespace: Map<string, PyValue>,
   annotations: ClassAnnotations
 ): PyCell {
-  const classDict = new PyCell(namespaceDict(namespace));
+  const classDict = new PyCell(namespace instanceof MappingNamespace ? namespace.mapping : namespaceDict(namespace));
   if (annotations.length > 0 && !namespace.has('__annotations__')) {
+    const runtime = currentRuntime();
+    for (const ref of annotationReferences(annotations)) {
+      runtime.finalizer.locals.escape(ref instanceof PyCell ? ref.value : ref);
+    }
     const closure = new Map([...annotationClosure(annotations), ['__classdict__', classDict]]);
     namespace.set(
       '__annotate_func__',
@@ -298,8 +311,12 @@ function runClassBody(
 
 /** A class body's namespace that a metaclass's `__prepare__` returned, read and written through its item methods. */
 export class MappingNamespace extends Map<string, PyValue> {
-  constructor(private readonly mapping: PyValue) {
+  constructor(readonly mapping: PyValue) {
     super();
+  }
+
+  override get size(): number {
+    return lengthOf(this.mapping);
   }
 
   override get(name: string): PyValue | undefined {
@@ -331,9 +348,16 @@ export class MappingNamespace extends Map<string, PyValue> {
   }
 
   override *[Symbol.iterator](): MapIterator<[string, PyValue]> {
-    if (!(this.mapping instanceof PyDict)) return;
-    for (const entry of this.mapping.store.ordered()) {
-      if (typeof entry.key === 'string') yield [entry.key, entry.value];
+    if (this.mapping instanceof PyDict) {
+      for (const entry of this.mapping.store.ordered()) {
+        if (typeof entry.key === 'string') yield [entry.key, entry.value];
+      }
+      return;
+    }
+    for (const key of toArray(this.mapping)) {
+      if (typeof key !== 'string') continue;
+      const value = this.get(key);
+      if (value !== undefined) yield [key, value];
     }
   }
 }
@@ -365,13 +389,13 @@ export function typeNew(
   cls.isBuiltin = false;
   cls.isBaseType = true;
   cls.layout = { base: layoutOf(effectiveBases) };
-  cls.mro = computeMro(cls);
   cls.module = typeof entries.get('__module__') === 'string' ? (entries.get('__module__') as string) : '__main__';
   cls.qualifiedName = qualifiedNameOf(entries, name);
   entries.delete('__qualname__');
+  cls.mro = resolveMro(cls);
   cls.flags.definesGetattribute =
-    entries.has('__getattribute__') || classBases.some((base) => base.flags.definesGetattribute);
-  cls.flags.definesDel = entries.has('__del__') || classBases.some((base) => base.flags.definesDel);
+    entries.has('__getattribute__') || cls.mro.slice(1).some((base) => base.flags.definesGetattribute);
+  cls.flags.definesDel = entries.has('__del__') || cls.mro.slice(1).some((base) => base.flags.definesDel);
   fillClassDict(cls, entries);
   const body = pendingBodies.get(namespace);
   if (body) {
@@ -437,6 +461,7 @@ function qualifiedNameOf(entries: Map<string, PyValue>, name: string): string {
 function baseProvides(base: PyClass, name: string): boolean {
   if (base.isSubclassOf(typeClass)) return true;
   if (name === '__dict__') return base.isSubclassOf(baseExceptionClass);
+  if (base.mro.some((each) => each.module === '_thread' && each.name === '_local')) return true;
   return [intClass, tupleClass, bytesClass, setClass, frozensetClass].some((each) => base.isSubclassOf(each));
 }
 
@@ -545,6 +570,17 @@ function descendantsOf(runtime: object, cls: PyClass): PyClass[] {
   };
   visit(cls);
   return found;
+}
+
+function resolveMro(cls: PyClass): PyClass[] {
+  const mroMethod = cls.cls === typeClass ? undefined : cls.cls.lookup('mro');
+  if (mroMethod === undefined || mroMethod === typeClass.dict.get('mro')) return computeMro(cls);
+  const items = toArray(callValue(bindValue(mroMethod, cls, cls.cls), []));
+  if (items.length === 0) throw typeError('type MRO must not be empty');
+  return items.map((item) => {
+    if (!(item instanceof PyClass)) throw typeError(`mro() returned a non-class ('${typeName(item)}')`);
+    return item;
+  });
 }
 
 /** Computes the C3 linearization of a class, raising TypeError when its bases admit none. */

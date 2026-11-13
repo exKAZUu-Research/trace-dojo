@@ -12,7 +12,7 @@ import {
   PROPERTY_RECORDS,
   PROPERTY_RUNS,
 } from './data/unicodeData';
-import { iterStr } from './strings';
+import { fromCodePoints, iterStr } from './strings';
 
 export interface CharacterProperties {
   category: string;
@@ -144,7 +144,7 @@ export function normalize(form: NormalizationForm, text: string, decomposition: 
     form.includes('K'),
     decomposition
   );
-  return String.fromCodePoint(...(form.endsWith('C') ? compose(points) : points));
+  return fromCodePoints(form.endsWith('C') ? compose(points) : points);
 }
 
 function decompose(points: number[], compatibility: boolean, decomposer: Decomposer): number[] {

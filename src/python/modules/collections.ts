@@ -290,42 +290,8 @@ method(dequeClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
 method(dequeClass, '__contains__', 'one', 1, 1, (self, [item]) =>
   dequeOf(self).items.some((each) => equals(each, item))
 );
-method(dequeClass, '__iter__', 'none', 0, 0, (self) => {
-  const deque = dequeOf(self);
-  let index = 0;
-  const length = deque.length;
-  return new PyIterator(
-    iteratorClass('collections._deque_iterator'),
-    withRemaining(
-      () => {
-        if (deque.length !== length) throw pyError('RuntimeError', 'deque mutated during iteration');
-        return index < deque.length ? deque.at(index++) : DONE;
-      },
-      () => (deque.length === length ? length - index : 0)
-    ),
-    () => [deque]
-  );
-});
-method(dequeClass, '__reversed__', 'none', 0, 0, (self) => {
-  const deque = dequeOf(self);
-  const length = deque.length;
-  let remaining = length;
-  return new PyIterator(
-    iteratorClass('collections._deque_reverse_iterator'),
-    withRemaining(
-      () => {
-        if (remaining === 0) return DONE;
-        if (deque.length !== length) {
-          remaining = 0;
-          throw pyError('RuntimeError', 'deque mutated during iteration');
-        }
-        return deque.at(--remaining);
-      },
-      () => (deque.length === length ? remaining : 0)
-    ),
-    () => [deque]
-  );
-});
+method(dequeClass, '__iter__', 'none', 0, 0, (self) => dequeIterator(self, false));
+method(dequeClass, '__reversed__', 'none', 0, 0, (self) => dequeIterator(self, true));
 method(dequeClass, '__repr__', 'none', 0, 0, (self) => {
   const deque = dequeOf(self);
   return containerRepr(deque, '[...]', () => {
@@ -876,3 +842,29 @@ registerModule('collections', (runtime, namespace) => {
 registerSourceModule('_collections_user', COLLECTIONS_USER_SOURCE);
 
 export { makeNamedTupleClass, namedTupleClass };
+
+/**
+ * An iterator over a deque, forward or reversed, which fails once the deque changes size; a reversed one stays
+ * exhausted after failing, as CPython's does.
+ */
+function dequeIterator(self: PyValue, reversed: boolean): PyIterator {
+  const deque = dequeOf(self);
+  const length = deque.length;
+  let taken = 0;
+  return new PyIterator(
+    iteratorClass(reversed ? 'collections._deque_reverse_iterator' : 'collections._deque_iterator'),
+    withRemaining(
+      () => {
+        if (reversed && taken === length) return DONE;
+        if (deque.length !== length) {
+          if (reversed) taken = length;
+          throw pyError('RuntimeError', 'deque mutated during iteration');
+        }
+        if (taken === length) return DONE;
+        return deque.at(reversed ? length - 1 - taken++ : taken++);
+      },
+      () => (deque.length === length ? length - taken : 0)
+    ),
+    () => [deque]
+  );
+}

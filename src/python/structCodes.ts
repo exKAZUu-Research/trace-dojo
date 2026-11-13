@@ -44,6 +44,7 @@ export const STANDARD_CODES: Readonly<Record<string, CodeInfo>> = Object.fromEnt
 
 const BYTE_HEX = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, '0'));
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Reads short integers by shifting and long ones through hex, in either byte order.
 export function readInteger(bytes: Uint8Array, little: boolean, signed: boolean): bigint {
   if (bytes.length === 0) return 0n;
   let value = 0n;

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 465 -- The state of a run and the operations the interpreter reaches through it.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -7,6 +8,7 @@ import { createBuiltins } from './builtins';
 import type { PyMemoryView } from './bytesValues';
 import { bindArguments } from './calls';
 import { markIterableCoroutine } from './coroutines';
+import { ensureThreadLocalDict, isThreadLocal } from './descriptors';
 import { enumClassDir, enumMemberDir, membersByName } from './enums';
 import { Evaluator } from './evaluator';
 import { GeneratorFinalizer } from './finalization';
@@ -18,16 +20,16 @@ import { deepNestingError, isHostStackOverflow } from './hostStack';
 import { instantiate } from './instances';
 import { keyError } from './items';
 import { viewOf } from './memoryview';
-import { importModule } from './modules';
+import { importModule, resolveImport } from './modules';
 import { systemExitError } from './modules/sys';
-import { checkNamespaceView } from './namespaceDifferences';
+import { checkNamespaceView, cpythonDirNames } from './namespaceDifferences';
 import { DEFAULT_MAX_STR_DIGITS } from './numbers';
 import { bindValue, callValue, getIterator, isTruthy, overriding, setAttribute, toArray } from './objects';
 import type { ProgramSource } from './programSource';
 import { withoutCharge } from './runtimeContext';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
-import { DEFAULT_SWITCH_INTERVAL, type Scheduler } from './threads';
+import { DEFAULT_SWITCH_INTERVAL, type Scheduler, threadRoots } from './threads';
 import { noteUnwinding, setFrameGenerator } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
@@ -257,7 +259,7 @@ export class Runtime {
         continue;
       }
       result.push({ frame, row });
-      row = frame.callRow;
+      if (!frame.inlinedIn) row = frame.callRow;
     }
     return result;
   }
@@ -271,7 +273,9 @@ export class Runtime {
     let row = this.callerRow();
     for (const frame of this.frames.toReversed()) {
       result.push({ frame, row });
-      row = this.libraryEntryRows.has(frame) ? this.libraryEntryRows.get(frame) : frame.callRow;
+      if (!frame.inlinedIn) {
+        row = this.libraryEntryRows.has(frame) ? this.libraryEntryRows.get(frame) : frame.callRow;
+      }
     }
     return result;
   }
@@ -305,6 +309,7 @@ export class Runtime {
     return new Frame('function', locals, cells, fn.globals, this.currentRow, def.isAtomic, def.scope, fn, fn.classCell);
   }
 
+  // code-gauge-allow functionNcss 31 -- Sets up each part of a call's frame.
   callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): PyValue {
     const { locals } = this.finalizer;
     const direct = locals.takeDirectCall();
@@ -425,6 +430,11 @@ export class Runtime {
 
   importModule(name: string): PyModule {
     return importModule(this, name);
+  }
+
+  /** Imports a module as an import statement does, which may give what a program put in `sys.modules`. */
+  resolveImport(name: string): PyValue {
+    return resolveImport(this, name);
   }
 
   // Delegated operations --------------------------------------------------------------------------------------------
@@ -585,9 +595,21 @@ export class Runtime {
     return this.listOf(this.dirNames(value));
   }
 
-  /** The sorted attribute names `dir()` lists, which AttributeError suggestions choose from. */
+  /** The sorted attribute names `dir()` lists. */
   dirNames(value: PyValue): string[] {
     checkNamespaceView(value, 'dir()');
+    return this.listedNames(value);
+  }
+
+  /**
+   * The sorted names an AttributeError suggestion chooses from: those CPython's `dir()` lists, which a namespace that
+   * differs from CPython's does not refuse to give.
+   */
+  suggestionNames(value: PyValue): string[] {
+    return sortedNames(cpythonDirNames(value, this.listedNames(value)));
+  }
+
+  private listedNames(value: PyValue): string[] {
     if (value instanceof PyClass && value.flags.isEnum && value.enumMembers) return enumClassDir(value, this);
     if (value instanceof PyInstance && value.enumValue !== undefined) return enumMemberDir(value, this);
     // A module lists the names this grader does not support too, as CPython's module has them.
@@ -595,7 +617,7 @@ export class Runtime {
       value instanceof PyModule
         ? new Set([...value.dict.keys(), ...value.unsupported.keys(), ...value.imports.keys()])
         : new Set([...objectAttributeNames(value), ...unsupportedClassAttributeNames(value)]);
-    return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return sortedNames(names);
   }
 
   idOf(value: PyValue): bigint {
@@ -657,7 +679,7 @@ export class Runtime {
       for (const value of frame.temporaries) roots.push(value);
       if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
     }
-    if (this.threads) roots.push(...this.threads.roots());
+    roots.push(...threadRoots(this));
     roots.push(...this.finalizer.finalizing());
     return roots;
   }
@@ -680,6 +702,10 @@ export { Frame, PyCell };
 export { isHostStackOverflow } from './hostStack';
 
 /** The attributes of a function that its class reads natively. */
+function sortedNames(names: Iterable<string>): string[] {
+  return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
 const FUNCTION_ATTRIBUTES = [
   '__annotate__',
   '__annotations__',
@@ -700,6 +726,7 @@ const GENERATOR_ATTRIBUTES: Record<string, string[]> = {
 };
 
 /** The attribute names `dir()` lists for an object other than a module. */
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of object whose attributes dir() lists.
 function objectAttributeNames(value: PyValue): Set<string> {
   const names = new Set<string>();
   const add = (keys: Iterable<string>): void => {
@@ -708,6 +735,7 @@ function objectAttributeNames(value: PyValue): Set<string> {
   const cls = value instanceof PyClass ? value : classOf(value);
   for (const each of cls.mro) add(each.dict.keys());
   if (value instanceof PyInstance || value instanceof PyFunction) add(value.dict.keys());
+  if (isThreadLocal(value)) add(ensureThreadLocalDict(value)?.keys() ?? []);
   if (value instanceof PyObject && value.instanceDict) add(value.instanceDict.keys());
   if (value instanceof PyObject && value.slotValues) add(value.slotValues.keys());
   add(['__class__', '__doc__']);

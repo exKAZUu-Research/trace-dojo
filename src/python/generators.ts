@@ -1,10 +1,11 @@
 import { addressOf } from './conversions';
 import { FINALIZER_FEATURE, method, unsupportedMethod, unsupportedSizeof } from './define';
 import type { Frame } from './frame';
-import { bindValue, callValue, getAttribute, getIterator, lookupSpecial } from './objects';
+import { bindValue, callValue, getAttribute, getAttributeOrUndefined, getIterator, lookupSpecial } from './objects';
 import { runningRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
 import { isWaitRequest, schedulerOf } from './threads';
+import { PyTraceback, setTraceback } from './tracebacks';
 import {
   asyncGeneratorClass,
   baseExceptionClass,
@@ -64,7 +65,7 @@ export function generatorNext(generator: PyGenerator, input: GeneratorInput): Py
  * Resumes a generator with the value its `yield` evaluates to or the exception it raises there, returning what it
  * yields next or, when it ends, what it returns.
  */
-// code-gauge-allow duplicateLines 18 -- The suspending variant passes the waits on where this one waits for them.
+// code-gauge-allow duplicateLines 19 -- The suspending variant passes the waits on where this one waits for them.
 export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): Step {
   const early = startResuming(generator, input);
   if (early) return early;
@@ -91,7 +92,7 @@ export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): 
  * Resumes a generator as {@link resumeGenerator} does, but passes the waits of blocking operations in its frame on to
  * the code resuming it, so that a thread waiting there suspends instead of waiting on the host's stack.
  */
-// code-gauge-allow duplicateLines 19 -- It passes the waits on where resumeGenerator waits for them.
+// code-gauge-allow duplicateLines 20 -- It passes the waits on where resumeGenerator waits for them.
 export function* resumeGeneratorSuspending(generator: PyGenerator, input: GeneratorInput): Suspension<Step> {
   const early = startResuming(generator, input);
   if (early) return early;
@@ -156,7 +157,7 @@ export function closeGenerator(generator: PyGenerator): PyValue {
     const step = resumeGenerator(generator, {
       error: new PyError(newException(exceptionClassNamed('GeneratorExit'), [])),
     });
-    if (!step.done) throw pyError('RuntimeError', 'generator ignored GeneratorExit');
+    if (!step.done) throw pyError('RuntimeError', `${generatorKind(generator)} ignored GeneratorExit`);
     return step.value;
   } catch (error) {
     if (error instanceof PyError && isGeneratorExit(error)) return None;
@@ -202,31 +203,35 @@ export function setDelegate(frame: Frame, iterator: PyValue | undefined): void {
 }
 
 /** Passes one input to the iterator a `yield from` or an `await` delegates to, returning what it yields or returns. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows how `yield from` passes each kind of input to a generator or another iterator.
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows how `yield from` passes each kind of input to a generator or another iterator.
 export function delegateStep(iterator: PyValue, input: GeneratorInput): Step {
+  const target =
+    iterator instanceof PyGenerator && iterator.cls.name === 'coroutine_wrapper'
+      ? ([...iterator.holds()][0] as PyGenerator)
+      : iterator;
   const { error } = input;
   if (error && isGeneratorExit(error)) {
-    if (iterator instanceof PyGenerator) closeGenerator(iterator);
+    if (target instanceof PyGenerator) closeGenerator(target);
     else {
-      const close = lookupSpecial(iterator, 'close');
-      if (close !== undefined) callValue(bindValue(close, iterator), []);
+      const close = getAttributeOrUndefined(target, 'close');
+      if (close !== undefined) callValue(close, []);
     }
     throw error;
   }
-  if (iterator instanceof PyGenerator) return resumeGenerator(iterator, input);
+  if (target instanceof PyGenerator) return resumeGenerator(target, input);
   if (error) {
-    const throwMethod = lookupSpecial(iterator, 'throw');
+    const throwMethod = getAttributeOrUndefined(target, 'throw');
     if (throwMethod === undefined) throw error;
-    return untilStopIteration(() => callValue(bindValue(throwMethod, iterator), [error.exception]));
+    return untilStopIteration(() => callValue(throwMethod, [error.exception]));
   }
-  if (input.value !== None) return untilStopIteration(() => callValue(getAttribute(iterator, 'send'), [input.value]));
-  if (iterator instanceof PyIterator) {
-    const value = iterator.next();
+  if (input.value !== None) return untilStopIteration(() => callValue(getAttribute(target, 'send'), [input.value]));
+  if (target instanceof PyIterator) {
+    const value = target.next();
     return value === DONE ? { done: true, value: None } : { done: false, value };
   }
-  const next = lookupSpecial(iterator, '__next__');
-  if (next === undefined) throw typeError(`'${typeName(iterator)}' object is not an iterator`);
-  return untilStopIteration(() => callValue(bindValue(next, iterator), []));
+  const next = lookupSpecial(target, '__next__');
+  if (next === undefined) throw typeError(`'${typeName(target)}' object is not an iterator`);
+  return untilStopIteration(() => callValue(bindValue(next, target), []));
 }
 
 /** Runs a step of an iterator that is no generator, reading the StopIteration that ends it as its return value. */
@@ -235,17 +240,26 @@ function untilStopIteration(run: () => PyValue): Step {
     return { done: false, value: run() };
   } catch (error) {
     if (!(error instanceof PyError) || !isStopIteration(error)) throw error;
-    return { done: true, value: error.exception.exception?.args.items[0] ?? None };
+    return { done: true, value: getAttribute(error.exception, 'value') };
   }
 }
 
 /** The exception `generator.throw()` raises: a class, called with the value, or an instance. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows how `generator.throw()` normalizes each form of its arguments.
+// code-gauge-allow functionCognitiveComplexity 24 -- Follows how `generator.throw()` normalizes each form of its arguments.
 export function thrownError([type, value, traceback]: PyValue[]): PyError {
-  if (traceback !== undefined && traceback !== None)
+  if (traceback !== undefined && traceback !== None && !(traceback instanceof PyTraceback)) {
     throw typeError('throw() third argument must be a traceback object');
+  }
+  const withTraceback = (error: PyError): PyError => {
+    if (traceback !== undefined && traceback !== None && error.exception.exception) {
+      setTraceback(error.exception.exception, traceback);
+    }
+    return error;
+  };
   if (type instanceof PyClass && type.isSubclassOf(baseExceptionClass)) {
-    if (value !== undefined && value !== None && isInstanceOf(value, type)) return new PyError(value as PyInstance);
+    if (value !== undefined && value !== None && isInstanceOf(value, type)) {
+      return withTraceback(new PyError(value as PyInstance));
+    }
     const args = value === undefined || value === None ? [] : value instanceof PyTuple ? value.items : [value];
     const instance = callValue(type, [...args]);
     if (!(instance instanceof PyInstance) || !instance.exception) {
@@ -253,11 +267,11 @@ export function thrownError([type, value, traceback]: PyValue[]): PyError {
         `calling ${pyClassText(type)} should have returned an instance of BaseException, not ${typeName(instance)}`
       );
     }
-    return new PyError(instance);
+    return withTraceback(new PyError(instance));
   }
   if (type instanceof PyInstance && type.exception) {
     if (value !== undefined && value !== None) throw typeError('instance exception may not have a separate value');
-    return new PyError(type);
+    return withTraceback(new PyError(type));
   }
   throw typeError(`exceptions must be classes or instances deriving from BaseException, not ${typeName(type)}`);
 }

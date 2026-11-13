@@ -5,6 +5,7 @@ import { toIndex } from './numbers';
 import { callValue, getAttribute, getAttributeOrUndefined } from './objects';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
+import { fromCodePoints } from './strings';
 import { exceptionClassNamed, newException, typeError, typeName, unbox } from './types';
 import { characterName } from './unicodeDatabase';
 import { escapePoint, unicodeException } from './unicodeErrors';
@@ -148,7 +149,7 @@ function registeredTextCodec(info: PyValue, encoding: string, direction: 'encode
   return {
     name: encoding,
     encode: (points, errors) => {
-      const result = call('encode', String.fromCodePoint(...points), errors);
+      const result = call('encode', fromCodePoints(points), errors);
       if (!(result instanceof PyBytes)) {
         throw typeError(
           `'${encoding}' encoder returned '${typeName(result)}' instead of 'bytes'; use codecs.encode() to encode to arbitrary types`
@@ -422,7 +423,7 @@ export class ErrorHandling {
         if (escaped === 0) throw this.decodeException(start, end, reason);
         const count = escaped === -1 ? bytes.length : escaped;
         return {
-          text: String.fromCodePoint(...bytes.slice(0, count).map((byte) => 0xdc_00 + byte)),
+          text: fromCodePoints(bytes.slice(0, count).map((byte) => 0xdc_00 + byte)),
           resume: start + count,
         };
       }
@@ -454,6 +455,12 @@ export class ErrorHandling {
   /** The UnicodeEncodeError for the characters from `start` up to `end`. */
   encodeException(start: number, end: number, reason: string): PyError {
     return this.exception('UnicodeEncodeError', this.object as string, start, end, reason);
+  }
+
+  /** The UnicodeEncodeError for an unencodable character inside a replacement string returned by an error handler. */
+  replacementEncodeException(replacement: string, start: number, end: number, reason: string): PyError {
+    const args = [this.encoding, replacement, BigInt(start), BigInt(end), reason];
+    return new PyError(unicodeException('UnicodeEncodeError', args, args));
   }
 
   private decodeException(start: number, end: number, reason: string): PyError {

@@ -124,6 +124,7 @@ export function incompleteTail(data: Uint8Array, step: Stepper): number {
 export type Encoder = (points: readonly number[], index: number, out: number[]) => number;
 
 /** Encodes characters, giving each one the encoder refuses to the error handler, as CPython's multibyte codecs do. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Hands each character the encoder refuses to the error handler, which may give bytes or text.
 export function encodeSteps(points: readonly number[], errors: ErrorHandling, encode: Encoder): number[] {
   const out: number[] = [];
   let index = 0;
@@ -134,11 +135,17 @@ export function encodeSteps(points: readonly number[], errors: ErrorHandling, en
       continue;
     }
     const replacement = errors.encodeError(index, index + 1, ILLEGAL);
-    if ('bytes' in replacement) out.push(...replacement.bytes);
-    else {
+    if ('bytes' in replacement) {
+      for (const byte of replacement.bytes) out.push(byte);
+    } else {
       // oxlint-disable-next-line typescript/no-misused-spread -- Python encodes strings by code point.
       const replaced = [...replacement.text].map((char) => char.codePointAt(0) as number);
-      for (let at = 0; at < replaced.length; at++) encode(replaced, at, out);
+      let at = 0;
+      while (at < replaced.length) {
+        const step = encode(replaced, at, out);
+        if (step === 0) throw errors.replacementEncodeException(replacement.text, at, at + 1, ILLEGAL);
+        at += step;
+      }
     }
     index++;
   }

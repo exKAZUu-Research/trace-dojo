@@ -1,3 +1,4 @@
+import { latin1Text } from './bytesValues';
 import { type ErrorHandling, registerCodec, type TextCodec } from './codecs';
 
 /** Puts a code point's bytes into `out`, or returns false when the codec cannot encode it. */
@@ -7,7 +8,7 @@ export type PointEncoder = (point: number, out: number[]) => boolean;
  * Encodes code points one at a time, giving the characters `encodePoint` refuses to the error handler: each run of
  * them at once when `groupErrors` is set, as CPython's single-byte and UTF-8 encoders do, or one by one.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows how CPython's encoders hand errors to the handler.
+// code-gauge-allow functionCognitiveComplexity 25 -- Follows how CPython's encoders hand errors to the handler.
 export function encodePoints(
   points: readonly number[],
   errors: ErrorHandling,
@@ -34,8 +35,13 @@ export function encodePoints(
     if ('bytes' in replacement && replacement.bytes.length % (options.unitSize ?? 1) !== 0) {
       throw errors.encodeException(index, end, reason);
     }
-    if ('bytes' in replacement) out.push(...replacement.bytes);
-    else for (const char of replacement.text) encodePoint(char.codePointAt(0) as number, out);
+    if ('bytes' in replacement) {
+      for (const byte of replacement.bytes) out.push(byte);
+    } else {
+      for (const char of replacement.text) {
+        if (!encodePoint(char.codePointAt(0) as number, out)) throw errors.encodeException(index, end, reason);
+      }
+    }
     index = end;
   }
   return Uint8Array.from(out);
@@ -147,7 +153,7 @@ function decodeUtf8(data: Uint8Array, errors: ErrorHandling, start = 0): string 
     if (lead < 0x80) {
       let end = index + 1;
       while (end < data.length && data[end] < 0x80) end++;
-      text += String.fromCodePoint(...data.subarray(index, end));
+      text += latin1Text(data.subarray(index, end));
       index = end;
       continue;
     }

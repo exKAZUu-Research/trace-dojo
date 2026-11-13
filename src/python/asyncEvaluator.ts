@@ -3,6 +3,7 @@ import { asyncIterator, asyncYield, awaitValue, isStopAsyncIteration, nextAwaita
 import type { Frame } from './frame';
 import { bindValue, callValue, isTruthy, iterate, lookupSpecial, type NextFunction } from './objects';
 import { SuspendingEvaluator, type Suspension } from './suspendingEvaluator';
+import { noteCaught } from './tracebacks';
 import { asyncGeneratorClass, classOf, fullyQualifiedName, newDict, newList, newSet, None, typeError } from './types';
 import { DONE, PyError, PyGenerator, type PyInstance, PyList, type PyValue } from './values';
 
@@ -38,6 +39,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       for (;;) {
         let item: PyValue;
         try {
+          runtime.currentRow = statement.row;
           item = yield* awaitValue(nextAwaitable(iterator), frame, statement.row);
         } catch (error) {
           if (isStopAsyncIteration(error)) break;
@@ -65,7 +67,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
   }
 
   /** `async with`: awaits the manager's `__aenter__` before the body and its `__aexit__` after it. */
-  // code-gauge-allow functionNcss 42 -- Follows the protocol of the async with statement.
+  // code-gauge-allow functionNcss 43 -- Follows the protocol of the async with statement.
   protected *asyncWithStatement(
     statement: Extract<Statement, { kind: 'with' }>,
     frame: Frame,
@@ -97,12 +99,17 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
         completion = yield* this.asyncWithStatement(statement, frame, index + 1);
       } catch (error) {
         if (!(error instanceof PyError) || !entered) throw error;
+        noteCaught(error, frame);
         this.runtime.currentRow = statement.row;
         const { exception } = error;
         const depth = this.attachHandling([exception]);
         let suppress: boolean;
         try {
-          const exited = callValue(bindValue(exit, manager), [exception.cls, exception, None]);
+          const exited = callValue(bindValue(exit, manager), [
+            exception.cls,
+            exception,
+            exception.exception?.traceback ?? None,
+          ]);
           suppress = isTruthy(yield* awaitValue(exited, frame, statement.row));
         } finally {
           this.detachHandling(depth);
@@ -140,6 +147,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       '<genexpr>',
       expression.qualifiedName ?? '<genexpr>',
       (input) => {
+        inner.callRow = runtime.currentRow;
         runtime.pushFrame(inner);
         try {
           return input.error ? body.throw(input.error) : body.next(input.value);

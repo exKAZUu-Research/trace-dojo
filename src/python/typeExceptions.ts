@@ -11,12 +11,13 @@ import {
   defineMethod,
   exceptionClasses,
   exceptionClassNamed,
+  initExceptionFields,
   newList,
   newTuple,
   None,
   typeError,
 } from './types';
-import { type ExceptionState, type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
+import { type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
 
 const instanceOf = (self: PyValue): PyInstance => self as PyInstance;
 
@@ -29,9 +30,8 @@ baseExceptionClass.construct = (cls, args, kwargs) => {
   if (cls.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) return constructGroup(cls, args, kwargs);
   const exception = new PyInstance(osErrorSubclass(cls, args));
   exception.exception = { args: newTuple(args), suppressContext: false };
-  // A builtin class's __init__ does not run again, so its keyword arguments set its fields here.
-  if (cls.isBuiltin) setKeywordFields(exception, kwargs);
-  if (isOSError(exception)) setOSErrorArgs(exception.exception, args);
+  if (cls.isBuiltin) checkKeywordFields(exception.cls, kwargs);
+  initExceptionFields(exception.cls, exception.exception, args, cls.isBuiltin ? kwargs : undefined);
   return exception;
 };
 for (const cls of exceptionClasses.values())
@@ -42,11 +42,11 @@ defineMethod(
   '__init__',
   (self, args, kwargs) => {
     const instance = instanceOf(self);
-    setKeywordFields(instance, kwargs);
+    checkKeywordFields(instance.cls, kwargs);
     const state = instance.exception;
     if (!state) return None;
     if (!state.exceptions) state.args = newTuple(args);
-    if (isOSError(instance)) setOSErrorArgs(state, args);
+    initExceptionFields(instance.cls, state, args, kwargs);
     return None;
   },
   { receiver: 'wrapper' }
@@ -64,20 +64,14 @@ function keywordOwner(cls: PyClass): string | undefined {
   return cls.mro.find((each) => each.isBuiltin && EXCEPTION_KEYWORDS.has(each.name))?.name;
 }
 
-/** Sets the fields an exception's `__init__` sets from its keyword arguments, which it rejects if it takes none. */
-function setKeywordFields(exception: PyInstance, kwargs: Kwargs): void {
-  const owner = keywordOwner(exception.cls);
-  if (owner === undefined) return rejectKeywords(exception.cls, kwargs);
+/** Validates the keyword arguments passed to an exception's constructor or `__init__`. */
+function checkKeywordFields(cls: PyClass, kwargs: Kwargs): void {
+  const owner = keywordOwner(cls);
+  if (owner === undefined) return rejectKeywords(cls, kwargs);
   const accepted = EXCEPTION_KEYWORDS.get(owner) ?? [];
   for (const key of kwargs?.keys() ?? []) {
     if (!accepted.includes(key)) throw typeError(`${owner}() got an unexpected keyword argument '${key}'`);
   }
-  const state = exception.exception;
-  if (!state) return;
-  const name = kwargs?.get('name') ?? None;
-  state.name = typeof name === 'string' ? name : undefined;
-  state.object = kwargs?.get('obj');
-  state.fields = new Map(accepted.map((key) => [key, kwargs?.get(key) ?? None]));
 }
 
 /**
@@ -113,19 +107,6 @@ function osErrorSubclass(cls: PyClass, args: readonly PyValue[]): PyClass {
   return name === undefined ? cls : exceptionClassNamed(name);
 }
 
-function isOSError(exception: PyInstance): boolean {
-  return exception.cls.isSubclassOf(exceptionClassNamed('OSError'));
-}
-
-/** Takes the file names out of an OSError's arguments, as `OSError(errno, strerror, filename)` does. */
-function setOSErrorArgs(state: ExceptionState, args: readonly PyValue[]): void {
-  state.filename = undefined;
-  state.filename2 = undefined;
-  if (args.length < 3 || args.length > 5 || args[2] === None) return;
-  state.filename = args[2];
-  if (args.length === 5) state.filename2 = args[4];
-  state.args = newTuple(args.slice(0, 2));
-}
 method(baseExceptionClass, '__str__', 'none', 0, 0, (self) => exceptionStr(instanceOf(self)));
 method(baseExceptionClass, '__repr__', 'none', 0, 0, (self) => {
   const exception = instanceOf(self);
@@ -148,6 +129,7 @@ method(baseExceptionClass, 'with_traceback', 'one', 1, 1, (self, [traceback]) =>
 });
 
 /** `str()` of an exception, as BaseException and the builtin exceptions that override it define it. */
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per builtin exception type that overrides __str__.
 export function exceptionStr(exception: PyInstance): string {
   const state = exception.exception;
   if (!state) return '';
@@ -158,11 +140,17 @@ export function exceptionStr(exception: PyInstance): string {
   const args = state.args.items;
   const is = (name: string): boolean => exception.cls.mro.some((cls) => cls.isBuiltin && cls.name === name);
   if (is('KeyError') && args.length === 1) return pyRepr(args[0]);
-  if (is('OSError') && args.length >= 2 && args.length <= 5) {
-    const message = `[Errno ${pyStr(args[0])}] ${pyStr(args[1])}`;
-    if (state.filename === undefined) return message;
-    if (state.filename2 === undefined) return `${message}: ${pyRepr(state.filename)}`;
-    return `${message}: ${pyRepr(state.filename)} -> ${pyRepr(state.filename2)}`;
+  if (is('OSError')) {
+    const errno = state.fields?.get('errno') ?? None;
+    const strerror = state.fields?.get('strerror') ?? None;
+    const filename = state.fields?.get('filename') ?? None;
+    const filename2 = state.fields?.get('filename2') ?? None;
+    if (errno !== None && strerror !== None) {
+      const message = `[Errno ${pyStr(errno)}] ${pyStr(strerror)}`;
+      if (filename === None) return message;
+      if (filename2 === None) return `${message}: ${pyRepr(filename)}`;
+      return `${message}: ${pyRepr(filename)} -> ${pyRepr(filename2)}`;
+    }
   }
   if (args.length === 0) return '';
   if (args.length === 1) return pyStr(args[0]);

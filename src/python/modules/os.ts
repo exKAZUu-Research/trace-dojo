@@ -1,10 +1,11 @@
 import { newBytes, PyBytes } from '../bytesValues';
 import { decodeBytes, encodeString } from '../codecs';
 import { registerModule, registerModuleAlias, registerSharedAttributes } from '../modules';
-import { callValue, lookupSpecial, toArray } from '../objects';
+import { bindValue, callValue, lookupSpecial, toArray } from '../objects';
 import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
+import { iterStr } from '../strings';
 import { nativeFunction, newList, None, typeError, typeName, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
@@ -145,7 +146,7 @@ function fspath(value: PyValue): PyValue {
   if (method === undefined) {
     throw typeError(`expected str, bytes or os.PathLike object, not ${typeName(value)}`);
   }
-  const result = callValue(method, [value]);
+  const result = callValue(bindValue(method, value), []);
   if (typeof result === 'string' || result instanceof PyBytes) return result;
   throw typeError(`expected ${typeName(value)}.__fspath__() to return str or bytes, not ${typeName(result)}`);
 }
@@ -388,10 +389,10 @@ function commonprefix(value: PyValue): PyValue {
   if (items.length === 0) return '';
   const paths = items.map((item) => text(item));
   const sorted = paths.toSorted(pythonOrder);
-  const [first, last] = [sorted[0], sorted.at(-1) as string];
+  const [first, last] = [iterStr(sorted[0]), iterStr(sorted.at(-1) as string)];
   let index = 0;
   while (index < first.length && first[index] === last[index]) index++;
-  return first.slice(0, index);
+  return first.slice(0, index).join('');
 }
 
 function commonpath(value: PyValue): PyValue {

@@ -1,23 +1,37 @@
 import { monotonicNanoseconds, nanosecondsToSeconds } from '../clock';
 import { addressOf } from '../conversions';
-import { builtin, method } from '../define';
+import { builtin, method, redeclareMethods } from '../define';
+import { registerThreadLocalAccess } from '../descriptors';
+import { defineNew } from '../instances';
 import { registerModule, registerSharedAttributes, setBuiltinFunctionModule } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { callValue, isTruthy } from '../objects';
+import { bindValue, callValue, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import {
   type Blocking,
   blockingBuiltin,
   blockingMethod,
+  currentThreadKey,
   type PyThreadState,
+  registerThreadLocalMap,
   schedulerOf,
   suspendingCall,
   WaitRequest,
 } from '../threads';
 import { toFloat } from '../typeNumbers';
 import { exceptionClassNamed, newTuple, None, objectClass, pyError, typeError, typeName, valueError } from '../types';
-import { type Kwargs, type PyBuiltinFunction, PyDict, PyError, PyOpaque, PyTuple, type PyValue } from '../values';
+import {
+  AttributeMap,
+  type Kwargs,
+  type PyBuiltinFunction,
+  PyDict,
+  PyError,
+  type PyObject,
+  PyOpaque,
+  PyTuple,
+  type PyValue,
+} from '../values';
 import { builtinClassWithBase } from './moduleClasses';
 import { systemExitError } from './sys';
 
@@ -216,12 +230,72 @@ function exitThread(): PyValue {
   throw systemExitError(undefined);
 }
 
+// Thread-local storage (`_thread._local`) -----------------------------------------------------------------------------
+
+interface LocalState {
+  readonly args: PyValue[];
+  readonly kwargs: Map<string, PyValue> | undefined;
+  readonly dicts: Map<object, Map<string, PyValue>>;
+}
+
+export const threadLocalClass = builtinClassWithBase('_local', objectClass, '_thread');
+threadLocalClass.typeName = '_thread._local';
+threadLocalClass.construct = undefined;
+
+defineNew(threadLocalClass, (cls, args, kwargs) => {
+  if ((args.length > 0 || (kwargs && kwargs.size > 0)) && cls.lookup('__init__') === objectClass.dict.get('__init__')) {
+    throw typeError('Initialization arguments are not supported');
+  }
+  const runtime = currentRuntime();
+  const dicts = new Map<object, Map<string, PyValue>>([[currentThreadKey(runtime), new AttributeMap()]]);
+  registerThreadLocalMap(dicts, runtime);
+  const instance = new PyOpaque(cls, '_local', {
+    args: [...args],
+    kwargs: kwargs && new Map(kwargs),
+    dicts,
+  } satisfies LocalState);
+  if (cls.flags.definesDel) runtime.finalizer.track(instance);
+  return instance;
+});
+
+redeclareMethods(threadLocalClass, objectClass, ['__getattribute__', '__setattr__', '__delattr__']);
+
+function localStateOf(value: PyObject): LocalState {
+  return (value as PyOpaque).data as LocalState;
+}
+
+registerThreadLocalAccess({
+  isThreadLocal: (value) => value instanceof PyOpaque && value.cls.isSubclassOf(threadLocalClass),
+  peekDict: (value) => localStateOf(value).dicts.get(currentThreadKey()),
+  ensureDict: (value) => {
+    const runtime = currentRuntime();
+    const key = currentThreadKey(runtime);
+    const state = localStateOf(value);
+    let dict = state.dicts.get(key);
+    if (dict !== undefined) return dict;
+    dict = new AttributeMap();
+    state.dicts.set(key, dict);
+    registerThreadLocalMap(state.dicts, runtime);
+    const init = value.cls.lookup('__init__');
+    if (init !== undefined && init !== objectClass.dict.get('__init__')) {
+      try {
+        callValue(bindValue(init, value), state.args, state.kwargs);
+      } catch (error) {
+        state.dicts.delete(key);
+        throw error;
+      }
+    }
+    return dict;
+  },
+});
+
 registerModule('_thread', () => {
   return new Map<string, PyValue>([
     ['stack_size', builtin('stack_size', 'takes', 0, 1, stackSize)],
     ['LockType', lockClass],
     ['lock', lockClass],
     ['RLock', rlockClass],
+    ['_local', threadLocalClass],
     ['allocate_lock', builtin('allocate_lock', 'none', 0, 0, () => newLock())],
     ['allocate', builtin('allocate', 'none', 0, 0, () => newLock())],
     ['get_ident', builtin('get_ident', 'none', 0, 0, () => schedulerOf().current.ident)],
@@ -272,7 +346,6 @@ registerModule('_thread', () => {
 });
 
 registerSharedAttributes('_thread', {
-  _local: 'threading:local',
   _ExceptHookArgs: 'threading:_ExceptHookArgs',
   _excepthook: 'threading:excepthook',
 });

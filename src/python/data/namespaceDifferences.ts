@@ -39,6 +39,11 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new__ __next__ __init__ close getvalue read readline tell truncate seek write seekable readable writable __getstate__ __setstate__ closed newlines line_buffering __doc__ __module__',
   '_io.TextIOWrapper':
     '__repr__ __next__ __init__ detach reconfigure write read readline flush close fileno seekable readable writable isatty seek tell truncate __getstate__ encoding line_buffering write_through _finalizing name closed newlines errors _CHUNK_SIZE buffer __doc__ __module__',
+  '_io._BufferedIOBase': 'detach read read1 readinto readinto1 write __doc__ __module__',
+  '_io._IOBase':
+    '__iter__ __next__ __del__ seek tell truncate flush close seekable readable writable _checkClosed _checkSeekable _checkReadable _checkWritable fileno isatty __enter__ __exit__ readline readlines writelines __dict__ closed __doc__ __module__',
+  '_io._RawIOBase': 'read readall readinto write __doc__ __module__',
+  '_io._TextIOBase': 'detach read readline write encoding newlines errors __doc__ __module__',
   '_lzma.LZMACompressor': '__new__ compress flush __doc__ __module__',
   '_lzma.LZMADecompressor': '__new__ decompress check eof needs_input unused_data __doc__ __module__',
   '_pickle.PickleError': '__module__ __weakref__ __doc__',
@@ -55,7 +60,6 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new__ __repr__ acquire release locked _is_owned _acquire_restore _release_save _recursion_count __enter__ __exit__ _at_fork_reinit __doc__ __module__',
   '_thread._ExceptHookArgs':
     '__new__ __repr__ __reduce__ __replace__ exc_type exc_value exc_traceback thread __doc__ __module__ n_sequence_fields n_fields n_unnamed_fields __match_args__',
-  '_thread._local': '__new__ __getattribute__ __setattr__ __delattr__ __doc__ __module__',
   '_thread.lock':
     '__new__ __repr__ acquire_lock acquire release_lock release locked_lock locked __enter__ __exit__ _at_fork_reinit __doc__ __module__',
   'annotationlib.Format':
@@ -271,8 +275,11 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__repr__ __hash__ __call__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __reduce__ __module__ __doc__ __name__ __qualname__ __self__ __text_signature__',
   'builtins.bytearray':
     '__new__ __repr__ __str__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __buffer__ __release_buffer__ __mod__ __rmod__ __len__ __getitem__ __setitem__ __delitem__ __add__ __mul__ __rmul__ __contains__ __iadd__ __imul__ __alloc__ __reduce__ __reduce_ex__ __sizeof__ append capitalize center clear copy count decode endswith expandtabs extend find fromhex hex index insert isalnum isalpha isascii isdigit islower isspace istitle isupper join ljust lower lstrip maketrans partition pop remove replace removeprefix removesuffix resize reverse rfind rindex rjust rpartition rsplit rstrip split splitlines startswith strip swapcase title translate upper zfill __doc__ __hash__',
+  'builtins.bytearray_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.bytes':
     '__new__ __repr__ __hash__ __str__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __buffer__ __mod__ __rmod__ __len__ __getitem__ __add__ __mul__ __rmul__ __contains__ __getnewargs__ __bytes__ capitalize center count decode endswith expandtabs find fromhex hex index isalnum isalpha isascii isdigit islower isspace istitle isupper join ljust lower lstrip maketrans partition replace removeprefix removesuffix rfind rindex rjust rpartition rsplit rstrip split splitlines startswith strip swapcase title translate upper zfill __doc__',
+  'builtins.bytes_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
+  'builtins.callable_iterator': '__iter__ __next__ __reduce__ __doc__',
   'builtins.cell': '__new__ __repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ cell_contents __doc__ __hash__',
   'builtins.classmethod':
     '__new__ __repr__ __get__ __init__ __class_getitem__ __func__ __wrapped__ __isabstractmethod__ __dict__ __annotations__ __annotate__ __doc__',
@@ -286,10 +293,16 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__repr__ __del__ __await__ send throw close __sizeof__ __class_getitem__ cr_origin __name__ __qualname__ cr_await cr_running cr_frame cr_code cr_suspended __doc__',
   'builtins.dict':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __or__ __ror__ __ior__ __len__ __getitem__ __setitem__ __delitem__ __contains__ __sizeof__ get setdefault pop popitem keys items values update fromkeys clear copy __reversed__ __class_getitem__ __doc__',
+  'builtins.dict_itemiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
   'builtins.dict_items':
     '__repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __sub__ __rsub__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __len__ __contains__ isdisjoint __reversed__ mapping __doc__ __hash__',
+  'builtins.dict_keyiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
   'builtins.dict_keys':
     '__repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __sub__ __rsub__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __len__ __contains__ isdisjoint __reversed__ mapping __doc__ __hash__',
+  'builtins.dict_reverseitemiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
+  'builtins.dict_reversekeyiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
+  'builtins.dict_reversevalueiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
+  'builtins.dict_valueiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
   'builtins.dict_values': '__repr__ __iter__ __len__ __reversed__ mapping __doc__',
   'builtins.ellipsis': '__new__ __repr__ __reduce__ __doc__',
   'builtins.enumerate': '__new__ __iter__ __next__ __reduce__ __class_getitem__ __doc__',
@@ -309,11 +322,15 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __add__ __radd__ __sub__ __rsub__ __mul__ __rmul__ __mod__ __rmod__ __divmod__ __rdivmod__ __pow__ __rpow__ __neg__ __pos__ __abs__ __bool__ __invert__ __lshift__ __rlshift__ __rshift__ __rrshift__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __int__ __float__ __floordiv__ __rfloordiv__ __truediv__ __rtruediv__ __index__ conjugate bit_length bit_count to_bytes from_bytes as_integer_ratio __trunc__ __floor__ __ceil__ __round__ __getnewargs__ __format__ __sizeof__ is_integer real imag numerator denominator __doc__',
   'builtins.list':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __len__ __getitem__ __setitem__ __delitem__ __add__ __mul__ __rmul__ __contains__ __iadd__ __imul__ __reversed__ __sizeof__ clear copy append insert extend pop remove index count reverse sort __class_getitem__ __doc__',
+  'builtins.list_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
+  'builtins.list_reverseiterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
+  'builtins.longrange_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.map': '__new__ __iter__ __next__ __reduce__ __setstate__ __doc__',
   'builtins.mappingproxy':
     '__new__ __repr__ __hash__ __str__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __or__ __ror__ __ior__ __len__ __getitem__ __contains__ get keys values items copy __class_getitem__ __reversed__ __doc__',
   'builtins.member_descriptor':
     '__repr__ __get__ __set__ __delete__ __reduce__ __objclass__ __name__ __doc__ __qualname__',
+  'builtins.memory_iterator': '__iter__ __next__ __doc__',
   'builtins.memoryview':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __buffer__ __release_buffer__ __len__ __getitem__ __setitem__ __delitem__ release tobytes hex tolist cast toreadonly _from_flags count index __enter__ __exit__ __class_getitem__ obj nbytes readonly itemsize format ndim shape strides suboffsets c_contiguous f_contiguous contiguous __doc__',
   'builtins.method':
@@ -329,19 +346,23 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new__ __get__ __set__ __delete__ __init__ getter setter deleter __set_name__ fget fset fdel __doc__ __name__ __isabstractmethod__',
   'builtins.range':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __bool__ __len__ __getitem__ __contains__ __reversed__ __reduce__ count index start stop step __doc__',
+  'builtins.range_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.reversed': '__new__ __iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.set':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __sub__ __rsub__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __isub__ __iand__ __ixor__ __ior__ __len__ __contains__ add clear copy discard difference difference_update intersection intersection_update isdisjoint issubset issuperset pop __reduce__ remove __sizeof__ symmetric_difference symmetric_difference_update union update __class_getitem__ __doc__',
+  'builtins.set_iterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
   'builtins.slice':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ indices __reduce__ start stop step __doc__',
   'builtins.staticmethod':
     '__new__ __repr__ __call__ __get__ __init__ __class_getitem__ __func__ __wrapped__ __isabstractmethod__ __dict__ __annotations__ __annotate__ __doc__',
   'builtins.str':
     '__new__ __repr__ __hash__ __str__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __mod__ __rmod__ __len__ __getitem__ __add__ __mul__ __rmul__ __contains__ encode replace split rsplit join capitalize casefold title center count expandtabs find partition index ljust lower lstrip rfind rindex rjust rstrip rpartition splitlines strip swapcase translate upper startswith endswith removeprefix removesuffix isascii islower isupper istitle isspace isdecimal isdigit isnumeric isalpha isalnum isidentifier isprintable zfill format format_map __format__ maketrans __sizeof__ __getnewargs__ __doc__',
+  'builtins.str_ascii_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.super': '__new__ __repr__ __getattribute__ __get__ __init__ __thisclass__ __self__ __self_class__ __doc__',
   'builtins.traceback': '__new__ __dir__ tb_frame tb_lasti tb_next tb_lineno __doc__',
   'builtins.tuple':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __len__ __getitem__ __add__ __mul__ __rmul__ __contains__ __getnewargs__ index count __class_getitem__ __doc__',
+  'builtins.tuple_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.type':
     '__new__ __repr__ __call__ __getattribute__ __setattr__ __delattr__ __init__ __or__ __ror__ mro __subclasses__ __prepare__ __instancecheck__ __subclasscheck__ __dir__ __sizeof__ __basicsize__ __itemsize__ __flags__ __weakrefoffset__ __base__ __dictoffset__ __name__ __qualname__ __bases__ __mro__ __module__ __abstractmethods__ __dict__ __doc__ __text_signature__ __annotations__ __annotate__ __type_params__',
   'builtins.wrapper_descriptor':
@@ -359,13 +380,10 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__repr__ __getattribute__ __init__ __or__ __ror__ __missing__ copy __copy__ __reduce__ __class_getitem__ default_factory __doc__ __module__',
   'collections.deque':
     '__new__ __repr__ __hash__ __getattribute__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __len__ __add__ __mul__ __rmul__ __getitem__ __setitem__ __delitem__ __contains__ __iadd__ __imul__ append appendleft clear __copy__ copy count extend extendleft index insert pop popleft __reduce__ remove __reversed__ reverse rotate __sizeof__ __class_getitem__ maxlen __doc__ __module__',
-  'concurrent.futures._base.BrokenExecutor': '__module__ __firstlineno__ __doc__ __static_attributes__ __weakref__',
-  'concurrent.futures._base.CancelledError': '__module__ __firstlineno__ __doc__ __static_attributes__',
   'concurrent.futures._base.Executor':
     '__module__ __firstlineno__ __doc__ submit map shutdown __enter__ __exit__ __static_attributes__ __dict__ __weakref__',
   'concurrent.futures._base.Future':
     '__module__ __firstlineno__ __doc__ __init__ _invoke_callbacks __repr__ cancel cancelled running done _Future__get_result add_done_callback result exception set_running_or_notify_cancel set_result set_exception __class_getitem__ __static_attributes__ __dict__ __weakref__',
-  'concurrent.futures._base.InvalidStateError': '__module__ __firstlineno__ __doc__ __static_attributes__',
   'dataclasses.Field':
     '__module__ __firstlineno__ __slots__ __init__ __repr__ __set_name__ __class_getitem__ __static_attributes__ _field_type compare default default_factory doc hash init kw_only metadata name repr type __doc__',
   'datetime.date':
@@ -485,6 +503,8 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new__ __repr__ __call__ __getattribute__ __reduce__ __vectorcalloffset__ __text_signature__ __doc__ __module__',
   'pathlib.PurePath':
     '__module__ __firstlineno__ __doc__ __slots__ parser __new__ __init__ with_segments joinpath __truediv__ __rtruediv__ __reduce__ __repr__ __fspath__ __bytes__ _str_normcase __hash__ __eq__ _parts_normcase __lt__ __le__ __gt__ __ge__ __str__ _format_parsed_parts _from_parsed_parts _from_parsed_string _parse_path _parse_pattern as_posix _raw_path drive root _tail anchor parts parent parents name with_name with_stem with_suffix stem suffix suffixes relative_to is_relative_to is_absolute is_reserved as_uri full_match match __static_attributes__ _drv _hash _parts_normcase_cached _raw_paths _root _str _str_normcase_cached _tail_cached',
+  'pathlib._os._PathInfoBase':
+    '__module__ __firstlineno__ __slots__ __init__ __repr__ _stat _posix_permissions _file_id _access_time_ns _mod_time_ns _bsd_flags __static_attributes__ _lstat_result _path _stat_result __doc__',
   'pickle.PickleBuffer': '__new__ __buffer__ __release_buffer__ raw release __doc__',
   'pickletools.ArgumentDescriptor':
     '__module__ __firstlineno__ __slots__ __init__ __static_attributes__ doc n name reader __doc__',
@@ -607,7 +627,10 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
   'zlib.error': '__module__ __weakref__ __doc__',
 };
 
-/** The modules and classes whose namespaces differ from CPython's, with the names CPython's has and the extra ones. */
+/**
+ * The modules and classes whose namespaces differ from CPython's, with the names CPython's has, the extra ones, and the
+ * extra ones CPython serves when read.
+ */
 export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
   modules: {
     _codecs: [
@@ -766,8 +789,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_CANCELLED',
         '_FINISHED',
         '_format_callback',
-        '_running_loop',
-        '_event_loop',
         '_AbstractEventLoopPolicy',
         '_BaseDefaultEventLoopPolicy',
         '_UnixDefaultEventLoopPolicy',
@@ -824,46 +845,8 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     calendar: [[], ['_unsupported']],
     codecs: [[], ['EncodingMap']],
     'collections.abc': [[], ['_builtin_callable']],
-    'concurrent.futures': [
-      ['__all__', '__dir__', '__getattr__'],
-      [
-        '_CPU_COUNT',
-        'collections',
-        'threading',
-        '_monotonic',
-        'islice',
-        '_AS_COMPLETED',
-        'PENDING',
-        'RUNNING',
-        'CANCELLED',
-        'CANCELLED_AND_NOTIFIED',
-        'FINISHED',
-        '_STATE_TO_DESCRIPTION_MAP',
-        '_Logger',
-        'LOGGER',
-        'Error',
-        '_Waiter',
-        '_AsCompletedWaiter',
-        '_FirstCompletedWaiter',
-        '_AllCompletedWaiter',
-        '_AcquireFutures',
-        '_create_and_install_waiters',
-        '_yield_finished_futures',
-        'DoneAndNotDoneFutures',
-        '_result_or_cancel',
-        'itertools',
-        'queue',
-        '_threads_queues',
-        '_shutdown',
-        '_global_shutdown_lock',
-        '_python_exit',
-        'WorkerContext',
-        '_WorkItem',
-        '_worker',
-        'BrokenThreadPool',
-        'ThreadPoolExecutor',
-      ],
-    ],
+    'concurrent.futures._base': [[], ['_monotonic', '_Logger']],
+    'concurrent.futures.thread': [[], ['_CPU_COUNT']],
     contextlib: [[], ['_check_methods']],
     copy: [[], ['_native_copy', '_native_deepcopy', '_deepcopy_other', '_copy_python']],
     dataclasses: [
@@ -871,7 +854,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ['_get_annotations', '_set_annotations', '_is_member_descriptor', '_library_globals', '_update_class_cell'],
     ],
     doctest: [[], ['_unsupported', '_ModuleFile']],
-    enum: [[], ['_builtins', '_builtin_property']],
     gettext: [[], ['_unsupported']],
     gzip: [[], ['_iobases']],
     hmac: [[], []],
@@ -955,21 +937,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     posixpath: [[], ['SEEK_SET', 'SEEK_CUR', 'SEEK_END', 'SEEK_SET', 'SEEK_CUR', 'SEEK_END']],
     pydoc: [[], ['_stand_in', '_check_class', '_unsupported', '_check_namespace', '_Unavailable', '_getmembers']],
     statistics: [[], ['_math']],
-    string: [[], ['_formatter_parser', '_formatter_field_name_split', '_ChainMap']],
-    threading: [
-      [],
-      [
-        '_thread',
-        '_start_thread',
-        '_ExceptHookArgs',
-        '_invoke_excepthook',
-        '_local_arguments',
-        '_local_dicts',
-        '_is_data_descriptor',
-        '_local_name',
-        '_local_values',
-      ],
-    ],
+    threading: [[], ['_thread', '_start_thread', '_ExceptHookArgs', '_invoke_excepthook']],
     tarfile: [[], ['_iobases']],
     traceback: [[], ['_unsupported', '_standard_stderr', '_handled_exception', '_print_lines', '_StackSummary']],
     typing: [
@@ -984,6 +952,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_UserGenericAlias',
         'ForwardRef',
       ],
+      ['Pattern', 'Match', 'ForwardRef'],
     ],
     'unittest.case': [[], ['_virtual_perf_counter']],
     'unittest.mock': [[], ['importlib', 're', '_is_coroutine']],
@@ -1032,7 +1001,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_Future__log_traceback',
         '_Future__schedule_callbacks',
         '__static_attributes__',
-        '__dict__',
         '__weakref__',
       ],
     ],
@@ -1132,26 +1100,12 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     '_csv.Error': [[], ['__firstlineno__', '__static_attributes__', '__weakref__']],
     '_csv.reader': [[], ['__firstlineno__', '__slots__', '__static_attributes__', '_input', '_dialect', '_line_num']],
     '_csv.writer': [[], ['__firstlineno__', '__slots__', '__static_attributes__', '_write', '_dialect']],
-    '_io.BytesIO': [
-      ['__init__', '__getstate__', '__sizeof__'],
-      ['fileno', '__enter__', '__exit__', 'readinto1', 'detach'],
-    ],
-    '_io.StringIO': [
-      ['__init__', '__getstate__'],
-      [
-        'readlines',
-        'isatty',
-        'flush',
-        'fileno',
-        'writelines',
-        '__iter__',
-        '__enter__',
-        '__exit__',
-        'encoding',
-        'errors',
-        'detach',
-      ],
-    ],
+    '_io.BytesIO': [['__init__', '__getstate__', '__sizeof__'], []],
+    '_io.StringIO': [['__init__', '__getstate__'], []],
+    '_io._BufferedIOBase': [[], ['_readinto']],
+    '_io._IOBase': [[], ['_unsupported', '_IOBase__closed', '__weakref__']],
+    '_io._RawIOBase': [[], []],
+    '_io._TextIOBase': [[], []],
     '_lzma.LZMACompressor': [['__module__'], []],
     '_lzma.LZMADecompressor': [['__module__'], []],
     '_lzma.LZMAError': [['__module__'], []],
@@ -1200,7 +1154,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_save_toplevel_by_name',
         'save_type',
         '__static_attributes__',
-        '__dict__',
         '__weakref__',
       ],
     ],
@@ -1283,7 +1236,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         'load_mark',
         'load_stop',
         '__static_attributes__',
-        '__dict__',
         '__weakref__',
       ],
     ],
@@ -1299,9 +1251,9 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     '_thread.RLock': [[], ['acquire_lock', 'release_lock']],
     '_thread._ExceptHookArgs': [
       ['__reduce__', '__replace__', '__match_args__'],
-      ['__firstlineno__', '__static_attributes__', '__dict__'],
+      ['__firstlineno__', '__static_attributes__'],
     ],
-    '_thread._local': [[], ['__firstlineno__', '__static_attributes__', '__dict__', '__weakref__']],
+    '_thread._local': [['__module__'], []],
     '_weakrefset.WeakSet': [['__class_getitem__'], ['_live', '__abstractmethods__', '_abc_impl']],
     'abc.abstractclassmethod': [[], []],
     'abc.abstractstaticmethod': [[], []],
@@ -1332,7 +1284,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_position',
         '_same_kind',
         '__static_attributes__',
-        '__dict__',
         '__weakref__',
       ],
     ],
@@ -1384,7 +1335,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     ],
     'asyncio.events.Handle': [
       ['__slots__', '_args', '_callback', '_cancelled', '_context', '_loop', '_repr', '_source_traceback'],
-      ['__dict__'],
+      [],
     ],
     'asyncio.events.TimerHandle': [['__slots__', '_scheduled', '_when'], []],
     'asyncio.exceptions.IncompleteReadError': [['__reduce__'], []],
@@ -1417,6 +1368,11 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     ],
     'binascii.Error': [['__module__'], []],
     'binascii.Incomplete': [['__module__'], []],
+    'builtins.callable_iterator': [[], []],
+    'builtins.dict_reverseitemiterator': [[], []],
+    'builtins.dict_reversekeyiterator': [[], []],
+    'builtins.dict_reversevalueiterator': [[], []],
+    'builtins.memory_iterator': [[], []],
     'calendar.Day': [
       [
         '_generate_next_value_',
@@ -1451,28 +1407,9 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ],
       [],
     ],
-    'collections.Counter': [['__doc__', 'fromkeys', 'copy', '__delitem__', '__hash__'], []],
+    'collections.Counter': [['__doc__', '__hash__'], []],
     'collections.OrderedDict': [
-      [
-        '__iter__',
-        '__or__',
-        '__ror__',
-        '__ior__',
-        '__setitem__',
-        '__delitem__',
-        'fromkeys',
-        '__sizeof__',
-        'setdefault',
-        'pop',
-        'keys',
-        'values',
-        'items',
-        'update',
-        'clear',
-        'copy',
-        '__reversed__',
-        '__hash__',
-      ],
+      ['__iter__', '__ior__', '__setitem__', '__delitem__', 'fromkeys', '__sizeof__', '__hash__'],
       [],
     ],
     'collections.abc.ByteString': [['_removal_version'], []],
@@ -1488,6 +1425,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     'decimal.Clamped': [['__module__'], []],
     'decimal.Context': [
       ['__getattribute__', '__delattr__', '__init__', '__reduce__'],
+      ['flags', 'traps'],
       ['flags', 'traps'],
     ],
     'decimal.ConversionSyntax': [['__module__'], []],
@@ -1830,42 +1768,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ],
       [],
     ],
-    'io.BufferedIOBase': [[], ['read', 'read1', 'readinto', 'readinto1', '_readinto', 'write', 'detach']],
-    'io.IOBase': [
-      [],
-      [
-        '_unsupported',
-        'seek',
-        'tell',
-        'truncate',
-        'flush',
-        '_IOBase__closed',
-        'close',
-        '__del__',
-        'seekable',
-        '_checkSeekable',
-        'readable',
-        '_checkReadable',
-        'writable',
-        '_checkWritable',
-        'closed',
-        '_checkClosed',
-        '__enter__',
-        '__exit__',
-        'fileno',
-        'isatty',
-        'readline',
-        '__iter__',
-        '__next__',
-        'readlines',
-        'writelines',
-        '__dict__',
-        '__weakref__',
-      ],
-    ],
-    'io.RawIOBase': [[], ['read', 'readall', 'readinto', 'write']],
     'io.Reader': [['__class_getitem__'], []],
-    'io.TextIOBase': [[], ['read', 'write', 'truncate', 'readline', 'detach', 'encoding', 'newlines', 'errors']],
     'io.UnsupportedOperation': [['__module__'], []],
     'io.Writer': [['__class_getitem__'], []],
     'ipaddress.IPv4Network': [['__dict__', '__weakref__'], []],
@@ -1876,7 +1779,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     'itertools.combinations': [['__new__', '__getattribute__', '__sizeof__', '__doc__'], []],
     'itertools.combinations_with_replacement': [['__new__', '__getattribute__', '__sizeof__', '__doc__'], []],
     'itertools.compress': [['__new__', '__getattribute__', '__doc__'], []],
-    'itertools.count': [['__repr__', '__getattribute__'], []],
+    'itertools.count': [['__getattribute__'], []],
     'itertools.cycle': [['__new__', '__getattribute__', '__doc__'], []],
     'itertools.dropwhile': [['__new__', '__getattribute__', '__doc__'], []],
     'itertools.filterfalse': [['__new__', '__getattribute__', '__doc__'], []],
@@ -1885,11 +1788,10 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     'itertools.pairwise': [['__new__', '__getattribute__', '__doc__'], []],
     'itertools.permutations': [['__new__', '__getattribute__', '__sizeof__', '__doc__'], []],
     'itertools.product': [['__new__', '__getattribute__', '__sizeof__', '__doc__'], []],
-    'itertools.repeat': [['__repr__', '__getattribute__', '__length_hint__'], []],
+    'itertools.repeat': [['__getattribute__', '__length_hint__'], []],
     'itertools.starmap': [['__new__', '__getattribute__', '__doc__'], []],
     'itertools.takewhile': [['__new__', '__getattribute__', '__doc__'], []],
     'itertools.zip_longest': [['__new__', '__getattribute__', '__doc__'], []],
-    'json.decoder.JSONDecoder': [[], ['parse_object', 'parse_array', 'parse_string']],
     'logging.Handler': [['_at_fork_reinit'], []],
     'logging.Logger': [['__reduce__'], []],
     'logging.LoggerAdapter': [['warn', '_log', '__class_getitem__'], []],
@@ -1975,10 +1877,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     'operator.attrgetter': [['__getattribute__', '__reduce__'], []],
     'operator.itemgetter': [['__getattribute__', '__reduce__'], []],
     'operator.methodcaller': [['__getattribute__', '__reduce__'], []],
-    'pickle.PickleBuffer': [
-      [],
-      ['__module__', '__firstlineno__', '__slots__', '__static_attributes__', '_pickle_buffer_view'],
-    ],
+    'pickle.PickleBuffer': [[], ['__firstlineno__', '__slots__', '__static_attributes__', '_pickle_buffer_view']],
     'plistlib.PlistFormat': [
       [
         '_generate_next_value_',
@@ -2024,8 +1923,11 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       [
         '__firstlineno__',
         '__slots__',
+        '__new__',
         '_init',
         '__getattr__',
+        '__setattr__',
+        '__delattr__',
         '_set_handler',
         '_set_buffer_text',
         '_set_buffer_size',
@@ -2070,7 +1972,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     ],
     'queue.Queue': [[], []],
     're.Match': [[], []],
-    're.Pattern': [['__hash__'], []],
+    're.Pattern': [[], []],
     're.RegexFlag': [
       [
         '_new_member_',
@@ -2103,7 +2005,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ['__module__', '__firstlineno__', '__init__', '__static_attributes__', '__dict__', '__weakref__', '__doc__'],
       [],
     ],
-    'statistics.LinearRegression': [['__getnewargs__'], []],
     'statistics.NormalDist': [['__doc__', '__getstate__'], []],
     'string.templatelib.Interpolation': [['__class_getitem__'], []],
     'string.templatelib.Template': [['__class_getitem__'], ['__radd__']],
@@ -2126,7 +2027,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       [],
     ],
     'tarfile.ExFileObject': [[], ['__abstractmethods__', '_abc_impl']],
-    'threading.Condition': [[], ['locked']],
+    'threading.Condition': [[], ['locked'], ['locked']],
     'time.struct_time': [['__reduce__'], []],
     'tomllib.TOMLDecodeError': [[], ['__firstlineno__']],
     'traceback.TracebackException': [
@@ -2153,10 +2054,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     'typing.ParamSpecKwargs': [['__module__'], []],
     'typing.TypeAliasType': [['__iter__', '__reduce__'], []],
     'typing.TypeVar': [['__reduce__'], []],
-    'typing.TypeVarTuple': [
-      ['__typing_subst__', '__typing_prepare_subst__', '__reduce__'],
-      ['__or__', '__ror__'],
-    ],
+    'typing.TypeVarTuple': [['__typing_subst__', '__typing_prepare_subst__', '__reduce__'], []],
     'unicodedata.UCD': [['__getattribute__', '__module__'], []],
     'uuid.SafeUUID': [
       [
@@ -2246,11 +2144,11 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '__contains__',
         '__hash__',
       ],
-      ['__module__', '__firstlineno__', '__slots__', '__static_attributes__'],
+      ['__firstlineno__', '__slots__', '__static_attributes__'],
     ],
     'weakref.ProxyType': [
       ['__ipow__', '__ilshift__', '__irshift__', '__imatmul__'],
-      ['__module__', '__firstlineno__', '__slots__', '__static_attributes__', '_proxy_ref', '__weakref__'],
+      ['__firstlineno__', '__slots__', '__static_attributes__', '_proxy_ref', '__weakref__'],
     ],
     'weakref.WeakKeyDictionary': [[], ['_live']],
     'weakref.WeakValueDictionary': [[], ['_live']],
@@ -2262,7 +2160,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     'xml.etree.ElementTree.ParseError': [[], ['__firstlineno__', '__static_attributes__']],
     'xml.etree.ElementTree.TreeBuilder': [
       ['__new__'],
-      ['__firstlineno__', '_flush', '_handle_single', '__static_attributes__', '__dict__', '__weakref__'],
+      ['__firstlineno__', '_flush', '_handle_single', '__static_attributes__', '__weakref__'],
     ],
     'xml.etree.ElementTree.XMLParser': [
       ['__new__', '_parse_whole', 'entity', 'target', 'version'],
@@ -2277,7 +2175,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_default',
         '_start_doctype',
         '__static_attributes__',
-        '__dict__',
         '__weakref__',
       ],
     ],

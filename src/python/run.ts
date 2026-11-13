@@ -4,7 +4,6 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { Module } from './ast';
 import { describeException } from './describe';
-import { recordFutureFeatures } from './dynamicCode';
 import { SAFE_NESTING_DEPTH } from './hostStack';
 import { runExitCallbacks } from './modules/atexit';
 import { callValue, isExceptionOf } from './objects';
@@ -42,12 +41,10 @@ export function executePythonProgram(source: string, input?: ProgramInput): Prog
  *
  * @param onEnd Called when the module ends, while its frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 22 -- Each language's runner wraps its own parser and runtime.
 export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     const globals = mainGlobals(runtime, module);
     runtime.mainGlobals = globals;
-    recordFutureFeatures(globals, module.futureFeatures);
     if (module.source !== undefined) runtime.program = programSourceOf(module, module.source);
     runtime.deepNesting = (module.nestingDepth ?? 0) > SAFE_NESTING_DEPTH;
     const frame = new Frame('module', globals, new Map(), globals, undefined, false, module.scope);

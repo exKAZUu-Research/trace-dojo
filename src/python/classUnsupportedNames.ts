@@ -13,7 +13,6 @@ const BUFFER = 'CPython のバッファのメモリ';
 /** Classes CPython writes in Python and this grader writes natively, whose internal attributes differ. */
 const PYTHON_CLASS = 'CPython が Python で書いたクラスの内部の属性';
 const ITERATOR_PICKLE = 'イテレータの pickle';
-const FINALIZER = 'オブジェクトの後始末（__del__）を直接呼ぶこと';
 const WEAKREF_LIST = '組み込みのクラスのオブジェクトの弱参照の一覧';
 const INTERNAL = 'CPython の内部の関数';
 
@@ -74,12 +73,7 @@ registerUnsupportedClassAttributes(
   of(PYTHON_CLASS, ['__firstlineno__', '__setstate__', '__slots__', '__static_attributes__'])
 );
 for (const stream of ['StringIO', 'BytesIO']) {
-  registerUnsupportedClassAttributes(`_io.${stream}`, {
-    ...of(FINALIZER, ['__del__']),
-    ...of(PYTHON_CLASS, ['__dict__']),
-    ...of('ストリームの pickle', ['__setstate__']),
-    ...of(INTERNAL, ['_checkClosed', '_checkReadable', '_checkSeekable', '_checkWritable']),
-  });
+  registerUnsupportedClassAttributes(`_io.${stream}`, of('ストリームの pickle', ['__setstate__']));
 }
 for (const lock of ['_thread.lock', '_thread.RLock', 'threading.Condition', 'threading.Event']) {
   registerUnsupportedClassAttributes(lock, of('プロセスの fork', ['_at_fork_reinit']));

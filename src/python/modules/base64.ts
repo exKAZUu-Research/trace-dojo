@@ -1,5 +1,5 @@
 // The base64 module, whose functions follow base64.py so that they raise the same errors in the same cases.
-import { bytesLikeData, latin1Bytes, newBytes } from '../bytesValues';
+import { bytesLikeData, latin1Bytes, latin1Text, newBytes } from '../bytesValues';
 import { pyRepr } from '../conversions';
 import { builtin } from '../define';
 import { registerModule } from '../modules';
@@ -97,7 +97,7 @@ function b32decode(alphabet: string, args: PyValue[], kwargs: Kwargs, withMap01:
   }
   if (isTruthy(argument(args, kwargs, 1, 'casefold') ?? false))
     data = translate(data, 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ');
-  const text = String.fromCodePoint(...data);
+  const text = latin1Text(data);
   const stripped = text.replace(/=+$/, '');
   const padding = text.length - stripped.length;
   const decoded: number[] = [];
@@ -130,7 +130,7 @@ function bigBytes(value: bigint, count: number): number[] {
 function b16decode(args: PyValue[], kwargs: Kwargs): PyValue {
   let data = decodeData(args[0]);
   if (isTruthy(argument(args, kwargs, 1, 'casefold') ?? false)) data = translate(data, 'abcdef', 'ABCDEF');
-  if (!/^[0-9A-F]*$/.test(String.fromCodePoint(...data))) throw binasciiError('Non-base16 digit found');
+  if (!/^[0-9A-F]*$/.test(latin1Text(data))) throw binasciiError('Non-base16 digit found');
   return newBytes(unhexlify(newBytes(data)));
 }
 
@@ -194,9 +194,9 @@ function a85encode(args: PyValue[], kwargs: Kwargs): PyValue {
 
 // code-gauge-allow functionCognitiveComplexity 29 -- Transcribes base64.a85decode.
 function a85decode(args: PyValue[], kwargs: Kwargs): PyValue {
-  let text = String.fromCodePoint(...decodeData(args[0]));
+  let text = latin1Text(decodeData(args[0]));
   const ignore = kwargs?.has('ignorechars')
-    ? String.fromCodePoint(...decodeData(kwargs.get('ignorechars') as PyValue))
+    ? latin1Text(decodeData(kwargs.get('ignorechars') as PyValue))
     : ' \t\n\r\v';
   if (isTruthy(kwargs?.get('adobe') ?? false)) {
     if (!text.endsWith('~>')) throw valueError("Ascii85 encoded byte sequences must end with b'~>'");

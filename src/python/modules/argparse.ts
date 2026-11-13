@@ -1,6 +1,6 @@
 import { registerSourceModule } from '../sourceModules';
 
-// CPython's `argparse.py`, whose default help width is the 80 columns `shutil.get_terminal_size()` falls back on, since output never goes to a terminal here and environment variables are not read. The default program name reads `sys.argv`, which stays unsupported, so programs give `prog`.
+// CPython's `argparse.py`, whose default help width is the 80 columns `shutil.get_terminal_size()` falls back on, since output never goes to a terminal here and environment variables are not read. The default program name is `-c`, the `sys.argv[0]` of CPython running a program with `-c`, since `sys.argv` stays unsupported.
 const SOURCE =
   String.raw`
 # Author: Steven J. Bethard <steven.bethard@gmail.com>.
@@ -1821,28 +1821,7 @@ class _MutuallyExclusiveGroup(_ArgumentGroup):
         raise ValueError('mutually exclusive groups cannot be nested')
 
 def _prog_name(prog=None):
-    if prog is not None:
-        return prog
-    arg0 = _sys.argv[0]
-    try:
-        modspec = _sys.modules['__main__'].__spec__
-    except (KeyError, AttributeError):
-        # possibly PYTHONSTARTUP or -X presite or other weird edge case
-        # no good answer here, so fall back to the default
-        modspec = None
-    if modspec is None:
-        # simple script
-        return _os.path.basename(arg0)
-    if modspec.name != '__main__' and arg0 != modspec.origin:
-        # named module executed as main without altering sys.argv[0]
-        return _os.path.basename(arg0)
-    py = _os.path.basename(_sys.executable)
-    if modspec.name != '__main__':
-        # imported module or package
-        modname = modspec.name.removesuffix('.__main__')
-        return f'{py} -m {modname}'
-    # directory or ZIP file
-    return f'{py} {arg0}'
+    return '-c' if prog is None else prog
 
 
 class ArgumentParser(_AttributeHolder, _ActionsContainer):

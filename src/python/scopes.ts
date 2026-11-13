@@ -78,9 +78,9 @@ export function fail(row: number, message: string): never {
 }
 
 /** Settles how every name of the program is accessed, once all scopes have been collected. */
-export function resolveScopes(module: ScopeBuilder): void {
+export function resolveScopes(module: ScopeBuilder, futureFeatures: readonly string[] = []): void {
   checkNonlocals(module);
-  resolve(module);
+  resolve(module, futureFeatures);
 }
 
 function checkNonlocals(scope: ScopeBuilder): void {
@@ -116,11 +116,12 @@ function ownerOf(scope: ScopeBuilder, name: string): ScopeBuilder | undefined {
   return undefined;
 }
 
-function resolve(scope: ScopeBuilder): void {
+function resolve(scope: ScopeBuilder, futureFeatures: readonly string[]): void {
   const { info } = scope;
+  if (futureFeatures.length > 0) info.futureFeatures = futureFeatures;
   info.locals = [...scope.bound.keys()].filter((name) => !scope.declarations.has(name));
   for (const ref of scope.refs) ref.access = accessOf(scope, ref.name);
-  for (const child of scope.children) resolve(child);
+  for (const child of scope.children) resolve(child, futureFeatures);
   if (scope.info.kind !== 'comprehension') {
     const inlined = inlinedComprehensions(scope).flatMap((child) => child.info.cells);
     if (inlined.length > 0) info.inlinedCells = inlined;

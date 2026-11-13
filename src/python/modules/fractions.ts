@@ -421,7 +421,7 @@ function limitDenominator(ratio: Ratio, limitValue: PyValue): PyFraction {
   let [n, d] = ratio;
   for (;;) {
     currentRuntime().spend();
-    const a = n / d;
+    const a = floorDivInt(n, d);
     const q2 = q0 + a * q1;
     if (q2 > limit) break;
     [p0, q0, p1, q1] = [p1, q1, p0 + a * p1, q2];

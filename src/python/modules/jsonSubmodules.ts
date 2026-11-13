@@ -321,11 +321,6 @@ def JSONArray(s_and_end, scan_once, _w=WHITESPACE.match, _ws=WHITESPACE_STR):
     return values, end
 
 del c_scanstring
-
-# This grader's JSONDecoder scans natively; CPython's decoders also hold the Python parsing functions.
-JSONDecoder.parse_object = staticmethod(JSONObject)
-JSONDecoder.parse_array = staticmethod(JSONArray)
-JSONDecoder.parse_string = staticmethod(scanstring)
 `,
   undefined,
   {

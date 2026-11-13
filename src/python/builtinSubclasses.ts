@@ -4,7 +4,8 @@ import { DictStore } from './dictStore';
 import { defineNew } from './instances';
 import { deleteListItem, setListItem } from './items';
 import { checkArgs } from './nativeArgs';
-import { toArray } from './objects';
+import { extendList } from './operators';
+import { currentRuntime } from './runtimeContext';
 import { updateTable } from './setOperations';
 import { SetTable } from './setTable';
 import { turtleClass } from './turtle';
@@ -55,8 +56,10 @@ defineNew(baseExceptionClass, baseExceptionClass.construct as NonNullable<PyClas
 defineNew(listClass, (subtype) => new PyList(subtype, []));
 defineMethod(listClass, '__init__', (self, args, kwargs) => {
   checkArgs({ qualified: 'list', min: 0, max: 1, style: 'expected' }, args, kwargs);
-  const items = args.length === 0 ? [] : toArray(args[0]);
-  (self as PyList).replaceItems(items);
+  const list = self as PyList;
+  const removed = list.replaceItems([]).toReversed();
+  if (removed.length > 0) currentRuntime().finalizer.release(removed, args);
+  if (args.length > 0) extendList(list, args[0]);
   return None;
 });
 
@@ -86,7 +89,9 @@ defineNew(setClass, (subtype) => new PySet(subtype, new SetTable()));
 defineMethod(setClass, '__init__', (self, args, kwargs) => {
   checkArgs({ qualified: 'set', min: 0, max: 1, style: 'expected' }, args, kwargs);
   const table = (self as PySet).table;
+  const removed = table.keys();
   table.clear();
+  if (removed.length > 0) currentRuntime().finalizer.release(removed, args);
   if (args.length > 0) updateTable(table, args[0]);
   return None;
 });

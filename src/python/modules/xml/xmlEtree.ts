@@ -1,5 +1,4 @@
 import { registerSourceModule } from '../../sourceModules';
-// code-gauge-allow-file duplicateLines 174 -- The CPython sources it holds share code with others this grader holds.
 import { elementTreeNatives } from './xmlEtreeNatives';
 
 // CPython's `xml.etree` package, whose ElementTree runs without its C accelerator.

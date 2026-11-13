@@ -3,6 +3,7 @@ import { moduleDoc } from '../builtinDocs';
 import { pyRepr } from '../conversions';
 import { isSupportedModule, MISSING_PLATFORM_MODULES } from '../moduleNames';
 import { isRegisteredModule, setBuiltinFunctionModule } from '../modules';
+import { checkNamespaceView } from '../namespaceDifferences';
 import { argument, checkArgs } from '../nativeArgs';
 import { callValue, importedModule } from '../objects';
 import { nativeFunction, newList, None, typeError, typeName } from '../types';
@@ -179,6 +180,7 @@ export function initializeModule(module: PyModule, args: PyValue[], kwargs: Kwar
 export function moduleDir(module: PyModule): PyValue {
   const own = module.dict.get('__dir__');
   if (own !== undefined) return callValue(own, []);
+  if (!createdModules.has(module)) checkNamespaceView(module, 'dir()');
   return newList([...new Set([...module.dict.keys(), ...module.unsupported.keys(), ...module.imports.keys()])]);
 }
 

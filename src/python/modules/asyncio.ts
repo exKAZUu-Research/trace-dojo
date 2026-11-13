@@ -187,10 +187,6 @@ class TimerHandle(Handle):
         return self._when
 
 
-_running_loop = None
-_event_loop = None
-
-
 def get_running_loop():
     loop = _get_running_loop()
     if loop is None:
@@ -199,14 +195,11 @@ def get_running_loop():
 
 
 def _get_running_loop():
-    if _running_loop is not None and _running_loop[1] == _core.get_ident():
-        return _running_loop[0]
-    return None
+    return _core.get_running_loop()
 
 
 def _set_running_loop(loop):
-    global _running_loop
-    _running_loop = None if loop is None else (loop, _core.get_ident())
+    _core.set_running_loop(loop)
 
 
 class _AbstractEventLoopPolicy:
@@ -247,19 +240,8 @@ class _BaseDefaultEventLoopPolicy(_AbstractEventLoopPolicy):
 
     _loop_factory = None
 
-    # Each thread's loop, kept by thread ident: importing threading for its local would start the thread
-    # scheduler, which slows every loop of a program.
-    class _Local:
-        def __init__(self):
-            self._loops = {}
-
-        @property
-        def _loop(self):
-            return self._loops.get(_core.get_ident())
-
-        @_loop.setter
-        def _loop(self, loop):
-            self._loops[_core.get_ident()] = loop
+    class _Local(_core.local):
+        _loop = None
 
     def __init__(self):
         self._local = self._Local()
@@ -3317,6 +3299,7 @@ registerSharedAttributes('asyncio', {
 });
 
 registerSourceModule('asyncio', SOURCE, asyncioNatives, {
+  blocks: true,
   unsupported: {
     Server: `${NETWORK}（asyncio.Server）`,
     StreamReader: `${NETWORK}のストリーム（asyncio.StreamReader）`,

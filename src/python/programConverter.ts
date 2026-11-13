@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 810 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 876 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -60,6 +60,7 @@ export class ProgramConverter extends ExpressionConverter {
   /** The top-level packages the module imports, which tell whether it may run threads. */
   private readonly importedPackages = new Set<string>();
 
+  // code-gauge-allow functionParameterCount 7 -- Each compiler flag comes from parseModule / compile().
   constructor(
     source: string,
     private readonly trace: TraceOptions | undefined,
@@ -67,12 +68,14 @@ export class ProgramConverter extends ExpressionConverter {
     /** Whether the source is a standard library module, whose imports of unsupported modules fail only when run. */
     private readonly library = false,
     inheritedFutureFeatures: readonly string[] = [],
-    allowsTopLevelAwait = false
+    allowsTopLevelAwait = false,
+    optimize = 0
   ) {
     const module = new ScopeBuilder('module', undefined, { namesInLocals });
     super(source, module);
     this.module = module;
     this.allowsTopLevelAwait = allowsTopLevelAwait;
+    this.optimize = optimize;
     for (const feature of inheritedFutureFeatures) this.futureFeatures.add(feature);
   }
 
@@ -85,13 +88,14 @@ export class ProgramConverter extends ExpressionConverter {
     const body = this.block(nodes);
     if ([...this.importedPackages].some((name) => THREAD_PACKAGES.has(name))) markAllSuspending(body);
     if (this.module.info.isAsync) markSuspendingStatements(body);
-    resolveScopes(this.module);
+    const futureFeatures = [...this.futureFeatures];
+    resolveScopes(this.module, futureFeatures);
     this.assignAtomicAnnotations();
     return {
       body: this.withAnnotationSetup(body, true),
       scope: this.module.info,
-      doc: docOf(body),
-      futureFeatures: [...this.futureFeatures],
+      doc: this.optimize >= 2 ? undefined : docOf(body),
+      futureFeatures,
     };
   }
 
@@ -201,6 +205,7 @@ export class ProgramConverter extends ExpressionConverter {
       fail(rowOf(node), '書き方に誤りがあります。');
     }
     const [test, message] = nodes.map((child) => this.expression(child));
+    if (this.optimize >= 1) return { kind: 'pass', row: rowOf(node) };
     return { kind: 'assert', test, message, row: rowOf(node) };
   }
 
@@ -584,7 +589,7 @@ export class ProgramConverter extends ExpressionConverter {
       if (fn.scope.isGenerator && fn.scope.isAsync) rejectReturnValues(body);
       if (fn.scope.isGenerator || fn.scope.isAsync) markSuspendingStatements(body);
       fn.body = body;
-      fn.doc = docOf(body);
+      fn.doc = this.optimize >= 2 ? undefined : docOf(body);
     });
   }
 
@@ -625,7 +630,7 @@ export class ProgramConverter extends ExpressionConverter {
       body: this.withAnnotationSetup([...setup, ...body]),
       scope: scope.info,
       decorators,
-      doc: docOf(body),
+      doc: this.optimize >= 2 ? undefined : docOf(body),
       typeParams,
       row: rowOf(node),
     };

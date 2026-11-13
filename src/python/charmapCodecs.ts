@@ -60,7 +60,7 @@ export function charmapTable(module: string): string {
  * it gives each run of unencodable characters to the error handler at once and encodes the replacement through the
  * mapping, failing for the whole run when the mapping cannot encode it either.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows charmap_encoding_error, which encodes each replacement through the mapping.
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows charmap_encoding_error, which encodes each replacement through the mapping.
 function encodeCharmap(
   points: readonly number[],
   errors: ErrorHandling,
@@ -78,8 +78,9 @@ function encodeCharmap(
     let end = index + 1;
     while (end < points.length && lookup(points[end]) === undefined) end++;
     const replacement = errors.encodeError(index, end, REASON);
-    if ('bytes' in replacement) out.push(...replacement.bytes);
-    else {
+    if ('bytes' in replacement) {
+      for (const byte of replacement.bytes) out.push(byte);
+    } else {
       for (const char of replacement.text) {
         const replaced = lookup(char.codePointAt(0) as number);
         if (!replaced) throw errors.encodeException(index, end, REASON);

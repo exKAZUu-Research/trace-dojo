@@ -46,3 +46,62 @@ names = dir(math), dir(str), dir(list), vars(math)`;
     });
   }
 });
+
+// CPython 3.14.10 computes `expected`.
+test('reading a name CPython serves outside its namespace works, while reading a grader-only name fails loudly', () => {
+  const program = String.raw`import concurrent.futures as cf, decimal, io, json, typing
+actual = [cf.ThreadPoolExecutor.__module__, typing.ForwardRef('int'), typing.Pattern, typing.Match]
+c = decimal.Context()
+actual += [c.traps[decimal.DivisionByZero], c.flags[decimal.Inexact]]
+actual.append(list(vars(json.JSONDecoder()))[6:9])
+f = io.StringIO('a\nb\n')
+actual += [f.readlines(), io.StringIO('ab\ncd\n').readlines(3), f.isatty(), f.encoding, f.errors]
+f.writelines(['c']); f.flush()
+actual.append(f.getvalue())
+b = io.BytesIO(b'xyz')
+buf = bytearray(2)
+actual += [b.readinto1(buf), buf]
+for stream in (io.StringIO(), io.BytesIO()):
+    try:
+        stream.detach()
+    except io.UnsupportedOperation as e:
+        actual.append(str(e))
+class Upper(io.TextIOBase):
+    def write(self, s):
+        return len(s)
+u = Upper()
+actual += [u.writable(), u.closed]
+u.close()
+actual.append(u.closed)
+class Raw(io.RawIOBase):
+    pass
+try:
+    Raw().read()
+except NotImplementedError as e:
+    actual.append(repr(e))
+actual += [[c.__name__ for c in io.StringIO.__mro__], [c.__name__ for c in io.BytesIO.__mro__],
+           [c.__name__ for c in io.TextIOBase.__mro__], isinstance(io.StringIO(), io.IOBase),
+           issubclass(io.BufferedReader, io.BufferedIOBase)]
+expected = ['concurrent.futures.thread', typing.ForwardRef('int'), typing.Pattern, typing.Match, True, False,
+            ['parse_object', 'parse_array', 'parse_string'], ['a\n', 'b\n'], ['ab\n', 'cd\n'], False, None, None,
+            'a\nb\nc', 2, bytearray(b'xy'), 'detach', 'detach', False, False, True, 'NotImplementedError()',
+            ['StringIO', '_TextIOBase', '_IOBase', 'object'], ['BytesIO', '_BufferedIOBase', '_IOBase', 'object'],
+            ['TextIOBase', '_TextIOBase', 'IOBase', '_IOBase', 'object'], True, True]
+for a, e in zip(actual, expected, strict=True):
+    if a != e:
+        raise ValueError(repr(a) + ' != ' + repr(e))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  for (const read of ['decimal.Context.traps', 'from io import os', 'import io\nio.os']) {
+    expect(executeProgram('python', `import decimal\n${read}`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('この採点環境では使えません'),
+    });
+  }
+});
+
+test('an uncaught AttributeError on an object whose namespace differs suggests a name as CPython does', () => {
+  expect(executeProgram('python', 'import collections\ncollections.deque().pp')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: "AttributeError: 'collections.deque' object has no attribute 'pp'. Did you mean: 'pop'?",
+  });
+});

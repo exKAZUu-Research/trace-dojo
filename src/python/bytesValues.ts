@@ -74,6 +74,27 @@ export class PyBytes extends PyObject {
     this.buffer.set(insert, start);
     this.size = size;
   }
+
+  /** Resizes this bytearray in place, checking the allocation budget before growing the underlying buffer. */
+  resize(requested: bigint): void {
+    if (requested === BigInt(this.size)) return;
+    this.checkNoExports();
+    if (requested > BigInt(Number.MAX_SAFE_INTEGER)) currentRuntime().ensureRoom(Number.MAX_SAFE_INTEGER);
+    const size = Number(requested);
+    if (size < this.size) {
+      this.size = size;
+      return;
+    }
+    if (size > this.buffer.length) {
+      currentRuntime().allocate(Math.ceil(size / 8));
+      const grown = new Uint8Array(Math.max(size, this.buffer.length * 2, 16));
+      grown.set(this.buffer.subarray(0, this.size));
+      this.buffer = grown;
+    } else {
+      this.buffer.fill(0, this.size, size);
+    }
+    this.size = size;
+  }
 }
 
 /** A `memoryview`: a one-dimensional view of items of `format` over the bytes of a bytes or bytearray object. */
@@ -165,7 +186,12 @@ export function bytesLikeData(value: PyValue): Uint8Array | undefined {
   if (value instanceof PyMemoryView) return value.toBytes();
   // A Python class implements the buffer protocol with `__buffer__` (PEP 688), as `array.array` does.
   if (value instanceof PyObject && !value.cls.isBuiltin && value.cls.lookup('__buffer__') !== undefined) {
-    return currentRuntime().bufferView(value).toBytes();
+    const view = currentRuntime().bufferView(value);
+    try {
+      return view.toBytes();
+    } finally {
+      view.release();
+    }
   }
   return undefined;
 }

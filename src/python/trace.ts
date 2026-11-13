@@ -5,12 +5,14 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { bytesText, PyBytes, PyMemoryView } from './bytesValues';
 import { complexRepr } from './complexNumbers';
+import { pyRepr } from './conversions';
 import type { Frame } from './frame';
 import { parsePython } from './parse';
 import { runModule } from './run';
 import { Runtime } from './runtime';
+import { withoutCharge } from './runtimeContext';
 import { strRepr } from './strings';
-import { None, unbox } from './types';
+import { Ellipsis, None, NotImplemented, unbox } from './types';
 import {
   PyBoundMethod,
   PyBuiltinFunction,
@@ -19,6 +21,7 @@ import {
   PyDeque,
   PyDescriptor,
   PyDict,
+  PyDictView,
   PyFunction,
   PyGenerator,
   PyInstance,
@@ -30,6 +33,8 @@ import {
   PyOpaque,
   PyRange,
   PySet,
+  PySlice,
+  PySuper,
   PyTuple,
   type PyValue,
 } from './values';
@@ -78,7 +83,7 @@ function isDunder(name: string): boolean {
   return name.startsWith('__') && name.endsWith('__');
 }
 
-/** Functions, classes, and modules are definitions, not variables, to learners. */
+/** Functions, classes, modules, and internal/resource objects are not learner variables in traces. */
 function isVariableValue(value: PyValue): boolean {
   return !(
     value instanceof PyFunction ||
@@ -87,17 +92,47 @@ function isVariableValue(value: PyValue): boolean {
     value instanceof PyBuiltinFunction ||
     value instanceof PyBoundMethod ||
     value instanceof PyDescriptor ||
+    value instanceof PyDictView ||
+    value instanceof PySuper ||
     value instanceof PyOpaque ||
-    (value instanceof PyInstance && isLibraryClass(value.cls))
+    (value instanceof PyInstance && isHiddenInstance(value))
   );
 }
 
 /**
  * Whether a class is one that a standard library module written in Python defines, such as `threading.Thread`, whose
- * instances the trace hides as it hides those of the builtin classes.
+ * instances the trace hides unless they represent immutable/value-like data.
  */
 function isLibraryClass(cls: PyClass): boolean {
   return !cls.isBuiltin && cls.module !== '__main__';
+}
+
+function isHiddenInstance(instance: PyInstance): boolean {
+  if (instance.turtle || instance.enumValue !== undefined || isValueLikeInstance(instance)) return false;
+  const { cls } = instance;
+  if (cls.module === 'types' && cls.name === 'SimpleNamespace') return false;
+  return cls.isBuiltin || isLibraryClass(cls);
+}
+
+// code-gauge-allow functionCognitiveComplexity 29 -- One check per class whose objects traces show as values.
+function isValueLikeInstance(instance: PyInstance): boolean {
+  const { cls } = instance;
+  if (cls.module === 'decimal' && cls.name === 'Decimal') return true;
+  if (cls.module === 'fractions' && cls.name === 'Fraction') return true;
+  if (cls.isBuiltin) {
+    if (instance.exception !== undefined) return true;
+    if (cls.name === 'mappingproxy') return true;
+    if (cls.module === 'datetime' && cls.name !== 'tzinfo') return true;
+    if (cls.module === 're' && (cls.name === 'Pattern' || cls.name === 'Match')) return true;
+    if (cls.module === 'struct' && cls.name === 'Struct') return true;
+    if (cls.module === 'string.templatelib') return true;
+    return false;
+  }
+  if (cls.module === 'pathlib' && cls.mro.some((base) => base.name === 'PurePath')) return true;
+  if (cls.module === 'ipaddress' && /^(?:IPv[46](?:Address|Network|Interface))$/.test(cls.name)) return true;
+  if (cls.module === 'uuid' && cls.name === 'UUID') return true;
+  if (cls.module === 'array' && cls.name === 'array') return true;
+  return false;
 }
 
 /** The instance a method runs on: its first parameter, which plays the role of Java's `this`. */
@@ -197,8 +232,8 @@ function traceIntOf(value: bigint): number | bigint {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value the trace shows.
-// code-gauge-allow functionNcss 33 -- One case per kind of value the trace shows.
+// code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of value the trace shows.
+// code-gauge-allow functionNcss 35 -- One case per kind of value the trace shows.
 function displayNodeOf(item: PyValue, seen: Set<PyObject>): DisplayNode | undefined {
   if (item instanceof PyInstance && item.enumValue !== undefined) {
     if (!isVariableValue(item) || seen.has(item)) return undefined;
@@ -222,6 +257,14 @@ function displayNodeOf(item: PyValue, seen: Set<PyObject>): DisplayNode | undefi
   if (value instanceof PyBytes) return { kind: 'value', value: bytesText(value) };
   if (value instanceof PyMemoryView) return undefined;
   if (value instanceof PyNumberInstance) return { kind: 'value', value: value.reprText() };
+  if (
+    value === Ellipsis ||
+    value === NotImplemented ||
+    value instanceof PySlice ||
+    (value instanceof PyInstance && isValueLikeInstance(value))
+  ) {
+    return valueReprNode(value);
+  }
   if (value instanceof PyInstance && value.turtle) {
     if (!value.turtle.isAlive) return undefined;
     return {
@@ -234,6 +277,14 @@ function displayNodeOf(item: PyValue, seen: Set<PyObject>): DisplayNode | undefi
     return containerNodeOf(value, seen);
   } finally {
     seen.delete(value);
+  }
+}
+
+function valueReprNode(value: PyObject): DisplayNode | undefined {
+  try {
+    return { kind: 'value', value: withoutCharge(() => pyRepr(value)) };
+  } catch {
+    return undefined;
   }
 }
 

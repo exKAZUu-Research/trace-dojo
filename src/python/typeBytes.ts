@@ -4,11 +4,9 @@ import {
   bytesClass,
   bytesLikeData,
   bytesRepr,
-  isBytesLike,
   latin1Text,
   newBytes,
   PyBytes,
-  requireBytesLike,
   sameKind,
 } from './bytesValues';
 import { decodeBytes, encodeString } from './codecs';
@@ -233,7 +231,8 @@ function bytesIterator(self: PyBytes): PyIterator {
 /** `item in data`, for an int byte value or a bytes-like subsequence. */
 export function bytesContains(data: Uint8Array, item: PyValue): boolean {
   currentRuntime().scan(data.length);
-  if (isBytesLike(item)) return latin1Text(data).includes(latin1Text(requireBytesLike(item)));
+  const sub = bytesLikeData(item);
+  if (sub !== undefined) return latin1Text(data).includes(latin1Text(sub));
   if (typeof item !== 'bigint' && typeof item !== 'boolean' && lookupSpecial(item, '__index__') === undefined) {
     throw typeError(`a bytes-like object is required, not '${typeName(item)}'`);
   }

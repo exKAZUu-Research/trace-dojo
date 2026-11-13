@@ -1,6 +1,5 @@
 // The IOBase, RawIOBase, BufferedIOBase, BufferedReader, and BufferedWriter classes of CPython 3.14's `Lib/_pyio.py`,
-// which the compression modules build their streams on, without registering them with the io module's base classes,
-// which this grader lacks.
+// which the compression modules build their streams on, as classes of their own apart from the io module's.
 export const IO_BASES_SOURCE =
   String.raw`import abc
 import errno

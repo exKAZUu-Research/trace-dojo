@@ -419,6 +419,17 @@ registerModule('json', (runtime, moduleNamespace) => {
     }
   }
   for (const name of ['__version__', '__all__']) moduleNamespace.set(name, namespace.get(name) as PyValue);
+  // A decoder imports json.decoder, whose code imports names from the json module, which hold them only from here on.
+  const decoder = callValue(
+    namespace.get('JSONDecoder') as PyValue,
+    [],
+    new Map([
+      ['object_hook', None],
+      ['object_pairs_hook', None],
+    ])
+  );
+  namespace.set('_default_decoder', decoder);
+  moduleNamespace.set('_default_decoder', decoder);
   return new Map();
 });
 

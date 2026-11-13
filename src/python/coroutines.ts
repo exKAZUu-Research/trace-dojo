@@ -16,6 +16,7 @@ import { bindValue, callValue, getAttributeOrUndefined, isTruthy, lookupSpecial 
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
+import { peekThreadAsyncGenHooks, type ThreadAsyncGenHooks, threadAsyncGenHooks } from './threads';
 import {
   asyncGeneratorClass,
   builtinClass,
@@ -67,6 +68,7 @@ interface AsyncGeneratorState {
   finalizer?: PyValue;
   /** Whether the finalizer is the program's, from `sys.set_asyncgen_hooks()`, rather than the event loop's. */
   finalizerFromProgram?: boolean;
+  hooks?: ThreadAsyncGenHooks;
 }
 
 const asyncGeneratorStates = new WeakMap<PyGenerator, AsyncGeneratorState>();
@@ -80,32 +82,9 @@ function stateOf(generator: PyGenerator): AsyncGeneratorState {
   return state;
 }
 
-/**
- * The async generator hooks of each run, as `sys.set_asyncgen_hooks()` sets them: a running event loop keeps the
- * generators first iterated while it runs, without keeping them alive, to close the open ones when it shuts down, and
- * its finalizer closes one that nothing refers to any more.
- */
-interface AsyncGeneratorHooks {
-  finalizer: PyValue | undefined;
-  readonly started: PyGenerator[];
-  /** The hooks the program set with `sys.set_asyncgen_hooks()`, which the event loop's leave alone. */
-  program: { firstiter: PyValue | undefined; finalizer: PyValue | undefined };
-}
-
-const hooksOfRuns = new WeakMap<Runtime, AsyncGeneratorHooks>();
-
-function hooksOf(runtime: Runtime): AsyncGeneratorHooks {
-  let hooks = hooksOfRuns.get(runtime);
-  if (!hooks) {
-    hooks = { finalizer: undefined, started: [], program: { firstiter: undefined, finalizer: undefined } };
-    hooksOfRuns.set(runtime, hooks);
-  }
-  return hooks;
-}
-
 /** Sets the finalizer of the event loop, which may not run while the program's own hooks are set. */
 export function setAsyncGeneratorFinalizer(runtime: Runtime, finalizer: PyValue | undefined): void {
-  const hooks = hooksOf(runtime);
+  const hooks = threadAsyncGenHooks(runtime);
   const { program } = hooks;
   if (program.firstiter !== undefined || program.finalizer !== undefined) {
     throw new UnsupportedFeatureError('sys.set_asyncgen_hooks() で設定したフックのままの asyncio のイベントループ');
@@ -114,8 +93,8 @@ export function setAsyncGeneratorFinalizer(runtime: Runtime, finalizer: PyValue 
 }
 
 /** The hooks the program set with `sys.set_asyncgen_hooks()`, which `sys.get_asyncgen_hooks()` gives. */
-export function programAsyncGeneratorHooks(runtime: Runtime): AsyncGeneratorHooks['program'] {
-  return hooksOf(runtime).program;
+export function programAsyncGeneratorHooks(runtime: Runtime): ThreadAsyncGenHooks['program'] {
+  return threadAsyncGenHooks(runtime).program;
 }
 
 /** Whether an async generator's finalizer is the program's, which calling at the end of the program is not matched. */
@@ -128,9 +107,9 @@ export function hasAsyncGeneratorFinalizer(generator: PyGenerator): boolean {
   return asyncGeneratorStates.get(generator)?.finalizer !== undefined;
 }
 
-/** Takes the async generators first iterated under the run's hooks that have not finished, as the loop closes them. */
+/** Takes the async generators first iterated under the thread's hooks that have not finished, as the loop closes them. */
 export function takeUnfinishedAsyncGenerators(runtime: Runtime): PyGenerator[] {
-  const hooks = hooksOfRuns.get(runtime);
+  const hooks = peekThreadAsyncGenHooks(runtime);
   if (!hooks) return [];
   const unfinished = hooks.started.filter((generator) => !generator.finished && !stateOf(generator).closed);
   hooks.started.length = 0;
@@ -142,9 +121,9 @@ export function takeUnfinishedAsyncGenerators(runtime: Runtime): PyGenerator[] {
  * whether it had one; one without is closed as a generator is.
  */
 export function finalizeAsyncGenerator(generator: PyGenerator): boolean {
-  const { finalizer } = stateOf(generator);
+  const state = stateOf(generator);
+  const { finalizer, hooks } = state;
   if (finalizer === undefined) return false;
-  const hooks = hooksOfRuns.get(currentRuntime());
   if (hooks) hooks.started.splice(hooks.started.indexOf(generator) >>> 0, hooks.started.includes(generator) ? 1 : 0);
   callValue(finalizer, [generator]);
   return true;
@@ -173,8 +152,16 @@ method(coroutineClass, '__await__', 'none', 0, 0, (self) => {
     () => [coroutine]
   );
 });
-defineIteratorMethods(coroutineWrapperClass);
-coroutineWrapperClass.dict.delete('__await__');
+const wrappedCoroutine = (self: PyValue): PyGenerator => [...(self as PyGenerator).holds()][0] as PyGenerator;
+method(coroutineWrapperClass, '__iter__', 'none', 0, 0, (self) => self);
+method(coroutineWrapperClass, '__next__', 'none', 0, 0, (self) =>
+  generatorNext(wrappedCoroutine(self), { value: None })
+);
+method(coroutineWrapperClass, 'send', 'one', 1, 1, (self, [value]) => generatorNext(wrappedCoroutine(self), { value }));
+method(coroutineWrapperClass, 'throw', 'expected', 1, 3, (self, args) =>
+  generatorNext(wrappedCoroutine(self), { error: thrownError(args) })
+);
+method(coroutineWrapperClass, 'close', 'none', 0, 0, (self) => closeGenerator(wrappedCoroutine(self)));
 
 /** Gives an awaitable helper object the methods of an iterator that a coroutine delegates to. */
 function defineIteratorMethods(cls: PyClass): void {
@@ -186,9 +173,12 @@ function defineIteratorMethods(cls: PyClass): void {
     generatorNext(self as PyGenerator, { error: thrownError(args) })
   );
   method(cls, 'close', 'none', 0, 0, (self) => {
-    const generator = self as PyGenerator;
-    generator.finished = true;
-    return None;
+    try {
+      return closeGenerator(self as PyGenerator);
+    } catch (error) {
+      if (isStopAsyncIteration(error)) return None;
+      throw error;
+    }
   });
 }
 
@@ -407,13 +397,14 @@ function initializeHooks(generator: PyGenerator): AsyncGeneratorState {
   const state = stateOf(generator);
   if (!state.hooksInitialized) {
     state.hooksInitialized = true;
-    const hooks = hooksOfRuns.get(currentRuntime());
+    const hooks = peekThreadAsyncGenHooks(currentRuntime());
     const program = hooks?.program;
     if (program?.finalizer !== undefined) {
       state.finalizer = program.finalizer;
       state.finalizerFromProgram = true;
     } else if (hooks?.finalizer !== undefined) {
       state.finalizer = hooks.finalizer;
+      state.hooks = hooks;
       hooks.started.push(generator);
     }
     if (program?.firstiter !== undefined) callValue(program.firstiter, [generator]);

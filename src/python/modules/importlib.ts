@@ -1,9 +1,9 @@
 import { builtin } from '../define';
-import { isSupportedModule, missingCodecModule, unsupportedModuleFeature } from '../moduleNames';
-import { registerModule, reloadModule } from '../modules';
+import { absentModule, isSupportedModule, missingCodecModule, unsupportedModuleFeature } from '../moduleNames';
+import { getModuleTable, moduleNotFoundError, registerModule, reloadModule, resolveImport } from '../modules';
 import { getAttribute, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { nativeFunction, None, pyError, typeError, valueError } from '../types';
+import { nativeFunction, None, typeError, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { type Kwargs, PyInstance, PyModule, type PyValue } from '../values';
 import { bindArguments } from './numberSupport';
@@ -29,12 +29,17 @@ export function dunderImport(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 /** Imports a module by its absolute name, as an import statement would. */
-function importByName(name: string): PyModule {
+function importByName(name: string): PyValue {
   if (name === '') throw valueError('Empty module name');
   const missing = missingCodecModule(name);
-  if (missing !== undefined) throw pyError('ModuleNotFoundError', `No module named '${missing}'`);
-  if (!isSupportedModule(name)) throw new UnsupportedFeatureError(unsupportedModuleFeature(name));
-  return currentRuntime().importModule(name);
+  if (missing !== undefined) throw moduleNotFoundError(`No module named '${missing}'`, missing);
+  const runtime = currentRuntime();
+  if (!isSupportedModule(name) && !runtime.modules.has(name) && !getModuleTable(runtime)?.has(name)) {
+    const absent = absentModule(name, runtime.inLibraryCode());
+    if (absent) throw moduleNotFoundError(absent.message, absent.name);
+    throw new UnsupportedFeatureError(unsupportedModuleFeature(name));
+  }
+  return resolveImport(runtime, name);
 }
 
 registerModule(

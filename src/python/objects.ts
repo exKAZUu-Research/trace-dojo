@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 529 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 531 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -7,8 +7,10 @@ import {
   callGetter,
   customGetattribute,
   descriptorGetter,
+  ensureThreadLocalDict,
   getWithCustomGetattribute,
   isDataDescriptor,
+  isThreadLocal,
   ownDict,
 } from './descriptors';
 import { getItem as getItemOf } from './items';
@@ -232,10 +234,12 @@ export function genericGetAttribute(value: PyValue, name: string): PyValue {
   return found;
 }
 
+// code-gauge-allow functionNcss 31 -- One step per place an attribute lookup may find a name.
 function findAttribute(value: PyValue, name: string): PyValue | undefined {
   if (value instanceof PyClass) return classAttribute(value, name);
   if (value instanceof PyModule) return moduleAttribute(value, name);
   if (value instanceof PySuper) return superAttribute(value, name);
+  if (isThreadLocal(value)) ensureThreadLocalDict(value);
   const cls = classOf(value);
   const special = specialAttribute(value, name);
   if (special !== undefined) return special;

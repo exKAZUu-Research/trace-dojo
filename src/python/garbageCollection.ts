@@ -1,5 +1,5 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
-import { peekFunctionAnnotationState } from './annotations';
+import { annotationReferences, functionAnnotationReferences, PyAnnotateFunction } from './annotations';
 import { pushAll } from './arrays';
 import { PyMemoryView } from './bytesValues';
 import { peekFieldsOf } from './cTypes';
@@ -225,8 +225,8 @@ function walk(
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionNcss 58 -- One case per kind of object that refers to others.
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of object that refers to others.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss 46 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);
@@ -245,25 +245,11 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
     return keys.length;
   }
   if (object instanceof PyInstance) return pushInstanceReferences(pending, object, reached);
-  // A weak reference keeps its callback alive, but not its referent.
   if (object instanceof PyOpaque) {
-    if (object.cls.mro.some((cls) => cls.name === 'ReferenceType' && cls.module === 'weakref')) {
-      const callback = (object.data as { callback?: unknown } | undefined)?.callback;
-      if (callback !== undefined) pending.push(callback);
-    } else {
-      pending.push(object.data);
-    }
+    pushOpaqueReferences(pending, object);
     return 0;
   }
-  if (object instanceof PyFunction) {
-    pushAll(pending, object.closure.values());
-    pushAll(pending, object.defaults);
-    pushAll(pending, object.keywordDefaults.values());
-    pushAll(pending, object.dict.values());
-    const annotationState = peekFunctionAnnotationState(object);
-    if (annotationState) pending.push(annotationState.annotations, annotationState.annotate);
-    return object.defaults.length;
-  }
+  if (object instanceof PyFunction) return pushFunctionReferences(pending, object);
   if (object instanceof PyClass || object instanceof PyModule) return pushNamespaceReferences(pending, object);
   if (object instanceof PyBoundMethod) pending.push(object.self, object.fn);
   else if (object instanceof PyBuiltinFunction) pending.push(object.self);
@@ -273,6 +259,28 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
   else if (object instanceof PyMemoryView) pending.push(object.source);
   else if (object instanceof PyIterator || object instanceof PyGenerator) pushAll(pending, object.holds());
   return 0;
+}
+
+/** Pushes what a native object refers to: a weak reference keeps its callback alive, but not its referent. */
+function pushOpaqueReferences(pending: unknown[], object: PyOpaque): void {
+  if (!object.cls.isBuiltin) pending.push(object.cls);
+  if (object.cls.mro.some((cls) => cls.name === 'ReferenceType' && cls.module === 'weakref')) {
+    const callback = (object.data as { callback?: unknown } | undefined)?.callback;
+    if (callback !== undefined) pending.push(callback);
+  } else {
+    pushNativeNodes(pending, object.data);
+  }
+}
+
+function pushFunctionReferences(pending: unknown[], fn: PyFunction): number {
+  pending.push(fn.builtins);
+  pushAll(pending, fn.closure.values());
+  pushAll(pending, fn.defaults);
+  pushAll(pending, fn.keywordDefaults.values());
+  pushAll(pending, fn.dict.values());
+  if (fn instanceof PyAnnotateFunction) pushAll(pending, annotationReferences(fn.annotations()));
+  pushAll(pending, functionAnnotationReferences(fn));
+  return fn.defaults.length;
 }
 
 function pushInstanceReferences(pending: unknown[], instance: PyInstance, reached: Set<TurtleState>): number {
@@ -298,6 +306,23 @@ function pushNamespaceReferences(pending: unknown[], object: PyClass | PyModule)
     pushAll(pending, object.bases);
   }
   return object.dict.size;
+}
+
+/** Pushes the Python objects and cells held inside native arrays, maps, sets, and plain records. */
+function pushNativeNodes(pending: unknown[], root: unknown): void {
+  const stack: unknown[] = [root];
+  const seen = new Set<object>();
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (typeof item !== 'object' || item === null) continue;
+    if (isNode(item)) {
+      pending.push(item);
+      continue;
+    }
+    if (seen.has(item)) continue;
+    seen.add(item);
+    pushNativeData(stack, item);
+  }
 }
 
 /** Pushes what the native state of a builtin object holds: the items of its arrays, maps, sets, and records. */

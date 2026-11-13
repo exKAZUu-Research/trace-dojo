@@ -34,9 +34,16 @@ export function parsePython(source: string, trace?: TraceOptions, library = fals
 export function parseDynamicCode(
   source: string,
   futureFeatures: readonly string[] = [],
-  allowsTopLevelAwait = false
+  allowsTopLevelAwait = false,
+  optimize = 0
 ): Module {
-  return parseModule(source, undefined, { library: false, namesInLocals: true, futureFeatures, allowsTopLevelAwait });
+  return parseModule(source, undefined, {
+    library: false,
+    namesInLocals: true,
+    futureFeatures,
+    allowsTopLevelAwait,
+    optimize,
+  });
 }
 
 function parseModule(
@@ -47,7 +54,14 @@ function parseModule(
     namesInLocals,
     futureFeatures = [],
     allowsTopLevelAwait = false,
-  }: { library: boolean; namesInLocals: boolean; futureFeatures?: readonly string[]; allowsTopLevelAwait?: boolean }
+    optimize = 0,
+  }: {
+    library: boolean;
+    namesInLocals: boolean;
+    futureFeatures?: readonly string[];
+    allowsTopLevelAwait?: boolean;
+    optimize?: number;
+  }
 ): Module {
   const source = library ? original : normalizeIdentifiers(original);
   const { lines, limitError } = library ? { lines: [], limitError: undefined } : logicalLines(source);
@@ -57,7 +71,7 @@ function parseModule(
     throw new CompileError(first ?? [indentationError.diagnostic]);
   }
   try {
-    return parseSourceModule(source, trace, { library, namesInLocals, futureFeatures, allowsTopLevelAwait });
+    return parseSourceModule(source, trace, { library, namesInLocals, futureFeatures, allowsTopLevelAwait, optimize });
   } catch (error) {
     if (!library && error instanceof CompileError) {
       const first = findFirstSyntaxError(source, lines, syntaxErrorsOf);
@@ -73,9 +87,15 @@ function parseModule(
 function parseSourceModule(
   source: string,
   trace: TraceOptions | undefined,
-  options: { library: boolean; namesInLocals: boolean; futureFeatures: readonly string[]; allowsTopLevelAwait: boolean }
+  options: {
+    library: boolean;
+    namesInLocals: boolean;
+    futureFeatures: readonly string[];
+    allowsTopLevelAwait: boolean;
+    optimize: number;
+  }
 ): Module {
-  const { library, namesInLocals, futureFeatures, allowsTopLevelAwait } = options;
+  const { library, namesInLocals, futureFeatures, allowsTopLevelAwait, optimize } = options;
   return parseSource(
     parser,
     source,
@@ -87,7 +107,8 @@ function parseSourceModule(
         namesInLocals,
         library,
         futureFeatures,
-        allowsTopLevelAwait
+        allowsTopLevelAwait,
+        optimize
       ).convert(root);
       const nestingError = library ? undefined : findBlockNestingError(root);
       if (nestingError) throw new CompileError([nestingError]);

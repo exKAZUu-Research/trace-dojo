@@ -271,8 +271,49 @@ export type ExceptionName =
 export function newException(cls: PyClass, args: readonly PyValue[]): PyInstance {
   const exception = new PyInstance(cls);
   const state: ExceptionState = { args: newTuple(args), suppressContext: false };
+  initExceptionFields(cls, state, args);
   exception.exception = state;
   return exception;
+}
+
+/** Initializes the C member attributes a builtin exception class derives from its constructor arguments. */
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per builtin exception type with C member attributes.
+export function initExceptionFields(
+  cls: PyClass,
+  state: ExceptionState,
+  args: readonly PyValue[],
+  kwargs?: ReadonlyMap<string, PyValue>
+): void {
+  const is = (name: string): boolean => cls.mro.some((each) => each.isBuiltin && each.name === name);
+  const fields = (state.fields ??= new Map<string, PyValue>());
+  if (is('StopIteration')) fields.set('value', args[0] ?? None);
+  if (is('SystemExit')) fields.set('code', args.length === 0 ? None : args.length === 1 ? args[0] : state.args);
+  if (is('ImportError')) {
+    fields.set('msg', args.length === 1 ? args[0] : None);
+    fields.set('name', kwargs?.get('name') ?? None);
+    fields.set('path', kwargs?.get('path') ?? None);
+    fields.set('name_from', kwargs?.get('name_from') ?? None);
+  }
+  if (is('AttributeError') || is('NameError')) {
+    const name = kwargs?.get('name') ?? state.name ?? None;
+    fields.set('name', name);
+    if (is('AttributeError')) fields.set('obj', kwargs?.get('obj') ?? state.object ?? None);
+  }
+  if (is('OSError')) initOSErrorFields(state, fields, args);
+  const errorName = fields.get('name');
+  if (errorName !== undefined) state.name = typeof errorName === 'string' ? errorName : undefined;
+  if (fields.has('obj')) state.object = fields.get('obj');
+}
+
+/** The fields of OSError, whose `args` keep only errno and strerror when a filename is given. */
+function initOSErrorFields(state: ExceptionState, fields: Map<string, PyValue>, args: readonly PyValue[]): void {
+  const tupleForm = args.length >= 2 && args.length <= 5;
+  fields.set('errno', tupleForm ? args[0] : None);
+  fields.set('strerror', tupleForm ? args[1] : None);
+  const hasFile = args.length >= 3 && args.length <= 5 && args[2] !== None;
+  fields.set('filename', hasFile ? args[2] : None);
+  fields.set('filename2', hasFile && args.length === 5 ? args[4] : None);
+  if (hasFile) state.args = newTuple(args.slice(0, 2));
 }
 
 /** The JavaScript error that raises a builtin exception with a message. */

@@ -6,6 +6,8 @@ import { asFloat } from './numbers';
 import { callValue, isTruthy, lookupSpecial } from './objects';
 import { binaryOp, compareOp } from './operators';
 import { currentRuntime } from './runtimeContext';
+import { addToTable } from './setOperations';
+import { SetTable } from './setTable';
 import type { Suspension } from './suspendingEvaluator';
 import { callSuspending, itemsSuspending, iterateSuspending } from './threadIteration';
 import { registerSuspendingConstructor, registerSuspendingVariant, type SuspendingNative } from './threads';
@@ -23,7 +25,7 @@ import {
   typeError,
   valueError,
 } from './types';
-import { DONE, type Kwargs, PyBuiltinFunction, PyDict, PyList, type PyValue } from './values';
+import { DONE, type Kwargs, PyBuiltinFunction, type PyClass, PyDict, PyList, PySet, type PyValue } from './values';
 
 /** Registers the suspending variants of the builtin functions of a run's builtins module. */
 export function registerBuiltinVariants(builtins: Map<string, PyValue>): void {
@@ -72,14 +74,32 @@ function* dictSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
   return dict;
 }
 
+/** `set(iterable)` and `frozenset(iterable)`, hashing and inserting each element as it is read. */
+function setSuspending(cls: PyClass): SuspendingNative {
+  return function* (args, kwargs) {
+    if (args.length !== 1 || (kwargs !== undefined && kwargs.size > 0)) return callValue(cls, args, kwargs);
+    const [source] = args;
+    if (source instanceof PySet || (source instanceof PyDict && source.cls === dictClass)) {
+      return callValue(cls, args);
+    }
+    const table = new SetTable();
+    const next = iterateSuspending(source);
+    for (let item = yield* next(); item !== DONE; item = yield* next()) addToTable(table, item);
+    return new PySet(cls, table);
+  };
+}
+
 let typeVariantsRegistered = false;
 
 /** Registers the suspending variants of the builtin types' constructors and methods, once they all exist. */
 function registerTypeVariants(): void {
   if (typeVariantsRegistered) return;
   typeVariantsRegistered = true;
-  for (const cls of [listClass, tupleClass, setClass, frozensetClass]) {
+  for (const cls of [listClass, tupleClass]) {
     registerSuspendingConstructor(cls, constructFromItems(cls));
+  }
+  for (const cls of [setClass, frozensetClass]) {
+    registerSuspendingConstructor(cls, setSuspending(cls));
   }
   registerSuspendingConstructor(dictClass, dictSuspending);
   const join = strClass.dict.get('join') as PyBuiltinFunction;

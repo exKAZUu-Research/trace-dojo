@@ -12,6 +12,7 @@ import { cInt, parseCArgs } from './datetimeArgs';
 import { defineComparisons, defineConstants, defineGetters, signOf, valueHash } from './datetimeClasses';
 import {
   ctime,
+  dateStrftime,
   EPOCH_ORDINAL,
   fieldsOfMicroseconds,
   fieldsOfTimestamp,
@@ -30,6 +31,7 @@ import { hashOfInts, isTimedelta, newTimedelta, type PyTimedelta } from './datet
 import { parseIsoDateTime } from './datetimeIso';
 import {
   checkTzinfo,
+  dateClass,
   datetimeTypeClass,
   isDate,
   isDateTime,
@@ -39,6 +41,7 @@ import {
   newDate,
   newDateTime,
   newTime,
+  type PyDate,
   type PyDateTime,
   reprName,
   type TimeOfDay,
@@ -184,12 +187,15 @@ method(datetimeTypeClass, 'isoformat', 'takes', 0, 2, (self, args, kwargs) => is
 });
 method(datetimeTypeClass, 'ctime', 'none', 0, 0, (self) => ctime(fieldsForStrftime(datetime(self))));
 method(
-  datetimeTypeClass,
+  dateClass,
   'strftime',
   'takes',
   0,
   1,
-  (self, args, kwargs) => datetimeStrftime(datetime(self), strftimeArgument(args, kwargs)),
+  (self, args, kwargs) => {
+    const format = strftimeArgument(args, kwargs);
+    return isDateTime(self) ? datetimeStrftime(self, format) : dateStrftime(self as PyDate, format);
+  },
   { keywords: ['format'] }
 );
 defineSlot(datetimeTypeClass, '__format__', (self, [spec]) => {

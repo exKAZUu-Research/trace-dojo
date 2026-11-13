@@ -18,7 +18,16 @@ import { cpythonFrames } from './reflection';
 import { currentRuntime } from './runtimeContext';
 import { builtinClass, newDict, newTuple, None, NotImplemented, pyError, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { type ExceptionState, PyError, type PyFunction, PyGenerator, PyObject, PyOpaque, type PyValue } from './values';
+import {
+  type ExceptionState,
+  PyError,
+  type PyFunction,
+  PyGenerator,
+  PyModule,
+  PyObject,
+  PyOpaque,
+  type PyValue,
+} from './values';
 
 // Traceback, frame, and code objects. An exception's traceback grows as it leaves each frame, as CPython adds an entry
 // for every frame it passes through: the frame it was raised in, each caller with the row of its call, up to the frame
@@ -138,10 +147,9 @@ defineProperty(frameClass, 'f_lineno', (self) => BigInt(frameRow(frameOf(self)) 
 defineProperty(frameClass, 'f_code', (self) => codeObject(frameOf(self)));
 defineProperty(frameClass, 'f_globals', (self) => namespaceDict(frameOf(self).globals));
 defineProperty(frameClass, 'f_builtins', (self) => {
-  const builtins = frameOf(self).globals.get('__builtins__');
-  return builtins instanceof PyObject && 'dict' in builtins
-    ? namespaceDict((builtins as { dict: Map<string, PyValue> }).dict)
-    : namespaceDict(currentRuntime().builtins);
+  const builtins = frameOf(self).builtins;
+  if (builtins === undefined) return namespaceDict(currentRuntime().builtins);
+  return builtins instanceof PyModule ? namespaceDict(builtins.dict) : builtins;
 });
 defineProperty(frameClass, 'f_locals', (self) => frameLocals(frameOf(self)));
 defineProperty(frameClass, 'f_back', (self) => {
@@ -272,10 +280,15 @@ function sameCode(a: CodeInfo, b: CodeInfo): boolean {
   return false;
 }
 
-/** The mode and source text of code compile() created, which decide its contents, or undefined for other code. */
+/** The mode and compiled AST of code compile() created, which decide its contents, or undefined for other code. */
 function compiledSource(info: CodeInfo): string | undefined {
   const compiled = info.compiled as { module: Module; mode: string } | undefined;
-  return compiled?.module.source === undefined ? undefined : `${compiled.mode}\n${compiled.module.source}`;
+  if (compiled?.module.source === undefined) return undefined;
+  return JSON.stringify([compiled.mode, compiled.module.doc, compiled.module.body], (_key, value: unknown) => {
+    if (typeof value === 'bigint') return { $bigint: String(value) };
+    if (value instanceof Uint8Array) return { $bytes: [...value] };
+    return value;
+  });
 }
 
 function parameterCount(self: PyValue, kinds: string[]): bigint {

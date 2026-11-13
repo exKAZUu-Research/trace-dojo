@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 466 -- The native random generator and the methods random.py's module functions run.
 import { setAttribute } from '../attributes';
-import { newBytes } from '../bytesValues';
+import { bytesClass, latin1Text, newBytes, PyBytes } from '../bytesValues';
 import { pyStr } from '../conversions';
 import { builtin, method, pythonMethod } from '../define';
 import { sha512 } from '../hashAlgorithms';
@@ -21,12 +21,15 @@ import {
   setItem,
   toArray,
 } from '../objects';
-import { binaryOp, lessThan } from '../operators';
+import { binaryOp, equals, lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import {
   builtinClass,
   classOf,
+  floatClass,
+  intClass,
+  isInstanceOf,
   methodClass,
   nativeFunction,
   newList,
@@ -34,6 +37,7 @@ import {
   None,
   objectClass,
   pyError,
+  strClass,
   typeError,
   typeName,
   valueError,
@@ -172,30 +176,59 @@ export class MersenneTwister {
   }
 }
 
-/** The key a seed initializes the generator with: its 32-bit words, as CPython's random_seed splits it. */
-function seedKey(value: PyValue | undefined): number[] {
-  if (value === undefined || value === None) return wordsOfHex(hexOfBytes(crypto.getRandomValues(new Uint8Array(32))));
-  if (typeof value === 'bigint' || typeof value === 'boolean') return keyOf(BigInt(value));
-  if (typeof value === 'string') {
-    const bytes = new TextEncoder().encode(value);
-    currentRuntime().scan(bytes.length);
-    return wordsOfHex(hexOfBytes(new Uint8Array([...bytes, ...sha512(bytes)])));
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows random_seed and Random.seed, one case per seed type and version.
+export function seedOf(value: PyValue | undefined, version: PyValue = 2n): bigint {
+  if (value === undefined || value === None) return bigintOfBytes(crypto.getRandomValues(new Uint8Array(32)));
+  if (isInstanceOf(value, intClass)) return toIndex(value);
+  if (isInstanceOf(value, strClass) || value instanceof PyBytes) {
+    if (equals(version, 1n) && (isInstanceOf(value, strClass) || isInstanceOf(value, bytesClass))) {
+      const text =
+        value instanceof PyBytes
+          ? latin1Text(value.data)
+          : typeof value === 'string'
+            ? value
+            : ((value as PyInstance).primitive as string);
+      return versionOneSeed(text);
+    }
+    if (equals(version, 2n)) return bigintOfBytes(versionTwoBytes(value));
+    return BigInt.asUintN(64, pyHash(value));
   }
-  // CPython seeds from a non-int's hash converted to size_t, so a negative hash wraps instead of losing its sign.
-  if (typeof value === 'number') return keyOf(BigInt.asUintN(64, pyHash(value)));
+  if (isInstanceOf(value, floatClass)) return BigInt.asUintN(64, pyHash(value));
   throw typeError('The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.');
 }
 
-export function seedOf(value: PyValue | undefined): bigint {
-  if (value === undefined || value === None) return bigintOfBytes(crypto.getRandomValues(new Uint8Array(32)));
-  if (typeof value === 'bigint' || typeof value === 'boolean') return BigInt(value);
-  if (typeof value === 'string') {
-    const bytes = new TextEncoder().encode(value);
-    currentRuntime().scan(bytes.length);
-    return bigintOfBytes(new Uint8Array([...bytes, ...sha512(bytes)]));
+/**
+ * The key a seed initializes the generator with. A str or bytes seed of version 2 makes it from its bytes directly,
+ * as the int CPython makes of them may exceed the size of the ints this grader lets a program make.
+ */
+function seedKey(value: PyValue | undefined, version: PyValue = 2n): number[] {
+  if (value !== undefined && (isInstanceOf(value, strClass) || value instanceof PyBytes) && equals(version, 2n)) {
+    return wordsOfHex(hexOfBytes(versionTwoBytes(value)).replace(/^0+(?=.)/, ''));
   }
-  if (typeof value === 'number') return BigInt.asUintN(64, pyHash(value));
-  throw typeError('The only supported seed types are:\nNone, int, float, str, bytes, and bytearray.');
+  return keyOf(seedOf(value, version));
+}
+
+/** The bytes of a str or bytes seed of version 2 followed by their SHA-512, whose int CPython seeds with. */
+function versionTwoBytes(value: PyValue): Uint8Array {
+  const bytes =
+    value instanceof PyBytes
+      ? value.data
+      : new TextEncoder().encode(typeof value === 'string' ? value : ((value as PyInstance).primitive as string));
+  currentRuntime().scan(bytes.length);
+  const combined = new Uint8Array(bytes.length + 64);
+  combined.set(bytes);
+  combined.set(sha512(bytes), bytes.length);
+  return combined;
+}
+
+/** The seed version 1 of random.seed makes from a string, which hashes it as Python 2 did. */
+function versionOneSeed(text: string): bigint {
+  currentRuntime().scan(text.length);
+  const codes = Array.from(text, (char) => BigInt(char.codePointAt(0) as number));
+  let x = codes.length > 0 ? codes[0] << 7n : 0n;
+  for (const code of codes) x = ((1_000_003n * x) ^ code) & 0xff_ff_ff_ff_ff_ff_ff_ffn;
+  x ^= BigInt(codes.length);
+  return x === -1n ? -2n : x;
 }
 
 /** The 32-bit words of a seed's absolute value, least significant first, as CPython's random_seed splits it. */
@@ -218,7 +251,7 @@ function hexOfBytes(bytes: Uint8Array): string {
 
 /** The big-endian unsigned integer that bytes encode. */
 function bigintOfBytes(bytes: Uint8Array): bigint {
-  return BigInt(`0x${hexOfBytes(bytes)}`);
+  return bytes.length === 0 ? 0n : BigInt(`0x${hexOfBytes(bytes)}`);
 }
 
 function randrange(generator: MersenneTwister, args: PyValue[]): bigint {
@@ -541,23 +574,9 @@ function muSigma(args: PyValue[], kwargs: Kwargs): [number, number] {
 function seedMethod(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): PyValue {
   const a = argument(args, kwargs, 0, 'a');
   const version = argument(args, kwargs, 1, 'version') ?? 2n;
-  if (version === 1n && typeof a === 'string') {
-    generator.initByArray(keyOf(versionOneSeed(a)));
-  } else {
-    generator.initByArray(seedKey(a));
-  }
+  generator.initByArray(seedKey(a, version));
   generator.gaussNext = undefined;
   return None;
-}
-
-/** The seed version 1 of random.seed makes from a string, which hashes it as Python 2 did. */
-function versionOneSeed(text: string): bigint {
-  currentRuntime().scan(text.length);
-  const codes = Array.from(text, (char) => BigInt(char.codePointAt(0) as number));
-  let x = codes.length > 0 ? codes[0] << 7n : 0n;
-  for (const code of codes) x = ((1_000_003n * x) ^ code) & 0xff_ff_ff_ff_ff_ff_ff_ffn;
-  x ^= BigInt(codes.length);
-  return x === -1n ? -2n : x;
 }
 
 /** `Random.randbytes(n)`: the bytes of `getrandbits(n * 8)`, least significant first. */
@@ -664,7 +683,7 @@ function coreOf(self: PyValue): MersenneTwister {
 /** The seed `_random.Random.seed(n)` takes: random bytes for None, an int's absolute value, or another value's hash. */
 function coreSeed(value: PyValue): bigint {
   if (value === None) return seedOf(undefined);
-  if (typeof value === 'bigint' || typeof value === 'boolean') return BigInt(value);
+  if (isInstanceOf(value, intClass)) return toIndex(value);
   return BigInt.asUintN(64, pyHash(value));
 }
 

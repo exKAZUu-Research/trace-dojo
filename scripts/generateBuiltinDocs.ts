@@ -9,8 +9,10 @@ import { builtinFunctionModule } from '../src/python/modules';
 import { parsePython } from '../src/python/parse';
 import { runModule } from '../src/python/run';
 import { Runtime } from '../src/python/runtime';
+import { withRuntime } from '../src/python/runtimeContext';
 import { classOf } from '../src/python/types';
-import { PyBuiltinFunction, PyClass, PyDescriptor, PyModule, type PyValue } from '../src/python/values';
+import { UnsupportedFeatureError } from '../src/python/unsupported';
+import { PyBuiltinFunction, PyClass, PyDescriptor, type PyValue } from '../src/python/values';
 
 /** Values of builtin types that no module names, such as iterators, whose types the data needs. */
 const SAMPLES =
@@ -127,12 +129,17 @@ function addKey(value: PyValue): void {
 
 function run(source: string, inspect: (runtime: Runtime, globals: Map<string, PyValue>) => void): void {
   const runtime = new Runtime();
+  let globals: Map<string, PyValue> | undefined;
   try {
-    runModule(runtime, parsePython(source), (frame) => inspect(runtime, frame.globals));
-  } catch {
-    // A module this grader cannot import alone, which has no data then.
+    runModule(runtime, parsePython(source), (frame) => {
+      globals = frame.globals;
+    });
+  } catch (error) {
+    if (!(error instanceof UnsupportedFeatureError)) throw error;
+    return;
   }
-  void PyModule;
+  // Naming a builtin reads the run's state, as a function's module does.
+  if (globals) withRuntime(runtime, () => inspect(runtime, globals as Map<string, PyValue>));
 }
 
 /** A getset or member descriptor, known by its owner, as importing their module first would break the import order. */

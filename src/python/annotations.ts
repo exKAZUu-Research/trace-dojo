@@ -77,13 +77,40 @@ export function newAnnotate(
 export function annotationClosure(annotations: readonly Annotation[]): Map<string, PyCell> {
   const closure = new Map<string, PyCell>();
   for (const { expression, frame } of annotations) {
-    if (frame.kind !== 'function') continue;
     for (const { name, access } of nameReferences(expression)) {
       if (access === 'cell') closure.set(name, frame.cells.get(name) ?? new PyCell());
-      else if (access === 'local' && !closure.has(name)) closure.set(name, new PyCell(frame.locals.get(name)));
+      else if (frame.kind === 'function' && access === 'local' && !closure.has(name)) {
+        closure.set(name, new PyCell(frame.locals.get(name)));
+      } else if (frame.kind === 'class' && access === 'classCell' && !frame.locals.has(name)) {
+        const cell = frame.cells.get(name);
+        if (cell) closure.set(name, cell);
+      }
     }
   }
   return closure;
+}
+
+/** The values and cells that evaluating `annotations` reads from the enclosing frames, without keeping unused locals. */
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per way a name an annotation reads is bound in its frame.
+export function annotationReferences(annotations: readonly Annotation[]): (PyValue | PyCell)[] {
+  const refs: (PyValue | PyCell)[] = [];
+  for (const { expression, frame, value } of annotations) {
+    if (value !== undefined) refs.push(value);
+    for (const { name, access } of nameReferences(expression)) {
+      const ref =
+        access === 'cell'
+          ? frame.cells.get(name)
+          : access === 'local' || access === 'name'
+            ? frame.locals.get(name)
+            : access === 'classCell'
+              ? (frame.locals.get(name) ?? frame.cells.get(name))
+              : access === 'global'
+                ? frame.globals.get(name)
+                : undefined;
+      if (ref !== undefined) refs.push(ref);
+    }
+  }
+  return refs;
 }
 
 function nameReferences(node: unknown, found: NameRef[] = []): NameRef[] {
@@ -161,7 +188,9 @@ function fakeFrame(frame: Frame, fake: FakeNames): Frame {
   for (const [name, cell] of frame.cells) {
     cells.set(name, fake.allowEvaluation && cell.value !== undefined ? cell : new PyCell(fake.stringifier(name)));
   }
-  return new Frame(frame.kind, locals, cells, globals, undefined, false, frame.scope, frame.fn, frame.classCell);
+  const inner = new Frame(frame.kind, locals, cells, globals, undefined, false, frame.scope, frame.fn, frame.classCell);
+  if (!globals.has('__builtins__')) inner.builtins = frame.builtins;
+  return inner;
 }
 
 /** Globals read through a mapping, whose `__missing__` gives annotationlib's stand-ins for undefined names. */
@@ -219,8 +248,21 @@ interface FunctionAnnotationState {
 
 const functionStates = new WeakMap<PyFunction, FunctionAnnotationState>();
 
-export function peekFunctionAnnotationState(fn: PyFunction): FunctionAnnotationState | undefined {
-  return functionStates.get(fn);
+export function functionAnnotationReferences(fn: PyFunction): (PyValue | PyCell)[] {
+  const state = functionStates.get(fn);
+  if (!state || state.annotate === undefined) {
+    return [
+      ...(state?.annotations === undefined ? [] : [state.annotations]),
+      ...annotationReferences(functionAnnotationList(fn)),
+    ];
+  }
+  const refs: (PyValue | PyCell)[] = [];
+  if (state.annotations !== undefined) refs.push(state.annotations);
+  if (state.annotate !== undefined) refs.push(state.annotate);
+  if (state.annotate instanceof PyAnnotateFunction) {
+    refs.push(...annotationReferences(state.annotate.annotations()));
+  }
+  return refs;
 }
 
 function functionState(fn: PyFunction): FunctionAnnotationState {
@@ -270,18 +312,26 @@ export function functionAnnotations(fn: PyFunction): PyDict {
 /** Assigns or deletes (`value` undefined) a function's `__annotations__` or `__annotate__`. */
 export function setFunctionAnnotationAttribute(fn: PyFunction, name: string, value: PyValue | undefined): void {
   const state = functionState(fn);
+  const droppedValues = (): (PyValue | undefined)[] =>
+    functionAnnotationReferences(fn).map((ref) => (ref instanceof PyCell ? ref.value : ref));
   if (name === '__annotations__') {
     if (value !== undefined && value !== None && !(value instanceof PyDict)) {
       throw typeError('__annotations__ must be set to a dict object');
     }
+    const dropped = droppedValues();
     state.annotations = value instanceof PyDict ? value : undefined;
     state.annotate = None;
+    fn.annotationFrame = undefined;
+    currentRuntime().finalizer.release(dropped, [value]);
     return;
   }
   if (value === undefined) throw typeError('__annotate__ cannot be deleted');
   if (value !== None && !isCallable(value)) throw typeError('__annotate__ must be callable or None');
+  const dropped = droppedValues();
   state.annotate = value;
   if (value !== None) state.annotations = undefined;
+  fn.annotationFrame = undefined;
+  currentRuntime().finalizer.release(dropped, [value]);
 }
 
 /** Calls `__annotate__(1)` as reading `__annotations__` does, or gives `{}` when it is None. */
@@ -348,11 +398,21 @@ export function classAnnotations(cls: PyClass): PyValue {
 
 export function setClassAnnotate(cls: PyClass, value: PyValue): void {
   if (value !== None && !isCallable(value)) throw typeError('__annotate__ must be callable or None');
+  const dropped = [
+    cls.dict.get('__annotate_func__'),
+    value !== None ? cls.dict.get('__annotations_cache__') : undefined,
+  ];
   cls.dict.set('__annotate_func__', value);
   if (value !== None) cls.dict.delete('__annotations_cache__');
+  currentRuntime().finalizer.release(dropped, [value]);
 }
 
 export function setClassAnnotations(cls: PyClass, value: PyValue | undefined): void {
+  const dropped = [
+    cls.dict.get('__annotations__'),
+    cls.dict.get('__annotations_cache__'),
+    cls.dict.get('__annotate_func__'),
+  ];
   if (value === undefined) {
     if (!cls.dict.delete('__annotations__') && !cls.dict.delete('__annotations_cache__')) {
       throw pyError('AttributeError', '__annotations__');
@@ -362,6 +422,7 @@ export function setClassAnnotations(cls: PyClass, value: PyValue | undefined): v
     cls.dict.delete('__annotations_cache__');
   }
   cls.dict.set('__annotate_func__', None);
+  currentRuntime().finalizer.release(dropped, [value]);
 }
 
 // Modules -------------------------------------------------------------------------------------------------------------

@@ -40,7 +40,8 @@ function safeStr(value: PyValue): string {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows traceback._compute_suggestion_error.
+// code-gauge-allow functionCognitiveComplexity 23 -- Follows traceback._compute_suggestion_error.
+// code-gauge-allow functionNcss 31 -- Follows traceback._compute_suggestion_error.
 function suggestionFor(exception: PyInstance): string | undefined {
   const state = exception.exception;
   if (!state) return undefined;
@@ -49,7 +50,12 @@ function suggestionFor(exception: PyInstance): string | undefined {
   if (!state.name) return undefined;
   const wrongName = state.name;
   if (is('AttributeError') && state.object !== undefined) {
-    let candidates = currentRuntime().dirNames(state.object);
+    let candidates: string[];
+    try {
+      candidates = currentRuntime().suggestionNames(state.object);
+    } catch {
+      return undefined;
+    }
     if (!wrongName.startsWith('_')) candidates = candidates.filter((candidate) => !candidate.startsWith('_'));
     const suggestion = bestSuggestion(wrongName, candidates);
     return suggestion ? `. Did you mean: '${suggestion}'?` : undefined;
@@ -76,7 +82,7 @@ function importSuggestion(state: ExceptionState): string | undefined {
   const runtime = currentRuntime();
   let candidates: string[];
   try {
-    candidates = runtime.dirNames(runtime.importModule(moduleName));
+    candidates = runtime.suggestionNames(runtime.resolveImport(moduleName));
   } catch {
     return undefined;
   }

@@ -1,10 +1,12 @@
-// `concurrent.futures` with its thread pool, transcribed from CPython's Lib/concurrent/futures/_base.py and thread.py
-// onto `threading` and `queue`. A pool's default size counts 8 CPUs, as `os.process_cpu_count()` differs per machine.
+// `concurrent.futures` with its thread pool: CPython's Lib/concurrent/futures/__init__.py, and _base.py and thread.py
+// transcribed onto `threading` and `queue`. A pool's default size counts 8 CPUs, as `os.process_cpu_count()` differs
+// per machine. The package leaves out CPython's import of `_interpreters`, whose name stays unsupported, and the
+// executors of other processes and interpreters stay unsupported too.
 import { registerModule } from '../modules';
 import { registerSourceModule } from '../sourceModules';
 
-const SOURCE = String.raw`
-_CPU_COUNT = 8
+const BASE_SOURCE = String.raw`
+__author__ = 'Brian Quinlan (brian@sweetapp.com)'
 import collections
 import threading
 from _thread import _monotonic
@@ -32,11 +34,11 @@ class _Logger:
         pass
 LOGGER = _Logger()
 class Error(Exception):
-    __module__ = 'concurrent.futures._base'
+    """Base class for all future-related exceptions."""
 class CancelledError(Error):
-    __module__ = 'concurrent.futures._base'
+    """The Future was cancelled."""
 class InvalidStateError(Error):
-    __module__ = 'concurrent.futures._base'
+    """The operation is not allowed in this state."""
 TimeoutError = TimeoutError
 class _Waiter(object):
     def __init__(self):
@@ -200,7 +202,6 @@ def _result_or_cancel(fut, timeout=None):
     finally:
         del fut
 class Future(object):
-    __module__ = 'concurrent.futures._base'
     def __init__(self):
         self._condition = threading.Condition()
         self._state = PENDING
@@ -334,7 +335,6 @@ class Future(object):
             self._condition.notify_all()
         self._invoke_callbacks()
 class Executor(object):
-    __module__ = 'concurrent.futures._base'
     def submit(self, fn, /, *args, **kwargs):
         raise NotImplementedError()
     def map(self, fn, *iterables, timeout=None, chunksize=1, buffersize=None):
@@ -378,9 +378,19 @@ class Executor(object):
         self.shutdown(wait=True)
         return False
 class BrokenExecutor(RuntimeError):
-    __module__ = 'concurrent.futures._base'
+    """
+    Raised when an executor has become non-functional after a severe failure.
+    """
+`;
+
+const THREAD_SOURCE = String.raw`
+"""Implements ThreadPoolExecutor."""
+__author__ = 'Brian Quinlan (brian@sweetapp.com)'
+from concurrent.futures import _base
 import itertools
 import queue
+import threading
+_CPU_COUNT = 8
 _threads_queues = {}
 _shutdown = False
 _global_shutdown_lock = threading.Lock()
@@ -395,7 +405,6 @@ def _python_exit():
         t.join()
 threading._register_atexit(_python_exit)
 class WorkerContext:
-    __module__ = 'concurrent.futures.thread'
     @classmethod
     def prepare(cls, initializer, initargs):
         if initializer is not None:
@@ -418,7 +427,6 @@ class WorkerContext:
         fn, args, kwargs = task
         return fn(*args, **kwargs)
 class _WorkItem:
-    __module__ = 'concurrent.futures.thread'
     def __init__(self, future, task):
         self.future = future
         self.task = task
@@ -463,10 +471,11 @@ def _worker(executor_reference, ctx, work_queue):
             del executor
     finally:
         ctx.finalize()
-class BrokenThreadPool(BrokenExecutor):
-    __module__ = 'concurrent.futures.thread'
-class ThreadPoolExecutor(Executor):
-    __module__ = 'concurrent.futures.thread'
+class BrokenThreadPool(_base.BrokenExecutor):
+    """
+    Raised when a worker thread in a ThreadPoolExecutor failed initializing.
+    """
+class ThreadPoolExecutor(_base.Executor):
     BROKEN = BrokenThreadPool
     _counter = itertools.count().__next__
     @classmethod
@@ -499,7 +508,7 @@ class ThreadPoolExecutor(Executor):
             if _shutdown:
                 raise RuntimeError('cannot schedule new futures after '
                                    'interpreter shutdown')
-            f = Future()
+            f = _base.Future()
             task = self._resolve_work_item_task(fn, args, kwargs)
             w = _WorkItem(f, task)
             self._work_queue.put(w)
@@ -547,8 +556,59 @@ class ThreadPoolExecutor(Executor):
                 t.join()
 `;
 
+const PACKAGE_SOURCE = String.raw`
+"""Execute computations asynchronously using threads or processes."""
+
+__author__ = 'Brian Quinlan (brian@sweetapp.com)'
+
+from concurrent.futures._base import (FIRST_COMPLETED,
+                                      FIRST_EXCEPTION,
+                                      ALL_COMPLETED,
+                                      CancelledError,
+                                      TimeoutError,
+                                      InvalidStateError,
+                                      BrokenExecutor,
+                                      Future,
+                                      Executor,
+                                      wait,
+                                      as_completed)
+
+__all__ = [
+    'FIRST_COMPLETED',
+    'FIRST_EXCEPTION',
+    'ALL_COMPLETED',
+    'CancelledError',
+    'TimeoutError',
+    'InvalidStateError',
+    'BrokenExecutor',
+    'Future',
+    'Executor',
+    'wait',
+    'as_completed',
+    'ProcessPoolExecutor',
+    'ThreadPoolExecutor',
+    'InterpreterPoolExecutor',
+]
+
+
+def __dir__():
+    return __all__ + ['__author__', '__doc__']
+
+
+def __getattr__(name):
+    global ThreadPoolExecutor
+
+    if name == 'ThreadPoolExecutor':
+        from concurrent.futures.thread import ThreadPoolExecutor
+        return ThreadPoolExecutor
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+`;
+
 registerModule('concurrent', () => new Map());
-registerSourceModule('concurrent.futures', SOURCE, undefined, {
+registerSourceModule('concurrent.futures._base', BASE_SOURCE, undefined, { blocks: true });
+registerSourceModule('concurrent.futures.thread', THREAD_SOURCE, undefined, { blocks: true });
+registerSourceModule('concurrent.futures', PACKAGE_SOURCE, undefined, {
   blocks: true,
   unsupported: {
     ProcessPoolExecutor: 'concurrent.futures.ProcessPoolExecutor（別のプロセスでの実行）',

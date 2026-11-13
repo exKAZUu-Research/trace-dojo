@@ -1,12 +1,13 @@
-// `contextvars`, whose classes CPython defines in C as `_contextvars`.
+// `contextvars` and `_contextvars`.
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { keyError } from '../items';
 import { registerModule } from '../modules';
 import { callValue, getAttribute } from '../objects';
 import { equals } from '../operators';
-import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
+import { callSuspending } from '../threadIteration';
+import { getThreadContext, registerSuspendingVariant, setThreadContext } from '../threads';
 import {
   builtinClass,
   defineMethod,
@@ -17,8 +18,9 @@ import {
   NotImplemented,
   pyError,
   typeError,
+  typeName,
 } from '../types';
-import { DONE, PyError, PyIterator, PyOpaque, type PyValue } from '../values';
+import { DONE, type PyBuiltinFunction, PyError, PyIterator, PyOpaque, type PyValue } from '../values';
 import { defineProperty } from './numberSupport';
 
 const contextClass = builtinClass('Context');
@@ -35,8 +37,7 @@ tokenClass.dict.set('MISSING', MISSING);
 
 interface Context {
   values: Map<PyOpaque, PyValue>;
-  /** The context that was current before `run` entered this one, or undefined while it is not entered. */
-  previous?: ContextObject;
+  entered?: boolean;
 }
 
 interface ContextVar {
@@ -53,16 +54,26 @@ interface Token {
 
 type ContextObject = PyOpaque & { data: Context };
 
-const currentContexts = new WeakMap<Runtime, ContextObject>();
-
 function currentContext(): ContextObject {
   const runtime = currentRuntime();
-  let context = currentContexts.get(runtime);
+  let context = getThreadContext(runtime) as ContextObject | undefined;
   if (context === undefined) {
     context = newContext(new Map());
-    currentContexts.set(runtime, context);
+    setThreadContext(context, runtime);
   }
   return context;
+}
+
+export function newInternalContextVar(name: string): PyOpaque {
+  return new PyOpaque(contextVarClass, name, { name } satisfies ContextVar);
+}
+
+export function getInternalContextVar(variable: PyOpaque): PyValue | undefined {
+  return currentContext().data.values.get(variable);
+}
+
+export function setInternalContextVar(variable: PyOpaque, value: PyValue): void {
+  currentContext().data.values.set(variable, value);
 }
 
 function newContext(values: Map<PyOpaque, PyValue>): ContextObject {
@@ -83,20 +94,43 @@ contextClass.construct = (_cls, args, kwargs) => {
 };
 contextClass.dict.set('__hash__', None);
 
-defineMethod(contextClass, 'run', (self, args, kwargs) => {
+function enterContext(self: PyValue | undefined, args: PyValue[]): { context: ContextObject; previous: ContextObject } {
+  if (self === undefined) throw typeError("descriptor 'run' of '_contextvars.Context' object needs an argument");
+  if (!(self instanceof PyOpaque && self.cls === contextClass)) {
+    throw typeError(
+      `descriptor 'run' for '_contextvars.Context' objects doesn't apply to a '${typeName(self)}' object`
+    );
+  }
   if (args.length === 0) throw typeError('run() missing 1 required positional argument');
   const context = self as ContextObject;
-  if (context.data.previous !== undefined) {
+  if (context.data.entered) {
     throw pyError('RuntimeError', `cannot enter context: ${pyRepr(context)} is already entered`);
   }
-  const runtime = currentRuntime();
-  context.data.previous = currentContext();
-  currentContexts.set(runtime, context);
+  const previous = currentContext();
+  context.data.entered = true;
+  setThreadContext(context);
+  return { context, previous };
+}
+
+function exitContext(context: ContextObject, previous: ContextObject): void {
+  setThreadContext(previous);
+  context.data.entered = false;
+}
+
+defineMethod(contextClass, 'run', (self, args, kwargs) => {
+  const { context, previous } = enterContext(self, args);
   try {
     return callValue(args[0], args.slice(1), kwargs);
   } finally {
-    currentContexts.set(runtime, context.data.previous);
-    context.data.previous = undefined;
+    exitContext(context, previous);
+  }
+});
+registerSuspendingVariant(contextClass.dict.get('run') as PyBuiltinFunction, function* ([self, ...args], kwargs) {
+  const { context, previous } = enterContext(self, args);
+  try {
+    return yield* callSuspending(args[0], args.slice(1), kwargs);
+  } finally {
+    exitContext(context, previous);
   }
 });
 method(contextClass, 'copy', 'none', 0, 0, (self) => newContext(new Map(contextOf(self).values)));
@@ -216,14 +250,24 @@ method(tokenClass, '__exit__', 'expected', 3, 3, (self) => {
   return None;
 });
 
+registerModule('_contextvars', () => {
+  return new Map<string, PyValue>([
+    ['Context', contextClass],
+    ['ContextVar', contextVarClass],
+    ['Token', tokenClass],
+    ['copy_context', builtin('copy_context', 'none', 0, 0, () => newContext(new Map(currentContext().data.values)))],
+  ]);
+});
+
 registerModule('contextvars', (runtime) => {
+  const cModule = runtime.importModule('_contextvars');
   const mapping = getAttribute(runtime.importModule('collections.abc'), 'Mapping');
   callValue(getAttribute(mapping, 'register'), [contextClass]);
   return new Map<string, PyValue>([
     ['Context', contextClass],
     ['ContextVar', contextVarClass],
     ['Token', tokenClass],
-    ['copy_context', builtin('copy_context', 'none', 0, 0, () => newContext(new Map(currentContext().data.values)))],
+    ['copy_context', cModule.dict.get('copy_context') as PyValue],
     ['__all__', newTuple(['Context', 'ContextVar', 'Token', 'copy_context'])],
   ]);
 });

@@ -20,6 +20,7 @@ import { toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy } from '../objects';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
+import { fromCodePoints } from '../strings';
 import { exceptionClassNamed, isInstanceOf, newException, newTuple, None, typeError, typeName } from '../types';
 import { characterName } from '../unicodeDatabase';
 import { escapePoint } from '../unicodeErrors';
@@ -561,7 +562,7 @@ function surrogateescapeErrors(error: PyValue, kind: UnicodeErrorKind): [PyValue
     const data = bytesLikeData(getAttribute(error, 'object')) ?? new Uint8Array();
     const bytes = [...data.subarray(errorStart(error), errorEnd(error))];
     if (bytes.some((byte) => byte < 0x80)) throw new PyError(error as PyInstance);
-    return [String.fromCodePoint(...bytes.map((byte) => 0xdc_00 + byte)), undefined];
+    return [fromCodePoints(bytes.map((byte) => 0xdc_00 + byte)), undefined];
   }
   if (kind === 'encode') {
     const points = errorPoints(error);

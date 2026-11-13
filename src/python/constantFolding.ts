@@ -139,6 +139,7 @@ function isSafeToFold(operator: BinaryOperator, left: PyValue, right: PyValue): 
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- One limit per kind of operand a repetition may multiply.
 function isSafeProduct(left: PyValue, right: PyValue): boolean {
   const [a, b] = [intOf(left), intOf(right)];
   if (a !== undefined && b !== undefined) {

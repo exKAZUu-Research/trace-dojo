@@ -19,7 +19,9 @@ import {
   callGetter,
   callSetter,
   descriptorGetter,
+  ensureThreadLocalDict,
   isDataDescriptor,
+  isThreadLocal,
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
@@ -80,10 +82,17 @@ export const BUILTIN_DOC = '組み込みの関数・型・モジュールの説�
 
 /** Reads an attribute of a class: its own data, then the attributes of its MRO, bound as a class reads them. */
 export function classAttribute(cls: PyClass, name: string): PyValue | undefined {
-  const own = typeData(cls, name) ?? (cls.flags.isEnum ? enumClassData(cls, name) : undefined);
-  if (own !== undefined) return own;
   const meta = cls.cls;
   const metaAttribute = meta === typeClass ? undefined : meta.lookup(name);
+  if (
+    metaAttribute !== undefined &&
+    metaAttribute !== typeClass.dict.get(name) &&
+    isMetaDataDescriptor(metaAttribute)
+  ) {
+    return bindToClass(metaAttribute, cls);
+  }
+  const own = typeData(cls, name) ?? (cls.flags.isEnum ? enumClassData(cls, name) : undefined);
+  if (own !== undefined) return own;
   if (metaAttribute !== undefined && isMetaDataDescriptor(metaAttribute)) return bindToClass(metaAttribute, cls);
   const attribute = cls.lookup(name);
   if (attribute === undefined) {
@@ -189,7 +198,7 @@ function ownClassAttribute(value: PyValue): PyValue | undefined {
 }
 
 /** The attributes builtin objects have of their own, outside any class dictionary. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of builtin object with attributes of its own.
+// code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of builtin object with attributes of its own.
 // code-gauge-allow functionNcss 37 -- One case per kind of builtin object with attributes of its own.
 export function specialAttribute(value: PyValue, name: string): PyValue | undefined {
   if (name === '__class__') return ownClassAttribute(value);
@@ -216,7 +225,8 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
     if (name === '__doc__') return value.doc ?? builtinDoc(value) ?? None;
     return attributeDescriptorField(value, name);
   }
-  if (name === '__dict__' && value instanceof PyObject && !value.cls.isBuiltin) return dictAttribute(value);
+  if (name === '__dict__' && value instanceof PyObject && (!value.cls.isBuiltin || isThreadLocal(value)))
+    return dictAttribute(value);
   return undefined;
 }
 
@@ -411,38 +421,14 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
   }
 }
 
-/** The fields some builtin exceptions derive from their arguments, such as `StopIteration.value`. */
-// code-gauge-allow functionCognitiveComplexity 26 -- One case per attribute exceptions keep outside their dictionary.
+/** The fields some builtin exceptions keep outside their dictionary, initialized from their arguments. */
 function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefined {
   const state = instance.exception;
   if (!state) return undefined;
-  const args = state.args.items;
-  const is = (className: string): boolean => instance.cls.mro.some((cls) => cls.isBuiltin && cls.name === className);
-  if (name === 'value' && is('StopIteration')) return args[0] ?? None;
-  if (name === 'code' && is('SystemExit')) return args.length === 0 ? None : args.length === 1 ? args[0] : state.args;
-  if ((name === 'name' || name === 'obj') && (is('AttributeError') || is('NameError') || is('ImportError'))) {
-    if (name === 'name') return state.name ?? state.fields?.get('name') ?? None;
-    return state.object ?? None;
-  }
-  if (is('ImportError')) return importErrorField(state, name);
-  return is('OSError') ? osErrorField(state, name) : undefined;
-}
-
-/** The fields an ImportError has besides its name: its message, and those its keyword arguments set. */
-function importErrorField(state: ExceptionState, name: string): PyValue | undefined {
-  if (name === 'msg') return state.args.items.length === 1 ? state.args.items[0] : None;
-  if (name === 'path' || name === 'name_from') return state.fields?.get(name) ?? None;
-  return undefined;
-}
-
-/** The fields an OSError derives from the arguments it was created with, as `OSError(errno, strerror, filename)`. */
-function osErrorField(state: ExceptionState, name: string): PyValue | undefined {
-  const args = state.args.items;
-  if (name === 'errno' || name === 'strerror') {
-    return args.length >= 2 && args.length <= 5 ? args[name === 'errno' ? 0 : 1] : None;
-  }
-  if (name === 'filename') return state.filename ?? None;
-  if (name === 'filename2') return state.filename2 ?? None;
+  const stored = state.fields?.get(name);
+  if (stored !== undefined) return stored;
+  if (name === 'name' && state.name !== undefined) return state.name;
+  if (name === 'obj' && state.object !== undefined) return state.object;
   return undefined;
 }
 
@@ -509,6 +495,7 @@ function takesInstanceAttributes(target: PyValue): boolean {
   return (
     target instanceof PyInstance ||
     isSubclassInstance(target) ||
+    isThreadLocal(target) ||
     (target instanceof PyObject && builtinClassesWithDict.has(target.cls))
   );
 }
@@ -581,7 +568,7 @@ function isSubclassInstance(value: PyValue): boolean {
 
 /** Whether attribute assignment on a value follows the rules of instances, as opposed to classes or modules. */
 export function isInstanceWithAttributes(value: PyValue): boolean {
-  return value instanceof PyInstance || isSubclassInstance(value);
+  return value instanceof PyInstance || isSubclassInstance(value) || isThreadLocal(value);
 }
 
 /** `type.__setattr__`: sets a class attribute as a metaclass's `__setattr__` does when it defers to `type`'s. */
@@ -642,6 +629,10 @@ function setProperty(property: PyDescriptor, target: PyObject, name: string, val
 
 /** Stores an instance attribute, honoring descriptors, slots, and the special attributes of exceptions. */
 export function setInstanceAttribute(target: PyObject, name: string, value: PyValue): void {
+  if (isThreadLocal(target)) {
+    ensureThreadLocalDict(target);
+    if (name === '__dict__') throw readOnlyError(target, name);
+  }
   if (name === '__class__') {
     setClassOf(target, value);
     return;
@@ -702,11 +693,20 @@ function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, 
   target.dict.set(name, value);
 }
 
+const UNDELETABLE_EXCEPTION_ATTRIBUTES = new Set([
+  'args',
+  '__traceback__',
+  '__cause__',
+  '__context__',
+  '__suppress_context__',
+]);
+
 /** Assigns, or deletes when `value` is undefined, an attribute that an exception's class lists as a descriptor. */
 export function assignExceptionAttribute(target: PyValue, name: string, value: PyValue | undefined): void {
   const instance = target as PyInstance;
   if (value === undefined) {
-    if (!instance.dict.delete(name)) throw attributeError(target, name);
+    if (UNDELETABLE_EXCEPTION_ATTRIBUTES.has(name)) throw typeError(`${name} may not be deleted`);
+    assignExceptionAttribute(target, name, None);
     return;
   }
   if (instance.exception && setExceptionField(instance.exception, name, value)) return;
@@ -829,8 +829,12 @@ function deleteNamespaceEntry(target: PyFunction | PyModule, name: string): bool
 }
 
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Honors native descriptors, properties, user descriptors, enum members, and own dict.
+// code-gauge-allow functionCognitiveComplexity 19 -- Honors native descriptors, properties, user descriptors, enum members, and own dict.
 export function deleteInstanceAttribute(target: PyObject, name: string): void {
+  if (isThreadLocal(target)) {
+    ensureThreadLocalDict(target);
+    if (name === '__dict__') throw readOnlyError(target, name);
+  }
   const attribute = target.cls.lookup(name);
   if (attribute instanceof PyAttribute && !attribute.stands) {
     attribute.assign(target, undefined);

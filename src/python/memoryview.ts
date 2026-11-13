@@ -34,7 +34,7 @@ memoryviewClass.construct = (_cls, args, kwargs) => {
 };
 
 /** A memoryview of a bytes-like object, which for a memoryview views the same memory. */
-export function viewOf(value: PyValue): PyMemoryView {
+export function viewOf(value: PyValue, prefix = 'memoryview: '): PyMemoryView {
   if (value instanceof PyMemoryView) {
     value.checkReleased();
     return copyView(value, value.readonly);
@@ -42,12 +42,13 @@ export function viewOf(value: PyValue): PyMemoryView {
   if (!(value instanceof PyBytes)) {
     // A Python class implements the buffer protocol with `__buffer__` (PEP 688).
     const buffer = typeof value === 'object' && !value.cls.isBuiltin ? lookupSpecial(value, '__buffer__') : undefined;
-    if (buffer === undefined) throw typeError(`memoryview: a bytes-like object is required, not '${typeName(value)}'`);
+    if (buffer === undefined) throw typeError(`${prefix}a bytes-like object is required, not '${typeName(value)}'`);
     const view = callValue(bindValue(buffer, value), [0n]);
     if (!(view instanceof PyMemoryView)) {
       throw typeError(`__buffer__ returned non-memoryview object '${typeName(view)}'`);
     }
-    return view;
+    view.checkReleased();
+    return copyView(view, view.readonly);
   }
   return new PyMemoryView(value, 0, value.length, 1, 'B', 1, !value.isMutable);
 }
@@ -219,22 +220,27 @@ method(memoryviewClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) =>
     return None;
   }
   const target = sliceView(view, key);
-  const source = value instanceof PyMemoryView || value instanceof PyBytes ? viewOf(value) : undefined;
-  if (!source) throw typeError(`a bytes-like object is required, not '${typeName(value)}'`);
-  const bytes = source.toBytes();
-  source.release();
-  if (source.count !== target.count || source.format !== target.format) {
+  try {
+    const source = viewOf(value, '');
+    let bytes: Uint8Array;
+    try {
+      bytes = source.toBytes();
+      if (source.count !== target.count || source.format !== target.format) {
+        throw valueError('memoryview assignment: lvalue and rvalue have different structures');
+      }
+    } finally {
+      source.release();
+    }
+    for (let index = 0; index < target.count; index++) {
+      target.source.data.set(
+        bytes.subarray(index * target.itemsize, (index + 1) * target.itemsize),
+        target.offset + index * target.stride
+      );
+    }
+    return None;
+  } finally {
     target.release();
-    throw valueError('memoryview assignment: lvalue and rvalue have different structures');
   }
-  for (let index = 0; index < target.count; index++) {
-    target.source.data.set(
-      bytes.subarray(index * target.itemsize, (index + 1) * target.itemsize),
-      target.offset + index * target.stride
-    );
-  }
-  target.release();
-  return None;
 });
 
 method(memoryviewClass, '__delitem__', 'one', 1, 1, (self) => {

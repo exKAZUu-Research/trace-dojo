@@ -15,6 +15,8 @@ export class Frame implements TracedFrame {
   inlinedIn?: Frame;
   /** What a generator expression's frame holds as its first argument: the iterator of its first iterable. */
   firstArgument?: PyValue;
+  /** The `__builtins__` binding captured when the frame or its function was created, or `undefined` when absent. */
+  builtins: PyValue | undefined;
 
   // code-gauge-allow functionParameterCount 9 -- Each frame field is set once at creation and read on every name access.
   constructor(
@@ -30,7 +32,9 @@ export class Frame implements TracedFrame {
     readonly fn?: PyFunction,
     /** The class a method's `super()` refers to. */
     readonly classCell?: PyCell
-  ) {}
+  ) {
+    this.builtins = fn ? fn.builtins : globals.has('__builtins__') ? globals.get('__builtins__') : undefined;
+  }
 
   /** The name of the module whose code runs here: `__main__` for the program. */
   get moduleName(): string {

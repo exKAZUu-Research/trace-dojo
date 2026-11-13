@@ -66,6 +66,7 @@ def collect_types(found, classes):
         if cls in found:
             continue
         found.append(cls)
+        pending.extend(cls.__mro__[1:])
         for value in list(cls.__dict__.values()):
             if isinstance(value, type):
                 pending.append(value)
@@ -94,8 +95,6 @@ if ${types ? 'True' : 'False'}:
     for name in sorted(entries):
         for key in entries[name]:
             emit('T ' + name + ' ' + key)
-    for cls in found:
-        emit('B ' + type_name(cls) + ' ' + ' '.join(type_name(base) for base in cls.__mro__[1:]))
 `;
 
 /** Names that this grader adds on purpose, which CPython lacks. */
@@ -157,8 +156,9 @@ function compare(modules: string[]): void {
   const [reference, ours] = [lines.reference.filter(keep), lines.ours.filter(keep)];
   const differences = {
     modules: differing(reference, ours, 'M'),
-    classes: withoutInherited(differing(reference, ours, 'T'), lines.reference),
+    classes: differing(reference, ours, 'T'),
   };
+  settleExtras(python, differences);
   for (const [kind, entries] of Object.entries(differences)) {
     for (const [name, [missing, extra]] of Object.entries(entries)) {
       const order = missing.length + extra.length === 0 ? ' (order only)' : '';
@@ -174,25 +174,57 @@ function compare(modules: string[]): void {
 }
 
 /**
- * Leaves out of each class's extra names those CPython's class has from a base, which reading finds in CPython too:
- * the extra names are those that reading must refuse.
+ * Settles the extra names by reading them in CPython: a class's extra names its CPython class has after all, from a
+ * base this grader does not model, are no longer extra, and after each extra list come those CPython serves when read
+ * though its namespace lacks them, a module's through its `__getattr__` and a class's on the instances its constructor
+ * makes without arguments.
  */
-function withoutInherited(entries: Record<string, Difference>, reference: string[]): Record<string, Difference> {
-  const names = namesBy(reference, 'T');
-  const bases = new Map(
-    reference
-      .filter((line) => line.startsWith('B '))
-      .map((line) => {
-        const [, name, ...rest] = line.split(' ');
-        return [name as string, rest] as const;
-      })
-  );
-  const result: Record<string, Difference> = {};
-  for (const [name, [missing, extra]] of Object.entries(entries)) {
-    const inherited = new Set((bases.get(name) ?? []).flatMap((base) => names.get(base) ?? []));
-    result[name] = [missing, extra.filter((key) => !inherited.has(key))];
+function settleExtras(python: string, differences: Record<'modules' | 'classes', Record<string, Difference>>): void {
+  for (const [name, difference] of Object.entries(differences.modules)) {
+    if (difference[1].length === 0) continue;
+    // Each module alone, as importing others adds their submodules to its namespace.
+    const program = `import importlib\nmodule = importlib.import_module(${JSON.stringify(name)})\nfor key in ${JSON.stringify(difference[1])}:\n    if hasattr(module, key): print('|' + key)\n`;
+    setReadable(difference, probeLines(runCPython(python, program)));
   }
-  return result;
+  const classes = Object.entries(differences.classes).filter(([, [, extra]]) => extra.length > 0);
+  const extras = JSON.stringify(Object.fromEntries(classes.map(([name, [, extra]]) => [name, extra])));
+  const program = `import importlib, json
+for key, extra in json.loads(${JSON.stringify(extras)}).items():
+    parts = key.split('.')
+    cls = None
+    for index in range(len(parts) - 1, 0, -1):
+        try:
+            cls = importlib.import_module('.'.join(parts[:index]))
+            for part in parts[index:]:
+                cls = getattr(cls, part)
+            break
+        except Exception:
+            cls = None
+    if cls is None:
+        continue
+    for name in extra:
+        if hasattr(cls, name):
+            print('|C ' + key + ' ' + name)
+    try:
+        instance = cls()
+    except Exception:
+        continue
+    for name in extra:
+        if not hasattr(cls, name) and hasattr(instance, name):
+            print('|I ' + key + ' ' + name)
+`;
+  const found = probeLines(runCPython(python, program)).map((line) => line.split(' ') as [string, string, string]);
+  const namesOf = (kind: string, name: string): string[] =>
+    found.filter(([each, key]) => each === kind && key === name).map((entry) => entry[2]);
+  for (const [name, difference] of classes) {
+    const onClass = namesOf('C', name);
+    difference[1] = difference[1].filter((key) => !onClass.includes(key));
+    setReadable(difference, namesOf('I', name));
+  }
+}
+
+function setReadable(difference: Difference, readable: string[]): void {
+  if (readable.length > 0) difference[2] = readable;
 }
 
 /** The CPython order of each class whose order this grader's creation does not give, by its natural order. */
@@ -210,7 +242,7 @@ function classOrders(reference: string[], natural: string[]): Record<string, str
   return orders;
 }
 
-type Difference = [missing: string[], extra: string[]];
+type Difference = [missing: string[], extra: string[], readable?: string[]];
 
 /** The entries (modules or classes) whose names differ in set or order, with the names one side lacks. */
 function differing(reference: string[], ours: string[], kind: 'M' | 'T'): Record<string, Difference> {
@@ -262,7 +294,10 @@ import type { NamespaceDifferences } from '../namespaceDifferences';
 /** The order of the namespaces of the classes whose order this grader's creation of them does not give. */
 export const CLASS_ORDERS: Readonly<Record<string, string>> = ${JSON.stringify(orders)};
 
-/** The modules and classes whose namespaces differ from CPython's, with the names CPython's has and the extra ones. */
+/**
+ * The modules and classes whose namespaces differ from CPython's, with the names CPython's has, the extra ones, and the
+ * extra ones CPython serves when read.
+ */
 export const NAMESPACE_DIFFERENCES: NamespaceDifferences = ${JSON.stringify(differences)};
 `
   );
@@ -293,12 +328,10 @@ function compareModules(python: string, modules: string[], lines: Lines): void {
 function compareTypes(python: string, modules: string[], lines: Lines): void {
   const typeProgram = PROGRAM(modules, true);
   const ourTypes = probeLines(runOurs(typeProgram).output).filter((line) => line.startsWith('T '));
-  const referenceLines = probeLines(runCPython(python, typeProgram));
-  const referenceTypes = referenceLines.filter((line) => line.startsWith('T '));
+  const referenceTypes = probeLines(runCPython(python, typeProgram)).filter((line) => line.startsWith('T '));
   // A class only one side reaches is a name a module lacks, which the module's lines show.
   const [ourTypeNames, referenceTypeNames] = [typeNames(ourTypes), typeNames(referenceTypes)];
   lines.reference.push(...referenceTypes.filter((line) => shared(line, ourTypeNames)));
-  lines.reference.push(...referenceLines.filter((line) => line.startsWith('B ')));
   lines.ours.push(...ourTypes.filter((line) => shared(line, referenceTypeNames)));
   const natural = spawnSync('bun', [process.argv[1] as string, '--natural', ...modules], {
     encoding: 'utf8',

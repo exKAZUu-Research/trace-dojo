@@ -1,6 +1,8 @@
-// The parts of CPython's `_pyio.py` written in Python here: the abstract I/O classes, the buffered readers and writers,
-// TextIOWrapper, and IncrementalNewlineDecoder, which work on the in-memory streams. Small stand-ins take the place of
-// the modules they use: `codecs` for the incremental codecs of ioCodecs.ts, and `os` and `errno` for two constants.
+// The parts of CPython's `_pyio.py` written in Python here: the base classes of `_io` (`_IOBase`, `_RawIOBase`,
+// `_BufferedIOBase`, and `_TextIOBase`, whose behavior follows the C ones where `_pyio` differs), under the abstract
+// classes of `io.py`, the buffered readers and writers, TextIOWrapper, and IncrementalNewlineDecoder, which work on the
+// in-memory streams. Small stand-ins take the place of the modules they use: `codecs` for the incremental codecs of
+// ioCodecs.ts, and `os` and `errno` for two constants.
 export const IO_SOURCE = String.raw`import abc
 import sys
 from _thread import allocate_lock as Lock
@@ -160,7 +162,7 @@ def text_encoding(encoding, stacklevel=2):
 
 
 
-class IOBase(metaclass=abc.ABCMeta):
+class _IOBase:
 
     """The abstract base class for all I/O classes.
 
@@ -419,7 +421,7 @@ class IOBase(metaclass=abc.ABCMeta):
         for line in self:
             lines.append(line)
             n += len(line)
-            if n >= hint:
+            if n > hint:
                 break
         return lines
 
@@ -435,7 +437,7 @@ class IOBase(metaclass=abc.ABCMeta):
 
 
 
-class RawIOBase(IOBase):
+class _RawIOBase(_IOBase):
 
     """Base class for raw binary I/O."""
 
@@ -475,14 +477,14 @@ class RawIOBase(IOBase):
             return data
 
     def readinto(self, b):
-        self._unsupported("readinto")
+        raise NotImplementedError
 
     def write(self, b):
-        self._unsupported("write")
+        raise NotImplementedError
 
 
 
-class BufferedIOBase(IOBase):
+class _BufferedIOBase(_IOBase):
 
     """Base class for buffered IO objects.
 
@@ -571,7 +573,17 @@ class BufferedIOBase(IOBase):
 
 
 
-class _BufferedIOMixin(BufferedIOBase):
+class IOBase(_IOBase, metaclass=abc.ABCMeta):
+    __doc__ = _IOBase.__doc__
+
+class RawIOBase(_RawIOBase, IOBase):
+    __doc__ = _RawIOBase.__doc__
+
+class BufferedIOBase(_BufferedIOBase, IOBase):
+    __doc__ = _BufferedIOBase.__doc__
+
+
+class _BufferedIOMixin(_BufferedIOBase):
 
     """A mixin implementation of BufferedIOBase with an underlying raw stream.
 
@@ -989,7 +1001,7 @@ class BufferedWriter(_BufferedIOMixin):
                 self.raw.close()
 
 
-class BufferedRWPair(BufferedIOBase):
+class BufferedRWPair(_BufferedIOBase):
 
     """A buffered reader and writer object together.
 
@@ -1138,7 +1150,7 @@ class BufferedRandom(BufferedWriter, BufferedReader):
 
 
 
-class TextIOBase(IOBase):
+class _TextIOBase(_IOBase):
 
     """Base class for text I/O.
 
@@ -1207,6 +1219,10 @@ class TextIOBase(IOBase):
         """
         return None
 
+
+
+class TextIOBase(_TextIOBase, IOBase):
+    __doc__ = _TextIOBase.__doc__
 
 
 class IncrementalNewlineDecoder(codecs.IncrementalDecoder):
@@ -1294,7 +1310,7 @@ class IncrementalNewlineDecoder(codecs.IncrementalDecoder):
                )[self.seennl]
 
 
-class TextIOWrapper(TextIOBase):
+class TextIOWrapper(_TextIOBase):
 
     r"""Character and line based layer over a BufferedIOBase object, buffer.
 
@@ -2006,8 +2022,12 @@ class TextIOWrapper(TextIOBase):
 
 
 
-BufferedIOBase.register(BytesIO)
-TextIOBase.register(StringIO)
+StringIO, BytesIO = _stream_classes(_TextIOBase, _BufferedIOBase)
+for klass in (BytesIO, BufferedReader, BufferedWriter, BufferedRandom, BufferedRWPair):
+    BufferedIOBase.register(klass)
+for klass in (StringIO, TextIOWrapper):
+    TextIOBase.register(klass)
+del klass
 
 
 class Reader(metaclass=abc.ABCMeta):
@@ -2055,11 +2075,14 @@ def _check_methods(C, *methods):
     return True
 
 
-# CPython's io takes these from its C module _io.
-for _cls in (BufferedRWPair, BufferedRandom, BufferedReader, BufferedWriter, IncrementalNewlineDecoder, TextIOWrapper):
+# CPython's io takes these from its C module _io. The base classes come last, as a C type takes the methods it has of
+# its own from its bases while they are still written in Python.
+for _cls in (BufferedRWPair, BufferedRandom, BufferedReader, BufferedWriter, IncrementalNewlineDecoder, TextIOWrapper,
+             _IOBase, _RawIOBase, _BufferedIOBase, _TextIOBase):
     _cls.__module__ = '_io'
     _c_type(_cls)
 del _cls
 
-del _c_type_name, _c_type, _allocate, _handled_exception, _standard_stderr
+del _IOBase, _RawIOBase, _BufferedIOBase, _TextIOBase
+del _c_type_name, _c_type, _allocate, _handled_exception, _standard_stderr, _stream_classes
 `;

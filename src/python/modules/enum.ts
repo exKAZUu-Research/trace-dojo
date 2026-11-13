@@ -17,10 +17,8 @@ import type { PyClass, PyValue } from '../values';
 // The parts of CPython's `enum.py` written in Python here: FlagBoundary, EnumCheck and verify, enum.property, EnumDict,
 // and the helpers for flags and pickling. The natives of enums.ts provide the enum classes themselves.
 const SOURCE =
-  String.raw`import builtins as _builtins
+  String.raw`import builtins as bltns
 from types import DynamicClassAttribute
-
-_builtin_property = _builtins.property
 
 
 class _auto_null:
@@ -291,7 +289,7 @@ class EnumDict(dict):
                 self._last_values.append(value)
         super().__setitem__(key, value)
 
-    @_builtin_property
+    @bltns.property
     def member_names(self):
         return list(self._member_names)
 

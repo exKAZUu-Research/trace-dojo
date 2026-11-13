@@ -1,8 +1,10 @@
 import { acceleratorModule } from './builtinDocs';
 import { SYS_BUILTIN_MODULE_NAMES } from './data/sysModuleNames';
+import { absentModule } from './moduleNames';
 import { addLayoutAttributes, orderNamespace, recordFunctionOwners } from './modules/moduleLayout';
 import type { Runtime } from './runtime';
-import { exceptionClassNamed, moduleClass, newException } from './types';
+import { exceptionClassNamed, moduleClass, newException, None } from './types';
+import { isUnavailable } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
 import { PyBuiltinFunction, PyError, PyModule, type PyValue } from './values';
 
@@ -53,6 +55,38 @@ export function registerModuleAlias(name: string, target: string): void {
 /** Makes `table` the run's `sys.modules`, which every later import adds its module to. */
 export function trackModules(runtime: Runtime, table: Map<string, PyValue>): void {
   moduleTables.set(runtime, table);
+}
+
+/** The run's `sys.modules`, once a program has read it. */
+export function getModuleTable(runtime: Runtime): Map<string, PyValue> | undefined {
+  return moduleTables.get(runtime);
+}
+
+/**
+ * Imports a module as an import statement does: what `sys.modules` holds under the name, which a program may have
+ * replaced with another object, or else the module, which importing creates anew once a program deleted it there.
+ */
+export function resolveImport(runtime: Runtime, name: string): PyValue {
+  const table = moduleTables.get(runtime);
+  if (table) {
+    const parts = name.split('.');
+    for (let index = 1; index <= parts.length; index++) {
+      const prefix = parts.slice(0, index).join('.');
+      if (table.get(prefix) === None)
+        throw moduleNotFoundError(`import of ${prefix} halted; None in sys.modules`, prefix);
+    }
+    const entry = table.get(name);
+    if (entry === undefined) runtime.modules.delete(name);
+    else if (!isUnavailable(entry)) return entry;
+  }
+  return importModule(runtime, name);
+}
+
+/** A ModuleNotFoundError whose `name` is the module that importing did not find. */
+export function moduleNotFoundError(message: string, name: string): PyError {
+  const error = newException(exceptionClassNamed('ModuleNotFoundError'), [message]);
+  error.exception?.fields?.set('name', name);
+  return new PyError(error);
 }
 
 const moduleAlls = new Map<string, readonly string[]>();
@@ -113,7 +147,11 @@ export function importModule(runtime: Runtime, name: string): PyModule {
     return module;
   }
   const factory = factories.get(name);
-  if (!factory) throw new UnsupportedFeatureError(`モジュール ${name}`);
+  if (!factory) {
+    const absent = absentModule(name, runtime.inLibraryCode());
+    if (absent) throw moduleNotFoundError(absent.message, absent.name);
+    throw new UnsupportedFeatureError(`モジュール ${name}`);
+  }
   // As in CPython, a package is imported before its submodule, and its code may import the submodule itself.
   const dot = name.lastIndexOf('.');
   const parent = dot === -1 ? undefined : importModule(runtime, name.slice(0, dot));
@@ -125,7 +163,9 @@ export function importModule(runtime: Runtime, name: string): PyModule {
 function createModule(runtime: Runtime, name: string, factory: ModuleFactory): PyModule {
   // The builtins module's namespace is the one names fall back to, so that changing either changes the other.
   const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new Map());
+  // As in CPython, the module is in sys.modules while its code runs, which a cyclic import finds it in.
   runtime.modules.set(name, module);
+  moduleTables.get(runtime)?.set(name, module);
   module.dict.set('__name__', name);
   for (const [key, value] of runFactory(runtime, name, factory, module)) module.dict.set(key, value);
   addRegisteredAttributes(runtime, module);
@@ -133,7 +173,6 @@ function createModule(runtime: Runtime, name: string, factory: ModuleFactory): P
   addLayoutAttributes(module, name);
   orderNamespace(module, name);
   recordFunctionOwners(module, name);
-  moduleTables.get(runtime)?.set(name, module);
   loadAccelerators(runtime, module);
   return module;
 }
@@ -246,7 +285,7 @@ export function reloadModule(runtime: Runtime, module: PyModule): PyModule {
   const { name } = module;
   if ((moduleTables.get(runtime) ?? runtime.modules).get(name) !== module) {
     const error = newException(exceptionClassNamed('ImportError'), [`module ${name} not in sys.modules`]);
-    error.dict.set('name', name);
+    error.exception?.fields?.set('name', name);
     throw new PyError(error);
   }
   if (name === '__main__') throw new UnsupportedFeatureError('プログラムのモジュール（__main__）の再読み込み');

@@ -12,7 +12,9 @@ export type CharsetItem =
 
 export interface Charset {
   negate: boolean;
-  /** The lowered characters of the Basic Multilingual Plane that a case-insensitive set contains. */
+  /** Literal code points in a case-sensitive set, indexed for constant-time membership checks. */
+  literals?: Set<number>;
+  /** The lowered characters that a case-insensitive set contains. */
   lowered?: Set<number>;
   items: CharsetItem[];
 }
@@ -325,7 +327,7 @@ function optimizeCharset(
     switch (item.op) {
       case 'LITERAL': {
         if (fold) hascased = addLoweredLiteral(charset, item.code, fold) || hascased;
-        else charset.items.push(item);
+        else (charset.literals ??= new Set()).add(item.code);
         break;
       }
       case 'RANGE': {

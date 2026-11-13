@@ -140,6 +140,8 @@ export interface ScopeInfo {
    * that awaits, which then suspends the coroutine running it or, for a generator expression, is an async generator.
    */
   isAsync?: true;
+  /** The `__future__` features enabled in the compilation unit this scope belongs to. */
+  futureFeatures?: readonly string[];
 }
 
 export interface Parameter {

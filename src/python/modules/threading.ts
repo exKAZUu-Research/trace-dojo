@@ -3,6 +3,7 @@
 import { registerSourceModule } from '../sourceModules';
 
 const SOURCE = String.raw`
+import _contextvars
 import _thread
 import sys as _sys
 from collections import deque as _deque
@@ -399,6 +400,7 @@ class Thread:
             self._daemonic = daemon
         else:
             self._daemonic = current_thread().daemon
+        self._context = context
         self._ident = None
         self._native_id = None
         self._handle = None
@@ -424,7 +426,16 @@ class Thread:
         if self._started.is_set():
             raise RuntimeError("threads can only be started once")
         _limbo[self] = self
-        self._handle = _start_thread(self._bootstrap, self._daemonic)
+        if self._context is None:
+            if _sys.flags.thread_inherit_context:
+                self._context = _contextvars.copy_context()
+            else:
+                self._context = _contextvars.Context()
+        try:
+            self._handle = _start_thread(self._bootstrap, self._daemonic)
+        except Exception:
+            del _limbo[self]
+            raise
         self._started.wait()
 
     def run(self):
@@ -442,7 +453,7 @@ class Thread:
             _active[self._ident] = self
             del _limbo[self]
             try:
-                self.run()
+                self._context.run(self.run)
             except BaseException as exc:
                 _invoke_excepthook(self, exc)
         finally:
@@ -638,63 +649,7 @@ def main_thread():
     return _main_thread
 
 
-class local:
-    __module__ = '_thread'
-
-    def __new__(cls, /, *args, **kw):
-        if (args or kw) and (cls.__init__ is object.__init__):
-            raise TypeError("Initialization arguments are not supported")
-        self = object.__new__(cls)
-        _local_arguments[id(self)] = (args, kw)
-        return self
-
-    def __getattribute__(self, name):
-        # The running thread's values stand in for the instance dict, between the class's data descriptors and the
-        # rest of its attributes.
-        values = _local_values(self)
-        if name == '__dict__':
-            return values
-        if name in values and not _is_data_descriptor(type(self), name):
-            return values[name]
-        return object.__getattribute__(self, name)
-
-    def __setattr__(self, name, value):
-        _local_values(self)[name] = value
-
-    def __delattr__(self, name):
-        values = _local_values(self)
-        if name not in values:
-            raise AttributeError(f"'{_local_name(self)}' object has no attribute '{name}'")
-        del values[name]
-
-local.__name__ = '_local'
-local.__qualname__ = '_local'
-
-_local_arguments = {}
-_local_dicts = {}
-
-def _is_data_descriptor(cls, name):
-    for klass in cls.__mro__:
-        if name in klass.__dict__:
-            kind = type(klass.__dict__[name])
-            return hasattr(kind, '__set__') or hasattr(kind, '__delete__')
-    return False
-
-def _local_name(self):
-    cls = type(self)
-    return '_thread._local' if cls is local else cls.__qualname__
-
-def _local_values(self):
-    key = (id(self), get_ident())
-    values = _local_dicts.get(key)
-    if values is None:
-        values = _local_dicts[key] = {}
-        if any(owner == id(self) for owner, _ in _local_dicts if (owner, _) != key):
-            args, kw = _local_arguments[id(self)]
-            init = type(self).__init__
-            if init is not object.__init__:
-                init(self, *args, **kw)
-    return values
+local = _thread._local
 
 
 _main_thread = _MainThread()

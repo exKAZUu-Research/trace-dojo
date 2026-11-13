@@ -4,7 +4,7 @@ import { builtin, method } from '../define';
 import type { Frame } from '../frame';
 import { defineNew } from '../instances';
 import { SUPPORTED_MODULES } from '../moduleNames';
-import { registerMainModule, trackModules } from '../modules';
+import { getModuleTable, registerMainModule, trackModules } from '../modules';
 import { namespaceDict } from '../namespaces';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
@@ -29,7 +29,6 @@ import {
   valueError,
 } from '../types';
 import { unavailableValue } from '../unavailableValues';
-import { UnsupportedFeatureError } from '../unsupported';
 import { type Kwargs, type PyClass, PyDict, PyInstance, PyModule, PyTuple, type PyValue } from '../values';
 import { defineProperty } from './numberSupport';
 
@@ -135,6 +134,9 @@ export function sysModules(runtime: Runtime): PyValue {
 }
 
 function moduleTable(runtime: Runtime): Map<string, PyValue> {
+  // `sys` created anew, as after `del sys.modules['sys']`, keeps the run's `sys.modules`.
+  const existing = getModuleTable(runtime);
+  if (existing) return existing;
   const table = new Map<string, PyValue>();
   for (const name of STARTUP_MODULES) {
     const loaded = runtime.modules.get(name) ?? (SUPPORTED_MODULES.has(name) ? runtime.importModule(name) : undefined);
@@ -145,12 +147,17 @@ function moduleTable(runtime: Runtime): Map<string, PyValue> {
   return table;
 }
 
-/** The `__main__` module, whose repr names the script's file. */
+/** The `__main__` module, whose repr names the loader of CPython running a program with `-c`. */
 const mainModuleClass = builtinClass('module', moduleClass);
 hideSubclass(mainModuleClass);
-method(mainModuleClass, '__repr__', 'none', 0, 0, () => {
-  throw new UnsupportedFeatureError('__main__ モジュールの repr（スクリプトのファイルのパスを含む）');
-});
+method(
+  mainModuleClass,
+  '__repr__',
+  'none',
+  0,
+  0,
+  () => "<module '__main__' (<class '_frozen_importlib.BuiltinImporter'>)>"
+);
 
 registerMainModule((runtime) => new PyModule(mainModuleClass, '__main__', (runtime.frames[0] as Frame).globals));
 
@@ -212,7 +219,6 @@ export function structSeq(
  * Gives a struct sequence type its `__reduce__`, with the hidden fields in a dict, and its `__new__`, or makes it
  * refuse to be created, as `sys.flags` does.
  */
-// code-gauge-allow functionParameterCount 6 -- The parts of the struct sequence that its creation needs.
 function defineStructSeqCreation(
   cls: PyClass,
   name: string,

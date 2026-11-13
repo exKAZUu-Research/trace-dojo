@@ -1,5 +1,6 @@
 import { addressOf } from './conversions';
 import { method } from './define';
+import { isThreadLocal } from './descriptors';
 import { findReachableObjects } from './garbageCollection';
 import { pyHash } from './hashing';
 import { defineNew } from './instances';
@@ -208,6 +209,7 @@ function callCallback(callback: PyValue, reference: PyValue): void {
 }
 
 function isWeaklyReferenceable(value: PyValue): value is PyObject {
+  if (isThreadLocal(value)) return true;
   if (value instanceof PyObject && !value.cls.isBuiltin) return value.cls.lookup('__weakref__') !== undefined;
   return (
     value instanceof PyInstance ||

@@ -30,6 +30,7 @@ import {
   PyOpaque,
   type PyValue,
 } from '../values';
+import { getInternalContextVar, newInternalContextVar, setInternalContextVar } from './contextvars';
 import {
   type Condition,
   conditionSet,
@@ -396,7 +397,7 @@ method(signalDictClass, '__eq__', 'one', 1, 1, (self, [other]) => {
 // The current context ------------------------------------------------------------------------------------------------
 
 interface ModuleState {
-  current?: PyContext;
+  contextVar: PyOpaque;
   defaultContext: PyContext;
   basicContext: PyContext;
   extendedContext: PyContext;
@@ -409,6 +410,7 @@ export function moduleState(): ModuleState {
   let state = states.get(runtime);
   if (!state) {
     state = {
+      contextVar: newInternalContextVar('decimal_context'),
       defaultContext: new PyContext(contextClass, newContextState()),
       basicContext: new PyContext(
         contextClass,
@@ -427,8 +429,12 @@ export function moduleState(): ModuleState {
 
 export function getContext(): PyContext {
   const state = moduleState();
-  state.current ??= copyContext(state.defaultContext);
-  return state.current;
+  let current = getInternalContextVar(state.contextVar) as PyContext | undefined;
+  if (!current) {
+    current = copyContext(state.defaultContext);
+    setInternalContextVar(state.contextVar, current);
+  }
+  return current;
 }
 
 export function setContext(value: PyValue): void {
@@ -438,10 +444,10 @@ export function setContext(value: PyValue): void {
   if (templates.includes(value)) {
     const copy = copyContext(value);
     copy.state.flags.clear();
-    state.current = copy;
+    setInternalContextVar(state.contextVar, copy);
     return;
   }
-  state.current = value;
+  setInternalContextVar(state.contextVar, value);
 }
 
 /** The context an operation uses: the one passed as `context=`, or the current one. */
@@ -483,6 +489,6 @@ method(contextManagerClass, '__enter__', 'none', 0, 0, (self) => {
 });
 method(contextManagerClass, '__exit__', 'expected', 3, 3, (self) => {
   const data = (self as PyOpaque).data as ManagerData;
-  if (data.saved) moduleState().current = data.saved;
+  if (data.saved) setInternalContextVar(moduleState().contextVar, data.saved);
   return None;
 });

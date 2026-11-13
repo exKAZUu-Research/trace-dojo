@@ -1,10 +1,11 @@
+import { MappingNamespace } from './classes';
 import type { Frame } from './frame';
 import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict } from './namespaces';
-import { getAttributeOrUndefined, getIterator } from './objects';
+import { getAttributeOrUndefined, getIterator, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { newDict, newList, typeError } from './types';
-import type { PyDict, PyList, PyValue } from './values';
+import { PyDict, type PyList, type PyValue } from './values';
 
 /** `globals()`: the dict of the calling frame's module variables, which shares them with the frame. */
 export function callerGlobals(): PyDict {
@@ -13,14 +14,15 @@ export function callerGlobals(): PyDict {
 }
 
 /**
- * `locals()` and `vars()`: the calling frame's variables. A module's or class body's namespace is a dict the frame
- * shares; a function's is a new snapshot on each call, as PEP 667 specifies.
+ * `locals()` and `vars()`: the calling frame's variables. A module's or class body's namespace is a dict (or custom
+ * `__prepare__` mapping) the frame shares; a function's is a new snapshot on each call, as PEP 667 specifies.
  */
-export function callerLocals(): PyDict {
+export function callerLocals(): PyValue {
   // The program can now read the frames' variables as objects.
   currentRuntime().finalizer.locals.expose();
   const frames = programFrames();
   const frame = frames.at(-1) as Frame;
+  if (frame.locals instanceof MappingNamespace) return frame.locals.mapping;
   if (frame.kind === 'module' || frame.kind === 'class') return namespaceDict(frame.locals);
   return newDict(localVariables(frames, frames.length - 1));
 }
@@ -44,7 +46,9 @@ export function vars(value: PyValue): PyValue {
 
 /** `dir()` without an argument: the sorted names of the calling frame's variables. */
 export function callerNames(): PyList {
-  const names = [...callerLocals().store.ordered()].map((entry) => entry.key as string).toSorted();
+  const locals = callerLocals();
+  const keys = locals instanceof PyDict ? locals.store.ordered().map((entry) => entry.key) : toArray(locals);
+  const names = keys.filter((key): key is string => typeof key === 'string').toSorted();
   return newList(names);
 }
 

@@ -3,8 +3,9 @@ import { builtin } from '../define';
 import { toIndex } from '../numbers';
 import { registerSourceModule } from '../sourceModules';
 import { strLength } from '../strings';
-import { intClass, isInstanceOf, pyError, typeError, typeName } from '../types';
+import { pyError, typeError, typeName } from '../types';
 import type { PyValue } from '../values';
+import { realArgument } from './math';
 
 // `array.array`, which CPython writes in C, written in Python over a bytearray holding its items in the machine's native
 // layout, little-endian with 8-byte longs, which memoryviews of the array share. Its items are converted natively as
@@ -113,7 +114,10 @@ class array:
         return len(self._data) // _ITEMSIZE[self._typecode]
 
     def __iter__(self):
-        return iter(self._items())
+        index = 0
+        while index < array.__len__(self):
+            yield array.__getitem__(self, index)
+            index += 1
 
     def __contains__(self, value):
         return value in self._items()
@@ -389,10 +393,7 @@ function convertCharacter(value: PyValue): PyValue {
 }
 
 function convertReal(typecode: string, value: PyValue): PyValue {
-  let number: number;
-  if (typeof value === 'number') number = value;
-  else if (isInstanceOf(value, intClass)) number = Number(toIndex(value));
-  else throw typeError(`must be real number, not ${typeName(value)}`);
+  const number = realArgument(value);
   return typecode === 'f' ? Math.fround(number) : number;
 }
 

@@ -10,11 +10,16 @@ import { PyClass, PyError, PyInstance, PyModule, type PyValue } from './values';
 // their namespace (vars(), __dict__, dir(), help()) and reading the names only one side has raise the unsupported
 // error, so that no program sees a difference silently.
 
-/** For each module or class (`module.qualname`), the names CPython's namespace has that this one lacks, and the extra. */
+/**
+ * For each module or class (`module.qualname`), the names CPython's namespace has that this one lacks, the extra, and
+ * the extra that CPython still serves when read: through a module's `__getattr__`, or on a class's instances.
+ */
 export interface NamespaceDifferences {
-  modules: Record<string, [missing: string[], extra: string[]]>;
-  classes: Record<string, [missing: string[], extra: string[]]>;
+  modules: Record<string, Difference>;
+  classes: Record<string, Difference>;
 }
+
+type Difference = [missing: string[], extra: string[], readable?: string[]];
 
 let enforced = true;
 
@@ -72,15 +77,40 @@ function viewDifference(value: PyValue, documenting: boolean): string | undefine
 
 /** Raises the unsupported error for a program reading a name that only this grader's namespace has. */
 export function checkExtraName(value: PyValue, name: string): void {
-  if (!enforced || !extraNames.has(name) || currentRuntime().inLibraryCode()) return;
+  if (!enforced || currentRuntime().inLibraryCode()) return;
+  const owner = extraOwner(value, name);
+  if (owner !== undefined) throw nameError(owner, name);
+}
+
+/** The module or class whose extra name `name` makes reading it from `value` differ from CPython, or undefined. */
+// code-gauge-allow functionCognitiveComplexity 16 -- A module and a class keep their extra names in different tables.
+function extraOwner(value: PyValue, name: string): string | undefined {
+  if (!extraNames.has(name)) return undefined;
   if (value instanceof PyModule) {
-    if (NAMESPACE_DIFFERENCES.modules[value.name]?.[1].includes(name)) throw nameError(value.name, name);
-    return;
+    const [, extra, readable] = NAMESPACE_DIFFERENCES.modules[value.name] ?? [[], []];
+    return extra.includes(name) && !readable?.includes(name) ? value.name : undefined;
   }
   for (const cls of value instanceof PyClass ? value.mro : classOf(value).mro) {
-    if (NAMESPACE_DIFFERENCES.classes[classKey(cls)]?.[1].includes(name)) throw nameError(classKey(cls), name);
-    if (cls.dict.has(name)) return;
+    const [, extra, readable] = NAMESPACE_DIFFERENCES.classes[classKey(cls)] ?? [[], []];
+    if (extra.includes(name)) return value instanceof PyClass || !readable?.includes(name) ? classKey(cls) : undefined;
+    if (cls.dict.has(name)) return undefined;
   }
+  return undefined;
+}
+
+/**
+ * The names `dir()` of CPython would list for `value`, as far as the tables tell, from those this grader's `dir()`
+ * lists: AttributeError suggestions choose from them.
+ */
+export function cpythonDirNames(value: PyValue, names: string[]): string[] {
+  const shown = names.filter((name) => extraOwner(value, name) === undefined);
+  const missing =
+    value instanceof PyModule
+      ? (NAMESPACE_DIFFERENCES.modules[value.name]?.[0] ?? [])
+      : (value instanceof PyClass ? value.mro : classOf(value).mro).flatMap(
+          (cls) => NAMESPACE_DIFFERENCES.classes[classKey(cls)]?.[0] ?? []
+        );
+  return [...new Set([...shown, ...missing])];
 }
 
 /**
@@ -160,7 +190,7 @@ function classDifference(cls: PyClass, sorted = false): string | undefined {
 }
 
 /** Whether a namespace differs: in its names, or, unless sorted, in their order too. */
-function differs(difference: [string[], string[]] | undefined, sorted: boolean): boolean {
+function differs(difference: Difference | undefined, sorted: boolean): boolean {
   return difference !== undefined && (!sorted || difference[0].length + difference[1].length > 0);
 }
 
