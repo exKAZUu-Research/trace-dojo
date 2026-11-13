@@ -2281,3 +2281,15 @@ public class Main { static void t(String n, Supplier<Object> s) { try { System.o
       'r java.lang.UnsupportedOperationException\nrt java.lang.UnsupportedOperationException\nri java.lang.UnsupportedOperationException\nrif java.lang.UnsupportedOperationException\nra java.lang.UnsupportedOperationException\ntwo java.lang.UnsupportedOperationException: remove\nc true [1=1]\n',
   });
 });
+
+test("Java's map entry sets clear as their JDK classes do", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { t("m2", () -> { Map.of(1,1,2,2).entrySet().clear(); return "ok"; }); t("sm", () -> { Collections.singletonMap(1,1).entrySet().clear(); return "ok"; }); t("em", () -> { Collections.emptyMap().entrySet().clear(); return "ok"; });
+  t("hm", () -> { Map<Integer,Integer> h = new HashMap<>(Map.of(1, 1)); h.entrySet().clear(); h.put(2, 2); h.values().clear(); return h; }); t("m0", () -> { Map.of().entrySet().clear(); return "ok"; }); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'm2 java.lang.UnsupportedOperationException: remove\nsm java.lang.UnsupportedOperationException\nem ok\nhm {}\nm0 ok\n',
+  });
+});

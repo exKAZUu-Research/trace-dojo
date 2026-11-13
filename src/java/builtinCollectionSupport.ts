@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 422 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
+// code-gauge-allow-file fileNcss 424 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
 import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
@@ -561,6 +561,8 @@ function clearView(frame: Frame, receiver: JavaObject): void {
   if (view?.lookup && eagerlyRejectingClasses.has(unwrapped(view.map).cls)) {
     throwBuiltin(frame, 'UnsupportedOperationException');
   }
+  // Otherwise it clears through its iterator, as AbstractCollection.clear does, rejecting as the iterator does.
+  if (elementsOf(receiver).length > 0) checkRemovable(frame, receiver);
   removeElements(frame, receiver, () => true);
 }
 
