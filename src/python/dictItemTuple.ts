@@ -7,6 +7,10 @@ export class DictItemTuple {
   private readonly tuple = newTuple([None, None]);
   private checking = false;
 
+  constructor() {
+    currentRuntime().finalizer.locals.born(this.tuple);
+  }
+
   holds(): PyTuple[] {
     return this.checking ? [] : [this.tuple];
   }
@@ -16,7 +20,12 @@ export class DictItemTuple {
     let shared: boolean;
     this.checking = true;
     try {
-      shared = runtime.reachableObjects([], new Set([this.tuple])).has(this.tuple);
+      const locals = runtime.finalizer.locals;
+      shared =
+        runtime.heldByNative().includes(this.tuple) ||
+        (locals.isLocal(this.tuple)
+          ? locals.aliveAmong([this.tuple], runtime.heldByNative()).has(this.tuple)
+          : runtime.reachableObjects([], new Set([this.tuple])).has(this.tuple));
     } finally {
       this.checking = false;
     }
@@ -27,6 +36,8 @@ export class DictItemTuple {
     items[0] = entry.key;
     items[1] = entry.value;
     this.tuple.hash = undefined;
+    runtime.finalizer.locals.own(entry.key, this.tuple);
+    runtime.finalizer.locals.own(entry.value, this.tuple);
     runtime.finalizer.release(dropped, [this.tuple]);
     return this.tuple;
   }

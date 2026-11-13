@@ -132,3 +132,27 @@ print('built')`;
     uncaughtException: undefined,
   });
 });
+
+test('dictionary item traversal remains bounded while retained tuples stay unchanged', () => {
+  const program = `d = {i: [i] for i in range(6000)}
+total = 0
+for key, value in d.items():
+    total += value[0]
+assert total == 17997000
+kept = []
+it = iter(d.items())
+first = next(it)
+kept.append(first)
+del first
+for pair in it:
+    assert kept[0][0] == 0
+assert kept == [(0, [0])]
+d = {i: i for i in range(16000)}
+assert sum(value for key, value in d.items()) == 127992000
+print('traversed')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'traversed\n',
+    uncaughtException: undefined,
+  });
+});

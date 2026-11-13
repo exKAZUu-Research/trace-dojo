@@ -120,7 +120,7 @@ const KEEPING_ITS_OWN = new Set([
  * Once the program reads a frame's variables as objects, through a frame object or `locals()`, nothing is local.
  */
 export class LocalReferences {
-  /** Whether objects are being followed, from the first object whose freeing runs code on. */
+  /** Whether objects with observable ownership are being followed. */
   marking = false;
   /** Whether the program read the frames' variables as objects, which makes every object reachable some other way. */
   private exposed = false;
@@ -133,7 +133,7 @@ export class LocalReferences {
 
   constructor(private readonly runtime: Runtime) {}
 
-  /** Follows a new object whose freeing runs code, which is local until it is handed on. */
+  /** Follows a new object whose ownership is observable, which is local until it is handed on. */
   born(object: PyObject): void {
     this.marking = true;
     if (!this.exposed) this.local.add(object);
