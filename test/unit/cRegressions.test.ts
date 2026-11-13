@@ -1132,3 +1132,34 @@ int main(void){int n=740;long total=0;for(int i=1;i<=n;i++){for(int j=1;j<=n;j++
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  '\u0085',
+  '\u00A0',
+  '\u1680',
+  '\u180E',
+  '\u2000',
+  '\u2003',
+  '\u200A',
+  '\u2028',
+  '\u2029',
+  '\u202F',
+  '\u205F',
+  '\u3000',
+])('Clang Unicode whitespace separates tokens: %j', (space) => {
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>\nint main(void){int${space}変数=1;int y${space}=2;printf("%d\\n",変数${space}+${space}y);}`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '3\n', uncaughtException: undefined });
+});
+
+test('leading BOM and supplementary C17 identifier characters are accepted', () => {
+  expect(executeProgram('c', '\uFEFF#include <stdio.h>\nint main(void){int 😀=7;printf("%d\\n",😀);}')).toMatchObject({
+    kind: 'executed',
+    stdout: '7\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('c', 'int ☃=1;int main(void){}').kind).toBe('compileError');
+});

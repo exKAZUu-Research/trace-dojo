@@ -1,4 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
+import { isUnicodeIdentifier, isUnicodeSpace } from './unicode';
 import { unsupported } from './unsupported';
 
 /** A preprocessing token, located by the 0-based row of the source where it starts. */
@@ -88,11 +89,11 @@ const PUNCTUATORS = [
 const DIGRAPHS: Record<string, string> = { '<:': '[', ':>': ']', '<%': '{', '%>': '}', '%:': '#', '%:%:': '##' };
 
 export function isIdentifierStart(char: string): boolean {
-  return /[A-Za-z_$]/.test(char) || (char.codePointAt(0) ?? 0) >= 0x80;
+  return /^[A-Za-z_$]$/.test(char) || isUnicodeIdentifier(char, true);
 }
 
 function isIdentifierPart(char: string): boolean {
-  return /[\w$]/.test(char) || (char.codePointAt(0) ?? 0) >= 0x80;
+  return /^[\w$]$/.test(char) || isUnicodeIdentifier(char, false);
 }
 
 /**
@@ -150,14 +151,22 @@ class Lexer {
     while (this.index < length) {
       this.skipSplices();
       if (this.index >= length) break;
-      const char = source[this.index];
+      const char = this.peek();
       if (char === '\n') {
         this.index++;
         this.lines.push(this.current);
         this.row++;
         this.current = { tokens: [], row: this.row };
         this.space = false;
-      } else if (char === ' ' || char === '\t' || char === '\r' || char === '\f' || char === '\v') {
+      } else if (
+        char === ' ' ||
+        char === '\t' ||
+        char === '\r' ||
+        char === '\f' ||
+        char === '\v' ||
+        isUnicodeSpace(char) ||
+        (this.index === 0 && char === '\uFEFF')
+      ) {
         this.index++;
         this.space = true;
       } else if (char === '/' && this.peek(1) === '/') {
@@ -199,7 +208,7 @@ class Lexer {
       while (source[position] === '\\' && (source[position + 1] === '\n' || source.startsWith('\r\n', position + 1))) {
         position += source[position + 1] === '\n' ? 2 : 3;
       }
-      if (remaining === 0) return source[position] ?? '';
+      if (remaining === 0) return position < source.length ? String.fromCodePoint(source.codePointAt(position)!) : '';
       position++;
       remaining--;
     }
@@ -207,7 +216,8 @@ class Lexer {
 
   private readonly take = (): string => {
     this.skipSplices();
-    const char = this.source[this.index++] ?? '';
+    const char = this.peek();
+    this.index += char.length;
     if (char === '\n') this.row++;
     return char;
   };
