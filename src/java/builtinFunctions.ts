@@ -97,28 +97,6 @@ function sameSignature(a: MethodInfo, b: MethodInfo): boolean {
   );
 }
 
-/**
- * Makes every builtin method that returns a function object it creates, as `Predicate.isEqual` or
- * `Comparator.thenComparing` do, keep the receiver and arguments it was made from reachable, as the turtles those
- * capture must stay while the function can still run; the closure the function runs holds them out of the walk's view.
- */
-export function retainFunctionOperands(classes: Iterable<ClassInfo>, objectClass: ClassInfo): void {
-  for (const cls of classes) {
-    for (const method of cls.methods) {
-      const { native, returnType } = method;
-      if (!native || returnType.kind !== 'class' || !functionalMethodOf(returnType.cls, objectClass)) continue;
-      method.native = (frame, receiver, args) => {
-        const result = native(frame, receiver, args);
-        // Only a function the library made has no captured values yet; a program's lambda has its own.
-        if (result instanceof JavaObject && result.function && !result.function.captured) {
-          result.function.captured = [receiver, ...args].filter((value) => value instanceof JavaObject);
-        }
-        return result;
-      };
-    }
-  }
-}
-
 /** Creates an object of a functional interface that runs `call` for its abstract method. */
 export function functionObject(
   frame: Frame,

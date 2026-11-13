@@ -2,9 +2,10 @@ import type { OutputChannel } from '../interpreter/programIo';
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { defineArrayCopy } from './arrayCopy';
 import { defineClassClass, runtimeClassNameOf } from './builtinClass';
+import { retainClosureOperands } from './builtinClosureRoots';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
 import { makeEnumGeneric } from './builtinEnum';
-import { defineFunctions, type Functions, retainFunctionOperands } from './builtinFunctions';
+import { defineFunctions, type Functions } from './builtinFunctions';
 import { defineFileIO, standardStreamsOf } from './builtinIo';
 import { defineMath } from './builtinMath';
 import { defineMisc, defineSerializable } from './builtinMisc';
@@ -115,7 +116,7 @@ function createBuiltins(): Builtins {
     ...standardStreamsOf(registry.classes.get('System') as ClassInfo),
   });
   defineSerializable(registry, collections);
-  retainFunctionOperands(registry.classes.values(), objectClass);
+  retainClosureOperands(registry.classes.values(), objectClass, registry.classes.get('Collector') as ClassInfo);
   return {
     classes: registry.classes,
     objectClass,

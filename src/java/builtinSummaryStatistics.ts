@@ -166,10 +166,12 @@ function accept(state: Statistics, value: Value): void {
 
 function combine(state: Statistics, other: Statistics): void {
   if (state.kind === 'Double') {
+    // The other's sums are read first, as it may be these statistics themselves.
     const { simpleSum } = state.total;
-    addWithCompensation(state.total, other.total.sum);
-    addWithCompensation(state.total, -other.total.compensation);
-    state.total.simpleSum = simpleSum + other.total.simpleSum;
+    const { sum, compensation, simpleSum: otherSimpleSum } = other.total;
+    addWithCompensation(state.total, sum);
+    addWithCompensation(state.total, -compensation);
+    state.total.simpleSum = simpleSum + otherSimpleSum;
   } else {
     state.integerSum = BigInt.asIntN(64, state.integerSum + other.integerSum);
   }

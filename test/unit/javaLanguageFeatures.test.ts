@@ -1704,6 +1704,16 @@ test.each([
     '',
   ],
   [
+    'an array that a predicate of Predicate.isEqual',
+    'java.util.function.Predicate<Object> p = java.util.function.Predicate.isEqual(new Object[] { new Turtle[] { new Turtle() } }); int done = 1;',
+    '',
+  ],
+  [
+    'a toMap collector',
+    'java.util.stream.Collector<Integer, ?, Map<Integer, Integer>> c = make(); int done = 1;',
+    'static java.util.stream.Collector<Integer, ?, Map<Integer, Integer>> make() { Turtle t = new Turtle(); return java.util.stream.Collectors.toMap(x -> x, x -> x, (x, y) -> { t.前に進む(); return x; }); }',
+  ],
+  [
     'a negated primitive predicate',
     'java.util.function.IntPredicate p = make().negate(); int done = 1;',
     'static java.util.function.IntPredicate make() { Turtle t = new Turtle(); return x -> { t.前に進む(); return x > 0; }; }',
