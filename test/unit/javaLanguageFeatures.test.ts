@@ -2167,3 +2167,14 @@ public class Main { public static void main(String[] a) { TreeMap<String,Integer
     stdout: 'true {b=2}\ntrue {b=2, d=4}\ntrue {}\nfalse true {}\ntrue []\n',
   });
 });
+
+test("Java's EnumMap rejects a null key wherever a method puts it", () => {
+  const program = `import java.util.*;
+public class Main { enum E { A } public static void main(String[] a) { EnumMap<E,Integer> m = new EnumMap<>(E.class); m.put(E.A,1);
+ try { m.computeIfAbsent(null, k -> 5); } catch (Exception e) { System.out.println(e); } try { m.merge(null, 1, Integer::sum); } catch (Exception e) { System.out.println(e); } try { m.putIfAbsent(null, 1); } catch (Exception e) { System.out.println(e); } try { m.put(null, 1); } catch (Exception e) { System.out.println(e); } System.out.println(m.computeIfPresent(null, (k, v) -> 1)); m.merge(E.A, 1, Integer::sum); System.out.println(m); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'java.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\nnull\n{A=2}\n',
+  });
+});

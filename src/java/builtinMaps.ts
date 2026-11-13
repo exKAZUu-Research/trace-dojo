@@ -43,7 +43,6 @@ import {
   createClass,
   INT,
   type JavaType,
-  type MethodInfo,
   type NativeMethod,
   type TypeVariable,
   VOID,
@@ -287,35 +286,18 @@ function defineEnumMap(cls: ClassInfo, classClass: ClassInfo): void {
   addConstructor(cls, [classType(classClass, { kind: 'typeVar', variable: key })], (_, receiver) =>
     createStore(receiver)
   );
-  // As EnumMap.isValidKey does, a key that is not a constant of the map's enum is absent, without comparing it.
-  answerNonMembers(
-    cls,
-    new Map<string, (args: Value[]) => Value>([
-      ['get', () => {}],
-      ['containsKey', () => false],
-      ['remove', () => {}],
-      ['getOrDefault', (args) => args[1]],
-    ])
-  );
-  const put = cls.methods.find((method) => method.name === 'put') as MethodInfo;
-  const putNative = put.native as NativeMethod;
-  // EnumMap.put checks its key's class first.
-  put.native = (frame, receiver, args) =>
-    args[0] === undefined
-      ? throwBuiltin(frame, 'NullPointerException', 'Cannot invoke "Object.getClass()" because "key" is null')
-      : putNative(frame, receiver, args);
+  enumMapClasses.add(cls);
+  enumCollectionClasses.add(cls);
 }
 
-/** Makes the one-argument lookups `answers` names give their answer for a value that is not a member of the enum. */
-function answerNonMembers(cls: ClassInfo, answers: Map<string, (args: Value[]) => Value>): void {
-  for (const method of cls.methods) {
-    const { native, name } = method;
-    const answer = answers.get(name);
-    if (!native || !answer || method.parameterTypes.length !== (name === 'getOrDefault' ? 2 : 1)) continue;
-    method.native = (frame, receiver, args) =>
-      isEnumMember(receiver, args[0]) ? native(frame, receiver, args) : answer(args);
-  }
-}
+/** The classes of `EnumMap`, which checks a key's class before it puts the key, whichever method puts it. */
+const enumMapClasses = new WeakSet<ClassInfo>();
+
+/**
+ * The classes of `EnumSet` and `EnumMap`, whose lookups find no value that is not a constant of their enum, as
+ * `EnumMap.isValidKey` decides, without comparing it with the constants they hold.
+ */
+const enumCollectionClasses = new WeakSet<ClassInfo>();
 
 /** Whether `value` is a constant of the enum whose constants an EnumSet or EnumMap holds, or may hold when empty. */
 function isEnumMember(collection: Value, value: Value): boolean {
@@ -334,14 +316,7 @@ function enumOf(constant: JavaObject): ClassInfo | undefined {
 /** `EnumSet`, a set of an enum's constants in their order, which only its static methods create. */
 function defineEnumSet(context: Context, cls: ClassInfo, collectionClass: ClassInfo): void {
   cls.constructors = [];
-  // An EnumSet holds only its enum's constants, so it neither finds nor removes another value, comparing none.
-  answerNonMembers(
-    cls,
-    new Map([
-      ['contains', () => false],
-      ['remove', () => false],
-    ])
-  );
+  enumCollectionClasses.add(cls);
   const classClass = context.registry.classes.get('Class') as ClassInfo;
   const create = (frame: Frame, values: Iterable<Value>): JavaObject => createEnumSet(frame, cls, values);
   const generic = (
@@ -942,6 +917,7 @@ export function storeOf(receiver: Value): HashStore {
 }
 
 export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore['entries'][number] | undefined {
+  if (enumCollectionClasses.has((receiver as JavaObject).cls) && !isEnumMember(receiver, key)) return undefined;
   const store = storeOf(receiver);
   if (store.compare) {
     const { index, isFound } = store.positionOf(frame, key);
@@ -961,6 +937,9 @@ export function putEntry(
   atBucketHead = false,
   evicts = true
 ): Value | typeof NO_ENTRY {
+  if (key === undefined && enumMapClasses.has((receiver as JavaObject).cls)) {
+    throwBuiltin(frame, 'NullPointerException', 'Cannot invoke "Object.getClass()" because "key" is null');
+  }
   const store = storeOf(receiver);
   // Comparing a key with itself rejects null and keys that are not comparable, even in an empty map.
   if (store.compare && store.entries.length === 0) store.compare(frame, key, key);
