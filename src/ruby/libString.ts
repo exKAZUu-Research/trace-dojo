@@ -23,6 +23,7 @@ import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
+import { transformInvalid } from './stringTransforms';
 import {
   arr,
   isNil,
@@ -375,7 +376,10 @@ def('String', 'prepend', [0, -1], function* (self: RString, args) {
 
 function* substring(self: RString, args: Value[]): Gen {
   const [first] = args;
-  if (args.length === 1 && first instanceof RString) return self.s.includes(first.s) ? str(first.s) : NIL;
+  if (args.length === 1 && first instanceof RString)
+    return !(first.rawBytes && !first.binary && !self.binary) && byteIndex(stringBytes(self), stringBytes(first)) >= 0
+      ? stringFromBytes(stringBytes(first), self.binary)
+      : NIL;
   regexpUnsupported(first);
   const chars = stringCharacters(self);
   const range = yield* substringRange(chars.length, args);
@@ -391,25 +395,33 @@ def('String', 'slice!', [1, 2], function* (self: RString, args) {
   if (result === NIL) return NIL;
   const [first] = args;
   if (args.length === 1 && first instanceof RString) {
-    setText(self, self.s.replace(first.s, ''));
+    const bytes = stringBytes(self);
+    const found = byteIndex(bytes, stringBytes(first));
+    setBytes(self, spliceBytes(bytes, found, stringBytes(first).length, new Uint8Array()));
     return result;
   }
-  const chars = charsOf(self.s);
+  const chars = stringCharacters(self);
   const range = yield* substringRange(chars.length, args);
   if (range) chars.splice(range.start, range.count);
-  setText(self, chars.join(''));
+  setBytes(self, stringBytes(joinStringCharacters(chars, self.binary)));
   return result;
 });
 // code-gauge-allow functionCognitiveComplexity 17 -- String assignment supports substring, index, and Range selectors with different bounds errors.
 def('String', '[]=', [2, 3], function* (self: RString, args) {
-  const value = yield* stringArg(args.at(-1) as Value);
+  const value = yield* stringArgValue(args.at(-1) as Value);
   const selectors = args.slice(0, -1);
   const [first] = selectors;
-  const chars = charsOf(self.s);
+  const chars = stringCharacters(self);
   if (selectors.length === 1 && first instanceof RString) {
-    const position = self.s.indexOf(first.s);
+    const bytes = stringBytes(self);
+    const position = first.rawBytes && !first.binary && !self.binary ? -1 : byteIndex(bytes, stringBytes(first));
     if (position === -1) throw indexError('string not matched');
-    setText(self, self.s.slice(0, position) + value + self.s.slice(position + first.s.length));
+    const binary = combinedStringEncoding(
+      self.binary,
+      bytes.every((byte) => byte < 0x80),
+      value
+    );
+    setBytes(self, spliceBytes(bytes, position, stringBytes(first).length, stringBytes(value)), binary);
     return args.at(-1) as Value;
   }
   regexpUnsupported(first);
@@ -426,10 +438,41 @@ def('String', '[]=', [2, 3], function* (self: RString, args) {
       throw indexError(`index ${yield* toIndex(first)} out of string`);
     }
   }
+  const binary = combinedStringEncoding(
+    self.binary,
+    stringBytes(self).every((byte) => byte < 0x80),
+    value
+  );
   chars.splice(range.start, range.count, value);
-  setText(self, chars.join(''));
+  setBytes(self, stringBytes(joinStringCharacters(chars, binary)), binary);
   return args.at(-1) as Value;
 });
+
+function byteIndex(haystack: Uint8Array, needle: Uint8Array): number {
+  if (needle.length === 0) return 0;
+  const prefix = new Int32Array(needle.length);
+  for (let index = 1, matched = 0; index < needle.length; index++) {
+    if (index % 256 === 0) rt().spend();
+    while (matched > 0 && needle[index] !== needle[matched]) matched = prefix[matched - 1];
+    if (needle[index] === needle[matched]) matched++;
+    prefix[index] = matched;
+  }
+  for (let index = 0, matched = 0; index < haystack.length; index++) {
+    if (index % 256 === 0) rt().spend();
+    while (matched > 0 && haystack[index] !== needle[matched]) matched = prefix[matched - 1];
+    if (haystack[index] === needle[matched]) matched++;
+    if (matched === needle.length) return index - needle.length + 1;
+  }
+  return -1;
+}
+
+function spliceBytes(bytes: Uint8Array, start: number, count: number, inserted: Uint8Array): Uint8Array {
+  const result = new Uint8Array(bytes.length - count + inserted.length);
+  result.set(bytes.subarray(0, start));
+  result.set(inserted, start);
+  result.set(bytes.subarray(start + count), start + inserted.length);
+  return result;
+}
 def('String', 'chars', 0, (self: RString) => arr(stringCharacters(self)));
 def('String', 'codepoints', 0, (self: RString) => {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
@@ -912,10 +955,7 @@ const TRANSFORMS: [string, (text: string, args: string[]) => string, number][] =
 
 for (const [name, transform, maxArgs] of TRANSFORMS) {
   def('String', name, [0, maxArgs], function* (self: RString, args) {
-    if (self.rawBytes && !self.binary) {
-      if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) throw argumentError('input string invalid');
-      if (['strip', 'lstrip', 'rstrip'].includes(name)) throw argumentError('invalid byte sequence in UTF-8');
-    }
+    if (self.rawBytes && !self.binary) return transformInvalid(self, name, yield* invalidSeparator(name, args));
     if (name === 'chomp' && args[0] === NIL) return str(self.s);
     const strings: string[] = [];
     for (const arg of args) strings.push(yield* stringArg(arg));
@@ -923,8 +963,20 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
   });
   def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
     if (self.rawBytes && !self.binary) {
-      if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) throw argumentError('input string invalid');
-      if (['strip', 'lstrip', 'rstrip'].includes(name)) throw argumentError('invalid byte sequence in UTF-8');
+      const result = transformInvalid(self, name, yield* invalidSeparator(name, args));
+      const before = stringBytes(self);
+      const after = stringBytes(result);
+      if (
+        name !== 'succ' &&
+        name !== 'next' &&
+        before.length === after.length &&
+        before.every((byte, index) => byte === after[index])
+      ) {
+        modify(self);
+        return NIL;
+      }
+      setBytes(self, after);
+      return self;
     }
     if (name === 'chomp' && args[0] === NIL) {
       modify(self);
@@ -944,6 +996,12 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
     setText(self, result);
     return self;
   });
+}
+
+function* invalidSeparator(name: string, args: Value[]): Gen<RString | typeof NIL | undefined> {
+  if (name !== 'chomp' || args.length === 0) return undefined;
+  if (args[0] === NIL) return NIL;
+  return yield* stringArgValue(args[0]);
 }
 
 def('String', 'reverse', 0, (self: RString) => joinStringCharacters(stringCharacters(self).toReversed(), self.binary));

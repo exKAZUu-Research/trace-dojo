@@ -540,6 +540,16 @@ test.each([
     String.raw`p "\xFF".reverse.bytes, "\xFF".ljust(2).bytes`,
     '[255]\n[255, 32]\n',
   ],
+  [
+    'invalid UTF-8 successor and trimming',
+    String.raw`p "\xFF".succ.bytes, "a\xFF".succ.bytes, "\xFF".chomp.bytes, "\xFF".chop.bytes`,
+    '[1, 255]\n[98, 255]\n[255]\n[]\n',
+  ],
+  [
+    'invalid UTF-8 slicing and mutation',
+    String.raw`s="a\xFF"; p s.slice!(1).bytes, s.bytes; s="a\xFF"; s[1]="b"; p s.bytes; p "a\xFF"["\xFF"]`,
+    '[255]\n[97]\n[97, 98]\nnil\n',
+  ],
   ['empty whole-string line iteration', 'p "".lines(nil), "".each_line(nil).to_a', '[""]\n[""]\n'],
   [
     'nonpositive cycle without traversal',
@@ -675,6 +685,9 @@ test('invalid UTF-8 raises Ruby character-operation errors', () => {
   }
   expect(run(String.raw`p "\xFF".upcase`)).toMatchObject({
     uncaughtException: 'input string invalid (ArgumentError)',
+  });
+  expect(run(String.raw`p "\xFF".rstrip`)).toMatchObject({
+    uncaughtException: 'invalid byte sequence in UTF-8 (Encoding::CompatibilityError)',
   });
 });
 
