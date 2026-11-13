@@ -1,3 +1,4 @@
+import { classObjectOf } from './builtinClass';
 import { addInterface, addMethod, addTypeParameters, type Registry } from './builtinSupport';
 import { type Wrappers } from './builtinWrappers';
 import { throwBuiltin } from './runtime';
@@ -46,6 +47,19 @@ export function makeEnumGeneric(
     }
   );
   valueOf.typeParameters = [t];
+  const getDeclaringClass = addMethod(
+    enumClass,
+    'getDeclaringClass',
+    [],
+    { kind: 'class', cls: classClass, args: [element] },
+    false,
+    (_, receiver) => {
+      // A constant with a body is an object of an anonymous subclass of its enum.
+      const { cls } = receiver as JavaObject;
+      return classObjectOf(cls.superclass === enumClass || !cls.superclass ? cls : cls.superclass, classClass);
+    }
+  );
+  getDeclaringClass.isFinal = true;
 }
 
 function ordinalOf(value: Value): number {

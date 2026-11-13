@@ -20,7 +20,9 @@ export const LIMITS = {
   /** The total length of what a run writes to files, including its input files. */
   maxStoredLength: 1_000_000,
 };
-const OPERATIONS_PER_CLOCK_CHECK = 1024;
+// An operation may stand for a slow native call (e.g., a search of a long list), so a larger interval lets a program
+// of such calls run seconds past the deadline.
+const OPERATIONS_PER_CLOCK_CHECK = 16;
 
 /** Counts the operations of one run against {@link LIMITS}. */
 export class ExecutionBudget {

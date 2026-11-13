@@ -16,8 +16,10 @@ import {
   touch,
   uncountedMapClasses,
   unmodifiableClasses,
+  unmodifiableWrappers,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
+import { accessedEntry, defineLinkedHashMapOrder, evictionOf, recordAccess } from './builtinLinkedHashMap';
 import { stringify } from './builtins';
 import {
   addAbstractMethod,
@@ -42,21 +44,35 @@ import {
 } from './types';
 import { HashStore, JavaArray, JavaObject, toInt32, type Value } from './values';
 
-/** `HashSet`, `LinkedHashSet`, `TreeSet`, and the class of the sets `Set.of` returns, which this returns. */
+/**
+ * `HashSet`, `LinkedHashSet`, `TreeSet`, and the classes of the sets `Set.of`, `Collections.emptySet`, and
+ * `Collections.singleton` return, which this returns.
+ */
 export function defineSets(
   context: Context,
   setClass: ClassInfo,
   collectionClass: ClassInfo,
   itrClass: ClassInfo
-): ClassInfo {
+): { immutableSet: ClassInfo; emptySet: ClassInfo; singletonSet: ClassInfo } {
   for (const name of ['HashSet', 'LinkedHashSet', 'TreeSet'])
     defineSetClass(context, name, setClass, collectionClass, itrClass);
   defineEnumSet(context, defineSetClass(context, 'EnumSet', setClass, collectionClass, itrClass), collectionClass);
-  return restrictToImmutable(
-    context.registry,
-    defineSetClass(context, 'ImmutableCollections$SetN', setClass, collectionClass, itrClass),
-    'SetN'
-  );
+  const collectionsSet = (name: string): ClassInfo =>
+    restrictToImmutable(
+      context.registry,
+      defineSetClass(context, `Collections$${name}`, setClass, collectionClass, itrClass),
+      name,
+      true
+    );
+  return {
+    immutableSet: restrictToImmutable(
+      context.registry,
+      defineSetClass(context, 'ImmutableCollections$SetN', setClass, collectionClass, itrClass),
+      'SetN'
+    ),
+    emptySet: collectionsSet('EmptySet'),
+    singletonSet: collectionsSet('SingletonSet'),
+  };
 }
 
 // code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
@@ -161,7 +177,7 @@ function defineSetClass(
 export function defineHashMap(
   context: Context,
   views: { setClass: ClassInfo; collectionClass: ClassInfo; snapshotSet: ClassInfo; snapshotCollection: ClassInfo }
-): { mapClass: ClassInfo; immutableMap: ClassInfo } {
+): { mapClass: ClassInfo; immutableMap: ClassInfo; emptyMap: ClassInfo; singletonMap: ClassInfo } {
   const { registry, objectType } = context;
   const mapClass = defineInterface(registry, 'Map', 'java.util');
   const [mapKey, mapValue] = addTypeParameters(mapClass, ['K', 'V'], objectType);
@@ -187,10 +203,18 @@ export function defineHashMap(
     return cls;
   };
   for (const name of ['HashMap', 'LinkedHashMap', 'TreeMap']) defineClass(name);
+  defineLinkedHashMapOrder(registry.classes.get('LinkedHashMap') as ClassInfo, entryClass, nodeClass);
   defineEnumMap(defineClass('EnumMap'), registry.classes.get('Class') as ClassInfo);
   defineMapEntry(mapClass, entryClass, nodeClass, objectType);
   const immutableMap = defineClass('MapN', 'ImmutableCollections$MapN');
-  return { mapClass, immutableMap: restrictToImmutable(registry, immutableMap, 'MapN') };
+  const collectionsMap = (name: string): ClassInfo =>
+    restrictToImmutable(registry, defineClass(name, `Collections$${name}`), name, true);
+  return {
+    mapClass,
+    immutableMap: restrictToImmutable(registry, immutableMap, 'MapN'),
+    emptyMap: collectionsMap('EmptyMap'),
+    singletonMap: collectionsMap('SingletonMap'),
+  };
 }
 
 /** The views each map has given, which `keySet`, `values`, and `entrySet` return again, as the JDK's maps do. */
@@ -364,12 +388,20 @@ function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass:
 function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo): void {
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
     if (other === receiver) return true;
+    // An unmodifiable wrapper compares as its backing map does.
+    let map = receiver as JavaObject;
+    while (unmodifiableWrappers.has(map)) map = map.retained?.[0] as JavaObject;
+    if (other === map) return true;
     if (!(other instanceof JavaObject) || !other.store || !frame.runtime.isInstance(other, mapClass)) return false;
-    const { entries } = storeOf(receiver);
+    const entries = storeOf(map).ordered();
+    const expectedModCount = map.modCount;
     return (
       entries.length === other.store.entries.length &&
+      // AbstractMap.equals reads each key, in iteration order, through the other map's get, which an access-ordered
+      // map records, while its entry iterator fails once a read through a view of the same map reorders it.
       entries.every((entry) => {
-        const found = findEntry(frame, other, entry.key);
+        if (map.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+        const found = accessedEntry(frame, other, entry.key);
         return found !== undefined && javaEquals(frame, entry.value, found.value);
       })
     );
@@ -408,16 +440,53 @@ function defineMapEntry(mapClass: ClassInfo, entryClass: ClassInfo, nodeClass: C
  * Makes a map or set class the class of the collections `Map.of` or `Set.of` return, whose iteration order the JDK
  * randomizes per run.
  */
-export function restrictToImmutable(registry: Registry, cls: ClassInfo, name: string): ClassInfo {
+export function restrictToImmutable(
+  registry: Registry,
+  cls: ClassInfo,
+  name: string,
+  changesOnlyOnUse = false
+): ClassInfo {
   registry.classes.delete(cls.name);
   unmodifiableClasses.add(cls);
-  defaultRemoveClasses.add(cls);
+  // The iterators of Collections' sets inherit no remove, so they reject it as their sets do, without a message.
+  if (!changesOnlyOnUse) defaultRemoveClasses.add(cls);
   cls.name = name;
   cls.constructors = [];
   for (const method of cls.methods) {
-    if (MUTATORS.has(method.name)) method.native = (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
+    if (!MUTATORS.has(method.name)) continue;
+    const mayBeNoOp =
+      method.name === 'clear' ||
+      method.name === 'addAll' ||
+      (method.name === 'remove' && method.parameterTypes[0] !== INT);
+    // A call that changes nothing leaves even the modCount its iterators check.
+    const unchanged = method.returnType === BOOLEAN ? false : undefined;
+    method.native =
+      changesOnlyOnUse && mayBeNoOp
+        ? (frame, receiver, args) =>
+            changesAny(frame, receiver, method.name, args)
+              ? throwBuiltin(frame, 'UnsupportedOperationException')
+              : unchanged
+        : (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
   }
   return cls;
+}
+
+/**
+ * Whether `clear`, `remove`, or `addAll` would change a set or map of `Collections`, which, as
+ * `AbstractCollection` and `AbstractMap` do, reject only a call that would change them.
+ */
+function changesAny(frame: Frame, receiver: Value, name: string, [argument]: Value[]): boolean {
+  switch (name) {
+    case 'clear': {
+      return storeOf(receiver).entries.length > 0;
+    }
+    case 'addAll': {
+      return itemsOf(frame, argument).length > 0;
+    }
+    default: {
+      return findEntry(frame, receiver, argument) !== undefined;
+    }
+  }
 }
 
 const MUTATORS = new Set(['put', 'remove', 'putIfAbsent', 'clear', 'putAll', 'add', 'addAll']);
@@ -448,7 +517,7 @@ export function mapSignatures(
 }
 
 /** The maps whose entries the nodes from `entrySet` are, which other nodes, such as `Map.entry`'s, lack. */
-const nodeMaps = new WeakMap<JavaObject, JavaObject>();
+export const nodeMaps = new WeakMap<JavaObject, JavaObject>();
 
 /** The entry objects that `entrySet` gives, which write `setValue` through to their map. */
 export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassInfo {
@@ -532,7 +601,8 @@ export function defineMapMethods(
       // As HashMap.putMapEntries does: a table for the entries, filled in the source's iteration order.
       const entries = source.store.ordered();
       createStore(receiver, entries.length === 0 ? 16 : tableSizeFor(Math.ceil(entries.length / 0.75)));
-      for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value);
+      // As the JDK's constructor does, the copy asks no `removeEldestEntry` override to evict.
+      for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value, false, false);
       return;
     }
   );
@@ -541,7 +611,7 @@ export function defineMapMethods(
     return previous === NO_ENTRY ? undefined : previous;
   });
   addMethod(cls, 'putIfAbsent', [key, value], value, false, (frame, receiver, [keyValue, newValue]) => {
-    const entry = findEntry(frame, receiver, keyValue);
+    const entry = accessedEntry(frame, receiver, keyValue);
     if (entry && entry.value !== undefined) return entry.value;
     if (entry) entry.value = newValue;
     else putEntry(frame, receiver, keyValue, false, newValue);
@@ -553,10 +623,10 @@ export function defineMapMethods(
     [objectType],
     value,
     false,
-    (frame, receiver, [keyValue]) => findEntry(frame, receiver, keyValue)?.value
+    (frame, receiver, [keyValue]) => accessedEntry(frame, receiver, keyValue)?.value
   );
   addMethod(cls, 'getOrDefault', [objectType, value], value, false, (frame, receiver, [keyValue, fallback]) => {
-    const entry = findEntry(frame, receiver, keyValue);
+    const entry = accessedEntry(frame, receiver, keyValue);
     return entry ? entry.value : fallback;
   });
   addMethod(
@@ -733,12 +803,19 @@ export const STORE_ORDERS: Record<string, HashStore['order']> = {
   EnumSet: 'sorted',
 };
 
+/** The order of the builtin map or set class that `cls` is or extends, as a program's subclass of `TreeMap` keeps. */
+function storeOrderOf(cls: ClassInfo): HashStore['order'] {
+  let builtin: ClassInfo | undefined = cls;
+  while (builtin && !builtin.isBuiltin) builtin = builtin.superclass;
+  return (builtin && STORE_ORDERS[builtin.name]) ?? 'hash';
+}
+
 /** Gives a new map or set its entries, which a sorted one compares with `comparator` or in natural order. */
 export function createStore(receiver: Value, capacity = 16, comparator?: Value): Value {
   const object = receiver as JavaObject;
   const store = new HashStore();
   store.capacity = capacity;
-  store.order = STORE_ORDERS[object.cls.name] ?? 'hash';
+  store.order = storeOrderOf(object.cls);
   if (store.order === 'sorted') {
     store.comparator = comparator;
     if (comparator !== undefined) object.retained = [...(object.retained ?? []), comparator];
@@ -784,7 +861,8 @@ export function putEntry(
   key: Value,
   keepsExisting: boolean,
   value?: Value,
-  atBucketHead = false
+  atBucketHead = false,
+  evicts = true
 ): Value | typeof NO_ENTRY {
   const store = storeOf(receiver);
   // Comparing a key with itself rejects null and keys that are not comparable, even in an empty map.
@@ -798,6 +876,7 @@ export function putEntry(
   if (entry) {
     const previous = entry.value;
     if (!keepsExisting) entry.value = value;
+    recordAccess(receiver, entry);
     return previous;
   }
   frame.runtime.allocateArray(frame, 2);
@@ -805,6 +884,7 @@ export function putEntry(
   else if (atBucketHead) store.addAtBucketHead({ key, value, hash: javaHash(frame, key) });
   else store.add({ key, value, hash: javaHash(frame, key) });
   touch(receiver);
+  if (evicts) evictionOf((receiver as JavaObject).cls)?.(frame, receiver as JavaObject);
   return NO_ENTRY;
 }
 

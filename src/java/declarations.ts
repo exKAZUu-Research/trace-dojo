@@ -7,6 +7,7 @@ import type {
   Modifiers,
   TypeSyntax,
 } from './ast';
+import { functionalMethodOf } from './builtinFunctions';
 import { sameParameters, superclassesOf } from './compilerBase';
 import { LambdaCompiler } from './lambdaCompiler';
 import { findImplementation, throwBuiltin } from './runtime';
@@ -27,6 +28,7 @@ import {
   substitute,
   superinterfacesOf,
   thisTypeOf,
+  typeName,
   type TypeVariable,
   VOID,
 } from './types';
@@ -404,8 +406,20 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
     if (cls.methods.some((other) => other.name === method.name && sameParameters(other, method))) {
       this.error(member, `メソッド ${member.name} はすでに定義されています。`);
     }
+    this.checkReceiver(member, cls, modifiers.isStatic ? undefined : cls);
+    this.checkSafeVarargs(
+      member,
+      method.isVarargs === true && (modifiers.isStatic || modifiers.isFinal || modifiers.access === 'private')
+    );
     this.checkOverride(cls, method, member);
-    if (member.modifiers.hasOverride && (method.isStatic || method.overrides?.size === 0)) {
+    const component =
+      method.parameterTypes.length === 0
+        ? cls.recordComponents?.find((candidate) => candidate.name === method.name)
+        : undefined;
+    if (component) this.checkAccessor(member, method, component);
+    // A record's accessor may carry `@Override` though it overrides nothing (JLS 9.6.4.4).
+    const isAccessor = component !== undefined;
+    if (member.modifiers.hasOverride && !isAccessor && (method.isStatic || method.overrides?.size === 0)) {
       this.error(
         member,
         `メソッド ${member.name} には @Override が付いていますが、親クラスやインターフェースのメソッドをオーバーライドしていません。`
@@ -459,19 +473,77 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
         this.error(member.explicitCall, '列挙型のコンストラクタでは super(...) を呼び出せません。');
       access = 'private';
     }
+    // A constructor's type parameters may be bounded by its class's, as `<U extends T> Box(U value)` is.
+    const { typeParameters, signature } = this.withInstanceTypeVariables(cls, true, () => {
+      const declared = this.declareTypeParameters(member.typeParameters ?? []);
+      return {
+        typeParameters: declared,
+        signature: this.withTypeVariables(declared, () => this.declaredSignature(cls, member)),
+      };
+    });
     const constructor: MethodInfo = {
       name: cls.name,
-      ...this.withInstanceTypeVariables(cls, true, () => this.declaredSignature(cls, member)),
+      ...signature,
+      typeParameters,
       access,
       returnType: VOID,
       isStatic: false,
       isAbstract: false,
       isConstructor: true,
     };
+    this.checkReceiver(member, cls, cls.hasOuterInstance ? cls.enclosing : undefined);
+    this.checkSafeVarargs(member, constructor.isVarargs === true);
     if (cls.constructors.some((other) => sameParameters(other, constructor))) {
       this.error(member, `コンストラクタ ${cls.name} はすでに定義されています。`);
     }
     cls.constructors.push(constructor);
+  }
+
+  /** Rejects an accessor a record declares that is not public, generic, or static, or that changes its component's type. */
+  protected checkAccessor(member: MethodDeclaration, method: MethodInfo, component: FieldInfo): void {
+    const faults: [isFaulty: boolean, fault: string][] = [
+      [method.access !== 'public', 'は public にしてください'],
+      [method.isStatic, 'に static は付けられません'],
+      [(method.typeParameters?.length ?? 0) > 0, 'には型パラメータを書けません'],
+      [!sameType(method.returnType, component.type), `の戻り値の型は ${typeName(component.type)} にしてください`],
+      [member.throwsTypes.length > 0, 'には throws を書けません'],
+    ];
+    const fault = faults.find(([isFaulty]) => isFaulty)?.[1];
+    if (fault) this.error(member, `レコードのアクセサ ${member.name} ${fault}。`);
+  }
+
+  /**
+   * Rejects a receiver parameter whose type is not `expected`: the class of an instance method, or the enclosing class
+   * of an inner class's constructor; a static method or another constructor has no receiver (`expected` undefined).
+   */
+  protected checkReceiver(
+    member: MethodDeclaration | ConstructorDeclaration,
+    cls: ClassInfo,
+    expected: ClassInfo | undefined
+  ): void {
+    if (!member.receiverType) return;
+    const type = this.withInstanceTypeVariables(cls, true, () => this.resolveType(member.receiverType as TypeSyntax));
+    if (!expected) this.error(member, 'ここでは this を引数に書けません。');
+    if (!sameType(type, thisTypeOf(expected))) this.error(member, `this の型は ${expected.name} にしてください。`);
+    // A constructor names its enclosing instance as `Outer.this`; a method may write `this` or its own `Name.this`.
+    const qualifier = member.receiverQualifier;
+    if (
+      member.kind === 'constructor'
+        ? qualifier !== simpleNameOf(expected)
+        : qualifier !== undefined && qualifier !== simpleNameOf(cls)
+    ) {
+      this.error(member, `this の名前は ${simpleNameOf(expected)}.this にしてください。`);
+    }
+  }
+
+  /** Rejects `@SafeVarargs` on a method or constructor that is not of variable arity or may be overridden. */
+  protected checkSafeVarargs(member: MethodDeclaration | ConstructorDeclaration, isApplicable: boolean): void {
+    if (member.modifiers.hasSafeVarargs && !isApplicable) {
+      this.error(
+        member,
+        '@SafeVarargs は、可変長引数を持つ static・final・private のメソッドか、可変長引数を持つコンストラクタにしか付けられません。'
+      );
+    }
   }
 
   /** What a method's and a constructor's declarations give alike. */
@@ -576,6 +648,14 @@ export abstract class DeclarationCompiler extends LambdaCompiler {
 
   protected checkAbstractMethods(cls: ClassInfo): void {
     this.checkInheritedDefaults(cls);
+    const declaration = cls.declaration as ClassDeclaration | undefined;
+    const isFunctional = cls.kind === 'interface' && functionalMethodOf(cls, this.builtins.objectClass) !== undefined;
+    if (declaration?.modifiers.hasFunctionalInterface && !isFunctional) {
+      this.error(
+        declaration,
+        `${cls.name} は関数型インターフェースではないので、@FunctionalInterface を付けられません。`
+      );
+    }
     if (cls.isAbstract) return;
     for (const ancestor of [cls, ...superclassesOf(cls), ...superinterfacesOf(cls)]) {
       for (const method of ancestor.methods) {
@@ -683,4 +763,8 @@ function leavesMethodsToConstants(declaration: ClassDeclaration): boolean {
     constants.some((constant) => constant.body) &&
     declaration.members.some((member) => member.kind === 'method' && member.modifiers.isAbstract)
   );
+}
+
+function simpleNameOf(cls: ClassInfo): string {
+  return cls.name.split(/[.$]/).at(-1) as string;
 }

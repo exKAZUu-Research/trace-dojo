@@ -38,6 +38,10 @@ export interface Modifiers {
   isDefault: boolean;
   /** Whether `@Override` is written, which requires the method to override another. */
   hasOverride?: boolean;
+  /** Whether `@FunctionalInterface` is written, which requires the interface to be functional. */
+  hasFunctionalInterface?: boolean;
+  /** Whether `@SafeVarargs` is written, which requires a variable arity method that cannot be overridden. */
+  hasSafeVarargs?: boolean;
   /** `sealed`, which limits the direct subclasses to those `permits` lists, or `non-sealed`, which lifts the limit. */
   sealing?: 'sealed' | 'non-sealed';
   access: 'public' | 'protected' | 'private' | 'package';
@@ -119,6 +123,10 @@ export interface MethodDeclaration extends Span {
   modifiers: Modifiers;
   returnType: TypeSyntax | undefined;
   parameters: Parameter[];
+  /** The type of a receiver parameter such as `Main this`, which only names the type of `this`. */
+  receiverType?: TypeSyntax;
+  /** The class name before `.this` in a receiver parameter such as `Outer Outer.this`. */
+  receiverQualifier?: string;
   throwsTypes: TypeSyntax[];
   body: Block | undefined;
 }
@@ -126,8 +134,14 @@ export interface MethodDeclaration extends Span {
 export interface ConstructorDeclaration extends Span {
   kind: 'constructor';
   name: string;
+  /** The type parameters of a generic constructor, as in `<T> Box(T value)`. */
+  typeParameters?: TypeParameter[];
   modifiers: Modifiers;
   parameters: Parameter[];
+  /** The type of a receiver parameter such as `Outer Outer.this`, which an inner class's constructor may write. */
+  receiverType?: TypeSyntax;
+  /** The class name before `.this` in a receiver parameter such as `Outer Outer.this`. */
+  receiverQualifier?: string;
   throwsTypes: TypeSyntax[];
   explicitCall: ExplicitConstructorCall | undefined;
   /** The statements before the explicit constructor call, which may not use the object under construction (JEP 513). */
@@ -146,6 +160,10 @@ export interface InitializerBlock extends Span {
 export interface ExplicitConstructorCall extends Span {
   kind: 'explicitConstructorCall';
   target: 'this' | 'super';
+  /** The enclosing instance written before `.super`, as in `outer.super()`, for a superclass that is an inner class. */
+  outer?: Expression;
+  /** Type arguments of a generic constructor, as in `<String>this(s)`. */
+  typeArgs?: TypeSyntax[];
   args: Expression[];
 }
 
@@ -393,6 +411,8 @@ export interface FieldAccess extends Span {
   kind: 'fieldAccess';
   /** `super` names the superclass view of `this`. */
   object: Expression | 'super';
+  /** The class before `.super` in `Outer.super.field`, whose instance's superclass view `super` names. */
+  superQualifier?: TypeSyntax;
   name: string;
 }
 
@@ -409,14 +429,16 @@ export interface MethodCall extends Span {
   args: Expression[];
   /** Type arguments written before the name, as in `Collections.<String>emptyList()`. */
   typeArgs?: TypeSyntax[];
-  /** The interface whose default method `Interface.super.m()` calls, with `object` set to `super`. */
-  superInterface?: TypeSyntax;
+  /** The type before `.super` in `Interface.super.m()` or `Outer.super.m()`, with `object` set to `super`. */
+  superQualifier?: TypeSyntax;
 }
 
 export interface NewObject extends Span {
   kind: 'new';
   type: TypeSyntax;
   args: Expression[];
+  /** Type arguments of a generic constructor, written after `new` as in `new <String>Box(s)`. */
+  typeArgs?: TypeSyntax[];
   /** The body of an anonymous class, which extends or implements `type`. */
   body?: MemberDeclaration[];
   /** The enclosing instance written before `.new`, as in `outer.new Inner()`. */
@@ -497,6 +519,8 @@ export interface Conditional extends Span {
 export interface Cast extends Span {
   kind: 'cast';
   type: TypeSyntax;
+  /** The interfaces after `&` in a cast to an intersection type, as in `(Runnable & Serializable) () -> {}`. */
+  additionalBounds?: TypeSyntax[];
   value: Expression;
 }
 
@@ -528,11 +552,14 @@ export interface LambdaParameter extends Span {
   isFinal: boolean;
 }
 
-/** `Type::method`, `expression::method`, or `Type::new`. */
+/** `Type::method`, `expression::method`, `super::method`, `Type.super::method`, or `Type::new`. */
 export interface MethodReference extends Span {
   kind: 'methodRef';
-  /** An expression, which may turn out to name a class, or a type that only a type syntax can write. */
-  target: { expression: Expression } | { type: TypeSyntax };
+  /**
+   * An expression, which may turn out to name a class, a type that only a type syntax can write, or `super` with the
+   * type written before it.
+   */
+  target: { expression: Expression } | { type: TypeSyntax } | { super: TypeSyntax | undefined };
   /** The method's name, or `new` for a constructor. */
   name: string;
   /** Type arguments written after `::`, as in `Collections::<String>emptyList`, which the call they make takes. */

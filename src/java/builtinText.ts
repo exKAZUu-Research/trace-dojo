@@ -1,15 +1,38 @@
 import type { Collections } from './builtinCollections';
+import { linkOverrides, subListChecks } from './builtinCollectionSupport';
 import { defineLocale } from './builtinLocale';
 import { type PrintWrite } from './builtinPrint';
 import { standardChannelOf, stringify } from './builtins';
-import { addConstructor, addMethod, newString, type Registry, requireString, text } from './builtinSupport';
+import {
+  addAbstractMethod,
+  addConstructor,
+  addInterface,
+  addMethod,
+  defineInterface,
+  newString,
+  type Registry,
+  requireString,
+  text,
+} from './builtinSupport';
 import { JAVA_WHITESPACE } from './builtinWrappers';
 import { formatText } from './javaFormatter';
 import { translateJavaRegex, UnsupportedRegexError } from './javaRegex';
 import { javaReplacer, ReplacementError } from './javaReplacement';
-import { encodable, type Frame, throwBuiltin } from './runtime';
+import { encodable, type Frame, JavaThrow, throwBuiltin } from './runtime';
 import { defineStringIdentity } from './stringIdentity';
-import { BOOLEAN, CHAR, type ClassInfo, DOUBLE, FLOAT, INT, type JavaType, LONG, VOID } from './types';
+import {
+  BOOLEAN,
+  CHAR,
+  type ClassInfo,
+  DOUBLE,
+  FLOAT,
+  INT,
+  type JavaType,
+  LONG,
+  type MethodInfo,
+  type NativeMethod,
+  VOID,
+} from './types';
 import { charCodeOf, charToString, JavaArray, JavaObject, JavaString, type Value } from './values';
 
 const LEADING_WHITESPACE = new RegExp(`^${JAVA_WHITESPACE}+`, 'u');
@@ -29,7 +52,12 @@ export function defineText(
   const objectArray: JavaType = { kind: 'array', element: objectType };
   // StringBuffer has StringBuilder's members, synchronized, which a single-threaded program cannot tell apart.
   for (const name of ['StringBuilder', 'StringBuffer']) defineStringBuilder(registry, objectClass, stringClass, name);
+  defineCharSequence(registry, [
+    stringClass,
+    ...['StringBuilder', 'StringBuffer'].map((name) => registry.classes.get(name) as ClassInfo),
+  ]);
   defineStringJoiner(registry, objectClass, stringClass.type);
+  definePatternSyntaxAccessors(registry, stringType);
   defineStringExtras(stringClass, collections);
   defineStringVariants(stringClass, objectClass);
   defineStringIdentity(
@@ -92,6 +120,108 @@ interface Joiner {
 }
 
 const joiners = new WeakMap<JavaObject, Joiner>();
+
+/** `CharSequence`, which strings and string builders implement, its `isEmpty` a default method as in the JDK. */
+function defineCharSequence(registry: Registry, implementations: ClassInfo[]): void {
+  const cls = defineInterface(registry, 'CharSequence', 'java.lang');
+  addAbstractMethod(cls, 'length', [], INT);
+  addAbstractMethod(cls, 'charAt', [INT], CHAR);
+  addAbstractMethod(cls, 'subSequence', [INT, INT], cls.type);
+  addMethod(
+    cls,
+    'isEmpty',
+    [],
+    BOOLEAN,
+    false,
+    (frame, receiver) => frame.runtime.invokeVirtual(frame, cls, 'length', receiver, []) === 0
+  );
+  for (const implementation of implementations) {
+    const substring = implementation.methods.find(
+      (method) => method.name === 'substring' && method.parameterTypes.length === 2
+    ) as MethodInfo;
+    addMethod(implementation, 'subSequence', [INT, INT], cls.type, false, (frame, receiver, args) =>
+      (substring.native as NativeMethod)(frame, receiver, args)
+    );
+    addInterface(implementation, { kind: 'class', cls });
+    linkOverrides(implementation);
+  }
+  defineAppendable(registry, cls, implementations.slice(1));
+}
+
+/**
+ * `Appendable`, whose methods declare `IOException`, and the `append` methods of string builders that implement it,
+ * which take any `CharSequence` and throw nothing checked.
+ */
+function defineAppendable(registry: Registry, charSequence: ClassInfo, builders: ClassInfo[]): void {
+  const cls = defineInterface(registry, 'Appendable', 'java.lang');
+  const ioException = registry.classes.get('IOException') as ClassInfo;
+  for (const parameterTypes of [[charSequence.type], [charSequence.type, INT, INT], [CHAR]]) {
+    addAbstractMethod(cls, 'append', parameterTypes, cls.type).thrownTypes = [ioException];
+  }
+  for (const builder of builders) {
+    addMethod(builder, 'append', [charSequence.type], builder.type, false, (frame, receiver, [value]) => {
+      const sequence = value ?? new JavaString('null');
+      const appended = charactersOf(frame, charSequence, sequence, 0, sequenceLength(frame, charSequence, sequence));
+      return setBuilder(frame, receiver, builderOf(receiver) + appended, appended.length);
+    });
+    addMethod(
+      builder,
+      'append',
+      [charSequence.type, INT, INT],
+      builder.type,
+      false,
+      (frame, receiver, [value, start, end]) => {
+        const sequence = value ?? new JavaString('null');
+        const length = sequenceLength(frame, charSequence, sequence);
+        const [begin, finish] = [start as number, end as number];
+        if (begin < 0 || begin > finish || finish > length) {
+          throwBuiltin(
+            frame,
+            'IndexOutOfBoundsException',
+            `Range [${begin}, ${finish}) out of bounds for length ${length}`
+          );
+        }
+        const appended = charactersOf(frame, charSequence, sequence, begin, finish);
+        return setBuilder(frame, receiver, builderOf(receiver) + appended, appended.length);
+      }
+    );
+    addInterface(builder, { kind: 'class', cls });
+    linkOverrides(builder);
+  }
+}
+
+/** The length of a non-null `CharSequence`, which a program's own implementation gives through `length()`. */
+function sequenceLength(frame: Frame, charSequence: ClassInfo, sequence: Value): number {
+  const text = textOfBuiltinSequence(sequence);
+  return text === undefined
+    ? (frame.runtime.invokeVirtual(frame, charSequence, 'length', sequence, []) as number)
+    : text.length;
+}
+
+/**
+ * The characters from `start` to `end` of a non-null `CharSequence`, which a string builder appends by `charAt` from
+ * a program's own implementation, as the JDK's does, rather than by its `toString()`.
+ */
+function charactersOf(frame: Frame, charSequence: ClassInfo, sequence: Value, start: number, end: number): string {
+  const text = textOfBuiltinSequence(sequence);
+  if (text !== undefined) return text.slice(start, end);
+  let characters = '';
+  for (let index = start; index < end; index++) {
+    characters += charToString(frame.runtime.invokeVirtual(frame, charSequence, 'charAt', sequence, [index]) as number);
+  }
+  return characters;
+}
+
+function textOfBuiltinSequence(sequence: Value): string | undefined {
+  return sequence instanceof JavaString ? sequence.value : (sequence as JavaObject).builder;
+}
+
+/** The characters of a `CharSequence` argument, which `append` writes as `null` for null. */
+export function charSequenceText(frame: Frame, value: Value): string {
+  if (value === undefined) return 'null';
+  if (value instanceof JavaString) return value.value;
+  return frame.runtime.invokeToString(frame, value as JavaObject)?.value ?? 'null';
+}
 
 function joinerOf(receiver: Value): Joiner {
   return joiners.get(receiver as JavaObject) as Joiner;
@@ -351,6 +481,7 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
     true,
     (frame, _, [delimiter, parts]) => {
       if (!(parts instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+      subListChecks.get(parts)?.();
       const items = parts.elements ?? parts.store?.ordered().map((entry) => entry.key) ?? [];
       return joinText(frame, requireString(frame, delimiter), items);
     }
@@ -483,9 +614,41 @@ function compileRegex(frame: Frame, pattern: string, flags: string, isWhole = fa
     return new RegExp(translated.source, translated.flags + flags);
   } catch (error) {
     if (!(error instanceof SyntaxError || error instanceof UnsupportedRegexError)) throw error;
-    const reason = error instanceof UnsupportedRegexError ? error.message : 'Invalid regular expression';
-    return throwBuiltin(frame, 'PatternSyntaxException', `${reason}\n${pattern}`);
+    const { description, index } =
+      error instanceof UnsupportedRegexError ? error : { description: 'Invalid regular expression', index: -1 };
+    try {
+      return throwBuiltin(frame, 'PatternSyntaxException', patternSyntaxMessage(description, index, pattern));
+    } catch (error_) {
+      if (error_ instanceof JavaThrow) patternSyntaxErrors.set(error_.value, { description, index, pattern });
+      throw error_;
+    }
   }
+}
+
+/** What a `PatternSyntaxException` the interpreter threw reports through its accessors. */
+const patternSyntaxErrors = new WeakMap<JavaObject, { description: string; index: number; pattern: string }>();
+
+/** `getDescription`, `getIndex`, and `getPattern` of `PatternSyntaxException`. */
+function definePatternSyntaxAccessors(registry: Registry, stringType: JavaType): void {
+  const cls = registry.classes.get('PatternSyntaxException') as ClassInfo;
+  addMethod(cls, 'getDescription', [], stringType, false, (frame, receiver) =>
+    newString(frame, patternSyntaxErrorOf(receiver)?.description ?? '')
+  );
+  addMethod(cls, 'getIndex', [], INT, false, (_, receiver) => patternSyntaxErrorOf(receiver)?.index ?? -1);
+  addMethod(cls, 'getPattern', [], stringType, false, (frame, receiver) =>
+    newString(frame, patternSyntaxErrorOf(receiver)?.pattern ?? '')
+  );
+}
+
+function patternSyntaxErrorOf(receiver: Value): { description: string; index: number; pattern: string } | undefined {
+  return patternSyntaxErrors.get(receiver as JavaObject);
+}
+
+/** The message of a `PatternSyntaxException`, which points at its index with a caret under the pattern. */
+function patternSyntaxMessage(description: string, index: number, pattern: string): string {
+  if (index < 0) return `${description}\n${pattern}`;
+  const caret = index < pattern.length ? `\n${' '.repeat(index)}^` : '';
+  return `${description} near index ${index}\n${pattern}${caret}`;
 }
 
 /** Splits as `String.split` does: trailing empty strings go when `limit` is 0, and at most `limit` parts remain when positive. */

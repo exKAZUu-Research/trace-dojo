@@ -3,6 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import { CompileError } from '../interpreter/diagnostics';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { ClassDeclaration, CompilationUnit, ImportDeclaration, MemberDeclaration } from './ast';
+import { checkAnnotations } from './parseAnnotations';
 import { convertTopLevelMember, convertTypeDeclaration } from './parseDeclarations';
 import { namedChildren, span } from './parseNodes';
 
@@ -24,7 +25,8 @@ function convertProgram(root: Node): CompilationUnit {
       case 'class_declaration':
       case 'interface_declaration':
       case 'enum_declaration':
-      case 'record_declaration': {
+      case 'record_declaration':
+      case 'annotation_type_declaration': {
         const declaration = convertTypeDeclaration(child);
         classes.push(declaration);
         members.push(declaration);
@@ -53,6 +55,7 @@ function convertProgram(root: Node): CompilationUnit {
       }
     }
   }
+  checkAnnotations(root, imports);
   return { classes: isCompact ? [implicitClass(members)] : classes, imports };
 }
 

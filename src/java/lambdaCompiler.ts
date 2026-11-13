@@ -321,6 +321,9 @@ export abstract class LambdaCompiler extends PatternCompiler {
     // The target type decides what the other arguments leave open before the lambdas, whose parameters may need it.
     if (targetType && !isPrimitive(targetType)) inferFromTarget(this.builtins, method, targetType, bindings);
     this.inferFromPendingArguments(context, method, args, expressions, bindings);
+    // A primitive target, boxed, decides only what the lambdas leave open, as a lambda that only throws does.
+    const boxedTarget = targetType && isPrimitive(targetType) && boxedTypeOf(this.builtins.wrappers, targetType);
+    if (boxedTarget) inferFromTarget(this.builtins, method, boxedTarget, bindings);
     return bindings;
   }
 
@@ -444,8 +447,6 @@ export abstract class LambdaCompiler extends PatternCompiler {
    * arguments or, failing that, an instance method on the first argument; `expression::method` calls it on the value;
    * `Type::new` creates an object or an array.
    */
-  // code-gauge-allow functionCognitiveComplexity 21 -- One case per form of method reference.
-  // code-gauge-allow functionNcss 33 -- One case per form of method reference.
   protected expandMethodReference(
     context: MethodContext,
     reference: MethodReference,
@@ -466,26 +467,10 @@ export abstract class LambdaCompiler extends PatternCompiler {
       referenceLambdas.add(lambda);
       return lambda;
     };
+    const direct = this.directReferenceBody(reference, args, span);
+    if (direct) return lambdaOf(direct);
     const { target } = reference;
     const targetType = 'type' in target ? target.type : undefined;
-    if (reference.name === 'new') {
-      if (!targetType) {
-        const named = 'expression' in target ? expressionAsType(target.expression) : undefined;
-        if (!named) return this.error(reference, 'new のメソッド参照には型を書いてください。');
-        return lambdaOf({ kind: 'new', type: named, args, ...span });
-      }
-      if (targetType.kind === 'array') {
-        return lambdaOf({
-          kind: 'newArray',
-          elementType: targetType.element,
-          dimensionLengths: args,
-          extraDimensions: 0,
-          initializer: undefined,
-          ...span,
-        });
-      }
-      return lambdaOf({ kind: 'new', type: targetType, args, ...span });
-    }
     const receiver = referenceReceiver(reference, span, receiverLocal);
     const isTypeName = targetType !== undefined || this.namesType(context, receiver);
     const staticForm = lambdaOf({
@@ -518,6 +503,37 @@ export abstract class LambdaCompiler extends PatternCompiler {
   }
 
   /**
+   * The body of a reference whose form alone decides what it calls: `super::method` and `Type.super::method`,
+   * `Type::new` and `int[]::new`, and a method of an array type such as `int[]::clone`, which names no static methods
+   * and so calls the method on the first argument.
+   */
+  protected directReferenceBody(reference: MethodReference, args: Expression[], span: Span): Expression | undefined {
+    const { target, name, typeArgs } = reference;
+    if ('super' in target) {
+      return { kind: 'call', object: 'super', superQualifier: target.super, name, args, typeArgs, ...span };
+    }
+    const targetType = 'type' in target ? target.type : undefined;
+    if (name !== 'new') {
+      if (targetType?.kind !== 'array' || args.length === 0) return;
+      return { kind: 'call', object: args[0], name, args: args.slice(1), ...span };
+    }
+    if (!targetType) {
+      const named = 'expression' in target ? expressionAsType(target.expression) : undefined;
+      if (!named) return this.error(reference, 'new のメソッド参照には型を書いてください。');
+      return { kind: 'new', type: named, args, typeArgs, ...span };
+    }
+    if (targetType.kind !== 'array') return { kind: 'new', type: targetType, args, typeArgs, ...span };
+    return {
+      kind: 'newArray',
+      elementType: targetType.element,
+      dimensionLengths: args,
+      extraDimensions: 0,
+      initializer: undefined,
+      ...span,
+    };
+  }
+
+  /**
    * Whether `Type::name` can name an instance method of `Type` called on the function's first argument: the
    * argument is a `Type`, and `Type` has an instance method of that name, which a static one cannot stand for.
    */
@@ -541,7 +557,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
     const { target } = expression;
     let hint: JavaType | undefined;
     if ('type' in target) hint = this.resolveType(target.type);
-    else if (this.namesType(context, target.expression)) {
+    else if ('expression' in target && this.namesType(context, target.expression)) {
       const named = this.compileExpression(context, target.expression);
       if (named.kind === 'class') hint = named.cls.type;
     }
@@ -578,6 +594,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
    */
   protected referenceArities(context: MethodContext, reference: MethodReference): number[] | undefined {
     const { target } = reference;
+    if ('super' in target) return undefined;
     const isType = 'type' in target || this.namesType(context, target.expression);
     const owner = this.referenceOwner(context, reference);
     if (!owner) return undefined;
@@ -599,6 +616,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
     const { target } = reference;
     try {
       if ('type' in target) return this.resolveType(target.type);
+      if ('super' in target) return undefined;
       const named = this.compileExpression(context, target.expression);
       return named.kind === 'class' ? named.cls.type : named.type;
     } catch (error) {
@@ -623,6 +641,7 @@ export abstract class LambdaCompiler extends PatternCompiler {
 function referenceReceiver(reference: MethodReference, span: Span, receiverLocal: string | undefined): Expression {
   const { target } = reference;
   if ('type' in target) return { kind: 'typeRef', type: target.type, ...span };
+  if ('super' in target) throw new Error('A super method reference has no receiver expression');
   return receiverLocal ? { kind: 'name', name: receiverLocal, ...span } : target.expression;
 }
 

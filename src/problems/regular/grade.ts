@@ -52,7 +52,7 @@ export function gradeRegularAnswers(input: {
 
 function normalizeAnswer(value: string, expected: TraceItemVariable[string]): string {
   const normalized = value.normalize('NFKC');
-  if (typeof expected !== 'number') return normalized;
+  if (typeof expected !== 'number' && typeof expected !== 'bigint') return normalized;
   // Japanese IMEs type the minus and period keys as ー and 。, which mean - and . only in a numeric value.
   return normalized.replaceAll(/[ー‐‑‒–—―−]/g, '-').replaceAll('。', '.');
 }

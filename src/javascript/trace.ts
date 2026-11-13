@@ -241,14 +241,14 @@ function displayedEntries(object: JsObject): [string, Value][] {
 }
 
 function primitiveNode(value: bigint | symbol): DisplayNode {
-  const displayed = displayedPrimitive(value);
-  return typeof displayed === 'string'
-    ? { kind: 'value', value: displayed, verbatim: true }
-    : { kind: 'value', value: displayed };
+  return typeof value === 'symbol'
+    ? { kind: 'value', value: value.toString(), verbatim: true }
+    : { kind: 'value', value: displayedPrimitive(value) };
 }
 
-/** A BigInt as the number it equals while that is exact, else its digits; a symbol as its description text. */
-function displayedPrimitive(value: bigint | symbol): number | string {
+/** A BigInt as the number it equals while that is exact, else itself; a symbol as its description text. */
+function displayedPrimitive(value: bigint | symbol): number | bigint | string {
   if (typeof value === 'symbol') return value.toString();
-  return Number.isSafeInteger(Number(value)) ? Number(value) : String(value);
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : value;
 }

@@ -163,7 +163,7 @@ const getInitialVariables = (
   }
   return Object.fromEntries(
     Object.entries(current)
-      .filter(([, value]) => typeof value === 'number' || typeof value === 'string')
+      .filter(([, value]) => typeof value === 'number' || typeof value === 'bigint' || typeof value === 'string')
       .map(([key]) => {
         const first = key.slice(0, 1);
         const isGlobal = first === first.toUpperCase() && first !== first.toLowerCase();
