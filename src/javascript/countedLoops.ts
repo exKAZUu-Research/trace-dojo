@@ -24,7 +24,7 @@ interface Assignment {
 
 /**
  * Marks the loops of a program whose end cannot depend on the clock, which then never poll it however many of their
- * iterations read it: a `for...of` or `for...in` loop that neither breaks nor returns, or a `for`, `while`, or
+ * iterations read it: a `for...in` loop that neither breaks nor returns, or a `for`, `while`, or
  * `do...while` loop that neither breaks nor returns and whose test and update only combine literals, the `length` of a
  * variable, and variables nothing can assign while it runs except its init, update, and plain statements directly in
  * its body. Assignments to another binding of the name, and those in the loop's own function outside the loop, run
@@ -36,7 +36,9 @@ export function markCountedLoops(program: Program): void {
   const programFrame: Frame = { owner: program, declared: declaredIn(program.scope), isFunction: true };
   visit(program, [programFrame], assignments, loops);
   for (const { loop, place } of loops) {
-    if (loop.kind === 'forOf' || loop.kind === 'forIn') {
+    // A for...of loop may grow the array it walks, or walk a generator, until a deadline, while for...in walks the keys
+    // the object had when the loop began.
+    if (loop.kind === 'forIn') {
       if (!leaves(loop.body)) loop.counted = true;
     } else if (
       (loop.kind === 'for' || loop.kind === 'while' || loop.kind === 'doWhile') &&
@@ -102,10 +104,7 @@ function visit(
   const record = node as { kind?: unknown; target?: unknown };
   if (isLoopKind(record.kind)) loops.push({ loop: node as AnyLoop, place: placeOf(frames) });
   const inner = framesIn(node, frames);
-  if (record.kind === 'assign' || record.kind === 'update') {
-    const place = placeOf(inner);
-    for (const name of namesIn(record.target)) assignments.push({ node, name, place });
-  }
+  for (const name of writtenNames(node)) assignments.push({ node, name, place: placeOf(inner) });
   for (const value of Object.values(node)) visit(value, inner, assignments, loops);
 }
 
@@ -123,6 +122,18 @@ function framesIn(node: object, frames: Frame[]): Frame[] {
   const frame = frames.at(-1) as Frame;
   for (const name of declaredIn(scope)) frame.declared.add(name);
   return frames;
+}
+
+/** The variables a node writes: an assignment's or increment's target, a declarator with a value, or a loop's target. */
+function writtenNames(node: object): string[] {
+  const record = node as { kind?: unknown; target?: unknown; init?: unknown };
+  if (record.kind === 'assign' || record.kind === 'update') return namesIn(record.target);
+  if (record.kind === 'forOf' || record.kind === 'forIn') return namesIn(record.target);
+  // A declarator, which a declaration lists without a kind of its own.
+  if (record.kind === undefined && 'target' in record && 'init' in record && record.init !== undefined) {
+    return namesIn(record.target);
+  }
+  return [];
 }
 
 function placeOf(frames: Frame[]): Place {
@@ -179,15 +190,14 @@ function isPlain(expression: Expression): boolean {
   }
 }
 
-/** Adds the assignment nodes in a node; `nested` false takes only the node itself when it is one. */
+/** Adds the nodes in a node that write variables; `nested` false takes only the node itself when it is one. */
 function collectAssignmentNodes(node: unknown, nodes: Set<object>, nested = true): void {
   if (typeof node !== 'object' || node === null) return;
   if (Array.isArray(node)) {
     for (const item of node) collectAssignmentNodes(item, nodes, nested);
     return;
   }
-  const { kind } = node as { kind?: unknown };
-  if (kind === 'assign' || kind === 'update') nodes.add(node);
+  if (writtenNames(node).length > 0) nodes.add(node);
   if (!nested) return;
   for (const value of Object.values(node)) collectAssignmentNodes(value, nodes);
 }

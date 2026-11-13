@@ -847,7 +847,9 @@ const o = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; if
 let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
 while (!ticked) tick(); console.log('ticked');
 let level = 0; const z = Date.now(); const bump = () => { if (Date.now() - z > 300) level = 99; };
-while (level < 5) { for (let i = 0; i < 2000; i++) sum += i; bump(); } console.log('closure counter');`,
+while (level < 5) { for (let i = 0; i < 2000; i++) sum += i; bump(); } console.log('closure counter');
+var waited = 0; const y = Date.now(); while (waited < 300) { for (let i = 0; i < 2000; i++) sum += i; var waited = Date.now() - y; } console.log('var wait');
+const grown = [0]; const x = Date.now(); for (const item of grown) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - x < 300) grown.push(item + 1); } console.log('grown');`,
   ],
   [
     'a timestamp helper around computation between timers',
