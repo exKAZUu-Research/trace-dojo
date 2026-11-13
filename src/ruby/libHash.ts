@@ -322,15 +322,20 @@ def('Hash', 'to_proc', 0, (self: RHash) => {
 });
 
 function* merge(target: RHash, others: Value[], block: RProc | undefined): Gen<RHash> {
-  for (const other of others) {
-    const source = yield* toHash(other);
-    for (const entry of snapshot(source.map.values())) {
-      const existing = block ? yield* hashGet(target, entry.key) : undefined;
-      const value = existing && block ? yield* callBlock(block, [entry.key, existing.value, entry.value]) : entry.value;
-      yield* hashSet(target, entry.key, value);
+  return yield* whileHeld(target, function* () {
+    for (const other of others) {
+      const source = yield* toHash(other);
+      yield* whileHeld(source, function* () {
+        for (const entry of snapshot(source.map.values())) {
+          const existing = block ? yield* hashGet(target, entry.key) : undefined;
+          const value =
+            existing && block ? yield* callBlock(block, [entry.key, existing.value, entry.value]) : entry.value;
+          yield* hashSet(target, entry.key, value);
+        }
+      });
     }
-  }
-  return target;
+    return target;
+  });
 }
 
 def('Hash', 'merge', [0, -1], function* (self: RHash, others, block) {
@@ -365,12 +370,14 @@ def('Hash', 'transform_values!', 0, function* (self: RHash, _args, block) {
 function* transformKeys(self: RHash, args: Value[], block: RProc | undefined): Gen<RHash> {
   const mapping = args.length > 0 ? yield* toHash(args[0]) : undefined;
   const hash = newHash();
-  yield* whileHeld(hash, () =>
-    eachEntry(self, function* (entry) {
-      const mapped = mapping ? yield* hashGet(mapping, entry.key) : undefined;
-      const key = mapped ? mapped.value : block ? yield* callBlock(block, [entry.key]) : entry.key;
-      yield* hashSet(hash, key, entry.value);
-    })
+  yield* whileHeld(mapping ?? NIL, () =>
+    whileHeld(hash, () =>
+      eachEntry(self, function* (entry) {
+        const mapped = mapping ? yield* hashGet(mapping, entry.key) : undefined;
+        const key = mapped ? mapped.value : block ? yield* callBlock(block, [entry.key]) : entry.key;
+        yield* hashSet(hash, key, entry.value);
+      })
+    )
   );
   return hash;
 }

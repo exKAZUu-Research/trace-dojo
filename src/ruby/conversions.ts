@@ -48,8 +48,10 @@ export function* toInt(value: Value): Gen<bigint> {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return floatToInt(value);
   if (value instanceof RBasic && classOf(value).findMethod('to_int')) {
-    const converted = yield* callMethod(value, 'to_int', []);
+    const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
     if (typeof converted === 'bigint') return converted;
+    const name = realClassOf(value).name;
+    throw typeError(`can't convert ${name} to Integer (${name}#to_int gives ${realClassOf(converted).name})`);
   }
   throw implicitConversionError(value, 'Integer');
 }
@@ -90,6 +92,8 @@ export function* toStrValue(value: Value): Gen<RString> {
   if (value instanceof RBasic && classOf(value).findMethod('to_str')) {
     const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
     if (converted instanceof RString) return converted;
+    const name = realClassOf(value).name;
+    throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
   }
   throw implicitConversionError(value, 'String');
 }
@@ -118,8 +122,8 @@ export function* toFloat(value: Value): Gen<number> {
   if (typeof value === 'bigint') return intToFloat(value);
   if (value === NIL) throw typeError("can't convert nil into Float");
   if (value instanceof RString) throw typeError("can't convert String into Float");
-  if (isA(value, rt().c.Numeric) && respondsTo(value, 'to_f')) {
-    const converted = yield* callMethod(value, 'to_f', []);
+  if (isA(value, rt().c.Numeric) && respondsTo(value, 'to_f', true)) {
+    const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
     if (typeof converted === 'number') return converted;
     throw typeError(
       `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`
@@ -189,11 +193,14 @@ export function anonymousClassName(cls: RClass): string {
 
 /** The text `inspect` makes, which `p` shows. */
 export function* inspect(value: Value): Gen<string> {
+  return (yield* inspectValue(value)).s;
+}
+
+export function* inspectValue(value: Value): Gen<RString> {
   const fast = fastInspect(value);
-  if (fast !== undefined && !isOverridden(value, 'inspect')) return fast;
+  if (fast !== undefined && !isOverridden(value, 'inspect')) return str(fast);
   const converted = yield* callMethod(value, 'inspect', []);
-  if (converted instanceof RString) return converted.s;
-  return yield* toS(converted);
+  return converted instanceof RString ? converted : yield* toSValue(converted);
 }
 
 function fastInspect(value: Value): string | undefined {
@@ -465,12 +472,23 @@ export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = n
 }
 
 function* hashEquals(a: RHash, b: Value, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
-  if (!(b instanceof RHash) || a.map.size !== b.map.size) return false;
-  for (const entry of a.map.values()) {
-    const other = yield* hashGet(b, entry.key);
-    if (!other || !(yield* rEquals(entry.value, other.value, pairs))) return false;
+  return b instanceof RHash && (yield* compareHashEntries(a, b, (left, right) => rEquals(left, right, pairs)));
+}
+
+function* compareHashEntries(a: RHash, b: RHash, equals: (left: Value, right: Value) => Gen<boolean>): Gen<boolean> {
+  if (a.map.size !== b.map.size) return false;
+  a.iterating++;
+  b.iterating++;
+  try {
+    for (const entry of a.map.values()) {
+      const other = yield* hashGet(b, entry.key);
+      if (!other || !(yield* equals(entry.value, other.value))) return false;
+    }
+    return true;
+  } finally {
+    a.iterating--;
+    b.iterating--;
   }
-  return true;
 }
 
 export function numericEquals(a: bigint | number, b: bigint | number): boolean {
@@ -503,14 +521,7 @@ function* eqlArray(a: RArray, b: RArray, pairs: Map<RBasic, Set<RBasic>>): Gen<b
 }
 
 function* eqlHash(a: RHash, b: RHash, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
-  return yield* eqlContainer(a, b, pairs, function* () {
-    if (a.map.size !== b.map.size) return false;
-    for (const entry of a.map.values()) {
-      const other = yield* hashGet(b, entry.key);
-      if (!other || !(yield* rEql(entry.value, other.value, pairs))) return false;
-    }
-    return true;
-  });
+  return yield* eqlContainer(a, b, pairs, () => compareHashEntries(a, b, (left, right) => rEql(left, right, pairs)));
 }
 
 function* eqlRange(a: RRange, b: RRange, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
@@ -529,7 +540,12 @@ function* eqlContainer(
   const matches = pairs.get(a) ?? new Set<RBasic>();
   matches.add(b);
   pairs.set(a, matches);
-  return yield* compare();
+  try {
+    return yield* compare();
+  } finally {
+    matches.delete(b);
+    if (matches.size === 0) pairs.delete(a);
+  }
 }
 
 /** The order of two values by `<=>`, raising "comparison of X with Y failed" when they do not compare. */
@@ -597,7 +613,10 @@ export function compareStrings(a: string, b: string): number {
 }
 
 export function compareRubyStrings(a: RString, b: RString): number {
-  return compareBytes(stringBytes(a), stringBytes(b));
+  const bytes = stringBytes(a);
+  const order = compareBytes(bytes, stringBytes(b));
+  if (order !== 0 || a.binary === b.binary || bytes.every((byte) => byte < 0x80)) return order;
+  return a.binary ? -1 : 1;
 }
 
 export function compareBytes(a: Uint8Array, b: Uint8Array): number {

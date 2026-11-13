@@ -374,3 +374,58 @@ test('Enumerable collectors retain yielded Turtles through later callbacks', () 
     ]);
   }
 });
+
+test('Enumerable grouping and extrema retain values through source steps', () => {
+  for (const call of [
+    'each_slice(2).to_a',
+    'each_cons(2).to_a',
+    'zip([])',
+    'tally',
+    'group_by { 1 }',
+    'min_by(2) { 1 }',
+  ]) {
+    const program = `class E; include Enumerable; def each; yield Turtle.new(1,0); x=1; yield Turtle.new(2,0); end; end; a=E.new.${call}`;
+    expect(traceProgram('ruby', program, program).finalTurtles.map(({ x, y }) => [x, y])).toEqual([
+      [1, 0],
+      [2, 0],
+    ]);
+  }
+  const program =
+    'class E; include Enumerable; def each; yield Turtle.new(1,0); x=1; yield Turtle.new(2,0); end; end; a=E.new.min_by { 1 }';
+  expect(traceProgram('ruby', program, program).finalTurtles.map(({ x, y }) => [x, y])).toEqual([[1, 0]]);
+});
+
+test('trace expansion stays bounded for shared Array graphs', () => {
+  const program = 'def mk # atomic\n a=[1]\n 23.times { a=[a,a] }\n a\nend\nx=mk';
+  const trace = traceProgram('ruby', program, program);
+  expect(JSON.stringify(trace.traceItems.at(-1)?.referenceVars.x).length).toBeLessThan(100_000);
+});
+
+test('converted Hash sources keep later Turtle values alive during insertion', () => {
+  for (const operation of ['h={**A.new}', 'h={}.merge(A.new)']) {
+    const program = `class K; def hash; x=1; 0; end; end; class A; def to_hash; {K.new=>1, 2=>Turtle.new}; end; end; ${operation}`;
+    expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+  }
+});
+
+test('multiple assignment roots pending values through earlier setters', () => {
+  for (const assignment of ['a.x,b=0,Turtle.new', 'a.x,(b,c)=0,[Turtle.new,1]']) {
+    const program = `class A; def x=(v); q=1; end; end; a=A.new; ${assignment}`;
+    expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+  }
+});
+
+test('operator assignment and case root earlier operands through later expressions', () => {
+  const operator =
+    'class P; def initialize; @t=Turtle.new; end; def +(x); self; end; end; class A; def x; P.new; end; def x=(v); $p=v; end; end; def f; x=1; 1; end; A.new.x += f';
+  expect(traceProgram('ruby', operator, operator).finalTurtles).toHaveLength(1);
+  const match = 'class P; def ===(x); $t=x; true; end; end; def f; x=1; P.new; end; case Turtle.new; when f; end';
+  expect(traceProgram('ruby', match, match).finalTurtles).toHaveLength(1);
+});
+
+test('ensure keeps pending return and break values reachable', () => {
+  const returned = 'def f; begin; return Turtle.new; ensure; x=1; end; end; t=f';
+  expect(traceProgram('ruby', returned, returned).finalTurtles).toHaveLength(1);
+  const broken = 't=loop do; begin; break Turtle.new; ensure; x=1; end; end';
+  expect(traceProgram('ruby', broken, broken).finalTurtles).toHaveLength(1);
+});

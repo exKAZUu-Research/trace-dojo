@@ -2,7 +2,7 @@ import {
   combinedStringEncoding,
   floatToInt,
   formatFloat,
-  inspect,
+  inspectValue,
   toRubyInt,
   toStrValue,
   toSValue,
@@ -249,9 +249,7 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RS
       return padStringValue(yield* toSValue(arg()), spec);
     }
     case 'p': {
-      let text = yield* inspect(arg());
-      if (spec.precision !== undefined) text = [...text].slice(0, spec.precision).join('');
-      return pad(text, spec, false);
+      return padStringValue(yield* inspectValue(arg()), spec);
     }
     case 'c': {
       const value = arg();
@@ -304,7 +302,7 @@ function* intArg(value: Value): Gen<bigint> {
     return (yield* kernelInteger([value], undefined)) as bigint;
   }
   if (value === NIL) throw typeError("can't convert nil into Integer");
-  const converted = yield* callMethod(value, 'to_i', []);
+  const converted = yield* callMethod(value, 'to_i', [], undefined, undefined, { fcall: true });
   if (typeof converted === 'bigint') return converted;
   throw typeError(`can't convert ${realClassOf(value).name} into Integer`);
 }
@@ -316,7 +314,7 @@ function* floatArg(value: Value): Gen<number> {
     return (yield* kernelFloat(value, undefined)) as number;
   }
   if (value === NIL) throw typeError("can't convert nil into Float");
-  const converted = yield* callMethod(value, 'to_f', []);
+  const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
   if (typeof converted === 'number') return converted;
   throw typeError(`can't convert ${realClassOf(value).name} into Float`);
 }

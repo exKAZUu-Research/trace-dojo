@@ -51,6 +51,7 @@ import {
   rt,
   RubyError,
   Scope,
+  ThrowSignal,
   UnsupportedFeatureError,
 } from './runtime';
 import { CORE_CLASSES, CORE_MODULES, UNSUPPORTED_CONSTANTS } from './unsupportedNames';
@@ -231,6 +232,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       frame.temporaries.push(...prepared.roots);
       try {
         const value = yield* ev(e.value, frame);
+        frame.temporaries.push(value);
         yield* prepared.write(value);
         return value;
       } finally {
@@ -454,7 +456,13 @@ function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): 
             `can't convert ${realClassOf(source).name} to Hash (${realClassOf(source).name}#to_hash gives ${realClassOf(value).name})`
           );
       }
-      for (const entry of snapshot(value.map.values())) yield* hashSet(hash, entry.key, entry.value);
+      const sourceMark = frame.temporaries.length;
+      frame.temporaries.push(value);
+      try {
+        for (const entry of snapshot(value.map.values())) yield* hashSet(hash, entry.key, entry.value);
+      } finally {
+        frame.temporaries.length = sourceMark;
+      }
       continue;
     }
     const key = yield* ev(item.key, frame);
@@ -719,21 +727,31 @@ function* constantTargetModule(target: Extract<Target, { k: 'const' }>, frame: F
 }
 
 function* assignPreparedMulti(target: MultiTarget, prepared: PreparedAssignment[], value: Value): Gen<void> {
-  const items = yield* toAryForAssignment(value);
-  const splat = target.splat;
-  if (splat === undefined) {
-    for (const [index, item] of prepared.entries()) if (!item.skip) yield* item.write(items[index] ?? NIL);
-    return;
-  }
-  const after = prepared.length - splat - 1;
-  for (let index = 0; index < splat; index++)
-    if (!prepared[index].skip) yield* prepared[index].write(items[index] ?? NIL);
-  const restEnd = Math.max(splat, items.length - after);
-  if (!prepared[splat].skip && (target.items[splat].k !== 'mlhs' || target.items[splat].items.length > 0))
-    yield* prepared[splat].write(arr(items.slice(splat, restEnd)));
-  for (let index = 0; index < after; index++) {
-    const item = prepared[splat + 1 + index];
-    if (!item.skip) yield* item.write(items[restEnd + index] ?? NIL);
+  const runtime = rt();
+  const heldMark = runtime.held.length;
+  const arraysMark = runtime.heldArrays.length;
+  runtime.held.push(value);
+  try {
+    const items = yield* toAryForAssignment(value);
+    runtime.heldArrays.push(items);
+    const splat = target.splat;
+    if (splat === undefined) {
+      for (const [index, item] of prepared.entries()) if (!item.skip) yield* item.write(items[index] ?? NIL);
+      return;
+    }
+    const after = prepared.length - splat - 1;
+    for (let index = 0; index < splat; index++)
+      if (!prepared[index].skip) yield* prepared[index].write(items[index] ?? NIL);
+    const restEnd = Math.max(splat, items.length - after);
+    if (!prepared[splat].skip && (target.items[splat].k !== 'mlhs' || target.items[splat].items.length > 0))
+      yield* prepared[splat].write(arr(items.slice(splat, restEnd)));
+    for (let index = 0; index < after; index++) {
+      const item = prepared[splat + 1 + index];
+      if (!item.skip) yield* item.write(items[restEnd + index] ?? NIL);
+    }
+  } finally {
+    runtime.heldArrays.length = arraysMark;
+    runtime.held.length = heldMark;
   }
 }
 
@@ -791,33 +809,48 @@ export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
 }
 
 export function* destructure(target: MultiTarget, value: Value, frame: Frame): Gen<void> {
-  const items = yield* toAryForAssignment(value);
-  const { splat } = target;
-  if (splat === undefined) {
-    for (const [index, item] of target.items.entries()) yield* assign(item, items[index] ?? NIL, frame);
-    return;
-  }
-  const after = target.items.length - splat - 1;
-  for (let index = 0; index < splat; index++) yield* assign(target.items[index], items[index] ?? NIL, frame);
-  const restEnd = Math.max(splat, items.length - after);
-  const rest = target.items[splat];
-  if (rest.k !== 'mlhs' || rest.items.length > 0) yield* assign(rest, arr(items.slice(splat, restEnd)), frame);
-  for (let index = 0; index < after; index++) {
-    yield* assign(target.items[splat + 1 + index], items[restEnd + index] ?? NIL, frame);
+  const runtime = rt();
+  const heldMark = runtime.held.length;
+  const arraysMark = runtime.heldArrays.length;
+  runtime.held.push(value);
+  try {
+    const items = yield* toAryForAssignment(value);
+    runtime.heldArrays.push(items);
+    const { splat } = target;
+    if (splat === undefined) {
+      for (const [index, item] of target.items.entries()) yield* assign(item, items[index] ?? NIL, frame);
+      return;
+    }
+    const after = target.items.length - splat - 1;
+    for (let index = 0; index < splat; index++) yield* assign(target.items[index], items[index] ?? NIL, frame);
+    const restEnd = Math.max(splat, items.length - after);
+    const rest = target.items[splat];
+    if (rest.k !== 'mlhs' || rest.items.length > 0) yield* assign(rest, arr(items.slice(splat, restEnd)), frame);
+    for (let index = 0; index < after; index++) {
+      yield* assign(target.items[splat + 1 + index], items[restEnd + index] ?? NIL, frame);
+    }
+  } finally {
+    runtime.heldArrays.length = arraysMark;
+    runtime.held.length = heldMark;
   }
 }
 
 function* toAryForAssignment(value: Value): Gen<Value[]> {
-  if (value instanceof RArray) return value.items;
+  if (value instanceof RArray) return assignmentItems(value.items);
   if (respondsTo(value, 'to_ary', true)) {
     const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
-    if (converted instanceof RArray) return converted.items;
+    if (converted instanceof RArray) return assignmentItems(converted.items);
     if (converted !== NIL)
       throw typeError(
         `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
       );
   }
   return [value];
+}
+
+function assignmentItems(items: Value[]): Value[] {
+  rt().spend(Math.ceil(items.length / 64));
+  return [...items];
 }
 
 function* operatorAssign(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): Gen {
@@ -860,6 +893,7 @@ function* operatorAssignInner(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): 
     }
     case 'const': {
       const module = yield* constantTargetModule(target, frame);
+      frame.temporaries.push(module);
       read = function* () {
         yield* [];
         try {
@@ -902,17 +936,22 @@ function* operatorAssignInner(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): 
   if (op === '||') {
     if (truthy(current)) return current;
     const value = yield* ev(e.value, frame);
+    frame.temporaries.push(value);
     yield* write(value);
     return value;
   }
   if (op === '&&') {
     if (!truthy(current)) return current;
     const value = yield* ev(e.value, frame);
+    frame.temporaries.push(value);
     yield* write(value);
     return value;
   }
+  frame.temporaries.push(current);
   const operand = yield* ev(e.value, frame);
+  frame.temporaries.push(operand);
   const value = yield* callMethod(current, op, [operand]);
+  frame.temporaries.push(value);
   yield* write(value);
   return value;
 }
@@ -977,18 +1016,28 @@ export function storesAnswer(value: Value): boolean {
 function* evalCase(e: Extract<Expr, { k: 'case' }>, frame: Frame): Gen {
   const runtime = rt();
   const subject = e.subject ? yield* ev(e.subject, frame) : undefined;
-  for (const when of e.whens) {
-    runtime.currentRow = when.row;
-    for (const condition of when.conds) {
-      const candidates =
-        condition.k === 'splat' ? yield* splatItems(yield* ev(condition.e, frame)) : [yield* ev(condition, frame)];
-      for (const candidate of candidates) {
-        const matched = subject === undefined ? truthy(candidate) : yield* caseEquals(candidate, subject);
-        if (matched) return yield* evalBody(when.body, frame);
+  const mark = frame.temporaries.length;
+  const arraysMark = runtime.heldArrays.length;
+  if (subject !== undefined) frame.temporaries.push(subject);
+  try {
+    for (const when of e.whens) {
+      runtime.currentRow = when.row;
+      for (const condition of when.conds) {
+        const candidates =
+          condition.k === 'splat' ? yield* splatItems(yield* ev(condition.e, frame)) : [yield* ev(condition, frame)];
+        runtime.heldArrays.push(candidates);
+        for (const candidate of candidates) {
+          const matched = subject === undefined ? truthy(candidate) : yield* caseEquals(candidate, subject);
+          if (matched) return yield* evalBody(when.body, frame);
+        }
+        runtime.heldArrays.pop();
       }
     }
+    return e.else ? yield* evalBody(e.else, frame) : NIL;
+  } finally {
+    runtime.heldArrays.length = arraysMark;
+    frame.temporaries.length = mark;
   }
-  return e.else ? yield* evalBody(e.else, frame) : NIL;
 }
 
 function returnTarget(frame: Frame): Frame {
@@ -1001,6 +1050,7 @@ function returnTarget(frame: Frame): Frame {
 
 function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
   const runtime = rt();
+  const mark = frame.temporaries.length;
   let pendingException: RObject | undefined;
   let fatalError: UnsupportedFeatureError | ExecutionLimitError | undefined;
   try {
@@ -1012,34 +1062,47 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
         if (!(error instanceof RubyError) || e.rescues.length === 0) throw error;
         const handled = yield* rescueClause(e, error, frame);
         if (handled === RETRY) continue;
+        frame.temporaries.push(handled.value);
         return handled.value;
       }
       if (e.else) value = yield* evalBody(e.else, frame);
+      frame.temporaries.push(value);
       return value;
     }
   } catch (error) {
     if (error instanceof RubyError) pendingException = error.exception;
+    if (
+      error instanceof ReturnSignal ||
+      error instanceof BreakSignal ||
+      error instanceof NextSignal ||
+      error instanceof ThrowSignal
+    )
+      frame.temporaries.push(error.value);
     if (error instanceof UnsupportedFeatureError || error instanceof ExecutionLimitError) fatalError = error;
     throw error;
   } finally {
-    if (e.ensure) {
-      const saved = runtime.currentRow;
-      const savedException = runtime.globals.get('$!') ?? NIL;
-      if (pendingException) {
-        frame.handling.push(pendingException);
-        runtime.globals.set('$!', pendingException);
-      }
-      try {
-        yield* evalBody(e.ensure, frame);
-      } catch (error) {
-        throw fatalError ?? error;
-      } finally {
+    try {
+      if (e.ensure) {
+        const saved = runtime.currentRow;
+        const savedException = runtime.globals.get('$!') ?? NIL;
         if (pendingException) {
-          frame.handling.pop();
-          runtime.globals.set('$!', savedException);
+          frame.handling.push(pendingException);
+          runtime.globals.set('$!', pendingException);
         }
-        runtime.currentRow = saved;
+        try {
+          yield* evalBody(e.ensure, frame);
+        } catch (error) {
+          throw fatalError ?? error;
+        } finally {
+          if (pendingException) {
+            frame.handling.pop();
+            runtime.globals.set('$!', savedException);
+          }
+          runtime.currentRow = saved;
+        }
       }
+    } finally {
+      frame.temporaries.length = mark;
     }
   }
 }

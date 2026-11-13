@@ -74,13 +74,15 @@ function isVariableValue(value: Value): boolean {
   return !(value instanceof RProc || value instanceof RClass);
 }
 
+const MAX_TRACE_EXPANSION = 2000;
+
 function addVariable(variables: TraceVariables, name: string, value: Value): void {
   if (!isVariableValue(value)) return;
-  const scalar = scalarOf(value, new Set());
+  const scalar = scalarOf(value, new Set(), { remaining: MAX_TRACE_EXPANSION });
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof RArray)) return;
-  const node = displayNodeOf(value, new Set());
+  const node = displayNodeOf(value, new Set(), { remaining: MAX_TRACE_EXPANSION });
   if (node) variables.referenceVars[name] = node;
 }
 
@@ -88,7 +90,9 @@ const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
 // code-gauge-allow duplicateLines 21 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
-function scalarOf(value: Value, seen: Set<object>): Scalar | typeof NOT_SCALAR {
+function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
+  if (budget.remaining-- <= 0) return NOT_SCALAR;
+  rt().spend();
   switch (typeof value) {
     case 'bigint': {
       return traceIntOf(value);
@@ -102,11 +106,11 @@ function scalarOf(value: Value, seen: Set<object>): Scalar | typeof NOT_SCALAR {
   if (value === NIL) return null;
   if (value instanceof RString) return value.s;
   if (value instanceof RSymbol) return symInspect(value.name);
-  if (!(value instanceof RArray) || seen.has(value)) return NOT_SCALAR;
+  if (!(value instanceof RArray) || seen.has(value) || seen.size >= 256) return NOT_SCALAR;
   seen.add(value);
   const items: Scalar[] = [];
   for (const item of value.items) {
-    const scalar = scalarOf(item, seen);
+    const scalar = scalarOf(item, seen, budget);
     if (scalar === NOT_SCALAR) return NOT_SCALAR;
     items.push(scalar);
   }
@@ -123,13 +127,16 @@ function traceIntOf(value: bigint): number | bigint {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
-function displayNodeOf(value: Value, seen: Set<object>): DisplayNode | undefined {
+function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
+  if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
+  rt().spend();
   if (typeof value === 'bigint') return { kind: 'value', value: traceIntOf(value) };
   if (typeof value !== 'object') return { kind: 'value', value };
   if (value === NIL) return NULL_NODE;
   if (value instanceof RString) return { kind: 'value', value: value.s };
   if (value instanceof RSymbol) return { kind: 'value', value: symInspect(value.name) };
   if (!isVariableValue(value) || seen.has(value)) return undefined;
+  if (seen.size >= 256) return { kind: 'value', value: '…' };
   if (value instanceof RRange) return { kind: 'value', value: rangeText(value) };
   if (value instanceof RObject && value.turtle) {
     if (!value.turtle.isAlive) return undefined;
@@ -141,7 +148,7 @@ function displayNodeOf(value: Value, seen: Set<object>): DisplayNode | undefined
   if (value instanceof RObject && value.data !== undefined) return undefined;
   seen.add(value);
   try {
-    return containerNodeOf(value as RBasic, seen);
+    return containerNodeOf(value as RBasic, seen, budget);
   } finally {
     seen.delete(value);
   }
@@ -157,10 +164,13 @@ function rangeText(value: RRange): string {
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
-function containerNodeOf(value: RBasic, seen: Set<object>): DisplayNode {
+function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: number }): DisplayNode {
   const entries: Record<string, DisplayNode> = {};
   if (value instanceof RArray) {
-    for (const [index, item] of value.items.entries()) entries[index] = displayNodeOf(item, seen) ?? NULL_NODE;
+    for (const [index, item] of value.items.entries()) {
+      entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
+      if (budget.remaining <= 0) break;
+    }
     return { kind: 'array', entries };
   }
   if (value instanceof RHash) {
@@ -168,17 +178,19 @@ function containerNodeOf(value: RBasic, seen: Set<object>): DisplayNode {
     const labels = keyLabels(ordered.map((entry) => entry.key));
     for (const [index, entry] of ordered.entries()) {
       Object.defineProperty(entries, labels[index], {
-        value: displayNodeOf(entry.value, seen) ?? NULL_NODE,
+        value: displayNodeOf(entry.value, seen, budget) ?? NULL_NODE,
         enumerable: true,
         configurable: true,
         writable: true,
       });
+      if (budget.remaining <= 0) break;
     }
   } else {
     for (const [key, item] of value.ivars ?? []) {
       if (key.startsWith('@__') || !isVariableValue(item)) continue;
-      const node = displayNodeOf(item, seen);
+      const node = displayNodeOf(item, seen, budget);
       if (node) entries[key] = node;
+      if (budget.remaining <= 0) break;
     }
   }
   return { kind: 'object', entries };

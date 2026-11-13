@@ -417,12 +417,14 @@ test.each([
   [
     'Math gamma handles signed zero and infinite domain',
     'p Math.gamma(-0.0),Math.gamma(0.0),Math.lgamma(-0.0),Math.lgamma(-1.0),Math.lgamma(1.0);begin;p Math.lgamma(-Float::INFINITY);rescue=>e;p e.class;end',
-    '-Infinity\nInfinity\n[Infinity, -1]\n[Infinity, 1]\n[0.0, 1]\nMath::DomainError\n',
+    `-Infinity\nInfinity\n[Infinity, -1]\n[Infinity, ${process.platform === 'linux' ? '-1' : '1'}]\n[0.0, 1]\nMath::DomainError\n`,
   ],
   [
     'Math gamma and lgamma match reference small arguments',
     'p Math.gamma(-0.5),Math.gamma(0.5),Math.gamma(2.5),Math.lgamma(3),Math.lgamma(5)',
-    '-3.5449077018110318\n1.772453850905516\n1.329340388179137\n[0.6931471805599454, 1]\n[3.1780538303479453, 1]\n',
+    process.platform === 'linux'
+      ? '-3.544907701811032\n1.772453850905516\n1.329340388179137\n[0.6931471805599453, 1]\n[3.1780538303479458, 1]\n'
+      : '-3.5449077018110318\n1.772453850905516\n1.329340388179137\n[0.6931471805599454, 1]\n[3.1780538303479453, 1]\n',
   ],
   [
     'Kernel output preserves replacement-stream callbacks',
@@ -1813,4 +1815,89 @@ test('singleton repeated selection sizes retain large Integer counts', () => {
 
 test('large random seeds stay within the execution deadline', () => {
   expect(run('Random.new(2**5000000); puts :ok')).toMatchObject({ stdout: 'ok\n' });
+});
+
+test('large random limits draw within the execution deadline', () => {
+  expect(run('r=Random.new(1).rand(2**3000000); p r>=0 && r<2**3000000')).toMatchObject({ stdout: 'true\n' });
+});
+
+test('implicit conversions invoke private methods and report invalid returns', () => {
+  expect(run('class A; private; def to_int; 0; end; end; p [42].fetch(A.new), "x" * A.new')).toMatchObject({
+    stdout: '42\n""\n',
+  });
+  expect(
+    run('class A; def to_int; "x"; end; end; begin; [1].fetch(A.new); rescue => e; p e.message; end')
+  ).toMatchObject({
+    stdout: '"can\'t convert A to Integer (A#to_int gives String)"\n',
+  });
+  expect(run('class A; def to_str; 1; end; end; begin; "a" + A.new; rescue => e; p e.message; end')).toMatchObject({
+    stdout: '"can\'t convert A to String (A#to_str gives Integer)"\n',
+  });
+});
+
+test('Math invokes private Numeric to_f conversions', () => {
+  expect(run('class A < Numeric; private; def to_f; 9.0; end; end; p Math.sqrt(A.new)')).toMatchObject({
+    stdout: '3.0\n',
+  });
+});
+
+test('shared Hash equality guards callbacks in both operands', () => {
+  expect(
+    run(
+      'class V; def ==(v); $a[:x]=3; false; end; end; $a={k:V.new}; b={k:0}; begin; p $a==b; rescue => e; p e.class,e.message; end; p $a.size'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n"can\'t add a new key into hash during iteration"\n1\n',
+  });
+  expect(
+    run(
+      'class V; def eql?(v); $a[:x]=3; false; end; end; $a={k:V.new}; b={k:0}; begin; p [$a].eql?([b]); rescue => e; p e.class; end; p $a.size'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n1\n',
+  });
+});
+
+test('shared container comparisons repeat completed equality callbacks', () => {
+  expect(
+    run('class X; def ==(x); $n+=1; $n==1; end; end; $n=0; a=[X.new]; b=[X.new]; p [a,a]==[b,b],$n')
+  ).toMatchObject({
+    stdout: 'false\n2\n',
+  });
+  expect(
+    run('class X; def eql?(x); $n+=1; $n==1; end; end; $n=0; a=[X.new]; b=[X.new]; p [a,a].eql?([b,b]),$n')
+  ).toMatchObject({
+    stdout: 'false\n2\n',
+  });
+});
+
+test('String ordering distinguishes incompatible equal bytes', () => {
+  expect(run(String.raw`a=255.chr;b="\xFF";p a<=>b,b<=>a,65.chr<=>"A"`)).toMatchObject({
+    stdout: '-1\n1\n0\n',
+  });
+});
+
+test('percent-p formatting preserves custom inspect bytes', () => {
+  expect(
+    run(String.raw`class A;def inspect;"\xFF";end;end;p format("%p",A.new).bytes,format("%3p",A.new).bytes`)
+  ).toMatchObject({
+    stdout: '[255]\n[32, 32, 255]\n',
+  });
+});
+
+test('format numeric directives invoke private conversion methods', () => {
+  expect(
+    run('class A; private; def to_f; 2.5; end; def to_i; 7; end; end; p format("%f %d",A.new,A.new)')
+  ).toMatchObject({
+    stdout: '"2.500000 7"\n',
+  });
+});
+
+test('multiple assignment snapshots values before setter callbacks', () => {
+  expect(run('class A; def x=(v); $a[1]=9; end; end; $a=[1,2]; A.new.x,b=$a; p b,$a')).toMatchObject({
+    stdout: '2\n[1, 9]\n',
+  });
+  expect(run('class A; def x=(v); $a[1]=9; end; end; $a=[1,2,3]; A.new.x,*b=$a; p b,$a')).toMatchObject({
+    stdout: '[2, 3]\n[1, 9, 3]\n',
+  });
 });

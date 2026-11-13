@@ -106,28 +106,37 @@ export class MersenneTwister {
   // code-gauge-allow functionCognitiveComplexity 22 -- Transcribed from Ruby's random.c, whose draws decide the numbers.
   limited(limit: bigint): bigint {
     if (limit === 0n) return 0n;
+    if (limit > 0xff_ff_ff_ffn) return this.limitedLarge(limit);
     const mask = maskOf(limit);
-    if (limit > 0xff_ff_ff_ffn) {
-      for (;;) {
-        let value = 0n;
-        let retry = false;
-        const words = (mask.toString(2).length + 31) >> 5;
-        for (let i = words - 1; i >= 0; i--) {
-          if (((mask >> BigInt(i * 32)) & 0xff_ff_ff_ffn) !== 0n) {
-            value |= BigInt(this.int32()) << BigInt(i * 32);
-            value &= mask;
-            if (limit < value) {
-              retry = true;
-              break;
-            }
-          }
-        }
-        if (!retry) return value;
-      }
-    }
     for (;;) {
       const value = BigInt(this.int32()) & mask;
       if (value <= limit) return value;
+    }
+  }
+
+  private limitedLarge(limit: bigint): bigint {
+    const hex = limit.toString(16);
+    const firstWidth = hex.length % 8 || 8;
+    const bounds: number[] = [Number.parseInt(hex.slice(0, firstWidth), 16)];
+    for (let index = firstWidth; index < hex.length; index += 8)
+      bounds.push(Number.parseInt(hex.slice(index, index + 8), 16));
+    const mask = 2 ** (32 - Math.clz32(bounds[0])) - 1;
+    for (;;) {
+      rt().spend();
+      const drawn: number[] = [];
+      let equal = true;
+      let rejected = false;
+      for (const [index, bound] of bounds.entries()) {
+        rt().spend();
+        const word = index === 0 ? (this.int32() & mask) >>> 0 : this.int32();
+        if (equal && word > bound) {
+          rejected = true;
+          break;
+        }
+        if (word < bound) equal = false;
+        drawn.push(word);
+      }
+      if (!rejected) return BigInt(`0x${drawn.map((word) => word.toString(16).padStart(8, '0')).join('')}`);
     }
   }
 }
