@@ -1760,3 +1760,10 @@ test('Hash equality guards both operands during key callbacks', () => {
     stdout: 'RuntimeError\n"can\'t add a new key into hash during iteration"\n1\n',
   });
 });
+
+test('Array map fills cleared positions with Ruby nil', () => {
+  expect(run('a=[1,2,3]; a.map! { |x| a.clear if x==2; x }; p a')).toMatchObject({ stdout: '[nil, 2]\n' });
+  expect(run('a=[1,2,3]; a.collect! { |x| a.clear if x==3; x }; p a')).toMatchObject({
+    stdout: '[nil, nil, 3]\n',
+  });
+});

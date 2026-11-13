@@ -404,6 +404,8 @@ def('Array', ['map!', 'collect!'], 0, function* (self: RArray, _args, block) {
   yield* modify(self);
   for (let index = 0; index < self.items.length; index++) {
     const value = yield* call(block, self.items[index]);
+    grow(index + 1, self);
+    while (self.items.length <= index) self.items.push(NIL);
     self.items[index] = value;
   }
   return self;
