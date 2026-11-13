@@ -11,14 +11,19 @@ import {
   type TypeVariable,
 } from './types';
 
-/**
- * The single abstract method of a functional interface, or `undefined` when `cls` is not one: the abstract methods it
- * declares and inherits, counted once per override-equivalent signature as `cls` sees them through its parameterized
- * superinterfaces, less those that redeclare a public method of `Object` and those a default method of a more specific
- * interface implements (JLS 9.8).
- */
-// code-gauge-allow functionCognitiveComplexity 18 -- One pass applying JLS 9.8's three exclusions to each inherited method.
+/** The single abstract method of a functional interface, or `undefined` when `cls` is not one. */
 export function functionalMethodOf(cls: ClassInfo, objectClass: ClassInfo): MethodInfo | undefined {
+  return functionalMethodsOf(cls, objectClass)?.[0];
+}
+
+/**
+ * The abstract methods a functional interface declares and inherits that share its one override-equivalent signature
+ * as `cls` sees them through its parameterized superinterfaces, the first of them its functional method, which a
+ * lambda implements them all by; or `undefined` when `cls` is not one. Methods that redeclare a public method of
+ * `Object` and those a default method of a more specific interface implements do not count (JLS 9.8).
+ */
+// code-gauge-allow functionCognitiveComplexity 21 -- One pass applying JLS 9.8's three exclusions to each inherited method.
+export function functionalMethodsOf(cls: ClassInfo, objectClass: ClassInfo): MethodInfo[] | undefined {
   if (cls.kind !== 'interface') return;
   const owners = [cls, ...superinterfacesOf(cls)];
   const self: ClassType = {
@@ -34,6 +39,7 @@ export function functionalMethodOf(cls: ClassInfo, objectClass: ClassInfo): Meth
   const implementsByDefault = (other: ClassInfo, signature: Signature): boolean =>
     other.methods.some((candidate) => !candidate.isAbstract && sameSignature(viewed(other, candidate), signature));
   const abstract: Signature[] = [];
+  const family: MethodInfo[] = [];
   for (const owner of owners) {
     for (const method of owner.methods) {
       if (!method.isAbstract || method.isStatic) continue;
@@ -47,11 +53,12 @@ export function functionalMethodOf(cls: ClassInfo, objectClass: ClassInfo): Meth
       const isImplemented = owners.some(
         (other) => other !== owner && superinterfacesOf(other).includes(owner) && implementsByDefault(other, signature)
       );
-      const isCounted = abstract.some((other) => sameSignature(other, signature));
-      if (!isObjectMethod && !isImplemented && !isCounted) abstract.push(signature);
+      if (isObjectMethod || isImplemented) continue;
+      if (!abstract.some((other) => sameSignature(other, signature))) abstract.push(signature);
+      family.push(method);
     }
   }
-  return abstract.length === 1 ? abstract[0]?.method : undefined;
+  return abstract.length === 1 ? family : undefined;
 }
 
 /** A method with its parameter types as an interface sees them through its parameterized superinterfaces. */

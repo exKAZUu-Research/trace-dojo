@@ -2134,3 +2134,25 @@ interface D<T> { void a(T x); }
 public class Main { public static void main(String[] args) { C c = x -> x.length(); A<String> a = c; System.out.println(a.size("abc")); H h = x -> x + 1; System.out.println(h.get(1)); S2 s2 = String::length; System.out.println(s2.apply("ab")); S3 s3 = String::length; System.out.println(((Function<String, Integer>) s3).apply("abcd")); D2 d = () -> System.out.println("b"); d.a("q"); d.b(); } }`;
   expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: '3\n2\n2\n4\nb\n' });
 });
+
+test("Java's lambdas implement every inherited method their functional method stands for", () => {
+  const program = `import java.util.function.*;
+interface A<T> { int size(T x); }
+interface B { int size(String x); }
+@FunctionalInterface interface C extends A<String>, B {}
+@FunctionalInterface interface R extends B, A<String> {}
+interface Ap { Integer apply(String s); }
+@FunctionalInterface interface F extends Function<String,Integer>, Ap {}
+public class Main {
+ static void t(String label, Runnable run) { try {run.run();} catch(Throwable e) {System.out.println(label+" "+e.getClass().getSimpleName());} }
+ public static void main(String[] args) {
+  t("lambda",()->{ C c=x->x.length(); B b=c; System.out.println("lambda "+b.size("abc")); });
+  t("reference",()->{ F f=String::length; Ap ap=f; System.out.println("reference "+ap.apply("abcd")); });
+  t("reversed",()->{ R r=x->x.length(); A<String> a=r; System.out.println("reversed "+a.size("abcde")); });
+ }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'lambda 3\nreference 4\nreversed 5\n',
+  });
+});

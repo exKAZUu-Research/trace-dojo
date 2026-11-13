@@ -25,7 +25,7 @@ import {
 } from './builtinSupport';
 import { compareIgnoringCase } from './builtinText';
 import { compareValues } from './builtinWrappers';
-import { functionalMethodOf } from './functionalInterfaces';
+import { functionalMethodOf, functionalMethodsOf } from './functionalInterfaces';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -80,7 +80,7 @@ export function functionClassOf(iface: ClassInfo, objectClass: ClassInfo, owner?
   }
   let cls = byOwner.get(owner);
   if (cls) return cls;
-  const method = functionalMethodOf(iface, objectClass) as MethodInfo;
+  const [method, ...equivalents] = functionalMethodsOf(iface, objectClass) as MethodInfo[];
   cls = createClass(`${owner?.binaryName ?? iface.name}$$Lambda`, objectClass, true);
   cls.isFinal = true;
   cls.interfaces = [iface];
@@ -93,7 +93,10 @@ export function functionClassOf(iface: ClassInfo, objectClass: ClassInfo, owner?
     false,
     (frame, receiver, args) => (receiver as JavaObject).function?.call(frame, args)
   );
-  implementation.overrides = new Set([method, ...(method.overrides ?? [])]);
+  // A lambda implements every inherited method its functional method stands for, whatever interface a call names.
+  implementation.overrides = new Set(
+    [method, ...equivalents].flatMap((implemented) => [implemented, ...(implemented.overrides ?? [])])
+  );
   byOwner.set(owner, cls);
   return cls;
 }
