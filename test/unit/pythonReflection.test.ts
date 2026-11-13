@@ -111,3 +111,12 @@ test('code run by exec records no steps of its own, as an atomic function', () =
   const program = 'x = 1\nexec("y = x + 1\\nz = y * 2")\nw = 3';
   expect(traceProgram('python', program, program).traceItems.map(({ line }) => line)).toEqual([0, 1, 2, 3]);
 });
+
+test('the ast module groups mixed bitwise operators as CPython does', () => {
+  expectSameAsCPython(`import ast
+for source, value in [('6 ^ 3 & 3', 5), ('6 & 3 ^ 3', 1), ('1 | 2 ^ 3 & 4', 3)]:
+    tree = ast.parse(source, mode='eval')
+    assert ast.unparse(tree) == source, ast.unparse(tree)
+    assert eval(compile(tree, '<s>', 'eval')) == value == eval(source)
+`);
+});
