@@ -14,6 +14,20 @@ export function fusedMultiplyAdd(x: number, y: number, z: number): number {
   return roundedDouble(sum, exponent);
 }
 
+export function floatFraction(value: number): { numerator: bigint | number; denominator: bigint } {
+  if (!Number.isFinite(value)) return { numerator: value, denominator: 1n };
+  const { mantissa, exponent } = dyadic(value);
+  if (exponent >= 0) return { numerator: mantissa << BigInt(exponent), denominator: 1n };
+  if (mantissa === 0n) return { numerator: 0n, denominator: 1n };
+  let numerator = mantissa;
+  let denominator = 1n << BigInt(-exponent);
+  while (numerator % 2n === 0n) {
+    numerator /= 2n;
+    denominator /= 2n;
+  }
+  return { numerator, denominator };
+}
+
 function dyadic(value: number): { mantissa: bigint; exponent: number } {
   bits.setFloat64(0, value);
   const raw = bits.getBigUint64(0);

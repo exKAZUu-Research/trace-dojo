@@ -14,7 +14,7 @@ import {
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
-import { fusedMultiplyAdd } from './floatMath';
+import { floatFraction, fusedMultiplyAdd } from './floatMath';
 import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -289,6 +289,34 @@ for (const owner of ['Integer', 'Float']) {
   );
   def(owner, 'clone', [0, 1], (self) => self);
   def(owner, 'dup', 0, (self) => self);
+}
+
+for (const owner of ['Integer', 'Float']) {
+  def(owner, 'real?', 0, () => true);
+  def(owner, 'real', 0, (self: Num) => self);
+  def(owner, ['imag', 'imaginary', 'i'], 0, () => 0n);
+  def(owner, 'abs2', 0, (self: Num) => numericAbs2(self));
+  def(owner, ['conj', 'conjugate'], 0, (self: Num) => self);
+  def(owner, ['arg', 'angle', 'phase'], 0, (self: Num) => numericArg(self));
+  def(owner, ['rect', 'rectangular'], 0, (self: Num) => arr([self, 0n]));
+  def(owner, 'polar', 0, (self: Num) =>
+    arr([typeof self === 'bigint' ? (self < 0n ? -self : self) : Math.abs(self), numericArg(self)])
+  );
+  def(owner, 'numerator', 0, (self: Num) => (typeof self === 'bigint' ? self : floatFraction(self).numerator));
+  def(owner, 'denominator', 0, (self: Num) => (typeof self === 'bigint' ? 1n : floatFraction(self).denominator));
+}
+
+function numericArg(value: Num): Num {
+  if (typeof value === 'bigint') return value < 0n ? Math.PI : 0n;
+  if (Number.isNaN(value)) return Number.NaN;
+  return value < 0 || Object.is(value, -0) ? Math.PI : 0n;
+}
+
+function numericAbs2(value: Num): Num {
+  if (typeof value === 'number') return value * value;
+  const bits = integerBits(value);
+  chargeIntegerResult(2 * bits, (bits * bits) / 1024);
+  return value * value;
 }
 
 function* modPow(self: Num, exponent: Value, modulus: Value): Gen {
