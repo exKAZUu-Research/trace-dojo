@@ -16,10 +16,10 @@ import { argumentError, floatDomainError, rangeError, rubyError, typeError, zero
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
 import { bigintRatio, floatFraction, floatStepCount, frexpDouble, fusedMultiplyAdd, ldexpDouble } from './floatMath';
 import { exactFloatPower } from './floatPower';
-import { gammaApprox, logGammaApprox } from './gammaMath';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { platformGamma, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str, truthy } from './values';
 
@@ -985,13 +985,13 @@ sdef('Math', 'gamma', 1, function* (_self, [value]) {
     for (let index = 2; index < number; index++) factorial *= BigInt(index);
     return Number(factorial);
   }
-  return gammaApprox(number);
+  return platformGamma(number);
 });
 sdef('Math', 'lgamma', 1, function* (_self, [value]) {
   const number = yield* toFloat(value);
   if (number === Number.NEGATIVE_INFINITY) domainCheck('lgamma', false);
   if (number === 0) return arr([Number.POSITIVE_INFINITY, Object.is(number, -0) ? -1n : 1n]);
-  const [logarithm, sign] = logGammaApprox(number);
+  const [logarithm, sign] = platformLogGamma(number);
   return arr([logarithm, BigInt(sign)]);
 });
 
