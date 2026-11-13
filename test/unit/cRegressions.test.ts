@@ -1558,3 +1558,33 @@ test.each(['while(0){}', 'enum E{A}e;'])('a value call before %s keeps its expre
     diagnostics: [expect.objectContaining({ row: 1 })],
   });
 });
+
+test.each([
+  'char *(*fp)(const char*)',
+  'int *(*fp)(void)',
+  'void *(*fp)(void*)',
+  'T *(*fp)(T)',
+  'int *(*fp[2])(void)',
+  'int *local(void)',
+  'struct P{int x;}*(*fp)(void)',
+  'int *(*(*fp)(void))[3]',
+])('pointer-returning declarators cannot consume the following statement: %s', (head) => {
+  const source = (separator: string): string =>
+    `#include <stdio.h>\ntypedef int T;\nint main(void){\n${head}${separator}\nputs("kept");\n}`;
+  expect(executeProgram('c', source(''))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 3 })],
+  });
+  expect(executeProgram('c', source(';'))).toMatchObject({
+    kind: 'executed',
+    stdout: 'kept\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('parameter annotation calls are rejected instead of discarded', () => {
+  expect(executeProgram('c', 'int f(int x\njunk(1)){return x;}int main(void){return 0;}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 1 })],
+  });
+});

@@ -22,6 +22,7 @@ import {
   type TypeName,
   type TypeSpecifier,
 } from './ast';
+import { validateDeclarationChildren, validateDeclaratorChildren } from './declarationSyntax';
 import { CSyntaxError } from './syntaxDiagnostics';
 import type { TypeScope } from './syntaxTokens';
 import { builtinType } from './types';
@@ -139,7 +140,7 @@ export class Converter {
   }
 
   convertUnit(root: Node, headers: readonly HeaderDeclarations[] = []): ExternalDeclaration[] {
-    if (!this.recovery) validateSyntax(root);
+    if (!this.recovery) validateSyntax(root, (node) => this.checkUnsupported(node));
     const items: ExternalDeclaration[] = [];
     this.headers = headers;
     this.nextHeader = 0;
@@ -283,11 +284,12 @@ export class Converter {
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of declaration specifier.
   private specifiers(node: Node): Specifiers {
+    const typeNodes = declarationTypeNodes(node);
+    if (typeNodes.length === 0) throw new CSyntaxError(node, '型の指定が必要です。');
+    validateDeclarationChildren(node, typeNodes, (child) => this.checkUnsupported(child));
     let storage: StorageClass | undefined;
     const qualifiers = { isConst: false, isVolatile: false };
     for (const child of node.namedChildren) {
-      if (!child) continue;
-      this.checkUnsupported(child);
       if (child.type === 'storage_class_specifier') {
         const word = child.text;
         if (word === 'inline' || word === '__inline' || word === '__inline__')
@@ -307,8 +309,6 @@ export class Converter {
         this.qualifier(child, qualifiers);
       }
     }
-    const typeNodes = declarationTypeNodes(node);
-    if (typeNodes.length === 0) throw new CSyntaxError(node, '型の指定が必要です。');
     for (const child of typeNodes.flatMap((typeNode) => typeNode.namedChildren))
       if (child.type === 'type_qualifier') this.qualifier(child, qualifiers);
     return { storage, qualifiers, type: this.declarationType(typeNodes), row: node.startPosition.row };
@@ -485,6 +485,7 @@ export class Converter {
   private declarator(node: Node): Declarator {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
+    validateDeclaratorChildren(node, (child) => this.checkUnsupported(child));
     switch (node.type) {
       case 'identifier':
       case 'field_identifier':
@@ -496,8 +497,6 @@ export class Converter {
       case 'abstract_pointer_declarator': {
         const qualifiers = { isConst: false, isVolatile: false };
         for (const child of node.namedChildren) {
-          if (!child) continue;
-          this.checkUnsupported(child);
           if (child.type === 'type_qualifier') this.qualifier(child, qualifiers);
         }
         return { kind: 'pointer', qualifiers, inner: this.innerDeclarator(node), row };
