@@ -2089,3 +2089,16 @@ public class Main { static void t(String n, Supplier<Object> s) { try { System.o
       'enum true [A, C]\ntmks java.lang.NullPointerException\nhmks false\nmofks false\nlhmks false\nes false\nhes false\nsingle false\nempty false\nuseto java.lang.UnsupportedOperationException\n',
   });
 });
+
+test("Java's EnumMap finds no key that is not a constant of its enum", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { enum E { A, B, C } static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { EnumMap<E, Integer> m = new EnumMap<>(E.class); m.put(E.A, 1); m.put(E.B, 2); m.put(E.C, 3);
+  t("ksr", () -> m.keySet().remove(null) + " " + m); t("ksra", () -> m.keySet().removeAll(Arrays.asList(null, E.B)) + " " + m);
+  t("get", () -> m.get(null)); t("ck", () -> m.containsKey(null)); t("rm", () -> m.remove(null)); t("god", () -> m.getOrDefault(null, 9)); t("cv", () -> m.containsValue(null)); t("other", () -> m.get("x")); t("put", () -> m.put(null, 1)); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ksr false {A=1, B=2, C=3}\nksra true {A=1, C=3}\nget null\nck false\nrm null\ngod 9\ncv false\nother null\nput java.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\n',
+  });
+});

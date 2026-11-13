@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 439 -- The set and map classes, which share one hash and tree store and its views.
+// code-gauge-allow-file fileNcss 456 -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
 import {
   checkModifiable,
@@ -43,6 +43,7 @@ import {
   createClass,
   INT,
   type JavaType,
+  type MethodInfo,
   type NativeMethod,
   type TypeVariable,
   VOID,
@@ -286,17 +287,61 @@ function defineEnumMap(cls: ClassInfo, classClass: ClassInfo): void {
   addConstructor(cls, [classType(classClass, { kind: 'typeVar', variable: key })], (_, receiver) =>
     createStore(receiver)
   );
+  // As EnumMap.isValidKey does, a key that is not a constant of the map's enum is absent, without comparing it.
+  answerNonMembers(
+    cls,
+    new Map<string, (args: Value[]) => Value>([
+      ['get', () => {}],
+      ['containsKey', () => false],
+      ['remove', () => {}],
+      ['getOrDefault', (args) => args[1]],
+    ])
+  );
+  const put = cls.methods.find((method) => method.name === 'put') as MethodInfo;
+  const putNative = put.native as NativeMethod;
+  // EnumMap.put checks its key's class first.
+  put.native = (frame, receiver, args) =>
+    args[0] === undefined
+      ? throwBuiltin(frame, 'NullPointerException', 'Cannot invoke "Object.getClass()" because "key" is null')
+      : putNative(frame, receiver, args);
+}
+
+/** Makes the one-argument lookups `answers` names give their answer for a value that is not a member of the enum. */
+function answerNonMembers(cls: ClassInfo, answers: Map<string, (args: Value[]) => Value>): void {
+  for (const method of cls.methods) {
+    const { native, name } = method;
+    const answer = answers.get(name);
+    if (!native || !answer || method.parameterTypes.length !== (name === 'getOrDefault' ? 2 : 1)) continue;
+    method.native = (frame, receiver, args) =>
+      isEnumMember(receiver, args[0]) ? native(frame, receiver, args) : answer(args);
+  }
+}
+
+/** Whether `value` is a constant of the enum whose constants an EnumSet or EnumMap holds, or may hold when empty. */
+function isEnumMember(collection: Value, value: Value): boolean {
+  if (!(value instanceof JavaObject) || !enumOf(value)) return false;
+  const [first] = storeOf(collection).entries;
+  return first === undefined || enumOf(first.key as JavaObject) === enumOf(value);
+}
+
+/** The enum a constant belongs to, whose subclass a constant with a body is. */
+function enumOf(constant: JavaObject): ClassInfo | undefined {
+  let cls: ClassInfo | undefined = constant.cls;
+  while (cls && cls.superclass?.name !== 'Enum') cls = cls.superclass;
+  return cls;
 }
 
 /** `EnumSet`, a set of an enum's constants in their order, which only its static methods create. */
 function defineEnumSet(context: Context, cls: ClassInfo, collectionClass: ClassInfo): void {
   cls.constructors = [];
-  // An EnumSet holds no null, so it neither finds nor removes one, without comparing it with its constants.
-  for (const method of cls.methods) {
-    const { native } = method;
-    if (!native || (method.name !== 'contains' && method.name !== 'remove')) continue;
-    method.native = (frame, receiver, args) => (args[0] === undefined ? false : native(frame, receiver, args));
-  }
+  // An EnumSet holds only its enum's constants, so it neither finds nor removes another value, comparing none.
+  answerNonMembers(
+    cls,
+    new Map([
+      ['contains', () => false],
+      ['remove', () => false],
+    ])
+  );
   const classClass = context.registry.classes.get('Class') as ClassInfo;
   const create = (frame: Frame, values: Iterable<Value>): JavaObject => createEnumSet(frame, cls, values);
   const generic = (
