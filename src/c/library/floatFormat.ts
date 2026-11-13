@@ -133,22 +133,15 @@ export function formatHex(value: number, precision: number | undefined, alternat
   let lead = 1n;
   let hex = mantissa.toString(16).padStart(13, '0');
   if (precision !== undefined && precision < 13) {
-    // Round the fraction to `precision` hex digits with ties to even.
     const dropBits = BigInt((13 - precision) * 4);
     const full = (lead << 52n) | mantissa;
     const kept = full >> dropBits;
     const remainder = full & ((1n << dropBits) - 1n);
     const half = 1n << (dropBits - 1n);
     let rounded = kept;
-    if (remainder > half || (remainder === half && (kept & 1n) === 1n)) rounded++;
+    if (remainder > half) rounded++;
     const fractionBits = BigInt(precision * 4);
     lead = rounded >> fractionBits;
-    if (lead > 1n) {
-      // A carry into the leading digit, as from 0x1.f to 0x2.0, renormalizes.
-      lead = 1n;
-      rounded >>= 1n;
-      exponent++;
-    }
     hex = precision > 0 ? (rounded & ((1n << fractionBits) - 1n)).toString(16).padStart(precision, '0') : '';
   } else if (precision === undefined) {
     hex = hex.replace(/0+$/, '');

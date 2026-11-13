@@ -49,7 +49,7 @@ export const STDIO_FUNCTIONS: Record<string, NativeFunction> = {
   },
   puts: (runtime, [s]) => {
     write(runtime, 'stdout', [...readCString(runtime, asAddress(s)), 0x0a]);
-    return 0;
+    return 10;
   },
   putchar: (runtime, [c]) => {
     const byte = asNumber(c) & 0xff;
@@ -57,8 +57,9 @@ export const STDIO_FUNCTIONS: Record<string, NativeFunction> = {
     return byte;
   },
   fputs: (runtime, [s, stream]) => {
-    write(runtime, streamOf(runtime, stream), readCString(runtime, asAddress(s)));
-    return 0;
+    const bytes = readCString(runtime, asAddress(s));
+    write(runtime, streamOf(runtime, stream), bytes);
+    return bytes.length;
   },
   fputc: (runtime, [c, stream]) => {
     const byte = asNumber(c) & 0xff;
@@ -283,7 +284,6 @@ class Scanner {
       this.position++;
     }
     if (this.position === start) return this.assigned;
-    if (conversion === 'c' && this.position - start < max) return this.inputFailure();
     this.converted = true;
     if (!suppress) {
       const bytes = input.subarray(start, this.position);

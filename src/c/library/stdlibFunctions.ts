@@ -38,7 +38,7 @@ function quotientRemainder(quotient: bigint, remainder: bigint, size: 4 | 8): Va
     view.setBigInt64(0, quotient, true);
     view.setBigInt64(8, remainder, true);
   }
-  return { bytes, initialized: new Uint8Array(size * 2).fill(1) };
+  return { bytes, initialized: new Uint8Array(size * 2).fill(255) };
 }
 
 function divide(x: bigint, y: bigint, bits: 32 | 64): { quotient: bigint; remainder: bigint } {
@@ -93,12 +93,7 @@ function strtoFloat(isFloat: boolean): NativeFunction {
     const parsed = parseFloatPrefix(bytes);
     let value = parsed.value;
     if (isFloat) value = Math.fround(value);
-    if (
-      parsed.length > 0 &&
-      Number.isFinite(parsed.value) === false &&
-      !parsed.isInfinityText &&
-      !Number.isNaN(value)
-    ) {
+    if (parsed.length > 0 && Number.isFinite(value) === false && !parsed.isInfinityText && !Number.isNaN(value)) {
       setErrno(runtime, ERANGE);
     }
     if (parsed.length > 0 && value === 0 && parsed.isNonzeroText) setErrno(runtime, ERANGE);
@@ -117,11 +112,6 @@ function storePointer(runtime: Runtime, address: number, value: number): void {
 
 export function setErrno(runtime: Runtime, value: number): void {
   runtime.errno = value;
-  if (runtime.errnoAddress !== undefined) {
-    const bytes = new Uint8Array(4);
-    new DataView(bytes.buffer).setInt32(0, value, true);
-    writeBytes(runtime, runtime.errnoAddress, bytes);
-  }
 }
 
 /** Calls a comparison function the program passed, as `qsort` and `bsearch` do. */
@@ -294,7 +284,7 @@ export const STDLIB_FUNCTIONS: Record<string, NativeFunction> = {
     const address = malloc(runtime, total);
     if (address !== 0) {
       const block = runtime.memory.findBase(address);
-      block?.initialized.fill(1);
+      block?.initialized.fill(255);
     }
     return address;
   },

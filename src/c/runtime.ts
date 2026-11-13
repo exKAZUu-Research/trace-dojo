@@ -25,6 +25,8 @@ export interface LocalInfo {
 }
 
 export interface GlobalInfo {
+  header?: string;
+  referencedAt?: number;
   index: number;
   name: string;
   type: CType;
@@ -137,7 +139,18 @@ export class Runtime implements TracedRuntime<Frame> {
   /** Where `strtok` continues when called with NULL. */
   tokenizerPosition = 0;
   readonly exitHandlers: number[] = [];
-  errno = 0;
+  private fallbackErrno = 0;
+
+  get errno(): number {
+    return this.errnoAddress === undefined
+      ? this.fallbackErrno
+      : (loaderOf({ kind: 'int', name: 'int' })(this, this.errnoAddress) as number);
+  }
+
+  set errno(value: number) {
+    this.fallbackErrno = value;
+    if (this.errnoAddress !== undefined) storerOf({ kind: 'int', name: 'int' })(this, this.errnoAddress, value);
+  }
   private allocatedSlots = 0;
 
   constructor(input?: ProgramInput) {
@@ -183,7 +196,7 @@ export class Runtime implements TracedRuntime<Frame> {
     if (!block) {
       block = this.allocate(bytes.length, 'data');
       block.bytes.set(bytes);
-      block.initialized.fill(1);
+      block.initialized.fill(255);
       block.isReadOnly = true;
       this.strings.set(key, block);
     }
@@ -294,7 +307,7 @@ type Storer = (runtime: Runtime, address: number, value: Scalar) => void;
 function checkInitialized(block: Allocation, offset: number, size: number): void {
   const flags = block.initialized;
   for (let index = offset; index < offset + size; index++) {
-    if (flags[index] === 0) throw new CRuntimeError('uninitialized');
+    if (flags[index] !== 255) throw new CRuntimeError('uninitialized');
   }
 }
 
@@ -313,7 +326,7 @@ function write(size: number, set: (view: DataView, offset: number, value: Scalar
     if (block.isReadOnly) throw new CRuntimeError('readOnly');
     const offset = address - block.base;
     set(block.view, offset, value);
-    block.initialized.fill(1, offset, offset + size);
+    block.initialized.fill(255, offset, offset + size);
   };
 }
 

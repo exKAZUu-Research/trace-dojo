@@ -10,7 +10,7 @@ import { libraryEntry } from './library';
 import { cString } from './library/support';
 import { parseC } from './parse';
 import { type Frame, Runtime, storeValue } from './runtime';
-import { CHAR_POINTER, INT, pointerTo } from './types';
+import { CHAR_POINTER, INT, pointerTo, sizeOf } from './types';
 
 // code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeCProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -47,8 +47,8 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
   try {
     try {
       setUp(runtime, program);
-      const status = callMain(runtime, program, onEnd);
-      exitWith(runtime, status);
+      callMain(runtime, program, onEnd);
+      exitWith(runtime);
     } catch (error) {
       if (!(error instanceof ProgramExit)) throw error;
     }
@@ -74,8 +74,8 @@ function setUp(runtime: Runtime, program: CompiledProgram): void {
   }
   runtime.literals = program.strings.map((bytes) => runtime.stringLiteral(bytes));
   runtime.globals = program.globals.map((global) => {
-    const block = runtime.allocate(Math.max(sizeOfGlobal(global.type), 1), 'data');
-    block.initialized.fill(1);
+    const block = runtime.allocate(Math.max(sizeOf(global.type), 1), 'data');
+    block.initialized.fill(255);
     block.type = global.type;
     block.name = global.name;
     return block;
@@ -95,15 +95,7 @@ function setUp(runtime: Runtime, program: CompiledProgram): void {
   for (const [index, global] of program.globals.entries()) global.initialize?.(runtime, runtime.globals[index]);
 }
 
-function sizeOfGlobal(type: CompiledProgram['globals'][number]['type']): number {
-  if (type.kind === 'array') return (type.length ?? 1) * sizeOfGlobal(type.of);
-  if (type.kind === 'record') return type.info.size;
-  if (type.kind === 'int')
-    return { bool: 1, char: 1, schar: 1, uchar: 1, short: 2, ushort: 2, int: 4, uint: 4 }[type.name as 'int'] ?? 8;
-  return type.kind === 'float' && type.name === 'float' ? 4 : 8;
-}
-
-function callMain(runtime: Runtime, program: CompiledProgram, onEnd: ((frame: Frame) => void) | undefined): number {
+function callMain(runtime: Runtime, program: CompiledProgram, onEnd: ((frame: Frame) => void) | undefined): void {
   const { main } = program;
   const args: Value[] = [];
   const types = [];
@@ -116,21 +108,19 @@ function callMain(runtime: Runtime, program: CompiledProgram, onEnd: ((frame: Fr
     types.push(INT, pointerTo(CHAR_POINTER));
   }
   // The turtles that main's variables still reach when it ends are the final ones, as in Java.
-  const result = runtime.call(main, args, types, undefined, (frame) => {
+  runtime.call(main, args, types, undefined, (frame) => {
     onEnd?.(frame);
     runtime.collectGarbage();
   });
-  return Number(result ?? 0);
 }
 
 /** Ends the program as returning from main does: `exit` runs the functions `atexit` registered. */
-function exitWith(runtime: Runtime, status: number): void {
+function exitWith(runtime: Runtime): void {
   while (runtime.exitHandlers.length > 0) {
     const address = runtime.exitHandlers.pop() as number;
     const fn = runtime.functions.get(address);
     if (fn) runtime.call(fn, [], [], undefined);
   }
-  void status;
 }
 
 function describeUncaught(error: unknown): string | undefined {

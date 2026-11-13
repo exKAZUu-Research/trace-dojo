@@ -8,7 +8,7 @@ export type Region = 'text' | 'data' | 'heap' | 'stack';
 export class Allocation {
   readonly bytes: Uint8Array;
   readonly view: DataView;
-  /** Which bytes hold a value, since reading a byte never written is undefined behavior the interpreter stops at. */
+  /** Each set bit marks an initialized bit; record copies must retain partial bit-field initialization. */
   readonly initialized: Uint8Array;
   isAlive = true;
   isReadOnly = false;

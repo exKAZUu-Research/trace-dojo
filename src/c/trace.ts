@@ -62,7 +62,8 @@ class Snapshotter {
     if (!withContext) return variables;
     this.addReceiverFields(variables, frame);
     for (const global of this.program.globals) {
-      if (!global.isShown) continue;
+      if (!global.isShown || frame.fn.locals.some((local) => local.name === global.name && frame.live[local.index]))
+        continue;
       const block = this.runtime.globals[global.index];
       if (block) this.addVariable(variables, global.name, global.type, { address: block.base });
     }
@@ -111,7 +112,7 @@ class Snapshotter {
     const offset = where.address - block.base;
     const size = sizeOf(type);
     if (offset + size > block.size) return undefined;
-    for (let index = offset; index < offset + size; index++) if (block.initialized[index] === 0) return undefined;
+    for (let index = offset; index < offset + size; index++) if (block.initialized[index] !== 255) return undefined;
     return readScalar(block.view, offset, type);
   }
 
@@ -127,6 +128,8 @@ class Snapshotter {
         const value = this.read(type, where);
         if (value === undefined) return undefined;
         if (value === 0) return NOT_SCALAR;
+        const block = this.runtime.memory.find(value as number);
+        if (!block) return `0x${Number(value).toString(16)}`;
         if (isCharType(type.to)) return this.stringAt(value as number) ?? NOT_SCALAR;
         if (isArrayLike(this.runtime, type, where)) return this.elementsFrom(type.to, value as number);
         return NOT_SCALAR;
@@ -171,7 +174,7 @@ class Snapshotter {
     if (!block) return undefined;
     const start = address - block.base;
     let end = start;
-    while (end < block.size && end - start < limit && block.initialized[end] === 1 && block.bytes[end] !== 0) end++;
+    while (end < block.size && end - start < limit && block.initialized[end] === 255 && block.bytes[end] !== 0) end++;
     return new TextDecoder().decode(block.bytes.subarray(start, end));
   }
 
@@ -245,7 +248,7 @@ class Snapshotter {
   /** What a pointer points to: a turtle, a struct, the elements from it to its block's end, or a single value. */
   private pointeeNode(type: CType, address: number, seen: Set<number>): DisplayNode | undefined {
     const block = this.runtime.memory.find(address);
-    if (!block) return undefined;
+    if (!block) return { kind: 'value', value: `0x${address.toString(16)}` };
     if (block.turtle) {
       if (!block.turtle.isAlive) return undefined;
       return {

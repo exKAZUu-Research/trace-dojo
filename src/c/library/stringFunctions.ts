@@ -2,8 +2,8 @@ import { CRuntimeError } from '../errors';
 import type { NativeFunction, Runtime } from '../runtime';
 import { asAddress, asNumber, asSize, cString, readBytes, readCString, readRaw, writeBytes } from './support';
 
-function checkOverlap(destination: number, source: number, size: number): void {
-  if (size > 0 && destination < source + size && source < destination + size)
+function checkOverlap(destination: number, source: number, size: number, sourceSize = size): void {
+  if (size > 0 && sourceSize > 0 && destination < source + sourceSize && source < destination + size)
     throw new CRuntimeError('overlappingCopy');
 }
 
@@ -43,7 +43,7 @@ function duplicate(runtime: Runtime, bytes: Uint8Array): number {
   if (!runtime.reserve(size)) return 0;
   const block = runtime.memory.allocate(size, 'heap');
   block.bytes.set(bytes);
-  block.initialized.fill(1);
+  block.initialized.fill(255);
   return block.base;
 }
 
@@ -66,6 +66,7 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
   strncpy: (runtime, [destination, source, count]) => {
     const n = asSize(count);
     const bytes = readCString(runtime, asAddress(source), n);
+    checkOverlap(asAddress(destination), asAddress(source), n, Math.min(bytes.length + 1, n));
     const result = new Uint8Array(n);
     result.set(bytes);
     writeBytes(runtime, asAddress(destination), result);
@@ -74,12 +75,14 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
   strcat: (runtime, [destination, source]) => {
     const existing = readCString(runtime, asAddress(destination));
     const bytes = readCString(runtime, asAddress(source));
+    checkOverlap(asAddress(destination), asAddress(source), existing.length + bytes.length + 1, bytes.length + 1);
     writeBytes(runtime, asAddress(destination) + existing.length, Uint8Array.from([...bytes, 0]));
     return destination;
   },
   strncat: (runtime, [destination, source, count]) => {
     const existing = readCString(runtime, asAddress(destination));
     const bytes = readCString(runtime, asAddress(source), asSize(count));
+    checkOverlap(asAddress(destination), asAddress(source), existing.length + bytes.length + 1, bytes.length + 1);
     writeBytes(runtime, asAddress(destination) + existing.length, Uint8Array.from([...bytes, 0]));
     return destination;
   },
@@ -188,7 +191,7 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
     const target = asNumber(c) & 0xff;
     const { bytes, initialized } = readRaw(runtime, asAddress(s), n);
     for (let index = 0; index < n; index++) {
-      if (initialized[index] === 0) throw new CRuntimeError('uninitialized');
+      if (initialized[index] !== 255) throw new CRuntimeError('uninitialized');
       if (bytes[index] === target) return asAddress(s) + index;
     }
     return 0;

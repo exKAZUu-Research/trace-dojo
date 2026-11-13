@@ -1,3 +1,6 @@
+import { CompileError } from '../interpreter/diagnostics';
+import { unsupported } from './unsupported';
+
 /** A preprocessing token, located by the 0-based row of the source where it starts. */
 export interface PPToken {
   kind: 'identifier' | 'number' | 'char' | 'string' | 'punctuator' | 'other';
@@ -111,6 +114,8 @@ class Lexer {
   private space = false;
 
   constructor(source: string) {
+    const trigraph = /\?\?[=()<>/'!-]/.exec(source);
+    if (trigraph) unsupported(source.slice(0, trigraph.index).split('\n').length - 1, 'トライグラフ');
     this.source = source;
   }
 
@@ -183,8 +188,11 @@ class Lexer {
     const { source } = this;
     const start = this.index;
     while (this.index < source.length && source[this.index] !== '\n') {
-      if (source[this.index] === '\\' && source[this.index + 1] === '\n') {
-        this.index += 2;
+      if (
+        source[this.index] === '\\' &&
+        (source[this.index + 1] === '\n' || source.startsWith('\r\n', this.index + 1))
+      ) {
+        this.index += source[this.index + 1] === '\n' ? 2 : 3;
         this.row++;
       } else {
         this.index++;
@@ -197,13 +205,13 @@ class Lexer {
   private blockComment(): void {
     const { source } = this;
     const start = this.index;
+    const row = this.row;
     this.take();
     this.take();
     while (this.index < source.length && !(source[this.index] === '*' && this.peek(1) === '/')) this.take();
-    if (this.index < source.length) {
-      this.take();
-      this.take();
-    }
+    if (this.index >= source.length) throw new CompileError([{ row, message: 'コメントを閉じる */ が足りません。' }]);
+    this.take();
+    this.take();
     this.comments.push({ index: start, text: source.slice(start, this.index), isLine: false });
     this.space = true;
   }

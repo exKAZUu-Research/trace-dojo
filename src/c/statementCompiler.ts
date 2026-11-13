@@ -4,7 +4,7 @@ import type { Compound, Declaration, Expression, Statement } from './ast';
 import type { FunctionContext, SwitchContext } from './compilerBase';
 import { ExpressionCompiler } from './expressionCompiler';
 import { Completion, type Exec, type Frame, type LocalInfo } from './runtime';
-import { INT_PROPERTIES, isInteger, promote, typeName, unqualified } from './types';
+import { isInteger, promote, typeName, unqualified } from './types';
 
 /** A compiled statement and the labels inside it, where a `goto` or `switch` may enter it. */
 export interface Compiled {
@@ -341,12 +341,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const run = body.exec;
     const { cases, defaultLabel } = context;
-    const isWide = INT_PROPERTIES[type.name].size === 8;
     const exec: Exec = (frame, entry) => {
       let label = entry;
       if (label === undefined) {
         const selected = value(frame) as Scalar;
-        label = cases.get(isWide ? String(selected) : String(selected)) ?? defaultLabel;
+        label = cases.get(String(selected)) ?? defaultLabel;
         if (label === undefined) return Completion.Normal;
       }
       const completion = run(frame, label);

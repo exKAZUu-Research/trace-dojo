@@ -313,7 +313,17 @@ export function compatible(a: CType, b: CType, ignoreQualifiers = false): boolea
     case 'function': {
       const other = b as FunctionType;
       if (!compatible(a.ret, other.ret)) return false;
-      if (!a.params || !other.params) return true;
+      if (!a.params || !other.params) {
+        const prototype = a.params ? a : other;
+        return (
+          !prototype.variadic &&
+          (prototype.params ?? []).every((param) =>
+            param.kind === 'float'
+              ? param.name !== 'float'
+              : param.kind !== 'int' || compatible(param, promote(param), true)
+          )
+        );
+      }
       if (a.variadic !== other.variadic || a.params.length !== other.params.length) return false;
       return a.params.every((param, index) =>
         compatible(unqualified(param), unqualified((other.params as CType[])[index]))
@@ -467,7 +477,11 @@ export function layoutRecord(info: RecordInfo, members: { name?: string; type: C
     if (member.bitWidth !== undefined) {
       if (member.bitWidth === 0) {
         // A zero-width bit-field ends the current storage unit.
-        bitPosition = Math.ceil(bitPosition / (memberSize * 8)) * memberSize * 8;
+        if (info.kind !== 'union') {
+          bitPosition = Math.ceil(bitPosition / (memberSize * 8)) * memberSize * 8;
+          offset = bitPosition / 8;
+          size = Math.max(size, offset);
+        }
         continue;
       }
       if (info.kind === 'union') {

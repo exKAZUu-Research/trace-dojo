@@ -96,7 +96,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.stringLiteral(expression.parts, row);
       }
       case 'paren': {
-        return { ...this.expression(expression.expression), isParenthesized: true };
+        return this.expression(expression.expression);
       }
       case 'binary': {
         const left = expression.left;
@@ -198,6 +198,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       case 'global': {
         const { global } = entity;
+        global.referencedAt ??= row;
         const index = global.index;
         const operand = this.memoryOperand(entity.type, (frame) => frame.runtime.globals[index].base);
         return {
@@ -223,7 +224,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (local.inMemory) {
           const index = local.index;
           const operand = this.memoryOperand(entity.type, (frame) => frame.bases[index]);
-          return { ...operand, ...folded, lvalue: { ...(operand.lvalue as LValue), local } };
+          return {
+            ...operand,
+            ...folded,
+            lvalue: { ...(operand.lvalue as LValue), local, isRegister: this.fn?.registerLocals.has(local) ?? false },
+          };
         }
         const index = local.index;
         const load = (frame: Frame): Value => {
@@ -583,15 +588,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const value = operand.value;
     const convert = (frame: Frame): Value => convertScalar(value(frame) as Scalar, source, type);
     const constant =
-      operand.constant !== undefined && isArithmetic(type) ? convertScalar(operand.constant, source, type) : undefined;
+      operand.constant !== undefined && isArithmetic(type)
+        ? convertedConstant(operand.constant, source, type)
+        : undefined;
     const result: Operand = {
       type,
       value: convert,
       ...(constant === undefined ? {} : { constant }),
       isAddressConstant: operand.isAddressConstant && type.kind === 'pointer',
     };
-    if (type.kind === 'pointer' && isVoidPointer(type) && isNullConstant(operand))
-      return { ...result, constant: 0, isAddressConstant: true };
+    if (type.kind === 'pointer' && isNullConstant(operand)) return { ...result, constant: 0, isAddressConstant: true };
     return result;
   }
 
@@ -616,7 +622,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (condition.constant !== undefined) {
       const chosen = isZero(condition.constant) ? whenFalse : whenTrue;
       if (chosen.constant !== undefined && isArithmetic(type)) {
-        return { type, value, constant: convertScalar(chosen.constant, chosen.type, type) };
+        return { type, value, constant: convertedConstant(chosen.constant, chosen.type, type) };
       }
     }
     return { type, value };
@@ -810,7 +816,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const temporary = (frame: Frame): Value => {
         const record = value(frame) as RecordValue;
         if (field.bitWidth !== undefined)
-          return readBits(record.bytes, offset, field.bitOffset ?? 0, field.bitWidth, field.type as IntType);
+          return readBits(record, offset, field.bitOffset ?? 0, field.bitWidth, field.type as IntType);
         return readFromBytes(record, offset, size, field.type);
       };
       return { type: fieldType as CType, value: temporary, bitWidth: field.bitWidth };
@@ -841,17 +847,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
         load: () => {
           const block = frame.runtime.memory.locate(address, size);
           const offset = address - block.base;
-          for (let index = 0; index < size; index++) {
-            if (block.initialized[offset + index] === 0) throw new CRuntimeError('uninitialized');
-          }
-          return readBits(block.bytes, offset, bitOffset, width, type);
+          return readBits(block, offset, bitOffset, width, type);
         },
         store: (value) => {
           const block = frame.runtime.memory.locate(address, size);
           if (block.isReadOnly) throw new CRuntimeError('readOnly');
           const offset = address - block.base;
-          writeBits(block.bytes, offset, bitOffset, width, value as Scalar);
-          block.initialized.fill(1, offset, offset + size);
+          writeBits(block, offset, bitOffset, width, value as Scalar);
         },
       };
     };
@@ -871,8 +873,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const value = operand.value;
     if (from.kind === 'record' || type.kind === 'record' || type.kind === 'void') return value;
     if (operand.constant !== undefined && isScalar(type)) {
-      const constant = convertScalar(operand.constant, from, type);
-      return () => constant;
+      const constant = convertedConstant(operand.constant, from, type);
+      if (constant !== undefined) return () => constant;
     }
     const sameInteger = from.kind === 'int' && type.kind === 'int' && from.name === type.name;
     const sameFloat = from.kind === 'float' && type.kind === 'float' && from.name === type.name;
@@ -936,7 +938,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return (frame) => value(frame) !== 0n;
     return (frame) => {
       const result = value(frame);
-      return result !== 0 && !(typeof result === 'number' && Number.isNaN(result) && false);
+      return result !== 0;
     };
   }
 
@@ -966,6 +968,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
 /** A name that stddef.h declares, telling that the program included it and may use offsetof. */
 export const OFFSETOF_MARKER = '__offsetof_is_declared';
+
+function convertedConstant(value: Scalar, source: CType, target: CType): Scalar | undefined {
+  try {
+    return convertScalar(value, source, target);
+  } catch (error) {
+    if (!(error instanceof CRuntimeError)) throw error;
+    return undefined;
+  }
+}
 
 function rvalueType(operand: Operand): CType {
   return operand.bitWidth !== undefined &&
@@ -1056,7 +1067,13 @@ export function offsetAddress(frame: Frame, address: number, delta: number): num
   return result;
 }
 
-export function readBits(bytes: Uint8Array, offset: number, bitOffset: number, width: number, type: IntType): Scalar {
+export function readBits(record: RecordValue, offset: number, bitOffset: number, width: number, type: IntType): Scalar {
+  const { bytes, initialized } = record;
+  const mask = ((1n << BigInt(width)) - 1n) << BigInt(bitOffset);
+  for (let index = 0; index < sizeOf(type); index++) {
+    const required = Number((mask >> BigInt(index * 8)) & 255n);
+    if ((initialized[offset + index] & required) !== required) throw new CRuntimeError('uninitialized');
+  }
   let raw = 0n;
   const size = sizeOf(type);
   for (let index = size - 1; index >= 0; index--) raw = (raw << 8n) | BigInt(bytes[offset + index]);
@@ -1066,14 +1083,18 @@ export function readBits(bytes: Uint8Array, offset: number, bitOffset: number, w
   return size === 8 ? field : Number(field);
 }
 
-function writeBits(bytes: Uint8Array, offset: number, bitOffset: number, width: number, value: Scalar): void {
+export function writeBits(record: RecordValue, offset: number, bitOffset: number, width: number, value: Scalar): void {
+  const { bytes, initialized } = record;
   const mask = ((1n << BigInt(width)) - 1n) << BigInt(bitOffset);
   let size = 0;
   while (size < 8 && offset + size < bytes.length && mask >> BigInt(size * 8) > 0n) size++;
   let raw = 0n;
   for (let index = size - 1; index >= 0; index--) raw = (raw << 8n) | BigInt(bytes[offset + index]);
   raw = (raw & ~mask) | ((BigInt(value) << BigInt(bitOffset)) & mask);
-  for (let index = 0; index < size; index++) bytes[offset + index] = Number((raw >> BigInt(index * 8)) & 0xffn);
+  for (let index = 0; index < size; index++) {
+    bytes[offset + index] = Number((raw >> BigInt(index * 8)) & 0xffn);
+    initialized[offset + index] |= Number((mask >> BigInt(index * 8)) & 255n);
+  }
 }
 
 function readFromBytes(record: RecordValue, offset: number, size: number, type: CType): Value {
@@ -1084,7 +1105,7 @@ function readFromBytes(record: RecordValue, offset: number, size: number, type: 
     };
   }
   for (let index = offset; index < offset + size; index++) {
-    if (record.initialized[index] === 0) throw new CRuntimeError('uninitialized');
+    if (record.initialized[index] !== 255) throw new CRuntimeError('uninitialized');
   }
   const view = new DataView(record.bytes.buffer, record.bytes.byteOffset);
   return readScalar(view, offset, type);

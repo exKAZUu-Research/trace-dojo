@@ -1,3 +1,4 @@
+import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
   Compound,
@@ -13,7 +14,7 @@ import type {
 } from './ast';
 import type { CompileOptions, Entity, FunctionContext, Operand } from './compilerBase';
 import { declaredName, findFunctionDeclarator } from './convert';
-import { isNullConstant, type SpecialCall } from './expressionCompiler';
+import { isNullConstant, type SpecialCall, writeBits } from './expressionCompiler';
 import { decodeStringLiteral } from './literals';
 import { TURTLE_HEADER_NAME } from './parse';
 import {
@@ -63,6 +64,7 @@ interface LocalPart {
 }
 
 export class Compiler extends StatementCompiler {
+  private readonly usedAtomicRows = new Set<number>();
   constructor(
     options: CompileOptions,
     private readonly library: (name: string) => LibraryEntry | undefined
@@ -79,6 +81,15 @@ export class Compiler extends StatementCompiler {
       if (fn.referencedAt !== undefined && !fn.isDefined && !fn.native && fn.header === undefined) {
         this.error(fn.referencedAt, `関数「${fn.name}」は宣言されていますが、定義されていません。`);
       }
+    }
+    for (const global of this.globals) {
+      if (!global.isDefined && global.header === undefined && global.referencedAt !== undefined)
+        this.error(global.referencedAt, `変数「${global.name}」は宣言されていますが、定義されていません。`);
+      if (global.isDefined && global.type.kind === 'array' && global.type.length === undefined)
+        global.type = { ...global.type, length: 1 };
+    }
+    for (const row of this.options.trace?.atomicAnnotations.keys() ?? []) {
+      if (!this.usedAtomicRows.has(row)) this.error(row, misplacedAtomicMessage);
     }
     return { globals: this.globals, functions: this.functions, strings: this.strings, main: main.fn };
   }
@@ -224,7 +235,7 @@ export class Compiler extends StatementCompiler {
         if (global.initialize) this.error(row, `変数「${name}」が2回定義されています。`);
         global.initialize = this.staticInitializer(global.type, init, row);
       }
-      if (storage !== 'extern') global.isDefined = true;
+      if (storage !== 'extern' || init !== undefined) global.isDefined = true;
       this.scope.ordinary.set(name, existing);
       return global;
     }
@@ -235,7 +246,8 @@ export class Compiler extends StatementCompiler {
       row,
       isShown: header === undefined && !isConstGlobal(type),
       isReadOnly: false,
-      isDefined: storage !== 'extern',
+      isDefined: storage !== 'extern' || init !== undefined,
+      header,
     };
     this.globals.push(global);
     const entity: Extract<Entity, { kind: 'global' }> = { kind: 'global', global, type };
@@ -281,9 +293,11 @@ export class Compiler extends StatementCompiler {
     info.isDefined = true;
     info.row = row;
     const annotations = this.options.trace?.atomicAnnotations;
-    info.isAtomic =
-      annotations !== undefined &&
-      [...annotations.keys()].some((annotation) => annotation >= row && annotation <= definition.bodyRow);
+    const atomicRows = [...(annotations?.keys() ?? [])].filter(
+      (annotation) => annotation >= row && annotation <= definition.bodyRow
+    );
+    info.isAtomic = atomicRows.length > 0;
+    for (const annotation of atomicRows) this.usedAtomicRows.add(annotation);
     const declarator = findFunctionDeclarator(definition.declarator) as Extract<Declarator, { kind: 'function' }>;
     const context: FunctionContext = {
       info,
@@ -363,6 +377,7 @@ export class Compiler extends StatementCompiler {
 
   protected localDeclaration(declaration: Declaration): Compiled {
     const { specifiers, row } = declaration;
+    this.declareStandaloneTag(declaration);
     const base = this.baseType(specifiers);
     const parts: LocalPart[] = [];
     for (const declarator of declaration.declarators) {
@@ -422,11 +437,7 @@ export class Compiler extends StatementCompiler {
   }
 
   private externLocal(name: string, type: CType, row: number): void {
-    const existing = this.fileScope.ordinary.get(name);
-    const global =
-      existing?.kind === 'global'
-        ? existing.global
-        : this.declareGlobal(name, type, row, 'extern', undefined, undefined);
+    const global = this.declareGlobal(name, type, row, 'extern', undefined, undefined);
     this.scope.ordinary.set(name, { kind: 'global', global, type: global.type });
   }
 
@@ -515,9 +526,15 @@ export class Compiler extends StatementCompiler {
   private singleExpression(type: CType, init: Initializer): Expression {
     if (init.kind === 'expression') return init.expression;
     if (init.items.length === 0) unsupported(init.row, '空の { } による初期化');
-    const [first] = init.items;
+    const [first, ...excess] = init.items;
+    for (const item of excess) this.validateInitializer(item);
     if (first.kind === 'list') this.error(first.row, `${typeName(type)} の初期化に、{ } を重ねて書けません。`);
     return first.expression;
+  }
+
+  private validateInitializer(init: Initializer): void {
+    if (init.kind === 'expression') this.rvalue(init.expression);
+    else for (const item of init.items) this.validateInitializer(item);
   }
 
   /** The length that an initializer gives an array declared without one. */
@@ -527,16 +544,13 @@ export class Compiler extends StatementCompiler {
       if (literal) return decodeStringLiteral(literal.parts, literal.row).length;
     }
     if (init.kind !== 'list') this.error(init.row, '配列の初期化には { } か文字列リテラルを書いてください。');
-    const elementSize = elementCount(type.of);
+    const cursor = { items: init.items, index: 0 };
     let count = 0;
-    let position = 0;
-    for (const item of init.items) {
-      if (item.kind === 'list' || elementSize === 1) {
-        position++;
-      } else {
-        position += 1 / elementSize;
-      }
-      count = Math.max(count, Math.ceil(position - 1e-9));
+    while (cursor.index < cursor.items.length) {
+      const before = cursor.index;
+      this.element(type.of, cursor, 0, [], false);
+      if (cursor.index === before) this.error(init.row, '配列の要素を初期化できません。');
+      count++;
     }
     if (count === 0) unsupported(init.row, '空の { } による初期化');
     return count;
@@ -568,7 +582,7 @@ export class Compiler extends StatementCompiler {
       const block = frame.runtime.memory.locate(address, size);
       const offset = address - block.base;
       block.bytes.fill(0, offset, offset + size);
-      block.initialized.fill(1, offset, offset + size);
+      block.initialized.fill(255, offset, offset + size);
       for (const { offset: at, write } of writes) write(frame, address + at);
     };
   }
@@ -584,7 +598,7 @@ export class Compiler extends StatementCompiler {
           const block = frame.runtime.memory.locate(address, size);
           const offset = address - block.base;
           block.bytes.fill(0, offset, offset + size);
-          block.initialized.fill(1, offset, offset + size);
+          block.initialized.fill(255, offset, offset + size);
           for (const { offset: at, write } of writes) write(frame, address + at);
         };
       }
@@ -713,19 +727,13 @@ export class Compiler extends StatementCompiler {
     bitOffset?: number;
     bitWidth?: number;
   }): (frame: Frame, address: number, value: Value) => void {
-    const operand = this.memoryOperand(INT, () => 0);
-    void operand;
     const width = field.bitWidth as number;
     const bitOffset = field.bitOffset ?? 0;
     const size = sizeOf(field.type);
     return (frame, address, value) => {
       const block = frame.runtime.memory.locate(address, size);
       const at = address - block.base;
-      const mask = ((1n << BigInt(width)) - 1n) << BigInt(bitOffset);
-      let raw = 0n;
-      for (let index = size - 1; index >= 0; index--) raw = (raw << 8n) | BigInt(block.bytes[at + index]);
-      raw = (raw & ~mask) | ((BigInt(value as number | bigint) << BigInt(bitOffset)) & mask);
-      for (let index = 0; index < size; index++) block.bytes[at + index] = Number((raw >> BigInt(index * 8)) & 0xffn);
+      writeBits(block, at, bitOffset, width, value as number | bigint);
     };
   }
 
@@ -751,17 +759,6 @@ function stringLiteralOf(init: Initializer): Extract<Expression, { kind: 'string
   if (init.kind === 'expression') return stringOf(init.expression);
   if (init.items.length === 1 && init.items[0].kind === 'expression') return stringOf(init.items[0].expression);
   return undefined;
-}
-
-/** The number of scalars in a type, for the length an elided initializer list gives an array. */
-function elementCount(type: CType): number {
-  if (type.kind === 'array') return (type.length ?? 0) * elementCount(type.of);
-  if (type.kind === 'record') {
-    const fields = type.info.fields ?? [];
-    if (type.info.kind === 'union') return fields.length > 0 ? elementCount(fields[0].type) : 1;
-    return fields.filter((field) => field.name !== undefined).reduce((sum, field) => sum + elementCount(field.type), 0);
-  }
-  return 1;
 }
 
 function functionBody(exec: Exec, isMain: boolean): Exec {

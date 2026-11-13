@@ -1,7 +1,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
-import type { Declarator, Expression, FieldDeclaration, Specifiers, TypeName, TypeSpecifier } from './ast';
+import type { Declaration, Declarator, Expression, FieldDeclaration, Specifiers, TypeName, TypeSpecifier } from './ast';
 import type { Frame, FunctionInfo, GlobalInfo, LocalInfo } from './runtime';
 import {
   builtinType,
@@ -65,8 +65,6 @@ export interface Operand {
   isCall?: boolean;
   /** Evaluates the expression for its effects only, as an expression statement does. */
   effect?: (frame: Frame) => void;
-  /** Whether the expression is a parenthesized one, which changes only some of clang's checks. */
-  isParenthesized?: boolean;
 }
 
 export interface Location {
@@ -113,6 +111,7 @@ export interface CompileOptions {
 
 export abstract class CompilerBase {
   protected scope = new Scope();
+  private inParameter = false;
   protected fn?: FunctionContext;
   protected readonly globals: GlobalInfo[] = [];
   protected readonly functions: FunctionInfo[] = [];
@@ -181,6 +180,19 @@ export abstract class CompilerBase {
       case 'enum': {
         return this.enumType(specifier);
       }
+    }
+  }
+
+  protected declareStandaloneTag(declaration: Declaration): void {
+    const { type } = declaration.specifiers;
+    if (
+      declaration.declarators.length === 0 &&
+      (type.kind === 'struct' || type.kind === 'union') &&
+      type.tag &&
+      !type.fields
+    ) {
+      const existing = this.scope.tags.get(type.tag);
+      if (!existing) this.scope.tags.set(type.tag, { kind: 'record', info: new RecordInfo(type.kind, type.tag) });
     }
   }
 
@@ -332,7 +344,7 @@ export abstract class CompilerBase {
   private arrayLength(size: Expression): number {
     const operand = this.constantOperand(size);
     if (operand?.constant === undefined || operand.type.kind !== 'int') {
-      if (this.fn) unsupported(size.row, '大きさが定数でない配列（可変長配列）');
+      if (this.fn || this.inParameter) unsupported(size.row, '大きさが定数でない配列（可変長配列）');
       this.error(size.row, '配列の大きさには、整数の定数を書いてください。');
     }
     const length = Number(operand.constant);
@@ -356,7 +368,26 @@ export abstract class CompilerBase {
     ) {
       return { kind: 'function', ret, params: [], variadic: declarator.variadic };
     }
-    const types = params.map((param) => this.parameterType(param).type);
+    const types = this.withScope(() =>
+      params.map((param) => {
+        const { type, name } = this.parameterType(param);
+        if (name)
+          this.scope.ordinary.set(name, {
+            kind: 'local',
+            type,
+            local: {
+              name,
+              type,
+              index: 0,
+              row: param.row,
+              inMemory: false,
+              size: 0,
+              isParameter: true,
+            },
+          });
+        return type;
+      })
+    );
     return { kind: 'function', ret, params: types, variadic: declarator.variadic };
   }
 
@@ -368,7 +399,15 @@ export abstract class CompilerBase {
     if (param.specifiers.storage && param.specifiers.storage !== 'register') {
       this.error(param.row, '引数に記憶域の指定（static など）は書けません。');
     }
-    const { type, name } = this.withScope(() => this.declaredType(this.baseType(param.specifiers), param.declarator));
+    const previous = this.inParameter;
+    this.inParameter = true;
+    let declared: ReturnType<CompilerBase['declaredType']>;
+    try {
+      declared = this.withScope(() => this.declaredType(this.baseType(param.specifiers), param.declarator));
+    } finally {
+      this.inParameter = previous;
+    }
+    const { type, name } = declared;
     if (type.kind === 'void') this.error(param.row, '引数の型に void は使えません。');
     if (type.kind === 'array')
       return { type: withQualifiers({ kind: 'pointer', to: type.of }, false, false), ...(name ? { name } : {}) };

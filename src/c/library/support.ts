@@ -11,7 +11,7 @@ export function readCString(runtime: Runtime, address: number, limit = Number.PO
   let end = start;
   while (end - start < limit) {
     if (end >= block.size) throw new CRuntimeError('unterminatedString');
-    if (block.initialized[end] === 0) throw new CRuntimeError('uninitialized');
+    if (block.initialized[end] !== 255) throw new CRuntimeError('uninitialized');
     if (block.bytes[end] === 0) break;
     end++;
   }
@@ -26,7 +26,7 @@ export function readBytes(runtime: Runtime, address: number, size: number): Uint
   const block = runtime.memory.locate(address, size);
   const offset = address - block.base;
   for (let index = offset; index < offset + size; index++) {
-    if (block.initialized[index] === 0) throw new CRuntimeError('uninitialized');
+    if (block.initialized[index] !== 255) throw new CRuntimeError('uninitialized');
   }
   runtime.spend(Math.ceil(size / 64));
   return block.bytes.slice(offset, offset + size);
@@ -57,7 +57,7 @@ export function writeBytes(runtime: Runtime, address: number, bytes: Uint8Array,
   const offset = address - block.base;
   block.bytes.set(bytes, offset);
   if (initialized) block.initialized.set(initialized, offset);
-  else block.initialized.fill(1, offset, offset + bytes.length);
+  else block.initialized.fill(255, offset, offset + bytes.length);
   runtime.spend(Math.ceil(bytes.length / 64));
 }
 
