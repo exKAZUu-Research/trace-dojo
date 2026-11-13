@@ -37,8 +37,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   attributed_declarator: '属性（[[...]]）',
   extension_expression: '__extension__',
   macro_type_specifier: 'マクロを型として使う書き方',
-  va_arg_expression: '可変長引数（va_arg）',
-  variadic_parameter: '可変長引数の関数（...）',
   gnu_asm_expression: 'インラインアセンブリ（asm）',
   builtin_available_expression: '__builtin_available',
   seh_try_statement: '__try',
@@ -856,6 +854,14 @@ export class Converter {
           row,
         };
       }
+      case 'va_arg_expression': {
+        return {
+          kind: 'vaArg',
+          operand: this.expression(field(node, 'value')),
+          typeName: this.typeName(field(node, 'type')),
+          row,
+        };
+      }
       case 'offsetof_expression': {
         return {
           kind: 'offsetof',
@@ -960,8 +966,6 @@ export class Converter {
   }
 
   private checkUnsupported(node: Node): void {
-    // Headers declare variadic functions such as printf, which learners' programs may call but not define.
-    if (this.fromHeader && node.type === 'variadic_parameter') return;
     const feature = UNSUPPORTED_NODES[node.type];
     if (feature) unsupported(node.startPosition.row, feature);
     const keyword = NOT_C17_KEYWORDS[node.type];

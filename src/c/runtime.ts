@@ -7,7 +7,7 @@ import type { RecordValue, Scalar, Value } from './arith';
 import { CRuntimeError } from './errors';
 import { ByteStream } from './library/support';
 import { type Allocation, Memory } from './memory';
-import type { CType, FunctionType } from './types';
+import { type CType, type FunctionType, sizeOf } from './types';
 
 /** A block-scope variable of a function, in the order the function declares it. */
 export interface LocalInfo {
@@ -82,6 +82,8 @@ export class Frame implements TracedFrame {
   returnValue: Value | undefined;
   /** The label a `goto` jumps to, while its completion travels to the statement holding the label. */
   gotoLabel = -1;
+  /** The address of the block holding a variadic function's extra arguments, which `va_start` points to. */
+  varargs = 0;
 
   constructor(
     readonly runtime: Runtime,
@@ -114,6 +116,8 @@ export class Runtime implements TracedRuntime<Frame> {
   /** Where `strtok` continues when called with NULL. */
   tokenizerPosition = 0;
   readonly exitHandlers: number[] = [];
+  /** The static struct tm and string of time.h's functions, created when first used. */
+  readonly timeBuffers: { tm?: Allocation; text?: Allocation } = {};
   errno = 0;
   private allocatedSlots = 0;
 
@@ -195,6 +199,8 @@ export class Runtime implements TracedRuntime<Frame> {
     for (const [index, param] of fn.params.entries()) {
       bindParameter(frame, param, args[index]);
     }
+    if (fn.type.variadic)
+      frame.varargs = this.storeVarargs(frame, args.slice(fn.params.length), argTypes.slice(fn.params.length));
     this.frames.push(frame);
     try {
       (fn.body as Exec)(frame);
@@ -202,10 +208,35 @@ export class Runtime implements TracedRuntime<Frame> {
     } finally {
       this.frames.pop();
       for (const block of frame.blocks) this.memory.release(block);
+      if (frame.varargs !== 0) this.varargTypes.delete(frame.varargs);
     }
     if (fn.isAtomic) this.steps.completeAtomicCall();
     return frame.returnValue;
   }
+
+  /**
+   * Stores a variadic call's extra arguments in 8-byte slots, as arm64 macOS passes them on the stack, so that `va_arg`
+   * reads them through a `va_list` that is a `char *`.
+   */
+  private storeVarargs(frame: Frame, values: Value[], types: CType[]): number {
+    const slots: CType[] = [];
+    for (const type of types) {
+      slots.push(type);
+      for (let extra = 8; extra < sizeOf(type); extra += 8) slots.push(type);
+    }
+    const block = this.allocate(Math.max(slots.length * 8, 8), 'stack');
+    frame.blocks.push(block);
+    let offset = 0;
+    for (const [index, type] of types.entries()) {
+      storeValue(this, block.base + offset, type, values[index]);
+      offset += Math.ceil(sizeOf(type) / 8) * 8;
+    }
+    this.varargTypes.set(block.base, slots);
+    return block.base;
+  }
+
+  /** The types of the arguments in a block of extra arguments, by 8-byte slot. */
+  readonly varargTypes = new Map<number, CType[]>();
 
   /** Removes the turtles that no variable, nor any block a variable reaches, points to any longer. */
   collectGarbage(): void {

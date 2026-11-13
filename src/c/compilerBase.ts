@@ -109,6 +109,11 @@ export interface CompileOptions {
 export abstract class CompilerBase {
   protected scope = new Scope();
   protected fn?: FunctionContext;
+
+  /** The function being compiled, for the checks of calls that depend on it, such as `va_start`. */
+  get currentFunction(): FunctionInfo | undefined {
+    return this.fn?.info;
+  }
   protected readonly globals: GlobalInfo[] = [];
   protected readonly functions: FunctionInfo[] = [];
   /** The distinct string literals, whose blocks the run creates when it starts. */

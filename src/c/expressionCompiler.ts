@@ -29,6 +29,7 @@ import {
   INT_PROPERTIES,
   type IntType,
   isArithmetic,
+  isCharType,
   isComplete,
   isConstQualified,
   isInteger,
@@ -153,6 +154,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'member': {
         return this.member(expression);
       }
+      case 'vaArg': {
+        return this.vaArg(expression);
+      }
       case 'offsetof': {
         return this.offsetof(expression);
       }
@@ -170,6 +174,46 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (!field) this.error(row, `「${typeName(type)}」にはメンバ「${member}」がありません。`);
     if (field.bitWidth !== undefined) this.error(row, 'ビットフィールドに offsetof は使えません。');
     return constantOperand(SIZE_T, BigInt(field.offset));
+  }
+
+  /** `va_arg(ap, T)`: reads the next extra argument of a variadic call and moves `ap` past it. */
+  private vaArg(expression: Extract<Expression, { kind: 'vaArg' }>): Operand {
+    const { row } = expression;
+    if (!this.scope.lookup(STDARG_MARKER)) this.undeclaredFunction('va_arg', row);
+    const list = this.vaList(expression.operand, row, 'va_arg');
+    const type = unqualified(this.typeOfName(expression.typeName));
+    if (type.kind === 'void' || type.kind === 'array' || type.kind === 'function' || !isComplete(type)) {
+      this.error(row, `va_arg では ${typeName(type)} の値は読めません。`);
+    }
+    const { load, store } = list;
+    const size = sizeOf(type);
+    const read =
+      type.kind === 'record'
+        ? (frame: Frame, at: number): Value => loadRecord(frame.runtime, at, size)
+        : (() => {
+            const loader = loaderOf(type);
+            return (frame: Frame, at: number): Value => loader(frame.runtime, at);
+          })();
+    return {
+      type,
+      value: (frame) => {
+        const address = load(frame) as number;
+        checkVararg(frame, address, type);
+        const value = read(frame, address);
+        store(frame, address + Math.ceil(size / 8) * 8);
+        return value;
+      },
+    };
+  }
+
+  /** The `va_list` variable that `va_start`, `va_arg`, and `va_copy` take. */
+  vaList(expression: Expression, row: number, what: string): LValue {
+    const operand = this.expression(expression);
+    const type = operand.type;
+    if (!operand.lvalue || type.kind !== 'pointer' || !isCharType(type.to)) {
+      this.error(row, `${what} の1つ目には、va_list の変数を書いてください。`);
+    }
+    return operand.lvalue;
   }
 
   // Names and literals ----------------------------------------------------------------------------------------------
@@ -964,6 +1008,31 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
 /** A name that stddef.h declares, telling that the program included it and may use offsetof. */
 export const OFFSETOF_MARKER = '__offsetof_is_declared';
+
+/** A name that stdarg.h declares, telling that the program included it and may use va_arg. */
+export const STDARG_MARKER = '__va_arg_is_declared';
+
+/**
+ * Stops at a `va_arg` past the extra arguments, or of a type other than the argument's, which C leaves undefined.
+ */
+function checkVararg(frame: Frame, address: number, type: CType): void {
+  const runtime = frame.runtime;
+  const block = runtime.memory.find(address) ?? runtime.memory.find(address - 1);
+  const slots = block ? runtime.varargTypes.get(block.base) : undefined;
+  if (!block || !slots) throw new CRuntimeError('custom', 'va_list が va_start で始めた可変長引数を指していません。');
+  const stored = slots[(address - block.base) / 8];
+  if (!stored) throw new CRuntimeError('custom', 'va_arg で、渡された引数より多く読みました。');
+  const sameKind =
+    stored.kind === type.kind &&
+    sizeOf(stored) === sizeOf(type) &&
+    (stored.kind !== 'record' || (type.kind === 'record' && stored.info === type.info));
+  if (!sameKind) {
+    throw new CRuntimeError(
+      'custom',
+      `va_arg で読んだ型（${typeName(type)}）が、渡された引数の型（${typeName(stored)}）と合いません。`
+    );
+  }
+}
 
 const RELATIONAL = new Set<string>(['<', '>', '<=', '>=']);
 

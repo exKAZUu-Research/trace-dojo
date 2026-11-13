@@ -3,10 +3,12 @@ import { ProgramAbort } from '../errors';
 import { FILE_NAME } from '../preprocessor';
 import type { NativeFunction } from '../runtime';
 import { CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
-import { STDIO_FUNCTIONS } from './stdioFunctions';
+import { vaStartCall } from './stdarg';
+import { STDIO_FUNCTIONS, VARARG_FUNCTIONS } from './stdioFunctions';
 import { STDLIB_FUNCTIONS } from './stdlibFunctions';
 import { STRING_FUNCTIONS } from './stringFunctions';
 import { asAddress, asNumber, bytesToText, readCString } from './support';
+import { TIME_FUNCTIONS } from './timeFunctions';
 import { newTurtleCall, removeCall, TURTLE_FUNCTIONS } from './turtleFunctions';
 
 const MISC_FUNCTIONS: Record<string, NativeFunction> = {
@@ -24,7 +26,6 @@ const UNSUPPORTED: Record<string, string> = {
   fscanf: 'ファイルの読み書き（fscanf）',
   vscanf: '標準入力（vscanf）',
   vfscanf: 'ファイルの読み書き（vfscanf）',
-  vsscanf: '可変長引数（vsscanf）',
   getchar: '標準入力（getchar）',
   getc: '標準入力・ファイルの読み込み（getc）',
   fgetc: '標準入力・ファイルの読み込み（fgetc）',
@@ -46,10 +47,6 @@ const UNSUPPORTED: Record<string, string> = {
   rename: 'ファイルの操作（rename）',
   tmpfile: 'ファイルの読み書き（tmpfile）',
   tmpnam: 'ファイルの操作（tmpnam）',
-  vprintf: '可変長引数（vprintf）',
-  vfprintf: '可変長引数（vfprintf）',
-  vsprintf: '可変長引数（vsprintf）',
-  vsnprintf: '可変長引数（vsnprintf）',
   getenv: '環境変数（getenv）',
   system: '外部のプロセスの呼び出し（system）',
   mblen: 'マルチバイト文字の変換（mblen）',
@@ -72,12 +69,16 @@ const NATIVES: Record<string, NativeFunction> = {
   ...MATH_FUNCTIONS,
   ...CTYPE_FUNCTIONS,
   ...MISC_FUNCTIONS,
+  ...VARARG_FUNCTIONS,
+  ...TIME_FUNCTIONS,
+  // The compiler compiles va_start itself; this entry only marks it as a library function.
+  __builtin_va_start: () => {},
   lldiv: STDLIB_FUNCTIONS.ldiv,
   imaxdiv: STDLIB_FUNCTIONS.ldiv,
   atoll: STDLIB_FUNCTIONS.atol,
 };
 
-const SPECIAL_CALLS = { new_turtle: newTurtleCall, remove: removeCall };
+const SPECIAL_CALLS = { new_turtle: newTurtleCall, remove: removeCall, __builtin_va_start: vaStartCall };
 
 /** The interpreter's implementation of a library function, or why it leaves the function out. */
 export function libraryEntry(name: string): LibraryEntry | undefined {
