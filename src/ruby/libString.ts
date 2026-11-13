@@ -27,12 +27,12 @@ import {
   typeError,
 } from './errors';
 import { formatString } from './format';
-import { hashGet } from './hashes';
+import { hashDefault, hashGet } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
 import {
   arr,
@@ -942,7 +942,11 @@ function* substitute(
     matched = true;
     let piece: string;
     if (replacement instanceof RHash) {
-      piece = yield* toS(yield* callMethod(replacement, '[]', [str(target)]));
+      const key = str(target);
+      piece = yield* whileHeld(key, function* () {
+        const entry = yield* hashGet(replacement, key);
+        return yield* toS(entry ? entry.value : yield* hashDefault(replacement, key));
+      });
     } else if (replacement !== undefined) {
       piece = expandReplacement(
         yield* stringArg(replacement),

@@ -171,6 +171,11 @@ test.each([
   ],
   ['gsub reads Hash default proc', 'p "aaa".gsub("a",Hash.new{|h,k|"X"})', '"XXX"\n'],
   [
+    'substitution bypasses Hash lookup overrides',
+    'class H<Hash;def [](x);puts :called;"x";end;end;p "a".gsub("a",H.new)',
+    '""\n',
+  ],
+  [
     'String padding checks encoding compatibility',
     'begin;p 255.chr.center(3,"é");rescue=>e;p e.class;end',
     'Encoding::CompatibilityError\n',
