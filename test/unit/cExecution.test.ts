@@ -117,8 +117,8 @@ test.each([
     '自分で作ったヘッダや別のファイル（#include "mine.h"）は、この採点環境では使えません。',
   ],
   [
-    'struct P { int x; };\nint main(void) {\n  struct P p = { .x = 1 };\n}',
-    '要素を指定した初期化（.x = 1 や [2] = 5）は、この採点環境では使えません。',
+    'int main(void) {\n  int x = 1;\n  return _Generic(x, int: 1, default: 0);\n}',
+    '_Genericは、この採点環境では使えません。',
   ],
 ])('features left out of the interpreter are rejected before running: %s', (program, message) => {
   const execution = executeProgram('c', program);
