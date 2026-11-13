@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 646 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 650 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -52,6 +52,7 @@ import {
   objectClass,
   pyError,
   staticmethodClass,
+  stringValue,
   tupleGetterClass,
   typeClass,
   typeError,
@@ -138,13 +139,13 @@ function isMetaDataDescriptor(attribute: PyValue): boolean {
 export function typeData(cls: PyClass, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {
-      return cls.name;
+      return cls.nameValue ?? cls.name;
     }
     case '__qualname__': {
-      return cls.qualifiedName;
+      return cls.qualifiedNameValue ?? cls.qualifiedName;
     }
     case '__module__': {
-      return cls.module;
+      return (!cls.isBuiltin ? cls.dict.get('__module__') : undefined) ?? cls.module;
     }
     case '__flags__': {
       return BigInt(typeFlags(cls));
@@ -532,6 +533,7 @@ function userHook(target: PyObject, name: string): PyValue | undefined {
   return isNativeMethod(custom) ? undefined : custom;
 }
 
+// code-gauge-allow functionCognitiveComplexity 21 -- Class metadata keeps string data and original objects together; splitting these cases only moves their complexity.
 function setClassAttribute(target: PyClass, name: string, value: PyValue, callsHook = true): void {
   refuseSharedClass(target);
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
@@ -543,14 +545,22 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue, callsH
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
   }
   if (name === '__name__' || name === '__qualname__') {
-    if (typeof value !== 'string') {
+    const previous = name === '__name__' ? target.nameValue : target.qualifiedNameValue;
+    const text = stringValue(value);
+    if (text === undefined) {
       throw typeError(`can only assign string to ${target.name}.${name}, not '${typeName(value)}'`);
     }
-    if (name === '__name__') (target as { name: string }).name = value;
-    else target.qualifiedName = value;
+    if (name === '__name__') {
+      (target as { name: string }).name = text;
+      target.nameValue = typeof value === 'string' ? undefined : value;
+    } else {
+      target.qualifiedName = text;
+      target.qualifiedNameValue = typeof value === 'string' ? undefined : value;
+    }
+    currentRuntime().finalizer.release([previous], [target, value]);
     return;
   }
-  if (name === '__module__' && typeof value === 'string') target.module = value;
+  if (name === '__module__') target.module = stringValue(value) ?? target.module;
   storeClassAttribute(target, name, value);
 }
 

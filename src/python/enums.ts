@@ -26,6 +26,7 @@ import {
   pyError,
   staticmethodClass,
   strClass,
+  stringValue,
   typeClass,
   typeError,
 } from './types';
@@ -194,7 +195,8 @@ function callMissing(cls: PyClass, value: PyValue): PyValue {
 function createEnum(cls: PyClass, className: PyValue, rawNames: PyValue, kwargs: Kwargs): PyValue {
   let names = rawNames;
   const start = kwargs?.get('start') ?? 1n;
-  if (typeof names === 'string') names = newList(names.replaceAll(',', ' ').split(/\s+/).filter(Boolean));
+  if (stringValue(names) !== undefined)
+    names = callValue(getAttribute(callValue(getAttribute(names, 'replace'), [',', ' ']), 'split'), []);
   const entries: [string, PyValue][] = [];
   const items = names === None ? [] : currentRuntime().toArray(names);
   const isSequence = names instanceof PyList || (names instanceof PyTuple && names.cls.isBuiltin);

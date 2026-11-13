@@ -27,6 +27,7 @@ import {
   functionClass,
   newException,
   None,
+  stringValue,
   typeError,
   typeName,
   valueError,
@@ -39,7 +40,7 @@ import {
   PyDict,
   PyError,
   PyFunction,
-  PyInstance,
+  type PyInstance,
   PyOpaque,
   type PyTuple,
   type PyValue,
@@ -61,12 +62,12 @@ function inheritedFeatures(): readonly string[] {
 
 // Code objects ------------------------------------------------------------------------------------------------------
 
-function newCode(code: Code, flags = 0n): PyOpaque {
+function newCode(code: Code, flags = 0n, filename?: PyValue): PyOpaque {
   const info: CodeInfo = {
     name: '<module>',
     qualifiedName: '<module>',
     firstRow: 0,
-    filename: code.filename,
+    filename: filename ?? code.filename,
     compiled: code,
     futureFlags: futureFlagsOf(code, flags),
   };
@@ -94,19 +95,21 @@ export const COMPILE_KEYWORDS = ['source', 'filename', 'mode', 'flags', 'dont_in
 /** `compile(source, filename, mode, flags=0, dont_inherit=False, optimize=-1)`. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Checks the arguments in the order CPython reports their errors in.
 export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
-  const [source, filename, mode, flags, dontInherit, optimize] = COMPILE_KEYWORDS.map((name, index) =>
+  const [source, filenameValue, modeValue, flags, dontInherit, optimize] = COMPILE_KEYWORDS.map((name, index) =>
     argument(args, kwargs, index, name)
   );
-  for (const [index, value] of [source, filename, mode].entries()) {
+  for (const [index, value] of [source, filenameValue, modeValue].entries()) {
     if (value === undefined) {
       throw typeError(`compile() missing required argument '${COMPILE_KEYWORDS[index]}' (pos ${index + 1})`);
     }
   }
-  if (typeof filename !== 'string') {
-    throw typeError(`expected str, bytes or os.PathLike object, not ${typeName(filename as PyValue)}`);
-  }
-  if (typeof mode !== 'string') {
-    throw typeError(`compile() argument 'mode' must be str, not ${typeName(mode as PyValue)}`);
+  const path =
+    (stringValue(filenameValue as PyValue) !== undefined ? filenameValue : undefined) ??
+    callValue(currentRuntime().importModule('os').dict.get('fsdecode') as PyValue, [filenameValue as PyValue]);
+  const filename = stringValue(path) as string;
+  const mode = stringValue(modeValue as PyValue);
+  if (mode === undefined) {
+    throw typeError(`compile() argument 'mode' must be str, not ${typeName(modeValue as PyValue)}`);
   }
   const { bits: flagBits, features, topLevelAwait, tree: treeKind } = compileFlags(flags);
   const optimizeLevel = compileOptimize(optimize);
@@ -121,7 +124,7 @@ export function compile(args: PyValue[], kwargs: Kwargs): PyValue {
     return finishTree(parseTree(astSupport, text, mode, filename), treeKind, optimizeLevel);
   }
   if (dontInherit === undefined || !isTruthy(dontInherit)) features.push(...inheritedFeatures());
-  return newCode(compileInput(text, mode, filename, features, flagBits, topLevelAwait, optimizeLevel), flagBits);
+  return newCode(compileInput(text, mode, filename, features, flagBits, topLevelAwait, optimizeLevel), flagBits, path);
 }
 
 /** `PyCF_DONT_IMPLY_DEDENT` and `PyCF_ALLOW_INCOMPLETE_INPUT`, with which `codeop` tells incomplete input. */
@@ -279,8 +282,8 @@ function codeArguments(args: PyValue[], kwargs: Kwargs, name: string): [string |
  * undefined for any other value.
  */
 function sourceText(value: PyValue, filename: string): string | Code | PyFunction | undefined {
-  if (typeof value === 'string') return checkNoNullCharacters(value);
-  if (value instanceof PyInstance && typeof value.primitive === 'string') return checkNoNullCharacters(value.primitive);
+  const text = stringValue(value);
+  if (text !== undefined) return checkNoNullCharacters(text);
   const bytes = value === undefined ? undefined : bytesLikeData(value);
   if (bytes !== undefined) return decodeSourceBytes(bytes, filename);
   if (value instanceof PyOpaque && value.cls === codeClass) {

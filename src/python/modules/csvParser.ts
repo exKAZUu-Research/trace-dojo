@@ -2,7 +2,7 @@
 // natively, since running its character loop in Python costs dozens of operations per character.
 import { callValue, getAttribute, type NextFunction, nextOf } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { floatClass, newException, newList, None, objectClass, pyError, typeName } from '../types';
+import { floatClass, newException, newList, None, objectClass, pyError, stringValue, typeName } from '../types';
 import { DONE, type PyClass, PyError, type PyList, type PyValue } from '../values';
 
 const START_RECORD = 0;
@@ -61,15 +61,16 @@ function readRecord(
 ): void {
   const runtime = currentRuntime();
   do {
-    const line = next();
-    if (line === DONE) {
+    const item = next();
+    if (item === DONE) {
       if (parser.field.length === 0 && parser.state !== IN_QUOTED_FIELD) throw pyError('StopIteration');
       if (parser.dialect.strict) throw error('unexpected end of data');
       parser.save();
       break;
     }
-    if (typeof line !== 'string') {
-      throw error(`iterator should return strings, not ${typeName(line)} (the file should be opened in text mode)`);
+    const line = stringValue(item);
+    if (line === undefined) {
+      throw error(`iterator should return strings, not ${typeName(item)} (the file should be opened in text mode)`);
     }
     counter.lines++;
     runtime.scan(line.length);

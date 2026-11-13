@@ -1,7 +1,7 @@
 // The methods of `datetime.time`.
 import { pyRepr, pyStr } from '../conversions';
 import { method } from '../define';
-import { None, NotImplemented, pyError, typeError } from '../types';
+import { None, NotImplemented, pyError, stringValue, typeError } from '../types';
 import type { Kwargs, PyValue } from '../values';
 import { cInt, parseCArgs } from './datetimeArgs';
 import { defineComparisons, defineConstants, defineGetters, signOf, valueHash } from './datetimeClasses';
@@ -152,13 +152,14 @@ method(
   'one',
   1,
   1,
-  (cls, [text]) => {
-    if (typeof text !== 'string') throw typeError('fromisoformat: argument must be str');
+  (cls, [rawText]) => {
+    const text = stringValue(rawText);
+    if (text === undefined) throw typeError('fromisoformat: argument must be str');
     const parsed = parseIsoTimeOnly(text);
-    if (!parsed) throw pyError('ValueError', `Invalid isoformat string: ${pyRepr(text)}`);
+    if (!parsed) throw pyError('ValueError', `Invalid isoformat string: ${pyRepr(rawText)}`);
     if (parsed.hour === 24) {
       if (parsed.minute !== 0 || parsed.second !== 0 || parsed.microsecond !== 0) {
-        throw pyError('ValueError', `Invalid isoformat string: ${pyRepr(text)}`);
+        throw pyError('ValueError', `Invalid isoformat string: ${pyRepr(rawText)}`);
       }
       parsed.hour = 0;
     }

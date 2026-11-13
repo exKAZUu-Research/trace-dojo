@@ -17,6 +17,7 @@ import {
   None,
   NotImplemented,
   pyError,
+  stringValue,
   typeError,
   typeName,
   valueError,
@@ -94,7 +95,8 @@ function newFraction(cls: PyClass, numerator: PyValue, denominator: PyValue): Py
     if (typeof numerator === 'number') return fromCoprime(floatRatio(numerator), cls);
     const asRatio = numerator instanceof PyClass ? undefined : getAttributeOrUndefined(numerator, 'as_integer_ratio');
     if (asRatio !== undefined) return fromCoprime(pairOf(callValue(asRatio, [])), cls);
-    if (typeof numerator === 'string') return normalized(parseFraction(numerator), cls);
+    const text = stringValue(numerator);
+    if (text !== undefined) return normalized(parseFraction(text), cls);
     throw typeError('argument should be a string or a Rational instance or have the as_integer_ratio() method');
   }
   if (typeof numerator === 'bigint' && typeof denominator === 'bigint')

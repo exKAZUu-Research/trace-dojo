@@ -4,7 +4,16 @@ import { method } from './define';
 import { pyHash } from './hashing';
 import { definePythonLevelNew } from './instances';
 import { defineProperty } from './modules/numberSupport';
-import { attributeError, callValue, getAttribute, getIterator, isTruthy, setAttribute, toArray } from './objects';
+import {
+  attributeError,
+  attributeName,
+  callValue,
+  getAttribute,
+  getIterator,
+  isTruthy,
+  setAttribute,
+  toArray,
+} from './objects';
 import { equals } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { genericClass, PyTypeParam, PyTypingAlias } from './typeParams';
@@ -22,7 +31,6 @@ import {
   tupleClass,
   typeClass,
   typeError,
-  typeName,
 } from './types';
 import { cachedTyping } from './typingCache';
 import {
@@ -111,7 +119,7 @@ function cTypeAttributes(cls: PyClass, attribute: AttributeHook): void {
 /** The `__getattribute__` of a C type that defines its own tp_getattro, which reads attributes as lookup does. */
 function defineGetattribute(cls: PyClass): void {
   method(cls, '__getattribute__', 'one', 1, 1, (self, [name]) => {
-    if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+    name = attributeName(name);
     return getAttribute(self, name);
   });
 }

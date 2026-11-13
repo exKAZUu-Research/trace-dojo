@@ -186,7 +186,14 @@ function collectorReferences(node: object): object[] {
   if (node instanceof Map) return [...node].flat().filter(isCollectorNode);
   if (node instanceof PyModule) return [node.dict];
   if (node instanceof PyClass && !node.isBuiltin)
-    return [node.dict, node.mro, node.bases, node.enumMembers ?? [], ...(!node.cls.isBuiltin ? [node.cls] : [])];
+    return [
+      node.dict,
+      node.mro,
+      node.bases,
+      node.enumMembers ?? [],
+      ...nativeReferences([node.nameValue, node.qualifiedNameValue]).filter(isCollectorNode),
+      ...(!node.cls.isBuiltin ? [node.cls] : []),
+    ];
   if (node instanceof PyFunction) {
     const annotations = functionAnnotationReferences(node);
     if (node instanceof PyAnnotateFunction) pushAll(annotations, annotationReferences(node.annotations()));
@@ -337,6 +344,7 @@ function pushNamespaceReferences(pending: unknown[], object: PyClass | PyModule)
   if (object instanceof PyClass && object.isBuiltin) return 0;
   pushAll(pending, object.dict.values());
   if (object instanceof PyClass) {
+    pending.push(object.nameValue, object.qualifiedNameValue);
     pushAll(pending, object.enumMembers ?? []);
     pushAll(pending, object.bases);
   }

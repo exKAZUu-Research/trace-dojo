@@ -336,7 +336,7 @@ test.each([
   {
     name: 'a generator consumed by sum',
     program: 'def gen(n):\n    for i in range(n):\n        v = i * 2\n        yield v\ntotal = sum(gen(3))',
-    steps: ['0:', '2:5', '3:5', '2:5', '3:5', '2:5', '3:5', '5:'],
+    steps: ['0:', '2:5', '3:5', '4:5', '2:5', '3:5', '4:5', '2:5', '3:5', '4:5', '5:'],
   },
 ])('steps of $name are called from the line of the call that runs them', ({ program, steps }) => {
   const trace = traceProgram('python', program, program);

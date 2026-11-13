@@ -10,7 +10,17 @@ import { registerModule } from '../modules';
 import { toIndex } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
 import { blockingBuiltin, sleepWait } from '../threads';
-import { intClass, isInstanceOf, newTuple, None, pyError, tupleClass, typeError, typeName } from '../types';
+import {
+  intClass,
+  isInstanceOf,
+  newTuple,
+  None,
+  pyError,
+  stringValue,
+  tupleClass,
+  typeError,
+  typeName,
+} from '../types';
 import { PyTuple, type PyValue } from '../values';
 import { toOrdinal } from './calendarMath';
 import { cInt } from './datetimeArgs';
@@ -159,10 +169,11 @@ function range(outside: boolean, what: string): void {
 }
 
 function formatTime(format: PyValue, value: PyValue | undefined): string {
-  if (typeof format !== 'string') throw typeError(`strftime() argument 1 must be str, not ${typeName(format)}`);
+  const text = stringValue(format);
+  if (text === undefined) throw typeError(`strftime() argument 1 must be str, not ${typeName(format)}`);
   const fields = tupleFields(value, 'strftime');
   const known = fields.isDst >= 0;
-  return strftime(format, {
+  return strftime(text, {
     ...fields,
     // macOS formats `%z` from the local zone and `%Z` from the struct's zone, both empty for an unknown DST flag.
     offset: { plain: known ? '+0900' : '', colon: ':z' },

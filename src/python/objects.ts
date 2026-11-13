@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 555 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 556 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -43,6 +43,7 @@ import {
   pyError,
   rangeClass,
   staticmethodClass,
+  stringValue,
   typeError,
   typeName,
   wrapperDescriptorClass,
@@ -838,8 +839,9 @@ export { NotImplemented };
 
 /** The name argument of getattr(), setattr(), delattr(), and object's attribute methods, which must be a str. */
 export function attributeName(name: PyValue): string {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-  return name;
+  const text = stringValue(name);
+  if (text === undefined) throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  return text;
 }
 
 /** `super(type, obj)`, refusing an object that is neither an instance nor a subclass of the type as CPython does. */

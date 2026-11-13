@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 430 -- Class creation, its MRO, and its slots follow CPython's type creation together.
+// code-gauge-allow-file fileNcss 436 -- Class creation, its MRO, and its slots follow CPython's type creation together.
 import {
   annotationClosure,
   annotationReferences,
@@ -52,6 +52,7 @@ import {
   objectClass,
   setClass,
   staticmethodClass,
+  stringValue,
   tupleClass,
   typeClass,
   typeError,
@@ -374,27 +375,32 @@ function isKeyError(error: unknown): boolean {
 // type.__new__ ------------------------------------------------------------------------------------------------------
 
 /** `type.__new__(meta, name, bases, namespace, **kwargs)`: creates a class and runs the hooks its bases define. */
-// code-gauge-allow functionNcss 36 -- Follows the steps of type.__new__ in order.
+// code-gauge-allow functionNcss 42 -- Follows the steps of type.__new__ in order.
 export function typeNew(
   meta: PyClass,
-  name: string,
+  name: PyValue,
   bases: readonly PyValue[],
   namespace: Map<string, PyValue> | PyDict,
   kwargs: Map<string, PyValue>
 ): PyClass {
+  const nameText = stringValue(name);
+  if (nameText === undefined) throw typeError(`type.__new__() argument 1 must be str, not ${typeName(name)}`);
   const winner = winningMeta(meta, bases);
-  const classBases = checkBases(name, bases);
+  const classBases = checkBases(nameText, bases);
   const effectiveBases = classBases.length > 0 ? classBases : [objectClass];
   checkLayout(effectiveBases);
   const entries = namespaceEntries(namespace);
   // As CPython does, a namespace without `__module__` takes the `__name__` of the globals calling `type()`.
   if (!entries.has('__module__'))
     entries.set('__module__', currentRuntime().frame.globals.get('__name__') ?? '__main__');
-  const cls = new PyClass(name, effectiveBases, winner);
+  const cls = new PyClass(nameText, effectiveBases, winner);
+  cls.nameValue = typeof name === 'string' ? undefined : name;
+  const qualifiedValue = entries.get('__qualname__') ?? name;
+  cls.qualifiedNameValue = typeof qualifiedValue === 'string' ? undefined : qualifiedValue;
   cls.isBuiltin = false;
   cls.isBaseType = true;
   cls.layout = { base: layoutOf(effectiveBases) };
-  cls.module = typeof entries.get('__module__') === 'string' ? (entries.get('__module__') as string) : '__main__';
+  cls.module = stringValue(entries.get('__module__') ?? '__main__') ?? '__main__';
   cls.qualifiedName = qualifiedNameOf(entries, name);
   entries.delete('__qualname__');
   cls.mro = resolveMro(cls);
@@ -452,11 +458,11 @@ function namespaceEntries(namespace: Map<string, PyValue> | PyDict): Map<string,
   return entries;
 }
 
-function qualifiedNameOf(entries: Map<string, PyValue>, name: string): string {
-  const qualified = entries.get('__qualname__');
-  if (qualified === undefined) return name;
-  if (typeof qualified !== 'string') throw typeError(`type __qualname__ must be a str, not ${typeName(qualified)}`);
-  return qualified;
+function qualifiedNameOf(entries: Map<string, PyValue>, name: PyValue): string {
+  const qualified = entries.get('__qualname__') ?? name;
+  const text = stringValue(qualified);
+  if (text === undefined) throw typeError(`type __qualname__ must be a str, not ${typeName(qualified)}`);
+  return text;
 }
 
 /**
@@ -634,8 +640,9 @@ export function solidBase(cls: PyClass): PyClass {
 /** `type(name, bases, namespace)` and `type.__new__(meta, name, bases, namespace)`. */
 export function typeNewFromArguments(meta: PyClass, args: PyValue[], kwargs: Kwargs): PyClass {
   if (args.length !== 3) throw typeError(`type.__new__() takes exactly 3 arguments (${args.length} given)`);
-  const [name, bases, namespace] = args;
-  if (typeof name !== 'string') throw typeError(`type.__new__() argument 1 must be str, not ${typeName(name)}`);
+  const [nameValue, bases, namespace] = args;
+  const name = stringValue(nameValue);
+  if (typeof name !== 'string') throw typeError(`type.__new__() argument 1 must be str, not ${typeName(nameValue)}`);
   if (!(bases instanceof PyTuple)) throw typeError(`type.__new__() argument 2 must be tuple, not ${typeName(bases)}`);
   if (!(namespace instanceof PyDict)) {
     throw typeError(`type.__new__() argument 3 must be dict, not ${typeName(namespace)}`);
@@ -647,7 +654,7 @@ export function typeNewFromArguments(meta: PyClass, args: PyValue[], kwargs: Kwa
     // A `__new__` written in Python, as ABCMeta's is, which CPython's slot calls through the attribute.
     return callValue(getAttribute(winner, '__new__'), [winner, ...args], kwargs) as PyClass;
   }
-  return typeNew(meta, name, bases.items, namespace, new Map(kwargs));
+  return typeNew(meta, nameValue, bases.items, namespace, new Map(kwargs));
 }
 
 /** The `__dict__` or `__weakref__` entry a class defines for its instances, which read them natively. */

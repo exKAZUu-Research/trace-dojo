@@ -11,6 +11,7 @@ import {
   NotImplemented,
   objectClass,
   pyError,
+  stringValue,
   typeClass,
   typeError,
   typeName,
@@ -123,8 +124,9 @@ decimalClass.construct = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => {
 function convertExact(value: PyValue, context: PyContext): Dec {
   if (value instanceof PyDecimal) return value.value;
   if (typeof value === 'bigint' || typeof value === 'boolean') return fromInteger(BigInt(value));
-  if (typeof value === 'string') {
-    const parsed = parseDecimal(value);
+  const text = stringValue(value);
+  if (text !== undefined) {
+    const parsed = parseDecimal(text);
     return parsed ?? inContext(context, (state) => raiseCondition(state, 'ConversionSyntax'));
   }
   if (typeof value === 'number') {

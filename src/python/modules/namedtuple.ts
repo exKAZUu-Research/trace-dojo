@@ -6,7 +6,6 @@ import { libraryReceiver, unsupportedReceiver } from '../libraryReceivers';
 import { argument } from '../nativeArgs';
 import { callValue, exactLength, getAttribute, isTruthy, iterate, toArray } from '../objects';
 import { runningRuntime } from '../runtimeContext';
-import { PYTHON_WHITESPACE } from '../strings';
 import { containerRepr } from '../typeContainers';
 import {
   builtinClass,
@@ -15,6 +14,7 @@ import {
   newTuple,
   None,
   pyError,
+  stringValue,
   tupleClass,
   tupleGetterClass,
   typeClass,
@@ -153,13 +153,11 @@ method(tupleGetterClass, '__delete__', 'one', 1, 1, () => {
 
 /** The field names of a namedtuple, with `rename` replacing each unusable or repeated name by `_<index>`. */
 function namedTupleFields(fieldNames: PyValue, rename: boolean): string[] {
-  const fields =
-    typeof fieldNames === 'string'
+  const names =
+    stringValue(fieldNames) === undefined
       ? fieldNames
-          .replaceAll(',', ' ')
-          .split(new RegExp(`${PYTHON_WHITESPACE.source}+`, 'u'))
-          .filter(Boolean)
-      : toArray(fieldNames).map(pyStr);
+      : callValue(getAttribute(callValue(getAttribute(fieldNames, 'replace'), [',', ' ']), 'split'), []);
+  const fields = toArray(names).map(pyStr);
   if (!rename) return fields;
   const seen = new Set<string>();
   return fields.map((name, index) => {

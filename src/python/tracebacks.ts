@@ -221,7 +221,7 @@ export interface CodeInfo {
   firstRow: number;
   fn?: PyFunction;
   /** The file name compile() was given, which code from the program's own file does not reveal. */
-  filename?: string;
+  filename?: PyValue;
   /** What compile() compiled, which exec() and eval() run. */
   compiled?: unknown;
   /** The scope of the code, which tells whether the code is the program's own. */

@@ -5,7 +5,17 @@ import { method } from '../define';
 import { tupleHash } from '../hashing';
 import { floorDivInt } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
-import { intClass, isInstanceOf, None, NotImplemented, pyError, typeError, typeName, unbox } from '../types';
+import {
+  intClass,
+  isInstanceOf,
+  None,
+  NotImplemented,
+  pyError,
+  stringValue,
+  typeError,
+  typeName,
+  unbox,
+} from '../types';
 import type { Kwargs, PyClass, PyValue } from '../values';
 import {
   dayOfYear,
@@ -164,9 +174,9 @@ export function localEpoch(fields: TimeFields): number | undefined {
 /** Reads the format of a `strftime` method. */
 export function strftimeArgument(args: PyValue[], kwargs: Kwargs): string {
   const [format] = parseCArgs({ names: ['format'], required: 1, name: 'strftime' }, args, kwargs, (value) => value);
-  if (typeof format !== 'string')
-    throw typeError(`strftime() argument 1 must be str, not ${typeName(format as PyValue)}`);
-  return format;
+  const text = stringValue(format as PyValue);
+  if (text === undefined) throw typeError(`strftime() argument 1 must be str, not ${typeName(format as PyValue)}`);
+  return text;
 }
 
 export function formatArgument(spec: PyValue): string {
@@ -364,10 +374,11 @@ method(
   'one',
   1,
   1,
-  (cls, [text]) => {
-    if (typeof text !== 'string') throw typeError('fromisoformat: argument must be str');
+  (cls, [rawText]) => {
+    const text = stringValue(rawText);
+    if (text === undefined) throw typeError('fromisoformat: argument must be str');
     const parsed = parseIsoDate(text);
-    if (!parsed) throw pyError('ValueError', `Invalid isoformat string: ${pyRepr(text)}`);
+    if (!parsed) throw pyError('ValueError', `Invalid isoformat string: ${pyRepr(rawText)}`);
     return newOfClass(cls, ...parsed);
   },
   { binding: 'class' }
@@ -411,7 +422,7 @@ export function parseStrptime(
   fromPython = false
 ): Exclude<ReturnType<typeof strptime>, { error: string }> {
   for (const [index, value] of [text, format].entries()) {
-    if (typeof value === 'string') continue;
+    if (stringValue(value) !== undefined) continue;
     // `time.strptime` checks its arguments in Python, and the datetime classes in C.
     throw typeError(
       fromPython
@@ -419,7 +430,7 @@ export function parseStrptime(
         : `strptime() argument ${index + 1} must be str, not ${typeName(value)}`
     );
   }
-  const parsed = strptime(text as string, format as string);
+  const parsed = strptime(stringValue(text) as string, stringValue(format) as string);
   if ('error' in parsed) throw pyError('ValueError', parsed.error);
   return parsed;
 }

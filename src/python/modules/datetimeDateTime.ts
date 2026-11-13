@@ -5,7 +5,7 @@ import { method } from '../define';
 import { trueDivideInt } from '../numbers';
 import { callValue, getAttribute } from '../objects';
 import { strLength } from '../strings';
-import { None, NotImplemented, pyError, typeError, typeName } from '../types';
+import { None, NotImplemented, pyError, stringValue, typeError, typeName } from '../types';
 import type { Kwargs, PyClass, PyValue } from '../values';
 import { dayOfYear, MAX_ORDINAL, MAXYEAR, toOrdinal, weekdayOf } from './calendarMath';
 import { cInt, parseCArgs } from './datetimeArgs';
@@ -369,10 +369,11 @@ classMethod(
   },
   ['date', 'time', 'tzinfo']
 );
-classMethod('fromisoformat', 1, 1, (cls, [text]) => {
-  if (typeof text !== 'string') throw typeError('fromisoformat: argument must be str');
+classMethod('fromisoformat', 1, 1, (cls, [rawText]) => {
+  const text = stringValue(rawText);
+  if (text === undefined) throw typeError('fromisoformat: argument must be str');
   const parsed = parseIsoDateTime(text);
-  if (!parsed) throw pyError('ValueError', `Invalid isoformat string: ${pyRepr(text)}`);
+  if (!parsed) throw pyError('ValueError', `Invalid isoformat string: ${pyRepr(rawText)}`);
   let [year, month, day] = parsed.date;
   const { time } = parsed;
   let { hour } = time;

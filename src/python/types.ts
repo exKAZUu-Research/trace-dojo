@@ -494,6 +494,11 @@ export function descriptorClassOf(cls: PyClass, name: string, binding: NativeBin
 const PRIMITIVE_CLASSES = new Set([intClass, boolClass, floatClass, strClass]);
 const RENDERING_METHODS = new Set(['__mod__', '__rmod__', 'format', 'format_map']);
 
+export function stringValue(value: PyValue): string | undefined {
+  const text = unbox(value);
+  return typeof text === 'string' ? text : undefined;
+}
+
 /** The builtin value an instance of a subclass of int, float, or str (including IntEnum and StrEnum) stands for. */
 export function unbox(value: PyValue): PyValue {
   if (!(value instanceof PyInstance)) return value;

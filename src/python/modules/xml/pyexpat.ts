@@ -1,10 +1,10 @@
-import { bytesLikeData, newBytes } from '../../bytesValues';
+import { bytesLikeData, newBytes, requireBytesLike } from '../../bytesValues';
 import { builtin } from '../../define';
 import { registerModule } from '../../modules';
 import { toIndex } from '../../numbers';
 import { callValue, toArray } from '../../objects';
 import { registerSourceModule } from '../../sourceModules';
-import { builtinClass, newDict, newList, newTuple, None, typeError, typeName } from '../../types';
+import { builtinClass, newDict, newList, newTuple, None, stringValue, typeError, typeName } from '../../types';
 import { unavailableValue } from '../../unavailableValues';
 import { PyOpaque, type PyValue } from '../../values';
 import { type ContentModel, ERROR_MESSAGES, XmlError } from './expatDocument';
@@ -125,8 +125,9 @@ const NATIVES: [string, PyValue][] = [
       const parser = engineOf(engine as PyValue);
       try {
         const size = request === None ? undefined : Number(request);
-        if (typeof data === 'string') parser.parseText(data, isFinal === true);
-        else parser.parseBytes(bytesLikeData(data as PyValue) as Uint8Array, isFinal === true, size);
+        const text = stringValue(data as PyValue);
+        if (text !== undefined) parser.parseText(text, isFinal === true);
+        else parser.parseBytes(requireBytesLike(data as PyValue), isFinal === true, size);
       } catch (error) {
         if (!(error instanceof XmlError)) throw error;
         return newTuple([BigInt(parser.errorCode), BigInt(parser.errorLine), BigInt(parser.errorColumn)]);

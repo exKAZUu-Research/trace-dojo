@@ -30,6 +30,7 @@ import {
   newTuple,
   None,
   pyError,
+  stringValue,
   typeError,
   typeName,
   unbox,
@@ -283,14 +284,15 @@ interface ComplexPart {
 
 /** `complex(value)`: a string is parsed, and any other value converts as a number. */
 function complexOf(value: PyValue): PyComplex {
-  if (typeof value === 'string') return parseComplex(value);
+  const text = stringValue(value);
+  if (text !== undefined) return parseComplex(text);
   const part = complexPartOf(value, true);
   if (!part) throw typeError(`complex() argument must be a string or a number, not ${typeName(value)}`);
   return newComplex(part.real, part.imag);
 }
 
 function namedPart(value: PyValue, name: 'real' | 'imag'): ComplexPart {
-  const part = typeof value === 'string' ? undefined : complexPartOf(value, name === 'real');
+  const part = stringValue(value) !== undefined ? undefined : complexPartOf(value, name === 'real');
   if (!part) throw typeError(`complex() argument '${name}' must be a real number, not ${typeName(value)}`);
   return part;
 }

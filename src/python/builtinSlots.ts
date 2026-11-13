@@ -1,18 +1,7 @@
 import { method } from './define';
-import { genericGetAttribute } from './objects';
+import { attributeName, genericGetAttribute } from './objects';
 import { binaryOp, unaryOp } from './operators';
-import {
-  boolClass,
-  classOf,
-  intClass,
-  methodClass,
-  moduleClass,
-  None,
-  NotImplemented,
-  superClass,
-  typeError,
-  typeName,
-} from './types';
+import { boolClass, classOf, intClass, methodClass, moduleClass, None, NotImplemented, superClass } from './types';
 
 // The slot methods CPython's bool and super define themselves, which this grader's operators and lookup implement.
 
@@ -33,7 +22,7 @@ method(boolClass, '__invert__', 'none', 0, 0, (self) => unaryOp('~', self));
 // super's, method's, and module's own lookup, which a subclass's __getattribute__ reaches without its hook.
 for (const cls of [superClass, methodClass, moduleClass]) {
   method(cls, '__getattribute__', 'one', 1, 1, (self, [name]) => {
-    if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+    name = attributeName(name);
     return genericGetAttribute(self, name);
   });
 }

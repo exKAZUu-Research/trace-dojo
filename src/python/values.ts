@@ -113,6 +113,8 @@ export class PyClass extends PyObject {
   qualifiedName: string;
   /** The name that messages of builtin code show for a type of a C extension module, such as `decimal.Decimal`. */
   typeName?: string;
+  nameValue?: PyValue;
+  qualifiedNameValue?: PyValue;
   doc?: string;
   /** Creates an instance of a builtin class, as its `__new__` and `__init__` together would. */
   construct?: (cls: PyClass, args: PyValue[], kwargs: Kwargs) => PyValue;

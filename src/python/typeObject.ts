@@ -21,6 +21,7 @@ import { iteratorNamesFor } from './iteratorTypes';
 import { createModule, initializeModule, moduleDir, moduleRepr } from './modules/moduleLayout';
 import { argument, checkArgs } from './nativeArgs';
 import {
+  attributeName,
   bindValue,
   callValue,
   deleteAttribute,
@@ -141,7 +142,7 @@ method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
   return pyStr(self);
 });
 method(objectClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  name = attributeName(name);
   if (self instanceof PyClass) throw typeError(`can't apply this __setattr__ to ${typeName(self)} object`);
   const runtime = currentRuntime();
   runtime.finalizer.replacing(self, name, true, () => {
@@ -151,11 +152,11 @@ method(objectClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
   return None;
 });
 method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  name = attributeName(name);
   return genericGetAttribute(self, name);
 });
 method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  name = attributeName(name);
   if (self instanceof PyClass) throw typeError(`can't apply this __delattr__ to ${typeName(self)} object`);
   currentRuntime().finalizer.replacing(self, name, true, () => {
     if (isInstanceWithAttributes(self)) deleteInstanceAttribute(self as PyObject, name);
@@ -273,16 +274,16 @@ function typeAttributeValue(instance: PyValue, name: string): PyValue {
 }
 
 method(typeClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  name = attributeName(name);
   return genericGetAttribute(self, name);
 });
 method(typeClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  name = attributeName(name);
   setClassAttributeWithoutHook(self as PyClass, name, value);
   return None;
 });
 method(typeClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  name = attributeName(name);
   deleteClassAttribute(self as PyClass, name);
   return None;
 });

@@ -206,10 +206,13 @@ export class GeneratorFinalizer {
   }
 
   /** The value an attribute or an item of a builtin container holds, read without running the program's code. */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Slots, class metadata and container storage need one ownership snapshot without invoking Python.
   private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): PyValue | undefined {
     if (this.pending.size === 0) return undefined;
     if (isAttribute) {
       if (!(object instanceof PyObject)) return undefined;
+      if (object instanceof PyClass && key === '__name__') return object.nameValue;
+      if (object instanceof PyClass && key === '__qualname__') return object.qualifiedNameValue;
       const dict = object instanceof PyInstance || object instanceof PyClass ? object.dict : peekOwnDict(object);
       return object.slotValues?.get(key as string) ?? dict?.get(key as string);
     }

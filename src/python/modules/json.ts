@@ -19,6 +19,7 @@ import {
   newTuple,
   None,
   pyError,
+  stringValue,
   typeError,
   typeName,
   unbox,
@@ -495,8 +496,8 @@ function makeScanner(decoder: PyValue, namespace: Map<string, PyValue>): PyValue
 }
 
 function textArgument(value: PyValue): string {
-  const text = unbox(value);
-  if (typeof text !== 'string') throw typeError(`first argument must be a string, not ${typeName(value)}`);
+  const text = stringValue(value);
+  if (text === undefined) throw typeError(`first argument must be a string, not ${typeName(value)}`);
   return text;
 }
 

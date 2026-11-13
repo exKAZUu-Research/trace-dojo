@@ -3,7 +3,7 @@ import { absentModule, isSupportedModule, missingCodecModule, unsupportedModuleF
 import { getModuleTable, moduleNotFoundError, registerModule, reloadModule, resolveImport } from '../modules';
 import { getAttribute, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
-import { nativeFunction, None, typeError, valueError } from '../types';
+import { nativeFunction, None, stringValue, typeError, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { type Kwargs, PyInstance, PyModule, type PyValue } from '../values';
 import { bindArguments } from './numberSupport';
@@ -20,8 +20,9 @@ export function dunderImport(args: PyValue[], kwargs: Kwargs): PyValue {
     args,
     kwargs
   );
-  const [name, fromlist, level] = [bound[0], bound[3], bound[4]];
-  if (typeof name !== 'string') throw typeError('module name must be a string');
+  const [fromlist, level] = [bound[3], bound[4]];
+  const name = stringValue(bound[0] as PyValue);
+  if (name === undefined) throw typeError('module name must be a string');
   if (level !== undefined && level !== 0n) throw new UnsupportedFeatureError('相対 import（__import__() の level）');
   const module = importByName(name);
   if (fromlist !== undefined && fromlist !== None && isTruthy(fromlist)) return module;
