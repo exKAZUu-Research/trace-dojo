@@ -4,6 +4,7 @@ import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
   batchRemovalClasses,
+  builtinClassOf,
   checkInsertPosition,
   checkListIndex,
   checkModifiable,
@@ -290,9 +291,7 @@ function defineSubListClasses(
 
 /** The class of a view of a list of `cls`, whose JDK class decides how the view checks indexes and changes. */
 function subListClassOf(listClass: ClassInfo): ClassInfo {
-  let cls = listClass;
-  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
-  return subListClassesOf.get(cls) ?? subListClasses.other;
+  return subListClassesOf.get(builtinClassOf(listClass)) ?? subListClasses.other;
 }
 
 /** A read-only set over another set's elements, which it reads afresh at each use. */

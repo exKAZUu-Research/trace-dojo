@@ -2211,10 +2211,13 @@ public class Main {
     System.out.println(keys.equals(Set.of("ab")));
     System.out.println(Collections.unmodifiableMap(ci).keySet().contains("AB"));
     System.out.println(Collections.unmodifiableMap(ci).keySet().containsAll(List.of("AB")));
-    System.out.println(true);
+    System.out.println(new TreeSet<>(List.of("x")).equals(Set.of(1)));
   }
 }`;
-  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\ntrue\ntrue\n' });
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\ntrue\ntrue\ntrue\nfalse\n',
+  });
 });
 
 test("Java's EnumMap subclasses look keys up as EnumMap does", () => {

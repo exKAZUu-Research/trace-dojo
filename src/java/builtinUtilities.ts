@@ -10,6 +10,7 @@ import {
   putEntry,
 } from './builtinCollections';
 import {
+  builtinClassOf,
   checkModifiable,
   mapViewSources,
   sortedValues,
@@ -390,8 +391,7 @@ function unmodifiableSetOrMap(
  * list of the JDK's here but `LinkedList` and its views do, from the others.
  */
 function unmodifiableListClass(collections: Collections, list: JavaObject): ClassInfo {
-  let cls = list.cls;
-  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
+  const cls = builtinClassOf(list.cls);
   return cls.name === 'LinkedList' || cls.name === 'Object' || cls === collections.sequentialSubList
     ? collections.unmodifiableList
     : collections.unmodifiableRandomAccessList;

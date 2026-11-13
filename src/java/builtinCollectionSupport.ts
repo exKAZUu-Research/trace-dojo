@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 411 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
+// code-gauge-allow-file fileNcss 413 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
 import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
@@ -657,10 +657,14 @@ export function checkListPosition(frame: Frame, list: Value, index: number, leng
 
 /** The class whose checks a list's methods make, which is that of the list an unmodifiable wrapper wraps. */
 function checkingClassOf(list: Value): ClassInfo {
-  // A program's subclass of a list inherits its builtin superclass's checks.
-  let { cls } = unwrapped(list as JavaObject);
-  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
-  return cls;
+  return builtinClassOf(unwrapped(list as JavaObject).cls);
+}
+
+/** The builtin class `cls` is or extends, which a program's subclass inherits its rules from. */
+export function builtinClassOf(cls: ClassInfo): ClassInfo {
+  let builtin = cls;
+  while (!builtin.isBuiltin && builtin.superclass) builtin = builtin.superclass;
+  return builtin;
 }
 
 /**
