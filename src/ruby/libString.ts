@@ -1,3 +1,4 @@
+import { foldCase } from './caseFold';
 // code-gauge-allow-file fileNcss 796 -- The libString module keeps one concern's cases together.
 import {
   compareStrings,
@@ -245,7 +246,7 @@ def('String', 'casecmp?', 1, function* (self: RString, [other]) {
     if (other instanceof RSymbol) throw implicitConversionError(other, 'String');
     return NIL;
   }
-  return self.s.toLowerCase() === other.s.toLowerCase();
+  return foldCase(self.s) === foldCase(other.s);
 });
 
 function foldAscii(text: string): string {

@@ -529,6 +529,16 @@ test.each([
     'p format("%c", 55296).bytes, format("%c", 57343).bytes',
     '[237, 160, 128]\n[237, 191, 191]\n',
   ],
+  [
+    'Float steps for custom arithmetic ranges',
+    'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); n <=> o.n; end; def succ; A.new(n+1); end; def +(v); A.new(n+v); end; end; (A.new(0)..A.new(3)).step(1.5) { |x| p x.n }',
+    '0\n1.5\n3.0\n',
+  ],
+  [
+    'Unicode case folding',
+    'p "ß".casecmp?("ss"), "ﬁ".casecmp?("fi"), "ς".casecmp?("σ"), "İ".casecmp?("i̇")',
+    'true\ntrue\ntrue\ntrue\n',
+  ],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });

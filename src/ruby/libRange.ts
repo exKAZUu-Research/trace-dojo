@@ -276,8 +276,6 @@ def('Range', 'eql?', 1, function* (self: RRange, [other]) {
 def('Range', 'hash', 0, function* (self: RRange) {
   return yield* structuralHashValue(self);
 });
-// code-gauge-allow functionNcss 31 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow functionCognitiveComplexity 27 -- Ruby's method takes these argument forms, which the branches mirror.
 def('Range', ['step', '%'], [0, 1], function* (self: RRange, args, block) {
   const step = args.length > 0 ? args[0] : 1n;
   if (typeof step !== 'bigint' && typeof step !== 'number')
@@ -285,40 +283,72 @@ def('Range', ['step', '%'], [0, 1], function* (self: RRange, args, block) {
   if (Number(step) < 0) throw argumentError("step can't be negative");
   if (Number(step) === 0) throw argumentError("step can't be 0");
   if (!block) return makeEnumerator(self, 'step', [step]);
-  const { begin, end, exclusive } = self;
+  return yield* stepRange(self, step, block);
+});
+
+function* stepRange(self: RRange, step: bigint | number, block: RProc): Gen {
+  const { begin, end } = self;
   if (typeof begin === 'bigint' && typeof step === 'bigint' && (typeof end === 'bigint' || end === NIL)) {
-    for (
-      let value = begin;
-      end === NIL || (exclusive ? value < (end as bigint) : value <= (end as bigint));
-      value += step
-    ) {
-      yield* callBlock(block, [value], false);
-    }
-    return self;
+    return yield* stepIntegerRange(self, begin, step, block);
   }
   if (
     (typeof begin === 'bigint' || typeof begin === 'number') &&
     (typeof end === 'bigint' || typeof end === 'number' || end === NIL)
   ) {
-    const start = Number(begin);
-    const by = Number(step);
-    const n = end === NIL ? Number.POSITIVE_INFINITY : Math.floor((Number(end) - start) / by + 1e-9);
-    for (let index = 0; index <= n; index++) {
-      rt().spend();
-      const value = start + index * by;
-      if (end !== NIL && exclusive && value >= Number(end)) break;
-      yield* callBlock(block, [value], false);
-    }
-    return self;
+    return yield* stepNumericRange(self, Number(begin), Number(step), block);
   }
+  if (begin !== NIL && !(begin instanceof RString) && typeof step === 'number')
+    return yield* stepCustomRange(self, step, block);
   if (typeof step !== 'bigint') throw typeError('no implicit conversion of Float into String');
+  return yield* stepSuccessorRange(self, step, block);
+}
+
+function* stepIntegerRange(self: RRange, begin: bigint, step: bigint, block: RProc): Gen {
+  const { end, exclusive } = self;
+  for (
+    let value = begin;
+    end === NIL || (exclusive ? value < (end as bigint) : value <= (end as bigint));
+    value += step
+  )
+    yield* callBlock(block, [value], false);
+  return self;
+}
+
+function* stepNumericRange(self: RRange, start: number, by: number, block: RProc): Gen {
+  const { end, exclusive } = self;
+  const n = end === NIL ? Number.POSITIVE_INFINITY : Math.floor((Number(end) - start) / by + 1e-9);
+  for (let index = 0; index <= n; index++) {
+    rt().spend();
+    const value = start + index * by;
+    if (end !== NIL && exclusive && value >= Number(end)) break;
+    yield* callBlock(block, [value], false);
+  }
+  return self;
+}
+
+function* stepCustomRange(self: RRange, step: number, block: RProc): Gen {
+  const { end, exclusive } = self;
+  let value = self.begin;
+  for (;;) {
+    rt().spend();
+    if (end !== NIL) {
+      const order = yield* spaceship(value, end);
+      if (order === undefined || order > 0 || (exclusive && order === 0)) break;
+    }
+    yield* callBlock(block, [value], false);
+    value = yield* callMethod(value, '+', [step]);
+  }
+  return self;
+}
+
+function* stepSuccessorRange(self: RRange, step: bigint, block: RProc): Gen {
   let index = 0n;
   yield* iterateRange(self, function* (value) {
     if (index % step === 0n) yield* callBlock(block, [value], false);
     index++;
   });
   return self;
-});
+}
 def('Range', 'dup', 0, (self) => self);
 def('Range', 'frozen?', 0, () => true);
 sdef('Range', 'new', [2, 3], function* (_self, [begin, end, exclusive = false]) {
