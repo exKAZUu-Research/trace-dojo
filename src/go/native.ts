@@ -1,6 +1,7 @@
 import type { Entity, FuncEntity, GoPackage } from './entities';
 import type { Runtime } from './runtime';
 import {
+  CONSTRAINT_NAMES,
   type FuncType,
   funcType,
   type InterfaceType,
@@ -44,7 +45,9 @@ export function isOpaque(type: Type): boolean {
 }
 
 export function namedType(pkg: string, name: string, underlyingType: Type): NamedType {
-  return { kind: 'named', name, pkg, underlying: underlyingType, methods: [] };
+  const type: NamedType = { kind: 'named', name, pkg, underlying: underlyingType, methods: [] };
+  if (underlyingType.kind === 'interface') CONSTRAINT_NAMES.set(underlyingType, type);
+  return type;
 }
 
 /** Adds a library method to a type; the implementation receives the receiver first. */
