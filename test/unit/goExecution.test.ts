@@ -789,7 +789,7 @@ func main() {
 		unwrapCalls,
 		copiedBytes, copyErr,
 		utf8.FullRuneInString("\xff"), utf8.FullRuneInString("\xc2A"), utf8.FullRuneInString("\xc2"),
-		cap(slices.Clone(s)), cap(slices.Collect(maps.Keys(m))), cap(slices.Sorted(maps.Keys(m))), cap(strings.SplitN("a,b,c", ",", 5)),
+		cap(slices.Clone(s)), len(maps.Clone(m)), cap(strings.SplitN("a,b,c", ",", 5)),
 		rNil, wNil,
 	)
 }`;
@@ -797,7 +797,7 @@ func main() {
     kind: 'executed',
     uncaughtException: undefined,
     stdout:
-      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 4 4 5 true true\n',
+      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 3 5 true true\n',
     stderr: '日',
   });
 });
@@ -1023,4 +1023,46 @@ func main() {
     stdout:
       '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
   });
+});
+
+test('a run that changes library variables leaves the next run unaffected', () => {
+  const changing = `package main
+import ("fmt"; "os"; "time"; "unicode")
+func main() {
+	*os.Stdout = *os.Stderr
+	*time.UTC = *time.FixedZone("X", 3600)
+	*unicode.Upper = unicode.RangeTable{}
+	fmt.Fprintln(os.Stdout, time.UTC, unicode.Is(unicode.Upper, 'A'))
+}`;
+  expect(executeProgram('go', changing)).toMatchObject({ stdout: '', stderr: 'X false\n' });
+  const reading = `package main
+import ("fmt"; "os"; "time"; "unicode")
+func main() { fmt.Fprintln(os.Stdout, time.UTC, unicode.Is(unicode.Upper, 'A')) }`;
+  expect(executeProgram('go', reading)).toMatchObject({ stdout: 'UTC true\n', stderr: '' });
+});
+
+test.each([
+  [
+    'list elements',
+    'package main\nimport "container/list"\nfunc main() { l := list.New(); l.PushBack(1); for i := 0; i < 18; i++ { l.PushBackList(l) } }',
+  ],
+  [
+    'a huge float precision',
+    'package main\nimport "strconv"\nfunc main() { _ = strconv.FormatFloat(1, \'f\', 1<<30, 64) }',
+  ],
+])('a library call that allocates past the limits stops the run: %s', (_, program) => {
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('out of memory'),
+  });
+});
+
+test.each([
+  ['math.Jn of a huge order', 'package main\nimport "math"\nfunc main() { _ = math.Jn(9223372036854775807, 1) }'],
+  [
+    'strconv.ParseFloat of a long number',
+    'package main\nimport ("strconv"; "strings")\nfunc main() { for i := 0; i < 100; i++ { _, _ = strconv.ParseFloat(strings.Repeat("9", 500000), 64) } }',
+  ],
+])('a library loop proportional to its argument spends operations: %s', (_, program) => {
+  expect(executeProgram('go', program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });

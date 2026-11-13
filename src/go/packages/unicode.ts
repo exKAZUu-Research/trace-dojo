@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import type { Entity } from '../entities';
 import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from '../literals';
-import { definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { definePackage, fn, namedType, nativeFunction, perRun, typeEntity } from '../native';
 import { indexPanic, nilPointerPanic } from '../runtimeErrors';
 import { BASIC, pointerTo, RUNE, sliceOf } from '../types';
 import { Cell, GoStruct, Pointer, type Value } from '../values';
@@ -58,7 +58,10 @@ const TABLES: Record<string, RegExp> = {
 };
 
 const tableValues = new Map(
-  Object.entries(TABLES).map(([name, pattern]) => [name, new Pointer(new Cell(new GoStruct([], { pattern })), 'v')])
+  Object.entries(TABLES).map(([name, pattern]) => [
+    name,
+    perRun(() => new Pointer(new Cell(new GoStruct([], { pattern })), 'v')),
+  ])
 );
 
 function inTable(table: Value, rune: number): boolean {
@@ -81,7 +84,7 @@ const unicodeMembers: Record<string, Entity> = {
         boxed: false,
         owner: undefined,
         slot: -1,
-        library: () => value,
+        library: value,
       },
     ])
   ),

@@ -1,6 +1,6 @@
 import type { Entity } from '../entities';
 import { newError } from '../errorValues';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction } from '../native';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, perRun } from '../native';
 import { ProgramExit } from '../runtime';
 import { BASIC, ERROR_TYPE, pointerTo, sliceOf } from '../types';
 import { Cell, GoStruct, Pointer, Slice, type Value } from '../values';
@@ -64,10 +64,7 @@ addMethod(
   true
 );
 
-const STDOUT = new Pointer(new Cell(new GoStruct([], { descriptor: 1 })), 'v');
-const STDERR = new Pointer(new Cell(new GoStruct([], { descriptor: 2 })), 'v');
-
-function fileVariable(name: string, value: Value): Entity {
+function fileVariable(name: string, descriptor: number): Entity {
   return {
     kind: 'var',
     name,
@@ -77,13 +74,13 @@ function fileVariable(name: string, value: Value): Entity {
     boxed: false,
     owner: undefined,
     slot: -1,
-    library: () => value,
+    library: perRun(() => new Pointer(new Cell(new GoStruct([], { descriptor })), 'v')),
   };
 }
 
 const members: Record<string, Entity> = {
-  Stdout: fileVariable('Stdout', STDOUT),
-  Stderr: fileVariable('Stderr', STDERR),
+  Stdout: fileVariable('Stdout', 1),
+  Stderr: fileVariable('Stderr', 2),
   Exit: nativeFunction('Exit', fn([BASIC.int], []), ([code]) => {
     throw new ProgramExit(Number(code as bigint));
   }),

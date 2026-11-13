@@ -59,7 +59,7 @@ for (const [suffix, type, bits] of SIZES) {
     reverse(x as bigint, bits)
   );
   members[`RotateLeft${suffix}`] = nativeFunction(`RotateLeft${suffix}`, fn([type, INT], [type]), ([x, k]) => {
-    const shift = ((Number(k as bigint) % bits) + bits) % bits;
+    const shift = Number((k as bigint) & BigInt(bits - 1));
     const value = x as bigint;
     return ((value << BigInt(shift)) | (value >> BigInt(bits - shift))) & mask;
   });

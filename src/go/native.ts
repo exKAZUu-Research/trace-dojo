@@ -19,6 +19,23 @@ export function currentRuntime(): Runtime {
   return running;
 }
 
+const perRunValues = new WeakMap<Runtime, Map<object, unknown>>();
+
+/** A library value that each run creates on first use, since a program may change it and runs must not share it. */
+export function perRun<T>(create: () => T): () => T {
+  const key = {};
+  return () => {
+    const runtime = currentRuntime();
+    let values = perRunValues.get(runtime);
+    if (!values) {
+      values = new Map();
+      perRunValues.set(runtime, values);
+    }
+    if (!values.has(key)) values.set(key, create());
+    return values.get(key) as T;
+  };
+}
+
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   const previous = running;
   running = runtime;

@@ -1,5 +1,5 @@
 import type { Entity } from '../entities';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, perRun, typeEntity } from '../native';
 import { boundsPanic, divideByZeroPanic, indexPanic, nilPointerPanic, runtimeErrorPanic } from '../runtimeErrors';
 import { BASIC, type NamedType, pointerTo, sliceOf, type Type } from '../types';
 import { Cell, copyValue, GoFunc, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
@@ -644,17 +644,12 @@ function newUniform(color: Value): Pointer {
   return new Pointer(new Cell(new GoStruct([color])), 'v');
 }
 
-/** The `image.Black`, `image.White`, `image.Transparent`, and `image.Opaque` of each run, which programs may change. */
-const uniformsByRuntime = new WeakMap<object, Record<string, Pointer>>();
-
 function uniformVariable(name: string, color: () => Iface): Entity {
-  return libraryVariable(name, UNIFORM_POINTER, () => {
-    const runtime = currentRuntime();
-    const uniforms = uniformsByRuntime.get(runtime) ?? {};
-    uniformsByRuntime.set(runtime, uniforms);
-    uniforms[name] ??= newUniform(color());
-    return uniforms[name];
-  });
+  return libraryVariable(
+    name,
+    UNIFORM_POINTER,
+    perRun(() => newUniform(color()))
+  );
 }
 
 const imageMembers: Record<string, Entity> = {
