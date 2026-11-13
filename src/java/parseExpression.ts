@@ -313,7 +313,8 @@ function convertMethodInvocation(node: Node): Expression {
 function convertObjectCreation(node: Node): Expression {
   const typeArgs = node.childForFieldName('type_arguments');
   const typeNode = field(node, 'type');
-  const parts = namedChildren(node);
+  // Type-use annotations of the created type precede it, so only an expression first is the enclosing instance.
+  const parts = namedChildren(node).filter((child) => !isAnnotation(child));
   const outerNode = [typeNode, typeArgs].some((child) => child?.startIndex === parts[0]?.startIndex)
     ? undefined
     : parts[0];

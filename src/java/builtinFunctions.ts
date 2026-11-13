@@ -36,6 +36,7 @@ import {
   type JavaType,
   LONG,
   type MethodInfo,
+  sameErasure,
   superinterfacesOf,
   type TypeVariable,
   VOID,
@@ -54,22 +55,46 @@ const extendsOf = (bound: JavaType): WildcardType => ({ kind: 'wildcard', bound,
 /** The classes of function objects, by interface and then by the class whose lambdas they are. */
 const functionClasses = new WeakMap<ClassInfo, Map<ClassInfo | undefined, ClassInfo>>();
 
-/** The single abstract method of a functional interface, or `undefined` when `cls` is not one. */
+/**
+ * The single abstract method of a functional interface, or `undefined` when `cls` is not one: the abstract methods it
+ * declares and inherits, counted once per override-equivalent signature, less those that redeclare a public method of
+ * `Object` and those a default method of a more specific interface implements (JLS 9.8).
+ */
 export function functionalMethodOf(cls: ClassInfo, objectClass: ClassInfo): MethodInfo | undefined {
   if (cls.kind !== 'interface') return;
+  const owners = [cls, ...superinterfacesOf(cls)];
   const abstract: MethodInfo[] = [];
-  for (const owner of [cls, ...superinterfacesOf(cls)]) {
+  for (const owner of owners) {
     for (const method of owner.methods) {
       if (!method.isAbstract || method.isStatic) continue;
-      // An interface may redeclare Object's public methods, which every object implements.
       const isObjectMethod = objectClass.methods.some(
-        (other) => other.name === method.name && other.parameterTypes.length === method.parameterTypes.length
+        (other) => other.access === 'public' && !other.isStatic && sameSignature(other, method)
       );
-      const isOverridden = abstract.some((other) => other.overrides?.has(method) || other.name === method.name);
-      if (!isObjectMethod && !isOverridden) abstract.push(method);
+      const isCounted = abstract.some((other) => sameSignature(other, method));
+      if (!isObjectMethod && !isImplementedByDefault(owners, owner, method) && !isCounted) abstract.push(method);
     }
   }
   return abstract.length === 1 ? abstract[0] : undefined;
+}
+
+/** Whether a default method of an interface among `owners` that inherits `owner` implements its abstract `method`. */
+function isImplementedByDefault(owners: ClassInfo[], owner: ClassInfo, method: MethodInfo): boolean {
+  return owners.some(
+    (other) =>
+      other !== owner &&
+      superinterfacesOf(other).includes(owner) &&
+      other.methods.some((candidate) => !candidate.isAbstract && sameSignature(candidate, method))
+  );
+}
+
+/** Whether two methods have override-equivalent signatures, by an override the compiler linked or by erasure. */
+function sameSignature(a: MethodInfo, b: MethodInfo): boolean {
+  if (a.name !== b.name) return false;
+  if (a.overrides?.has(b) || b.overrides?.has(a)) return true;
+  return (
+    a.parameterTypes.length === b.parameterTypes.length &&
+    a.parameterTypes.every((type, index) => sameErasure(type, b.parameterTypes[index] as JavaType))
+  );
 }
 
 /** Creates an object of a functional interface that runs `call` for its abstract method. */
@@ -643,10 +668,7 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     BOOLEAN,
     false,
     (frame, receiver, [filter]) => {
-      // The singletons override removeIf to throw at once; the default rejects only a removal.
-      rejectEagerly(frame, receiver);
-      if (singletonClasses.has((receiver as JavaObject).cls)) throwBuiltin(frame, 'UnsupportedOperationException');
-      if (filter === undefined) throwBuiltin(frame, 'NullPointerException');
+      startBulkChange(frame, receiver, filter);
       return removeMatching(
         frame,
         receiver,
@@ -655,6 +677,16 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     }
   );
   defineBulkOperations(collections);
+}
+
+/**
+ * Starts `removeIf` or `replaceAll`, which ImmutableCollections and the singletons override to throw at once, and whose
+ * defaults then require a function.
+ */
+function startBulkChange(frame: Frame, receiver: Value, fn: Value): void {
+  rejectEagerly(frame, receiver);
+  if (singletonClasses.has((receiver as JavaObject).cls)) throwBuiltin(frame, 'UnsupportedOperationException');
+  if (fn === undefined) throwBuiltin(frame, 'NullPointerException');
 }
 
 /** `containsAll`, `removeAll`, and `retainAll`, which ask the other collection whether it contains each element. */
@@ -709,9 +741,9 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     VOID,
     false,
     (frame, receiver, [operator]) => {
-      rejectEagerly(frame, receiver);
-      if (singletonClasses.has((receiver as JavaObject).cls)) throwBuiltin(frame, 'UnsupportedOperationException');
+      startBulkChange(frame, receiver, operator);
       replaceEach(frame, receiver as JavaObject, (value) => callFunction(frame, functions.unary, operator, [value]));
+      if (countsNoOpChanges(receiver)) touch(receiver);
     }
   );
 }

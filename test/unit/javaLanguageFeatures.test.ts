@@ -1902,3 +1902,56 @@ public class Main {
       'asList java.util.Arrays$ArrayList java.util.AbstractList$RandomAccessSubList\nasList remove false false false false\nasList removeFound java.lang.UnsupportedOperationException: remove\nasList clear java.lang.UnsupportedOperationException\nasList sort ok\nasList swap ok\nasList subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 2\nasList subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\nasList subRemove java.lang.UnsupportedOperationException\nempty java.util.Collections$EmptyList java.util.AbstractList$RandomAccessSubList\nempty remove false false false false\nempty removeFound false\nempty clear ok\nempty sort ok\nempty swap java.lang.IndexOutOfBoundsException: Index: 0\nempty subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 0\nempty subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 0\nempty subRemove false\nsingle java.util.Collections$SingletonList java.util.AbstractList$RandomAccessSubList\nsingle remove java.lang.UnsupportedOperationException\nsingle removeFound java.lang.UnsupportedOperationException\nsingle clear java.lang.UnsupportedOperationException\nsingle sort ok\nsingle swap java.lang.UnsupportedOperationException\nsingle subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 1\nsingle subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 1\nsingle subRemove java.lang.UnsupportedOperationException\ncopies java.util.Collections$CopiesList java.util.Collections$CopiesList\ncopies remove false false false false\ncopies removeFound java.lang.UnsupportedOperationException\ncopies clear java.lang.UnsupportedOperationException\ncopies sort java.lang.UnsupportedOperationException\ncopies swap java.lang.UnsupportedOperationException\ncopies subSet java.lang.UnsupportedOperationException\ncopies subAdd java.lang.UnsupportedOperationException\ncopies subRemove java.lang.UnsupportedOperationException\nof java.util.ImmutableCollections$List12 java.util.ImmutableCollections$SubList\nof remove java.lang.UnsupportedOperationException\nof removeFound java.lang.UnsupportedOperationException\nof clear java.lang.UnsupportedOperationException\nof sort java.lang.UnsupportedOperationException\nof swap java.lang.UnsupportedOperationException\nof subSet java.lang.UnsupportedOperationException\nof subAdd java.lang.UnsupportedOperationException\nof subRemove java.lang.UnsupportedOperationException\nunmod java.util.Collections$UnmodifiableRandomAccessList java.util.Collections$UnmodifiableRandomAccessList\nunmod remove java.lang.UnsupportedOperationException\nunmod removeFound java.lang.UnsupportedOperationException\nunmod clear java.lang.UnsupportedOperationException\nunmod sort java.lang.UnsupportedOperationException\nunmod swap java.lang.UnsupportedOperationException\nunmod subSet java.lang.UnsupportedOperationException\nunmod subAdd java.lang.UnsupportedOperationException\nunmod subRemove java.lang.UnsupportedOperationException\nstackLi java.lang.IndexOutOfBoundsException: Index: 5\n',
   });
 });
+
+test("Java's array streams, descending iterators, wrapper equality, replaceAll, and failed class initialization behave as the JDK's", () => {
+  const program = `import java.util.*;
+import java.util.stream.*;
+public class Main {
+  static class Failure extends RuntimeException { Failure(String m) { super(m); } public String toString() { System.out.println("toString"); return "failure"; } }
+  static class Bad { static int x = fail(); static int fail() { throw new Failure("detail"); } }
+  public static void main(String[] args) {
+    int[] a = {1, 2};
+    System.out.println(Arrays.toString(IntStream.of(a).peek(x -> a[1] = 9).toArray()));
+    Deque<Integer> d = new ArrayDeque<>(List.of(1, 2, 3, 4));
+    Iterator<Integer> it = d.descendingIterator();
+    while (it.hasNext()) if (it.next() % 2 == 0) it.remove();
+    Iterator<Integer> stale = d.descendingIterator();
+    d.clear();
+    System.out.println(d + " " + stale.hasNext());
+    List<Integer> root = new ArrayList<>(List.of(1, 2));
+    List<Integer> view = root.subList(0, 1);
+    List<Integer> wrapper = Collections.unmodifiableList(view);
+    root.add(3);
+    System.out.println(wrapper.equals(view));
+    try { for (int x : root) root.replaceAll(y -> y * 2); } catch (ConcurrentModificationException e) { System.out.println("CME " + root); }
+    for (int i = 0; i < 2; i++) {
+      try { System.out.println(Bad.x); } catch (Throwable e) { System.out.println(e + " / " + e.getCause()); }
+    }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[1, 9]\n[] true\ntrue\nCME [2, 4, 6]\ntoString\njava.lang.ExceptionInInitializerError / failure\njava.lang.NoClassDefFoundError: Could not initialize class Main$Bad / java.lang.ExceptionInInitializerError: Exception Main$Failure: detail [in thread "main"]\n',
+  });
+});
+
+test("Java's @FunctionalInterface interfaces count inherited defaults, Object's methods, and overrides as javac does", () => {
+  const program = `import java.util.function.*;
+interface A { void a(); }
+@FunctionalInterface interface B extends A { default void a() { System.out.println("a"); } void b(); }
+@FunctionalInterface interface Named { void equals(String text); }
+@FunctionalInterface interface Increment extends Function<Integer, Integer> { Integer apply(Integer x); }
+public class Main {
+  public static void main(String[] args) {
+    B b = () -> System.out.println("b");
+    b.a();
+    b.b();
+    Named named = text -> System.out.println(text);
+    named.equals("named");
+    Increment increment = x -> x + 1;
+    System.out.println(increment.apply(1));
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'a\nb\nnamed\n2\n' });
+});

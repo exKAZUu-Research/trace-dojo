@@ -301,6 +301,13 @@ function rootListOf(collection: JavaObject): JavaObject {
   return list;
 }
 
+/** The list an unmodifiable wrapper wraps, through any nesting of wrappers. */
+function unwrapped(list: JavaObject): JavaObject {
+  let backing = list;
+  while (unmodifiableWrappers.has(backing)) backing = backing.retained?.[0] as JavaObject;
+  return backing;
+}
+
 export function elementsOf(receiver: Value): Value[] {
   subListChecks.get(receiver as JavaObject)?.();
   return (receiver as JavaObject).elements as Value[];
@@ -312,7 +319,15 @@ export const subListChecks = new WeakMap<JavaObject, () => void>();
 export function touch(receiver: Value): void {
   const object = receiver as JavaObject;
   object.modCount = (object.modCount ?? 0) + 1;
+  const capacity = vectorCapacities.get(object);
+  if (capacity === undefined) return;
+  // Vector grows its array to twice its length, or to the size needed if that is more, and never shrinks it.
+  const size = (object.elements as Value[]).length;
+  if (size > capacity) vectorCapacities.set(object, Math.max(capacity * 2, size));
 }
+
+/** The length of each `Stack`'s array, which its index messages report. */
+export const vectorCapacities = new WeakMap<JavaObject, number>();
 
 /** The methods that read a collection whose `elements` hold its items in iteration order. */
 export function defineReadMethods(
@@ -483,7 +498,10 @@ export function compareNatural(frame: Frame, a: Value, b: Value): number {
 }
 
 /** How a list class reports an index outside it, as the JDK implementation it stands for checks the index. */
-export const indexFailures = new Map<ClassInfo, (frame: Frame, index: number, length: number) => never>();
+export const indexFailures = new Map<
+  ClassInfo,
+  (frame: Frame, index: number, length: number, list: JavaObject) => never
+>();
 
 /** The classes of `List.of`, whose position checks write their messages without a comma. */
 export const immutableCollectionsLists = new WeakSet<ClassInfo>();
@@ -491,7 +509,7 @@ export const immutableCollectionsLists = new WeakSet<ClassInfo>();
 /** Checks the index of an element of `list`, which an unmodifiable wrapper leaves to the list it wraps. */
 export function checkListIndex(frame: Frame, list: Value, index: number, length: number): void {
   if (index >= 0 && index < length) return;
-  indexFailures.get(checkingClassOf(list))?.(frame, index, length);
+  indexFailures.get(checkingClassOf(list))?.(frame, index, length, list as JavaObject);
   checkIndex(frame, index, length);
 }
 
@@ -507,18 +525,16 @@ export function checkListPosition(frame: Frame, list: Value, index: number, leng
 
 /** The class whose checks a list's methods make, which is that of the list an unmodifiable wrapper wraps. */
 function checkingClassOf(list: Value): ClassInfo {
-  const object = list as JavaObject;
   // A program's subclass of a list inherits its builtin superclass's checks.
-  let backing = object;
-  while (unmodifiableWrappers.has(backing)) backing = backing.retained?.[0] as JavaObject;
-  let { cls } = backing;
+  let { cls } = unwrapped(list as JavaObject);
   while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
   return cls;
 }
 
 /**
- * Whether a sort, or an `addAll` of nothing, counts as a structural change of `list`, as `ArrayList` and `Vector` count
- * them, unlike sublists, `LinkedList`, and the `AbstractList` classes of `Arrays.asList` and `Collections`.
+ * Whether a sort, a `replaceAll`, or an `addAll` of nothing counts as a structural change of `list`, as `ArrayList` and
+ * `Vector` count them, unlike sublists, `LinkedList`, and the `AbstractList` classes of `Arrays.asList` and
+ * `Collections`.
  */
 export function countsNoOpChanges(list: Value): boolean {
   if (subListChecks.has(list as JavaObject)) return false;
@@ -541,12 +557,10 @@ export function defineIndexFailures(lists: Record<string, ClassInfo>, registry: 
   );
   indexFailures.set(lists.singletonList, sizedIndexFailure);
   indexFailures.set(registry.classes.get('LinkedList') as ClassInfo, sizedIndexFailure);
-  // A Vector checks only the upper bound and reads its array, whose capacity starts at 10 and doubles.
-  indexFailures.set(registry.classes.get('Stack') as ClassInfo, (frame, index, length) => {
+  // A Vector checks only the upper bound and reads its array.
+  indexFailures.set(registry.classes.get('Stack') as ClassInfo, (frame, index, length, list) => {
     if (index >= length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${index}`);
-    let capacity = 10;
-    while (capacity < length) capacity *= 2;
-    return arrayAccessFailure(frame, index, capacity);
+    return arrayAccessFailure(frame, index, vectorCapacities.get(unwrapped(list)) ?? 10);
   });
 }
 

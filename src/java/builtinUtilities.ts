@@ -347,18 +347,7 @@ function defineCollectionViews(
         [readOnly(owner, ...types)],
         classOf(owner, ...types),
         true,
-        (frame, _, [source]) => {
-          if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
-          // As the JDK's, an unmodifiable set or map is returned as it is rather than wrapped again.
-          if (unmodifiableWrappers.has(source) && frame.runtime.isInstance(source, owner)) return source;
-          // A set without a store of its own, such as a map's key set, shares its elements, which it reads afresh.
-          const view = frame.runtime.allocateObject(frame, source.store ? immutable : collections.unmodifiableViewSet);
-          view.store = source.store;
-          // A map's view keeps its map's iterators, which traverse the entries they started with.
-          const mapSource = mapViewSources.get(source);
-          if (mapSource) mapViewSources.set(view, mapSource);
-          return wrapUnmodifiable(view, source);
-        }
+        (frame, _, [source]) => unmodifiableSetOrMap(frame, source, owner, immutable, collections)
       )
     );
   }
@@ -372,6 +361,28 @@ function defineCollectionViews(
   addMethod(cls, 'binarySearch', [readOnly(listClass, comparable), key], INT, true, (frame, _, [list, target]) =>
     binarySearch(frame, itemsOf(frame, list), target, compareNatural)
   ).typeParameters = [keyVariable];
+}
+
+/** `Collections.unmodifiableSet` or `unmodifiableMap` of `source`, a set or map as `owner` tells. */
+function unmodifiableSetOrMap(
+  frame: Frame,
+  source: Value,
+  owner: ClassInfo,
+  immutable: ClassInfo,
+  collections: Collections
+): JavaObject {
+  if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+  // As the JDK's, an unmodifiable set or map is returned as it is rather than wrapped again.
+  if (unmodifiableWrappers.has(source) && frame.runtime.isInstance(source, owner)) return source;
+  // Like the other builtins, a wrapper reads only the builtin collections, whose elements it can share.
+  if (!source.store && !source.elements && !mapViewSources.has(source)) itemsOf(frame, source);
+  // A set without a store of its own, such as a map's key set, shares its elements, which it reads afresh.
+  const view = frame.runtime.allocateObject(frame, source.store ? immutable : collections.unmodifiableViewSet);
+  view.store = source.store;
+  // A map's view keeps its map's iterators, which traverse the entries they started with.
+  const mapSource = mapViewSources.get(source);
+  if (mapSource) mapViewSources.set(view, mapSource);
+  return wrapUnmodifiable(view, source);
 }
 
 /**

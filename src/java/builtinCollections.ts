@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 441 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
+// code-gauge-allow-file fileNcss 463 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
 import { checkCopiedElement } from './arrayCopy';
 import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
@@ -31,6 +31,7 @@ import {
   touch,
   unmodifiableClasses,
   unmodifiableWrappers,
+  vectorCapacities,
   wrapUnmodifiable,
 } from './builtinCollectionSupport';
 import { addListIterators, defineListIterator } from './builtinListIterator';
@@ -382,6 +383,15 @@ function insertAll(frame: Frame, receiver: Value, index: number, source: Value):
 /** `Stack`, a list whose end is the top of the stack. */
 function defineStack(cls: ClassInfo): void {
   const element: JavaType = { kind: 'typeVar', variable: cls.typeParameters[0] };
+  for (const constructor of cls.constructors) {
+    const construct = constructor.native as NativeMethod;
+    constructor.native = (frame, receiver, args) => {
+      const result = construct(frame, receiver, args);
+      // A Vector starts with an array of 10, or one as long as the collection it copies.
+      vectorCapacities.set(receiver as JavaObject, Math.max(elementsOf(receiver).length, args.length > 0 ? 0 : 10));
+      return result;
+    };
+  }
   addMethod(cls, 'push', [element], element, false, (_, receiver, [value]) => {
     elementsOf(receiver).push(value);
     touch(receiver);
@@ -727,21 +737,27 @@ function defineListSearches(cls: ClassInfo, context: Context): void {
     for (let index = items.length - 1; index >= 0; index--) if (javaEquals(frame, value, items[index])) return index;
     return -1;
   });
-  addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
-    if (other === receiver) return true;
-    if (!(other instanceof JavaObject) || !other.elements || !isList(other)) return false;
-    subListChecks.get(other)?.();
-    const items = elementsOf(receiver);
-    return (
-      items.length === other.elements.length &&
-      items.every((item, index) => javaEquals(frame, item, other.elements?.[index]))
-    );
-  });
+  addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, listEquals);
   addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => {
     let hash = 1;
     for (const item of elementsOf(receiver)) hash = toInt32(Math.imul(hash, 31) + javaHash(frame, item));
     return hash;
   });
+}
+
+/** `List.equals`, which compares the elements in order with those of any list. */
+function listEquals(frame: Frame, receiver: Value, [other]: Value[]): boolean {
+  // An unmodifiable wrapper compares through the list it wraps, which is equal to itself before reading anything.
+  let list = receiver as JavaObject;
+  while (unmodifiableWrappers.has(list)) list = list.retained?.[0] as JavaObject;
+  if (other === receiver || other === list) return true;
+  if (!(other instanceof JavaObject) || !other.elements || !isList(other)) return false;
+  subListChecks.get(other)?.();
+  const items = elementsOf(receiver);
+  return (
+    items.length === other.elements.length &&
+    items.every((item, index) => javaEquals(frame, item, other.elements?.[index]))
+  );
 }
 
 const LIST_CLASSES = new Set<ClassInfo>();
@@ -753,19 +769,7 @@ function isList(object: JavaObject): boolean {
 /** The queue and stack methods of `LinkedList`, which learners use for breadth-first searches and stacks. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
 function defineDequeMethods(cls: ClassInfo, element: JavaType, itrClass: ClassInfo): void {
-  addMethod(cls, 'descendingIterator', [], classType(itrClass, element), false, (frame, receiver) =>
-    createIterator(
-      frame,
-      itrClass,
-      receiver as JavaObject,
-      () => elementsOf(receiver).toReversed(),
-      (_, index) => {
-        const items = elementsOf(receiver);
-        items.splice(items.length - 1 - index, 1);
-        touch(receiver);
-      }
-    )
-  );
+  defineDescendingIterator(cls, element, itrClass);
   for (const [name, atEnd] of [
     ['addFirst', false],
     ['addLast', true],
@@ -810,6 +814,35 @@ function defineDequeMethods(cls: ClassInfo, element: JavaType, itrClass: ClassIn
       return value;
     });
   }
+}
+
+/** `descendingIterator`, which walks a deque from its last element. */
+function defineDescendingIterator(cls: ClassInfo, element: JavaType, itrClass: ClassInfo): void {
+  addMethod(cls, 'descendingIterator', [], classType(itrClass, element), false, (frame, receiver) => {
+    // As the JDK's, it counts the elements it has yet to return, which only its own removals change, and reads each in
+    // place, its position counted from the end of the deque.
+    let length = elementsOf(receiver).length;
+    const reversed = new Proxy<Value[]>([], {
+      get: (target, property) => {
+        if (property === 'length') return length;
+        if (typeof property !== 'string' || !/^\d+$/.test(property)) return Reflect.get(target, property);
+        const items = elementsOf(receiver);
+        return items[items.length - 1 - Number(property)];
+      },
+    });
+    return createIterator(
+      frame,
+      itrClass,
+      receiver as JavaObject,
+      () => reversed,
+      (_, index) => {
+        const items = elementsOf(receiver);
+        items.splice(items.length - 1 - index, 1);
+        length--;
+        touch(receiver);
+      }
+    );
+  });
 }
 
 function createList(receiver: Value): Value {
