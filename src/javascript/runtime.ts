@@ -62,13 +62,15 @@ export class Frame {
 }
 
 /**
- * A running loop: the iteration it is in, the first iteration that read the clock, and the last iteration in which a
- * read found the program had written output or scheduled a timer since the previous read.
+ * A running loop: the iteration it is in, the first iteration that read the clock, and whether a clock read decides when
+ * it ends, as a busy wait's does: a read in its test or in the condition of an `if` that can end it.
  */
 export interface LoopState {
   iteration: number;
   firstClockRead?: number;
-  observedIteration?: number;
+  clockEndsIt: boolean;
+  /** Whether a condition that can end the loop is being evaluated now. */
+  inExitCondition: boolean;
 }
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
@@ -581,7 +583,7 @@ export class Runtime {
 
   /** Starts a loop in the current frame, whose iterations the caller counts until it calls {@link exitLoop}. */
   enterLoop(): LoopState {
-    const loop: LoopState = { iteration: 0 };
+    const loop: LoopState = { iteration: 0, clockEndsIt: false, inExitCondition: false };
     this.frame.loops.push(loop);
     return loop;
   }
@@ -592,16 +594,15 @@ export class Runtime {
 
   /**
    * Notes a read of the clock, returning whether it polls, as a busy wait does: whether the innermost running loop, in
-   * this frame or a caller of it, read the clock in an earlier iteration, and has done nothing observable in this one,
-   * whose reads would then time the rounds of a loop rather than wait.
+   * this frame or a caller of it, is one whose end a clock read decides, and read the clock in an earlier iteration.
    */
-  pollsClock(observedSinceLastRead: boolean): boolean {
+  pollsClock(): boolean {
     for (let index = this.frames.length - 1; index >= 0; index--) {
       const loop = this.frames[index].loops.at(-1);
       if (!loop) continue;
+      if (loop.inExitCondition) loop.clockEndsIt = true;
       loop.firstClockRead ??= loop.iteration;
-      if (observedSinceLastRead) loop.observedIteration = loop.iteration;
-      return loop.firstClockRead < loop.iteration && loop.observedIteration !== loop.iteration;
+      return loop.clockEndsIt && loop.firstClockRead < loop.iteration;
     }
     return false;
   }

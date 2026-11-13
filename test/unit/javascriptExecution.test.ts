@@ -851,7 +851,10 @@ for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 20000; i
 for (const n of [1, 2]) log(n); setTimeout(() => console.log('H 0'), 0);
 setTimeout(() => console.log('I 50'), 50);
 let k = 0; while (true) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; console.log('pass', k, Date.now() - s >= 0); if (++k === 2) break; }
-setTimeout(() => console.log('J 0'), 0);`,
+setTimeout(() => console.log('J 0'), 0);
+setTimeout(() => console.log('K 50'), 50); const times = [];
+for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; times.push(Date.now() - s); }
+console.log(times.length); setTimeout(() => console.log('L 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',

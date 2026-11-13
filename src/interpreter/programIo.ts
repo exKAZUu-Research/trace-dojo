@@ -30,12 +30,6 @@ export class ProgramIO {
   readonly stdout: OutputChannel;
   readonly stderr: OutputChannel;
   readonly files: VirtualFileSystem;
-  private readonly written = { length: 0 };
-
-  /** The length the program has written to standard output and standard error so far. */
-  get writtenLength(): number {
-    return this.written.length;
-  }
 
   constructor(
     private readonly budget: ExecutionBudget,
@@ -43,8 +37,9 @@ export class ProgramIO {
   ) {
     const stdin = input.stdin ?? '';
     this.stdin = new StandardInput(new TextReader(() => stdin, budget));
-    this.stdout = new OutputChannel(this.written);
-    this.stderr = new OutputChannel(this.written);
+    const written = { length: 0 };
+    this.stdout = new OutputChannel(written);
+    this.stderr = new OutputChannel(written);
     this.files = new VirtualFileSystem(budget);
     for (const [path, content] of Object.entries(input.files ?? {})) {
       this.files.createDirectory(parentOf(path), true);

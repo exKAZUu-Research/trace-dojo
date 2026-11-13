@@ -50,9 +50,9 @@ interface TimerList {
 /**
  * How a read of the clock moves it forward: by the operations spent since the previous read at
  * OPERATIONS_PER_MILLISECOND, and by at least CLOCK_STEP. A read polls the clock, as a busy wait does, when the
- * innermost running loop read it in an earlier iteration and no read in this iteration found the program had written
- * output or scheduled a timer since the previous read; it then takes the whole advance, so a busy wait as long as a run's time limit spends at most
- * a fifth of the operation budget whatever its body costs. Any other read, such as a timestamp a loop's rounds print,
+ * innermost running loop is one whose end a clock read decides and read the clock in an earlier iteration; it then
+ * takes the whole advance, so a busy wait as long as a run's time limit spends at most
+ * a fifth of the operation budget whatever its body costs. Any other read, such as a timestamp of a loop's rounds,
  * takes at most MAX_CLOCK_ADVANCE, Node.js's clock resolution, since the interpreter's operations are far slower than
  * Node.js's and a timestamp after computation must not push timers scheduled after it past earlier ones.
  */
@@ -79,8 +79,6 @@ export class EventLoop {
   private now = 0;
   /** The operations spent when the clock last moved, by a read or a jump to a timer. */
   private spentAtNow = 0;
-  /** What the program had written and scheduled at the previous read, which a polling loop leaves unchanged. */
-  private observableAtRead = '';
   /** The timer whose callback is running, which clearing stops from running again. */
   private runningTimer: Timer | undefined;
   private nextTimerId = 1;
@@ -94,10 +92,7 @@ export class EventLoop {
     const { runtime } = this;
     const { spent } = runtime.budget;
     const advance = Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND);
-    const observable = `${runtime.io.writtenLength} ${this.nextTimerId}`;
-    const polls = runtime.pollsClock(observable !== this.observableAtRead);
-    this.observableAtRead = observable;
-    this.now += polls ? advance : Math.min(MAX_CLOCK_ADVANCE, advance);
+    this.now += runtime.pollsClock() ? advance : Math.min(MAX_CLOCK_ADVANCE, advance);
     this.spentAtNow = spent;
     return Math.floor(this.now);
   }

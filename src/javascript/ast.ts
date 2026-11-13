@@ -34,7 +34,14 @@ export type Statement = Span &
     | { kind: 'class'; cls: ClassNode }
     /** A `return`, which awaits its value in an async generator. */
     | { kind: 'return'; value?: Expression; awaitsValue: boolean }
-    | { kind: 'if'; test: Expression; consequent: Statement; alternate?: Statement }
+    | {
+        kind: 'if';
+        test: Expression;
+        consequent: Statement;
+        alternate?: Statement;
+        /** Whether a branch can end the loop the `if` is in, so a clock read in its test may decide when the loop ends. */
+        exitsLoop?: true;
+      }
     | Block
     | {
         kind: 'for';
