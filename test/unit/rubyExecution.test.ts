@@ -422,6 +422,9 @@ test('Array extrema report comparison operands in Ruby order', () => {
   expect(run('begin; [1, nil].each.minmax; rescue => e; puts e.message; end')).toMatchObject({
     stdout: 'comparison of Integer with nil failed\n',
   });
+  expect(run('begin; [1, 2, nil].minmax; rescue => e; puts e.message; end')).toMatchObject({
+    stdout: 'comparison of Integer with nil failed\n',
+  });
   expect(run('p [3, 1, 2, 5, 4].minmax { |a, b| p [a, b]; a <=> b }')).toMatchObject({
     stdout: '[3, 1]\n[2, 5]\n[2, 1]\n[5, 3]\n[4, 1]\n[4, 5]\n[1, 5]\n',
   });

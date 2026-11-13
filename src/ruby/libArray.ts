@@ -15,7 +15,18 @@ import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
 import { hashGet, hashSet, structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
-import { blockCompare, inject, iterate, nmin, sortBy, sortValues, sum, toArray, uniqValues } from './libEnumerable';
+import {
+  blockCompare,
+  inject,
+  iterate,
+  minmax as enumerableMinmax,
+  nmin,
+  sortBy,
+  sortValues,
+  sum,
+  toArray,
+  uniqValues,
+} from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { randomIndex } from './libRandom';
 import { rangeBounds } from './libString';
@@ -776,24 +787,40 @@ def('Array', 'sum', [0, 1], (self: RArray, args, block) => sum(self, args, block
 def('Array', ['inject', 'reduce'], [0, -1], (self: RArray, args, block) => inject(self, args, block));
 def('Array', 'max', [0, 1], function* (self: RArray, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self.items, args[0], undefined, block, true);
+  if (!block) return yield* arrayExtreme(self, true);
   let result: Value | undefined;
   for (const item of self.items) {
     if (result === undefined) result = item;
-    else if (block ? (yield* blockCompare(block, item, result)) > 0 : (yield* compareValues(result, item)) < 0)
-      result = item;
+    else if ((yield* blockCompare(block, item, result)) > 0) result = item;
   }
   return result ?? NIL;
 });
 def('Array', 'min', [0, 1], function* (self: RArray, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self.items, args[0], undefined, block, false);
+  if (!block) return yield* arrayExtreme(self, false);
   let result: Value | undefined;
   for (const item of self.items) {
     if (result === undefined) result = item;
-    else if (block ? (yield* blockCompare(block, item, result)) < 0 : (yield* compareValues(result, item)) > 0)
-      result = item;
+    else if ((yield* blockCompare(block, item, result)) < 0) result = item;
   }
   return result ?? NIL;
 });
+def('Array', 'minmax', 0, function* (self: RArray, _args, block) {
+  if (block) return yield* enumerableMinmax(self, block);
+  return arr([yield* arrayExtreme(self, false), yield* arrayExtreme(self, true)]);
+});
+
+function* arrayExtreme(self: RArray, wantMax: boolean): Gen {
+  let result: Value | undefined;
+  for (const item of self.items) {
+    if (result === undefined) result = item;
+    else {
+      const order = yield* compareValues(result, item);
+      if (wantMax ? order < 0 : order > 0) result = item;
+    }
+  }
+  return result ?? NIL;
+}
 
 def('Array', 'cycle', [0, 1], function* (self: RArray, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);

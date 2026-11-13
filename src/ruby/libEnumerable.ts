@@ -624,7 +624,9 @@ def('Enumerable', 'max_by', [0, 1], function* (self, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self, args[0], block, undefined, true);
   return yield* extremeBy(self, block, true);
 });
-def('Enumerable', 'minmax', 0, function* (self, _args, block) {
+def('Enumerable', 'minmax', 0, (self, _args, block) => minmax(self, block));
+
+export function* minmax(self: Value, block: RProc | undefined): Gen {
   let min: Value | undefined;
   let max: Value | undefined;
   let pending: Value | undefined;
@@ -665,7 +667,7 @@ def('Enumerable', 'minmax', 0, function* (self, _args, block) {
   } finally {
     held.length = mark;
   }
-});
+}
 function orderOf(block: RProc | undefined, a: Value, b: Value): Gen<number> {
   return block ? blockCompare(block, a, b) : compareValues(a, b);
 }
