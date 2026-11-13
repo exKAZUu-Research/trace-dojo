@@ -1,4 +1,5 @@
 import type { Scalar, Value } from './arith';
+import type { BinaryOperator } from './ast';
 import type { Operand } from './compilerBase';
 import { CRuntimeError } from './errors';
 import type { Frame } from './runtime';
@@ -23,9 +24,11 @@ interface PointerByte {
 }
 export type PointerBytes = Map<number, PointerByte>;
 
+export type MetadataReader = ((frame: Frame) => Evaluated) & { always?: boolean };
+
 export type Evaluator = ((frame: Frame) => Value) & {
   pointer?: (frame: Frame) => Address;
-  read?: (frame: Frame) => Evaluated;
+  read?: MetadataReader;
 };
 
 export interface Evaluated {
@@ -38,7 +41,7 @@ export function resultOperand(type: CType, execute: (frame: Frame) => Evaluated,
   return {
     type,
     bitWidth,
-    read: execute,
+    read: Object.assign(execute, { always: true }),
     value: (frame) => execute(frame).value,
     pointer:
       type.kind === 'pointer'
@@ -51,7 +54,7 @@ export function resultOperand(type: CType, execute: (frame: Frame) => Evaluated,
 }
 
 export function evaluate(value: Evaluator, frame: Frame): Evaluated {
-  if (value.read) return value.read(frame);
+  if (value.read && (value.read.always || frame.runtime.hasProvenance)) return value.read(frame);
   if (!value.pointer) return { value: value(frame) };
   const at = value.pointer(frame);
   return { value: addressOf(at), range: typeof at === 'number' ? undefined : { start: at.start, end: at.end } };
@@ -78,7 +81,10 @@ export function pointerEvaluator(operand: Operand): Evaluator {
       const at = boundPointer(frame, result.value as number, operand.type.to);
       return { ...result, range: typeof at === 'number' ? undefined : { start: at.start, end: at.end } };
     });
-  return Object.assign((frame: Frame) => operand.value(frame), { pointer, read });
+  return Object.assign((frame: Frame) => operand.value(frame), {
+    pointer,
+    read: read && Object.assign(read, { always: true }),
+  });
 }
 
 export function pointerAt(frame: Frame, address: number, element: CType, range?: PointerRange): Address {
@@ -129,10 +135,16 @@ function subobjectRange(
   return compatible(type, element, true) ? { start: base, end: base + sizeOf(type) } : undefined;
 }
 
-export function slicePointerBytes(bytes: PointerBytes | undefined, offset: number, size: number): PointerBytes {
-  return new Map(
-    [...(bytes ?? [])].filter(([at]) => at >= offset && at < offset + size).map(([at, byte]) => [at - offset, byte])
+export function slicePointerBytes(
+  bytes: PointerBytes | undefined,
+  offset: number,
+  size: number
+): PointerBytes | undefined {
+  if (!bytes?.size) return;
+  const result = new Map(
+    [...bytes].filter(([at]) => at >= offset && at < offset + size).map(([at, byte]) => [at - offset, byte])
   );
+  return result.size > 0 ? result : undefined;
 }
 
 export function replacePointerBytes(bytes: PointerBytes, offset: number, size: number, source?: PointerBytes): void {
@@ -145,30 +157,40 @@ export function pointerBytesOf(range: PointerRange, value: Scalar): PointerBytes
   return new Map(Array.from({ length: 8 }, (_, index) => [index, { origin, index }]));
 }
 
-export function rangeOfBytes(bytes: PointerBytes | undefined, offset = 0): PointerRange | undefined {
+export function rangeOfBytes(
+  bytes: PointerBytes | undefined,
+  offset: number,
+  representation: Uint8Array
+): PointerRange | undefined {
   const first = bytes?.get(offset);
   if (!first || first.index !== 0) return;
-  for (let i = 1; i < 8; i++) {
+  for (let i = 0; i < 8; i++) {
     const byte = bytes!.get(offset + i);
     if (
       !byte ||
       byte.index !== i ||
       byte.origin.representation !== first.origin.representation ||
       byte.origin.range.start !== first.origin.range.start ||
-      byte.origin.range.end !== first.origin.range.end
+      byte.origin.range.end !== first.origin.range.end ||
+      representation[offset + i] !== Number((first.origin.representation >> BigInt(i * 8)) & 255n)
     )
       return;
   }
   return first.origin.range;
 }
 
-export function arithmeticResult(value: Scalar, operands: Evaluated[]): Evaluated {
-  const ranges = operands.flatMap((operand) => (operand.range ? [operand.range] : []));
-  const first = ranges[0];
-  const range =
-    first && ranges.every((candidate) => candidate.start === first.start && candidate.end === first.end)
-      ? first
-      : undefined;
-  const unchanged = operands.find((operand) => operand.value === value && operand.bytes?.size);
-  return { value, range, bytes: unchanged?.bytes };
+export function arithmeticResult(value: Scalar, operands: Evaluated[], operator?: BinaryOperator): Evaluated {
+  const [left, right] = operands;
+  if (operator === '-' && left?.range && right?.range) return { value };
+  let range: PointerRange | undefined;
+  let bytes: PointerBytes | undefined;
+  let ambiguous = false;
+  for (const operand of operands) {
+    if (operand.range) {
+      if (range && (range.start !== operand.range.start || range.end !== operand.range.end)) ambiguous = true;
+      range ??= operand.range;
+    }
+    bytes ??= operand.bytes;
+  }
+  return { value, range: ambiguous ? undefined : range, bytes };
 }

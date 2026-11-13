@@ -1078,3 +1078,57 @@ int main(void){for(int k=0;k<8;k++){volatile float x=1+(2*k+1)/8388608.0f;volati
     uncaughtException: undefined,
   });
 });
+
+test.each(['int*q=p;q+=zero;', 'int*q=(int*)((uintptr_t)p+zero);'])(
+  'pointer-bearing results retain their origin when offsets were pointer differences: %s',
+  (operation) => {
+    const source = `#include <stdio.h>\n#include <stdint.h>\nint main(void){int a[2][2]={{1,2},{3,4}};int*p=a[0]+2;uintptr_t m=(uintptr_t)a[1];uintptr_t zero=m-m;${operation}printf("%d\\n",*q);}`;
+    const result = executeProgram('c', source);
+    expect(result).toMatchObject({ kind: 'executed', stdout: '' });
+    expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+  }
+);
+
+test.each(['b=(b^1)^1;', 'b=(b+1)-1;', 'b++;b--;', 'b+=1;b-=1;'])(
+  'pointer bytes retain their origins through reversible integer transforms: %s',
+  (transform) => {
+    const source = `#include <stdio.h>\nint main(void){int a[2][2]={{1,2},{3,4}};int*p=a[0]+2,*q;for(int i=0;i<8;i++){unsigned char b=((unsigned char*)&p)[i];${transform}((unsigned char*)&q)[i]=b;}printf("%d\\n",*q);}`;
+    const result = executeProgram('c', source);
+    expect(result).toMatchObject({ kind: 'executed', stdout: '' });
+    expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+  }
+);
+
+test.each(['sizeof(int)n', 'sizeof(int)4', 'sizeof(int)(n)'])(
+  'sizeof rejects unparenthesized casts: %s',
+  (expression) => {
+    expect(executeProgram('c', `int main(void){int n=3;return ${expression};}`).kind).toBe('compileError');
+  }
+);
+
+test.each([
+  'int default=1;',
+  'double float=2.5;',
+  'int f(int double){return 0;}',
+  'struct S{int while;};',
+  'int goto(void){return 0;}',
+])('keywords cannot become contextual identifiers: %s', (declaration) => {
+  expect(executeProgram('c', `${declaration}int main(void){}`).kind).toBe('compileError');
+});
+
+test('header merge diagnostics point at the include without mutating cached header locations', () => {
+  for (const padding of [2, 5]) {
+    const source = `int isascii(int c){return 1;}\n${'\n'.repeat(padding)}#include <ctype.h>\nint main(void){}`;
+    expect(executeProgram('c', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: padding + 1 }] });
+  }
+});
+
+test('ordinary scalar arithmetic remains inside the execution budget', () => {
+  const source = `#include <stdio.h>
+int main(void){int n=740;long total=0;for(int i=1;i<=n;i++){for(int j=1;j<=n;j++){total+=(i*j+i/j-j%i)*(i^j)+((i<<1)|(j>>1))-(total%7);}}printf("%ld\\n",total);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '37534503955344\n',
+    uncaughtException: undefined,
+  });
+});

@@ -30,7 +30,7 @@ export function parseC(source: string): TranslationUnit {
   for (const header of [{ row: -1, name: TURTLE_HEADER_NAME, declarations: TURTLE_HEADER }, ...includes]) {
     const parsed = parseHeader(header.name, header.declarations, typedefNames);
     typedefNames.push(...parsed.typedefNames);
-    headers.push({ row: header.row, name: header.name, ...parsed });
+    headers.push({ row: header.row, name: header.name, ...parsed, items: headerItemsAt(parsed.items, header.row) });
   }
   try {
     return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => ({
@@ -39,6 +39,17 @@ export function parseC(source: string): TranslationUnit {
   } catch (error) {
     throw atEndOfFile(error, text);
   }
+}
+
+function headerItemsAt(source: Declaration[], row: number): Declaration[] {
+  const items = structuredClone(source);
+  const pending: object[] = [items];
+  while (pending.length > 0) {
+    const item = pending.pop()!;
+    if ('row' in item) item.row = row;
+    for (const child of Object.values(item)) if (child && typeof child === 'object') pending.push(child);
+  }
+  return items;
 }
 
 /** clang reports a `}` missing at the end of the file at the end of the file, after the last line. */

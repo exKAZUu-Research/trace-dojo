@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 652 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
+// code-gauge-allow-file fileNcss 655 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -22,7 +22,7 @@ import {
   type TypeSpecifier,
 } from './ast';
 import { unsupported } from './unsupported';
-import { validateSyntax } from './validateSyntax';
+import { validateNames, validateSyntax } from './validateSyntax';
 
 /** What learners call the syntax that the converter leaves out, by tree-sitter's node type. */
 const UNSUPPORTED_NODES: Record<string, string> = {
@@ -127,6 +127,7 @@ export class Converter {
       items.push(...this.externalDeclaration(child));
     }
     items.push(...this.headersBefore(Number.POSITIVE_INFINITY));
+    validateNames({ items });
     return items;
   }
 
@@ -955,6 +956,8 @@ export class Converter {
         return { kind: 'sizeofType', typeName, row };
       });
     }
+    if (value.type === 'cast_expression')
+      throw new CompileError([{ row, message: 'sizeof の型や式を括弧で正しく囲んでください。' }]);
     const operand = this.expression(value);
     const typeName = this.parenthesizedTypeName(operand);
     return typeName ? { kind: 'sizeofType', typeName, row } : { kind: 'sizeofExpression', operand, row };

@@ -2,7 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
 import type { Declaration, Declarator, Expression, FieldDeclaration, Specifiers, TypeName, TypeSpecifier } from './ast';
-import type { Address, Evaluated, PointerBytes, PointerRange } from './pointerBounds';
+import type { Address, MetadataReader, PointerBytes, PointerRange } from './pointerBounds';
 import type { Frame, FunctionInfo, GlobalInfo, LocalInfo } from './runtime';
 import {
   builtinType,
@@ -56,7 +56,7 @@ export interface Operand {
   type: CType;
   /** Computes the value, after an lvalue's conversion and the decay of arrays and functions. */
   value: (frame: Frame) => Value;
-  read?: (frame: Frame) => Evaluated;
+  read?: MetadataReader;
   lvalue?: LValue;
   bitWidth?: number;
   constantBytes?: Uint8Array;

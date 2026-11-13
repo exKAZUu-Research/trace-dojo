@@ -25,6 +25,7 @@ import {
   type Evaluated,
   type Evaluator,
   evaluatorOf,
+  type MetadataReader,
   pointerAt,
   pointerEvaluator,
   rangeOfBytes,
@@ -318,7 +319,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         load: () => loaderOf(type)(frame.runtime, at),
         range: () => {
           const block = frame.runtime.memory.locate(at, sizeOf(type));
-          return rangeOfBytes(block.pointerBytes, at - block.base);
+          return sizeOf(type) === 8 ? rangeOfBytes(block.pointerBytes, at - block.base, block.bytes) : undefined;
         },
         bytes: () => {
           const block = frame.runtime.memory.locate(at, sizeOf(type));
@@ -398,17 +399,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
     const a = this.converted(left, operation.left);
     const b = this.converted(right, operation.right);
+    const preserveOrigin = operation.type.kind === 'int' && !['==', '!=', '<', '<=', '>', '>='].includes(operator);
     const read = (frame: Frame): Evaluated => {
       const av = evaluate(a, frame),
         bv = evaluate(b, frame);
       const value = operation.run(av.value as Scalar, bv.value as Scalar);
-      return operation.type.kind === 'int' && !['==', '!=', '<', '<=', '>', '>='].includes(operator)
-        ? arithmeticResult(value, [av, bv])
-        : { value };
+      return preserveOrigin ? arithmeticResult(value, [av, bv], operator) : { value };
     };
     return foldBinary(
       operation.type,
-      (frame) => read(frame).value,
+      (frame) => operation.run(a(frame) as Scalar, b(frame) as Scalar),
       left,
       right,
       () =>
@@ -652,7 +652,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const previousBytes = location.bytes?.();
       const next = step(previous, frame);
       if (type.kind === 'pointer' && range) checkAddress({ address: next as number, ...range }, 0);
-      const metadata = arithmeticResult(next, [{ value: previous, range, bytes: previousBytes }]);
+      const metadata =
+        type.kind === 'pointer'
+          ? { value: next, range, bytes: undefined }
+          : arithmeticResult(next, [{ value: previous, range, bytes: previousBytes }]);
       location.store(next, metadata.range, metadata.bytes);
       if (lvalue.local) frame.live[lvalue.local.index] = true;
       const value = expression.prefix ? (lvalue.isBitField ? location.load() : next) : previous;
@@ -685,7 +688,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Assignment conversion, target resolution, and pointer provenance must share the cached right operand.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Assignment conversion, target resolution, and pointer provenance must share the cached right operand.
   private assignment(expression: Extract<Expression, { kind: 'assign' }>): Operand {
     const { row, operator } = expression;
     const target = this.expression(expression.left);
@@ -708,7 +711,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
             type
           )
         : evaluated.value;
-      const metadata = calculate ? arithmeticResult(result as Scalar, [previous!, evaluated]) : evaluated;
+      const metadata = calculate
+        ? type.kind === 'pointer'
+          ? { value: result, range: previous!.range }
+          : arithmeticResult(result as Scalar, [previous!, evaluated], operator)
+        : evaluated;
       const range = metadata.range;
       if (type.kind === 'pointer' && range) checkAddress({ address: result as number, ...range }, 0);
       const bytes = metadata.bytes;
@@ -1060,6 +1067,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Conversions -----------------------------------------------------------------------------------------------------
 
   /** Converts an rvalue to a type, which the caller has checked it may be converted to. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Scalar conversion, the plain-value fast path, and metadata propagation must describe the same type conversion.
   converted(operand: Operand, type: CType): Evaluator {
     const from = operand.type;
     const original = evaluatorOf(operand);
@@ -1076,7 +1084,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const size = sizeOf(type);
       return { value, range: size >= 8 ? result.range : undefined, bytes: slicePointerBytes(result.bytes, 0, size) };
     };
-    return Object.assign((frame: Frame) => read(frame).value, { read });
+    const same =
+      from.kind === type.kind &&
+      (from.kind === 'pointer' || ('name' in from && 'name' in type && from.name === type.name));
+    const value = (frame: Frame): Value =>
+      same ? operand.value(frame) : convertScalar(operand.value(frame) as Scalar, from, type);
+    return Object.assign(value, {
+      read: Object.assign(read, { always: !!original.pointer || original.read?.always === true }),
+    });
   }
 
   /** Converts a value as assignment does, rejecting the conversions clang rejects. */
@@ -1202,8 +1217,9 @@ function fold(
   value: (frame: Frame) => Value,
   operand: Operand,
   compute: () => Scalar,
-  read?: (frame: Frame) => Evaluated
+  read?: MetadataReader
 ): Operand {
+  if (read) read.always = operand.read?.always;
   if (operand.constant === undefined) return { type, value, read };
   try {
     const constant = compute();
@@ -1220,8 +1236,9 @@ function foldBinary(
   left: Operand,
   right: Operand,
   compute: () => Scalar,
-  read?: (frame: Frame) => Evaluated
+  read?: MetadataReader
 ): Operand {
+  if (read) read.always = left.read?.always || right.read?.always;
   if (left.constant === undefined || right.constant === undefined) return { type, value, read };
   try {
     const constant = compute();
