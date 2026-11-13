@@ -16,7 +16,7 @@ import {
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, nameError, rubyError, typeError } from './errors';
-import { hashKeyOf } from './hashes';
+import { hashKeyOf, hashSet } from './hashes';
 import {
   addMethod,
   callMethod,
@@ -53,18 +53,26 @@ import { arr, classOf, isA, newHash, realClassOf, singletonClassOf, str, sym, tr
 
 def('BasicObject', 'initialize', 0, () => NIL, { visibility: 'private' });
 def('BasicObject', 'initialize_copy', 1, () => NIL, { visibility: 'private' });
-for (const hook of ['initialize_dup', 'initialize_clone']) {
-  def(
-    'BasicObject',
-    hook,
-    1,
-    function* (self, [source]) {
-      yield* callMethod(self, 'initialize_copy', [source], undefined, undefined, { fcall: true });
-      return NIL;
-    },
-    { visibility: 'private' }
-  );
-}
+def(
+  'BasicObject',
+  'initialize_dup',
+  1,
+  function* (self, [source]) {
+    yield* callMethod(self, 'initialize_copy', [source], undefined, undefined, { fcall: true });
+    return NIL;
+  },
+  { visibility: 'private' }
+);
+def(
+  'BasicObject',
+  'initialize_clone',
+  1,
+  function* (self, [source]) {
+    yield* callMethod(self, 'initialize_copy', [source], undefined, undefined, { fcall: true });
+    return NIL;
+  },
+  { visibility: 'private', keywords: true }
+);
 def('BasicObject', '==', 1, (self, [other]) => self === other || (typeof self === 'number' && self === other));
 def('BasicObject', 'equal?', 1, (self, [other]) => self === other);
 def('BasicObject', '!', 0, (self) => !truthy(self));
@@ -142,27 +150,31 @@ def('Kernel', 'tap', 0, function* (self, _args, block) {
   return self;
 });
 def('Kernel', 'dup', 0, function* (self) {
-  return yield* copyObject(self, false, false);
+  return yield* copyObject(self, false);
 });
 def(
   'Kernel',
   'clone',
   [0, 1],
   function* (self, _args, _block, keywords) {
-    let keepFrozen = true;
+    let freezeOption: Value | undefined;
     if (keywords) {
       for (const entry of keywords.map.values()) {
-        if (entry.key instanceof RSymbol && entry.key.name === 'freeze') keepFrozen = entry.value !== false;
+        if (entry.key instanceof RSymbol && entry.key.name === 'freeze') {
+          freezeOption = entry.value;
+          if (freezeOption !== true && freezeOption !== false && freezeOption !== NIL)
+            throw argumentError(`unexpected value for freeze: ${realClassOf(freezeOption).name}`);
+        }
       }
     }
-    return yield* copyObject(self, true, keepFrozen);
+    return yield* copyObject(self, true, freezeOption);
   },
   { keywords: true }
 );
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Ruby's method takes these argument forms, which the branches mirror.
 // code-gauge-allow functionNcss 39 -- Ruby's method takes these argument forms, which the branches mirror.
-function* copyObject(self: Value, clone: boolean, keepFrozen: boolean): Gen {
+function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
   if (!(self instanceof RBasic) || self instanceof RClass) return self;
   let copy: RBasic;
   if (self instanceof RString) {
@@ -189,19 +201,32 @@ function* copyObject(self: Value, clone: boolean, keepFrozen: boolean): Gen {
     return self;
   }
   if (self.ivars) copy.ivars = new Map(self.ivars);
-  if (clone && self.singleton) {
-    const singleton = new RClass(rt().c.Class, undefined, self.singleton.superclass, false, true);
-    singleton.attached = copy;
-    for (const included of self.singleton.includes) singleton.includes.push(included);
-    for (const prepended of self.singleton.prepends) singleton.prepends.push(prepended);
-    for (const [name, method] of self.singleton.methods)
-      singleton.methods.set(name, { ...method, owner: method.owner === self.singleton ? singleton : method.owner });
-    copy.singleton = singleton;
-    invalidateMethodCaches();
-  }
-  yield* callMethod(copy, clone ? 'initialize_clone' : 'initialize_dup', [self], undefined, undefined, { fcall: true });
-  if (keepFrozen) copy.frozen = self.frozen;
+  if (clone && self.singleton) copySingleton(self.singleton, copy);
+  yield* initializeCopy(copy, self, clone, freezeOption);
+  if (clone) copy.frozen = freezeOption === true || (freezeOption !== false && self.frozen);
   return copy;
+}
+
+function copySingleton(original: RClass, copy: RBasic): void {
+  const singleton = new RClass(rt().c.Class, undefined, original.superclass, false, true);
+  singleton.attached = copy;
+  for (const included of original.includes) singleton.includes.push(included);
+  for (const prepended of original.prepends) singleton.prepends.push(prepended);
+  for (const [name, method] of original.methods)
+    singleton.methods.set(name, { ...method, owner: method.owner === original ? singleton : method.owner });
+  copy.singleton = singleton;
+  invalidateMethodCaches();
+}
+
+function* initializeCopy(copy: RBasic, source: RBasic, clone: boolean, freezeOption: Value | undefined): Gen<void> {
+  let keywords: RHash | undefined;
+  if (clone && freezeOption !== undefined) {
+    keywords = newHash();
+    yield* hashSet(keywords, sym('freeze'), freezeOption);
+  }
+  yield* callMethod(copy, clone ? 'initialize_clone' : 'initialize_dup', [source], keywords, undefined, {
+    fcall: true,
+  });
 }
 
 function copyData(data: unknown): unknown {

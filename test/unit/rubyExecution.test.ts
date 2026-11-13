@@ -404,6 +404,19 @@ test('pretty printing a shared graph is bounded before expanding its output', ()
   expect(run('s = "x" * 100000; pp Array.new(1000, s)')).toEqual({ kind: 'limitExceeded', limit: 'output' });
 });
 
+test('inspecting repeated long Strings stops before expanding the whole result', () => {
+  expect(run('a = ["x" * 500000] * 400; p a')).toEqual({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('clone forwards freeze to its hook and applies the requested state', () => {
+  expect(
+    run('class P; def initialize_clone(o, freeze: nil); p freeze; super; end; end; p P.new.clone(freeze: true).frozen?')
+  ).toMatchObject({
+    stdout: 'true\ntrue\n',
+  });
+  expect(run('p Object.new.freeze.clone(freeze: false).frozen?')).toMatchObject({ stdout: 'false\n' });
+});
+
 test('standard error is accepted but not shown, and exit ends the program normally', () => {
   expect(run('warn "w"\n$stderr.puts "e"\nputs "out"\nexit\nputs "after"')).toMatchObject({
     stdout: 'out\n',

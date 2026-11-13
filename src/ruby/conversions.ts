@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 411 -- The conversions module keeps one concern's cases together.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
 import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, respondsTo, runToEnd } from './interp';
@@ -192,7 +193,8 @@ export function* inspectArray(array: RArray): Gen<string> {
   inspecting.add(array);
   try {
     const parts: string[] = [];
-    for (const item of array.items) parts.push(yield* inspect(item));
+    let length = 2;
+    for (const item of array.items) length = pushInspected(parts, yield* inspect(item), length, 2);
     return `[${parts.join(', ')}]`;
   } finally {
     inspecting.delete(array);
@@ -205,12 +207,13 @@ export function* inspectHash(hash: RHash): Gen<string> {
   inspecting.add(hash);
   try {
     const parts: string[] = [];
+    let length = 2;
     for (const { key, value } of hash.map.values()) {
       if (key instanceof RSymbol) {
         const name = isSimpleSymbol(key.name) ? key.name : yield* inspect(str(key.name));
-        parts.push(`${name}: ${yield* inspect(value)}`);
+        length = pushInspected(parts, `${name}: ${yield* inspect(value)}`, length, 2);
       } else {
-        parts.push(`${yield* inspect(key)} => ${yield* inspect(value)}`);
+        length = pushInspected(parts, `${yield* inspect(key)} => ${yield* inspect(value)}`, length, 2);
       }
     }
     return `{${parts.join(', ')}}`;
@@ -227,6 +230,7 @@ function isSimpleSymbol(name: string): boolean {
 export function* inspectRange(value: RRange): Gen<string> {
   const begin = value.begin === NIL && value.end !== NIL ? '' : yield* inspect(value.begin);
   const end = value.end === NIL && value.begin !== NIL ? '' : yield* inspect(value.end);
+  if (begin.length + end.length + 3 > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   return `${begin}${value.exclusive ? '...' : '..'}${end}`;
 }
 
@@ -238,11 +242,20 @@ export function* inspectObject(object: RBasic): Gen<string> {
   inspecting.add(object);
   try {
     const parts: string[] = [];
-    for (const [key, value] of ivars) parts.push(`${key}=${yield* inspect(value)}`);
+    let length = name.length + 24;
+    for (const [key, value] of ivars) length = pushInspected(parts, `${key}=${yield* inspect(value)}`, length, 2);
     return `#<${name}:${addressOf(object)} ${parts.join(', ')}>`;
   } finally {
     inspecting.delete(object);
   }
+}
+
+function pushInspected(parts: string[], part: string, length: number, separatorLength: number): number {
+  const total = length + part.length + (parts.length > 0 ? separatorLength : 0);
+  if (total > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  rt().spend(Math.ceil(part.length / 256));
+  parts.push(part);
+  return total;
 }
 
 export function* inspectException(exception: RObject): Gen<string> {
@@ -274,6 +287,10 @@ export function className(cls: RClass): string {
 export function strInspect(text: string): string {
   let result = '"';
   for (let index = 0; index < text.length; index++) {
+    if (index % 256 === 0) {
+      rt().spend();
+      if (result.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    }
     const char = text[index];
     const code = text.codePointAt(index) as number;
     if (code > 0xff_ff) {
@@ -334,6 +351,7 @@ export function strInspect(text: string): string {
       }
     }
   }
+  if (result.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   return `${result}"`;
 }
 
