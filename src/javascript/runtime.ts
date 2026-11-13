@@ -456,7 +456,6 @@ export class Runtime {
     this.spend();
     const { behavior } = fn;
     if (behavior.kind === 'native') {
-      // Held inline rather than through holdingAll, whose callback would cost every callback recursion depth.
       // Inline rather than through runBuiltin, whose callback would cost every callback recursion depth.
       const { frame } = this;
       const { temporaries } = frame;
@@ -569,21 +568,6 @@ export class Runtime {
   popFrame(): void {
     const frame = this.frames.pop();
     if (frame?.isAtomic) this.steps.completeAtomicCall();
-  }
-
-  /**
-   * Keeps a builtin's receiver and arguments reachable while it runs, since it may call the program's code before it
-   * has stored them anywhere else.
-   */
-  private holdingAll<T>(values: Value[], run: () => T): T {
-    const { temporaries } = this.frame;
-    const held = temporaries.length;
-    appendAll(temporaries, values);
-    try {
-      return run();
-    } finally {
-      temporaries.length = held;
-    }
   }
 
   /** Keeps `value` reachable for garbage collection while `run` computes with it. */
