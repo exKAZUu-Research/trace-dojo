@@ -361,6 +361,11 @@ test.each([
     { kind: 'executed', uncaughtException: 'RangeError: Out of memory' },
   ],
   [
+    'splitting a long text with a regular expression',
+    'const s = "word ".repeat(200000); console.log(s.split(/ /).length, s.split(" ").length);',
+    { kind: 'executed', stdout: '200001 200001\n' },
+  ],
+  [
     'splitting with many captures per match',
     'const s = "a".repeat(1000000).split(new RegExp("a" + "()".repeat(1000)));',
     { kind: 'limitExceeded' },

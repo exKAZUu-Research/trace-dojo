@@ -352,8 +352,10 @@ export function splitWithRegExp(runtime: Runtime, text: string, object: RegExpOb
   }
   let start = 0;
   let position = 0;
+  // The positions tried are charged as a scan of the text, as other native string work is; each part kept is charged
+  // as it is kept.
+  runtime.scan(text.length);
   while (position < text.length) {
-    runtime.spend();
     splitter.lastIndex = position;
     const match = splitter.exec(text);
     const end = match ? Math.min(splitter.lastIndex, text.length) : start;
