@@ -434,6 +434,9 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   expect(run('p 1.0.remainder(0.0)')).toMatchObject({
     uncaughtException: 'divided by 0 (ZeroDivisionError)',
   });
+  expect(run('p (1.0..3.0).last(0)')).toMatchObject({
+    uncaughtException: "can't iterate from Float (TypeError)",
+  });
 });
 
 test('unsupported conversion cannot be hidden with exception false', () => {

@@ -131,7 +131,13 @@ def('Range', 'last', [0, 1], function* (self: RRange, args) {
   if (self.end === NIL) throw rangeError('cannot get the last element of endless range');
   const count = yield* toIndex(args[0]);
   if (count < 0) throw argumentError('negative array size');
-  if (count === 0) return arr([]);
+  if (count === 0) {
+    yield* iterateRange(self, function* () {
+      yield* [];
+      return STOP;
+    });
+    return arr([]);
+  }
   if (typeof self.begin === 'bigint' && typeof self.end === 'bigint') {
     const final = self.exclusive ? self.end - 1n : self.end;
     const start = self.begin > final - BigInt(count) + 1n ? self.begin : final - BigInt(count) + 1n;
