@@ -157,7 +157,9 @@ export function bootstrap(runtime: Runtime): void {
   object.constants.set('STDERR', runtime.globals.get('$stderr') as Value);
   runtime.globals.set('$!', NIL);
   runtime.globals.set('$,', NIL);
-  runtime.globals.set('$/', str('\n'));
+  const inputSeparator = str('\n');
+  inputSeparator.frozen = true;
+  runtime.globals.set('$/', inputSeparator);
   stackTooDeepFactory.create = () => rubyError(runtime.c.SystemStackError, 'stack level too deep');
 }
 

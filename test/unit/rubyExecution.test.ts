@@ -1472,6 +1472,9 @@ test('Kernel putc delegates to replacement stream methods and returns their resu
 });
 
 test('input record separator stores a frozen copy', () => {
+  expect(run('p $/.frozen?; begin; $/ << "x"; rescue => e; p e.class; end')).toMatchObject({
+    stdout: 'true\nFrozenError\n',
+  });
   expect(run('s="x"; $/=s; s<<"y"; p $/.frozen?, $/')).toMatchObject({ stdout: 'true\n"x"\n' });
   expect(run('$/="x"; begin; $/ << "y"; rescue => e; p e.class; end')).toMatchObject({
     stdout: 'FrozenError\n',
