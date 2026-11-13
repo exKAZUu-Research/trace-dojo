@@ -29,7 +29,6 @@ import {
   unsupported,
   unsupportedFeatures,
 } from './convertNodes';
-import { markCountedLoops } from './countedLoops';
 import { ExpressionConverter, patternSuspends } from './expressionConverter';
 import { isConstantExpression } from './stepRules';
 
@@ -120,7 +119,6 @@ export class ProgramConverter extends ExpressionConverter {
     this.popScope();
     this.assignAtomicAnnotations();
     const program = { body, scope };
-    markCountedLoops(program);
     return program;
   }
 

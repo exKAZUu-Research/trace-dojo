@@ -47,8 +47,6 @@ export type Statement = Span &
         /** Names the init declares with `let` or `const`, copied into a new scope for every iteration. */
         perIterationNames: string[];
         scope: ScopeDeclarations;
-        /** Marks a counted loop, whose end cannot depend on the clock, as countedLoops.ts decides. */
-        counted?: true;
       }
     | {
         kind: 'forOf' | 'forIn';

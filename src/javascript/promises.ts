@@ -50,8 +50,8 @@ interface TimerList {
 /**
  * How a read of the clock moves it forward. A read that polls it, as a busy wait does (see Runtime.pollsClock), moves it
  * by the operations spent since the previous read at OPERATIONS_PER_MILLISECOND, so a busy wait as long as a run's time
- * limit spends at most a fifth of the operation budget whatever its body costs. Any other read, such as a timestamp of
- * a loop's rounds, moves it by CLOCK_STEP alone: the interpreter's operations are far slower than Node.js's, where such
+ * limit spends a fifth of the operation budget once it polls, whatever its body costs. Any other read, such as a
+ * timestamp of a loop's rounds, moves it by CLOCK_STEP alone: the interpreter's operations are far slower than Node.js's, where such
  * computation takes next to no time, and a timestamp after it must not push timers scheduled after it past earlier ones.
  */
 const OPERATIONS_PER_MILLISECOND = LIMITS.maxOperations / (LIMITS.maxMilliseconds * 5);

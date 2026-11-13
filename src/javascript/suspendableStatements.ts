@@ -295,9 +295,9 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     labels: string[]
   ): Steps<Completion> {
     const { runtime } = this;
-    const loop = runtime.enterLoop(false);
+    runtime.enterLoop();
     try {
-      for (let first = true; ; first = false, loop.iteration++) {
+      for (let first = true; ; first = false) {
         if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
           return undefined;
         const result = yield* this.loopBodySteps(statement.body, labels);
@@ -329,10 +329,10 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         yield* this.forInitSteps(statement);
         const frame = runtime.frame;
         const outer = frame.scope;
-        const loop = runtime.enterLoop(statement.counted === true);
+        runtime.enterLoop();
         try {
           this.copyIterationScope(perIterationNames);
-          for (; ; loop.iteration++) {
+          for (;;) {
             if (statement.test && !toBoolean(yield* this.valueSteps(statement.test))) return;
             const result = yield* this.loopBodySteps(statement.body, labels);
             if (result !== 'next') return result;
@@ -412,9 +412,9 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
-    const loop = runtime.enterLoop(false);
+    runtime.enterLoop();
     try {
-      for (; ; loop.iteration++) {
+      for (;;) {
         const value = yield* iterator.next();
         if (value === DONE) {
           isExhausted = true;

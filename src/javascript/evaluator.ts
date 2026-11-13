@@ -111,9 +111,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
       case 'while':
       case 'doWhile': {
-        const loop = runtime.enterLoop(false);
+        runtime.enterLoop();
         try {
-          for (let first = true; ; first = false, loop.iteration++) {
+          for (let first = true; ; first = false) {
             if (!(first && statement.kind === 'doWhile') && !toBoolean(this.evaluate(statement.test))) return undefined;
             const result = this.loopBody(statement.body, labels);
             if (result !== 'next') return result;
@@ -233,10 +233,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
       this.forInit(statement);
       const frame = runtime.frame;
       const outer = frame.scope;
-      const loop = runtime.enterLoop(statement.counted === true);
+      runtime.enterLoop();
       try {
         this.copyIterationScope(perIterationNames);
-        for (; ; loop.iteration++) {
+        for (;;) {
           if (statement.test && !toBoolean(this.evaluate(statement.test))) return;
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
@@ -294,9 +294,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
-    const loop = runtime.enterLoop(false);
+    runtime.enterLoop();
     try {
-      for (let value = iterator.next(); value !== DONE; value = iterator.next(), loop.iteration++) {
+      for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
         runtime.spend();
         const outer = frame.scope;
         try {

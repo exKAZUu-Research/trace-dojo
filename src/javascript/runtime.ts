@@ -42,8 +42,8 @@ export class Frame {
   readonly iterations = new Set<ValueIterator>();
   /** How many builtins run in the frame now, which keep what the program's code returns to them in its temporaries. */
   builtinsRunning = 0;
-  /** The loops running in the frame, innermost last, which tell a clock read polling in a loop from a lone one. */
-  readonly loops: LoopState[] = [];
+  /** The budget spent when each loop running in the frame began, innermost last. */
+  readonly loopStarts: number[] = [];
 
   constructor(
     public scope: Scope,
@@ -62,20 +62,11 @@ export class Frame {
 }
 
 /**
- * How many iterations of a loop must read the clock before its reads count as polling: more than a loop timing rounds
- * of work usually runs, and few enough that a busy wait whose body costs ten thousand operations a poll spends a tenth
- * of the operation budget before its polls move the clock by all their work.
+ * How many operations a loop must spend before a clock read in it polls: a quarter of the budget, more than a loop
+ * timing rounds of work usually spends, and little enough that a busy wait, whatever its body costs, then reaches a
+ * deadline as long as the time limit within the budget.
  */
-const POLLING_ITERATIONS = 10;
-
-/** A running loop: the iteration it is in, the last iteration that read the clock, and how many iterations did. */
-export interface LoopState {
-  iteration: number;
-  lastClockRead?: number;
-  clockReadIterations: number;
-  /** Whether the loop's end cannot depend on the clock, so it never polls it. */
-  counted: boolean;
-}
+const POLLING_OPERATIONS = LIMITS.maxOperations / 4;
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 
@@ -585,37 +576,23 @@ export class Runtime {
     return isObject(prototype) ? prototype : fallback;
   }
 
-  /** Starts a loop in the current frame, whose iterations the caller counts until it calls {@link exitLoop}. */
-  enterLoop(counted: boolean): LoopState {
-    const loop: LoopState = { iteration: 0, clockReadIterations: 0, counted };
-    this.frame.loops.push(loop);
-    return loop;
+  /** Starts a loop in the current frame, which runs until the caller calls {@link exitLoop}. */
+  enterLoop(): void {
+    this.frame.loopStarts.push(this.budget.spent);
   }
 
   exitLoop(): void {
-    this.frame.loops.pop();
+    this.frame.loopStarts.pop();
   }
 
   /**
-   * Notes a read of the clock, returning whether it polls, as a busy wait does: whether a running loop, in this frame or
-   * a caller of it, that is not counted (its end may depend on the clock) has read the clock in more than
-   * POLLING_ITERATIONS of its iterations. A loop timing a few rounds of work reads it in a handful, while a busy wait
-   * reads it again and again, whatever decides its end.
+   * Whether a clock read polls, as a busy wait does: whether a running loop, in this frame or a caller of it, has spent
+   * more than POLLING_OPERATIONS. Telling a busy wait from timed computation by how its end is written kept missing ways
+   * a busy wait ends, while a loop that runs that long would take real time on Node.js too.
    */
   pollsClock(): boolean {
-    // Every running loop the read happens in counts it, and any of them the clock may end can make it poll: the read
-    // may be in a batch of work, or a short inner loop made anew each time, inside the loop it ends.
-    let polls = false;
-    for (const { loops } of this.frames) {
-      for (const loop of loops) {
-        if (loop.lastClockRead !== loop.iteration) {
-          loop.lastClockRead = loop.iteration;
-          loop.clockReadIterations++;
-        }
-        if (!loop.counted && loop.clockReadIterations > POLLING_ITERATIONS) polls = true;
-      }
-    }
-    return polls;
+    const { spent } = this.budget;
+    return this.frames.some(({ loopStarts }) => loopStarts.some((start) => spent - start > POLLING_OPERATIONS));
   }
 
   pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {

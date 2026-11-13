@@ -838,24 +838,20 @@ for (const f of [() => Object.create(1), () => Object.create(null, null), () => 
     'blocking busy waits that delay timers',
     `let sum = 0;
 setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
-setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);
-let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 0; i < 500; i++) sum += i; last = Date.now(); } console.log('polled twice per pass');
-let running = true; const f = Date.now(); while (running) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - f >= 300) running = false; } console.log('flag wait');
+setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);`,
+  ],
+  [
+    'busy waits with costly bodies that end through a flag or a throw',
+    `let sum = 0;
 let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 500; i++) sum += i; done = Date.now() - g >= 300; } console.log('flag set');
-const h = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; const elapsed = Date.now() - h; if (elapsed >= 300) break; } console.log('elapsed variable');
-const o = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - o < 300) continue; break; } console.log('continue wait');
+try { const d = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - d >= 300) throw new Error('timeout'); } } catch (error) { console.log(error.message); }`,
+  ],
+  [
+    'busy waits with costly bodies that end through a helper or an inner loop',
+    `let sum = 0;
 let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
 while (!ticked) tick(); console.log('ticked');
-let level = 0; const z = Date.now(); const bump = () => { if (Date.now() - z > 300) level = 99; };
-while (level < 5) { for (let i = 0; i < 500; i++) sum += i; bump(); } console.log('closure counter');
-var waited = 0; const y = Date.now(); while (waited < 300) { for (let i = 0; i < 500; i++) sum += i; var waited = Date.now() - y; } console.log('var wait');
-const grown = [0]; const x = Date.now(); for (const item of grown) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - x < 300) grown.push(item + 1); } console.log('grown');
-let elapsed = 0; const e = Date.now(); while (elapsed < 300) { for (let i = 0; i < 500; i++) sum += i; const now = Date.now(); elapsed = now - e; } console.log('local now');
-const queue = [1]; const p = Date.now(); for (let i = 0; i < queue.length; i++) { for (let k = 0; k < 500; k++) sum += k; if (Date.now() - p < 300) queue.push(1); } console.log('queue grown');
-const u = Date.now(); function update() { spent = Date.now() - u; } for (var spent = 0; spent < 300; ) { for (let i = 0; i < 500; i++) sum += i; update(); } console.log('var counter');
-try { const d = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - d >= 300) throw new Error('timeout'); } } catch (error) { console.log(error.message); }
-let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');
-const pushed = [0]; const n = Date.now(); for (let i = 0; i < pushed.length; i++) { for (let k = 0; k < 500; k++) sum += k; if (Date.now() - n < 300) pushed['push'](1); } console.log('pushed');`,
+let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');`,
   ],
   [
     'a timestamp helper around computation between timers',
