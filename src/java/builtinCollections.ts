@@ -34,6 +34,7 @@ import {
   touch,
   unmodifiableClasses,
   unmodifiableWrappers,
+  unwrapped,
   vectorCapacities,
   wrapUnmodifiable,
 } from './builtinCollectionSupport';
@@ -755,8 +756,7 @@ function defineListSearches(cls: ClassInfo, context: Context): void {
 /** `List.equals`, which compares the elements in order with those of any list. */
 function listEquals(frame: Frame, receiver: Value, [other]: Value[]): boolean {
   // An unmodifiable wrapper compares through the list it wraps, which is equal to itself before reading anything.
-  let list = receiver as JavaObject;
-  while (unmodifiableWrappers.has(list)) list = list.retained?.[0] as JavaObject;
+  const list = unwrapped(receiver as JavaObject);
   if (other === receiver || other === list) return true;
   if (!(other instanceof JavaObject) || !other.elements || !isList(other)) return false;
   subListChecks.get(other)?.();

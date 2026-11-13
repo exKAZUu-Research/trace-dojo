@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 458 -- The set and map classes, which share one hash and tree store and its views.
+// code-gauge-allow-file fileNcss 461 -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
 import {
   builtinClassOf,
@@ -22,7 +22,7 @@ import {
   touch,
   uncountedMapClasses,
   unmodifiableClasses,
-  unmodifiableWrappers,
+  unwrapped,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
 import { accessedEntry, defineLinkedHashMapOrder, evictionOf, recordAccess } from './builtinLinkedHashMap';
@@ -248,8 +248,7 @@ function mapView(
   map: Value,
   viewClass: ClassInfo,
   elementOf: (entry: HashStore['entries'][number]) => Value,
-  isKeySet = false,
-  lookup?: MapViewSource['lookup']
+  { isKeySet = false, lookup, containsEntry }: Pick<MapViewSource, 'isKeySet' | 'lookup' | 'containsEntry'> = {}
 ): JavaObject {
   const view = frame.runtime.allocateObject(frame, viewClass);
   // A view reads the map's entries whenever it is used, so that it follows every later change to the map.
@@ -270,6 +269,7 @@ function mapView(
     elementOf,
     isKeySet,
     lookup,
+    containsEntry,
     remove: (removeFrame, entry) => {
       checkModifiable(removeFrame, map, true);
       removeEntry(removeFrame, map, entry.key);
@@ -407,14 +407,30 @@ function constantsOf(frame: Frame, type: Value): Value[] {
 /** The view `entrySet` returns, in which each entry keeps one node, so that reading it again keeps identities. */
 function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass: ClassInfo): JavaObject {
   const nodes = new WeakMap<HashStore['entries'][number], JavaObject>();
-  return mapView(frame, map, viewClass, (entry) => {
-    let node = nodes.get(entry);
-    if (!node) {
-      node = createEntryNode(frame, nodeClass, entry, map as JavaObject);
-      nodes.set(entry, node);
-    }
-    return node;
-  });
+  const entryClass = nodeClass.interfaces[0] as ClassInfo;
+  // As HashMap's and TreeMap's entry sets do, contains looks the entry's key up in the map and compares its value.
+  const containsEntry = (lookupFrame: Frame, value: Value): boolean => {
+    if (!(value instanceof JavaObject) || !lookupFrame.runtime.isInstance(value, entryClass)) return false;
+    const { runtime } = lookupFrame;
+    const key = runtime.invokeVirtual(lookupFrame, entryClass, 'getKey', value, []);
+    const found = findEntry(lookupFrame, unwrapped(map as JavaObject), key);
+    if (!found) return false;
+    return javaEquals(lookupFrame, runtime.invokeVirtual(lookupFrame, entryClass, 'getValue', value, []), found.value);
+  };
+  return mapView(
+    frame,
+    map,
+    viewClass,
+    (entry) => {
+      let node = nodes.get(entry);
+      if (!node) {
+        node = createEntryNode(frame, nodeClass, entry, map as JavaObject);
+        nodes.set(entry, node);
+      }
+      return node;
+    },
+    { containsEntry }
+  );
 }
 
 /** `equals` and `hashCode` of a map, which compare and hash its entries as `AbstractMap` does. */
@@ -422,8 +438,7 @@ function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
     if (other === receiver) return true;
     // An unmodifiable wrapper compares as its backing map does.
-    let map = receiver as JavaObject;
-    while (unmodifiableWrappers.has(map)) map = map.retained?.[0] as JavaObject;
+    const map = unwrapped(receiver as JavaObject);
     if (other === map) return true;
     if (!(other instanceof JavaObject) || !other.store || !frame.runtime.isInstance(other, mapClass)) return false;
     const entries = storeOf(map).ordered();
@@ -723,12 +738,12 @@ export function defineMapMethods(
   });
   addMethod(cls, 'keySet', [], classType(views.setClass, key), false, (frame, receiver) =>
     cachedView(receiver, 'keySet', () =>
-      mapView(frame, receiver, views.snapshotSet, (entry) => entry.key, true, 'containsKey')
+      mapView(frame, receiver, views.snapshotSet, (entry) => entry.key, { isKeySet: true, lookup: 'containsKey' })
     )
   );
   addMethod(cls, 'values', [], classType(views.collectionClass, value), false, (frame, receiver) =>
     cachedView(receiver, 'values', () =>
-      mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value, false, 'containsValue')
+      mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value, { lookup: 'containsValue' })
     )
   );
   addMethod(

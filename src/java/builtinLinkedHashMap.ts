@@ -1,4 +1,4 @@
-import { classType, touch, unmodifiableWrappers } from './builtinCollectionSupport';
+import { classType, touch, unwrapped } from './builtinCollectionSupport';
 import { createEntryNode, createStore, findEntry, removeEntry, storeOf, tableSizeFor } from './builtinMaps';
 import { addConstructor, addMethod } from './builtinSupport';
 import { findImplementation, type Frame, throwBuiltin } from './runtime';
@@ -24,8 +24,7 @@ export function evictionOf(cls: ClassInfo): ((frame: Frame, map: JavaObject) => 
  */
 export function recordAccess(map: Value, entry: HashEntry): void {
   // An unmodifiable wrapper reads through its backing map, which records the access.
-  let owner = map as JavaObject;
-  while (unmodifiableWrappers.has(owner)) owner = owner.retained?.[0] as JavaObject;
+  const owner = unwrapped(map as JavaObject);
   if (!accessOrderedMaps.has(owner)) return;
   if (storeOf(owner).moveToEnd(entry)) touch(owner);
 }

@@ -155,6 +155,8 @@ export interface MapViewSource {
   isKeySet?: boolean;
   /** The map's lookup that the view's `contains` makes, as `AbstractMap`'s key set and values make one. */
   lookup?: 'containsKey' | 'containsValue';
+  /** An entry set's `contains`, which looks the entry's key up in the map. */
+  containsEntry?: (frame: Frame, value: Value) => boolean;
   remove: (frame: Frame, entry: HashStore['entries'][number]) => void;
 }
 
@@ -403,9 +405,7 @@ function looksUpThroughMap(collection: Value): boolean {
 
 /** The map whose lookup a key set asks: its map, or the map an unmodifiable wrapper of it wraps. */
 function lookupMapOf(view: MapViewSource): JavaObject {
-  let { map } = view;
-  while (unmodifiableWrappers.has(map)) map = map.retained?.[0] as JavaObject;
-  return map;
+  return unwrapped(view.map);
 }
 
 /** The list a sublist views, through any nesting of sublists, or the collection itself when it is not a sublist. */
@@ -415,9 +415,9 @@ function rootListOf(collection: JavaObject): JavaObject {
   return list;
 }
 
-/** The list an unmodifiable wrapper wraps, through any nesting of wrappers. */
-function unwrapped(list: JavaObject): JavaObject {
-  let backing = list;
+/** The collection or map an unmodifiable wrapper wraps, through any nesting of wrappers, or `collection` itself. */
+export function unwrapped(collection: JavaObject): JavaObject {
+  let backing = collection;
   while (unmodifiableWrappers.has(backing)) backing = backing.retained?.[0] as JavaObject;
   return backing;
 }
@@ -455,16 +455,23 @@ export function defineReadMethods(
 ): void {
   addMethod(cls, 'size', [], INT, false, (_, receiver) => elementsOf(receiver).length);
   addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => elementsOf(receiver).length === 0);
-  addMethod(cls, 'contains', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) =>
-    looksUpThroughMap(receiver)
-      ? frame.runtime.invokeVirtual(
-          frame,
-          frame.runtime.builtins.collections.mapClass,
-          'containsKey',
-          mapViewSources.get(receiver as JavaObject)?.map,
-          [value]
-        )
-      : indexOf(frame, elementsOf(receiver), value) !== -1
+  addMethod(
+    cls,
+    'contains',
+    [context.objectType],
+    BOOLEAN,
+    false,
+    (frame, receiver, [value]) =>
+      mapViewSources.get(receiver as JavaObject)?.containsEntry?.(frame, value) ??
+      (looksUpThroughMap(receiver)
+        ? frame.runtime.invokeVirtual(
+            frame,
+            frame.runtime.builtins.collections.mapClass,
+            'containsKey',
+            mapViewSources.get(receiver as JavaObject)?.map,
+            [value]
+          )
+        : indexOf(frame, elementsOf(receiver), value) !== -1)
   );
   addMethod(cls, 'iterator', [], { kind: 'class', cls: itrClass, args: [element] }, false, (frame, receiver) => {
     const view = mapViewSources.get(receiver as JavaObject);

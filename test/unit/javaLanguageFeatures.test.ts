@@ -2233,3 +2233,13 @@ public class Main {
 }`;
   expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'null\nfalse\n' });
 });
+
+test("Java's entry sets look an entry up by its key in their map", () => {
+  const program = `import java.util.*;
+public class Main { public static void main(String[] a) { TreeMap<String,Integer> ci = new TreeMap<>(String.CASE_INSENSITIVE_ORDER); ci.put("ab", 1); System.out.println(ci.entrySet().contains(Map.entry("AB", 1)) + " " + ci.entrySet().contains(Map.entry("AB", 2)) + " " + ci.entrySet().contains("x") + " " + ci.entrySet().contains(null));
+ Map<String,Integer> h = new HashMap<>(Map.of("a", 1)); System.out.println(h.entrySet().contains(Map.entry("a", 1)) + " " + Collections.unmodifiableMap(h).entrySet().contains(Map.entry("a", 1)) + " " + Map.of("a", 1).entrySet().contains(Map.entry("a", 1)) + " " + h.entrySet().equals(Map.of("a", 1).entrySet())); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true false false false\ntrue true true true\n',
+  });
+});
