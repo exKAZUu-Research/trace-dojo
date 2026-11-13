@@ -844,7 +844,10 @@ let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 
   [
     'a timestamp helper around computation between timers',
     `let sum = 0; const start = Date.now(); const log = (message) => console.log(message, Date.now() - start >= 0);
-setTimeout(() => console.log('E 50'), 50); log('begin'); for (let i = 0; i < 20000; i++) sum += i; log('end'); setTimeout(() => console.log('F 0'), 0);`,
+setTimeout(() => console.log('E 50'), 50); log('begin'); for (let i = 0; i < 20000; i++) sum += i; log('end'); setTimeout(() => console.log('F 0'), 0);
+setTimeout(() => console.log('G 50'), 50);
+for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; console.log('round', k, Date.now() - s >= 0); }
+for (const n of [1, 2]) log(n); setTimeout(() => console.log('H 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',
