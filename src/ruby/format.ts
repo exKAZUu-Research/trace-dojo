@@ -1,4 +1,12 @@
-import { combinedStringEncoding, floatToInt, formatFloat, inspect, toStrValue, toSValue } from './conversions';
+import {
+  combinedStringEncoding,
+  floatToInt,
+  formatFloat,
+  inspect,
+  toRubyInt,
+  toStrValue,
+  toSValue,
+} from './conversions';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
@@ -150,7 +158,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: FormatPar
     if (template[index] === '*') {
       index++;
       const selected = /^(\d+)\$/.exec(template.slice(index));
-      const width = Number(yield* intArg(selected ? numberedArg(selected[1]) : takeArg()));
+      const width = yield* toRubyInt(selected ? numberedArg(selected[1]) : takeArg());
       if (width < 0) spec.minus = true;
       spec.width = Math.abs(width);
       if (selected) index += selected[0].length;
@@ -163,7 +171,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: FormatPar
       if (template[index] === '*') {
         index++;
         const selected = /^(\d+)\$/.exec(template.slice(index));
-        const precision = Number(yield* intArg(selected ? numberedArg(selected[1]) : takeArg()));
+        const precision = yield* toRubyInt(selected ? numberedArg(selected[1]) : takeArg());
         spec.precision = precision < 0 ? undefined : precision;
         if (selected) index += selected[0].length;
       } else {

@@ -289,8 +289,10 @@ def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
 def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
-  if (end === NIL || (typeof end === 'number' && !Number.isFinite(end)))
-    throw rangeError('cannot get the last element of endless arithmetic sequence');
+  if (end === NIL) throw rangeError('cannot get the last element of endless arithmetic sequence');
+  for (const value of [start, end, step])
+    if (typeof value === 'number' && !Number.isFinite(value))
+      throw floatDomainError(Number.isNaN(value) ? 'NaN' : value > 0 ? 'Infinity' : '-Infinity');
   const index = arithmeticLastIndex(
     start as bigint | number,
     end as bigint | number,
@@ -312,10 +314,16 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
   const requested = yield* toInt(args[0]);
   if (requested < 0n) throw argumentError('negative array size');
   const values: Value[] = [];
-  const first = index - requested + 1n > 0n ? index - requested + 1n : 0n;
-  for (let position = first; position <= index; position++) {
+  const count = requested < index + 1n ? requested : index + 1n;
+  let value = arithmeticValue(start as bigint | number, step as bigint | number, index);
+  value =
+    typeof value === 'bigint' && typeof step === 'bigint'
+      ? value - step * count
+      : Number(value) - Number(step) * Number(count);
+  for (let position = 0n; position < count; position++) {
     rt().spend();
-    values.push(arithmeticValue(start as bigint | number, step as bigint | number, position));
+    value = typeof value === 'bigint' && typeof step === 'bigint' ? value + step : Number(value) + Number(step);
+    values.push(value);
   }
   return arr(values);
 });
@@ -358,9 +366,8 @@ function arithmeticValue(start: bigint | number, step: bigint | number, index: b
 }
 
 function canonicalNumber(value: Value): string {
-  if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return BigInt(value).toString();
-  return String(value);
+  if (typeof value === 'bigint') return `i${value}`;
+  return `f${typeof value === 'number' && value === 0 ? 0 : value}`;
 }
 for (const name of ['==', '===', 'eql?'])
   def('Enumerator::ArithmeticSequence', name, 1, (self: RObject, [other]) => {

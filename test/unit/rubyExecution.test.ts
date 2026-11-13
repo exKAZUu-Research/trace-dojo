@@ -26,9 +26,26 @@ test('imaginary unit remains unsupported', () => {
 });
 
 test('pretty-printing a flat large Array stays within the execution budget', () => {
+  vi.restoreAllMocks();
   const result = run('pp [1] * 15000');
   expect(result).toMatchObject({ kind: 'executed' });
   if (result.kind === 'executed') expect(result.stdout).toHaveLength(60_000);
+});
+
+test('negative binary formatting stays within the execution budget', () => {
+  vi.restoreAllMocks();
+  expect(run('p format("%b", -(1<<900000)).bytesize')).toMatchObject({
+    kind: 'executed',
+    stdout: '900003\n',
+  });
+});
+
+test('empty repetitions stay within the execution budget', () => {
+  vi.restoreAllMocks();
+  expect(run('p("" * 300000000, [] * 300000000)')).toMatchObject({
+    kind: 'executed',
+    stdout: '""\n[]\n',
+  });
 });
 
 test.each([
@@ -97,6 +114,11 @@ test.each([
     'begin; printf("é%s",255.chr); rescue Encoding::CompatibilityError; puts :incompatible; end',
     'incompatible\n',
   ],
+  [
+    'dynamic format sizes use to_int',
+    'class A; def to_int; 2; end; end; p format("%*s", A.new, "x"), format("%.*f", A.new, 1.234)',
+    '" x"\n"1.23"\n',
+  ],
   ['Float remainder by Integer zero', 'begin; 1.0.remainder(0); rescue ZeroDivisionError; puts :zero; end', 'zero\n'],
   [
     'Enumerator sizes and arithmetic sequence inspection',
@@ -122,6 +144,11 @@ test.each([
     'ArithmeticSequence last and structural hash',
     'e=1.step(10,3); p e.last, e.last(2), e.last(0); p [e,e].uniq.size; h={e=>1}; p h[1.step(10,3)]; p (0.1..0.3).step(0.1).last, 1.0.step(0.0,-0.1).last, 1.step(10**400,2).last == 10**400-1',
     '10\n[7, 10]\n[]\n1\n1\n0.2\n0.0\ntrue\n',
+  ],
+  [
+    'Float ArithmeticSequence last values and typed hash',
+    'p (0.0...1.0).step(0.1).last(3), 1.0.step(0.0,-0.1).last(3); a=1.step(10,3); b=1.0.step(10,3); h={a=>7}; p a.eql?(b), a.hash==b.hash, h[b]; begin; 1.0.step(Float::NAN,1).last; rescue => e; p e.class; end',
+    '[0.7, 0.7999999999999999, 0.8999999999999999]\n[0.20000000000000004, 0.10000000000000003, 2.7755575615628914e-17]\ntrue\nfalse\nnil\nFloatDomainError\n',
   ],
   [
     'Integer iteration near Float precision boundary',
@@ -150,8 +177,6 @@ test.each([
   ],
   ['underscores in Float exponents', 'p "1e2_1".to_f, "1e2__1".to_f', '1.0e+21\n100.0\n'],
   ['Cherokee full case folding', 'p "Ꭱ".casecmp?("ꭱ")', 'true\n'],
-  ['negative binary formatting work is bounded', 'p format("%b", -(1<<200000)).bytesize', '200003\n'],
-  ['empty repetitions return promptly', 'p("" * 300000000, [] * 300000000)', '""\n[]\n'],
   [
     'String sum long bound',
     'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',
