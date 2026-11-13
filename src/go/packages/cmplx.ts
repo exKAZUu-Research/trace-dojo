@@ -1,4 +1,4 @@
-import type { Entity } from '../entities';
+import { always, type Entity, type FuncEntity } from '../entities';
 import { fma } from '../fma';
 import { definePackage, fn, nativeFunction } from '../native';
 import { BASIC } from '../types';
@@ -382,7 +382,7 @@ function tanSeries(z: Complex): number {
   return d;
 }
 
-const unary = (name: string, impl: (x: Complex) => Complex): Entity =>
+const unary = (name: string, impl: (x: Complex) => Complex): FuncEntity =>
   nativeFunction(name, fn([C], [C]), ([value]) => impl(value as Complex));
 
 const members: Record<string, Entity> = {
@@ -397,7 +397,7 @@ const members: Record<string, Entity> = {
     const [s, c] = goMath.sincos(theta as number);
     return cx((r as number) * c, (r as number) * s);
   }),
-  Conj: unary('Conj', (x) => cx(x.re, -x.im)),
+  Conj: { ...unary('Conj', (x) => cx(x.re, -x.im)), inlinedResult: { partNegations: [undefined, always] } },
   IsNaN: nativeFunction('IsNaN', fn([C], [BOOL]), ([value]) => isNaN(value as Complex)),
   IsInf: nativeFunction(
     'IsInf',

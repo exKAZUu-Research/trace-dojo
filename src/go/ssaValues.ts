@@ -6,7 +6,7 @@
  * through a pointer.
  */
 import type { FunctionContext, ProductSource, VarEntity } from './entities';
-import { gateFacts, type SsaConstant, type SsaFields, type StaticValue } from './operand';
+import { gateFacts, type Operand, type SsaConstant, type SsaFields, type StaticValue } from './operand';
 
 export interface SsaValues {
   definitions: Map<VarEntity, Definition>;
@@ -17,7 +17,7 @@ export interface SsaValues {
   versions: number;
 }
 
-export interface Definition {
+export interface Definition extends Negations {
   constant?: SsaConstant;
   fields?: SsaFields;
   /** The hidden slots holding the factors of the multiplication the value is, which an addition using it fuses. */
@@ -44,12 +44,15 @@ interface Region {
 }
 
 /** The value a use of a variable sees. */
-export interface ReachingValue {
+export interface ReachingValue extends Negations {
   constant?: SsaConstant;
   fields?: SsaFields;
   factors?: ProductFactors;
   version?: number;
 }
+
+/** Which of a value's parts Go's compiler computes as negations, which makes a product of them FNMULD. */
+type Negations = Pick<Operand, 'negation' | 'partNegations'>;
 
 const MEMORY = Symbol('memory');
 /** The other stores Go's load forwarding rules look through (generic.rules, `Load` of `Store`). */
@@ -69,7 +72,7 @@ export function define(
   {
     static: resolved,
     ...value
-  }: {
+  }: Negations & {
     constant?: SsaConstant;
     fields?: SsaFields;
     factors?: ProductFactors;
@@ -112,7 +115,7 @@ export function storeLocalMemory(fn: FunctionContext | undefined, variable: VarE
 export function reachingValue(fn: FunctionContext | undefined, variable: VarEntity): ReachingValue {
   const definition = fn?.ssa.definitions.get(variable);
   if (!fn || !definition) return {};
-  const { constant, factors, fields, version } = definition;
+  const { constant, factors, fields, version, negation, partNegations } = definition;
   if (!variable.owner && fn.ssa.stores - definition.stores > FORWARDED_STORES) return { version };
   const local = variable.owner !== undefined;
   const loops = fn.ssa.regions.slice(definition.depth).filter((region) => region.loop);
@@ -123,6 +126,10 @@ export function reachingValue(fn: FunctionContext | undefined, variable: VarEnti
     constant: constant && ((frame) => reaches() && constant(frame)),
     factors: factors && { ...factors, enabled: () => reaches() && (factors.enabled?.() ?? true) },
     fields: fields && gateFacts({ ssaFields: fields }, reaches).ssaFields,
+    negation: negation && ((): boolean => reaches() && negation()),
+    partNegations: partNegations?.map(
+      (part) => part && ((): boolean => reaches() && part())
+    ) as Negations['partNegations'],
     version,
   };
 }

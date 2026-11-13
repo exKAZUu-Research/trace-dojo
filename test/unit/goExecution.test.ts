@@ -1274,6 +1274,93 @@ func main() {
   });
 });
 
+test('package variables referenced before their declaration are initialized once', () => {
+  const program = `package main
+
+import "fmt"
+
+var a = b + c + d + e
+var b = f()
+var c, d = f(), 2
+var e = len(fmt.Sprint(f()))
+var k = 3
+var l = k * 2
+
+func f() int {
+	fmt.Println("f")
+	return 10
+}
+
+func main() {
+	fmt.Println(a, b, c, d, e, l)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', stdout: 'f\nf\nf\n24 10 10 2 2 6\n' });
+});
+
+test('failed comma-ok type assertions yield the zero value and false in every assignment form', () => {
+  const program = `package main
+
+import "fmt"
+
+var g interface{} = "s"
+var pn, pok = g.(int)
+
+func f() int { fmt.Println("f"); return 1 }
+
+type S struct{ a, b int }
+
+func main() {
+	var a interface{} = 3.0
+	var n, ok = a.(int)
+	fmt.Println(n, ok, pn, pok)
+	var s S
+	s, ok = a.(S)
+	fmt.Println(s, ok)
+	m := map[int]int{}
+	m[f()], ok = a.(int)
+	fmt.Println(m, ok)
+	x, ok := a.(float64)
+	fmt.Println(x, ok)
+	defer func() { fmt.Println(recover()) }()
+	fmt.Println(f(), a.(int), f())
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '0 false 0 false\n{0 0} false\nf\nmap[1:0] false\n3 true\nf\ninterface conversion: interface {} is float64, not int\n',
+  });
+});
+
+// Go's arm64 rules fuse a product of plain factors (FMULD) before a product with a negated factor (FNMULD), whatever
+// their order, in float sums and in the parts of a complex product.
+test('products with a negated factor fuse after plain products', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"math/cmplx"
+)
+
+var vs = [][4]float64{{1.1, 2.3, 0.7, 1.9}, {0.1, 0.7, 0.3, 0.9}}
+var zs = []complex128{1.7 + 2.9i, 0.1 + 0.7i}
+
+func main() {
+	for _, v := range vs {
+		a, b, c, d := v[0], v[1], v[2], v[3]
+		nd := -d
+		fmt.Println(a*c-b*(-d), a*c - -(b*d), a*c-b*nd, a-b*(-d))
+	}
+	for _, z := range zs {
+		fmt.Println(z*cmplx.Conj(z), complex(real(z), -imag(z))*z)
+	}
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '5.139999999999999 5.139999999999999 5.139999999999999 5.47\n0.66 0.66 0.66 0.73\n(11.3+4.44089209850063e-18i) (11.3+4.44089209850063e-18i)\n(0.49999999999999994+6.661338147750939e-18i) (0.49999999999999994+6.661338147750939e-18i)\n',
+  });
+});
+
 // Go's compiler keeps a small struct that never has its address taken in SSA values, field by field, and folds products
 // of the constants it finds there as it does those built by complex() from constant-valued variables.
 test('constants reach products through complex numbers and struct fields', () => {

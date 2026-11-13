@@ -79,6 +79,8 @@ const SEMICOLON_LISTS = new Set([
   'labeled_statement',
 ]);
 
+const SWITCH_STATEMENTS = new Set(['expression_switch_statement', 'type_switch_statement', 'select_statement']);
+
 /**
  * Finds newlines that Go's lexer turns into a semicolon where the grammar allows none, which tree-sitter's grammar,
  * lacking the lexer's rule, accepts: a `{` or `else` on the next line, or a list of arguments or elements whose line
@@ -102,11 +104,18 @@ function findMisplacedNewlines(root: Node): SourceDiagnostic[] {
     const next = leaves[index + 1];
     if (next.startPosition.row <= token.endPosition.row || !triggersSemicolon(token)) continue;
     const container = commonAncestor(token, next);
-    if (container && SEMICOLON_LISTS.has(container.type)) continue;
+    if (container && SEMICOLON_LISTS.has(container.type) && !beforeBody(container, next)) continue;
     errors.push({ row: token.endPosition.row, message: newlineMessage(next) });
     if (errors.length >= 5) break;
   }
   return errors;
+}
+
+/** Whether a token lies in the header of a `switch` or `select`, before the `{` that opens the clauses. */
+function beforeBody(container: Node, token: Node): boolean {
+  if (!SWITCH_STATEMENTS.has(container.type)) return false;
+  const brace = container.children.find((child) => child.type === '{');
+  return brace !== undefined && token.startIndex <= brace.startIndex;
 }
 
 function triggersSemicolon(token: Node): boolean {

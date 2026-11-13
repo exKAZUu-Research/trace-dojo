@@ -15,6 +15,7 @@ import {
 import { mapKeyOf } from './equality';
 import { containsTypeParam, substitute } from './generics';
 import { currentRuntime } from './native';
+import type { Operand } from './operand';
 import { lookupPackage } from './packages/index';
 import { type Eval, evaluateAll, type Frame, type FunctionInfo, type LocalInfo, type StackBuffers } from './runtime';
 import { Scope } from './scope';
@@ -858,12 +859,15 @@ export class ProgramCompiler extends StatementCompiler {
         ? spec.values.map((value, index) => ({ values: [value], variables: [variables[index]] }))
         : [{ values: spec.values, variables }];
       const types: Type[] = [];
+      const operands: Operand[] = [];
       const compiled = units.map((unit) => {
         const unitTypes: Type[] = [];
+        const unitOperands: Operand[] = [];
         const { result: values, run: ordered } = this.hoistingCalls(() =>
-          this.rightSide(spec, unit.values, unit.variables.length, () => declaredType, unitTypes)
+          this.rightSide(spec, unit.values, unit.variables.length, () => declaredType, unitTypes, unitOperands)
         );
         types.push(...unitTypes);
+        operands.push(...unitOperands);
         return { values, ordered, variables: unit.variables };
       });
       for (const [index, variable] of variables.entries()) {
@@ -873,7 +877,8 @@ export class ProgramCompiler extends StatementCompiler {
         this.globalZeros[variable.slot] = this.zeroOf(variable.type);
       }
       if (compiled.some((unit) => !unit.values)) return;
-      const isConstant = spec.values.every((value) => this.isConstantExpression(value));
+      const isConstant =
+        operands.length === spec.values.length && operands.every((operand) => operand.mode === 'constant');
       const row = this.trace && !isConstant ? spec.row : undefined;
       const createsObjects = spec.values.every((value) => this.createsObject(value));
       const run = (frame: Frame): void => {
@@ -896,17 +901,6 @@ export class ProgramCompiler extends StatementCompiler {
       this.scope = outerScope;
       this.fn = outerFn;
       this.initContext.references = outerReferences;
-    }
-  }
-
-  private isConstantExpression(expression: VarSpec['values'][number]): boolean {
-    const saved = this.reporting;
-    this.reporting = false;
-    try {
-      const operand = this.withScopeOf(this.fileScope, () => this.expression(expression));
-      return operand.mode === 'constant';
-    } finally {
-      this.reporting = saved;
     }
   }
 

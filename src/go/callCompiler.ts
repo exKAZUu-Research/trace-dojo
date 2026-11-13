@@ -347,7 +347,8 @@ export abstract class CallCompiler extends CompositeCompiler {
             return fn.call(argValues, row, undefined, buffers(frame));
           }
     );
-    return call ? { ...result, ...programCallResult(call, signature.results) } : result;
+    if (call) return { ...result, ...programCallResult(call, signature.results) };
+    return { ...result, ...callee.func?.inlinedResult };
   }
 
   protected prepareGenericCall(
@@ -1200,6 +1201,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       span: expression,
       eval: (frame) => new Complex(readRe(frame) as number, readIm(frame) as number),
       ssaConstant: allConstant(re, im),
+      partNegations: [re.negation, im.negation],
     };
   }
 
@@ -1237,6 +1239,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       span: expression,
       eval: (frame) => (read(frame) as Complex)[name === 'real' ? 're' : 'im'],
       ssaConstant: operand.ssaConstant,
+      negation: operand.partNegations?.[name === 'real' ? 0 : 1],
     };
   }
 

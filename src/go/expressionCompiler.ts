@@ -34,8 +34,26 @@ import { checkKeyHashable, equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
 import { currentRuntime, libraryCell } from './native';
-import { allConstant, gateFacts, keyedFields, type Operand, type SsaFacts, ssaFactsAt, type Storage } from './operand';
-import { arithmetic, bitwiseNot, complexProduct, foldedComplexProduct, negate, ordering, shift } from './operators';
+import {
+  allConstant,
+  gateFacts,
+  keyedFields,
+  type Negation,
+  type Operand,
+  type SsaFacts,
+  ssaFactsAt,
+  type Storage,
+} from './operand';
+import {
+  arithmetic,
+  bitwiseNot,
+  type ComplexNegations,
+  complexProduct,
+  foldedComplexProduct,
+  negate,
+  ordering,
+  shift,
+} from './operators';
 import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
 import { boxesByAddress, isPointerShaped, moveToHeap, sizeOf } from './sliceOps';
@@ -221,9 +239,26 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const tracked = this.withRuntimeCallTracking(() => this.compileExpression(expression));
     let operand = tracked.result;
     if (operand.mode === 'value' && !this.isInvalid(operand) && this.copiedInFirstPass(expression, operand)) {
-      operand = { ...operand, eval: this.hoist(operand.eval) };
+      operand = operand.commaOk
+        ? this.hoistCommaOk(operand, operand.commaOk)
+        : { ...operand, eval: this.hoist(operand.eval) };
     }
     return { ...operand, firstPass: hoisted.count };
+  }
+
+  /** Copies a type assertion in the first pass in the form its statement uses: one value, which may panic, or `v, ok`. */
+  private hoistCommaOk(operand: Operand, commaOk: NonNullable<Operand['commaOk']>): Operand {
+    const single = operand.eval;
+    let pair = false;
+    const read = this.hoist((frame) => (pair ? (commaOk(frame) as unknown as Value) : single(frame)));
+    return {
+      ...operand,
+      eval: read,
+      commaOk: (frame) => read(frame) as unknown as [Value, boolean],
+      useCommaOk: () => {
+        pair = true;
+      },
+    };
   }
 
   private copiedInFirstPass(expression: Expression, operand: Operand): boolean {
@@ -605,8 +640,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** What Go's SSA form knows of a variable's value at this use, from the definition that reaches it. */
-  private reachingOperand(entity: VarEntity): Pick<Operand, 'product' | 'ssaConstant' | 'ssaFields' | 'ssaVersion'> {
-    const { constant, factors, fields, version } = reachingValue(this.fn, entity);
+  private reachingOperand(
+    entity: VarEntity
+  ): Pick<Operand, 'product' | 'ssaConstant' | 'ssaFields' | 'ssaVersion' | 'negation' | 'partNegations'> {
+    const { constant, factors, fields, version, negation, partNegations } = reachingValue(this.fn, entity);
     return {
       product: factors && {
         left: (frame) => frame.locals[factors.left] as Value,
@@ -618,6 +655,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       ssaConstant: constant,
       ssaFields: fields,
       ssaVersion: version,
+      negation,
+      partNegations,
     };
   }
 
@@ -863,7 +902,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type,
         span,
         eval: (frame) => apply(read(frame)),
-        product: { ...operand.product, left: negated, right },
+        product: { ...operand.product, left: negated, right, negated: toggled(operand.product.negated) },
       };
     }
     if (this.hasTypeParam(type)) return { mode: 'value', type, span, eval: () => {} };
@@ -875,6 +914,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
       span,
       eval: (frame) => apply(read(frame)),
       ssaConstant: operand.ssaConstant,
+      // Go's compiler negates a negation again (FNEGD) rather than cancelling the two.
+      ...(operator === '-' && isFloat(type) ? { negation: always } : {}),
+      ...(operator === '-' && isComplex(type) ? { partNegations: [always, always] as const } : {}),
     };
   }
 
@@ -1048,7 +1090,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type,
         span: expression,
         eval: (frame) => apply(readLeft(frame), readRight(frame)),
-        product: { ...factors, constant: ssaConstant, source: this.productSource(operator, left, right) },
+        product: {
+          ...factors,
+          constant: ssaConstant,
+          negated: () => (left.negation?.() ?? false) || (right.negation?.() ?? false),
+          source: this.productSource(operator, left, right),
+        },
         ssaConstant,
       };
     }
@@ -1083,6 +1130,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const single = isBasic(type, 'complex64');
     const readLeft = left.eval;
     const readRight = right.eval;
+    const [xRe, xIm] = left.partNegations ?? [];
+    const [yRe, yIm] = right.partNegations ?? [];
+    const negations = (): ComplexNegations => ({
+      xRe: xRe?.() ?? false,
+      xIm: xIm?.() ?? false,
+      yRe: yRe?.() ?? false,
+      yIm: yIm?.() ?? false,
+    });
     return {
       mode: 'value',
       type,
@@ -1091,7 +1146,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const x = readLeft(frame) as Complex;
         const y = readRight(frame) as Complex;
         if (ssaConstant?.(frame)) return foldedComplexProduct(x, y, single);
-        return complexProduct(x, y, fn !== undefined && sumsGrouped(contexts, fn, frame), single);
+        return complexProduct(x, y, fn !== undefined && sumsGrouped(contexts, fn, frame), single, negations());
       },
       ssaConstant,
     };
@@ -1160,7 +1215,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
       eval: (frame) => {
         const leftFuses = leftProduct !== undefined && fuses(leftProduct, frame);
         const rightFuses = rightProduct !== undefined && fuses(rightProduct, frame);
-        if (leftFuses && (!rightFuses || prefersLeft(frame))) return (fuseLeft as Eval)(frame);
+        // Go's arm64 rules fuse a product of plain factors (FMULD) before one with a negated factor (FNMULD).
+        const leftPlain = leftFuses && !leftProduct.negated?.();
+        const rightPlain = rightFuses && !rightProduct.negated?.();
+        if (leftPlain !== rightPlain ? leftPlain : leftFuses && (!rightFuses || prefersLeft(frame)))
+          return (fuseLeft as Eval)(frame);
         if (rightFuses) return (fuseRight as Eval)(frame);
         return plain(frame);
       },
@@ -2460,6 +2519,11 @@ function canSsa(type: Type): boolean {
   if (under.kind === 'struct')
     return under.fields.length <= SSA_MAX_STRUCT_FIELDS && under.fields.every((field) => canSsa(field.type));
   return true;
+}
+
+/** A negated product: Go's arm64 rules turn FMULD into FNMULD and FNMULD back into FMULD. */
+function toggled(negated: Negation | undefined): Negation {
+  return () => !(negated?.() ?? false);
 }
 
 function isNil(operand: Operand): boolean {

@@ -64,6 +64,8 @@ export interface Operand extends Storage {
   onWrite?: () => void;
   /** Evaluates `v, ok` forms: a map index or a type assertion. */
   commaOk?: (frame: Frame) => [Value, boolean];
+  /** Tells a value its statement evaluates in the first pass that the statement uses `commaOk` rather than `eval`. */
+  useCommaOk?: () => void;
   builtin?: string;
   package?: PackageEntity;
   /** The function a name refers to, which a call may call directly. */
@@ -84,6 +86,8 @@ export interface Operand extends Storage {
     enabled?: () => boolean;
     /** Whether both factors are constants to Go's compiler, which computes the product before the program runs. */
     constant?: SsaConstant;
+    /** Whether Go's compiler multiplies with FNMULD, for a negated factor or a negated product. */
+    negated?: Negation;
     source: ProductSource;
   };
   /**
@@ -93,6 +97,10 @@ export interface Operand extends Storage {
    * the value is computed in, which is undefined for the function itself rather than one of its calls.
    */
   ssaConstant?: SsaConstant;
+  /** Whether Go's compiler computes a float value as a negation (FNEGD), which makes a product of it FNMULD. */
+  negation?: Negation;
+  /** For a complex value, whether Go's compiler computes its real and imaginary parts as negations. */
+  partNegations?: readonly [Negation | undefined, Negation | undefined];
   /** For a struct value, what Go's compiler knows of each field when it keeps the struct in SSA form. */
   ssaFields?: SsaFields;
   /** What Go's compiler resolves the value to through names it sees defined once (see `StaticValue`). */
@@ -121,6 +129,9 @@ export function allConstant(...operands: readonly Pick<Operand, 'ssaConstant'>[]
   if (!parts.every(Boolean)) return undefined;
   return (params) => parts.every((part) => part?.(params));
 }
+
+/** Decided once the function is compiled, as which definitions reach a use is. */
+export type Negation = () => boolean;
 
 /** What Go's compiler knows of each field of a struct value; a field of a constant struct is itself a constant. */
 export type SsaFields = (SsaFacts | undefined)[];

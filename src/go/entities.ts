@@ -1,6 +1,6 @@
 import type { FunctionDeclaration, Span } from './ast';
 import type { Constant } from './constants';
-import type { StaticValue, Storage } from './operand';
+import type { Operand, StaticValue, Storage } from './operand';
 import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
 import type { SliceTracking } from './slicePass';
 import type { SsaValues } from './ssaValues';
@@ -101,6 +101,8 @@ export interface FuncEntity {
   direct?: (args: Value[], callRow: number | undefined, stackBuffers?: StackBuffers) => Value | Value[];
   /** What calls learn from the body of a function the program declares. */
   summary?: CalleeSummary;
+  /** What Go's compiler sees of the result of a library function it inlines, such as cmplx.Conj's negated part. */
+  inlinedResult?: Pick<Operand, 'partNegations'>;
   generic?: GenericFunc;
   declaration?: FunctionDeclaration;
 }

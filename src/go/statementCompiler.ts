@@ -625,7 +625,9 @@ export abstract class StatementCompiler extends CallCompiler {
   /** Records a write of an assignment's target: a definition of a variable Go's SSA form tracks, else a store. */
   private defineTarget(
     target: Operand | undefined,
-    value: Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'ssaFields' | 'static'> | undefined,
+    value:
+      | Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'ssaFields' | 'static' | 'negation' | 'partNegations'>
+      | undefined,
     values?: Eval[],
     index = 0
   ): void {
@@ -648,7 +650,9 @@ export abstract class StatementCompiler extends CallCompiler {
    */
   private defineFromValue(
     variable: VarEntity,
-    operand: Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'ssaFields' | 'static'> | undefined,
+    operand:
+      | Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'ssaFields' | 'static' | 'negation' | 'partNegations'>
+      | undefined,
     values: Eval[] | undefined,
     index: number
   ): void {
@@ -665,6 +669,8 @@ export abstract class StatementCompiler extends CallCompiler {
         constant: operand?.ssaConstant,
         fields: operand?.ssaFields,
         static: operand?.static,
+        negation: operand?.negation,
+        partNegations: operand?.partNegations,
       });
       return;
     }
@@ -1762,6 +1768,7 @@ function spreadResults(call: Operand, convert: Convert): Eval[] {
 /** `v, ok` of a map index or a type assertion, converted as `spreadResults` converts results. */
 function commaOkResults(operand: Operand, convert: Convert): Eval[] {
   const lookup = operand.commaOk as NonNullable<Operand['commaOk']>;
+  operand.useCommaOk?.();
   let result: [Value, boolean] = [undefined, false];
   const first = convert({ ...operand, mode: 'value', eval: () => result[0] }, 0);
   const second = convert({ mode: 'value', type: BASIC.untypedBool, span: operand.span, eval: () => result[1] }, 1);

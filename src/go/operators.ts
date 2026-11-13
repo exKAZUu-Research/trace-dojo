@@ -108,15 +108,39 @@ function complexArithmetic(operator: string, single: boolean): Binary {
 }
 
 /**
- * Multiplies as Go's arm64 code does, complex64 included (it multiplies in float64): the real part fuses its second
- * product, and the imaginary part, a sum of two products, fuses `im(x)*re(y)`, or `re(x)*im(y)` when common
- * subexpression elimination orders the function's sums of products (`groupedSums`).
+ * Multiplies as Go's arm64 code does, complex64 included (it multiplies in float64). Its rules fuse a product of
+ * plain factors (FMULD) before one with a negated factor (FNMULD), given by `negated` for each part of x and y. Among
+ * products of the same kind, the real part fuses its second product, and the imaginary part, a sum of two products,
+ * fuses `im(x)*re(y)`, or `re(x)*im(y)` when common subexpression elimination orders the function's sums of products
+ * (`groupedSums`).
  */
-export function complexProduct(x: Complex, y: Complex, groupedSums: boolean, single: boolean): Complex {
+export function complexProduct(
+  x: Complex,
+  y: Complex,
+  groupedSums: boolean,
+  single: boolean,
+  negated: ComplexNegations = NO_NEGATIONS
+): Complex {
   const round = single ? Math.fround : (value: number): number => value;
-  const im = groupedSums ? fma(x.re, y.im, x.im * y.re) : fma(x.im, y.re, x.re * y.im);
-  return new Complex(round(fma(-x.im, y.im, x.re * y.re)), round(im));
+  const reLeftPlain = !negated.xRe && !negated.yRe;
+  const reRightPlain = !negated.xIm && !negated.yIm;
+  const re = reLeftPlain && !reRightPlain ? fma(x.re, y.re, -(x.im * y.im)) : fma(-x.im, y.im, x.re * y.re);
+  const imFirstPlain = !negated.xRe && !negated.yIm;
+  const imSecondPlain = !negated.xIm && !negated.yRe;
+  const fusesFirst = imFirstPlain === imSecondPlain ? groupedSums : imFirstPlain;
+  const im = fusesFirst ? fma(x.re, y.im, x.im * y.re) : fma(x.im, y.re, x.re * y.im);
+  return new Complex(round(re), round(im));
 }
+
+/** Which parts of the operands of a complex product Go's compiler computes as negations. */
+export interface ComplexNegations {
+  xRe: boolean;
+  xIm: boolean;
+  yRe: boolean;
+  yIm: boolean;
+}
+
+const NO_NEGATIONS: ComplexNegations = { xRe: false, xIm: false, yRe: false, yIm: false };
 
 /** A complex product of constants, which Go's compiler folds with each operation rounded on its own. */
 export function foldedComplexProduct(x: Complex, y: Complex, single: boolean): Complex {
