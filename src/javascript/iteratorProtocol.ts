@@ -167,8 +167,7 @@ function iteratorObject(runtime: Runtime, iterable: Value, key: symbol, factory:
     const what = key === WELL_KNOWN_SYMBOLS.iterator ? 'iterable' : 'async iterable';
     return runtime.throwError('TypeError', `${runtime.describe(iterable)} is not ${what}`);
   }
-  // The iterable stays reachable while the program's code creates its iterator.
-  const iterator = runtime.hold(iterable, () => runtime.call(factory, iterable, [], runtime.currentRow));
+  const iterator = runtime.call(factory, iterable, [], runtime.currentRow);
   if (!isObject(iterator))
     return runtime.throwError('TypeError', `Result of the ${key.description} method is not an object`);
   return iterator;
@@ -180,8 +179,7 @@ function iterationOf(
   iterator: JsObject,
   adapt: (step: () => Value, method: 'next' | 'return' | 'throw') => Value = (step) => step()
 ): ProtocolIteration {
-  // The iterator stays reachable while the program's code reads its `next`, before anything roots the iteration.
-  const next = runtime.hold(iterator, () => runtime.get(iterator, 'next'));
+  const next = runtime.get(iterator, 'next');
   const method = (name: 'return' | 'throw'): ((...args: Value[]) => Value) | undefined => {
     const fn = runtime.get(iterator, name);
     if (fn === undefined || fn === null) return undefined;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 535 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 540 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -468,7 +468,16 @@ export class Runtime {
     if (behavior.kind === 'class') {
       return this.throwError('TypeError', `Class constructor ${this.functionName(fn)} cannot be invoked without 'new'`);
     }
-    return this.evaluator.callFunction(fn, behavior, thisValue, args, callRow);
+    // The receiver stays reachable through the call, which an arrow function or a getter's caller would not ensure, so
+    // a builtin calling the program's code on a value it holds only in a host local never loses that value's turtles.
+    const { temporaries } = this.frame;
+    const held = temporaries.length;
+    temporaries.push(thisValue);
+    try {
+      return this.evaluator.callFunction(fn, behavior, thisValue, args, callRow);
+    } finally {
+      temporaries.length = held;
+    }
   }
 
   construct(fn: Value, args: Value[], newTarget: Value = fn, callRow?: number): JsObject {
@@ -670,11 +679,10 @@ export class Runtime {
     method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator)
   ): ValueIterator {
     if (!isCallable(method)) return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
-    // The iterable, and then its iterator, stay reachable while the program's code creates and reads them.
-    const iterator = this.hold(value, () => this.call(method, value, [], this.currentRow));
+    const iterator = this.call(method, value, [], this.currentRow);
     if (!isObject(iterator))
       return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
-    const next = this.hold(iterator, () => this.get(iterator, 'next'));
+    const next = this.get(iterator, 'next');
     const { hostIterator } = iterator;
     if (!hostIterator || !(next instanceof JsFunction) || !this.realm.hostIteratorMethods.has(next)) {
       return this.tracked(this.protocolIteration(iterator, next), [iterator, next]);

@@ -269,6 +269,11 @@ const result = Object.create(null, props);`,
     'false\n',
   ],
   [
+    'a spread keeps its iterable while reading its iterator method',
+    `const out = [...Object.defineProperty({ t: new Turtle(1, 1) }, Symbol.iterator, { get: () => { console.log(observer.canMoveForward()); return () => [][Symbol.iterator](); } })];`,
+    'false\n',
+  ],
+  [
     'a spread keeps its iterable while making its iterator',
     `const out = [...{ t: new Turtle(1, 1), [Symbol.iterator]: () => { console.log(observer.canMoveForward()); return [][Symbol.iterator](); } }];`,
     'false\n',
