@@ -854,7 +854,8 @@ let elapsed = 0; const e = Date.now(); while (elapsed < 300) { for (let i = 0; i
 const queue = [1]; const p = Date.now(); for (let i = 0; i < queue.length; i++) { for (let k = 0; k < 500; k++) sum += k; if (Date.now() - p < 300) queue.push(1); } console.log('queue grown');
 const u = Date.now(); function update() { spent = Date.now() - u; } for (var spent = 0; spent < 300; ) { for (let i = 0; i < 500; i++) sum += i; update(); } console.log('var counter');
 try { const d = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - d >= 300) throw new Error('timeout'); } } catch (error) { console.log(error.message); }
-let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');`,
+let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');
+const pushed = [0]; const n = Date.now(); for (let i = 0; i < pushed.length; i++) { for (let k = 0; k < 500; k++) sum += k; if (Date.now() - n < 300) pushed['push'](1); } console.log('pushed');`,
   ],
   [
     'a timestamp helper around computation between timers',
@@ -880,6 +881,8 @@ setTimeout(() => console.log('Q 50'), 50); const ROUNDS = 15; const roundTimes =
 for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n % 8); roundTimes.push(Date.now() - s); }
 let r = 1; while (r <= ROUNDS) { const s = Date.now(); fib(r % 8); roundTimes.push(Date.now() - s); r++; }
 console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);
+setTimeout(() => console.log('U 50'), 50); for (const v of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) { for (let i = 0; i < 500; i++) sum += i; Date.now(); }
+setTimeout(() => console.log('V 0'), 0);
 setTimeout(() => console.log('S 50'), 50); let c; for (c = 0; c < 15; c++) { const s = Date.now(); fib(c % 8); roundTimes.push(Date.now() - s); }
 c = 0; while (c < 15) { const s = Date.now(); fib(c % 8); roundTimes.push(Date.now() - s); c++; }
 function count(values) { let c = 0; for (const value of values) c += value; return c; }

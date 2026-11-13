@@ -26,19 +26,19 @@ interface Collected {
   uses: { name: string; place: Place; readsOnly: boolean }[];
   /** Identifier nodes already noted, as members' objects or as written variables. */
   handled: Set<object>;
-  /** Members a write's target is, through which their object is changed. */
+  /** Members a write's target is, or a call's callee, through which their object may be changed. */
   writtenThrough: Set<object>;
 }
 
 /**
  * Marks the loops of a program whose end cannot depend on the clock, which then never poll it however many of their
- * iterations read it: a `for...in` loop that neither breaks, returns, nor throws, or a `for`, `while`, or `do...while`
+ * iterations read it: a `for...in` loop or a `for...of` loop over a literal that neither breaks, returns, nor throws, or a `for`, `while`, or `do...while`
  * loop that neither breaks, returns, nor throws and whose test and update only combine literals, variables, and the
  * `length` of arrays and strings no code changes, where nothing can write those variables while it runs except its
  * `let` or `const` init, its update, and plain statements directly in its body that read only such variables. Writes
  * to another binding of a name, and those the loop's own function makes outside the loop, run before or after it. A
- * `for...of` loop may grow the array it walks or walk a generator until a deadline. Any busy wait ends through
- * something else, which a clock read can change.
+ * `for...of` loop counts only over an array or string literal, since another may grow the array it walks or walk a
+ * generator until a deadline. Any busy wait ends through something else, which a clock read can change.
  */
 export function markCountedLoops(program: Program): void {
   const collected: Collected = { writes: [], loops: [], uses: [], handled: new Set(), writtenThrough: new Set() };
@@ -50,7 +50,7 @@ export function markCountedLoops(program: Program): void {
   };
   visit(program, [programFrame], collected);
   for (const { loop, place } of collected.loops) {
-    if (loop.kind === 'forIn') {
+    if (loop.kind === 'forIn' || (loop.kind === 'forOf' && isFreshSequence(loop.iterable))) {
       if (!leaves(loop.body)) loop.counted = true;
     } else if (
       (loop.kind === 'for' || loop.kind === 'while' || loop.kind === 'doWhile') &&
@@ -171,6 +171,9 @@ function visit(node: unknown, frames: Frame[], collected: Collected): void {
   if (written.length > 0) markHandled(record.target, collected.handled);
   if (record.target && (record.target as { kind?: unknown }).kind === 'member')
     collected.writtenThrough.add(record.target);
+  // A method called on a variable, as `a.push(1)` or `a['push'](1)` is, may change it.
+  const { callee } = node as { callee?: { kind?: unknown } };
+  if (record.kind === 'call' && callee?.kind === 'member') collected.writtenThrough.add(callee);
   noteUse(node, place, collected);
   for (const value of Object.values(node)) visit(value, inner, collected);
 }
@@ -180,8 +183,8 @@ function noteUse(node: object, place: Place, collected: Collected): void {
   const record = node as { kind?: unknown; name?: unknown; object?: Expression; property?: Record<string, unknown> };
   const { object, property } = record;
   if (record.kind === 'member' && object?.kind === 'identifier' && !collected.handled.has(object)) {
-    const readsElementOrLength =
-      property?.kind === 'computed' || (property?.kind === 'key' && property.key === 'length');
+    const readsElement = property?.kind === 'computed' && !isStringLiteral(property.expression);
+    const readsElementOrLength = readsElement || (property?.kind === 'key' && property.key === 'length');
     const readsOnly = readsElementOrLength && !collected.writtenThrough.has(node);
     collected.uses.push({ name: object.name, place, readsOnly });
     collected.handled.add(object);
@@ -292,13 +295,25 @@ function valueOf(node: object): unknown {
   return record.value ?? record.init;
 }
 
-/** Whether a write stores an array literal or a string, whose `length` no code of the program computes. */
+/**
+ * Whether a write stores an array literal or a string in its variable, whose `length` no code of the program computes;
+ * a destructuring write stores one of its elements instead.
+ */
 function storesSequence(node: object): boolean {
-  const value = valueOf(node) as Expression | undefined;
+  const { target } = node as { target?: { kind?: unknown } };
+  if (target?.kind !== 'identifier') return false;
+  return isFreshSequence(valueOf(node) as Expression | undefined);
+}
+
+/** Whether an expression makes an array or a string no other code can refer to yet. */
+function isFreshSequence(value: Expression | undefined): boolean {
   if (!value) return false;
-  return (
-    value.kind === 'array' || value.kind === 'template' || (value.kind === 'literal' && typeof value.value === 'string')
-  );
+  return value.kind === 'array' || value.kind === 'template' || isStringLiteral(value);
+}
+
+function isStringLiteral(expression: unknown): boolean {
+  const record = expression as { kind?: unknown; value?: unknown } | undefined;
+  return record?.kind === 'literal' && typeof record.value === 'string';
 }
 
 /** The variables whose `length` an expression reads. */
