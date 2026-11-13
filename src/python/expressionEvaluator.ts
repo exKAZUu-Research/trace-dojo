@@ -845,6 +845,7 @@ export class ExpressionEvaluator {
       return runtime.frameGenerator(generatorClass, '<genexpr>', expression.qualifiedName ?? '<genexpr>', inner, body);
     }
     runtime.pushFrame(inner);
+    const temporaryScope = new TemporaryScope(inner.temporaries);
     try {
       inner.temporaries.push(iterable, first);
       const { locals } = runtime.finalizer;
@@ -854,7 +855,7 @@ export class ExpressionEvaluator {
         const items = this.comprehensionItems(expression, inner, next, (key, value) => dict.store.set(key, value));
         while (!items.next().done);
         if (locals.marking) locals.bornContainer(dict, referencesOf(dict) as PyValue[]);
-        return dict;
+        return temporaryScope.keep(dict);
       }
       const container = expression.type === 'list' ? newList([]) : newSet();
       inner.temporaries.push(container);
@@ -863,9 +864,12 @@ export class ExpressionEvaluator {
         else container.table.add(item);
       }
       if (locals.marking) locals.bornContainer(container, referencesOf(container) as PyValue[]);
-      return container;
+      return temporaryScope.keep(container);
+    } catch (error) {
+      throw temporaryScope.capture(error);
     } finally {
       runtime.popFrame();
+      temporaryScope.release(inner.clearLocals());
     }
   }
 

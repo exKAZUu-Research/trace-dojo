@@ -5,6 +5,7 @@ import type { Annotation, PyCell, PyFunction, PyValue } from './values';
 /** The variables of a running module, class body, or function call. */
 export class Frame implements TracedFrame {
   readonly temporaries: PyValue[] = [];
+  readonly innerFrames: Frame[] = [];
   /** How many native calls were running when the frame last started or resumed running. */
   nativeCalls = 0;
   /** The annotations a module or class body ran, in the order of the source, which its `__annotate__` evaluates. */
@@ -41,27 +42,25 @@ export class Frame implements TracedFrame {
     this.builtins = fn ? fn.builtins : globals.has('__builtins__') ? globals.get('__builtins__') : undefined;
   }
 
-  clearLocals(): (PyValue | undefined)[] {
+  clearLocals(): unknown[] {
     const dropped = this.localValues();
     this.locals.clear();
     this.cells.clear();
     this.temporaries.length = 0;
     this.firstArgument = undefined;
+    this.innerFrames.length = 0;
     return dropped;
   }
 
-  localValues(): (PyValue | undefined)[] {
-    const values: (PyValue | undefined)[] = [
-      ...this.temporaries.toReversed(),
-      ...[...this.cells.values()].map((cell) => cell.value),
-    ];
+  localValues(): unknown[] {
+    const values: unknown[] = [...this.temporaries.toReversed(), ...[...this.cells.values()].map((cell) => cell.value)];
     const listed = new Set(this.scope.locals);
     for (const [name, value] of this.locals) if (!listed.has(name)) values.push(value);
     for (let index = this.scope.locals.length - 1; index >= 0; index--) {
       const value = this.locals.get(this.scope.locals[index] as string);
       if (value !== undefined) values.push(value);
     }
-    values.push(this.firstArgument);
+    values.push(this.firstArgument, ...this.innerFrames);
     return values;
   }
 

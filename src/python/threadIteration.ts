@@ -2,7 +2,7 @@
 // read, suspends the thread, as the scheduler expects, instead of waiting on the host's stack.
 import { resumeGeneratorSuspending } from './generators';
 import { bindValue, callValue, getIterator, lookupSpecial, type NextFunction } from './objects';
-import { releaseCaughtException } from './runtimeContext';
+import { currentRuntime, releaseCaughtException } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
 import { suspendingCall } from './threads';
 import { exceptionClassNamed, isIteratorGenerator, None, typeError, typeName } from './types';
@@ -27,8 +27,10 @@ export function withSuspendingNext(next: NextFunction, suspending: SuspendingNex
 }
 
 /** Iterates a value as `iter()` would, reading each item so that a wait while reading it suspends the thread. */
-export function iterateSuspending(iterable: PyValue): SuspendingNext {
-  return suspendingNextOf(getIterator(iterable));
+export function iterateSuspending(iterable: PyValue, held: PyValue[]): SuspendingNext {
+  const iterator = getIterator(iterable);
+  held.push(iterator);
+  return suspendingNextOf(iterator);
 }
 
 /** How to read the next item of an iterator so that a wait while reading it suspends the thread. */
@@ -67,7 +69,7 @@ export function suspendingNextOf(iterator: PyValue): SuspendingNext {
 
 /** The items of an iterable, read so that a wait while reading them suspends the thread. */
 export function* itemsSuspending(iterable: PyValue): Suspension<PyValue[]> {
-  const next = iterateSuspending(iterable);
+  const next = iterateSuspending(iterable, currentRuntime().frame.temporaries);
   const items: PyValue[] = [];
   for (let item = yield* next(); item !== DONE; item = yield* next()) items.push(item);
   return items;

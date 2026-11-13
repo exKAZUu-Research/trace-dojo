@@ -524,7 +524,7 @@ export class Evaluator extends AsyncEvaluator {
     try {
       let held: PyValue | undefined;
       // A thread reads its loop's iterable where it can suspend, so that waiting in a generator it reads suspends it.
-      const suspendingNext = runtime.threads ? iterateSuspending(iterable) : undefined;
+      const suspendingNext = runtime.threads ? iterateSuspending(iterable, frame.temporaries) : undefined;
       let next: (() => PyValue | typeof DONE) | undefined;
       if (!suspendingNext) {
         ({ next, held } = iterateHeld(iterable));

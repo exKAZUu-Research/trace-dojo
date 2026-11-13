@@ -1,7 +1,7 @@
 import type { Comprehension, Expression, Statement } from './ast';
 import { asyncIterator, asyncYield, awaitValue, isStopAsyncIteration, nextAwaitable } from './coroutines';
 import type { Frame } from './frame';
-import { bindValue, callValue, isTruthy, iterate, lookupSpecial, type NextFunction } from './objects';
+import { bindValue, callValue, isTruthy, iterateHeld, lookupSpecial, type NextFunction } from './objects';
 import { releaseCaughtException } from './runtimeContext';
 import { SuspendingEvaluator, type Suspension } from './suspendingEvaluator';
 import { TemporaryScope } from './temporaryScope';
@@ -138,7 +138,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       return super.comprehension(expression, frame, firstIterable);
     const first = firstIterable ?? this.evaluateIterable(expression.generators[0].iterable, frame);
     const inner = this.comprehensionFrame(expression, frame, first);
-    const source = this.sourceOf(expression.generators[0], first);
+    const source = this.sourceOf(expression.generators[0], first, inner.temporaries);
     const body = this.comprehensionLevel(expression, inner, 0, source, function* (value) {
       yield asyncYield(value);
     });
@@ -154,19 +154,28 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
   /** Runs a list, set, or dict comprehension that awaits, in its own frame on top of the coroutine's. */
   protected *asyncComprehension(expression: ComprehensionExpression, frame: Frame, first: PyValue): Suspension {
     const inner = this.comprehensionFrame(expression, frame);
-    inner.temporaries.push(first);
-    const source = this.sourceOf(expression.generators[0], first);
-    const container = expression.type === 'dict' ? newDict() : expression.type === 'list' ? newList([]) : newSet();
-    inner.temporaries.push(container);
-    const store = function* (this: AsyncEvaluator, value: PyValue): Suspension<void> {
-      if (container instanceof PyList) container.append(value);
-      else if (expression.type === 'dict') {
-        const dict = container as ReturnType<typeof newDict>;
-        dict.store.set(value, yield* this.evaluateSuspending(expression.value as Expression, inner));
-      } else (container as ReturnType<typeof newSet>).table.add(value);
-    };
-    yield* this.inFrame(inner, this.comprehensionLevel(expression, inner, 0, source, store.bind(this)));
-    return container;
+    const temporaryScope = new TemporaryScope(inner.temporaries);
+    frame.innerFrames.push(inner);
+    try {
+      inner.temporaries.push(first);
+      const source = this.sourceOf(expression.generators[0], first, inner.temporaries);
+      const container = expression.type === 'dict' ? newDict() : expression.type === 'list' ? newList([]) : newSet();
+      inner.temporaries.push(container);
+      const store = function* (this: AsyncEvaluator, value: PyValue): Suspension<void> {
+        if (container instanceof PyList) container.append(value);
+        else if (expression.type === 'dict') {
+          const dict = container as ReturnType<typeof newDict>;
+          dict.store.set(value, yield* this.evaluateSuspending(expression.value as Expression, inner));
+        } else (container as ReturnType<typeof newSet>).table.add(value);
+      };
+      yield* this.inFrame(inner, this.comprehensionLevel(expression, inner, 0, source, store.bind(this)));
+      return temporaryScope.keep(container);
+    } catch (error) {
+      throw temporaryScope.capture(error);
+    } finally {
+      frame.innerFrames.pop();
+      temporaryScope.release(inner.clearLocals());
+    }
   }
 
   /** Runs `run` with `frame` on top of the stack, taking it off while `run` is suspended. */
@@ -190,13 +199,21 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
     }
   }
 
-  private sourceOf(generator: Comprehension, iterable: PyValue): Source {
-    return generator.isAsync ? { asyncIterator: asyncIterator(iterable) } : { next: iterate(iterable) };
+  private sourceOf(generator: Comprehension, iterable: PyValue, held: PyValue[]): Source {
+    if (generator.isAsync) {
+      const iterator = asyncIterator(iterable);
+      held.push(iterator);
+      return { asyncIterator: iterator };
+    }
+    const source = iterateHeld(iterable);
+    held.push(source.held);
+    return { next: source.next };
   }
 
   /** Runs the clauses of a comprehension from the one at `index`, passing each element to `emit`. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows how a comprehension runs its clauses, each sync or async.
-  // code-gauge-allow functionNcss 33 -- Follows how a comprehension runs its clauses, each sync or async.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Follows how a comprehension runs its clauses, each sync or async.
+  // code-gauge-allow functionNcss 39 -- Follows how a comprehension runs its clauses, each sync or async.
+  // code-gauge-allow duplicateLines 16 -- Async and threaded clauses use the same explicit ownership scope around their different iteration protocols.
   private *comprehensionLevel(
     expression: ComprehensionExpression,
     frame: Frame,
@@ -235,11 +252,21 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       if (index + 1 < generators.length) {
         const next = generators[index + 1];
         const iterable = yield* this.evaluateSuspending(next.iterable, frame);
-        yield* this.holding(
-          frame,
-          iterable,
-          this.comprehensionLevel(expression, frame, index + 1, this.sourceOf(next, iterable), emit)
-        );
+        const temporaryScope = new TemporaryScope(frame.temporaries);
+        frame.temporaries.push(iterable);
+        try {
+          yield* this.comprehensionLevel(
+            expression,
+            frame,
+            index + 1,
+            this.sourceOf(next, iterable, frame.temporaries),
+            emit
+          );
+        } catch (error) {
+          throw temporaryScope.capture(error);
+        } finally {
+          temporaryScope.release();
+        }
         continue;
       }
       yield* emit(yield* this.evaluateSuspending(expression.element, frame));

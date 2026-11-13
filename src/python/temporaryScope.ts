@@ -1,3 +1,4 @@
+import { pushAll } from './arrays';
 import { nativeReferences } from './garbageCollection';
 import { currentRuntime } from './runtimeContext';
 import { PyError, type PyInstance, PyObject, type PyValue } from './values';
@@ -33,13 +34,14 @@ export class TemporaryScope {
     return error;
   }
 
-  release(): void {
+  release(additional: readonly unknown[] = []): void {
     const { finalizer } = currentRuntime();
     if (this.aborted || finalizer.pending.size === 0) {
       this.values.length = this.length;
       return;
     }
-    const dropped = this.values.splice(this.length).toReversed();
+    const dropped: unknown[] = this.values.splice(this.length).toReversed();
+    pushAll(dropped, additional);
     const transferred = this.failed ? [] : (this.transferred?.(this.result) ?? []);
     finalizer.release(dropped, nativeReferences([this.result, this.exception, ...transferred]));
   }

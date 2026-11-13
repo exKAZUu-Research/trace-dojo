@@ -67,7 +67,7 @@ function* dictSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
     return callValue(dictClass, args, kwargs);
   }
   const dict = newDict();
-  const next = iterateSuspending(source);
+  const next = iterateSuspending(source, currentRuntime().frame.temporaries);
   let index = 0;
   for (let item = yield* next(); item !== DONE; item = yield* next()) addUpdatePair(dict, item, index++);
   for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
@@ -83,7 +83,7 @@ function setSuspending(cls: PyClass): SuspendingNative {
       return callValue(cls, args);
     }
     const table = new SetTable();
-    const next = iterateSuspending(source);
+    const next = iterateSuspending(source, currentRuntime().frame.temporaries);
     for (let item = yield* next(); item !== DONE; item = yield* next()) addToTable(table, item);
     return new PySet(cls, table);
   };
@@ -154,7 +154,7 @@ function minMaxSuspending(name: 'min' | 'max'): SuspendingNative {
     if (args.length > 1 && fallback !== undefined) {
       throw typeError(`Cannot specify a default for ${name}() with multiple positional arguments`);
     }
-    const next = iterateSuspending(args.length === 1 ? args[0] : newList(args));
+    const next = iterateSuspending(args.length === 1 ? args[0] : newList(args), currentRuntime().frame.temporaries);
     const operator = name === 'max' ? '>' : '<';
     let best: PyValue | typeof DONE = DONE;
     let bestKey: PyValue = None;
@@ -173,7 +173,7 @@ function minMaxSuspending(name: 'min' | 'max'): SuspendingNative {
 }
 
 function* anyAllSuspending(iterable: PyValue, isAny: boolean): Suspension {
-  const next = iterateSuspending(iterable);
+  const next = iterateSuspending(iterable, currentRuntime().frame.temporaries);
   for (let item = yield* next(); item !== DONE; item = yield* next()) {
     currentRuntime().spend();
     if (isTruthy(item) === isAny) return isAny;
@@ -189,7 +189,7 @@ function* sumSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
   let result = argument(args, kwargs, 1, 'start') ?? 0n;
   if (typeof result === 'string') throw typeError("sum() can't sum strings [use ''.join(seq) instead]");
   const runtime = currentRuntime();
-  const next = iterateSuspending(args[0]);
+  const next = iterateSuspending(args[0], currentRuntime().frame.temporaries);
   let item = yield* next();
   while (item !== DONE && typeof result === 'bigint' && (typeof item === 'bigint' || typeof item === 'boolean')) {
     runtime.spend();
@@ -223,7 +223,7 @@ function* sumSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
 function* reduceSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
   checkArgs({ qualified: 'reduce', min: 2, max: 3, style: 'expected', keywords: ['initial'] }, args, kwargs);
   const [fn, iterable] = args;
-  const next = iterateSuspending(iterable);
+  const next = iterateSuspending(iterable, currentRuntime().frame.temporaries);
   let accumulator: PyValue | typeof DONE = args.length > 2 ? args[2] : (kwargs?.get('initial') ?? (yield* next()));
   if (accumulator === DONE) throw typeError('reduce() of empty iterable with no initial value');
   for (let item = yield* next(); item !== DONE; item = yield* next()) {

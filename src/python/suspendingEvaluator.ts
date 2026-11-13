@@ -140,7 +140,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     }
     if (expression.scope.isAsync || expression.type === 'generator')
       return this.comprehension(expression, frame, first);
-    return yield* this.threadComprehension(expression, frame, first, iterateSuspending(first));
+    return yield* this.threadComprehension(expression, frame, first);
   }
 
   /**
@@ -156,23 +156,24 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     if (!expression.suspends || expression.scope.isAsync) {
       return super.generatorItems(expression, inner, first, firstNext);
     }
-    return this.itemsSuspending(expression, inner, iterateSuspending(first));
+    return this.itemsSuspending(expression, inner, iterateSuspending(first, inner.temporaries));
   }
 
   /** Runs a list, set, or dict comprehension of a program that runs threads, passing the waits in it on. */
   private *threadComprehension(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
-    first: PyValue,
-    next: SuspendingNext
+    first: PyValue
   ): Suspension {
     const { runtime } = this;
     const inner = this.comprehensionFrame(expression, frame);
     runtime.pushFrame(inner);
+    const temporaryScope = new TemporaryScope(inner.temporaries);
     try {
       inner.temporaries.push(first);
       const result = expression.type === 'list' ? newList([]) : expression.type === 'set' ? newSet() : newDict();
       inner.temporaries.push(result);
+      const next = iterateSuspending(first, inner.temporaries);
       const items = this.itemsSuspending(expression, inner, next);
       for (let step = items.next(); !step.done; step = items.next()) {
         if (isWaitRequest(step.value)) {
@@ -186,9 +187,12 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
           (result as PyDict).store.set(key, value);
         }
       }
-      return result;
+      return temporaryScope.keep(result);
+    } catch (error) {
+      throw temporaryScope.capture(error);
     } finally {
       runtime.popFrame();
+      temporaryScope.release(inner.clearLocals());
     }
   }
 
@@ -223,7 +227,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
           const temporaryScope = new TemporaryScope(frame.temporaries);
           frame.temporaries.push(iterable);
           try {
-            yield* level.call(this, index + 1, iterateSuspending(iterable));
+            yield* level.call(this, index + 1, iterateSuspending(iterable, frame.temporaries));
           } catch (error) {
             throw temporaryScope.capture(error);
           } finally {
