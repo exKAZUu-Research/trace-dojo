@@ -3,7 +3,7 @@ import { addressOf, anonymousClassName, inspect, strInspect, symInspect } from '
 import type { Gen } from './interp';
 import { RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { classOf, realClassOf } from './values';
+import { classOf, realClassOf, stringBytes, stringFromBytes } from './values';
 
 /** A document for Ruby's PrettyPrint: text, a breakable space, or a group whose breakables break together. */
 type Doc =
@@ -73,12 +73,12 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> 
     return group(1, '{', parts, '}', budget);
   }
   if (value instanceof RString && !showsItself(value)) {
-    const lines = value.s.split(/(?<=\n)/);
-    if (lines.length <= 1) return text(strInspect(value.s), budget);
+    const lines = stringLines(value);
+    if (lines.length <= 1) return text(yield* inspect(value), budget);
     const parts: Doc[] = [];
     for (const [index, line] of lines.entries()) {
       if (index > 0) parts.push(text(' +', budget), breakable());
-      parts.push(text(strInspect(line), budget));
+      parts.push(text(yield* inspect(line), budget));
     }
     return { kind: 'group', indent: 0, parts };
   }
@@ -110,6 +110,19 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> 
     return group(1, `#<${cls.name ?? anonymousClassName(cls)}:${addressOf(value)}`, parts, '>', budget);
   }
   return text(yield* inspect(value), budget);
+}
+
+function stringLines(value: RString): RString[] {
+  const bytes = stringBytes(value);
+  const lines: RString[] = [];
+  let start = 0;
+  for (let index = 0; index < bytes.length; index++) {
+    if (bytes[index] !== 10) continue;
+    lines.push(stringFromBytes(bytes.slice(start, index + 1), value.binary));
+    start = index + 1;
+  }
+  if (start < bytes.length || lines.length === 0) lines.push(stringFromBytes(bytes.slice(start), value.binary));
+  return lines;
 }
 
 function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc[]> {

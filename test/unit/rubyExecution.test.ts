@@ -2216,6 +2216,11 @@ test('puts decides newline before writer mutates the String', () => {
   });
 });
 
+test('pp inspects binary and invalid UTF-8 String bytes', () => {
+  expect(run('pp 255.chr')).toMatchObject({ stdout: '"\\xFF"\n' });
+  expect(run(String.raw`pp "\xFF"`)).toMatchObject({ stdout: '"\\xFF"\n' });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',
