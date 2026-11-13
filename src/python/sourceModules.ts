@@ -5,6 +5,7 @@ import { Frame } from './frame';
 import { registerModule } from './modules';
 import { checkNamespaceView } from './namespaceDifferences';
 import { parsePython } from './parse';
+import { programSourceOf } from './programSource';
 import type { Runtime } from './runtime';
 import { markAllSuspending } from './suspension';
 import { None } from './types';
@@ -22,13 +23,13 @@ export function registerSourceModule(
   name: string,
   source: string,
   natives: (runtime: Runtime) => Map<string, PyValue> = () => new Map(),
-  { blocks = false, unsupported = {} }: SourceModuleOptions = {}
+  { blocks = false, unsupported = {}, nativeImplementation = false }: SourceModuleOptions = {}
 ): void {
   registerModule(
     name,
     (runtime, namespace) => {
       for (const [key, value] of natives(runtime)) namespace.set(key, value);
-      runModuleSource(runtime, namespace, source, blocks);
+      runModuleSource(runtime, namespace, source, blocks, nativeImplementation);
       return new Map();
     },
     unsupported,
@@ -46,7 +47,8 @@ export function runModuleSource(
   runtime: Runtime,
   namespace: Map<string, PyValue>,
   source: string,
-  blocks = false
+  blocks = false,
+  nativeImplementation = false
 ): void {
   let parsed = parsedSources.get(source);
   if (!parsed) {
@@ -54,6 +56,7 @@ export function runModuleSource(
     parsed = runtime.withoutCharge(() => budget.excludingTime(() => parseSourceModule(source, blocks)));
     parsedSources.set(source, parsed);
   }
+  if (nativeImplementation) runtime.nativeImplementationDefinitions.push(programSourceOf(parsed, source).definitions);
   // Only the helpers the code uses, so that a module's namespace lists no others.
   for (const [key, value] of commonNatives(runtime)) {
     if (!namespace.has(key) && new RegExp(String.raw`\b${key}\b`).test(source)) namespace.set(key, value);
@@ -70,6 +73,8 @@ export function runModuleSource(
 }
 
 interface SourceModuleOptions {
+  /** Implements a C module: boundary calls/data and storage are charged; Python steps check time. */
+  nativeImplementation?: boolean;
   /** Whether every call may suspend the thread running it, as the blocking operations of threads need. */
   blocks?: boolean;
   /** The attributes this grader does not support, with the feature to name in the error. */

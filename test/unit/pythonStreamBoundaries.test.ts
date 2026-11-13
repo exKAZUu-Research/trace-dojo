@@ -132,3 +132,33 @@ for data in (b'ab', b'abc', b'abcd'):
     uncaughtException: undefined,
   });
 });
+
+test('text readline preserves Unicode positions and newline state across buffered and refill paths', () => {
+  const program = String.raw`import io
+text = (chr(128512) + 'a\r\nb' + chr(233) + '\rc\nz') * 7
+for newline in [None, '', '\n', '\r', '\r\n']:
+    def stream():
+        result = io.TextIOWrapper(io.BytesIO(text.encode()), encoding='utf-8', newline=newline)
+        result._CHUNK_SIZE = 5
+        return result
+    expected = stream().read()
+    for size in [0, 1, 2, 7, -1]:
+        source = stream()
+        parts = []
+        if size == 0:
+            assert source.readline(0) == ''
+            size = -1
+        while part := source.readline(size):
+            if size > 0: assert len(part) <= size
+            parts.append(part)
+        assert ''.join(parts) == expected
+        try: source.readline(None)
+        except TypeError: pass
+        else: raise AssertionError('accepted None size')
+print('lines')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'lines\n',
+    uncaughtException: undefined,
+  });
+});

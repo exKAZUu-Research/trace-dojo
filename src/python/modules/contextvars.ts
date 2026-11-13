@@ -187,11 +187,11 @@ function iterate(items: PyValue[]): PyIterator {
 // ContextVar --------------------------------------------------------------------------------------------------------
 
 contextVarClass.construct = (_cls, args, kwargs) => {
-  for (const key of kwargs?.keys() ?? []) {
-    if (key !== 'default') throw typeError(`ContextVar() got an unexpected keyword argument '${key}'`);
-  }
   if (args.length !== 1) {
     throw typeError(`ContextVar() takes exactly 1 positional argument (${args.length} given)`);
+  }
+  for (const key of kwargs?.keys() ?? []) {
+    if (key !== 'default') throw typeError(`ContextVar() got an unexpected keyword argument '${key}'`);
   }
   const [name] = args;
   if (stringValue(name) === undefined) throw typeError('context variable name must be a str');

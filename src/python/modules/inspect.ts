@@ -76,7 +76,7 @@ registerSourceModule(
           'takes',
           1,
           1,
-          ([value], kwargs) => signature(value, kwargs?.get('annotation_format') ?? 1n),
+          ([value], kwargs) => signature(value, kwargs?.get('annotation_format') ?? 1n, kwargs),
           {
             keywords: ['follow_wrapped', 'globals', 'locals', 'eval_str', 'annotation_format'],
           }

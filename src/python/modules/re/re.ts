@@ -8,7 +8,7 @@ import { nativeFunction, None, typeError, typeName, unbox, valueError } from '..
 import { type Kwargs, PyObject, type PyTuple, type PyValue } from '../../values';
 import { pythonArgs, type PythonParameter } from './arguments';
 import { FLAG } from './constants';
-import { flagValue, isFlag, regexFlagClass } from './flags';
+import { createRegexFlagClass, flagValue, isFlag } from './flags';
 import { lexiconScannerClass } from './lexiconScanner';
 import { matchClass } from './match';
 import { checkFlagsOperand, compileRegex, patternClass, patternErrorClass, PatternObject } from './pattern';
@@ -148,6 +148,7 @@ function escape(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 registerModule('re', (runtime) => {
+  const regexFlagClass = createRegexFlagClass(runtime);
   const namespace = new Map<string, PyValue>();
   for (const name of ['match', 'fullmatch', 'search', 'findall', 'finditer'])
     namespace.set(name, searchFunction(runtime, name));

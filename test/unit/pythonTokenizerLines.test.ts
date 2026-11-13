@@ -26,3 +26,24 @@ print('tokenized')`;
     uncaughtException: undefined,
   });
 });
+
+test('tokenizing incomplete named escapes makes progress through interpolated strings', () => {
+  const program = String.raw`import io, tokenize
+for prefix in ['f', 't']:
+    text = prefix + '"{0:' + chr(92) + 'N{' + '\n'
+    try:
+        list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except tokenize.TokenError:
+        pass
+    else:
+        raise AssertionError('incomplete escape accepted')
+    complete = prefix + '"{0:' + chr(92) + 'N{LATIN CAPITAL LETTER A}}"'
+    tokens = list(tokenize.generate_tokens(io.StringIO(complete).readline))
+    assert tokenize.untokenize(tokens) == complete
+print('escapes')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'escapes\n',
+    uncaughtException: undefined,
+  });
+});

@@ -26,7 +26,7 @@ import {
   valueError,
 } from '../types';
 import { PyDict, PyError, type PyInstance, PyList, type PyObject, PyTuple, type PyValue } from '../values';
-import { JSON_SOURCE } from './jsonSource';
+import { JSON_MODULE_SOURCE, JSON_SOURCE } from './jsonSource';
 
 interface DumpOptions {
   indent?: string;
@@ -397,7 +397,7 @@ registerUnsupportedAttributes('json', {
 const PRIVATE_NAMES = new Set(['INFINITY', 'NaN', 'NegInf', 'PosInf', 'encode_basestring', 'encode_basestring_ascii']);
 
 registerModule('json', (runtime, moduleNamespace) => {
-  // The Python part runs in globals of its own, of which the module shows all but the private names.
+  // Encoder and decoder classes retain their implementation globals; public functions use the module's globals.
   const namespace = new Map<string, PyValue>([['__name__', 'json']]);
   const encodeAscii = jsonStringEncoder(true);
   const encodeText = jsonStringEncoder(false);
@@ -420,6 +420,7 @@ registerModule('json', (runtime, moduleNamespace) => {
     }
   }
   for (const name of ['__version__', '__all__']) moduleNamespace.set(name, namespace.get(name) as PyValue);
+  runModuleSource(runtime, moduleNamespace, JSON_MODULE_SOURCE);
   // A decoder imports json.decoder, whose code imports names from the json module, which hold them only from here on.
   const decoder = callValue(
     namespace.get('JSONDecoder') as PyValue,
@@ -429,7 +430,6 @@ registerModule('json', (runtime, moduleNamespace) => {
       ['object_pairs_hook', None],
     ])
   );
-  namespace.set('_default_decoder', decoder);
   moduleNamespace.set('_default_decoder', decoder);
   return new Map();
 });

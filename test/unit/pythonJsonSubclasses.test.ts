@@ -22,3 +22,33 @@ print('json')`;
     uncaughtException: undefined,
   });
 });
+
+test('json public functions use the live module globals for replacement encoders and decoders', () => {
+  const program = `import json, io
+class Encoder(json.JSONEncoder):
+    def encode(self, value): return 'patched'
+    def iterencode(self, value, _one_shot=False): yield 'streamed'
+class Decoder(json.JSONDecoder):
+    def decode(self, value): return 'decoded'
+json.JSONEncoder = Encoder
+json.JSONDecoder = Decoder
+assert json.dumps(1, indent=2) == 'patched'
+output = io.StringIO()
+json.dump(1, output, indent=2)
+assert output.getvalue() == 'streamed'
+assert json.loads('1', parse_int=int) == 'decoded'
+assert json.load(io.StringIO('1'), parse_int=int) == 'decoded'
+original = json.loads.__globals__['JSONDecoder']
+del json.JSONDecoder
+try: json.loads('1', parse_int=int)
+except NameError: pass
+else: raise AssertionError('deleted class remained visible')
+json.JSONDecoder = original
+assert json.loads('1', parse_int=int) == 'decoded'
+print('live')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'live\n',
+    uncaughtException: undefined,
+  });
+});

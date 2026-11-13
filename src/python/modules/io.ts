@@ -13,6 +13,7 @@ import { iterStr } from '../strings';
 import {
   builtinClass,
   classOf,
+  defineMethod,
   exceptionClassNamed,
   nativeFunction,
   newException,
@@ -26,9 +27,11 @@ import {
   unbox,
   valueError,
 } from '../types';
-import { DONE, PyClass, PyDescriptor, PyError, PyOpaque, type PyValue } from '../values';
+import { DONE, PyClass, PyDescriptor, PyError, PyFunction, PyOpaque, type PyValue } from '../values';
+import { unpackKeywords } from './clinicArgs';
 import { ioCodecNatives } from './ioCodecs';
 import { IO_SOURCE } from './ioPython';
+import { defineTextReadline } from './ioTextReadline';
 
 const unsupportedOperationClass = new PyClass(
   'UnsupportedOperation',
@@ -404,6 +407,18 @@ function writeBytes(stream: BinaryStream, data: Uint8Array): number {
 
 // The module --------------------------------------------------------------------------------------------------------
 
+function clinicInitializer(cls: PyClass): void {
+  const initialize = cls.dict.get('__init__');
+  if (!(initialize instanceof PyFunction)) return;
+  const params = initialize.def.params.slice(1).map(({ name }) => name);
+  const required = params.length - initialize.defaults.length;
+  if (cls.name === 'TextIOWrapper') defineTextReadline(cls);
+  defineMethod(cls, '__init__', (self, args, kwargs) => {
+    unpackKeywords(cls.name, params, required, args, kwargs);
+    return callValue(initialize, [self, ...args], kwargs);
+  });
+}
+
 const FILE_FEATURE = 'ファイルの読み書き';
 
 registerSourceModule(
@@ -426,6 +441,13 @@ registerSourceModule(
           return newTuple([stringIO, bytesIO]);
         }),
       ],
+      [
+        '_clinic_init',
+        nativeFunction('_clinic_init', ([cls]) => {
+          clinicInitializer(cls as PyClass);
+          return None;
+        }),
+      ],
       ['UnsupportedOperation', unsupportedOperationClass],
       ['SEEK_SET', 0n],
       ['SEEK_CUR', 1n],
@@ -435,6 +457,7 @@ registerSourceModule(
       ...ioCodecNatives(),
     ]),
   {
+    nativeImplementation: true,
     unsupported: Object.fromEntries(['open', 'open_code'].map((name) => [name, `io.${name}（${FILE_FEATURE}）`])),
   }
 );

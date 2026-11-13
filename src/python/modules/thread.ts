@@ -68,7 +68,8 @@ export function newLock(): PyOpaque {
 }
 
 lockClass.construct = (_cls, args, kwargs) => {
-  if (args.length > 0 || (kwargs && kwargs.size > 0)) throw typeError('lock() takes no arguments');
+  if (kwargs && kwargs.size > 0) throw typeError('lock() takes no keyword arguments');
+  if (args.length > 0) throw typeError(`lock expected 0 arguments, got ${args.length}`);
   return newLock();
 };
 rlockClass.construct = () => new PyOpaque(rlockClass, 'RLock', { owner: undefined, count: 0 } satisfies LockState);

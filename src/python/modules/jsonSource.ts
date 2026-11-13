@@ -348,7 +348,9 @@ def _make_iterencode(markers, _default, _encoder, _indent, _floatstr,
 
 
 JSONEncoder.__module__ = 'json.encoder'
+`;
 
+export const JSON_MODULE_SOURCE = String.raw`
 _default_encoder = JSONEncoder(
     skipkeys=False,
     ensure_ascii=True,

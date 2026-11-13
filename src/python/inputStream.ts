@@ -144,7 +144,7 @@ function readInto(self: PyValue, [target]: PyValue[]): PyValue {
         state.pending = bytes.subarray(count);
       }
     }
-    state.runtime.scan(written);
+    state.runtime.spendNative(Math.ceil(written / 64));
     return BigInt(written);
   } finally {
     view.release();

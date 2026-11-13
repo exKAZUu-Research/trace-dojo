@@ -33,7 +33,15 @@ import { builtinFunctionModule } from './modules';
 import { completeNamespace } from './modules/moduleLayout';
 import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict, namespaceOf } from './namespaces';
-import { attributeError, attributeName, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
+import {
+  attributeError,
+  attributeName,
+  bindValue,
+  callValue,
+  getAttribute,
+  getAttributeOrUndefined,
+  lookupSpecial,
+} from './objects';
 import { currentRuntime } from './runtimeContext';
 import { instancesHaveDict } from './slots';
 import { runSubclasses } from './subclasses';
@@ -286,7 +294,7 @@ function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | un
     return specialAttribute(method.fn, name);
   }
   // As CPython's method_getattro does, a method reads the other attributes of its function.
-  if (method.fn instanceof PyFunction) return method.fn.dict.get(name) ?? specialAttribute(method.fn, name);
+  if (method.fn instanceof PyFunction) return getAttributeOrUndefined(method.fn, name);
   return undefined;
 }
 

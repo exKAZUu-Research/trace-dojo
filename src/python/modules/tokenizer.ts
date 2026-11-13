@@ -533,7 +533,8 @@ export class Tokenizer {
   /** Skips an escape sequence; a named escape ends the text token there, as the C tokenizer reads its braces. */
   private escape(part: LiteralPart, line: string): Token[] | undefined {
     if (line[this.index + 1] === 'N' && line[this.index + 2] === '{') {
-      this.index = line.indexOf('}', this.index) + 1;
+      const close = line.indexOf('}', this.index + 3);
+      this.index = close === -1 ? line.length : close + 1;
       return [this.middleToken(part)];
     }
     this.index += 2;

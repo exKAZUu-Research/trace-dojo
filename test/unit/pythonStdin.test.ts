@@ -164,3 +164,34 @@ test('tracing receives input and separate executions start with fresh streams', 
     });
   }
 });
+
+test.each(['input()', 'sys.stdin.readline()', 'next(sys.stdin)'])(
+  'line reads through %s have native I/O operation costs',
+  (read) => {
+    const count = 3000;
+    const program = `import sys
+count = int(${read})
+total = 0
+for _ in range(count):
+    left, right = map(int, ${read}.split())
+    total += left + right
+print(total)`;
+    expect(executeProgram('python', program, { stdin: `${count}\n${'1 2\n'.repeat(count)}` })).toMatchObject({
+      kind: 'executed',
+      stdout: `${count * 3}\n`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('learner callbacks reached from the native stdin stack remain subject to operation limits', () => {
+  const program = `import sys
+def readinto(target):
+    while True: pass
+sys.stdin.buffer.raw.readinto = readinto
+input()`;
+  expect(executeProgram('python', program, { stdin: 'x\n' })).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'operations',
+  });
+});

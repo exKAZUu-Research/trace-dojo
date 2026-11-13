@@ -234,6 +234,7 @@ function blake2Class(name: 'blake2b' | 'blake2s', wide: boolean): PyClass {
   cls.construct = (constructed, args, kwargs) => {
     checkArgs({ qualified: name, min: 0, max: 1, style: 'takes', keywords: BLAKE2_KEYWORDS }, args, kwargs);
     const option = (key: string): PyValue | undefined => kwargs?.get(key);
+    const initial = blake2Data(name, args, kwargs);
     const bytesOption = (key: string, limit: number): Uint8Array => {
       const value = option(key);
       const data = value === undefined ? new Uint8Array(0) : messageData(value);
@@ -261,11 +262,7 @@ function blake2Class(name: 'blake2b' | 'blake2s', wide: boolean): PyClass {
       innerSize: number('inner_size', 0),
       lastNode: isTruthy(option('last_node') ?? false),
     };
-    return newHash(
-      constructed,
-      { name, data: new Uint8Array(0), length: 0, blake2: parameters },
-      args[0] ?? option('string')
-    );
+    return newHash(constructed, { name, data: new Uint8Array(0), length: 0, blake2: parameters }, initial);
   };
   defineHashMethods(cls, (state) => ({ digestSize: state.blake2?.digestSize ?? 0, blockSize: wide ? 128 : 64 }));
   method(cls, 'digest', 'none', 0, 0, (self) => newBytes(digestOf(stateOf(self))));
@@ -280,6 +277,21 @@ function blake2Class(name: 'blake2b' | 'blake2s', wide: boolean): PyClass {
     cls.dict.set(key, BigInt(value));
   }
   return cls;
+}
+
+function blake2Data(name: string, args: PyValue[], kwargs: Kwargs): PyValue | undefined {
+  const data = kwargs?.get('data');
+  const string = kwargs?.get('string');
+  if (data !== undefined && string !== undefined) {
+    throw typeError(
+      "'data' and 'string' are mutually exclusive and support for 'string' keyword parameter is slated for removal in a future version."
+    );
+  }
+  const keyword = data === undefined ? 'string' : 'data';
+  if (args.length > 0 && (data !== undefined || string !== undefined)) {
+    throw typeError(`argument for ${name}() given by name ('${keyword}') and position (1)`);
+  }
+  return args[0] ?? data ?? string;
 }
 
 const blake2bClass = blake2Class('blake2b', true);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 495 -- The state of a run and the operations the interpreter reaches through it.
+// code-gauge-allow-file fileNcss 497 -- The state of a run and the operations the interpreter reaches through it.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -114,6 +114,7 @@ export class Runtime {
   deepNesting = false;
   /** The globals of the standard library modules written in Python. */
   readonly libraryNamespaces = new WeakSet<Map<string, PyValue>>();
+  readonly nativeImplementationDefinitions: WeakSet<object>[] = [];
   /** Whether any library module written in Python was imported, without which no frame is a library frame. */
   private hasLibraryNamespaces = false;
   private readonly libraryEntryRows = new WeakMap<Frame, number | undefined>();
@@ -167,6 +168,19 @@ export class Runtime {
   }
 
   spend(cost = 1): void {
+    const scope = this.frames.at(-1)?.scope;
+    if (scope && this.isNativeImplementation(scope)) {
+      if (this.freeBuilds === 0) this.budget.spend(0);
+      return;
+    }
+    this.spendNative(cost);
+  }
+
+  isNativeImplementation(definition: object): boolean {
+    return this.nativeImplementationDefinitions.some((definitions) => definitions.has(definition));
+  }
+
+  spendNative(cost: number): void {
     if (this.freeBuilds === 0) {
       this.operations += cost;
       this.budget.spend(cost);

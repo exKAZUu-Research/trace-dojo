@@ -51,7 +51,8 @@ import { nativeCheckCaller } from './abc';
 import { defaultdictClass, dequeClass, orderedDictClass } from './collections';
 import { NEW_TYPE_SOURCE } from './newTypeSource';
 import { isTypedDict, TYPING_CLASSES } from './typingClasses';
-import { getTypeHints } from './typingTypeVars';
+import './typingTypeVars';
+import { TYPING_HINTS_SOURCE } from './typingHintsSource';
 
 /** The names of typing that need features this grader does not support. */
 registerUnsupportedAttributes('typing', {
@@ -994,10 +995,18 @@ def _should_unflatten_callable_args(typ, args):
 
 
 def _eval_type(t, globalns, localns, type_params, *, recursive_guard=frozenset(),
-               format=None, owner=None, parent_fwdref=None):
+               format=None, owner=None, parent_fwdref=None, prefer_fwd_module=False):
     """Evaluate all forward references in the given type t."""
     import annotationlib
     if isinstance(t, annotationlib.ForwardRef):
+        if prefer_fwd_module and t.__forward_module__ is not None:
+            globalns = None
+            if owner_type_params := getattr(owner, "__type_params__", None):
+                globalns = getattr(sys.modules.get(t.__forward_module__, None), "__dict__", None)
+                if globalns is not None:
+                    globalns = dict(globalns)
+                    for type_param in owner_type_params:
+                        globalns[type_param.__name__] = type_param
         return evaluate_forward_ref(t, globals=globalns, locals=localns,
                                     type_params=type_params, owner=owner,
                                     _recursive_guard=recursive_guard, format=format)
@@ -1018,7 +1027,7 @@ def _eval_type(t, globalns, localns, type_params, *, recursive_guard=frozenset()
         ev_args = tuple(
             _eval_type(
                 a, globalns, localns, type_params, recursive_guard=recursive_guard,
-                format=format, owner=owner,
+                format=format, owner=owner, prefer_fwd_module=prefer_fwd_module,
             )
             for a in t.__args__
         )
@@ -1070,6 +1079,7 @@ registerModule('typing', (runtime, namespace) => {
   }
   runModuleSource(runtime, namespace, SOURCE);
   runModuleSource(runtime, namespace, NEW_TYPE_SOURCE);
+  runModuleSource(runtime, namespace, TYPING_HINTS_SOURCE);
   return new Map();
 });
 
@@ -1194,14 +1204,6 @@ function natives(): [string, PyValue][] {
     ...TYPING_CLASSES,
     ['get_origin', pythonFunction('get_origin', 'tp', ([tp]) => typingOrigin(tp))],
     ['get_args', pythonFunction('get_args', 'tp', ([tp]) => typingArgs(tp))],
-    [
-      'get_type_hints',
-      pythonFunction(
-        'get_type_hints',
-        'obj, globalns=None, localns=None, include_extras=False, *, format=None',
-        getTypeHints
-      ),
-    ],
     [
       '_firstlineno',
       builtin('_firstlineno', 'one', 1, 1, ([fn]) => {

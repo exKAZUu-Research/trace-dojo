@@ -417,6 +417,7 @@ class _IOBase:
         lines will be read if the total size (in bytes/characters) of all
         lines so far exceeds hint.
         """
+        self._checkClosed()
         if hint is None or hint <= 0:
             return list(self)
         n = 0
@@ -635,7 +636,7 @@ class _BufferedIOMixin(_BufferedIOBase):
 
     def flush(self):
         if self.closed:
-            raise ValueError("flush on closed file")
+            raise ValueError("I/O operation on closed file.")
         self.raw.flush()
 
     def close(self):
@@ -738,6 +739,7 @@ class BufferedReader(_BufferedIOMixin):
         mode. If size is negative, read until EOF or until read() would
         block.
         """
+        self._checkClosed("read of closed file")
         if size is not None and size < -1:
             raise ValueError("invalid number of bytes to read")
         with self._read_lock:
@@ -813,6 +815,10 @@ class BufferedReader(_BufferedIOMixin):
             self._read_buf = self.raw.read(self.buffer_size) or b""
             self._read_pos = 0
         return self._read_buf[self._read_pos:]
+
+    def readline(self, size=-1):
+        self._checkClosed("readline of closed file")
+        return super().readline(size)
 
     def read1(self, size=-1):
         """Reads up to size bytes, with at most one read() system call."""
@@ -972,7 +978,7 @@ class BufferedWriter(_BufferedIOMixin):
 
     def _flush_unlocked(self):
         if self.closed:
-            raise ValueError("flush on closed file")
+            raise ValueError("flush of closed file")
         while self._write_buf:
             try:
                 n = self.raw.write(self._write_buf)
@@ -1929,7 +1935,7 @@ class TextIOWrapper(_TextIOBase):
 
     def readline(self, size=None):
         if self.closed:
-            raise ValueError("read from closed file")
+            raise ValueError("I/O operation on closed file.")
         if size is None:
             size = -1
         else:
@@ -2093,9 +2099,11 @@ for _cls in (BufferedRWPair, BufferedRandom, BufferedReader, BufferedWriter, Inc
              _IOBase, _RawIOBase, _BufferedIOBase, _TextIOBase):
     _cls.__module__ = '_io'
     _c_type_name(_cls, '_io.' + _cls.__name__)
+    if _cls in (TextIOWrapper, BufferedReader, BufferedWriter, BufferedRandom):
+        _clinic_init(_cls)
     _c_type(_cls)
 del _cls
 
 del _IOBase, _RawIOBase, _BufferedIOBase, _TextIOBase
-del _c_type_name, _c_type, _allocate, _handled_exception, _standard_stderr, _stream_classes, _file_class
+del _clinic_init, _c_type_name, _c_type, _allocate, _handled_exception, _standard_stderr, _stream_classes, _file_class
 `;

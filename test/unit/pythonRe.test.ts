@@ -79,3 +79,30 @@ for a, e in zip(actual, expected, strict=True):
         raise ValueError(repr(a) + ' != ' + repr(e))`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
+
+test('regex flag classes, named members and unknown combinations are isolated between executions', () => {
+  expect(
+    executeProgram(
+      'python',
+      `import re
+re.I.secret = 'named'
+re.RegexFlag(1024).secret = 'unknown'
+re.RegexFlag.secret = 'class'
+assert re.I is re.IGNORECASE and re.RegexFlag(1024) is re.RegexFlag(1024)
+print(re.RegexFlag(1024).secret)`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'unknown\n', uncaughtException: undefined });
+  expect(
+    executeProgram(
+      'python',
+      `import re
+assert not hasattr(re.I, 'secret')
+assert not hasattr(re.RegexFlag(1024), 'secret')
+assert not hasattr(re.RegexFlag, 'secret')
+assert re.I is re.IGNORECASE
+assert re.RegexFlag(1024) is re.RegexFlag(1024)
+assert list(re.I | re.M) == [re.I, re.M]
+print(re.I | re.M)`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 're.IGNORECASE|re.MULTILINE\n', uncaughtException: undefined });
+});

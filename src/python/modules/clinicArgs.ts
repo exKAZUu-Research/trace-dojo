@@ -3,6 +3,47 @@ import { toIndex } from '../numbers';
 import { defineMethod, nativeFunction, pyError, typeError } from '../types';
 import type { Kwargs, PyBuiltinFunction, PyClass, PyValue } from '../values';
 
+/**
+ * Reads the arguments of a builtin method whose parameters may be passed by position or keyword, with the errors of
+ * CPython's Argument Clinic (`_PyArg_UnpackKeywords`).
+ */
+// code-gauge-allow functionCognitiveComplexity 17 -- Follows the checks of CPython's _PyArg_UnpackKeywords in their order.
+export function unpackKeywords(
+  name: string,
+  params: readonly string[],
+  required: number,
+  args: readonly PyValue[],
+  kwargs: Kwargs
+): (PyValue | undefined)[] {
+  const keywordCount = kwargs?.size ?? 0;
+  const max = params.length;
+  const given = args.length + keywordCount;
+  if (given > max) {
+    const keyword = args.length === 0 ? 'keyword ' : '';
+    throw typeError(`${name}() takes at most ${max} ${keyword}argument${max === 1 ? '' : 's'} (${given} given)`);
+  }
+  const values: (PyValue | undefined)[] = [...args];
+  let remaining = keywordCount;
+  for (let index = args.length; index < max; index++) {
+    const value = remaining > 0 ? kwargs?.get(params[index]) : undefined;
+    if (value !== undefined) {
+      values[index] = value;
+      remaining--;
+    } else if (index < required) {
+      throw typeError(`${name}() missing required argument '${params[index]}' (pos ${index + 1})`);
+    }
+  }
+  if (remaining > 0) {
+    for (let index = 0; index < args.length; index++) {
+      if (kwargs?.has(params[index]))
+        throw typeError(`argument for ${name}() given by name ('${params[index]}') and position (${index + 1})`);
+    }
+    const unexpected = [...(kwargs?.keys() ?? [])].find((key) => !params.includes(key));
+    throw typeError(`${name}() got an unexpected keyword argument '${unexpected}'`);
+  }
+  return values;
+}
+
 /** The parameters of a builtin whose arguments CPython's Argument Clinic parses. */
 export interface ClinicSpec {
   name: string;

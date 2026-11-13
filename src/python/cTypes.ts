@@ -4,8 +4,9 @@ import { unsupportedSizeof } from './define';
 import { builtinClassesWithDict, fieldedCTypes } from './descriptors';
 import { defineNew } from './instances';
 import { bindValue, callValue } from './objects';
+import { currentRuntime } from './runtimeContext';
 import { defineMethod, None, propertyClass, staticmethodClass, typeClass } from './types';
-import { type PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from './values';
+import { type Kwargs, type PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from './values';
 
 /** The entries a class statement adds to a class's namespace, which a C type has only when CPython's data lists them. */
 const CLASS_STATEMENT_NAMES = [
@@ -34,7 +35,7 @@ export function makeCType(cls: PyClass, subclassable = true): void {
   if (names !== undefined) hidePrivateHelpers(cls, names);
   for (const [name, attribute] of new Map(cls.dict)) {
     if (attribute instanceof PyFunction) {
-      defineMethod(cls, name, (self, args, kwargs) => callValue(attribute, [self, ...args], kwargs));
+      defineMethod(cls, name, (self, args, kwargs) => callCMethod(attribute, self, args, kwargs));
     } else if (name === '__new__' && attribute instanceof PyDescriptor && attribute.cls === staticmethodClass) {
       defineNew(cls, (subclass, args, kwargs) => callValue(attribute.fn, [subclass, ...args], kwargs));
     }
@@ -47,6 +48,15 @@ export function makeCType(cls: PyClass, subclassable = true): void {
   // A C type's docstring comes from CPython's data.
   if (cls.dict.get('__doc__') === None) cls.dict.delete('__doc__');
   convertBuiltinAttributes([cls]);
+}
+
+function callCMethod(fn: PyFunction, self: PyValue, args: PyValue[], kwargs: Kwargs): PyValue {
+  const runtime = currentRuntime();
+  const result = callValue(fn, [self, ...args], kwargs);
+  if (runtime.isNativeImplementation(fn.def) && typeof result === 'string') {
+    runtime.spendNative(Math.ceil(result.length / 64));
+  }
+  return result;
 }
 
 function removeClassStatementNames(cls: PyClass, names: Set<string | undefined> | undefined): void {
