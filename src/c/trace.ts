@@ -5,11 +5,12 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import type { Scalar } from './arith';
 import type { CompiledProgram } from './compiler';
+import { CRuntimeError } from './errors';
 import { compileC, runProgram } from './execute';
-import { readScalar } from './expressionCompiler';
+import { readBits, readScalar } from './expressionCompiler';
 import type { Allocation } from './memory';
 import { type Frame, Runtime } from './runtime';
-import { type CType, INT_PROPERTIES, isCharType, sizeOf } from './types';
+import { type CType, isCharType, sizeOf } from './types';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -42,11 +43,12 @@ class Snapshotter {
   ) {}
 
   /** The variables a frame shows: its own in scope, then the file-scope variables when `withContext`. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Lexical locals, receiver fields, and globals must obey one shadowing order.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const hidesArgs = frame.fn === this.program.main && frame.fn.params.length === 2;
-    for (const local of frame.fn.locals) {
-      if (!frame.live[local.index]) continue;
+    const locals = frame.visibleLocals ?? frame.fn.locals.filter((local) => frame.live[local.index]);
+    for (const local of locals) {
       // main's parameters only receive the launcher's arguments, which these programs never use.
       if (hidesArgs && local.isParameter) continue;
       if (!local.inMemory) {
@@ -62,8 +64,7 @@ class Snapshotter {
     if (!withContext) return variables;
     this.addReceiverFields(variables, frame);
     for (const global of this.program.globals) {
-      if (!global.isShown || frame.fn.locals.some((local) => local.name === global.name && frame.live[local.index]))
-        continue;
+      if (!global.isShown || locals.some((local) => local.name === global.name)) continue;
       const block = this.runtime.globals[global.index];
       if (block) this.addVariable(variables, global.name, global.type, { address: block.base });
     }
@@ -117,6 +118,7 @@ class Snapshotter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
+  // code-gauge-allow functionNcss 35 -- One display case per C type; helpers isolate strings and pointed-to elements.
   private scalarOf(type: CType, where: Where): Scalarish | typeof NOT_SCALAR | undefined {
     switch (type.kind) {
       case 'int':
@@ -179,6 +181,7 @@ class Snapshotter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
+  // code-gauge-allow functionNcss 39 -- One display case per C type; recursion shares the same cycle-detection set.
   private nodeOf(type: CType, where: Where, seen: Set<number>): DisplayNode | undefined {
     switch (type.kind) {
       case 'int':
@@ -231,18 +234,16 @@ class Snapshotter {
     const block = this.runtime.memory.find(address);
     if (!field || !block || field.bitWidth === undefined) return NULL_NODE;
     const offset = address - block.base + field.offset;
-    let raw = 0n;
-    const size = sizeOf(field.type);
-    for (let index = size - 1; index >= 0; index--) raw = (raw << 8n) | BigInt(block.bytes[offset + index]);
-    let value = (raw >> BigInt(field.bitOffset ?? 0)) & ((1n << BigInt(field.bitWidth)) - 1n);
-    if (
-      field.type.kind === 'int' &&
-      INT_PROPERTIES[field.type.name].signed &&
-      (value >> BigInt(field.bitWidth - 1)) & 1n
-    ) {
-      value -= 1n << BigInt(field.bitWidth);
+    if (field.type.kind !== 'int') return NULL_NODE;
+    try {
+      return {
+        kind: 'value',
+        value: Number(readBits(block, offset, field.bitOffset ?? 0, field.bitWidth, field.type)),
+      };
+    } catch (error) {
+      if (!(error instanceof CRuntimeError) || error.kind !== 'uninitialized') throw error;
+      return NULL_NODE;
     }
-    return { kind: 'value', value: Number(value) };
   }
 
   /** What a pointer points to: a turtle, a struct, the elements from it to its block's end, or a single value. */

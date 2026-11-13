@@ -108,6 +108,7 @@ export const STDIO_FUNCTIONS: Record<string, NativeFunction> = {
 };
 
 /** The type a `scanf` conversion stores through its pointer argument. */
+// code-gauge-allow functionCognitiveComplexity 19 -- The scanf length modifier and conversion jointly determine the destination type; keep that decision together.
 function scanTarget(conversion: string, length: string): CType {
   if ('diouxXn'.includes(conversion)) {
     const signed = 'din'.includes(conversion);
@@ -193,6 +194,7 @@ class Scanner {
     return this.conversion();
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Suppression, field width, and conversion kind share the scanner cursor; helpers handle the individual conversions.
   private conversion(): Stop {
     const { input, format } = this;
     let suppress = false;

@@ -38,6 +38,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Running a block from a label, and leaving its scope.
+  // code-gauge-allow functionNcss 34 -- Label dispatch and scope exit must use the same ordered child list and completion state.
   private blockItems(items: (Statement | Declaration)[], endsScope: boolean): Compiled {
     const children = items.map((item) =>
       item.kind === 'declaration' ? this.localDeclaration(item) : this.statement(item)
@@ -86,6 +87,36 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected statement(statement: Statement): Compiled {
+    return this.withVisibility(this.compileStatement(statement));
+  }
+
+  protected withVisibility(compiled: Compiled): Compiled {
+    if (!this.isTracing) return compiled;
+    const locals: LocalInfo[] = [];
+    const names = new Set<string>();
+    for (let scope: typeof this.scope | undefined = this.scope; scope; scope = scope.parent) {
+      for (const [name, entity] of scope.ordinary) {
+        if (names.has(name)) continue;
+        names.add(name);
+        if (entity.kind === 'local') locals.push(entity.local);
+      }
+    }
+    return {
+      ...compiled,
+      exec: (frame, entry) => {
+        const previous = frame.visibleLocals;
+        frame.visibleLocals = locals;
+        try {
+          return compiled.exec(frame, entry);
+        } finally {
+          frame.visibleLocals = previous;
+        }
+      },
+    };
+  }
+
+  // code-gauge-allow functionNcss 43 -- One case per C statement kind; helpers already isolate control-flow construction.
+  private compileStatement(statement: Statement): Compiled {
     const { row } = statement;
     switch (statement.kind) {
       case 'compound': {
@@ -104,7 +135,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.doWhileStatement(statement);
       }
       case 'for': {
-        return this.withScope(() => this.forStatement(statement));
+        return this.withScope(() => this.withVisibility(this.forStatement(statement)));
       }
       case 'switch': {
         return this.switchStatement(statement);
@@ -220,6 +251,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Loop entry labels and condition/step timing must remain coordinated with completion handling.
+  // code-gauge-allow duplicateLines 16 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
   private whileStatement(statement: Extract<Statement, { kind: 'while' }>): Compiled {
     const condition = this.condition(statement.condition, 'while 文');
     const body = this.loopBody(statement.body);
@@ -240,6 +273,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return { exec, labels: body.labels };
   }
 
+  // code-gauge-allow duplicateLines 16 -- While and do-while intentionally mirror completion handling but differ in condition and step timing.
   private doWhileStatement(statement: Extract<Statement, { kind: 'doWhile' }>): Compiled {
     const body = this.loopBody(statement.body);
     const condition = this.condition(statement.condition, 'do while 文');
@@ -259,6 +293,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- The parts of a for statement, each optional, and their steps.
+  // code-gauge-allow functionNcss 33 -- Initialization, condition, update, entry labels, and scope exit form one loop lifecycle.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>): Compiled {
     const row = this.stepRow(statement.row);
     const init = statement.init === undefined ? undefined : this.forInit(statement.init);

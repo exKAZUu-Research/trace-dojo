@@ -123,6 +123,7 @@ export function binaryOperation(operator: BinaryOperator, type: IntType | FloatT
   return signed ? signed32(operator, name) : unsigned32(operator);
 }
 
+// code-gauge-allow duplicateLines 21 -- The number and bigint operator paths intentionally mirror each other while retaining distinct host arithmetic.
 function floatOperation(operator: BinaryOperator, isFloat: boolean): Operation {
   const round = isFloat ? Math.fround : (value: number): number => value;
   switch (operator) {
@@ -164,6 +165,7 @@ const INT_MAX = 2_147_483_647;
 const INT_MIN = -2_147_483_648;
 
 // code-gauge-allow functionCognitiveComplexity 25 -- One case per operator, with C's undefined behavior.
+// code-gauge-allow functionNcss 36 -- Keep the signed 32-bit operator dispatch together; host-number overflow rules differ from bigint arithmetic.
 function signed32(operator: BinaryOperator, name: string): Operation {
   const checked = (result: number): number => {
     if (result > INT_MAX || result < INT_MIN) throw overflowError(name);
@@ -253,6 +255,7 @@ function unsigned32(operator: BinaryOperator): Operation {
   }
 }
 
+// code-gauge-allow duplicateLines 16 -- The number and bigint operator paths intentionally mirror each other while retaining distinct host arithmetic.
 function bitwiseOrComparison(operator: BinaryOperator, wrap: (value: number) => number): Operation {
   switch (operator) {
     case '&': {
@@ -270,6 +273,7 @@ function bitwiseOrComparison(operator: BinaryOperator, wrap: (value: number) => 
   }
 }
 
+// code-gauge-allow duplicateLines 21 -- The number and bigint operator paths intentionally mirror each other while retaining distinct host arithmetic.
 function comparison(operator: BinaryOperator): Operation {
   switch (operator) {
     case '==': {
@@ -300,6 +304,7 @@ function checkShift(count: Scalar, bits: number): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per operator, with C's undefined behavior.
+// code-gauge-allow functionNcss 37 -- Keep the signed 64-bit operator dispatch together; bigint overflow and shift rules differ from host numbers.
 function signed64(operator: BinaryOperator, name: string): Operation {
   const checked = (result: bigint): bigint => {
     if (BigInt.asIntN(64, result) !== result) throw overflowError(name);
@@ -391,6 +396,7 @@ function unsigned64(operator: BinaryOperator): Operation {
   }
 }
 
+// code-gauge-allow duplicateLines 16 -- The number and bigint operator paths intentionally mirror each other while retaining distinct host arithmetic.
 function bigBitwiseOrComparison(operator: BinaryOperator, wrap: (value: bigint) => bigint): Operation {
   switch (operator) {
     case '&': {

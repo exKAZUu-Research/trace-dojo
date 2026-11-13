@@ -87,10 +87,16 @@ function remainder(x: number, y: number): number {
   return x - quotient * y;
 }
 
-function nextAfter(x: number, y: number): number {
+function nextAfter(x: number, y: number, isFloat = false): number {
   if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
   if (x === y) return y;
-  if (x === 0) return y > 0 ? Number.MIN_VALUE : -Number.MIN_VALUE;
+  if (x === 0) return (y > 0 ? 1 : -1) * (isFloat ? 2 ** -149 : Number.MIN_VALUE);
+  if (isFloat) {
+    const view = new DataView(new ArrayBuffer(4));
+    view.setFloat32(0, x);
+    view.setUint32(0, view.getUint32(0) + (y > x === x > 0 ? 1 : -1));
+    return view.getFloat32(0);
+  }
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, x);
   let bits = view.getBigInt64(0);
@@ -303,6 +309,11 @@ MATH_FUNCTIONS.scalblnf = MATH_FUNCTIONS.ldexpf;
 MATH_FUNCTIONS.scalblnl = MATH_FUNCTIONS.ldexp;
 MATH_FUNCTIONS.remquof = (runtime, args, types, row) =>
   Math.fround(MATH_FUNCTIONS.remquo(runtime, args, types, row) as number);
+
+MATH_FUNCTIONS.nextafterf = (_runtime, [x, y]) => nextAfter(x as number, y as number, true);
+MATH_FUNCTIONS.nexttoward = MATH_FUNCTIONS.nextafter;
+MATH_FUNCTIONS.nexttowardf = MATH_FUNCTIONS.nextafterf;
+MATH_FUNCTIONS.nexttowardl = MATH_FUNCTIONS.nextafterl;
 
 export const CTYPE_FUNCTIONS: Record<string, NativeFunction> = {};
 const CLASSES: Record<string, (c: number) => boolean> = {

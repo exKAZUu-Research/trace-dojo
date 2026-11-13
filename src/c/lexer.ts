@@ -119,6 +119,7 @@ class Lexer {
     this.source = source;
   }
 
+  // code-gauge-allow functionNcss 31 -- Logical-line and comment handling share row and splice state; splitting the scanner loop would distribute that state.
   tokenize(): { lines: LogicalLine[]; comments: SourceComment[]; rowCount: number } {
     const { source } = this;
     const length = source.length;
@@ -208,14 +209,19 @@ class Lexer {
     const row = this.row;
     this.take();
     this.take();
-    while (this.index < source.length && !(source[this.index] === '*' && this.peek(1) === '/')) this.take();
-    if (this.index >= source.length) throw new CompileError([{ row, message: 'コメントを閉じる */ が足りません。' }]);
+    for (;;) {
+      this.skipSplices();
+      if (this.index >= source.length) throw new CompileError([{ row, message: 'コメントを閉じる */ が足りません。' }]);
+      if (this.peek() === '*' && this.peek(1) === '/') break;
+      this.take();
+    }
     this.take();
     this.take();
     this.comments.push({ index: start, text: source.slice(start, this.index), isLine: false });
     this.space = true;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 25 -- Token categories share the splice-aware character cursor; keep their dispatch together.
   private token(char: string): TokenBody {
     const prefix = /^(?:u8|u|U|L)/.exec(this.source.slice(this.index, this.index + 3))?.[0];
     const afterPrefix = prefix && this.source[this.index + prefix.length];

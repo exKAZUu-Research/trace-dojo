@@ -1,5 +1,6 @@
 import type { HeaderLookup } from '../preprocessor';
 import { unsupportedMessage } from '../unsupported';
+import { PLATFORM_HEADER_FUNCTIONS } from './platformHeaderFunctions';
 
 /** The interpreter's own declarations, which every program sees without including anything. */
 export const TURTLE_HEADER = `
@@ -327,7 +328,8 @@ ${type} scalbn${suffix}(${type} x, int exponent);
 ${type} scalbln${suffix}(${type} x, long exponent);
 int ilogb${suffix}(${type} x);
 ${type} nan${suffix}(const char *tag);
-${type} remquo${suffix}(${type} x, ${type} y, int *quotient);`;
+${type} remquo${suffix}(${type} x, ${type} y, int *quotient);
+${type} nexttoward${suffix}(${type} x, long double y);`;
   })
   .join('\n')}
 
@@ -619,7 +621,10 @@ const UNSUPPORTED_HEADERS: Record<string, string> = {
 /** Finds the header that `#include` names, or why the program cannot include it. */
 export const lookupHeader: HeaderLookup = (name, quoted) => {
   const text = HEADERS[name];
-  if (text !== undefined) return { text };
+  if (text !== undefined) {
+    const extensions = PLATFORM_HEADER_FUNCTIONS[name] ?? [];
+    return { text: `${text}\n${extensions.map((functionName) => `int ${functionName}();`).join('\n')}` };
+  }
   const feature = UNSUPPORTED_HEADERS[name];
   if (feature) return { refusal: unsupportedMessage(feature) };
   return {

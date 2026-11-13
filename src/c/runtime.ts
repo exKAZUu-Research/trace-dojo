@@ -81,6 +81,7 @@ export class Frame implements TracedFrame {
   readonly blocks = new Map<number, Allocation>();
   /** Which variables are in scope, by local index, for the trace. */
   readonly live: boolean[] = [];
+  visibleLocals?: readonly LocalInfo[];
   returnValue: Value | undefined;
   /** The label a `goto` jumps to, while its completion travels to the statement holding the label. */
   gotoLabel = -1;
@@ -237,6 +238,7 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Removes the turtles that no variable, nor any block a variable reaches, points to any longer. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Root discovery and the reachability worklist share allocation identities; retain the single traversal.
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
     const reached = new Set<Allocation>();

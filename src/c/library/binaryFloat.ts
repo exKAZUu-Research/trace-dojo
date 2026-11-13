@@ -9,6 +9,7 @@ export function exactParts(value: number): { mantissa: bigint; exponent: number 
     : { mantissa: fraction | (1n << 52n), exponent: biased - 1075 };
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Normal/subnormal precision and ties-to-even rounding form one exact conversion; splitting it would only move the arithmetic.
 export function roundBinary(numerator: bigint, denominator: bigint, exponent: number, isFloat = false): number {
   if (numerator === 0n) return 0;
   const bits = isFloat ? 24 : 53;

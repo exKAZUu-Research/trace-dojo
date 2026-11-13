@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 641 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -112,6 +113,7 @@ export class Converter {
     for (const name of builtinTypedefs) this.scope.declare(name, 'type');
   }
 
+  // code-gauge-allow functionCognitiveComplexity 27 -- Header declarations must become visible in row order during conversion; retain the single ordered traversal.
   convertUnit(root: Node, headers: readonly HeaderDeclarations[] = []): ExternalDeclaration[] {
     const items: ExternalDeclaration[] = [];
     let nextHeader = 0;
@@ -384,6 +386,7 @@ export class Converter {
   }
 
   /** The declarators of a member declaration, each with the width after it when it is a bit-field. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keep named, unnamed, and bit-field declarators in the same field-list conversion.
   private fieldDeclarators(node: Node): FieldDeclaration['declarators'] {
     const result: FieldDeclaration['declarators'] = [];
     let current: FieldDeclaration['declarators'][number] | undefined;
@@ -428,6 +431,7 @@ export class Converter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of declarator.
+  // code-gauge-allow functionNcss 38 -- One case per C declarator shape; splitting the dispatch would only relocate its cases.
   private declarator(node: Node): Declarator {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
@@ -544,6 +548,7 @@ export class Converter {
   }
 
   /** A block item, where a `case` label's statements become the statements after the label. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Case-label flattening and declaration disambiguation share the current block scope; keep those alternatives together.
   private blockItem(node: Node): (Statement | Declaration)[] {
     if (node.type === 'expression_statement') {
       const declaration = this.reparseDeclaration(node);
@@ -634,6 +639,7 @@ export class Converter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of statement.
+  // code-gauge-allow functionNcss 43 -- One case per C statement shape; helpers handle the compound cases.
   private statement(node: Node): Statement {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
@@ -777,6 +783,7 @@ export class Converter {
 
   // Expressions -----------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionNcss 52 -- One case per C expression kind; helpers already isolate the nontrivial forms.
   private expression(node: Node): Expression {
     const row = node.startPosition.row;
     this.checkUnsupported(node);

@@ -60,6 +60,7 @@ export interface Operand {
   bitWidth?: number;
   constantBytes?: Uint8Array;
   pointer?: (frame: Frame) => Address;
+  arrayObject?: boolean;
   /** The value of an arithmetic constant expression. */
   constant?: Scalar;
   /** Whether the value is an address known before the program runs, as static initializers require. */
@@ -115,6 +116,7 @@ export interface CompileOptions {
 
 export abstract class CompilerBase {
   protected scope = new Scope();
+  protected isUnevaluated = false;
   private inParameter = false;
   protected fn?: FunctionContext;
   protected readonly globals: GlobalInfo[] = [];
@@ -131,6 +133,16 @@ export abstract class CompilerBase {
 
   protected get isTracing(): boolean {
     return this.options.trace !== undefined;
+  }
+
+  protected unevaluated<T>(compile: () => T): T {
+    const previous = this.isUnevaluated;
+    this.isUnevaluated = true;
+    try {
+      return compile();
+    } finally {
+      this.isUnevaluated = previous;
+    }
   }
 
   protected withScope<T>(compile: () => T): T {
@@ -200,6 +212,7 @@ export abstract class CompilerBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Tag lookup and definition must share the current-scope identity; keep their resolution rules together.
   private recordInfo(specifier: Extract<TypeSpecifier, { kind: 'struct' | 'union' }>): RecordInfo {
     const { tag, fields, row, kind } = specifier;
     let info: RecordInfo | undefined;
@@ -224,6 +237,7 @@ export abstract class CompilerBase {
     return info;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Field validation, duplicate names, and layout are one declaration pass; helpers already isolate type and width checks.
   private defineRecord(info: RecordInfo, fields: FieldDeclaration[], row: number): void {
     const members: { name?: string; type: CType; bitWidth?: number }[] = [];
     const names = new Set<string>();
@@ -274,6 +288,8 @@ export abstract class CompilerBase {
     return bitWidth;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Enumerator values and tag identity are resolved in declaration order; splitting the pass would distribute its state.
+  // code-gauge-allow functionNcss 32 -- Enumerator values and tag identity are resolved in declaration order; splitting the pass would distribute its state.
   private enumType(specifier: Extract<TypeSpecifier, { kind: 'enum' }>): CType {
     const { tag, enumerators, row } = specifier;
     if (tag !== undefined && !enumerators) {
@@ -308,6 +324,7 @@ export abstract class CompilerBase {
   }
 
   /** The type a declarator derives from a base type, and the name it declares. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- The declarator walk applies pointer, array, and function layers in order; separate cases would only move the same branches.
   protected declaredType(base: CType, declarator: Declarator): { type: CType; name?: string; row: number } {
     let type = base;
     let current = declarator;

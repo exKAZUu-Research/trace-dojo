@@ -56,6 +56,7 @@ class Arguments {
 }
 
 /** Formats a `printf` format string and its arguments into bytes, as macOS's libc does. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Format parsing and byte/text field emission share argument and output positions; keep their ordered traversal together.
 export function formatPrintf(runtime: Runtime, format: Uint8Array, values: Value[], types: CType[]): number[] {
   const out: number[] = [];
   const args = new Arguments(values, types);
@@ -82,6 +83,8 @@ export function formatPrintf(runtime: Runtime, format: Uint8Array, values: Value
   return out;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Flags, dynamic width, precision, and modifiers are one sequential format-specifier grammar.
+// code-gauge-allow functionNcss 33 -- Flags, dynamic width, precision, and modifiers are one sequential format-specifier grammar.
 function readSpec(format: Uint8Array, start: number, spec: Spec, args: Arguments): number {
   let index = start;
   while (index < format.length && '-+ #0'.includes(String.fromCodePoint(format[index]))) {
@@ -129,6 +132,7 @@ function readDigits(format: Uint8Array, start: number): string {
   return digits;
 }
 
+// code-gauge-allow functionNcss 48 -- One case per printf conversion; helpers already isolate numeric and string formatting.
 function convert(runtime: Runtime, spec: Spec, args: Arguments, written: number): string | Uint8Array | undefined {
   const { conversion, length } = spec;
   const wide = ['l', 'll', 'j', 'z', 't', 'q'].includes(length) || 'DOU'.includes(conversion);
@@ -247,6 +251,8 @@ function integerField(
   return lead + body;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
+// code-gauge-allow functionNcss 36 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
 function floatField(spec: Spec, value: number): string {
   const { conversion } = spec;
   const upper = conversion === conversion.toUpperCase();

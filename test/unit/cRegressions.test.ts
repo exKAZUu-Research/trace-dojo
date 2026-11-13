@@ -399,3 +399,79 @@ int main(void) {
     uncaughtException: undefined,
   });
 });
+
+test('sizeof checks extern operands without requiring a linked definition', () => {
+  const program = `#include <stdio.h>\nextern int x; extern int a[2]; int main(void){printf("%zu %zu %zu\\n",sizeof x,sizeof &x,sizeof a);}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4 8 8\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'struct S { int x; }; int main(void){register struct S s={1}; int*p=&s.x;}',
+  'int main(void){register int a[2]={1,2}; int*p=&a[0];}',
+])('register subobjects retain their address restriction: %s', (program) => {
+  expect(executeProgram('c', program).kind).toBe('compileError');
+});
+
+test('register pointer variables do not restrict addressing their pointees', () => {
+  const program = `#include <stdio.h>\nstruct S{int x;}; int main(void){struct S s={7};register struct S *p=&s;int *q=&p->x;printf("%d\\n",*q);}`;
+  expect(executeProgram('c', program)).toMatchObject({ kind: 'executed', stdout: '7\n', uncaughtException: undefined });
+});
+
+test('goto bypassing a declaration keeps the lexical local visible after assignment', () => {
+  const program = `int x=9;
+int main(void){
+ goto L;
+ int x;
+ L: x=3;
+ x++;
+}`;
+  const result = traceProgram('c', program, program);
+  expect(result.traceItems.find((item) => item.line === 5)?.vars).toEqual({ x: 3 });
+  expect(result.finalVars).toEqual({ x: 4 });
+});
+
+test('assignment evaluates and converts the right side before binding the target once', () => {
+  const program = `#include <stdio.h>
+int a;int *left(void){putchar(76);return &a;}int right(void){putchar(82);return 7;}
+int main(void){*left()=right();printf("%d\\n",a);*left()+=right();printf("%d\\n",a);}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'RL7\nRL14\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['\n', '\r\n'])('comment terminators after line splices are recognized: %j', (newline) => {
+  expect(executeProgram('c', `#include <stdio.h>\nint main(void){/*\\${newline}*/puts("ok");}`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('bit-field snapshots preserve uninitialized neighbors', () => {
+  const program = `struct S{unsigned x:1,y:1;};
+int main(void){
+ struct S s;
+ s.x=1;
+}`;
+  const result = traceProgram('c', program, program);
+  expect(result.traceItems.find((item) => item.line === 4)?.referenceVars.s).toEqual({
+    kind: 'object',
+    // oxlint-disable-next-line unicorn/no-null -- The trace protocol represents uninitialized fields as null.
+    entries: { x: { kind: 'value', value: 1 }, y: { kind: 'value', value: null } },
+  });
+});
+
+test('float nextafter and nexttoward advance by a float representable step', () => {
+  const program = `#include <stdio.h>\n#include <math.h>\nint main(void){printf("%a %a %a\\n",nextafterf(1.0f,2.0f),nexttowardf(1.0f,1.0000000001L),nextafterf(0.0f,-1.0f));}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0x1.000002p+0 0x1.000002p+0 -0x1p-149\n',
+    uncaughtException: undefined,
+  });
+});

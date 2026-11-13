@@ -109,6 +109,8 @@ export function formatGeneral(value: number, precision: number, alternate: boole
 }
 
 /** `%a` of a finite non-negative double, without its sign: macOS's form, `0x1.8p+1`, with the precision if given. */
+// code-gauge-allow functionCognitiveComplexity 24 -- Keep normalization, discarded-digit rounding, and exponent formatting together as one hexadecimal conversion.
+// code-gauge-allow functionNcss 37 -- Keep normalization, discarded-digit rounding, and exponent formatting together as one hexadecimal conversion.
 export function formatHex(value: number, precision: number | undefined, alternate: boolean): string {
   if (value === 0) {
     const fraction = precision ? `.${'0'.repeat(precision)}` : alternate ? '.' : '';

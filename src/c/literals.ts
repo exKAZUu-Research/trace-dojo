@@ -27,6 +27,7 @@ function parseFloating(text: string, fail: () => never): { type: CType; value: S
   return { type: suffix === 'l' ? LDOUBLE : DOUBLE, value };
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- C suffix and radix rules choose from one ordered set of integer types; splitting them obscures that selection.
 function parseInteger(text: string, row: number, isHex: boolean, fail: () => never): { type: CType; value: Scalar } {
   const match = /^(0[xX][\da-fA-F]+|\d+)([uUlL]*)$/.exec(text);
   if (!match) return fail();
@@ -72,6 +73,8 @@ const SIMPLE_ESCAPES: Record<string, number> = {
 };
 
 /** The bytes of a literal's body, with escapes decoded and other characters in UTF-8. */
+// code-gauge-allow functionCognitiveComplexity 21 -- Escape forms share the literal byte cursor and diagnostics; keep the decoding alternatives together.
+// code-gauge-allow functionNcss 41 -- Escape forms share the literal byte cursor and diagnostics; keep the decoding alternatives together.
 function decodeBody(body: string, row: number): number[] {
   const bytes: number[] = [];
   const encoder = new TextEncoder();

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 546 -- Declaration and initializer compilation share symbol and type state; splitting the phase would only distribute that state across modules.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -73,6 +74,7 @@ export class Compiler extends StatementCompiler {
     super(options);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keep final entry-point, unresolved-symbol, and annotation validation together at the translation-unit boundary.
   compile(unit: TranslationUnit): CompiledProgram {
     for (const item of unit.items) this.externalDeclaration(item);
     const main = this.scope.ordinary.get('main');
@@ -101,7 +103,7 @@ export class Compiler extends StatementCompiler {
   }
 
   protected checkFunctionUse(fn: FunctionInfo, row: number): void {
-    fn.referencedAt ??= row;
+    if (!this.isUnevaluated) fn.referencedAt ??= row;
     if (fn.header === undefined) return;
     const entry = this.library(fn.name);
     if (entry?.kind === 'unsupported') unsupported(row, entry.feature);
@@ -148,6 +150,7 @@ export class Compiler extends StatementCompiler {
     this.scope.ordinary.set(name, { kind: 'typedef', type });
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keep the compatible-declaration and builtin-replacement rules together; extracting branches would obscure their shared symbol state.
   protected declareFunction(
     name: string,
     type: FunctionType,
@@ -211,6 +214,7 @@ export class Compiler extends StatementCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- C's rules for tentative definitions and redeclarations.
+  // code-gauge-allow functionNcss 35 -- Tentative definitions, composite types, and initializers update one symbol; separating branches would split that invariant.
   private declareGlobal(
     name: string,
     declaredType: CType,
@@ -275,6 +279,7 @@ export class Compiler extends StatementCompiler {
   // Functions ---------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Declaring a function's parameters, checking main's form.
+  // code-gauge-allow functionNcss 51 -- Parameter scope, labels, and body compilation form one function lifecycle; splitting it would distribute the context restoration.
   private functionDefinition(definition: FunctionDefinition): void {
     const { specifiers, row } = definition;
     if (specifiers.storage === 'typedef' || specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -400,9 +405,11 @@ export class Compiler extends StatementCompiler {
             frame.runtime.steps.runStatement(step, false, () => run(frame));
             return Completion.Normal;
           };
-    return { exec, labels: new Set() };
+    return this.withVisibility({ exec, labels: new Set() });
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Storage-class and declarator rules must be checked before allocating a local; keep those alternatives together.
+  // code-gauge-allow functionNcss 33 -- Storage-class and declarator rules must be checked before allocating a local; keep those alternatives together.
   private localDeclarator(
     storage: StorageClass | undefined,
     base: CType,
@@ -625,6 +632,7 @@ export class Compiler extends StatementCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- C's rules for braces and brace elision.
+  // code-gauge-allow functionNcss 31 -- The shared initializer cursor implements brace elision across arrays and records; keep its consumption rules together.
   private aggregate(
     type: CType,
     cursor: { items: Initializer[]; index: number },
@@ -783,6 +791,7 @@ function functionBody(exec: Exec, isMain: boolean): Exec {
 }
 
 /** The names whose addresses a function body takes with `&`, whose variables must live in memory. */
+// code-gauge-allow functionCognitiveComplexity 18 -- The recursive AST walk must visit every expression shape; splitting the visitor would only relocate its cases.
 function addressTakenNames(body: Compound): Set<string> {
   const names = new Set<string>();
   const visit = (node: unknown): void => {

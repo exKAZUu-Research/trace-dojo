@@ -28,6 +28,7 @@ export function boundPointer(frame: Frame, address: number, element: CType): Add
   return { address, ...(range ?? { start: block.base, end: block.end }) };
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Array and record recursion must preserve the same address and element-type context.
 function subobjectRange(
   type: CType,
   base: number,

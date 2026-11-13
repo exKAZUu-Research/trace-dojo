@@ -15,6 +15,7 @@ function digitValue(byte: number): number {
  * The integer at the start of a string as `strtol` reads it: the value with its sign, its magnitude, and how many
  * bytes it takes (0 when no digits follow the white space and sign).
  */
+// code-gauge-allow functionCognitiveComplexity 19 -- Sign, base detection, and digit consumption share one input cursor; separating branches would distribute that state.
 export function parseIntegerPrefix(
   bytes: Uint8Array,
   requestedBase: number,
@@ -55,6 +56,7 @@ export function parseIntegerPrefix(
 
 /** The floating-point number at the start of a string as `strtod` reads it. */
 // code-gauge-allow functionCognitiveComplexity 30 -- The forms strtod accepts: decimal, hexadecimal, infinity, NaN.
+// code-gauge-allow functionNcss 35 -- Decimal, hexadecimal, infinity, and NaN prefixes share one consumed-length contract.
 export function parseFloatPrefix(
   bytes: Uint8Array,
   maxLength = Number.POSITIVE_INFINITY

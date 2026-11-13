@@ -57,6 +57,7 @@ function span(bytes: Uint8Array, set: Uint8Array, inSet: boolean): number {
   return index;
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Constant-folding eligibility and safe comparison bounds must agree before bypassing the runtime call.
 export const comparisonCall: SpecialCall = (compiler, call, fn) => {
   const count = fn.name === 'strcmp' ? 2 : 3;
   if (call.args.length !== count) return;

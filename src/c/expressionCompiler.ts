@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 782 -- Expression compilation shares lvalue and conversion invariants; splitting by operator would couple more compiler classes.
 import {
   binaryOperation,
   complement,
@@ -83,11 +84,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const address = operand.value(frame) as number;
         return { address, start: address, end: address + (size ?? frame.runtime.memory.findBase(address)?.size ?? 0) };
       };
-      return { ...operand, type: rvalueType(operand), pointer };
+      if (operand.lvalue?.isRegister) this.error(expression.row, 'register を付けた配列のアドレスは使えません。');
+      return { ...operand, type: rvalueType(operand), pointer, arrayObject: true };
     }
     return { ...operand, type: rvalueType(operand) };
   }
 
+  // code-gauge-allow functionNcss 54 -- One case per C expression kind; helpers already isolate the nontrivial forms.
   expression(expression: Expression): Operand {
     const { row } = expression;
     switch (expression.kind) {
@@ -139,7 +142,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.sizeofType(this.typeOfName(expression.typeName), row);
       }
       case 'sizeofExpression': {
-        const operand = this.expression(expression.operand);
+        const operand = this.unevaluated(() => this.expression(expression.operand));
         if (operand.lvalue?.isBitField) this.error(row, 'ビットフィールドに sizeof は使えません。');
         return this.sizeofType(operand.type, row);
       }
@@ -191,6 +194,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.entityOperand(entity, name, row);
   }
 
+  // code-gauge-allow functionNcss 36 -- Each symbol storage class has its own load/address contract; keep that dispatch together.
   protected entityOperand(entity: Entity, name: string, row: number): Operand {
     switch (entity.kind) {
       case 'typedef': {
@@ -207,7 +211,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       case 'global': {
         const { global } = entity;
-        global.referencedAt ??= row;
+        if (!this.isUnevaluated) global.referencedAt ??= row;
         const index = global.index;
         const operand = this.memoryOperand(entity.type, (frame) => frame.runtime.globals[index].base);
         return {
@@ -545,6 +549,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type, value, bitWidth: operand.bitWidth };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 26 -- C pointer, boolean, and arithmetic updates have distinct conversion rules; splitting them only relocates the cases.
   private updateOperation(type: CType, operator: '++' | '--', row: number): (value: Scalar, frame: Frame) => Scalar {
     const sign = operator === '++' ? 1 : -1;
     if (type.kind === 'pointer') {
@@ -581,11 +586,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type,
       bitWidth: target.bitWidth,
       value: (frame) => {
+        const right = calculate ? calculate.right(frame) : (value as (frame: Frame) => Value)(frame);
         const location = lvalue.resolve(frame);
         const result = calculate
-          ? convertScalar(calculate(frame, location.load() as Scalar), calculate.type, type)
-          : (value as (frame: Frame) => Value)(frame);
+          ? convertScalar(calculate.apply(frame, location.load() as Scalar, right as Scalar), calculate.type, type)
+          : right;
         location.store(result);
+        if (lvalue.local) frame.live[lvalue.local.index] = true;
         return lvalue.isBitField ? location.load() : result;
       },
     };
@@ -596,26 +603,26 @@ export abstract class ExpressionCompiler extends CompilerBase {
     type: CType,
     right: Operand,
     row: number
-  ): ((frame: Frame, previous: Scalar) => Scalar) & { type: CType } {
+  ): { type: CType; right: (frame: Frame) => Value; apply: (frame: Frame, previous: Scalar, other: Scalar) => Scalar } {
     if (type.kind === 'pointer' && (operator === '+' || operator === '-') && isInteger(right.type)) {
       const size = this.pointerElementSize(type, row) * (operator === '+' ? 1 : -1);
-      const offset = this.converted(right, LONG);
-      return Object.assign(
-        (frame: Frame, previous: Scalar) => offsetAddress(frame, previous as number, Number(offset(frame)) * size),
-        { type }
-      );
+      return {
+        type,
+        right: this.converted(right, LONG),
+        apply: (frame, previous, other) => offsetAddress(frame, previous as number, Number(other) * size),
+      };
     }
     if (!isArithmetic(type) || !isArithmetic(right.type))
       this.error(row, `「${operator}=」の左右の型（${typeName(type)} と ${typeName(right.type)}）では計算できません。`);
     const operation = this.arithmeticOperation(operator, type, right.type, row);
-    const value = this.converted(right, operation.right);
-    return Object.assign(
-      (frame: Frame, previous: Scalar) =>
-        operation.run(convertScalar(previous, type, operation.left), value(frame) as Scalar),
-      { type: operation.type }
-    );
+    return {
+      type: operation.type,
+      right: this.converted(right, operation.right),
+      apply: (_frame, previous, other) => operation.run(convertScalar(previous, type, operation.left), other),
+    };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keep C cast admissibility and static-address classification together with the resulting conversion.
   private cast(target: CType, operand: Operand, row: number): Operand {
     const type = unqualified(target);
     const source = operand.type;
@@ -676,6 +683,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type, value };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- C conditional expressions have distinct arithmetic, pointer, record, and void rules; retain the single type-selection dispatch.
   private conditionalType(a: Operand, b: Operand, row: number): CType {
     const at = a.type;
     const bt = b.type;
@@ -696,6 +704,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Calls -----------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Direct builtin handling and indirect calls converge on the same argument validation; keep that resolution together.
   private call(expression: Extract<Expression, { kind: 'call' }>): Operand {
     const { row } = expression;
     let direct: FunctionInfo | undefined;
@@ -729,6 +738,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Converts a call's arguments to the parameters' types, or promotes them where the function declares none. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Prototype, variadic, and default-promotion rules form one ordered argument-validation pass.
   arguments(
     fnType: FunctionType,
     argExpressions: Expression[],
@@ -829,10 +839,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return {
       ...operand,
       isAddressConstant: isStatic && target.kind === 'array',
-      lvalue: { ...(operand.lvalue as LValue), isStatic },
+      lvalue: {
+        ...(operand.lvalue as LValue),
+        isStatic,
+        local: array.arrayObject ? array.lvalue?.local : undefined,
+        isRegister: array.arrayObject && array.lvalue?.isRegister,
+      },
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
+  // code-gauge-allow functionNcss 42 -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
   private member(expression: Extract<Expression, { kind: 'member' }>): Operand {
     const { row, field: name, arrow } = expression;
     let recordType: RecordType;
@@ -886,7 +903,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return {
       ...operand,
       isAddressConstant: isStatic && fieldType.kind === 'array',
-      lvalue: { ...(operand.lvalue as LValue), isStatic },
+      lvalue: {
+        ...(operand.lvalue as LValue),
+        isStatic,
+        local: !arrow ? object.lvalue?.local : undefined,
+        isRegister: !arrow && object.lvalue?.isRegister,
+      },
     };
   }
 

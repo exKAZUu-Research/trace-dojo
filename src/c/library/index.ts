@@ -3,6 +3,7 @@ import { ProgramAbort } from '../errors';
 import { FILE_NAME } from '../preprocessor';
 import type { NativeFunction } from '../runtime';
 import { classificationCall, CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
+import { PLATFORM_HEADER_FUNCTIONS } from './platformHeaderFunctions';
 import { STDIO_FUNCTIONS } from './stdioFunctions';
 import { STDLIB_FUNCTIONS } from './stdlibFunctions';
 import { comparisonCall, STRING_FUNCTIONS } from './stringFunctions';
@@ -100,6 +101,8 @@ const NATIVES: Record<string, NativeFunction> = {
   atoll: STDLIB_FUNCTIONS.atol,
 };
 
+const PLATFORM_FUNCTIONS = new Set(Object.values(PLATFORM_HEADER_FUNCTIONS).flat());
+
 const SPECIAL_CALLS = {
   strcmp: comparisonCall,
   strncmp: comparisonCall,
@@ -115,7 +118,10 @@ export function libraryEntry(name: string): LibraryEntry | undefined {
   const feature = UNSUPPORTED[name];
   if (feature) return { kind: 'unsupported', feature };
   const run = NATIVES[name];
-  if (!run) return undefined;
+  if (!run)
+    return PLATFORM_FUNCTIONS.has(name)
+      ? { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name}）` }
+      : undefined;
   return {
     kind: 'native',
     run,

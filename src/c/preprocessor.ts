@@ -1,7 +1,6 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type LogicalLine, type PPToken, spell, tokenize } from './lexer';
-import { decodeCharLiteral, parseNumber } from './literals';
-import { INT_PROPERTIES } from './types';
+import { evaluatePreprocessorCondition } from './preprocessorCondition';
 import { unsupported } from './unsupported';
 
 /** A macro, as `#define` records it. */
@@ -100,6 +99,7 @@ class Preprocessor {
     return { text: output.map((tokens) => tokens.join(' ')).join('\n'), includes: this.includes };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Directive processing and ordinary-token flushing share source order and conditional state.
   private process(lines: LogicalLine[], emit: (tokens: PPToken[]) => void): void {
     const conditionals: Conditional[] = [];
     let pending: PPToken[] = [];
@@ -202,6 +202,7 @@ class Preprocessor {
     top.taken = value;
   }
 
+  // code-gauge-allow functionNcss 31 -- One case per preprocessing directive outside conditional inclusion.
   private otherDirective(name: string, nameToken: PPToken | undefined, rest: PPToken[], row: number): void {
     switch (name) {
       case '': {
@@ -263,6 +264,7 @@ class Preprocessor {
     this.macros.set(name, { name, params, variadic, body, fromHeader: this.inHeader });
   }
 
+  // code-gauge-allow functionNcss 34 -- Include expansion, lookup, declarations, and source rows form one ordered header operation.
   private include(tokens: PPToken[], row: number): void {
     let target = tokens;
     if (target[0]?.kind !== 'string' && target[0]?.text !== '<') target = this.expand(target);
@@ -309,6 +311,7 @@ class Preprocessor {
 
   // Conditions ----------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- defined replacement and identifier normalization precede one shared integer-expression evaluator.
   private evaluateCondition(tokens: PPToken[], row: number): boolean {
     const replaced: PPToken[] = [];
     for (let index = 0; index < tokens.length; index++) {
@@ -329,12 +332,14 @@ class Preprocessor {
       token.kind === 'identifier' ? { ...token, kind: 'number', text: '0' } : token
     );
     if (expanded.length === 0) throw new CompileError([{ row, message: '#if の後には条件を書いてください。' }]);
-    return new ConditionParser(expanded, row).parse() !== 0n;
+    return evaluatePreprocessorCondition(expanded, row) !== 0n;
   }
 
   // Expansion -----------------------------------------------------------------------------------------------------
 
   /** Expands the macros in a list of tokens, as C's rescanning with hide sets does. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- Macro recursion, hide sets, and argument substitution share the token worklist.
+  // code-gauge-allow functionNcss 33 -- Macro recursion, hide sets, and argument substitution share the token worklist.
   private expand(input: PPToken[]): PPToken[] {
     const output: PPToken[] = [];
     const queue = [...input];
@@ -377,6 +382,7 @@ class Preprocessor {
     return output;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 23 -- Nested parentheses, separators, and the closing token share one argument cursor.
   private collectArguments(
     queue: PPToken[],
     open: number,
@@ -458,6 +464,7 @@ class Preprocessor {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Parameter names and variadic placement are validated in one sequential macro signature.
 function macroParameters(rest: PPToken[], row: number): { params: string[]; variadic: boolean; body: PPToken[] } {
   const params: string[] = [];
   let variadic = false;
@@ -519,146 +526,4 @@ function paste(left: PPToken, right: PPToken, row: number): PPToken {
     throw new CompileError([{ row, message: `## でつないだ「${text}」は、1つの字句になりません。` }]);
   }
   return { ...tokens[0], row, space: left.space };
-}
-
-const truth = (value: boolean): bigint => (value ? 1n : 0n);
-
-interface ConditionValue {
-  value: bigint;
-  unsigned: boolean;
-}
-
-function conditionValue(value: bigint, unsigned = false): ConditionValue {
-  return { value: unsigned ? BigInt.asUintN(64, value) : BigInt.asIntN(64, value), unsigned };
-}
-
-const CONDITION_OPERATIONS: Record<string, (a: bigint, b: bigint) => bigint> = {
-  '||': (a, b) => truth(a !== 0n || b !== 0n),
-  '&&': (a, b) => truth(a !== 0n && b !== 0n),
-  '|': (a, b) => a | b,
-  '^': (a, b) => a ^ b,
-  '&': (a, b) => a & b,
-  '==': (a, b) => truth(a === b),
-  '!=': (a, b) => truth(a !== b),
-  '<': (a, b) => truth(a < b),
-  '>': (a, b) => truth(a > b),
-  '<=': (a, b) => truth(a <= b),
-  '>=': (a, b) => truth(a >= b),
-  '<<': (a, b) => a << b,
-  '>>': (a, b) => a >> b,
-  '+': (a, b) => a + b,
-  '-': (a, b) => a - b,
-  '*': (a, b) => a * b,
-  '/': (a, b) => a / b,
-  '%': (a, b) => a % b,
-};
-
-/** Evaluates the integer constant expression of `#if`, in the widest integer type as C requires. */
-class ConditionParser {
-  private index = 0;
-
-  constructor(
-    private readonly tokens: PPToken[],
-    private readonly row: number
-  ) {}
-
-  parse(): bigint {
-    const value = this.conditional();
-    if (this.index < this.tokens.length) this.fail();
-    return value.value;
-  }
-
-  private fail(): never {
-    throw new CompileError([{ row: this.row, message: '#if の条件の書き方に誤りがあります。' }]);
-  }
-
-  private peek(): string | undefined {
-    return this.tokens[this.index]?.text;
-  }
-
-  private conditional(evaluate = true): ConditionValue {
-    const condition = this.binary(0, evaluate);
-    if (this.peek() !== '?') return condition;
-    this.index++;
-    const whenTrue = this.conditional(evaluate && condition.value !== 0n);
-    if (this.peek() !== ':') this.fail();
-    this.index++;
-    const whenFalse = this.conditional(evaluate && condition.value === 0n);
-    const selected = condition.value === 0n ? whenFalse : whenTrue;
-    return conditionValue(selected.value, whenTrue.unsigned || whenFalse.unsigned);
-  }
-
-  private static readonly LEVELS: string[][] = [
-    ['||'],
-    ['&&'],
-    ['|'],
-    ['^'],
-    ['&'],
-    ['==', '!='],
-    ['<', '>', '<=', '>='],
-    ['<<', '>>'],
-    ['+', '-'],
-    ['*', '/', '%'],
-  ];
-
-  private binary(level: number, evaluate: boolean): ConditionValue {
-    if (level >= ConditionParser.LEVELS.length) return this.unary(evaluate);
-    let left = this.binary(level + 1, evaluate);
-    for (;;) {
-      const operator = this.peek();
-      if (operator === undefined || !ConditionParser.LEVELS[level].includes(operator)) return left;
-      this.index++;
-      const skipped = (operator === '&&' && left.value === 0n) || (operator === '||' && left.value !== 0n);
-      const right = this.binary(level + 1, evaluate && !skipped);
-      left = this.apply(operator, left, right, evaluate);
-    }
-  }
-
-  private apply(operator: string, a: ConditionValue, b: ConditionValue, evaluate: boolean): ConditionValue {
-    const comparison = ['||', '&&', '==', '!=', '<', '>', '<=', '>='].includes(operator);
-    const shift = operator === '<<' || operator === '>>';
-    const unsigned = !comparison && (shift ? a.unsigned : a.unsigned || b.unsigned);
-    if (!evaluate) return conditionValue(0n, unsigned);
-    const left = conditionValue(a.value, a.unsigned || (!shift && b.unsigned)).value;
-    const right = conditionValue(b.value, b.unsigned || (!shift && a.unsigned)).value;
-    if ((operator === '/' || operator === '%') && right === 0n)
-      throw new CompileError([{ row: this.row, message: '#if の条件で 0 で割っています。' }]);
-    if (shift && (right < 0n || right >= 64n)) this.fail();
-    const value = CONDITION_OPERATIONS[operator](left, right);
-    return conditionValue(value, unsigned);
-  }
-
-  private unary(evaluate: boolean): ConditionValue {
-    const token = this.tokens[this.index++];
-    if (!token) this.fail();
-    switch (token.text) {
-      case '-': {
-        const value = this.unary(evaluate);
-        return conditionValue(-value.value, value.unsigned);
-      }
-      case '+': {
-        return this.unary(evaluate);
-      }
-      case '!': {
-        return conditionValue(truth(this.unary(evaluate).value === 0n));
-      }
-      case '~': {
-        const value = this.unary(evaluate);
-        return conditionValue(~value.value, value.unsigned);
-      }
-      case '(': {
-        const value = this.conditional(evaluate);
-        if (this.peek() !== ')') this.fail();
-        this.index++;
-        return value;
-      }
-    }
-    if (token.kind === 'number') {
-      const parsed = parseNumber(token.text, this.row);
-      if (parsed.type.kind !== 'int') this.fail();
-      return conditionValue(BigInt(parsed.value), !INT_PROPERTIES[parsed.type.name].signed);
-    }
-    if (token.kind === 'char') return conditionValue(BigInt(decodeCharLiteral(token.text, this.row)));
-    this.fail();
-  }
 }
