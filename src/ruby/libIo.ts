@@ -1,8 +1,8 @@
 import type { OutputChannel } from '../interpreter/programIo';
-import { inspect, toInt, toSValue } from './conversions';
+import { inspect, inspectValue, toInt, toSValue } from './conversions';
 import { def } from './define';
 import { argumentError, typeError } from './errors';
-import { formatString } from './format';
+import { exportBinaryInspect, formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { prettyInspect } from './prettyPrint';
@@ -104,7 +104,8 @@ def(
   [0, -1],
   function* (_self, args) {
     for (const arg of args) {
-      yield* write(stdout(), yield* inspect(arg));
+      const inspected = yield* inspectValue(arg);
+      yield* write(stdout(), inspected.binary ? exportBinaryInspect(inspected) : inspected);
       yield* write(stdout(), '\n');
     }
     if (args.length === 0) return NIL;

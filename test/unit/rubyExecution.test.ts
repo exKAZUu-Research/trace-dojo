@@ -2156,6 +2156,22 @@ test('Hash inspection rejects insertion from child callbacks', () => {
   });
 });
 
+test('Array inspection follows changes from element callbacks', () => {
+  expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];p $a.inspect,$a')).toMatchObject({
+    stdout: '"[x]"\n[]\n',
+  });
+});
+
+test('p escapes binary inspect results before writing to replacement stdout', () => {
+  expect(
+    run(
+      'class A;def inspect;255.chr;end;end;class W;def write(x);$v<<x;end;end;$v=[];$stdout=W.new;p A.new;$stdout=STDOUT;p $v[0].bytes'
+    )
+  ).toMatchObject({
+    stdout: '[92, 120, 70, 70]\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

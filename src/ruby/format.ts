@@ -292,7 +292,7 @@ function padStringValue(value: RString, spec: Spec): RString {
   return stringFromBytes(bytes, value.binary);
 }
 
-function exportBinaryInspect(value: RString): RString {
+export function exportBinaryInspect(value: RString): RString {
   const bytes = stringBytes(value);
   if (bytes.every((byte) => byte < 0x80)) return value;
   let text = '';

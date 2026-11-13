@@ -220,7 +220,8 @@ export function* inspectArray(array: RArray): Gen<string> {
   try {
     const parts: string[] = [];
     let length = 2;
-    for (const item of array.items) length = pushInspected(parts, yield* inspect(item), length, 2);
+    for (let index = 0; index < array.items.length; index++)
+      length = pushInspected(parts, yield* inspect(array.items[index]), length, 2);
     return `[${parts.join(', ')}]`;
   } finally {
     inspecting.delete(array);
