@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 679 -- The libNumeric module keeps one concern's cases together.
 import {
+  compareValues,
   comparisonFailed,
   floatToInt,
   formatFloat,
@@ -14,14 +15,22 @@ import {
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
-import { bigintRatio, floatFraction, floatStepCount, frexpDouble, fusedMultiplyAdd, ldexpDouble } from './floatMath';
+import {
+  bigintRatio,
+  floatFraction,
+  floatStepCount,
+  frexpDouble,
+  fusedMultiplyAdd,
+  ldexpDouble,
+  roundedDouble,
+} from './floatMath';
 import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { platformGamma, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, realClassOf, str, truthy } from './values';
+import { arr, classOf, realClassOf, str, truthy } from './values';
 
 type Num = bigint | number;
 
@@ -113,7 +122,8 @@ function chargeIntegerResult(bits: number, cost: number): void {
 }
 
 function floatPow(base: number, exponent: number): Value {
-  if (base < 0 && !Number.isInteger(exponent) && Number.isFinite(exponent)) {
+  if (base === 1 || (base === -1 && !Number.isNaN(exponent) && !Number.isFinite(exponent))) return 1;
+  if (base < 0 && (Number.isNaN(exponent) || (!Number.isInteger(exponent) && Number.isFinite(exponent)))) {
     throw new UnsupportedFeatureError('負の数の小数乗（結果が複素数になるもの）');
   }
   return exactFloatPower(base, exponent) ?? base ** exponent;
@@ -191,6 +201,7 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, '+@', 0, (self: Num) => self);
   def(owner, ['==', '==='], 1, function* (self: Num, [other]) {
     if (isNum(other)) return numericEquals(self, other);
+    if (classOf(other).findMethod('==')?.body.kind === 'user') return truthy(yield* callMethod(other, '==', [self]));
     if (other === NIL || typeof other === 'boolean' || other instanceof RString || other instanceof RSymbol)
       return false;
     return truthy(yield* callMethod(other, '==', [self]));
@@ -372,8 +383,18 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
     if (!block) throw argumentError("step can't be 0");
     throw argumentError("step can't be 0");
   }
-  if (limit !== NIL && !isNum(limit)) throw comparisonFailed(self, limit);
   if (!block) return makeEnumerator(self, 'step', args, keywords);
+  if (limit !== NIL && !isNum(limit)) {
+    let value: Num = self;
+    const ascending = Number(step) > 0;
+    for (;;) {
+      const order = yield* compareValues(value, limit);
+      if (ascending ? order > 0 : order < 0) break;
+      yield* callBlock(block, [value], false);
+      value = arithmetic('+', value, step) as Num;
+    }
+    return self;
+  }
   const useFloat = typeof self === 'number' || typeof limit === 'number' || typeof step === 'number';
   if (!useFloat) {
     const begin = self as bigint;
@@ -760,13 +781,13 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
     if (baseValue === undefined && typeof value === 'bigint') return value;
     if (baseValue === undefined && typeof value === 'number') return floatToInt(value);
     if (value === NIL && baseValue === undefined) throw typeError("can't convert nil into Integer");
-    if (baseValue === undefined && respondsTo(value, 'to_int')) {
-      const converted = yield* callMethod(value, 'to_int', []);
+    if (baseValue === undefined && respondsTo(value, 'to_int', true)) {
+      const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
       if (typeof converted === 'bigint') return converted;
     }
     let convertedString: Value = NIL;
-    if (respondsTo(value, 'to_str')) {
-      convertedString = yield* callMethod(value, 'to_str', []);
+    if (respondsTo(value, 'to_str', true)) {
+      convertedString = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
       if (convertedString instanceof RString) {
         parsedString = true;
         if (invalidBase) throw argumentError(`invalid radix ${base}`);
@@ -778,8 +799,8 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
       throw argumentError('base specified for non string value');
     }
     if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
-    if (respondsTo(value, 'to_i')) {
-      const converted = yield* callMethod(value, 'to_i', []);
+    if (respondsTo(value, 'to_i', true)) {
+      const converted = yield* callMethod(value, 'to_i', [], undefined, undefined, { fcall: true });
       if (typeof converted === 'bigint') return converted;
       throw typeError(
         `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_i gives ${realClassOf(converted).name})`
@@ -853,8 +874,8 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
       return parsed;
     }
     if (value === NIL) throw typeError("can't convert nil into Float");
-    if (respondsTo(value, 'to_f')) {
-      const converted = yield* callMethod(value, 'to_f', []);
+    if (respondsTo(value, 'to_f', true)) {
+      const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
       if (typeof converted === 'number') return converted;
       throw typeError(
         `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`
@@ -869,14 +890,23 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
 
 function parseFloatStrict(text: string): number | undefined {
   const trimmed = text.replaceAll(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '');
-  if (/^[+-]?0[xX][\da-fA-F]+(?:_[\da-fA-F]+)*$/.test(trimmed)) return Number(parseIntegerStrict(trimmed));
-  if (
-    !/^[+-]?(?:\d+(?:_\d+)*)(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+(?:_\d+)*)?$/.test(trimmed) &&
-    !/^[+-]?\.\d+(?:_\d+)*(?:[eE][+-]?\d+)?$/.test(trimmed)
-  ) {
+  const hex =
+    /^([+-]?)0[xX]([\da-fA-F]+(?:_[\da-fA-F]+)*)?(?:\.([\da-fA-F]+(?:_[\da-fA-F]+)*)?)?(?:[pP]([+-]?\d+(?:_\d+)*))?$/.exec(
+      trimmed
+    );
+  if (hex && (hex[2] || hex[3])) return parseHexFloat(hex);
+  if (!/^[+-]?(?:\d+(?:_\d+)*(?:\.(?:\d+(?:_\d+)*)?)?|\.\d+(?:_\d+)*)(?:[eE][+-]?\d+(?:_\d+)*)?$/.test(trimmed))
     return undefined;
-  }
   return Number(trimmed.replaceAll('_', ''));
+}
+
+function parseHexFloat(match: RegExpExecArray): number {
+  const fraction = (match[3] ?? '').replaceAll('_', '');
+  const coefficient = BigInt(`0x${((match[2] ?? '') + fraction).replaceAll('_', '')}`);
+  const sign = match[1] === '-' ? -1n : 1n;
+  if (coefficient === 0n) return sign < 0n ? -0 : 0;
+  const exponent = Number((match[4] ?? '0').replaceAll('_', '')) - fraction.length * 4;
+  return roundedDouble(sign * coefficient, exponent);
 }
 
 /** The leading number of a string, as `String#to_i` reads it: invalid text ends it, giving 0 when nothing came. */
@@ -915,7 +945,7 @@ export function parseIntegerLenient(text: string, base = 10): bigint {
 }
 
 export function parseFloatLenient(text: string): number {
-  const match = /^[\t\n\v\f\r ]*([+-]?(?:\d+(?:_\d+)*)?(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+(?:_\d+)*)?)/.exec(text);
+  const match = /^[\t\n\v\f\r ]*([+-]?(?:\d+(?:_\d+)*)?(?:\.(?:\d+(?:_\d+)*)?)?(?:[eE][+-]?\d+(?:_\d+)*)?)/.exec(text);
   const body = match?.[1].replaceAll('_', '') ?? '';
   if (!/\d/.test(body)) {
     const leading = /^[\t\n\v\f\r ]*([+-]?\d+(?:_\d+)*)/.exec(text);

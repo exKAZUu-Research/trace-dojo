@@ -91,16 +91,23 @@ def(
     }
     const size = yield* toIndex(args[0]);
     if (size < 0) throw argumentError('negative array size');
-    grow(size, self);
-    const items: Value[] = [];
     if (block) {
-      self.items = items;
-      for (let index = 0; index < size; index++) items.push(yield* call(block, BigInt(index)));
+      grow(size);
+      self.items = [];
+      for (let index = 0; index < size; index++) {
+        const result = yield* call(block, BigInt(index));
+        yield* modify(self);
+        grow(index + 1, self);
+        while (self.items.length < index) self.items.push(NIL);
+        self.items[index] = result;
+      }
     } else {
+      grow(size, self);
+      const items: Value[] = [];
       const fill = args[1] ?? NIL;
       for (let index = 0; index < size; index++) items.push(fill);
+      self.items = items;
     }
-    self.items = items;
     return NIL;
   },
   { visibility: 'private' }
@@ -121,21 +128,22 @@ function* slice(self: RArray, args: Value[]): Gen {
 
 function* resolvedSlice(self: RArray, args: Value[]): Gen<{ value: Value; start?: number; count?: number }> {
   const [first, second] = args;
-  const length = self.items.length;
   if (second === undefined && !(first instanceof RRange)) {
     let index = yield* toIndex(first);
+    const length = self.items.length;
     if (index < 0) index += length;
     return index < 0 || index >= length ? { value: NIL } : { value: self.items[index], start: index, count: 1 };
   }
   if (second !== undefined) {
     let start = yield* toIndex(first);
     const count = yield* toIndex(second);
+    const length = self.items.length;
     if (start < 0) start += length;
     if (start < 0 || start > length || count < 0) return { value: NIL };
     const selected = self.items.slice(start, start + count);
     return { value: arr(selected), start, count: selected.length };
   }
-  const bounds = yield* rangeBounds(first as RRange, length);
+  const bounds = yield* rangeBounds(first as RRange, () => self.items.length);
   if (!bounds) return { value: NIL };
   const selected = self.items.slice(bounds.start, bounds.start + bounds.count);
   return { value: arr(selected), start: bounds.start, count: selected.length };
@@ -146,9 +154,9 @@ def('Array', 'at', 1, (self: RArray, [index]) => elementAt(self, index));
 def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   yield* modify(self);
   const value = args.at(-1) as Value;
-  const length = self.items.length;
   if (args.length === 2 && !(args[0] instanceof RRange)) {
     let index = yield* toIndex(args[0]);
+    const length = self.items.length;
     if (index < 0) {
       index += length;
       if (index < 0) throw indexError(`index ${index - length} too small for array; minimum: -${length}`);
@@ -163,6 +171,7 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   if (args.length === 3) {
     start = yield* toIndex(args[0]);
     count = yield* toIndex(args[1]);
+    const length = self.items.length;
     if (start < 0) {
       start += length;
       if (start < 0) throw indexError(`index ${start - length} too small for array; minimum: -${length}`);
@@ -171,7 +180,9 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   } else {
     const range = args[0] as RRange;
     start = range.begin === NIL ? 0 : yield* toIndex(range.begin);
-    let end = range.end === NIL ? length : yield* toIndex(range.end);
+    let end = range.end === NIL ? undefined : yield* toIndex(range.end);
+    const length = self.items.length;
+    end ??= length;
     if (start < 0) {
       start += length;
       if (start < 0) throw rangeError(`${yield* inspect(range)} out of range`);
@@ -251,14 +262,15 @@ def('Array', '==', 1, function* (self: RArray, [other]) {
 });
 def('Array', 'eql?', 1, (self: RArray, [other]) => rEql(self, other));
 def('Array', '<=>', 1, function* (self: RArray, [other]) {
-  if (!(other instanceof RArray)) return NIL;
-  const length = Math.min(self.items.length, other.items.length);
+  const compared = other instanceof RArray ? other : yield* tryAry(other);
+  if (!compared) return NIL;
+  const length = Math.min(self.items.length, compared.items.length);
   for (let index = 0; index < length; index++) {
-    const order = yield* spaceship(self.items[index], other.items[index]);
+    const order = yield* spaceship(self.items[index] ?? NIL, compared.items[index] ?? NIL);
     if (order === undefined) return NIL;
     if (order !== 0) return BigInt(order);
   }
-  return BigInt(Math.sign(self.items.length - other.items.length));
+  return BigInt(Math.sign(self.items.length - compared.items.length));
 });
 
 // Modification --------------------------------------------------------------------------------------------------------

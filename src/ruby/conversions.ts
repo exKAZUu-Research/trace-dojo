@@ -434,17 +434,16 @@ export function symInspect(name: string): string {
 /** `a == b`, with the library's own types compared without calling methods unless the program redefined them. */
 export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   rt().spend();
+  if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
   if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
   if (typeof a === 'bigint' || typeof a === 'number') {
-    if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
     if (typeof b === 'bigint' || typeof b === 'number') return numericEquals(a, b);
-    if (b instanceof RBasic && classOf(b).findMethod('==')?.body.kind === 'user') {
+    if (isOverridden(b, '==')) {
       return truthy(yield* callMethod(b, '==', [a]));
     }
     return false;
   }
   if (typeof a !== 'object' || a === NIL || a instanceof RSymbol) return false;
-  if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
   if (a instanceof RString) return b instanceof RString && truthy(yield* callMethod(a, '==', [b]));
   if (a instanceof RArray) {
     if (!(b instanceof RArray) || a.items.length !== b.items.length) return false;

@@ -1,4 +1,4 @@
-import { addressOf, comparisonFailed, inspect, numericCompare, toIndex, toInt } from './conversions';
+import { addressOf, comparisonFailed, inspect, numericCompare, spaceship, toIndex, toInt } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError } from './errors';
 import { floatStepCount } from './floatMath';
@@ -293,7 +293,7 @@ def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject,
   const { start, end, step } = arithmeticSpec(source.recv, source.args, source.keywords);
   const floatSequence = typeof start === 'number' || typeof end === 'number' || typeof step === 'number';
   const first = floatSequence ? Number(start) : start;
-  const order = end === NIL ? undefined : numericCompare(start as bigint | number, end as bigint | number);
+  const order = end === NIL ? undefined : yield* spaceship(start, end);
   const empty = order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0));
   if (args.length === 0) {
     if (typeof step === 'number' && Number.isNaN(step)) throw comparisonFailed(step, 0n);

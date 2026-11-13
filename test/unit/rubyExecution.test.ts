@@ -2245,6 +2245,75 @@ test('pp emits container prefixes before user inspect callbacks', () => {
   });
 });
 
+test('Integer step compares numeric-like limits through coerce', () => {
+  expect(run('class A;private;def coerce(x);[x,3];end;end;p 1.step(A.new).first(2)')).toMatchObject({
+    stdout: '[1, 2]\n',
+  });
+});
+
+test('Kernel numeric conversions invoke private conversion methods', () => {
+  expect(run('class A;private;def to_int;12;end;end;p Integer(A.new)')).toMatchObject({ stdout: '12\n' });
+  expect(run('class A;private;def to_str;"12";end;end;p Integer(A.new)')).toMatchObject({ stdout: '12\n' });
+  expect(run('class A;private;def to_i;12;end;end;p Integer(A.new)')).toMatchObject({ stdout: '12\n' });
+  expect(run('class A;private;def to_f;1.5;end;end;p Float(A.new)')).toMatchObject({ stdout: '1.5\n' });
+});
+
+test('Float conversion accepts Ruby decimal and hexadecimal text', () => {
+  expect(run('p Float(".5e1_0"),Float("-.2e2_1"),Float("1."),Float("1.e2")')).toMatchObject({
+    stdout: '5000000000.0\n-2.0e+20\n1.0\n100.0\n',
+  });
+  expect(run('p Float("0x1.8p1"),Float("0x.1p2"),Float("0x1.")')).toMatchObject({
+    stdout: '3.0\n0.25\n1.0\n',
+  });
+  expect(run('p "1.e2".to_f,"-2.e3".to_f')).toMatchObject({ stdout: '100.0\n-2000.0\n' });
+});
+
+test('Float powers handle unit and Complex nonfinite boundaries', () => {
+  expect(run('p 1.0**Float::INFINITY,(-1.0)**(-Float::INFINITY),1.0**Float::NAN')).toMatchObject({
+    stdout: '1.0\n1.0\n1.0\n',
+  });
+  expect(run('p (-2.0)**Float::NAN')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('使えません'),
+  });
+});
+
+test('numeric equality honors reopened operand classes', () => {
+  expect(run('class String;def ==(x);puts :hit;true;end;end;p 1=="a"')).toMatchObject({
+    stdout: 'hit\ntrue\n',
+  });
+  expect(run('class TrueClass;def ==(x);true;end;end;p 1==true')).toMatchObject({ stdout: 'true\n' });
+});
+
+test('Array bounds use current storage after selector conversions', () => {
+  expect(run('class I;def to_int;$a.clear;0;end;end;$a=[1];p $a[I.new]')).toMatchObject({ stdout: 'nil\n' });
+  expect(
+    run('class I;def to_int;$a.clear;-1;end;end;$a=[1,2,3];begin;$a[I.new]=9;rescue=>e;p e.class;end;p $a')
+  ).toMatchObject({
+    stdout: 'IndexError\n[]\n',
+  });
+});
+
+test('Array initializer writes to current storage and checks frozen state', () => {
+  expect(run('class A<Array;def initialize;super(3){|i|clear if i==1;i};end;end;p A.new')).toMatchObject({
+    stdout: '[nil, 1, 2]\n',
+  });
+  expect(
+    run(
+      'class A<Array;def initialize;$a=self;super(3){|i|freeze if i==1;i};end;end;begin;A.new;rescue=>e;p e.class;end;p $a'
+    )
+  ).toMatchObject({
+    stdout: 'FrozenError\n[0]\n',
+  });
+});
+
+test('Array comparison converts array-like values and handles callback shrinkage', () => {
+  expect(run('class A;private;def to_ary;[2];end;end;p [1]<=>A.new')).toMatchObject({ stdout: '-1\n' });
+  expect(run('class A;def <=>(x);$a.clear;0;end;end;$a=[A.new,2];p $a<=>[0,2]')).toMatchObject({
+    stdout: 'nil\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

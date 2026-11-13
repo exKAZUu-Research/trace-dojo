@@ -111,7 +111,7 @@ function dyadic(value: number): { mantissa: bigint; exponent: number } {
     : { mantissa: sign * ((1n << 52n) | fraction), exponent: storedExponent - 1075 };
 }
 
-function roundedDouble(value: bigint, exponent: number): number {
+export function roundedDouble(value: bigint, exponent: number): number {
   if (value === 0n) return 0;
   const sign = value < 0n ? SIGN_BIT : 0n;
   const magnitude = value < 0n ? -value : value;

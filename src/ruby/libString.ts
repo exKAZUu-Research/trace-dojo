@@ -137,14 +137,19 @@ function* substringRange(
 }
 
 /** The start and length a range selects from a sequence of `length` items, as `[]` resolves it. */
-export function* rangeBounds(range: RRange, length: number): Gen<{ start: number; count: number } | undefined> {
+export function* rangeBounds(
+  range: RRange,
+  length: number | (() => number)
+): Gen<{ start: number; count: number } | undefined> {
   let start = range.begin === NIL ? 0 : yield* toIndex(range.begin);
-  let end = range.end === NIL ? length : yield* toIndex(range.end);
-  if (start < 0) start += length;
-  if (start < 0 || start > length) return undefined;
-  if (end < 0) end += length;
+  let end = range.end === NIL ? undefined : yield* toIndex(range.end);
+  const currentLength = typeof length === 'number' ? length : length();
+  end ??= currentLength;
+  if (start < 0) start += currentLength;
+  if (start < 0 || start > currentLength) return undefined;
+  if (end < 0) end += currentLength;
   if (!range.exclusive && range.end !== NIL) end += 1;
-  return { start, count: Math.max(0, Math.min(end, length) - start) };
+  return { start, count: Math.max(0, Math.min(end, currentLength) - start) };
 }
 
 // Construction and conversion -----------------------------------------------------------------------------------------
