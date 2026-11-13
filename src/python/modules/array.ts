@@ -126,10 +126,10 @@ class array:
     def __repr__(self):
         items = self._items()
         if not items:
-            return f"array('{self._typecode}')"
+            return f"{type(self).__name__}('{self._typecode}')"
         if self._typecode in 'uw':
-            return f"array('{self._typecode}', {''.join(items)!r})"
-        return f"array('{self._typecode}', {items!r})"
+            return f"{type(self).__name__}('{self._typecode}', {''.join(items)!r})"
+        return f"{type(self).__name__}('{self._typecode}', {items!r})"
 
     def __len__(self):
         return len(self._data) // _ITEMSIZE[self._typecode]

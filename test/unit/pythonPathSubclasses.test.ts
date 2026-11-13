@@ -62,3 +62,20 @@ print('paths')`;
     uncaughtException: undefined,
   });
 });
+
+test('path joins diagnose mutable components before checking mixed encodings', () => {
+  const program = `import os.path
+class Buffer(bytearray): pass
+for component in [bytearray(b'b'), Buffer(b'b')]:
+    for start in ['a', b'a']:
+        try: os.path.join(start, component)
+        except TypeError as error:
+            assert str(error) == "join() argument must be str, bytes, or os.PathLike object, not '" + type(component).__name__ + "'"
+        else: raise AssertionError('accepted')
+print('joined')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'joined\n',
+    uncaughtException: undefined,
+  });
+});

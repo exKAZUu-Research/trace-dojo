@@ -16,7 +16,7 @@ import { callValue, getAttribute } from './objects';
 import { firstRowOf } from './programSource';
 import { cpythonFrames } from './reflection';
 import { currentRuntime } from './runtimeContext';
-import { builtinClass, newDict, newTuple, None, NotImplemented, pyError, typeError } from './types';
+import { builtinClass, newDict, newTuple, None, NotImplemented, pyError, stringValue, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   type ExceptionState,
@@ -338,7 +338,7 @@ method(codeClass, '__repr__', 'none', 0, 0, (self) => {
   if (filename === undefined) {
     throw new UnsupportedFeatureError('コードオブジェクトの表示（スクリプトのファイルのパスを含む）');
   }
-  return `<code object ${name} at ${addressOf(self as PyOpaque)}, file "${filename}", line ${firstRow + 1}>`;
+  return `<code object ${name} at ${addressOf(self as PyOpaque)}, file "${stringValue(filename)}", line ${firstRow + 1}>`;
 });
 defineProperty(codeClass, 'co_name', (self) => infoOf(self).name);
 defineProperty(codeClass, 'co_qualname', (self) => infoOf(self).qualifiedName);

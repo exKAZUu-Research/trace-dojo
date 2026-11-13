@@ -241,7 +241,7 @@ for (const [name, atEnd] of [
 // Splitting and joining ---------------------------------------------------------------------------------------------
 
 /** Splits at the first or, from the end, the last `limit` occurrences of `separator`, or at all for a negative one. */
-function splitAt(text: string, separator: string, limit: number, fromEnd: boolean): string[] {
+export function splitOn(text: string, separator: string, limit: number, fromEnd: boolean): string[] {
   const offsets = occurrences(text, separator, { fromEnd, limit: limit < 0 ? Number.POSITIVE_INFINITY : limit });
   if (fromEnd) offsets.reverse();
   const parts: string[] = [];
@@ -303,18 +303,10 @@ for (const [name, fromEnd] of [
       if (separator === '') throw valueError('empty separator');
       // No split leaves the text as it is without looking at it.
       if (limit === 0) return newList([text]);
-      return newList(splitAt(text, separator, limit, fromEnd));
+      return newList(splitOn(text, separator, limit, fromEnd));
     },
     { keywords: ['sep', 'maxsplit'], named: 2 }
   );
-}
-
-/** Splits at a separator at most `limit` times, counting from the end when `fromEnd`, as str.rsplit does. */
-export function splitOn(text: string, separator: string, limit: number, fromEnd: boolean): string[] {
-  const parts = text.split(separator);
-  if (limit < 0 || parts.length - 1 <= limit) return parts;
-  if (!fromEnd) return [...parts.slice(0, limit), parts.slice(limit).join(separator)];
-  return [parts.slice(0, parts.length - limit).join(separator), ...parts.slice(parts.length - limit)];
 }
 
 method(

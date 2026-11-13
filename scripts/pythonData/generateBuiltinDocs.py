@@ -81,6 +81,7 @@ def add_classes(entries, pending):
 
 def add_class(entries, key, cls):
     """Adds the entries of a class and its attributes under `key`, returning its nested classes."""
+    entries.setdefault(f'^{key}', ['1' if cls.__flags__ & (1 << 8) else '0', None])
     # A type whose objects have a __doc__ member, as property's, keeps its own docstring in tp_doc.
     doc = cls.__dict__.get('__doc__')
     add(entries, key, doc if isinstance(doc, str) else type.__dict__['__doc__'].__get__(cls), getattr(cls, '__text_signature__', None))

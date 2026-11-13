@@ -11,7 +11,7 @@ import {
   sharedPythonClasses,
 } from './annotations';
 import { attributeDescriptorField, PyAttribute } from './attributeDescriptors';
-import { builtinDoc, builtinTextSignature } from './builtinDocs';
+import { builtinDoc, builtinTextSignature, builtinTypeImmutable } from './builtinDocs';
 import { setClassBases, solidBase } from './classes';
 import { pyRepr } from './conversions';
 import {
@@ -774,11 +774,10 @@ function setKeywordField(state: ExceptionState, name: string, value: PyValue): b
 }
 
 /**
- * Refuses to change a class CPython writes in Python that every run here shares, such as `abc.ABCMeta`, whose change
- * would reach the runs of other programs.
+ * Refuses mutations CPython allows on library classes shared across runs, which would leak between programs.
  */
 function refuseSharedClass(target: PyClass): void {
-  if (sharedPythonClasses.has(target)) {
+  if (sharedPythonClasses.has(target) || (target.isBuiltin && builtinTypeImmutable(target) === false)) {
     throw new UnsupportedFeatureError(`標準ライブラリのクラス ${target.module}.${target.name} の属性の書き換え`);
   }
 }

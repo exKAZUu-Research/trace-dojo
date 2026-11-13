@@ -1,5 +1,6 @@
+import { callValue, getAttribute } from './objects';
 import { currentRuntime } from './runtimeContext';
-import { exceptionClassNamed, newException, newTuple } from './types';
+import { exceptionClassNamed, newException, newTuple, typeError } from './types';
 import { type PyClass, PyInstance, PyList, type PyValue } from './values';
 
 /** Creates an exception group of `cls` holding `exceptions`, with its message and sub-exceptions set. */
@@ -32,15 +33,22 @@ export function exceptionGroupOf(exception: PyInstance, exceptions?: PyInstance[
 
 const wrappedGroups = new WeakMap<PyInstance, PyInstance>();
 
-/** Copies a group with other sub-exceptions, keeping its message, cause, context, and notes, as `derive` does. */
 export function deriveGroup(group: PyInstance, exceptions: PyInstance[]): PyInstance {
+  return callValue(exceptionClassNamed('BaseExceptionGroup'), [
+    group.exception?.message ?? '',
+    newTuple(exceptions),
+  ]) as PyInstance;
+}
+
+function derivePartition(group: PyInstance, exceptions: PyInstance[]): PyInstance {
+  const derived = callValue(getAttribute(group, 'derive'), [newTuple(exceptions)]);
+  if (!(derived instanceof PyInstance) || !derived.cls.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) {
+    throw typeError('derive must return an instance of BaseExceptionGroup');
+  }
   const state = group.exception;
-  const cls = group.cls.isBuiltin
-    ? group.cls
-    : exceptionClassNamed(isBaseOnly(exceptions) ? 'BaseExceptionGroup' : 'ExceptionGroup');
-  const derived = makeExceptionGroup(cls, state?.message ?? '', exceptions);
   const derivedState = derived.exception;
   if (state && derivedState) {
+    derivedState.traceback = state.traceback;
     derivedState.cause = state.cause;
     derivedState.context = state.context;
     derivedState.suppressContext = state.suppressContext;
@@ -52,12 +60,7 @@ export function deriveGroup(group: PyInstance, exceptions: PyInstance[]): PyInst
   return derived;
 }
 
-function isBaseOnly(exceptions: PyInstance[]): boolean {
-  return exceptions.some((exception) => !exception.cls.isSubclassOf(exceptionClassNamed('Exception')));
-}
-
 /** Splits a group into the exceptions that satisfy `predicate` and the rest, keeping its nesting. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows BaseExceptionGroup.split, which recurses into nested groups.
 export function splitGroup(
   group: PyInstance,
   predicate: (exception: PyInstance) => boolean
@@ -79,19 +82,10 @@ export function splitGroup(
       rest.push(exception);
     }
   }
-  const match =
-    matched.length === 0
-      ? undefined
-      : matched.length === exceptions.length && rest.length === 0
-        ? group
-        : deriveGroup(group, matched);
-  const remaining =
-    rest.length === 0
-      ? undefined
-      : rest.length === exceptions.length && matched.length === 0
-        ? group
-        : deriveGroup(group, rest);
-  return [match, remaining];
+  return [
+    matched.length === 0 ? undefined : derivePartition(group, matched),
+    rest.length === 0 ? undefined : derivePartition(group, rest),
+  ];
 }
 
 export { PyInstance };

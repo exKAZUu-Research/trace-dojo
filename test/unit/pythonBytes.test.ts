@@ -155,3 +155,19 @@ re.compile(r'\\N{NOPE}')`,
 ])('%s ends the program as CPython does', (_name, program, uncaughtException) => {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException });
 });
+
+test('binary splitting selects nonoverlapping separators from the requested end', () => {
+  const program = `for make in [bytes, bytearray]:
+    for data, sep in [(b'aaa', b'aa'), (b'ababa', b'aba'), (b'aaaaa', b'aa')]:
+        for limit in [-1, 0, 1, 2]:
+            actual = make(data).rsplit(sep, limit)
+            expected = [make(part[::-1]) for part in data[::-1].split(sep[::-1], limit)][::-1]
+            assert actual == expected
+            assert all(type(part) is make for part in actual)
+print('split')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'split\n',
+    uncaughtException: undefined,
+  });
+});

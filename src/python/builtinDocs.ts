@@ -59,6 +59,11 @@ export function builtinClassLayout(cls: PyClass): string | undefined {
   return entries().get(`!${classKey(cls)}`)?.[0];
 }
 
+export function builtinTypeImmutable(cls: PyClass): boolean | undefined {
+  const flag = entries().get(`^${classKey(cls)}`)?.[0];
+  return flag === undefined ? undefined : flag === '1';
+}
+
 function entries(): Map<string, [string | undefined, string | undefined]> {
   if (!table) {
     const [keys, strings, pairs] = JSON.parse(BUILTIN_DOCS) as [string[], string[], [number, number][]];
@@ -69,6 +74,7 @@ function entries(): Map<string, [string | undefined, string | undefined]> {
       })
     );
     for (const [key, value] of table) {
+      if (key.startsWith('^')) continue;
       const suffix = key.split('.').slice(-2).join('.');
       if (key.startsWith('builtins.') || !bySuffix.has(suffix)) bySuffix.set(suffix, value);
     }

@@ -324,7 +324,7 @@ function checkArgTypes(name: string, values: PyValue[]): void {
   for (const value of values) {
     if (typeof value === 'string' || (value instanceof PyInstance && typeof value.primitive === 'string')) {
       hasString = true;
-    } else if (value instanceof PyBytes) {
+    } else if (isPath(value)) {
       hasBytes = true;
     } else {
       throw typeError(`${name}() argument must be str, bytes, or os.PathLike object, not '${typeName(value)}'`);

@@ -113,6 +113,7 @@ function collect(value: PyValue): void {
   addKey(value);
   const key = docKey(value) as string;
   keys.add(`!${key}`);
+  keys.add(`^${key}`);
   for (const [name, attribute] of value.dict) {
     if (attribute instanceof PyClass) collect(attribute);
     else if (

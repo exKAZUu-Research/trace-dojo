@@ -119,8 +119,11 @@ export function createClass(
         : explicit;
     const prepared = meta === typeClass ? undefined : prepare(meta, def.name, bases, keywords);
     const namespace = prepared === undefined ? new Map<string, PyValue>() : new MappingNamespace(prepared);
-    // A class body reads `__module__` from `__name__`, which code `exec` runs in fresh globals finds in builtins.
-    namespace.set('__module__', frame.globals.get('__name__') ?? currentRuntime().builtins.get('__name__') ?? None);
+    namespace.set(
+      '__module__',
+      namespace.get('__name__') ??
+        evaluator.loadName({ kind: 'name', name: '__name__', access: 'global', row: def.row }, frame)
+    );
     namespace.set('__qualname__', def.qualifiedName);
     namespace.set('__firstlineno__', BigInt(firstRowOf(def) + 1));
     if (def.doc !== undefined) namespace.set('__doc__', def.doc);

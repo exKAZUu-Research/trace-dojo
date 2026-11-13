@@ -66,3 +66,19 @@ print('generated')`;
     uncaughtException: undefined,
   });
 });
+
+test('array subclasses retain their type name in all representations', () => {
+  const program = `import array
+class A(array.array): pass
+for code, values in [('i', []), ('i', [1, 2]), ('u', 'ab')]:
+    plain = array.array(code, values)
+    custom = A(code, values)
+    assert repr(custom) == 'A' + repr(plain)[5:]
+    assert list(custom) == list(plain)
+print('arrays')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'arrays\n',
+    uncaughtException: undefined,
+  });
+});

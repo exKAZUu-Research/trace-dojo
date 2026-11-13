@@ -7,10 +7,6 @@ import { classOf, None, typeError } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Kwargs, PyBoundMethod, PyClass, PyFunction, type PyValue } from './values';
 
-/**
- * `help(obj)` of a function or method written in Python, which prints what pydoc's text renderer does. The help of
- * other objects shows CPython's docstrings and pydoc's layout of classes and modules, which this grader does not have.
- */
 // code-gauge-allow functionCognitiveComplexity 16 -- Checks the arguments of pydoc's Helper and the kinds of objects it documents here.
 export function help(args: PyValue[], kwargs?: Kwargs): PyValue {
   for (const key of kwargs?.keys() ?? []) {
