@@ -1,5 +1,6 @@
 import { parseIntText } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
+import { repeatText } from '../stringBuilder';
 import { strLength } from '../strings';
 import { valueError } from '../types';
 import type { DecimalContext } from './decimalContext';
@@ -137,9 +138,9 @@ export function formatDecimal(value: Dec, text: string, context: DecimalContext)
   let fracPart: string;
   if (dotPlace < 0) {
     intPart = '0';
-    fracPart = '0'.repeat(-dotPlace) + self.int;
+    fracPart = repeatText('0', -dotPlace) + self.int;
   } else if (dotPlace > self.int.length) {
-    intPart = self.int + '0'.repeat(dotPlace - self.int.length);
+    intPart = self.int + repeatText('0', dotPlace - self.int.length);
     fracPart = '';
   } else {
     intPart = self.int.slice(0, dotPlace) || '0';

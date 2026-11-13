@@ -253,6 +253,7 @@ shared('zfill', 'one', 1, 1, (self, [width]) => {
   const text = textOf(self);
   const target = Number(toIndex(width));
   if (text.length >= target) return sameKind(self as PyBytes, new Uint8Array(dataOf(self)));
+  currentRuntime().buildString(target);
   const sign = text.startsWith('+') || text.startsWith('-') ? text[0] : '';
   return wrap(self, sign + '0'.repeat(target - text.length) + text.slice(sign.length));
 });

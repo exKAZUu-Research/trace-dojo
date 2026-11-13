@@ -2,6 +2,7 @@ import { bytesLikeData, latin1Bytes, latin1Text, newBytes, PyBytes } from './byt
 import { pyAscii } from './conversions';
 import { bindValue, callValue, lookupSpecial } from './objects';
 import { renderPercent, TemplateReader } from './percentFormat';
+import { repeatText } from './stringBuilder';
 import { pyError, typeError, typeName, valueError } from './types';
 import { PyTuple, type PyValue } from './values';
 
@@ -29,7 +30,7 @@ class BytesTemplateReader extends TemplateReader {
     if ('diuoxXeEfFgG'.includes(type)) return super.convertSpecifier(type, value, flags, width, precision, position);
     const body = textOf(type, value, position);
     const shown = precision === undefined || type === 'c' ? body : body.slice(0, precision);
-    const padding = ' '.repeat(Math.max(0, Number(width || '0') - shown.length));
+    const padding = repeatText(' ', Number(width || '0') - shown.length);
     return flags.includes('-') ? shown + padding : padding + shown;
   }
 
