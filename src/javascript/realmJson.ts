@@ -76,14 +76,13 @@ export function jsonStringify(
 }
 
 function propertyListOf(runtime: Runtime, replacer: JsArray): string[] {
-  const list: string[] = [];
+  // A Set keeps the first occurrence of each key in order, without searching the keys kept so far.
+  const keys = new Set<string>();
   runtime.scan(replacer.elements.length);
   for (const element of replacer.elements) {
-    if (typeof element !== 'string' && typeof element !== 'number') continue;
-    const key = String(element);
-    if (!list.includes(key)) list.push(key);
+    if (typeof element === 'string' || typeof element === 'number') keys.add(String(element));
   }
-  return list;
+  return [...keys];
 }
 
 function gapOf(space: Value): string {
