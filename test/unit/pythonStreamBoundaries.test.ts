@@ -162,3 +162,24 @@ print('lines')`;
     uncaughtException: undefined,
   });
 });
+
+test('text iteration uses the builtin reader for exact streams and dispatches subclass readline overrides', () => {
+  const program = `import io
+stream = io.TextIOWrapper(io.BytesIO(b'a\\nb\\n'))
+stream.readline = lambda: 'shadowed'
+assert next(stream) == 'a\\n' and next(stream) == 'b\\n'
+class Text(str): pass
+line = Text('subclass')
+class Stream(io.TextIOWrapper):
+    def readline(self): return line
+stream = Stream(io.BytesIO())
+assert next(stream) is line
+line = ''
+assert next(stream, 'finished') == 'finished'
+print('iterated')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'iterated\n',
+    uncaughtException: undefined,
+  });
+});

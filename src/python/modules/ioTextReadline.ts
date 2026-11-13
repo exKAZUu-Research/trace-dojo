@@ -4,8 +4,8 @@ import { toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { codePointOffset, strLength } from '../strings';
-import { None, pyError, valueError } from '../types';
-import { type PyClass, PyFunction, type PyInstance, PyList, type PyValue } from '../values';
+import { exceptionClassNamed, newException, None, pyError, stringValue, typeName, valueError } from '../types';
+import { type PyClass, PyError, PyFunction, type PyInstance, PyList, type PyValue } from '../values';
 
 export function defineTextReadline(cls: PyClass): void {
   const original = cls.dict.get('readline');
@@ -30,6 +30,24 @@ export function defineTextReadline(cls: PyClass): void {
     if (typeof result === 'string') currentRuntime().spendNative(Math.ceil(result.length / 64));
     return result;
   });
+  const readline = cls.dict.get('readline') as PyValue;
+  method(cls, '__next__', 'none', 0, 0, (self) => nextLine(self as PyInstance, cls, readline));
+}
+
+function nextLine(self: PyInstance, cls: PyClass, readline: PyValue): PyValue {
+  self.dict.set('_telling', false);
+  const line = self.cls === cls ? callValue(readline, [self]) : callValue(getAttribute(self, 'readline'), []);
+  const text = stringValue(line);
+  if (text === undefined)
+    throw new PyError(
+      newException(exceptionClassNamed('OSError'), [
+        `readline() should have returned a str object, not '${typeName(line)}'`,
+      ])
+    );
+  if (text.length > 0) return line;
+  self.dict.set('_snapshot', None);
+  self.dict.set('_telling', self.dict.get('_seekable') ?? false);
+  throw pyError('StopIteration');
 }
 
 function bufferedLine(self: PyInstance, size: number): string | undefined {

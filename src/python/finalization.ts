@@ -12,7 +12,7 @@ import {
 import { closeGenerator } from './generators';
 import { hostRoots } from './hostRoots';
 import { LocalReferences } from './localReferences';
-import { namespaceReferences } from './namespaceMap';
+import { NamespaceMap, namespaceReferences } from './namespaceMap';
 import { namespaceMapOf } from './namespaces';
 import { bindValue, callValue } from './objects';
 import type { Runtime } from './runtime';
@@ -21,6 +21,7 @@ import { asyncGeneratorClass, None } from './types';
 import { reportUnraisable } from './unraisable';
 import { UnsupportedFeatureError } from './unsupported';
 import {
+  LazyModuleAttribute,
   PyClass,
   PyDeque,
   PyDict,
@@ -101,6 +102,8 @@ function isContainer(value: PyValue): value is PyList | PyDict | PySet | PyDeque
 export class GeneratorFinalizer {
   /** The generators and instances whose freeing runs code, in the order they were first tracked. */
   readonly pending = new Set<PyObject>();
+  private readonly moduleBindings = new WeakMap<PyObject, { module: PyModule; name: string }>();
+
   /** Whether a program's `gc.disable()` or a zero threshold turned off the automatic collector. */
   private automaticCollection = true;
   /** The objects a finalization in progress frees, which a nested one keeps alive. */
@@ -115,6 +118,17 @@ export class GeneratorFinalizer {
 
   constructor(private readonly runtime: Runtime) {
     this.locals = new LocalReferences(runtime);
+  }
+
+  recordModuleBinding(module: PyModule, name: string, value: PyValue): void {
+    if (
+      value instanceof PyObject &&
+      this.pending.has(value) &&
+      module.dict instanceof NamespaceMap &&
+      !module.dict.dictionary
+    ) {
+      this.moduleBindings.set(value, { module, name });
+    }
   }
 
   /** Tracks a generator after it ran, depending on whether it suspended inside a `try` or `with` statement. */
@@ -206,24 +220,32 @@ export class GeneratorFinalizer {
     this.release([previous], inFlight);
   }
 
-  /** The value an attribute or an item of a builtin container holds, read without running the program's code. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Slots, class metadata and container storage need one ownership snapshot without invoking Python.
-  private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): PyValue | undefined {
+  private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): unknown {
     if (this.pending.size === 0) return undefined;
-    if (isAttribute) {
-      if (!(object instanceof PyObject)) return undefined;
-      if ((object instanceof PyClass || object instanceof PyFunction) && key === '__name__') return object.nameValue;
-      if ((object instanceof PyClass || object instanceof PyFunction) && key === '__qualname__')
-        return object.qualifiedNameValue;
-      const dict = object instanceof PyInstance || object instanceof PyClass ? object.dict : peekOwnDict(object);
-      return object.slotValues?.get(key as string) ?? dict?.get(key as string);
-    }
+    if (isAttribute) return this.heldAttributeValue(object, key);
     if (object instanceof PyList && typeof key === 'bigint') {
       const { items } = object;
       return items[Number(key < 0n ? key + BigInt(items.length) : key)];
     }
     if (object instanceof PyDict && typeof key !== 'object') return object.store.get(key);
     return undefined;
+  }
+
+  private heldAttributeValue(object: PyValue, key: PyValue): unknown {
+    if (!(object instanceof PyObject)) return undefined;
+    if (object instanceof PyModule) return this.heldModuleValue(object, key);
+    if ((object instanceof PyClass || object instanceof PyFunction) && key === '__name__') return object.nameValue;
+    if ((object instanceof PyClass || object instanceof PyFunction) && key === '__qualname__')
+      return object.qualifiedNameValue;
+    const dict = object instanceof PyInstance || object instanceof PyClass ? object.dict : peekOwnDict(object);
+    return object.slotValues?.get(key as string) ?? dict?.get(key as string);
+  }
+
+  private heldModuleValue(module: PyModule, key: PyValue): readonly unknown[] {
+    if (typeof key !== 'string' || !(module.dict instanceof NamespaceMap) || module.dict.dictionary)
+      return referencesOf(module);
+    const lazy = module.imports.get(key);
+    return [module.dict.get(key), lazy instanceof LazyModuleAttribute ? lazy.value : undefined];
   }
 
   /**
@@ -321,7 +343,10 @@ export class GeneratorFinalizer {
   private mainHeldElsewhere(globals: Map<string, PyValue>): boolean {
     const modules = [...this.runtime.modules.values()].filter((module) => module.dict !== globals);
     const reached = findReachableInOrder(
-      [...modules.flatMap((module) => [...module.dict.values()]), ...hostRoots(this.runtime)],
+      [
+        ...modules.flatMap((module) => [...namespaceReferences(module.dict), ...module.resolvedImports()]),
+        ...hostRoots(this.runtime),
+      ],
       (object) => object instanceof PyModule
     );
     return reached.some((object) => object instanceof PyFunction && object.globals === globals);
@@ -464,6 +489,17 @@ export class GeneratorFinalizer {
 
   private moduleOwns(object: object): boolean {
     const { modules } = this.runtime;
+    const binding = object instanceof PyObject ? this.moduleBindings.get(object) : undefined;
+    if (binding) {
+      const { module, name } = binding;
+      if (
+        modules.get(module.name) === module &&
+        module.dict instanceof NamespaceMap &&
+        !module.dict.dictionary &&
+        module.dict.get(name) === object
+      )
+        return true;
+    }
     if (object instanceof PyDict) {
       const namespace = namespaceMapOf(object);
       const name = namespace?.get('__name__');

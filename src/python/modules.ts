@@ -174,6 +174,7 @@ function createModule(runtime: Runtime, name: string, factory: ModuleFactory): P
   orderNamespace(module, name);
   recordFunctionOwners(module, name);
   loadAccelerators(runtime, module);
+  for (const [key, value] of module.dict) runtime.finalizer.recordModuleBinding(module, key, value);
   return module;
 }
 

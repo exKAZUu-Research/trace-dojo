@@ -168,7 +168,7 @@ test('tracing receives input and separate executions start with fresh streams', 
 test.each(['input()', 'sys.stdin.readline()', 'next(sys.stdin)'])(
   'line reads through %s have native I/O operation costs',
   (read) => {
-    const count = 3000;
+    const count = 10_000;
     const program = `import sys
 count = int(${read})
 total = 0
@@ -193,5 +193,41 @@ input()`;
   expect(executeProgram('python', program, { stdin: 'x\n' })).toMatchObject({
     kind: 'limitExceeded',
     limit: 'operations',
+  });
+});
+
+test.each(['sum(1 for line in sys.stdin)', 'len(sys.stdin.readlines())'])(
+  'bulk input through %s retains native line costs',
+  (expression) => {
+    expect(
+      executeProgram('python', `import sys\nprint(${expression})`, { stdin: 'line\n'.repeat(50_000) })
+    ).toMatchObject({ kind: 'executed', stdout: '50000\n', uncaughtException: undefined });
+  }
+);
+
+test('replacing both standard input aliases releases the stream and its close hook', () => {
+  const program = `import sys, io, gc
+log = []
+stream = sys.stdin
+stream.close = lambda: log.append('closed')
+assert input() == 'line'
+assert log == []
+class Name(str): pass
+setattr(sys, Name('marker'), 1)
+sys.stdin = io.StringIO('replacement\\n')
+del stream
+gc.collect()
+assert log == []
+sys.stdin = sys.__stdin__
+assert input() == 'remaining'
+sys.stdin = None
+sys.__stdin__ = None
+gc.collect()
+assert log == ['closed']
+print('released')`;
+  expect(executeProgram('python', program, { stdin: 'line\nremaining\n' })).toMatchObject({
+    kind: 'executed',
+    stdout: 'released\n',
+    uncaughtException: undefined,
   });
 });

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 661 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 662 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -487,6 +487,7 @@ export function setAttribute(target: PyValue, nameValue: PyValue, value: PyValue
     storeNamedAttribute(target.dict, nameValue, value);
     target.unsupported.delete(name);
     target.imports.delete(name);
+    currentRuntime().finalizer.recordModuleBinding(target, name, value);
     return;
   }
   if (target instanceof PyDescriptor && isPropertyKind(target.cls) && name === '__doc__') {

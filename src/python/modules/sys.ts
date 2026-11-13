@@ -5,7 +5,7 @@ import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { UNSUPPORTED_SYS_ATTRIBUTES } from '../sysAttributes';
 import { exceptionClassNamed, newException, None, typeError, valueError } from '../types';
-import { PyError, type PyValue } from '../values';
+import { LazyModuleAttribute, PyError, type PyValue } from '../values';
 import { sysHooks } from './sysHooks';
 import { sysInformation, sysModules } from './sysInfo';
 
@@ -57,7 +57,8 @@ registerModule(
     for (const [key, value] of entries) namespace.set(key, value);
     namespace.set('modules', sysModules(runtime));
     const module = runtime.importModule('sys');
-    for (const name of ['stdin', '__stdin__']) module.imports.set(name, () => runtime.standardStream('stdin'));
+    const stdin = new LazyModuleAttribute(() => runtime.standardStream('stdin'));
+    for (const name of ['stdin', '__stdin__']) module.imports.set(name, stdin);
     return new Map();
   },
   UNSUPPORTED_SYS_ATTRIBUTES

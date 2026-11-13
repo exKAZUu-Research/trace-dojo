@@ -104,7 +104,10 @@ export function findReachableAsCollector(roots: unknown[]): object[] {
 function collectorReferences(node: object): object[] {
   if (Array.isArray(node)) return node.filter(isCollectorNode);
   if (node instanceof Map) return [...node].flat().filter(isCollectorNode);
-  if (node instanceof PyModule) return [node.dict];
+  if (node instanceof PyModule) {
+    const references: unknown[] = [node.dict, ...node.resolvedImports()];
+    return references.filter(isCollectorNode);
+  }
   if (node instanceof PyClass && !node.isBuiltin)
     return [
       node.dict,
@@ -263,7 +266,9 @@ function pushInstanceReferences(pending: unknown[], instance: PyInstance, reache
 function pushNamespaceReferences(pending: unknown[], object: PyClass | PyModule): number {
   if (object instanceof PyClass && object.isBuiltin) return 0;
   pushAll(pending, namespaceReferences(object.dict));
-  if (object instanceof PyClass) {
+  if (object instanceof PyModule) {
+    pushAll(pending, object.resolvedImports());
+  } else {
     pending.push(object.nameValue, object.qualifiedNameValue);
     pushAll(pending, object.enumMembers ?? []);
     pushAll(pending, object.bases);

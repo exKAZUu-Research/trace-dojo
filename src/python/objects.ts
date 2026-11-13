@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 561 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 568 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -301,10 +301,21 @@ function moduleTypeAttribute(module: PyModule, name: string): PyValue | undefine
 export function importedModule(module: PyModule, name: string): PyValue | undefined {
   const target = module.imports.get(name);
   if (target === undefined) return undefined;
-  const value = typeof target === 'string' ? importTarget(target) : target();
-  module.imports.delete(name);
-  module.dict.set(name, value);
-  return value;
+  const runtime = currentRuntime();
+  return runtime.runNative(() => {
+    const value = typeof target === 'string' ? importTarget(target) : target.resolve();
+    runtime.handToNative(value);
+    const aliases =
+      typeof target === 'string'
+        ? [name]
+        : [...module.imports].filter(([, other]) => other === target).map(([alias]) => alias);
+    for (const alias of aliases) {
+      module.dict.set(alias, value);
+      module.imports.delete(alias);
+      runtime.finalizer.recordModuleBinding(module, alias, value);
+    }
+    return value;
+  });
 }
 
 function importTarget(target: string): PyValue {

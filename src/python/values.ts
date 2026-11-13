@@ -464,10 +464,21 @@ export class PyBoundMethod extends PyObject {
   }
 }
 
+export class LazyModuleAttribute {
+  value?: PyValue;
+
+  constructor(private readonly create: () => PyValue) {}
+
+  resolve(): PyValue {
+    this.value ??= this.create();
+    return this.value;
+  }
+}
+
 export class PyModule extends PyObject {
   /** Attributes this grader does not support, by name, with the feature to name in the error. */
   readonly unsupported = new Map<string, string>();
-  readonly imports = new Map<string, string | (() => PyValue)>();
+  readonly imports = new Map<string, string | LazyModuleAttribute>();
   /** The feature to name for every attribute the module lacks, when this grader has only some of CPython's module. */
   partialFeature?: string;
 
@@ -477,6 +488,12 @@ export class PyModule extends PyObject {
     readonly dict: Map<string, PyValue>
   ) {
     super(cls);
+  }
+
+  *resolvedImports(): Generator<PyValue> {
+    for (const target of this.imports.values()) {
+      if (target instanceof LazyModuleAttribute && target.value !== undefined) yield target.value;
+    }
   }
 }
 

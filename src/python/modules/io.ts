@@ -1,3 +1,4 @@
+import { defineAttribute } from '../attributeDescriptors';
 import { bytesLikeData, newByteArray, newBytes, PyBytes } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { method } from '../define';
@@ -27,7 +28,7 @@ import {
   unbox,
   valueError,
 } from '../types';
-import { DONE, PyClass, PyDescriptor, PyError, PyFunction, PyOpaque, type PyValue } from '../values';
+import { DONE, PyClass, PyDescriptor, PyError, PyFunction, type PyInstance, PyOpaque, type PyValue } from '../values';
 import { unpackKeywords } from './clinicArgs';
 import { ioCodecNatives } from './ioCodecs';
 import { IO_SOURCE } from './ioPython';
@@ -412,11 +413,23 @@ function clinicInitializer(cls: PyClass): void {
   if (!(initialize instanceof PyFunction)) return;
   const params = initialize.def.params.slice(1).map(({ name }) => name);
   const required = params.length - initialize.defaults.length;
-  if (cls.name === 'TextIOWrapper') defineTextReadline(cls);
+  const text = cls.name === 'TextIOWrapper';
+  defineAttribute(cls, 'closed', (self) => underlyingClosed(self as PyInstance, text));
+  if (text) defineTextReadline(cls);
   defineMethod(cls, '__init__', (self, args, kwargs) => {
     unpackKeywords(cls.name, params, required, args, kwargs);
     return callValue(initialize, [self, ...args], kwargs);
   });
+}
+
+function underlyingClosed(self: PyInstance, text: boolean): PyValue {
+  const stream = self.dict.get(text ? '_buffer' : '_raw');
+  if (stream === undefined) {
+    if (text) return true;
+    throw valueError('I/O operation on uninitialized object');
+  }
+  if (stream === None) throw valueError(text ? 'underlying buffer has been detached' : 'raw stream has been detached');
+  return getAttribute(stream, 'closed');
 }
 
 const FILE_FEATURE = 'ファイルの読み書き';
