@@ -2,11 +2,12 @@ import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
+import { C17_KEYWORDS } from './lexer';
 import {
-  declarationFollowers,
   sizeofTypeFollowers,
   type SourceToken,
   sourceTokens,
+  syntaxBoundaryFollowers,
   type TypeScope,
 } from './syntaxTokens';
 
@@ -25,6 +26,8 @@ export function cSyntaxDiagnostics(
   if (!failure && errorOffset === undefined) return errors;
   const illegal = firstIllegalConstruct(root, headerTypes);
   const next = errorOffset === undefined ? nextToken(source, failure!) : { offset: errorOffset, row: errors[0].row };
+  if (illegal && errorOffset === illegal.startIndex)
+    return [{ row: illegal.startPosition.row, message: 'ここには関数の定義や文を書けません。' }];
   const tokens = sourceTokens(source, budget);
   const names = knownTypes(root, headerTypes);
   const earlyError = invalidCToken(root);
@@ -34,7 +37,7 @@ export function cSyntaxDiagnostics(
   }
   const candidates = [
     ...sizeofTypeFollowers(tokens, typeScopes, names, budget),
-    ...declarationFollowers(tokens, declarationStarts(root, budget), typeScopes, names, budget),
+    ...syntaxBoundaryFollowers(tokens, declarationStarts(root, budget), typeScopes, names, budget),
   ]
     .filter((token) => token.start < next.offset)
     .toSorted((a, b) => a.start - b.start);
@@ -58,8 +61,10 @@ function declarationStarts(root: Node, budget: ExecutionBudget): number[] {
     const node = pending.pop()!;
     if (
       node.isError ||
-      (['declaration', 'type_definition', 'function_definition', 'field_declaration'].includes(node.type) &&
-        node.childForFieldName('type'))
+      (['declaration', 'type_definition', 'function_definition', 'field_declaration', 'expression_statement'].includes(
+        node.type
+      ) &&
+        (node.type === 'expression_statement' || node.childForFieldName('type')))
     )
       starts.push(node.startIndex);
     pending.push(...node.namedChildren);
@@ -70,9 +75,9 @@ function declarationStarts(root: Node, budget: ExecutionBudget): number[] {
 export class CSyntaxError extends CompileError {
   readonly offset: number;
 
-  constructor(node: Node, message: string) {
-    super([{ row: node.startPosition.row, message }]);
-    this.offset = node.startIndex;
+  constructor(node: Node, message: string, position?: { row: number; offset: number }) {
+    super([{ row: position?.row ?? node.startPosition.row, message }]);
+    this.offset = position?.offset ?? node.startIndex;
   }
 }
 
@@ -178,7 +183,17 @@ function firstIllegalConstruct(root: Node, headerTypes: readonly string[]): Node
   const pending = [root];
   while (pending.length > 0) {
     const node = pending.pop()!;
-    if (node.type === 'function_definition' && node.parent?.type === 'compound_statement') return node;
+    if (node.type === 'function_definition' && node.parent?.type === 'compound_statement') {
+      const declarator = node.childForFieldName('declarator');
+      if (
+        declarator &&
+        !declarator.hasError &&
+        !C17_KEYWORDS.has(firstNamedLeaf(declarator).text) &&
+        declarator.descendantsOfType('macro_specifier').length === 0 &&
+        isFunctionDeclarator(declarator)
+      )
+        return node.childForFieldName('body') ?? node;
+    }
     if (
       node.parent?.type === 'translation_unit' &&
       node.type.endsWith('_statement') &&
@@ -188,6 +203,23 @@ function firstIllegalConstruct(root: Node, headerTypes: readonly string[]): Node
     pending.push(...node.namedChildren.toReversed());
   }
   return undefined;
+}
+
+function isFunctionDeclarator(node: Node): boolean {
+  let current: Node | undefined = node;
+  let kind: string | undefined;
+  while (current) {
+    if (
+      current.type === 'function_declarator' &&
+      current.childForFieldName('parameters')?.endIndex !== current.endIndex
+    )
+      return false;
+    if (['function_declarator', 'pointer_declarator', 'array_declarator'].includes(current.type)) kind = current.type;
+    current =
+      current.childForFieldName('declarator') ??
+      (current.type === 'parenthesized_declarator' ? (current.firstNamedChild ?? undefined) : undefined);
+  }
+  return kind === 'function_declarator';
 }
 
 function firstNamedLeaf(node: Node): Node {

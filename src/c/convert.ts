@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 735 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
+// code-gauge-allow-file fileNcss 738 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -308,6 +308,7 @@ export class Converter {
       }
     }
     const typeNodes = declarationTypeNodes(node);
+    if (typeNodes.length === 0) throw new CSyntaxError(node, '型の指定が必要です。');
     for (const child of typeNodes.flatMap((typeNode) => typeNode.namedChildren))
       if (child.type === 'type_qualifier') this.qualifier(child, qualifiers);
     return { storage, qualifiers, type: this.declarationType(typeNodes), row: node.startPosition.row };
@@ -611,7 +612,8 @@ export class Converter {
       return this.externalDeclaration(node) as Declaration[];
     }
     if (node.type === 'function_definition') {
-      throw new CompileError([{ row: node.startPosition.row, message: '関数の中では、関数を定義できません。' }]);
+      this.specifiers(node);
+      throw new CSyntaxError(field(node, 'body'), '関数の中では、関数を定義できません。');
     }
     if (node.type === 'case_statement') {
       const row = node.startPosition.row;
@@ -636,12 +638,22 @@ export class Converter {
     const leading = this.leadingType(node.text, node.startPosition.row);
     if (!leading) return undefined;
     const source = '\n'.repeat(node.startPosition.row) + 'int' + node.text.slice(leading.length);
-    return parseSource(this.parser, source, {}, (root) => {
-      const declaration = root.firstNamedChild;
-      if (!declaration || declaration.type !== 'declaration')
-        throw new CompileError([{ row: node.startPosition.row, message: '宣言の書き方に誤りがあります。' }]);
-      return this.declaration(declaration, leading.type);
-    });
+    return parseSource(
+      this.parser,
+      source,
+      {},
+      (root) => {
+        const declaration = root.firstNamedChild;
+        if (!declaration || declaration.type !== 'declaration')
+          throw new CompileError([{ row: node.startPosition.row, message: '宣言の書き方に誤りがあります。' }]);
+        return this.declaration(declaration, leading.type);
+      },
+      (_root, errors) => {
+        if (errors.length > 0)
+          throw new CSyntaxError(node, errors[0].message, { row: errors[0].row, offset: node.endIndex });
+        return errors;
+      }
+    );
   }
 
   private leadingType(text: string, row: number): { length: number; type: TypeSpecifier } | undefined {

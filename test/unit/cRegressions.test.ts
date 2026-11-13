@@ -1511,3 +1511,50 @@ test('typedef specifiers retain every type word across storage-class specifiers'
     diagnostics: [expect.objectContaining({ row: 1 })],
   });
 });
+
+test.each([
+  'unsigned long n',
+  'long n',
+  'unsigned n',
+  'char *p',
+  'int (*fp)(int)',
+  'int local(int a)',
+  'struct L{int x;}',
+  'union L{int x;}',
+  'enum L{A,B}',
+])('local declarations keep their boundary before statements: %s', (head) => {
+  for (const tail of ['if(s)s=2;', 'return 1;', 'struct M{int y;};', 'switch(s){case 1:break;}']) {
+    expect(executeProgram('c', `#include <stdio.h>\nint main(void){int s=0;\n${head}\n${tail}\n}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ row: 2 })],
+    });
+  }
+});
+
+test('a multiline local tag definition reports its closing brace when its terminator is missing', () => {
+  expect(executeProgram('c', 'int main(void){\nstruct L{\nint x;\n}\nstruct M{int y;};\n}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 3 })],
+  });
+});
+
+test('a nested function definition points at its opening brace', () => {
+  expect(executeProgram('c', 'int main(void){\nint local(int a)\n{return a;}\n}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 2 })],
+  });
+});
+
+test('a function-pointer variable needs a semicolon before a following block', () => {
+  expect(executeProgram('c', 'int main(void){\nint (*fp)(int)\n{}\n}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 1 })],
+  });
+});
+
+test.each(['while(0){}', 'enum E{A}e;'])('a value call before %s keeps its expression boundary', (tail) => {
+  expect(executeProgram('c', `int f(int n){return n;}int main(void){int i=1;\nf(i)\n${tail}\n}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 1 })],
+  });
+});

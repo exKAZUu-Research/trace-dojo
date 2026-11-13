@@ -1,5 +1,5 @@
 import type { ExecutionBudget } from '../interpreter/limits';
-import { type PPToken, tokenize } from './lexer';
+import { C17_KEYWORDS, type PPToken, tokenize } from './lexer';
 
 export interface TypeScope {
   start: number;
@@ -108,7 +108,8 @@ export function sizeofTypeFollowers(
   return result;
 }
 
-export function declarationFollowers(
+// code-gauge-allow functionCognitiveComplexity 17 -- One source-order pass shares type scopes and delimiter matches across declaration and expression prefixes.
+export function syntaxBoundaryFollowers(
   tokens: SourceToken[],
   starts: readonly number[],
   scopes: readonly TypeScope[],
@@ -117,7 +118,11 @@ export function declarationFollowers(
 ): SourceToken[] {
   budget.spend(starts.length);
   const offsets = new Set(starts);
-  const closes = closingDelimiters(tokens, '{', '}', budget);
+  const closes = new Map([
+    ...closingDelimiters(tokens, '{', '}', budget),
+    ...closingDelimiters(tokens, '(', ')', budget),
+    ...closingDelimiters(tokens, '[', ']', budget),
+  ]);
   const cursor = new TypeScopeCursor(scopes, budget);
   const result: SourceToken[] = [];
   for (const [index, current] of tokens.entries()) {
@@ -125,13 +130,25 @@ export function declarationFollowers(
     if (!offsets.has(current.start)) continue;
     const names = cursor.at(current.start) ?? fallback;
     const start = afterDeclarationSpecifiers(tokens, index, names, closes, budget);
-    if (start === index) continue;
+    if (start === index) {
+      const end = afterDeclarator(tokens, index, closes, budget);
+      const next = end === undefined ? undefined : tokens[end];
+      if (next && !expressionContinues(next.token.text)) result.push(next);
+      continue;
+    }
+    const boundary = afterDeclaratorList(tokens, start, closes, budget);
+    if (boundary !== undefined && tokens[boundary]) result.push(tokens[boundary]);
     const following = declarationFollower(tokens, start, names, budget);
     if (following) result.push(following);
   }
   return result;
 }
 
+function expressionContinues(text: string): boolean {
+  return (CONTINUATIONS.has(text) && text !== '{') || ['(', '[', '.', '->', '++', '--'].includes(text);
+}
+
+// code-gauge-allow functionCognitiveComplexity 21 -- Type words, tag bodies, and interleaved qualifiers determine one declaration prefix.
 function afterDeclarationSpecifiers(
   tokens: SourceToken[],
   start: number,
@@ -149,12 +166,61 @@ function afterDeclarationSpecifiers(
       if (tokens[index]?.token.kind === 'identifier') index++;
       const close = closes.get(index);
       if (close !== undefined) index = close + 1;
-      return index;
+      const end = index;
+      while (DECLARATION_WORDS.has(tokens[index]?.token.text) && !TYPE_WORDS.has(tokens[index]?.token.text)) {
+        budget.spend();
+        index++;
+      }
+      return startsType(tokens, index, names, budget) ? end : index;
     }
     if (TYPE_WORDS.has(text)) hasType = true;
     else if (!hasType && names.has(text)) hasType = true;
     else if (!DECLARATION_WORDS.has(text)) return index;
     index++;
+  }
+  return index;
+}
+
+function afterDeclaratorList(
+  tokens: SourceToken[],
+  start: number,
+  closes: ReadonlyMap<number, number>,
+  budget: ExecutionBudget
+): number | undefined {
+  let index = start;
+  for (;;) {
+    budget.spend();
+    const end = afterDeclarator(tokens, index, closes, budget);
+    if (end === undefined) return C17_KEYWORDS.has(tokens[index]?.token.text) ? index : undefined;
+    const next = tokens[end]?.token.text;
+    if (next === ',') index = end + 1;
+    else return next === '=' || next === ';' || next === '{' ? undefined : end;
+  }
+}
+
+function afterDeclarator(
+  tokens: SourceToken[],
+  start: number,
+  closes: ReadonlyMap<number, number>,
+  budget: ExecutionBudget
+): number | undefined {
+  let index = start;
+  while (tokens[index]?.token.text === '*' || QUALIFIERS.has(tokens[index]?.token.text)) {
+    budget.spend();
+    index++;
+  }
+  const first = tokens[index]?.token;
+  if (first?.text === '(') {
+    const end = closes.get(index);
+    if (end === undefined) return;
+    index = end + 1;
+  } else if (first?.kind === 'identifier' && !C17_KEYWORDS.has(first.text)) index++;
+  else return;
+  while (tokens[index]?.token.text === '(' || tokens[index]?.token.text === '[') {
+    budget.spend();
+    const end = closes.get(index);
+    if (end === undefined) return;
+    index = end + 1;
   }
   return index;
 }
