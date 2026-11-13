@@ -2258,3 +2258,14 @@ public class Main { static void t(String n, Supplier<Object> s) { try { System.o
       'vri java.lang.UnsupportedOperationException\nksr java.lang.UnsupportedOperationException\nksra java.lang.UnsupportedOperationException\nksrt java.lang.UnsupportedOperationException\nesri java.lang.UnsupportedOperationException\nclr java.lang.UnsupportedOperationException\nok true [80, 90] 2\nhm false false false\nmof false\n',
   });
 });
+
+test("Java's Map.of views reject a removal with the message of their iterator's remove", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { t("ra", () -> Map.of(1,1,2,2).keySet().retainAll(List.of(1))); t("va", () -> Map.of(1,1,2,2).values().removeAll(List.of(2))); t("kr", () -> Map.of(1,1).keySet().remove(1)); t("vr", () -> Map.of(1,1,2,2).values().remove(2)); t("ri", () -> Map.of(1,1,2,2).entrySet().removeIf(e -> e.getKey() == 2)); t("al", () -> Arrays.asList(1,2).removeIf(x -> true)); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ra java.lang.UnsupportedOperationException: remove\nva java.lang.UnsupportedOperationException: remove\nkr java.lang.UnsupportedOperationException: remove\nvr java.lang.UnsupportedOperationException: remove\nri java.lang.UnsupportedOperationException: remove\nal java.lang.UnsupportedOperationException: remove\n',
+  });
+});

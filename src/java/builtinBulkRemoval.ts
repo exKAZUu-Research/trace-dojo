@@ -115,8 +115,9 @@ function removeFromView(
   for (const entry of view.entries()) {
     if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
     if (!matches(view.elementOf(entry))) continue;
-    // The iterator's remove checks for a change the predicate made first.
+    // The iterator's remove checks for a change the predicate made first, then rejects as its iterator does.
     if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+    checkRemovable(frame, collection);
     view.remove(frame, entry);
     expectedModCount = collection.modCount;
     isRemoved = true;
