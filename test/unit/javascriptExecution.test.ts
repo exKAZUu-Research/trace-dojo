@@ -39,6 +39,12 @@ test.each([
     String.raw`\u{110000} は、この位置の名前に使える文字を表していません。`,
   ],
   [
+    'an escaped reserved word as a label',
+    String.raw`\u0069f: for (;;) break \u0069f;`,
+    0,
+    '予約語 if は、エスケープを含めて書けません。',
+  ],
+  [
     'a #name escape of a digit first',
     String.raw`class C { #\u0030a = 1; }`,
     0,

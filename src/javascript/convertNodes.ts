@@ -92,8 +92,9 @@ export function nameOf(node: Node): string {
       return character;
     }
   );
-  const isReference = node.type === 'identifier' || node.type.startsWith('shorthand_property_identifier');
-  if (isReference && reservedWords.has(name)) fail(node, `予約語 ${name} は、エスケープを含めて書けません。`);
+  // Property names and #names may be reserved words; variables and labels may not.
+  const mayBeReserved = node.type.startsWith('property_identifier') || node.type === 'private_property_identifier';
+  if (!mayBeReserved && reservedWords.has(name)) fail(node, `予約語 ${name} は、エスケープを含めて書けません。`);
   return name;
 }
 
