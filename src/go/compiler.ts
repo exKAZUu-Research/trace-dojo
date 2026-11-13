@@ -18,7 +18,7 @@ import { mapKeyOf } from './equality';
 import { containsTypeParam, substitute } from './generics';
 import { currentRuntime } from './native';
 import { lookupPackage } from './packages/index';
-import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
+import { evaluateAll, type FunctionInfo, type LocalInfo, type StackBuffers } from './runtime';
 import { Scope } from './scope';
 import { STANDARD_PACKAGES } from './standardPackages';
 import { declareValue, StatementCompiler } from './statementCompiler';
@@ -854,7 +854,9 @@ export class ProgramCompiler extends StatementCompiler {
         return;
       }
       const types: Type[] = [];
-      const values = this.rightSide(spec, spec.values, variables.length, () => declaredType, types);
+      const { result: values, run: ordered } = this.hoistingCalls(() =>
+        this.rightSide(spec, spec.values, variables.length, () => declaredType, types)
+      );
       for (const [index, variable] of variables.entries()) {
         if (!declaredType) variable.type = types[index] ?? BASIC.invalid;
         if (isUntyped(variable.type))
@@ -866,13 +868,14 @@ export class ProgramCompiler extends StatementCompiler {
       const row = this.trace && !isConstant ? spec.row : undefined;
       const createsObjects = spec.values.every((value) => this.createsObject(value));
       const run = (frame: Parameters<(typeof values)[0]>[0]): void => {
-        const evaluate = (): void => {
-          const evaluated = values.map((value) => value(frame));
-          for (const [index, variable] of variables.entries()) {
-            const cell = frame.runtime.globals[variable.slot];
-            cell.v = writeInPlace(cell.v, evaluated[index]);
-          }
-        };
+        const evaluate = (): void =>
+          ordered(frame, () => {
+            const evaluated = evaluateAll(frame, values);
+            for (const [index, variable] of variables.entries()) {
+              const cell = frame.runtime.globals[variable.slot];
+              cell.v = writeInPlace(cell.v, evaluated[index]);
+            }
+          });
         if (row === undefined) evaluate();
         else frame.runtime.steps.runStatement(row, createsObjects, evaluate);
       };

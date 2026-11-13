@@ -204,7 +204,7 @@ export abstract class StatementCompiler extends CallCompiler {
   protected simpleStatement(statement: SimpleStatement): Exec {
     switch (statement.kind) {
       case 'expression': {
-        const operand = this.expression(statement.expression);
+        const { result: operand, run } = this.hoistingCalls(() => this.expression(statement.expression));
         if (this.isInvalid(operand)) return () => {};
         if (!operand.isCall || (operand as { pureValue?: boolean }).pureValue) {
           if (operand.mode === 'type')
@@ -216,7 +216,7 @@ export abstract class StatementCompiler extends CallCompiler {
         return this.withStep(
           statement,
           (frame) => {
-            read(frame);
+            run(frame, () => void read(frame));
             return;
           },
           true
@@ -529,30 +529,41 @@ export abstract class StatementCompiler extends CallCompiler {
       this.error(statement, ':= の左辺に新しい変数がありません（すでにある変数への代入は = で書きます）。');
     }
     const single = left.length === 1 && right.length === 1 && !existing[0] && names[0].name !== '_';
-    const first = single ? this.expression(right[0]) : undefined;
-    if (first?.product && isFloat(first.type) && !isUntyped(first.type)) {
-      return this.productDeclaration(statement, names[0], first);
-    }
     const types: Type[] = [];
-    const definedAsConstant = first?.ssaConstant;
     const holders = names.map(({ name, span }, index): VarEntity | 'discard' => {
       if (name === '_') return 'discard';
       const current = existing[index];
       if (current?.kind === 'var') return current;
       return this.discardTarget(span);
     });
-    const values = this.rightSide(
-      statement,
-      right,
-      left.length,
-      (index) => {
-        const entity = existing[index];
-        return entity?.kind === 'var' ? entity.type : undefined;
-      },
-      types,
-      first,
-      (index) => holders[index]
-    );
+    const {
+      result: [first, values],
+      run,
+    } = this.hoistingCalls(() => {
+      const compiledFirst = single ? this.expression(right[0]) : undefined;
+      if (compiledFirst?.product && isFloat(compiledFirst.type) && !isUntyped(compiledFirst.type)) {
+        return [compiledFirst, undefined] as const;
+      }
+      return [
+        compiledFirst,
+        this.rightSide(
+          statement,
+          right,
+          left.length,
+          (index) => {
+            const entity = existing[index];
+            return entity?.kind === 'var' ? entity.type : undefined;
+          },
+          types,
+          compiledFirst,
+          (index) => holders[index]
+        ),
+      ] as const;
+    });
+    if (first?.product && isFloat(first.type) && !isUntyped(first.type)) {
+      return this.productDeclaration(statement, names[0], first, run);
+    }
+    const definedAsConstant = first?.ssaConstant;
     if (!values) {
       for (const [index, { name, span }] of names.entries())
         if (!existing[index] && name !== '_') this.declareLocal(name, BASIC.invalid, span).used = true;
@@ -581,9 +592,11 @@ export abstract class StatementCompiler extends CallCompiler {
       return (frame) => (value) => declareValue(frame, variable, value);
     });
     const exec: Exec = (frame) => {
-      const writers = prepares.map((prepare) => prepare(frame));
-      const evaluated = evaluateAll(frame, values);
-      for (const [index, write] of writers.entries()) write(evaluated[index]);
+      run(frame, () => {
+        const writers = prepares.map((prepare) => prepare(frame));
+        const evaluated = evaluateAll(frame, values);
+        for (const [index, write] of writers.entries()) write(evaluated[index]);
+      });
       return;
     };
     const createsObjects = right.length === left.length && right.every((value) => this.createsObject(value));
@@ -594,7 +607,12 @@ export abstract class StatementCompiler extends CallCompiler {
    * `x := a * b` with floats: keeps the factors in hidden slots so that an addition using x fuses the multiplication,
    * as Go's compiler does on arm64 while x keeps this single definition.
    */
-  private productDeclaration(statement: Span, name: { name: string; span: Span }, operand: Operand): Exec {
+  private productDeclaration(
+    statement: Span,
+    name: { name: string; span: Span },
+    operand: Operand,
+    run: (frame: Frame, rest: () => void) => void
+  ): Exec {
     const product = operand.product as NonNullable<Operand['product']>;
     const left = this.hiddenSlot();
     const right = this.hiddenSlot();
@@ -605,11 +623,13 @@ export abstract class StatementCompiler extends CallCompiler {
     return this.withStep(
       statement,
       (frame) => {
-        const x = product.left(frame);
-        const y = product.right(frame);
-        frame.locals[left] = x;
-        frame.locals[right] = y;
-        declareValue(frame, variable, multiply(x, y));
+        run(frame, () => {
+          const x = product.left(frame);
+          const y = product.right(frame);
+          frame.locals[left] = x;
+          frame.locals[right] = y;
+          declareValue(frame, variable, multiply(x, y));
+        });
         return;
       },
       false
@@ -634,14 +654,16 @@ export abstract class StatementCompiler extends CallCompiler {
       const holders = spec.names.map((name): VarEntity | 'discard' =>
         name.name === '_' ? 'discard' : this.discardTarget(name)
       );
-      const values = this.rightSide(
-        spec,
-        spec.values,
-        spec.names.length,
-        () => declaredType,
-        types,
-        undefined,
-        (index) => holders[index]
+      const { result: values, run } = this.hoistingCalls(() =>
+        this.rightSide(
+          spec,
+          spec.values,
+          spec.names.length,
+          () => declaredType,
+          types,
+          undefined,
+          (index) => holders[index]
+        )
       );
       const variables = spec.names.map((name, index) => {
         const type = declaredType ?? types[index] ?? BASIC.invalid;
@@ -654,8 +676,10 @@ export abstract class StatementCompiler extends CallCompiler {
       });
       if (!values) continue;
       const exec: Exec = (frame) => {
-        const evaluated = evaluateAll(frame, values);
-        for (const [index, variable] of variables.entries()) declareValue(frame, variable, evaluated[index]);
+        run(frame, () => {
+          const evaluated = evaluateAll(frame, values);
+          for (const [index, variable] of variables.entries()) declareValue(frame, variable, evaluated[index]);
+        });
         return;
       };
       parts.push(
@@ -675,7 +699,7 @@ export abstract class StatementCompiler extends CallCompiler {
   // Control flow ----------------------------------------------------------------------------------------------------
 
   protected condition(expression: Expression, statement: string): Eval {
-    const operand = this.value(expression);
+    const operand = this.orderedValue(expression);
     if (this.isInvalid(operand)) return () => false;
     if (!isBoolean(operand.type)) {
       this.error(
@@ -771,7 +795,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private rangeStatement(statement: Extract<Statement, { kind: 'range' }>): Exec {
-    const { result: ranged, hasRuntimeCall } = this.withRuntimeCallTracking(() => this.value(statement.range));
+    const { result: ranged, hasRuntimeCall } = this.withRuntimeCallTracking(() => this.orderedValue(statement.range));
     // The loop keeps the slice's array, which lets it be shared.
     const range = this.sliceTransition(statement.range, ranged);
     const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range, hasRuntimeCall);
@@ -925,7 +949,7 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- Expression switches with Go's rules for duplicates and fallthrough.
   private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
-    let tag = statement.tag ? this.value(statement.tag) : undefined;
+    let tag = statement.tag ? this.orderedValue(statement.tag) : undefined;
     if (tag && !this.isInvalid(tag)) tag = this.defaulted(tag);
     const tagType = tag && !this.isInvalid(tag) ? tag.type : statement.tag ? BASIC.invalid : BASIC.bool;
     const defaults = statement.cases.filter((switchCase) => !switchCase.values);
@@ -948,7 +972,12 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       return { tests, body, fallsThrough, isDefault: !switchCase.values };
     });
-    const readTag = tag && !this.isInvalid(tag) ? tag.eval : () => true;
+    let readTag: Eval = alwaysTrue;
+    if (tag && !this.isInvalid(tag)) {
+      const read = tag.eval;
+      // A case may change the tag's variable, so an array or a struct tag is copied first.
+      readTag = isValueKind(tag.type) ? (frame) => copyValue(read(frame)) : read;
+    }
     return (frame) => {
       init?.(frame);
       const value = readTag(frame);
@@ -972,7 +1001,7 @@ export abstract class StatementCompiler extends CallCompiler {
     tagType: Type,
     seen: Map<string, Span>
   ): (frame: Frame, value: Value) => boolean {
-    let operand = this.value(expression);
+    let operand = this.orderedValue(expression);
     if (this.isInvalid(operand) || tagType === BASIC.invalid) return () => false;
     if (!tag) {
       if (operand.resolveUntyped) {
@@ -1057,7 +1086,7 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- Type switches with their bound variable per clause.
   private typeSwitchStatement(statement: Extract<Statement, { kind: 'typeSwitch' }>): Exec {
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
-    const operand = this.value(statement.operand);
+    const operand = this.orderedValue(statement.operand);
     const valid = !this.isInvalid(operand);
     if (valid && !isInterface(operand.type)) {
       this.error(
@@ -1188,24 +1217,28 @@ export abstract class StatementCompiler extends CallCompiler {
       return () => RETURN;
     }
     const holder = (fn.resultHolder ??= this.resultHolder());
-    const values = this.rightSide(
-      statement,
-      statement.results,
-      results.length,
-      (index) => results[index],
-      undefined,
-      undefined,
-      () => holder
+    const { result: values, run } = this.hoistingCalls(() =>
+      this.rightSide(
+        statement,
+        statement.results,
+        results.length,
+        (index) => results[index],
+        undefined,
+        undefined,
+        () => holder
+      )
     );
     if (!values) return () => RETURN;
     const slots = fn.info.resultSlots;
     return (frame) => {
-      const evaluated = evaluateAll(frame, values);
-      for (const [index, slot] of slots.entries()) {
-        const current = frame.locals[slot];
-        if (current instanceof Cell) current.v = writeInPlace(current.v, evaluated[index]);
-        else frame.locals[slot] = writeInPlace(current as Value, evaluated[index]);
-      }
+      run(frame, () => {
+        const evaluated = evaluateAll(frame, values);
+        for (const [index, slot] of slots.entries()) {
+          const current = frame.locals[slot];
+          if (current instanceof Cell) current.v = writeInPlace(current.v, evaluated[index]);
+          else frame.locals[slot] = writeInPlace(current as Value, evaluated[index]);
+        }
+      });
       return RETURN;
     };
   }
@@ -1239,8 +1272,17 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Deferred calls of functions, generic functions, methods, and builtins.
   private deferStatement(statement: Extract<Statement, { kind: 'defer' }>): Exec {
+    const { result: exec, run, hoists } = this.hoistingCalls(() => this.deferredCall(statement));
+    if (!hoists) return exec;
+    return (frame) => {
+      run(frame, () => void exec(frame));
+      return;
+    };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 30 -- Deferred calls of functions, generic functions, methods, and builtins.
+  private deferredCall(statement: Extract<Statement, { kind: 'defer' }>): Exec {
     (this.fn as FunctionContext).notInlinable = true;
     const call = stripParens(statement.call);
     if (call.kind !== 'call') {
@@ -1651,6 +1693,10 @@ function isNumericType(type: Type): boolean {
     !['bool', 'string', 'untypedBool', 'untypedString', 'untypedNil', 'invalid'].includes(under.basic)
     ? true
     : type.kind === 'typeParam';
+}
+
+function alwaysTrue(): boolean {
+  return true;
 }
 
 function isValueKind(type: Type): boolean {
