@@ -1,4 +1,11 @@
-import { checkModifiable, classType, type Context, elementsOf, linkOverrides } from './builtinCollectionSupport';
+import {
+  checkListPosition,
+  checkModifiable,
+  classType,
+  type Context,
+  elementsOf,
+  linkOverrides,
+} from './builtinCollectionSupport';
 import { addAbstractMethod, addInterface, addMethod, addTypeParameters, defineInterface } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, INT, type JavaType, VOID } from './types';
@@ -63,7 +70,7 @@ export function addListIterators(cls: ClassInfo, element: JavaType, listItrClass
 
 function createListIterator(frame: Frame, cls: ClassInfo, list: Value, index: number): JavaObject {
   const size = elementsOf(list).length;
-  if (index < 0 || index > size) throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}`);
+  checkListPosition(frame, list, index, size);
   const iterator = frame.runtime.allocateObject(frame, cls);
   const source = list as JavaObject;
   states.set(iterator, { list: source, cursor: index, lastReturned: -1, expectedModCount: source.modCount });
@@ -75,7 +82,8 @@ function createListIterator(frame: Frame, cls: ClassInfo, list: Value, index: nu
 function defineMovements(cls: ClassInfo, element: JavaType): void {
   addMethod(cls, 'hasNext', [], BOOLEAN, false, (_, receiver) => {
     const state = stateOf(receiver);
-    return state.cursor < elementsOf(state.list).length;
+    // As the JDK's, hasNext compares with the size it knows, without the fail-fast checks next makes.
+    return state.cursor < (state.list.elements as Value[]).length;
   });
   addMethod(cls, 'hasPrevious', [], BOOLEAN, false, (_, receiver) => stateOf(receiver).cursor > 0);
   addMethod(cls, 'nextIndex', [], INT, false, (_, receiver) => stateOf(receiver).cursor);

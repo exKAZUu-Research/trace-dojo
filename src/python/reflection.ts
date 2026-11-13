@@ -44,9 +44,7 @@ export function vars(value: PyValue): PyValue {
 
 /** `dir()` without an argument: the sorted names of the calling frame's variables. */
 export function callerNames(): PyList {
-  const runtime = currentRuntime();
   const names = [...callerLocals().store.ordered()].map((entry) => entry.key as string).toSorted();
-  runtime.allocate(names.length + 1);
   return newList(names);
 }
 
@@ -56,8 +54,8 @@ export function callerNames(): PyList {
  */
 const generatorIterables = new WeakMap<Frame, { value: PyValue; iterator?: PyValue }>();
 
-export function markGeneratorExpression(frame: Frame, iterable: PyValue): void {
-  generatorIterables.set(frame, { value: iterable });
+export function markGeneratorExpression(frame: Frame, iterable: PyValue, iterator?: PyValue): void {
+  generatorIterables.set(frame, { value: iterable, iterator });
 }
 
 /** The frames CPython has on its stack: those of `frames` but the comprehensions it runs in the frame around them. */

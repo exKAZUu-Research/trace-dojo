@@ -9,7 +9,7 @@ type Edition = 2000 | 2004;
 const HALFWIDTH_KATAKANA_OFFSET = 0xfe_c0;
 
 /** A decoded code's step: its text, or the error CPython reports, two bytes for a cell :2000 lacks. */
-function codeStep(text: string | 'refused' | undefined, length: number): Step {
+function codeStep(text: string | undefined, length: number): Step {
   if (text === 'refused') return { illegal: 2 };
   return text === undefined ? 'illegal' : { text, length };
 }

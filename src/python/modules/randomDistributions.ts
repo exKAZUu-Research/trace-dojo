@@ -1,8 +1,10 @@
-import { toIndex } from '../numbers';
+import { floatPower } from '../floatPower';
+import { intToFloat, toIndex } from '../numbers';
+import { currentRuntime } from '../runtimeContext';
 import { pyError, valueError } from '../types';
-import { UnsupportedFeatureError } from '../unsupported';
 import type { PyValue } from '../values';
 import { realArgument } from './math';
+import { transformedRejection } from './randomBinomial';
 
 /** The source of random floats in [0, 1) the distributions draw from, a Random instance's Mersenne Twister. */
 export interface RandomSource {
@@ -47,6 +49,7 @@ export function triangular(
 export function normalvariate(source: RandomSource, mu: number, sigma: number): number {
   let z: number;
   for (;;) {
+    currentRuntime().spend();
     const u1 = source.random();
     const u2 = 1 - source.random();
     z = (NV_MAGICCONST * (u1 - 0.5)) / u2;
@@ -61,8 +64,7 @@ export function lognormvariate(source: RandomSource, mu: number, sigma: number):
 }
 
 export function expovariate(source: RandomSource, lambd: number): number {
-  if (lambd === 0) throw pyError('ZeroDivisionError', 'float division by zero');
-  return -Math.log(1 - source.random()) / lambd;
+  return divide(-Math.log(1 - source.random()), lambd);
 }
 
 export function vonmisesvariate(source: RandomSource, mu: number, kappa: number): number {
@@ -71,6 +73,7 @@ export function vonmisesvariate(source: RandomSource, mu: number, kappa: number)
   const r = s + Math.sqrt(1 + s * s);
   let z: number;
   for (;;) {
+    currentRuntime().spend();
     const u1 = source.random();
     z = Math.cos(Math.PI * u1);
     const d = z / (r + z);
@@ -97,6 +100,7 @@ export function gammavariate(source: RandomSource, alpha: number, beta: number):
     const bbb = alpha - LOG4;
     const ccc = alpha + ainv;
     for (;;) {
+      currentRuntime().spend();
       const u1 = source.random();
       if (!(1e-7 < u1 && u1 < 0.9999999)) continue;
       const u2 = 1 - source.random();
@@ -113,13 +117,14 @@ export function gammavariate(source: RandomSource, alpha: number, beta: number):
 
 function smallGamma(source: RandomSource, alpha: number): number {
   for (;;) {
+    currentRuntime().spend();
     const u = source.random();
     const b = (Math.E + alpha) / Math.E;
     const p = b * u;
-    const x = p <= 1 ? p ** (1 / alpha) : -Math.log((b - p) / alpha);
+    const x = p <= 1 ? floatPower(p, 1 / alpha) : -Math.log((b - p) / alpha);
     const u1 = source.random();
     if (p > 1) {
-      if (u1 <= x ** (alpha - 1)) return x;
+      if (u1 <= floatPower(x, alpha - 1)) return x;
     } else if (u1 <= Math.exp(-x)) {
       return x;
     }
@@ -134,15 +139,14 @@ export function betavariate(source: RandomSource, alpha: number, beta: number): 
 
 export function paretovariate(source: RandomSource, alpha: number): number {
   const u = 1 - source.random();
-  return u ** (-1 / alpha);
+  return floatPower(u, divide(-1, alpha));
 }
 
 export function weibullvariate(source: RandomSource, alpha: number, beta: number): number {
   const u = 1 - source.random();
-  return alpha * (-Math.log(u)) ** (1 / beta);
+  return alpha * floatPower(-Math.log(u), divide(1, beta));
 }
 
-/** `random.binomialvariate(n, p)`, whose BTRS method needs the C library's lgamma, which this grader lacks. */
 export function binomialvariate(source: RandomSource, nValue: PyValue, pValue: PyValue): bigint {
   const n = toIndex(nValue);
   const p = realArgument(pValue);
@@ -154,10 +158,8 @@ export function binomialvariate(source: RandomSource, nValue: PyValue, pValue: P
   }
   if (n === 1n) return source.random() < p ? 1n : 0n;
   if (p > 0.5) return n - binomialvariate(source, n, 1 - p);
-  if (Number(n) * p < 10) return geometricBinomial(source, n, p);
-  throw new UnsupportedFeatureError(
-    'n * p が 10 以上の random.binomialvariate()（C ライブラリの lgamma と最後の桁まで同じ値を出せないため）'
-  );
+  if (intToFloat(n) * p < 10) return geometricBinomial(source, n, p);
+  return transformedRejection(source, n, p);
 }
 
 /** The geometric method of binomialvariate for small n * p, which counts the trials that fit before n. */
@@ -167,10 +169,17 @@ function geometricBinomial(source: RandomSource, n: bigint, p: number): bigint {
   const c = Math.log2(1 - p);
   if (!c) return x;
   for (;;) {
+    currentRuntime().spend();
     const r = source.random();
     if (r === 0) continue;
     y += BigInt(Math.floor(Math.log2(r) / c)) + 1n;
     if (y > n) return x;
     x++;
   }
+}
+
+/** Python's float division, which raises where the divisor is zero, after the operands are computed as random.py does. */
+function divide(dividend: number, divisor: number): number {
+  if (divisor === 0) throw pyError('ZeroDivisionError', 'division by zero');
+  return dividend / divisor;
 }

@@ -83,8 +83,8 @@ function pushMethod(
   return info;
 }
 
-export function addConstructor(cls: ClassInfo, parameterTypes: JavaType[], native: NativeMethod): void {
-  cls.constructors.push({
+export function addConstructor(cls: ClassInfo, parameterTypes: JavaType[], native: NativeMethod): MethodInfo {
+  const constructor: MethodInfo = {
     name: cls.name,
     owner: cls,
     parameterTypes,
@@ -95,7 +95,9 @@ export function addConstructor(cls: ClassInfo, parameterTypes: JavaType[], nativ
     access: 'public',
     thrownTypes: [],
     native,
-  });
+  };
+  cls.constructors.push(constructor);
+  return constructor;
 }
 
 export function addConstant(cls: ClassInfo, name: string, type: JavaType, constant: Value): void {

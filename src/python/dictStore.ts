@@ -1,5 +1,6 @@
 import { keyHash, pyHash } from './hashing';
 import { keysEqual } from './operators';
+import { chargeSlots, chargeStep } from './runtimeContext';
 import type { PyValue } from './values';
 
 export interface DictEntry {
@@ -29,7 +30,8 @@ export class DictStore {
   lookup(key: PyValue, hash = keyHash(key, 'dict key')): DictEntry | undefined {
     const bucket = this.index.get(hash);
     if (!bucket) return undefined;
-    for (const entry of bucket) {
+    for (const [index, entry] of bucket.entries()) {
+      if (index > 0) chargeStep();
       if (entry.alive && keysEqual(entry.key, key)) return entry;
     }
     return undefined;
@@ -50,6 +52,7 @@ export class DictStore {
       existing.value = value;
       return;
     }
+    chargeSlots(1);
     const entry: DictEntry = { key, value, hash, alive: true };
     this.entries.push(entry);
     const bucket = this.index.get(hash);
@@ -113,6 +116,12 @@ export class DictStore {
     return this.entries.filter((entry) => entry.alive);
   }
 
+  /** The live entries from the last inserted, read lazily as {@link liveEntries} reads them. */
+  *reversedLiveEntries(): Generator<DictEntry> {
+    const { entries } = this;
+    for (let index = entries.length - 1; index >= 0; index--) if (entries[index].alive) yield entries[index];
+  }
+
   last(): DictEntry | undefined {
     for (let index = this.entries.length - 1; index >= 0; index--) {
       if (this.entries[index].alive) return this.entries[index];
@@ -126,6 +135,8 @@ export class DictStore {
 
   /** Moves an entry to the end (or the start), as `OrderedDict.move_to_end` does. */
   moveToEnd(entry: DictEntry, last: boolean): void {
+    // As od_move_to_end does, an entry already at that end stays, and the dict's iterators see no change.
+    if ((last ? this.last() : this.first()) === entry) return;
     this.entries = this.entries.filter((candidate) => candidate !== entry && candidate.alive);
     this.deleted = 0;
     if (last) this.entries.push(entry);

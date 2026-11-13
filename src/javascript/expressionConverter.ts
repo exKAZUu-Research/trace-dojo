@@ -25,8 +25,13 @@ const assignableTypes = new Set(['identifier', 'member_expression', 'subscript_e
 export abstract class ExpressionConverter extends ConverterBase {
   private readonly expressionConverters: Record<string, ExpressionConverterFunction> = {
     number: (node) => ({ kind: 'literal', value: this.number(node), row: rowOf(node) }),
-    string: (node) => ({ kind: 'literal', value: decodeStringLiteral(node.text), row: rowOf(node) }),
+    string: (node) => ({
+      kind: 'literal',
+      value: decodeStringLiteral(node.text),
+      row: rowOf(node),
+    }),
     template_string: (node) => this.template(node),
+    regex: (node) => regexLiteral(node),
     true: (node) => ({ kind: 'literal', value: true, row: rowOf(node) }),
     false: (node) => ({ kind: 'literal', value: false, row: rowOf(node) }),
     // oxlint-disable-next-line unicorn/no-null -- JavaScript null is a value of the interpreted language.
@@ -42,7 +47,18 @@ export abstract class ExpressionConverter extends ConverterBase {
       fn: this.functionNode(node, 'normal'),
       row: rowOf(node),
     }),
-    arrow_function: (node) => ({ kind: 'functionExpression', fn: this.functionNode(node, 'arrow'), row: rowOf(node) }),
+    generator_function: (node) => ({
+      kind: 'functionExpression',
+      fn: this.functionNode(node, 'normal'),
+      row: rowOf(node),
+    }),
+    yield_expression: (node) => this.yieldExpression(node),
+    await_expression: (node) => this.awaitExpression(node),
+    arrow_function: (node) => ({
+      kind: 'functionExpression',
+      fn: this.functionNode(node, 'arrow'),
+      row: rowOf(node),
+    }),
     class: (node) => ({
       kind: 'classExpression',
       cls: this.classNode(node, node.childForFieldName('name')?.text ?? ''),
@@ -74,18 +90,53 @@ export abstract class ExpressionConverter extends ConverterBase {
       expression: this.expression(namedChildren(node)[0]),
       row: rowOf(node),
     }),
-    meta_property: (node) => unsupported(node, `${node.text} `),
+    meta_property: (node) => this.metaProperty(node),
   };
 
   expression(node: Node): Expression {
     const convert = this.expressionConverters[node.type] as ExpressionConverterFunction | undefined;
-    if (convert) return convert(node);
-    return unsupported(node, unsupportedFeatures[node.type] ?? `式「${node.type}」`);
+    if (!convert) return unsupported(node, unsupportedFeatures[node.type] ?? `式「${node.type}」`);
+    const { context } = this;
+    const suspensionsBefore = context.suspensionCount;
+    const expression = convert(node);
+    if (context.suspensionCount !== suspensionsBefore) {
+      expression.suspends = true;
+      if (!canSuspendIn(expression)) unsupported(node, 'この位置の yield や await ');
+    }
+    return expression;
+  }
+
+  private awaitExpression(node: Node): Expression {
+    // The grammar also parses `await` in a static block or a field initializer, where JavaScript reserves it.
+    if (!this.context.isAsync) fail(node, 'await は async 関数の中にしか書けません。');
+    const argument = this.expression(namedChildren(node)[0]);
+    this.context.suspensionCount++;
+    return { kind: 'await', argument, row: rowOf(node) };
+  }
+
+  private yieldExpression(node: Node): Expression {
+    if (!this.context.isGenerator) fail(node, 'yield はジェネレータ関数の中にしか書けません。');
+    const argumentNode = namedChildren(node).at(0);
+    const argument = argumentNode ? this.expression(argumentNode) : undefined;
+    const delegate = node.children.some((child) => child?.type === '*');
+    this.context.suspensionCount++;
+    return { kind: 'yield', argument, delegate, isAsync: this.context.isAsync, row: rowOf(node) };
+  }
+
+  private metaProperty(node: Node): Expression {
+    if (node.text !== 'new.target') return unsupported(node, `${node.text} `);
+    if (!this.context.canUseNewTarget) fail(node, 'new.target は関数の中にしか書けません。');
+    return { kind: 'newTarget', row: rowOf(node) };
   }
 
   /** Reads a variable by name, noting a read of `arguments`, which the enclosing function then creates. */
   private identifierRead(node: Node): Expression {
-    if (node.text === 'arguments') this.context.argumentsUse.isUsed = true;
+    this.checkContextualName(node, node.text);
+    if (node.text === 'arguments') {
+      if (this.context.argumentsUse.isForbidden)
+        fail(node, 'フィールドの初期値や static ブロックの中では arguments を使えません。');
+      this.context.argumentsUse.isUsed = true;
+    }
     return { kind: 'identifier', name: node.text, row: rowOf(node) };
   }
 
@@ -100,24 +151,53 @@ export abstract class ExpressionConverter extends ConverterBase {
     return value;
   }
 
-  private number(node: Node): number {
+  private number(node: Node): number | bigint {
     const value = parseNumberLiteral(node.text);
     if (value === undefined) return unsupported(node, `数値「${node.text}」`);
     return value;
   }
 
   private template(node: Node): Expression {
-    const strings: string[] = [''];
+    const { raw, expressions } = this.templateParts(node);
+    return {
+      kind: 'template',
+      strings: raw.map((text) => decodeTemplateFragment(text)),
+      expressions,
+      row: rowOf(node),
+    };
+  }
+
+  /** The source texts between a template's substitutions, with line breaks normalized to `\n`, and the substitutions. */
+  private templateParts(node: Node): { raw: string[]; expressions: Expression[] } {
+    const raw: string[] = [''];
     const expressions: Expression[] = [];
     for (const child of node.children) {
       if (child?.type === 'template_substitution') {
         expressions.push(this.expression(namedChildren(child)[0]));
-        strings.push('');
+        raw.push('');
       } else if (child?.type === 'string_fragment' || child?.type === 'escape_sequence') {
-        strings[strings.length - 1] += decodeTemplateFragment(child.text);
+        raw[raw.length - 1] += child.text.replaceAll(/\r\n?/g, '\n');
       }
     }
-    return { kind: 'template', strings, expressions, row: rowOf(node) };
+    return { raw, expressions };
+  }
+
+  /** Converts a tagged template to a call of its tag with the template's strings and substitutions. */
+  private taggedTemplate(node: Node, functionNode: Node, template: Node): Expression {
+    const row = rowOf(node);
+    const { raw, expressions } = this.templateParts(template);
+    const cooked = raw.map((text) => (hasInvalidEscape(text) ? undefined : decodeTemplateFragment(text)));
+    const strings: Expression = { kind: 'templateObject', cooked, raw, row: rowOf(template) };
+    const callee = this.expression(functionNode);
+    if (callee.kind === 'member' && callee.optional) fail(node, '?. の後ろにはタグ付きテンプレートを書けません。');
+    return {
+      kind: 'call',
+      callee,
+      args: [strings, ...expressions],
+      optional: false,
+      calleeText: calleeText(functionNode),
+      row,
+    };
   }
 
   private assignment(node: Node, operator: string): Expression {
@@ -125,7 +205,13 @@ export abstract class ExpressionConverter extends ConverterBase {
     if (operator !== '=' && !assignableTypes.has(unwrapParentheses(left).type))
       fail(left, 'この式には代入できません。');
     const target = this.assignmentTarget(left);
-    return { kind: 'assign', operator, target, value: this.namedValue(field(node, 'right'), target), row: rowOf(node) };
+    return {
+      kind: 'assign',
+      operator,
+      target,
+      value: this.namedValue(field(node, 'right'), target),
+      row: rowOf(node),
+    };
   }
 
   private update(node: Node): Expression {
@@ -152,7 +238,15 @@ export abstract class ExpressionConverter extends ConverterBase {
   private binary(node: Node): Expression {
     const operator = field(node, 'operator').text;
     const leftNode = field(node, 'left');
-    if (leftNode.type === 'private_property_identifier') unsupported(leftNode, '#name in 式');
+    if (leftNode.type === 'private_property_identifier') {
+      if (operator !== 'in') fail(leftNode, '# で始まる名前は、in の左か「.」の後ろにしか書けません。');
+      return {
+        kind: 'privateIn',
+        name: leftNode.text,
+        right: this.expression(field(node, 'right')),
+        row: rowOf(node),
+      };
+    }
     const left = this.expression(leftNode);
     const right = this.expression(field(node, 'right'));
     if (operator === '&&' || operator === '||' || operator === '??') {
@@ -167,16 +261,27 @@ export abstract class ExpressionConverter extends ConverterBase {
   }
 
   private objectMembers(node: Node): ObjectMember[] {
+    let hasPrototype = false;
     return namedChildren(node).map((member): ObjectMember => {
       switch (member.type) {
         case 'pair': {
-          const key = this.propertyName(field(member, 'key'));
+          const keyNode = field(member, 'key');
+          const key = this.propertyName(keyNode);
           const value = this.expression(field(member, 'value'));
+          if (keyNode.type !== 'computed_property_name' && key.kind === 'key' && key.key === '__proto__') {
+            if (hasPrototype) fail(member, '__proto__ は1つしか書けません。');
+            hasPrototype = true;
+            return { kind: 'prototype', value };
+          }
           if (key.kind === 'key') nameAnonymous(value, key.key);
           return { kind: 'property', key, value };
         }
         case 'shorthand_property_identifier': {
-          return { kind: 'property', key: { kind: 'key', key: member.text }, value: this.identifierRead(member) };
+          return {
+            kind: 'property',
+            key: { kind: 'key', key: member.text },
+            value: this.identifierRead(member),
+          };
         }
         case 'method_definition': {
           return this.objectMethod(member);
@@ -227,13 +332,20 @@ export abstract class ExpressionConverter extends ConverterBase {
   private call(node: Node): Expression {
     const functionNode = field(node, 'function');
     const argumentsNode = field(node, 'arguments');
-    if (argumentsNode.type === 'template_string') unsupported(node, 'タグ付きテンプレート');
     if (functionNode.type === 'import') unsupported(node, 'import() ');
+    if (argumentsNode.type === 'template_string') return this.taggedTemplate(node, functionNode, argumentsNode);
     const args = this.arguments(argumentsNode);
     const row = rowOf(node);
     if (functionNode.type === 'super') {
       if (!this.context.canCallSuper) fail(node, 'super(...) は継承したクラスのコンストラクタの中にしか書けません。');
-      return { kind: 'call', callee: { kind: 'super', row }, args, optional: false, calleeText: 'super', row };
+      return {
+        kind: 'call',
+        callee: { kind: 'super', row },
+        args,
+        optional: false,
+        calleeText: 'super',
+        row,
+      };
     }
     const optional = node.childForFieldName('optional_chain') !== null;
     const callee = this.expression(functionNode);
@@ -323,7 +435,14 @@ export abstract class ExpressionConverter extends ConverterBase {
       // An object or array literal used as a pattern spells defaults as assignments.
       case 'assignment_expression': {
         const target = this.pattern(field(node, 'left'), leaf);
-        return { kind: 'default', target, value: this.expression(field(node, 'right')), row: rowOf(node) };
+        const value = this.expression(field(node, 'right'));
+        if (value.suspends) unsupported(node, '分割代入の初期値の yield や await ');
+        return {
+          kind: 'default',
+          target,
+          value,
+          row: rowOf(node),
+        };
       }
       case 'array_pattern':
       case 'array': {
@@ -362,12 +481,17 @@ export abstract class ExpressionConverter extends ConverterBase {
           break;
         }
         case 'object_assignment_pattern': {
-          properties.push({ key: { kind: 'key', key: field(child, 'left').text }, value: this.pattern(child, leaf) });
+          properties.push({
+            key: { kind: 'key', key: field(child, 'left').text },
+            value: this.pattern(child, leaf),
+          });
           break;
         }
         case 'pair_pattern':
         case 'pair': {
           const key = this.propertyName(field(child, 'key'));
+          if (key.kind === 'computed' && key.expression.suspends)
+            unsupported(child, '分割代入のキーの yield や await ');
           properties.push({ key, value: this.pattern(field(child, 'value'), leaf) });
           break;
         }
@@ -383,6 +507,92 @@ export abstract class ExpressionConverter extends ConverterBase {
     }
     return { kind: 'objectPattern', properties, rest, row: rowOf(node) };
   }
+}
+
+/**
+ * Whether a generator can evaluate an expression containing a `yield` or `await` step by step: the parts of the
+ * expression that hold it must be evaluated in order without a callback, as operands, arguments, and object literal
+ * members are, but destructuring defaults and `super(...)` arguments are not.
+ */
+function canSuspendIn(expression: Expression): boolean {
+  switch (expression.kind) {
+    case 'yield':
+    case 'await':
+    case 'parenthesized':
+    case 'sequence':
+    case 'binary':
+    case 'logical':
+    case 'conditional':
+    case 'unary':
+    case 'template':
+    case 'array':
+    case 'object':
+    case 'member':
+    case 'new':
+    case 'privateIn': {
+      return true;
+    }
+    case 'assign': {
+      // A member target evaluates its parts step by step, but a destructuring target binds in one go.
+      return expression.target.kind === 'member' || !patternSuspends(expression.target);
+    }
+    case 'call': {
+      return expression.callee.kind !== 'super';
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** Whether assigning to a pattern suspends, at a `yield` or an `await` in a member it assigns to or in a key. */
+export function patternSuspends(pattern: Pattern): boolean {
+  switch (pattern.kind) {
+    case 'identifier': {
+      return false;
+    }
+    case 'member': {
+      return (
+        (pattern.object.kind !== 'super' && pattern.object.suspends === true) ||
+        (pattern.property.kind === 'computed' && pattern.property.expression.suspends === true)
+      );
+    }
+    case 'arrayPattern': {
+      return [...pattern.elements, pattern.rest].some((element) => element !== undefined && patternSuspends(element));
+    }
+    case 'objectPattern': {
+      return (
+        pattern.properties.some(
+          ({ key, value }) => (key.kind === 'computed' && key.expression.suspends === true) || patternSuspends(value)
+        ) ||
+        (pattern.rest !== undefined && patternSuspends(pattern.rest))
+      );
+    }
+    case 'default': {
+      return pattern.value.suspends === true || patternSuspends(pattern.target);
+    }
+  }
+}
+
+/** Converts a regular expression literal, rejecting a pattern or flags that JavaScript rejects. */
+function regexLiteral(node: Node): Expression {
+  const pattern = field(node, 'pattern').text;
+  const flags = node.childForFieldName('flags')?.text ?? '';
+  try {
+    new RegExp(pattern, flags);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    fail(node, '正規表現の書き方に誤りがあります。');
+  }
+  return { kind: 'regex', pattern, flags, row: rowOf(node) };
+}
+
+/** Whether a template's source text has an escape that a tagged template leaves without a cooked string. */
+function hasInvalidEscape(raw: string): boolean {
+  const escapes = raw.replaceAll(String.raw`\\`, '');
+  if (/\\(?:u(?!\{[\dA-Fa-f]+\}|[\dA-Fa-f]{4})|x(?![\dA-Fa-f]{2})|0\d|[1-9])/.test(escapes)) return true;
+  // A code point escape must name a code point, at most U+10FFFF.
+  return [...escapes.matchAll(/\\u\{([\dA-Fa-f]+)\}/g)].some(([, digits]) => Number.parseInt(digits, 16) > 0x10_ff_ff);
 }
 
 /** Converts the elements between brackets, where a comma without an element leaves a hole. */

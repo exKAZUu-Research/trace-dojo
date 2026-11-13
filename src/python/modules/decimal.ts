@@ -3,7 +3,6 @@ import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { exactBinary, parseFloatText } from '../numbers';
 import { callValue } from '../objects';
-import { currentRuntime } from '../runtimeContext';
 import {
   nativeFunction,
   newList,
@@ -90,7 +89,6 @@ decimalClass.isBaseType = true;
 registerVirtual(numberClass, decimalClass);
 
 export function newDecimal(value: Dec, cls: PyClass = decimalClass): PyDecimal {
-  currentRuntime().allocate(1);
   return new PyDecimal(cls, value);
 }
 

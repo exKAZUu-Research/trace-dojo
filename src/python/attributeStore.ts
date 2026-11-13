@@ -1,5 +1,5 @@
 import { type DictEntry, DictStore } from './dictStore';
-import { pyHash } from './hashing';
+import { keyHash, pyHash } from './hashing';
 import type { PyValue } from './values';
 
 /** The entries of each object's attributes whose keys are not strings, with the attribute each was stored after. */
@@ -29,7 +29,10 @@ export class AttributeStore extends DictStore {
   }
 
   override lookup(key: PyValue): DictEntry | undefined {
-    if (typeof key !== 'string') return this.extras?.store.lookup(key);
+    if (typeof key !== 'string') {
+      const hash = keyHash(key, 'dict key');
+      return this.extras?.store.lookup(key, hash);
+    }
     const value = this.attributes.get(key);
     return value === undefined ? undefined : entryOf(key, value);
   }
@@ -100,6 +103,17 @@ export class AttributeStore extends DictStore {
 
   override ordered(): DictEntry[] {
     return [...this.liveEntries()];
+  }
+
+  override *reversedLiveEntries(): Generator<DictEntry> {
+    yield* this.ordered().toReversed();
+  }
+
+  override previous(entry: DictEntry | undefined): DictEntry | undefined {
+    const entries = this.ordered();
+    if (entry === undefined) return entries.at(-1);
+    const index = entries.findIndex((each) => each.key === entry.key && typeof each.key === typeof entry.key);
+    return index > 0 ? entries[index - 1] : undefined;
   }
 
   override last(): DictEntry | undefined {

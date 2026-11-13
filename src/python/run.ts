@@ -1,15 +1,16 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import type { Module } from './ast';
 import { describeException } from './describe';
 import { recordFutureFeatures } from './dynamicCode';
-import { deepNestingError, isHostStackOverflow, SAFE_NESTING_DEPTH } from './hostStack';
+import { SAFE_NESTING_DEPTH } from './hostStack';
 import { runExitCallbacks } from './modules/atexit';
-import { callValue } from './objects';
+import { callValue, isExceptionOf } from './objects';
 import { parsePython } from './parse';
 import { programSourceOf } from './programSource';
-import { Frame, Runtime } from './runtime';
+import { Frame, hostRefusal, Runtime } from './runtime';
 import { withRuntime } from './runtimeContext';
 import { DeadlockError, WaitRequest } from './threads';
 import { None } from './types';
@@ -20,7 +21,7 @@ import { PyError, type PyValue } from './values';
 import './library';
 
 // code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
-export function executePythonProgram(source: string): ProgramExecution {
+export function executePythonProgram(source: string, input?: ProgramInput): ProgramExecution {
   let module: Module;
   try {
     module = parsePython(source);
@@ -29,17 +30,11 @@ export function executePythonProgram(source: string): ProgramExecution {
     throw error;
   }
   try {
-    const { output: _output, ...run } = runModule(new Runtime(), module);
-    return { kind: 'executed', ...run };
+    return { kind: 'executed', ...runModule(new Runtime(input), module) };
   } catch (error) {
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
   }
-}
-
-/** The output of a run along with how it ended, which tests compare with CPython's. */
-export interface PythonRun extends ProgramRun {
-  output: string;
 }
 
 /**
@@ -47,7 +42,8 @@ export interface PythonRun extends ProgramRun {
  *
  * @param onEnd Called when the module ends, while its frame still holds its variables.
  */
-export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): PythonRun {
+// code-gauge-allow duplicateLines 22 -- Each language's runner wraps its own parser and runtime.
+export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     const globals = mainGlobals(runtime, module);
     runtime.mainGlobals = globals;
@@ -83,7 +79,7 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
         finalBoard: runtime.world.boardText(),
         finalTurtles: runtime.world.turtleTraces(),
         uncaughtException,
-        output: runtime.budget.output,
+        ...runtime.io.output(),
       };
     } finally {
       runtime.popFrame();
@@ -123,14 +119,12 @@ function mainGlobals(runtime: Runtime, module: Module): Map<string, PyValue> {
 }
 
 function describeUncaught(error: unknown, runtime: Runtime): string | undefined {
-  if (error instanceof UnsupportedFeatureError || error instanceof DeadlockError) return error.message;
-  if (isHostStackOverflow(error)) {
-    return runtime.deepNesting ? deepNestingError().message : 'RecursionError: maximum recursion depth exceeded';
-  }
-  if (!(error instanceof PyError)) throw error;
-  if (error.exception.cls.name === 'SystemExit' && error.exception.cls.isBuiltin) return undefined;
+  const raised = hostRefusal(error, runtime.deepNesting) ?? error;
+  if (raised instanceof UnsupportedFeatureError || raised instanceof DeadlockError) return raised.message;
+  if (!(raised instanceof PyError)) throw raised;
+  if (isExceptionOf(raised, 'SystemExit')) return undefined;
   try {
-    return describeException(error.exception);
+    return describeException(raised.exception);
   } catch (describeError) {
     // An exception whose message this grader cannot reproduce stops the program when shown.
     if (describeError instanceof UnsupportedFeatureError) return describeError.message;

@@ -316,7 +316,8 @@ function builtinSignature(fn: PyBuiltinFunction): Signature {
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
 // code-gauge-allow functionNcss 32 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
 function partialSignature(value: PyOpaque): Signature {
-  const { fn, args, kwargs } = value.data as Partial;
+  const { fn, args, keywords } = value.data as Partial;
+  const kwargs = new Map(keywords.store.ordered().map((entry) => [entry.key as string, entry.value]));
   const { parameters, returnAnnotation } = signatureData(fn);
   const params = parameters.map(parameterOf);
   const positional = params.filter((each) => each.kind <= Kind.PositionalOrKeyword);
@@ -325,10 +326,10 @@ function partialSignature(value: PyOpaque): Signature {
     params.some((each) => each.name === name && each.kind !== Kind.PositionalOnly && each.kind !== Kind.VarPositional);
   const hasVarKeywords = params.some((each) => each.kind === Kind.VarKeyword);
   const badKeyword = [...kwargs.keys()].some((name) => !accepts(name) && !hasVarKeywords);
-  if ((args.length > positional.length && !hasVarArgs) || badKeyword) {
+  if ((args.items.length > positional.length && !hasVarArgs) || badKeyword) {
     throw valueError(`partial object ${pyRepr(value)} has incorrect arguments`);
   }
-  const bound = new Set(positional.slice(0, args.length));
+  const bound = new Set(positional.slice(0, args.items.length));
   let keywordOnly = false;
   const result: Parameter[] = [];
   const moved: Parameter[] = [];

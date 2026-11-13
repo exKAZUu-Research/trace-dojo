@@ -27,7 +27,17 @@ import {
   typeClass,
   typeError,
 } from '../types';
-import { PyClass, PyDescriptor, PyError, PyFunction, PyInstance, PyObject, PyOpaque, type PyValue } from '../values';
+import {
+  PyBoundMethod,
+  PyClass,
+  PyDescriptor,
+  PyError,
+  PyFunction,
+  PyInstance,
+  PyObject,
+  PyOpaque,
+  type PyValue,
+} from '../values';
 import { weakReferenceTo } from '../weakReferences';
 import { OWN_REGISTRATIONS, REGISTERING_IMPORTS, STARTUP_TOKEN } from './abcRegistrations';
 import { ABC_SOURCE } from './abcSource';
@@ -124,7 +134,7 @@ function isAbstract(value: PyValue | undefined): boolean {
     return [value.fn, value.setter, value.deleter].some((fn) => fn !== undefined && fn !== None && isAbstract(fn));
   }
   if (value instanceof PyFunction) return isTruthy(value.dict.get('__isabstractmethod__') ?? false);
-  if (value instanceof PyInstance || value instanceof PyDescriptor) {
+  if (value instanceof PyInstance || value instanceof PyDescriptor || value instanceof PyBoundMethod) {
     return isTruthy(getAttributeOrUndefined(value, '__isabstractmethod__') ?? false);
   }
   return false;

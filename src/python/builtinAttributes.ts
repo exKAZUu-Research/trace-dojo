@@ -1,19 +1,21 @@
 import { implicitlyWrapped } from './annotations';
+import { defineAttribute } from './attributeDescriptors';
 import { builtinTextSignature } from './builtinDocs';
 import { enumerateClass } from './builtins';
 import { addressOf } from './conversions';
 import { method } from './define';
 import { defineNew } from './instances';
-import { sliceIndices } from './items';
+import { exactSliceBounds } from './items';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceDict } from './namespaces';
 import { exactBinary, scaleToFloat, toIndex } from './numbers';
-import { bindValue, callValue, getAttribute, setAttribute } from './objects';
+import { bindValue, callValue, getAttribute, isTruthy, setAttribute } from './objects';
 import { binaryOp, compareOp } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { sharedNamespaceModules } from './sharedNamespaces';
 import { newGenericAlias } from './typeHints';
 import {
+  argumentTypeName,
   asyncGeneratorClass,
   baseExceptionClass,
   boolClass,
@@ -127,7 +129,8 @@ method(
   1,
   1,
   (_cls, [kind]) => {
-    if (typeof kind !== 'string') throw typeError(`__getformat__() argument must be str, not ${typeName(kind)}`);
+    if (typeof kind !== 'string')
+      throw typeError(`__getformat__() argument must be str, not ${argumentTypeName(kind)}`);
     if (kind !== 'double' && kind !== 'float')
       throw valueError("__getformat__() argument 1 must be 'double' or 'float'");
     return 'IEEE, little-endian';
@@ -189,7 +192,7 @@ method(
   1,
   1,
   (cls, [text]) => {
-    if (typeof text !== 'string') throw typeError(`fromhex() argument must be str, not ${typeName(text)}`);
+    if (typeof text !== 'string') throw typeError('bad argument type for built-in operation');
     const value = floatFromHex(text);
     return cls === floatClass ? value : callValue(cls, [value]);
   },
@@ -239,7 +242,6 @@ function floatFromHex(text: string): number {
   if (!Number.isFinite(result)) throw pyError('OverflowError', 'hexadecimal value too large to represent as a float');
   return negative ? -result : result;
 }
-
 // Sequences, mappings, and sets -------------------------------------------------------------------------------------
 
 method(strClass, '__getnewargs__', 'none', 0, 0, (self) => newTuple([unbox(self)]));
@@ -290,8 +292,8 @@ method(sliceClass, 'indices', 'one', 1, 1, (self, [length]) => sliceIndicesOf(se
 function sliceIndicesOf(slice: PySlice, lengthValue: PyValue): PyValue {
   const length = toIndex(lengthValue);
   if (length < 0n) throw valueError('length should not be negative');
-  const { start, stop, step } = sliceIndices(slice, Number(length));
-  return newTuple([BigInt(start), BigInt(stop), BigInt(step)]);
+  const { start, stop, step } = exactSliceBounds(slice, length);
+  return newTuple([start, stop, step]);
 }
 
 method(notImplementedClass, '__bool__', 'none', 0, 0, () => {
@@ -315,7 +317,7 @@ defineProperty(
   (self) => (self as PyBuiltinFunction).self ?? currentRuntime().importModule('builtins')
 );
 defineProperty(builtinFunctionClass, '__module__', (self) =>
-  (self as PyBuiltinFunction).self === undefined ? 'builtins' : None
+  (self as PyBuiltinFunction).self === undefined ? ((self as PyBuiltinFunction).module ?? 'builtins') : None
 );
 defineProperty(methodDescriptorClass, '__objclass__', (self) => objclassOf(self as PyBuiltinFunction));
 method(methodDescriptorClass, '__get__', 'expected', 1, 2, (self, [instance]) =>
@@ -388,7 +390,8 @@ method(propertyClass, '__delete__', 'one', 1, 1, (self, [instance]) => {
 method(propertyClass, '__set_name__', 'expected', 2, 2, () => None);
 
 function isAbstract(value: PyValue | undefined): boolean {
-  return value instanceof PyFunction && value.dict.get('__isabstractmethod__') === true;
+  const flag = value instanceof PyFunction ? value.dict.get('__isabstractmethod__') : undefined;
+  return flag !== undefined && isTruthy(flag);
 }
 
 for (const cls of [staticmethodClass, classmethodClass]) {
@@ -507,11 +510,22 @@ method(cellClass, '__repr__', 'none', 0, 0, (self) => {
   const there = `0x${currentRuntime().idOf(value).toString(16)}`;
   return `<cell at ${here}: ${typeName(value)} object at ${there}>`;
 });
-defineProperty(cellClass, 'cell_contents', (self) => {
-  const { value } = (self as PyOpaque).data as PyCell;
-  if (value === undefined) throw valueError('Cell is empty');
-  return value;
-});
+defineAttribute(
+  cellClass,
+  'cell_contents',
+  (self) => {
+    const { value } = (self as PyOpaque).data as PyCell;
+    if (value === undefined) throw valueError('Cell is empty');
+    return value;
+  },
+  {
+    set: (self, value) => {
+      const cell = (self as PyOpaque).data as PyCell;
+      if (value === undefined && cell.value === undefined) throw valueError('Cell is empty');
+      cell.value = value;
+    },
+  }
+);
 
 // Exceptions --------------------------------------------------------------------------------------------------------
 

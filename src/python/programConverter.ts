@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 802 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 810 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -19,9 +19,20 @@ import type {
   TypeParams,
   WithItem,
 } from './ast';
-import { children, field, fieldNodes, hasToken, namedChildren, rowOf, unsupported } from './convertNodes';
+import {
+  checkClauseLines,
+  children,
+  field,
+  fieldNodes,
+  hasToken,
+  namedChildren,
+  rowOf,
+  unsupported,
+} from './convertNodes';
 import { type Context, ExpressionConverter } from './expressionConverter';
 import { isSupportedModule, unsupportedModuleFeature } from './moduleNames';
+import { literalKeyId } from './patternKeys';
+import { refuseReservedNames } from './reservedNames';
 import { fail, resolveScopes, ScopeBuilder } from './scopes';
 import { blocksOf, markAllSuspending, markSuspendingStatements } from './suspension';
 
@@ -58,7 +69,7 @@ export class ProgramConverter extends ExpressionConverter {
     inheritedFutureFeatures: readonly string[] = [],
     allowsTopLevelAwait = false
   ) {
-    const module = new ScopeBuilder('module', undefined, namesInLocals);
+    const module = new ScopeBuilder('module', undefined, { namesInLocals });
     super(source, module);
     this.module = module;
     this.allowsTopLevelAwait = allowsTopLevelAwait;
@@ -66,6 +77,7 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   convert(root: Node): Module {
+    if (!this.library) refuseReservedNames(root);
     const nodes = namedChildren(root);
     const start = isDocstring(nodes[0]) ? 1 : 0;
     const end = nodes.findIndex((node, index) => index >= start && node.type !== 'future_import_statement');
@@ -98,9 +110,10 @@ export class ProgramConverter extends ExpressionConverter {
     return this.block(node.type === 'block' ? namedChildren(node) : [node]);
   }
 
-  // code-gauge-allow functionNcss 55 -- One case per kind of statement node, each delegating where it grows.
+  // code-gauge-allow functionNcss 56 -- One case per kind of statement node, each delegating where it grows.
   private statement(node: Node): Statement[] {
     const row = rowOf(node);
+    checkClauseLines(node);
     switch (node.type) {
       case 'expression_statement': {
         return [this.expressionStatement(node)];
@@ -217,7 +230,9 @@ export class ProgramConverter extends ExpressionConverter {
     const row = rowOf(node);
     const word = node.type === 'break_statement' ? 'break' : 'continue';
     if (!this.context.inLoop) fail(row, `${word} 文はループの中にしか書けません。`);
-    if (this.context.inExceptStar) fail(row, `except* の中には ${word} 文を書けません。`);
+    if (this.context.inExceptStar && !this.context.inLoopOfExceptStar) {
+      fail(row, `except* の中には ${word} 文を書けません。`);
+    }
     return { kind: word, row };
   }
 
@@ -240,6 +255,10 @@ export class ProgramConverter extends ExpressionConverter {
   private raiseStatement(node: Node): Statement {
     const causeNode = node.childForFieldName('cause');
     const exceptionNode = namedChildren(node).find((child) => child.id !== causeNode?.id);
+    if (causeNode && !exceptionNode) fail(rowOf(node), 'raise from の前に、送出する例外を書いてください。');
+    if (exceptionNode?.type === 'expression_list') {
+      fail(rowOf(node), 'raise 例外, 値 の書き方は Python 3 では使えません。raise 例外(値) と書いてください。');
+    }
     return {
       kind: 'raise',
       exception: exceptionNode ? this.expression(exceptionNode) : undefined,
@@ -290,6 +309,7 @@ export class ProgramConverter extends ExpressionConverter {
         fail(row, '型ヒントを付けて代入できるのは、1つの変数・属性・要素だけです。');
       }
       if (rightNode?.type === 'assignment') fail(row, '型ヒントを付けた代入は、連続して書けません。');
+      this.checkAnnotatedName(leftNode);
       const value = rightNode ? this.expression(rightNode) : undefined;
       const annotation = this.annotation(typeNode);
       const target =
@@ -325,6 +345,15 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   /** `x: int` in a function declares x as a local variable without assigning it. */
+  private checkAnnotatedName(node: Node): void {
+    const { scope } = this.context;
+    if (node.type !== 'identifier' || scope.info.kind === 'module') return;
+    const declaration = scope.declarations.get(this.mangle(node.text));
+    if (declaration) {
+      fail(rowOf(node), `${node.text} は ${declaration} 宣言されているので、型ヒントを付けられません。`);
+    }
+  }
+
   private declareAnnotated(node: Node): Target {
     return this.bindName(node);
   }
@@ -394,7 +423,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   private loopBody(node: Node): Statement[] {
     const outer = this.context;
-    this.context = { ...outer, inLoop: true, inExceptStar: false };
+    this.context = { ...outer, inLoop: true, inLoopOfExceptStar: outer.inExceptStar };
     try {
       return this.body(node);
     } finally {
@@ -452,12 +481,14 @@ export class ProgramConverter extends ExpressionConverter {
       // CPython reports the line where it expected the clause: the else clause's, the next statement's, or the last.
       fail(elseNode ? rowOf(elseNode) : followingRow(node), 'try 文には、except か finally の節が必要です。');
     }
+    if (handlerNodes.length === 0 && elseNode) {
+      fail(rowOf(elseNode), 'try に else を書くときは、except も書いてください。');
+    }
     const orelse = elseNode ? this.body(field(elseNode, 'body')) : [];
     const finalbody = finallyNode
       ? this.body(namedChildren(finallyNode).find((child) => child.type === 'block') as Node)
       : [];
-    const statement: Statement = { kind: 'try', body, handlers, isGroup, orelse, finalbody, row: rowOf(node) };
-    return statement;
+    return { kind: 'try', body, handlers, isGroup, orelse, finalbody, row: rowOf(node) };
   }
 
   /** Converts an except clause, checking the rules CPython applies to it. */
@@ -477,7 +508,7 @@ export class ProgramConverter extends ExpressionConverter {
     const name = aliasNode ? this.bindName(aliasNode) : undefined;
     const blockNode = namedChildren(handler).find((child) => child.type === 'block') as Node;
     const outer = this.context;
-    this.context = { ...outer, inExceptStar: isGroup || outer.inExceptStar };
+    this.context = isGroup ? { ...outer, inExceptStar: true, inLoopOfExceptStar: false } : outer;
     try {
       return { types, name, body: this.body(blockNode), row };
     } finally {
@@ -576,6 +607,7 @@ export class ProgramConverter extends ExpressionConverter {
       qualifiedPrefix: `${qualifiedName}.`,
       inLoop: false,
       inExceptStar: false,
+      inLoopOfExceptStar: false,
     };
     let body: Statement[];
     let setup: Statement[] = [];
@@ -688,6 +720,7 @@ export class ProgramConverter extends ExpressionConverter {
   // Imports ---------------------------------------------------------------------------------------------------------
 
   private importStatement(node: Node): Statement {
+    refuseTrailingComma(node);
     const names: ImportName[] = fieldNodes(node, 'name').map((nameNode) => {
       const aliased = nameNode.type === 'aliased_import';
       const dotted = aliased ? field(nameNode, 'name') : nameNode;
@@ -700,6 +733,7 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   private importFromStatement(node: Node): Statement {
+    refuseTrailingComma(node);
     const moduleNode = field(node, 'module_name');
     if (moduleNode.type === 'relative_import') unsupported(node, '相対 import（from . import）');
     const module = moduleNode.text.replaceAll(/\s/g, '');
@@ -750,6 +784,8 @@ export class ProgramConverter extends ExpressionConverter {
         ? this.expression(subjects[0])
         : { kind: 'tuple', elements: subjects.map((child) => this.expression(child)), row };
     const caseNodes = fieldNodes(field(node, 'body'), 'alternative');
+    // The parser moves a body without case clauses out of the match, which CPython refuses as invalid syntax.
+    if (caseNodes.length === 0) fail(row, 'match 文の中には、case を1つ以上書いてください。');
     const cases: MatchCase[] = caseNodes.map((caseNode, index) => {
       const patternNodes = namedChildren(caseNode).filter((child) => child.type === 'case_pattern');
       const caseRow = rowOf(caseNode);
@@ -757,7 +793,7 @@ export class ProgramConverter extends ExpressionConverter {
       const pattern: Pattern =
         patternNodes.length === 1 && !children(caseNode).some((child) => child.type === ',')
           ? this.pattern(patternNodes[0], names)
-          : { kind: 'sequence', patterns: patternNodes.map((child) => this.pattern(child, names)), row: caseRow };
+          : { kind: 'sequence', patterns: patternNodes.map((child) => this.sequenceItem(child, names)), row: caseRow };
       if (pattern.kind === 'sequence') pattern.starIndex = starIndexOf(pattern.patterns, caseRow);
       const guardNode = caseNode.childForFieldName('guard');
       const guard = guardNode ? this.expression(namedChildren(guardNode)[0]) : undefined;
@@ -770,12 +806,15 @@ export class ProgramConverter extends ExpressionConverter {
     return { kind: 'match', subject, cases, row };
   }
 
-  // code-gauge-allow functionNcss 57 -- One case per kind of pattern node.
+  // code-gauge-allow functionNcss 58 -- One case per kind of pattern node.
   // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of pattern node.
   private pattern(node: Node, names: Set<string>): Pattern {
     const row = rowOf(node);
     const named = namedChildren(node);
     switch (node.type) {
+      // The grammar leaves a bare wildcard in an or-pattern or a keyword pattern as an anonymous token, which has no
+      // children, as a wildcard case pattern has none.
+      case '_':
       case 'case_pattern': {
         if (named.length === 0) return { kind: 'capture', row };
         if (children(node).some((child) => child.type === '-')) return this.negativeLiteral(named[0], row);
@@ -804,16 +843,14 @@ export class ProgramConverter extends ExpressionConverter {
       }
       case 'list_pattern':
       case 'tuple_pattern': {
-        const patterns = named.map((child) => this.pattern(child, names));
         const isGroup =
-          node.type === 'tuple_pattern' && patterns.length === 1 && !children(node).some((child) => child.type === ',');
-        if (isGroup) return patterns[0];
+          node.type === 'tuple_pattern' && named.length === 1 && !children(node).some((child) => child.type === ',');
+        if (isGroup) return this.pattern(named[0], names);
+        const patterns = named.map((child) => this.sequenceItem(child, names));
         return { kind: 'sequence', patterns, starIndex: starIndexOf(patterns, row), row };
       }
       case 'splat_pattern': {
-        const nameNode = named[0];
-        if (!nameNode || nameNode.text === '_') return { kind: 'star', row };
-        return { kind: 'star', name: this.patternName(nameNode, names), row };
+        return fail(row, '* を付けたパターンは、シーケンスのパターンの要素としてしか書けません。');
       }
       case 'dict_pattern': {
         return this.mappingPattern(node, names);
@@ -827,6 +864,10 @@ export class ProgramConverter extends ExpressionConverter {
       case 'as_pattern': {
         const aliasNode = field(node, 'alias');
         if (aliasNode.text === '_') fail(row, 'as の後に _ は書けません。');
+        // The inner pattern is wrapped in a case_pattern node; a parenthesized one is a tuple_pattern inside it.
+        if (namedChildren(named[0])[0]?.type === 'as_pattern') {
+          fail(row, 'as を続けて書くときは、前のパターンを ( ) で囲んでください。');
+        }
         const pattern = this.pattern(named[0], names);
         return { kind: 'as', pattern, name: this.patternName(aliasNode, names), row };
       }
@@ -840,8 +881,12 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   private negativeLiteral(node: Node, row: number): Pattern {
+    return { kind: 'value', value: this.negativeNumber(node, row), row };
+  }
+
+  private negativeNumber(node: Node, row: number): Expression {
     if (node.type !== 'integer' && node.type !== 'float') fail(row, 'パターンの - の後には数を書いてください。');
-    return { kind: 'value', value: { kind: 'unary', operator: '-', operand: this.expression(node), row }, row };
+    return { kind: 'unary', operator: '-', operand: this.expression(node), row };
   }
 
   /** `1+2j` or `-1-2j`, whose real part must be a real number and whose imaginary part an imaginary one. */
@@ -878,28 +923,70 @@ export class ProgramConverter extends ExpressionConverter {
   private mappingPattern(node: Node, names: Set<string>): Pattern {
     const keys: Expression[] = [];
     const patterns: Pattern[] = [];
-    let rest: NameRef | undefined;
-    const keyTexts = new Set<string>();
-    const keyNodes = fieldNodes(node, 'key');
+    const keyIds = new Set<string>();
     const valueNodes = fieldNodes(node, 'value');
-    for (const [index, keyNode] of keyNodes.entries()) {
-      const key =
-        keyNode.type === 'dotted_name' ? this.dottedValue(namedChildren(keyNode)) : this.pattern(keyNode, names);
-      const keyExpression = 'kind' in key && key.kind === 'value' ? key.value : (key as Expression);
-      const text = this.textOf(keyNode);
-      if (keyNode.type !== 'dotted_name' && keyTexts.has(text))
-        fail(rowOf(keyNode), `マッピングのパターンで、キー ${text} が重複しています。`);
-      keyTexts.add(text);
-      keys.push(keyExpression);
-      patterns.push(this.pattern(valueNodes[index], names));
+    let sign: Node | undefined;
+    // The sign of a negative number is a key node of its own, before the number's.
+    for (const keyNode of fieldNodes(node, 'key')) {
+      if (keyNode.type === '-') {
+        sign = keyNode;
+        continue;
+      }
+      const key = sign ? this.negativeNumber(keyNode, rowOf(sign)) : this.mappingKey(keyNode, names);
+      const id = literalKeyId(key);
+      if (id !== undefined && keyIds.has(id)) {
+        fail(
+          rowOf(keyNode),
+          `マッピングのパターンで、キー ${sign ? '-' : ''}${this.textOf(keyNode)} が重複しています。`
+        );
+      }
+      if (id !== undefined) keyIds.add(id);
+      keys.push(key);
+      patterns.push(this.pattern(valueNodes[patterns.length], names));
+      sign = undefined;
     }
-    const splat = namedChildren(node).find((child) => child.type === 'splat_pattern');
-    if (splat) {
-      const nameNode = namedChildren(splat)[0];
-      if (!nameNode || nameNode.text === '_') fail(rowOf(splat), '** の後に _ は書けません。');
-      rest = this.patternName(nameNode, names);
+    return { kind: 'mapping', keys, patterns, rest: this.mappingRest(node, names), row: rowOf(node) };
+  }
+
+  /** An item of a sequence pattern, the only place where a star pattern (`*rest`) may stand. */
+  private sequenceItem(node: Node, names: Set<string>): Pattern {
+    const named = namedChildren(node);
+    const splat = node.type === 'case_pattern' && named.length === 1 ? named[0] : node;
+    if (splat.type !== 'splat_pattern') return this.pattern(node, names);
+    if (children(splat)[0].text !== '*')
+      fail(rowOf(splat), 'シーケンスのパターンには、** ではなく * を書いてください。');
+    const nameNode = namedChildren(splat)[0];
+    if (!nameNode || nameNode.text === '_') return { kind: 'star', row: rowOf(splat) };
+    return { kind: 'star', name: this.patternName(nameNode, names), row: rowOf(splat) };
+  }
+
+  /** The name a mapping pattern's `**rest` binds, which may appear once, as the last subpattern. */
+  private mappingRest(node: Node, names: Set<string>): NameRef | undefined {
+    const subpatterns = namedChildren(node);
+    const splats = subpatterns.filter((child) => child.type === 'splat_pattern');
+    if (splats.length === 0) return undefined;
+    for (const splat of splats) {
+      if (children(splat)[0].text !== '**')
+        fail(rowOf(splat), 'マッピングのパターンには、* ではなく ** を書いてください。');
     }
-    return { kind: 'mapping', keys, patterns, rest, row: rowOf(node) };
+    if (splats.length > 1) fail(rowOf(splats[1]), 'マッピングのパターンには、** を1つしか書けません。');
+    const [splat] = splats;
+    if (subpatterns.at(-1) !== splat) {
+      fail(rowOf(splat), 'マッピングのパターンでは、** を付けたパターンを最後に書いてください。');
+    }
+    const nameNode = namedChildren(splat)[0];
+    if (!nameNode || nameNode.text === '_') fail(rowOf(splat), '** の後に _ は書けません。');
+    return this.patternName(nameNode, names);
+  }
+
+  /** A mapping pattern's key, which CPython allows to be only a literal or an attribute lookup (`a.b`). */
+  private mappingKey(node: Node, names: Set<string>): Expression {
+    const isAttribute = node.type === 'dotted_name' && namedChildren(node).length > 1;
+    if (isAttribute) return this.dottedValue(namedChildren(node));
+    const pattern = node.type === 'dotted_name' || node.type === '_' ? undefined : this.pattern(node, names);
+    if (pattern?.kind === 'value') return pattern.value;
+    if (pattern?.kind === 'singleton') return this.expression(node);
+    return fail(rowOf(node), 'マッピングのパターンのキーには、リテラルか属性（a.b）しか書けません。');
   }
 
   private classPattern(node: Node, names: Set<string>): Pattern {
@@ -909,8 +996,9 @@ export class ProgramConverter extends ExpressionConverter {
     const keywordPatterns: Pattern[] = [];
     for (const argument of argumentNodes) {
       const inner = argument.type === 'case_pattern' ? namedChildren(argument)[0] : argument;
+      if (inner?.type === 'splat_pattern') fail(rowOf(inner), 'クラスのパターンには、* を書けません。');
       if (inner?.type === 'keyword_pattern') {
-        const [keywordNode, valueNode] = namedChildren(inner);
+        const [keywordNode, valueNode] = patternChildren(inner);
         if (keywords.includes(keywordNode.text))
           fail(rowOf(inner), `クラスのパターンで、${keywordNode.text} を2回書いています。`);
         keywords.push(keywordNode.text);
@@ -935,13 +1023,20 @@ export class ProgramConverter extends ExpressionConverter {
     return this.pattern(node, names);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Checks the rules CPython applies to the alternatives of an or-pattern.
   private orPattern(node: Node, names: Set<string>): Pattern {
-    const alternatives = namedChildren(node);
+    const alternatives = patternChildren(node);
+    const signs = new Map<number, Node>();
+    // The sign of a negative number is a child of its own, before the number.
+    for (const [index, child] of children(node).entries()) {
+      if (child.type === '-') signs.set(children(node)[index + 1].startIndex, child);
+    }
     const patterns: Pattern[] = [];
     let bound: Set<string> | undefined;
     for (const [index, alternative] of alternatives.entries()) {
       const own = new Set<string>();
-      const pattern = this.pattern(alternative, own);
+      const sign = signs.get(alternative.startIndex);
+      const pattern = sign ? this.negativeLiteral(alternative, rowOf(sign)) : this.pattern(alternative, own);
       if (index < alternatives.length - 1 && isIrrefutable(pattern)) {
         fail(rowOf(alternative), '| の前のパターンがどんな値にも当てはまるので、後のパターンが使われません。');
       }
@@ -1127,10 +1222,20 @@ function expandTabs(text: string): string {
   return result;
 }
 
+/** Refuses an import whose names end with a comma outside parentheses, which only `from m import (a, b,)` allows. */
+function refuseTrailingComma(node: Node): void {
+  if (children(node).at(-1)?.type === ',') fail(rowOf(node), 'import する名前の後に「,」は書けません。');
+}
+
 function starIndexOf(patterns: Pattern[], row: number): number | undefined {
   const indexes = patterns.flatMap((pattern, index) => (pattern.kind === 'star' ? [index] : []));
   if (indexes.length > 1) fail(row, 'シーケンスのパターンには、* を1つしか書けません。');
   return indexes[0];
+}
+
+/** The named children of a pattern node and the anonymous `_` tokens among them, which are wildcards. */
+function patternChildren(node: Node): Node[] {
+  return children(node).filter((child) => child.isNamed || child.type === '_');
 }
 
 function isIrrefutable(pattern: Pattern): boolean {

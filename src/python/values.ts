@@ -2,6 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, Expression, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
+import { asPythonError, chargeScan, chargeSlots, chargeStep, refuseOversizedString } from './runtimeContext';
 import type { SetTable } from './setTable';
 import { recordSubclass } from './subclasses';
 
@@ -28,6 +29,9 @@ export class PyObject {
 
   constructor(cls: PyClass | undefined) {
     if (cls) this.cls = cls;
+    // Every object a program makes costs a slot here, and what it holds is charged where the storage grows, so that
+    // no kind of object can be retained outside the slot limit.
+    chargeSlots(1);
   }
 
   get identity(): number {
@@ -36,27 +40,55 @@ export class PyObject {
   }
 }
 
-export type NativeFunction = (args: PyValue[], kwargs: Kwargs) => PyValue;
+/** A builtin's body; `boundTo` is the object a bound method was read from, which names it in its errors. */
+export type NativeFunction = (args: PyValue[], kwargs: Kwargs, boundTo?: PyValue) => PyValue;
 
 /** How a builtin in a class dictionary binds when read from an instance. */
 export type NativeBinding = 'method' | 'static' | 'class';
 
+const checkedRuns = new WeakSet<NativeFunction>();
+
 export class PyBuiltinFunction extends PyObject {
+  readonly run: NativeFunction;
+  /** The `__module__` of a module's function: the name its module has in C, such as `_functools`. */
+  module?: string;
+
   constructor(
     cls: PyClass,
     readonly name: string,
-    readonly run: NativeFunction,
+    run: NativeFunction,
     /** The object a bound builtin method was read from, or the module a function belongs to. */
     readonly self?: PyValue,
     readonly binding: NativeBinding = 'method',
     readonly ownerName?: string
   ) {
     super(cls);
+    this.run = refusingOversizedStrings(run);
   }
 
   get qualifiedName(): string {
     return this.ownerName ? `${this.ownerName}.${this.name}` : this.name;
   }
+}
+
+/**
+ * Makes a native function refuse to return a string beyond the length limit. A function already wrapped is kept, since
+ * bound methods are equal when they share their function.
+ */
+function refusingOversizedStrings(run: NativeFunction): NativeFunction {
+  if (checkedRuns.has(run)) return run;
+  const checked: NativeFunction = (args, kwargs, boundTo) => {
+    let result: PyValue;
+    try {
+      result = run(args, kwargs, boundTo);
+    } catch (error) {
+      throw asPythonError(error);
+    }
+    refuseOversizedString(result);
+    return result;
+  };
+  checkedRuns.add(checked);
+  return checked;
 }
 
 export interface ClassLayout {
@@ -80,6 +112,8 @@ export class PyClass extends PyObject {
   isBuiltin = true;
   /** Whether a program may subclass this builtin class. */
   isBaseType = false;
+  /** Whether CPython's library writes this class in Python, so that its methods run their bodies with any receiver. */
+  isWrittenInPython = false;
   /** The feature to name when a class statement derives from this builtin class, which this grader does not support. */
   unsupportedBase?: string;
   /** The ordered annotations of the class body, which `@dataclass` reads. */
@@ -87,6 +121,7 @@ export class PyClass extends PyObject {
   readonly flags: {
     isEnum?: boolean;
     isAbstractEnum?: boolean;
+    isOrderedDict?: boolean;
     /** Whether the class or a base defined `__getattribute__` in its body. */
     definesGetattribute?: boolean;
     /** Whether the class or a base defines `__del__`, whose instances the finalizer tracks. */
@@ -161,7 +196,6 @@ export interface ExceptionState {
   args: PyTuple;
   /** The frames of the functions the exception left, whose variables its traceback keeps alive. */
   tracebackFrames?: { readonly locals: Map<string, PyValue>; readonly cells: Map<string, PyCell> }[];
-  notes?: PyList;
   cause?: PyValue;
   context?: PyValue;
   suppressContext: boolean;
@@ -190,7 +224,7 @@ export interface ExceptionState {
 /** An instance of a class written in the program, or of a builtin class with instance attributes. */
 export class PyInstance extends PyObject {
   /** The instance's attributes, which assigning `__dict__` replaces. */
-  dict = new Map<string, PyValue>();
+  dict: Map<string, PyValue> = new AttributeMap();
   exception?: ExceptionState;
   turtle?: TurtleState;
   /** The value of an Enum member. */
@@ -204,21 +238,97 @@ export abstract class PyNumberInstance extends PyInstance {
   abstract reprText(): string;
 }
 
-export class PyList extends PyObject {
-  constructor(
-    cls: PyClass,
-    public items: PyValue[]
-  ) {
-    super(cls);
+/** The attributes of an instance or opaque object, which charge the slot each new name takes. */
+export class AttributeMap extends Map<string, PyValue> {
+  override set(name: string, value: PyValue): this {
+    if (!this.has(name)) chargeSlots(1);
+    return super.set(name, value);
   }
 }
 
+/**
+ * Storage charges itself: a list, tuple, deque, set, dict, or instance costs one slot when it is created, and one more
+ * for each item, entry, or attribute it holds from then or gains later. The classes that own the storage charge it, so
+ * that code building or growing a container neither forgets the charge nor repeats it.
+ */
+abstract class PyGrowableSequence extends PyObject {
+  protected storage: PyValue[];
+
+  constructor(cls: PyClass, items: PyValue[]) {
+    super(cls);
+    chargeSlots(items.length);
+    this.storage = items;
+  }
+
+  get items(): readonly PyValue[] {
+    return this.storage;
+  }
+
+  /** The items for an edit in place that overwrites, reorders, or removes them: only the methods below add items. */
+  get editableItems(): PyValue[] {
+    return this.storage;
+  }
+
+  append(item: PyValue): void {
+    chargeSlots(1);
+    this.storage.push(item);
+  }
+
+  extend(items: readonly PyValue[]): void {
+    chargeSlots(items.length);
+    for (const item of items) this.storage.push(item);
+  }
+
+  /** Replaces `deleteCount` items from `start` with `items`, charging the new slots and the items moved past them. */
+  splice(start: number, deleteCount: number, items: readonly PyValue[]): void {
+    const storage = this.editableItems;
+    chargeSlots(Math.max(items.length - deleteCount, 0));
+    // The items after the replaced ones move only when the length changes; nothing before them is copied.
+    const tailStart = start + deleteCount;
+    const shift = items.length - deleteCount;
+    chargeScan(items.length + (shift === 0 ? 0 : storage.length - tailStart));
+    const oldLength = storage.length;
+    if (shift > 0) {
+      for (let index = 0; index < shift; index++) storage.push(undefined as unknown as PyValue);
+      for (let index = oldLength - 1; index >= tailStart; index--) storage[index + shift] = storage[index];
+    } else if (shift < 0) {
+      for (let index = tailStart; index < oldLength; index++) storage[index + shift] = storage[index];
+      storage.length = oldLength + shift;
+    }
+    for (const [index, item] of items.entries()) storage[start + index] = item;
+  }
+
+  /** Removes `count` items from `start`, charging the items moved into their place, and returns them. */
+  removeRange(start: number, count: number): PyValue[] {
+    if (count === 0) return [];
+    const storage = this.editableItems;
+    chargeScan(storage.length - start);
+    return storage.splice(start, count);
+  }
+
+  /**
+   * Puts another array in place of the items at no charge and returns the previous one, for a caller that drops items
+   * or lends the array out and back, as a sort does.
+   */
+  replaceItems(items: PyValue[]): PyValue[] {
+    const previous = this.storage;
+    this.storage = items;
+    return previous;
+  }
+}
+
+export class PyList extends PyGrowableSequence {}
+
 export class PyTuple extends PyObject {
+  /** The hash of the items, which cannot change, once something hashed them, as CPython 3.14 keeps it. */
+  hash?: bigint;
+
   constructor(
     cls: PyClass,
     readonly items: readonly PyValue[]
   ) {
     super(cls);
+    chargeSlots(items.length);
   }
 }
 
@@ -234,6 +344,9 @@ export class PyDict extends PyObject {
 }
 
 export class PySet extends PyObject {
+  /** The hash of a frozenset, which cannot change, once something hashed it, as CPython keeps it. */
+  hash?: bigint;
+
   constructor(
     cls: PyClass,
     public table: SetTable
@@ -285,15 +398,17 @@ export class PyCell {
 }
 
 export class PyFunction extends PyObject {
-  readonly dict = new Map<string, PyValue>();
+  readonly dict: Map<string, PyValue> = new AttributeMap();
   name: string;
   qualifiedName: string;
-  doc: PyValue;
+  doc: PyValue | undefined;
   module: PyValue = '__main__';
   /** The type parameters written in brackets after the name, as `__type_params__` gives them. */
   typeParams: PyValue[] = [];
   /** The frame of those type parameters, where the annotations that mention them are evaluated. */
   annotationFrame?: unknown;
+  /** Whether staticmethod or classmethod wrapped this function, whose first parameter is then no instance it runs on. */
+  isStaticOrClassMethod = false;
 
   // code-gauge-allow functionParameterCount 7 -- Each function field is set once at creation.
   constructor(
@@ -310,7 +425,7 @@ export class PyFunction extends PyObject {
     super(cls);
     this.name = def.name;
     this.qualifiedName = def.qualifiedName;
-    this.doc = def.doc ?? '';
+    this.doc = def.doc;
   }
 }
 
@@ -429,14 +544,104 @@ export class PyOpaque extends PyObject {
   }
 }
 
-/** A `collections.deque`. */
-export class PyDeque extends PyObject {
+/**
+ * A `collections.deque`. Its items start `front` places into the storage, so that taking and adding items at either
+ * end, and reading one by index, costs no move of the others; reading `items` packs them first, which an operation at
+ * the ends pays for only once the free places are as many as the items.
+ */
+export class PyDeque extends PyGrowableSequence {
+  private front = 0;
+
   constructor(
     cls: PyClass,
-    public items: PyValue[],
+    items: PyValue[],
     public maxlen: number | undefined
   ) {
-    super(cls);
+    super(cls, items);
+  }
+
+  override replaceItems(items: PyValue[]): PyValue[] {
+    this.pack();
+    return super.replaceItems(items);
+  }
+
+  override get items(): readonly PyValue[] {
+    this.pack();
+    return this.storage;
+  }
+
+  override get editableItems(): PyValue[] {
+    this.pack();
+    return this.storage;
+  }
+
+  get length(): number {
+    return this.storage.length - this.front;
+  }
+
+  /** The item at an index already checked to be within the deque, read without packing. */
+  at(index: number): PyValue {
+    return this.storage[this.front + index] as PyValue;
+  }
+
+  popRight(): PyValue {
+    const item = this.storage.pop() as PyValue;
+    if (this.length === 0) this.pack();
+    return item;
+  }
+
+  popLeft(): PyValue {
+    const item = this.storage[this.front] as PyValue;
+    this.storage[this.front] = undefined as unknown as PyValue;
+    this.front++;
+    if (this.front >= this.length) this.pack();
+    return item;
+  }
+
+  appendLeft(item: PyValue): void {
+    chargeSlots(1);
+    if (this.front === 0) this.reserveFront();
+    this.front--;
+    this.storage[this.front] = item;
+  }
+
+  /**
+   * Rotates the items `steps` places to the right (left when negative), moving the items of the shorter side across one
+   * at a time, as CPython's deque does.
+   */
+  rotate(steps: number): void {
+    const { length } = this;
+    let shift = steps;
+    if (shift > length / 2) shift -= length;
+    else if (shift < -length / 2) shift += length;
+    for (; shift > 0; shift--) {
+      chargeStep();
+      const item = this.storage.pop() as PyValue;
+      if (this.front === 0) this.reserveFront();
+      this.front--;
+      this.storage[this.front] = item;
+    }
+    for (; shift < 0; shift++) {
+      chargeStep();
+      this.storage.push(this.storage[this.front] as PyValue);
+      this.storage[this.front] = undefined as unknown as PyValue;
+      this.front++;
+    }
+    if (this.front >= this.length) this.pack();
+  }
+
+  private reserveFront(): void {
+    const room = Math.max(this.storage.length, 8);
+    const storage: PyValue[] = Array.from({ length: room });
+    for (const item of this.storage) storage.push(item);
+    this.storage = storage;
+    this.front = room;
+  }
+
+  private pack(): void {
+    if (this.front === 0) return;
+    this.storage = this.storage.slice(this.front);
+    this.front = 0;
   }
 }
 

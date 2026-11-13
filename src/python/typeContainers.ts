@@ -1,10 +1,11 @@
 // code-gauge-allow-file fileNcss 436 -- The list, tuple, and dict types keep their methods together.
+import { mappingEntries } from './callArguments';
 import { pyRepr } from './conversions';
 import { method } from './define';
-import { type DictEntry, DictStore } from './dictStore';
-import { mappingEntries } from './expressionEvaluator';
+import { reversedDictIterator } from './dictReversal';
+import { DictStore } from './dictStore';
 import { pyHash } from './hashing';
-import { builtinGetItem, keyError, sliceIndices } from './items';
+import { builtinGetItem, keyError } from './items';
 import { clamp, reduction, withState } from './iteratorStates';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
@@ -19,23 +20,34 @@ import {
   toArray,
   withRemaining,
 } from './objects';
-import { builtinContains, contains, equals, lessThan } from './operators';
+import { builtinContains, contains, countEqual, equals, extendList, lessThan } from './operators';
 import { currentRuntime } from './runtimeContext';
 import {
+  addToTable,
+  areDisjoint,
   differenceUpdate,
-  setDifference,
+  isSetLikeView,
+  isSubset,
+  lookupSetKey,
+  setDifferenceAll,
   setIntersection,
+  setIntersectionAll,
+  setSymmetricDifference,
   setUnion,
   symmetricDifferenceUpdate,
   updateTable,
 } from './setOperations';
 import { SetTable } from './setTable';
+import { StringBuilder } from './stringBuilder';
+import { timsort } from './timsort';
 import {
+  addNote,
   defineMethod,
   dictClass,
   dictItemsClass,
   dictKeysClass,
   dictValuesClass,
+  exceptionClassNamed,
   frozensetClass,
   iteratorClass,
   listClass,
@@ -46,10 +58,7 @@ import {
   rangeClass,
   resultClassOf,
   setClass,
-  sliceClass,
   tupleClass,
-  typeError,
-  typeName,
   valueError,
 } from './types';
 import {
@@ -57,12 +66,12 @@ import {
   type Kwargs,
   PyDict,
   PyDictView,
+  PyError,
   PyIterator,
   PyList,
   type PyObject,
   PyRange,
   PySet,
-  PySlice,
   PyTuple,
   type PyValue,
 } from './values';
@@ -82,23 +91,21 @@ export function containerRepr(object: PyObject, placeholder: string, render: () 
   }
 }
 
-function joinReprs(items: readonly PyValue[]): string {
-  let result = '';
+/** The reprs of items separated by commas, refused once they outgrow the string limit. */
+export function joinReprs(items: readonly PyValue[]): string {
+  const result = new StringBuilder();
   for (const [index, item] of items.entries()) {
-    if (index > 0) result += ', ';
-    result += pyRepr(item);
-    currentRuntime().buildString(result.length);
+    if (index > 0) result.append(', ');
+    result.append(pyRepr(item));
   }
-  return result;
+  return result.build();
 }
 
 // list --------------------------------------------------------------------------------------------------------------
 
 listClass.construct = (cls, args, kwargs) => {
   checkArgs({ qualified: 'list', min: 0, max: 1, style: 'expected' }, args, kwargs);
-  const items = args.length === 0 ? [] : toArray(args[0]);
-  currentRuntime().allocate(items.length + 1);
-  return new PyList(cls, items);
+  return new PyList(cls, args.length === 0 ? [] : toArray(args[0]));
 };
 const listOf = (self: PyValue): PyList => self as PyList;
 
@@ -111,43 +118,44 @@ method(listClass, '__getitem__', 'one', 1, 1, (self, [key]) => builtinGetItem(se
 method(listClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
 method(listClass, '__reversed__', 'none', 0, 0, (self) => reversedIterator(listOf(self), 'list_reverseiterator'));
 method(listClass, 'append', 'one', 1, 1, (self, [item]) => {
-  currentRuntime().allocate(1);
-  listOf(self).items.push(item);
+  listOf(self).append(item);
   return None;
 });
 method(listClass, 'extend', 'one', 1, 1, (self, [iterable]) => {
-  const items = toArray(iterable);
-  currentRuntime().allocate(items.length);
-  for (const item of items) listOf(self).items.push(item);
+  extendList(listOf(self), iterable);
   return None;
 });
 method(listClass, 'insert', 'expected', 2, 2, (self, [index, item]) => {
-  const { items } = listOf(self);
   let position = toIndex(index);
-  const length = BigInt(items.length);
+  const length = BigInt(listOf(self).items.length);
   if (position < 0n) position = position + length < 0n ? 0n : position + length;
   if (position > length) position = length;
-  currentRuntime().allocate(1);
-  items.splice(Number(position), 0, item);
+  listOf(self).splice(Number(position), 0, [item]);
   return None;
 });
 method(listClass, 'remove', 'one', 1, 1, (self, [item]) => {
-  const { items } = listOf(self);
+  const items = listOf(self).items;
   const index = items.findIndex((element) => equals(element, item));
+  currentRuntime().scan(index === -1 ? items.length : index + 1);
   if (index === -1) throw valueError('list.remove(x): x not in list');
-  items.splice(index, 1);
+  listOf(self).removeRange(index, 1);
   return None;
 });
+const MAX_SSIZE = (1n << 63n) - 1n;
 method(listClass, 'pop', 'expected', 0, 1, (self, [index]) => {
-  const { items } = listOf(self);
-  if (items.length === 0) throw pyError('IndexError', 'pop from empty list');
+  // Argument clinic converts the index to a Py_ssize_t before list_pop_impl looks at the list.
   let position = index === undefined ? -1n : toIndex(index);
+  if (position > MAX_SSIZE || position < -MAX_SSIZE - 1n) {
+    throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
+  }
+  const items = listOf(self).editableItems;
+  if (items.length === 0) throw pyError('IndexError', 'pop from empty list');
   if (position < 0n) position += BigInt(items.length);
   if (position < 0n || position >= BigInt(items.length)) throw pyError('IndexError', 'pop index out of range');
-  return items.splice(Number(position), 1)[0];
+  return listOf(self).removeRange(Number(position), 1)[0];
 });
 method(listClass, 'clear', 'none', 0, 0, (self) => {
-  listOf(self).items.length = 0;
+  listOf(self).editableItems.length = 0;
   return None;
 });
 method(listClass, 'index', 'expected', 1, 3, (self, [item, start, stop]) => {
@@ -159,7 +167,10 @@ method(listClass, 'count', 'one', 1, 1, (self, [item]) =>
   BigInt(listOf(self).items.filter((element) => equals(element, item)).length)
 );
 method(listClass, 'reverse', 'none', 0, 0, (self) => {
-  listOf(self).items.reverse();
+  const items = listOf(self).editableItems;
+  // Moving the items is charged at the rate of the other native scans over items.
+  currentRuntime().scan(items.length);
+  items.reverse();
   return None;
 });
 method(listClass, 'copy', 'none', 0, 0, (self) => newList([...listOf(self).items]));
@@ -169,8 +180,7 @@ method(
   'takes',
   0,
   0,
-  (self, args, kwargs) => {
-    if (args.length > 0) throw typeError('sort() takes no positional arguments');
+  (self, _args, kwargs) => {
     sortList(listOf(self), kwargs?.get('key') ?? None, isTruthy(kwargs?.get('reverse') ?? false));
     return None;
   },
@@ -179,68 +189,98 @@ method(
 listClass.dict.set('__hash__', None);
 
 /** The index of the first item equal to `item` between the slice bounds, or -1. */
-function sequenceIndex(
+export function sequenceIndex(
   items: readonly PyValue[],
   item: PyValue,
   start: PyValue | undefined,
   stop: PyValue | undefined
 ): number {
-  const { start: from, stop: to } = sliceIndices(
-    new PySlice(sliceClass, start ?? None, stop ?? None, None),
-    items.length
-  );
-  for (let index = from; index < to; index++) {
+  const from = indexBound(start, 0, items.length);
+  const to = indexBound(stop, items.length, items.length);
+  for (let index = from; index < to && index < items.length; index++) {
     currentRuntime().spend();
     if (equals(items[index], item)) return index;
   }
   return -1;
 }
 
-/** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
-export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
-  // As in CPython, the list is empty while the keys are computed and the items compared.
-  const original = list.items;
-  list.items = [];
-  try {
-    const keys = key === None ? original : original.map((item) => callValue(key, [item]));
-    sortByKeys(list, original, keys, reverse);
-  } catch (error) {
-    if (list.items.length === 0) list.items = original;
-    throw error;
-  }
+/**
+ * A bound of list, tuple, or deque `index`, converted as _PyEval_SliceIndexNotNone converts it (no None, clamped to the
+ * size) and counted from the end when negative.
+ */
+function indexBound(value: PyValue | undefined, fallback: number, length: number): number {
+  if (value === undefined) return fallback;
+  const index = toIndex(value, () => 'slice indices must be integers or have an __index__ method');
+  const bound =
+    index < 0n
+      ? Number(index < BigInt(-length) ? BigInt(-length) : index) + length
+      : Number(index > BigInt(length) ? BigInt(length) : index);
+  return Math.max(0, bound);
 }
 
-/** Puts the items `sortList` took out of a list back in the order of their keys, stably. */
-export function sortByKeys(list: PyList, original: PyValue[], keys: PyValue[], reverse: boolean): void {
-  const indices = original.map((_, index) => index);
-  if (reverse) indices.reverse();
-  const runtime = currentRuntime();
-  const sorted = mergeSort(indices, (a, b) => {
-    runtime.spend();
-    return lessThan(keys[a], keys[b]);
+/** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
+export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
+  let modified = false;
+  // CPython also reports a list that was filled and emptied again during the sort, which the final length hides.
+  const itemsDuringSort = new Proxy<PyValue[]>([], {
+    set(target, property, value: unknown) {
+      if (property !== 'length') modified = true;
+      return Reflect.set(target, property, value);
+    },
   });
-  if (reverse) sorted.reverse();
-  const modified = list.items.length > 0;
-  list.items = sorted.map((index) => original[index]);
+  const items = list.replaceItems(itemsDuringSort);
+  // The list no longer holds its items while the key function and the comparisons run.
+  currentRuntime().handToNative(items);
+  try {
+    sortDetachedItems(items, key, reverse);
+    modified ||= list.items !== itemsDuringSort;
+  } finally {
+    list.replaceItems(items);
+  }
   if (modified) throw valueError('list modified during sort');
 }
 
-/** A stable merge sort that only asks whether one item is less than another, as Python's sort does. */
-function mergeSort(items: number[], less: (a: number, b: number) => boolean): number[] {
-  if (items.length <= 1) return items;
-  const middle = items.length >> 1;
-  const left = mergeSort(items.slice(0, middle), less);
-  const right = mergeSort(items.slice(middle), less);
-  const result: number[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < left.length && j < right.length) {
-    if (less(right[j], left[i])) result.push(right[j++]);
-    else result.push(left[i++]);
+/** Puts the items `sortSuspending` took out of a list back in the order of their keys, stably. */
+export function sortByKeys(list: PyList, original: PyValue[], keys: PyValue[], reverse: boolean): void {
+  const runtime = currentRuntime();
+  const order = original.map((_, index) => index);
+  timsort(
+    order,
+    (left: number, right: number) => {
+      runtime.spend();
+      return lessThan(keys[left], keys[right]);
+    },
+    reverse
+  );
+  const modified = list.items.length > 0;
+  list.replaceItems(order.map((index) => original[index]));
+  if (modified) throw valueError('list modified during sort');
+}
+
+function sortDetachedItems(items: PyValue[], key: PyValue, reverse: boolean): void {
+  const runtime = currentRuntime();
+  const charged =
+    <T>(less: (left: T, right: T) => boolean) =>
+    (left: T, right: T): boolean => {
+      runtime.spend();
+      return less(left, right);
+    };
+  if (key === None) {
+    timsort(items, charged(lessThan), reverse);
+    return;
   }
-  while (i < left.length) result.push(left[i++]);
-  while (j < right.length) result.push(right[j++]);
-  return result;
+  const keys = items.map((item) => callValue(key, [item]));
+  const values = [...items];
+  const order = items.map((_, index) => index);
+  try {
+    timsort(
+      order,
+      charged((left: number, right: number) => lessThan(keys[left], keys[right])),
+      reverse
+    );
+  } finally {
+    for (const [index, source] of order.entries()) items[index] = values[source];
+  }
 }
 
 function reversedIterator(sequence: PyList | PyTuple, name: string): PyIterator {
@@ -271,7 +311,6 @@ tupleClass.construct = (cls, args, kwargs) => {
   if (args.length === 0) return cls === tupleClass ? newTuple([]) : new PyTuple(cls, []);
   if (args[0] instanceof PyTuple && cls === tupleClass && args[0].cls === tupleClass) return args[0];
   const items = toArray(args[0]);
-  currentRuntime().allocate(items.length + 1);
   return cls === tupleClass ? newTuple(items) : new PyTuple(cls, items);
 };
 const tupleOf = (self: PyValue): PyTuple => self as PyTuple;
@@ -324,14 +363,26 @@ method(rangeClass, '__hash__', 'none', 0, 0, (self) => {
   const { start, step, length } = rangeOf(self);
   return pyHash(newTuple([length, length === 0n ? None : start, length <= 1n ? None : step]));
 });
-method(rangeClass, 'count', 'one', 1, 1, (self, [item]) => (contains(self, item) ? 1n : 0n));
+method(rangeClass, 'count', 'one', 1, 1, (self, [item]) =>
+  isExactInt(item) ? (contains(self, item) ? 1n : 0n) : BigInt(countEqual(iterate(self), item))
+);
 method(rangeClass, 'index', 'one', 1, 1, (self, [item]) => {
   const range = rangeOf(self);
-  if (!contains(self, item) || (typeof item !== 'bigint' && typeof item !== 'boolean')) {
-    throw valueError(`${pyRepr(item)} is not in range`);
-  }
+  if (!isExactInt(item)) return indexByIteration(self, item);
+  if (!contains(self, item)) throw valueError('range.index(x): x not in range');
   return (BigInt(item) - range.start) / range.step;
 });
+const isExactInt = (item: PyValue): item is bigint | boolean => typeof item === 'bigint' || typeof item === 'boolean';
+
+function indexByIteration(range: PyValue, item: PyValue): bigint {
+  const next = iterate(range);
+  let index = 0n;
+  for (let element = next(); element !== DONE; element = next(), index++) {
+    currentRuntime().spend();
+    if (equals(element, item)) return index;
+  }
+  throw valueError('sequence.index(x): x not in sequence');
+}
 
 // dict --------------------------------------------------------------------------------------------------------------
 
@@ -342,7 +393,6 @@ dictClass.construct = (cls, args, kwargs) => {
 };
 const dictOf = (self: PyValue): PyDict => self as PyDict;
 
-/** Adds the entries of a mapping, or of an iterable of pairs, as `dict.update` does. */
 /** Updates a dict from an optional mapping or iterable of pairs, then from keyword arguments, as `dict()` does. */
 function updateFromArguments(qualified: string, dict: PyDict, args: PyValue[], kwargs: Kwargs): void {
   checkArgs({ qualified, min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] }, args, kwargs);
@@ -351,32 +401,41 @@ function updateFromArguments(qualified: string, dict: PyDict, args: PyValue[], k
 }
 
 export function updateDict(dict: PyDict, source: PyValue): void {
+  const runtime = currentRuntime();
   if (source instanceof PyDict || lookupSpecial(source, 'keys') !== undefined) {
-    for (const [key, value] of mappingEntries(source)) dict.store.set(key, value);
+    for (const [key, value] of mappingEntries(source)) {
+      runtime.spend();
+      dict.store.set(key, value);
+    }
     return;
   }
   const next = iterate(source);
   let index = 0;
-  for (let item = next(); item !== DONE; item = next(), index++) addUpdatePair(dict, item, index);
+  for (let item = next(); item !== DONE; item = next(), index++) {
+    runtime.spend();
+    addUpdatePair(dict, item, index);
+  }
 }
 
 /** Adds the item at `index` of the pairs `dict.update` reads, which must be a sequence of a key and a value. */
 export function addUpdatePair(dict: PyDict, item: PyValue, index: number): void {
-  // CPython 3.14 words a pair that is not iterable without naming its type or index.
-  if (!isIterable(item)) throw typeError('object is not iterable');
-  const pair = toArray(item);
+  const pair = updatePair(item, index);
   if (pair.length !== 2) {
     throw valueError(`dictionary update sequence element #${index} has length ${pair.length}; 2 is required`);
   }
   dict.store.set(pair[0], pair[1]);
 }
 
-/** Whether `iter()` accepts a value: one with `__iter__`, or a sequence with `__getitem__`. */
-function isIterable(value: PyValue): boolean {
-  if (typeof value === 'string') return true;
-  const iter = lookupSpecial(value, '__iter__');
-  if (iter !== undefined) return iter !== None;
-  return lookupSpecial(value, '__getitem__') !== undefined;
+/** An element of a dict's update sequence as a sequence, failing as dict_merge_from_seq2's PySequence_Fast does. */
+function updatePair(item: PyValue, index: number): PyValue[] {
+  try {
+    return toArray(item, 'object is not iterable');
+  } catch (error) {
+    if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError'))) {
+      addNote(error.exception, `Cannot convert dictionary update sequence element #${index} to a sequence`);
+    }
+    throw error;
+  }
 }
 
 method(dictClass, '__repr__', 'none', 0, 0, (self) =>
@@ -384,13 +443,12 @@ method(dictClass, '__repr__', 'none', 0, 0, (self) =>
 );
 
 export function dictBody(dict: PyDict): string {
-  let result = '{';
+  const result = new StringBuilder().append('{');
   for (const [index, entry] of dict.store.ordered().entries()) {
-    if (index > 0) result += ', ';
-    result += `${pyRepr(entry.key)}: ${pyRepr(entry.value)}`;
-    currentRuntime().buildString(result.length);
+    if (index > 0) result.append(', ');
+    result.append(pyRepr(entry.key)).append(': ').append(pyRepr(entry.value));
   }
-  return `${result}}`;
+  return result.append('}').build();
 }
 
 method(dictClass, '__len__', 'none', 0, 0, (self) => BigInt(dictOf(self).store.size));
@@ -405,7 +463,7 @@ method(dictClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
   return None;
 });
 method(dictClass, '__iter__', 'none', 0, 0, (self) => getIterator(new PyDictView(dictKeysClass, dictOf(self), 'keys')));
-method(dictClass, '__reversed__', 'none', 0, 0, (self) => reversedDict(dictOf(self), 'keys'));
+method(dictClass, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator(dictOf(self), 'keys'));
 method(dictClass, 'keys', 'none', 0, 0, (self) => new PyDictView(dictKeysClass, dictOf(self), 'keys'));
 method(dictClass, 'values', 'none', 0, 0, (self) => new PyDictView(dictValuesClass, dictOf(self), 'values'));
 method(dictClass, 'items', 'none', 0, 0, (self) => new PyDictView(dictItemsClass, dictOf(self), 'items'));
@@ -460,66 +518,25 @@ dictClass.dict.set('__hash__', None);
 dictKeysClass.dict.set('__hash__', None);
 dictItemsClass.dict.set('__hash__', None);
 
-function viewItem(entry: DictEntry, view: 'keys' | 'values' | 'items'): PyValue {
-  if (view === 'keys') return entry.key;
-  return view === 'values' ? entry.value : newTuple([entry.key, entry.value]);
-}
-
-/**
- * A reverse iterator over a dict, which reads the entries as they are when it reaches them, as CPython's does, and
- * fails once the dict's size changes.
- */
-function reversedDict(dict: PyDict, view: 'keys' | 'values' | 'items'): PyIterator {
-  const { store } = dict;
-  const size = store.size;
-  let last: DictEntry | undefined;
-  let remaining = size;
-  let state: 'running' | 'failed' | 'done' = 'running';
-  const itemOf = (entry: DictEntry): PyValue => viewItem(entry, view);
-  const next = withRemaining(
-    () => {
-      if (state === 'done') return DONE;
-      if (state === 'failed' || store.size !== size) {
-        state = 'failed';
-        throw pyError('RuntimeError', 'dictionary changed size during iteration');
-      }
-      const entry = remaining > 0 ? store.previous(last) : undefined;
-      if (entry === undefined) {
-        state = 'done';
-        return DONE;
-      }
-      last = entry;
-      remaining--;
-      return itemOf(entry);
-    },
-    () => (state === 'running' && store.size === size ? remaining : 0)
-  );
-  withState(next, {
-    reduce: () => {
-      const items: PyValue[] = [];
-      for (let entry = store.previous(last); entry && state === 'running'; entry = store.previous(entry)) {
-        items.push(itemOf(entry));
-      }
-      return reduction('iter', [newList(items.slice(0, remaining))]);
-    },
-  });
-  return new PyIterator(iteratorClass(`dict_reverse${view.slice(0, -1)}iterator`), next, () => [dict]);
-}
-
 for (const [cls, view] of [
   [dictKeysClass, 'keys'],
   [dictValuesClass, 'values'],
   [dictItemsClass, 'items'],
 ] as const) {
   method(cls, '__repr__', 'none', 0, 0, (self) =>
-    containerRepr(self as PyObject, '...', () => `${cls.name}([${joinReprs(toArray(self))}])`)
+    containerRepr(self as PyObject, '...', () => `${(self as PyObject).cls.name}([${joinReprs(toArray(self))}])`)
   );
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt((self as PyDictView).dict.store.size));
   method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
-  method(cls, '__reversed__', 'none', 0, 0, (self) => reversedDict((self as PyDictView).dict, view));
+  method(cls, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator((self as PyDictView).dict, view));
   if (view !== 'values') {
-    method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => toArray(other).every((item) => !contains(self, item)));
+    method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) => {
+      // As dictviews_isdisjoint does, a larger set or set-like view is probed while the view is iterated.
+      const otherSize = other instanceof PySet ? other.table.size : isSetLikeView(other) ? other.dict.store.size : 0;
+      if (otherSize > (self as PyDictView).dict.store.size) return !someItem(self, (item) => contains(other, item));
+      return !someItem(other, (item) => contains(self, item));
+    });
   }
 }
 
@@ -528,14 +545,19 @@ for (const [cls, view] of [
 for (const cls of [setClass, frozensetClass]) {
   cls.construct = (setType, args, kwargs) => {
     checkArgs({ qualified: cls.name, min: 0, max: 1, style: 'expected' }, args, kwargs);
+    if (isExactFrozenset(args[0]) && setType === frozensetClass) return args[0];
     const table = new SetTable();
     if (args.length > 0) updateTable(table, args[0]);
-    currentRuntime().allocate(table.size + 1);
     return new PySet(setType, table);
   };
 }
 
 const setOf = (self: PyValue): PySet => self as PySet;
+
+/** An exact frozenset, which CPython returns itself for where it would copy a set: `frozenset(f)` and `f.copy()`. */
+function isExactFrozenset(value: PyValue | undefined): value is PySet {
+  return value instanceof PySet && value.cls === frozensetClass;
+}
 
 function setRepr(self: PyValue): string {
   const set = setOf(self);
@@ -548,71 +570,61 @@ function setRepr(self: PyValue): string {
   });
 }
 
-function otherSet(value: PyValue, operator: string, self: PyValue): PySet {
-  if (value instanceof PySet) return value;
-  throw typeError(`unsupported operand type(s) for ${operator}: '${typeName(self)}' and '${typeName(value)}'`);
-}
-
 for (const cls of [setClass, frozensetClass]) {
   method(cls, '__repr__', 'none', 0, 0, setRepr);
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt(setOf(self).table.size));
-  method(cls, '__contains__', 'one', 1, 1, (self, [item]) => setOf(self).table.has(item));
+  method(cls, '__contains__', 'one', 1, 1, (self, [item]) => lookupSetKey(item, (key) => setOf(self).table.has(key)));
   method(cls, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
-  method(cls, 'copy', 'none', 0, 0, (self) => new PySet(resultClassOf(setOf(self).cls), setOf(self).table.copy()));
+  method(cls, 'copy', 'none', 0, 0, (self) => (isExactFrozenset(self) ? self : setUnion(setOf(self), [])));
   method(cls, 'union', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => setUnion(setOf(self), others));
   method(cls, 'intersection', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) =>
-    foldSets(setOf(self), others, setIntersection)
+    setIntersectionAll(setOf(self), others)
   );
   method(cls, 'difference', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) =>
-    foldSets(setOf(self), others, setDifference)
+    setDifferenceAll(setOf(self), others)
   );
-  method(cls, 'symmetric_difference', 'one', 1, 1, (self, [other]) => {
-    const table = (other instanceof PySet ? other.table : tableFrom(other)).copy();
-    symmetricDifferenceUpdate(table, self);
-    return new PySet(resultClassOf(setOf(self).cls), table);
-  });
+  method(cls, 'symmetric_difference', 'one', 1, 1, (self, [other]) => setSymmetricDifference(setOf(self), other));
   method(cls, 'isdisjoint', 'one', 1, 1, (self, [other]) =>
-    toArray(other).every((item) => !setOf(self).table.has(item))
+    other instanceof PySet
+      ? areDisjoint(setOf(self).table, other.table)
+      : !someItem(other, (item) => setOf(self).table.has(item))
   );
-  method(cls, 'issubset', 'one', 1, 1, (self, [other]) => {
+  method(cls, 'issubset', 'one', 1, 1, (self, [other]) =>
     // CPython compares the size of the intersection unless the other operand is a set.
-    if (!(other instanceof PySet)) return setIntersection(setOf(self), other).table.size === setOf(self).table.size;
-    return setOf(self)
-      .table.keys()
-      .every((key) => other.table.has(key));
-  });
-  method(cls, 'issuperset', 'one', 1, 1, (self, [other]) =>
-    toArray(other).every((item) => setOf(self).table.has(item))
+    other instanceof PySet
+      ? isSubset(setOf(self).table, other.table)
+      : setIntersection(setOf(self), other).table.size === setOf(self).table.size
   );
-  void otherSet;
+  method(cls, 'issuperset', 'one', 1, 1, (self, [other]) =>
+    other instanceof PySet
+      ? isSubset(other.table, setOf(self).table)
+      : !someItem(other, (item) => !setOf(self).table.has(item))
+  );
 }
 
-/** Applies a set operation with each of `others` in turn, starting from a copy of `set`. */
-function foldSets(set: PySet, others: PyValue[], operation: (set: PySet, other: PyValue) => PySet): PySet {
-  let result = new PySet(resultClassOf(set.cls), set.table.copy());
-  for (const other of others) result = operation(result, other);
-  return result;
-}
-
-function tableFrom(value: PyValue): SetTable {
-  const table = new SetTable();
-  updateTable(table, value);
-  return table;
+/** Whether an iterable has an item passing the test, reading no further than the first one as CPython does. */
+function someItem(iterable: PyValue, test: (item: PyValue) => boolean): boolean {
+  const runtime = currentRuntime();
+  const next = iterate(iterable);
+  for (let item = next(); item !== DONE; item = next()) {
+    runtime.spend();
+    if (test(item)) return true;
+  }
+  return false;
 }
 
 method(frozensetClass, '__hash__', 'none', 0, 0, (self) => pyHash(self));
 setClass.dict.set('__hash__', None);
 method(setClass, 'add', 'one', 1, 1, (self, [item]) => {
-  setOf(self).table.add(item);
-  currentRuntime().allocate(1);
+  addToTable(setOf(self).table, item);
   return None;
 });
 method(setClass, 'remove', 'one', 1, 1, (self, [item]) => {
-  if (!setOf(self).table.discard(item)) throw keyError(item);
+  if (!lookupSetKey(item, (key) => setOf(self).table.discard(key))) throw keyError(item);
   return None;
 });
 method(setClass, 'discard', 'one', 1, 1, (self, [item]) => {
-  setOf(self).table.discard(item);
+  lookupSetKey(item, (key) => setOf(self).table.discard(key));
   return None;
 });
 method(setClass, 'pop', 'none', 0, 0, (self) => {
@@ -629,8 +641,7 @@ method(setClass, 'update', 'expected', 0, Number.POSITIVE_INFINITY, (self, other
   return None;
 });
 method(setClass, 'intersection_update', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => {
-  const set = setOf(self);
-  set.table = foldSets(set, others, setIntersection).table;
+  setOf(self).table.adopt(setIntersectionAll(setOf(self), others).table);
   return None;
 });
 method(setClass, 'difference_update', 'expected', 0, Number.POSITIVE_INFINITY, (self, others) => {

@@ -5,6 +5,8 @@ import { callValue, isTruthy, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { setTraceback } from './tracebacks';
 import {
+  addNote,
+  argumentTypeName,
   baseExceptionClass,
   defineMethod,
   exceptionClasses,
@@ -13,7 +15,6 @@ import {
   newTuple,
   None,
   typeError,
-  typeName,
 } from './types';
 import { type ExceptionState, type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
 
@@ -36,13 +37,20 @@ baseExceptionClass.construct = (cls, args, kwargs) => {
 for (const cls of exceptionClasses.values())
   if (cls !== baseExceptionClass) cls.construct ??= baseExceptionClass.construct;
 
-defineMethod(baseExceptionClass, '__init__', (self, args, kwargs) => {
-  setKeywordFields(instanceOf(self), kwargs);
-  const state = instanceOf(self).exception;
-  if (state && !state.exceptions) state.args = newTuple(args);
-  if (state && isOSError(instanceOf(self))) setOSErrorArgs(state, args);
-  return None;
-});
+defineMethod(
+  baseExceptionClass,
+  '__init__',
+  (self, args, kwargs) => {
+    const instance = instanceOf(self);
+    setKeywordFields(instance, kwargs);
+    const state = instance.exception;
+    if (!state) return None;
+    if (!state.exceptions) state.args = newTuple(args);
+    if (isOSError(instance)) setOSErrorArgs(state, args);
+    return None;
+  },
+  { receiver: 'wrapper' }
+);
 
 /** The keyword arguments of the builtin exceptions that take some, which set their fields. */
 const EXCEPTION_KEYWORDS = new Map<string, readonly string[]>([
@@ -129,12 +137,8 @@ method(baseExceptionClass, '__repr__', 'none', 0, 0, (self) => {
   return args.length === 1 ? `${name}(${pyRepr(args[0])})` : `${name}${pyRepr(newTuple(args))}`;
 });
 method(baseExceptionClass, 'add_note', 'one', 1, 1, (self, [note]) => {
-  if (typeof note !== 'string') throw typeError(`note must be a str, not '${typeName(note)}'`);
-  const state = instanceOf(self).exception;
-  if (!state) return None;
-  state.notes ??= newList([]);
-  if (!(state.notes instanceof PyList)) throw typeError('Cannot add note: __notes__ is not a list');
-  state.notes.items.push(note);
+  if (typeof note !== 'string') throw typeError(`add_note() argument must be str, not ${argumentTypeName(note)}`);
+  addNote(instanceOf(self), note);
   return None;
 });
 method(baseExceptionClass, 'with_traceback', 'one', 1, 1, (self, [traceback]) => {
@@ -172,7 +176,9 @@ function constructGroup(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyInstan
   if (args.length !== 2)
     throw typeError(`BaseExceptionGroup.__new__() takes exactly 2 arguments (${args.length} given)`);
   const [message, sequence] = args;
-  if (typeof message !== 'string') throw typeError(`argument 1 must be str, not ${typeName(message)}`);
+  if (typeof message !== 'string') {
+    throw typeError(`BaseExceptionGroup.__new__() argument 1 must be str, not ${argumentTypeName(message)}`);
+  }
   if (!(sequence instanceof PyList || sequence instanceof PyTuple)) {
     throw typeError('second argument (exceptions) must be a sequence');
   }

@@ -42,13 +42,24 @@ export const STANDARD_CODES: Readonly<Record<string, CodeInfo>> = Object.fromEnt
     .map(([char, info]) => [char, 'lL'.includes(char) ? code(info.kind, 4) : info])
 );
 
+const BYTE_HEX = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, '0'));
+
 export function readInteger(bytes: Uint8Array, little: boolean, signed: boolean): bigint {
+  if (bytes.length === 0) return 0n;
   let value = 0n;
-  for (let index = 0; index < bytes.length; index++) {
-    value = (value << 8n) | BigInt(bytes[little ? bytes.length - 1 - index : index]);
+  if (bytes.length <= 8) {
+    for (let index = 0; index < bytes.length; index++) {
+      value = (value << 8n) | BigInt(bytes[little ? bytes.length - 1 - index : index]);
+    }
+  } else {
+    let hex = '0x';
+    for (let index = 0; index < bytes.length; index++) {
+      hex += BYTE_HEX[bytes[little ? bytes.length - 1 - index : index]];
+    }
+    value = BigInt(hex);
   }
-  const bits = BigInt(bytes.length * 8);
-  if (signed && bytes.length > 0 && value >= 1n << (bits - 1n)) value -= 1n << bits;
+  const signByte = bytes[little ? bytes.length - 1 : 0];
+  if (signed && (signByte & 0x80) !== 0) value -= 1n << BigInt(bytes.length * 8);
   return value;
 }
 

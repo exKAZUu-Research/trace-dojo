@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 718 -- The expression evaluator keeps one method per kind of expression together.
+// code-gauge-allow-file fileNcss 760 -- The expression evaluator keeps one method per kind of expression together.
+import { pushAll } from './arrays';
 import type {
   Argument,
   Comprehension,
-  Constant,
   Element,
   Expression,
   FormattedValue,
@@ -11,21 +11,21 @@ import type {
   ScopeInfo,
   Target,
 } from './ast';
-import { newBytes } from './bytesValues';
-import { newComplex } from './complexNumbers';
+import { functionStr, KeywordArguments, mappingEntries } from './callArguments';
+import { constantValue, foldConstants } from './constantFolding';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
 import { referencesOf } from './garbageCollection';
 import { programAttribute } from './namespaceDifferences';
 import { namespaceOf } from './namespaces';
 import {
-  bindValue,
   callValue,
   deleteAttribute,
   deleteItem,
   getItem,
   isTruthy,
   iterate,
+  iterateHeld,
   lengthOf,
   lookupSpecial,
   setAttribute,
@@ -35,12 +35,15 @@ import {
 import { binaryOp, compareOp, unaryOp } from './operators';
 import { markGeneratorExpression } from './reflection';
 import type { Runtime } from './runtime';
+import { currentRuntime, withoutCharge } from './runtimeContext';
+import { addToTable, updateTable } from './setOperations';
 import { templateLiteral } from './templateStrings';
 import { noteUnwinding, setFrameGenerator } from './tracebacks';
 import {
-  Ellipsis,
+  dictClass,
   functionClass,
   generatorClass,
+  listClass,
   newDict,
   newList,
   newSet,
@@ -48,6 +51,7 @@ import {
   None,
   pyError,
   sliceClass,
+  tupleClass,
   typeError,
   typeName,
 } from './types';
@@ -66,10 +70,15 @@ import {
   PyList,
   PyModule,
   PyObject,
+  type PySet,
   PySlice,
   PyTuple,
   type PyValue,
 } from './values';
+
+// CPython's compiler pushes at most this many elements of a display before building the collection.
+const MAX_STACKED_ELEMENTS = 30;
+const MIN_FOLDED_ELEMENTS = 3;
 
 /** Evaluates expressions in a frame, synchronously: only statements may suspend a generator. */
 export class ExpressionEvaluator {
@@ -145,7 +154,7 @@ export class ExpressionEvaluator {
         );
       }
       case 'lambda': {
-        return this.createFunction(expression.fn, frame, []);
+        return this.createFunction(expression.fn, frame);
       }
       case 'namedExpression': {
         const value = this.evaluateValue(expression.value, frame);
@@ -190,21 +199,61 @@ export class ExpressionEvaluator {
     return result;
   }
 
+  /** Evaluates the iterable of a `for` clause, which CPython compiles differently when it is a set display. */
+  protected evaluateIterable(expression: Expression, frame: Frame): PyValue {
+    return expression.kind === 'set'
+      ? this.setDisplay(expression.elements, frame, true)
+      : this.evaluate(expression, frame);
+  }
+
   private display(expression: Extract<Expression, { kind: 'list' | 'tuple' | 'set' }>, frame: Frame): PyValue {
-    const build = (): PyValue => {
-      const items = this.elements(expression.elements, frame);
-      const display = this.newDisplay(expression.kind, items);
-      const { locals } = this.runtime.finalizer;
-      if (locals.marking) locals.bornContainer(display, items);
-      return display;
-    };
-    return expression.kind === 'set' ? this.withTemporaries(frame, build) : build();
+    if (expression.kind === 'set') return this.setDisplay(expression.elements, frame, false);
+    const items = this.elements(expression.elements, frame);
+    const display = this.newDisplay(expression.kind, items);
+    const { locals } = this.runtime.finalizer;
+    if (locals.marking) locals.bornContainer(display, items);
+    return display;
   }
 
   protected newDisplay(kind: 'list' | 'tuple' | 'set', items: PyValue[]): PyValue {
-    this.runtime.allocate(items.length + 1);
     if (kind === 'set') return newSet(items);
     return kind === 'list' ? newList(items) : newTuple(items);
+  }
+
+  /**
+   * Builds a set in the steps CPython's bytecode takes, which decide the order of its elements: the elements before
+   * the first starred one are added together, as a folded frozenset merged into the set when they are three or more
+   * constants, and each later element is added as it is evaluated. A display of more than 30 elements adds one by
+   * one, and so does a display of constants that a `for` clause iterates, where the frozenset itself is iterated.
+   */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Follows the steps in which CPython's compiler builds a set display.
+  private setDisplay(elements: Element[], frame: Frame, iterated: boolean): PySet {
+    return this.withTemporaries(frame, () => {
+      const starIndex = elements.findIndex((element) => element.kind === 'starred');
+      const leadingCount = elements.length > MAX_STACKED_ELEMENTS ? 0 : starIndex === -1 ? elements.length : starIndex;
+      const leading = elements.slice(0, leadingCount) as Expression[];
+      const isFolded = leadingCount >= MIN_FOLDED_ELEMENTS && !(iterated && starIndex === -1);
+      const constants = isFolded ? foldConstants(leading) : undefined;
+      const set = newSet();
+      if (constants) {
+        updateTable(
+          set.table,
+          withoutCharge(() => newSet(constants, true))
+        );
+      } else {
+        const items = this.elements(leading, frame);
+        pushAll(frame.temporaries, items);
+        for (const item of items) addToTable(set.table, item);
+      }
+      frame.temporaries.push(set);
+      for (const element of elements.slice(leadingCount)) {
+        if (element.kind === 'starred') updateTable(set.table, this.evaluate(element.value, frame));
+        else addToTable(set.table, this.evaluate(element, frame));
+      }
+      const { locals } = this.runtime.finalizer;
+      if (locals.marking) locals.bornContainer(set, referencesOf(set) as PyValue[]);
+      return set;
+    });
   }
 
   protected slice(expression: Extract<Expression, { kind: 'slice' }>, frame: Frame): PyValue {
@@ -295,6 +344,7 @@ export class ExpressionEvaluator {
     if (state) {
       state.name = name;
       state.candidates = [
+        ...inlinedNames(frame),
         ...frame.locals.keys(),
         ...[...frame.cells.entries()].filter(([, cell]) => cell.value !== undefined).map(([key]) => key),
         ...(frame.globals === frame.locals ? [] : frame.globals.keys()),
@@ -450,14 +500,14 @@ export class ExpressionEvaluator {
       if (item === DONE) throw notEnough(index);
       items.push(item);
     }
-    const rest: PyValue[] = [];
+    const starred = newList([]);
     for (let item = next(); item !== DONE; item = next()) {
-      this.runtime.allocate(1);
-      rest.push(item);
+      starred.append(item);
     }
-    if (rest.length < after) throw notEnough(before + rest.length);
-    this.runtime.allocate(1);
-    return [...items, newList(rest.slice(0, rest.length - after)), ...rest.slice(rest.length - after)];
+    if (starred.items.length < after) throw notEnough(before + starred.items.length);
+    const tail: PyValue[] = [];
+    for (let index = 0; index < after; index++) tail.unshift(starred.editableItems.pop() as PyValue);
+    return [...items, starred, ...tail];
   }
 
   deleteTarget(target: Target, frame: Frame): void {
@@ -537,7 +587,6 @@ export class ExpressionEvaluator {
     return items;
   }
 
-  // code-gauge-allow duplicateLines 15 -- The suspending evaluator mirrors this step by step, sharing how it combines the values.
   private dictDisplay(expression: Extract<Expression, { kind: 'dict' }>, frame: Frame): PyValue {
     return this.withTemporaries(frame, () => {
       const dict = newDict();
@@ -552,7 +601,6 @@ export class ExpressionEvaluator {
         const value = this.evaluateValue(item.value, frame);
         dict.store.set(key, value);
       }
-      this.runtime.allocate(dict.store.size + 1);
       const { locals } = this.runtime.finalizer;
       if (locals.marking) locals.bornContainer(dict, referencesOf(dict) as PyValue[]);
       return dict;
@@ -650,24 +698,50 @@ export class ExpressionEvaluator {
 
   /**
    * Evaluates call arguments, holding each for garbage collection until the call returns. `leading` counts the
-   * positional arguments the call passes before these, as a class statement passes its body and name.
+   * positional arguments the call passes before these, as a class statement passes its body and name. As CPython
+   * compiles a call whose only positional argument is starred to CALL_FUNCTION_EX, which converts that iterable after
+   * evaluating the keywords and names the callee if it fails, such an argument is read last; any other starred
+   * argument is read in order, as a list display reads it.
    */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows CPython's argument evaluation and CALL_FUNCTION_EX unpacking order.
+  // code-gauge-allow functionNcss 31 -- Follows CPython's argument evaluation and CALL_FUNCTION_EX unpacking order.
   arguments(argumentList: Argument[], frame: Frame, callee: PyValue, leading = 0): CallArguments {
-    const collected: CallArguments = { args: [], kwargs: undefined };
+    const positionals = argumentList.filter((argument) => argument.kind === 'positional' || argument.kind === 'star');
+    const soleStar = leading + positionals.length === 1 && positionals[0].kind === 'star' ? positionals[0] : undefined;
+    const args: PyValue[] = [];
+    const keywords = new KeywordArguments(callee);
     const { locals } = this.runtime.finalizer;
     // Arguments that only a Python function's frame or a local container keeps stay local; spread ones are copied.
     const keeps = locals.marking && locals.keepsArgumentsLocal(callee);
+    let deferred: PyValue | undefined;
     for (const argument of argumentList) {
+      if (argument === soleStar) {
+        deferred = this.evaluate(argument.value, frame);
+        frame.temporaries.push(deferred);
+        continue;
+      }
       const local = keeps && (argument.kind === 'positional' || argument.kind === 'keyword');
       const value = local ? this.evaluateValue(argument.value, frame) : this.evaluate(argument.value, frame);
-      if (argument.kind === 'positional') {
-        collected.args.push(value);
-        frame.temporaries.push(value);
-      } else {
-        addArgument(collected, argument, value, { callee, argumentList, leading }, frame);
-      }
+      frame.temporaries.push(value);
+      if (argument.kind === 'positional') args.push(value);
+      else if (argument.kind === 'star') this.pushAll(frame, args, starredItems(value));
+      else if (argument.kind === 'keyword') keywords.add(argument.name, value);
+      else keywords.merge(value, frame);
     }
-    return collected;
+    if (deferred !== undefined) {
+      if (!isIterable(deferred)) {
+        throw typeError(`${functionStr(callee)} argument after * must be an iterable, not ${typeName(deferred)}`);
+      }
+      this.pushAll(frame, args, toArray(deferred));
+    }
+    return { args, kwargs: keywords.finish() };
+  }
+
+  private pushAll(frame: Frame, args: PyValue[], items: PyValue[]): void {
+    for (const item of items) {
+      args.push(item);
+      frame.temporaries.push(item);
+    }
   }
 
   private compare(expression: Extract<Expression, { kind: 'compare' }>, frame: Frame): PyValue {
@@ -686,49 +760,61 @@ export class ExpressionEvaluator {
 
   /**
    * Creates a function object, evaluating its defaults in the defining frame unless `defaultValues` gives the values of
-   * the parameters' defaults in order.
+   * the parameters' defaults in order, and holding evaluated defaults as temporaries until the function exists.
    */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Sets each attribute a new function object carries.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Sets each attribute a new function object carries.
+  // code-gauge-allow functionNcss 33 -- Sets each attribute a new function object carries.
   createFunction(
     def: FunctionDef,
     frame: Frame,
-    decorators: PyValue[],
-    defaultValues: PyValue[] = def.params.flatMap((param) =>
-      param.default ? [this.evaluate(param.default, frame)] : []
-    ),
+    decorators: PyValue[] = [],
+    defaultValues?: PyValue[],
     typeParams?: PyValue[]
   ): PyValue {
-    const defaults: PyValue[] = [];
-    const keywordDefaults = new Map<string, PyValue>();
-    let index = 0;
-    for (const param of def.params) {
-      if (!param.default) continue;
-      const value = defaultValues[index++];
-      if (param.kind === 'keywordOnly') keywordDefaults.set(param.name, value);
-      else defaults.push(value);
-    }
-    const closure = new Map<string, PyCell>();
-    for (const name of def.scope.frees) {
-      let cell = frame.cells.get(name);
-      if (!cell) {
-        cell = new PyCell();
-        frame.cells.set(name, cell);
+    return this.withTemporaries(frame, () => {
+      const resolvedDefaults =
+        defaultValues ??
+        def.params.flatMap((param) => {
+          if (!param.default) return [];
+          const value = this.evaluate(param.default, frame);
+          frame.temporaries.push(value);
+          return [value];
+        });
+      const defaults: PyValue[] = [];
+      const keywordDefaults = new Map<string, PyValue>();
+      let index = 0;
+      for (const param of def.params) {
+        if (!param.default) continue;
+        const value = resolvedDefaults[index++];
+        if (param.kind === 'keywordOnly') keywordDefaults.set(param.name, value);
+        else defaults.push(value);
       }
-      closure.set(name, cell);
-    }
-    const fn = new PyFunction(
-      functionClass,
-      def,
-      frame.globals,
-      closure,
-      defaults,
-      keywordDefaults,
-      def.usesClassCell ? frame.classCell : undefined
-    );
-    fn.module = frame.globals.get('__name__') ?? None;
-    if (typeParams) fn.typeParams = typeParams;
-    if (def.returns || def.params.some((param) => param.annotation)) fn.annotationFrame = frame;
-    this.runtime.allocate(2);
+      const closure = new Map<string, PyCell>();
+      for (const name of def.scope.frees) {
+        let cell = frame.cells.get(name);
+        if (!cell) {
+          cell = new PyCell();
+          frame.cells.set(name, cell);
+        }
+        closure.set(name, cell);
+      }
+      const fn = new PyFunction(
+        functionClass,
+        def,
+        frame.globals,
+        closure,
+        defaults,
+        keywordDefaults,
+        def.usesClassCell ? frame.classCell : undefined
+      );
+      fn.module = frame.globals.get('__name__') ?? None;
+      if (typeParams) fn.typeParams = typeParams;
+      if (def.returns || def.params.some((param) => param.annotation)) fn.annotationFrame = frame;
+      return this.decorate(fn, decorators);
+    });
+  }
+
+  private decorate(fn: PyFunction, decorators: PyValue[]): PyValue {
     let result: PyValue = fn;
     for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
     return result;
@@ -736,26 +822,25 @@ export class ExpressionEvaluator {
 
   // Comprehensions --------------------------------------------------------------------------------------------------
 
-  /** Runs a comprehension, whose first iterable `first` the enclosing frame evaluated. */
-  // code-gauge-allow functionNcss 45 -- Follows how CPython runs each kind of comprehension in its own scope.
-  // code-gauge-allow functionCognitiveComplexity 24 -- Follows how CPython runs each kind of comprehension in its own scope.
+  /** Runs a comprehension, whose first iterable `firstIterable` the enclosing frame evaluated when passed. */
+  // code-gauge-allow functionNcss 48 -- Follows how CPython runs each kind of comprehension in its own scope.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Follows how CPython runs each kind of comprehension in its own scope.
   protected comprehension(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
-    // A generator expression keeps its first iterable; the other comprehensions only read it.
-    first = expression.type === 'generator'
-      ? this.evaluate(expression.generators[0].iterable, frame)
-      : this.evaluateValue(expression.generators[0].iterable, frame)
+    firstIterable?: PyValue
   ): PyValue {
     const { runtime } = this;
-    const inner = this.comprehensionFrame(expression, frame);
+    const iterable = firstIterable ?? this.evaluateIterable(expression.generators[0].iterable, frame);
+    const { next, held: first } = iterateHeld(iterable);
+    const inner = this.comprehensionFrame(expression, frame, first);
     if (expression.type === 'generator') {
-      markGeneratorExpression(inner, first);
-      const body = this.generatorItems(expression, inner, first);
+      markGeneratorExpression(inner, first, first !== iterable ? first : undefined);
+      const body = this.generatorItems(expression, inner, first, next);
       const generator = new PyGenerator(
         generatorClass,
         '<genexpr>',
-        '<genexpr>',
+        expression.qualifiedName ?? '<genexpr>',
         (input) => {
           runtime.pushFrame(inner);
           try {
@@ -769,16 +854,15 @@ export class ExpressionEvaluator {
             if (runtime.finalizer.locals.marking) runtime.finalizer.locals.escapeFrame(inner);
           }
         },
-        () => [first, ...inner.locals.values(), ...inner.temporaries]
+        () => [iterable, first, ...inner.locals.values(), ...inner.cells.values(), ...inner.temporaries]
       );
       generator.frame = inner;
       setFrameGenerator(inner, generator);
       return generator;
     }
-    const next = iterate(first);
     runtime.pushFrame(inner);
     try {
-      inner.temporaries.push(first);
+      inner.temporaries.push(iterable, first);
       const { locals } = runtime.finalizer;
       if (expression.type === 'dict') {
         const dict = newDict();
@@ -788,16 +872,13 @@ export class ExpressionEvaluator {
         if (locals.marking) locals.bornContainer(dict, referencesOf(dict) as PyValue[]);
         return dict;
       }
-      const items: PyValue[] = [];
-      const container = expression.type === 'list' ? newList(items) : newSet();
+      const container = expression.type === 'list' ? newList([]) : newSet();
       inner.temporaries.push(container);
       for (const item of this.comprehensionItems(expression, inner, next)) {
-        runtime.allocate(1);
-        if (container instanceof PyList) items.push(item);
+        if (container instanceof PyList) container.append(item);
         else container.table.add(item);
       }
-      if (locals.marking)
-        locals.bornContainer(container, items.length > 0 ? items : (referencesOf(container) as PyValue[]));
+      if (locals.marking) locals.bornContainer(container, referencesOf(container) as PyValue[]);
       return container;
     } finally {
       runtime.popFrame();
@@ -808,13 +889,21 @@ export class ExpressionEvaluator {
   protected generatorItems(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     inner: Frame,
-    first: PyValue
+    _first: PyValue,
+    firstNext: () => PyValue | typeof DONE
   ): Generator<PyValue, PyValue> {
-    return this.comprehensionItems(expression, inner, iterate(first));
+    return this.comprehensionItems(expression, inner, firstNext);
   }
 
-  protected comprehensionFrame(expression: Extract<Expression, { kind: 'comprehension' }>, frame: Frame): Frame {
-    return this.nestedFrame('comprehension', expression.scope, frame);
+  protected comprehensionFrame(
+    expression: Extract<Expression, { kind: 'comprehension' }>,
+    frame: Frame,
+    firstIterator?: PyValue
+  ): Frame {
+    const inner = this.nestedFrame('comprehension', expression.scope, frame);
+    if (expression.type === 'generator') inner.firstArgument = firstIterator;
+    else inner.inlinedIn = frame;
+    return inner;
   }
 
   /** The frame of a scope nested in `frame`'s, which captures the variables of `frame` it reads. */
@@ -853,11 +942,12 @@ export class ExpressionEvaluator {
         this.assign(generator.target, item, frame);
         if (!generator.conditions.every((condition) => isTruthy(this.evaluate(condition, frame)))) continue;
         if (index + 1 < generators.length) {
-          const iterable = this.evaluate(generators[index + 1].iterable, frame);
+          const iterable = this.evaluateIterable(generators[index + 1].iterable, frame);
           const length = frame.temporaries.length;
-          frame.temporaries.push(iterable);
+          const { next: innerNext, held } = iterateHeld(iterable);
+          frame.temporaries.push(iterable, held);
           try {
-            yield* level.call(this, index + 1, iterate(iterable));
+            yield* level.call(this, index + 1, innerNext);
           } finally {
             frame.temporaries.length = length;
           }
@@ -880,29 +970,6 @@ export class ExpressionEvaluator {
     };
     yield* level.call(this, 0, firstNext);
     return None;
-  }
-}
-
-function constantValue(constant: Constant): PyValue {
-  switch (constant.kind) {
-    case 'int':
-    case 'float':
-    case 'str':
-    case 'bool': {
-      return constant.value;
-    }
-    case 'none': {
-      return None;
-    }
-    case 'ellipsis': {
-      return Ellipsis;
-    }
-    case 'imaginary': {
-      return newComplex(0, constant.value);
-    }
-    case 'bytes': {
-      return newBytes(constant.value);
-    }
   }
 }
 
@@ -981,7 +1048,7 @@ export function addArgument(
     case 'keyword': {
       const kwargs = (collected.kwargs ??= new Map());
       if (kwargs.has(argument.name)) {
-        throw typeError(`${calleeName(callee)} got multiple values for keyword argument '${argument.name}'`);
+        throw typeError(`${functionStr(callee)} got multiple values for keyword argument '${argument.name}'`);
       }
       kwargs.set(argument.name, value);
       frame.temporaries.push(value);
@@ -989,12 +1056,13 @@ export function addArgument(
     }
     case 'doubleStar': {
       if (lookupSpecial(value, 'keys') === undefined) {
-        throw typeError(`${calleeName(callee)} argument after ** must be a mapping, not ${typeName(value)}`);
+        throw typeError(`${functionStr(callee)} argument after ** must be a mapping, not ${typeName(value)}`);
       }
       const kwargs = (collected.kwargs ??= new Map());
       for (const [key, item] of mappingEntries(value)) {
         if (typeof key !== 'string') throw typeError('keywords must be strings');
-        if (kwargs.has(key)) throw typeError(`${calleeName(callee)} got multiple values for keyword argument '${key}'`);
+        if (kwargs.has(key))
+          throw typeError(`${functionStr(callee)} got multiple values for keyword argument '${key}'`);
         kwargs.set(key, item);
         frame.temporaries.push(item);
       }
@@ -1040,71 +1108,67 @@ function classCellOf(name: string, frame: Frame): PyValue | undefined {
  */
 function notIterableError(argumentList: Argument[], callee: PyValue, leading: number, iterable: PyValue): Error {
   const positional = argumentList.filter((each) => each.kind === 'positional' || each.kind === 'star').length;
-  const subject = leading + positional === 1 ? `${calleeName(callee)} argument` : 'Value';
+  const subject = leading + positional === 1 ? `${functionStr(callee)} argument` : 'Value';
   return typeError(`${subject} after * must be an iterable, not ${typeName(iterable)}`);
 }
-
-function calleeName(callee: PyValue): string {
-  if (callee instanceof PyFunction) return `${callee.qualifiedName}()`;
-  if (callee instanceof PyClass) return `${callee.qualifiedName}()`;
-  if (callee instanceof PyInstance || callee instanceof PyTuple) return `${typeName(callee)} object`;
-  const name = (callee as { qualifiedName?: string }).qualifiedName;
-  return name ? `${name}()` : `${typeName(callee)} object`;
-}
-
 function isIterable(value: PyValue): boolean {
   if (typeof value === 'string' || value instanceof PyList || value instanceof PyTuple || value instanceof PyDict)
     return true;
   return lookupSpecial(value, '__iter__') !== undefined || lookupSpecial(value, '__getitem__') !== undefined;
 }
 
+/** The items of a starred value that is read as a list display reads it. */
 function starredItems(value: PyValue): PyValue[] {
   if (!isIterable(value)) throw typeError(`Value after * must be an iterable, not ${typeName(value)}`);
   return toArray(value);
 }
 
-/** The key-value pairs of a mapping, read through `keys()` and indexing for mappings that are not dicts. */
-export function mappingEntries(mapping: PyValue): [PyValue, PyValue][] {
-  if (mapping instanceof PyDict) return mapping.store.ordered().map((entry) => [entry.key, entry.value]);
-  const keys = lookupSpecial(mapping, 'keys');
-  if (keys === undefined) throw typeError(`'${typeName(mapping)}' object is not a mapping`);
-  return toArray(callValue(bindValue(keys, mapping), [])).map((key) => [key, getItem(mapping, key)]);
+/** The names of the frames an inlined comprehension runs within, which CPython's frame for it holds as its own. */
+function inlinedNames(frame: Frame): string[] {
+  const names: string[] = [];
+  for (let outer = frame.inlinedIn; outer; outer = outer.inlinedIn) names.unshift(...outer.locals.keys());
+  return names;
 }
 
-/** The items a target list unpacks a value into, raising the errors CPython raises for a count mismatch. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Matches CPython's messages for each way unpacking fails.
+/**
+ * The items a target list unpacks a value into, raising the errors CPython raises for a count mismatch: it reports how
+ * many values there were only for an exact list, tuple, or dict, and asks no other iterable for its length.
+ */
 export function unpack(value: PyValue, count: number): PyValue[] {
-  if (value instanceof PyList || value instanceof PyTuple || typeof value === 'string') {
-    const items = value instanceof PyList || value instanceof PyTuple ? value.items : toArray(value);
-    if (items.length > count)
-      throw pyError('ValueError', `too many values to unpack (expected ${count}, got ${items.length})`);
-    if (items.length < count) {
-      throw pyError('ValueError', `not enough values to unpack (expected ${count}, got ${items.length})`);
-    }
+  if ((value instanceof PyList && value.cls === listClass) || (value instanceof PyTuple && value.cls === tupleClass)) {
+    const { items } = value;
+    if (items.length > count) throw tooManyValues(count, items.length);
+    if (items.length < count) throw notEnoughValues(count, items.length);
     return [...items];
   }
   if (!isIterable(value)) throw typeError(`cannot unpack non-iterable ${typeName(value)} object`);
+  // The items taken so far are only here while the iterator runs Python code.
+  return currentRuntime().runNative(() => unpackIterated(value, count));
+}
+
+function unpackIterated(value: PyValue, count: number): PyValue[] {
   const next = iterate(value);
   const items: PyValue[] = [];
   for (let index = 0; index < count; index++) {
     const item = next();
-    if (item === DONE)
-      throw pyError('ValueError', `not enough values to unpack (expected ${count}, got ${items.length})`);
+    if (item === DONE) throw notEnoughValues(count, items.length);
     items.push(item);
   }
   if (next() !== DONE) {
-    let length: number | undefined;
-    try {
-      length = lengthOf(value);
-    } catch {
-      length = undefined;
-    }
-    throw pyError(
-      'ValueError',
-      `too many values to unpack (expected ${count}${length === undefined ? '' : `, got ${length}`})`
-    );
+    throw tooManyValues(count, value instanceof PyDict && value.cls === dictClass ? lengthOf(value) : undefined);
   }
   return items;
+}
+
+function tooManyValues(expected: number, actual: number | undefined): PyError {
+  return pyError(
+    'ValueError',
+    `too many values to unpack (expected ${expected}${actual === undefined ? '' : `, got ${actual}`})`
+  );
+}
+
+function notEnoughValues(expected: number, actual: number): PyError {
+  return pyError('ValueError', `not enough values to unpack (expected ${expected}, got ${actual})`);
 }
 
 export { PyError };

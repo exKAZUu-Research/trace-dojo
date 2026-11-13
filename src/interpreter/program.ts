@@ -10,11 +10,12 @@ import { executePythonProgram } from '../python/run';
 import { tracePythonProgram } from '../python/trace';
 import type { SourceDiagnostic } from './diagnostics';
 import type { ExecutionLimitError } from './limits';
+import type { ProgramInput, ProgramOutput } from './programIo';
 import { atomicAnnotationsOf, removeAnnotations, type TraceAnnotation, type TraceOptions } from './traceAnnotations';
 
 export type ProgrammingLanguage = keyof typeof interpreters;
 
-export interface ProgramRun {
+export interface ProgramRun extends ProgramOutput {
   finalBoard: string;
   /** The turtles that the program's variables still reach when it ends. */
   finalTurtles: TurtleTrace[];
@@ -35,7 +36,7 @@ export interface ProgramRecording extends ProgramRun {
 }
 
 export interface ProgramTrace extends ProgramRecording {
-  /** The program without its `// atomic` annotations, whose rows match the lines that trace items refer to. */
+  /** The program without its atomic annotations (`// atomic`, or `# atomic` in Python), whose rows match the lines that trace items refer to. */
   displayProgram: string;
 }
 
@@ -43,9 +44,9 @@ interface Interpreter {
   /** Finds the annotations in line comments, skipping look-alikes in literals and other comments. */
   findTraceAnnotations: (source: string) => TraceAnnotation[];
   /** Runs a model program, recording its steps outside the methods its annotations mark atomic. */
-  record: (program: string, trace: TraceOptions) => ProgramRecording;
+  record: (program: string, trace: TraceOptions, input?: ProgramInput) => ProgramRecording;
   /** Compiles and runs a learner's program, reporting how it ended. */
-  execute: (source: string) => ProgramExecution;
+  execute: (source: string, input?: ProgramInput) => ProgramExecution;
 }
 
 const interpreters = {
@@ -63,23 +64,30 @@ const interpreters = {
 } satisfies Record<string, Interpreter>;
 
 /**
- * Runs a model program and records its steps outside the methods marked `// atomic`.
+ * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python).
  *
  * @param program The program to run, with every blank filled in.
  * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.
  */
-export function traceProgram(language: ProgrammingLanguage, program: string, displayProgram: string): ProgramTrace {
+export function traceProgram(
+  language: ProgrammingLanguage,
+  program: string,
+  displayProgram: string,
+  input?: ProgramInput
+): ProgramTrace {
   const interpreter: Interpreter = interpreters[language];
   return {
-    ...interpreter.record(program, {
-      atomicAnnotations: atomicAnnotationsOf(program, interpreter.findTraceAnnotations(program)),
-    }),
+    ...interpreter.record(
+      program,
+      { atomicAnnotations: atomicAnnotationsOf(program, interpreter.findTraceAnnotations(program)) },
+      input
+    ),
     displayProgram: removeAnnotations(displayProgram, interpreter.findTraceAnnotations(displayProgram)),
   };
 }
 
 /** Compiles and runs a learner's program, reporting how it ended. */
-export function executeProgram(language: ProgrammingLanguage, source: string): ProgramExecution {
+export function executeProgram(language: ProgrammingLanguage, source: string, input?: ProgramInput): ProgramExecution {
   const interpreter: Interpreter = interpreters[language];
-  return interpreter.execute(source);
+  return interpreter.execute(source, input);
 }

@@ -1,0 +1,262 @@
+import type { TextReader } from '../interpreter/programIo';
+import {
+  BUFFER_SIZE,
+  classOf,
+  classType,
+  defineIOInterface,
+  filePathOf,
+  type IOContext,
+  openFileReader,
+  ReadAheadSource,
+  readSourceOf,
+  readSources,
+  STANDARD_INPUT,
+  TextSource,
+  throwsIO,
+} from './builtinIoSupport';
+import { createStream } from './builtinStreamSupport';
+import { addConstructor, addMethod, newString } from './builtinSupport';
+import { type Frame, JavaThrow, throwBuiltin } from './runtime';
+import { BOOLEAN, CHAR, type ClassInfo, INT, isSubclass, type JavaType, LONG, VOID } from './types';
+import { charCodeOf, JavaArray, type JavaObject, JavaString, type Value } from './values';
+
+const CHAR_ARRAY: JavaType = { kind: 'array', element: CHAR };
+
+/** `System.in`, `FileInputStream`, and the readers of `java.io`, which read standard input and files. */
+export function defineReaders(context: IOContext, closeable: ClassInfo): void {
+  const inputStream = classOf(context, 'InputStream');
+  inputStream.interfaces.push(closeable);
+  inputStream.supertypes.push(classType(closeable));
+  readSources.set(context.systemIn, STANDARD_INPUT);
+  defineInputStream(context, inputStream);
+  const reader = context.registry.define('Reader', context.objectClass, 'java.io');
+  reader.isAbstract = true;
+  for (const parent of [defineIOInterface(context, 'Readable', 'java.lang'), closeable]) {
+    reader.interfaces.push(parent);
+    reader.supertypes.push(classType(parent));
+  }
+  defineReaderMethods(context, reader);
+  const inputStreamReader = context.registry.define('InputStreamReader', reader, 'java.io');
+  addConstructor(inputStreamReader, [inputStream.type], (frame, receiver, [stream]) => {
+    readSources.set(receiver as JavaObject, new ReadAheadSource(frame, readSourceOf(frame, stream)));
+  });
+  const fileReader = context.registry.define('FileReader', inputStreamReader, 'java.io');
+  const notFound = { takesAppend: false, thrown: classOf(context, 'FileNotFoundException') };
+  defineFileOpeners(context, fileReader, notFound, (frame, receiver, path) => {
+    readSources.set(receiver as JavaObject, new ReadAheadSource(frame, new TextSource(openFileReader(frame, path))));
+  });
+  defineStringReader(context, reader);
+  defineBufferedReader(context, reader);
+}
+
+/**
+ * Adds the constructors of a class that opens a file by its name or its `File`, and with `takesAppend` also whether
+ * to append to it.
+ */
+export function defineFileOpeners(
+  context: IOContext,
+  cls: ClassInfo,
+  options: { takesAppend: boolean; thrown: ClassInfo },
+  open: (frame: Frame, receiver: Value, path: string, append: boolean) => void
+): void {
+  for (const pathType of [context.stringType, classOf(context, 'File').type]) {
+    for (const parameterTypes of options.takesAppend ? [[pathType], [pathType, BOOLEAN]] : [[pathType]]) {
+      const constructor = addConstructor(cls, parameterTypes, (frame, receiver, [path, append]) => {
+        open(frame, receiver, filePathOf(frame, path), append === true);
+      });
+      constructor.thrownTypes = [options.thrown];
+    }
+  }
+}
+
+function defineInputStream(context: IOContext, inputStream: ClassInfo): void {
+  throwsIO(
+    context,
+    addMethod(inputStream, 'read', [], INT, false, (frame, receiver) =>
+      readByte(readSourceOf(frame, receiver).reader(frame))
+    )
+  );
+  throwsIO(
+    context,
+    addMethod(inputStream, 'close', [], VOID, false, (frame, receiver) => {
+      readSourceOf(frame, receiver).close(frame);
+    })
+  );
+  const fileInputStream = context.registry.define('FileInputStream', inputStream, 'java.io');
+  const notFound = { takesAppend: false, thrown: classOf(context, 'FileNotFoundException') };
+  defineFileOpeners(context, fileInputStream, notFound, (frame, receiver, path) => {
+    readSources.set(receiver as JavaObject, new TextSource(openFileReader(frame, path)));
+  });
+}
+
+/** The UTF-8 bytes of a code point that a byte read has begun and not yet returned. */
+const pendingBytes = new WeakMap<TextReader, number[]>();
+
+const encoder = new TextEncoder();
+
+/** Reads the next byte of the text's UTF-8 encoding, or -1 at its end. */
+function readByte(reader: TextReader): number {
+  let pending = pendingBytes.get(reader);
+  if (!pending || pending.length === 0) {
+    const unit = reader.read();
+    if (unit === undefined) return -1;
+    const next = reader.text[reader.position];
+    const isPair = /[\uD800-\uDBFF]/.test(unit) && next !== undefined && /[\uDC00-\uDFFF]/.test(next);
+    if (isPair) reader.position++;
+    pending = [...encoder.encode(isPair ? `${unit}${next}` : unit.replace(/\p{Cs}/u, '?'))];
+    pendingBytes.set(reader, pending);
+  }
+  return pending.shift() as number;
+}
+
+function defineReaderMethods(context: IOContext, reader: ClassInfo): void {
+  throwsIO(
+    context,
+    addMethod(reader, 'read', [], INT, false, (frame, receiver) => readChar(textOf(frame, receiver)))
+  );
+  throwsIO(
+    context,
+    addMethod(reader, 'read', [CHAR_ARRAY], INT, false, (frame, receiver, [array]) =>
+      readInto(frame, receiver, array, 0, array instanceof JavaArray ? array.values.length : 0)
+    )
+  );
+  throwsIO(
+    context,
+    addMethod(reader, 'read', [CHAR_ARRAY, INT, INT], INT, false, (frame, receiver, [array, offset, length]) =>
+      readInto(frame, receiver, array, offset as number, length as number)
+    )
+  );
+  throwsIO(
+    context,
+    addMethod(reader, 'ready', [], BOOLEAN, false, (frame, receiver) => readSourceOf(frame, receiver).isReady(frame))
+  );
+  throwsIO(
+    context,
+    addMethod(reader, 'skip', [LONG], LONG, false, (frame, receiver, [count]) => {
+      if ((count as bigint) < 0n) throwBuiltin(frame, 'IllegalArgumentException', 'skip value is negative');
+      const text = textOf(frame, receiver);
+      let skipped = 0;
+      // A buffered reader refills as it skips past what it holds.
+      while (skipped < Number(count as bigint) && !text.isAtEnd) {
+        const step = Math.min(Number(count as bigint) - skipped, text.text.length - text.position);
+        text.position += step;
+        skipped += step;
+      }
+      frame.runtime.scanString(skipped);
+      return BigInt(skipped);
+    })
+  );
+  throwsIO(
+    context,
+    addMethod(reader, 'close', [], VOID, false, (frame, receiver) => {
+      readSourceOf(frame, receiver).close(frame);
+    })
+  );
+}
+
+/** Reads the next UTF-16 code unit as a `char`, or -1 at the end. */
+function readChar(reader: TextReader): number {
+  const unit = reader.read();
+  return unit === undefined ? -1 : charCodeOf(unit, 0);
+}
+
+function textOf(frame: Frame, receiver: Value): TextReader {
+  return readSourceOf(frame, receiver).reader(frame);
+}
+
+/** Reads up to `length` chars into the array from `offset`, returning how many it read, or -1 at the end. */
+function readInto(frame: Frame, receiver: Value, array: Value, offset: number, length: number): number {
+  if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
+  if (offset < 0 || length < 0 || offset + length > array.values.length) {
+    throwBuiltin(frame, 'IndexOutOfBoundsException');
+  }
+  const text = textOf(frame, receiver);
+  if (length === 0) return 0;
+  if (text.isAtEnd) return -1;
+  // A read waits for some input, then takes more only while more is ready, as Java's readers do, so that it reads a
+  // file to the array's length but a console only to the end of the line entered.
+  const source = readSourceOf(frame, receiver);
+  let count = 0;
+  do {
+    const step = Math.min(length - count, text.text.length - text.position);
+    for (let index = 0; index < step; index++) array.values[offset + count + index] = readChar(text);
+    count += step;
+  } while (count < length && source.isReady(frame) && !text.isAtEnd);
+  return count;
+}
+
+function defineStringReader(context: IOContext, reader: ClassInfo): void {
+  const stringReader = context.registry.define('StringReader', reader, 'java.io');
+  addConstructor(stringReader, [context.stringType], (frame, receiver, [text]) => {
+    if (!(text instanceof JavaString)) throwBuiltin(frame, 'NullPointerException');
+    readSources.set(receiver as JavaObject, new TextSource(frame.runtime.io.textReader(text.value), true));
+  });
+  // StringReader skips backward for a negative count, within the text, and skips nothing at its end.
+  throwsIO(
+    context,
+    addMethod(stringReader, 'skip', [LONG], LONG, false, (frame, receiver, [count]) => {
+      const text = textOf(frame, receiver);
+      if (text.isAtEnd) return 0n;
+      const skipped = Math.max(Math.min(Number(count as bigint), text.text.length - text.position), -text.position);
+      text.position += skipped;
+      frame.runtime.scanString(Math.abs(skipped));
+      return BigInt(skipped);
+    })
+  );
+  // StringReader's close throws no IOException, though its reads still declare one.
+  addMethod(stringReader, 'close', [], VOID, false, (frame, receiver) => {
+    readSourceOf(frame, receiver).close(frame);
+  });
+}
+
+function defineBufferedReader(context: IOContext, reader: ClassInfo): void {
+  const bufferedReader = context.registry.define('BufferedReader', reader, 'java.io');
+  for (const parameterTypes of [[reader.type], [reader.type, INT]]) {
+    addConstructor(bufferedReader, parameterTypes, (frame, receiver, [inner, size]) => {
+      if (size !== undefined && (size as number) <= 0)
+        throwBuiltin(frame, 'IllegalArgumentException', 'Buffer size <= 0');
+      const source = new ReadAheadSource(
+        frame,
+        readSourceOf(frame, inner),
+        (size as number | undefined) ?? BUFFER_SIZE
+      );
+      readSources.set(receiver as JavaObject, source);
+    });
+  }
+  throwsIO(
+    context,
+    addMethod(bufferedReader, 'readLine', [], context.stringType, false, (frame, receiver) => {
+      const line = readSourceOf(frame, receiver).reader(frame).readLine();
+      return line === undefined ? undefined : newString(frame, line);
+    })
+  );
+  const { stream, streamImpl } = context;
+  addMethod(bufferedReader, 'lines', [], classType(stream, context.stringType), false, (frame, receiver) =>
+    createStream(
+      frame,
+      streamImpl,
+      function* () {
+        for (
+          let line = readLineUnchecked(frame, receiver);
+          line !== undefined;
+          line = readLineUnchecked(frame, receiver)
+        ) {
+          yield newString(frame, line);
+        }
+      },
+      [receiver]
+    )
+  );
+}
+
+/** Reads a line for a stream of lines, which wraps an `IOException` in an `UncheckedIOException`, as Java's does. */
+function readLineUnchecked(frame: Frame, receiver: Value): string | undefined {
+  try {
+    return readSourceOf(frame, receiver).reader(frame).readLine();
+  } catch (error) {
+    const ioException = frame.runtime.builtins.classes.get('IOException') as ClassInfo;
+    if (!(error instanceof JavaThrow) || !isSubclass(error.value.cls, ioException)) throw error;
+    const message = frame.runtime.invokeToString(frame, error.value)?.value;
+    return throwBuiltin(frame, 'UncheckedIOException', message, error.value);
+  }
+}

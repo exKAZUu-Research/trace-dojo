@@ -2,6 +2,7 @@ import { annotationClosure, classAnnotationLists, implicitlyWrapped, newAnnotate
 import type { ClassDef } from './ast';
 import { defineAttribute, PyAttribute } from './attributeDescriptors';
 import { INSTANCE_ATTRIBUTE_DOCS } from './builtinDocs';
+import { pyRepr } from './conversions';
 import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
 import type { CallArguments } from './expressionEvaluator';
@@ -76,57 +77,76 @@ export const classDefinitions = new WeakMap<PyClass, ClassDef>();
 // The class statement -----------------------------------------------------------------------------------------------
 
 /** Runs a class statement: evaluates the bases, runs the body in a namespace, and calls the metaclass. */
-// code-gauge-allow functionNcss 36 -- Follows how a class statement prepares its namespace and calls its metaclass.
+// code-gauge-allow functionNcss 44 -- Follows how a class statement prepares its namespace and calls its metaclass.
 export function createClass(
   evaluator: Evaluator,
   def: ClassDef,
   frame: Frame,
-  decorators: PyValue[] = def.decorators.map((decorator) => evaluator.evaluate(decorator, frame)),
+  decorators?: PyValue[],
   evaluated?: CallArguments
 ): PyValue {
-  const { args: originalBases, kwargs } = evaluated ?? evaluator.arguments(def.bases, frame, buildClass, 2);
-  const bases = resolveBases(originalBases, def.name);
-  const keywords = new Map(kwargs);
-  const explicit = keywords.get('metaclass');
-  keywords.delete('metaclass');
-  const meta =
-    explicit === undefined || explicit instanceof PyClass
-      ? winningMeta(explicit ?? metaOfBases(bases), bases)
-      : explicit;
-  const prepared = meta === typeClass ? undefined : prepare(meta, def.name, bases, keywords);
-  const namespace = prepared === undefined ? new Map<string, PyValue>() : new MappingNamespace(prepared);
-  // A class body reads `__module__` from `__name__`, which code `exec` runs in fresh globals finds in builtins.
-  namespace.set('__module__', frame.globals.get('__name__') ?? currentRuntime().builtins.get('__name__') ?? None);
-  namespace.set('__qualname__', def.qualifiedName);
-  namespace.set('__firstlineno__', BigInt(firstRowOf(def) + 1));
-  if (def.doc !== undefined) namespace.set('__doc__', def.doc);
-  const classCell = new PyCell();
-  const body = runClassBody(evaluator, def, frame, namespace, classCell);
-  const classDict = addClassAnnotate(def, frame, namespace, body.annotations);
-  namespace.set('__static_attributes__', newTuple(def.staticAttributes));
-  // As __build_class__ does once the body has run.
-  if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
-  const factory = bases.find(
-    (base): base is PyClass => base instanceof PyClass && base.classFactory !== undefined
-  )?.classFactory;
-  if (factory) {
-    const cls = factory(def, namespace, body.annotations, keywords.size > 0 ? keywords : undefined, bases as PyClass[]);
-    classCell.value = cls;
-    classDict.value = namespaceDict(cls.dict);
-    let decorated: PyValue = cls;
-    for (const decorator of decorators.toReversed()) decorated = callValue(decorator, [decorated]);
-    return decorated;
+  const length = frame.temporaries.length;
+  try {
+    const resolvedDecorators =
+      decorators ??
+      def.decorators.map((decorator) => {
+        const value = evaluator.evaluate(decorator, frame);
+        frame.temporaries.push(value);
+        return value;
+      });
+    const { args: originalBases, kwargs } = evaluated ?? evaluator.arguments(def.bases, frame, buildClass, 2);
+    frame.temporaries.push(...originalBases);
+    const bases = resolveBases(originalBases, def.name);
+    const keywords = new Map(kwargs);
+    const explicit = keywords.get('metaclass');
+    keywords.delete('metaclass');
+    const meta =
+      explicit === undefined || explicit instanceof PyClass
+        ? winningMeta(explicit ?? metaOfBases(bases), bases)
+        : explicit;
+    const prepared = meta === typeClass ? undefined : prepare(meta, def.name, bases, keywords);
+    const namespace = prepared === undefined ? new Map<string, PyValue>() : new MappingNamespace(prepared);
+    // A class body reads `__module__` from `__name__`, which code `exec` runs in fresh globals finds in builtins.
+    namespace.set('__module__', frame.globals.get('__name__') ?? currentRuntime().builtins.get('__name__') ?? None);
+    namespace.set('__qualname__', def.qualifiedName);
+    namespace.set('__firstlineno__', BigInt(firstRowOf(def) + 1));
+    if (def.doc !== undefined) namespace.set('__doc__', def.doc);
+    const classCell = new PyCell();
+    const body = runClassBody(evaluator, def, frame, namespace, classCell);
+    const classDict = addClassAnnotate(def, frame, namespace, body.annotations);
+    namespace.set('__static_attributes__', newTuple(def.staticAttributes));
+    // As __build_class__ does once the body has run.
+    if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
+    const factory = bases.find(
+      (base): base is PyClass => base instanceof PyClass && base.classFactory !== undefined
+    )?.classFactory;
+    if (factory) {
+      const cls = factory(
+        def,
+        namespace,
+        body.annotations,
+        keywords.size > 0 ? keywords : undefined,
+        bases as PyClass[]
+      );
+      classCell.value = cls;
+      classDict.value = namespaceDict(cls.dict);
+      let decorated: PyValue = cls;
+      for (const decorator of resolvedDecorators.toReversed()) decorated = callValue(decorator, [decorated]);
+      return decorated;
+    }
+    let result = callMeta(meta, def.name, bases, prepared ?? namespace, keywords, {
+      classCell,
+      annotations: body.annotations,
+    });
+    if (result instanceof PyClass) {
+      classDefinitions.set(result, def);
+      classDict.value = namespaceDict(result.dict);
+    }
+    for (const decorator of resolvedDecorators.toReversed()) result = callValue(decorator, [result]);
+    return result;
+  } finally {
+    frame.temporaries.length = length;
   }
-  let result = callMeta(meta, def.name, bases, prepared ?? namespace, keywords, {
-    classCell,
-    annotations: body.annotations,
-  });
-  if (result instanceof PyClass) {
-    classDefinitions.set(result, def);
-    classDict.value = namespaceDict(result.dict);
-  }
-  for (const decorator of decorators.toReversed()) result = callValue(decorator, [result]);
-  return result;
 }
 
 /**
@@ -262,6 +282,7 @@ function runClassBody(
   const runtime = currentRuntime();
   const cells = new Map<string, PyCell>();
   for (const name of def.scope.frees) cells.set(name, frame.cells.get(name) ?? new PyCell());
+  cells.set('__class__', classCell);
   const body = new Frame('class', namespace, cells, frame.globals, undefined, false, def.scope, undefined, classCell);
   runtime.pushFrame(body);
   try {
@@ -362,7 +383,7 @@ export function typeNew(
     const boundary = kwargs.get('boundary');
     kwargs.delete('boundary');
     if (boundary !== undefined && boundary !== None) cls.dict.set('_boundary_', boundary);
-    createEnumMembers(cls);
+    createEnumMembers(cls, namespace);
   }
   const originalBases = cls.dict.get('__orig_bases__');
   initGenericSubclass(cls, originalBases instanceof PyTuple ? originalBases.items : undefined);
@@ -381,18 +402,18 @@ function applyBody(cls: PyClass, body: ClassBody): void {
 
 /** Checks the bases a class statement or `type()` passes, as `type.__new__` does. */
 function checkBases(name: string, bases: readonly PyValue[]): PyClass[] {
-  const seen = new Set<PyClass>();
-  return bases.map((base) => {
+  const classes = bases.map((base) => {
     if (!(base instanceof PyClass)) throw typeError('bases must be types');
     if (base.unsupportedBase !== undefined) throw new UnsupportedFeatureError(base.unsupportedBase);
     if (!isBaseType(base)) throw typeError(`type '${base.typeName ?? base.name}' is not an acceptable base type`);
     if (base.flags.isEnum && base.enumMembers && base.enumMembers.length > 0) {
-      throw typeError(`${name}: cannot extend ${base.qualifiedName}`);
+      throw typeError(`<enum '${name}'> cannot extend ${pyRepr(base)}`);
     }
-    if (seen.has(base)) throw typeError(`duplicate base class ${base.name}`);
-    seen.add(base);
     return base;
   });
+  const duplicate = classes.find((base, index) => classes.includes(base, index + 1));
+  if (duplicate) throw typeError(`duplicate base class ${duplicate.name}`);
+  return classes;
 }
 
 function namespaceEntries(namespace: Map<string, PyValue> | PyDict): Map<string, PyValue> {
@@ -500,15 +521,15 @@ function checkNewBases(cls: PyClass, value: PyValue): PyClass[] {
     throw typeError(`can only assign tuple to ${cls.name}.__bases__, not ${typeName(value)}`);
   }
   if (value.items.length === 0) throw typeError(`can only assign non-empty tuple to ${cls.name}.__bases__, not ()`);
-  const bases: PyClass[] = [];
-  for (const item of value.items) {
+  const bases = value.items.map((item) => {
     if (!(item instanceof PyClass)) {
       throw typeError(`${cls.name}.__bases__ must be tuple of classes, not '${typeName(item)}'`);
     }
     if (item.mro.includes(cls)) throw typeError('a __bases__ item causes an inheritance cycle');
-    if (bases.includes(item)) throw typeError(`duplicate base class ${item.name}`);
-    bases.push(item);
-  }
+    return item;
+  });
+  const duplicate = bases.find((base, index) => bases.includes(base, index + 1));
+  if (duplicate) throw typeError(`duplicate base class ${duplicate.name}`);
   return bases;
 }
 
@@ -537,8 +558,9 @@ export function computeMro(cls: PyClass): PyClass[] {
       .map((sequence) => sequence[0])
       .find((candidate) => nonEmpty.every((sequence) => !sequence.slice(1).includes(candidate)));
     if (!head) {
+      const heads = [...new Set(nonEmpty.map((sequence) => sequence[0]))];
       throw typeError(
-        `Cannot create a consistent method resolution order (MRO) for bases ${cls.bases.map((base) => base.name).join(', ')}`
+        `Cannot create a consistent method resolution order (MRO) for bases ${heads.map((base) => base.name).join(', ')}`
       );
     }
     result.push(head);

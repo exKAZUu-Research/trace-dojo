@@ -1,17 +1,10 @@
 import { PyBytes, PyMemoryView } from './bytesValues';
 import { pyStr } from './conversions';
 import { callSpecial, lookupSpecial } from './objects';
-import { exceptionClassNamed, isNativeMethod, None, typeError, typeName } from './types';
-import {
-  type PyBuiltinFunction,
-  PyComplex,
-  PyError,
-  PyInstance,
-  type PyObject,
-  PySet,
-  PyTuple,
-  type PyValue,
-} from './values';
+import { chargeScan, chargeStep } from './runtimeContext';
+import { rememberedHash } from './strings';
+import { exceptionClassNamed, isNativeMethod, None, typeError, typeName, unbox } from './types';
+import { type PyBuiltinFunction, PyComplex, PyError, type PyObject, PySet, PyTuple, type PyValue } from './values';
 
 const MASK64 = (1n << 64n) - 1n;
 const MODULUS = (1n << 61n) - 1n;
@@ -65,8 +58,11 @@ export function hashFloat(value: number): bigint {
 /** Splits a finite nonzero number into a mantissa in [0.5, 1) and a power of two, as C's frexp does. */
 export function frexp(value: number): { mantissa: number; exponent: number } {
   if (value === 0 || !Number.isFinite(value)) return { mantissa: value, exponent: 0 };
-  let exponent = Math.max(-1073, Math.floor(Math.log2(Math.abs(value))) + 1);
-  let mantissa = value * 2 ** -exponent;
+  // A subnormal is scaled up first: the power of two that normalizes it directly is not a finite number.
+  const isSubnormal = Math.abs(value) < 2 ** -1022;
+  const scaled = isSubnormal ? value * 2 ** 54 : value;
+  let exponent = Math.floor(Math.log2(Math.abs(scaled))) + 1;
+  let mantissa = scaled * 2 ** -exponent;
   while (Math.abs(mantissa) < 0.5) {
     mantissa *= 2;
     exponent--;
@@ -75,12 +71,18 @@ export function frexp(value: number): { mantissa: number; exponent: number } {
     mantissa /= 2;
     exponent++;
   }
-  return { mantissa, exponent };
+  return { mantissa, exponent: isSubnormal ? exponent - 54 : exponent };
 }
 
-function hashTuple(items: readonly PyValue[]): bigint {
+function hashTuple(tuple: PyTuple): bigint {
+  tuple.hash ??= computeTupleHash(tuple.items);
+  return tuple.hash;
+}
+
+function computeTupleHash(items: readonly PyValue[]): bigint {
   let acc = XXPRIME_5;
   for (const item of items) {
+    chargeStep();
     const lane = pyHash(item) & MASK64;
     acc = (acc + lane * XXPRIME_2) & MASK64;
     acc = ((acc << 31n) | (acc >> 33n)) & MASK64;
@@ -96,8 +98,14 @@ function shuffleBits(hash: bigint): bigint {
 }
 
 function hashFrozenset(set: PySet): bigint {
+  set.hash ??= computeFrozensetHash(set);
+  return set.hash;
+}
+
+function computeFrozensetHash(set: PySet): bigint {
   let hash = 0n;
   const { table } = set;
+  chargeScan(table.capacity);
   for (const slot of table.slots()) hash ^= shuffleBits(slot === undefined ? 0n : slot.hash & MASK64);
   if ((BigInt(table.capacity - table.fill) & 1n) === 1n) hash ^= shuffleBits(0n);
   if ((BigInt(table.fill - table.used) & 1n) === 1n) hash ^= shuffleBits(MASK64);
@@ -113,6 +121,11 @@ function hashFrozenset(set: PySet): bigint {
  * on its values or on the order of a set of strings.
  */
 function hashString(value: string): bigint {
+  return rememberedHash(value, () => computeStringHash(value));
+}
+
+function computeStringHash(value: string): bigint {
+  chargeScan(value.length);
   let high = 0x81_1c_9d_c5;
   let low = 0x01_00_01_93;
   for (let index = 0; index < value.length; index++) {
@@ -159,7 +172,7 @@ export function pyHash(value: PyValue): bigint {
     }
   }
   if (value === None) return NONE_HASH;
-  if (value instanceof PyTuple && value.cls.isBuiltin) return hashTuple(value.items);
+  if (value instanceof PyTuple && value.cls.isBuiltin) return hashTuple(value);
   const special = lookupSpecial(value, '__hash__');
   if (special === None) throw typeError(`unhashable type: '${typeName(value)}'`);
   if (value instanceof PyBytes || value instanceof PyMemoryView) {
@@ -179,12 +192,13 @@ export function pyHash(value: PyValue): bigint {
 /** The hash a builtin type's `__hash__` gives an instance of it or of a subclass that does not override it. */
 function builtinHash(value: PyObject): bigint {
   if (value instanceof PySet) return hashFrozenset(value);
-  if (value instanceof PyTuple) return hashTuple(value.items);
+  if (value instanceof PyTuple) return hashTuple(value);
   if (value instanceof PyComplex) {
     const hash = signed(hashFloat(value.real) + 1_000_003n * hashFloat(value.imag));
     return hash === -1n ? -2n : hash;
   }
-  if (value instanceof PyInstance && value.primitive !== undefined) return pyHash(value.primitive);
+  const unboxed = unbox(value);
+  if (unboxed !== value) return pyHash(unboxed);
   return identityHash(value);
 }
 

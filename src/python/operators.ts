@@ -1,36 +1,58 @@
-// code-gauge-allow-file fileNcss 582 -- The operator implementations of the builtin types belong together.
+// code-gauge-allow-file fileNcss 707 -- The operator implementations of the builtin types belong together.
 import type { BinaryOperator, CompareOperator } from './ast';
 import { isBytesLike, PyBytes } from './bytesValues';
 import { complexBinary, isComplexOperand, newComplex } from './complexNumbers';
-import { DictStore } from './dictStore';
-import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, trueDivideInt } from './numbers';
-import { bindValue, callSpecial, callValue, iterate, lookupSpecial, overriding } from './objects';
+import { floatPower } from './floatPower';
+import { asFloat, divmodFloat, floorDivInt, intToFloat, modInt, toIndex, trueDivideInt } from './numbers';
+import {
+  bindValue,
+  callSpecial,
+  callValue,
+  iterate,
+  iterateOr,
+  lookupSpecial,
+  type NextFunction,
+  overriding,
+} from './objects';
 import { formatPercent } from './percentFormat';
-import { currentRuntime } from './runtimeContext';
-import { dictViewBinary, isSetLikeView } from './setOperations';
+import { chargeStep, currentRuntime } from './runtimeContext';
+import {
+  dictViewBinary,
+  differenceUpdate,
+  isSetLikeView,
+  isSubset,
+  lookupSetKey,
+  setIntersection,
+  symmetricDifferenceUpdate,
+  updateTable,
+} from './setOperations';
+import { repeatText } from './stringBuilder';
 import { compareStr, strLength } from './strings';
+import { containsStr } from './strSearch';
 import {
   classOf,
   dictClass,
+  frozensetClass,
   intClass,
+  newDict,
   newList,
-  newSet,
   newTuple,
   NotImplemented,
   objectClass,
   pyError,
-  resultClassOf,
   strClass,
+  tupleClass,
   typeError,
   typeName,
   unbox,
 } from './types';
 import {
   DONE,
+  type PyClass,
   PyComplex,
+  PyDeque,
   PyDict,
   PyDictView,
-  PyError,
   PyInstance,
   PyList,
   PyObject,
@@ -87,11 +109,11 @@ function callSlot(method: PyValue, self: PyValue, other: PyValue): PyValue {
 export function binaryOp(operator: BinaryOperator, leftValue: PyValue, rightValue: PyValue): PyValue {
   if (typeof leftValue !== 'object' && typeof rightValue !== 'object') {
     const native = nativeBinary(operator, leftValue, rightValue);
-    return native === NotImplemented ? dispatchOrRaise(operator, leftValue, rightValue) : native;
+    return native === NotImplemented ? dispatchOrRaise(operator, leftValue, rightValue, false) : native;
   }
   // The bitwise operators of a Flag combine its members into members, before an IntFlag counts as an int.
   if ('|&^'.includes(operator) && (isFlagMember(leftValue) || isFlagMember(rightValue))) {
-    const combined = dispatchBinary(operator, leftValue, rightValue);
+    const combined = dispatchBinary(operator, leftValue, rightValue, false);
     if (combined !== NotImplemented) return combined;
   }
   const left = intEnumValue(leftValue);
@@ -101,19 +123,20 @@ export function binaryOp(operator: BinaryOperator, leftValue: PyValue, rightValu
     const native = nativeBinary(operator, left, right);
     if (native !== NotImplemented) return native;
   }
-  return dispatchOrRaise(operator, left, right);
+  return dispatchOrRaise(operator, left, right, false);
 }
 
-function dispatchOrRaise(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
-  const result = dispatchBinary(operator, left, right);
+function dispatchOrRaise(operator: BinaryOperator, left: PyValue, right: PyValue, isInplace: boolean): PyValue {
+  const result = dispatchBinary(operator, left, right, isInplace);
   if (result !== NotImplemented) return result;
-  throw binaryTypeError(operator, left, right);
+  throw binaryTypeError(operator, left, right, isInplace);
 }
 
 /** Python's augmented assignment operators, which try the in-place method first. */
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows CPython's augmented-assignment slot fallback order.
 export function inplaceOp(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
-  if (typeof left !== 'object') return binaryOp(operator, left, right);
-  if (left.cls.isBuiltin) {
+  if ((operator === '+' || operator === '*') && isMutableSequence(left)) return sequenceInplace(operator, left, right);
+  if (typeof left === 'object' && left.cls.isBuiltin) {
     const native = nativeInplace(operator, left, right);
     if (native !== NotImplemented) return native;
   }
@@ -123,38 +146,69 @@ export function inplaceOp(operator: BinaryOperator, left: PyValue, right: PyValu
     const result = callSlot(method, left, right);
     if (result !== NotImplemented) return result;
   }
-  return binaryOp(operator, left, right);
+  if ('|&^'.includes(operator) && (isFlagMember(left) || isFlagMember(right))) {
+    const combined = dispatchBinary(operator, left, right, true);
+    if (combined !== NotImplemented) return combined;
+  }
+  const leftVal = intEnumValue(left);
+  const rightVal = operator === '%' && typeof leftVal === 'string' ? right : intEnumValue(right);
+  if (isPlain(leftVal) && isPlain(rightVal)) {
+    const native = nativeBinary(operator, leftVal, rightVal);
+    if (native !== NotImplemented) return native;
+  }
+  return dispatchOrRaise(operator, leftVal, rightVal, true);
+}
+
+function isMutableSequence(value: PyValue): value is PyList | PyDeque {
+  return (value instanceof PyList || value instanceof PyDeque) && value.cls.isBuiltin;
+}
+
+/**
+ * `+=` and `*=` of a list or deque. CPython keeps their in-place methods in sequence slots, which it asks only after
+ * the reflected method of the other operand, and after which it does not fall back to the binary operator.
+ */
+function sequenceInplace(operator: '+' | '*', left: PyList | PyDeque, right: PyValue): PyValue {
+  const [, reflected, inplace] = SPECIAL_NAMES[operator];
+  if (!isPlain(right)) {
+    const reflectedMethod = lookupSpecial(right, reflected);
+    if (reflectedMethod !== undefined && reflectedMethod !== classOf(left).lookup(reflected)) {
+      const result = callSlot(reflectedMethod, right, left);
+      if (result !== NotImplemented) return result;
+    }
+  }
+  const result =
+    left instanceof PyList
+      ? listInplace(operator, left, right)
+      : callValue(bindValue(lookupSpecial(left, inplace) as PyValue, left), [right]);
+  if (result !== NotImplemented) return result;
+  throw binaryTypeError(operator, left, right, true);
+}
+
+function listInplace(operator: '+' | '*', list: PyList, other: PyValue): PyValue {
+  if (operator === '+') {
+    extendList(list, other);
+    return list;
+  }
+  if (!isIntLike(other) && (isBuiltinSequence(other) || lookupSpecial(other, '__index__') === undefined)) {
+    return NotImplemented;
+  }
+  const times = repeatCount(toIndex(other));
+  if (times <= 0) list.replaceItems([]);
+  else list.extend(repeatItems(list.items, times - 1));
+  return list;
 }
 
 /** The in-place operators of the builtin mutable types, or NotImplemented for the others. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per builtin mutable type.
 export function nativeInplace(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
-  if (left instanceof PyList) {
-    if (operator === '+') {
-      left.items.push(...iterateAll(right));
-      currentRuntime().allocate(0);
-      return left;
-    }
-    if (operator === '*') {
-      const times = repeatCount(right, left);
-      const items = [...left.items];
-      currentRuntime().allocate(items.length * Math.max(times - 1, 0));
-      left.items = times <= 0 ? [] : Array.from({ length: times }, () => items).flat();
-      return left;
-    }
+  if (left instanceof PyList && (operator === '+' || operator === '*')) {
+    return listInplace(operator, left, right);
   }
-  if (
-    left instanceof PySet &&
-    !left.cls.name.startsWith('frozen') &&
-    right instanceof PySet &&
-    '|&-^'.includes(operator)
-  ) {
-    const result = binaryOp(operator, left, right) as PySet;
-    left.table = result.table;
-    return left;
+  if (left instanceof PySet && right instanceof PySet && !left.cls.isSubclassOf(frozensetClass)) {
+    return inplaceSet(operator, left, right);
   }
   if (left instanceof PyDict && operator === '|' && inheritsDictSlot(left, '__ior__')) {
-    for (const [key, value] of mappingItems(right)) left.store.set(key, value);
+    // CPython updates through dict.update itself, whatever `update` a subclass defines.
+    callValue(dictClass.dict.get('update') as PyValue, [left, right]);
     return left;
   }
   if (left instanceof PyBytes && left.isMutable) {
@@ -164,26 +218,50 @@ export function nativeInplace(operator: BinaryOperator, left: PyValue, right: Py
   return NotImplemented;
 }
 
-function iterateAll(value: PyValue): PyValue[] {
-  const next = iterate(value);
-  const items: PyValue[] = [];
-  for (let item = next(); item !== DONE; item = next()) items.push(item);
-  return items;
+/** `list += iterable` and `list.extend(iterable)`, which append each item as the iterable yields it. */
+export function extendList(list: PyList, iterable: PyValue): void {
+  // CPython copies the items of a list or tuple at once, so that `a.extend(a)` ends.
+  if (iterable === list || ((iterable instanceof PyList || iterable instanceof PyTuple) && iterable.cls.isBuiltin)) {
+    list.extend([...(iterable as PyList | PyTuple).items]);
+    return;
+  }
+  const next = iterate(iterable);
+  for (let item = next(); item !== DONE; item = next()) list.append(item);
 }
 
-function mappingItems(value: PyValue): [PyValue, PyValue][] {
-  if (value instanceof PyDict) return value.store.ordered().map((entry) => [entry.key, entry.value]);
-  throw typeError(`'${typeName(value)}' object is not a mapping`);
+/** The in-place set operators, which change the set's table as CPython does: that decides the order of its elements. */
+function inplaceSet(operator: BinaryOperator, left: PySet, right: PySet): PyValue {
+  switch (operator) {
+    case '|': {
+      updateTable(left.table, right);
+      return left;
+    }
+    case '&': {
+      left.table.adopt(setIntersection(left, right).table);
+      return left;
+    }
+    case '-': {
+      differenceUpdate(left.table, right);
+      return left;
+    }
+    case '^': {
+      symmetricDifferenceUpdate(left.table, right);
+      return left;
+    }
+    default: {
+      return NotImplemented;
+    }
+  }
 }
 
-function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue): PyValue {
+function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue, isInplace: boolean): PyValue {
+  if (operator === '*' && (isBuiltinSequence(left) || isBuiltinSequence(right))) {
+    return dispatchRepeat(left, right, isInplace);
+  }
   const [name, reflected] = SPECIAL_NAMES[operator];
-  const leftClass = classOf(left);
-  const rightClass = classOf(right);
   const leftMethod = lookupSpecial(left, name);
-  const rightMethod = leftClass === rightClass ? undefined : lookupSpecial(right, reflected);
-  // A subclass that overrides the reflected method gets the first chance.
-  if (rightMethod !== undefined && rightClass.isSubclassOf(leftClass) && rightMethod !== leftClass.lookup(reflected)) {
+  const rightMethod = asksReflected(operator, left, right, isInplace) ? lookupSpecial(right, reflected) : undefined;
+  if (rightMethod !== undefined && asksReflectedFirst(operator, left, right, reflected)) {
     const result = callSlot(rightMethod, right, left);
     if (result !== NotImplemented) return result;
     return leftMethod === undefined ? NotImplemented : callSlot(leftMethod, left, right);
@@ -196,16 +274,76 @@ function dispatchBinary(operator: BinaryOperator, left: PyValue, right: PyValue)
   return NotImplemented;
 }
 
-function binaryTypeError(operator: BinaryOperator, left: PyValue, right: PyValue): Error {
+/**
+ * Whether the right operand's reflected method gets the first chance: a subclass's that overrides the base's, and any
+ * before a sequence concatenates or repeats, which is not a numeric operator in CPython and raises where the operator
+ * must go on.
+ */
+function asksReflectedFirst(operator: BinaryOperator, left: PyValue, right: PyValue, reflected: string): boolean {
+  const isSequenceOperation =
+    (operator === '+' && isBuiltinSequence(left)) ||
+    ((operator === '+' || operator === '*') && left instanceof PyDeque);
+  if (isSequenceOperation) return true;
+  const leftClass = classOf(left);
+  const rightClass = classOf(right);
+  return (
+    rightClass !== leftClass &&
+    rightClass.isSubclassOf(leftClass) &&
+    overridesReflected(leftClass, rightClass, reflected)
+  );
+}
+
+/**
+ * Whether a subclass's reflected method differs from the base's, which gives it the first call. A builtin base has a
+ * native slot that a class's method always differs from; between classes, slot_nb_* asks method_is_overloaded.
+ */
+function overridesReflected(leftClass: PyClass, rightClass: PyClass, reflected: string): boolean {
+  const right = rightClass.lookup(reflected);
+  if (right === undefined) return false;
+  return leftClass.lookup(reflected) !== right;
+}
+
+function asksReflected(operator: BinaryOperator, left: PyValue, right: PyValue, isInplace: boolean): boolean {
+  if (classOf(left) === classOf(right)) return false;
+  // `instance *= deque` does not repeat the deque: an instance of a class has sequence slots of its own.
+  return !(isInplace && operator === '*' && right instanceof PyDeque && isUserObject(left));
+}
+
+/**
+ * `sequence * other` where the native operation did not apply: the other operand's method decides, then its
+ * `__index__`. The sequence's own `__mul__` is not asked, because it raises where the operator must go on.
+ */
+function dispatchRepeat(left: PyValue, right: PyValue, isInplace: boolean): PyValue {
+  const isSequenceLeft = isBuiltinSequence(left);
+  const [sequence, other] = isSequenceLeft ? [left, right] : [right, left];
+  if (isBuiltinSequence(other)) return NotImplemented;
+  const method = lookupSpecial(other, isSequenceLeft ? '__rmul__' : '__mul__');
+  if (method !== undefined) {
+    const result = callSlot(method, other, sequence);
+    if (result !== NotImplemented) return result;
+  }
+  // `other *= sequence` repeats the sequence only for a number: an instance of a class has sequence slots of its own.
+  if (isInplace && !isSequenceLeft && isUserObject(other)) return NotImplemented;
+  if (lookupSpecial(other, '__index__') === undefined) return NotImplemented;
+  return nativeBinary('*', sequence, toIndex(other));
+}
+
+function isBuiltinSequence(value: PyValue): boolean {
+  return typeof value === 'string' || (isSequence(value) && value.cls.isBuiltin);
+}
+
+function binaryTypeError(operator: BinaryOperator, left: PyValue, right: PyValue, isInplace = false): Error {
   const base = sequenceTypeName(left);
   if (operator === '+' && base !== undefined && !isUserObject(right)) {
     return typeError(`can only concatenate ${base} (not "${typeName(right)}") to ${base}`);
   }
-  if (operator === '*' && (isSequenceLike(left) || isSequenceLike(right))) {
+  // `*=` does not fall back to repeating the right operand when the left one is a container that cannot repeat.
+  const repeatsRight = isSequenceLike(right) && !(isInplace && isUnrepeatableContainer(left));
+  if (operator === '*' && (isSequenceLike(left) || repeatsRight)) {
     const other = isSequenceLike(left) ? right : left;
     return typeError(`can't multiply sequence by non-int of type '${typeName(other)}'`);
   }
-  const shown = operator === '**' ? '** or pow()' : operator;
+  const shown = isInplace ? `${operator}=` : operator === '**' ? '** or pow()' : operator;
   return typeError(`unsupported operand type(s) for ${shown}: '${typeName(left)}' and '${typeName(right)}'`);
 }
 
@@ -227,7 +365,17 @@ function isSequence(value: PyValue): value is PyList | PyTuple {
 }
 
 function isSequenceLike(value: PyValue): boolean {
-  return typeof value === 'string' || isSequence(value);
+  return typeof value === 'string' || isSequence(value) || value instanceof PyDeque;
+}
+
+function isUnrepeatableContainer(value: PyValue): boolean {
+  return (
+    value instanceof PyDict ||
+    value instanceof PySet ||
+    value instanceof PyDictView ||
+    value instanceof PyRange ||
+    value instanceof PyInstance
+  );
 }
 
 /** The result of an operator on builtin operands, or NotImplemented when their types do not define it. */
@@ -237,11 +385,11 @@ export function nativeBinary(operator: BinaryOperator, left: PyValue, right: PyV
   if (isComplexOperand(left) && isComplexOperand(right) && (left instanceof PyComplex || right instanceof PyComplex)) {
     return complexBinary(operator, left, right);
   }
-  if (typeof left === 'string') return stringBinary(operator, left, right);
-  if (typeof right === 'string' && operator === '*' && isIntLike(left)) return repeatString(right, left);
   if ((isSetLikeView(left) || isSetLikeView(right)) && '&|-^'.includes(operator)) {
     return dictViewBinary(operator as '&' | '|' | '-' | '^', left, right, viewContains);
   }
+  if (typeof left === 'string') return stringBinary(operator, left, right);
+  if (typeof right === 'string' && operator === '*' && isIntLike(left)) return repeatString(right, left);
   if (isSequence(left) && !isUserObject(left)) return sequenceBinary(operator, left, right);
   if (isSequence(right) && operator === '*' && isIntLike(left)) return repeatSequence(right, left);
   if (left instanceof PySet && right instanceof PySet) return setBinary(operator, left, right);
@@ -273,15 +421,15 @@ function stringBinary(operator: BinaryOperator, left: string, right: PyValue): P
 function sequenceBinary(operator: BinaryOperator, left: PyList | PyTuple, right: PyValue): PyValue {
   if (operator === '+' && isSequence(right) && sameSequenceKind(left, right)) {
     const items = [...left.items, ...right.items];
-    currentRuntime().allocate(items.length);
     return left instanceof PyList ? newList(items) : newTuple(items);
   }
   if (operator === '*' && isIntLike(right)) return repeatSequence(left, right);
   return NotImplemented;
 }
 
-function mergeDicts(left: PyDict, right: PyDict): PyDict {
-  const result = new PyDict(resultClassOf(left.cls), new DictStore(), left.defaultFactory);
+/** `dict | dict`, which gives a plain dict for subclasses that do not define the operator themselves. */
+export function mergeDicts(left: PyDict, right: PyDict): PyDict {
+  const result = newDict();
   for (const entry of left.store.ordered()) result.store.set(entry.key, entry.value);
   for (const entry of right.store.ordered()) result.store.set(entry.key, entry.value);
   return result;
@@ -291,28 +439,34 @@ function isIntLike(value: PyValue): value is bigint | boolean {
   return typeof value === 'bigint' || typeof value === 'boolean';
 }
 
-function repeatCount(count: PyValue, sequence: PyValue): number {
+function repeatCount(count: PyValue): number {
   if (!isIntLike(count)) throw typeError(`can't multiply sequence by non-int of type '${typeName(count)}'`);
   const times = asInt(count);
-  if (times > BigInt(Number.MAX_SAFE_INTEGER))
+  if (times >= 1n << 63n || times < -(1n << 63n)) {
     throw pyError('OverflowError', `cannot fit 'int' into an index-sized integer`);
-  void sequence;
+  }
   return Number(times);
 }
 
 function repeatString(text: string, count: bigint | boolean): string {
-  const times = repeatCount(count, text);
-  if (times <= 0 || text === '') return '';
-  currentRuntime().buildString(text.length * times);
-  return text.repeat(times);
+  const times = repeatCount(count);
+  return repeatText(text, times);
 }
 
 function repeatSequence(sequence: PyList | PyTuple, count: bigint | boolean): PyValue {
-  const times = Math.max(repeatCount(count, sequence), 0);
-  currentRuntime().allocate(sequence.items.length * times);
-  const items: PyValue[] = [];
-  for (let index = 0; index < times; index++) items.push(...sequence.items);
+  const times = repeatCount(count);
+  if (times === 1 && sequence.cls === tupleClass) return sequence;
+  const items = repeatItems(sequence.items, times);
   return sequence instanceof PyList ? newList(items) : newTuple(items);
+}
+
+/** `rounds` copies of the items, refused before any copy is made when the program has no room for them. */
+function repeatItems(items: readonly PyValue[], rounds: number): PyValue[] {
+  const repeated: PyValue[] = [];
+  if (items.length === 0 || rounds <= 0) return repeated;
+  currentRuntime().ensureRoom(items.length * rounds);
+  for (let round = 0; round < rounds; round++) for (const item of items) repeated.push(item);
+  return repeated;
 }
 
 function setBinary(operator: BinaryOperator, left: PySet, right: PySet): PyValue {
@@ -442,7 +596,7 @@ export function powFloat(x: number, y: number): PyValue {
     return complexBinary('**', newComplex(x, 0), y);
   }
   if (x === -1 && !Number.isFinite(y)) return 1;
-  const result = x ** y;
+  const result = floatPower(x, y);
   if (!Number.isFinite(result) && Number.isFinite(x) && Number.isFinite(y)) {
     throw pyError('OverflowError', "(34, 'Result too large')");
   }
@@ -549,7 +703,7 @@ function isTruthyValue(value: PyValue): boolean {
   return currentRuntime().truthy(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of builtin value.
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of builtin value.
 export function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValue, right: PyValue): PyValue {
   if (isNumeric(left) && isNumeric(right)) {
     const a = typeof left === 'boolean' ? Number(left) : left;
@@ -565,6 +719,7 @@ export function nativeCompare(operator: keyof typeof COMPARE_NAMES, left: PyValu
     return compareSequences(operator, left.items, right.items);
   }
   if (left instanceof PySet && right instanceof PySet) return compareSets(operator, left, right);
+  if (isSetLike(left) && isSetLike(right)) return compareSetLikeView(operator, left, right);
   return NotImplemented;
 }
 
@@ -598,27 +753,22 @@ function applyOrderValue(operator: keyof typeof COMPARE_NAMES, order: number): b
 }
 
 /** Equality of builtin values whose types define it natively, or undefined to defer to `__eq__` and the containers. */
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of builtin value.
+// code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of builtin value.
 function nativeEquals(left: PyValue, right: PyValue): boolean | undefined {
   if (definesEquality(left) || definesEquality(right) || isBytesLike(left) || isBytesLike(right)) return undefined;
   if (left instanceof PyComplex || right instanceof PyComplex) {
     if (!isComplexOperand(left) || !isComplexOperand(right)) return false;
-    const a = toComplexParts(left);
-    const b = toComplexParts(right);
-    return a[0] === b[0] && a[1] === b[1];
+    if (!(left instanceof PyComplex)) return complexEqualsReal(right as PyComplex, left);
+    if (!(right instanceof PyComplex)) return complexEqualsReal(left, right);
+    return left.real === right.real && left.imag === right.imag;
   }
   if (typeof left === 'string' || typeof right === 'string' || isNumeric(left) || isNumeric(right)) return false;
   if (left instanceof PyRange && right instanceof PyRange) return rangesEqual(left, right);
   if (left instanceof PyDict && right instanceof PyDict) return dictsEqual(left, right);
-  if (left instanceof PyDictView && right instanceof PyDictView) {
-    return left.view !== 'values' && left.view === right.view && dictsEqual(left.dict, right.dict);
-  }
+  if (left instanceof PyDictView || right instanceof PyDictView) return viewEquals(left, right);
   if (isSequence(left) && isSequence(right)) return sameSequenceKind(left, right) ? undefined : false;
   if (left instanceof PySet && right instanceof PySet) return undefined;
-  if (left instanceof PyDictView && left.view === 'keys' && right instanceof PySet) {
-    return compareSets('==', newSet(iterateAll(left)), right);
-  }
-  // Another builtin object, such as a deque, compares by its own `__eq__`.
+  // Another builtin object, such as a deque or type hint, compares by its own `__eq__`.
   if (builtinEquality(left) || builtinEquality(right)) return undefined;
   return left === right;
 }
@@ -636,13 +786,82 @@ function definesEquality(value: PyValue): boolean {
   return !cls.isBuiltin || cls.lookup('__eq__') !== objectClass.dict.get('__eq__');
 }
 
+/** Equality with a dict view: keys and items views compare as sets with each other and with sets, values views by identity. */
+function viewEquals(left: PyValue, right: PyValue): boolean {
+  if (left === right) return true;
+  if (!isSetLike(left) || !isSetLike(right)) return false;
+  return compareSetLikeView('==', left, right);
+}
+
+const SWAPPED = { '<': '>', '<=': '>=', '>': '<', '>=': '<=', '==': '==', '!=': '!=' } as const;
+
+/**
+ * Compares a keys or items view with a set or another such view, as CPython's dictview_richcompare does. With a set on
+ * the left, the set refuses the view and the view answers the swapped comparison.
+ */
+function compareSetLikeView(
+  operator: keyof typeof COMPARE_NAMES,
+  left: PyDictView | PySet,
+  right: PyDictView | PySet
+): boolean {
+  if (left instanceof PySet) return compareSetLikeView(SWAPPED[operator], right, left);
+  const leftSize = setLikeSize(left);
+  const rightSize = setLikeSize(right);
+  switch (operator) {
+    case '==': {
+      return leftSize === rightSize && allContainedIn(left, right);
+    }
+    case '!=': {
+      return !(leftSize === rightSize && allContainedIn(left, right));
+    }
+    case '<': {
+      return leftSize < rightSize && allContainedIn(left, right);
+    }
+    case '<=': {
+      return leftSize <= rightSize && allContainedIn(left, right);
+    }
+    case '>': {
+      return leftSize > rightSize && allContainedIn(right, left);
+    }
+    default: {
+      return leftSize >= rightSize && allContainedIn(right, left);
+    }
+  }
+}
+
+function setLikeSize(value: PyDictView | PySet): number {
+  return value instanceof PySet ? value.table.size : value.dict.store.size;
+}
+
+function allContainedIn(items: PyDictView | PySet, container: PyDictView | PySet): boolean {
+  const runtime = currentRuntime();
+  const next = iterate(items);
+  for (let item = next(); item !== DONE; item = next()) {
+    runtime.spend();
+    const isContained =
+      container instanceof PySet
+        ? lookupSetKey(item, (key) => container.table.has(key))
+        : viewContains(container, item);
+    if (!isContained) return false;
+  }
+  return true;
+}
+
+function isSetLike(value: PyValue): value is PyDictView | PySet {
+  return value instanceof PySet || isSetLikeView(value);
+}
+
 function sameSequenceKind(left: PyList | PyTuple, right: PyList | PyTuple): boolean {
   return left instanceof PyList === right instanceof PyList;
 }
 
-function toComplexParts(value: PyValue): [number, number] {
-  if (value instanceof PyComplex) return [value.real, value.imag];
-  return [asFloat(value as Numeric), 0];
+/** Whether a complex number equals an int, bool, or float, comparing an int exactly as int and float compare. */
+function complexEqualsReal(complex: PyComplex, real: PyValue): boolean {
+  if (complex.imag !== 0 || Number.isNaN(complex.real)) return false;
+  const other = typeof real === 'boolean' ? Number(real) : (real as bigint | number);
+  if (typeof other === 'number') return complex.real === other;
+  // JavaScript compares a bigint with a number by their exact values.
+  return !(complex.real < other) && !(complex.real > other);
 }
 
 function rangesEqual(left: PyRange, right: PyRange): boolean {
@@ -653,9 +872,10 @@ function rangesEqual(left: PyRange, right: PyRange): boolean {
   return length === 1n || left.step === right.step;
 }
 
-function dictsEqual(left: PyDict, right: PyDict): boolean {
+export function dictsEqual(left: PyDict, right: PyDict): boolean {
   if (left.store.size !== right.store.size) return false;
-  for (const entry of left.store.ordered()) {
+  for (const entry of left.store.liveEntries()) {
+    currentRuntime().spend();
     const other = right.store.lookup(entry.key);
     if (!other || !equals(entry.value, other.value)) return false;
   }
@@ -680,36 +900,39 @@ function compareSequences(
   return applyOrder(operator, left.length, right.length);
 }
 
-function subset(a: PySet, b: PySet): boolean {
-  return a.table.keys().every((key) => b.table.has(key));
-}
-
 function compareSets(operator: keyof typeof COMPARE_NAMES, left: PySet, right: PySet): boolean {
   switch (operator) {
     case '==': {
-      return left.table.size === right.table.size && subset(left, right);
+      return left.table.size === right.table.size && isSubset(left.table, right.table);
     }
     case '!=': {
-      return !(left.table.size === right.table.size && subset(left, right));
+      return !(left.table.size === right.table.size && isSubset(left.table, right.table));
     }
     case '<=': {
-      return subset(left, right);
+      return isSubset(left.table, right.table);
     }
     case '<': {
-      return left.table.size < right.table.size && subset(left, right);
+      return left.table.size < right.table.size && isSubset(left.table, right.table);
     }
     case '>=': {
-      return subset(right, left);
+      return isSubset(right.table, left.table);
     }
     default: {
-      return right.table.size < left.table.size && subset(right, left);
+      return right.table.size < left.table.size && isSubset(right.table, left.table);
     }
   }
 }
 
-/** Python's `==` as a boolean, which identity short-circuits as containers do. */
+/**
+ * Python's `==` as a boolean, which identity short-circuits as containers do. Floats are unboxed, so every NaN counts
+ * as one object: `x in [x]` and `math.nan in [math.nan]` hold as in CPython, at the cost of two separately computed
+ * NaNs, which CPython keeps apart.
+ */
 export function equals(left: PyValue, right: PyValue): boolean {
-  if (left === right && !(typeof left === 'number' && Number.isNaN(left))) return true;
+  // Every equality test costs a step, the identity shortcut included, which compares equal host strings by scanning
+  // them, so that the clock check stops any native loop of them.
+  chargeStep();
+  if (isSame(left, right)) return true;
   return isTruthyValue(compareOp('==', left, right));
 }
 
@@ -729,7 +952,7 @@ function isFlagMember(value: PyValue): boolean {
 
 /** Whether two dict keys or set elements are the same key: identical, or equal by `==`. */
 export function keysEqual(left: PyValue, right: PyValue): boolean {
-  if (left === right) return true;
+  if (isSame(left, right)) return true;
   const leftType = typeof left;
   if (leftType !== 'object' && typeof right !== 'object') {
     if (leftType === 'string' || typeof right === 'string') return false;
@@ -761,42 +984,48 @@ export function contains(containerValue: PyValue, item: PyValue): boolean {
 
 /** `item in container` as the builtin type of `container` defines it, whatever `__contains__` its class defines. */
 export function builtinContains(container: PyValue, item: PyValue): boolean {
-  if (typeof container === 'string') {
-    if (typeof item !== 'string') {
+  const unboxed = unbox(container);
+  if (typeof unboxed === 'string') {
+    const sub = unbox(item);
+    if (typeof sub !== 'string') {
       throw typeError(`'in <string>' requires string as left operand, not ${typeName(item)}`);
     }
-    currentRuntime().scan(container.length);
-    return container.includes(item);
+    return containsStr(unboxed, sub);
   }
   if (container instanceof PyDict) return container.store.has(item);
-  if (container instanceof PySet) return container.table.has(item);
+  if (container instanceof PySet) return lookupSetKey(item, (key) => container.table.has(key));
   if (container instanceof PyDictView && container.view !== 'values') return viewContains(container, item);
-  if (container instanceof PyRange && isIntLike(item)) return rangeContains(container, asInt(item));
+  if (container instanceof PyRange) {
+    return isIntLike(item) ? rangeContains(container, asInt(item)) : countEqual(iterate(container), item, 1) > 0;
+  }
   if (container instanceof PyList || container instanceof PyTuple) {
-    currentRuntime().scan(container.items.length);
-    return container.items.some((element) => equals(element, item));
+    return sequenceContains(container, item);
   }
   const special = lookupSpecial(container, '__contains__');
   if (special !== undefined) return isTruthyValue(callValue(bindValue(special, container), [item]));
-  const next = iterateContainer(container);
-  for (let element = next(); element !== DONE; element = next()) {
-    currentRuntime().spend();
-    if (equals(element, item)) return true;
+  const next = iterateOr(container, `argument of type '${typeName(container)}' is not a container or iterable`);
+  return countEqual(next, item, 1) > 0;
+}
+
+function sequenceContains(sequence: PyList | PyTuple, item: PyValue): boolean {
+  // As list_contains does, the length is read again after each comparison, which may change the list.
+  for (let index = 0; index < sequence.items.length; index++) {
+    if (equals(sequence.items[index], item)) return true;
   }
   return false;
 }
 
-/** Starts iterating the right operand of `in`, whose lack of both protocols CPython words differently. */
-function iterateContainer(container: PyValue): () => PyValue | typeof DONE {
-  try {
-    return iterate(container);
-  } catch (error) {
-    const message = error instanceof PyError ? error.exception.exception?.args.items[0] : undefined;
-    if (message === `'${typeName(container)}' object is not iterable`) {
-      throw typeError(`argument of type '${typeName(container)}' is not a container or iterable`);
-    }
-    throw error;
+/** The number of items an iterator yields that equal a value, stopping at `limit` of them. */
+export function countEqual(next: NextFunction, item: PyValue, limit = Number.POSITIVE_INFINITY): number {
+  let count = 0;
+  // The limit is tested before the iterator is asked again: a generator must not run past the deciding item.
+  while (count < limit) {
+    const element = next();
+    if (element === DONE) break;
+    currentRuntime().spend();
+    if (equals(element, item)) count++;
   }
+  return count;
 }
 
 function viewContains(view: PyDictView, item: PyValue): boolean {

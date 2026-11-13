@@ -144,16 +144,14 @@ export class AstBuilder extends AstPatternBuilder {
         return [this.classDef(node, [])];
       }
       case 'decorated_definition': {
-        const decorators = newList(
-          namedChildren(node)
-            .filter((child) => child.type === 'decorator')
-            .map((decorator) => this.expr(namedChildren(decorator)[0]))
-        );
+        const decorators = namedChildren(node)
+          .filter((child) => child.type === 'decorator')
+          .map((decorator) => this.expr(namedChildren(decorator)[0]));
         const definition = field(node, 'definition');
         return [
           definition.type === 'class_definition'
-            ? this.classDef(definition, decorators.items)
-            : this.functionDef(definition, decorators.items),
+            ? this.classDef(definition, decorators)
+            : this.functionDef(definition, decorators),
         ];
       }
       case 'match_statement': {

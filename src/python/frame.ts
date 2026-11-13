@@ -5,10 +5,16 @@ import type { Annotation, PyCell, PyFunction, PyValue } from './values';
 /** The variables of a running module, class body, or function call. */
 export class Frame implements TracedFrame {
   readonly temporaries: PyValue[] = [];
+  /** How many native calls were running when the frame last started or resumed running. */
+  nativeCalls = 0;
   /** The annotations a module or class body ran, in the order of the source, which its `__annotate__` evaluates. */
   readonly annotations: Annotation[] = [];
   /** How many `try` and `with` statements a generator's frame is inside, where closing it runs code. */
   protectedDepth = 0;
+  /** The frame an inlined (list, set, or dict) comprehension runs within, whose names CPython's frame shares. */
+  inlinedIn?: Frame;
+  /** What a generator expression's frame holds as its first argument: the iterator of its first iterable. */
+  firstArgument?: PyValue;
 
   // code-gauge-allow functionParameterCount 9 -- Each frame field is set once at creation and read on every name access.
   constructor(

@@ -1,4 +1,4 @@
-import { builtin } from '../define';
+import { moduleBuiltin } from '../define';
 import { displayValue } from '../display';
 import { registerModule } from '../modules';
 import { argument } from '../nativeArgs';
@@ -8,6 +8,8 @@ import { exceptionClassNamed, newException, None, typeError, valueError } from '
 import { PyError, type PyValue } from '../values';
 import { sysHooks } from './sysHooks';
 import { sysInformation, sysModules } from './sysInfo';
+
+const builtin = moduleBuiltin('sys');
 
 registerModule(
   'sys',

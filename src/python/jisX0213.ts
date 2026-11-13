@@ -87,7 +87,7 @@ export function encodeIn(point: number, edition: 2000 | 2004): number | undefine
  * How an edition decodes a code: its text, `'refused'` for a cell :2000 lacks, which CPython's Japanese codecs report
  * as an error of two bytes, or undefined.
  */
-export function decodeIn(code: number, edition: 2000 | 2004): string | 'refused' | undefined {
+export function decodeIn(code: number, edition: 2000 | 2004): string | undefined {
   if (edition === 2000) {
     if (CELLS_ADDED_IN_2004.has(code)) return 'refused';
     if (code === OLD_9B1D) return '鬝';

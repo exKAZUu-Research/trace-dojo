@@ -1,4 +1,5 @@
-import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span } from './ast';
+// code-gauge-allow-file fileNcss 418 -- One compiler of the expressions, whose operators, casts, and literals share its conversions.
+import type { ArrayInitializer, BinaryOperator, Expression, PatternBinding, Span, TypeSyntax } from './ast';
 import { box, boxedTypeOf, unbox } from './builtinWrappers';
 import {
   type Compiled,
@@ -11,7 +12,7 @@ import {
 } from './compilerBase';
 import { unboxedTypeOf } from './conversions';
 import { declarationKey } from './definiteAssignment';
-import { binaryOperation, castOperation, conditionalType, unaryOperation } from './operators';
+import { binaryOperation, castOperation, conditionalType, intersectionOf, unaryOperation } from './operators';
 import { bindingsWhen } from './patternBindings';
 import { booleanConstants } from './reachability';
 import { ReferenceCompiler, thisValue } from './referenceCompiler';
@@ -19,6 +20,7 @@ import { type Frame } from './runtime';
 import {
   BOOLEAN,
   CHAR,
+  type ClassType,
   DOUBLE,
   FLOAT,
   INT,
@@ -578,12 +580,10 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
   }
 
   protected compileCast(context: MethodContext, expression: Extract<Expression, { kind: 'cast' }>): Compiled {
+    if (expression.additionalBounds)
+      return this.compileIntersectionCast(context, expression, expression.additionalBounds);
     const type = this.resolveType(expression.type);
-    // A lambda, a method reference, or a conditional of them takes its type from the cast (JLS 15.16).
-    const operand = ['lambda', 'methodRef', 'conditional', 'switchExpression'].includes(expression.value.kind)
-      ? this.compileValueFor(context, expression.value, type)
-      : this.compileValue(context, expression.value, false, true);
-    const value = this.checkErased(operand, type);
+    const value = this.checkErased(this.compileCastOperand(context, expression.value, type), type);
     if (value.type.kind !== 'null' && isPrimitive(value.type) !== isPrimitive(type)) {
       return this.compileBoxingCast(value, type, expression);
     }
@@ -601,6 +601,49 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
           : undefined,
       source: value.source,
     };
+  }
+
+  /** A cast to an intersection of a class or interface and further interfaces, which checks each of them (JLS 15.16). */
+  protected compileIntersectionCast(
+    context: MethodContext,
+    expression: Extract<Expression, { kind: 'cast' }>,
+    additionalBounds: TypeSyntax[]
+  ): CompiledValue {
+    const [first, ...rest] = [expression.type, ...additionalBounds].map((syntax) => {
+      const bound = this.resolveType(syntax);
+      if (bound.kind !== 'class') return this.error(syntax, `交差型には ${typeName(bound)} 型を使えません。`);
+      return bound;
+    });
+    const interfaces = first.cls.kind === 'interface' ? [first, ...rest] : rest;
+    if (rest.some((bound) => bound.cls.kind !== 'interface')) {
+      this.error(expression, '交差型の & の後ろには、インターフェースしか書けません。');
+    }
+    const superclass = first.cls.kind === 'interface' ? (this.builtins.objectClass.type as ClassType) : first;
+    const type = intersectionOf(superclass, interfaces, this.builtins.objectClass);
+    const operand = this.compileCastOperand(context, expression.value, type);
+    const casts = [first, ...rest].map((bound) => {
+      if (!isCastable(operand.type, bound, this.builtins.objectClass)) {
+        this.error(expression, `${typeName(operand.type)} 型の値を ${typeName(bound)} 型にキャストできません。`);
+      }
+      return this.castOperation(operand.type, bound, expression);
+    });
+    return {
+      kind: 'value',
+      type,
+      run: (frame) => {
+        let value = operand.run(frame);
+        for (const cast of casts) value = cast(frame, value);
+        return value;
+      },
+      source: operand.source,
+    };
+  }
+
+  /** A cast's operand, which a lambda, a method reference, or a conditional of them takes its type from (JLS 15.16). */
+  protected compileCastOperand(context: MethodContext, value: Expression, type: JavaType): CompiledValue {
+    return ['lambda', 'methodRef', 'conditional', 'switchExpression'].includes(value.kind)
+      ? this.compileValueFor(context, value, type)
+      : this.compileValue(context, value, false, true);
   }
 
   /**

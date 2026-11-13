@@ -1,7 +1,9 @@
 import { bindValue, callValue, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
+import { iterStr, stripNumberSpace } from './strings';
 import { pyError, typeError, typeName, valueError } from './types';
-import { PyInstance, type PyValue } from './values';
+import { decimalDigitValue, isDecimalCode } from './unicodeClasses';
+import { type PyError, PyInstance, type PyValue } from './values';
 
 /** The limit of decimal digits an int may convert to or from, which sys.set_int_max_str_digits changes (0: none). */
 export const DEFAULT_MAX_STR_DIGITS = 4300;
@@ -54,22 +56,35 @@ export function toIndex(value: PyValue, describe: (value: PyValue) => string = d
 }
 
 export function intToString(value: bigint): string {
+  const limit = maxStrDigits();
+  const magnitude = value < 0n ? -value : value;
+  // The digits a number of this many bits has at least, which refuses an oversized number before the slow conversion,
+  // as CPython does from the size of the number before converting it.
+  const bits = magnitude.toString(16).length * 4;
+  const leastDigits = Math.floor((bits - 4) * Math.log10(2)) + 1;
+  if (limit > 0 && leastDigits > limit) throw digitLimitError(limit);
+  if (bits > 64) {
+    const runtime = currentRuntime();
+    runtime.ensureStringFits(leastDigits);
+    runtime.spend(Math.ceil(bits / 16));
+  }
   const text = value.toString();
   const digits = value < 0n ? text.length - 1 : text.length;
-  const limit = maxStrDigits();
-  if (limit > 0 && digits > limit) {
-    throw valueError(
-      `Exceeds the limit (${limit} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`
-    );
-  }
+  if (limit > 0 && digits > limit) throw digitLimitError(limit);
   return text;
+}
+
+function digitLimitError(limit: number): PyError {
+  return valueError(
+    `Exceeds the limit (${limit} digits) for integer string conversion; use sys.set_int_max_str_digits() to increase the limit`
+  );
 }
 
 /** Parses a string as `int(text, base)` does, returning undefined when it is not a valid literal. */
 // code-gauge-allow functionNcss 37 -- Follows the grammar of int() literals.
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows the grammar of int() literals.
 export function parseIntText(text: string, base: number): bigint | undefined {
-  let body = text.trim().replaceAll(/^[\s]+|[\s]+$/gu, '');
+  let body = stripNumberSpace(text);
   let negative = false;
   if (body.startsWith('+') || body.startsWith('-')) {
     negative = body.startsWith('-');
@@ -95,34 +110,44 @@ export function parseIntText(text: string, base: number): bigint | undefined {
   const normalized = toAsciiDigits(digits);
   if (!valid.test(normalized)) return undefined;
   const limit = maxStrDigits();
-  if (radix === 10 && limit > 0 && normalized.length > limit) {
+  // Only a radix that is a power of two converts in linear time, which CPython leaves unlimited.
+  if ((radix & (radix - 1)) !== 0 && limit > 0 && normalized.length > limit) {
     throw valueError(
       `Exceeds the limit (${limit} digits) for integer string conversion: value has ${normalized.length} digits; use sys.set_int_max_str_digits() to increase the limit`
     );
   }
-  let result = 0n;
-  const bigRadix = BigInt(radix);
-  if (radix === 10) result = BigInt(normalized);
-  else for (const digit of normalized.toLowerCase()) result = result * bigRadix + BigInt(Number.parseInt(digit, radix));
+  const result = radix === 10 ? BigInt(normalized) : digitsValue(normalized, radix);
   return negative ? -result : result;
 }
 
+/** The value of digits in a radix, halved so that a long text costs a few large multiplications, not one per digit. */
+function digitsValue(digits: string, radix: number): bigint {
+  // Ten digits of the largest radix fit a float exactly.
+  if (digits.length <= 10) return BigInt(Number.parseInt(digits, radix));
+  const low = digits.length >> 1;
+  const split = digits.length - low;
+  return (
+    digitsValue(digits.slice(0, split), radix) * BigInt(radix) ** BigInt(low) + digitsValue(digits.slice(split), radix)
+  );
+}
+
+/** The value of text made only of decimal digits, Unicode ones included, as format field names read an index. */
+export function decimalValue(text: string): bigint | undefined {
+  if (text === '' || !iterStr(text).every((char) => isDecimalCode(char.codePointAt(0) as number))) return undefined;
+  return BigInt(toAsciiDigits(text));
+}
+
 /** Converts Unicode decimal digits, which int() and float() accept, to ASCII digits. */
-function toAsciiDigits(text: string): string {
-  return text.replaceAll(/\p{Nd}/gu, (digit) => {
-    const code = digit.codePointAt(0) as number;
-    if (code < 0x80) return digit;
-    // Every decimal digit block runs from 0 to 9, so the digit is its offset from the block's zero.
-    for (let zero = code; zero > code - 10; zero--) {
-      if (!/\p{Nd}/u.test(String.fromCodePoint(zero - 1))) return String(code - zero);
-    }
-    return digit;
-  });
+export function toAsciiDigits(text: string): string {
+  // oxlint-disable-next-line eslint/no-control-regex -- Only non-ASCII characters can be non-ASCII digits.
+  return text.replaceAll(/[^\u0000-\u007F]/gu, (char) =>
+    String(decimalDigitValue(char.codePointAt(0) as number) ?? char)
+  );
 }
 
 /** Parses a string as `float(text)` does, returning undefined when it is not a valid float. */
 export function parseFloatText(text: string): number | undefined {
-  const body = toAsciiDigits(text.trim());
+  const body = toAsciiDigits(stripNumberSpace(text));
   const special = /^([+-]?)(inf|infinity|nan)$/i.exec(body);
   if (special) {
     const value = special[2].toLowerCase() === 'nan' ? Number.NaN : Number.POSITIVE_INFINITY;
@@ -148,9 +173,11 @@ export function modInt(a: bigint, b: bigint): bigint {
 }
 
 /** Divides floats as CPython's float divmod does, returning the floored quotient and the remainder. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes float_divmod of CPython's floatobject.c.
 export function divmodFloat(a: number, b: number): [number, number] {
   if (b === 0) throw pyError('ZeroDivisionError', 'division by zero');
   let mod = a % b;
+  if (Number.isNaN(mod)) return [Number.NaN, Number.NaN];
   let div = (a - mod) / b;
   if (mod) {
     if (b < 0 !== mod < 0) {

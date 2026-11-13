@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 609 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 646 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -13,6 +13,7 @@ import {
 import { attributeDescriptorField, PyAttribute } from './attributeDescriptors';
 import { builtinDoc, builtinTextSignature } from './builtinDocs';
 import { setClassBases, solidBase } from './classes';
+import { pyRepr } from './conversions';
 import {
   builtinClassesWithDict,
   callGetter,
@@ -22,11 +23,12 @@ import {
   noteGetattributeAssigned,
   ownDict,
 } from './descriptors';
-import { enumClassData, enumMemberData } from './enums';
+import { enumClassData, enumMemberData, membersByName } from './enums';
 import type { Frame } from './frame';
 import { delegateOf } from './generators';
 import { hasPythonLevelNew } from './instances';
 import { builtinFunctionModule } from './modules';
+import { completeNamespace } from './modules/moduleLayout';
 import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
@@ -69,6 +71,7 @@ import {
   PyObject,
   PyRange,
   PySlice,
+  PyTuple,
   type PyValue,
 } from './values';
 import { weakReferenceOf } from './weakReferences';
@@ -187,7 +190,7 @@ function ownClassAttribute(value: PyValue): PyValue | undefined {
 
 /** The attributes builtin objects have of their own, outside any class dictionary. */
 // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of builtin object with attributes of its own.
-// code-gauge-allow functionNcss 34 -- One case per kind of builtin object with attributes of its own.
+// code-gauge-allow functionNcss 37 -- One case per kind of builtin object with attributes of its own.
 export function specialAttribute(value: PyValue, name: string): PyValue | undefined {
   if (name === '__class__') return ownClassAttribute(value);
   if (typeof value === 'bigint' || typeof value === 'boolean') return integerAttribute(BigInt(value), name);
@@ -199,7 +202,11 @@ export function specialAttribute(value: PyValue, name: string): PyValue | undefi
   if (value instanceof PyFunction) return functionAttribute(value, name);
   if (value instanceof PyBoundMethod) return boundMethodAttribute(value, name);
   if (value instanceof PyBuiltinFunction) return builtinFunctionAttribute(value, name);
-  if (value instanceof PyModule) return name === '__dict__' ? namespaceDict(value.dict) : undefined;
+  if (value instanceof PyModule) {
+    if (name !== '__dict__') return undefined;
+    completeNamespace(value);
+    return namespaceDict(value.dict);
+  }
   if (value instanceof PySlice || value instanceof PyRange) {
     return name === 'start' || name === 'stop' || name === 'step' ? value[name] : undefined;
   }
@@ -271,7 +278,6 @@ function boundMethodAttribute(method: PyBoundMethod, name: string): PyValue | un
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per attribute CPython's builtin functions have.
 function builtinFunctionAttribute(fn: PyBuiltinFunction, name: string): PyValue | undefined {
   if (name === '__name__') return fn.name;
   if (name === '__qualname__') return fn.qualifiedName;
@@ -331,7 +337,7 @@ function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
       return fn.qualifiedName;
     }
     case '__doc__': {
-      return fn.dict.get('__doc__') ?? fn.def.doc ?? None;
+      return fn.doc ?? fn.dict.get('__doc__') ?? fn.def.doc ?? None;
     }
     case '__module__': {
       return fn.module;
@@ -380,9 +386,6 @@ function instanceAttribute(instance: PyInstance, name: string): PyValue | undefi
   switch (name) {
     case 'args': {
       return state.args;
-    }
-    case '__notes__': {
-      return state.notes;
     }
     case '__cause__': {
       return state.cause ?? None;
@@ -443,15 +446,33 @@ function osErrorField(state: ExceptionState, name: string): PyValue | undefined 
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 28 -- One case per writable attribute a function keeps outside its dictionary.
+// code-gauge-allow functionNcss 38 -- One case per writable attribute a function keeps outside its dictionary.
 function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue): void {
   if (name === '__globals__' || name === '__closure__' || name === '__builtins__') {
     throw pyError('AttributeError', 'readonly attribute');
   }
   if (name === '__annotations__' || name === '__annotate__') setFunctionAnnotationAttribute(fn, name, value);
-  else if (name === '__name__' && typeof value === 'string') fn.name = value;
-  else if (name === '__qualname__' && typeof value === 'string') fn.qualifiedName = value;
-  else if (name === '__module__') fn.module = value;
-  else fn.dict.set(name, value);
+  else if (name === '__name__') {
+    if (typeof value !== 'string') throw typeError('__name__ must be set to a string object');
+    fn.name = value;
+  } else if (name === '__qualname__') {
+    if (typeof value !== 'string') throw typeError('__qualname__ must be set to a string object');
+    fn.qualifiedName = value;
+  } else if (name === '__module__') fn.module = value;
+  else if (name === '__doc__') fn.doc = value;
+  else if (name === '__defaults__') {
+    if (value !== None && !(value instanceof PyTuple)) throw typeError('__defaults__ must be set to a tuple object');
+    fn.defaults = value instanceof PyTuple ? [...value.items] : [];
+  } else if (name === '__kwdefaults__') {
+    if (value !== None && !(value instanceof PyDict)) throw typeError('__kwdefaults__ must be set to a dict object');
+    fn.keywordDefaults = new Map(
+      value instanceof PyDict ? value.store.ordered().map((entry) => [entry.key as string, entry.value]) : []
+    );
+  } else if (name === '__type_params__') {
+    if (!(value instanceof PyTuple)) throw typeError('__type_params__ must be set to a tuple');
+    fn.typeParams = [...value.items];
+  } else fn.dict.set(name, value);
 }
 
 export function setAttribute(target: PyValue, name: string, value: PyValue): void {
@@ -523,7 +544,6 @@ function userHook(target: PyObject, name: string): PyValue | undefined {
   return isNativeMethod(custom) ? undefined : custom;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows the order type.__setattr__ checks the special attributes of a class in.
 function setClassAttribute(target: PyClass, name: string, value: PyValue, callsHook = true): void {
   refuseSharedClass(target);
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
@@ -531,7 +551,7 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue, callsH
   if (name === '__getattribute__') noteGetattributeAssigned();
   // Instances created from now on are tracked; CPython also finalizes the existing ones, which this grader does not.
   if (name === '__del__') target.flags.definesDel = true;
-  if (target.enumMembers?.some((member) => member.dict.get('_name_') === name)) {
+  if (membersByName(target).has(name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
   }
   if (name === '__name__' || name === '__qualname__') {
@@ -663,8 +683,14 @@ function replaceDict(target: PyObject, value: PyValue): void {
 function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, attribute: PyValue | undefined): void {
   const cls = target.cls;
   if (cls.slotNames !== undefined) throw noDictError(target, name, attribute);
-  if (target.enumValue !== undefined && (name === 'name' || name === 'value')) {
-    throw pyError('AttributeError', `<enum 'Enum'> cannot set attribute '${name}'`);
+  if (target.enumValue !== undefined) {
+    if (name === 'name' || name === 'value') {
+      throw pyError('AttributeError', `<enum 'Enum'> cannot set attribute '${name}'`);
+    }
+    if (name === '_value_') {
+      target.enumValue = value;
+      return;
+    }
   }
   const state = target.exception;
   if (state && setExceptionField(state, name, value)) return;
@@ -711,10 +737,6 @@ function setExceptionField(state: ExceptionState, name: string, value: PyValue):
       state.args = newTuple(currentRuntime().toArray(value));
       return true;
     }
-    case '__notes__': {
-      state.notes = value as never;
-      return true;
-    }
     default: {
       return setKeywordField(state, name, value);
     }
@@ -747,6 +769,9 @@ export function deleteClassAttribute(target: PyClass, name: string): void {
   refuseSharedClass(target);
   // CPython words deleting as it does assigning.
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
+  if (membersByName(target).has(name)) {
+    throw pyError('AttributeError', `${pyRepr(target.name)} cannot delete member ${pyRepr(name)}.`);
+  }
   if (name === '__annotations__') setClassAnnotations(target, undefined);
   else if (!target.dict.delete(name)) throw attributeError(target, name);
 }
@@ -766,9 +791,10 @@ function noDictError(target: PyValue, name: string, attribute?: PyValue): Error 
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
+// code-gauge-allow functionCognitiveComplexity 22 -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
 export function deleteAttribute(target: PyValue, name: string): void {
-  if (target instanceof PyInstance || isSubclassInstance(target)) {
+  currentRuntime().spend();
+  if (takesInstanceAttributes(target)) {
     const custom = userHook(target as PyObject, '__delattr__');
     if (custom === undefined) deleteInstanceAttribute(target as PyObject, name);
     else callValue(bindValue(custom, target), [name]);
@@ -782,6 +808,10 @@ export function deleteAttribute(target: PyValue, name: string): void {
   }
   if (target instanceof PyFunction && (name === '__annotations__' || name === '__annotate__')) {
     setFunctionAnnotationAttribute(target, name, undefined);
+    return;
+  }
+  if (target instanceof PyFunction && name === '__doc__') {
+    target.doc = None;
     return;
   }
   if (target instanceof PyFunction || target instanceof PyModule) {
@@ -799,6 +829,7 @@ function deleteNamespaceEntry(target: PyFunction | PyModule, name: string): bool
 }
 
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Honors native descriptors, properties, user descriptors, enum members, and own dict.
 export function deleteInstanceAttribute(target: PyObject, name: string): void {
   const attribute = target.cls.lookup(name);
   if (attribute instanceof PyAttribute && !attribute.stands) {
@@ -817,5 +848,10 @@ export function deleteInstanceAttribute(target: PyObject, name: string): void {
     return;
   }
   if (attribute !== undefined && callSetter(attribute, target, undefined)) return;
-  if (!ownDict(target)?.delete(name)) throw attributeError(target, name);
+  if (target instanceof PyInstance && target.enumValue !== undefined && (name === 'name' || name === 'value')) {
+    throw pyError('AttributeError', `<enum 'Enum'> cannot delete attribute '${name}'`);
+  }
+  const dict = ownDict(target);
+  if (dict === undefined) throw noDictError(target, name, attribute);
+  if (!dict.delete(name)) throw attributeError(target, name);
 }

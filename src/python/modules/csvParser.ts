@@ -48,7 +48,6 @@ export function readerNext(self: PyValue): PyValue {
   } finally {
     callValue(objectClass.dict.get('__setattr__') as PyValue, [self, '_line_num', counter.lines]);
   }
-  runtime.allocate(fields.items.length + 1);
   return fields;
 }
 
@@ -262,7 +261,7 @@ class LineParser {
         value = callValue(floatClass, [value]);
       }
     }
-    this.fields.items.push(value);
+    this.fields.append(value);
     this.field = [];
     this.unquoted = true;
   }

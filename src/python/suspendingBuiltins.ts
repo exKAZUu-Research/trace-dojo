@@ -95,9 +95,9 @@ function registerTypeVariants(): void {
 }
 
 function* sortedSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
-  checkArgs({ qualified: 'sorted', min: 1, max: 1, style: 'expected', keywords: ['key', 'reverse'] }, args, kwargs);
+  checkArgs({ qualified: 'sorted', min: 1, max: 1, style: 'expected' }, args, undefined);
+  checkArgs({ qualified: 'sort', min: 0, max: 0, style: 'takes', keywords: ['key', 'reverse'] }, [], kwargs);
   const list = newList(yield* itemsSuspending(args[0]));
-  currentRuntime().allocate(list.items.length + 1);
   yield* sortSuspending(list, kwargs);
   return list;
 }
@@ -108,15 +108,15 @@ function* sortSuspending(list: PyList, kwargs: Kwargs): Suspension<void> {
   if (unexpected !== undefined) throw typeError(`sort() got an unexpected keyword argument '${unexpected}'`);
   const key = kwargs?.get('key') ?? None;
   const reverse = isTruthy(kwargs?.get('reverse') ?? false);
-  const original = list.items;
-  list.items = [];
+  const original = list.replaceItems([]);
+  currentRuntime().handToNative(original);
   try {
     const keys: PyValue[] = [];
     if (key === None) keys.push(...original);
     else for (const item of original) keys.push(yield* callSuspending(key, [item]));
     sortByKeys(list, original, keys, reverse);
   } catch (error) {
-    if (list.items.length === 0) list.items = original;
+    if (list.items.length === 0) list.replaceItems(original);
     throw error;
   }
 }

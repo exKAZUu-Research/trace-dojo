@@ -33,7 +33,6 @@ import './modules/inspect';
 import './modules/weakref';
 import './modules/enum';
 import './modules/collections';
-import './modules/dequeOperators';
 import './modules/json';
 import './modules/jsonSubmodules';
 import './modules/annotationlib';

@@ -1,11 +1,14 @@
+import type { OutputChannel } from '../interpreter/programIo';
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { defineArrayCopy } from './arrayCopy';
 import { defineClassClass, runtimeClassNameOf } from './builtinClass';
 import { type Collections, defineCollections, javaEquals, javaHash, linkComparator } from './builtinCollections';
 import { makeEnumGeneric } from './builtinEnum';
 import { defineFunctions, type Functions } from './builtinFunctions';
+import { defineFileIO, standardStreamsOf } from './builtinIo';
 import { defineMath } from './builtinMath';
-import { defineMisc } from './builtinMisc';
+import { defineMisc, defineSerializable } from './builtinMisc';
+import { definePrintMethods } from './builtinPrint';
 import { defineStreams } from './builtinStreams';
 import {
   addConstant,
@@ -21,7 +24,7 @@ import {
 import { charsInRange, defineText } from './builtinText';
 import { defineUtilities } from './builtinUtilities';
 import { type BoxableKind, defineWrappers, hashOf, type Wrappers } from './builtinWrappers';
-import { type Frame, ProgramExit, throwBuiltin } from './runtime';
+import { encodable, type Frame, ProgramExit, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   CHAR,
@@ -100,7 +103,17 @@ function createBuiltins(): Builtins {
   defineText(registry, objectClass, stringClass, registry.classes.get('PrintStream') as ClassInfo, collections);
   const functions = defineFunctions(registry, objectClass, collections, wrappers.comparableClass);
   linkComparator(collections, functions.comparatorClass);
-  defineStreams(registry, objectClass, stringClass.type, collections, wrappers, functions);
+  const streams = defineStreams(registry, objectClass, stringClass.type, collections, wrappers, functions);
+  defineFileIO({
+    registry,
+    objectClass,
+    stringType: stringClass.type,
+    collections,
+    ...streams,
+    ioException: registry.classes.get('IOException') as ClassInfo,
+    ...standardStreamsOf(registry.classes.get('System') as ClassInfo),
+  });
+  defineSerializable(registry, collections);
   return {
     classes: registry.classes,
     objectClass,
@@ -190,18 +203,30 @@ const causeTakers = new Set([
   'IllegalStateException',
   'UnsupportedOperationException',
   'IOException',
+  'UncheckedIOException',
   'MatchException',
   'AssertionError',
 ]);
 
+/** Defines a subclass of `Throwable` with the constructors that take a message, and a cause where Java's do. */
+export function defineThrowableIn(
+  registry: Registry,
+  name: string,
+  superclass: ClassInfo,
+  packageName = 'java.lang'
+): ClassInfo {
+  const cls = registry.define(name, superclass, packageName);
+  const stringType = (registry.classes.get('String') as ClassInfo).type;
+  const throwableType = (registry.classes.get('Throwable') as ClassInfo).type;
+  // Constructors are not inherited, and only these classes declare the ones taking a cause.
+  addMessageConstructors(cls, stringType, causeTakers.has(name) ? throwableType : undefined);
+  return cls;
+}
+
 // code-gauge-allow functionNcss 54 -- One registration per builtin method, each a small native.
 function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType: JavaType): ClassInfo {
-  const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo => {
-    const cls = registry.define(name, superclass, packageName);
-    // Constructors are not inherited, and only these classes declare the ones taking a cause.
-    addMessageConstructors(cls, stringType, causeTakers.has(name) ? throwableClass.type : undefined);
-    return cls;
-  };
+  const defineThrowable = (name: string, superclass: ClassInfo, packageName = 'java.lang'): ClassInfo =>
+    defineThrowableIn(registry, name, superclass, packageName);
   const throwableClass = registry.define('Throwable', objectClass);
   addMessageConstructors(throwableClass, stringType, throwableClass.type);
   addMethod(throwableClass, 'getMessage', [], stringType, false, (_, receiver) => (receiver as JavaObject).message);
@@ -231,8 +256,10 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
       return new JavaArray(throwableClass.type, [...suppressed]);
     }
   );
-  // A stack trace goes to standard error, which learners do not see.
-  addMethod(throwableClass, 'printStackTrace', [], VOID, false, () => {});
+  // The call stack is not recorded, so a stack trace shows the exception and its causes only.
+  addMethod(throwableClass, 'printStackTrace', [], VOID, false, (frame, receiver) => {
+    frame.runtime.io.stderr.write(encodable(stackTraceOf(frame, receiver as JavaObject)));
+  });
   addMethod(throwableClass, 'toString', [], stringType, false, (frame, receiver) => {
     const exception = receiver as JavaObject;
     const name = registry.qualifiedNames.get(exception.cls) ?? exception.cls.binaryName;
@@ -286,9 +313,33 @@ function defineThrowables(registry: Registry, objectClass: ClassInfo, stringType
     exception.message = newString(frame, stringify(frame, detail, objectClass.type));
     if (detail instanceof JavaObject && frame.runtime.isInstance(detail, throwableClass)) exception.cause = detail;
   });
-  const linkage = defineThrowable('LinkageError', errorClass);
-  defineThrowable('AbstractMethodError', defineThrowable('IncompatibleClassChangeError', linkage));
+  defineLinkageErrors(defineThrowable('LinkageError', errorClass), defineThrowable, throwableClass);
   return throwableClass;
+}
+
+/** The errors of linking and initializing classes, of which `ExceptionInInitializerError` takes its cause alone. */
+function defineLinkageErrors(
+  linkage: ClassInfo,
+  defineThrowable: (name: string, superclass: ClassInfo) => ClassInfo,
+  throwableClass: ClassInfo
+): void {
+  defineThrowable('AbstractMethodError', defineThrowable('IncompatibleClassChangeError', linkage));
+  defineThrowable('NoClassDefFoundError', linkage);
+  const initializerError = defineThrowable('ExceptionInInitializerError', linkage);
+  addConstructor(initializerError, [throwableClass.type], (_, receiver, [thrown]) => {
+    (receiver as JavaObject).cause = thrown as JavaObject | undefined;
+  });
+}
+
+/** The exception and its causes, which a stack trace lists, each on a line of its own. */
+function stackTraceOf(frame: Frame, exception: JavaObject): string {
+  let text = '';
+  const seen = new Set<JavaObject>();
+  for (let cause: JavaObject | undefined = exception; cause && !seen.has(cause); cause = cause.cause) {
+    seen.add(cause);
+    text += `${text ? 'Caused by: ' : ''}${stringify(frame, cause, OBJECT_TYPE.value as JavaType)}\n`;
+  }
+  return text;
 }
 
 function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableType: JavaType | undefined): void {
@@ -310,53 +361,30 @@ function addMessageConstructors(cls: ClassInfo, stringType: JavaType, throwableT
   });
 }
 
+let standardError: JavaObject | undefined;
+
+/** The channel `System.out` or `System.err` writes to. */
+export function standardChannelOf(frame: Frame, stream: Value): OutputChannel {
+  return stream === standardError ? frame.runtime.io.stderr : frame.runtime.io.stdout;
+}
+
 function defineSystem(registry: Registry, objectClass: ClassInfo, stringType: JavaType): void {
-  const printStreamClass = registry.define('PrintStream', objectClass, 'java.io');
+  const outputStreamClass = registry.define('OutputStream', objectClass, 'java.io');
+  const inputStreamClass = registry.define('InputStream', objectClass, 'java.io');
+  outputStreamClass.isAbstract = true;
+  inputStreamClass.isAbstract = true;
+  const printStreamClass = registry.define('PrintStream', outputStreamClass, 'java.io');
   const systemClass = registry.define('System', objectClass);
+  addConstant(systemClass, 'in', inputStreamClass.type, new JavaObject(inputStreamClass));
   addConstant(systemClass, 'out', printStreamClass.type, new JavaObject(printStreamClass));
-  // Learners see only standard output, so standard error discards what it prints.
-  const errorStream = new JavaObject(printStreamClass);
-  addConstant(systemClass, 'err', printStreamClass.type, errorStream);
+  standardError = new JavaObject(printStreamClass);
+  addConstant(systemClass, 'err', printStreamClass.type, standardError);
   addMethod(systemClass, 'exit', [INT], VOID, true, () => {
     throw new ProgramExit();
   });
   defineArrayCopy(systemClass, objectClass.type);
-  for (const [name, suffix] of [
-    ['print', ''],
-    ['println', '\n'],
-  ] as const) {
-    for (const type of [INT, LONG, FLOAT, DOUBLE, CHAR, BOOLEAN, stringType, objectClass.type]) {
-      addMethod(printStreamClass, name, [type], VOID, false, (frame, receiver, [value]) => {
-        const text = `${stringify(frame, value, type)}${suffix}`;
-        if (receiver !== errorStream) frame.runtime.print(text);
-      });
-    }
-    addMethod(printStreamClass, name, [CHAR_ARRAY], VOID, false, (frame, receiver, [value]) => {
-      if (!(value instanceof JavaArray)) throwBuiltin(frame, 'NullPointerException');
-      frame.runtime.scanString(value.values.length);
-      const text = `${value.values.map((code) => charToString(code as number)).join('')}${suffix}`;
-      if (receiver !== errorStream) frame.runtime.print(text);
-    });
-  }
-  addMethod(printStreamClass, 'println', [], VOID, false, (frame, receiver) => {
-    if (receiver !== errorStream) frame.runtime.print('\n');
-  });
-  defineIO(registry, objectClass);
-}
-
-/** `IO`, which compact source files use to print without `System.out`. */
-function defineIO(registry: Registry, objectClass: ClassInfo): void {
-  const ioClass = registry.define('IO', objectClass);
-  for (const [name, suffix] of [
-    ['print', ''],
-    ['println', '\n'],
-  ] as const) {
-    addMethod(ioClass, name, [objectClass.type], VOID, true, (frame, _, [value]) => {
-      frame.runtime.print(`${stringify(frame, value, objectClass.type)}${suffix}`);
-    });
-  }
-  addMethod(ioClass, 'println', [], VOID, true, (frame) => {
-    frame.runtime.print('\n');
+  definePrintMethods(printStreamClass, stringType, objectClass.type, (frame, receiver, text) => {
+    standardChannelOf(frame, receiver).write(encodable(text));
   });
 }
 

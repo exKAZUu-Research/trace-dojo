@@ -5,7 +5,6 @@ import { defineNew } from './instances';
 import { deleteListItem, setListItem } from './items';
 import { checkArgs } from './nativeArgs';
 import { toArray } from './objects';
-import { currentRuntime } from './runtimeContext';
 import { updateTable } from './setOperations';
 import { SetTable } from './setTable';
 import { turtleClass } from './turtle';
@@ -38,7 +37,6 @@ for (const cls of [intClass, floatClass, strClass]) {
 
 /** An instance of a program's subclass of int, float, or str, standing for a builtin value. */
 function box(cls: PyClass, value: bigint | number | string): PyInstance {
-  currentRuntime().allocate(1);
   const instance = new PyInstance(cls);
   instance.primitive = value;
   return instance;
@@ -58,8 +56,7 @@ defineNew(listClass, (subtype) => new PyList(subtype, []));
 defineMethod(listClass, '__init__', (self, args, kwargs) => {
   checkArgs({ qualified: 'list', min: 0, max: 1, style: 'expected' }, args, kwargs);
   const items = args.length === 0 ? [] : toArray(args[0]);
-  currentRuntime().allocate(items.length);
-  (self as PyList).items = items;
+  (self as PyList).replaceItems(items);
   return None;
 });
 
@@ -88,10 +85,9 @@ export function updateDictFromArguments(dict: PyDict, qualified: string, args: P
 defineNew(setClass, (subtype) => new PySet(subtype, new SetTable()));
 defineMethod(setClass, '__init__', (self, args, kwargs) => {
   checkArgs({ qualified: 'set', min: 0, max: 1, style: 'expected' }, args, kwargs);
-  const table = new SetTable();
+  const table = (self as PySet).table;
+  table.clear();
   if (args.length > 0) updateTable(table, args[0]);
-  currentRuntime().allocate(table.size);
-  (self as PySet).table = table;
   return None;
 });
 

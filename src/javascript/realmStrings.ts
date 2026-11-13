@@ -1,6 +1,7 @@
 import type { RealmBuilder } from './realm';
+import { asRegExp, replaceWithRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
-import { isCallable, type NativeCall, type Value } from './values';
+import { isCallable, JsObject, type NativeCall, type Value } from './values';
 
 /** One fixed locale, so that sorting with localeCompare gives the same order on every server. */
 const collator = new Intl.Collator('en');
@@ -11,7 +12,11 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
     'String',
     1,
     stringPrototype,
-    ({ runtime, args }) => (args.length === 0 ? '' : runtime.toString(args[0])),
+    ({ runtime, args }) => {
+      if (args.length === 0) return '';
+      // Called as a function, String describes a symbol instead of rejecting it.
+      return typeof args[0] === 'symbol' ? args[0].toString() : runtime.toString(args[0]);
+    },
     false
   );
   builder.method(stringConstructor, 'fromCharCode', 1, ({ runtime, args }) => {
@@ -26,6 +31,18 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
       runtime.throwError('RangeError', 'Invalid code point');
     }
     return codePoints.map((codePoint) => String.fromCodePoint(codePoint)).join('');
+  });
+  builder.method(stringConstructor, 'raw', 1, ({ runtime, args }) => {
+    const raw = runtime.toObject(runtime.get(runtime.toObject(args[0]), 'raw'));
+    const length = Math.max(0, Math.min(Math.trunc(runtime.toNumber(runtime.get(raw, 'length'))) || 0, 2 ** 53 - 1));
+    let text = '';
+    for (let index = 0; index < length; index++) {
+      const part = runtime.toString(runtime.get(raw, String(index)));
+      const substitution = index + 1 < length && index + 1 < args.length ? runtime.toString(args[index + 1]) : '';
+      runtime.extendString(text.length + part.length + substitution.length, part.length + substitution.length);
+      text += part + substitution;
+    }
+    return text;
   });
   const method = (name: string, length: number, run: (call: NativeCall, text: string) => Value): void => {
     builder.method(stringPrototype, name, length, (call) => {
@@ -62,15 +79,17 @@ function defineSearches(method: StringMethod): void {
       args[1] === undefined ? Number.POSITIVE_INFINITY : runtime.toNumber(args[1])
     )
   );
-  method('includes', 1, ({ runtime, args }, text) =>
-    text.includes(runtime.toString(args[0]), integerArgument(runtime, args[1], 0))
-  );
-  method('startsWith', 1, ({ runtime, args }, text) =>
-    text.startsWith(runtime.toString(args[0]), integerArgument(runtime, args[1], 0))
-  );
-  method('endsWith', 1, ({ runtime, args }, text) =>
-    text.endsWith(runtime.toString(args[0]), integerArgument(runtime, args[1], text.length))
-  );
+  for (const name of ['includes', 'startsWith', 'endsWith'] as const) {
+    method(name, 1, ({ runtime, args }, text) => {
+      if (args[0] instanceof JsObject && args[0].regexp) {
+        runtime.throwError('TypeError', `First argument to String.prototype.${name} must not be a regular expression`);
+      }
+      const search = runtime.toString(args[0]);
+      return name === 'endsWith'
+        ? text.endsWith(search, integerArgument(runtime, args[1], text.length))
+        : text[name](search, integerArgument(runtime, args[1], 0));
+    });
+  }
   method('localeCompare', 1, ({ runtime, args }, text) => collator.compare(text, runtime.toString(args[0])));
 }
 
@@ -94,9 +113,21 @@ function defineExtractions(method: StringMethod): void {
   method('trimEnd', 0, (_, text) => text.trimEnd());
   method('toUpperCase', 0, (_, text) => text.toUpperCase());
   method('toLowerCase', 0, (_, text) => text.toLowerCase());
+  method('normalize', 0, ({ runtime, args }, text) => {
+    const form = args[0] === undefined ? 'NFC' : runtime.toString(args[0]);
+    if (!['NFC', 'NFD', 'NFKC', 'NFKD'].includes(form)) {
+      runtime.throwError('RangeError', 'The normalization form should be one of NFC, NFD, NFKC, NFKD.');
+    }
+    return text.normalize(form);
+  });
   method('split', 2, ({ runtime, args }, text) => {
     const limit = args[1] === undefined ? 2 ** 32 - 1 : runtime.toNumber(args[1]) >>> 0;
-    const parts = args[0] === undefined ? [text] : text.split(runtime.toString(args[0]), limit);
+    const regexp = asRegExp(args[0]);
+    const separator = regexp ? new RegExp(regexp.regexp.source, regexp.regexp.flags) : args[0];
+    const parts =
+      separator === undefined
+        ? [text]
+        : text.split(separator instanceof RegExp ? separator : runtime.toString(separator), limit);
     return runtime.newArray(parts);
   });
 }
@@ -135,7 +166,10 @@ function defineBuilders(method: StringMethod): void {
   }
 }
 
-function replaceText({ runtime, args, callRow }: NativeCall, text: string, all: boolean): string {
+function replaceText(call: NativeCall, text: string, all: boolean): string {
+  const { runtime, args, callRow } = call;
+  const regexp = asRegExp(args[0]);
+  if (regexp) return replaceWithRegExp(call, text, regexp, args[1], all);
   const pattern = runtime.toString(args[0]);
   const replacement = args[1];
   let result = '';

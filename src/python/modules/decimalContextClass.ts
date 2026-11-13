@@ -318,7 +318,6 @@ function contextField(context: PyContext, field: (typeof CONTEXT_FIELDS)[number]
 }
 
 export function copyContext(context: PyContext, cls: PyClass = contextClass): PyContext {
-  currentRuntime().allocate(1);
   return new PyContext(cls, { ...copyContextState(context.state), flags: new Set(context.state.flags) });
 }
 

@@ -1,11 +1,13 @@
+import { LIMITS } from '../../interpreter/limits';
 import { pyRepr } from '../conversions';
 import { builtin } from '../define';
+import { builtinMemberValue } from '../enums';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
-import { floatRepr, intToString, toIndex } from '../numbers';
+import { floatRepr, intToString, parseIntText, toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy, toArray } from '../objects';
-import { intEnumValue } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { runModuleSource } from '../sourceModules';
+import { repeatText } from '../stringBuilder';
 import { iterStr } from '../strings';
 import {
   exceptionClassNamed,
@@ -16,6 +18,7 @@ import {
   newList,
   newTuple,
   None,
+  pyError,
   typeError,
   typeName,
   unbox,
@@ -62,7 +65,8 @@ const JSON_ESCAPES: Record<string, string> = {
 function unicodeEscape(char: string): string {
   let result = '';
   for (let unit = 0; unit < char.length; unit++)
-    result += `\\u${((char.codePointAt(unit) as number) & 0xff_ff).toString(16).padStart(4, '0')}`;
+    // oxlint-disable-next-line unicorn/prefer-code-point -- JSON escapes the two surrogates of an astral character separately.
+    result += `\\u${char.charCodeAt(unit).toString(16).padStart(4, '0')}`;
   return result;
 }
 
@@ -75,78 +79,114 @@ function floatText(value: number, options: DumpOptions): string {
   return value > 0 ? 'Infinity' : '-Infinity';
 }
 
-function encode(item: PyValue, options: DumpOptions, level: number, stack: Set<PyObject>): string {
+/** What one call of the encoder has done so far. */
+interface EncodeState {
+  /** The containers being encoded, among which a repeated one is a circular reference. */
+  containers: Set<PyObject>;
+  /** The pieces of the output in order, and their total length. */
+  parts: string[];
+  length: number;
+}
+
+/**
+ * Appends a piece of the output. Every piece passes through here, so the length checked against the string limit is
+ * the length of the output itself, and an output beyond the limit ends before the rest is made.
+ */
+function write(state: EncodeState, text: string): void {
+  state.length += text.length;
+  if (state.length > LIMITS.maxStringLength) throw pyError('MemoryError');
+  state.parts.push(text);
+}
+
+function encode(member: PyValue, options: DumpOptions, level: number, state: EncodeState): void {
   currentRuntime().spend();
-  const value = unbox(item);
+  const value = builtinMemberValue(unbox(member));
+  if (value instanceof PyList || value instanceof PyTuple) return encodeArray(value, options, level, state);
+  if (value instanceof PyDict) return encodeObject(value, options, level, state);
+  const text = scalarText(value, options, state);
+  if (text !== undefined) return write(state, text);
+  enterContainer(value as PyObject, state, options);
+  encode(callValue(options.defaultFn, [value]), options, level, state);
+  state.containers.delete(value as PyObject);
+}
+
+/** The text of a value that is not a container, or undefined for one the `default` function must convert. */
+function scalarText(value: PyValue, options: DumpOptions, state: EncodeState): string | undefined {
+  if (typeof value === 'string') return quoted(value, options.ensureAscii, state);
   if (value === None) return 'null';
-  if (value === true) return 'true';
-  if (value === false) return 'false';
-  if (typeof value === 'bigint') return intToString(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return floatText(value, options);
-  if (typeof value === 'string') return quote(value, options.ensureAscii);
-  if (value instanceof PyList || value instanceof PyTuple) return encodeArray(value, options, level, stack);
-  if (value instanceof PyDict) return encodeObject(value, options, level, stack);
-  const integer = intEnumValue(value);
-  if (typeof integer === 'bigint') return intToString(integer);
-  enterContainer(value as PyObject, stack, options);
-  const result = encode(callValue(options.defaultFn, [value]), options, level, stack);
-  stack.delete(value as PyObject);
-  return result;
+  return typeof value === 'bigint' ? intToString(value) : undefined;
 }
 
-function encodeArray(value: PyList | PyTuple, options: DumpOptions, level: number, stack: Set<PyObject>): string {
-  if (value.items.length === 0) return '[]';
-  enterContainer(value, stack, options);
-  const items = value.items.map((item) => newline(options, level + 1) + encode(item, options, level + 1, stack));
-  stack.delete(value);
-  return `[${items.join(options.itemSeparator)}${newline(options, level)}]`;
+/** Quotes a string, refusing one that cannot fit before doing the work of escaping it. */
+function quoted(text: string, ensureAscii: boolean, state: EncodeState): string {
+  if (state.length + text.length + 2 > LIMITS.maxStringLength) throw pyError('MemoryError');
+  currentRuntime().buildString(text.length);
+  return quote(text, ensureAscii);
 }
 
-function encodeObject(value: PyDict, options: DumpOptions, level: number, stack: Set<PyObject>): string {
-  if (value.store.size === 0) return '{}';
-  enterContainer(value, stack, options);
-  let entries: (readonly [PyValue, PyValue])[] = value.store
-    .ordered()
-    .map((entry) => [entry.key, entry.value] as const);
-  // As the encoders of CPython, the items themselves are sorted, keys and then values, before the keys are converted.
-  if (options.sortKeys) {
-    entries = toArray(
-      callValue(currentRuntime().builtins.get('sorted') as PyValue, [newList(entries.map((entry) => newTuple(entry)))])
-    ).map((item) => (item as PyTuple).items as [PyValue, PyValue]);
+function encodeArray(value: PyList | PyTuple, options: DumpOptions, level: number, state: EncodeState): void {
+  if (value.items.length === 0) return write(state, '[]');
+  enterContainer(value, state, options);
+  write(state, '[');
+  for (const [index, item] of value.items.entries()) {
+    if (index > 0) write(state, options.itemSeparator);
+    writeNewline(options, level + 1, state);
+    encode(item, options, level + 1, state);
   }
-  const parts: string[] = [];
-  for (const [key, item] of entries) {
+  state.containers.delete(value);
+  writeNewline(options, level, state);
+  write(state, ']');
+}
+
+function encodeObject(value: PyDict, options: DumpOptions, level: number, state: EncodeState): void {
+  enterContainer(value, state, options);
+  let isEmpty = true;
+  for (const [key, item] of objectEntries(value, options)) {
     const text = keyText(key, options);
     if (text === undefined) continue;
-    parts.push(
-      `${newline(options, level + 1)}${quote(text, options.ensureAscii)}${options.keySeparator}${encode(item, options, level + 1, stack)}`
-    );
+    write(state, isEmpty ? '{' : options.itemSeparator);
+    isEmpty = false;
+    writeNewline(options, level + 1, state);
+    write(state, quoted(text, options.ensureAscii, state));
+    write(state, options.keySeparator);
+    encode(item, options, level + 1, state);
   }
-  stack.delete(value);
-  if (parts.length === 0) return '{}';
-  return `{${parts.join(options.itemSeparator)}${newline(options, level)}}`;
+  state.containers.delete(value);
+  if (isEmpty) return write(state, '{}');
+  writeNewline(options, level, state);
+  write(state, '}');
 }
 
-function enterContainer(value: PyObject, stack: Set<PyObject>, options: DumpOptions): void {
+function objectEntries(value: PyDict, options: DumpOptions): (readonly [PyValue, PyValue])[] {
+  const entries = value.store.ordered().map((entry) => [entry.key, entry.value] as const);
+  if (!options.sortKeys) return entries;
+  // As the encoders of CPython, the items themselves are sorted, keys and then values, before the keys are converted.
+  return toArray(
+    callValue(currentRuntime().builtins.get('sorted') as PyValue, [newList(entries.map((entry) => newTuple(entry)))])
+  ).map((item) => (item as PyTuple).items as [PyValue, PyValue]);
+}
+
+function enterContainer(value: PyObject, state: EncodeState, options: DumpOptions): void {
   if (!options.checkCircular) return;
-  if (stack.has(value)) throw valueError('Circular reference detected');
-  stack.add(value);
+  if (state.containers.has(value)) throw valueError('Circular reference detected');
+  state.containers.add(value);
 }
 
-function newline(options: DumpOptions, depth: number): string {
-  return options.indent === undefined ? '' : `\n${options.indent.repeat(depth)}`;
+function writeNewline(options: DumpOptions, depth: number, state: EncodeState): void {
+  if (options.indent !== undefined) write(state, `\n${repeatText(options.indent, depth)}`);
 }
 
 /** The text of a dict key, or undefined for a key that `skipkeys` skips. */
-function keyText(item: PyValue, options: DumpOptions): string | undefined {
-  const key = unbox(item);
+function keyText(member: PyValue, options: DumpOptions): string | undefined {
+  const key = builtinMemberValue(unbox(member));
   if (typeof key === 'string') return key;
   if (typeof key === 'number') return floatText(key, options);
   if (key === true) return 'true';
   if (key === false) return 'false';
   if (key === None) return 'null';
-  const integer = intEnumValue(key);
-  if (typeof integer === 'bigint') return intToString(integer);
+  if (typeof key === 'bigint') return intToString(key);
   if (options.skipKeys) return undefined;
   throw typeError(`keys must be str, int, float, bool or None, not ${typeName(key)}`);
 }
@@ -206,6 +246,7 @@ class Decoder {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of JSON value.
   value(): PyValue {
     currentRuntime().spend();
     const char = this.chars[this.index];
@@ -228,13 +269,16 @@ class Decoder {
         return callValue(this.hooks.parseConstant, [word]);
       }
     }
-    const match = /^-?(?:0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?/.exec(
-      this.chars.slice(this.index, this.index + 400).join('')
-    );
+    let end = this.index;
+    while (end < this.chars.length && '+-.0123456789Ee'.includes(this.chars[end])) end++;
+    currentRuntime().scan(end - this.index);
+    const match = /^-?(?:0|[1-9]\d*)(\.\d+)?([eE][-+]?\d+)?/.exec(this.chars.slice(this.index, end).join(''));
     if (!match) throw this.error('Expecting value');
     this.index += match[0].length;
     if (match[1] === undefined && match[2] === undefined) {
-      return this.hooks.parseInt === intClass ? BigInt(match[0]) : callValue(this.hooks.parseInt, [match[0]]);
+      return this.hooks.parseInt === intClass
+        ? (parseIntText(match[0], 10) as bigint)
+        : callValue(this.hooks.parseInt, [match[0]]);
     }
     return this.hooks.parseFloat === floatClass ? Number(match[0]) : callValue(this.hooks.parseFloat, [match[0]]);
   }
@@ -346,9 +390,6 @@ class Decoder {
 
 registerUnsupportedAttributes('json', {
   __author__: 'json.__author__（作者の情報）',
-  decoder: 'モジュール json.decoder',
-  encoder: 'モジュール json.encoder',
-  scanner: 'モジュール json.scanner',
 });
 
 /** The names the Python part defines for itself, which CPython keeps in json.decoder and json.encoder. */
@@ -357,8 +398,8 @@ const PRIVATE_NAMES = new Set(['INFINITY', 'NaN', 'NegInf', 'PosInf', 'encode_ba
 registerModule('json', (runtime, moduleNamespace) => {
   // The Python part runs in globals of its own, of which the module shows all but the private names.
   const namespace = new Map<string, PyValue>([['__name__', 'json']]);
-  const encodeAscii = builtin('encode_basestring_ascii', 'one', 1, 1, ([text]) => quote(text as string, true));
-  const encodeText = builtin('encode_basestring', 'one', 1, 1, ([text]) => quote(text as string, false));
+  const encodeAscii = builtin('encode_basestring_ascii', 'one', 1, 1, ([text]) => quoteAlone(text as string, true));
+  const encodeText = builtin('encode_basestring', 'one', 1, 1, ([text]) => quoteAlone(text as string, false));
   for (const [name, value] of [
     ['encode_basestring_ascii', encodeAscii],
     ['encode_basestring', encodeText],
@@ -381,6 +422,12 @@ registerModule('json', (runtime, moduleNamespace) => {
   return new Map();
 });
 
+function quoteAlone(text: string, ensureAscii: boolean): string {
+  currentRuntime().buildString(text.length);
+  const quoted = quote(text, ensureAscii);
+  currentRuntime().buildString(quoted.length);
+  return quoted;
+}
 function skipWhitespace(text: string, indexValue: PyValue): bigint {
   const chars = iterStr(text);
   let index = Number(indexValue);
@@ -403,7 +450,9 @@ function makeEncoder(args: PyValue[], encodeAscii: PyValue): PyValue {
     defaultFn,
   };
   return builtin('_iterencode', 'expected', 2, 2, ([value]) => {
-    const text = encode(value, options, 0, new Set());
+    const state: EncodeState = { containers: new Set(), parts: [], length: 0 };
+    encode(value, options, 0, state);
+    const text = state.parts.join('');
     currentRuntime().buildString(text.length);
     return newTuple([text]);
   });

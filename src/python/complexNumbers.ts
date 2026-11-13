@@ -1,4 +1,6 @@
 import type { BinaryOperator } from './ast';
+import { floatPower } from './floatPower';
+import { fusedMultiplyAdd as fma } from './modules/mathFma';
 import { asFloat, floatRepr } from './numbers';
 import { complexClass, NotImplemented, pyError } from './types';
 import { PyComplex, type PyValue } from './values';
@@ -27,22 +29,50 @@ function product(a: Parts, b: Parts): Parts {
   return { real: a.real * b.real - a.imag * b.imag, imag: a.real * b.imag + a.imag * b.real };
 }
 
-/** Divides as CPython's _Py_c_quot does. */
-function quotient(a: Parts, b: Parts): Parts {
+/**
+ * Divides as CPython's _Py_c_quot does, with the message of the operator that divides for a zero divisor. The C
+ * compiler of the CPython this matches contracts each `x * y ± z` of the algorithm into one fused multiply-add.
+ */
+function quotient(a: Parts, b: Parts, zeroDivisor = 'division by zero'): Parts {
   const absReal = Math.abs(b.real);
   const absImag = Math.abs(b.imag);
+  let result: Parts = { real: Number.NaN, imag: Number.NaN };
   if (absReal >= absImag) {
-    if (absReal === 0) throw pyError('ZeroDivisionError', 'division by zero');
+    if (absReal === 0) throw pyError('ZeroDivisionError', zeroDivisor);
     const ratio = b.imag / b.real;
-    const denominator = b.real + b.imag * ratio;
-    return { real: (a.real + a.imag * ratio) / denominator, imag: (a.imag - a.real * ratio) / denominator };
-  }
-  if (absImag >= absReal) {
+    const denominator = fma(b.imag, ratio, b.real);
+    result = { real: fma(a.imag, ratio, a.real) / denominator, imag: fma(-a.real, ratio, a.imag) / denominator };
+  } else if (absImag >= absReal) {
     const ratio = b.real / b.imag;
-    const denominator = b.real * ratio + b.imag;
-    return { real: (a.real * ratio + a.imag) / denominator, imag: (a.imag * ratio - a.real) / denominator };
+    const denominator = fma(b.real, ratio, b.imag);
+    result = { real: fma(a.real, ratio, a.imag) / denominator, imag: fma(a.imag, ratio, -a.real) / denominator };
   }
-  return { real: Number.NaN, imag: Number.NaN };
+  return Number.isNaN(result.real) && Number.isNaN(result.imag) ? recoveredQuotient(a, b, result) : result;
+}
+
+/** Recovers the infinities and zeros that computed as nan+nanj, as C11's Annex G.5.2 and CPython do. */
+function recoveredQuotient(a: Parts, b: Parts, result: Parts): Parts {
+  if ((isInfinite(a.real) || isInfinite(a.imag)) && Number.isFinite(b.real) && Number.isFinite(b.imag)) {
+    const x = copySign(isInfinite(a.real) ? 1 : 0, a.real);
+    const y = copySign(isInfinite(a.imag) ? 1 : 0, a.imag);
+    return {
+      real: Number.POSITIVE_INFINITY * fma(x, b.real, y * b.imag),
+      imag: Number.POSITIVE_INFINITY * fma(y, b.real, -x * b.imag),
+    };
+  }
+  if ((isInfinite(b.real) || isInfinite(b.imag)) && Number.isFinite(a.real) && Number.isFinite(a.imag)) {
+    const x = copySign(isInfinite(b.real) ? 1 : 0, b.real);
+    const y = copySign(isInfinite(b.imag) ? 1 : 0, b.imag);
+    return { real: 0 * fma(a.real, x, a.imag * y), imag: 0 * fma(a.imag, x, -a.real * y) };
+  }
+  return result;
+}
+
+const isInfinite = (value: number): boolean => value === Number.POSITIVE_INFINITY || value === Number.NEGATIVE_INFINITY;
+
+/** C's copysign, for which JavaScript cannot read a NaN's sign, taken as positive. */
+function copySign(magnitude: number, sign: number): number {
+  return sign < 0 || Object.is(sign, -0) ? -Math.abs(magnitude) : Math.abs(magnitude);
 }
 
 function powerUnsigned(x: Parts, n: number): Parts {
@@ -55,23 +85,25 @@ function powerUnsigned(x: Parts, n: number): Parts {
   return result;
 }
 
+const ZERO_TO_NEGATIVE_POWER = 'zero to a negative or complex power';
+
 function power(a: Parts, b: Parts): Parts {
   if (b.imag === 0 && b.real === Math.floor(b.real) && Math.abs(b.real) <= 100) {
     const n = b.real;
-    return n > 0 ? powerUnsigned(a, n) : quotient({ real: 1, imag: 0 }, powerUnsigned(a, -n));
+    return n > 0 ? powerUnsigned(a, n) : quotient({ real: 1, imag: 0 }, powerUnsigned(a, -n), ZERO_TO_NEGATIVE_POWER);
   }
   if (b.real === 0 && b.imag === 0) return { real: 1, imag: 0 };
   if (a.real === 0 && a.imag === 0) {
-    if (b.imag !== 0 || b.real < 0) throw pyError('ZeroDivisionError', 'zero to a negative or complex power');
+    if (b.imag !== 0 || b.real < 0) throw pyError('ZeroDivisionError', ZERO_TO_NEGATIVE_POWER);
     return { real: 0, imag: 0 };
   }
   const magnitude = Math.hypot(a.real, a.imag);
-  let length = magnitude ** b.real;
+  let length = floatPower(magnitude, b.real);
   const angle = Math.atan2(a.imag, a.real);
   let phase = angle * b.real;
   if (b.imag !== 0) {
-    length /= Math.exp(angle * b.imag);
-    phase += b.imag * Math.log(magnitude);
+    length *= Math.exp(-angle * b.imag);
+    phase = fma(b.imag, Math.log(magnitude), phase);
   }
   return { real: length * Math.cos(phase), imag: length * Math.sin(phase) };
 }

@@ -149,9 +149,12 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
   protected override generatorItems(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     inner: Frame,
-    first: PyValue
+    first: PyValue,
+    firstNext: () => PyValue | typeof DONE
   ): Generator<PyValue, PyValue> {
-    if (!expression.suspends || expression.scope.isAsync) return super.generatorItems(expression, inner, first);
+    if (!expression.suspends || expression.scope.isAsync) {
+      return super.generatorItems(expression, inner, first, firstNext);
+    }
     return this.itemsSuspending(expression, inner, iterateSuspending(first));
   }
 
@@ -175,8 +178,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
           yield step.value;
           continue;
         }
-        runtime.allocate(1);
-        if (result instanceof PyList) result.items.push(step.value);
+        if (result instanceof PyList) result.append(step.value);
         else if (result instanceof PySet) result.table.add(step.value);
         else {
           const [key, value] = (step.value as PyTuple).items;
@@ -378,7 +380,6 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
         frame.temporaries.push(key);
         dict.store.set(key, yield* this.evaluateSuspending(item.value, frame));
       }
-      this.runtime.allocate(dict.store.size + 1);
       return dict;
     } finally {
       frame.temporaries.length = length;

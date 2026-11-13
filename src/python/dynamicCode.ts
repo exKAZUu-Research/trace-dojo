@@ -6,7 +6,7 @@ import { MappingNamespace } from './classes';
 import { method } from './define';
 import { Frame } from './frame';
 import { isIncompleteInput } from './incompleteInput';
-import { findIndentationError } from './indentation';
+import { findIndentationError, logicalLines } from './indentation';
 import { builtinClassWithBase } from './modules/moduleClasses';
 import { defineProperty } from './modules/numberSupport';
 import { namespaceOf } from './namespaces';
@@ -202,8 +202,11 @@ function finishTree(tree: PyValue, kind: 'parsed' | 'optimized', optimize: PyVal
 
 /** The tree `ast.parse` gives, raising the SyntaxError of text the grammar rejects. */
 function parseTree(support: AstSupport, text: string, mode: Mode, filename: string): PyValue {
-  const indentationError = findIndentationError(text);
-  if (indentationError) throw syntaxError(unshownIndentationErrorClass, filename, reasonOf(indentationError));
+  const { lines, limitError } = logicalLines(text);
+  const indentationError = findIndentationError(text, lines, limitError);
+  if (indentationError) {
+    throw syntaxError(unshownIndentationErrorClass, filename, reasonOf(indentationError.diagnostic));
+  }
   return support.parse(text, mode, (reason) => syntaxError(unshownSyntaxErrorClass, filename, reason));
 }
 
@@ -410,12 +413,13 @@ function parseSource(
   mode: Mode,
   topLevelAwait: boolean
 ): Module {
-  const indentationError = findIndentationError(source);
+  const { lines, limitError } = logicalLines(source);
+  const indentationError = findIndentationError(source, lines, limitError);
   if (indentationError) {
     // In eval mode, the parser rejects a statement at its first token, before the tokenizer reads its indentation.
     const cls =
       mode === 'eval' && STATEMENT_START.test(source) ? unshownSyntaxErrorClass : unshownIndentationErrorClass;
-    throw syntaxError(cls, filename, reasonOf(indentationError));
+    throw syntaxError(cls, filename, reasonOf(indentationError.diagnostic));
   }
   try {
     return parseDynamicCode(source, features, topLevelAwait);

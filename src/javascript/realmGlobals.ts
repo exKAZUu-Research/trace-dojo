@@ -1,9 +1,12 @@
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
-import { inspect, OutputBudget } from './inspect';
+import { formatLogArguments } from './consoleFormat';
+import { inspect, inspectValue } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
+import { dateValueOf } from './realmDate';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { defineHidden, type Runtime } from './runtime';
 import {
-  isAccessor,
+  freeze,
   isCallable,
   isObject,
   JsArray,
@@ -46,7 +49,13 @@ function defineObject(builder: RealmBuilder): void {
     ({ runtime, thisValue, args }) =>
       runtime.getOwnProperty(runtime.toObject(thisValue), runtime.toPropertyKey(args[0])) !== undefined
   );
-  builder.method(objectPrototype, 'toString', 0, ({ thisValue }) => `[object ${tagOf(thisValue)}]`);
+  builder.method(objectPrototype, 'toString', 0, ({ runtime, thisValue }) => {
+    const tag =
+      thisValue === undefined || thisValue === null
+        ? undefined
+        : runtime.get(thisValue, WELL_KNOWN_SYMBOLS.toStringTag);
+    return `[object ${typeof tag === 'string' ? tag : tagOf(thisValue)}]`;
+  });
   builder.method(objectPrototype, 'valueOf', 0, ({ runtime, thisValue }) => runtime.toObject(thisValue));
 }
 
@@ -55,7 +64,11 @@ function tagOf(value: Value): string {
   if (value === null) return 'Null';
   if (value instanceof JsArray) return 'Array';
   if (value instanceof JsFunction) return 'Function';
-  if (value instanceof JsObject) return value.isError ? 'Error' : 'Object';
+  if (value instanceof JsObject) {
+    if (value.regexp) return 'RegExp';
+    if (dateValueOf(value) !== undefined) return 'Date';
+    return value.isError ? 'Error' : 'Object';
+  }
   if (typeof value === 'string') return 'String';
   return typeof value === 'number' ? 'Number' : 'Boolean';
 }
@@ -77,7 +90,7 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
     for (const source of args.slice(1)) {
       if (source === undefined || source === null) continue;
       const object = runtime.toObject(source);
-      for (const key of runtime.ownEnumerableKeys(object)) runtime.set(target, key, runtime.get(object, key));
+      runtime.forEachOwnEnumerable(object, (key) => runtime.set(target, key, runtime.get(object, key)));
     }
     return target;
   });
@@ -91,13 +104,7 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
   });
   builder.method(objectConstructor, 'freeze', 1, ({ args }) => {
     const object = args[0];
-    if (!isObject(object)) return object;
-    if (object instanceof JsArray) object.frozen = true;
-    object.extensible = false;
-    for (const property of object.properties.values()) {
-      property.configurable = false;
-      if (!isAccessor(property)) property.writable = false;
-    }
+    if (isObject(object)) freeze(object);
     return object;
   });
 }
@@ -162,6 +169,13 @@ function defineFunction(builder: RealmBuilder): void {
     bound.captured = [target, boundThis, ...boundArgs];
     return bound;
   });
+  builder.constant(
+    functionPrototype,
+    WELL_KNOWN_SYMBOLS.hasInstance,
+    builder.function('[Symbol.hasInstance]', 1, ({ runtime, thisValue, args }) =>
+      runtime.ordinaryHasInstance(thisValue, args[0])
+    )
+  );
   builder.method(functionPrototype, 'toString', 0, ({ runtime, thisValue }) => {
     if (!(thisValue instanceof JsFunction))
       return runtime.throwError('TypeError', 'Function.prototype.toString requires a function');
@@ -171,14 +185,31 @@ function defineFunction(builder: RealmBuilder): void {
   });
 }
 
-const errorNames: ErrorName[] = ['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError'];
+const errorNames: ErrorName[] = [
+  'Error',
+  'TypeError',
+  'RangeError',
+  'ReferenceError',
+  'SyntaxError',
+  'AggregateError',
+  'SuppressedError',
+];
+
+/** The `length` of the error constructors that take more than a message. */
+const errorArgumentCounts: Partial<Record<ErrorName, number>> = { AggregateError: 2, SuppressedError: 3 };
 
 function defineErrors(builder: RealmBuilder): void {
   const { errorPrototypes } = builder.realm;
   let errorConstructor: JsFunction | undefined;
   for (const name of errorNames) {
     const prototype = errorPrototypes[name];
-    const fn = builder.defineClass(name, 1, prototype, (call) => createError(call, prototype));
+    const fn = builder.defineClass(name, errorArgumentCounts[name] ?? 1, prototype, (call) =>
+      name === 'AggregateError'
+        ? createAggregateError(call, prototype)
+        : name === 'SuppressedError'
+          ? createSuppressedError(call, prototype)
+          : createError(call, prototype)
+    );
     if (errorConstructor) fn.proto = errorConstructor;
     else errorConstructor = fn;
     defineHidden(prototype, 'name', name);
@@ -205,15 +236,37 @@ function createError({ runtime, args, newTarget }: NativeCall, prototype: JsObje
   return error;
 }
 
+/** Creates a SuppressedError, whose first two arguments are the error and the error it suppressed. */
+function createSuppressedError(call: NativeCall, prototype: JsObject): JsObject {
+  const [error, suppressed] = call.args;
+  const object = createError({ ...call, args: call.args.slice(2) }, prototype);
+  defineHidden(object, 'error', error);
+  defineHidden(object, 'suppressed', suppressed);
+  return object;
+}
+
+/** Creates an AggregateError, whose first argument is the iterable of errors it gathers. */
+function createAggregateError(call: NativeCall, prototype: JsObject): JsObject {
+  const { runtime, args } = call;
+  const error = createError({ ...call, args: args.slice(1) }, prototype);
+  defineHidden(error, 'errors', runtime.newArray(runtime.iterate(args[0])));
+  return error;
+}
+
 // code-gauge-allow functionCognitiveComplexity 16 -- Lists the builtin methods, each a small closure of its own.
-// code-gauge-allow functionNcss 32 -- Lists the builtin methods, each a small closure of its own.
+// code-gauge-allow functionNcss 33 -- Lists the builtin methods, each a small closure of its own.
 function defineNumber(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
   const numberConstructor = builder.defineClass(
     'Number',
     1,
     numberPrototype,
-    ({ runtime, args }) => (args.length === 0 ? 0 : runtime.toNumber(args[0])),
+    ({ runtime, args }) => {
+      if (args.length === 0) return 0;
+      // Number converts a BigInt, which the implicit conversion of arithmetic rejects.
+      const numeric = runtime.toNumeric(args[0]);
+      return typeof numeric === 'bigint' ? Number(numeric) : numeric;
+    },
     false
   );
   for (const [name, value] of [
@@ -270,7 +323,30 @@ function defineNumber(builder: RealmBuilder): void {
       runtime.throwError('RangeError', 'toFixed() digits argument must be between 0 and 100');
     return value.toFixed(digits);
   });
+  defineNumberFormats(builder);
   builder.method(numberPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisNumber(runtime, thisValue));
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+function defineNumberFormats(builder: RealmBuilder): void {
+  const { numberPrototype } = builder.realm;
+  builder.method(numberPrototype, 'toPrecision', 1, ({ runtime, thisValue, args }) => {
+    const value = thisNumber(runtime, thisValue);
+    if (args[0] === undefined) return String(value);
+    const precision = Math.trunc(runtime.toNumber(args[0])) || 0;
+    if (!Number.isFinite(value)) return String(value);
+    if (!(precision >= 1 && precision <= 100))
+      runtime.throwError('RangeError', 'toPrecision() argument must be between 1 and 100');
+    return value.toPrecision(precision);
+  });
+  builder.method(numberPrototype, 'toExponential', 1, ({ runtime, thisValue, args }) => {
+    const value = thisNumber(runtime, thisValue);
+    const digits = Math.trunc(runtime.toNumber(args[0])) || 0;
+    if (!Number.isFinite(value)) return String(value);
+    if (!(digits >= 0 && digits <= 100))
+      runtime.throwError('RangeError', 'toExponential() argument must be between 0 and 100');
+    return args[0] === undefined ? value.toExponential() : value.toExponential(digits);
+  });
 }
 
 function thisNumber(runtime: Runtime, value: Value): number {
@@ -299,26 +375,36 @@ function defineMath(builder: RealmBuilder): void {
   for (const name of [
     'abs',
     'acos',
+    'acosh',
     'asin',
+    'asinh',
     'atan',
+    'atanh',
     'cbrt',
     'ceil',
+    'clz32',
     'cos',
+    'cosh',
     'exp',
+    'expm1',
     'floor',
+    'fround',
     'log',
     'log10',
+    'log1p',
     'log2',
     'round',
     'sign',
     'sin',
+    'sinh',
     'sqrt',
     'tan',
+    'tanh',
     'trunc',
   ] as const) {
     builder.method(math, name, 1, ({ runtime, args }) => Math[name](runtime.toNumber(args[0])));
   }
-  for (const name of ['atan2', 'pow'] as const) {
+  for (const name of ['atan2', 'imul', 'pow'] as const) {
     builder.method(math, name, 2, ({ runtime, args }) =>
       Math[name](runtime.toNumber(args[0]), runtime.toNumber(args[1]))
     );
@@ -335,13 +421,83 @@ function defineMath(builder: RealmBuilder): void {
 
 function defineConsole(builder: RealmBuilder): void {
   const console = builder.namespace('console');
-  for (const name of ['log', 'info', 'warn', 'error', 'debug']) {
+  // Grouping indents everything printed after it, on every line, as Node.js does.
+  let groupIndentation = '';
+  const write = (runtime: Runtime, stream: 'stdout' | 'stderr', text: string): void => {
+    const indented = groupIndentation ? groupIndentation + text.replaceAll('\n', `\n${groupIndentation}`) : text;
+    runtime.io[stream].write(`${indented}\n`);
+  };
+  // Node.js writes warnings and errors to standard error.
+  for (const [name, stream] of [
+    ['log', 'stdout'],
+    ['info', 'stdout'],
+    ['debug', 'stdout'],
+    ['warn', 'stderr'],
+    ['error', 'stderr'],
+  ] as const) {
     builder.method(console, name, 0, ({ runtime, args }) => {
-      const budget = new OutputBudget();
-      runtime.budget.print(`${args.map((value) => inspect(runtime, value, budget)).join(' ')}\n`);
+      write(runtime, stream, formatLogArguments(runtime, args));
       return;
     });
   }
+  builder.method(console, 'dir', 0, ({ runtime, args }) => {
+    const [value, options] = args;
+    // null means no limit for depth and maxArrayLength, as util.inspect takes them.
+    const limit = (name: string): number | undefined => {
+      const option = isObject(options) ? runtime.get(options, name) : undefined;
+      if (option === undefined) return undefined;
+      return option === null ? Number.POSITIVE_INFINITY : runtime.toNumber(option);
+    };
+    const compact = isObject(options) ? runtime.get(options, 'compact') : undefined;
+    write(
+      runtime,
+      'stdout',
+      inspectValue(runtime, value, undefined, limit('depth'), {
+        breakLength: limit('breakLength'),
+        compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
+        maxArrayLength: limit('maxArrayLength'),
+      })
+    );
+    return;
+  });
+  for (const name of ['group', 'groupCollapsed']) {
+    builder.method(console, name, 0, ({ runtime, args }) => {
+      if (args.length > 0) write(runtime, 'stdout', formatLogArguments(runtime, args));
+      groupIndentation += '  ';
+      return;
+    });
+  }
+  builder.method(console, 'groupEnd', 0, () => {
+    groupIndentation = groupIndentation.slice(2);
+    return;
+  });
+  const counts = new Map<string, number>();
+  builder.method(console, 'count', 0, ({ runtime, args }) => {
+    const label = labelOf(runtime, args[0]);
+    const count = (counts.get(label) ?? 0) + 1;
+    counts.set(label, count);
+    write(runtime, 'stdout', `${label}: ${count}`);
+    return;
+  });
+  builder.method(console, 'countReset', 0, ({ runtime, args }) => {
+    const label = labelOf(runtime, args[0]);
+    if (counts.has(label)) counts.set(label, 0);
+    else write(runtime, 'stderr', `Count for '${label}' does not exist`);
+    return;
+  });
+  builder.method(console, 'assert', 0, ({ runtime, args }) => {
+    const [condition, ...data] = args;
+    if (toBoolean(condition)) return;
+    const message =
+      typeof data[0] === 'string' ? [`Assertion failed: ${data[0]}`, ...data.slice(1)] : ['Assertion failed', ...data];
+    write(runtime, 'stderr', formatLogArguments(runtime, message));
+    return;
+  });
+}
+
+/** The label `console.count` counts under, `default` when none is given. */
+function labelOf(runtime: Runtime, label: Value): string {
+  return label === undefined ? 'default' : runtime.toString(label);
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Lists the builtin methods, each a small closure of its own.

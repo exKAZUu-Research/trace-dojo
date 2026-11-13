@@ -1,5 +1,6 @@
+import { currentRuntime } from './runtimeContext';
 import { exceptionClassNamed, newException, newTuple } from './types';
-import { type PyClass, PyInstance, type PyValue } from './values';
+import { type PyClass, PyInstance, PyList, type PyValue } from './values';
 
 /** Creates an exception group of `cls` holding `exceptions`, with its message and sub-exceptions set. */
 export function makeExceptionGroup(cls: PyClass, message: string, exceptions: readonly PyValue[]): PyInstance {
@@ -42,8 +43,11 @@ export function deriveGroup(group: PyInstance, exceptions: PyInstance[]): PyInst
   if (state && derivedState) {
     derivedState.cause = state.cause;
     derivedState.context = state.context;
-    derivedState.notes = state.notes;
     derivedState.suppressContext = state.suppressContext;
+  }
+  const notes = group.dict.get('__notes__');
+  if (notes !== undefined) {
+    derived.dict.set('__notes__', notes instanceof PyList ? new PyList(notes.cls, [...notes.items]) : notes);
   }
   return derived;
 }
@@ -64,6 +68,7 @@ export function splitGroup(
   const matched: PyInstance[] = [];
   const rest: PyInstance[] = [];
   for (const exception of exceptions) {
+    currentRuntime().spend();
     if (exception.exception?.exceptions) {
       const [match, remaining] = splitGroup(exception, predicate);
       if (match) matched.push(match);

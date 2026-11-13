@@ -336,6 +336,17 @@ function byteOrderArgument(value: PyValue | undefined, functionName: string): bo
   return order === 'little';
 }
 
+const MAX_SSIZE = (1n << 63n) - 1n;
+
+function fitsInBytes(value: bigint, length: bigint, signed: boolean): boolean {
+  const bits = length * 8n;
+  if (!signed) return value === 0n || BigInt(value.toString(2).length) <= bits;
+  if (length === 0n) return value === 0n;
+  if (value >= 0n) return value === 0n || BigInt(value.toString(2).length) <= bits - 1n;
+  const complement = -value - 1n;
+  return complement === 0n || BigInt(complement.toString(2).length) <= bits - 1n;
+}
+
 method(
   intClass,
   'to_bytes',
@@ -347,12 +358,11 @@ method(
     const value = BigInt(self as bigint | boolean);
     const length = toIndex(argument(args, kwargs, 0, 'length') ?? 1n);
     if (length < 0n) throw valueError('length argument must be non-negative');
+    if (length > MAX_SSIZE) throw pyError('OverflowError', 'Python int too large to convert to C ssize_t');
     const little = byteOrderArgument(argument(args, kwargs, 1, 'byteorder'), 'to_bytes');
     const signed = isTruthy(kwargs?.get('signed') ?? false);
     if (!signed && value < 0n) throw pyError('OverflowError', "can't convert negative int to unsigned");
-    const bits = length * 8n;
-    const fits = signed ? value >= -(1n << (bits - 1n)) && value < 1n << (bits - 1n) : value < 1n << bits;
-    if (!fits || (signed && length === 0n && value !== 0n)) throw pyError('OverflowError', 'int too big to convert');
+    if (!fitsInBytes(value, length, signed)) throw pyError('OverflowError', 'int too big to convert');
     currentRuntime().buildString(Number(length));
     const data = new Uint8Array(Number(length));
     writeInteger(value, data.length, little, data, 0);
@@ -374,8 +384,11 @@ method(
     const data = bytesLikeData(source) ?? bytesFromObject('bytes', source);
     const little = byteOrderArgument(argument(args, kwargs, 1, 'byteorder'), 'from_bytes');
     currentRuntime().scan(data.length);
+    currentRuntime().chargeBits(BigInt(data.length * 8));
     const value = readInteger(data, little, isTruthy(kwargs?.get('signed') ?? false));
-    return owner === boolClass ? value !== 0n : value;
+    if (owner === intClass) return value;
+    if (owner === boolClass) return value !== 0n;
+    return callValue(owner, [value]);
   },
   { keywords: ['bytes', 'byteorder', 'signed'], binding: 'class' }
 );

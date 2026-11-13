@@ -296,9 +296,8 @@ function harmonicMean(dataValue: PyValue, weightsValue: PyValue | undefined): Py
 
 function sortedData(data: PyValue): PyValue[] {
   const list = newList(toArray(data));
-  currentRuntime().allocate(list.items.length + 1);
   sortList(list, None, false);
-  return list.items;
+  return [...list.items];
 }
 
 function median(data: PyValue): PyValue {

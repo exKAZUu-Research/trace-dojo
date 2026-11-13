@@ -133,7 +133,7 @@ method(newTypeClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime()
  */
 export function getTypeHints(args: PyValue[], kwargs: Kwargs): PyValue {
   const hints = typeHints(args, kwargs);
-  if (isTruthy(kwargs?.get('include_extras') ?? false)) return hints;
+  if (isTruthy(args[3] ?? kwargs?.get('include_extras') ?? false)) return hints;
   const strip = currentRuntime().importModule('typing').dict.get('_strip_annotations') as PyValue;
   for (const entry of hints.store.ordered()) {
     const value = entry.value;
@@ -156,7 +156,6 @@ function typeHints(args: PyValue[], kwargs: Kwargs): PyDict {
   const globalns = globalArgument === None ? undefined : namespaceOfMapping(globalArgument);
   const localns = localArgument === None ? undefined : namespaceOfMapping(localArgument);
   const hints = newDict();
-  const runtime = currentRuntime();
   if (target instanceof PyClass) {
     for (const cls of target.mro.toReversed()) {
       const annotations = cls.isBuiltin ? undefined : getAttribute(cls, '__annotations__');
@@ -185,7 +184,6 @@ function typeHints(args: PyValue[], kwargs: Kwargs): PyDict {
       hints.store.set(entry.key, resolveHint(entry.value, globals, localns ?? globals, typeParamsOf(target)));
     }
   }
-  runtime.allocate(hints.store.size + 1);
   return hints;
 }
 

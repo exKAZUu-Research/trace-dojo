@@ -1,15 +1,20 @@
-// code-gauge-allow-file fileNcss 477 -- The enum machinery keeps the members, flags, and their boundaries together.
-import { pyRepr, pyStr } from './conversions';
+// code-gauge-allow-file fileNcss 635 -- The enum machinery keeps the members, flags, and their boundaries together.
+import { pyFormat, pyRepr, pyStr } from './conversions';
+import { pythonMethod } from './define';
+import { ownDict } from './descriptors';
 import { hashInt, pyHash } from './hashing';
-import { getItem } from './items';
-import { callValue, getAttribute, getIterator } from './objects';
-import { intEnumValue, keysEqual } from './operators';
+import { getItem, keyError } from './items';
+import { bindValue, callValue, enumMemberGenerator, getAttribute, isTruthy, setItem } from './objects';
+import { binaryOp, intEnumValue, keysEqual } from './operators';
 import { currentRuntime } from './runtimeContext';
 import { defineValueHash } from './slotWrappers';
 import {
-  builtinClass,
+  argumentTypeName,
   classOf,
   defineMethod,
+  exceptionClassNamed,
+  functionClass,
+  generatorClass,
   intClass,
   newDict,
   newList,
@@ -19,6 +24,7 @@ import {
   objectClass,
   propertyClass,
   pyError,
+  staticmethodClass,
   strClass,
   typeClass,
   typeError,
@@ -29,10 +35,12 @@ import {
   PyBuiltinFunction,
   PyClass,
   PyDescriptor,
+  PyDict,
+  PyError,
   PyFunction,
+  PyGenerator,
   PyInstance,
   PyList,
-  PyOpaque,
   PyTuple,
   type PyValue,
 } from './values';
@@ -41,6 +49,7 @@ import {
 export const enumTypeClass = new PyClass('EnumType', [typeClass], typeClass);
 enumTypeClass.mro = [enumTypeClass, ...typeClass.mro];
 enumTypeClass.module = 'enum';
+enumTypeClass.isWrittenInPython = true;
 
 export const enumClass = enumBuiltin('Enum', []);
 export const reprEnumClass = enumBuiltin('ReprEnum', [enumClass]);
@@ -48,19 +57,13 @@ export const intEnumClass = enumBuiltin('IntEnum', [intClass, reprEnumClass]);
 export const strEnumClass = enumBuiltin('StrEnum', [strClass, reprEnumClass]);
 export const flagClass = enumBuiltin('Flag', [enumClass]);
 export const intFlagClass = enumBuiltin('IntFlag', [intClass, reprEnumClass, flagClass]);
-export const autoClass = builtinClass('auto');
-autoClass.module = 'enum';
-/** `enum.member()` and `enum.nonmember()`, which mark what a class body's attribute becomes. */
-export const memberClass = builtinClass('member');
-memberClass.module = 'enum';
-export const nonmemberClass = builtinClass('nonmember');
-nonmemberClass.module = 'enum';
 
 function enumBuiltin(name: string, bases: PyClass[]): PyClass {
   const cls = new PyClass(name, bases.length > 0 ? bases : [objectClass], enumTypeClass);
   cls.mro = linearize(cls);
   cls.module = 'enum';
   cls.isBaseType = true;
+  cls.isWrittenInPython = true;
   cls.flags.isEnum = true;
   cls.layout = { base: 'object' };
   return cls;
@@ -91,6 +94,8 @@ export function isFlagClass(cls: PyClass): boolean {
 
 /** The members of each Enum class by name, in definition order, aliases and multi-bit flags included. */
 const namedMembers = new WeakMap<PyClass, Map<string, PyInstance>>();
+/** The canonical member for each distinct value of an Enum class, keyed by its value before `__init__` runs. */
+const memberLookups = new WeakMap<PyClass, [PyValue, PyInstance][]>();
 /** The flag values without a name of their own that each Flag class has made members for. */
 const pseudoMembers = new WeakMap<PyClass, Map<bigint, PyInstance>>();
 
@@ -98,51 +103,97 @@ export function membersByName(cls: PyClass): Map<string, PyInstance> {
   return namedMembers.get(cls) ?? new Map();
 }
 
-/** `Color(value)`: the member whose value equals `value`, a combination of flags, or what `_missing_` returns. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows EnumType.__call__ and Enum.__new__.
+function lookupEntries(cls: PyClass): [PyValue, PyInstance][] {
+  return memberLookups.get(cls) ?? [];
+}
+
+const FUNCTIONAL_KEYWORDS = new Set(['value', 'names', 'module', 'qualname', 'type', 'start', 'boundary']);
+
+/** `Color(value)` or `Enum('Name', names, ...)`: `EnumType.__call__`. */
+// code-gauge-allow functionCognitiveComplexity 24 -- Follows EnumType.__call__ and Enum.__new__.
 export function enumLookup(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
-  if (args.length > 1 || (kwargs && kwargs.size > 0)) return createEnum(cls, args, kwargs);
-  if (args.length !== 1) {
-    throw typeError(`${cls.name}() takes 1 positional argument but ${args.length} were given`);
-  }
-  const [value] = args;
+  validateEnumCallArgs(args, kwargs);
+  const firstValue = args.length > 0 ? args[0] : (kwargs?.get('value') as PyValue);
+  const hasNames = args.length >= 2 || (kwargs?.has('names') ?? false);
+  if (membersByName(cls).size === 0) return emptyEnumCall(cls, firstValue, hasNames, args, kwargs);
+  const value =
+    args.length > 1
+      ? newTuple(args)
+      : kwargs?.has('names')
+        ? newTuple([firstValue, kwargs.get('names') as PyValue])
+        : firstValue;
   if (value instanceof PyInstance && value.cls === cls) return value;
-  for (const member of membersByName(cls).values()) if (keysEqual(member.enumValue as PyValue, value)) return member;
+  for (const [memberVal, member] of lookupEntries(cls)) if (keysEqual(memberVal, value)) return member;
   const missing = cls.lookup('_missing_');
-  if (missing !== undefined && missing !== enumClass.dict.get('_missing_')) {
-    const result = callValue(getAttribute(cls, '_missing_'), [value]);
-    if (result instanceof PyInstance && result.cls.isSubclassOf(cls)) return result;
-    if (result !== None) {
-      throw typeError(
-        `error in ${cls.qualifiedName}._missing_: returned ${pyRepr(result)} instead of None or a valid member`
-      );
-    }
-  } else if (isFlagClass(cls) && (typeof value === 'bigint' || typeof value === 'boolean')) {
+  if (missing !== undefined && missing !== enumClass.dict.get('_missing_')) return callMissing(cls, value);
+  if (isFlagClass(cls) && (typeof value === 'bigint' || typeof value === 'boolean')) {
     return flagMember(cls, BigInt(value));
   }
   throw pyError('ValueError', `${pyRepr(value)} is not a valid ${cls.qualifiedName}`);
 }
 
-const FUNCTIONAL_KEYWORDS = new Set(['value', 'names', 'module', 'qualname', 'type', 'start', 'boundary']);
-
-/**
- * `Enum('Name', names, *, module=None, qualname=None, type=None, start=1, boundary=None)`, the functional API of
- * EnumType.__call__, which creates a new Enum class as `_create_` does.
- */
-// code-gauge-allow functionCognitiveComplexity 26 -- Follows EnumType._create_, which accepts names in four forms.
-// code-gauge-allow functionNcss 40 -- Follows EnumType._create_, which accepts names in four forms.
-function createEnum(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
+function validateEnumCallArgs(args: PyValue[], kwargs: Kwargs): void {
   for (const key of kwargs?.keys() ?? []) {
     if (!FUNCTIONAL_KEYWORDS.has(key)) {
       throw typeError(`EnumType.__call__() got an unexpected keyword argument '${key}'`);
     }
   }
-  if (args.length > 2) throw typeError(`${cls.name}() takes 1 positional argument but ${args.length} were given`);
-  const option = (name: string, index: number): PyValue | undefined => args[index] ?? kwargs?.get(name);
-  const value = option('value', 0);
-  let names = option('names', 1) ?? None;
-  const start = option('start', -1) ?? 1n;
-  if (cls.enumMembers && cls.enumMembers.length > 0) throw typeError(`${cls.name} has no members defined`);
+  if (args.length > 0 && kwargs?.has('value')) {
+    throw typeError("EnumType.__call__() got multiple values for argument 'value'");
+  }
+  if (args.length >= 2 && kwargs?.has('names')) {
+    throw typeError("EnumType.__call__() got multiple values for argument 'names'");
+  }
+  if (args.length === 0 && !kwargs?.has('value')) {
+    throw typeError("EnumType.__call__() missing 1 required positional argument: 'value'");
+  }
+}
+
+function emptyEnumCall(cls: PyClass, firstValue: PyValue, hasNames: boolean, args: PyValue[], kwargs: Kwargs): PyValue {
+  const mixin = kwargs?.get('type') ?? None;
+  if (!hasNames && mixin === None) {
+    throw typeError(`${pyRepr(cls)} has no members; specify \`names=()\` if you meant to create a new, empty, enum`);
+  }
+  if (args.length > 2) throw typeError(`${cls.name}() takes at most 2 positional arguments (${args.length} given)`);
+  const names = hasNames ? (args.length >= 2 ? args[1] : (kwargs?.get('names') as PyValue)) : None;
+  return createEnum(cls, firstValue, names, kwargs);
+}
+
+function callMissing(cls: PyClass, value: PyValue): PyValue {
+  let result: PyValue = None;
+  let caught: unknown;
+  try {
+    result = callValue(getAttribute(cls, '_missing_'), [value]);
+  } catch (error) {
+    caught = error;
+  }
+  if (caught === undefined && result instanceof PyInstance && result.cls.isSubclassOf(cls)) return result;
+  if (caught === undefined && isFlagClass(cls) && boundaryOf(cls) === 'eject' && typeof result === 'bigint') {
+    return result;
+  }
+  const invalid = pyError('ValueError', `${pyRepr(value)} is not a valid ${cls.qualifiedName}`);
+  if (caught === undefined && result === None) throw invalid;
+  const raised =
+    caught ?? typeError(`error in ${cls.name}._missing_: returned ${pyRepr(result)} instead of None or a valid member`);
+  if (
+    raised instanceof PyError &&
+    !raised.exception.cls.isSubclassOf(exceptionClassNamed('ValueError')) &&
+    raised.exception.exception
+  ) {
+    raised.exception.exception.context = invalid.exception;
+  }
+  throw raised;
+}
+
+/**
+ * `Enum('Name', names, *, module=None, qualname=None, type=None, start=1, boundary=None)`, the functional API of
+ * EnumType.__call__, which creates a new Enum class as `_create_` does.
+ */
+// code-gauge-allow functionCognitiveComplexity 28 -- Follows EnumType._create_, which accepts names in four forms.
+// code-gauge-allow functionNcss 42 -- Follows EnumType._create_, which accepts names in four forms.
+function createEnum(cls: PyClass, className: PyValue, rawNames: PyValue, kwargs: Kwargs): PyValue {
+  let names = rawNames;
+  const start = kwargs?.get('start') ?? 1n;
   if (typeof names === 'string') names = newList(names.replaceAll(',', ' ').split(/\s+/).filter(Boolean));
   const entries: [string, PyValue][] = [];
   const items = names === None ? [] : currentRuntime().toArray(names);
@@ -164,15 +215,20 @@ function createEnum(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
       }
     }
   }
-  const mixin = option('type', -1);
+  const mixin = kwargs?.get('type');
   const bases = mixin === undefined || mixin === None ? [cls] : [mixin, cls];
-  const module = option('module', -1);
-  const namespace = newDict([
-    ['__module__', module === undefined || module === None ? '__main__' : module],
-    ...entries,
-  ]);
-  const created = callValue(classOf(cls), [value as PyValue, newTuple(bases), namespace]) as PyClass;
-  const qualname = option('qualname', -1);
+  const meta = classOf(cls);
+  const prepareFn = meta.dict.get('__prepare__');
+  const namespace =
+    prepareFn === undefined ? newDict() : callValue(bindValue(prepareFn, meta, meta), [className, newTuple(bases)]);
+  const module = kwargs?.get('module');
+  setItem(namespace, '__module__', module === undefined || module === None ? '__main__' : module);
+  for (const [key, val] of entries) setItem(namespace, key, val);
+  const boundary = kwargs?.get('boundary');
+  const metaKwargs =
+    boundary !== undefined && boundary !== None ? new Map<string, PyValue>([['boundary', boundary]]) : undefined;
+  const created = callValue(meta, [className, newTuple(bases), namespace], metaKwargs) as PyClass;
+  const qualname = kwargs?.get('qualname');
   if (typeof qualname === 'string') created.qualifiedName = qualname;
   return created;
 }
@@ -180,18 +236,37 @@ function createEnum(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
 /** `value in Color`: a member, or the value of one, as Python 3.12 and later decide. */
 export function enumContains(cls: PyClass, value: PyValue): boolean {
   if (value instanceof PyInstance && value.cls.isSubclassOf(cls) && value.enumValue !== undefined) return true;
-  for (const member of membersByName(cls).values()) if (keysEqual(member.enumValue as PyValue, value)) return true;
-  if (isFlagClass(cls) && typeof value === 'bigint') return (value & ~flagMask(cls)) === 0n && value >= 0n;
+  if (isFlagClass(cls) && (typeof value === 'bigint' || typeof value === 'boolean')) {
+    try {
+      const result = flagMember(cls, BigInt(value));
+      return result instanceof PyInstance && result.cls.isSubclassOf(cls);
+    } catch {
+      return false;
+    }
+  }
+  for (const [memberVal] of lookupEntries(cls)) if (keysEqual(memberVal, value)) return true;
   return false;
 }
 
 // Members -----------------------------------------------------------------------------------------------------------
 
 /** Replaces the plain attributes of an Enum class body with members, in definition order. */
-// code-gauge-allow functionCognitiveComplexity 26 -- Follows how EnumType turns a class body into members.
-// code-gauge-allow functionNcss 37 -- Follows how EnumType turns a class body into members.
-export function createEnumMembers(cls: PyClass): void {
+// code-gauge-allow functionCognitiveComplexity 29 -- Follows how EnumType turns a class body into members.
+// code-gauge-allow functionNcss 56 -- Follows how EnumType turns a class body into members.
+export function createEnumMembers(cls: PyClass, namespace?: Map<string, PyValue> | PyDict): void {
   cls.flags.isEnum = true;
+  if (cls.bases.includes(reprEnumClass) && memberTypeOf(cls) === objectClass) {
+    throw typeError('ReprEnum subclasses must be mixed with a data type (i.e. int, str, float, etc.)');
+  }
+  const enumDictFields = namespace instanceof PyDict ? ownDict(namespace) : undefined;
+  const memberNamesDict = enumDictFields?.get('_member_names');
+  const ignoredList = enumDictFields?.get('_ignore');
+  if (ignoredList instanceof PyList) {
+    for (const ignored of ignoredList.items) if (typeof ignored === 'string') cls.dict.delete(ignored);
+  }
+  cls.dict.delete('_ignore_');
+  const rawOrder = cls.dict.get('_order_');
+  cls.dict.delete('_order_');
   // As EnumType does, the body's own `__new__` creates the members, and calling the class looks one up.
   const create = cls.dict.get('__new__');
   if (create !== undefined) {
@@ -199,36 +274,62 @@ export function createEnumMembers(cls: PyClass): void {
     cls.dict.set('__new_member__', create);
   }
   const iterated: PyInstance[] = [];
+  const iteratedNames: string[] = [];
   const named = new Map<string, PyInstance>();
-  const lastValues: PyValue[] = [];
+  const lookups: [PyValue, PyInstance][] = [];
   // The members so far, which a `__new__` creating the next one may read through `__members__`.
   namedMembers.set(cls, named);
-  for (const [name, attribute] of cls.dict) {
-    let value = attribute;
-    if (value instanceof PyOpaque && value.cls === nonmemberClass) {
-      cls.dict.set(name, value.data as PyValue);
-      continue;
-    }
-    const forced = value instanceof PyOpaque && value.cls === memberClass;
-    if (forced) value = (attribute as PyOpaque).data as PyValue;
-    if (!forced && (isDunderOrSunder(name) || isDescriptorLike(value))) continue;
-    if (value instanceof PyOpaque && value.cls === autoClass) value = nextValue(cls, name, named.size, lastValues);
-    const created = create === undefined ? undefined : customMember(cls, value);
-    value = created ? (created.enumValue as PyValue) : mixinValue(cls, value);
-    lastValues.push(value);
-    const alias = [...named.values()].find((member) => keysEqual(member.enumValue as PyValue, value));
+  memberLookups.set(cls, lookups);
+  const candidateNames =
+    memberNamesDict instanceof PyDict
+      ? [...memberNamesDict.store.ordered()].map((entry) => entry.key as string).filter((key) => cls.dict.has(key))
+      : [...cls.dict.entries()]
+          .filter(([key, val]) => !isDunderOrSunder(key) && !isDescriptorLike(val))
+          .map(([key]) => key);
+  for (const name of candidateNames) {
+    if (name === 'mro' || name === '') throw pyError('ValueError', `invalid enum member name(s) ${pyRepr(name)}`);
+    const rawValue = cls.dict.get(name) as PyValue;
+    const created = create === undefined ? undefined : customMember(cls, rawValue);
+    const converted = created ? (created.enumValue as PyValue) : mixinValue(cls, rawValue);
+    const alias = lookups.find(([existingKey]) => keysEqual(existingKey, converted))?.[1];
     if (alias) {
       cls.dict.set(name, alias);
       named.set(name, alias);
       continue;
     }
-    const member = created ? initializeMember(created, name, value) : newMember(cls, name, value);
+    const member = created ? initializeMember(created, name, rawValue) : newMember(cls, name, converted, rawValue);
+    lookups.push([converted, member]);
     named.set(name, member);
     cls.dict.set(name, member);
-    if (!isFlagClass(cls) || isSingleBit(value)) iterated.push(member);
+    if (!isFlagClass(cls) || isSingleBit(converted)) {
+      iterated.push(member);
+      iteratedNames.push(name);
+    }
   }
   cls.enumMembers = iterated;
+  checkMemberOrder(rawOrder, named, iteratedNames);
   useEnumMethodsOverMixin(cls);
+}
+
+function checkMemberOrder(
+  rawOrder: PyValue | undefined,
+  named: Map<string, PyInstance>,
+  iteratedNames: string[]
+): void {
+  if (rawOrder === undefined || rawOrder === None) return;
+  const orderItems =
+    typeof rawOrder === 'string'
+      ? rawOrder.replaceAll(',', ' ').split(/\s+/).filter(Boolean)
+      : currentRuntime().toArray(rawOrder);
+  if (orderItems.length === 0) return;
+  const filtered = orderItems.filter(
+    (entry) => typeof entry !== 'string' || !named.has(entry) || iteratedNames.includes(entry)
+  );
+  if (filtered.length !== iteratedNames.length || filtered.some((entry, idx) => entry !== iteratedNames[idx])) {
+    throw typeError(
+      `member order does not match _order_:\n  ${pyRepr(newList(iteratedNames))}\n  ${pyRepr(newList(filtered))}`
+    );
+  }
 }
 
 /**
@@ -239,8 +340,8 @@ function useEnumMethodsOverMixin(cls: PyClass): void {
   if (!cls.isSubclassOf(strClass) && !cls.isSubclassOf(intClass)) return;
   const reprEnum = cls.isSubclassOf(reprEnumClass);
   const methods: [string, PyClass][] = [
-    ['__repr__', enumClass],
-    ['__str__', reprEnum ? reprEnumClass : enumClass],
+    ['__repr__', isFlagClass(cls) ? flagClass : enumClass],
+    ['__str__', reprEnum ? reprEnumClass : isFlagClass(cls) ? flagClass : enumClass],
     ['__format__', reprEnum ? reprEnumClass : enumClass],
     ['__eq__', strEnumClass],
     ['__hash__', strEnumClass],
@@ -273,17 +374,17 @@ function isDescriptorLike(value: PyValue): boolean {
   );
 }
 
-function newMember(cls: PyClass, name: string | undefined, value: PyValue): PyInstance {
+function newMember(cls: PyClass, name: string | undefined, value: PyValue, initArgSource = value): PyInstance {
   const member = new PyInstance(cls);
   member.enumValue = value;
-  return initializeMember(member, name, value);
+  return initializeMember(member, name, initArgSource);
 }
 
 /** Names a new member and runs the class's `__init__` with the arguments its value stands for. */
-function initializeMember(member: PyInstance, name: string | undefined, value: PyValue): PyInstance {
+function initializeMember(member: PyInstance, name: string | undefined, initArgSource: PyValue): PyInstance {
   member.dict.set('_name_', name ?? None);
   const init = member.cls.lookup('__init__');
-  if (init instanceof PyFunction) callValue(init, [member, ...memberArguments(value)]);
+  if (init instanceof PyFunction) callValue(init, [member, ...memberArguments(initArgSource)]);
   return member;
 }
 
@@ -312,13 +413,6 @@ function isTupleValue(value: PyValue): boolean {
   return typeof value === 'object' && value.cls.name === 'tuple';
 }
 
-/** The value `auto()` stands for, from the class's `_generate_next_value_`. */
-function nextValue(cls: PyClass, name: string, count: number, lastValues: PyValue[]): PyValue {
-  const generate = cls.lookup('_generate_next_value_') as PyValue;
-  const fn = generate instanceof PyDescriptor ? generate.fn : generate;
-  return callValue(fn, [name, 1n, BigInt(count), newList([...lastValues])]);
-}
-
 /** A member's value converted by the type its class mixes in, as `int` and `str` subclasses of Enum do. */
 function mixinValue(cls: PyClass, value: PyValue): PyValue {
   if (cls.isSubclassOf(strEnumClass) && typeof value !== 'string') throw typeError(`${pyRepr(value)} is not a string`);
@@ -328,30 +422,37 @@ function mixinValue(cls: PyClass, value: PyValue): PyValue {
 }
 
 function memberName(member: PyValue): PyValue {
-  return (member as PyInstance).dict.get('_name_') as PyValue;
+  return (member as PyInstance).dict.get('_name_') ?? None;
 }
 
 function memberValue(member: PyValue): PyValue {
   return (member as PyInstance).enumValue as PyValue;
 }
 
-defineMethod(enumClass, '__repr__', (self) => {
-  const member = self as PyInstance;
-  const name = memberName(member);
-  const cls = member.cls.qualifiedName;
-  return `<${name === None ? cls : `${cls}.${name as string}`}: ${pyRepr(memberValue(member))}>`;
+pythonMethod(enumClass, '__repr__', '', (self) => {
+  if (self instanceof PyInstance && self.enumValue !== undefined) {
+    const name = memberName(self);
+    const cls = self.cls.name;
+    return `<${name === None ? cls : `${cls}.${name as string}`}: ${pyRepr(memberValue(self))}>`;
+  }
+  const valueRepr = getAttribute(classOf(self), '_value_repr_');
+  const name = getAttribute(self, '_name_');
+  const value = getAttribute(self, '_value_');
+  const rendered = isTruthy(valueRepr) ? pyStr(callValue(valueRepr, [value])) : pyRepr(value);
+  return `<${classOf(self).name}.${pyStr(name)}: ${rendered}>`;
 });
-defineMethod(enumClass, '__str__', (self) => enumStr(self as PyInstance));
-defineMethod(enumClass, '__format__', (self, [spec]) => {
-  const text = enumStr(self as PyInstance);
-  return spec === '' ? text : pyStr(text);
+pythonMethod(enumClass, '__str__', '', (self) => {
+  if (self instanceof PyInstance && self.enumValue !== undefined) return enumStr(self);
+  return `${classOf(self).name}.${pyStr(getAttribute(self, '_name_'))}`;
+});
+pythonMethod(enumClass, '__format__', 'format_spec', (self, [spec]) => {
+  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
+  return pyFormat(pyStr(self), spec);
 });
 
 function enumStr(member: PyInstance): string {
   const name = memberName(member);
-  return name === None
-    ? `${member.cls.qualifiedName}(${pyRepr(memberValue(member))})`
-    : `${member.cls.qualifiedName}.${name as string}`;
+  return name === None ? `${member.cls.name}(${pyRepr(memberValue(member))})` : `${member.cls.name}.${name as string}`;
 }
 
 defineMethod(enumClass, '__eq__', (self, [other]) => self === other);
@@ -359,24 +460,43 @@ defineValueHash(enumClass, (self) => pyHash(memberName(self)));
 defineMethod(enumClass, '_missing_', () => None, 'class');
 enumClass.dict.set(
   '_generate_next_value_',
-  new PyBuiltinFunction(
-    builtinClass('function'),
-    '_generate_next_value_',
-    ([, start, , lastValues]) => {
-      for (const value of [...(lastValues as PyList).items].toReversed()) {
-        if (typeof value === 'bigint') return value + 1n;
-      }
-      return start;
-    },
-    undefined,
-    'static'
+  new PyDescriptor(
+    staticmethodClass,
+    new PyBuiltinFunction(
+      functionClass,
+      '_generate_next_value_',
+      ([, start, , lastValues]) => {
+        const items = (lastValues as PyList).items;
+        if (items.length === 0) return start;
+        let sortedList: PyList;
+        try {
+          sortedList = callValue(currentRuntime().builtins.get('sorted') as PyValue, [lastValues]) as PyList;
+        } catch (error) {
+          if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError'))) {
+            throw typeError('unable to sort non-numeric values');
+          }
+          throw error;
+        }
+        const lastValue = sortedList.items.at(-1) as PyValue;
+        try {
+          return binaryOp('+', lastValue, 1n);
+        } catch (error) {
+          if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError'))) {
+            throw typeError(`unable to increment ${pyRepr(lastValue)}`);
+          }
+          throw error;
+        }
+      },
+      undefined,
+      'static'
+    )
   )
 );
 
-defineMethod(reprEnumClass, '__str__', (self) => pyStr(memberValue(self)));
-defineMethod(reprEnumClass, '__format__', (self, [spec]) => {
-  const text = pyStr(memberValue(self));
-  return spec === '' ? text : pyStr(text);
+defineMethod(reprEnumClass, '__str__', (self) => pyStr(valueOrSelf(self)));
+pythonMethod(reprEnumClass, '__format__', 'format_spec', (self, [spec]) => {
+  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
+  return pyFormat(valueOrSelf(self), spec);
 });
 for (const cls of [intEnumClass, strEnumClass]) {
   defineMethod(cls, '__eq__', (self, [other]) => keysEqual(memberValue(self), intEnumValue(other)));
@@ -386,12 +506,15 @@ defineMethod(intEnumClass, '__index__', (self) => memberValue(self));
 defineMethod(intEnumClass, '__int__', (self) => memberValue(self));
 strEnumClass.dict.set(
   '_generate_next_value_',
-  new PyBuiltinFunction(
-    builtinClass('function'),
-    '_generate_next_value_',
-    ([name]) => (name as string).toLowerCase(),
-    undefined,
-    'static'
+  new PyDescriptor(
+    staticmethodClass,
+    new PyBuiltinFunction(
+      functionClass,
+      '_generate_next_value_',
+      ([name]) => (name as string).toLowerCase(),
+      undefined,
+      'static'
+    )
   )
 );
 
@@ -401,10 +524,19 @@ function isSingleBit(value: PyValue): boolean {
   return typeof value === 'bigint' && value > 0n && (value & (value - 1n)) === 0n;
 }
 
-/** The bits of every member of a Flag class. */
-function flagMask(cls: PyClass): bigint {
+/** The bits of every single-bit member of a Flag class. */
+function singlesMask(cls: PyClass): bigint {
   let mask = 0n;
   for (const member of cls.enumMembers ?? []) mask |= member.enumValue as bigint;
+  return mask;
+}
+
+/** The bits of every integer member of a Flag class, multi-bit aliases included. */
+function flagMask(cls: PyClass): bigint {
+  let mask = 0n;
+  for (const member of membersByName(cls).values()) {
+    if (typeof member.enumValue === 'bigint') mask |= member.enumValue;
+  }
   return mask;
 }
 
@@ -422,18 +554,53 @@ export function flagMember(cls: PyClass, value: bigint): PyValue {
   const bounded = withinBoundary(cls, value, mask);
   if (bounded === undefined) return value;
   if (bounded !== value) return flagMember(cls, bounded);
-  const extra = value & ~mask;
-  if (extra !== 0n && boundaryOf(cls) !== 'keep') throw invalidFlag(cls, value, mask);
-  const names = (cls.enumMembers ?? [])
-    .filter((member) => ((member.enumValue as bigint) & value) !== 0n)
-    .map((member) => memberName(member) as string);
-  // Unknown bits join the names of the known ones; a value with no known bits has no name.
-  if (extra !== 0n && names.length > 0) names.push(String(extra));
+  if ((value & ~mask) !== 0n && boundaryOf(cls) !== 'keep') throw invalidFlag(cls, value, mask);
   const member = new PyInstance(cls);
   member.enumValue = value;
-  member.dict.set('_name_', names.length === 0 ? None : names.join('|'));
+  member.dict.set('_name_', pseudoFlagName(cls, value, singlesMask(cls)));
   cache.set(value, member);
   return member;
+}
+
+// code-gauge-allow functionCognitiveComplexity 26 -- Follows Flag._missing_ for single-bit members, multi-bit aliases, and unknown bits.
+function pseudoFlagName(cls: PyClass, value: bigint, singles: bigint): string | typeof None {
+  const aliases = value & ~singles;
+  const memberBits = value & singles;
+  const parts: PyInstance[] = [];
+  let combined = 0n;
+  if (memberBits !== 0n || aliases !== 0n) {
+    for (const member of cls.enumMembers ?? []) {
+      const bit = member.enumValue as bigint;
+      if ((bit & memberBits) !== 0n) {
+        parts.push(member);
+        combined |= bit;
+      }
+    }
+    if (aliases !== 0n) {
+      for (const candidate of membersByName(cls).values()) {
+        const candidateVal = candidate.enumValue;
+        if (
+          !parts.includes(candidate) &&
+          typeof candidateVal === 'bigint' &&
+          candidateVal !== 0n &&
+          (candidateVal & value) === candidateVal
+        ) {
+          parts.push(candidate);
+          combined |= candidateVal;
+        }
+      }
+    }
+  }
+  if (combined === 0n) return None;
+  const leftover = value ^ combined;
+  const names = parts.map((part) => memberName(part) as string);
+  if (leftover !== 0n) {
+    if (boundaryOf(cls) === 'strict') {
+      throw pyError('ValueError', `${pyRepr(cls)}: no members with value ${leftover}`);
+    }
+    names.push(String(leftover));
+  }
+  return names.join('|');
 }
 
 /** The FlagBoundary of a Flag class: `_boundary_` of the class or a base, KEEP for an IntFlag and STRICT otherwise. */
@@ -520,10 +687,19 @@ for (const [name, apply] of [
 for (const cls of [flagClass, intFlagClass]) {
   defineMethod(cls, '__invert__', (self) => {
     const owner = (self as PyInstance).cls;
-    return flagMember(owner, flagMask(owner) & ~flagOf(self));
+    const boundary = boundaryOf(owner);
+    const inverted = boundary === 'eject' || boundary === 'keep' ? ~flagOf(self) : singlesMask(owner) & ~flagOf(self);
+    return flagMember(owner, inverted);
   });
 }
-defineMethod(flagClass, '__contains__', (self, [other]) => {
+pythonMethod(flagClass, '__repr__', '', (self) => {
+  const member = self as PyInstance;
+  const name = memberName(member);
+  const cls = member.cls.name;
+  return `<${name === None ? cls : `${cls}.${name as string}`}: ${pyRepr(memberValue(member))}>`;
+});
+pythonMethod(flagClass, '__str__', '', (self) => enumStr(self as PyInstance));
+pythonMethod(flagClass, '__contains__', 'other', (self, [other]) => {
   const value = otherFlag(self, other);
   if (value === undefined || !(other instanceof PyInstance)) {
     throw typeError(
@@ -537,20 +713,23 @@ function typeNameOf(value: PyValue): string {
   return typeof value === 'object' ? value.cls.name : typeof value === 'bigint' ? 'int' : typeof value;
 }
 
-defineMethod(flagClass, '__iter__', (self) => {
+pythonMethod(flagClass, '__iter__', '', (self) => {
   const value = flagOf(self);
   const members = ((self as PyInstance).cls.enumMembers ?? []).filter(
     (member) => ((member.enumValue as bigint) & value) !== 0n
   );
-  return getIterator(newList(members));
+  return enumMemberGeneratorFromList(members, 'Flag.__iter__');
 });
 
-defineMethod(flagClass, '__len__', (self) => {
-  const value = flagOf(self);
-  return BigInt(
-    ((self as PyInstance).cls.enumMembers ?? []).filter((member) => ((member.enumValue as bigint) & value) !== 0n)
-      .length
-  );
+pythonMethod(flagClass, '__len__', '', (self) => {
+  let bits = flagOf(self);
+  if (bits < 0n) bits = -bits;
+  let count = 0n;
+  while (bits > 0n) {
+    bits &= bits - 1n;
+    count++;
+  }
+  return count;
 });
 defineMethod(flagClass, '__bool__', (self) => flagOf(self) !== 0n);
 defineValueHash(flagClass, (self) => hashInt(flagOf(self)));
@@ -561,25 +740,32 @@ defineMethod(flagClass, '__eq__', (self, [other]) => {
 });
 flagClass.dict.set(
   '_generate_next_value_',
-  new PyBuiltinFunction(
-    builtinClass('function'),
-    '_generate_next_value_',
-    ([, start, count, lastValues]) => {
-      if (count === 0n) return start;
-      let high = 0n;
-      for (const value of (lastValues as PyList).items) {
-        if (typeof value !== 'bigint') throw typeError(`invalid flag value ${pyRepr(value)}`);
-        if (value > high) high = value;
-      }
-      return 1n << BigInt(high.toString(2).length);
-    },
-    undefined,
-    'static'
+  new PyDescriptor(
+    staticmethodClass,
+    new PyBuiltinFunction(
+      functionClass,
+      '_generate_next_value_',
+      ([, start, count, lastValues]) => {
+        if (count === 0n) return start;
+        let high = 0n;
+        for (const value of (lastValues as PyList).items) {
+          if (typeof value !== 'bigint') throw typeError(`invalid flag value ${pyRepr(value)}`);
+          if (value > high) high = value;
+        }
+        return 1n << BigInt(high.toString(2).length);
+      },
+      undefined,
+      'static'
+    )
   )
 );
-defineMethod(intFlagClass, '__str__', (self) => pyStr(memberValue(self)));
+defineMethod(intFlagClass, '__str__', (self) => pyStr(valueOrSelf(self)));
 defineMethod(intFlagClass, '__index__', (self) => memberValue(self));
 defineMethod(intFlagClass, '__int__', (self) => memberValue(self));
+
+function valueOrSelf(self: PyValue): PyValue {
+  return self instanceof PyInstance && self.enumValue !== undefined ? self.enumValue : self;
+}
 
 // EnumType ----------------------------------------------------------------------------------------------------------
 
@@ -587,7 +773,7 @@ enumTypeClass.dict.set(
   '__members__',
   new PyDescriptor(
     propertyClass,
-    new PyBuiltinFunction(builtinClass('function'), '__members__', ([cls]) => {
+    new PyBuiltinFunction(functionClass, '__members__', ([cls]) => {
       const types = currentRuntime().importModule('types');
       const entries = [...membersByName(cls as PyClass)].map(([name, member]): [PyValue, PyValue] => [name, member]);
       return callValue(types.dict.get('MappingProxyType') as PyValue, [newDict(entries)]);
@@ -595,11 +781,36 @@ enumTypeClass.dict.set(
   )
 );
 
-defineMethod(enumTypeClass, '__contains__', (cls, [value]) => enumContains(cls as PyClass, value));
-defineMethod(enumTypeClass, '__iter__', (cls) => getIterator(newList([...((cls as PyClass).enumMembers ?? [])])));
-defineMethod(enumTypeClass, '__reversed__', (cls) =>
-  getIterator(newList([...((cls as PyClass).enumMembers ?? [])].toReversed()))
+function enumMemberGeneratorFromList(members: PyInstance[], ownerQualified: string): PyValue {
+  let index = 0;
+  return new PyGenerator(
+    generatorClass,
+    '<genexpr>',
+    `${ownerQualified}.<locals>.<genexpr>`,
+    () => (index < members.length ? { done: false, value: members[index++] } : { done: true, value: None }),
+    () => members
+  );
+}
+
+pythonMethod(enumTypeClass, '__contains__', 'value', (cls, [value]) => enumContains(cls as PyClass, value));
+pythonMethod(enumTypeClass, '__iter__', '', (cls) => enumMemberGenerator(cls as PyClass, false));
+pythonMethod(enumTypeClass, '__reversed__', '', (cls) => enumMemberGenerator(cls as PyClass, true));
+pythonMethod(enumTypeClass, '__len__', '', (cls) => BigInt(((cls as PyClass).enumMembers ?? []).length));
+pythonMethod(enumTypeClass, '__bool__', '', () => true);
+pythonMethod(
+  enumTypeClass,
+  '__repr__',
+  '',
+  (cls) => `<${isFlagClass(cls as PyClass) ? 'flag' : 'enum'} '${(cls as PyClass).name}'>`
 );
+pythonMethod(enumTypeClass, '__getitem__', 'name', (cls, [name]) => {
+  const member = typeof name === 'string' ? membersByName(cls as PyClass).get(name) : undefined;
+  if (member === undefined) throw keyError(name);
+  return member;
+});
+defineMethod(enumTypeClass, '__call__', (cls, args, kwargs) => enumLookup(cls as PyClass, args, kwargs), {
+  receiver: 'unchecked',
+});
 
 /** `EnumType.__dir__`: the members and the class's protocol, with what `dir()` lists of a mixed-in type. */
 export function enumClassDir(cls: PyClass, runtime: { dirNames: (value: PyValue) => string[] }): string[] {
@@ -643,6 +854,7 @@ export function enumMemberDir(member: PyInstance, runtime: { dirNames: (value: P
 }
 
 /** The data of an Enum class that EnumType keeps: its members by name and by value, and the bits of a Flag's. */
+// code-gauge-allow functionNcss 31 -- One case per EnumType class attribute.
 export function enumClassData(cls: PyClass, name: string): PyValue | undefined {
   const runtime = currentRuntime();
   const named = membersByName(cls);
@@ -654,7 +866,7 @@ export function enumClassData(cls: PyClass, name: string): PyValue | undefined {
       return newDict([...named].map(([key, member]): [PyValue, PyValue] => [key, member]));
     }
     case '_value2member_map_': {
-      return newDict([...named.values()].map((member): [PyValue, PyValue] => [member.enumValue as PyValue, member]));
+      return newDict(lookupEntries(cls).filter(([val]) => isHashable(val)));
     }
     case '_member_type_': {
       return memberTypeOf(cls);
@@ -674,9 +886,11 @@ export function enumClassData(cls: PyClass, name: string): PyValue | undefined {
     case '_unhashable_values_map_': {
       return hashableData(cls, name);
     }
-    case '_flag_mask_':
-    case '_singles_mask_': {
+    case '_flag_mask_': {
       return isFlagClass(cls) ? flagMask(cls) : undefined;
+    }
+    case '_singles_mask_': {
+      return isFlagClass(cls) ? singlesMask(cls) : undefined;
     }
     case '_all_bits_': {
       return isFlagClass(cls) ? (1n << BigInt(flagMask(cls).toString(2).length)) - 1n : undefined;
@@ -718,8 +932,35 @@ function isHashable(value: PyValue): boolean {
   }
 }
 
-export function newAuto(): PyValue {
-  return new PyOpaque(autoClass, 'auto()');
+/** A member without its value yet, so that the class's `__init__` can still set attributes on it. */
+export function newEnumMember(cls: PyClass, name: PyValue, value: PyValue): PyInstance {
+  const member = new PyInstance(cls);
+  member.dict.set('_name_', name);
+  member.dict.set('_value_', value);
+  return member;
+}
+
+/** Gives a member the value its `__init__` left in `_value_`, from which on its attributes cannot be set. */
+export function finishEnumMember(member: PyInstance): PyValue {
+  const value = member.dict.get('_value_') ?? None;
+  member.dict.delete('_value_');
+  member.enumValue = value;
+  return value;
+}
+
+/**
+ * The int or str a member of an enum whose members CPython makes ints or strs (IntEnum, IntFlag, StrEnum) stands for,
+ * which consumers such as JSON encoders read in place of the member; any other value as it is.
+ */
+export function builtinMemberValue(value: PyValue): PyValue {
+  if (!(value instanceof PyInstance) || value.enumValue === undefined) return value;
+  const memberType = enumClassData(value.cls, '_member_type_');
+  return memberType === intClass || memberType === strClass ? value.enumValue : value;
+}
+
+/** Sets the members that iterating the class gives, which exclude aliases. */
+export function setEnumMembers(cls: PyClass, members: PyInstance[]): void {
+  cls.enumMembers = members;
 }
 
 /** The members of an Enum class, which iterating the class gives. */

@@ -121,7 +121,6 @@ export function evaluateAnnotations(annotations: readonly Annotation[], fake?: F
     const value = given ?? runtime.evaluator.evaluate(expression, fake ? fakeFrame(frame, fake) : frame);
     dict.store.set(name, value);
   }
-  runtime.allocate(dict.store.size + 1);
   return dict;
 }
 
@@ -219,6 +218,10 @@ interface FunctionAnnotationState {
 }
 
 const functionStates = new WeakMap<PyFunction, FunctionAnnotationState>();
+
+export function peekFunctionAnnotationState(fn: PyFunction): FunctionAnnotationState | undefined {
+  return functionStates.get(fn);
+}
 
 function functionState(fn: PyFunction): FunctionAnnotationState {
   let state = functionStates.get(fn);

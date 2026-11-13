@@ -1,5 +1,6 @@
+import { formatComplex } from './formatComplex';
 import { formatValue } from './formatSpec';
-import { floatRepr, intToString } from './numbers';
+import { decimalValue, floatRepr, intToString } from './numbers';
 import { bindValue, callValue, getAttribute, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { asciiEscape, iterStr, strRepr } from './strings';
@@ -77,14 +78,11 @@ export function pyFormat(value: PyValue, spec: string): string {
     return spec === '' ? pyStr(value) : formatValue(value.primitive, spec, pyStr);
   }
   if (value === None && spec !== '') throw typeError('unsupported format string passed to NoneType.__format__');
-  if (typeof value === 'object' && !isNativeFormattable(value) && spec !== '') {
+  if (value instanceof PyComplex) return formatComplex(value, spec);
+  if (typeof value === 'object' && spec !== '') {
     throw typeError(`unsupported format string passed to ${typeName(value)}.__format__`);
   }
   return formatValue(value, spec, pyStr);
-}
-
-function isNativeFormattable(value: PyObject): boolean {
-  return value instanceof PyComplex;
 }
 
 // str.format ---------------------------------------------------------------------------------------------------------
@@ -95,7 +93,15 @@ interface FieldState {
 }
 
 /** `str.format()` and `str.format_map()`. */
-export function formatString(template: string, args: readonly PyValue[], kwargs: (name: string) => PyValue): string {
+/**
+ * `str.format`, or `str.format_map` when `args` is undefined, which refuses positional fields as CPython does by
+ * passing no argument tuple.
+ */
+export function formatString(
+  template: string,
+  args: readonly PyValue[] | undefined,
+  kwargs: (name: string) => PyValue
+): string {
   const state: FieldState = { auto: 0 };
   const result = renderTemplate(template, args, kwargs, state, 2);
   currentRuntime().buildString(result.length);
@@ -104,12 +110,12 @@ export function formatString(template: string, args: readonly PyValue[], kwargs:
 
 function renderTemplate(
   template: string,
-  args: readonly PyValue[],
+  args: readonly PyValue[] | undefined,
   kwargs: (name: string) => PyValue,
   state: FieldState,
   depth: number
 ): string {
-  if (depth < 0) throw valueError('Max string recursion exceeded');
+  if (depth <= 0) throw valueError('Max string recursion exceeded');
   const chars = iterStr(template);
   let result = '';
   let index = 0;
@@ -128,57 +134,129 @@ function renderTemplate(
     } else {
       const end = fieldEnd(chars, index + 1);
       result += renderField(chars.slice(index + 1, end).join(''), args, kwargs, state, depth);
+      currentRuntime().ensureStringFits(result.length);
       index = end + 1;
     }
   }
   return result;
 }
 
-/** Returns the index of the `}` closing the replacement field that starts at `start`. */
+/**
+ * Returns the index of the `}` closing the replacement field that starts at `start`, failing as CPython's
+ * MarkupIterator_next and parse_field do: a field name ends at `}`, `:` or `!` outside brackets, and a format spec
+ * counts its own braces.
+ */
 function fieldEnd(chars: readonly string[], start: number): number {
-  let level = 1;
-  let inBracket = false;
-  for (let end = start; end < chars.length; end++) {
-    const c = chars[end];
-    if (c === '[') inBracket = true;
-    if (c === ']') inBracket = false;
-    if (inBracket) continue;
-    if (c === '{') level++;
-    if (c === '}' && --level === 0) return end;
+  if (start >= chars.length) throw valueError("Single '{' encountered in format string");
+  const { index, terminator } = fieldNameEnd(chars, start);
+  if (terminator === '}') return index - 1;
+  if (terminator === ':') return formatSpecEnd(chars, index);
+  return conversionEnd(chars, index);
+}
+
+/** Reads a field name up to the `}`, `:` or `!` after it, which brackets hide. */
+function fieldNameEnd(chars: readonly string[], start: number): { index: number; terminator: string } {
+  let index = start;
+  while (index < chars.length) {
+    const c = chars[index++];
+    if (c === '{') throw valueError("unexpected '{' in field name");
+    if (c === '}' || c === ':' || c === '!') return { index, terminator: c };
+    if (c === '[') while (index < chars.length && chars[index] !== ']') index++;
   }
-  throw valueError(level > 1 ? "expected '}' before end of string" : "Single '{' encountered in format string");
+  throw valueError("expected '}' before end of string");
+}
+
+/** The index of the `}` closing a field after its `!` and conversion character, through any format spec. */
+function conversionEnd(chars: readonly string[], start: number): number {
+  if (start >= chars.length) throw valueError('end of string while looking for conversion specifier');
+  const index = start + 1;
+  if (index >= chars.length) return formatSpecEnd(chars, index);
+  if (chars[index] === '}') return index;
+  if (chars[index] !== ':') throw valueError("expected ':' after conversion specifier");
+  return formatSpecEnd(chars, index + 1);
+}
+
+/** The index of the `}` closing a format spec that starts at `start`, whose own nested fields count their braces. */
+function formatSpecEnd(chars: readonly string[], start: number): number {
+  let level = 1;
+  for (let index = start; index < chars.length; index++) {
+    if (chars[index] === '{') level++;
+    else if (chars[index] === '}' && --level === 0) return index;
+  }
+  throw valueError("unmatched '{' in format spec");
 }
 
 function renderField(
   field: string,
-  args: readonly PyValue[],
+  args: readonly PyValue[] | undefined,
   kwargs: (name: string) => PyValue,
   state: FieldState,
   depth: number
 ): string {
-  const match = /^([^!:[.]*)((?:\.[^![.:]+|\[[^\]]*\])*)(?:!(.))?(?::(.*))?$/s.exec(field);
-  if (!match) {
-    if (/![^:]{2,}/.test(field)) throw valueError("expected ':' after conversion specifier");
-    throw valueError(`unmatched '{' in format spec`);
-  }
-  const [, name, accessors, conversion, spec = ''] = match;
-  let value = fieldValue(name, args, kwargs, state);
-  for (const accessor of accessors.match(/\.[^![.:]+|\[[^\]]*\]/g) ?? []) {
-    if (accessor.startsWith('.')) {
-      value = getAttribute(value, accessor.slice(1));
-    } else {
-      const key = accessor.slice(1, -1);
-      value = getItem(value, /^\d+$/.test(key) ? BigInt(key) : key);
-    }
-  }
-  if (conversion !== undefined) value = convertField(value, conversion);
+  const { name, conversion, spec } = splitField(field);
+  const value = fieldObject(name, args, kwargs, state);
+  const converted = conversion === undefined ? value : convertField(value, conversion);
   const renderedSpec = spec.includes('{') ? renderTemplate(spec, args, kwargs, state, depth - 1) : spec;
-  return pyFormat(value, renderedSpec);
+  return pyFormat(converted, renderedSpec);
+}
+
+/** A closed field's name, conversion, and format spec, split as parse_field splits them. */
+function splitField(field: string): { name: string; conversion: string | undefined; spec: string } {
+  const chars = iterStr(field);
+  let index = 0;
+  while (index < chars.length && chars[index] !== ':' && chars[index] !== '!') {
+    if (chars[index++] === '[') while (index < chars.length && chars[index] !== ']') index++;
+  }
+  const name = chars.slice(0, index).join('');
+  if (chars[index] !== '!') return { name, conversion: undefined, spec: chars.slice(index + 1).join('') };
+  return { name, conversion: chars[index + 1], spec: chars.slice(index + 3).join('') };
+}
+
+/**
+ * The object a field name refers to, as get_field_object finds it: the argument the part before the first `.` or `[`
+ * names, then each accessor applied as soon as FieldNameIterator_next reads it.
+ */
+function fieldObject(
+  name: string,
+  args: readonly PyValue[] | undefined,
+  kwargs: (name: string) => PyValue,
+  state: FieldState
+): PyValue {
+  const chars = iterStr(name);
+  let index = 0;
+  while (index < chars.length && chars[index] !== '.' && chars[index] !== '[') index++;
+  let value = fieldValue(chars.slice(0, index).join(''), args, kwargs, state);
+  while (index < chars.length) {
+    const accessor = nextAccessor(chars, index);
+    index = accessor.end;
+    value = accessor.isAttribute
+      ? getAttribute(value, accessor.key)
+      : getItem(value, fieldIndex(accessor.key) ?? accessor.key);
+  }
+  return value;
+}
+
+/** FieldNameIterator_next: the `.attribute` or `[key]` at `start`, and where the next one starts. */
+function nextAccessor(chars: readonly string[], start: number): { isAttribute: boolean; key: string; end: number } {
+  const isAttribute = chars[start] === '.';
+  if (!isAttribute && chars[start] !== '[') {
+    throw valueError("Only '.' or '[' may follow ']' in format field specifier");
+  }
+  let end = start + 1;
+  if (isAttribute) {
+    while (end < chars.length && chars[end] !== '.' && chars[end] !== '[') end++;
+  } else {
+    while (end < chars.length && chars[end] !== ']') end++;
+    if (end >= chars.length) throw valueError("Missing ']' in format string");
+  }
+  const key = chars.slice(start + 1, end).join('');
+  if (key === '') throw valueError('Empty attribute in format string');
+  return { isAttribute, key, end: isAttribute ? end : end + 1 };
 }
 
 function fieldValue(
   name: string,
-  args: readonly PyValue[],
+  args: readonly PyValue[] | undefined,
   kwargs: (name: string) => PyValue,
   state: FieldState
 ): PyValue {
@@ -187,16 +265,26 @@ function fieldValue(
       throw valueError('cannot switch from manual field specification to automatic field numbering');
     }
     state.mode = 'auto';
-    return positional(args, state.auto++);
+    return positional(args, BigInt(state.auto++));
   }
-  if (/^\d+$/.test(name)) {
+  const index = fieldIndex(name);
+  if (index !== undefined) {
     if (state.mode === 'auto') {
       throw valueError('cannot switch from automatic field numbering to manual field specification');
     }
     state.mode = 'manual';
-    return positional(args, Number(name));
+    return positional(args, index);
   }
   return kwargs(name);
+}
+
+const MAX_SSIZE = (1n << 63n) - 1n;
+
+/** get_integer: the value of a text of decimal digits, refusing one beyond sys.maxsize, or undefined for another. */
+function fieldIndex(text: string): bigint | undefined {
+  const index = decimalValue(text);
+  if (index !== undefined && index > MAX_SSIZE) throw valueError('Too many decimal digits in format string');
+  return index;
 }
 
 function convertField(value: PyValue, conversion: string): PyValue {
@@ -206,11 +294,12 @@ function convertField(value: PyValue, conversion: string): PyValue {
   throw valueError(`Unknown conversion specifier ${conversion}`);
 }
 
-function positional(args: readonly PyValue[], index: number): PyValue {
-  if (index >= args.length) {
+function positional(args: readonly PyValue[] | undefined, index: bigint): PyValue {
+  if (args === undefined) throw valueError('Format string contains positional fields');
+  if (index >= BigInt(args.length)) {
     throw currentRuntime().indexError(`Replacement index ${index} out of range for positional args tuple`);
   }
-  return args[index];
+  return args[Number(index)];
 }
 
 export function isStringLike(value: PyValue): value is string {

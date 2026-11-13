@@ -521,7 +521,7 @@ class Reader {
   private list(flagged: boolean): PyValue {
     const length = this.size('list');
     const list = this.remember(newList([]), flagged);
-    for (let index = 0; index < length; index++) list.items.push(this.object('list'));
+    for (let index = 0; index < length; index++) list.append(this.object('list'));
     return list;
   }
 

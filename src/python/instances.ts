@@ -40,9 +40,11 @@ export function instantiate(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyVa
 }
 
 /** `type.__call__`: creates an instance with the class's `__new__` and initializes it with its `__init__`. */
+// code-gauge-allow functionNcss 31 -- Follows type.__call__'s __new__ and __init__ dispatch.
 export function typeCall(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyValue {
   if (isEnumClass(cls)) return enumLookup(cls, args, kwargs);
-  if (cls.construct) return cls.construct(cls, args, kwargs);
+  const { construct } = cls;
+  if (construct) return currentRuntime().runNative(() => construct(cls, args, kwargs));
   const newMethod = cls.lookup('__new__');
   const constructing = newMethod === objectNew() ? cls.mro.find(isSubclassableConstruct) : undefined;
   if (constructing?.construct) return constructSubclass(cls, constructing.construct, args, kwargs);
@@ -76,7 +78,7 @@ function constructSubclass(
   args: PyValue[],
   kwargs: Kwargs
 ): PyValue {
-  const instance = construct(cls, args, kwargs);
+  const instance = currentRuntime().runNative(() => construct(cls, args, kwargs));
   if (instance instanceof PyObject && instance.cls !== cls && cls.isSubclassOf(instance.cls)) instance.cls = cls;
   if (cls.flags.definesDel && instance instanceof PyObject) currentRuntime().finalizer.track(instance);
   const init = cls.lookup('__init__');
@@ -146,7 +148,6 @@ function newObject(cls: PyClass): PyInstance {
   if (cls !== objectClass && refusesObjectNew(cls)) throw cannotCreate(cls);
   checkNotAbstract(cls);
   const runtime = currentRuntime();
-  runtime.allocate(1);
   const instance = new PyInstance(cls);
   if (cls.flags.definesDel) runtime.finalizer.track(instance);
   return instance;

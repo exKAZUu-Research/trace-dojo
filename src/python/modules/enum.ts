@@ -1,26 +1,18 @@
 import { builtin } from '../define';
 import {
-  autoClass,
   enumClass,
   enumTypeClass,
   flagClass,
   globalEnum,
   intEnumClass,
   intFlagClass,
-  memberClass,
-  newAuto,
-  nonmemberClass,
   reprEnumClass,
   strEnumClass,
   uniqueEnum,
 } from '../enums';
 import { registerSourceModule } from '../sourceModules';
 import { None } from '../types';
-import { type PyClass, PyOpaque, type PyValue } from '../values';
-
-autoClass.construct = () => newAuto();
-memberClass.construct = (_cls, [value]) => new PyOpaque(memberClass, 'member', value);
-nonmemberClass.construct = (_cls, [value]) => new PyOpaque(nonmemberClass, 'nonmember', value);
+import type { PyClass, PyValue } from '../values';
 
 // The parts of CPython's `enum.py` written in Python here: FlagBoundary, EnumCheck and verify, enum.property, EnumDict,
 // and the helpers for flags and pickling. The natives of enums.ts provide the enum classes themselves.
@@ -29,6 +21,39 @@ const SOURCE =
 from types import DynamicClassAttribute
 
 _builtin_property = _builtins.property
+
+
+class _auto_null:
+    def __repr__(self):
+        return '_auto_null'
+_auto_null = _auto_null()
+
+
+class auto:
+    """
+    Instances are replaced with an appropriate value in Enum class suites.
+    """
+    def __init__(self, value=_auto_null):
+        self.value = value
+
+    def __repr__(self):
+        return "auto(%r)" % self.value
+
+
+class member(object):
+    """
+    Forces item to become an Enum member during class creation.
+    """
+    def __init__(self, value):
+        self.value = value
+
+
+class nonmember(object):
+    """
+    Protects item from becoming an Enum member during class creation.
+    """
+    def __init__(self, value):
+        self.value = value
 
 
 def _is_descriptor(obj):
@@ -199,7 +224,11 @@ class EnumDict(dict):
             if key == '_generate_next_value_':
                 if self._auto_called:
                     raise TypeError("_generate_next_value_ must be defined before members")
-                _gnv = value.__func__ if isinstance(value, staticmethod) else value
+                if isinstance(value, staticmethod):
+                    _gnv = value.__func__
+                else:
+                    _gnv = value
+                    value = staticmethod(value)
                 setattr(self, '_generate_next_value', _gnv)
             elif key == '_ignore_':
                 if isinstance(value, str):
@@ -221,7 +250,7 @@ class EnumDict(dict):
         elif key in self._ignore:
             pass
         elif isinstance(value, nonmember):
-            value = _nonmember_value(value)
+            value = value.value
         elif _is_descriptor(value):
             pass
         elif self._cls_name is not None and _is_internal_class(self._cls_name, value):
@@ -230,15 +259,33 @@ class EnumDict(dict):
             if key in self:
                 raise TypeError('%r already defined as %r' % (key, self[key]))
             elif isinstance(value, member):
-                value = _member_value(value)
+                value = value.value
             non_auto_store = True
+            single = False
             if isinstance(value, auto):
-                non_auto_store = False
-                value = self._generate_next_value(
-                        key, 1, len(self._member_names), self._last_values[:],
-                        )
-                self._auto_called = True
-                self._last_values.append(value)
+                single = True
+                value = (value, )
+            if isinstance(value, tuple) and any(isinstance(v, auto) for v in value):
+                auto_valued = []
+                t = type(value)
+                for v in value:
+                    if isinstance(v, auto):
+                        non_auto_store = False
+                        if v.value == _auto_null:
+                            v.value = self._generate_next_value(
+                                    key, 1, len(self._member_names), self._last_values[:],
+                                    )
+                            self._auto_called = True
+                        v = v.value
+                        self._last_values.append(v)
+                    auto_valued.append(v)
+                if single:
+                    value = auto_valued[0]
+                else:
+                    try:
+                        value = t(auto_valued)
+                    except TypeError:
+                        value = t(*auto_valued)
             self._member_names[key] = None
             if non_auto_store:
                 self._last_values.append(value)
@@ -260,6 +307,23 @@ class EnumDict(dict):
 
 
 _EnumDict = EnumDict
+
+
+def _enum_prepare(metacls, cls, bases, **kwds):
+    enum_dict = EnumDict(cls)
+    if bases:
+        first_enum = bases[-1]
+        if not isinstance(first_enum, EnumType):
+            raise TypeError(
+                    "new enumerations should be created as "
+                    "\x60EnumName([mixin_type, ...] [data_type,] enum_type)\x60"
+                    )
+        gnv = getattr(first_enum, '_generate_next_value_', None)
+        if gnv is not None:
+            setattr(enum_dict, '_generate_next_value', gnv)
+    return enum_dict
+_set_class_attribute(EnumType, '__prepare__', classmethod(_enum_prepare))
+del _enum_prepare
 
 
 def pickle_by_global_name(self, proto):
@@ -511,9 +575,6 @@ registerSourceModule(
       ['StrEnum', strEnumClass],
       ['Flag', flagClass],
       ['IntFlag', intFlagClass],
-      ['auto', autoClass],
-      ['member', memberClass],
-      ['nonmember', nonmemberClass],
       ['unique', builtin('unique', 'one', 1, 1, ([cls]) => uniqueEnum(cls))],
       ['global_enum', builtin('global_enum', 'one', 1, 1, ([cls]) => globalEnum(cls))],
       [
@@ -523,7 +584,5 @@ registerSourceModule(
           return None;
         }),
       ],
-      ['_member_value', builtin('_member_value', 'one', 1, 1, ([value]) => (value as PyOpaque).data as PyValue)],
-      ['_nonmember_value', builtin('_nonmember_value', 'one', 1, 1, ([value]) => (value as PyOpaque).data as PyValue)],
     ])
 );

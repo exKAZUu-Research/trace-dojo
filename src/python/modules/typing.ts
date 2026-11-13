@@ -1,5 +1,6 @@
-import { builtin } from '../define';
+import { builtin, pythonFunction } from '../define';
 import { importModule, registerModule, registerSharedAttributes, registerUnsupportedAttributes } from '../modules';
+import { getAttribute } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { runModuleSource } from '../sourceModules';
 import {
@@ -1105,23 +1106,25 @@ function natives(): [string, PyValue][] {
     ['NoDefault', NoDefault],
     ['NewType', newTypeClass],
     ...TYPING_CLASSES,
-    ['get_origin', builtin('get_origin', 'one', 1, 1, ([tp]) => typingOrigin(tp))],
-    ['get_args', builtin('get_args', 'one', 1, 1, ([tp]) => typingArgs(tp))],
+    ['get_origin', pythonFunction('get_origin', 'tp', ([tp]) => typingOrigin(tp))],
+    ['get_args', pythonFunction('get_args', 'tp', ([tp]) => typingArgs(tp))],
     [
       'get_type_hints',
-      builtin('get_type_hints', 'takes', 1, 3, getTypeHints, {
-        keywords: ['obj', 'globalns', 'localns', 'include_extras', 'format'],
-      }),
+      pythonFunction(
+        'get_type_hints',
+        'obj, globalns=None, localns=None, include_extras=False, *, format=None',
+        getTypeHints
+      ),
     ],
     [
       '_firstlineno',
       builtin('_firstlineno', 'one', 1, 1, ([fn]) => {
-        if (!(fn instanceof PyFunction)) throw typeError('not a function');
-        return BigInt(fn.def.row + 1);
+        if (fn instanceof PyFunction) return BigInt(fn.def.row + 1);
+        return getAttribute(getAttribute(fn, '__code__'), 'co_firstlineno');
       }),
     ],
     ['_is_typeddict', builtin('_is_typeddict', 'one', 1, 1, ([tp]) => isTypedDict(tp))],
-    ['_frame_module_name', builtin('_frame_module_name', 'one', 1, 1, ([depth]) => frameModuleName(depth as PyValue))],
+    ['_frame_module_name', builtin('_frame_module_name', 'one', 1, 1, ([depth]) => frameModuleName(depth))],
     [
       '_declare_parameters',
       builtin('_declare_parameters', 'one', 1, 1, ([cls]) => {

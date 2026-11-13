@@ -16,6 +16,7 @@ import {
   NotImplemented,
   objectClass,
   typeClass,
+  typeError,
 } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { type Kwargs, PyClass, PyError, PyInstance, type PyValue } from '../values';
@@ -49,7 +50,6 @@ const INIT = { qualified: 'NormalDist.__init__', params: ['mu', 'sigma'], requir
 
 normalDistClass.construct = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => {
   const instance = new PyNormalDist(cls);
-  currentRuntime().allocate(1);
   if (cls === normalDistClass) initialize(instance, bindArguments(INIT, args, kwargs));
   return instance;
 };
@@ -117,12 +117,17 @@ pythonMethod(normalDistClass, { params: ['x'], required: 1 }, 'pdf', (self, [x])
   return Math.exp((diff * diff) / (-2 * variance)) / Math.sqrt(2 * Math.PI * variance);
 });
 
-for (const name of ['cdf', 'overlap']) {
-  pythonMethod(normalDistClass, { params: [name === 'cdf' ? 'x' : 'other'], required: 1 }, name, () => {
-    // These use the C library's erfc, whose results JavaScript cannot reproduce in the last bit.
-    throw new UnsupportedFeatureError(`statistics.NormalDist.${name}()`);
-  });
-}
+pythonMethod(normalDistClass, { params: ['x'], required: 1 }, 'cdf', () => {
+  // Uses the C library's erfc, whose results JavaScript cannot reproduce in the last bit.
+  throw new UnsupportedFeatureError('statistics.NormalDist.cdf()');
+});
+
+pythonMethod(normalDistClass, { params: ['other'], required: 1 }, 'overlap', (self, [other]) => {
+  if (!(other instanceof PyNormalDist)) throw typeError('Expected another NormalDist instance');
+  if (!dist(self).sigma || !other.sigma) throw statisticsError('overlap() not defined when sigma is zero');
+  // Uses the C library's erfc, whose results JavaScript cannot reproduce in the last bit.
+  throw new UnsupportedFeatureError('statistics.NormalDist.overlap()');
+});
 
 pythonMethod(normalDistClass, { params: ['p'], required: 1 }, 'inv_cdf', (self, [p]) => {
   if (compareOp('<=', p as PyValue, 0) === true || compareOp('>=', p as PyValue, 1) === true) {

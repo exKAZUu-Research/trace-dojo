@@ -23,12 +23,18 @@ export class ScopeBuilder {
   /** Whether this comprehension scope is a generator expression, which an `await` makes an async generator. */
   isGeneratorExpression = false;
 
+  /** Whether a module's names live in its own namespace, as in code `exec` runs with separate globals and locals. */
+  readonly namesInLocals: boolean;
+  /** Whether CPython compiles this comprehension inline in its enclosing scope (a list, set, or dict comprehension). */
+  readonly isInlined: boolean;
+
   constructor(
     kind: ScopeInfo['kind'],
     readonly parent: ScopeBuilder | undefined,
-    /** Whether a module's names live in its own namespace, as in code `exec` runs with separate globals and locals. */
-    readonly namesInLocals = false
+    options: { namesInLocals?: boolean; isInlined?: boolean } = {}
   ) {
+    this.namesInLocals = options.namesInLocals ?? false;
+    this.isInlined = options.isInlined ?? false;
     this.info = { kind, locals: [], cells: [], frees: [], isGenerator: false };
     parent?.children.push(this);
   }
@@ -80,7 +86,7 @@ export function resolveScopes(module: ScopeBuilder): void {
 function checkNonlocals(scope: ScopeBuilder): void {
   for (const [name, declaration] of scope.declarations) {
     if (declaration !== 'nonlocal') continue;
-    const owner = ownerOf(scope.parent, name);
+    const owner = ownerOf(scope, name);
     const row = scope.declarationRows.get(name) ?? 0;
     if (!owner) fail(row, `nonlocal で宣言した ${name} が、外側の関数に見つかりません。`);
     if (owner.typeParameters.has(name)) fail(row, `型引数 ${name} は、nonlocal 宣言できません。`);
@@ -88,10 +94,21 @@ function checkNonlocals(scope: ScopeBuilder): void {
   for (const child of scope.children) checkNonlocals(child);
 }
 
-/** The nearest enclosing function that owns `name`, skipping class bodies, which nested functions do not see. */
-function ownerOf(scope: ScopeBuilder | undefined, name: string): ScopeBuilder | undefined {
-  for (let current = scope; current; current = current.parent) {
-    if (current.info.kind === 'class') continue;
+/**
+ * The nearest scope enclosing `scope` that owns `name`, skipping class bodies, which nested functions do not see. A class
+ * body owns only the implicit `__class__` cell, and only for the scopes CPython compiles as functions in it, however
+ * deep: an inlined comprehension directly in a class body reads `__class__` as the class body does.
+ */
+function ownerOf(scope: ScopeBuilder, name: string): ScopeBuilder | undefined {
+  // Inlined comprehensions are part of the scope around them, so only a function among the scopes walked so far makes
+  // the reference come from a function of the class body.
+  let fromFunction = !scope.isInlined;
+  for (let current = scope.parent; current; current = current.parent) {
+    if (current.info.kind === 'class') {
+      if (name === '__class__' && fromFunction) return current;
+      continue;
+    }
+    if (!current.isInlined) fromFunction = true;
     if (current.info.kind === 'module') return undefined;
     if (current.declarations.get(name) === 'global') return undefined;
     if (current.owns(name)) return current;
@@ -126,7 +143,7 @@ function accessOf(scope: ScopeBuilder, name: string): NameRef['access'] {
     if (scope.info.kind === 'class') return 'name';
     return capturedBelow(scope, name) ? markCell(scope, name) : 'local';
   }
-  const owner = ownerOf(scope.parent, name);
+  const owner = ownerOf(scope, name);
   if (!owner) return scope.info.kind === 'class' ? 'name' : 'global';
   markCell(owner, name);
   for (let current: ScopeBuilder | undefined = scope; current && current !== owner; current = current.parent) {

@@ -117,11 +117,18 @@ export const iteratorClasses = new Map<string, PyClass>();
 /** Gives each new iterator class the iterator protocol, registered by the module that defines it. */
 export const iteratorClassSetup: ((cls: PyClass) => void)[] = [];
 
-/** The class of a native iterator, such as `list_iterator`. */
+/** The class of a native iterator, such as `list_iterator` or `collections._deque_iterator`. */
 export function iteratorClass(name: string): PyClass {
   let cls = iteratorClasses.get(name);
   if (!cls) {
-    cls = builtinClass(name);
+    const dot = name.indexOf('.');
+    if (dot === -1) {
+      cls = builtinClass(name);
+    } else {
+      cls = builtinClass(name.slice(dot + 1));
+      cls.module = name.slice(0, dot);
+      cls.typeName = name;
+    }
     iteratorClasses.set(name, cls);
     for (const setup of iteratorClassSetup) setup(cls);
   }
@@ -283,6 +290,18 @@ export function valueError(message: string): PyError {
 
 // Containers --------------------------------------------------------------------------------------------------------
 
+/** BaseException.add_note on an exception, which the interpreter also calls as CPython's _PyErr_FormatNote does. */
+export function addNote(exception: PyInstance, note: string): void {
+  if (!exception.exception) return;
+  let notes = exception.dict.get('__notes__');
+  if (notes === undefined) {
+    notes = newList([]);
+    exception.dict.set('__notes__', notes);
+  }
+  if (!(notes instanceof PyList)) throw typeError('Cannot add note: __notes__ is not a list');
+  notes.append(note);
+}
+
 export function newList(items: PyValue[]): PyList {
   return new PyList(listClass, items);
 }
@@ -337,6 +356,20 @@ export function nativeFunction(name: string, run: NativeFunction, ownerName?: st
 }
 
 /**
+ * How a builtin method treats the receiver it is called with: CPython's method descriptors (`method`) and slot wrappers
+ * (`wrapper`) reject one that is not an instance of the declaring class, each in its own words, while a method its
+ * library writes in Python (`unchecked`) runs its body with any receiver.
+ */
+export type ReceiverCheck = 'method' | 'wrapper' | 'unchecked';
+
+export interface MethodOptions {
+  binding?: NativeBinding;
+  receiver?: ReceiverCheck;
+  /** The name receiver errors give the declaring class, when CPython declares the method on a C base of it. */
+  ownerName?: string;
+}
+
+/**
  * Adds a builtin method to a class, which receives the instance as its first argument. The methods of int, float, and
  * str receive the builtin values that instances of a program's subclasses stand for, as their own arguments too,
  * except where CPython renders an argument with its own methods.
@@ -344,20 +377,23 @@ export function nativeFunction(name: string, run: NativeFunction, ownerName?: st
 export function defineMethod(
   cls: PyClass,
   name: string,
-  run: (self: PyValue, args: PyValue[], kwargs: Kwargs) => PyValue,
-  binding: NativeBinding = 'method'
+  run: (self: PyValue, args: PyValue[], kwargs: Kwargs, boundTo?: PyValue) => PyValue,
+  options: NativeBinding | MethodOptions = {}
 ): void {
+  const opts = typeof options === 'string' ? { binding: options } : options;
+  const binding = opts.binding ?? 'method';
+  const descriptorClass = descriptorClassOf(cls, name, binding);
+  const receiver = opts.receiver ?? (descriptorClass === wrapperDescriptorClass ? 'wrapper' : 'method');
+  const check = binding === 'method' ? receiverCheck(cls, name, receiver, opts.ownerName) : undefined;
   const unboxes = PRIMITIVE_CLASSES.has(cls) && binding === 'method';
   const unboxesArguments = unboxes && !RENDERING_METHODS.has(name);
   const fn = new PyBuiltinFunction(
-    descriptorClassOf(cls, name, binding),
+    descriptorClass,
     name,
-    (args, kwargs) => {
-      if (args.length === 0 && binding === 'method') {
-        throw typeError(`unbound method ${cls.name}.${name}() needs an argument`);
-      }
-      if (!unboxes) return run(args[0], args.slice(1), kwargs);
-      return run(unbox(args[0]), unboxesArguments ? args.slice(1).map(unbox) : args.slice(1), kwargs);
+    (args, kwargs, boundTo) => {
+      check?.(args[0]);
+      if (!unboxes) return run(args[0], args.slice(1), kwargs, boundTo);
+      return run(unbox(args[0]), unboxesArguments ? args.slice(1).map(unbox) : args.slice(1), kwargs, boundTo);
     },
     // A static method of a builtin type is a builtin function bound to the type, which calling passes no instance.
     binding === 'static' ? cls : undefined,
@@ -380,6 +416,7 @@ export function isNativeMethod(value: PyValue | undefined): boolean {
 
 /** The class CPython gives a builtin method that `cls` defines under `name`. */
 export function descriptorClassOf(cls: PyClass, name: string, binding: NativeBinding): PyClass {
+  if (cls.isWrittenInPython && binding !== 'class') return functionClass;
   if (binding === 'static') return builtinFunctionClass;
   if (binding === 'class') return classmethodDescriptorClass;
   return SLOT_NAMES.has(name) && !METHOD_TABLE_SLOTS.get(cls)?.includes(name)
@@ -390,9 +427,42 @@ export function descriptorClassOf(cls: PyClass, name: string, binding: NativeBin
 const PRIMITIVE_CLASSES = new Set([intClass, boolClass, floatClass, strClass]);
 const RENDERING_METHODS = new Set(['__mod__', '__rmod__', 'format', 'format_map']);
 
-/** The builtin value of an instance of a program's subclass of int, float, or str, or any other value as it is. */
+/** The builtin value an instance of a subclass of int, float, or str (including IntEnum and StrEnum) stands for. */
 export function unbox(value: PyValue): PyValue {
-  return value instanceof PyInstance && value.primitive !== undefined ? value.primitive : value;
+  if (!(value instanceof PyInstance)) return value;
+  if (value.primitive !== undefined) return value.primitive;
+  const { enumValue, cls } = value;
+  if (enumValue !== undefined) {
+    if (typeof enumValue === 'bigint' && cls.isSubclassOf(intClass)) return enumValue;
+    if (typeof enumValue === 'number' && cls.isSubclassOf(floatClass)) return enumValue;
+    if (typeof enumValue === 'string' && cls.isSubclassOf(strClass)) return enumValue;
+  }
+  return value;
+}
+
+function receiverCheck(
+  cls: PyClass,
+  name: string,
+  receiver: ReceiverCheck,
+  ownerName = cls.typeName ?? cls.name
+): ((self: PyValue | undefined) => void) | undefined {
+  if (receiver === 'unchecked') return undefined;
+  return (self) => {
+    if (self === undefined) throw typeError(missingReceiverMessage(cls, name, receiver, ownerName));
+    if (cls.isWrittenInPython || isInstanceOf(self, cls)) return;
+    throw typeError(
+      receiver === 'wrapper'
+        ? `descriptor '${name}' requires a '${ownerName}' object but received a '${typeName(self)}'`
+        : `descriptor '${name}' for '${ownerName}' objects doesn't apply to a '${typeName(self)}' object`
+    );
+  };
+}
+
+function missingReceiverMessage(cls: PyClass, name: string, receiver: ReceiverCheck, ownerName: string): string {
+  if (cls.isWrittenInPython) return `${cls.name}.${name}() missing 1 required positional argument: 'self'`;
+  return receiver === 'wrapper'
+    ? `descriptor '${name}' of '${ownerName}' object needs an argument`
+    : `unbound method ${cls.name}.${name}() needs an argument`;
 }
 
 /** Whether a value is an instance of `cls`, counting `bool` as an `int`. */
@@ -442,6 +512,11 @@ export function fullyQualifiedName(cls: PyClass): string {
 export function typeName(value: PyValue): string {
   const cls = classOf(value);
   return cls.typeName ?? cls.name;
+}
+
+/** The type an Argument Clinic error names for an argument, which spells None as `None` rather than its type. */
+export function argumentTypeName(value: PyValue): string {
+  return value === None ? 'None' : typeName(value);
 }
 
 export type { Kwargs };

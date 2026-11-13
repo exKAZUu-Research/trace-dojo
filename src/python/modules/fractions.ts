@@ -62,7 +62,6 @@ fractionClass.construct = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => {
 
 /** Creates a fraction already in lowest terms, as `Fraction._from_coprime_ints` does. */
 export function fromCoprime([numerator, denominator]: Ratio, cls: PyClass = fractionClass): PyFraction {
-  currentRuntime().allocate(1);
   return new PyFraction(cls, numerator, denominator);
 }
 

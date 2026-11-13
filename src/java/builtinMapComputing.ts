@@ -1,6 +1,7 @@
 import { findEntry, javaEquals, putEntry, removeEntry } from './builtinCollections';
 import { checkModifiable, uncountedMapClasses } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
+import { accessedEntry } from './builtinLinkedHashMap';
 import { classType, extendsOf, superOf } from './builtinStreamSupport';
 import { addMethod } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
@@ -50,7 +51,7 @@ export function defineMapRemappings(
   });
   addMethod(mapClass, 'replace', [mapK, mapV], mapV, false, (frame, receiver, [key, value]) => {
     checkModifiable(frame, receiver, false);
-    const entry = findEntry(frame, receiver, key);
+    const entry = accessedEntry(frame, receiver, key);
     if (!entry) return;
     const previous = entry.value;
     entry.value = value;
@@ -67,8 +68,10 @@ function defineMapReplaceAll(mapClass: ClassInfo, functions: ComputeFunctions, m
   const functionType = classType(functions.biFunction, superOf(mapK), superOf(mapV), extendsOf(mapV));
   addMethod(mapClass, 'replaceAll', [functionType], VOID, false, (frame, receiver, [fn]) => {
     if (fn === undefined) throwBuiltin(frame, 'NullPointerException');
-    checkModifiable(frame, receiver, false);
     const map = receiver as JavaObject;
+    // Collections.emptyMap overrides replaceAll to do nothing, unlike the other unmodifiable maps.
+    if (map.cls.isBuiltin && map.cls.name === 'EmptyMap') return;
+    checkModifiable(frame, receiver, false);
     const store = map.store;
     if (!store) return throwBuiltin(frame, 'UnsupportedOperationException');
     const apply = (entry: HashEntry): void => {

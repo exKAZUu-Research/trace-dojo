@@ -1,4 +1,5 @@
 import type { ProgramRecording } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
@@ -8,6 +9,7 @@ import type { Frame } from './frame';
 import { parsePython } from './parse';
 import { runModule } from './run';
 import { Runtime } from './runtime';
+import { strRepr } from './strings';
 import { None, unbox } from './types';
 import {
   PyBoundMethod,
@@ -32,9 +34,9 @@ import {
   type PyValue,
 } from './values';
 
-export function tracePythonProgram(program: string, trace: TraceOptions): ProgramRecording {
+export function tracePythonProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const parsed = parsePython(program, trace);
-  const runtime = new Runtime();
+  const runtime = new Runtime(input);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(frame, true),
@@ -42,20 +44,20 @@ export function tracePythonProgram(program: string, trace: TraceOptions): Progra
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
   // A model program may end with an uncaught exception to show how one stops the program.
-  const { output: _output, ...run } = runModule(runtime, parsed, (frame) => {
+  const run = runModule(runtime, parsed, (frame) => {
     finalVars = variablesOf(frame, false).vars;
   });
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
-/** The variables a frame shows: its own, then the fields of `self` and the class variables when `withContext`. */
+/** The variables a frame shows: its own, then the class variables and the fields of `self` when `withContext`. */
 function variablesOf(frame: Frame, withContext: boolean): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, value] of namedValues(frame)) addVariable(variables, name, value);
   if (!withContext) return variables;
+  addClassVariables(variables, frame.globals);
   const self = selfOf(frame);
   if (self) addSelf(variables, self.name, self.value);
-  addClassVariables(variables, frame.globals);
   return variables;
 }
 
@@ -101,7 +103,7 @@ function isLibraryClass(cls: PyClass): boolean {
 /** The instance a method runs on: its first parameter, which plays the role of Java's `this`. */
 function selfOf(frame: Frame): { name: string; value: PyObject } | undefined {
   const fn = frame.fn;
-  if (frame.kind !== 'function' || !fn?.def.isMethod) return undefined;
+  if (frame.kind !== 'function' || !fn?.def.isMethod || fn.isStaticOrClassMethod) return undefined;
   const first = fn.def.params[0];
   if (!first || first.kind === 'varArgs' || first.kind === 'varKeywords') return undefined;
   const value = frame.locals.get(first.name) ?? frame.cells.get(first.name)?.value;
@@ -157,10 +159,11 @@ type Scalar = TraceItemVariable[string];
 
 // code-gauge-allow duplicateLines 16 -- Each language converts its own values for the trace.
 function scalarOf(item: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCALAR {
+  if (item instanceof PyInstance && item.enumValue !== undefined) return NOT_SCALAR;
   const value = unbox(item);
   switch (typeof value) {
     case 'bigint': {
-      return Number(value);
+      return traceIntOf(value);
     }
     case 'number':
     case 'string':
@@ -185,14 +188,26 @@ function scalarOf(item: PyValue, seen: Set<PyObject>): Scalar | typeof NOT_SCALA
   return items as Scalar;
 }
 
+function traceIntOf(value: bigint): number | bigint {
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : value;
+}
+
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows None as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of value the trace shows.
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value the trace shows.
+// code-gauge-allow functionNcss 33 -- One case per kind of value the trace shows.
 function displayNodeOf(item: PyValue, seen: Set<PyObject>): DisplayNode | undefined {
+  if (item instanceof PyInstance && item.enumValue !== undefined) {
+    if (!isVariableValue(item) || seen.has(item)) return undefined;
+    const name = item.dict.get('_name_');
+    // A Flag value that no member names, such as `Perm(0)`, is shown as its value.
+    return typeof name === 'string' ? { kind: 'value', value: name } : displayNodeOf(item.enumValue, seen);
+  }
   const value = unbox(item);
-  if (typeof value === 'bigint') return { kind: 'value', value: Number(value) };
+  if (typeof value === 'bigint') return { kind: 'value', value: traceIntOf(value) };
   if (typeof value !== 'object') return { kind: 'value', value };
   if (value === None) return NULL_NODE;
   if (!isVariableValue(value) || value instanceof PyGenerator || value instanceof PyIterator || seen.has(value)) {
@@ -214,9 +229,6 @@ function displayNodeOf(item: PyValue, seen: Set<PyObject>): DisplayNode | undefi
       entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
     };
   }
-  if (value instanceof PyInstance && value.enumValue !== undefined) {
-    return { kind: 'value', value: value.dict.get('_name_') as string };
-  }
   seen.add(value);
   try {
     return containerNodeOf(value, seen);
@@ -233,8 +245,10 @@ function containerNodeOf(value: PyObject, seen: Set<PyObject>): DisplayNode {
     return { kind: 'array', entries };
   }
   if (value instanceof PyDict) {
-    for (const entry of value.store.ordered())
-      entries[keyText(entry.key)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
+    const ordered = value.store.ordered();
+    const labels = keyLabels(ordered.map((entry) => entry.key));
+    for (const [index, entry] of ordered.entries())
+      entries[labels[index]] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
   } else if (value instanceof PyInstance) {
     addAttributeNodes(entries, value, seen);
   }
@@ -249,14 +263,36 @@ function addAttributeNodes(entries: Record<string, DisplayNode>, instance: PyIns
   }
 }
 
-/** A dict key as text, without running any of the program's own methods. */
-function keyText(item: PyValue): string {
+/**
+ * Labels a dict's keys, distinct for distinct keys: by their text when no two keys share one, and otherwise by their
+ * literals, with strings quoted, where only keys that are no literal (instances, or NaNs) can share a label, so those
+ * get their position among the keys sharing it, a form no literal takes.
+ */
+function keyLabels(keys: PyValue[]): string[] {
+  const texts = keys.map((key) => keyText(key, false));
+  if (new Set(texts).size === texts.length) return texts;
+  const literals = keys.map((key) => keyText(key, true));
+  const counts = new Map<string, number>();
+  for (const literal of literals) counts.set(literal, (counts.get(literal) ?? 0) + 1);
+  const positions = new Map<string, number>();
+  return literals.map((literal) => {
+    if (counts.get(literal) === 1) return literal;
+    const position = (positions.get(literal) ?? 0) + 1;
+    positions.set(literal, position);
+    return `${literal} (${position})`;
+  });
+}
+
+/** A dict key as text, quoting strings when `quoted`, without running any of the program's own methods. */
+function keyText(item: PyValue, quoted: boolean): string {
   const key = unbox(item);
-  if (typeof key === 'string') return key;
-  if (typeof key === 'bigint' || typeof key === 'number' || typeof key === 'boolean') {
-    return typeof key === 'boolean' ? (key ? 'True' : 'False') : String(key);
-  }
+  if (typeof key === 'string') return quoted ? strRepr(key) : key;
+  if (typeof key === 'boolean') return key ? 'True' : 'False';
+  if (typeof key === 'bigint' || typeof key === 'number') return String(key);
   if (key === None) return 'None';
-  if (key instanceof PyTuple) return `(${key.items.map(keyText).join(', ')}${key.items.length === 1 ? ',' : ''})`;
+  if (key instanceof PyTuple) {
+    const items = key.items.map((item) => keyText(item, quoted));
+    return `(${items.join(', ')}${items.length === 1 ? ',' : ''})`;
+  }
   return `<${key.cls.name}>`;
 }

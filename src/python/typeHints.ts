@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 529 -- The methods and attributes of the builtin types it defines belong together.
-import { pyRepr } from './conversions';
+import { pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
 import { definePythonLevelNew } from './instances';
@@ -66,6 +66,7 @@ interface SpecialAliasData {
 function typingClass(name: string, base?: PyClass): PyClass {
   const cls = builtinClass(name, base);
   cls.module = 'typing';
+  cls.isWrittenInPython = true;
   return cls;
 }
 
@@ -74,6 +75,8 @@ genericAliasClass.module = 'types';
 genericAliasClass.typeName = 'types.GenericAlias';
 export const unionClass = typingClass('Union');
 unionClass.typeName = 'typing.Union';
+// CPython writes typing.Union in C, unlike the other classes of typing.
+unionClass.isWrittenInPython = false;
 export const typingAliasClass = typingClass('_GenericAlias');
 const callableAliasClass = typingClass('_CallableGenericAlias', typingAliasClass);
 const literalAliasClass = typingClass('_LiteralGenericAlias', typingAliasClass);
@@ -141,7 +144,7 @@ function qualifiedNameOf(value: PyValue): string | undefined {
   if (value instanceof PyClass)
     return value.module === 'builtins' ? value.qualifiedName : `${value.module}.${value.qualifiedName}`;
   if (value instanceof PyFunction)
-    return value.module === 'builtins' ? value.qualifiedName : `${value.module}.${value.qualifiedName}`;
+    return value.module === 'builtins' ? value.qualifiedName : `${pyStr(value.module)}.${value.qualifiedName}`;
   if (value instanceof PyBuiltinFunction) return value.qualifiedName;
   return undefined;
 }
@@ -191,6 +194,17 @@ function newTypingAlias(
   cls = typingAliasClass
 ): PyOpaque {
   return new PyOpaque(cls, '', { origin, args, name, inst } satisfies AliasData);
+}
+
+/**
+ * `value` with each argument mapped, as _GenericAlias.copy_with and `GenericAlias(origin, args)` build it, or `value`
+ * itself when no argument changes.
+ */
+export function mapAliasArgs(value: PyOpaque, map: (arg: PyValue) => PyValue): PyOpaque {
+  const { args } = aliasOf(value);
+  const mapped = args.map(map);
+  if (mapped.every((arg, index) => arg === args[index])) return value;
+  return new PyOpaque(value.cls, '', { ...aliasOf(value), args: mapped } satisfies AliasData);
 }
 
 export function isAlias(value: PyValue): value is PyOpaque {
@@ -387,7 +401,6 @@ anyType.isBaseType = true;
 anyType.module = 'typing';
 definePythonLevelNew(anyType, (cls) => {
   if (cls === anyType) throw typeError('Any cannot be instantiated');
-  currentRuntime().allocate(1);
   return new PyInstance(cls);
 });
 method(anyMetaClass, '__repr__', 'none', 0, 0, (self) =>
@@ -512,6 +525,15 @@ method(callableTypeClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
   return newTypingAlias(data.origin, [...args, returns], 'Callable', true, callableAliasClass);
 });
 
+/**
+ * A typing alias's `__origin__`. An Annotated alias keeps the Annotated form as its origin and the wrapped type with
+ * the metadata as its args, which get_origin and get_args report, but its `__origin__` is the wrapped type.
+ */
+function originOf(self: PyOpaque): PyValue {
+  const alias = aliasOf(self);
+  return self.cls === annotatedAliasClass ? alias.args[0] : alias.origin;
+}
+
 function callAlias(
   alias: { origin: PyValue; name?: string; inst?: boolean },
   args: PyValue[],
@@ -536,7 +558,7 @@ for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, anno
   method(cls, '__repr__', 'none', 0, 0, (self) => typingAliasRepr(self as PyOpaque));
   method(cls, '__getitem__', 'one', 1, 1, (self, [key]) => substituteAlias(self as PyOpaque, key));
   defineMethod(cls, '__call__', (self, args, kwargs) => {
-    const result = callAlias(aliasOf(self), args, kwargs);
+    const result = callAlias({ ...aliasOf(self), origin: originOf(self as PyOpaque) }, args, kwargs);
     // `_BaseGenericAlias.__call__` records the alias on the instance where it can.
     try {
       setAttribute(result, '__orig_class__', self);
@@ -561,10 +583,11 @@ for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, anno
   );
   opaqueAttributes(cls, (self, name) => {
     const alias = aliasOf(self);
-    if (name === '__origin__') return self.cls === annotatedAliasClass ? alias.args[0] : alias.origin;
-    if (name === '__args__') return newTuple(self.cls === annotatedAliasClass ? alias.args.slice(0, 1) : alias.args);
+    const isAnnotated = self.cls === annotatedAliasClass;
+    if (name === '__origin__') return originOf(self);
+    if (name === '__args__') return newTuple(isAnnotated ? alias.args.slice(0, 1) : alias.args);
     if (name === '__parameters__') return newTuple(collectParameters(alias.args));
-    if (name === '__metadata__' && self.cls === annotatedAliasClass) return newTuple(alias.args.slice(1));
+    if (name === '__metadata__' && isAnnotated) return newTuple(alias.args.slice(1));
     if ((name === '__name__' || name === '__qualname__' || name === '_name') && alias.name !== undefined)
       return alias.name;
     if (name === '__module__') return 'typing';
@@ -680,6 +703,7 @@ method(genericAliasClass, '__reduce__', 'none', 0, 0, (self) =>
 
 export const callableGenericAliasClass = builtinClass('_CallableGenericAlias', genericAliasClass);
 callableGenericAliasClass.module = 'collections.abc';
+callableGenericAliasClass.isWrittenInPython = true;
 callableGenericAliasClass.construct = (cls, args) => {
   const [origin, key] = args;
   if (!(key instanceof PyTuple && key.items.length === 2)) {
@@ -757,8 +781,7 @@ export function unionGetItem(key: PyValue): PyValue {
   return unionOf(items.map(typeConvert));
 }
 
-// ForwardRef --------------------------------------------------------------------------------------------------------
-
+// typing.get_args and typing.get_origin ---------------------------------------------------------------------------
 /** The arguments `typing.get_args` gives, unflattening a Callable's parameters into a list. */
 export function typingArgs(value: PyValue): PyValue {
   if (value instanceof PyTypingAlias) return newTuple(value.args);

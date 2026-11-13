@@ -1,4 +1,5 @@
 import type { ProgramRecording } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { TurtleState } from '../interpreter/turtleWorld';
@@ -21,9 +22,9 @@ import {
 } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
-export function traceJavaProgram(program: string, trace: TraceOptions): ProgramRecording {
+export function traceJavaProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseJava(program), { trace });
-  const runtime = new Runtime(compiled.builtins);
+  const runtime = new Runtime(compiled.builtins, input);
   const snapshotter = new Snapshotter(runtime, compiled);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.method?.isAtomic === true,

@@ -65,7 +65,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
   }
 
   /** `async with`: awaits the manager's `__aenter__` before the body and its `__aexit__` after it. */
-  // code-gauge-allow functionNcss 36 -- Follows the protocol of the async with statement.
+  // code-gauge-allow functionNcss 42 -- Follows the protocol of the async with statement.
   protected *asyncWithStatement(
     statement: Extract<Statement, { kind: 'with' }>,
     frame: Frame,
@@ -87,14 +87,17 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
     const length = frame.temporaries.length;
     frame.temporaries.push(manager);
     try {
-      const entered = yield* awaitValue(callValue(bindValue(enter, manager), []), frame, statement.row);
-      if (index === 0) this.runtime.steps.step(statement.stepRow);
-      if (item.target) yield* this.assignSuspending(item.target, entered, frame);
+      let entered = false;
       let completion: Completion;
       try {
+        const value = yield* awaitValue(callValue(bindValue(enter, manager), []), frame, statement.row);
+        entered = true;
+        if (index === 0) this.runtime.steps.step(statement.stepRow);
+        if (item.target) yield* this.assignSuspending(item.target, value, frame);
         completion = yield* this.asyncWithStatement(statement, frame, index + 1);
       } catch (error) {
-        if (!(error instanceof PyError)) throw error;
+        if (!(error instanceof PyError) || !entered) throw error;
+        this.runtime.currentRow = statement.row;
         const { exception } = error;
         const depth = this.attachHandling([exception]);
         let suppress: boolean;
@@ -107,6 +110,8 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
         if (!suppress) throw error;
         return undefined;
       }
+      this.runtime.currentRow = statement.row;
+      if (typeof completion === 'object') frame.temporaries.push(completion.value);
       yield* awaitValue(callValue(bindValue(exit, manager), [None, None, None]), frame, statement.row);
       return completion;
     } finally {
@@ -119,11 +124,12 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
   protected override comprehension(
     expression: ComprehensionExpression,
     frame: Frame,
-    first = this.evaluate(expression.generators[0].iterable, frame)
+    firstIterable?: PyValue
   ): PyValue {
     if (expression.type !== 'generator' || !expression.scope.isAsync)
-      return super.comprehension(expression, frame, first);
-    const inner = this.nestedFrame('comprehension', expression.scope, frame);
+      return super.comprehension(expression, frame, firstIterable);
+    const first = firstIterable ?? this.evaluateIterable(expression.generators[0].iterable, frame);
+    const inner = this.comprehensionFrame(expression, frame, first);
     const source = this.sourceOf(expression.generators[0], first);
     const body = this.comprehensionLevel(expression, inner, 0, source, function* (value) {
       yield asyncYield(value);
@@ -132,7 +138,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
     return new PyGenerator(
       asyncGeneratorClass,
       '<genexpr>',
-      `${frame.fn?.def.qualifiedName ?? ''}${frame.fn ? '.<locals>.' : ''}<genexpr>`,
+      expression.qualifiedName ?? '<genexpr>',
       (input) => {
         runtime.pushFrame(inner);
         try {
@@ -147,16 +153,13 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
 
   /** Runs a list, set, or dict comprehension that awaits, in its own frame on top of the coroutine's. */
   protected *asyncComprehension(expression: ComprehensionExpression, frame: Frame, first: PyValue): Suspension {
-    const inner = this.nestedFrame('comprehension', expression.scope, frame);
+    const inner = this.comprehensionFrame(expression, frame);
     inner.temporaries.push(first);
     const source = this.sourceOf(expression.generators[0], first);
-    const items: PyValue[] = [];
-    const container = expression.type === 'dict' ? newDict() : expression.type === 'list' ? newList(items) : newSet();
+    const container = expression.type === 'dict' ? newDict() : expression.type === 'list' ? newList([]) : newSet();
     inner.temporaries.push(container);
-    const { runtime } = this;
     const store = function* (this: AsyncEvaluator, value: PyValue): Suspension<void> {
-      runtime.allocate(1);
-      if (container instanceof PyList) items.push(value);
+      if (container instanceof PyList) container.append(value);
       else if (expression.type === 'dict') {
         const dict = container as ReturnType<typeof newDict>;
         dict.store.set(value, yield* this.evaluateSuspending(expression.value as Expression, inner));

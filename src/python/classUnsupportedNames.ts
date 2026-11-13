@@ -46,10 +46,6 @@ registerUnsupportedClassAttributes('collections.ChainMap', {
   ...of(WEAKREF_LIST, ['__weakref__']),
   ...of(PYTHON_CLASS, ['_abc_impl']),
 });
-registerUnsupportedClassAttributes('collections.Counter', {
-  ...of(WEAKREF_LIST, ['__weakref__']),
-  ...of(PYTHON_CLASS, ['__dict__', '__firstlineno__', '__static_attributes__', '_keep_positive']),
-});
 registerUnsupportedClassAttributes('collections.OrderedDict', of(PYTHON_CLASS, ['__dict__']));
 registerUnsupportedClassAttributes(
   'fractions.Fraction',

@@ -3,7 +3,7 @@
 import { bindValue, callValue, lookupSpecial } from './objects';
 import { instancesHaveDict } from './slots';
 import { classOf, objectClass, pyError } from './types';
-import { type PyClass, PyError, PyFunction, PyInstance, PyObject, type PyValue } from './values';
+import { AttributeMap, type PyClass, PyError, PyFunction, PyInstance, PyObject, type PyValue } from './values';
 
 /** The builtin classes whose objects are data descriptors, which take attributes over instance dicts. */
 export const builtinDataDescriptorClasses = new Set<PyClass>();
@@ -53,7 +53,7 @@ export function ownDict(value: PyValue): Map<string, PyValue> | undefined {
   if (value instanceof PyFunction) return value.dict;
   if (!(value instanceof PyObject)) return undefined;
   if (value.cls.isBuiltin ? !builtinClassesWithDict.has(value.cls) : !instancesHaveDict(value.cls)) return undefined;
-  value.instanceDict ??= new Map();
+  value.instanceDict ??= new AttributeMap();
   return value.instanceDict;
 }
 

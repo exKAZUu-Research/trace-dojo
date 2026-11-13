@@ -1,5 +1,6 @@
 import { keyHash } from './hashing';
 import { keysEqual } from './operators';
+import { chargeSlots, chargeStep } from './runtimeContext';
 import type { PyValue } from './values';
 
 const MIN_SIZE = 8;
@@ -73,6 +74,7 @@ export class SetTable {
         if (entry !== DUMMY && entry.hash === hash && keysEqual(entry.key, key)) return slot;
         slot++;
       } while (probes-- > 0);
+      chargeStep();
       perturb >>= PERTURB_SHIFT;
       index = Number((BigInt(index) * 5n + 1n + perturb) & BigInt(mask));
     }
@@ -90,8 +92,7 @@ export class SetTable {
       do {
         const entry = this.table[slot];
         if (entry === undefined) {
-          this.used++;
-          this.version++;
+          this.countNewEntry();
           if (freeSlot !== undefined) {
             this.table[freeSlot] = { key, hash };
             return;
@@ -102,15 +103,23 @@ export class SetTable {
           return;
         }
         if (entry === DUMMY) {
-          freeSlot ??= slot;
+          // CPython 3.14 remembers the last dummy of the probe sequence, not the first.
+          freeSlot = slot;
         } else if (entry.hash === hash && keysEqual(entry.key, key)) {
           return;
         }
         slot++;
       } while (probes-- > 0);
+      chargeStep();
       perturb >>= PERTURB_SHIFT;
       index = Number((BigInt(index) * 5n + 1n + perturb) & BigInt(mask));
     }
+  }
+
+  private countNewEntry(): void {
+    chargeSlots(1);
+    this.used++;
+    this.version++;
   }
 
   discard(key: PyValue, hash = keyHash(key, 'set element')): boolean {
@@ -175,6 +184,7 @@ export class SetTable {
           }
         }
       }
+      chargeStep();
       perturb >>= PERTURB_SHIFT;
       index = Number((BigInt(index) * 5n + 1n + perturb) & BigInt(mask));
     }
@@ -182,16 +192,32 @@ export class SetTable {
 
   /** Adds every entry of another table, as CPython's set_merge does. */
   merge(other: SetTable): void {
-    if (other.used === 0) return;
+    if (other === this || other.used === 0) return;
+    if ((this.fill + other.used) * 5 >= this.mask * 3) this.resize((this.used + other.used) * 2);
     if (this.fill === 0 && this.mask === other.mask && other.fill === other.used) {
-      this.table = other.table.map((entry) => (entry ? { ...entry } : undefined));
+      chargeSlots(other.used);
+      this.table = [...other.table];
       this.fill = other.fill;
       this.used = other.used;
       this.version++;
-      return;
+    } else if (this.fill === 0) {
+      chargeSlots(other.used);
+      this.fill = other.used;
+      this.used = other.used;
+      for (const entry of other.entries()) this.insertClean(entry);
+      this.version++;
+    } else {
+      for (const entry of other.entries()) this.add(entry.key, entry.hash);
     }
-    if ((this.fill + other.used) * 5 >= this.mask * 3) this.resize((this.used + other.used) * 2);
-    for (const entry of other.entries()) this.add(entry.key, entry.hash);
+  }
+
+  /** Takes over the entries of another table but keeps the pop position, as CPython's set_swap_bodies does. */
+  adopt(other: SetTable): void {
+    this.table = other.table;
+    this.mask = other.mask;
+    this.fill = other.fill;
+    this.used = other.used;
+    this.version++;
   }
 
   /** Prepares for adding `count` keys from a dict, as CPython's set_update_dict does. */

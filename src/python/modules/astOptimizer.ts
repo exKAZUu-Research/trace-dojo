@@ -22,7 +22,7 @@ class Optimizer {
   // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of node CPython's AST optimizer changes.
   node(value: PyValue): PyValue {
     if (value instanceof PyList) {
-      for (const [index, item] of value.items.entries()) value.items[index] = this.node(item);
+      for (const [index, item] of value.items.entries()) value.editableItems[index] = this.node(item);
       return value;
     }
     if (!(value instanceof PyInstance) || !isInstanceOf(value, this.cls('AST'))) return value;
@@ -33,7 +33,7 @@ class Optimizer {
     if (this.is(value, 'MatchValue')) value.dict.set('value', this.fold(value.dict.get('value') as PyValue));
     if (this.is(value, 'MatchMapping')) {
       const keys = value.dict.get('keys') as PyList;
-      for (const [index, key] of keys.items.entries()) keys.items[index] = this.fold(key);
+      for (const [index, key] of keys.items.entries()) keys.editableItems[index] = this.fold(key);
     }
     for (const field of (getAttribute(value.cls, '_fields') as PyTuple).items) {
       const child = value.dict.get(field as string);
@@ -53,13 +53,13 @@ class Optimizer {
   /** Drops a body's docstring, leaving `pass` where it stood when nothing else remains. */
   private removeDocstring(node: PyInstance): void {
     const body = node.dict.get('body') as PyList;
-    const docstring = body.items.shift() as PyInstance;
+    const [docstring] = body.removeRange(0, 1) as [PyInstance];
     if (body.items.length > 0) return;
     // The `pass` stands at the docstring's start, spanning the four characters of its keyword.
     const pass = this.make('Pass', {}, docstring);
     pass.dict.set('end_lineno', docstring.dict.get('lineno') as PyValue);
     pass.dict.set('end_col_offset', (docstring.dict.get('col_offset') as bigint) + 4n);
-    body.items.push(pass);
+    body.append(pass);
   }
 
   /** A pattern's value folded into a constant: a negative number, or a complex number written as a sum. */

@@ -9,8 +9,11 @@ export interface TurtleTrace {
   dir: string;
 }
 
+/** An integer is a bigint only when a number cannot hold it exactly. */
+export type TraceScalar = number | bigint | string | boolean | null;
+
 export type DisplayNode =
-  | { kind: 'value'; value: number | string | boolean | null }
+  | { kind: 'value'; value: TraceScalar }
   | { kind: 'object' | 'array'; entries: Record<string, DisplayNode> };
 
 export interface TraceItem {
@@ -24,7 +27,6 @@ export interface TraceItem {
   board: string;
 }
 
-export type TraceScalar = number | string | boolean | null;
 export type TraceArray = (TraceScalar | TraceArray)[];
 export type TraceItemVariable = Record<string, TraceScalar | TraceArray>;
 

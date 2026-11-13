@@ -1,11 +1,31 @@
+import { defineAsyncGeneratorBuiltins } from './asyncGenerators';
+import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
+import { definePromiseBuiltins } from './promises';
 import { defineArrayBuiltins } from './realmArrays';
+import { defineAsyncBuiltins } from './realmAsyncBuiltins';
+import { defineBigIntBuiltins } from './realmBigInt';
+import { defineCollectionBuiltins } from './realmCollections';
+import { defineDateBuiltins } from './realmDate';
 import { defineGlobalBuiltins } from './realmGlobals';
+import { defineIteratorHelpers } from './realmIteratorHelpers';
+import { defineIteratorBuiltins } from './realmIterators';
+import { defineJsonBuiltins } from './realmJson';
+import { defineNodeBuiltins } from './realmNode';
+import { defineObjectBuiltins } from './realmObjects';
+import { defineRegExpBuiltins } from './realmRegExp';
 import { defineStringBuiltins } from './realmStrings';
 import type { Runtime } from './runtime';
-import { JsFunction, JsObject, type NativeFunction, Scope, type Value } from './values';
+import { JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
 
-export type ErrorName = 'Error' | 'TypeError' | 'RangeError' | 'ReferenceError' | 'SyntaxError';
+export type ErrorName =
+  | 'Error'
+  | 'TypeError'
+  | 'RangeError'
+  | 'ReferenceError'
+  | 'SyntaxError'
+  | 'AggregateError'
+  | 'SuppressedError';
 
 /** The builtin objects of one run, which programs may modify. */
 export interface Realm {
@@ -15,6 +35,28 @@ export interface Realm {
   stringPrototype: JsObject;
   numberPrototype: JsObject;
   booleanPrototype: JsObject;
+  symbolPrototype: JsObject;
+  bigintPrototype: JsObject;
+  promisePrototype: JsObject;
+  regExpPrototype: JsObject;
+  datePrototype: JsObject;
+  mapPrototype: JsObject;
+  setPrototype: JsObject;
+  /** `%IteratorPrototype%`, the parent of the builtin iterators' prototypes. */
+  iteratorPrototype: JsObject;
+  /**
+   * The builtin `next` and `return` methods of the iterators that step through a host iteration, which loops may then
+   * step through directly; an iterator whose methods the program replaced is stepped through its methods instead.
+   */
+  hostIteratorMethods: Set<JsFunction>;
+  /** The symbols `Symbol.for` registered in this run, by key, which end with the run. */
+  symbolRegistry: Map<string, symbol>;
+  /** `%GeneratorPrototype%`, with the methods every generator object has. */
+  generatorPrototype: JsObject;
+  /** `%AsyncIteratorPrototype%`, the parent of `%AsyncGeneratorPrototype%`. */
+  asyncIteratorPrototype: JsObject;
+  /** `%AsyncGeneratorPrototype%`, with the methods every async generator object has. */
+  asyncGeneratorPrototype: JsObject;
   errorPrototypes: Record<ErrorName, JsObject>;
   /** The scope of the builtin globals, which encloses the program's own scope. */
   globals: Scope;
@@ -28,6 +70,8 @@ export class RealmBuilder {
     // oxlint-disable-next-line unicorn/no-null -- Object.prototype ends every prototype chain.
     const objectPrototype = new JsObject(null);
     const errorPrototype = new JsObject(objectPrototype);
+    const iteratorPrototype = new JsObject(objectPrototype);
+    const asyncIteratorPrototype = new JsObject(objectPrototype);
     this.realm = {
       objectPrototype,
       functionPrototype: new JsObject(objectPrototype),
@@ -35,12 +79,27 @@ export class RealmBuilder {
       stringPrototype: new JsObject(objectPrototype),
       numberPrototype: new JsObject(objectPrototype),
       booleanPrototype: new JsObject(objectPrototype),
+      symbolPrototype: new JsObject(objectPrototype),
+      bigintPrototype: new JsObject(objectPrototype),
+      promisePrototype: new JsObject(objectPrototype),
+      regExpPrototype: new JsObject(objectPrototype),
+      datePrototype: new JsObject(objectPrototype),
+      mapPrototype: new JsObject(objectPrototype),
+      setPrototype: new JsObject(objectPrototype),
+      iteratorPrototype,
+      hostIteratorMethods: new Set(),
+      symbolRegistry: new Map(),
+      generatorPrototype: new JsObject(iteratorPrototype),
+      asyncIteratorPrototype,
+      asyncGeneratorPrototype: new JsObject(asyncIteratorPrototype),
       errorPrototypes: {
         Error: errorPrototype,
         TypeError: new JsObject(errorPrototype),
         RangeError: new JsObject(errorPrototype),
         ReferenceError: new JsObject(errorPrototype),
         SyntaxError: new JsObject(errorPrototype),
+        AggregateError: new JsObject(errorPrototype),
+        SuppressedError: new JsObject(errorPrototype),
       },
       globals: new Scope(undefined),
     };
@@ -53,22 +112,27 @@ export class RealmBuilder {
   }
 
   /** Defines a builtin method, which is non-enumerable. */
-  method(object: JsObject, name: string, length: number, run: NativeFunction): JsFunction {
-    const fn = this.function(name, length, run);
-    object.properties.set(name, { value: fn, writable: true, enumerable: false, configurable: true });
+  method(object: JsObject, name: Key, length: number, run: NativeFunction): JsFunction {
+    const fn = this.function(functionNameOf(name), length, run);
+    object.properties.set(name, {
+      value: fn,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
     return fn;
   }
 
-  getter(object: JsObject, name: string, run: NativeFunction): void {
+  getter(object: JsObject, name: Key, run: NativeFunction): void {
     object.properties.set(name, {
-      get: this.function(`get ${name}`, 0, run),
+      get: this.function(`get ${functionNameOf(name)}`, 0, run),
       set: undefined,
       enumerable: false,
       configurable: true,
     });
   }
 
-  constant(object: JsObject, name: string, value: Value): void {
+  constant(object: JsObject, name: Key, value: Value): void {
     object.properties.set(name, { value, writable: false, enumerable: false, configurable: false });
   }
 
@@ -81,8 +145,18 @@ export class RealmBuilder {
     isConstructor = true
   ): JsFunction {
     const fn = this.function(name, length, run, isConstructor);
-    fn.properties.set('prototype', { value: prototype, writable: false, enumerable: false, configurable: false });
-    prototype.properties.set('constructor', { value: fn, writable: true, enumerable: false, configurable: true });
+    fn.properties.set('prototype', {
+      value: prototype,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    prototype.properties.set('constructor', {
+      value: fn,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
     this.global(name, fn);
     return fn;
   }
@@ -98,10 +172,28 @@ export class RealmBuilder {
   }
 }
 
+/** The name of a function stored under a key, which for a symbol is its description in brackets. */
+function functionNameOf(key: Key): string {
+  return typeof key === 'string' ? key : `[${key.description ?? ''}]`;
+}
+
 export function createRealm(runtime: Runtime): Realm {
   const builder = new RealmBuilder(runtime);
   defineGlobalBuiltins(builder);
+  defineObjectBuiltins(builder);
+  defineNodeBuiltins(builder);
   defineArrayBuiltins(builder);
   defineStringBuiltins(builder);
+  defineIteratorBuiltins(builder);
+  defineRegExpBuiltins(builder);
+  defineGeneratorBuiltins(builder);
+  definePromiseBuiltins(builder);
+  defineAsyncGeneratorBuiltins(builder);
+  defineBigIntBuiltins(builder);
+  defineCollectionBuiltins(builder);
+  defineJsonBuiltins(builder);
+  defineIteratorHelpers(builder);
+  defineAsyncBuiltins(builder);
+  defineDateBuiltins(builder);
   return builder.realm;
 }

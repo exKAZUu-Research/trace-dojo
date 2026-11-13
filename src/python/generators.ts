@@ -2,6 +2,7 @@ import { addressOf } from './conversions';
 import { FINALIZER_FEATURE, method, unsupportedMethod, unsupportedSizeof } from './define';
 import type { Frame } from './frame';
 import { bindValue, callValue, getAttribute, getIterator, lookupSpecial } from './objects';
+import { runningRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
 import { isWaitRequest, schedulerOf } from './threads';
 import {
@@ -76,6 +77,7 @@ export function resumeGenerator(generator: PyGenerator, input: GeneratorInput): 
       step = generator.resume({ value: None });
     }
     if (step.done) generator.finished = true;
+    else runningRuntime()?.handToNative(step.value);
     return step;
   } catch (error) {
     generator.finished = true;
@@ -101,6 +103,7 @@ export function* resumeGeneratorSuspending(generator: PyGenerator, input: Genera
       step = generator.resume({ value: None });
     }
     if (step.done) generator.finished = true;
+    else runningRuntime()?.handToNative(step.value);
     return step;
   } catch (error) {
     generator.finished = true;

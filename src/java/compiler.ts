@@ -20,7 +20,7 @@ import { checkDefiniteAssignment } from './definiteAssignment';
 import { checkInitialization } from './initializationCheck';
 import { localClassNamesOf } from './localClassNames';
 import { canCompleteNormally } from './reachability';
-import { type Frame, type Slot, UNASSIGNED } from './runtime';
+import { type Frame, type Slot, throwBuiltin, UNASSIGNED } from './runtime';
 import { isObjectCreation } from './stepRules';
 import {
   asSuper,
@@ -28,10 +28,12 @@ import {
   type ClassType,
   createClass,
   type FieldInfo,
+  isWidening,
   type JavaType,
   type MethodInfo,
   sameType,
   thisTypeOf,
+  typeName,
   VOID,
 } from './types';
 import type { JavaObject, JavaString, Value } from './values';
@@ -49,6 +51,13 @@ export interface CompiledProgram {
   internedStrings: Map<string, JavaString>;
   /** The value of a static field's initializer when it is a constant expression. */
   initialConstantOf: (field: FieldInfo) => Value;
+}
+
+/** The constructor a constructor calls first, its arguments, and the enclosing instance `outer.super(...)` gives. */
+interface ConstructorCall {
+  target: MethodInfo;
+  convertedArgs: Eval[];
+  outer?: Eval;
 }
 
 export function compileProgram(unit: CompilationUnit, options: CompileOptions = {}): CompiledProgram {
@@ -168,7 +177,9 @@ class Compiler extends DeclarationCompiler {
       );
     }
     this.withInstanceTypeVariables(cls, true, () => {
-      for (const constructor of cls.constructors) this.compileConstructor(cls, constructor);
+      for (const constructor of cls.constructors) {
+        this.withTypeVariables(constructor.typeParameters ?? [], () => this.compileConstructor(cls, constructor));
+      }
     });
   }
 
@@ -315,10 +326,12 @@ class Compiler extends DeclarationCompiler {
     cls: ClassInfo,
     constructor: MethodInfo,
     declaration: ConstructorDeclaration | undefined
-  ): { target: MethodInfo; convertedArgs: Eval[] } {
+  ): ConstructorCall {
     const explicitCall = declaration?.explicitCall;
     const callsThis = explicitCall?.target === 'this';
     const targetClass = callsThis ? cls : (cls.superclass as ClassInfo);
+    const span = explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration);
+    const outer = callsThis ? undefined : this.superclassOuterInstance(context, cls, span, explicitCall?.outer);
     // Arguments of an explicit constructor call may not refer to the object under construction.
     const argSyntax = explicitCall?.args ?? [];
     const args = argSyntax.map((arg) =>
@@ -328,12 +341,12 @@ class Compiler extends DeclarationCompiler {
       callsThis ? thisTypeOf(cls) : asSuper(thisTypeOf(cls), targetClass),
       targetClass
     );
-    const span = explicitCall ?? declaration ?? (cls.declaration as ClassDeclaration);
+    const candidates = targetClass.constructors
+      .filter((candidate) => candidate !== constructor || !callsThis)
+      .map((candidate) => methodView(candidate, targetBindings));
     const target = this.selectMethod(
       span,
-      targetClass.constructors
-        .filter((candidate) => candidate !== constructor || !callsThis)
-        .map((candidate) => methodView(candidate, targetBindings)),
+      this.withConstructorTypeArguments(explicitCall?.typeArgs, candidates),
       args.map((arg) => arg.type),
       `コンストラクタ ${targetClass.name}`
     );
@@ -346,15 +359,45 @@ class Compiler extends DeclarationCompiler {
         args,
         argSyntax
       ),
+      outer,
     };
   }
 
-  /** An anonymous class's constructor passes its arguments on to the superclass constructor that its creation chose. */
-  protected forwardingCall(
+  /**
+   * The enclosing instance that `outer.super(...)` gives a superclass that is an inner class. Without a qualifier, the
+   * object shares the enclosing instance of its own class or of a class enclosing it, which must exist.
+   */
+  protected superclassOuterInstance(
     context: MethodContext,
-    constructor: MethodInfo,
-    target: MethodInfo
-  ): { target: MethodInfo; convertedArgs: Eval[] } {
+    cls: ClassInfo,
+    span: Span,
+    qualifier: Expression | undefined
+  ): Eval | undefined {
+    const superclass = cls.superclass as ClassInfo;
+    const enclosing = superclass.hasOuterInstance ? superclass.enclosing : undefined;
+    if (!qualifier) {
+      if (enclosing && !this.outerInstanceValue(context, enclosing)) {
+        this.error(
+          span,
+          `${superclass.name} のコンストラクタを呼び出すには、${enclosing.name} のオブジェクトが必要です。`
+        );
+      }
+      return;
+    }
+    if (!enclosing)
+      this.error(qualifier, `${superclass.name} は内部クラスではないので、super の前にオブジェクトを書けません。`);
+    if (cls.hasOuterInstance) {
+      this.error(qualifier, '外側のオブジェクトを持つクラスでの修飾された super(...) は、この採点環境では使えません。');
+    }
+    const value = this.compileValue({ ...context, isStatic: true, isBeforeConstructorCall: true }, qualifier);
+    if (!isWidening(value.type, enclosing.type, this.builtins.objectClass)) {
+      this.error(qualifier, `${typeName(value.type)} 型の値は ${enclosing.name} のオブジェクトではありません。`);
+    }
+    return value.run;
+  }
+
+  /** An anonymous class's constructor passes its arguments on to the superclass constructor that its creation chose. */
+  protected forwardingCall(context: MethodContext, constructor: MethodInfo, target: MethodInfo): ConstructorCall {
     const span = constructor.owner.declaration as ClassDeclaration;
     const convertedArgs = constructor.parameterTypes.map((type, index): Eval => {
       // A name no source can write cannot clash with the program's variables.
@@ -468,7 +511,7 @@ class Compiler extends DeclarationCompiler {
     const prologue =
       declaration?.prologue &&
       this.compileStatements({ ...context, isStatic: true, isBeforeConstructorCall: true }, declaration.prologue);
-    const { target, convertedArgs } = constructor.forwardsTo
+    const { target, convertedArgs, outer } = constructor.forwardsTo
       ? this.forwardingCall(context, constructor, constructor.forwardsTo)
       : this.explicitConstructorCall(context, cls, constructor, declaration);
     const explicitCall = declaration?.explicitCall;
@@ -488,6 +531,11 @@ class Compiler extends DeclarationCompiler {
       locals: context.locals,
       run: (frame) => {
         prologue?.(frame);
+        if (outer) {
+          const outerObject = outer(frame);
+          if (outerObject === undefined) throwBuiltin(frame, 'NullPointerException');
+          (frame.thisObject as JavaObject).outer = outerObject as JavaObject;
+        }
         this.invokeWithArguments(frame, target.declared ?? target, frame.thisObject, convertedArgs, callRow);
         for (const initializer of initializers) initializer(frame);
         body?.(frame);

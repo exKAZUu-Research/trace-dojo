@@ -1,11 +1,14 @@
 // Gives the builtin types the special methods of their operators, which instances of a program's subclasses reach
 // through the classes' dictionaries, as `super().__add__(other)` and the operators on such instances do.
 import type { BinaryOperator } from './ast';
-import { method } from './define';
+import { modPow } from './builtins';
+import { method, redeclareMethods } from './define';
 import { divmodFloat, floorDivInt, modInt } from './numbers';
 import {
   builtinSlots,
   COMPARE_NAMES,
+  dictsEqual,
+  mergeDicts,
   nativeBinary,
   nativeCompare,
   nativeInplace,
@@ -14,6 +17,7 @@ import {
 } from './operators';
 import { formatPercent } from './percentFormat';
 import {
+  boolClass,
   complexClass,
   dictClass,
   floatClass,
@@ -21,6 +25,7 @@ import {
   intClass,
   listClass,
   newTuple,
+  None,
   NotImplemented,
   setClass,
   strClass,
@@ -28,6 +33,7 @@ import {
   typeError,
   typeName,
   unbox,
+  valueError,
 } from './types';
 import { type PyClass, PyComplex, PyDict, PyList, PySet, PyTuple, type PyValue } from './values';
 
@@ -41,9 +47,9 @@ const isStr: Accepts = (value) => typeof value === 'string';
 const isList: Accepts = (value) => value instanceof PyList;
 const isTuple: Accepts = (value) => value instanceof PyTuple;
 const isSet: Accepts = (value) => value instanceof PySet;
-const isDict: Accepts = (value) => value instanceof PyDict;
+const isDict = (value: PyValue): value is PyDict => value instanceof PyDict;
 
-const ARITHMETIC: BinaryOperator[] = ['+', '-', '*', '/', '//', '%', '**'];
+const ARITHMETIC: BinaryOperator[] = ['+', '-', '*', '/', '//', '%'];
 const BITWISE: BinaryOperator[] = ['<<', '>>', '&', '|', '^'];
 const ORDERING = ['<', '<=', '>', '>=', '==', '!='] as const;
 
@@ -91,11 +97,53 @@ function defineUnary(cls: PyClass): void {
 for (const [cls, accepts, operators] of [
   [intClass, isInt, [...ARITHMETIC, ...BITWISE]],
   [floatClass, isReal, ARITHMETIC],
-  [complexClass, isComplexOperand, ['+', '-', '*', '/', '**']],
+  [complexClass, isComplexOperand, ['+', '-', '*', '/']],
 ] as const) {
   for (const operator of operators) defineOperator(cls, operator, accepts);
+  definePow(cls, accepts);
   defineComparisons(cls, accepts, cls === complexClass ? ['==', '!='] : ORDERING);
   defineUnary(cls);
+}
+
+function definePow(cls: PyClass, accepts: Accepts): void {
+  const binaryPow: Slot = (self, other) => {
+    const value = unbox(other);
+    return accepts(value) ? nativeBinary('**', unbox(self), value) : NotImplemented;
+  };
+  const reflectedPow: Slot = (self, other) => {
+    const value = unbox(other);
+    return accepts(value) ? nativeBinary('**', value, unbox(self)) : NotImplemented;
+  };
+  method(cls, '__pow__', 'expected', 1, 2, (self, [other, mod = None]) =>
+    mod === None ? binaryPow(self, other) : ternaryPowSlot(cls, unbox(self), unbox(other), unbox(mod), accepts)
+  );
+  method(cls, '__rpow__', 'expected', 1, 2, (self, [other, mod = None]) =>
+    mod === None ? reflectedPow(self, other) : ternaryPowSlot(cls, unbox(other), unbox(self), unbox(mod), accepts)
+  );
+  builtinSlots.set(cls.dict.get('__pow__') as PyValue, binaryPow);
+  builtinSlots.set(cls.dict.get('__rpow__') as PyValue, reflectedPow);
+}
+
+function ternaryPowSlot(cls: PyClass, base: PyValue, exp: PyValue, mod: PyValue, accepts: Accepts): PyValue {
+  if (!accepts(base) || !accepts(exp)) return NotImplemented;
+  if (cls === intClass) {
+    return isInt(mod) ? modPow(BigInt(base as bigint), BigInt(exp as bigint), BigInt(mod as bigint)) : NotImplemented;
+  }
+  if (cls === floatClass) throw typeError('pow() 3rd argument not allowed unless all arguments are integers');
+  throw valueError('complex modulo');
+}
+redeclareMethods(boolClass, intClass, [
+  '__and__',
+  '__rand__',
+  '__or__',
+  '__ror__',
+  '__xor__',
+  '__rxor__',
+  '__invert__',
+]);
+for (const name of ['__and__', '__rand__', '__or__', '__ror__', '__xor__', '__rxor__']) {
+  const slot = builtinSlots.get(intClass.dict.get(name) as PyValue);
+  if (slot) builtinSlots.set(boolClass.dict.get(name) as PyValue, slot);
 }
 
 for (const [cls, accepts] of [
@@ -164,6 +212,8 @@ for (const operator of ['|', '&', '-', '^'] as const) {
     isSet(other) ? nativeInplace(operator, self, other) : NotImplemented
   );
 }
-defineOperator(dictClass, '|', isDict);
+defineSlot(dictClass, '__or__', (self, other) => (isDict(other) ? mergeDicts(self as PyDict, other) : NotImplemented));
+defineSlot(dictClass, '__ror__', (self, other) => (isDict(other) ? mergeDicts(other, self as PyDict) : NotImplemented));
 defineSlot(dictClass, '__ior__', (self, other) => nativeInplace('|', self, other));
-defineComparisons(dictClass, isDict, ['==', '!=']);
+defineSlot(dictClass, '__eq__', (self, other) => (isDict(other) ? dictsEqual(self as PyDict, other) : NotImplemented));
+defineSlot(dictClass, '__ne__', (self, other) => (isDict(other) ? !dictsEqual(self as PyDict, other) : NotImplemented));

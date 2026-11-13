@@ -1,10 +1,11 @@
 import { builtin } from '../define';
+import { decimalValue } from '../numbers';
 import { registerSourceModule } from '../sourceModules';
-import { newList, newTuple, None, pyError, typeError, typeName } from '../types';
-import type { PyValue } from '../values';
+import { iteratorClass, newTuple, None, pyError, typeError, typeName } from '../types';
+import { DONE, PyIterator, type PyValue } from '../values';
 
 // CPython's `string` module, with natives standing in for the helpers of its `_string` module and a lookup standing in
-// for `collections.ChainMap`, which this interpreter lacks.
+// for `collections.ChainMap`.
 const SOURCE =
   String.raw`
 """A collection of string constants.
@@ -389,15 +390,15 @@ registerSourceModule(
 // Formatter ---------------------------------------------------------------------------------------------------------
 
 /** `_string.formatter_parser`: the (literal, field name, format spec, conversion) tuples of a format string. */
-// code-gauge-allow functionNcss 35 -- Follows MarkupIterator_next of CPython's unicode_format.h.
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows MarkupIterator_next of CPython's unicode_format.h.
+// code-gauge-allow functionCognitiveComplexity 25 -- Follows MarkupIterator_next of CPython's unicode_format.h.
+// code-gauge-allow functionNcss 34 -- Follows MarkupIterator_next of CPython's unicode_format.h.
 function formatterParser(value: PyValue): PyValue {
   if (typeof value !== 'string') throw typeError(`expected str, got ${typeName(value)}`);
   // oxlint-disable-next-line typescript/no-misused-spread -- CPython parses a format string by code points.
   const chars = [...value];
-  const items: PyValue[] = [];
   let position = 0;
-  while (position < chars.length) {
+  return new PyIterator(iteratorClass('formatteriterator'), () => {
+    if (position >= chars.length) return DONE;
     const start = position;
     let char = '';
     let markup = false;
@@ -421,15 +422,11 @@ function formatterParser(value: PyValue): PyValue {
       } else length--;
     }
     const literal = chars.slice(start, start + length).join('');
-    if (!markup) {
-      items.push(newTuple([literal, None, None, None]));
-      continue;
-    }
+    if (!markup) return newTuple([literal, None, None, None]);
     const field = parseField(chars, position);
     position = field.end;
-    items.push(newTuple([literal, field.name, field.spec, field.conversion ?? None]));
-  }
-  return newList(items);
+    return newTuple([literal, field.name, field.spec, field.conversion ?? None]);
+  });
 }
 
 interface ParsedField {
@@ -485,32 +482,41 @@ function parseSpec(chars: string[], start: number, name: string, hasConversion: 
 }
 
 /** `_string.formatter_field_name_split`: the first part of a field name and the attributes and keys after it. */
-// code-gauge-allow functionCognitiveComplexity 25 -- Follows FieldNameIterator of CPython's unicode_format.h.
+// code-gauge-allow functionCognitiveComplexity 22 -- Follows FieldNameIterator of CPython's unicode_format.h.
+// code-gauge-allow functionNcss 31 -- Follows FieldNameIterator of CPython's unicode_format.h.
 function fieldNameSplit(value: PyValue): PyValue {
   if (typeof value !== 'string') throw typeError(`expected str, got ${typeName(value)}`);
-  let end = 0;
-  while (end < value.length && value[end] !== '.' && value[end] !== '[') end++;
-  const first = value.slice(0, end);
-  const rest: PyValue[] = [];
-  let position = end;
-  while (position < value.length) {
+  let position = 0;
+  while (position < value.length && value[position] !== '.' && value[position] !== '[') position++;
+  const first = integerOr(value.slice(0, position));
+  const iterator = new PyIterator(iteratorClass('fieldnameiterator'), () => {
+    if (position >= value.length) return DONE;
     const marker = value[position++];
     if (marker === '.') {
       let stop = position;
       while (stop < value.length && value[stop] !== '.' && value[stop] !== '[') stop++;
       if (stop === position) throw pyError('ValueError', 'Empty attribute in format string');
-      rest.push(newTuple([true, value.slice(position, stop)]));
+      const attribute = value.slice(position, stop);
       position = stop;
-    } else if (marker === '[') {
+      return newTuple([true, attribute]);
+    }
+    if (marker === '[') {
       const stop = value.indexOf(']', position);
       if (stop === -1) throw pyError('ValueError', "Missing ']' in format string");
       const key = value.slice(position, stop);
-      rest.push(newTuple([false, /^\d+$/.test(key) ? BigInt(key) : key]));
+      if (key === '') throw pyError('ValueError', 'Empty attribute in format string');
       position = stop + 1;
-      if (position < value.length && value[position] !== '.' && value[position] !== '[') {
-        throw pyError('ValueError', "Only '.' or '[' may follow ']' in format field specifier");
-      }
+      return newTuple([false, integerOr(key)]);
     }
-  }
-  return newTuple([/^\d+$/.test(first) ? BigInt(first) : first, newList(rest)]);
+    throw pyError('ValueError', "Only '.' or '[' may follow ']' in format field specifier");
+  });
+  return newTuple([first, iterator]);
+}
+
+function integerOr(text: string): PyValue {
+  const digits = decimalValue(text);
+  if (digits === undefined) return text;
+  const value = BigInt(digits);
+  if (value >= 1n << 63n) throw pyError('ValueError', 'Too many decimal digits in format string');
+  return value;
 }

@@ -8,6 +8,7 @@ import {
   defineInterface,
   newString,
   type Registry,
+  requireString,
 } from './builtinSupport';
 import { parseHexFloat } from './hexFloat';
 import { numericValueOf } from './numericValues';
@@ -448,6 +449,46 @@ function defineIntegerMembers(integerClass: ClassInfo, stringType: JavaType): vo
   for (const [name, operation] of Object.entries(INT_BIT_OPERATIONS)) {
     addMethod(integerClass, name, [INT], INT, true, (_, __, [value]) => operation(value as number));
   }
+  addMethod(integerClass, 'rotateLeft', [INT, INT], INT, true, (_, __, [value, distance]) =>
+    rotateLeft(value as number, distance as number)
+  );
+  addMethod(integerClass, 'rotateRight', [INT, INT], INT, true, (_, __, [value, distance]) =>
+    rotateLeft(value as number, -(distance as number))
+  );
+  addMethod(integerClass, 'compareUnsigned', [INT, INT], INT, true, (_, __, [a, b]) =>
+    Math.sign(((a as number) >>> 0) - ((b as number) >>> 0))
+  );
+  addMethod(integerClass, 'toUnsignedLong', [INT], LONG, true, (_, __, [value]) => BigInt((value as number) >>> 0));
+  addMethod(integerClass, 'decode', [stringType], integerClass.type, true, (frame, _, [text]) =>
+    box(frame, integerClass, decodeInt(frame, requireString(frame, text)))
+  );
+}
+
+function rotateLeft(value: number, distance: number): number {
+  const shift = distance & 31;
+  return toInt32((value << shift) | (value >>> (32 - shift)));
+}
+
+/** `Integer.decode`, which reads a sign, then a `0x`, `#`, or `0` radix prefix, then the digits. */
+function decodeInt(frame: Frame, text: string): number {
+  if (text.length === 0) throwBuiltin(frame, 'NumberFormatException', 'Zero length string');
+  const isNegative = text.startsWith('-');
+  let index = isNegative || text.startsWith('+') ? 1 : 0;
+  let radix = 10;
+  if (text.startsWith('0x', index) || text.startsWith('0X', index)) {
+    index += 2;
+    radix = 16;
+  } else if (text.startsWith('#', index)) {
+    index++;
+    radix = 16;
+  } else if (text.startsWith('0', index) && text.length > index + 1) {
+    index++;
+    radix = 8;
+  }
+  if (text.startsWith('-', index) || text.startsWith('+', index)) {
+    throwBuiltin(frame, 'NumberFormatException', 'Sign character in wrong position');
+  }
+  return parseRadix(frame, new JavaString(`${isNegative ? '-' : ''}${text.slice(index)}`), radix);
 }
 
 const INT_BIT_OPERATIONS: Record<string, (value: number) => number> = {
@@ -537,6 +578,9 @@ function codePointToString(code: Value): string {
 function defineCharacterMembers(characterClass: ClassInfo): void {
   addConstant(characterClass, 'MAX_VALUE', CHAR, 0xff_ff);
   addConstant(characterClass, 'MIN_VALUE', CHAR, 0);
+  addMethod(characterClass, 'charCount', [INT], INT, true, (_, __, [codePoint]) =>
+    (codePoint as number) >= 0x1_00_00 ? 2 : 1
+  );
   // Each method takes a char or an int code point, as `str.chars()` gives.
   for (const type of [CHAR, INT]) {
     for (const [name, pattern] of Object.entries(CHARACTER_TESTS)) {

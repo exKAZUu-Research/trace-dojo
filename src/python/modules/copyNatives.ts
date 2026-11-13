@@ -88,7 +88,7 @@ function copyContainer(
   if (copier === global('_deepcopy_list') && x instanceof PyList) {
     const list = newList([]);
     setItem(memo, id, list);
-    for (let index = 0; index < x.items.length; index++) list.items.push(copy(x.items[index]));
+    for (let index = 0; index < x.items.length; index++) list.append(copy(x.items[index]));
     return { value: list, done: false };
   }
   if (copier === global('_deepcopy_tuple') && x instanceof PyTuple) {

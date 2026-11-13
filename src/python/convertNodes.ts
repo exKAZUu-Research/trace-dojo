@@ -7,6 +7,7 @@ export function rowOf(node: Node): number {
   return node.startPosition.row;
 }
 
+/** The named children except extras: comments and backslash line continuations, which may appear anywhere. */
 export function namedChildren(node: Node): Node[] {
   return node.namedChildren.filter((child): child is Node => child !== null && !isExtra(child));
 }
@@ -28,6 +29,28 @@ export function field(node: Node, name: string): Node {
 
 export function fieldNodes(node: Node, name: string): Node[] {
   return node.childrenForFieldName(name).filter((child): child is Node => child !== null);
+}
+
+const CLAUSE_TYPES = new Set(['elif_clause', 'else_clause', 'except_clause', 'finally_clause']);
+
+/**
+ * Rejects a clause of a compound statement that the grammar accepts and CPython does not: one following the previous
+ * body on its line, as in `if x: a(); else: b()`, and one indented deeper than its statement, which the grammar's
+ * error recovery attaches by inserting a dedent that no node shows.
+ */
+export function checkClauseLines(node: Node): void {
+  const all = children(node);
+  for (const [index, clause] of all.entries()) {
+    if (!CLAUSE_TYPES.has(clause.type)) continue;
+    const previous = all[index - 1];
+    const keyword = clause.text.split(/[\s:]/, 1)[0];
+    if (previous.endPosition.row === clause.startPosition.row && previous.endPosition.column > 0) {
+      fail(rowOf(clause), `${keyword} は、行の先頭に書いてください。`);
+    }
+    if (clause.startPosition.column !== node.startPosition.column) {
+      fail(rowOf(clause), `${keyword} は、対応する文と同じ字下げで書いてください。`);
+    }
+  }
 }
 
 export function hasToken(node: Node, token: string): boolean {

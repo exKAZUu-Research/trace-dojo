@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 632 -- The expression converter keeps one method per kind of expression node together.
+// code-gauge-allow-file fileNcss 640 -- The expression converter keeps one method per kind of expression node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { assignmentExpressionError } from './assignmentExpressions';
 import type {
   Argument,
   BinaryOperator,
@@ -16,6 +17,7 @@ import type {
   Parameter,
   Target,
 } from './ast';
+import { BITWISE_PRECEDENCE, groupBitwise } from './bitwisePrecedence';
 import { comprehensionsByScope } from './codeNames';
 import {
   children,
@@ -28,6 +30,8 @@ import {
   rowOf,
   unsupported,
 } from './convertNodes';
+import { hasUnbracketedLambda, isOperatorOperand } from './lambdaPositions';
+import { parseNumber } from './numberLiterals';
 import { fail, ScopeBuilder } from './scopes';
 import { markSuspendingExpression } from './suspension';
 import { unparseAnnotation } from './unparse';
@@ -42,6 +46,8 @@ export interface Context {
   inLoop: boolean;
   /** Whether a `break`, `continue`, or `return` here would leave an `except*` block. */
   inExceptStar: boolean;
+  /** Whether a loop of the except* clause encloses the statement, so that break and continue stay inside the clause. */
+  inLoopOfExceptStar: boolean;
   /** The function being converted, which `super` and `__class__` mark. */
   fn?: FunctionDef;
 }
@@ -56,6 +62,10 @@ interface ParameterOrder {
 }
 
 /** Converts expressions, targets, and parameters, registering the names they use and bind in their scopes. */
+
+/** The string prefixes CPython 3.14 accepts, in lowercase. */
+const STRING_PREFIXES = new Set(['', 'r', 'u', 'b', 'f', 't', 'br', 'rb', 'fr', 'rf', 'tr', 'rt']);
+
 export abstract class ExpressionConverter {
   protected context: Context;
   /** The scope of the type parameters of the function being defined, which its annotations belong to. */
@@ -69,7 +79,13 @@ export abstract class ExpressionConverter {
     protected readonly source: string,
     module: ScopeBuilder
   ) {
-    this.context = { scope: module, qualifiedPrefix: '', inLoop: false, inExceptStar: false };
+    this.context = {
+      scope: module,
+      qualifiedPrefix: '',
+      inLoop: false,
+      inExceptStar: false,
+      inLoopOfExceptStar: false,
+    };
   }
 
   protected abstract functionBody(node: Node, fn: FunctionDef): void;
@@ -141,7 +157,7 @@ export abstract class ExpressionConverter {
         };
       }
       case 'dictionary': {
-        return { kind: 'dict', items: namedChildren(node).map((child) => this.dictItem(child)), row };
+        return this.dictionary(node, row);
       }
       case 'attribute': {
         return this.attribute(node);
@@ -175,7 +191,7 @@ export abstract class ExpressionConverter {
         return { kind: 'conditional', test, body, orelse, row };
       }
       case 'lambda': {
-        return { kind: 'lambda', fn: this.lambda(node), row };
+        return this.lambdaExpression(node, row);
       }
       case 'named_expression': {
         return this.namedExpression(node);
@@ -245,6 +261,7 @@ export abstract class ExpressionConverter {
   private binaryOperator(node: Node): Expression {
     const operator = field(node, 'operator').type;
     if (!BINARY_OPERATORS.has(operator)) fail(rowOf(node), `演算子 ${operator} は Python 3 では使えません。`);
+    if (operator in BITWISE_PRECEDENCE) return this.bitwiseChain(node);
     return {
       kind: 'binary',
       operator: operator as BinaryOperator,
@@ -252,6 +269,27 @@ export abstract class ExpressionConverter {
       right: this.expression(field(node, 'right')),
       row: rowOf(node),
     };
+  }
+
+  /**
+   * Converts a chain of `|`, `^`, and `&` with Python's precedence (`&` binds tighter than `^`), which the grammar has
+   * the other way round for `&` and `^`: the chain is read in source order and grouped again.
+   */
+  private bitwiseChain(node: Node): Expression {
+    const operands: Expression[] = [];
+    const operators: Node[] = [];
+    const collect = (part: Node): void => {
+      const operator = part.type === 'binary_operator' ? field(part, 'operator') : undefined;
+      if (!operator || !(operator.type in BITWISE_PRECEDENCE)) {
+        operands.push(this.expression(part));
+        return;
+      }
+      collect(field(part, 'left'));
+      operators.push(operator);
+      collect(field(part, 'right'));
+    };
+    collect(node);
+    return groupBitwise(operands, operators);
   }
 
   private comparison(node: Node): Expression {
@@ -308,6 +346,11 @@ export abstract class ExpressionConverter {
     const callee = this.expression(field(node, 'function'));
     const argumentsNode = field(node, 'arguments');
     if (argumentsNode.type === 'generator_expression') {
+      // The parser folds a trailing comma into the generator's last clause, which only ( ) around it would allow.
+      const lastClause = namedChildren(argumentsNode).at(-1);
+      if (lastClause && hasToken(lastClause, ',')) {
+        fail(rowOf(argumentsNode), 'ジェネレータ式を引数にするときは、それだけを書くか、( ) で囲んでください。');
+      }
       return {
         kind: 'call',
         callee,
@@ -315,14 +358,16 @@ export abstract class ExpressionConverter {
         row: rowOf(node),
       };
     }
+    if (children(argumentsNode)[1]?.type === ',') fail(rowOf(argumentsNode), '引数の前に「,」は書けません。');
     return { kind: 'call', callee, args: this.argumentList(argumentsNode), row: rowOf(node) };
   }
 
-  // code-gauge-allow functionNcss 33 -- Checks the order rules CPython applies to call arguments.
+  // code-gauge-allow functionNcss 34 -- Checks the order rules CPython applies to call arguments.
   // code-gauge-allow functionCognitiveComplexity 21 -- Checks the order rules CPython applies to call arguments.
   protected argumentList(node: Node): Argument[] {
     const nodes = namedChildren(node);
-    const args: Argument[] = [];
+    const positionals: Argument[] = [];
+    const named: Argument[] = [];
     const keywords = new Set<string>();
     let seenKeyword = false;
     let seenDoubleStar = false;
@@ -336,20 +381,31 @@ export abstract class ExpressionConverter {
         if (keywords.has(name)) fail(row, `キーワード引数 ${name} を2回書いています。`);
         keywords.add(name);
         seenKeyword = true;
-        args.push({ kind: 'keyword', name, value: this.expression(field(argument, 'value')) });
+        named.push({ kind: 'keyword', name, value: this.expression(field(argument, 'value')) });
       } else if (argument.type === 'dictionary_splat') {
         seenDoubleStar = true;
-        args.push({ kind: 'doubleStar', value: this.expression(namedChildren(argument)[0]) });
+        named.push({ kind: 'doubleStar', value: this.expression(namedChildren(argument)[0]) });
       } else if (argument.type === 'list_splat') {
         if (seenDoubleStar) fail(row, '* を付けた引数は、** を付けた引数より前に書いてください。');
-        args.push({ kind: 'star', value: this.expression(namedChildren(argument)[0]) });
+        positionals.push({ kind: 'star', value: this.expression(namedChildren(argument)[0]) });
       } else {
         if (seenDoubleStar) fail(row, '位置引数は、** を付けた引数より前に書いてください。');
         if (seenKeyword) fail(row, '位置引数は、キーワード引数より前に書いてください。');
-        args.push({ kind: 'positional', value: this.expression(argument) });
+        positionals.push({ kind: 'positional', value: this.expression(argument) });
       }
     }
-    return args;
+    // CPython evaluates a * argument written after a keyword argument before that keyword's value.
+    return [...positionals, ...named];
+  }
+
+  private lambdaExpression(node: Node, row: number): Expression {
+    if (isOperatorOperand(node)) fail(row, '演算子の前後に lambda を書くときは、( ) で囲んでください。');
+    return { kind: 'lambda', fn: this.lambda(node), row };
+  }
+
+  private dictionary(node: Node, row: number): Expression {
+    if (children(node)[1]?.type === ',') fail(row, '辞書の { の直後に「,」は書けません。');
+    return { kind: 'dict', items: namedChildren(node).map((child) => this.dictItem(child)), row };
   }
 
   /** `yield value` or `yield from iterable`, which makes the function it is in a generator. */
@@ -393,6 +449,8 @@ export abstract class ExpressionConverter {
   }
 
   private namedExpression(node: Node): Expression {
+    const error = assignmentExpressionError(node);
+    if (error) fail(rowOf(node), error);
     const nameNode = field(node, 'name');
     const value = this.expression(field(node, 'value'));
     const { scope } = this.context;
@@ -426,9 +484,14 @@ export abstract class ExpressionConverter {
 
   // Strings ---------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per string prefix a literal can have.
+  // code-gauge-allow functionCognitiveComplexity 20 -- One case per string prefix a literal can have.
   private stringLiteral(node: Node): Expression {
     const strings = node.type === 'concatenated_string' ? namedChildren(node) : [node];
+    for (const string of strings) {
+      if (children(string)[0].text.endsWith('`')) {
+        fail(rowOf(string), 'バッククォート（`...`）は Python 3 では使えません。repr(...) を使ってください。');
+      }
+    }
     const prefixes = strings.map((string) =>
       children(string)[0]
         .text.replace(/['"]+$/, '')
@@ -440,9 +503,11 @@ export abstract class ExpressionConverter {
     const isTemplate = prefixes.some((prefix) => prefix.includes('t'));
     for (const [index, string] of strings.entries()) {
       const prefix = prefixes[index];
-      if (prefix.includes('u') && prefix !== 'u')
+      if (prefix.includes('u') && prefix !== 'u') {
         fail(rowOf(string), '接頭辞 u は、ほかの接頭辞と組み合わせられません。');
+      }
       if (prefix.includes('t') && prefix.includes('f')) fail(rowOf(string), '接頭辞 t と f は、組み合わせられません。');
+      if (!STRING_PREFIXES.has(prefix)) fail(rowOf(string), `文字列の接頭辞「${prefix}」は使えません。`);
       if (prefix.includes('t') !== isTemplate) {
         fail(rowOf(string), "テンプレート文字列（t'...'）は、ほかの文字列のリテラルと続けて書けません。");
       }
@@ -466,6 +531,10 @@ export abstract class ExpressionConverter {
     if (mixed) fail(rowOf(mixed), 'bytes のリテラルと str のリテラルは、続けて書けません。');
     const incompatible = strings.find((_, index) => /[fut]/.test(prefixes[index]));
     if (incompatible) fail(rowOf(incompatible), 'bytes のリテラルには、接頭辞 b と f・u・t を一緒に付けられません。');
+    for (const [index, string] of strings.entries()) {
+      const prefix = prefixes[index];
+      if (!STRING_PREFIXES.has(prefix)) fail(rowOf(string), `文字列の接頭辞「${prefix}」は使えません。`);
+    }
     const parts: Uint8Array[] = [];
     for (const [index, string] of strings.entries()) {
       const nodes = children(string);
@@ -509,6 +578,7 @@ export abstract class ExpressionConverter {
   private interpolation(node: Node): FormattedValue {
     const expressionNode = field(node, 'expression');
     const row = rowOf(node);
+    if (hasUnbracketedLambda(expressionNode)) fail(row, 'f-string の { } の中の lambda は、( ) で囲んでください。');
     const expression =
       expressionNode.type === 'expression_list' || expressionNode.type === 'pattern_list'
         ? { kind: 'tuple' as const, elements: namedChildren(expressionNode).map((child) => this.element(child)), row }
@@ -567,12 +637,13 @@ export abstract class ExpressionConverter {
             : 'generator';
     const clauses = namedChildren(node).filter((child) => child.type === 'for_in_clause' || child.type === 'if_clause');
     const outer = this.context;
-    const scope = new ScopeBuilder('comprehension', outer.scope);
+    const scope = new ScopeBuilder('comprehension', outer.scope, { isInlined: type !== 'generator' });
     scope.isGeneratorExpression = type === 'generator';
+    const { qualifiedName, inner } = comprehensionContext(type, outer, scope);
     const generators: Comprehension[] = [];
     for (const [index, clause] of clauses.entries()) {
       if (clause.type === 'if_clause') {
-        this.context = { ...outer, scope };
+        this.context = inner;
         (generators.at(-1) as Comprehension).conditions.push(this.expression(namedChildren(clause)[0]));
         continue;
       }
@@ -582,12 +653,14 @@ export abstract class ExpressionConverter {
         this.enterAsync(rowOf(clause), 'async for を使う内包表記は、async def の関数の中にしか書けません。');
       }
       const rights = fieldNodes(clause, 'right');
-      if (rights.length > 1) fail(rowOf(clause), '内包表記の in の後に複数の式を書くときは、( ) で囲んでください。');
+      if (rights.length > 1 || hasToken(clause, ',')) {
+        fail(rowOf(clause), '内包表記の in の後に複数の式を書くときは、( ) で囲んでください。');
+      }
       // The first iterable is evaluated in the enclosing scope, before the comprehension starts.
-      this.context = index === 0 ? outer : { ...outer, scope };
+      this.context = index === 0 ? outer : inner;
       const iterable = this.expression(rights[0]);
       if (iterable.kind === 'namedExpression') fail(rowOf(clause), '内包表記の繰り返す対象には、代入式を使えません。');
-      this.context = { ...outer, scope };
+      this.context = inner;
       const target = this.target(field(clause, 'left'), (nameNode) => {
         const ref = this.bindName(nameNode);
         scope.iterationVariables.add(ref.name);
@@ -595,7 +668,7 @@ export abstract class ExpressionConverter {
       });
       generators.push(isAsync ? { target, iterable, conditions: [], isAsync } : { target, iterable, conditions: [] });
     }
-    this.context = { ...outer, scope };
+    this.context = inner;
     try {
       const body = field(node, 'body');
       if (body.type === 'list_splat' || body.type === 'dictionary_splat') {
@@ -610,6 +683,7 @@ export abstract class ExpressionConverter {
         value,
         generators,
         scope: scope.info,
+        qualifiedName,
         row: rowOf(node),
       });
     } finally {
@@ -670,6 +744,7 @@ export abstract class ExpressionConverter {
       qualifiedPrefix: `${fn.qualifiedName}.<locals>.`,
       inLoop: false,
       inExceptStar: false,
+      inLoopOfExceptStar: false,
       fn,
     };
     try {
@@ -711,9 +786,8 @@ export abstract class ExpressionConverter {
       checkParameterOrder(parameter, params, order, row);
       params.push(parameter);
     }
-    const last = params.at(-1);
-    const endsAfterStar = last && ['keywordOnly', 'varArgs', 'varKeywords'].includes(last.kind);
-    if (order.sawStar && !endsAfterStar && !params.some((param) => param.kind === 'varArgs')) {
+    const hasNamedAfterStar = params.some((param) => param.kind === 'keywordOnly' || param.kind === 'varArgs');
+    if (order.sawStar && !hasNamedAfterStar) {
       fail(rowOf(node), '* の後には、名前で渡す引数が必要です。');
     }
     return params;
@@ -781,6 +855,10 @@ export abstract class ExpressionConverter {
       case 'type': {
         return this.typeExpression(namedChildren(node)[0]);
       }
+      case 'list': {
+        // A bracketed list of types, as Callable[[int], int] takes its parameters, which may also unpack iterables.
+        return { kind: 'list', elements: namedChildren(node).map((element) => this.typeListElement(element)), row };
+      }
       case 'splat_type': {
         // `*args: *Ts` annotates with the one item that unpacking `Ts` gives, `typing.Unpack[Ts]`.
         const value = this.typeExpression(namedChildren(node)[0]);
@@ -796,6 +874,14 @@ export abstract class ExpressionConverter {
         return this.expression(node);
       }
     }
+  }
+
+  /** An element of a bracketed list in a type position: a type, or a `*` that unpacks one. */
+  private typeListElement(node: Node): Element {
+    if (node.type === 'list_splat') {
+      return { kind: 'starred', value: this.typeExpression(namedChildren(node)[0]), row: rowOf(node) };
+    }
+    return node.type === 'type' ? this.typeExpression(namedChildren(node)[0]) : this.element(node);
   }
 
   /** An index of a subscript the grammar reads as a generic type, such as `x[a:b]` or `x[*a]`. */
@@ -941,26 +1027,19 @@ export function constantOf(node: Node): Constant {
   }
 }
 
-/** Parses a number literal, rejecting the forms CPython's tokenizer rejects. */
-function parseNumber(node: Node): Constant {
-  const text = node.text;
-  const row = rowOf(node);
-  const digits = text.replaceAll('_', '').toLowerCase();
-  if (INTEGER_LITERAL.test(text)) return { kind: 'int', value: BigInt(digits) };
-  if (FLOAT_LITERAL.test(text)) return { kind: 'float', value: Number(digits) };
-  if (IMAGINARY_LITERAL.test(text)) return { kind: 'imaginary', value: Number(digits.slice(0, -1)) };
-  if (/^0+_?\d/.test(text) && /^[\d_]+$/.test(text)) {
-    fail(row, '0 で始まる整数は書けません（8進数は 0o を付けて書きます）。');
-  }
-  return fail(row, `数値「${text}」の書き方に誤りがあります。`);
+/**
+ * The context a comprehension's parts are converted in. A generator expression is a function of its own, whose name
+ * prefixes what it defines, without `<locals>` as CPython names it (`<genexpr>.<lambda>`); the others run inline.
+ */
+function comprehensionContext(
+  type: 'list' | 'set' | 'dict' | 'generator',
+  outer: Context,
+  scope: ScopeBuilder
+): { qualifiedName: string | undefined; inner: Context } {
+  if (type !== 'generator') return { qualifiedName: undefined, inner: { ...outer, scope } };
+  const qualifiedName = `${outer.qualifiedPrefix}<genexpr>`;
+  return { qualifiedName, inner: { ...outer, scope, qualifiedPrefix: `${qualifiedName}.` } };
 }
-
-const DIGIT_PART = String.raw`\d(?:_?\d)*`;
-const POINT_FLOAT = String.raw`(?:(?:${DIGIT_PART})?\.${DIGIT_PART}|${DIGIT_PART}\.)`;
-const FLOAT_NUMBER = String.raw`(?:${POINT_FLOAT}(?:[eE][+-]?${DIGIT_PART})?|${DIGIT_PART}[eE][+-]?${DIGIT_PART})`;
-const INTEGER_LITERAL = /^(?:[1-9](?:_?\d)*|0+(?:_?0)*|0[bB](?:_?[01])+|0[oO](?:_?[0-7])+|0[xX](?:_?[\dA-Fa-f])+)$/;
-const FLOAT_LITERAL = new RegExp(`^${FLOAT_NUMBER}$`);
-const IMAGINARY_LITERAL = new RegExp(`^(?:${FLOAT_NUMBER}|${DIGIT_PART})[jJ]$`);
 
 /** Notes the comprehension of its scope, whose code a generator expression's `gi_code` describes. */
 function registered(comprehension: Extract<Expression, { kind: 'comprehension' }>): Expression {

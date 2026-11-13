@@ -1,11 +1,25 @@
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
-import { floatToInt } from './numbers';
-import { callValue, getAttribute, getItem, lookupSpecial } from './objects';
-import { intEnumValue } from './operators';
+import { truncateStr } from './formatSpec';
+import { toIndex } from './numbers';
+import { callValue, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
-import { iterStr } from './strings';
-import { pyError, typeError, typeName, unbox, valueError } from './types';
-import { PyInstance, PyObject, PyTuple, type PyValue } from './values';
+import { repeatText } from './stringBuilder';
+import { iterStr, strLength } from './strings';
+import {
+  exceptionClassNamed,
+  floatClass,
+  intClass,
+  None,
+  pyError,
+  typeError,
+  typeName,
+  unbox,
+  valueError,
+} from './types';
+import { PyComplex, PyError, PyInstance, PyTuple, type PyValue } from './values';
+
+const MAX_SSIZE = (1n << 63n) - 1n;
+const MAX_INT = (1n << 31n) - 1n;
 
 /** The `%` operator on a string. */
 export function formatPercent(template: string, argument: PyValue): string {
@@ -18,15 +32,17 @@ export function formatPercent(template: string, argument: PyValue): string {
 
 /** Formats a template with its reader, raising CPython's error for arguments the template leaves unused. */
 export function renderPercent(reader: TemplateReader, kind: 'string' | 'bytes'): string {
+  const runtime = currentRuntime();
   let result = '';
   while (!reader.done) {
     const char = reader.read();
     result += char === '%' ? reader.convert() : char;
+    runtime.ensureStringFits(result.length);
   }
   if (reader.hasUnusedArguments && reader.mapping === undefined) {
     throw typeError(`not all arguments converted during ${kind} formatting`);
   }
-  currentRuntime().buildString(result.length);
+  runtime.buildString(result.length);
   return result;
 }
 
@@ -62,23 +78,33 @@ export class TemplateReader {
   /** Converts the specifier following a `%`, following the grammar of printf-style conversion specifiers. */
   convert(): string {
     if (this.done) throw valueError('incomplete format');
+    // Only `%%` escapes a percent sign; after a key, flag, width, precision, or length, `%` is a conversion.
+    if (this.peek() === '%') {
+      this.index++;
+      return '%';
+    }
     let value = this.peek() === '(' ? this.mappingValue() : undefined;
     let flags = '';
     while ('-+ #0'.includes(this.peek() ?? 'x')) flags += this.read();
-    const width = this.readCount();
+    let width = this.readCount('width', MAX_SSIZE, 'ssize_t');
+    // A negative `*` width left-aligns by its magnitude, and a negative `*` precision means zero.
+    if (width < 0n) {
+      flags += '-';
+      width = -width;
+    }
     let precision: number | undefined;
     if (this.peek() === '.') {
       this.index++;
-      const digits = this.readCount();
-      precision = digits ? Number(digits) : 0;
+      const count = this.readCount('precision', MAX_INT, 'int');
+      precision = count < 0n ? 0 : Number(count);
     }
-    while ('hlL'.includes(this.peek() ?? 'x')) this.index++;
+    // CPython skips one length modifier; a second is read as the conversion character.
+    if ('hlL'.includes(this.peek() ?? 'x')) this.index++;
     const type = this.peek();
     this.index++;
     if (type === undefined) throw valueError('incomplete format');
-    if (type === '%') return '%';
     value ??= this.take();
-    return this.convertSpecifier(type, value, flags, width, precision, this.index - 1);
+    return this.convertSpecifier(type, value, flags, width === 0n ? '' : String(width), precision, this.index - 1);
   }
 
   /** Converts the value of one specifier, as bytes formatting does differently for some types. */
@@ -123,15 +149,20 @@ export class TemplateReader {
     return getItem(this.mapping, this.mappingKey(key));
   }
 
-  /** Reads a width or a precision: digits, or `*` taking it from the arguments. */
-  private readCount(): string {
+  /** Reads a width or a precision: digits, or `*` taking it from the arguments as the C type CPython stores it in. */
+  private readCount(name: string, max: bigint, cType: string): bigint {
     if (this.peek() === '*') {
       this.index++;
-      return String(intArgument(this.take(), '* wants int'));
+      const count = intArgument(this.take(), '* wants int');
+      if (count > max || count < -max - 1n)
+        throw pyError('OverflowError', `Python int too large to convert to C ${cType}`);
+      return count;
     }
     let digits = '';
     while (/\d/.test(this.peek() ?? '')) digits += this.read();
-    return digits;
+    const count = BigInt(digits || '0');
+    if (count > max) throw valueError(`${name} too big`);
+    return count;
   }
 }
 
@@ -182,64 +213,81 @@ function convertOne(
 
 function textOf(type: string, value: PyValue, precision: number | undefined): string {
   const text = type === 's' ? pyStr(value) : type === 'r' ? pyRepr(value) : pyAscii(value);
-  return precision === undefined ? text : iterStr(text).slice(0, precision).join('');
+  return precision === undefined ? text : truncateStr(text, precision);
 }
 
 function charOf(argument: PyValue): string {
-  const unboxed = intEnumValue(unbox(argument));
-  const value = intOf(unboxed, '__index__') ?? unboxed;
-  if (typeof value === 'string') {
-    const length = iterStr(value).length;
+  const unboxed = unbox(argument);
+  if (typeof unboxed === 'string') {
+    currentRuntime().scan(unboxed.length);
+    const length = strLength(unboxed);
     if (length !== 1) throw typeError(`%c requires an int or a unicode character, not a string of length ${length}`);
-    return value;
+    return unboxed;
   }
-  if (typeof value === 'bigint' || typeof value === 'boolean') {
-    const code = BigInt(value);
+  if (
+    typeof unboxed === 'bigint' ||
+    typeof unboxed === 'boolean' ||
+    lookupSpecial(argument, '__index__') !== undefined
+  ) {
+    const code = toIndex(argument);
+    if (code > MAX_SSIZE || code < -MAX_SSIZE - 1n) {
+      throw pyError('OverflowError', 'Python int too large to convert to C long');
+    }
     if (code < 0n || code > 0x10_ff_ffn) throw pyError('OverflowError', '%c arg not in range(0x110000)');
     return String.fromCodePoint(Number(code));
   }
-  throw typeError(`%c requires an int or a unicode character, not ${typeName(value)}`);
+  throw typeError(`%c requires an int or a unicode character, not ${typeName(argument)}`);
 }
 
+/** Lays an integer out as CPython's `_PyUnicode_FormatLong` and `unicode_format_arg_output` do. */
 function formatInteger(type: string, integer: bigint, conversion: Conversion): string {
-  const { align, zero, sign, alternate, width, precision } = conversion;
+  const { sign, alternate, precision = 0 } = conversion;
   const formatType = 'diu'.includes(type) ? 'd' : type;
-  if (precision === undefined) {
-    return pyFormat(integer, `${zero ? '0=' : align}${sign}${alternate}${width}${formatType}`);
+  const magnitude = pyFormat(integer < 0n ? -integer : integer, formatType);
+  currentRuntime().buildString(precision);
+  const prefix = alternate && formatType !== 'd' ? `0${formatType}` : '';
+  return padNumber(`${integer < 0n ? '-' : sign}${prefix}`, magnitude.padStart(precision, '0'), conversion);
+}
+
+/** Pads a number to the width: with zeros between its sign and prefix and its digits, or with spaces outside. */
+function padNumber(signAndPrefix: string, digits: string, { align, zero, width }: Conversion): string {
+  const padding = Math.max(0, Number(width) - signAndPrefix.length - digits.length);
+  if (align === '<') return signAndPrefix + digits + repeatText(' ', padding);
+  return zero ? signAndPrefix + repeatText('0', padding) + digits : repeatText(' ', padding) + signAndPrefix + digits;
+}
+
+/** The integer a `%d`-like conversion formats, as mainformatlong of CPython's unicodeobject.c converts it. */
+function toInteger(type: string, value: PyValue): bigint {
+  const unboxed = unbox(value);
+  if (typeof unboxed === 'bigint') return unboxed;
+  if (typeof unboxed === 'boolean') return unboxed ? 1n : 0n;
+  const isDecimal = 'diu'.includes(type);
+  const wrongType = (): Error =>
+    typeError(`%${type} format: ${isDecimal ? 'a real number' : 'an integer'} is required, not ${typeName(value)}`);
+  if (!isNumber(value)) throw wrongType();
+  try {
+    return isDecimal ? (unbox(callValue(intClass, [value])) as bigint) : toIndex(value);
+  } catch (error) {
+    if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('TypeError')))
+      throw wrongType();
+    throw error;
   }
-  const digits = (integer < 0n ? -integer : integer).toString(formatType === 'd' ? 10 : formatType === 'o' ? 8 : 16);
-  const padded = digits.padStart(precision, '0');
-  const shown = type === 'X' ? padded.toUpperCase() : padded;
-  const prefix = alternate ? `0${formatType === 'X' ? 'X' : formatType}` : '';
-  const body = `${integer < 0n ? '-' : sign}${prefix}${shown}`;
-  return pyFormat(body, `${zero ? '0' : ''}${align}${width}`);
 }
 
-function toInteger(type: string, argument: PyValue): bigint {
-  const value = intEnumValue(unbox(argument));
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'boolean') return value ? 1n : 0n;
-  const decimal = 'diu'.includes(type);
-  if (typeof value === 'number' && decimal) return floatToInt(value);
-  // CPython's %d takes int(value), through __int__ or __index__, and %x and %o take only __index__.
-  const integer = decimal ? (intOf(value, '__int__') ?? intOf(value, '__index__')) : intOf(value, '__index__');
-  if (integer !== undefined) return integer;
-  throw typeError(`%${type} format: ${decimal ? 'a real number' : 'an integer'} is required, not ${typeName(value)}`);
+/** The float a `%f`-like conversion formats, as PyFloat_AsDouble converts it. */
+function toFloat(value: PyValue): number {
+  const unboxed = unbox(value);
+  if (typeof unboxed === 'string' || !isNumber(value) || unboxed instanceof PyComplex) {
+    throw typeError(`must be real number, not ${typeName(value)}`);
+  }
+  return unbox(callValue(floatClass, [value])) as number;
 }
 
-/** The int a special method such as `__index__` gives, or undefined when it is missing or gives no int. */
-function intOf(value: PyValue, name: '__int__' | '__index__'): bigint | undefined {
-  if (!(value instanceof PyObject) || lookupSpecial(value, name) === undefined) return undefined;
-  const result = callValue(getAttribute(value, name), []);
-  if (typeof result === 'bigint') return result;
-  if (typeof result === 'boolean') return result ? 1n : 0n;
-  return undefined;
-}
-
-function toFloat(argument: PyValue): number {
-  const value = unbox(argument);
-  if (typeof value === 'number') return value;
-  if (typeof value === 'bigint') return Number(value);
-  if (typeof value === 'boolean') return value ? 1 : 0;
-  throw typeError(`must be real number, not ${typeName(value)}`);
+/** CPython's PyNumber_Check: a value with an int, index, or float conversion, or a complex number. */
+function isNumber(value: PyValue): boolean {
+  const unboxed = unbox(value);
+  if (typeof unboxed === 'number' || typeof unboxed === 'bigint' || typeof unboxed === 'boolean') return true;
+  if (typeof unboxed === 'string' || value === None) return false;
+  if (unboxed instanceof PyComplex) return true;
+  return ['__index__', '__int__', '__float__'].some((name) => lookupSpecial(value, name) !== undefined);
 }

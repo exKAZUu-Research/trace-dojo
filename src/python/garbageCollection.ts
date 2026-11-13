@@ -1,7 +1,12 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
+import { peekFunctionAnnotationState } from './annotations';
+import { pushAll } from './arrays';
 import { PyMemoryView } from './bytesValues';
+import { peekFieldsOf } from './cTypes';
+import { DictStore } from './dictStore';
 import {
   PyBoundMethod,
+  PyBuiltinFunction,
   PyCell,
   PyClass,
   PyDeque,
@@ -185,6 +190,7 @@ function pushChildren(pending: unknown[], item: PyObject | PyCell, turtles: Set<
   else pushReferences(pending, item, turtles);
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Traverses object references while optionally short-circuiting on target hits.
 function walk(
   roots: unknown[],
   reached: Set<TurtleState>,
@@ -196,10 +202,14 @@ function walk(
   let missing = targets?.size ?? -1;
   while (pending.length > 0) {
     const item = pending.pop();
-    if (!(item instanceof PyObject || item instanceof PyCell) || visited.has(item)) continue;
+    if (typeof item !== 'object' || item === null || visited.has(item)) continue;
     visited.add(item);
     scanned++;
     if (targets?.has(item) && --missing === 0) break;
+    if (!(item instanceof PyObject || item instanceof PyCell)) {
+      pushNativeData(pending, item);
+      continue;
+    }
     if (item instanceof PyCell) {
       pending.push(item.value);
       continue;
@@ -207,14 +217,16 @@ function walk(
     // The attributes and slots any object may have besides what its kind holds.
     if (item.instanceDict) pushAll(pending, item.instanceDict.values());
     if (item.slotValues) pushAll(pending, item.slotValues.values());
+    const extraFields = peekFieldsOf(item);
+    if (extraFields) pushAll(pending, extraFields);
     scanned += pushReferences(pending, item, reached);
   }
   return { visited, scanned };
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionNcss 49 -- One case per kind of object that refers to others.
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss 58 -- One case per kind of object that refers to others.
+// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);
@@ -235,8 +247,12 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
   if (object instanceof PyInstance) return pushInstanceReferences(pending, object, reached);
   // A weak reference keeps its callback alive, but not its referent.
   if (object instanceof PyOpaque) {
-    const callback = (object.data as { callback?: unknown } | undefined)?.callback;
-    if (callback !== undefined) pending.push(callback);
+    if (object.cls.mro.some((cls) => cls.name === 'ReferenceType' && cls.module === 'weakref')) {
+      const callback = (object.data as { callback?: unknown } | undefined)?.callback;
+      if (callback !== undefined) pending.push(callback);
+    } else {
+      pending.push(object.data);
+    }
     return 0;
   }
   if (object instanceof PyFunction) {
@@ -244,10 +260,13 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
     pushAll(pending, object.defaults);
     pushAll(pending, object.keywordDefaults.values());
     pushAll(pending, object.dict.values());
+    const annotationState = peekFunctionAnnotationState(object);
+    if (annotationState) pending.push(annotationState.annotations, annotationState.annotate);
     return object.defaults.length;
   }
   if (object instanceof PyClass || object instanceof PyModule) return pushNamespaceReferences(pending, object);
   if (object instanceof PyBoundMethod) pending.push(object.self, object.fn);
+  else if (object instanceof PyBuiltinFunction) pending.push(object.self);
   else if (object instanceof PySuper) pending.push(object.self, object.thisClass);
   else if (object instanceof PyDescriptor) pending.push(object.fn, object.setter, object.deleter);
   else if (object instanceof PyDictView) pending.push(object.dict);
@@ -262,7 +281,7 @@ function pushInstanceReferences(pending: unknown[], instance: PyInstance, reache
   pending.push(instance.cls, instance.enumValue);
   const state = instance.exception;
   if (state) {
-    pending.push(state.args, state.notes, state.cause, state.context, state.exceptions, state.traceback);
+    pending.push(state.args, state.cause, state.context, state.exceptions, state.traceback);
     for (const frame of state.tracebackFrames ?? []) {
       pushAll(pending, frame.locals.values());
       for (const cell of frame.cells.values()) pending.push(cell);
@@ -274,11 +293,17 @@ function pushInstanceReferences(pending: unknown[], instance: PyInstance, reache
 function pushNamespaceReferences(pending: unknown[], object: PyClass | PyModule): number {
   if (object instanceof PyClass && object.isBuiltin) return 0;
   pushAll(pending, object.dict.values());
-  if (object instanceof PyClass) pushAll(pending, object.enumMembers ?? []);
+  if (object instanceof PyClass) {
+    pushAll(pending, object.enumMembers ?? []);
+    pushAll(pending, object.bases);
+  }
   return object.dict.size;
 }
 
-/** Pushes values one by one: spreading a large array into push() exceeds the engine's argument limit. */
-function pushAll(pending: unknown[], values: Iterable<unknown>): void {
-  for (const value of values) pending.push(value);
+/** Pushes what the native state of a builtin object holds: the items of its arrays, maps, sets, and records. */
+function pushNativeData(pending: unknown[], data: object): void {
+  if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
+  else if (data instanceof Map) for (const [key, value] of data) pending.push(key, value);
+  else if (data instanceof DictStore) for (const entry of data.ordered()) pending.push(entry.key, entry.value);
+  else if (Object.getPrototypeOf(data) === Object.prototype) pushAll(pending, Object.values(data));
 }

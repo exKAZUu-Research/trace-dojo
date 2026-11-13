@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 910 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 930 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   ClassDef,
@@ -13,11 +13,12 @@ import type {
   TypeParam,
 } from './ast';
 import { AsyncEvaluator } from './asyncEvaluator';
+import { mappingEntries } from './callArguments';
 import { buildClass, createClass } from './classes';
 import { pyRepr } from './conversions';
 import { asyncYield } from './coroutines';
 import { exceptionGroupOf, splitGroup } from './exceptionGroups';
-import { addArgument, type CallArguments, mappingEntries } from './expressionEvaluator';
+import { addArgument, type CallArguments } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { isMapping, isSequenceForMatch } from './matching';
 import { isRegisteredModule } from './modules';
@@ -31,14 +32,15 @@ import {
   getItem,
   importedModule,
   isTruthy,
-  iterate,
+  iterateHeld,
+  lengthOf,
   lookupSpecial,
   setAttribute,
   setItem,
+  toArray,
 } from './objects';
-import { equals, inplaceOp, isSame } from './operators';
+import { compareOp, equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
-// code-gauge-allow-file fileNcss 910 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import type { Suspension } from './suspendingEvaluator';
 import { targetSuspends } from './suspension';
 import { iterateSuspending, type SuspendingNext } from './threadIteration';
@@ -149,7 +151,7 @@ export class Evaluator extends AsyncEvaluator {
         return undefined;
       }
       case 'assign': {
-        this.assignStatement(statement, frame);
+        this.assignValue(statement.stepRow, statement.targets, statement.value, frame);
         return undefined;
       }
       case 'augmentedAssign': {
@@ -192,8 +194,7 @@ export class Evaluator extends AsyncEvaluator {
         throw assertionError(statement.message ? [this.evaluate(statement.message, frame)] : []);
       }
       case 'functionDef': {
-        const decorators = statement.fn.decorators.map((decorator) => this.evaluate(decorator, frame));
-        this.storeName(statement.binding, this.defineFunction(statement.fn, frame, decorators), frame);
+        this.storeName(statement.binding, this.defineFunction(statement.fn, frame), frame);
         return undefined;
       }
       case 'classDef': {
@@ -239,15 +240,20 @@ export class Evaluator extends AsyncEvaluator {
     if (runtime.finalizer.pending.size > 0) this.release(result);
   }
 
-  private assignStatement(statement: Extract<Statement, { kind: 'assign' }>, frame: Frame): void {
+  private annotatedAssign(statement: Extract<Statement, { kind: 'annotatedAssign' }>, frame: Frame): void {
+    this.annotate(statement, frame);
+    if (statement.value) this.assignValue(statement.stepRow, [statement.target], statement.value, frame);
+  }
+
+  /** Assigns a value to the targets as one step, which is left out when the value only created objects. */
+  private assignValue(stepRow: number | undefined, targets: Target[], expression: Expression, frame: Frame): void {
     let created = false;
     this.runtime.steps.runStatement(
-      statement.stepRow,
-      () => created && statement.targets.every(storesReference),
+      stepRow,
+      () => created && targets.every(storesReference),
       () => {
-        const [value, isCreation] = this.evaluateCreation(statement.value, frame);
+        const [value, isCreation] = this.evaluateCreation(expression, frame);
         created = isCreation;
-        const { targets } = statement;
         // Garbage collection only looks for objects among the values held.
         if (typeof value !== 'object') {
           for (const target of targets) this.assign(target, value, frame);
@@ -257,15 +263,6 @@ export class Evaluator extends AsyncEvaluator {
           for (const target of targets) this.assign(target, value, frame);
         });
       }
-    );
-  }
-
-  private annotatedAssign(statement: Extract<Statement, { kind: 'annotatedAssign' }>, frame: Frame): void {
-    this.annotate(statement, frame);
-    const valueExpression = statement.value;
-    if (!valueExpression) return;
-    this.runtime.steps.runStatement(statement.stepRow, false, () =>
-      this.assign(statement.target, this.evaluate(valueExpression, frame), frame)
     );
   }
 
@@ -286,7 +283,6 @@ export class Evaluator extends AsyncEvaluator {
       }
     }
   }
-
   private importFrom(statement: Extract<Statement, { kind: 'importFrom' }>, frame: Frame): void {
     const module = this.runtime.importModule(statement.module);
     for (const { name, binding } of statement.names) {
@@ -300,7 +296,13 @@ export class Evaluator extends AsyncEvaluator {
         (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, name) : undefined) ??
         (isRegisteredModule(submodule) ? this.runtime.importModule(submodule) : undefined);
       if (value === undefined) {
-        throw pyError('ImportError', `cannot import name '${name}' from '${statement.module}' (unknown location)`);
+        const error = pyError(
+          'ImportError',
+          `cannot import name '${name}' from '${statement.module}' (unknown location)`
+        );
+        const state = error.exception.exception;
+        if (state) state.fields = new Map([...(state.fields ?? []), ['name', statement.module], ['name_from', name]]);
+        throw error;
       }
       this.storeName(binding, value, frame);
     }
@@ -328,7 +330,6 @@ export class Evaluator extends AsyncEvaluator {
             items.push(item);
             frame.temporaries.push(item);
           }
-          this.runtime.allocate(items.length + 1);
           for (const item of items) this.runtime.finalizer.locals.escape(item);
           return [expression.kind === 'list' ? newList(items) : newTuple(items), created];
         } finally {
@@ -428,6 +429,7 @@ export class Evaluator extends AsyncEvaluator {
           const completion = yield* this.block(statement.body, frame);
           if (completion === 'break') return undefined;
           if (completion && completion !== 'continue') return completion;
+          runtime.currentRow = statement.row;
         }
         return yield* this.block(statement.orelse, frame);
       }
@@ -486,24 +488,29 @@ export class Evaluator extends AsyncEvaluator {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Follows the protocol of the for loop, closing a generator it leaves.
-  // code-gauge-allow functionNcss 35 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Follows the protocol of the for loop, closing a generator it leaves.
+  // code-gauge-allow functionNcss 42 -- Follows the protocol of the for loop, closing a generator it leaves.
   private *forStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
     const { target } = statement;
     // The loop holds its iterable among the frame's values, and its iterator only reads it.
     const iterable = statement.iterable.suspends
       ? yield* this.evaluateSuspending(statement.iterable, frame)
-      : this.evaluateValue(statement.iterable, frame);
+      : this.evaluateIterable(statement.iterable, frame);
     const suspendingTarget = targetSuspends(target);
     const length = frame.temporaries.length;
     frame.temporaries.push(iterable);
     // What leaves the loop along with control, which stays alive when the loop's generator closes.
     let leaving: unknown;
+    let held: PyValue | undefined;
     try {
       // A thread reads its loop's iterable where it can suspend, so that waiting in a generator it reads suspends it.
       const suspendingNext = runtime.threads ? iterateSuspending(iterable) : undefined;
-      const next = suspendingNext ? undefined : iterate(iterable);
+      let next: (() => PyValue | typeof DONE) | undefined;
+      if (!suspendingNext) {
+        ({ next, held } = iterateHeld(iterable));
+        frame.temporaries.push(held);
+      }
       const read = function* (): Suspension<PyValue | typeof DONE> {
         return next ? next() : yield* (suspendingNext as SuspendingNext)();
       };
@@ -526,7 +533,7 @@ export class Evaluator extends AsyncEvaluator {
       throw error;
     } finally {
       frame.temporaries.length = length;
-      runtime.finalizer.release([iterable], [leaving]);
+      runtime.finalizer.release([iterable, held], [leaving]);
     }
     return yield* this.block(statement.orelse, frame);
   }
@@ -534,13 +541,31 @@ export class Evaluator extends AsyncEvaluator {
   // Definitions ---------------------------------------------------------------------------------------------------------
 
   /** Creates a function, inside the scope of its type parameters when it has them. */
-  private defineFunction(fn: FunctionDef, frame: Frame, decorators: PyValue[], defaults?: PyValue[]): PyValue {
-    if (!fn.typeParams) return this.createFunction(fn, frame, decorators, defaults);
-    const defaultValues =
-      defaults ?? fn.params.flatMap((param) => (param.default ? [this.evaluate(param.default, frame)] : []));
-    const scopeFrame = this.typeParamFrame(fn.typeParams.scope, frame);
-    const params = this.createTypeParams(fn.typeParams.params, scopeFrame);
-    return this.createFunction(fn, scopeFrame, decorators, defaultValues, params);
+  private defineFunction(fn: FunctionDef, frame: Frame, decorators?: PyValue[], defaults?: PyValue[]): PyValue {
+    const length = frame.temporaries.length;
+    try {
+      const resolvedDecorators =
+        decorators ??
+        fn.decorators.map((decorator) => {
+          const value = this.evaluate(decorator, frame);
+          frame.temporaries.push(value);
+          return value;
+        });
+      if (!fn.typeParams) return this.createFunction(fn, frame, resolvedDecorators, defaults);
+      const defaultValues =
+        defaults ??
+        fn.params.flatMap((param) => {
+          if (!param.default) return [];
+          const value = this.evaluate(param.default, frame);
+          frame.temporaries.push(value);
+          return [value];
+        });
+      const scopeFrame = this.typeParamFrame(fn.typeParams.scope, frame);
+      const params = this.createTypeParams(fn.typeParams.params, scopeFrame);
+      return this.createFunction(fn, scopeFrame, resolvedDecorators, defaultValues, params);
+    } finally {
+      frame.temporaries.length = length;
+    }
   }
 
   /** Creates a class, inside the scope of its type parameters when it has them, which adds `Generic[...]` to its bases. */
@@ -788,7 +813,7 @@ export class Evaluator extends AsyncEvaluator {
       ({ completion, pending } = yield* this.guarded(statement.orelse, frame));
     }
     if (statement.finalbody.length > 0) {
-      const finalCompletion = yield* this.finallyBlock(statement.finalbody, pending, frame);
+      const finalCompletion = yield* this.finallyBlock(statement.finalbody, pending, completion, frame);
       if (finalCompletion) return finalCompletion;
     }
     if (pending) throw pending;
@@ -813,26 +838,34 @@ export class Evaluator extends AsyncEvaluator {
     frame: Frame
   ): Generator<PyValue, Outcome, PyValue> {
     noteCaught(caught, frame);
-    if (statement.isGroup) return yield* this.exceptStar(statement, caught, frame);
-    let handler: ExceptHandler | undefined;
-    for (const each of statement.handlers) {
-      const types = each.types && (yield* this.handlerTypes(each.types, frame));
-      if (types === undefined || matchesExceptionTypes(caught.exception, types)) {
-        handler = each;
-        break;
-      }
-    }
-    if (!handler) return { pending: caught };
     try {
+      if (statement.isGroup) return yield* this.exceptStar(statement, caught, frame);
+      let handler: ExceptHandler | undefined;
+      for (const each of statement.handlers) {
+        const types = each.types && (yield* this.handlerTypes(each.types, frame));
+        if (types === undefined || matchesExceptionTypes(caught.exception, types)) {
+          handler = each;
+          break;
+        }
+      }
+      if (!handler) return { pending: caught };
       return { completion: yield* this.runHandler(handler, caught.exception, frame) };
     } catch (error) {
       if (!(error instanceof PyError)) throw error;
+      this.chainTo(error.exception, caught.exception);
       return { pending: error };
     }
   }
 
-  private *finallyBlock(finalbody: Statement[], pending: PyError | undefined, frame: Frame): Execution {
+  /** Runs a finally block, holding the exception or the returned value it delays until it ends. */
+  private *finallyBlock(
+    finalbody: Statement[],
+    pending: PyError | undefined,
+    completion: Completion,
+    frame: Frame
+  ): Execution {
     const length = frame.temporaries.length;
+    if (typeof completion === 'object') frame.temporaries.push(completion.value);
     if (pending) {
       frame.temporaries.push(pending.exception);
       this.handling.push(pending.exception);
@@ -930,6 +963,7 @@ export class Evaluator extends AsyncEvaluator {
 
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
+    const { runtime } = this;
     const item = statement.items[index];
     const manager = item.context.suspends
       ? yield* this.evaluateSuspending(item.context, frame)
@@ -937,6 +971,7 @@ export class Evaluator extends AsyncEvaluator {
     const enter = lookupSpecial(manager, '__enter__');
     const exit = lookupSpecial(manager, '__exit__');
     if (enter === undefined || exit === undefined) {
+      // CPython looks up __exit__ first, so an object with neither method reports __exit__.
       const missed = exit === undefined ? '__exit__' : '__enter__';
       throw typeError(
         `'${fullyQualifiedName(classOf(manager))}' object does not support the context manager protocol (missed ${missed} method)`
@@ -945,15 +980,22 @@ export class Evaluator extends AsyncEvaluator {
     const length = frame.temporaries.length;
     frame.temporaries.push(manager);
     try {
-      yield* this.enterContext(statement, index, bindValue(enter, manager), frame);
+      let entered = false;
       let completion: Completion;
       try {
+        yield* this.enterContext(statement, index, bindValue(enter, manager), frame, () => {
+          entered = true;
+        });
         completion = yield* this.withStatement(statement, frame, index + 1);
       } catch (error) {
-        if (!(error instanceof PyError)) throw error;
+        if (!(error instanceof PyError) || !entered) throw error;
+        runtime.currentRow = statement.row;
         if (!(yield* this.exitWithException(statement, bindValue(exit, manager), error.exception))) throw error;
         return undefined;
       }
+      runtime.currentRow = statement.row;
+      // The value the body returns stays reachable while __exit__ runs.
+      if (typeof completion === 'object') frame.temporaries.push(completion.value);
       yield* this.callExit(statement, bindValue(exit, manager), [None, None, None]);
       return completion;
     } finally {
@@ -970,7 +1012,8 @@ export class Evaluator extends AsyncEvaluator {
     statement: Extract<Statement, { kind: 'with' }>,
     index: number,
     enter: PyValue,
-    frame: Frame
+    frame: Frame,
+    onEntered: () => void
   ): Execution {
     const { runtime } = this;
     const item = statement.items[index];
@@ -983,12 +1026,14 @@ export class Evaluator extends AsyncEvaluator {
       const begun = runtime.steps.stepCount;
       const switches = runtime.threads?.switches;
       entered = yield* enterCall;
+      onEntered();
       if (item.target && !target) this.assign(item.target, entered, frame);
       if (runtime.threads?.switches === switches) runtime.steps.finishStatement(stepRow, onlyCalls(), begun);
       else runtime.steps.step(stepRow);
     } else {
       entered = runtime.steps.runStatement(stepRow, onlyCalls, () => {
         const value = callValue(enter, []);
+        onEntered();
         if (item.target && !target) this.assign(item.target, value, frame);
         return value;
       });
@@ -1058,7 +1103,7 @@ export class Evaluator extends AsyncEvaluator {
     this.runtime.spend();
     switch (pattern.kind) {
       case 'value': {
-        return equals(subject, this.evaluate(pattern.value, frame));
+        return isTruthy(compareOp('==', subject, this.evaluate(pattern.value, frame)));
       }
       case 'singleton': {
         return isSame(subject, pattern.value ?? None);
@@ -1113,24 +1158,28 @@ export class Evaluator extends AsyncEvaluator {
     frame: Frame
   ): boolean {
     if (!isSequenceForMatch(subject)) return false;
-    const items = toItems(subject);
+    // As CPython does, the length decides first and only the items the pattern names are read by index; a starred
+    // capture alone takes the items between.
+    const length = Number(lengthOf(subject));
+    const item = (index: number): PyValue => getItem(subject, BigInt(index));
     const { patterns, starIndex } = pattern;
     if (starIndex === undefined) {
-      if (items.length !== patterns.length) return false;
-      return patterns.every((each, index) => this.matchPattern(each, items[index], bindings, frame));
+      if (length !== patterns.length) return false;
+      return patterns.every((each, index) => this.matchPattern(each, item(index), bindings, frame));
     }
     const after = patterns.length - starIndex - 1;
-    if (items.length < patterns.length - 1) return false;
+    if (length < patterns.length - 1) return false;
     for (let index = 0; index < starIndex; index++) {
-      if (!this.matchPattern(patterns[index], items[index], bindings, frame)) return false;
+      if (!this.matchPattern(patterns[index], item(index), bindings, frame)) return false;
     }
     for (let index = 0; index < after; index++) {
-      const item = items[items.length - after + index];
-      if (!this.matchPattern(patterns[starIndex + 1 + index], item, bindings, frame)) return false;
+      if (!this.matchPattern(patterns[starIndex + 1 + index], item(length - after + index), bindings, frame)) {
+        return false;
+      }
     }
     const star = patterns[starIndex];
     if (star.kind === 'star' && star.name) {
-      bindings.set(star.name, this.listOf(items.slice(starIndex, items.length - after)));
+      bindings.set(star.name, newList(toArray(subject).slice(starIndex, length - after)));
     }
     return true;
   }
@@ -1210,11 +1259,6 @@ export class Evaluator extends AsyncEvaluator {
     return names;
   }
 
-  private listOf(items: PyValue[]): PyValue {
-    this.runtime.allocate(items.length + 1);
-    return newList(items);
-  }
-
   private reprOf(value: PyValue): string {
     return pyRepr(value);
   }
@@ -1244,7 +1288,7 @@ const SELF_MATCHING = new Set([
 function starNames(module: PyModule): [string, PyValue][] {
   const all = getAttributeOrUndefined(module, '__all__');
   if (all === undefined) return [...module.dict].filter(([name]) => !name.startsWith('_'));
-  return toItems(all).map((name) => {
+  return toArray(all).map((name) => {
     if (typeof name !== 'string') {
       throw typeError(`Item in ${module.name}.__all__ must be str, not ${typeName(name)}`);
     }
@@ -1334,27 +1378,29 @@ function setUpAnnotations(kind: 'setupAnnotations' | 'setupAnnotate', frame: Fra
 }
 
 function matchesExceptionTypes(exception: PyInstance, types: PyValue): boolean {
-  if (types instanceof PyTuple) return types.items.some((type) => matchesExceptionTypes(exception, type));
-  if (!(types instanceof PyClass) || !types.isSubclassOf(baseExceptionClass)) {
-    throw typeError('catching classes that do not inherit from BaseException is not allowed');
-  }
-  return exception.cls.isSubclassOf(types);
+  return exceptionTypes(types).some((type) => exception.cls.isSubclassOf(type));
 }
 
 function checkExceptStarTypes(types: PyValue): void {
-  const list = types instanceof PyTuple ? types.items : [types];
-  for (const type of list) {
-    if (type instanceof PyClass && type.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) {
+  for (const type of exceptionTypes(types)) {
+    if (type.isSubclassOf(exceptionClassNamed('BaseExceptionGroup'))) {
       throw typeError('catching ExceptionGroup with except* is not allowed. Use except instead.');
     }
   }
 }
 
-function toItems(subject: PyValue): PyValue[] {
-  const next = iterate(subject);
-  const items: PyValue[] = [];
-  for (let item = next(); item !== DONE; item = next()) items.push(item);
-  return items;
+/**
+ * The classes an `except` clause names, every one checked before any is matched, as CPython's
+ * check_except_type_valid does: a tuple's members must be exception classes themselves, not nested tuples.
+ */
+function exceptionTypes(types: PyValue): PyClass[] {
+  const list = types instanceof PyTuple ? types.items : [types];
+  return list.map((type) => {
+    if (!(type instanceof PyClass) || !type.isSubclassOf(baseExceptionClass)) {
+      throw typeError('catching classes that do not inherit from BaseException is not allowed');
+    }
+    return type;
+  });
 }
 
 function mappingGet(mapping: PyValue, key: PyValue): PyValue | undefined {

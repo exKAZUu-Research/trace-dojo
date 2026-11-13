@@ -13,7 +13,7 @@ import { method } from './define';
 import { callGetter, descriptorGetter } from './descriptors';
 import { enumTypeClass, isEnumClass, isFlagClass } from './enums';
 import { generatorNext } from './generators';
-import { identityHash } from './hashing';
+import { identityHash, pyHash } from './hashing';
 import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
 import { stateIndex, stateOf } from './iteratorStates';
 import { createModule, initializeModule, moduleDir, moduleRepr } from './modules/moduleLayout';
@@ -34,6 +34,7 @@ import { currentRuntime } from './runtimeContext';
 import { subclassesOf } from './subclassQuery';
 import { typeOr } from './typeHints';
 import {
+  argumentTypeName,
   builtinFunctionClass,
   bytearrayClass,
   classmethodClass,
@@ -105,7 +106,10 @@ objectClass.dict.set(
   new PyBuiltinFunction(
     wrapperDescriptorClass,
     '__init__',
-    ([self, ...args], kwargs) => objectInitImplementation(self, args, kwargs),
+    (callArgs, kwargs) => {
+      if (callArgs.length === 0) throw typeError("descriptor '__init__' of 'object' object needs an argument");
+      return objectInitImplementation(callArgs[0], callArgs.slice(1), kwargs);
+    },
     undefined,
     'method',
     'object'
@@ -131,7 +135,7 @@ for (const name of ['__lt__', '__le__', '__gt__', '__ge__']) {
 }
 method(objectClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
 method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
-  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${typeName(spec)}`);
+  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
   if (spec !== '') throw typeError(`unsupported format string passed to ${typeName(self)}.__format__`);
   return pyStr(self);
 });
@@ -157,7 +161,7 @@ method(objectClass, '__sizeof__', 'none', 0, 0, (self) => sizeWithoutHeader(self
 for (const cls of [intClass, strClass]) method(cls, '__sizeof__', 'none', 0, 0, (self) => sizeWithoutHeader(self));
 for (const cls of [intClass, floatClass, complexClass]) {
   method(cls, '__format__', 'one', 1, 1, (self, [spec]) => {
-    if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${typeName(spec)}`);
+    if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
     return spec === '' ? pyStr(self) : pyFormat(self, spec);
   });
 }
@@ -324,7 +328,8 @@ method(
   'none',
   0,
   0,
-  (self) => `<function ${(self as PyFunction).qualifiedName} at ${addressOf(self as PyObject)}>`
+  (self) =>
+    `<function ${self instanceof PyFunction ? self.qualifiedName : pyStr(getAttribute(self, '__qualname__'))} at ${addressOf(self as PyObject)}>`
 );
 method(functionClass, '__get__', 'expected', 1, 2, (self, [instance]) =>
   instance === None ? self : new PyBoundMethod(methodClass, instance, self)
@@ -358,7 +363,11 @@ for (const cls of [builtinFunctionClass, methodWrapperClass]) {
     const fn = self as PyBuiltinFunction;
     return fn === other || (fn.run === other.run && fn.self === other.self);
   });
-  method(cls, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
+  // Hashes what equality compares, the native function and the receiver, as CPython hashes m_self and ml_meth.
+  method(cls, '__hash__', 'none', 0, 0, (self) => {
+    const fn = self as PyBuiltinFunction;
+    return receiverHash(fn.self) ^ nativeIdentity(fn.run);
+  });
 }
 for (const [cls, kind] of [
   [methodDescriptorClass, 'method'],
@@ -387,6 +396,25 @@ function boundObjectText(self: PyValue): string {
   return `${typeName(self)} object at ${self instanceof PyObject ? addressOf(self) : '0x0'}`;
 }
 
+/** The hash of a builtin method's receiver: its identity, which for an unboxed value is the value itself. */
+function receiverHash(receiver: PyValue | undefined): bigint {
+  if (receiver === undefined) return 0n;
+  return receiver instanceof PyObject ? identityHash(receiver) : pyHash(receiver);
+}
+
+const nativeIdentities = new WeakMap<object, bigint>();
+let nextNativeIdentity = 1n;
+
+/** A stable number for a native function, which equal builtin methods share. */
+function nativeIdentity(run: object): bigint {
+  let identity = nativeIdentities.get(run);
+  if (identity === undefined) {
+    identity = nextNativeIdentity++;
+    nativeIdentities.set(run, identity);
+  }
+  return identity;
+}
+
 // Generators and iterators ------------------------------------------------------------------------------------------
 
 /** `next(iterator)`, raising StopIteration at the end, with the return value of a generator. */
@@ -405,7 +433,7 @@ export function defineIteratorClass(cls: PyClass): void {
     if (value === DONE) throw pyError('StopIteration');
     return value;
   });
-  if (HINTED_ITERATORS.has(cls.name)) {
+  if (HINTED_ITERATORS.has(cls.typeName ?? cls.name)) {
     method(cls, '__length_hint__', 'none', 0, 0, (self) => BigInt(remainingOf((self as PyIterator).next) ?? 0));
   }
   if (REDUCED_ITERATORS.has(cls.name)) {
@@ -490,7 +518,7 @@ defineNew(propertyClass, (cls, args, kwargs) => newProperty(cls, args, kwargs));
 
 function newProperty(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyDescriptor {
   checkArgs(
-    { qualified: 'property', min: 0, max: 4, style: 'takes', keywords: ['fget', 'fset', 'fdel', 'doc'] },
+    { qualified: 'property', min: 0, max: 4, style: 'takes', keywords: ['fget', 'fset', 'fdel', 'doc'], named: 4 },
     args,
     kwargs
   );
@@ -539,6 +567,12 @@ function callAccessor(property: PyDescriptor, kind: 'setter' | 'deleter', args: 
   return None;
 }
 
+/** A staticmethod or classmethod wrapping `fn`, which no longer runs on an instance. */
+export function newMethodDescriptor(cls: PyClass, fn: PyValue): PyDescriptor {
+  if (fn instanceof PyFunction) fn.isStaticOrClassMethod = true;
+  return new PyDescriptor(cls, fn);
+}
+
 function copyProperty(self: PyValue, change: { fn?: PyValue; setter?: PyValue; deleter?: PyValue }): PyValue {
   const property = self as PyDescriptor;
   return new PyDescriptor(
@@ -553,7 +587,7 @@ function copyProperty(self: PyValue, change: { fn?: PyValue; setter?: PyValue; d
 for (const cls of [staticmethodClass, classmethodClass]) {
   cls.construct = (descriptorClass, args, kwargs) => {
     checkArgs({ qualified: cls.name, min: 1, max: 1, style: 'expected' }, args, kwargs);
-    return new PyDescriptor(descriptorClass, args[0]);
+    return newMethodDescriptor(descriptorClass, args[0]);
   };
   defineNew(cls, (descriptorClass, args, kwargs) => {
     checkArgs({ qualified: cls.name, min: 1, max: 1, style: 'expected' }, args, kwargs);
@@ -610,9 +644,9 @@ export function superAttribute(sup: PySuper, name: string): PyValue | undefined 
       if (value !== undefined) return bindThroughSuper(value, self, selfClass);
     }
   }
-  if (name === '__class__') return superClass;
-  const own = superClass.lookup(name);
-  return own === undefined ? undefined : bindValue(own, sup, superClass);
+  if (name === '__class__') return sup.cls;
+  const own = sup.cls.lookup(name);
+  return own === undefined ? undefined : bindValue(own, sup, sup.cls);
 }
 
 function bindThroughSuper(value: PyValue, self: PyValue, selfClass: PyClass): PyValue {

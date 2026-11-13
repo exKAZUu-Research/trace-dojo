@@ -1,3 +1,4 @@
+import { chargeScan, currentRuntime } from './runtimeContext';
 import { CASE_DATA } from './unicodeCaseData';
 
 /**
@@ -74,93 +75,138 @@ const codesOf = (text: string): number[] => Array.from(text, (char) => char.code
 const map = (mapping: Mapping, code: number): string => mapping.get(code) ?? String.fromCodePoint(code);
 
 export function isUpperCode(code: number): boolean {
-  return loadTables().isUpper.has(code);
+  return hasCase(code, UPPER, 'isUpper');
 }
 
 export function isLowerCode(code: number): boolean {
-  return loadTables().isLower.has(code);
+  return hasCase(code, LOWER, 'isLower');
 }
 
 export function isTitleCode(code: number): boolean {
-  return loadTables().isTitle.has(code);
+  return hasCase(code, TITLE, 'isTitle');
 }
 
 export function isCasedCode(code: number): boolean {
-  return loadTables().isCased.has(code);
+  return hasCase(code, CASED, 'isCased');
+}
+
+const UPPER = 1;
+const LOWER = 2;
+const TITLE = 4;
+const CASED = 8;
+/** The code points below this have their case classes in a bit table, since most text consists of them. */
+const TABLED_CODES = 0x1_00;
+let tabledCases: Uint8Array | undefined;
+
+function hasCase(code: number, bit: number, set: 'isUpper' | 'isLower' | 'isTitle' | 'isCased'): boolean {
+  if (code >= TABLED_CODES) return loadTables()[set].has(code);
+  tabledCases ??= Uint8Array.from({ length: TABLED_CODES }, (_, each) => {
+    const { isUpper, isLower, isTitle, isCased } = loadTables();
+    return (
+      (isUpper.has(each) ? UPPER : 0) |
+      (isLower.has(each) ? LOWER : 0) |
+      (isTitle.has(each) ? TITLE : 0) |
+      (isCased.has(each) ? CASED : 0)
+    );
+  });
+  return (tabledCases[code] & bit) !== 0;
 }
 
 export function upper(text: string): string {
-  const { upper: mapping } = loadTables();
-  return codesOf(text)
-    .map((code) => map(mapping, code))
-    .join('');
+  return converted(text, (codes) => {
+    const { upper: mapping } = loadTables();
+    return codes.map((code) => map(mapping, code)).join('');
+  });
 }
 
 export function lower(text: string): string {
-  const codes = codesOf(text);
-  return codes.map((_, index) => lowerAt(codes, index)).join('');
+  return converted(text, (codes) => codes.map((_, index) => lowerAt(codes, index)).join(''));
 }
 
 export function casefold(text: string): string {
-  const { fold } = loadTables();
-  return codesOf(text)
-    .map((code) => map(fold, code))
-    .join('');
+  return converted(text, (codes) => {
+    const { fold } = loadTables();
+    return codes.map((code) => map(fold, code)).join('');
+  });
 }
 
 export function swapcase(text: string): string {
-  const codes = codesOf(text);
-  const { upper: mapping } = loadTables();
-  return codes
-    .map((code, index) => {
-      if (isUpperCode(code)) return lowerAt(codes, index);
-      if (isLowerCode(code)) return map(mapping, code);
-      return String.fromCodePoint(code);
-    })
-    .join('');
+  return converted(text, (codes) => {
+    const { upper: mapping } = loadTables();
+    return codes
+      .map((code, index) => {
+        if (isUpperCode(code)) return lowerAt(codes, index);
+        if (isLowerCode(code)) return map(mapping, code);
+        return String.fromCodePoint(code);
+      })
+      .join('');
+  });
 }
 
 export function capitalize(text: string): string {
-  const codes = codesOf(text);
-  const { title: mapping } = loadTables();
-  return codes.map((code, index) => (index === 0 ? map(mapping, code) : lowerAt(codes, index))).join('');
+  return converted(text, (codes) => {
+    const { title: mapping } = loadTables();
+    return codes.map((code, index) => (index === 0 ? map(mapping, code) : lowerAt(codes, index))).join('');
+  });
 }
 
 export function title(text: string): string {
-  const codes = codesOf(text);
-  const { title: mapping } = loadTables();
-  let previousCased = false;
-  let result = '';
-  for (const [index, code] of codes.entries()) {
-    result += previousCased ? lowerAt(codes, index) : map(mapping, code);
-    previousCased = isCasedCode(code);
-  }
+  return converted(text, (codes) => {
+    const { title: mapping } = loadTables();
+    let previousCased = false;
+    let result = '';
+    for (const [index, code] of codes.entries()) {
+      result += previousCased ? lowerAt(codes, index) : map(mapping, code);
+      previousCased = isCasedCode(code);
+    }
+    return result;
+  });
+}
+
+/** Converts the code points of a text, charging the running program for the text it reads before and builds after. */
+function converted(text: string, convert: (codes: number[]) => string): string {
+  chargeScan(text.length);
+  const result = convert(codesOf(text));
+  currentRuntime().buildString(result.length);
   return result;
 }
 
 /** `str.isupper()`: a cased character and no lowercase or titlecase one. */
 export function isUpperText(text: string): boolean {
   let cased = false;
-  for (const code of codesOf(text)) {
-    if (isLowerCode(code) || isTitleCode(code)) return false;
+  const complete = everyCode(text, (code) => {
     cased ||= isUpperCode(code);
-  }
-  return cased;
+    return !isLowerCode(code) && !isTitleCode(code);
+  });
+  return complete && cased;
 }
 
 /** `str.islower()`: a cased character and no uppercase or titlecase one. */
 export function isLowerText(text: string): boolean {
   let cased = false;
-  for (const code of codesOf(text)) {
-    if (isUpperCode(code) || isTitleCode(code)) return false;
+  const complete = everyCode(text, (code) => {
     cased ||= isLowerCode(code);
-  }
-  return cased;
+    return !isUpperCode(code) && !isTitleCode(code);
+  });
+  return complete && cased;
 }
 
 /** `str.istitle()`: uppercase and titlecase characters only start words, lowercase ones only follow cased ones. */
 export function isTitleText(text: string): boolean {
-  return isTitleSequence(codesOf(text), (code) => isUpperCode(code) || isTitleCode(code), isLowerCode);
+  let previousCased = false;
+  let cased = false;
+  const complete = everyCode(text, (code) => {
+    const isCapital = isUpperCode(code) || isTitleCode(code);
+    if (isCapital || isLowerCode(code)) {
+      if (isCapital === previousCased) return false;
+      previousCased = true;
+      cased = true;
+    } else {
+      previousCased = false;
+    }
+    return true;
+  });
+  return complete && cased;
 }
 
 /** Whether a text is titlecased: uppercase only after uncased characters and lowercase only after cased ones. */
@@ -185,6 +231,25 @@ export function isTitleSequence<T>(
     }
   }
   return sawCased;
+}
+
+/**
+ * Whether every code point of a text passes a test, reading them in order up to the first that fails, as CPython's
+ * predicates do, and charging the running program for the code points read.
+ */
+export function everyCode(text: string, test: (code: number) => boolean): boolean {
+  let read = 0;
+  try {
+    for (let index = 0; index < text.length; index++) {
+      const code = text.codePointAt(index) as number;
+      if (code > 0xff_ff) index++;
+      read++;
+      if (!test(code)) return false;
+    }
+    return true;
+  } finally {
+    chargeScan(read);
+  }
 }
 
 const CAPITAL_SIGMA = 0x3_a3;

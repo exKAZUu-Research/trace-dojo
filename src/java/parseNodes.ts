@@ -61,8 +61,7 @@ function applyModifier(modifiers: Modifiers, child: Node): void {
     case 'marker_annotation':
     case 'annotation': {
       const name = (child.childForFieldName('name')?.text ?? '').replace(/^java\.lang\./, '');
-      if (!KNOWN_ANNOTATIONS.has(name)) unsupported(child, `アノテーション「${child.text}」`);
-      if (name === 'Override') modifiers.hasOverride = true;
+      if (Object.hasOwn(checkedAnnotations, name)) modifiers[checkedAnnotations[name]] = true;
       break;
     }
     // The fork exposes visibility keywords and modifiers as named nodes; other tokens are punctuation.
@@ -72,11 +71,15 @@ function applyModifier(modifiers: Modifiers, child: Node): void {
   }
 }
 
-/** The annotations of java.lang, which change nothing these programs do except what `@Override` checks. */
-const KNOWN_ANNOTATIONS = new Set(['Override', 'SuppressWarnings', 'Deprecated', 'FunctionalInterface', 'SafeVarargs']);
-
 /** Modifiers that concern only threads and serialization, which these single-threaded programs never see. */
 const IGNORED_MODIFIERS = new Set(['transient', 'volatile', 'synchronized', 'strictfp']);
+
+/** The annotations of java.lang that javac checks, by the modifier flag that records each. */
+const checkedAnnotations: Readonly<Record<string, 'hasOverride' | 'hasFunctionalInterface' | 'hasSafeVarargs'>> = {
+  Override: 'hasOverride',
+  FunctionalInterface: 'hasFunctionalInterface',
+  SafeVarargs: 'hasSafeVarargs',
+};
 
 const keywordModifiers = {
   static: 'isStatic',
@@ -98,8 +101,11 @@ function applyKeywordModifier(modifiers: Modifiers, child: Node): void {
   modifiers[key] = true;
 }
 
+export function isAnnotation(node: Node): boolean {
+  return node.type === 'marker_annotation' || node.type === 'annotation';
+}
+
 export function countDimensions(node: Node): number {
-  if (node.namedChildren.some((child) => child && !isComment(child))) unsupported(node, '配列の次元へのアノテーション');
   // The dimensions of a class literal's type, as in `int[].class`, come without child tokens, only their text.
   if (node.childCount === 0) return node.text.split('[').length - 1;
   return node.children.filter((child) => child?.type === '[').length;
@@ -131,6 +137,9 @@ export function convertType(node: Node): TypeSyntax {
     case 'scoped_type_identifier': {
       return convertScopedType(node);
     }
+    case 'annotated_type': {
+      return convertType(namedChildren(node).at(-1) as Node);
+    }
     case 'generic_type': {
       const [base, argumentsNode] = namedChildren(node);
       const type = convertType(base);
@@ -145,7 +154,9 @@ export function convertType(node: Node): TypeSyntax {
 
 function convertTypeArgument(node: Node): TypeSyntax {
   if (node.type !== 'wildcard') return convertType(node);
-  const bound = namedChildren(node).find((child) => child.type !== 'super' && child.type !== 'extends');
+  const bound = namedChildren(node).find(
+    (child) => child.type !== 'super' && child.type !== 'extends' && !isAnnotation(child)
+  );
   return {
     kind: 'wildcard',
     bound: bound ? convertType(bound) : undefined,
@@ -157,8 +168,7 @@ function convertTypeArgument(node: Node): TypeSyntax {
 export function convertTypeParameters(node: Node | null): TypeParameter[] {
   if (!node) return [];
   return namedChildren(node).map((parameter) => {
-    const [name, bound] = namedChildren(parameter);
-    if (name.type !== 'type_identifier') unsupported(parameter, '型パラメータへのアノテーション');
+    const [name, bound] = namedChildren(parameter).filter((child) => !isAnnotation(child));
     return {
       name: name.text,
       bounds: bound ? namedChildren(bound).map((type) => convertType(type)) : [],
@@ -214,23 +224,16 @@ export function identifierOf(node: Node, what: string): Node {
 }
 
 function convertScopedType(node: Node): TypeSyntax {
-  if (namedChildren(node).some((child) => child.type.endsWith('annotation'))) {
-    unsupported(node, `型「${node.text}」`);
-  }
-  const [qualifierNode, nameNode] = namedChildren(node);
-  if (qualifierNode && nameNode && hasTypeArguments(qualifierNode)) {
-    const outer = convertType(qualifierNode);
-    if (outer.kind !== 'named') return unsupported(node, `型「${node.text}」`);
-    return {
-      kind: 'named',
-      name: nameNode.text,
-      qualifier: [...outer.qualifier, outer.name],
-      outer,
-      ...span(node),
-    };
-  }
-  const parts = node.text.split('.').map((part) => part.trim());
-  return { kind: 'named', name: parts.at(-1) ?? '', qualifier: parts.slice(0, -1), ...span(node) };
+  const [qualifierNode, nameNode] = namedChildren(node).filter((child) => !isAnnotation(child));
+  const outer = convertType(qualifierNode);
+  if (outer.kind !== 'named') return unsupported(node, `型「${node.text}」`);
+  return {
+    kind: 'named',
+    name: nameNode.text,
+    qualifier: [...outer.qualifier, outer.name],
+    ...(hasTypeArguments(qualifierNode) && { outer }),
+    ...span(node),
+  };
 }
 
 function hasTypeArguments(node: Node): boolean {

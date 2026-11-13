@@ -12,26 +12,35 @@ interface Indent {
   altColumn: number;
 }
 
+export interface IndentationError {
+  diagnostic: SourceDiagnostic;
+  /** The index of the logical line where the error is found, or the number of lines for one at the end. */
+  lineIndex: number;
+}
+
 /**
  * Finds the first indentation error CPython's tokenizer and parser report: an unexpected indent, a missing indented
  * block, a dedent to no enclosing level, or tabs and spaces mixed ambiguously, or the first nesting of brackets or
  * f-strings deeper than its tokenizer allows.
  */
-export function findIndentationError(source: string): SourceDiagnostic | undefined {
-  const { lines, limitError } = logicalLines(source);
+export function findIndentationError(
+  source: string,
+  lines: LogicalLine[],
+  limitError?: SourceDiagnostic
+): IndentationError | undefined {
   const stack: Indent[] = [{ column: 0, altColumn: 0 }];
   let previous: LogicalLine | undefined;
-  for (const line of lines) {
-    const error = indentError(stack, line, previous);
-    if (error) return error;
+  for (const [lineIndex, line] of lines.entries()) {
+    const diagnostic = indentError(stack, line, previous);
+    if (diagnostic) return { diagnostic, lineIndex };
     // A clause where none may stand is the parser's error, which comes before the indentation of the lines after it.
     if (line.misplaced) return undefined;
     previous = line;
   }
-  if (limitError) return limitError;
+  if (limitError) return { diagnostic: limitError, lineIndex: Math.max(0, lines.length - 1) };
   // At the end of the input, CPython reports the last line.
-  if (previous?.opensBlock) return expectedBlock(source.replace(/\r?\n$/, '').split('\n').length - 1, previous.row);
-  return undefined;
+  if (!previous?.opensBlock) return undefined;
+  return { diagnostic: { row: lastRow(source), message: expectedBlock(previous) }, lineIndex: lines.length };
 }
 
 /** The error a line's indentation makes after `previous`, keeping `stack` the indentation levels open. */
@@ -48,7 +57,7 @@ function indentError(
     stack.push(indent);
     return stack.length > MAX_INDENT_LEVELS ? { row, message: '字下げ（インデント）が深すぎます。' } : undefined;
   }
-  if (previous?.opensBlock) return expectedBlock(row, previous.row);
+  if (previous?.opensBlock) return { row, message: expectedBlock(previous) };
   if (previous?.isDecorator && indent.column < top.column) {
     return { row, message: 'デコレータの後の行の字下げ（インデント）を戻すことはできません。' };
   }
@@ -62,15 +71,29 @@ function indentError(
 
 const TAB_MESSAGE = '字下げ（インデント）に、タブとスペースが紛らわしく混ざっています。';
 
-function expectedBlock(row: number, openerRow: number): SourceDiagnostic {
-  return { row, message: `${openerRow + 1}行目の : の後には、字下げ（インデント）した本体が必要です。` };
+/** The row CPython reports for the end of the source: the last line, which a final line break does not start. */
+function lastRow(source: string): number {
+  return Math.max(0, source.replace(/\r?\n$/, '').split('\n').length - 1);
 }
 
-interface LogicalLine {
+function expectedBlock(opener: LogicalLine): string {
+  return `${opener.row + 1}行目の : の後には、字下げ（インデント）した本体が必要です。`;
+}
+
+export interface LogicalLine {
   row: number;
+  /** The row of the line's last token, which differs from `row` for a line continued over several rows. */
+  endRow: number;
+  /** The offset of the line's first character, which starts its indentation. */
+  offset: number;
+  /** The offsets of the line's first token and of the end of its last token. */
+  start: number;
+  end: number;
   indent: Indent;
   /** Whether the line is a compound statement's header, ending with a colon outside brackets, which opens a block. */
   opensBlock: boolean;
+  /** Whether the line has a colon outside brackets and strings. */
+  hasColon: boolean;
   /** Whether the line is a clause such as `else` that follows no header it may continue. */
   misplaced: boolean;
   /** Whether the line is a decorator, which the next line must follow at the same indentation. */
@@ -81,14 +104,16 @@ interface LogicalLine {
  * Splits a source into its logical lines, skipping blank lines and lines holding only a comment, up to the line where
  * the tokenizer stops at a nesting too deep.
  */
-function logicalLines(source: string): { lines: LogicalLine[]; limitError?: SourceDiagnostic } {
+export function logicalLines(source: string): { lines: LogicalLine[]; limitError?: SourceDiagnostic } {
   const lines: LogicalLine[] = [];
   const scanner = new Scanner(source);
   /** The first word of the last line at each indentation column that is still open. */
   const previous = new Map<number, string>();
   while (!scanner.done) {
+    const offset = scanner.offset;
     const indent = scanner.readIndent();
     const row = scanner.row;
+    const start = scanner.offset;
     const ch = scanner.peek();
     if (ch === '\n' || ch === '\r' || ch === '#' || ch === undefined) {
       scanner.skipLine();
@@ -96,15 +121,26 @@ function logicalLines(source: string): { lines: LogicalLine[]; limitError?: Sour
     }
     try {
       const keyword = scanner.peekWord();
-      const lastToken = scanner.readLogicalLine();
+      const { lastToken, ...tokens } = scanner.readLogicalLine();
       for (const column of previous.keys()) if (column > indent.column) previous.delete(column);
       const misplaced = !continuesHeader(keyword, previous.get(indent.column));
       const opensBlock = lastToken === ':' && BLOCK_KEYWORDS.has(keyword) && !misplaced;
-      lines.push({ row, indent, opensBlock, isDecorator: ch === '@', misplaced });
+      lines.push({ row, offset, start, indent, opensBlock, isDecorator: ch === '@', misplaced, ...tokens });
       previous.set(indent.column, keyword);
     } catch (error) {
       if (!(error instanceof NestingLimitError)) throw error;
-      lines.push({ row, indent, opensBlock: false, isDecorator: false, misplaced: false });
+      lines.push({
+        row,
+        endRow: scanner.row,
+        offset,
+        start,
+        end: scanner.offset,
+        indent,
+        opensBlock: false,
+        hasColon: false,
+        isDecorator: false,
+        misplaced: false,
+      });
       return { lines, limitError: { row: error.row, message: error.message } };
     }
   }
@@ -152,6 +188,13 @@ class NestingLimitError extends Error {
   }
 }
 
+interface LineTokens {
+  lastToken: string;
+  end: number;
+  endRow: number;
+  hasColon: boolean;
+}
+
 class Scanner {
   private index = 0;
   row = 0;
@@ -160,6 +203,10 @@ class Scanner {
   private fstringLevel = 0;
 
   constructor(private readonly source: string) {}
+
+  get offset(): number {
+    return this.index;
+  }
 
   /** The name or keyword at the current position, if any. */
   peekWord(): string {
@@ -207,28 +254,39 @@ class Scanner {
     if (!this.done) this.advance();
   }
 
-  /** Reads to the end of a logical line, returning its last token outside comments. */
-  readLogicalLine(): string {
+  /** Reads to the end of a logical line, describing its tokens outside comments. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Follows how CPython's tokenizer joins the physical lines of a logical line.
+  readLogicalLine(): LineTokens {
     this.bracketLevel = 0;
-    let last = '';
+    const tokens: LineTokens = { lastToken: '', end: this.index, endRow: this.row, hasColon: false };
+    let depth = 0;
     while (!this.done) {
       const ch = this.peek() as string;
       if (ch === '\n') {
         this.advance();
-        if (this.bracketLevel === 0) return last;
+        if (depth === 0) break;
         continue;
       }
       if (this.skipTrivia(ch)) continue;
       if (this.skipStringLiteral()) {
-        last = 'string';
-        continue;
+        tokens.lastToken = 'string';
+      } else {
+        if ('([{'.includes(ch)) {
+          depth++;
+          this.openBracket();
+        }
+        if (')]}'.includes(ch)) {
+          depth = Math.max(0, depth - 1);
+          this.bracketLevel = Math.max(0, this.bracketLevel - 1);
+        }
+        if (ch === ':' && depth === 0 && this.peek(1) !== '=') tokens.hasColon = true;
+        this.index++;
+        tokens.lastToken = ch;
       }
-      if ('([{'.includes(ch)) this.openBracket();
-      if (')]}'.includes(ch)) this.bracketLevel = Math.max(0, this.bracketLevel - 1);
-      this.index++;
-      last = ch;
+      tokens.end = this.index;
+      tokens.endRow = this.row;
     }
-    return last;
+    return tokens;
   }
 
   private openBracket(): void {

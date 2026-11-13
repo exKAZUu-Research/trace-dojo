@@ -16,9 +16,11 @@ import { checkExtraName, missingNamespaceName, readProgramAttribute } from './na
 import { argument, checkArgs } from './nativeArgs';
 import { asFloat, divmodFloat, floorDivInt, modInt, toIndex } from './numbers';
 import {
+  attributeName,
   bindValue,
   callValue,
   deleteAttribute,
+  exactLength,
   getAttribute,
   getAttributeOrUndefined,
   getItem,
@@ -26,7 +28,6 @@ import {
   isCallable,
   isTruthy,
   iterate,
-  lengthOf,
   lookupSpecial,
   nextOf,
   setAttribute,
@@ -38,6 +39,7 @@ import { callerGlobals, callerLocals, callerNames, vars } from './reflection';
 import { currentRuntime } from './runtimeContext';
 import { siteBuiltins } from './siteBuiltins';
 import { iterStr, strLength } from './strings';
+import { sum } from './sum';
 import { registerBuiltinVariants } from './suspendingBuiltins';
 import { callSuspending, suspendingNextOf, withSuspendingNext } from './threadIteration';
 import { turtleClass } from './turtle';
@@ -45,6 +47,7 @@ import { sortList } from './typeContainers';
 import { roundFloat, roundInt } from './typeNumbers';
 import { defineIteratorClass, nextValue } from './typeObject';
 import {
+  argumentTypeName,
   boolClass,
   builtinClass,
   classmethodClass,
@@ -98,9 +101,8 @@ import {
 
 export const enumerateClass = builtinClass('enumerate');
 enumerateClass.construct = (cls, args, kwargs) => {
-  const iterable = argument(args, kwargs, 0, 'iterable');
-  if (iterable === undefined) throw typeError("enumerate() missing required argument 'iterable'");
-  checkArgs({ qualified: 'enumerate', min: 1, max: 2, style: 'takes', keywords: ['iterable', 'start'] }, args, kwargs);
+  checkEnumerateArgs(args.length, [...(kwargs?.keys() ?? [])]);
+  const iterable = argument(args, kwargs, 0, 'iterable') as PyValue;
   let index = toIndex(argument(args, kwargs, 1, 'start') ?? 0n);
   const iterator = getIterator(iterable);
   const next = nextOf(iterator);
@@ -115,8 +117,18 @@ enumerateClass.construct = (cls, args, kwargs) => {
     if (item === DONE) return DONE;
     return currentRuntime().tuple([index++, item]);
   });
-  return new PyIterator(cls, enumerated, () => [iterable]);
+  return new PyIterator(cls, enumerated, () => [iterator]);
 };
+
+/** Follows enumerate's own argument parser (enum_vectorcall in Objects/enumobject.c). */
+function checkEnumerateArgs(count: number, keywords: string[]): void {
+  const given = count + keywords.length;
+  if (given === 0 || (given > 2 && count === 0)) throw typeError("enumerate() missing required argument 'iterable'");
+  if (given > 2) throw typeError(`enumerate() takes at most 2 arguments (${given} given)`);
+  const expected = keywords[0] === 'start' && given === 2 ? ['start', 'iterable'] : ['iterable', 'start'].slice(count);
+  const wrong = keywords.find((keyword, index) => keyword !== expected[index]);
+  if (wrong !== undefined) throw typeError(`'${wrong}' is an invalid keyword argument for enumerate()`);
+}
 
 export const zipClass = builtinClass('zip');
 // code-gauge-allow functionCognitiveComplexity 26 -- Each builtin iterator keeps its next function, its reduction, and its suspending next together.
@@ -165,23 +177,18 @@ zipClass.construct = (cls, args, kwargs) => {
       strict = state !== 0n;
     },
   });
-  return new PyIterator(cls, zipped, () => args);
+  return new PyIterator(cls, zipped, () => iterators);
 };
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Words each length mismatch as CPython's strict zip and map do.
-function checkStrictLengths(name: string, nexts: (() => PyValue | typeof DONE)[], index: number): typeof DONE {
-  if (index > 0) {
-    throw valueError(
-      `${name}() argument ${index + 1} is shorter than argument${index === 1 ? '' : 's'} 1${index > 1 ? `-${index}` : ''}`
+/** Raises the error of a strict `zip` or `map` whose iterable at `index` ended first, unless all end together. */
+function checkStrictLengths(name: 'zip' | 'map', nexts: (() => PyValue | typeof DONE)[], index: number): typeof DONE {
+  const mismatch = (position: number, relation: string): Error =>
+    valueError(
+      `${name}() argument ${position + 1} is ${relation} than argument${position === 1 ? '' : 's'} 1${position > 1 ? `-${position}` : ''}`
     );
-  }
+  if (index > 0) throw mismatch(index, 'shorter');
   for (const [other, next] of nexts.entries()) {
-    if (other === 0) continue;
-    if (next() !== DONE) {
-      throw valueError(
-        `${name}() argument ${other + 1} is longer than argument${other === 1 ? '' : 's'} 1${other > 1 ? `-${other}` : ''}`
-      );
-    }
+    if (other > 0 && next() !== DONE) throw mismatch(other, 'longer');
   }
   return DONE;
 }
@@ -223,7 +230,7 @@ mapClass.construct = (cls, args, kwargs) => {
     }
     return yield* callSuspending(fn, items);
   });
-  return new PyIterator(cls, mapped, () => args);
+  return new PyIterator(cls, mapped, () => [fn, ...iterators]);
 };
 
 export const filterClass = builtinClass('filter');
@@ -249,7 +256,7 @@ filterClass.construct = (cls, args, kwargs) => {
     }
     return DONE;
   });
-  return new PyIterator(cls, filtered, () => args);
+  return new PyIterator(cls, filtered, () => [fn, iterator]);
 };
 
 export const reversedClass = builtinClass('reversed');
@@ -267,15 +274,15 @@ reversedClass.construct = (_cls, args, kwargs) => {
   ) {
     throw typeError(`'${typeName(sequence)}' object is not reversible`);
   }
-  let index = BigInt(lengthOf(sequence)) - 1n;
+  let index = exactLength(sequence) - 1n;
   const next = withRemaining(
     () => (index >= 0n ? getItem(sequence, index--) : DONE),
-    () => (index >= 0n && BigInt(lengthOf(sequence)) > index ? Number(index) + 1 : 0)
+    () => (index >= 0n && exactLength(sequence) > index ? Number(index) + 1 : 0)
   );
   withState(next, {
     reduce: () => (index >= 0n ? reduction('reversed', [sequence], index) : reduction('reversed', [newTuple([])])),
     setState: (state) => {
-      const last = BigInt(lengthOf(sequence)) - 1n;
+      const last = exactLength(sequence) - 1n;
       if (index >= 0n) index = state < -1n ? -1n : state > last ? last : state;
     },
   });
@@ -289,9 +296,35 @@ for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClas
 
 // Functions ---------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows CPython's print, which writes to a replaced stdout or another file piece by piece.
-// code-gauge-allow functionNcss 31 -- Follows CPython's print, which writes to a replaced stdout or another file piece by piece.
 function print(args: PyValue[], kwargs: Kwargs): PyValue {
+  const { separator, end } = printTexts(kwargs);
+  const runtime = currentRuntime();
+  const file = printFile(kwargs?.get('file') ?? None);
+  if (file === None) return None;
+  const isStdout = file === runtime.standardStream('stdout');
+  // Each piece is written on its own, as CPython writes them, so that the output limit ends a huge print early.
+  const write = (text: string): void => {
+    if (isStdout) runtime.io.stdout.write(text);
+    else callValue(getAttribute(file, 'write'), [text]);
+  };
+  for (const [index, value] of args.entries()) {
+    if (index > 0) write(separator);
+    write(pyStr(value));
+  }
+  write(end);
+  return None;
+}
+
+/** The stream `print` writes to: its `file`, else the current `sys.stdout`, which a program may replace or remove. */
+function printFile(file: PyValue): PyValue {
+  if (file !== None) return file;
+  const stdout = currentRuntime().importModule('sys').dict.get('stdout');
+  if (stdout === undefined) throw pyError('RuntimeError', 'lost sys.stdout');
+  return stdout;
+}
+
+/** The separator and the end of a print call, after the checks CPython makes on its keywords. */
+function printTexts(kwargs: Kwargs): { separator: string; end: string } {
   for (const key of kwargs?.keys() ?? []) {
     if (!['sep', 'end', 'file', 'flush'].includes(key))
       throw typeError(`print() got an unexpected keyword argument '${key}'`);
@@ -301,84 +334,11 @@ function print(args: PyValue[], kwargs: Kwargs): PyValue {
   if (separator !== None && typeof separator !== 'string')
     throw typeError(`sep must be None or a string, not ${typeName(separator)}`);
   if (end !== None && typeof end !== 'string') throw typeError(`end must be None or a string, not ${typeName(end)}`);
-  const runtime = currentRuntime();
-  let file = kwargs?.get('file') ?? None;
-  // `sys.stdout` may have been replaced, as contextlib.redirect_stdout does.
-  if (file === None) file = runtime.modules.get('sys')?.dict.get('stdout') ?? None;
-  const sep = typeof separator === 'string' ? separator : ' ';
-  const ending = typeof end === 'string' ? end : '\n';
-  if (file !== None && file !== runtime.standardStream('stdout') && file !== runtime.standardStream('stderr')) {
-    // Another file receives each piece in its own write() call, as CPython writes them.
-    const write = getAttribute(file, 'write');
-    for (const [index, value] of args.entries()) {
-      if (index > 0) callValue(write, [sep]);
-      callValue(write, [pyStr(value)]);
-    }
-    callValue(write, [ending]);
-    return None;
-  }
-  const text = args.map((value) => pyStr(value)).join(sep) + ending;
-  runtime.buildString(text.length);
-  if (file === runtime.standardStream('stderr')) runtime.errorOutput += text;
-  else runtime.budget.print(text);
-  return None;
+  return { separator: typeof separator === 'string' ? separator : ' ', end: typeof end === 'string' ? end : '\n' };
 }
 
-/** Whether an item's truth is `truth`, reading the items only up to the first such one, as `any` and `all` do. */
-function someItem(iterable: PyValue, truth: boolean): boolean {
-  const next = iterate(iterable);
-  for (let item = next(); item !== DONE; item = next()) {
-    currentRuntime().spend();
-    if (isTruthy(item) === truth) return true;
-  }
-  return false;
-}
-
-// code-gauge-allow functionNcss 33 -- Follows CPython's builtin sum, including its float compensation.
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows CPython's builtin sum, including its float compensation.
-function sum(args: PyValue[], kwargs: Kwargs): PyValue {
-  if (args.length === 0) throw typeError('sum() takes at least 1 positional argument (0 given)');
-  checkArgs({ qualified: 'sum', min: 1, max: 2, style: 'takes', keywords: ['start'] }, args, kwargs);
-  let result = argument(args, kwargs, 1, 'start') ?? 0n;
-  if (typeof result === 'string') throw typeError("sum() can't sum strings [use ''.join(seq) instead]");
-  const runtime = currentRuntime();
-  const next = iterate(args[0]);
-  let item = next();
-  while (item !== DONE && typeof result === 'bigint' && (typeof item === 'bigint' || typeof item === 'boolean')) {
-    runtime.spend();
-    result += BigInt(item);
-    item = next();
-  }
-  if (item !== DONE && typeof result === 'bigint') {
-    result = binaryOp('+', result, item);
-    item = next();
-  }
-  if (typeof result === 'number') {
-    let high = result;
-    let low = 0;
-    for (; item !== DONE; item = next()) {
-      runtime.spend();
-      if (typeof item !== 'number' && typeof item !== 'bigint' && typeof item !== 'boolean') break;
-      const x = asFloat(item);
-      const total = high + x;
-      low += Math.abs(high) >= Math.abs(x) ? high - total + x : x - total + high;
-      high = total;
-    }
-    result = low && Number.isFinite(low) ? high + low : high;
-  }
-  for (; item !== DONE; item = next()) {
-    runtime.spend();
-    result = binaryOp('+', result, item);
-  }
-  return result;
-}
-
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows CPython's min_max argument checks.
 function minMax(name: 'min' | 'max'): (args: PyValue[], kwargs: Kwargs) => PyValue {
   return (args, kwargs) => {
-    const unexpected = [...(kwargs?.keys() ?? [])].find((key) => key !== 'key' && key !== 'default');
-    if (unexpected !== undefined) throw typeError(`${name}() got an unexpected keyword argument '${unexpected}'`);
-    if (args.length === 0) throw typeError(`${name} expected at least 1 argument, got 0`);
     const key = kwargs?.get('key') ?? None;
     const fallback = kwargs?.get('default');
     if (args.length > 1 && fallback !== undefined) {
@@ -439,7 +399,11 @@ function divmod([a, b]: PyValue[]): PyValue {
 }
 
 function pow(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'pow', min: 0, max: 3, style: 'takes', keywords: ['base', 'exp', 'mod'] }, args, kwargs);
+  checkArgs(
+    { qualified: 'pow', min: 2, max: 3, style: 'takes', keywords: ['base', 'exp', 'mod'], named: 3 },
+    args,
+    kwargs
+  );
   const base = argument(args, kwargs, 0, 'base');
   const exponent = argument(args, kwargs, 1, 'exp');
   const modulus = argument(args, kwargs, 2, 'mod') ?? None;
@@ -473,7 +437,7 @@ function ternaryPow(base: PyValue, exponent: PyValue, modulus: PyValue): PyValue
   );
 }
 
-function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
+export function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
   if (modulus === 0n) throw valueError('pow() 3rd argument cannot be 0');
   let b = base;
   let e = exponent;
@@ -484,8 +448,9 @@ function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
   const m = modulus < 0n ? -modulus : modulus;
   let result = 1n % m;
   b = ((b % m) + m) % m;
+  const cost = stepCost(m);
   while (e > 0n) {
-    currentRuntime().spend();
+    currentRuntime().spend(cost);
     if (e & 1n) result = (result * b) % m;
     b = (b * b) % m;
     e >>= 1n;
@@ -498,7 +463,9 @@ function modInverse(value: bigint, modulus: bigint): bigint {
   const m = modulus < 0n ? -modulus : modulus;
   let [oldR, r] = [((value % m) + m) % m, m];
   let [oldS, s] = [1n, 0n];
+  const cost = stepCost(m);
   while (r !== 0n) {
+    currentRuntime().spend(cost);
     const quotient = oldR / r;
     [oldR, r] = [r, oldR - quotient * r];
     [oldS, s] = [s, oldS - quotient * s];
@@ -507,8 +474,17 @@ function modInverse(value: bigint, modulus: bigint): bigint {
   return ((oldS % m) + m) % m;
 }
 
+/** The budget one step of modular arithmetic costs, which grows with the size of the modulus. */
+function stepCost(modulus: bigint): number {
+  return 1 + Math.floor((modulus.toString(16).length * 4) / 8192);
+}
+
 function round(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'round', min: 1, max: 2, style: 'takes', keywords: ['number', 'ndigits'] }, args, kwargs);
+  checkArgs(
+    { qualified: 'round', min: 1, max: 2, style: 'takes', keywords: ['number', 'ndigits'], named: 2 },
+    args,
+    kwargs
+  );
   const value = argument(args, kwargs, 0, 'number') as PyValue;
   const digits = argument(args, kwargs, 1, 'ndigits');
   if (typeof value === 'bigint' || typeof value === 'boolean') return roundInt(BigInt(value), digits);
@@ -637,8 +613,8 @@ function next(args: PyValue[], kwargs: Kwargs): PyValue {
 
 function getattr(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'getattr', min: 2, max: 3, style: 'expected' }, args, kwargs);
-  const [object, name, fallback] = args;
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+  const [object, nameValue, fallback] = args;
+  const name = attributeName(nameValue);
   if (fallback === undefined) return readProgramAttribute(object, name, () => getAttribute(object, name));
   return readProgramAttribute(object, name, () => {
     const value = getAttributeOrUndefined(object, name);
@@ -651,15 +627,16 @@ function getattr(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 function sorted(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'sorted', min: 1, max: 1, style: 'expected', keywords: ['key', 'reverse'] }, args, kwargs);
+  checkArgs({ qualified: 'sorted', min: 1, max: 1, style: 'expected' }, args, undefined);
+  // The keywords go to list.sort, which reports the wrong ones under its own name.
+  checkArgs({ qualified: 'sort', min: 0, max: 0, style: 'takes', keywords: ['key', 'reverse'] }, [], kwargs);
   const list = newList(toArray(args[0]));
-  currentRuntime().allocate(list.items.length + 1);
   sortList(list, kwargs?.get('key') ?? None, isTruthy(kwargs?.get('reverse') ?? false));
   return list;
 }
 
-function hasAttribute(object: PyValue, name: PyValue): boolean {
-  if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
+function hasAttribute(object: PyValue, nameValue: PyValue): boolean {
+  const name = attributeName(nameValue);
   // An attribute this grader lacks exists in CPython, so code may test for it before it uses it.
   if (object instanceof PyModule && object.unsupported.has(name)) return true;
   if (unsupportedClassAttribute(object, name) !== undefined) return true;
@@ -695,6 +672,17 @@ function dir(value: PyValue): PyValue {
   return callValue(runtime.builtins.get('sorted') as PyValue, [names]);
 }
 
+/** Whether an item passes the test, taking no item after the first that does, as `all` and `any` stop. */
+function someItem(iterable: PyValue, test: (item: PyValue) => boolean): boolean {
+  const next = iterate(iterable);
+  const runtime = currentRuntime();
+  for (let item = next(); item !== DONE; item = next()) {
+    runtime.spend();
+    if (test(item)) return true;
+  }
+  return false;
+}
+
 // The namespace -----------------------------------------------------------------------------------------------------
 
 /** The builtins module's namespace, in CPython's order, which NameError suggestions depend on. */
@@ -714,8 +702,8 @@ function builtinNamespace(): Map<string, PyValue> {
     ['__build_class__', buildClass],
     ['__import__', nativeFunction('__import__', dunderImport)],
     ['abs', one('abs', abs)],
-    ['all', one('all', ([iterable]) => !someItem(iterable, false))],
-    ['any', one('any', ([iterable]) => someItem(iterable, true))],
+    ['all', one('all', ([iterable]) => !someItem(iterable, (item) => !isTruthy(item)))],
+    ['any', one('any', ([iterable]) => someItem(iterable, isTruthy))],
     ['ascii', one('ascii', ([value]) => pyAscii(value))],
     ['bin', one('bin', radix('0b', 2))],
     [
@@ -732,7 +720,7 @@ function builtinNamespace(): Map<string, PyValue> {
     [
       'delattr',
       builtin('delattr', 'expected', 2, 2, ([object, name]) => {
-        deleteAttribute(object, name as string);
+        deleteAttribute(object, attributeName(name));
         return None;
       }),
     ],
@@ -744,7 +732,7 @@ function builtinNamespace(): Map<string, PyValue> {
       'format',
       builtin('format', 'expected', 1, 2, ([value, spec]) => {
         if (spec !== undefined && typeof spec !== 'string')
-          throw typeError(`format() argument 2 must be str, not ${typeName(spec)}`);
+          throw typeError(`format() argument 2 must be str, not ${argumentTypeName(spec)}`);
         return pyFormat(value, spec ?? '');
       }),
     ],
@@ -759,31 +747,30 @@ function builtinNamespace(): Map<string, PyValue> {
     ['issubclass', builtin('issubclass', 'expected', 2, 2, ([cls, classInfo]) => isSubclass(cls, classInfo))],
     ['iter', builtin('iter', 'expected', 1, 2, iter)],
     ['aiter', one('aiter', ([value]) => aiter(value))],
-    ['len', one('len', ([value]) => BigInt(lengthOf(value)))],
+    ['len', one('len', ([value]) => exactLength(value))],
     ['locals', builtin('locals', 'none', 0, 0, callerLocals)],
-    ['max', builtin('max', 'expected', 0, Number.POSITIVE_INFINITY, minMax('max'), { keywords: ['key', 'default'] })],
-    ['min', builtin('min', 'expected', 0, Number.POSITIVE_INFINITY, minMax('min'), { keywords: ['key', 'default'] })],
+    ['max', builtin('max', 'expected', 1, Number.POSITIVE_INFINITY, minMax('max'), { keywords: ['key', 'default'] })],
+    ['min', builtin('min', 'expected', 1, Number.POSITIVE_INFINITY, minMax('min'), { keywords: ['key', 'default'] })],
     ['next', builtin('next', 'expected', 1, 2, next)],
     ['anext', builtin('anext', 'expected', 1, 2, ([iterator, fallback]) => anext(iterator, fallback))],
     ['oct', one('oct', radix('0o', 8))],
     ['ord', one('ord', ord)],
-    ['pow', builtin('pow', 'takes', 0, 3, pow, { keywords: ['base', 'exp', 'mod'] })],
+    ['pow', builtin('pow', 'takes', 2, 3, pow, { keywords: ['base', 'exp', 'mod'], named: 3 })],
     [
       'print',
       builtin('print', 'expected', 0, Number.POSITIVE_INFINITY, print, { keywords: ['sep', 'end', 'file', 'flush'] }),
     ],
     ['repr', one('repr', ([value]) => pyRepr(value))],
-    ['round', builtin('round', 'takes', 1, 2, round, { keywords: ['number', 'ndigits'] })],
+    ['round', builtin('round', 'takes', 1, 2, round, { keywords: ['number', 'ndigits'], named: 2 })],
     [
       'setattr',
       builtin('setattr', 'expected', 3, 3, ([object, name, value]) => {
-        if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
-        setAttribute(object, name, value);
+        setAttribute(object, attributeName(name), value);
         return None;
       }),
     ],
-    ['sorted', builtin('sorted', 'expected', 1, 1, sorted, { keywords: ['key', 'reverse'] })],
-    ['sum', builtin('sum', 'takes', 0, 2, sum, { keywords: ['start'] })],
+    ['sorted', nativeFunction('sorted', sorted)],
+    ['sum', builtin('sum', 'takes', 1, 2, sum, { keywords: ['start'], named: 1 })],
     ['vars', builtin('vars', 'expected', 0, 1, ([value]) => (value === undefined ? callerLocals() : vars(value)))],
     ['None', None],
     ['Ellipsis', Ellipsis],

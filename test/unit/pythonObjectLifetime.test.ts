@@ -82,7 +82,7 @@ if texts != ["<method 'upper' of 'str' objects>", "<slot wrapper '__add__' of 'i
 /** The text a program writes, with how it ended. */
 function outputOf(program: string): string {
   const run = runModule(new Runtime(), parsePython(program));
-  return `${run.output}=== ${run.uncaughtException ?? 'ok'}\n`;
+  return `${run.stdout}=== ${run.uncaughtException ?? 'ok'}\n`;
 }
 
 test('__del__ runs when reference counting would free the object, and at the end in the order CPython clears it', () => {

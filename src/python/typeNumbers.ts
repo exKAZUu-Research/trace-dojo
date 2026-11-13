@@ -2,6 +2,7 @@ import { bytesLikeData, latin1Text } from './bytesValues';
 import { complexRepr, newComplex } from './complexNumbers';
 import { pyRepr } from './conversions';
 import { method } from './define';
+import { formatComplex } from './formatComplex';
 import { frexp, hashFloat, hashInt } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
 import {
@@ -14,11 +15,14 @@ import {
   parseFloatText,
   parseIntText,
   roundDecimal,
+  toAsciiDigits,
   toIndex,
 } from './numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial } from './objects';
-import { strRepr } from './strings';
+import { currentRuntime } from './runtimeContext';
+import { stripNumberSpace, strRepr } from './strings';
 import {
+  argumentTypeName,
   boolClass,
   complexClass,
   floatClass,
@@ -36,7 +40,9 @@ import { PyComplex, PyInstance, type PyValue } from './values';
 // int ---------------------------------------------------------------------------------------------------------------
 
 intClass.construct = (cls, args, kwargs) => {
-  checkArgs({ qualified: 'int', min: 0, max: 2, style: 'expected', keywords: ['base'] }, args, kwargs);
+  // Called with keywords, int parses its arguments as a keyword parser does.
+  const style = kwargs && kwargs.size > 0 ? 'takes' : 'expected';
+  checkArgs({ qualified: 'int', min: 0, max: 2, style, keywords: ['base'], named: 1 }, args, kwargs);
   const value = args[0];
   const base = argument(args, kwargs, 1, 'base');
   if (value === undefined) {
@@ -65,7 +71,7 @@ export function toInt(value: PyValue): bigint {
   if (typeof value === 'string') return parseIntOrThrow(value, 10);
   const data = bytesLikeData(value);
   if (data !== undefined) return parseIntOrThrow(latin1Text(data), 10, pyRepr(value));
-  for (const name of ['__int__', '__index__', '__trunc__']) {
+  for (const name of ['__int__', '__index__']) {
     const special = lookupSpecial(value, name);
     if (special === undefined) continue;
     const result = callValue(bindValue(special, value), []);
@@ -73,8 +79,6 @@ export function toInt(value: PyValue): bigint {
     if (typeof result === 'boolean') return result ? 1n : 0n;
     throw typeError(`${name} returned non-int (type ${typeName(result)})`);
   }
-  if (value instanceof PyInstance && value.enumValue !== undefined && typeof value.enumValue === 'bigint')
-    return value.enumValue;
   if (value instanceof PyInstance && typeof value.primitive === 'string') return parseIntOrThrow(value.primitive, 10);
   throw typeError(`int() argument must be a string, a bytes-like object or a real number, not '${typeName(value)}'`);
 }
@@ -118,6 +122,10 @@ export function roundInt(value: bigint, digits: PyValue | undefined): bigint {
   if (digits === undefined || digits === None) return value;
   const places = toIndex(digits);
   if (places >= 0n) return value;
+  const magnitude = value < 0n ? -value : value;
+  // A value with fewer digits than the rounding unit's zeros rounds to zero, which needs no huge power of ten.
+  if (BigInt(magnitude.toString(16).length * 4) * 30_103n < -places * 100_000n - 100_000n) return 0n;
+  currentRuntime().chargeBits(-places * 4n);
   const unit = 10n ** -places;
   const remainder = ((value % unit) + unit) % unit;
   const down = value - remainder;
@@ -237,42 +245,79 @@ export function roundFloat(value: number, digits: PyValue | undefined): PyValue 
 // complex -----------------------------------------------------------------------------------------------------------
 
 complexClass.construct = (_cls, args, kwargs) => {
-  checkArgs({ qualified: 'complex', min: 0, max: 2, style: 'takes', keywords: ['real', 'imag'] }, args, kwargs);
-  const real = argument(args, kwargs, 0, 'real') ?? 0n;
-  const imag = argument(args, kwargs, 1, 'imag') ?? 0n;
-  if (typeof real === 'string') return parseComplex(real);
-  const [a, b] = toParts(real);
-  const [c, d] = toParts(imag);
-  // As complex_new does, only complex parts add terms, so that the signs of zero parts survive.
-  return newComplex(imag instanceof PyComplex ? a - d : a, real instanceof PyComplex ? b + c : c);
+  checkArgs(
+    { qualified: 'complex', min: 0, max: 2, style: 'takes', keywords: ['real', 'imag'], named: 2 },
+    args,
+    kwargs
+  );
+  const real = argument(args, kwargs, 0, 'real') ?? false;
+  const imag = argument(args, kwargs, 1, 'imag');
+  if (imag === undefined) return complexOf(real);
+  const a = namedPart(real, 'real');
+  const b = namedPart(imag, 'imag');
+  // A part combines with the other argument only when that one is complex: adding a zero would drop the sign of -0.0.
+  return newComplex(b.isComplex ? a.real - b.imag : a.real, a.isComplex ? b.real + a.imag : b.real);
 };
 
-function toParts(value: PyValue): [number, number] {
-  return value instanceof PyComplex ? [value.real, value.imag] : [toFloatStrict(value), 0];
+interface ComplexPart {
+  real: number;
+  imag: number;
+  isComplex: boolean;
 }
 
-function toFloatStrict(value: PyValue): number {
-  if (typeof value === 'string') throw typeError("complex() second arg can't be a string");
-  return toFloat(value);
+/** `complex(value)`: a string is parsed, and any other value converts as a number. */
+function complexOf(value: PyValue): PyComplex {
+  if (typeof value === 'string') return parseComplex(value);
+  const part = complexPartOf(value, true);
+  if (!part) throw typeError(`complex() argument must be a string or a number, not ${typeName(value)}`);
+  return newComplex(part.real, part.imag);
+}
+
+function namedPart(value: PyValue, name: 'real' | 'imag'): ComplexPart {
+  const part = typeof value === 'string' ? undefined : complexPartOf(value, name === 'real');
+  if (!part) throw typeError(`complex() argument '${name}' must be a real number, not ${typeName(value)}`);
+  return part;
+}
+
+/** The number an argument of `complex()` stands for, or undefined for no number; only `real` is asked `__complex__`. */
+function complexPartOf(value: PyValue, asksComplexMethod: boolean): ComplexPart | undefined {
+  if (value instanceof PyComplex) return { real: value.real, imag: value.imag, isComplex: true };
+  const special = asksComplexMethod ? lookupSpecial(value, '__complex__') : undefined;
+  if (special !== undefined) {
+    const result = callValue(bindValue(special, value), []);
+    if (!(result instanceof PyComplex)) {
+      throw typeError(`__complex__ returned non-complex (type ${typeName(result)})`);
+    }
+    return { real: result.real, imag: result.imag, isComplex: true };
+  }
+  const isReal =
+    typeof value === 'number' ||
+    typeof value === 'bigint' ||
+    typeof value === 'boolean' ||
+    lookupSpecial(value, '__float__') !== undefined ||
+    lookupSpecial(value, '__index__') !== undefined;
+  return isReal ? { real: toFloat(value), imag: 0, isComplex: false } : undefined;
 }
 
 function parseComplex(text: string): PyComplex {
-  const body = text
-    .trim()
-    .replace(/^\((.*)\)$/, '$1')
-    .trim();
-  const number = String.raw`[+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|inf|nan)`;
-  const full = new RegExp(
-    `^(${number})([+-](?:\\d+\\.?\\d*(?:[eE][+-]?\\d+)?|\\.\\d+(?:[eE][+-]?\\d+)?|inf|nan)?)[jJ]$`,
-    'i'
-  );
-  const imaginaryOnly = new RegExp(`^(${number})?[jJ]$`, 'i');
+  // A part accepts what float() accepts: Unicode decimal digits and single underscores between digits.
+  const body = stripNumberSpace(stripNumberSpace(toAsciiDigits(text)).replace(/^\((.*)\)$/, '$1'));
+  // The digits before and after the point are told apart by the point, so that a long number is not matched in every
+  // split of its digits.
+  const digits = String.raw`\d(?:_?\d)*`;
+  const exponent = String.raw`(?:[eE][+-]?${digits})?`;
+  const unsigned = `(?:${digits}(?:\\.(?:${digits})?)?${exponent}|\\.${digits}${exponent}|inf(?:inity)?|nan)`;
+  const number = `[+-]?${unsigned}`;
+  const full = new RegExp(`^(${number})([+-]${unsigned}?)[jJ]$`, 'i');
+  const imaginaryOnly = new RegExp(`^(${number}|[+-])?[jJ]$`, 'i');
   const realOnly = new RegExp(`^${number}$`, 'i');
   let match = full.exec(body);
-  if (match) return newComplex(Number(match[1]), imagPart(match[2]));
+  if (match) return newComplex(parseFloatText(match[1]) ?? Number.NaN, imagPart(match[2]));
   match = imaginaryOnly.exec(body);
   if (match) return newComplex(0, imagPart(match[1] ?? '+'));
   if (realOnly.test(body)) return newComplex(parseFloatText(body) ?? Number.NaN, 0);
+  // CPython checks the underscores first and reports a string it cannot read with them in its own words.
+  if (text.includes('_')) throw valueError(`could not convert string to complex: ${pyRepr(text)}`);
   throw valueError('complex() arg is a malformed string');
 }
 
@@ -283,6 +328,10 @@ function imagPart(text: string): number {
 }
 
 method(complexClass, '__repr__', 'none', 0, 0, (self) => complexRepr(self as PyComplex));
+method(complexClass, '__format__', 'one', 1, 1, (self, [spec]) => {
+  if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
+  return formatComplex(self as PyComplex, spec);
+});
 method(complexClass, 'conjugate', 'none', 0, 0, (self) =>
   newComplex((self as PyComplex).real, -(self as PyComplex).imag)
 );

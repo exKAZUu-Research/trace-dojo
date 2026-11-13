@@ -4,7 +4,6 @@ import { unsupportedSizeof } from './define';
 import { builtinClassesWithDict, fieldedCTypes } from './descriptors';
 import { defineNew } from './instances';
 import { bindValue, callValue } from './objects';
-import { currentRuntime } from './runtimeContext';
 import { defineMethod, None, propertyClass, staticmethodClass, typeClass } from './types';
 import { type PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from './values';
 
@@ -94,7 +93,6 @@ function inheritOwnAttributes(cls: PyClass, names: Set<string | undefined> | und
 
 /** The instance a C type's tp_alloc creates, which `object.__new__` refuses for a builtin type. */
 export function allocateInstance(cls: PyClass): PyInstance {
-  currentRuntime().allocate(1);
   return new PyInstance(cls);
 }
 
@@ -105,4 +103,8 @@ export function fieldsOf(instance: PyValue): PyValue[] {
   let found = fields.get(instance as object);
   if (!found) fields.set(instance as object, (found = []));
   return found;
+}
+
+export function peekFieldsOf(instance: object): readonly PyValue[] | undefined {
+  return fields.get(instance);
 }

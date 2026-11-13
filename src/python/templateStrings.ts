@@ -5,7 +5,7 @@ import { defineNew } from './instances';
 import { importModule } from './modules';
 import { readOnlyAttribute } from './modules/re/attributes';
 import { getAttribute, getIterator } from './objects';
-import { currentRuntime } from './runtimeContext';
+import { chargeSlots, currentRuntime } from './runtimeContext';
 import { builtinClass, newTuple, None, NotImplemented, pyError, typeError, typeName, unbox } from './types';
 import { type Kwargs, PyObject, type PyValue } from './values';
 
@@ -36,6 +36,7 @@ export class PyTemplate extends PyObject {
     readonly interpolations: readonly PyInterpolation[]
   ) {
     super(templateClass);
+    chargeSlots(strings.length + interpolations.length);
   }
 }
 
@@ -55,7 +56,6 @@ export function templateLiteral(parts: (string | FormattedValue)[], fields: [PyV
     interpolations.push(new PyInterpolation(value, part.expressionText ?? '', part.conversion ?? None, spec));
   }
   strings.push(text);
-  currentRuntime().allocate(strings.length + interpolations.length + 1);
   return new PyTemplate(strings, interpolations);
 }
 
@@ -81,7 +81,6 @@ defineNew(templateClass, (_cls, args, kwargs) => {
     }
   }
   flush();
-  currentRuntime().allocate(args.length + 1);
   return new PyTemplate(strings, interpolations);
 });
 
@@ -121,7 +120,6 @@ method(templateClass, '__add__', 'one', 1, 1, (self, [other]) => {
       stringValue(template.strings.at(-1) as PyValue) + stringValue(other.strings[0]),
       ...other.strings.slice(1),
     ];
-    currentRuntime().allocate(strings.length + 1);
     return new PyTemplate(strings, [...template.interpolations, ...other.interpolations]);
   }
   throw typeError(
@@ -152,7 +150,6 @@ defineNew(interpolationClass, (_cls, args, kwargs) => {
     }
   }
   if (!isStr(formatSpec)) throw argumentTypeError('format_spec', 'str', formatSpec);
-  currentRuntime().allocate(1);
   return new PyInterpolation(value, expression, conversion, formatSpec);
 });
 

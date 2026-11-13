@@ -1,15 +1,21 @@
-import { builtin } from '../define';
-import { sumOfProducts, vectorNorm } from '../floatArithmetic';
+import { moduleBuiltin } from '../define';
+import { vectorNorm } from '../floatArithmetic';
+import { floatPower } from '../floatPower';
 import { frexp } from '../hashing';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
-import { argument, checkArgs } from '../nativeArgs';
-import { exactBinary, floatRepr, intToFloat, scaleToFloat, toIndex } from '../numbers';
-import { bindValue, callValue, isTruthy, iterate, lookupSpecial, toArray } from '../objects';
+import { argument } from '../nativeArgs';
+import { floatRepr, intToFloat, toIndex } from '../numbers';
+import { bindValue, callValue, isTruthy, lookupSpecial, toArray } from '../objects';
 import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
 import type { Kwargs, PyValue } from '../values';
-import { fma } from './mathFma';
+import { fma, fusedMultiplyAdd } from './mathFma';
+import { fsum as fsumWith } from './mathFsum';
+import { type GammaResult, lgamma, tgamma } from './mathGamma';
+import { sumprod } from './mathSumprod';
+
+const builtin = moduleBuiltin('math');
 
 /** A real number argument as a float, as math functions convert theirs. */
 export function realArgument(value: PyValue): number {
@@ -41,28 +47,56 @@ function floatFunction(name: string, fn: (x: number) => number, check?: (x: numb
   });
 }
 
+/** Wraps a gamma function as math_1a does, with the error message CPython gives for its poles. */
+function gammaFunction(name: string, fn: (x: number) => GammaResult): PyValue {
+  return builtin(name, 'one', 1, 1, ([value]) => {
+    const x = realArgument(value);
+    const result = fn(x);
+    if (result === 'domain') throw valueError(`expected a noninteger or positive integer, got ${floatRepr(x)}`);
+    if (result === 'range') throw rangeError();
+    return result;
+  });
+}
+
 const rangeCheck =
   (low: number, high: number, message: string) =>
   (x: number): Error | undefined =>
     x < low || x > high ? valueError(`${message}, got ${floatRepr(x)}`) : undefined;
 
-/** The natural logarithm of an int too large for a float, from its bit length. */
-function logOfInt(value: bigint): number {
-  const bits = value.toString(2).length;
-  if (bits <= 1000) return Math.log(Number(value));
-  const shift = BigInt(bits - 60);
-  return Math.log(Number(value >> shift)) + Number(shift) * Math.LN2;
-}
+const finiteCheck = (x: number): Error | undefined =>
+  Number.isFinite(x) || Number.isNaN(x) ? undefined : valueError(`expected a finite input, got ${floatRepr(x)}`);
 
-function logOf(value: PyValue, base: (x: number) => number): number {
-  if ((typeof value === 'bigint' || typeof value === 'boolean') && BigInt(value) > 0n)
-    return base(logOfInt(BigInt(value)));
+/** The logarithm `func` gives of a positive int or float, refusing other values as CPython's loghelper does. */
+function logOf(value: PyValue, func: (x: number) => number): number {
+  if (typeof value === 'bigint' || typeof value === 'boolean') {
+    if (BigInt(value) <= 0n) throw valueError('expected a positive input');
+    return logOfInt(BigInt(value), func);
+  }
   const x = realArgument(value);
   if (!(x > 0)) {
     if (Number.isNaN(x)) return x;
-    throw valueError('expected a positive input');
+    throw valueError(`expected a positive input, got ${floatRepr(x)}`);
   }
-  return base(Math.log(x));
+  return func(x);
+}
+
+/** loghelper's int path: an int too large for a float is split as x * 2**e, whose log is log(x) + log(2) * e. */
+function logOfInt(value: bigint, func: (x: number) => number): number {
+  const x = Number(value);
+  if (Number.isFinite(x)) return func(x);
+  const { mantissa, exponent } = frexpInt(value);
+  // The reference CPython's compiler fuses `func(x) + func(2.0) * e` into one fma.
+  return fusedMultiplyAdd(func(2), exponent, func(mantissa));
+}
+
+/** _PyLong_Frexp: a positive int as a mantissa in [0.5, 1) rounded half-even to 53 bits, times 2**exponent. */
+function frexpInt(value: bigint): { mantissa: number; exponent: number } {
+  const bits = value.toString(2).length;
+  // Two guard bits and a sticky bit let the conversion to a float round the kept bits once, as the whole value would.
+  const shift = BigInt(bits - 55);
+  const sticky = (value & ((1n << shift) - 1n)) === 0n ? 0n : 1n;
+  const mantissa = Number((value >> shift) | sticky) * 2 ** -55;
+  return mantissa === 1 ? { mantissa: 0.5, exponent: bits + 1 } : { mantissa, exponent: bits };
 }
 
 function integerArgument(value: PyValue): bigint {
@@ -85,6 +119,20 @@ function floorOrCeil(name: string, round: (x: number) => number, special: string
   });
 }
 
+/** `math.trunc`: an int as it is, a float truncated, and anything else by its own `__trunc__`, as math_trunc does. */
+function trunc(value: PyValue): PyValue {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'boolean') return value ? 1n : 0n;
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) throw valueError('cannot convert float NaN to integer');
+    if (!Number.isFinite(value)) throw pyError('OverflowError', 'cannot convert float infinity to integer');
+    return BigInt(Math.trunc(value));
+  }
+  const method = lookupSpecial(value, '__trunc__');
+  if (method === undefined) throw typeError(`type ${typeName(value)} doesn't define __trunc__ method`);
+  return callValue(bindValue(method, value), []);
+}
+
 function factorial(value: PyValue): bigint {
   const n = integerArgument(value);
   if (n < 0n) throw valueError('factorial() not defined for negative values');
@@ -96,26 +144,49 @@ function factorial(value: PyValue): bigint {
   return result;
 }
 
+const SMALL_INT = 1n << 64n;
+/** The bits of operand that one remainder step of Euclid's algorithm handles for one unit of the budget. */
+const BITS_PER_OPERATION = 1 << 13;
+
 function gcdOf(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y) [x, y] = [y, x % y];
+  if (x < SMALL_INT && y < SMALL_INT) {
+    while (y) [x, y] = [y, x % y];
+    return x;
+  }
+  // The steps of large operands are too many and too slow to leave uncharged.
+  const bits = Math.max(x.toString(16).length, y.toString(16).length) * 4;
+  let work = 0;
+  while (y) {
+    work += bits;
+    if (work >= BITS_PER_OPERATION) {
+      currentRuntime().spend(Math.floor(work / BITS_PER_OPERATION));
+      work %= BITS_PER_OPERATION;
+    }
+    [x, y] = [y, x % y];
+  }
   return x;
 }
 
+/**
+ * CPython's adaptive-precision integer square root (Modules/mathmodule.c): each step doubles the number of correct
+ * bits of `a`, so the whole costs about one division of full size.
+ */
 export function isqrt(n: bigint): bigint {
   if (n < 0n) throw valueError('isqrt() argument must be nonnegative');
-  if (n < 2n) return n;
-  let x = BigInt(Math.floor(Math.sqrt(Number(n))));
-  if (n > 1n << 100n) x = 1n << BigInt(Math.ceil(n.toString(2).length / 2));
-  for (;;) {
-    const y = (x + n / x) >> 1n;
-    if (y >= x) break;
-    x = y;
+  if (n === 0n) return 0n;
+  const bits = n.toString(2).length;
+  currentRuntime().chargeBits(BigInt(bits));
+  const c = (bits - 1) >> 1;
+  let a = 1n;
+  let d = 0;
+  for (let s = 31 - Math.clz32(c); s >= 0; s--) {
+    const e = d;
+    d = c >> s;
+    a = (a << BigInt(d - e - 1)) + (n >> BigInt(2 * c - e - d + 1)) / a;
   }
-  while (x * x > n) x--;
-  while ((x + 1n) * (x + 1n) <= n) x++;
-  return x;
+  return a * a > n ? a - 1n : a;
 }
 
 function comb(nValue: PyValue, kValue: PyValue): bigint {
@@ -127,59 +198,54 @@ function comb(nValue: PyValue, kValue: PyValue): bigint {
   const smaller = k < n - k ? k : n - k;
   let result = 1n;
   for (let index = 1n; index <= smaller; index++) {
-    currentRuntime().spend();
-    result = (result * (n - smaller + index)) / index;
+    const factor = n - smaller + index;
+    currentRuntime().chargeBigint(result, factor);
+    result = (result * factor) / index;
   }
   return result;
 }
 
 function perm(nValue: PyValue, kValue: PyValue | undefined): bigint {
   const n = integerArgument(nValue);
-  if (n < 0n) throw valueError('n must be a non-negative integer');
+  // As math_perm_impl does, the one-argument form is factorial, with factorial's own checks.
   if (kValue === undefined || kValue === currentRuntime().none) return factorial(n);
+  if (n < 0n) throw valueError('n must be a non-negative integer');
   const k = integerArgument(kValue);
   if (k < 0n) throw valueError('k must be a non-negative integer');
   if (k > n) return 0n;
   let result = 1n;
   for (let index = n - k + 1n; index <= n; index++) {
-    currentRuntime().spend();
+    currentRuntime().chargeBigint(result, index);
     result *= index;
   }
   return result;
 }
 
 /** `math.fsum`: the exact sum of the floats, rounded once. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows math.fsum's handling of NaN, infinities, and signed zero.
 export function fsum(iterable: PyValue): number {
-  const values = toArray(iterable).map(realArgument);
-  let infinity = 0;
-  for (const value of values) {
-    if (Number.isNaN(value)) return Number.NaN;
-    if (!Number.isFinite(value)) {
-      if (infinity !== 0 && Math.sign(value) !== infinity) throw valueError('-inf + inf in fsum');
-      infinity = Math.sign(value);
-    }
-  }
-  if (infinity !== 0) return infinity * Number.POSITIVE_INFINITY;
-  const parts = values.filter((value) => value !== 0).map(exactBinary);
-  if (parts.length === 0) return values.some((value) => !Object.is(value, -0)) || values.length === 0 ? 0 : -0;
-  const exponent = Math.min(...parts.map((part) => part.exponent));
-  let total = 0n;
-  for (const part of parts) total += part.mantissa << BigInt(part.exponent - exponent);
-  const result = scaleToFloat(total, exponent);
-  if (!Number.isFinite(result)) throw pyError('OverflowError', 'intermediate overflow in fsum');
-  return result;
+  return fsumWith(iterable, realArgument);
 }
 
+function hypot(values: number[]): number {
+  currentRuntime().scan(values.length);
+  return vectorNorm(values);
+}
+
+/** CPython's m_remainder (Modules/mathmodule.c), every step of which is exact. */
 function remainder(x: number, y: number): number {
   if (Number.isNaN(x) || Number.isNaN(y)) return Number.NaN;
   if (!Number.isFinite(x) || y === 0) throw domainError();
   if (!Number.isFinite(y)) return x;
-  const quotient = x / y;
-  let nearest = Math.round(quotient);
-  if (Math.abs(quotient - Math.trunc(quotient)) === 0.5) nearest = 2 * Math.round(quotient / 2);
-  const result = x - nearest * y;
-  return result === 0 ? signedZero(x) : result;
+  const absX = Math.abs(x);
+  const absY = Math.abs(y);
+  const modulus = absX % absY;
+  const complement = absY - modulus;
+  let result: number;
+  if (modulus < complement) result = modulus;
+  else if (modulus > complement) result = -complement;
+  // Halfway between two multiples of y, the even one is the nearest.
+  else result = modulus - 2 * ((0.5 * (absX - modulus)) % absY);
+  return copysign(1, x) * result;
 }
 
 /** Zero with the sign of `x`. */
@@ -207,9 +273,8 @@ function ulp(x: number): number {
 }
 
 function isclose(args: PyValue[], kwargs: Kwargs): boolean {
-  checkArgs({ qualified: 'isclose', min: 2, max: 2, style: 'takes', keywords: ['rel_tol', 'abs_tol'] }, args, kwargs);
-  const a = realArgument(args[0]);
-  const b = realArgument(args[1]);
+  const a = realArgument(argument(args, kwargs, 0, 'a') as PyValue);
+  const b = realArgument(argument(args, kwargs, 1, 'b') as PyValue);
   const relative = realArgument(kwargs?.get('rel_tol') ?? 1e-9);
   const absolute = realArgument(kwargs?.get('abs_tol') ?? 0);
   if (relative < 0 || absolute < 0) throw valueError('tolerances must be non-negative');
@@ -223,13 +288,12 @@ function pow(x: number, y: number): number {
   if (x === 0 && y < 0 && Number.isFinite(y)) throw domainError();
   if (x < 0 && Number.isFinite(x) && Number.isFinite(y) && !Number.isInteger(y)) throw domainError();
   if (x === 1 || y === 0) return 1;
-  const result = x ** y;
+  const result = floatPower(x, y);
   if (!Number.isFinite(result) && Number.isFinite(x) && Number.isFinite(y)) throw rangeError();
   return result;
 }
 
 function product(args: PyValue[], kwargs: Kwargs): PyValue {
-  checkArgs({ qualified: 'prod', min: 1, max: 1, style: 'takes', keywords: ['start'] }, args, kwargs);
   let result = kwargs?.get('start') ?? 1n;
   for (const item of toArray(args[0])) result = binaryOp('*', result, item);
   return result;
@@ -243,6 +307,7 @@ function lcm(values: bigint[]): bigint {
   let result = 1n;
   for (const value of values) {
     if (result === 0n || value === 0n) return 0n;
+    currentRuntime().chargeBigint(result, value);
     const product = result * value;
     result = (product < 0n ? -product : product) / gcdOf(result, value);
   }
@@ -254,8 +319,6 @@ function lcm(values: bigint[]): bigint {
 registerUnsupportedAttributes('math', {
   erf: 'math.erf()（C ライブラリの erf と最後の桁まで同じ値を出せないため）',
   erfc: 'math.erfc()（C ライブラリの erfc と最後の桁まで同じ値を出せないため）',
-  gamma: 'math.gamma()（C ライブラリの tgamma と最後の桁まで同じ値を出せないため）',
-  lgamma: 'math.lgamma()（C ライブラリの lgamma と最後の桁まで同じ値を出せないため）',
 });
 
 registerModule('math', () => {
@@ -269,20 +332,20 @@ registerModule('math', () => {
     ['isqrt', builtin('isqrt', 'one', 1, 1, ([value]) => isqrt(integerArgument(value)))],
     ['cbrt', floatFunction('cbrt', Math.cbrt)],
     ['exp', floatFunction('exp', Math.exp)],
-    ['exp2', floatFunction('exp2', (x) => 2 ** x)],
+    ['exp2', floatFunction('exp2', (x) => floatPower(2, x))],
     ['expm1', floatFunction('expm1', Math.expm1)],
     ['log', builtin('log', 'expected', 1, 2, ([value, base]) => log(value, base))],
-    ['log2', builtin('log2', 'one', 1, 1, ([value]) => log2Of(value))],
-    ['log10', builtin('log10', 'one', 1, 1, ([value]) => log10Of(value))],
+    ['log2', builtin('log2', 'one', 1, 1, ([value]) => logOf(value, Math.log2))],
+    ['log10', builtin('log10', 'one', 1, 1, ([value]) => logOf(value, Math.log10))],
     [
       'log1p',
       floatFunction('log1p', Math.log1p, (x) =>
         x <= -1 ? valueError(`expected argument value > -1, got ${floatRepr(x)}`) : undefined
       ),
     ],
-    ['sin', floatFunction('sin', Math.sin)],
-    ['cos', floatFunction('cos', Math.cos)],
-    ['tan', floatFunction('tan', Math.tan)],
+    ['sin', floatFunction('sin', Math.sin, finiteCheck)],
+    ['cos', floatFunction('cos', Math.cos, finiteCheck)],
+    ['tan', floatFunction('tan', Math.tan, finiteCheck)],
     ['asin', floatFunction('asin', Math.asin, rangeCheck(-1, 1, 'expected a number in range from -1 up to 1'))],
     ['acos', floatFunction('acos', Math.acos, rangeCheck(-1, 1, 'expected a number in range from -1 up to 1'))],
     ['atan', floatFunction('atan', Math.atan)],
@@ -307,20 +370,22 @@ registerModule('math', () => {
     ['radians', floatFunction('radians', (x) => x * (Math.PI / 180))],
     ['floor', floorOrCeil('floor', Math.floor, '__floor__')],
     ['ceil', floorOrCeil('ceil', Math.ceil, '__ceil__')],
-    ['trunc', floorOrCeil('trunc', Math.trunc, '__trunc__')],
+    ['trunc', builtin('trunc', 'one', 1, 1, ([value]) => trunc(value))],
     ['fabs', floatFunction('fabs', Math.abs)],
+    ['gamma', gammaFunction('gamma', tgamma)],
+    ['lgamma', gammaFunction('lgamma', lgamma)],
     ['factorial', builtin('factorial', 'one', 1, 1, ([value]) => factorial(value))],
     ['gcd', builtin('gcd', 'expected', 0, Number.POSITIVE_INFINITY, (args) => gcd(args.map(integerArgument)))],
     ['lcm', builtin('lcm', 'expected', 0, Number.POSITIVE_INFINITY, (args) => lcm(args.map(integerArgument)))],
     ['comb', builtin('comb', 'expected', 2, 2, ([n, k]) => comb(n, k))],
     ['perm', builtin('perm', 'expected', 1, 2, ([n, k]) => perm(n, k))],
     ['pow', two('pow', pow)],
-    ['hypot', builtin('hypot', 'expected', 0, Number.POSITIVE_INFINITY, (args) => vectorNorm(args.map(realArgument)))],
+    ['hypot', builtin('hypot', 'expected', 0, Number.POSITIVE_INFINITY, (args) => hypot(args.map(realArgument)))],
     ['dist', builtin('dist', 'expected', 2, 2, ([p, q]) => dist(p, q))],
     ['fsum', builtin('fsum', 'one', 1, 1, ([iterable]) => fsum(iterable))],
     ['prod', builtin('prod', 'takes', 1, 1, product, { keywords: ['start'] })],
-    ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumOfProducts(iterate(p), iterate(q)))],
-    ['isclose', builtin('isclose', 'takes', 2, 2, isclose, { keywords: ['rel_tol', 'abs_tol'] })],
+    ['sumprod', builtin('sumprod', 'expected', 2, 2, ([p, q]) => sumprod(p, q))],
+    ['isclose', builtin('isclose', 'takes', 2, 2, isclose, { keywords: ['a', 'b', 'rel_tol', 'abs_tol'], named: 2 })],
     ['isfinite', builtin('isfinite', 'one', 1, 1, ([value]) => Number.isFinite(realArgument(value)))],
     ['isinf', builtin('isinf', 'one', 1, 1, ([value]) => isInfinite(realArgument(value)))],
     ['isnan', builtin('isnan', 'one', 1, 1, ([value]) => Number.isNaN(realArgument(value)))],
@@ -347,9 +412,9 @@ function sqrt(x: number): number {
 }
 
 export function log(value: PyValue, base: PyValue | undefined): number {
-  const numerator = logOf(value, (x) => x);
+  const numerator = logOf(value, Math.log);
   if (base === undefined) return numerator;
-  const denominator = logOf(base, (x) => x);
+  const denominator = logOf(base, Math.log);
   if (denominator === 0) throw pyError('ZeroDivisionError', 'division by zero');
   return numerator / denominator;
 }
@@ -398,30 +463,6 @@ function ldexp(x: number, exponent: PyValue): number {
   const result = x * 2 ** half * 2 ** (power - half);
   if (!Number.isFinite(result) && Number.isFinite(x)) throw rangeError();
   return result;
-}
-
-function log2Of(value: PyValue): number {
-  if (typeof value === 'number' && value > 0) return Math.log2(value);
-  if (
-    (typeof value === 'bigint' || typeof value === 'boolean') &&
-    BigInt(value) > 0n &&
-    BigInt(value).toString(2).length <= 1000
-  ) {
-    return Math.log2(Number(value));
-  }
-  return logOf(value, (x) => x / Math.LN2);
-}
-
-function log10Of(value: PyValue): number {
-  if (typeof value === 'number' && value > 0) return Math.log10(value);
-  if (
-    (typeof value === 'bigint' || typeof value === 'boolean') &&
-    BigInt(value) > 0n &&
-    BigInt(value).toString(2).length <= 1000
-  ) {
-    return Math.log10(Number(value));
-  }
-  return logOf(value, (x) => x / Math.LN10);
 }
 
 export { argument, isTruthy };

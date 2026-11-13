@@ -115,7 +115,7 @@ export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
   define(
     'report',
     builtin('report', 'one', 1, 1, ([message]) => {
-      runtime.errorOutput += `${pyStr(message as PyValue)}\n`;
+      pyStr(message as PyValue);
       return None;
     })
   );

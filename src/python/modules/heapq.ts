@@ -1,21 +1,21 @@
 import { BUILTIN_DOC } from '../attributes';
-import { builtin } from '../define';
+import { moduleBuiltin } from '../define';
 import { registerModule, registerUnsupportedAttributes } from '../modules';
-import { argument, checkArgs } from '../nativeArgs';
-import { toIndex } from '../numbers';
-import { callValue, toArray } from '../objects';
+import { argument } from '../nativeArgs';
 import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { runModuleSource } from '../sourceModules';
-import { newList, None, pyError, typeError, typeName } from '../types';
-import { type Kwargs, PyList, type PyValue } from '../values';
+import { argumentTypeName, None, pyError, typeError } from '../types';
+import { PyList, type PyValue } from '../values';
+
+const builtin = moduleBuiltin('_heapq');
 
 /** The items of a heap argument, which argument clinic checks is a list, naming the function. */
 function heapOf(value: PyValue, name: string, onlyArgument: boolean): PyValue[] {
   if (!(value instanceof PyList)) {
-    throw typeError(`${name}() argument${onlyArgument ? '' : ' 1'} must be list, not ${typeName(value)}`);
+    throw typeError(`${name}() argument${onlyArgument ? '' : ' 1'} must be list, not ${argumentTypeName(value)}`);
   }
-  return value.items;
+  return value.editableItems;
 }
 
 type Less = (a: PyValue, b: PyValue) => boolean;
@@ -61,7 +61,7 @@ function siftUp(heap: PyValue[], position: number, less: Less = minLess): void {
 
 function heappush([heap, item]: PyValue[], less: Less = minLess): PyValue {
   const items = heapOf(heap, less === minLess ? 'heappush' : 'heappush_max', false);
-  items.push(item);
+  (heap as PyList).append(item);
   siftDown(items, 0, items.length - 1, less);
   return None;
 }
@@ -103,34 +103,131 @@ function heapreplace([heap, item]: PyValue[], less: Less = minLess): PyValue {
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows heapq.nsmallest and heapq.nlargest's shortcuts.
-function nSorted(largest: boolean): (args: PyValue[], kwargs: Kwargs) => PyValue {
-  return (args, kwargs) => {
-    checkArgs(
-      { qualified: largest ? 'nlargest' : 'nsmallest', min: 2, max: 2, style: 'takes', keywords: ['key'] },
-      args,
-      kwargs
-    );
-    const count = Number(toIndex(args[0]));
-    const key = kwargs?.get('key') ?? None;
-    const items = toArray(args[1]).map((item, index) => ({
-      item,
-      index,
-      key: key === None ? item : callValue(key, [item]),
-    }));
-    const sorted = items.toSorted((a, b) => {
-      const first = largest ? b : a;
-      const second = largest ? a : b;
-      if (lessThan(first.key, second.key)) return -1;
-      if (lessThan(second.key, first.key)) return 1;
-      return a.index - b.index;
-    });
-    return newList(sorted.slice(0, Math.max(0, count)).map((entry) => entry.item));
-  };
-}
+/** heapq.nsmallest, nlargest, and merge from CPython 3.14's Lib/heapq.py. */
+const HEAPQ_SOURCE = String.raw`def nsmallest(n, iterable, key=None):
+    """Find the n smallest elements in a dataset.
 
-/** `heapq.merge` from CPython's `heapq.py`. */
-const MERGE_SOURCE = String.raw`
+    Equivalent to:  sorted(iterable, key=key)[:n]
+    """
+
+    # Short-cut for n==1 is to use min()
+    if n == 1:
+        it = iter(iterable)
+        sentinel = object()
+        result = min(it, default=sentinel, key=key)
+        if result is sentinel:
+            return []
+        return [result]
+
+    # When n>=size, it's faster to use sorted()
+    try:
+        size = len(iterable)
+    except (TypeError, AttributeError):
+        pass
+    else:
+        if n >= size:
+            return sorted(iterable, key=key)[:n]
+
+    # When key is none, use simpler decoration
+    if key is None:
+        it = iter(iterable)
+        # put the range(n) first so that zip() doesn't
+        # consume one too many elements from the iterator
+        result = [(elem, i) for i, elem in zip(range(n), it)]
+        if not result:
+            return result
+        heapify_max(result)
+        top = result[0][0]
+        order = n
+        _heapreplace = heapreplace_max
+        for elem in it:
+            if elem < top:
+                _heapreplace(result, (elem, order))
+                top, _order = result[0]
+                order += 1
+        result.sort()
+        return [elem for (elem, order) in result]
+
+    # General case, slowest method
+    it = iter(iterable)
+    result = [(key(elem), i, elem) for i, elem in zip(range(n), it)]
+    if not result:
+        return result
+    heapify_max(result)
+    top = result[0][0]
+    order = n
+    _heapreplace = heapreplace_max
+    for elem in it:
+        k = key(elem)
+        if k < top:
+            _heapreplace(result, (k, order, elem))
+            top, _order, _elem = result[0]
+            order += 1
+    result.sort()
+    return [elem for (k, order, elem) in result]
+
+def nlargest(n, iterable, key=None):
+    """Find the n largest elements in a dataset.
+
+    Equivalent to:  sorted(iterable, key=key, reverse=True)[:n]
+    """
+
+    # Short-cut for n==1 is to use max()
+    if n == 1:
+        it = iter(iterable)
+        sentinel = object()
+        result = max(it, default=sentinel, key=key)
+        if result is sentinel:
+            return []
+        return [result]
+
+    # When n>=size, it's faster to use sorted()
+    try:
+        size = len(iterable)
+    except (TypeError, AttributeError):
+        pass
+    else:
+        if n >= size:
+            return sorted(iterable, key=key, reverse=True)[:n]
+
+    # When key is none, use simpler decoration
+    if key is None:
+        it = iter(iterable)
+        result = [(elem, i) for i, elem in zip(range(0, -n, -1), it)]
+        if not result:
+            return result
+        heapify(result)
+        top = result[0][0]
+        order = -n
+        _heapreplace = heapreplace
+        for elem in it:
+            if top < elem:
+                _heapreplace(result, (elem, order))
+                top, _order = result[0]
+                order -= 1
+        result.sort(reverse=True)
+        return [elem for (elem, order) in result]
+
+    # General case, slowest method
+    it = iter(iterable)
+    result = [(key(elem), i, elem) for i, elem in zip(range(0, -n, -1), it)]
+    if not result:
+        return result
+    heapify(result)
+    top = result[0][0]
+    order = -n
+    _heapreplace = heapreplace
+    for elem in it:
+        k = key(elem)
+        if top < k:
+            _heapreplace(result, (k, order, elem))
+            top, _order, _elem = result[0]
+            order -= 1
+    result.sort(reverse=True)
+    return [elem for (k, order, elem) in result]
+
+
+
 def merge(*iterables, key=None, reverse=False):
     '''Merge multiple sorted inputs into a single sorted output.
 
@@ -224,12 +321,10 @@ registerModule('heapq', (runtime, namespace) => {
     ['heapify_max', builtin('heapify_max', 'one', 1, 1, (args) => heapify(args, maxLess))],
     ['heappushpop_max', builtin('heappushpop_max', 'expected', 2, 2, (args) => heappushpop(args, maxLess))],
     ['heapreplace_max', builtin('heapreplace_max', 'expected', 2, 2, (args) => heapreplace(args, maxLess))],
-    ['nlargest', builtin('nlargest', 'takes', 2, 2, nSorted(true), { keywords: ['key'] })],
-    ['nsmallest', builtin('nsmallest', 'takes', 2, 2, nSorted(false), { keywords: ['key'] })],
   ] as [string, PyValue][]) {
     namespace.set(key, value);
   }
-  runModuleSource(runtime, namespace, MERGE_SOURCE);
+  runModuleSource(runtime, namespace, HEAPQ_SOURCE);
   return new Map();
 });
 
