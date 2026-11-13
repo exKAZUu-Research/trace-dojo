@@ -1658,3 +1658,65 @@ func main() {
       '<?xml version="1.0" encoding="UTF-8"?>\n <plant>\n   <Id>27</Id>\n   <Name>Coffee &amp; Tea</Name>\n   <Origin>Ethiopia</Origin>\n   <Origin>Brazil</Origin>\n </plant>\n<nil> plant 27 Coffee & Tea [Ethiopia Brazil]\nstrconv.ParseInt: parsing "x": invalid syntax\nxml.StartElement {{ a} [{{ x} 1}]}\nxml.Comment [99]\nxml.CharData [116 60]\nxml.StartElement {{ b} []}\nxml.EndElement {{ b}}\nxml.EndElement {{ a}}\nEOF\nxml: unsupported type: map[string]int\nXML syntax error on line 1: element <b> closed by </a>\n',
   });
 });
+
+// Go's compiler evaluates a statement's calls, and the other values its order pass copies, before the other operands.
+test('every statement orders its calls before the reads of its other operands as Go does', () => {
+  const program = String.raw`package main
+
+import "fmt"
+
+type S struct{ a, b int }
+
+func (s S) Sum(k int) int { return s.a + s.b + k }
+
+var x = 1
+var str = "a"
+var i any = 1
+var p = &S{1, 1}
+
+func f() int { x = 2; str = "bb"; i = 2; p = &S{2, 2}; return 9 }
+func reset() { x = 1; str = "a"; i = 1; p = &S{1, 1} }
+func g(a, b int) int { return a*10 + b }
+func r() (int, int) { return x, f() }
+func change(a *[1]int) [1]int { a[0] = 2; return [1]int{1} }
+
+func main() {
+	fmt.Println(x, f(), g(x, g(x, f())), p.Sum(f())); reset()
+	var a, b = x, f()
+	c, d := x, f()
+	fmt.Println(a, b, c, d); reset()
+	fmt.Println(r()); reset()
+	fmt.Println(x == 1 && x+f() == 11, x); reset()
+	fmt.Println(len(str), x == 1, S{x, 0}, map[int]int{0: x}, i.(int), []byte(str), f()); reset()
+	arr := [1]int{1}
+	switch arr {
+	case change(&arr):
+		fmt.Println("match")
+	}
+	defer fmt.Println(x, f())
+	reset()
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '2 9 49 13\n2 9 2 9\n2 9\ntrue 2\n1 true {1 0} map[0:1] 1 [97] 9\nmatch\n2 9\n',
+  });
+});
+
+test.each([
+  [
+    "append's first operand while a later one runs",
+    'func first() []*Turtle { return []*Turtle{NewTurtle()} }\nfunc arg() *Turtle { return NewTurtle(2, 0) }\nfunc main() { ts := append(first(), arg()); ts[0].Forward() }',
+    [
+      { x: 0, y: 1, color: '#', dir: 'N' },
+      { x: 2, y: 0, color: '#', dir: 'N' },
+    ],
+  ],
+  [
+    'an earlier package initializer while a later one runs',
+    'var a, ok = NewTurtle(0, 0), check()\nfunc check() bool { t := NewTurtle(3, 3); return t.CanMoveForward() }\nfunc main() { _ = ok; a.Forward() }',
+    [{ x: 0, y: 1, color: '#', dir: 'N' }],
+  ],
+])('a turtle stays reachable through %s', (_name, body, finalTurtles) => {
+  expect(executeProgram('go', `package main\n${body}`)).toMatchObject({ kind: 'executed', finalTurtles });
+});

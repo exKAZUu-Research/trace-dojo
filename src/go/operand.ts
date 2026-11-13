@@ -93,6 +93,8 @@ export interface Operand extends Storage {
    * rather than one of its calls.
    */
   ssaConstant?: SsaConstant;
+  /** How many values the statement's first pass evaluates before this expression's place (`hoistingCalls`). */
+  firstPass?: number;
   /** The variable a name refers to, for marking it used or assigned. */
   variable?: { markUsed(): void; entity?: VarEntity };
 }

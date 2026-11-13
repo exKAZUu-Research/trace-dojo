@@ -624,9 +624,15 @@ export function isComparable(type: Type, seen = new Set<Type>()): boolean {
 // Fields and methods ------------------------------------------------------------------------------------------------
 
 export type Selection =
-  | { kind: 'field'; path: number[]; type: Type; indirect: boolean }
+  /** `pkg` is the package of the named type declaring the field, or '' for a struct type that no type names. */
+  | { kind: 'field'; path: number[]; type: Type; indirect: boolean; pkg: string }
   | { kind: 'method'; path: number[]; method: Method; receiverBase: NamedType; indirect: boolean }
   | { kind: 'interfaceMethod'; path: number[]; method: InterfaceMethod; indirect: boolean };
+
+/** Whether a field is unexported and declared in a library package, which the program cannot refer to. */
+export function isForeignUnexported(name: string, pkg: string): boolean {
+  return pkg !== '' && pkg !== 'main' && !/^\p{Lu}/u.test(name);
+}
 
 export type LookupResult = Selection | { kind: 'ambiguous' } | { kind: 'notFound' };
 
@@ -635,6 +641,7 @@ interface EmbeddedEntry {
   path: number[];
   indirect: boolean;
   multiples: boolean;
+  pkg: string;
 }
 
 /**
@@ -654,7 +661,7 @@ export function lookupFieldOrMethod(type: Type, name: string): LookupResult {
     indirect = true;
     if (start.kind === 'typeParam' || underlying(start).kind === 'interface') return { kind: 'notFound' };
   }
-  let current: EmbeddedEntry[] = [{ type: start, path: [], indirect, multiples: false }];
+  let current: EmbeddedEntry[] = [{ type: start, path: [], indirect, multiples: false, pkg: '' }];
   const seen = new Set<string>();
   while (current.length > 0) {
     let found: Selection | undefined;
@@ -675,10 +682,11 @@ export function lookupFieldOrMethod(type: Type, name: string): LookupResult {
       }
       const under = underlying(entryType);
       if (under.kind === 'struct') {
+        const pkg = entryType.kind === 'named' ? entryType.pkg : entry.pkg;
         for (const [index, field] of under.fields.entries()) {
           if (field.name === name) {
             if (found || entry.multiples) return { kind: 'ambiguous' };
-            found = { kind: 'field', path: [...entry.path, index], type: field.type, indirect: entry.indirect };
+            found = { kind: 'field', path: [...entry.path, index], type: field.type, indirect: entry.indirect, pkg };
           } else if (!found && field.embedded) {
             const embedded = field.type.kind === 'pointer' ? field.type.element : field.type;
             next.push({
@@ -686,6 +694,7 @@ export function lookupFieldOrMethod(type: Type, name: string): LookupResult {
               path: [...entry.path, index],
               indirect: entry.indirect || field.type.kind === 'pointer',
               multiples: entry.multiples,
+              pkg,
             });
           }
         }

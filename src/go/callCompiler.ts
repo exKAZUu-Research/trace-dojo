@@ -61,7 +61,7 @@ import {
 import { Cell, Complex, copyValue, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
 
 /** Builtins whose call has a value that a statement must use, as Go reports `len(s) (value) is not used`. */
-const VALUE_BUILTINS = new Set([
+export const VALUE_BUILTINS = new Set([
   'append',
   'cap',
   'complex',
@@ -228,6 +228,13 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   private spreadArguments(span: Span, call: Operand, signature: FuncType, name: string): ListEval | undefined {
+    const { parts, spread } = this.spreadResults(call);
+    const args = this.listArguments(span, parts, signature, name);
+    return args && spread(args);
+  }
+
+  /** The results of a call with several results as operands, which `spread` lets the arguments read. */
+  private spreadResults(call: Operand): { parts: Operand[]; spread: (args: ListEval) => ListEval } {
     const types = (call.type as { types: Type[] }).types;
     // The conversions of the results call no code of the program, so one holder serves every call.
     let results: Value[] = [];
@@ -237,17 +244,18 @@ export abstract class CallCompiler extends CompositeCompiler {
       span: call.span,
       eval: () => results[index],
     }));
-    const args = this.listArguments(span, parts, signature, name);
-    if (!args) return undefined;
     const read = call.eval;
-    return (frame) => {
-      results = read(frame) as unknown as Value[];
-      frame.temporaries.push(results);
-      try {
-        return args(frame);
-      } finally {
-        frame.temporaries.pop();
-      }
+    return {
+      parts,
+      spread: (args) => (frame) => {
+        results = read(frame) as unknown as Value[];
+        frame.temporaries.push(results);
+        try {
+          return args(frame);
+        } finally {
+          frame.temporaries.pop();
+        }
+      },
     };
   }
 
@@ -298,7 +306,11 @@ export abstract class CallCompiler extends CompositeCompiler {
     entity: FuncEntity
   ): { instance: GoFunc | undefined; args: ListEval; results: Type[] } | undefined {
     const generic = entity.generic as GenericFunc;
-    const operands = expression.args.map((arg) => this.expression(arg));
+    let operands = expression.args.map((arg) => this.expression(arg));
+    let spread: ((args: ListEval) => ListEval) | undefined;
+    if (operands.length === 1 && operands[0].type.kind === 'tuple') {
+      ({ parts: operands, spread } = this.spreadResults(operands[0]));
+    }
     const mapping = this.inferTypeArguments(expression, generic, operands);
     if (!mapping) return undefined;
     const typeArgs = generic.typeParams.map((param) => mapping.get(param.id) as Type);
@@ -307,8 +319,9 @@ export abstract class CallCompiler extends CompositeCompiler {
     const signature = substitute(generic.type, mapping, (named, args) =>
       this.instantiateNamed(named, args)
     ) as FuncType;
-    const args = this.listArguments(expression, operands, signature, entity.name);
-    if (!args) return undefined;
+    const listed = this.listArguments(expression, operands, signature, entity.name);
+    if (!listed) return undefined;
+    const args = spread ? spread(listed) : listed;
     if (typeArgs.some((arg) => containsTypeParam(arg))) {
       return { instance: undefined, args, results: signature.results };
     }
@@ -512,7 +525,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   // Builtins --------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per builtin function.
-  private builtin(expression: Extract<Expression, { kind: 'call' }>, name: string): Operand {
+  protected builtin(expression: Extract<Expression, { kind: 'call' }>, name: string): Operand {
     const { args } = expression;
     const count = (min: number, max = min): boolean => {
       if (args.length >= min && args.length <= max) return true;

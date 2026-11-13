@@ -415,16 +415,24 @@ export abstract class CompilerBase {
           continue;
         }
         name = base.name;
-        const under = type.kind === 'pointer' ? type.element : type;
-        if (field.type.kind === 'pointer' && under.kind === 'named' && underlying(under).kind === 'pointer') {
-          this.error(field, '埋め込むフィールドに、ポインタの型へのポインタは使えません。');
-        }
+        this.checkEmbeddedType(field, type);
       }
       if (name !== '_' && names.has(name)) this.error(field, `フィールド ${name} が2回宣言されています。`);
       names.add(name);
       fields.push({ name, type, embedded: field.name === undefined });
     }
     return { kind: 'struct', fields };
+  }
+
+  /** Go embeds a type or a pointer to one, but neither a pointer type nor a pointer to an interface. */
+  private checkEmbeddedType(field: Span, type: Type): void {
+    const isPointer = type.kind === 'pointer';
+    const under = underlying(isPointer ? type.element : type);
+    if (under.kind === 'pointer') {
+      this.error(field, '埋め込むフィールドの型には、ポインタの型を使えません。');
+    } else if (under.kind === 'interface' && isPointer) {
+      this.error(field, '埋め込むフィールドの型には、インターフェースへのポインタを使えません。');
+    }
   }
 
   private resolveInterface(syntax: Extract<TypeExpression, { kind: 'interface' }>): InterfaceType {

@@ -72,6 +72,50 @@ function layoutOf(type: Type): { size: number; align: number } {
   }
 }
 
+/** Whether an interface holds a value of the type itself rather than a pointer to a copy (types.IsDirectIface). */
+export function isPointerShaped(type: Type): boolean {
+  const under = underlying(type);
+  switch (under.kind) {
+    case 'pointer':
+    case 'map':
+    case 'func': {
+      return true;
+    }
+    case 'array': {
+      return under.length === 1 && isPointerShaped(under.element);
+    }
+    case 'struct': {
+      return under.fields.length === 1 && isPointerShaped(under.fields[0].type);
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/**
+ * Whether Go's compiler passes the address of a value of the type to the runtime function converting it to an
+ * interface, rather than the value itself (walk.dataWordFuncName).
+ */
+export function boxesByAddress(type: Type): boolean {
+  const { size, align } = layoutOf(type);
+  if ((size === 2 || size === 4 || size === 8) && align === size) return false;
+  const sole = soleComponent(type);
+  return !sole || (underlying(sole).kind !== 'slice' && !isBasicString(sole));
+}
+
+function soleComponent(type: Type): Type | undefined {
+  const under = underlying(type);
+  if (under.kind === 'struct') return under.fields.length === 1 ? soleComponent(under.fields[0].type) : undefined;
+  if (under.kind === 'array') return under.length === 1 ? soleComponent(under.element) : undefined;
+  return type;
+}
+
+function isBasicString(type: Type): boolean {
+  const under = underlying(type);
+  return under.kind === 'basic' && under.basic === 'string';
+}
+
 /** Whether values of the type hold pointers, which decides whether Go's allocator adds a header to large objects. */
 export function hasPointers(type: Type): boolean {
   const under = underlying(type);

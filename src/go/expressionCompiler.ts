@@ -35,7 +35,7 @@ import type { Operand, SsaConstant, Storage } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
 import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
-import { moveToHeap, sizeOf } from './sliceOps';
+import { boxesByAddress, isPointerShaped, moveToHeap, sizeOf } from './sliceOps';
 import { sliceMode, type SliceTracking, type SliceUse } from './slicePass';
 import {
   BASIC,
@@ -51,6 +51,7 @@ import {
   isComparable,
   isComplex,
   isFloat,
+  isForeignUnexported,
   isInteger,
   isInterface,
   isNumeric,
@@ -97,19 +98,30 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return operand.type === BASIC.invalid;
   }
 
-  /** The values of the assignment being compiled that `hoistingCalls` evaluates first. */
-  private hoisted: { fn: FunctionContext | undefined; values: { slot: number; evaluate: Eval }[] } | undefined;
+  /**
+   * The values of the statement being compiled that `hoistingCalls` evaluates first, in the order of their keys, and
+   * the number of values that their own expressions put there so far.
+   */
+  private hoisted:
+    | { fn: FunctionContext | undefined; values: { slot: number; evaluate: Eval; key: number }[]; count: number }
+    | undefined;
 
   /**
-   * Compiles an assignment's operands so that their calls run first, in order, and the rest of the operands, the checks
-   * of the destinations, and the stores run after them, as Go's compiler orders an assignment. Besides calls, Go's
-   * compiler copies slice expressions, && and || expressions, and keys of maps without fast access to temporaries in
-   * that first pass (walk/order.go). The values wait in hidden slots, which garbage collection follows, until the
+   * Compiles a statement's expressions in Go's compiler's two passes (walk/order.go): the first evaluates the calls into
+   * temporaries, in order with each call after the calls among its operands, and the second the rest of the
+   * operands, such as variable reads, the checks of assignment destinations, and the stores. Besides calls, the first
+   * pass copies slice expressions, && and || expressions, type assertions to types that are not pointer-shaped, map
+   * literals, conversions of strings to byte or rune slices, keys of maps without fast access, and values that are
+   * not variables converted to interfaces through their addresses. The values wait in hidden slots, which garbage collection follows, until the
    * statement ends.
    */
-  protected hoistingCalls<T>(compile: () => T): { result: T; run: (frame: Frame, rest: () => void) => void } {
+  protected hoistingCalls<T>(compile: () => T): {
+    result: T;
+    run: (frame: Frame, rest: () => void) => void;
+    hoists: boolean;
+  } {
     const outer = this.hoisted;
-    const hoisted: NonNullable<typeof this.hoisted> = { fn: this.fn, values: [] };
+    const hoisted: NonNullable<typeof this.hoisted> = { fn: this.fn, values: [], count: 0 };
     this.hoisted = hoisted;
     let result: T;
     try {
@@ -117,10 +129,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     } finally {
       this.hoisted = outer;
     }
-    const { values } = hoisted;
-    if (values.length === 0) return { result, run: (_, rest) => rest() };
+    if (hoisted.values.length === 0) return { result, run: (_, rest) => rest(), hoists: false };
+    const values = hoisted.values.toSorted((a, b) => a.key - b.key);
     return {
       result,
+      hoists: true,
       run: (frame, rest) => {
         try {
           for (const { slot, evaluate } of values) frame.locals[slot] = evaluate(frame) as Value;
@@ -132,33 +145,95 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  /** Evaluates a value in the first pass of the assignment being compiled, if any. */
-  private hoist(evaluate: Eval): Eval {
+  /**
+   * Evaluates a value in the first pass of the statement being compiled, if any: after the values already there, or
+   * where an operand compiled earlier stands, given by its `firstPass`.
+   */
+  private hoist(evaluate: Eval, firstPass?: number): Eval {
     const hoisted = this.hoisted;
     if (!hoisted || hoisted.fn !== this.fn) return evaluate;
     const slot = this.hiddenSlot();
-    hoisted.values.push({ slot, evaluate });
+    const key = firstPass === undefined ? hoisted.count++ : firstPass - 0.5;
+    hoisted.values.push({ slot, evaluate, key });
     return (frame) => frame.locals[slot] as Value;
   }
 
+  /** Converts a value to an interface, in the first pass where Go's compiler copies it to take its address. */
+  private boxing(value: Operand): Eval {
+    const box = toInterface(value.type);
+    const read = value.eval;
+    if (value.mode === 'constant') {
+      // Go's compiler places a converted constant in read-only data, shared by every evaluation.
+      const constantIface = box(read({} as Frame)) as Iface;
+      CONSTANT_IFACES.add(constantIface);
+      return () => constantIface;
+    }
+    const boxed: Eval = (frame) => box(read(frame));
+    if (value.mode === 'variable' || !boxesByAddress(value.type)) return boxed;
+    return this.hoist(boxed, value.firstPass);
+  }
+
+  /** Compiles a value whose calls run first when it is read, as Go's compiler orders the expression of a statement. */
+  protected orderedValue(expression: Expression): Operand {
+    const { result: operand, run, hoists } = this.hoistingCalls(() => this.value(expression));
+    if (!hoists) return operand;
+    const read = operand.eval;
+    return {
+      ...operand,
+      eval: (frame) => {
+        let value: Value;
+        run(frame, () => {
+          value = read(frame) as Value;
+        });
+        return value;
+      },
+    };
+  }
+
+  /** The arguments of a deferred builtin call, which `capture` makes read the values the defer statement took. */
+  protected deferredArguments: { args: ReadonlySet<Expression>; capture: (operand: Operand) => Operand } | undefined;
+
   expression(expression: Expression): Operand {
-    const isLogical = expression.kind === 'binary' && (expression.operator === '&&' || expression.operator === '||');
-    if (!this.hoisted || (expression.kind !== 'call' && expression.kind !== 'slice' && !isLogical)) {
-      return this.compileExpression(expression);
+    const deferred = this.deferredArguments;
+    if (deferred?.args.has(expression)) {
+      this.deferredArguments = undefined;
+      try {
+        return deferred.capture(this.expression(expression));
+      } finally {
+        this.deferredArguments = deferred;
+      }
     }
-    // A call's own operands run with the call, and the right operand of && or || only when it is needed.
     const hoisted = this.hoisted;
-    this.hoisted = undefined;
-    let tracked: { result: Operand; hasRuntimeCall: boolean };
-    try {
-      tracked = this.withRuntimeCallTracking(() => this.compileExpression(expression));
-    } finally {
-      this.hoisted = hoisted;
+    if (!hoisted || hoisted.fn !== this.fn) return this.compileExpression(expression);
+    const tracked = this.withRuntimeCallTracking(() => this.compileExpression(expression));
+    let operand = tracked.result;
+    if (operand.mode === 'value' && !this.isInvalid(operand) && this.copiedInFirstPass(expression, operand)) {
+      operand = { ...operand, eval: this.hoist(operand.eval) };
     }
-    const operand = tracked.result;
-    if (operand.mode !== 'value' || this.isInvalid(operand)) return operand;
-    if (expression.kind === 'call' && !tracked.hasRuntimeCall) return operand;
-    return { ...operand, eval: this.hoist(operand.eval) };
+    return { ...operand, firstPass: hoisted.count };
+  }
+
+  private copiedInFirstPass(expression: Expression, operand: Operand): boolean {
+    switch (expression.kind) {
+      case 'call': {
+        return operand.isCall === true;
+      }
+      case 'slice': {
+        return true;
+      }
+      case 'binary': {
+        return expression.operator === '&&' || expression.operator === '||';
+      }
+      case 'typeAssert': {
+        return !isPointerShaped(operand.type);
+      }
+      case 'composite': {
+        return underlying(operand.type).kind === 'map';
+      }
+      default: {
+        return false;
+      }
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per expression kind.
@@ -578,17 +653,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       );
       return () => {};
     }
-    if (isInterface(target) && !isInterface(value.type)) {
-      const box = toInterface(value.type);
-      const read = value.eval;
-      if (value.mode === 'constant') {
-        // Go's compiler places a converted constant in read-only data, shared by every evaluation.
-        const constantIface = box(read({} as Frame)) as Iface;
-        CONSTANT_IFACES.add(constantIface);
-        return () => constantIface;
-      }
-      return (frame) => box(read(frame));
-    }
+    if (isInterface(target) && !isInterface(value.type)) return this.boxing(value);
     if (isValueType(target)) {
       const read = value.eval;
       return (frame) => copyValue(read(frame));
@@ -858,6 +923,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // code-gauge-allow functionCognitiveComplexity 50 -- The binary operators and their type rules, one at a time.
   private binary(expression: Extract<Expression, { kind: 'binary' }>): Operand {
+    if (expression.operator === '&&' || expression.operator === '||') {
+      // Each operand orders its own calls, as the right one runs only when it is needed.
+      return this.binaryOfOperands(
+        expression,
+        expression.operator,
+        this.orderedValue(expression.left),
+        this.orderedValue(expression.right)
+      );
+    }
     return this.binaryOfOperands(
       expression,
       expression.operator,
@@ -1157,16 +1231,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     if (!ordered && !isNil(left) && !isNil(right) && !isComparable(type)) {
-      const under = underlying(type);
-      const what =
-        under.kind === 'slice'
-          ? 'スライス'
-          : under.kind === 'map'
-            ? 'map'
-            : under.kind === 'func'
-              ? '関数'
-              : `${describeType(type)} 型の値`;
-      this.error(expression, `${what}は nil としか比べられません。`);
+      this.error(expression, incomparableMessage(type));
       return this.invalid(expression);
     }
     if (left.mode === 'constant' && right.mode === 'constant' && left.constant && right.constant) {
@@ -1243,7 +1308,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     if (
       !isInteger(right.type) &&
-      !(right.mode === 'constant' && right.constant && exactInteger(right.constant) !== undefined)
+      !(
+        right.mode === 'constant' &&
+        right.constant &&
+        // Go's type checker shifts two constants before it checks the count's type.
+        (isUntyped(right.type) || left.mode === 'constant') &&
+        exactInteger(right.constant) !== undefined
+      )
     ) {
       this.error(expression.right, `シフトする量には整数を書いてください。`);
       return this.invalid(expression);
@@ -1429,6 +1500,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(span, `${field} は埋め込んだ複数の型にあるので、どれか決められません。`);
       return this.invalid(span);
     }
+    if (selection.kind === 'field' && isForeignUnexported(field, selection.pkg)) {
+      this.error(
+        span,
+        `${field} は ${selection.pkg} パッケージの外から使えないフィールドです（大文字で始まる名前だけを使えます）。`
+      );
+      return this.invalid(span);
+    }
     operand.variable?.markUsed();
     if (selection.kind !== 'field') {
       return { mode: 'method', type: NO_VALUE, span, eval: () => {}, method: { receiver: operand, selection } };
@@ -1555,7 +1633,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const read = operand.eval;
     return (frame) => {
       const value = read(frame) as bigint;
-      return value > 1n << 53n ? Number.MAX_SAFE_INTEGER : value < 0n ? -1 : Number(value);
+      // Beyond 2^53, any index is out of range, which only the panic message shows.
+      return value > 1n << 53n
+        ? Number.MAX_SAFE_INTEGER
+        : value < -(1n << 53n)
+          ? Number.MIN_SAFE_INTEGER
+          : Number(value);
     };
   }
 
@@ -1733,8 +1816,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const bounds = (frame: Frame, length: number, limit: number, limitName: string): [number, number] => {
       const from = low(frame);
       const to = high ? high(frame) : length;
-      if (to < 0 || to > limit) boundsPanic(`slice bounds out of range [:${to}] with ${limitName} ${limit}`);
-      if (from < 0 || from > to) boundsPanic(`slice bounds out of range [${from}:${to}]`);
+      // Go's runtime leaves out the other bound, and the length or capacity, for a negative bound.
+      if (to < 0) boundsPanic(`slice bounds out of range [:${to}]`);
+      if (to > limit) boundsPanic(`slice bounds out of range [:${to}] with ${limitName} ${limit}`);
+      if (from < 0) boundsPanic(`slice bounds out of range [${from}:]`);
+      if (from > to) boundsPanic(`slice bounds out of range [${from}:${to}]`);
       return [from, to];
     };
     if (isString(type) && type.kind === 'basic') {
@@ -1830,6 +1916,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const zero = this.zeroOf(target);
     const sourceName = typeString(operand.type);
     const targetName = typeString(target);
+    // Go's runtime names the asserted interface's type only when the target is concrete (assertE2I passes none).
+    const nilMessage = `${isInterface(target) ? 'interface' : sourceName} is nil, not ${targetName}`;
     const commaOk = (frame: Frame): [Value, boolean] => {
       const value = read(frame) as Iface | undefined;
       const result = value === undefined ? undefined : test(value);
@@ -1842,7 +1930,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       commaOk,
       eval: (frame) => {
         const value = read(frame) as Iface | undefined;
-        if (value === undefined) typeAssertionPanic(`interface is nil, not ${targetName}`);
+        if (value === undefined) typeAssertionPanic(nilMessage);
         const result = test(value);
         if (result !== undefined) return result.value;
         if (isInterface(target)) {
@@ -1996,12 +2084,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type: target,
         span,
         nonEscaping,
-        eval: (frame) => {
+        eval: this.hoist((frame) => {
           const convert = !staysLocal(nonEscaping, frame) ? heap : nonEscaping.written ? stack : exact;
           return convert(read(frame), frame.runtime);
-        },
+        }),
         ssaConstant: source.ssaConstant,
       };
+    }
+    if (isInterface(target) && !isInterface(source.type)) {
+      return { mode: 'value', type: target, span, eval: this.boxing(source), ssaConstant: source.ssaConstant };
     }
     const apply = conversion(source.type, target);
     const read = source.eval;
@@ -2041,6 +2132,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     return undefined;
   }
+}
+
+/** The error for comparing values of a type that is not comparable. */
+export function incomparableMessage(type: Type): string {
+  const under = underlying(type);
+  if (under.kind === 'slice') return 'スライスは nil としか比べられません。';
+  if (under.kind === 'map') return 'map は nil としか比べられません。';
+  if (under.kind === 'func') return '関数は nil としか比べられません。';
+  return `${describeType(type)} 型の値は、比べられないフィールドや要素を含むので比べられません。`;
 }
 
 function encodeRuneText(rune: number): string {

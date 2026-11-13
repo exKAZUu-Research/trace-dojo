@@ -9,6 +9,7 @@ import {
   coreType,
   defaultType,
   describeType,
+  isForeignUnexported,
   isInterface,
   isUntyped,
   lookupFieldOrMethod,
@@ -115,6 +116,14 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
           this.expression(element.value);
           continue;
         }
+        if (isForeignUnexported(element.key.name, selection.pkg)) {
+          this.error(
+            element.key,
+            `${element.key.name} は ${selection.pkg} パッケージの外から使えないフィールドです（大文字で始まる名前だけを使えます）。`
+          );
+          this.expression(element.value);
+          continue;
+        }
         if (selection.indirect) {
           this.error(
             element.key,
@@ -146,6 +155,13 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
           }
           this.expression(element.value);
           continue;
+        }
+        const fieldName = fields[index].name;
+        if (type.kind === 'named' && isForeignUnexported(fieldName, type.pkg)) {
+          this.error(
+            element,
+            `${fieldName} は ${type.pkg} パッケージの外から使えないフィールドなので、値を書けません。`
+          );
         }
         const value = this.element(element.value, fields[index].type, 'フィールド');
         // Go evaluates the value of a blank field for its effects but leaves the field zero.

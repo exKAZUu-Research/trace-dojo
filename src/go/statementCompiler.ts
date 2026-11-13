@@ -13,10 +13,10 @@ import {
   type TypeDeclaration,
   type VarDeclaration,
 } from './ast';
-import { CallCompiler } from './callCompiler';
+import { CallCompiler, VALUE_BUILTINS } from './callCompiler';
 import { type FunctionContext, linkEscapeSource, linkTemporary, markReturned, type VarEntity } from './entities';
 import { equalityOf } from './equality';
-import { describeMissingMethod } from './expressionCompiler';
+import { describeMissingMethod, incomparableMessage } from './expressionCompiler';
 import { runesOf } from './literals';
 import { dynamicMethod, invokeMethod, receiverFor } from './methods';
 import type { Operand } from './operand';
@@ -49,6 +49,7 @@ import {
   type FuncType,
   identical,
   isBoolean,
+  isComparable,
   isFloat,
   isInteger,
   isInterface,
@@ -205,7 +206,7 @@ export abstract class StatementCompiler extends CallCompiler {
   protected simpleStatement(statement: SimpleStatement): Exec {
     switch (statement.kind) {
       case 'expression': {
-        const operand = this.expression(statement.expression);
+        const { result: operand, run } = this.hoistingCalls(() => this.expression(statement.expression));
         if (this.isInvalid(operand)) return () => {};
         if (!operand.isCall || (operand as { pureValue?: boolean }).pureValue) {
           if (operand.mode === 'type')
@@ -217,7 +218,7 @@ export abstract class StatementCompiler extends CallCompiler {
         return this.withStep(
           statement,
           (frame) => {
-            read(frame);
+            run(frame, () => void read(frame));
             return;
           },
           true
@@ -552,17 +553,19 @@ export abstract class StatementCompiler extends CallCompiler {
       if (current?.kind === 'var') return current;
       return this.discardTarget(span);
     });
-    const values = this.rightSide(
-      statement,
-      right,
-      left.length,
-      (index) => {
-        const entity = existing[index];
-        return entity?.kind === 'var' ? entity.type : undefined;
-      },
-      types,
-      compiled,
-      (index) => holders[index]
+    const { result: values, run } = this.hoistingCalls(() =>
+      this.rightSide(
+        statement,
+        right,
+        left.length,
+        (index) => {
+          const entity = existing[index];
+          return entity?.kind === 'var' ? entity.type : undefined;
+        },
+        types,
+        compiled,
+        (index) => holders[index]
+      )
     );
     if (!values) {
       for (const [index, { name, span }] of names.entries())
@@ -592,9 +595,11 @@ export abstract class StatementCompiler extends CallCompiler {
       return (frame) => (value) => declareValue(frame, variable, value);
     });
     const exec: Exec = (frame) => {
-      const writers = prepares.map((prepare) => prepare(frame));
-      const evaluated = evaluateAll(frame, values);
-      for (const [index, write] of writers.entries()) write(evaluated[index]);
+      run(frame, () => {
+        const writers = prepares.map((prepare) => prepare(frame));
+        const evaluated = evaluateAll(frame, values);
+        for (const [index, write] of writers.entries()) write(evaluated[index]);
+      });
       return;
     };
     const createsObjects = right.length === left.length && right.every((value) => this.createsObject(value));
@@ -643,14 +648,16 @@ export abstract class StatementCompiler extends CallCompiler {
       const holders = spec.names.map((name): VarEntity | 'discard' =>
         name.name === '_' ? 'discard' : this.discardTarget(name)
       );
-      const values = this.rightSide(
-        spec,
-        spec.values,
-        spec.names.length,
-        () => declaredType,
-        types,
-        compiled,
-        (index) => holders[index]
+      const { result: values, run } = this.hoistingCalls(() =>
+        this.rightSide(
+          spec,
+          spec.values,
+          spec.names.length,
+          () => declaredType,
+          types,
+          compiled,
+          (index) => holders[index]
+        )
       );
       const variables = spec.names.map((name, index) => {
         const type = declaredType ?? types[index] ?? BASIC.invalid;
@@ -664,8 +671,10 @@ export abstract class StatementCompiler extends CallCompiler {
       });
       if (!values) continue;
       const exec: Exec = (frame) => {
-        const evaluated = evaluateAll(frame, values);
-        for (const [index, variable] of variables.entries()) declareValue(frame, variable, evaluated[index]);
+        run(frame, () => {
+          const evaluated = evaluateAll(frame, values);
+          for (const [index, variable] of variables.entries()) declareValue(frame, variable, evaluated[index]);
+        });
         return;
       };
       parts.push(
@@ -685,7 +694,7 @@ export abstract class StatementCompiler extends CallCompiler {
   // Control flow ----------------------------------------------------------------------------------------------------
 
   protected condition(expression: Expression, statement: string): Eval {
-    const operand = this.value(expression);
+    const operand = this.orderedValue(expression);
     if (this.isInvalid(operand)) return () => false;
     if (!isBoolean(operand.type)) {
       this.error(
@@ -781,7 +790,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private rangeStatement(statement: Extract<Statement, { kind: 'range' }>): Exec {
-    const { result: ranged, hasRuntimeCall } = this.withRuntimeCallTracking(() => this.value(statement.range));
+    const { result: ranged, hasRuntimeCall } = this.withRuntimeCallTracking(() => this.orderedValue(statement.range));
     // The loop keeps the slice's array, which lets it be shared.
     const range = this.sliceTransition(statement.range, ranged);
     const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range, hasRuntimeCall);
@@ -935,7 +944,7 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- Expression switches with Go's rules for duplicates and fallthrough.
   private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
-    let tag = statement.tag ? this.value(statement.tag) : undefined;
+    let tag = statement.tag ? this.orderedValue(statement.tag) : undefined;
     if (tag && !this.isInvalid(tag)) tag = this.defaulted(tag);
     const tagType = tag && !this.isInvalid(tag) ? tag.type : statement.tag ? BASIC.invalid : BASIC.bool;
     const defaults = statement.cases.filter((switchCase) => !switchCase.values);
@@ -958,7 +967,12 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       return { tests, body, fallsThrough, isDefault: !switchCase.values };
     });
-    const readTag = tag && !this.isInvalid(tag) ? tag.eval : () => true;
+    let readTag: Eval = alwaysTrue;
+    if (tag && !this.isInvalid(tag)) {
+      const read = tag.eval;
+      // A case may change the tag's variable, so an array or a struct tag is copied first.
+      readTag = isValueKind(tag.type) ? (frame) => copyValue(read(frame)) : read;
+    }
     return (frame) => {
       init?.(frame);
       const value = readTag(frame);
@@ -982,7 +996,8 @@ export abstract class StatementCompiler extends CallCompiler {
     tagType: Type,
     seen: Map<string, Span>
   ): (frame: Frame, value: Value) => boolean {
-    let operand = this.value(expression);
+    let operand = this.orderedValue(expression);
+    const rawType = operand.type;
     if (this.isInvalid(operand) || tagType === BASIC.invalid) return () => false;
     if (!tag) {
       if (operand.resolveUntyped) {
@@ -1038,6 +1053,11 @@ export abstract class StatementCompiler extends CallCompiler {
       );
       return () => false;
     }
+    const incomparable = [operand.type, tagType].find((type) => !isComparable(type));
+    if (incomparable && rawType !== BASIC.untypedNil) {
+      this.error(expression, incomparableMessage(incomparable));
+      return () => false;
+    }
     if (operand.mode === 'constant' && operand.constant) {
       const key = constantIdentityKey(operand.constant, concreteType);
       const previous = seen.get(key);
@@ -1067,7 +1087,7 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- Type switches with their bound variable per clause.
   private typeSwitchStatement(statement: Extract<Statement, { kind: 'typeSwitch' }>): Exec {
     const init = statement.init ? this.simpleStatement(statement.init) : undefined;
-    const operand = this.value(statement.operand);
+    const operand = this.orderedValue(statement.operand);
     const valid = !this.isInvalid(operand);
     if (valid && !isInterface(operand.type)) {
       this.error(
@@ -1198,24 +1218,28 @@ export abstract class StatementCompiler extends CallCompiler {
       return () => RETURN;
     }
     const holder = (fn.resultHolder ??= this.resultHolder());
-    const values = this.rightSide(
-      statement,
-      statement.results,
-      results.length,
-      (index) => results[index],
-      undefined,
-      undefined,
-      () => holder
+    const { result: values, run } = this.hoistingCalls(() =>
+      this.rightSide(
+        statement,
+        statement.results,
+        results.length,
+        (index) => results[index],
+        undefined,
+        undefined,
+        () => holder
+      )
     );
     if (!values) return () => RETURN;
     const slots = fn.info.resultSlots;
     return (frame) => {
-      const evaluated = evaluateAll(frame, values);
-      for (const [index, slot] of slots.entries()) {
-        const current = frame.locals[slot];
-        if (current instanceof Cell) current.v = writeInPlace(current.v, evaluated[index]);
-        else frame.locals[slot] = writeInPlace(current as Value, evaluated[index]);
-      }
+      run(frame, () => {
+        const evaluated = evaluateAll(frame, values);
+        for (const [index, slot] of slots.entries()) {
+          const current = frame.locals[slot];
+          if (current instanceof Cell) current.v = writeInPlace(current.v, evaluated[index]);
+          else frame.locals[slot] = writeInPlace(current as Value, evaluated[index]);
+        }
+      });
       return RETURN;
     };
   }
@@ -1249,8 +1273,17 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Deferred calls of functions, generic functions, methods, and builtins.
   private deferStatement(statement: Extract<Statement, { kind: 'defer' }>): Exec {
+    const { result: exec, run, hoists } = this.hoistingCalls(() => this.deferredCall(statement));
+    if (!hoists) return exec;
+    return (frame) => {
+      run(frame, () => void exec(frame));
+      return;
+    };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 30 -- Deferred calls of functions, generic functions, methods, and builtins.
+  private deferredCall(statement: Extract<Statement, { kind: 'defer' }>): Exec {
     (this.fn as FunctionContext).notInlinable = true;
     const call = stripParens(statement.call);
     if (call.kind !== 'call') {
@@ -1386,9 +1419,50 @@ export abstract class StatementCompiler extends CallCompiler {
         return;
       };
     }
-    for (const arg of call.args) this.expression(arg);
-    this.unsupported(statement, `defer での ${name} の呼び出し`);
-    return () => {};
+    if (name === 'close') {
+      for (const arg of call.args) this.expression(arg);
+      this.unsupported(statement, `defer での ${name} の呼び出し`);
+      return () => {};
+    }
+    return this.deferBuiltinStatement(call, name);
+  }
+
+  /** A deferred builtin such as delete, clear, or copy, whose arguments the defer statement evaluates. */
+  private deferBuiltinStatement(call: Extract<Expression, { kind: 'call' }>, name: string): Exec {
+    const evaluates: Eval[] = [];
+    let current: Value[] = [];
+    this.deferredArguments = {
+      args: new Set(call.args),
+      capture: (operand) => {
+        const index = evaluates.length;
+        evaluates.push(operand.eval);
+        return { ...operand, eval: () => current[index] };
+      },
+    };
+    let operand: Operand;
+    try {
+      operand = this.builtin(call, name);
+    } finally {
+      this.deferredArguments = undefined;
+    }
+    if (this.isInvalid(operand)) return () => {};
+    if (VALUE_BUILTINS.has(name)) {
+      this.error(call, `defer では ${name} の結果を使えません。`);
+      return () => {};
+    }
+    const run = operand.eval;
+    return (frame) => {
+      const values = evaluateAll(frame, evaluates);
+      frame.runtime.defer(
+        frame,
+        () => {
+          current = values;
+          run(frame);
+        },
+        values
+      );
+      return;
+    };
   }
 
   // Functions -------------------------------------------------------------------------------------------------------
@@ -1663,6 +1737,10 @@ function isNumericType(type: Type): boolean {
     !['bool', 'string', 'untypedBool', 'untypedString', 'untypedNil', 'invalid'].includes(under.basic)
     ? true
     : type.kind === 'typeParam';
+}
+
+function alwaysTrue(): boolean {
+  return true;
 }
 
 function isValueKind(type: Type): boolean {
