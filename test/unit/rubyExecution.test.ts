@@ -2178,6 +2178,24 @@ test('puts follows Array mutations during element conversion', () => {
   });
 });
 
+test('putc passes original bytes to write-only stdout', () => {
+  expect(
+    run('class W;def write(s);$v<<s.bytes;end;end;$v=[];$stdout=W.new;putc 255;putc 233.chr;$stdout=STDOUT;p $v')
+  ).toMatchObject({
+    stdout: '[[255], [233]]\n',
+  });
+});
+
+test('print reads the current field separator after writer callbacks', () => {
+  expect(
+    run(
+      'class W;def write(x);$v<<x;$,="-" if x==1;end;end;$v=[];$,=":";$stdout=W.new;print 1,2,3;$stdout=STDOUT;$,=nil;p $v'
+    )
+  ).toMatchObject({
+    stdout: '[1, "-", 2, "-", 3]\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

@@ -7,7 +7,7 @@ import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { prettyInspect } from './prettyPrint';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { arr, classOf, realClassOf, str, stringBytes } from './values';
+import { arr, classOf, realClassOf, str, stringBytes, stringCharacters, stringFromBytes } from './values';
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
@@ -52,9 +52,9 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
 }
 
 function* writePrint(target: Value, args: Value[]): Gen<void> {
-  const field = rt().globals.get('$,') ?? NIL;
   const values = args.length > 0 ? args : [rt().frame.home.scope.vars.get('$_') ?? NIL];
   for (const [index, arg] of values.entries()) {
+    const field = rt().globals.get('$,') ?? NIL;
     if (index > 0 && field !== NIL) yield* write(target, field);
     yield* write(target, arg);
   }
@@ -177,10 +177,9 @@ def(
   { ...PRIVATE, keywords: true }
 );
 
-function* charOf(value: Value): Gen<string> {
-  if (value instanceof RString)
-    return value.s.slice(0, value.s.codePointAt(0) && value.s.codePointAt(0)! > 0xff_ff ? 2 : 1);
-  return String.fromCodePoint(Number((yield* toInt(value)) & 0xffn));
+function* charOf(value: Value): Gen<RString> {
+  if (value instanceof RString) return stringCharacters(value)[0] ?? str('');
+  return stringFromBytes(Uint8Array.of(Number((yield* toInt(value)) & 0xffn)), true);
 }
 
 // $stdout and $stderr ----------------------------------------------------------------------------------------------
