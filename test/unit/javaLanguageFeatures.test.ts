@@ -2052,3 +2052,24 @@ public class Main { static void t(String n, Supplier<Object> s) { try { System.o
       'ks java.lang.NullPointerException\nvs java.lang.NullPointerException\nksAll java.lang.NullPointerException\nuks java.lang.NullPointerException\nes false\nm1vs java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nm1ks java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nhks true true\nuhks true\ntm false\n',
   });
 });
+
+test("Java's sets remove the elements of a smaller collection one by one, as AbstractSet.removeAll does", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) {
+  Set<String> l = new LinkedHashSet<>(Arrays.asList(null, "keep", "remove")); t("lhs", () -> l.removeAll(List.of("remove")) + " " + l);
+  Set<String> h = new HashSet<>(Arrays.asList(null, "x")); t("hs", () -> h.removeAll(Set.of("x")) + " " + h);
+  Set<String> h2 = new HashSet<>(Arrays.asList(null, "x")); t("hsBig", () -> h2.removeAll(List.of("x", "y", "z")) + " " + h2);
+  Set<String> h3 = new HashSet<>(Arrays.asList(null, "x")); t("retain", () -> h3.retainAll(List.of("x")) + " " + h3);
+  List<String> al = new ArrayList<>(Arrays.asList(null, "x")); t("al", () -> al.removeAll(List.of("x")) + " " + al);
+  TreeSet<Integer> ts = new TreeSet<>(List.of(1, 2, 3)); t("ts", () -> ts.removeAll(List.of(2, 2)) + " " + ts);
+  Map<String, Integer> m = new HashMap<>(Map.of("a", 1, "b", 2, "c", 3)); t("ks", () -> m.keySet().removeAll(List.of("a")) + " " + m);
+  Set<Integer> s1 = new HashSet<>(List.of(1, 2, 3)); t("dupe", () -> s1.removeAll(List.of(4)) + " " + s1);
+  t("single", () -> Collections.singleton(1).removeAll(List.of()));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'lhs true [null, keep]\nhs true [null]\nhsBig java.lang.NullPointerException\nretain java.lang.NullPointerException\nal java.lang.NullPointerException\nts true [1, 3]\nks true {b=2, c=3}\ndupe false [1, 2, 3]\nsingle false\n',
+  });
+});

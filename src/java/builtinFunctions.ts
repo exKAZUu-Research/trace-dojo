@@ -696,7 +696,16 @@ function startBulkChange(frame: Frame, receiver: Value, fn: Value): void {
 
 /** `containsAll`, `removeAll`, and `retainAll`, which ask the other collection whether it contains each element. */
 function defineBulkOperations(collections: Collections): void {
-  const { collectionClass } = collections;
+  const { collectionClass, setClass } = collections;
+  const sizeOf = (frame: Frame, collection: Value): number =>
+    frame.runtime.invokeVirtual(frame, collectionClass, 'size', collection, []) as number;
+  const removeEach = (frame: Frame, receiver: Value, removed: readonly Value[]): boolean => {
+    let isChanged = false;
+    for (const item of removed) {
+      isChanged = frame.runtime.invokeVirtual(frame, collectionClass, 'remove', receiver, [item]) === true || isChanged;
+    }
+    return isChanged;
+  };
   const otherType = classType(collectionClass, { kind: 'wildcard', bound: undefined, isSuper: false });
   const contains = (frame: Frame, collection: Value, item: Value): boolean => {
     if (collection === undefined) return throwBuiltin(frame, 'NullPointerException');
@@ -712,7 +721,12 @@ function defineBulkOperations(collections: Collections): void {
     addMethod(collectionClass, name, [otherType], BOOLEAN, false, (frame, receiver, [other]) => {
       rejectEagerly(frame, receiver);
       if (other === undefined) throwBuiltin(frame, 'NullPointerException');
-      const removed = [...itemsOf(frame, receiver)].filter((item) => contains(frame, other, item) !== keepsContained);
+      const items = itemsOf(frame, receiver);
+      // AbstractSet.removeAll removes the other's elements one by one when this set is the larger.
+      if (!keepsContained && frame.runtime.isInstance(receiver, setClass) && items.length > sizeOf(frame, other)) {
+        return removeEach(frame, receiver, itemsOf(frame, other));
+      }
+      const removed = [...items].filter((item) => contains(frame, other, item) !== keepsContained);
       return removeAllOf(frame, receiver, removed);
     });
   }

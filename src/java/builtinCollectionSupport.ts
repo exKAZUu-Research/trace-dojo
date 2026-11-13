@@ -481,8 +481,11 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
   }
   addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
     const index = indexOf(frame, elementsOf(receiver), value);
-    if (index !== -1) removeElements(frame, receiver, (_, position) => position === index);
-    return index !== -1;
+    if (index === -1) return false;
+    // As AbstractCollection.remove does, it removes through the view's iterator.
+    checkRemovable(frame, receiver);
+    removeElements(frame, receiver, (_, position) => position === index);
+    return true;
   });
   addMethod(cls, 'clear', [], VOID, false, (frame, receiver) => {
     removeElements(frame, receiver, () => true);
