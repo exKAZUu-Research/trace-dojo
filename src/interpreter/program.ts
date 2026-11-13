@@ -1,3 +1,6 @@
+import { executeCProgram } from '../c/execute';
+import { findCTraceAnnotations } from '../c/parse';
+import { traceCProgram } from '../c/trace';
 import { executeJavaProgram } from '../java/execute';
 import { traceJavaProgram } from '../java/trace';
 import { findJavaScriptTraceAnnotations } from '../javascript/parse';
@@ -69,6 +72,7 @@ const interpreters = {
     record: traceRubyProgram,
     execute: executeRubyProgram,
   },
+  c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
 } satisfies Record<string, Interpreter>;
 
 /**
