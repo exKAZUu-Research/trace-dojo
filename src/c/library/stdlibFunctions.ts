@@ -74,7 +74,7 @@ function absolute(bits: 32 | 64): NativeFunction {
 function strtoInteger(bits: 32 | 64, signed: boolean, wide: boolean): NativeFunction {
   return (runtime, [text, end, base]) => {
     const bytes = readCString(runtime, asAddress(text));
-    const parsed = parseIntegerPrefix(bytes, asNumber(base));
+    const parsed = parseIntegerPrefix(bytes, asNumber(base), undefined, () => runtime.spend());
     if (parsed.length === 0) setErrno(runtime, ERROR_NUMBERS.EINVAL);
     let value = parsed.value;
     const min = signed ? -(1n << BigInt(bits - 1)) : 0n;
@@ -208,7 +208,7 @@ export const STDLIB_FUNCTIONS: Record<string, NativeFunction> = {
     const target = runtime.memory.findBase(result);
     if (target && copied > 0) {
       const snapshot = readRaw(runtime, block.base, copied);
-      writeBytes(runtime, result, snapshot.bytes, snapshot.initialized, snapshot.pointerRanges);
+      writeBytes(runtime, result, snapshot.bytes, snapshot.initialized, snapshot.pointerBytes);
     }
     free(runtime, address);
     return result;

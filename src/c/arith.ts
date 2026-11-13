@@ -1,6 +1,6 @@
 import type { BinaryOperator } from './ast';
 import { CRuntimeError, overflowError } from './errors';
-import type { PointerRanges } from './pointerBounds';
+import type { PointerBytes } from './pointerBounds';
 import { type CType, type FloatType, INT_PROPERTIES, type IntName, type IntType, typeName } from './types';
 
 /**
@@ -13,7 +13,7 @@ export type Scalar = number | bigint;
 export interface RecordValue {
   bytes: Uint8Array;
   initialized: Uint8Array;
-  pointerRanges?: PointerRanges;
+  pointerBytes?: PointerBytes;
 }
 
 export type Value = Scalar | RecordValue;

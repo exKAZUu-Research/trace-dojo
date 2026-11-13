@@ -1,6 +1,6 @@
 import type { RecordValue, Scalar, Value } from '../arith';
 import { CRuntimeError } from '../errors';
-import { type PointerRanges, replacePointerRanges, slicePointerRanges } from '../pointerBounds';
+import { type PointerBytes, replacePointerBytes, slicePointerBytes } from '../pointerBounds';
 import type { Runtime } from '../runtime';
 import { type CType, INT_PROPERTIES } from '../types';
 
@@ -41,7 +41,7 @@ export function readRaw(runtime: Runtime, address: number, size: number): Record
   const offset = address - block.base;
   runtime.spend(Math.ceil(size / 64));
   return {
-    pointerRanges: slicePointerRanges(block.pointerRanges, offset, size),
+    pointerBytes: slicePointerBytes(block.pointerBytes, offset, size),
     bytes: block.bytes.slice(offset, offset + size),
     initialized: block.initialized.slice(offset, offset + size),
   };
@@ -52,14 +52,14 @@ export function writeBytes(
   address: number,
   bytes: Uint8Array,
   initialized?: Uint8Array,
-  pointerRanges?: PointerRanges
+  pointerBytes?: PointerBytes
 ): void {
   if (bytes.length === 0) return;
   if (address === 0) throw new CRuntimeError('nullArgument');
   const block = runtime.memory.locate(address, bytes.length);
   if (block.isReadOnly) throw new CRuntimeError('readOnly');
   const offset = address - block.base;
-  replacePointerRanges(block.pointerRanges, offset, bytes.length, pointerRanges);
+  replacePointerBytes(block.pointerBytes, offset, bytes.length, pointerBytes);
   block.bytes.set(bytes, offset);
   if (initialized) block.initialized.set(initialized, offset);
   else block.initialized.fill(255, offset, offset + bytes.length);

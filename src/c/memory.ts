@@ -1,6 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CRuntimeError } from './errors';
-import type { PointerRanges } from './pointerBounds';
+import type { PointerBytes } from './pointerBounds';
 import type { CType } from './types';
 
 export type Region = 'text' | 'data' | 'heap' | 'stack';
@@ -11,7 +11,7 @@ export class Allocation {
   readonly view: DataView;
   /** Each set bit marks an initialized bit; record copies must retain partial bit-field initialization. */
   readonly initialized: Uint8Array;
-  readonly pointerRanges: PointerRanges = new Map();
+  readonly pointerBytes: PointerBytes = new Map();
   isAlive = true;
   isReadOnly = false;
   /** The declared type of a variable, which the trace uses to show what a pointer to it points to. */

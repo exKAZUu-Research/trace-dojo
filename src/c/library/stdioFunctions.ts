@@ -238,7 +238,7 @@ class Scanner {
   private integer(conversion: string, length: string, limit: number, suppress: boolean): Stop {
     const base =
       conversion === 'd' ? 10 : conversion === 'i' ? 0 : conversion === 'o' ? 8 : conversion === 'u' ? 10 : 16;
-    const parsed = parseIntegerPrefix(this.input.subarray(this.position), base, limit);
+    const parsed = parseIntegerPrefix(this.input.subarray(this.position), base, limit, () => this.runtime.spend());
     if (parsed.length === 0) return this.assigned;
     this.position += parsed.length;
     if (!suppress) {

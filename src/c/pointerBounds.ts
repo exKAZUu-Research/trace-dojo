@@ -13,19 +13,31 @@ export interface BoundedAddress {
 export type Address = number | BoundedAddress;
 
 export type PointerRange = Pick<BoundedAddress, 'start' | 'end'>;
-export type PointerRanges = Map<number, PointerRange>;
+interface PointerOrigin {
+  range: PointerRange;
+}
+interface PointerByte {
+  origin: PointerOrigin;
+  index: number;
+}
+export type PointerBytes = Map<number, PointerByte>;
 
-export type Evaluator = ((frame: Frame) => Value) & { pointer?: (frame: Frame) => Address };
+export type Evaluator = ((frame: Frame) => Value) & {
+  pointer?: (frame: Frame) => Address;
+  read?: (frame: Frame) => Evaluated;
+};
 
 export interface Evaluated {
   value: Value;
   range?: PointerRange;
+  bytes?: PointerBytes;
 }
 
 export function resultOperand(type: CType, execute: (frame: Frame) => Evaluated, bitWidth?: number): Operand {
   return {
     type,
     bitWidth,
+    read: execute,
     value: (frame) => execute(frame).value,
     pointer:
       type.kind === 'pointer'
@@ -38,9 +50,16 @@ export function resultOperand(type: CType, execute: (frame: Frame) => Evaluated,
 }
 
 export function evaluate(value: Evaluator, frame: Frame): Evaluated {
+  if (value.read) return value.read(frame);
   if (!value.pointer) return { value: value(frame) };
   const at = value.pointer(frame);
   return { value: addressOf(at), range: typeof at === 'number' ? undefined : { start: at.start, end: at.end } };
+}
+
+export function evaluatorOf(operand: Operand): Evaluator {
+  return operand.type.kind === 'pointer'
+    ? pointerEvaluator(operand)
+    : Object.assign((frame: Frame) => operand.value(frame), { read: operand.read });
 }
 
 export function pointerEvaluator(operand: Operand): Evaluator {
@@ -50,7 +69,15 @@ export function pointerEvaluator(operand: Operand): Evaluator {
       const address = operand.value(frame) as number;
       return operand.type.kind === 'pointer' ? boundPointer(frame, address, operand.type.to) : address;
     });
-  return Object.assign((frame: Frame) => operand.value(frame), { pointer });
+  const read =
+    operand.read &&
+    ((frame: Frame): Evaluated => {
+      const result = operand.read!(frame);
+      if (result.range || operand.type.kind !== 'pointer') return result;
+      const at = boundPointer(frame, result.value as number, operand.type.to);
+      return { ...result, range: typeof at === 'number' ? undefined : { start: at.start, end: at.end } };
+    });
+  return Object.assign((frame: Frame) => operand.value(frame), { pointer, read });
 }
 
 export function pointerAt(frame: Frame, address: number, element: CType, range?: PointerRange): Address {
@@ -101,20 +128,28 @@ function subobjectRange(
   return compatible(type, element, true) ? { start: base, end: base + sizeOf(type) } : undefined;
 }
 
-export function slicePointerRanges(ranges: PointerRanges | undefined, offset: number, size: number): PointerRanges {
+export function slicePointerBytes(bytes: PointerBytes | undefined, offset: number, size: number): PointerBytes {
   return new Map(
-    [...(ranges ?? [])]
-      .filter(([at]) => at >= offset && at + 8 <= offset + size)
-      .map(([at, range]) => [at - offset, range])
+    [...(bytes ?? [])].filter(([at]) => at >= offset && at < offset + size).map(([at, byte]) => [at - offset, byte])
   );
 }
 
-export function replacePointerRanges(
-  ranges: PointerRanges,
-  offset: number,
-  size: number,
-  source?: PointerRanges
-): void {
-  for (const at of ranges.keys()) if (at < offset + size && at + 8 > offset) ranges.delete(at);
-  for (const [at, range] of source ?? []) if (at >= 0 && at + 8 <= size) ranges.set(offset + at, range);
+export function replacePointerBytes(bytes: PointerBytes, offset: number, size: number, source?: PointerBytes): void {
+  for (const at of bytes.keys()) if (at >= offset && at < offset + size) bytes.delete(at);
+  for (const [at, byte] of source ?? []) if (at >= 0 && at < size) bytes.set(offset + at, byte);
+}
+
+export function pointerBytesOf(range: PointerRange): PointerBytes {
+  const origin = { range };
+  return new Map(Array.from({ length: 8 }, (_, index) => [index, { origin, index }]));
+}
+
+export function rangeOfBytes(bytes: PointerBytes | undefined, offset = 0): PointerRange | undefined {
+  const first = bytes?.get(offset);
+  if (!first || first.index !== 0) return;
+  for (let i = 1; i < 8; i++) {
+    const byte = bytes!.get(offset + i);
+    if (byte?.origin !== first.origin || byte.index !== i) return;
+  }
+  return first.origin.range;
 }

@@ -23,10 +23,13 @@ import {
   evaluate,
   type Evaluated,
   type Evaluator,
+  evaluatorOf,
   pointerAt,
   pointerEvaluator,
-  replacePointerRanges,
+  rangeOfBytes,
+  replacePointerBytes,
   resultOperand,
+  slicePointerBytes,
 } from './pointerBounds';
 import { type Frame, type FunctionInfo, loaderOf, loadRecord, storeRecord, storeValue } from './runtime';
 import {
@@ -98,12 +101,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return { address, start: address, end: address + (size ?? frame.runtime.memory.findBase(address)?.size ?? 0) };
       };
       if (operand.lvalue?.isRegister) this.error(expression.row, 'register を付けた配列のアドレスは使えません。');
-      return { ...operand, type: rvalueType(operand), pointer, arrayObject: true };
+      return { ...operand, type: rvalueType(operand), pointer, read: undefined, arrayObject: true };
     }
     return { ...operand, type: rvalueType(operand) };
   }
 
-  // code-gauge-allow functionNcss 54 -- One case per C expression kind; helpers already isolate the nontrivial forms.
+  // code-gauge-allow functionNcss 55 -- One case per C expression kind; helpers already isolate the nontrivial forms.
   expression(expression: Expression): Operand {
     const { row } = expression;
     switch (expression.kind) {
@@ -166,15 +169,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const left = this.rvalue(expression.left);
         const right = this.rvalue(expression.right);
         const leftEffect = left.effect ?? left.value;
-        const value = right.value;
-        return {
-          type: right.type,
-          value: (frame) => (leftEffect(frame), value(frame)),
-          pointer:
-            right.type.kind === 'pointer'
-              ? (frame) => (leftEffect(frame), pointerEvaluator(right).pointer!(frame))
-              : undefined,
-        };
+        return resultOperand(right.type, (frame) => {
+          leftEffect(frame);
+          return evaluate(evaluatorOf(right), frame);
+        });
       }
       case 'call': {
         return this.call(expression);
@@ -274,12 +272,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return {
           type: entity.type,
           value: load,
+          read: (frame) => ({
+            value: load(frame),
+            range: frame.scalarRanges.get(index),
+            bytes: frame.scalarBytes.get(index),
+          }),
           ...folded,
           pointer:
             entity.type.kind === 'pointer'
               ? (frame) => {
                   const address = load(frame) as number;
-                  const range = frame.pointerRanges.get(index);
+                  const range = frame.scalarRanges.get(index);
                   return range
                     ? { address, ...range }
                     : boundPointer(frame, address, (entity.type as Extract<CType, { kind: 'pointer' }>).to);
@@ -288,12 +291,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
           lvalue: {
             resolve: (frame) => ({
               load: () => load(frame),
-              range: () => frame.pointerRanges.get(index),
-              store: (value, range) => {
-                frame.slots[index] = value as Scalar;
-                if (range) frame.pointerRanges.set(index, range);
-                else frame.pointerRanges.delete(index);
-              },
+              range: () => frame.scalarRanges.get(index),
+              bytes: () => frame.scalarBytes.get(index),
+              store: (value, range, bytes) => frame.assign(index, { value, range, bytes }),
             }),
             local,
             isRegister: this.fn?.registerLocals.has(local) ?? false,
@@ -317,14 +317,22 @@ export abstract class ExpressionCompiler extends CompilerBase {
         load: () => loaderOf(type)(frame.runtime, at),
         range: () => {
           const block = frame.runtime.memory.locate(at, sizeOf(type));
-          return block.pointerRanges.get(at - block.base);
+          return rangeOfBytes(block.pointerBytes, at - block.base);
         },
-        store: (value, range) => storeValue(frame.runtime, at, type, value, range),
+        bytes: () => {
+          const block = frame.runtime.memory.locate(at, sizeOf(type));
+          return slicePointerBytes(block.pointerBytes, at - block.base, sizeOf(type));
+        },
+        store: (value, range, bytes) => storeValue(frame.runtime, at, type, value, range, bytes),
       };
     };
     return {
       type,
       value: (frame) => resolve(frame).load(),
+      read: (frame) => {
+        const location = resolve(frame);
+        return { value: location.load(), range: location.range?.(), bytes: location.bytes?.() };
+      },
       pointer:
         type.kind === 'pointer'
           ? (frame) => {
@@ -649,7 +657,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Assignment conversion, target resolution, and pointer provenance must share the cached right operand.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Assignment conversion, target resolution, and pointer provenance must share the cached right operand.
   private assignment(expression: Extract<Expression, { kind: 'assign' }>): Operand {
     const { row, operator } = expression;
     const target = this.expression(expression.left);
@@ -673,9 +681,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
         : evaluated.value;
       const range = calculate && type.kind === 'pointer' ? location.range?.() : evaluated.range;
       if (type.kind === 'pointer' && range) checkAddress({ address: result as number, ...range }, 0);
-      location.store(result, range);
+      const bytes = calculate ? undefined : evaluated.bytes;
+      location.store(result, range, bytes);
       if (lvalue.local) frame.live[lvalue.local.index] = true;
-      return { value: lvalue.isBitField ? location.load() : result, range };
+      return { value: lvalue.isBitField ? location.load() : result, range, bytes };
     };
     return resultOperand(type, execute, target.bitWidth);
   }
@@ -721,16 +730,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if ((type.kind === 'pointer' && source.kind === 'float') || (type.kind === 'float' && source.kind === 'pointer')) {
       this.error(row, `${typeName(source)} の値は ${typeName(type)} にキャストできません。`);
     }
-    const value = operand.value;
-    const convert = (frame: Frame): Value => convertScalar(value(frame) as Scalar, source, type);
+    const convert = this.converted(operand, type);
     const constant =
       operand.constant !== undefined && isArithmetic(type)
         ? convertedConstant(operand.constant, source, type)
         : undefined;
     const result: Operand = {
-      type,
-      value: convert,
-      pointer: type.kind === 'pointer' ? operand.pointer : undefined,
+      ...resultOperand(type, (frame) => evaluate(convert, frame)),
       ...(constant === undefined ? {} : { constant }),
       isAddressConstant: operand.isAddressConstant && type.kind === 'pointer',
     };
@@ -754,8 +760,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const whenTrue = this.rvalue(expression.consequent);
     const whenFalse = this.rvalue(expression.alternative);
     const type = this.conditionalType(whenTrue, whenFalse, row);
-    const a = type.kind === 'void' || type.kind === 'record' ? whenTrue.value : this.converted(whenTrue, type);
-    const b = type.kind === 'void' || type.kind === 'record' ? whenFalse.value : this.converted(whenFalse, type);
+    const a = this.converted(whenTrue, type);
+    const b = this.converted(whenFalse, type);
     const value = (frame: Frame): Value => (truth(frame) ? a(frame) : b(frame));
     if (condition.constant !== undefined) {
       const chosen = isZero(condition.constant) ? whenFalse : whenTrue;
@@ -763,17 +769,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return { type, value, constant: convertedConstant(chosen.constant, chosen.type, type) };
       }
     }
-    return {
-      type,
-      value,
-      pointer:
-        type.kind === 'pointer'
-          ? (frame) => {
-              const chosen = truth(frame) ? whenTrue : whenFalse;
-              return pointerEvaluator(chosen).pointer!(frame);
-            }
-          : undefined,
-    };
+    return resultOperand(type, (frame) => evaluate(truth(frame) ? a : b, frame));
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- C conditional expressions have distinct arithmetic, pointer, record, and void rules; retain the single type-selection dispatch.
@@ -861,13 +857,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const promoted = defaultPromotion(operand.type);
       if (promoted.kind === 'record' && !isComplete(promoted))
         this.error(argExpression.row, '中身が定義されていない型の値は渡せません。');
-      args.push(
-        promoted.kind === 'pointer'
-          ? pointerEvaluator(operand)
-          : promoted === operand.type
-            ? operand.value
-            : this.converted(operand, promoted)
-      );
+      args.push(this.converted(operand, promoted));
       argTypes.push(promoted);
     }
     return { args, argTypes };
@@ -894,7 +884,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         argTypes,
         row,
         undefined,
-        values.map((item) => item.range)
+        values
       );
     };
     const effect = (frame: Frame): void => {
@@ -904,21 +894,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (ret.kind === 'record' && !isComplete(ret))
       this.error(row, '中身が定義されていない型の値を返す関数は呼び出せません。');
     return {
-      type: ret,
-      value: (frame) => {
-        const result = invoke(frame);
-        if (result === undefined) throw new CRuntimeError('missingReturn');
-        return result;
-      },
-      pointer:
-        ret.kind === 'pointer'
-          ? (frame) => {
-              const address = invoke(frame);
-              if (address === undefined) throw new CRuntimeError('missingReturn');
-              const range = frame.runtime.returnRange;
-              return pointerAt(frame, address as number, ret.to, range);
-            }
-          : undefined,
+      ...resultOperand(ret, (frame) => {
+        const value = invoke(frame);
+        if (value === undefined) throw new CRuntimeError('missingReturn');
+        return { value, range: frame.runtime.returnRange, bytes: frame.runtime.returnBytes };
+      }),
       effect,
       isCall: true,
     };
@@ -1052,17 +1032,21 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** Converts an rvalue to a type, which the caller has checked it may be converted to. */
   converted(operand: Operand, type: CType): Evaluator {
     const from = operand.type;
-    if (type.kind === 'pointer' && from.kind === 'pointer') return pointerEvaluator(operand);
-    const value = operand.value;
-    if (from.kind === 'record' || type.kind === 'record' || type.kind === 'void') return value;
+    const original = evaluatorOf(operand);
+    if (from.kind === 'record' || type.kind === 'record' || type.kind === 'void') return original;
     if (operand.constant !== undefined && isScalar(type)) {
       const constant = convertedConstant(operand.constant, from, type);
       if (constant !== undefined) return () => constant;
     }
-    const sameInteger = from.kind === 'int' && type.kind === 'int' && from.name === type.name;
-    const sameFloat = from.kind === 'float' && type.kind === 'float' && from.name === type.name;
-    if (sameInteger || sameFloat) return value;
-    return (frame) => convertScalar(value(frame) as Scalar, from, type);
+    const read = (frame: Frame): Evaluated => {
+      const result = evaluate(original, frame);
+      const value = convertScalar(result.value as Scalar, from, type);
+      if (from.kind === 'float' || type.kind === 'float' || (type.kind === 'int' && type.name === 'bool'))
+        return { value };
+      const size = sizeOf(type);
+      return { value, range: size >= 8 ? result.range : undefined, bytes: slicePointerBytes(result.bytes, 0, size) };
+    };
+    return Object.assign((frame: Frame) => read(frame).value, { read });
   }
 
   /** Converts a value as assignment does, rejecting the conversions clang rejects. */
@@ -1272,7 +1256,7 @@ export function writeBits(record: RecordValue, offset: number, bitOffset: number
   const mask = ((1n << BigInt(width)) - 1n) << BigInt(bitOffset);
   let size = 0;
   while (size < 8 && offset + size < bytes.length && mask >> BigInt(size * 8) > 0n) size++;
-  if (record.pointerRanges) replacePointerRanges(record.pointerRanges, offset, size);
+  if (record.pointerBytes) replacePointerBytes(record.pointerBytes, offset, size);
   let raw = 0n;
   for (let index = size - 1; index >= 0; index--) raw = (raw << 8n) | BigInt(bytes[offset + index]);
   raw = (raw & ~mask) | ((BigInt(value) << BigInt(bitOffset)) & mask);

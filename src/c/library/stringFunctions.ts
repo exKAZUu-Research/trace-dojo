@@ -1,8 +1,8 @@
 import { convertScalar } from '../arith';
 import { CRuntimeError } from '../errors';
 import type { SpecialCall } from '../expressionCompiler';
-import type { NativeFunction, Runtime } from '../runtime';
-import { INT, SIZE_T } from '../types';
+import { loaderOf, type NativeFunction, type Runtime } from '../runtime';
+import { INT, SIZE_T, UCHAR } from '../types';
 import { errorMessage } from './appleErrno';
 import { asAddress, asNumber, asSize, cString, readBytes, readCString, readRaw, writeBytes } from './support';
 
@@ -201,13 +201,13 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
   memcpy: (runtime, [destination, source, count]) => {
     const n = asSize(count);
     checkOverlap(asAddress(destination), asAddress(source), n);
-    const { bytes, initialized, pointerRanges } = readRaw(runtime, asAddress(source), n);
-    writeBytes(runtime, asAddress(destination), bytes, initialized, pointerRanges);
+    const { bytes, initialized, pointerBytes } = readRaw(runtime, asAddress(source), n);
+    writeBytes(runtime, asAddress(destination), bytes, initialized, pointerBytes);
     return destination;
   },
   memmove: (runtime, [destination, source, count]) => {
-    const { bytes, initialized, pointerRanges } = readRaw(runtime, asAddress(source), asSize(count));
-    writeBytes(runtime, asAddress(destination), bytes, initialized, pointerRanges);
+    const { bytes, initialized, pointerBytes } = readRaw(runtime, asAddress(source), asSize(count));
+    writeBytes(runtime, asAddress(destination), bytes, initialized, pointerBytes);
     return destination;
   },
   memset: (runtime, [s, c, count]) => {
@@ -226,10 +226,10 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
   memchr: (runtime, [s, c, count]) => {
     const n = asSize(count);
     const target = asNumber(c) & 0xff;
-    const { bytes, initialized } = readRaw(runtime, asAddress(s), n);
+    const read = loaderOf(UCHAR);
     for (let index = 0; index < n; index++) {
-      if (initialized[index] !== 255) throw new CRuntimeError('uninitialized');
-      if (bytes[index] === target) return asAddress(s) + index;
+      if (index % 64 === 0) runtime.spend();
+      if (read(runtime, asAddress(s) + index) === target) return asAddress(s) + index;
     }
     return 0;
   },

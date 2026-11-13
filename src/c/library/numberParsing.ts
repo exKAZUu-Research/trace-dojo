@@ -12,14 +12,16 @@ function digitValue(byte: number): number {
 }
 
 /**
- * The integer at the start of a string as `strtol` reads it: the value with its sign, its magnitude, and how many
- * bytes it takes (0 when no digits follow the white space and sign).
+ * The integer prefix with its sign, magnitude and consumed length (0 when no digits follow the sign).
+ * Magnitudes beyond uint64 retain only an overflow sentinel while scanning continues to the end of the prefix.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Sign, base detection, and digit consumption share one input cursor; separating branches would distribute that state.
+// code-gauge-allow functionCognitiveComplexity 23 -- Sign, base detection, bounded accumulation and digit consumption share one input cursor; separating branches would distribute that state.
+// code-gauge-allow functionNcss 31 -- Prefix classification and the consumed-length result share the same scan cursor.
 export function parseIntegerPrefix(
   bytes: Uint8Array,
   requestedBase: number,
-  maxLength = Number.POSITIVE_INFINITY
+  maxLength = Number.POSITIVE_INFINITY,
+  spend?: () => void
 ): { value: bigint; magnitude: bigint; length: number } {
   const limit = Math.min(bytes.length, maxLength);
   let index = 0;
@@ -47,7 +49,8 @@ export function parseIntegerPrefix(
   let magnitude = 0n;
   const bigBase = BigInt(base);
   while (index < limit && digitValue(bytes[index]) < base) {
-    magnitude = magnitude * bigBase + BigInt(digitValue(bytes[index]));
+    if (index % 64 === 0) spend?.();
+    if (magnitude <= 0xff_ff_ff_ff_ff_ff_ff_ffn) magnitude = magnitude * bigBase + BigInt(digitValue(bytes[index]));
     index++;
   }
   if (index === start) return { value: 0n, magnitude: 0n, length: 0 };

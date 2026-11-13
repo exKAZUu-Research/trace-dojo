@@ -452,6 +452,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         const result = frame.runtime.fullExpression(() => evaluate(value, frame));
         frame.returnValue = result.value;
         frame.returnRange = result.range;
+        frame.returnBytes = result.bytes;
         return Completion.Return;
       },
       labels: NO_LABELS,

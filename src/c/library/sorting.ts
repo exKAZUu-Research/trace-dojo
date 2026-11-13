@@ -169,7 +169,7 @@ class QuickSort {
     const at = (index: number): number => start + (index - 1) * size;
     const copy = (destination: number, source: number): void => {
       const value = readRaw(runtime, source, size);
-      writeBytes(runtime, destination, value.bytes, value.initialized, value.pointerRanges);
+      writeBytes(runtime, destination, value.bytes, value.initialized, value.pointerBytes);
     };
     const temporary = runtime.allocate(size, 'heap');
     try {
@@ -215,7 +215,7 @@ class QuickSort {
     if (a === b) return;
     const first = readRaw(this.runtime, a, this.size);
     const second = readRaw(this.runtime, b, this.size);
-    writeBytes(this.runtime, a, second.bytes, second.initialized, second.pointerRanges);
-    writeBytes(this.runtime, b, first.bytes, first.initialized, first.pointerRanges);
+    writeBytes(this.runtime, a, second.bytes, second.initialized, second.pointerBytes);
+    writeBytes(this.runtime, b, first.bytes, first.initialized, first.pointerBytes);
   }
 }

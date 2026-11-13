@@ -924,3 +924,59 @@ extern int a[10000000];int main(void){printf("%zu\\n",sizeof a);}`;
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  'memcpy(&q,&p,4);memcpy((char*)&q+4,(char*)&p+4,4);',
+  'memmove(&q,&p,3);memmove((char*)&q+3,(char*)&p+3,5);',
+  'for(int i=0;i<8;i++)((unsigned char*)&q)[i]=((unsigned char*)&p)[i];',
+  'for(int i=0;i<8;i++){unsigned char b=((unsigned char*)&p)[i];((unsigned char*)&q)[i]=pass(b);}',
+  'uintptr_t n=(uintptr_t)p;q=(int*)n;',
+  'q=(int*)(uintptr_t)p;',
+  'struct N{uintptr_t n;};struct N n={(uintptr_t)p};struct N copy=n;q=(int*)identity(copy.n);',
+  'uintptr_t n=(uintptr_t)p;q=(int*)(1?n:0);',
+  'uintptr_t n=(uintptr_t)p;q=(int*)(0,n);',
+])('pointer identity survives representation copies and integer round trips: %s', (copy) => {
+  const source = `#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+unsigned char pass(unsigned char b){return b;}uintptr_t identity(uintptr_t n){return n;}
+int main(void){int a[2][2]={{1,2},{3,4}};int*p=a[0]+2;int*q;${copy}printf("%d\\n",*q);}`;
+  const result = executeProgram('c', source);
+  expect(result).toMatchObject({ kind: 'executed', stdout: '' });
+  expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+});
+
+test('copied pointer identities distinguish adjacent rows and preserve backward movement', () => {
+  const source = `#include <stdio.h>
+#include <stdint.h>
+int main(void){int a[2][2]={{1,2},{3,4}};int*p=a[0]+2;int*q=(int*)(uintptr_t)p;--q;int*r=(int*)(uintptr_t)a[1];printf("%d %d\\n",*q,*r);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '2 3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('memchr stops at a valid match before inaccessible or uninitialized trailing bytes', () => {
+  const source = `#include <stdio.h>
+#include <string.h>
+int main(void){char a[2]={1,2};char b[3];b[0]=7;printf("%ld %ld\\n",(char*)memchr(a,2,100)-a,(char*)memchr(b,7,3)-b);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('integer overflow scanning retains the end pointer with bounded arithmetic', () => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+int main(void){char a[300001];memset(a,57,300000);a[300000]=0;char*end;errno=0;long n=strtol(a,&end,10);printf("%ld %d %ld\\n",n,errno,end-a);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '9223372036854775807 34 300000\n',
+    uncaughtException: undefined,
+  });
+});

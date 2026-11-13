@@ -18,7 +18,7 @@ import { declaredName, findFunctionDeclarator } from './convert';
 import { isNullConstant, type SpecialCall, writeBits } from './expressionCompiler';
 import { decodeStringLiteral } from './literals';
 import { TURTLE_HEADER_NAME } from './parse';
-import { evaluate, type Evaluator, replacePointerRanges } from './pointerBounds';
+import { evaluate, type Evaluator, replacePointerBytes } from './pointerBounds';
 import {
   Completion,
   type Exec,
@@ -511,12 +511,11 @@ export class Compiler extends StatementCompiler {
               frame.live[index] = true;
               const block = frame.runtime.memory.find(frame.bases[index]);
               block?.initialized.fill(0);
-              block?.pointerRanges.clear();
+              block?.pointerBytes.clear();
             }
           : (frame) => {
               frame.live[index] = true;
-              frame.slots[index] = undefined;
-              frame.pointerRanges.delete(index);
+              frame.assign(index, undefined);
             },
         initializes: false,
       };
@@ -526,9 +525,7 @@ export class Compiler extends StatementCompiler {
       return {
         run: (frame) => {
           const result = evaluate(value, frame);
-          frame.slots[index] = result.value as number;
-          if (result.range) frame.pointerRanges.set(index, result.range);
-          else frame.pointerRanges.delete(index);
+          frame.assign(index, result);
           frame.live[index] = true;
         },
         initializes: true,
@@ -614,7 +611,7 @@ export class Compiler extends StatementCompiler {
       const value = this.convertForAssignment(operand, unqualified(type), 'initialization', expression.row);
       return (frame, address) => {
         const result = evaluate(value, frame);
-        storeValue(frame.runtime, address, unqualified(type), result.value, result.range);
+        storeValue(frame.runtime, address, unqualified(type), result.value, result.range, result.bytes);
       };
     }
     if (init.items.length === 0) unsupported(init.row, '空の { } による初期化');
@@ -628,7 +625,7 @@ export class Compiler extends StatementCompiler {
     return (frame, address) => {
       const block = frame.runtime.memory.locate(address, size);
       const offset = address - block.base;
-      replacePointerRanges(block.pointerRanges, offset, size);
+      replacePointerBytes(block.pointerBytes, offset, size);
       block.bytes.fill(0, offset, offset + size);
       block.initialized.fill(255, offset, offset + size);
       for (const { offset: at, write } of writes) write(frame, address + at);
@@ -645,7 +642,7 @@ export class Compiler extends StatementCompiler {
         return (frame, address) => {
           const block = frame.runtime.memory.locate(address, size);
           const offset = address - block.base;
-          replacePointerRanges(block.pointerRanges, offset, size);
+          replacePointerBytes(block.pointerBytes, offset, size);
           block.bytes.fill(0, offset, offset + size);
           block.initialized.fill(255, offset, offset + size);
           for (const { offset: at, write } of writes) write(frame, address + at);
@@ -734,7 +731,7 @@ export class Compiler extends StatementCompiler {
         offset,
         write: (frame, address) => {
           const result = evaluate(value, frame);
-          storeValue(frame.runtime, address, target, result.value, result.range);
+          storeValue(frame.runtime, address, target, result.value, result.range, result.bytes);
         },
       });
       return;
@@ -773,7 +770,7 @@ export class Compiler extends StatementCompiler {
       offset,
       write: (frame, address) => {
         const block = frame.runtime.memory.locate(address, copied.length);
-        replacePointerRanges(block.pointerRanges, address - block.base, copied.length);
+        replacePointerBytes(block.pointerBytes, address - block.base, copied.length);
         block.bytes.set(copied, address - block.base);
       },
     });
