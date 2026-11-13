@@ -127,3 +127,8 @@ export function isFloat(value: Value): value is number {
 export function isNumeric(value: Value): value is bigint | number {
   return typeof value === 'bigint' || typeof value === 'number';
 }
+
+/** A copy of what an iteration visits, for loops whose bodies may change the collection. */
+export function snapshot<T>(items: Iterable<T>): T[] {
+  return [...items];
+}

@@ -5,9 +5,9 @@ import { hashDelete, hashGet, hashKeyOf, hashSet } from './hashes';
 import { callBlock, type Gen } from './interp';
 import { iterate, toArray } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
-import { NIL, RHash, RObject, type Value } from './objects';
+import { NIL, type RHash, RObject, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, newHash, str, truthy } from './values';
+import { arr, newHash, snapshot, str, truthy } from './values';
 
 /** A Set keeps its members as the keys of a Hash, which gives it the Hash's insertion order and equality. */
 class SetData {
@@ -25,7 +25,7 @@ class SetData {
 
   /** Two sets are `eql?` when they hold equal members, whatever their order. */
   hashKey(): string {
-    return `set{${[...this.members.map.keys()].sort().join(',')}}`;
+    return `set{${[...this.members.map.keys()].toSorted().join(',')}}`;
   }
 }
 
@@ -53,24 +53,31 @@ function* inspectSet(self: RObject): Gen<string> {
 }
 
 function* other(value: Value): Gen<Value[]> {
-  if (value instanceof RObject && value.data instanceof SetData) return [...membersOf(value).map.values()].map((e) => e.key);
+  if (value instanceof RObject && value.data instanceof SetData)
+    return [...membersOf(value).map.values()].map((e) => e.key);
   if (value === NIL || typeof value !== 'object') throw typeError('value must be enumerable');
   return yield* toArray(value);
 }
 
-def('Set', 'initialize', [0, 1], function* (self: RObject, args, block) {
-  self.data = new SetData(newHash());
-  if (args.length > 0 && args[0] !== NIL) {
-    for (const value of yield* toArray(args[0])) {
-      yield* hashSet(membersOf(self), block ? yield* callBlock(block, [value]) : value, true);
+def(
+  'Set',
+  'initialize',
+  [0, 1],
+  function* (self: RObject, args, block) {
+    self.data = new SetData(newHash());
+    if (args.length > 0 && args[0] !== NIL) {
+      for (const value of yield* toArray(args[0])) {
+        yield* hashSet(membersOf(self), block ? yield* callBlock(block, [value]) : value, true);
+      }
     }
-  }
-  return NIL;
-}, { visibility: 'private' });
+    return NIL;
+  },
+  { visibility: 'private' }
+);
 sdef('Set', '[]', [0, -1], (_self, args) => newSet(args));
 def('Set', 'each', 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'each', []);
-  for (const entry of [...membersOf(self).map.values()]) yield* callBlock(block, [entry.key], false);
+  for (const entry of snapshot(membersOf(self).map.values())) yield* callBlock(block, [entry.key], false);
   return self;
 });
 def('Set', ['add', '<<'], 1, function* (self: RObject, [value]) {
@@ -100,7 +107,12 @@ def('Set', ['size', 'length', 'count'], [0, 1], function* (self: RObject, args, 
   if (args.length === 0 && !block) return BigInt(membersOf(self).map.size);
   let count = 0n;
   for (const entry of membersOf(self).map.values()) {
-    if (args.length > 0 ? (yield* hashKeyOf(entry.key)) === (yield* hashKeyOf(args[0])) : truthy(yield* callBlock(block!, [entry.key]))) count++;
+    if (
+      args.length > 0
+        ? (yield* hashKeyOf(entry.key)) === (yield* hashKeyOf(args[0]))
+        : truthy(yield* callBlock(block!, [entry.key]))
+    )
+      count++;
   }
   return count;
 });
@@ -116,20 +128,27 @@ def('Set', ['|', 'union', '+'], 1, function* (self: RObject, [value]) {
 def('Set', ['&', 'intersection'], 1, function* (self: RObject, [value]) {
   const right = yield* newSet(yield* other(value));
   const kept: Value[] = [];
-  for (const entry of membersOf(self).map.values()) if (yield* hashGet(membersOf(right), entry.key)) kept.push(entry.key);
+  for (const entry of membersOf(self).map.values())
+    if (yield* hashGet(membersOf(right), entry.key)) kept.push(entry.key);
   return yield* newSet(kept);
 });
 def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
   const right = yield* newSet(yield* other(value));
   const kept: Value[] = [];
-  for (const entry of membersOf(self).map.values()) if (!(yield* hashGet(membersOf(right), entry.key))) kept.push(entry.key);
+  for (const entry of membersOf(self).map.values())
+    if (!(yield* hashGet(membersOf(right), entry.key))) kept.push(entry.key);
   return yield* newSet(kept);
 });
 def('Set', '^', 1, function* (self: RObject, [value]) {
   const right = yield* newSet(yield* other(value));
-  const union = [...[...membersOf(self).map.values()].map((e) => e.key), ...[...membersOf(right).map.values()].map((e) => e.key)];
+  const union = [
+    ...[...membersOf(self).map.values()].map((e) => e.key),
+    ...[...membersOf(right).map.values()].map((e) => e.key),
+  ];
   const kept: Value[] = [];
-  for (const item of (yield* newSet(union)) === undefined ? [] : [...membersOf(yield* newSet(union)).map.values()].map((e) => e.key)) {
+  for (const item of (yield* newSet(union)) === undefined
+    ? []
+    : [...membersOf(yield* newSet(union)).map.values()].map((e) => e.key)) {
     const inLeft = (yield* hashGet(membersOf(self), item)) !== undefined;
     const inRight = (yield* hashGet(membersOf(right), item)) !== undefined;
     if (inLeft !== inRight) kept.push(item);
@@ -184,9 +203,6 @@ def('Set', ['merge'], [0, -1], function* (self: RObject, values) {
   for (const value of values) for (const item of yield* other(value)) yield* hashSet(membersOf(self), item, true);
   return self;
 });
-def('Set', ['select!', 'filter!', 'keep_if', 'reject!', 'delete_if'], 0, function* () {
-  return NIL;
-});
 for (const [name, keep] of [
   ['select!', true],
   ['filter!', true],
@@ -198,7 +214,7 @@ for (const [name, keep] of [
     if (!block) return makeEnumerator(self, name, []);
     yield* modify(self);
     let changed = false;
-    for (const [slot, entry] of [...membersOf(self).map]) {
+    for (const [slot, entry] of snapshot(membersOf(self).map)) {
       if (truthy(yield* callBlock(block, [entry.key])) !== keep) {
         membersOf(self).map.delete(slot);
         changed = true;

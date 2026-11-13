@@ -25,7 +25,7 @@ export const misplacedRubyAtomicMessage =
  * @param trace Marks the methods whose headers hold `# atomic`, for a model program.
  */
 export function parseRuby(source: string, trace?: TraceOptions): Program {
-  const atomicRows = new Set(trace?.atomicAnnotations.keys() ?? []);
+  const atomicRows = new Set(trace?.atomicAnnotations.keys());
   return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => {
     const converter = new Converter(source, atomicRows);
     const program = converter.convertProgram(root);

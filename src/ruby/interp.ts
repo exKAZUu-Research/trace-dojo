@@ -41,7 +41,7 @@ import {
   UnsupportedFeatureError,
 } from './runtime';
 import { CORE_CLASSES, CORE_MODULES, UNSUPPORTED_CONSTANTS } from './unsupportedNames';
-import { arr, classOf, isA, newHash, range, realClassOf, singletonClassOf, str, sym, truthy } from './values';
+import { arr, classOf, isA, newHash, range, realClassOf, singletonClassOf, snapshot, str, truthy } from './values';
 
 export type Gen<T = Value> = Generator<unknown, T, unknown>;
 
@@ -195,8 +195,8 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return !truthy(value);
     }
     case 'if': {
-      if (truthy(yield* ev(e.cond, frame))) return yield* evalBody(e.then, frame);
-      return e.else ? yield* evalBody(e.else, frame) : NIL;
+      if (truthy(yield* ev(e.cond, frame))) return yield* evalBody(e.consequent, frame);
+      return e.alternative ? yield* evalBody(e.alternative, frame) : NIL;
     }
     case 'while': {
       return yield* evalWhile(e, frame);
@@ -269,8 +269,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
 function* interpolate(parts: (string | Expr)[], frame: Frame): Gen<string> {
   let text = '';
   for (const part of parts) {
-    if (typeof part === 'string') text += part;
-    else text += yield* toS(yield* ev(part, frame));
+    text += typeof part === 'string' ? part : yield* toS(yield* ev(part, frame));
   }
   if (text.length > 1_000_000) throw rubyError(rt().c.NoMemoryError, 'failed to allocate memory');
   return text;
@@ -324,7 +323,7 @@ function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): 
       const value = yield* ev(item.splat, frame);
       if (value === NIL) continue;
       if (!(value instanceof RHash)) throw implicitConversionError(value, 'Hash');
-      for (const entry of [...value.map.values()]) yield* hashSet(hash, entry.key, entry.value);
+      for (const entry of snapshot(value.map.values())) yield* hashSet(hash, entry.key, entry.value);
       continue;
     }
     const key = yield* ev(item.key, frame);
@@ -352,7 +351,7 @@ export function ivarGet(self: Value, name: string): Value {
 
 export function ivarSet(self: Value, name: string, value: Value): void {
   if (!(self instanceof RBasic)) {
-    throw frozenError(self, String(self));
+    throw frozenError(self, runToEnd(inspect(self)));
   }
   if (self.frozen) throw frozenError(self, inspectForFrozen(self));
   self.ivars ??= new Map();
@@ -387,10 +386,8 @@ const UNSUPPORTED_GLOBALS: Record<string, string> = {
 
 function globalSet(name: string, value: Value): void {
   if (UNSUPPORTED_GLOBALS[name]) throw new UnsupportedFeatureError(UNSUPPORTED_GLOBALS[name]);
-  if (name === '$stdout' || name === '$stderr') {
-    if (!respondsTo(value, 'write')) {
-      throw typeError(`${name} must have write method, ${realClassOf(value).name} given`);
-    }
+  if ((name === '$stdout' || name === '$stderr') && !respondsTo(value, 'write')) {
+    throw typeError(`${name} must have write method, ${realClassOf(value).name} given`);
   }
   rt().globals.set(name, value);
 }
@@ -593,6 +590,7 @@ function* operatorAssign(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): Gen {
     }
     case 'cvar': {
       read = function* () {
+        yield* [];
         if (op === '||') {
           try {
             return classVariableGet(frame, target.name);
@@ -994,7 +992,7 @@ export function* callMethod(
 ): Gen {
   rt().spend();
   const method = classOf(recv).findMethod(name);
-  if (!method) return yield* methodMissing(recv, name, args, options);
+  if (!method) methodMissing(recv, name, options);
   if (method.visibility !== 'public' && !options.fcall) {
     if (method.visibility === 'private' && !name.endsWith('=')) {
       throw noMethodError(`private method '${name}' called for ${receiverDescription(recv)}`, recv, name);
@@ -1006,11 +1004,10 @@ export function* callMethod(
   return yield* invoke(method, recv, args, keywords, block, options.used ?? true);
 }
 
-function* methodMissing(recv: Value, name: string, args: Value[], options: CallOptions): Gen {
+function methodMissing(recv: Value, name: string, options: CallOptions): never {
   if (options.vcall) {
     throw nameError(`undefined local variable or method '${name}' for ${receiverDescription(recv)}`, recv, name);
   }
-  void args;
   throw noMethodError(`undefined method '${name}' for ${receiverDescription(recv)}`, recv, name);
 }
 

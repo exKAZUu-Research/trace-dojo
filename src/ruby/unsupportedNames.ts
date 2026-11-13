@@ -80,7 +80,16 @@ export const UNSUPPORTED_CONSTANTS: Record<string, string> = {
 };
 
 /** Modules Ruby defines that this grader leaves out, which a program cannot define as classes. */
-export const CORE_MODULES = new Set(['Signal', 'Process', 'GC', 'ObjectSpace', 'Marshal', 'FileTest', 'Warning', 'Errno']);
+export const CORE_MODULES = new Set([
+  'Signal',
+  'Process',
+  'GC',
+  'ObjectSpace',
+  'Marshal',
+  'FileTest',
+  'Warning',
+  'Errno',
+]);
 
 /** Classes Ruby defines that this grader leaves out, which a program would reopen rather than define. */
 export const CORE_CLASSES = new Set([

@@ -31,10 +31,18 @@ class LocalScope {
     readonly parent?: LocalScope
   ) {}
 
+  private self(): LocalScope {
+    return this;
+  }
+
   /** How many block scopes out the variable is, or -1 when no visible scope declares it. */
   depthOf(name: string): number {
     let depth = 0;
-    for (let scope: LocalScope | undefined = this; scope; scope = scope.kind === 'block' ? scope.parent : undefined) {
+    for (
+      let scope: LocalScope | undefined = this.self();
+      scope;
+      scope = scope.kind === 'block' ? scope.parent : undefined
+    ) {
       if (scope.set.has(name)) return depth;
       depth++;
     }
@@ -252,8 +260,8 @@ export class Converter {
         return {
           k: 'if',
           cond: this.expr(required(node.childForFieldName('condition'))),
-          then: [this.statement(required(node.childForFieldName('consequence')), use === 0 ? 1 : use)],
-          else: [this.statement(required(node.childForFieldName('alternative')), use === 0 ? 1 : use)],
+          consequent: [this.statement(required(node.childForFieldName('consequence')), use)],
+          alternative: [this.statement(required(node.childForFieldName('alternative')), use)],
         };
       }
       case 'if':
@@ -265,7 +273,9 @@ export class Converter {
       case 'unless_modifier': {
         const body = [this.statement(required(node.childForFieldName('body')), use)];
         const cond = this.expr(required(node.childForFieldName('condition')));
-        return node.type === 'if_modifier' ? { k: 'if', cond, then: body } : { k: 'if', cond, then: [], else: body };
+        return node.type === 'if_modifier'
+          ? { k: 'if', cond, consequent: body }
+          : { k: 'if', cond, consequent: [], alternative: body };
       }
       case 'while':
       case 'until': {
@@ -810,8 +820,8 @@ export class Converter {
     } else if (alternativeNode) {
       alternative = this.bodyOf(alternativeNode, use);
     }
-    if (node.type === 'unless') return { k: 'if', cond, then: alternative ?? [], else: consequence };
-    return { k: 'if', cond, then: consequence, else: alternative };
+    if (node.type === 'unless') return { k: 'if', cond, consequent: alternative ?? [], alternative: consequence };
+    return { k: 'if', cond, consequent: consequence, alternative };
   }
 
   private loopBody<T>(convert: () => T): T {
@@ -1138,7 +1148,8 @@ function stepKindOf(e: Expr): StepKind {
  */
 function classBodyStepKind(e: Expr, step: StepKind): StepKind {
   if (step === 'call' || step === 'expr' || step === 'value') return 'none';
-  if (step === 'assign' && (e.k === 'asgn' || e.k === 'opasgn') && e.k === 'asgn' && isLiteral(e.value)) return 'constant';
+  if (step === 'assign' && (e.k === 'asgn' || e.k === 'opasgn') && e.k === 'asgn' && isLiteral(e.value))
+    return 'constant';
   return step;
 }
 
@@ -1249,7 +1260,7 @@ function childrenOf(e: Expr): Expr[] {
       return [e.e];
     }
     case 'if': {
-      return [e.cond, ...[...e.then, ...(e.else ?? [])].map((statement) => statement.e)];
+      return [e.cond, ...[...e.consequent, ...(e.alternative ?? [])].map((statement) => statement.e)];
     }
     case 'seq': {
       return e.body.map((statement) => statement.e);

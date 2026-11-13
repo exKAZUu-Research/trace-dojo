@@ -1,5 +1,5 @@
 import type { OutputChannel } from '../interpreter/programIo';
-import { inspect, toS } from './conversions';
+import { inspect, toInt, toS } from './conversions';
 import { def } from './define';
 import { format } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
@@ -145,14 +145,8 @@ def(
 function* charOf(value: Value): Gen<string> {
   if (value instanceof RString)
     return value.s.slice(0, value.s.codePointAt(0) && value.s.codePointAt(0)! > 0xff_ff ? 2 : 1);
-  const { toInt } = yield* conversionsModule();
   return String.fromCodePoint(Number((yield* toInt(value)) & 0xffn));
 }
-
-function* conversionsModule(): Gen<typeof import('./conversions')> {
-  return conversions;
-}
-import * as conversions from './conversions';
 
 // $stdout and $stderr ----------------------------------------------------------------------------------------------
 

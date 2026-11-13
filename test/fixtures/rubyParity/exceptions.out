@@ -1,0 +1,34 @@
+#<MyError: my default>
+"my default"
+MyError
+StandardError
+#<OtherError: custom>
+ensure 4
+2.0
+ensure -1
+caught negative
+finally
+99
+-1
+ok after 3
+"wrapped"
+#<ZeroDivisionError: divided by 0>
+"boom"
+true
+RuntimeError
+"no block given (yield)"
+"index 3 outside of array bounds: 0...0"
+"key not found: :z"
+:z
+{a: 1}
+#<TypeError: t>
+"x"
+#<Exception: base>
+#<ArgumentError: wrong number of arguments (given 0, expected 1)>
+2
+0
+1
+2
+5
+"uncaught throw :nope"
+[uncaught] my default (MyError)

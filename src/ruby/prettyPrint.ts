@@ -4,7 +4,10 @@ import { RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } 
 import { classOf, realClassOf } from './values';
 
 /** A document for Ruby's PrettyPrint: text, a breakable space, or a group whose breakables break together. */
-type Doc = { kind: 'text'; text: string } | { kind: 'break'; text: string } | { kind: 'group'; indent: number; parts: Doc[] };
+type Doc =
+  | { kind: 'text'; text: string }
+  | { kind: 'break'; text: string }
+  | { kind: 'group'; indent: number; parts: Doc[] };
 
 /** `pp` prints to a stream that is not a terminal, where Ruby's width is 80 columns less one. */
 const WIDTH = 79;
@@ -87,7 +90,11 @@ function* build(value: Value, seen: Set<object>): Gen<Doc> {
       if (name.startsWith('@__')) continue;
       if (!first) parts.push(text(','));
       first = false;
-      parts.push(breakable(), text(`${name}=`), { kind: 'group', indent: 1, parts: [breakable(''), yield* build(item, seen)] });
+      parts.push(breakable(), text(`${name}=`), {
+        kind: 'group',
+        indent: 1,
+        parts: [breakable(''), yield* build(item, seen)],
+      });
     }
     seen.delete(value);
     return group(1, `#<${cls.name ?? anonymousClassName(cls)}:${addressOf(value)}`, parts, '>');

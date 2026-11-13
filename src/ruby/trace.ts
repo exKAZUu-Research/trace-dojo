@@ -147,8 +147,12 @@ function displayNodeOf(value: Value, seen: Set<object>): DisplayNode | undefined
   }
 }
 
+function rangeEnd(item: Value): string {
+  return item === NIL ? '' : keyText(item, true);
+}
+
 function rangeText(value: RRange): string {
-  const end = (item: Value): string => (item === NIL ? '' : keyText(item, true));
+  const end = rangeEnd;
   return `${end(value.begin)}${value.exclusive ? '...' : '..'}${end(value.end)}`;
 }
 

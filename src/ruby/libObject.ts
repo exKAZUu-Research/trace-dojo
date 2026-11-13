@@ -29,6 +29,8 @@ import {
   requireBlock,
   respondsTo,
 } from './interp';
+import { curry, makeEnumerator } from './libEnumerator';
+import { kernelFloat, kernelInteger } from './libNumeric';
 import {
   invalidateMethodCaches,
   NIL,
@@ -38,6 +40,7 @@ import {
   RHash,
   RObject,
   RProc,
+  RRange,
   RString,
   RSymbol,
   type Value,
@@ -198,14 +201,8 @@ def('Kernel', 'display', 0, function* (self) {
 def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args) {
   const [method = sym('each'), ...rest] = args;
   if (!(method instanceof RSymbol)) throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
-  const { makeEnumerator } = yield* enumeratorModule();
   return makeEnumerator(self, method.name, rest);
 });
-
-function* enumeratorModule(): Gen<typeof import('./libEnumerator')> {
-  return enumerators;
-}
-import * as enumerators from './libEnumerator';
 
 def('Kernel', 'instance_variables', 0, () => {
   throw new UnsupportedFeatureError('instance_variables');
@@ -222,7 +219,6 @@ def(
   0,
   function* (_self, _args, block) {
     if (!block) {
-      const { makeEnumerator } = yield* enumeratorModule();
       return makeEnumerator(rt().mainObject, 'loop', []);
     }
     for (;;) {
@@ -292,26 +288,38 @@ export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
   return new RubyError(object);
 }
 
-def('Kernel', 'catch', [0, 1], function* (_self, args, block) {
-  const runtime = rt();
-  const tag = args.length > 0 ? args[0] : new RObject(runtime.c.Object);
-  runtime.catchTags.push(tag);
-  try {
-    return yield* callProc(requireBlock(block), [tag]);
-  } catch (signal) {
-    if (signal instanceof ThrowSignal && signal.tag === tag) return signal.value;
-    throw signal;
-  } finally {
-    runtime.catchTags.pop();
-  }
-}, PRIVATE);
-def('Kernel', 'throw', [1, 2], function* (_self, [tag, value = NIL]) {
-  const runtime = rt();
-  for (const active of runtime.catchTags.toReversed()) {
-    if (active === tag || (yield* rEquals(active, tag))) throw new ThrowSignal(active, value);
-  }
-  throw rubyError(runtime.c.UncaughtThrowError, `uncaught throw ${yield* inspect(tag)}`);
-}, PRIVATE);
+def(
+  'Kernel',
+  'catch',
+  [0, 1],
+  function* (_self, args, block) {
+    const runtime = rt();
+    const tag = args.length > 0 ? args[0] : new RObject(runtime.c.Object);
+    runtime.catchTags.push(tag);
+    try {
+      return yield* callProc(requireBlock(block), [tag]);
+    } catch (error) {
+      if (error instanceof ThrowSignal && error.tag === tag) return error.value;
+      throw error;
+    } finally {
+      runtime.catchTags.pop();
+    }
+  },
+  PRIVATE
+);
+def(
+  'Kernel',
+  'throw',
+  [1, 2],
+  function* (_self, [tag, value = NIL]) {
+    const runtime = rt();
+    for (const active of runtime.catchTags.toReversed()) {
+      if (active === tag || (yield* rEquals(active, tag))) throw new ThrowSignal(active, value);
+    }
+    throw rubyError(runtime.c.UncaughtThrowError, `uncaught throw ${yield* inspect(tag)}`);
+  },
+  PRIVATE
+);
 
 def(
   'Kernel',
@@ -358,7 +366,6 @@ def(
   'Integer',
   [1, 2],
   function* (_self, args, _block, keywords) {
-    const { kernelInteger } = yield* numericModule();
     return yield* kernelInteger(args, keywords);
   },
   { ...PRIVATE, keywords: true }
@@ -368,16 +375,10 @@ def(
   'Float',
   1,
   function* (_self, args, _block, keywords) {
-    const { kernelFloat } = yield* numericModule();
     return yield* kernelFloat(args[0], keywords);
   },
   { ...PRIVATE, keywords: true }
 );
-
-function* numericModule(): Gen<typeof import('./libNumeric')> {
-  return numerics;
-}
-import * as numerics from './libNumeric';
 
 def(
   'Kernel',
@@ -847,7 +848,6 @@ def('Comparable', 'between?', 2, function* (self, [min, max]) {
 def('Comparable', 'clamp', [1, 2], function* (self, args) {
   let [min, max] = args;
   if (args.length === 1) {
-    const { RRange } = yield* objectsModule();
     if (!(min instanceof RRange)) throw typeError(`wrong argument type ${realClassOf(min).name} (expected Range)`);
     if (min.exclusive && min.end !== NIL) throw argumentError('cannot clamp with an exclusive range');
     [min, max] = [min.begin, min.end];
@@ -859,11 +859,6 @@ def('Comparable', 'clamp', [1, 2], function* (self, args) {
   if (max !== NIL && (yield* compareOrFail(self, max)) > 0) return max;
   return self;
 });
-
-function* objectsModule(): Gen<typeof import('./objects')> {
-  return objects;
-}
-import * as objects from './objects';
 
 // Proc ----------------------------------------------------------------------------------------------------------------
 
@@ -885,14 +880,9 @@ def('Proc', 'parameters', 0, () => {
 def('Proc', ['inspect', 'to_s'], 0, (self: RProc) => str(inspectProc(self)));
 def('Proc', 'curry', [0, 1], function* (self: RProc, args) {
   const arity = args.length > 0 ? Number(yield* toInt(args[0])) : procArity(self);
-  const { curry } = yield* procsModule();
   return curry(self, arity < 0 ? -arity - 1 : arity, []);
 });
 sdef('Proc', 'new', 0, (_self, _args, block) => requireBlock(block));
-
-function* procsModule(): Gen<typeof import('./libEnumerator')> {
-  return enumerators;
-}
 
 export function procArity(proc: RProc): number {
   if (proc.body.kind === 'native') return proc.body.arity;

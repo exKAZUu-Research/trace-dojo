@@ -1,0 +1,66 @@
+true
+true
+38
+Named(a)
+Named(a)
+Named(a)
+"Named(a)"
+["Named(a)"]
+8
+[0, 2, 4]
+"HI!"
+[#<Person B>, #<Person C>, #<Person A>]
+#<Person B>
+"A"
+["A(30)", "B(20)", "C(25)"]
+["A walks", "B walks", "C walks"]
+true
+true
+true
+#<Person C>
+B(20), C(25), A(30)
+75
+{true => ["A", "C"], false => ["B"]}
+false
+false
+true
+true
+false
+[]
+""
+"nil"
+[1, [2, 3, 4]]
+[1, [2, 3, 4]]
+false
+true
+true
+false
+FrozenError
+Integer
+Float
+NilClass
+TrueClass
+Symbol
+String
+Array
+Hash
+Range
+Class
+Object
+[Integer, Numeric, Comparable, Object]
+true
+true
+false
+true
+true
+true
+["number", "number", "string", "nil", "array of 1", "other"]
+"nil"
+5
+6
+6
+3
+{a: 1, b: [1, 2]}
+1
+"two"
+nil

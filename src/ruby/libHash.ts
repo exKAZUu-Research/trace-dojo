@@ -4,10 +4,11 @@ import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, rubyError } from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, respondsTo } from './interp';
+import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, type RProc, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, newHash, str, truthy } from './values';
+import { arr, newHash, snapshot, str, truthy } from './values';
 
 function* modify(self: RHash): Gen<void> {
   if (self.frozen) throw frozenError(self, yield* inspectHash(self));
@@ -186,7 +187,7 @@ function* filtered(self: RHash, block: RProc, keep: boolean): Gen<RHash> {
 function* filterInPlace(self: RHash, block: RProc, keep: boolean): Gen<boolean> {
   yield* modify(self);
   let changed = false;
-  for (const [slot, entry] of [...self.map]) {
+  for (const [slot, entry] of snapshot(self.map)) {
     if (truthy(yield* pair(block, entry.key, entry.value)) !== keep) {
       self.map.delete(slot);
       changed = true;
@@ -252,7 +253,7 @@ def('Hash', 'shift', 0, function* (self: RHash) {
 function* merge(target: RHash, others: Value[], block: RProc | undefined): Gen<RHash> {
   for (const other of others) {
     const source = yield* toHash(other);
-    for (const entry of [...source.map.values()]) {
+    for (const entry of snapshot(source.map.values())) {
       const existing = block ? yield* hashGet(target, entry.key) : undefined;
       const value = existing && block ? yield* callBlock(block, [entry.key, existing.value, entry.value]) : entry.value;
       yield* hashSet(target, entry.key, value);
@@ -282,14 +283,14 @@ def('Hash', 'transform_values', 0, function* (self: RHash, _args, block) {
 def('Hash', 'transform_values!', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'transform_values!', []);
   yield* modify(self);
-  for (const entry of [...self.map.values()]) entry.value = yield* callBlock(block, [entry.value]);
+  for (const entry of snapshot(self.map.values())) entry.value = yield* callBlock(block, [entry.value]);
   return self;
 });
 
 function* transformKeys(self: RHash, args: Value[], block: RProc | undefined): Gen<RHash> {
   const mapping = args.length > 0 ? yield* toHash(args[0]) : undefined;
   const hash = newHash();
-  for (const entry of [...self.map.values()]) {
+  for (const entry of snapshot(self.map.values())) {
     let key: Value;
     const mapped = mapping ? yield* hashGet(mapping, entry.key) : undefined;
     if (mapped) key = mapped.value;
@@ -346,7 +347,7 @@ def('Hash', 'compact', 0, function* (self: RHash) {
 def('Hash', 'compact!', 0, function* (self: RHash) {
   yield* modify(self);
   let changed = false;
-  for (const [slot, entry] of [...self.map]) {
+  for (const [slot, entry] of snapshot(self.map)) {
     if (entry.value === NIL) {
       self.map.delete(slot);
       changed = true;
@@ -367,27 +368,21 @@ def('Hash', 'any?', [0, 1], function* (self: RHash, args, block) {
     return false;
   }
   if (!block) return self.map.size > 0;
-  for (const entry of [...self.map.values()]) if (truthy(yield* pair(block, entry.key, entry.value))) return true;
+  for (const entry of snapshot(self.map.values())) if (truthy(yield* pair(block, entry.key, entry.value))) return true;
   return false;
 });
 def('Hash', 'count', [0, 1], function* (self: RHash, args, block) {
   if (args.length === 0 && !block) return BigInt(self.map.size);
   let count = 0n;
-  for (const entry of [...self.map.values()]) {
+  for (const entry of snapshot(self.map.values())) {
     const item = arr([entry.key, entry.value]);
     if (args.length > 0 ? yield* rEquals(item, args[0]) : truthy(yield* callBlock(block as RProc, [item]))) count++;
   }
   return count;
 });
 def('Hash', 'sum', [0, 1], function* (self: RHash, args, block) {
-  const { sum } = yield* enumerableModule();
   return yield* sum(self, args, block);
 });
-
-function* enumerableModule(): Gen<typeof import('./libEnumerable')> {
-  return enumerable;
-}
-import * as enumerable from './libEnumerable';
 
 def('Hash', 'hash', 0, (self: RHash) => BigInt(self.map.size));
 def('Hash', 'rehash', 0, (self: RHash) => {
@@ -405,7 +400,7 @@ def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
 def('Hash', 'group_by', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'group_by', []);
   const groups = newHash();
-  for (const entry of [...self.map.values()]) {
+  for (const entry of snapshot(self.map.values())) {
     const item = arr([entry.key, entry.value]);
     const key = yield* callBlock(block, [item]);
     const existing = yield* hashGet(groups, key);

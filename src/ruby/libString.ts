@@ -17,7 +17,7 @@ import { hashGet } from './hashes';
 import { callBlock, callMethod, type Gen, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
-import { NIL, RArray, RHash, RRange, RString, RSymbol, type Value } from './objects';
+import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, isNil, str, sym, truthy } from './values';
 
@@ -32,11 +32,6 @@ export function charsOf(text: string): string[] {
 
 export function charLength(text: string): number {
   return SURROGATE.test(text) ? [...text].length : text.length;
-}
-
-function sliceChars(text: string, start: number, end?: number): string {
-  if (!SURROGATE.test(text)) return text.slice(start, end);
-  return [...text].slice(start, end).join('');
 }
 
 function modify(self: RString): void {
@@ -118,7 +113,12 @@ sdef(
   { keywords: true }
 );
 def('String', ['to_s', 'to_str'], 0, (self: RString) => (self.cls === rt().c.String ? self : str(self.s)));
-def('String', ['inspect', 'dump'], 0, (self: RString) => str(strInspect(self.s)));
+def('String', ['inspect', 'dump'], 0, (self: RString) => str(self.binary ? binaryInspect(self.s) : strInspect(self.s)));
+
+/** A binary string's inspect, which shows the bytes from 128 on as `\xFF`. */
+function binaryInspect(text: string): string {
+  return strInspect(text).replaceAll(/[\u0080-\u00FF]/g, (char) => `\\x${(char.codePointAt(0) as number).toString(16).toUpperCase()}`);
+}
 def('String', ['to_sym', 'intern'], 0, (self: RString) => sym(self.s));
 def('String', 'to_i', [0, 1], function* (self: RString, args) {
   const base = args.length > 0 ? Number(yield* toInt(args[0])) : 10;
@@ -290,7 +290,7 @@ def('String', 'chars', 0, (self: RString) => arr(charsOf(self.s).map((char) => s
 def('String', 'codepoints', 0, (self: RString) =>
   arr(charsOf(self.s).map((char) => BigInt(char.codePointAt(0) as number)))
 );
-def('String', 'bytes', 0, (self: RString) => arr([...new TextEncoder().encode(self.s)].map((byte) => BigInt(byte))));
+def('String', 'bytes', 0, (self: RString) => arr([...new TextEncoder().encode(self.s)].map(BigInt)));
 def('String', 'getbyte', 1, function* (self: RString, [index]) {
   const bytes = new TextEncoder().encode(self.s);
   let position = yield* toIndex(index);
@@ -402,7 +402,7 @@ function unitOffset(text: string, position: number): number {
 
 function charPosition(text: string, offset: number): number {
   if (!SURROGATE.test(text)) return offset;
-  return [...text.slice(0, offset)].length;
+  return text.slice(0, offset).length;
 }
 
 def('String', 'index', [1, 2], function* (self: RString, args) {
@@ -582,12 +582,7 @@ function expandReplacement(replacement: string, match: string, before: string, a
   });
 }
 
-function* substitute(
-  self: RString,
-  args: Value[],
-  block: import('./objects').RProc | undefined,
-  global: boolean
-): Gen<string> {
+function* substitute(self: RString, args: Value[], block: RProc | undefined, global: boolean): Gen<string> {
   const [pattern, replacement] = args;
   regexpUnsupported(pattern);
   const target = yield* stringArg(pattern);
@@ -613,7 +608,7 @@ function* substitute(
         text.slice(found + target.length)
       );
     } else {
-      piece = yield* toS(yield* callBlock(block as import('./objects').RProc, [str(target)]));
+      piece = yield* toS(yield* callBlock(block as RProc, [str(target)]));
     }
     result += text.slice(position, found) + piece;
     position = found + target.length;
@@ -718,7 +713,7 @@ const TRANSFORMS: [string, (text: string, args: string[]) => string, number][] =
   ['downcase', (text) => text.toLowerCase(), 0],
   ['capitalize', capitalize, 0],
   ['swapcase', swapcase, 0],
-  ['reverse', (text) => charsOf(text).reverse().join(''), 0],
+  ['reverse', (text) => charsOf(text).toReversed().join(''), 0],
   ['strip', (text) => lstrip(rstrip(text)), 0],
   ['lstrip', lstrip, 0],
   ['rstrip', rstrip, 0],
@@ -752,10 +747,12 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
 }
 
 /** The successor of a string: its rightmost alphanumeric character incremented, carrying leftward. */
+const isAlnum = (char: string): boolean => /^[A-Za-z0-9]$/.test(char);
+const isSpace = (char: string): boolean => ' \t\n\v\f\r\0'.includes(char);
+
 export function succ(text: string): string {
   if (text.length === 0) return '';
   const chars = charsOf(text);
-  const isAlnum = (char: string): boolean => /^[A-Za-z0-9]$/.test(char);
   let index = chars.length - 1;
   while (index >= 0 && !isAlnum(chars[index])) index--;
   if (index < 0) {
@@ -863,7 +860,6 @@ def('String', 'split', [0, 2], function* (self: RString, args, block) {
 function splitWhitespace(text: string, limit: number): string[] {
   const parts: string[] = [];
   let index = 0;
-  const isSpace = (char: string): boolean => ' \t\n\v\f\r\0'.includes(char);
   while (index < text.length && isSpace(text[index])) index++;
   while (index < text.length) {
     if (limit > 0 && parts.length === limit - 1) {
@@ -933,7 +929,7 @@ for (const name of [
     throw new UnsupportedFeatureError(`String#${name}（文字コード）`);
   });
 }
-def('String', 'ascii_only?', 0, (self: RString) => /^[\u0000-\u007F]*$/.test(self.s));
+def('String', 'ascii_only?', 0, (self: RString) => !/[^\u0000-\u007F]/.test(self.s));
 def('String', 'between?', 2, function* (self: RString, [min, max]) {
   return compareStrings(self.s, yield* stringArg(min)) >= 0 && compareStrings(self.s, yield* stringArg(max)) <= 0;
 });

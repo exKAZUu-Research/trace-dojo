@@ -2,11 +2,11 @@ import { compareValues, inspectRange, rangeCovers, rEql, rEquals, spaceship, toI
 import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
 import { hashKeyOf } from './hashes';
-import { callBlock, callMethod, type Gen } from './interp';
+import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { succ } from './libString';
-import { NIL, RRange, RString, type Value } from './objects';
+import { NIL, type RProc, RRange, RString, type Value } from './objects';
 import { rt } from './runtime';
 import { arr, realClassOf, str } from './values';
 
@@ -48,7 +48,7 @@ function* iterateRange(range: RRange, visit: (value: Value) => Gen<unknown>): Ge
     for (const item of items) if ((yield* visit(item)) === STOP) return;
     return;
   }
-  if (begin === NIL || typeof begin === 'number' || !(yield* respondsToSucc(begin))) {
+  if (begin === NIL || typeof begin === 'number' || !respondsToSucc(begin)) {
     throw typeError(`can't iterate from ${realClassOf(begin).name}`);
   }
   let current: Value = begin;
@@ -63,18 +63,12 @@ function* iterateRange(range: RRange, visit: (value: Value) => Gen<unknown>): Ge
   }
 }
 
-function* respondsToSucc(value: Value): Gen<boolean> {
-  const { respondsTo } = yield* interpModule();
+function respondsToSucc(value: Value): boolean {
   return respondsTo(value, 'succ');
 }
 
-function* interpModule(): Gen<typeof import('./interp')> {
-  return interp;
-}
-import * as interp from './interp';
-
-function nativeCollector(items: Value[]): import('./objects').RProc {
-  return interp.nativeProc(1, ([value]) => {
+function nativeCollector(items: Value[]): RProc {
+  return nativeProc(1, ([value]) => {
     items.push(value);
     return NIL;
   });
@@ -153,10 +147,10 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   return self.end;
 });
 
-function* callEnumerable(self: RRange, name: string, args: Value[], block: import('./objects').RProc | undefined): Gen {
+function* callEnumerable(self: RRange, name: string, args: Value[], block: RProc | undefined): Gen {
   const method = rt().c.Enumerable.methods.get(name);
   if (!method) throw new Error(`Enumerable#${name} is missing`);
-  return yield* interp.invoke(method, self, args, undefined, block, true);
+  return yield* invoke(method, self, args, undefined, block, true);
 }
 
 def('Range', 'sum', [0, 1], function* (self: RRange, args, block) {
@@ -273,5 +267,5 @@ def('Range', ['step', '%'], [0, 1], function* (self: RRange, args, block) {
 def('Range', 'dup', 0, (self) => self);
 def('Range', 'frozen?', 0, () => true);
 sdef('Range', 'new', [2, 3], function* (_self, [begin, end, exclusive = false]) {
-  return yield* interp.makeRange(begin, end, interp.truthyValue(exclusive));
+  return yield* makeRange(begin, end, truthyValue(exclusive));
 });

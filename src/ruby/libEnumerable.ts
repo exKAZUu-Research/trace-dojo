@@ -6,9 +6,9 @@ import { eachEntry, hashGet, hashKeyOf, hashSet } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
-import { rt } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
-import { arr, newHash, str, truthy } from './values';
+import { arr, newHash, realClassOf, truthy } from './values';
 
 /** Stops an iteration early, as `break` does, when a method has what it needs. */
 class StopSignal {}
@@ -52,15 +52,13 @@ export function* iterate(collection: Value, visit: Visit): Gen<void> {
     return NIL;
   });
   try {
-    if (collection instanceof RObject && collection.cls === runtime.c.Enumerator) {
-      yield* iterateEnumerator(collection, function* (value) {
-        runtime.spend();
-        if ((yield* visit(value)) === STOP) throw signal;
-        return NIL;
-      });
-    } else {
-      yield* callMethod(collection, 'each', [], undefined, block);
-    }
+    yield* collection instanceof RObject && collection.cls === runtime.c.Enumerator
+      ? iterateEnumerator(collection, function* (value) {
+          runtime.spend();
+          if ((yield* visit(value)) === STOP) throw signal;
+          return NIL;
+        })
+      : callMethod(collection, 'each', [], undefined, block);
   } catch (error) {
     if (error !== signal) throw error;
   }
@@ -222,11 +220,10 @@ export function* inject(self: Value, args: Value[], block: RProc | undefined): G
       accumulator = value;
       return;
     }
-    if (operator !== undefined) {
-      accumulator = yield* fastOperator(accumulator, operator, value);
-    } else {
-      accumulator = yield* callBlock(block as RProc, [accumulator, value]);
-    }
+    accumulator =
+      operator === undefined
+        ? yield* callBlock(block as RProc, [accumulator, value])
+        : yield* fastOperator(accumulator, operator, value);
   });
   return accumulator ?? NIL;
 }
@@ -281,8 +278,7 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
         }
         if (!Number.isFinite(f)) continue;
         const t = f + x;
-        if (Math.abs(f) >= Math.abs(x)) c += f - t + x;
-        else c += x - t + f;
+        c += Math.abs(f) >= Math.abs(x) ? f - t + x : x - t + f;
         f = t;
       }
       if (index === items.length) return f + c;
@@ -435,29 +431,22 @@ def('Enumerable', 'drop_while', 0, function* (self, _args, block) {
 
 function* blockCompare(block: RProc, a: Value, b: Value): Gen<number> {
   const result = yield* callBlock(block, [a, b]);
-  if (result === NIL) throw argumentError(`comparison of ${yield* className(a)} with ${yield* className(b)} failed`);
+  if (result === NIL) throw argumentError(`comparison of ${className(a)} with ${className(b)} failed`);
   if (typeof result === 'bigint') return result > 0n ? 1 : result < 0n ? -1 : 0;
   if (typeof result === 'number') return Math.sign(result);
   if (truthy(yield* callMethod(result, '>', [0n]))) return 1;
   return truthy(yield* callMethod(result, '<', [0n])) ? -1 : 0;
 }
 
-function* className(value: Value): Gen<string> {
-  const { realClassOf } = yield* valuesModule();
+function className(value: Value): string {
   if (value === NIL) return 'NilClass';
   return realClassOf(value).name ?? '';
 }
 
-function* valuesModule(): Gen<typeof import('./values')> {
-  return values;
-}
-import * as values from './values';
-
 /** Sorts values as `sort` does: by `<=>`, or by the block's comparison. */
 export function* sortValues(items: Value[], block: RProc | undefined): Gen<Value[]> {
   const sorted = [...items];
-  if (block) yield* platformSort(sorted, (a, b) => blockCompare(block, a, b));
-  else yield* platformSort(sorted, compareValues);
+  yield* platformSort(sorted, block ? (a, b) => blockCompare(block, a, b) : compareValues);
   return sorted;
 }
 
@@ -622,12 +611,15 @@ def('Enumerable', 'minmax', 0, function* (self, _args, block) {
       max = value;
       return;
     }
-    const compare = (a: Value, b: Value): Gen<number> => (block ? blockCompare(block, a, b) : compareValues(a, b));
-    if ((yield* compare(value, min)) < 0) min = value;
-    if ((yield* compare(value, max)) > 0) max = value;
+    if ((yield* orderOf(block, value, min)) < 0) min = value;
+    if ((yield* orderOf(block, value, max)) > 0) max = value;
   });
   return arr([min ?? NIL, max ?? NIL]);
 });
+function orderOf(block: RProc | undefined, a: Value, b: Value): Gen<number> {
+  return block ? blockCompare(block, a, b) : compareValues(a, b);
+}
+
 def('Enumerable', 'minmax_by', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'minmax_by', []);
   return arr([yield* extremeBy(self, block, false), yield* extremeBy(self, block, true)]);
@@ -752,7 +744,7 @@ def('Enumerable', 'to_h', [0, -1], function* (self, _args, block) {
   yield* iterate(self, function* (value) {
     const pair = block ? yield* call(block, value) : value;
     if (!(pair instanceof RArray)) {
-      throw typeError(`wrong element type ${yield* className(pair)} (expected array)`);
+      throw typeError(`wrong element type ${className(pair)} (expected array)`);
     }
     if (pair.items.length !== 2) {
       throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
@@ -784,17 +776,12 @@ def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
   }
   return NIL;
 });
-def('Enumerable', 'each_index', 0, function* (self) {
-  return self;
-});
 def('Enumerable', 'compact', 0, function* (self) {
   return arr((yield* toArray(self)).filter((value) => value !== NIL));
 });
 def('Enumerable', 'lazy', 0, () => {
-  const { UnsupportedFeatureError } = runtimeModule;
   throw new UnsupportedFeatureError('遅延評価（lazy）');
 });
-import * as runtimeModule from './runtime';
 
 def('Enumerable', 'to_set', 0, function* (self) {
   return yield* callMethod(rt().c.Set, 'new', [self]);

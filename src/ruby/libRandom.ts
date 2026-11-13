@@ -1,4 +1,4 @@
-import { toFloat, toInt } from './conversions';
+import { inspectRange, toFloat, toInt } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, rubyError } from './errors';
 import { callMethod, type Gen } from './interp';
@@ -205,16 +205,6 @@ function* randomValue(generator: MersenneTwister, args: Value[]): Gen {
   if (limit <= 0n) throw argumentError(`invalid argument - ${limit}`);
   return generator.limited(limit - 1n);
 }
-
-function* inspectRange(range: RRange): Gen<string> {
-  const { inspectRange: inspect } = yield* conversionsModule();
-  return yield* inspect(range);
-}
-
-function* conversionsModule(): Gen<typeof import('./conversions')> {
-  return conversions;
-}
-import * as conversions from './conversions';
 
 def(
   'Kernel',

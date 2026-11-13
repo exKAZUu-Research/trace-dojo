@@ -15,8 +15,7 @@ import { argumentError, floatDomainError, rangeError, rubyError, typeError, zero
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
-import type { RHash} from './objects';
-import { NIL, RArray, RString, RSymbol, type Value } from './objects';
+import { NIL, RArray, type RHash, type RProc, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str, truthy } from './values';
 
@@ -249,7 +248,7 @@ for (const owner of ['Integer', 'Float']) {
     if (typeof self === 'bigint' || Number.isFinite(self) || Number.isNaN(self)) return NIL;
     return self > 0 ? 1n : -1n;
   });
-  def(owner, 'to_f', 0, (self: Num) => Number(self));
+  def(owner, 'to_f', 0, Number);
   def(owner, 'to_c', 0, () => {
     throw new UnsupportedFeatureError('to_c（複素数）');
   });
@@ -288,12 +287,7 @@ function* modPow(self: Num, exponent: Value, modulus: Value): Gen {
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Ruby's Numeric#step with its argument forms.
-function* numericStep(
-  self: Num,
-  args: Value[],
-  block: import('./objects').RProc | undefined,
-  keywords: RHash | undefined
-): Gen {
+function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywords: RHash | undefined): Gen {
   let [limit = NIL, step = 1n] = args;
   if (keywords) {
     for (const entry of keywords.map.values()) {
@@ -407,7 +401,9 @@ def('Integer', 'odd?', 0, (self: bigint) => self % 2n !== 0n);
 def('Integer', 'chr', [0, 1], (self: bigint, args) => {
   if (args.length > 0) throw new UnsupportedFeatureError('Integer#chr の文字コードの指定');
   if (self < 0n || self > 255n) throw rangeError(`${self} out of char range`);
-  return str(String.fromCodePoint(Number(self)));
+  const char = str(String.fromCodePoint(Number(self)));
+  char.binary = self > 127n;
+  return char;
 });
 def('Integer', 'ord', 0, (self) => self);
 def('Integer', 'size', 0, () => 8n);
@@ -694,8 +690,11 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
 function parseFloatStrict(text: string): number | undefined {
   const trimmed = text.replaceAll(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '');
   if (/^[+-]?0[xX][\da-fA-F]+(?:_[\da-fA-F]+)*$/.test(trimmed)) return Number(parseIntegerStrict(trimmed));
-  if (!/^[+-]?(?:\d+(?:_\d+)*)(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+(?:_\d+)*)?$/.test(trimmed)) {
-    if (!/^[+-]?\.\d+(?:_\d+)*(?:[eE][+-]?\d+)?$/.test(trimmed)) return undefined;
+  if (
+    !/^[+-]?(?:\d+(?:_\d+)*)(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+(?:_\d+)*)?$/.test(trimmed) &&
+    !/^[+-]?\.\d+(?:_\d+)*(?:[eE][+-]?\d+)?$/.test(trimmed)
+  ) {
+    return undefined;
   }
   return Number(trimmed.replaceAll('_', ''));
 }

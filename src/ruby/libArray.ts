@@ -19,10 +19,9 @@ import { inject, iterate, nmin, sortBy, sortValues, sum, toArray, uniqValues } f
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { randomIndex } from './libRandom';
 import { rangeBounds } from './libString';
-import type { RHash} from './objects';
-import { NIL, RArray, type RProc, RRange, RString, RSymbol, type Value } from './objects';
-import { rt } from './runtime';
-import { arr, newHash, str, truthy } from './values';
+import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { rt, UnsupportedFeatureError } from './runtime';
+import { arr, newHash, snapshot, str, truthy } from './values';
 
 function* modify(self: RArray): Gen<void> {
   if (self.frozen) throw frozenError(self, yield* inspectArray(self));
@@ -412,7 +411,7 @@ def('Array', 'uniq!', 0, function* (self: RArray, _args, block) {
   self.items = unique;
   return self;
 });
-def('Array', 'reverse', 0, (self: RArray) => arr([...self.items].reverse()));
+def('Array', 'reverse', 0, (self: RArray) => arr(self.items.toReversed()));
 def('Array', 'reverse!', 0, function* (self: RArray) {
   yield* modify(self);
   self.items.reverse();
@@ -613,7 +612,7 @@ function* combinations(items: Value[], size: number, visit: (combination: Value[
 
 function* permutations(items: Value[], size: number, visit: (permutation: Value[]) => Gen<void>): Gen<void> {
   if (size > items.length || size < 0) return;
-  const used = new Array<boolean>(items.length).fill(false);
+  const used = Array.from({ length: items.length }, () => false);
   const current: Value[] = [];
   const recurse = function* (): Gen<void> {
     if (current.length === size) {
@@ -652,7 +651,7 @@ def('Array', 'repeated_combination', 1, function* (self: RArray, [sizeValue], bl
   if (!block) return makeEnumerator(self, 'repeated_combination', [sizeValue]);
   const items = [...self.items];
   if (size < 0 || (items.length === 0 && size > 0)) return self;
-  const indices = new Array<number>(size).fill(0);
+  const indices = Array.from({ length: size }, () => 0);
   for (;;) {
     rt().spend();
     yield* call(block, arr(indices.map((index) => items[index])), false);
@@ -668,7 +667,7 @@ def('Array', 'repeated_permutation', 1, function* (self: RArray, [sizeValue], bl
   if (!block) return makeEnumerator(self, 'repeated_permutation', [sizeValue]);
   const items = [...self.items];
   if (size < 0 || (items.length === 0 && size > 0)) return self;
-  const indices = new Array<number>(size).fill(0);
+  const indices = Array.from({ length: size }, () => 0);
   for (;;) {
     rt().spend();
     yield* call(block, arr(indices.map((index) => items[index])), false);
@@ -737,7 +736,7 @@ def('Array', 'include?', 1, function* (self: RArray, [target]) {
 def('Array', 'count', [0, 1], function* (self: RArray, args, block) {
   if (args.length === 0 && !block) return BigInt(self.items.length);
   let count = 0n;
-  for (const item of [...self.items]) {
+  for (const item of snapshot(self.items)) {
     if (args.length > 0 ? yield* rEquals(item, args[0]) : truthy(yield* call(block as RProc, item))) count++;
   }
   return count;
@@ -962,9 +961,7 @@ def(
   { keywords: true }
 );
 def('Array', 'pack', [1, -1], () => {
-  const { UnsupportedFeatureError } = runtime;
   throw new UnsupportedFeatureError('Array#pack');
 });
-import * as runtime from './runtime';
 
 export { iterate };

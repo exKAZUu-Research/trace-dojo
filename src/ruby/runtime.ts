@@ -15,16 +15,18 @@ export class Scope {
   constructor(readonly parent?: Scope) {}
 
   lookup(name: string, depth: number): Value {
-    let scope: Scope = this;
-    for (let index = 0; index < depth; index++) scope = scope.parent as Scope;
-    return scope.vars.get(name) ?? NIL;
+    return (depth === 0 ? this : outerScope(this, depth)).vars.get(name) ?? NIL;
   }
 
   assign(name: string, depth: number, value: Value): void {
-    let scope: Scope = this;
-    for (let index = 0; index < depth; index++) scope = scope.parent as Scope;
-    scope.vars.set(name, value);
+    (depth === 0 ? this : outerScope(this, depth)).vars.set(name, value);
   }
+}
+
+function outerScope(start: Scope, depth: number): Scope {
+  let scope = start;
+  for (let index = 0; index < depth; index++) scope = scope.parent as Scope;
+  return scope;
 }
 
 export type FrameKind = 'main' | 'method' | 'block' | 'class';

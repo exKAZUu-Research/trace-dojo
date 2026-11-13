@@ -1,10 +1,20 @@
 import { inspect } from './conversions';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
-import type { RBasic} from './objects';
-import { type HashEntry, NIL, RArray, RHash, RObject, RRange, RString, RSymbol, type Value } from './objects';
+import {
+  type HashEntry,
+  NIL,
+  RArray,
+  type RBasic,
+  RHash,
+  RObject,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
 import { rt } from './runtime';
-import { classOf, str, truthy } from './values';
+import { classOf, snapshot, str, truthy } from './values';
 
 /**
  * The key a Hash files a value under: equal for keys that are `eql?`, computed without calling the program's methods
@@ -38,7 +48,7 @@ export function* hashKeyOf(value: Value): Gen<string> {
     for (const entry of value.map.values()) {
       parts.push(`${yield* hashKeyOf(entry.key)}=>${yield* hashKeyOf(entry.value)}`);
     }
-    return `h{${parts.sort().join(',')}}`;
+    return `h{${parts.toSorted().join(',')}}`;
   }
   const method = classOf(value).findMethod('hash');
   if (method && method.body.kind === 'user') {
@@ -108,7 +118,7 @@ export function* hashDelete(hash: RHash, key: Value): Gen<HashEntry | undefined>
 export function* eachEntry(hash: RHash, visit: (entry: HashEntry) => Gen<void>): Gen<void> {
   hash.iterating++;
   try {
-    for (const [slot, entry] of [...hash.map]) {
+    for (const [slot, entry] of snapshot(hash.map)) {
       if (hash.map.get(slot) !== entry) continue;
       yield* visit(entry);
     }

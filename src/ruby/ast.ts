@@ -117,7 +117,7 @@ export type Expr =
   | { k: 'yield'; args: Expr[]; used: Use; row: number }
   | { k: 'and' | 'or'; l: Expr; r: Expr }
   | { k: 'not'; e: Expr; row: number }
-  | { k: 'if'; cond: Expr; then: Body; else?: Body }
+  | { k: 'if'; cond: Expr; consequent: Body; alternative?: Body }
   | { k: 'while'; cond: Expr; body: Body; until: boolean; doWhile: boolean }
   | { k: 'for'; target: Target; iter: Expr; body: Body; row: number }
   | { k: 'case'; subject?: Expr; whens: { conds: Expr[]; body: Body; row: number }[]; else?: Body }

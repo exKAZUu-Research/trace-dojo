@@ -1,9 +1,11 @@
 import { formatFloat, inspect, toS, toStr } from './conversions';
-import { argumentError, typeError } from './errors';
+import { argumentError, floatDomainError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
 import { callMethod, type Gen } from './interp';
+import { kernelFloat, kernelInteger } from './libNumeric';
 import { NIL, RHash, RString, RSymbol, type Value } from './objects';
+import { rt } from './runtime';
 import { realClassOf } from './values';
 
 interface Spec {
@@ -32,8 +34,6 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     if (!hashArg) throw argumentError('one hash required');
     const entry = yield* hashGet(hashArg, RSymbol.of(name));
     if (!entry) {
-      const { rubyError } = yield* errorsModule();
-      const { rt } = yield* runtimeModule();
       throw rubyError(rt().c.KeyError, `key<${name}> not found`);
     }
     return entry.value;
@@ -118,15 +118,6 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
   return result;
 }
 
-function* errorsModule(): Gen<typeof import('./errors')> {
-  return errors;
-}
-function* runtimeModule(): Gen<typeof import('./runtime')> {
-  return runtime;
-}
-import * as errors from './errors';
-import * as runtime from './runtime';
-
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per directive.
 function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
   switch (type) {
@@ -169,8 +160,7 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
     case 'c': {
       const value = arg();
       let text: string;
-      if (value instanceof RString) text = [...value.s][0] ?? '';
-      else text = String.fromCodePoint(Number(yield* intArg(value)));
+      text = value instanceof RString ? ([...value.s][0] ?? '') : String.fromCodePoint(Number(yield* intArg(value)));
       return pad(text, spec, false);
     }
     case '\n':
@@ -187,13 +177,11 @@ function* intArg(value: Value): Gen<bigint> {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
-      const { floatDomainError } = errors;
       throw floatDomainError(formatFloat(value));
     }
     return BigInt(Math.floor(value));
   }
   if (value instanceof RString) {
-    const { kernelInteger } = yield* numericModule();
     return (yield* kernelInteger([value], undefined)) as bigint;
   }
   if (value === NIL) throw typeError("can't convert nil into Integer");
@@ -202,16 +190,10 @@ function* intArg(value: Value): Gen<bigint> {
   throw typeError(`can't convert ${realClassOf(value).name} into Integer`);
 }
 
-function* numericModule(): Gen<typeof import('./libNumeric')> {
-  return numerics;
-}
-import * as numerics from './libNumeric';
-
 function* floatArg(value: Value): Gen<number> {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return Number(value);
   if (value instanceof RString) {
-    const { kernelFloat } = yield* numericModule();
     return (yield* kernelFloat(value, undefined)) as number;
   }
   if (value === NIL) throw typeError("can't convert nil into Float");

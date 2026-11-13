@@ -77,7 +77,7 @@ def('Enumerator', ['with_object', 'each_with_object'], 1, function* (self: RObje
 });
 def('Enumerator', 'size', 0, (self: RObject) => {
   const source = sourceOf(self);
-  return source.size > 0 ? source.size() : NIL;
+  return source.size === undefined ? NIL : source.size();
 });
 def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const source = sourceOf(self);

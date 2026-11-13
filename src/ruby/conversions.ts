@@ -1,4 +1,5 @@
-import { argumentError, implicitConversionError, rangeError, typeError } from './errors';
+import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
+import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
 import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
@@ -26,9 +27,7 @@ export function formatFloat(value: number): string {
 }
 
 /** Converts an Integer to a Float as Ruby does, rounding to nearest even, with huge values becoming infinite. */
-export function intToFloat(value: bigint): number {
-  return Number(value);
-}
+export const intToFloat: (value: bigint) => number = Number;
 
 /** Converts a Float to an Integer, truncating, or raises for NaN and infinities as `to_i` does. */
 export function floatToInt(value: number): bigint {
@@ -38,11 +37,8 @@ export function floatToInt(value: number): bigint {
 }
 
 function floatDomain(message: string): unknown {
-  const { rubyError } = errorsModule;
   return rubyError(rt().c.FloatDomainError, message);
 }
-
-import * as errorsModule from './errors';
 
 /** The Integer an argument stands for, as Ruby's implicit `to_int` conversion makes it (floats truncate). */
 export function* toInt(value: Value): Gen<bigint> {
@@ -157,7 +153,7 @@ export function* inspect(value: Value): Gen<string> {
 
 function fastInspect(value: Value): string | undefined {
   if (value === NIL) return 'nil';
-  if (value instanceof RString) return strInspect(value.s);
+  if (value instanceof RString && !value.binary) return strInspect(value.s);
   if (value instanceof RSymbol) return symInspect(value.name);
   if (typeof value === 'object') return undefined;
   return fastToS(value);
@@ -400,19 +396,12 @@ export function* rEquals(a: Value, b: Value): Gen<boolean> {
 
 function* hashEquals(a: RHash, b: Value): Gen<boolean> {
   if (!(b instanceof RHash) || a.map.size !== b.map.size) return false;
-  const { hashGet } = yield* hashesModule();
   for (const entry of a.map.values()) {
     const other = yield* hashGet(b, entry.key);
     if (!other || !(yield* rEquals(entry.value, other.value))) return false;
   }
   return true;
 }
-
-function* hashesModule(): Gen<typeof import('./hashes')> {
-  return hashes;
-}
-
-import * as hashes from './hashes';
 
 export function numericEquals(a: bigint | number, b: bigint | number): boolean {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a === b;

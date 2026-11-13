@@ -56,6 +56,9 @@ export interface ExceptionState {
 }
 
 export class RString extends RBasic {
+  /** Whether the string holds bytes rather than text (ASCII-8BIT), as `Integer#chr` makes for 128 to 255. */
+  binary = false;
+
   constructor(
     cls: RClass,
     public s: string
@@ -136,6 +139,7 @@ export type NativeResult = Value | Generator<unknown, Value, unknown>;
  * method takes keywords (otherwise they arrive as a trailing Hash, as Ruby passes them to methods without keywords).
  */
 export type NativeFn = (
+  // oxlint-disable-next-line typescript/no-explicit-any -- Each native method narrows self to its class's representation.
   self: any,
   args: Value[],
   block: RProc | undefined,

@@ -27,9 +27,10 @@ function divideHalfEven(dividend: bigint, divisor: bigint): bigint {
 /** The digits of `|value|` rounded to `precision` decimals, as C's `%.*f` makes them (without the sign). */
 export function fixedDigits(value: number, precision: number): string {
   const { digits, scale } = exactDecimal(value);
-  let scaled: bigint;
-  if (scale <= precision) scaled = digits * 10n ** BigInt(precision - scale);
-  else scaled = divideHalfEven(digits, 10n ** BigInt(scale - precision));
+  const scaled =
+    scale <= precision
+      ? digits * 10n ** BigInt(precision - scale)
+      : divideHalfEven(digits, 10n ** BigInt(scale - precision));
   const text = scaled.toString().padStart(precision + 1, '0');
   if (precision === 0) return text;
   return `${text.slice(0, -precision)}.${text.slice(-precision)}`;
@@ -155,7 +156,7 @@ const QUICK_MAX = 14;
 export function rubyDtoa(value: number, mode: 2 | 3, requested: number): { digits: string; decpt: number } {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value);
-  const exponentBits = (view.getUint16(0) >> 4) & 0x7ff;
+  const exponentBits = (view.getUint16(0) >> 4) & 0x7_ff;
   let mantissaScaled: number;
   let binaryExponent: number;
   if (exponentBits === 0) {
@@ -165,7 +166,7 @@ export function rubyDtoa(value: number, mode: 2 | 3, requested: number): { digit
     binaryExponent = exponentBits - 1023;
     mantissaScaled = value / 2 ** binaryExponent;
   }
-  const estimate = (mantissaScaled - 1.5) * 0.289_529_654_602_168 + 0.176_091_259_055_8 + binaryExponent * 0.301_029_995_663_981;
+  const estimate = (mantissaScaled - 1.5) * 0.289529654602168 + 0.1760912590558 + binaryExponent * 0.301029995663981;
   let k = Math.trunc(estimate);
   if (estimate < 0 && estimate !== k) k--;
   let kCheck = true;
@@ -253,7 +254,7 @@ function quickDigits(
     if (i === ilim) {
       if (d > 0.5 + eps) return { result: bumpUp(digits, k), half: false };
       if (d < 0.5 - eps) return { result: { digits: trimZeros(digits), decpt: k + 1 }, half: false };
-      if (digits[digits.length - 1] & 1) return { result: bumpUp(digits, k), half: true };
+      if ((digits.at(-1) ?? 0) & 1) return { result: bumpUp(digits, k), half: true };
       return { half: true };
     }
   }
