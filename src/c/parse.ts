@@ -39,7 +39,7 @@ export function parseC(source: string): TranslationUnit {
     (root) => ({
       items: new Converter([], parser).convertUnit(root, headers),
     }),
-    cSyntaxDiagnostics
+    (root, errors) => cSyntaxDiagnostics(parser, text, root, errors, typedefNames)
   );
 }
 

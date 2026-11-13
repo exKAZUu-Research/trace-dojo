@@ -1313,3 +1313,57 @@ int main(void){int a[2][2]={{1,2},{3,4}};uintptr_t p=(uintptr_t)(a[0]+${end ? 2 
     });
   }
 });
+
+test.each([
+  ['printf("%d",i', 'return 1;', 3],
+  ['s=f(1', 's=5;', 3],
+  ['s=(s+1', 's=5;', 3],
+  ['int a[3', 's=2;', 3],
+  ['int a[3]={1,2,3;', 'return 0;', 2],
+  ['do {i++;}', 'puts("x");return 0;', 3],
+  ['do {i++;} puts("x");', 'return 0;', 2],
+  ['if i>0 {}', 'return 0;', 2],
+])('the first failed parse position locates syntax errors: %s / %s', (first, following, row) => {
+  const source = `#include <stdio.h>\nint f(int a){return a;}\nint main(void){int i=0,s=0;\n${first}\n${following}\n}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: row + 1 })],
+  });
+});
+
+test.each(['return 1;', 'int k=1;', 'if(1){}', 'f(2);', 's+=1;', '}'])(
+  'a missing delimiter points at the next token: %s',
+  (next) => {
+    const source = `int f(int n){return n;}\nint main(void){int s=0;\ns=f(1\n${next}\n}`;
+    expect(executeProgram('c', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ row: 3 })],
+    });
+  }
+);
+
+test.each([
+  ['s=f(1', 3],
+  ['s=a[1', 3],
+  ['int b[2]={1', 3],
+  ['s=f(1)', 2],
+  ['do {s++;}', 3],
+])('recovery location is independent of the following statement kind: %s', (first, row) => {
+  for (const next of ['return 1;', 'int k=1;', 'if(1){}', 'f(2);', 's+=1;', '}']) {
+    const source = `int f(int n){return n;}\nint main(void){int s=0,a[2];\n${first}\n${next}\n}`;
+    expect(executeProgram('c', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ row })],
+    });
+  }
+});
+
+test.each(['typedef int T;T (*fp)(T);', 'typedef struct{int x;} S;S g(void);', 'int values[3]={1,2,3};'])(
+  'valid ambiguous prefixes do not change a later syntax-error location: %s',
+  (prefix) => {
+    expect(executeProgram('c', `${prefix}int main(void){\nint 変数=0;\n変数=(変数+1\nreturn 0;\n}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ row: 3 })],
+    });
+  }
+);
