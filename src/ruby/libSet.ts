@@ -190,7 +190,9 @@ def('Set', 'hash', 0, function* (self: RObject) {
   data.hashing = true;
   try {
     let hash = 0n;
-    for (const entry of data.members.map.values()) hash += BigInt(`0x${yield* hashKeyOf(entry.key)}`);
+    yield* eachEntry(data.members, function* (entry) {
+      hash += BigInt(`0x${yield* hashKeyOf(entry.key)}`);
+    });
     return hash;
   } finally {
     data.hashing = false;

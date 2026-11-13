@@ -1579,3 +1579,13 @@ test('Set mapping callbacks reject insertion during iteration', () => {
     });
   }
 });
+
+test('Set hash callbacks reject insertion during iteration', () => {
+  expect(
+    run(
+      'class K; attr_accessor :a; def hash; $s.add(3) if @a; 0; end; end; k=K.new; $s=Set[k]; k.a=true; begin; p $s.hash; rescue => e; p e.class, e.message; end; p $s.size'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n"can\'t add a new item into set during iteration"\n1\n',
+  });
+});
