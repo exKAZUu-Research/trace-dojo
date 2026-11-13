@@ -4,6 +4,7 @@ import type { BinaryOperator } from './ast';
 import type { Operand } from './compilerBase';
 import { CRuntimeError } from './errors';
 import { MIN_ADDRESS } from './memory';
+import { type ProvenanceAlgebra, provenanceAlgebra, type ProvenanceExpression } from './provenanceExpressions';
 import type { Frame } from './runtime';
 import { compatible, type CType, sizeOf } from './types';
 
@@ -16,16 +17,18 @@ export interface BoundedAddress {
 export type Address = number | BoundedAddress;
 
 export type PointerRange = Pick<BoundedAddress, 'start' | 'end'>;
-interface PointerOrigin {
+export interface PointerOrigin {
   representation: bigint;
   key: string;
   range?: PointerRange;
   expression?: AddressTerms;
+  proof?: ProvenanceExpression;
 }
 type AddressTerms = ReadonlyMap<string, { range: PointerRange; weight: bigint }>;
-interface PointerByte {
+export interface PointerByte {
   origin: PointerOrigin;
   index: number;
+  proof?: ProvenanceExpression;
 }
 export type PointerBytes = Map<number, ReadonlyMap<string, PointerByte>>;
 
@@ -172,6 +175,8 @@ export function rangeOfBytes(
   budget: ExecutionBudget
 ): PointerRange | undefined {
   const origins = matchingOrigins(bytes, offset, representation, budget);
+  const proven = origins.find((origin) => origin.proof?.source?.origin?.range)?.proof?.source?.origin?.range;
+  if (proven) return proven;
   const expression = origins.find((origin) => origin.expression)?.expression;
   if (expression) return rangeOfTerms(expression);
   let range: PointerRange | undefined;
@@ -214,34 +219,142 @@ function coherentOrigin(
   return true;
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Byte identities and address roles are selected together before the resulting metadata is emitted.
 export function arithmeticResult(
   value: Scalar,
   operands: Evaluated[],
   budget: ExecutionBudget,
-  operator?: BinaryOperator
+  operator?: BinaryOperator | '~'
 ): Evaluated {
   if (!operands.some((operand) => !!operand.range || !!operand.bytes?.size)) return { value };
   const sources = operands.map(
     (operand) => operand.bytes ?? (operand.range ? pointerBytesOf(operand.range, operand.value as Scalar) : undefined)
   );
   const bytes = mergePointerBytes(sources, budget);
+  const width = operands.every(
+    (operand, index) =>
+      !operand.range && (!sources[index]?.size || (sources[index]!.size === 1 && sources[index]!.has(0)))
+  )
+    ? 8
+    : 64;
+  const algebra = provenanceAlgebra(budget);
+  const proof = algebra.combine({
+    operator,
+    value,
+    width,
+    inputs: operands.map((operand, index) => ({
+      value: operand.value as Scalar,
+      expression: operandProof(operand, sources[index], width, algebra, budget),
+    })),
+  });
+  if (width === 8) return { value, bytes: bytesOfProof(proof, budget) };
   const terms = operands.map((operand) => termsOf(operand, budget));
-  if (!terms.some((item) => item !== undefined)) return { value, bytes };
+  if (!terms.some((item) => item !== undefined))
+    return { value, bytes: expressionBytes(bytes, value, new Map(), budget, proof) };
   const numeric = BigInt(value);
   const isAddress = numeric >= BigInt(MIN_ADDRESS) && numeric <= BigInt(Number.MAX_SAFE_INTEGER);
   let expression: AddressTerms;
-  if (operator === '+' || operator === '-') expression = combineTerms(terms, operator, budget);
+  const proven = proof.source?.origin?.range;
+  if (proven) expression = termsForRange(proven);
+  else if (operator === '+' || operator === '-') expression = combineTerms(terms, operator, budget);
   else if (!isAddress) expression = new Map();
   else {
     const recovered = rangeOfBytes(bytes, 0, representationOf(value), budget);
-    const range = recovered ?? uniqueRange(operands);
+    const range = recovered ?? rangeOfProofSources(proof, value, budget) ?? uniqueRange(operands);
     expression = range ? termsForRange(range) : new Map();
   }
   return {
     value,
     range: isAddress ? rangeOfTerms(expression) : undefined,
-    bytes: expressionBytes(bytes, value, expression, budget),
+    bytes: expressionBytes(bytes, value, expression, budget, proof),
   };
+}
+
+function operandProof(
+  operand: Evaluated,
+  bytes: PointerBytes | undefined,
+  width: 8 | 64,
+  algebra: ProvenanceAlgebra,
+  budget: ExecutionBudget
+): ProvenanceExpression {
+  const value = operand.value as Scalar;
+  if (!bytes?.size) return algebra.constant(value, width);
+  if (width === 8) return byteOperandProof(value, bytes, algebra, budget);
+  const matching = matchingOrigins(bytes, 0, representationOf(value), budget);
+  const previous = matching.find((origin) => origin.proof)?.proof;
+  if (previous) return previous;
+  const inputs = matching.map((origin) => ({
+    value,
+    expression: algebra.source({ key: `p:${origin.key}`, value: origin.representation, origin }, 64),
+  }));
+  if (inputs.length === 1) return inputs[0].expression;
+  if (inputs.length === 0) {
+    for (const [offset, entries] of bytes) {
+      budget.spend(entries.size);
+      for (const byte of entries.values()) {
+        const expression =
+          byte.proof ??
+          algebra.source(
+            { key: `b:${byte.origin.key}/${byte.index}`, value: BigInt(representationOf(value)[offset] ?? 0), byte },
+            8
+          );
+        inputs.push({ value, expression });
+      }
+    }
+  }
+  return algebra.combine({ value, inputs, width });
+}
+
+function byteOperandProof(
+  value: Scalar,
+  bytes: PointerBytes,
+  algebra: ProvenanceAlgebra,
+  budget: ExecutionBudget
+): ProvenanceExpression {
+  budget.spend(bytes.get(0)?.size ?? 0);
+  const candidates = [...(bytes.get(0)?.values() ?? [])];
+  const partial = candidates.find((byte) => byte.proof)?.proof;
+  if (partial) return partial;
+  const whole = candidates.find((byte) => byte.origin.proof);
+  const selected = whole ? [whole] : candidates;
+  const inputs = selected.map((byte) => ({
+    value,
+    expression: algebra.source(
+      {
+        key: `b:${byte.origin.key}/${byte.index}`,
+        value: BigInt(value),
+        byte: { origin: byte.origin, index: byte.index },
+      },
+      8
+    ),
+  }));
+  return inputs.length === 1 ? inputs[0].expression : algebra.combine({ value, inputs, width: 8 });
+}
+
+function bytesOfProof(proof: ProvenanceExpression, budget: ExecutionBudget): PointerBytes | undefined {
+  const candidates = new Map<string, PointerByte>();
+  budget.spend(proof.sources.size);
+  for (const source of proof.sources.values()) {
+    if (source.byte) candidates.set(`${source.byte.origin.key}/${source.byte.index}`, { ...source.byte, proof });
+  }
+  return candidates.size > 0 ? new Map([[0, candidates]]) : undefined;
+}
+
+function rangeOfProofSources(
+  proof: ProvenanceExpression,
+  value: Scalar,
+  budget: ExecutionBudget
+): PointerRange | undefined {
+  budget.spend(proof.sources.size);
+  let range: PointerRange | undefined;
+  for (const source of proof.sources.values()) {
+    const candidate = source.origin?.range;
+    if (!candidate || source.value !== BigInt.asUintN(64, BigInt(value))) continue;
+    range = range
+      ? { start: Math.max(range.start, candidate.start), end: Math.min(range.end, candidate.end) }
+      : candidate;
+  }
+  return range;
 }
 
 function termsOf(operand: Evaluated, budget: ExecutionBudget): AddressTerms | undefined {
@@ -298,21 +411,29 @@ function expressionBytes(
   bytes: PointerBytes | undefined,
   value: Scalar,
   expression: AddressTerms,
-  budget: ExecutionBudget
+  budget: ExecutionBudget,
+  proof: ProvenanceExpression
 ): PointerBytes {
   const representation = BigInt.asUintN(64, BigInt(value));
   budget.spend(expression.size);
   const key =
-    `e:${representation}/` +
+    `e:${representation}/p:${proof.id}/` +
     [...expression]
       .map(([at, term]) => `${at}=${term.weight}`)
       .toSorted()
       .join(',');
-  const origin: PointerOrigin = { representation, key, expression };
+  const origin: PointerOrigin = { representation, key, expression, proof };
   const result: PointerBytes = new Map();
   for (const [offset, candidates] of bytes ?? []) {
     budget.spend(candidates.size);
-    result.set(offset, new Map([...candidates].filter(([, byte]) => !byte.origin.expression)));
+    result.set(
+      offset,
+      new Map(
+        [...candidates]
+          .filter(([, byte]) => !byte.origin.expression)
+          .map(([at, byte]) => [at, { origin: byte.origin, index: byte.index }])
+      )
+    );
   }
   for (let index = 0; index < 8; index++) {
     result.set(
@@ -348,13 +469,20 @@ export function storedPointerBytes(
   budget: ExecutionBudget
 ): PointerBytes {
   const retained: PointerBytes = new Map();
+  const proofs = new Set(
+    matchingOrigins(bytes, 0, representationOf(value), budget)
+      .filter((origin) => origin.proof)
+      .map((origin) => origin.key)
+  );
   for (const [offset, candidates] of bytes ?? []) {
     budget.spend(candidates.size);
     const other = new Map(
       [...candidates].filter(
         ([, byte]) =>
-          byte.origin.range !== undefined &&
-          (byte.origin.range.start !== range.start || byte.origin.range.end !== range.end)
+          proofs.has(byte.origin.key) ||
+          (proofs.size === 0 &&
+            byte.origin.range !== undefined &&
+            (byte.origin.range.start !== range.start || byte.origin.range.end !== range.end))
       )
     );
     if (other.size > 0) retained.set(offset, other);

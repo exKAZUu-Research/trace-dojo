@@ -569,7 +569,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         () => operation(convertScalar(operand.constant!, type, promoted)),
         (frame) => {
           const previous = evaluate(value, frame);
-          return arithmeticResult(operation(previous.value as Scalar), [previous], frame.runtime.budget);
+          return arithmeticResult(operation(previous.value as Scalar), [previous], frame.runtime.budget, '~');
         }
       );
     }
