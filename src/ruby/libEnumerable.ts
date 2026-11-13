@@ -753,13 +753,20 @@ function chunkEnumerator(self: Value, predicate: RProc, splitWhenTrue: boolean):
     held.push(current);
     try {
       yield* iterate(self, function* (value) {
-        if (previous !== undefined && truthy(yield* callBlock(predicate, [previous, value])) === splitWhenTrue) {
-          yield* callBlock(block, [arr(current)], false);
-          current = [];
-          held[mark] = current;
+        const rootMark = rt().held.length;
+        rt().held.push(value);
+        if (previous !== undefined) rt().held.push(previous);
+        try {
+          if (previous !== undefined && truthy(yield* callBlock(predicate, [previous, value])) === splitWhenTrue) {
+            yield* callBlock(block, [arr(current)], false);
+            current = [];
+            held[mark] = current;
+          }
+          current.push(value);
+          previous = value;
+        } finally {
+          rt().held.length = rootMark;
         }
-        current.push(value);
-        previous = value;
       });
       if (current.length > 0) yield* callBlock(block, [arr(current)], false);
       return self;
@@ -812,34 +819,41 @@ function* chunkByKey(self: Value, classifier: RProc, consumer: RProc): Gen {
   rt().held.push(NIL);
   try {
     yield* iterate(self, function* (value) {
-      const key = yield* call(classifier, value);
-      if (key === NIL || (key instanceof RSymbol && key.name === '_separator')) {
-        if (current.length > 0) yield* callBlock(consumer, [arr([currentKey as Value, arr(current)])], false);
-        current = [];
-        heldArrays[arrayMark] = current;
-        currentKey = undefined;
-        rt().held[keyMark] = NIL;
-        return;
+      const valueMark = rt().held.length;
+      rt().held.push(value);
+      try {
+        const key = yield* call(classifier, value);
+        rt().held.push(key);
+        if (key === NIL || (key instanceof RSymbol && key.name === '_separator')) {
+          if (current.length > 0) yield* callBlock(consumer, [arr([currentKey as Value, arr(current)])], false);
+          current = [];
+          heldArrays[arrayMark] = current;
+          currentKey = undefined;
+          rt().held[keyMark] = NIL;
+          return;
+        }
+        if (key instanceof RSymbol && key.name === '_alone') {
+          if (current.length > 0) yield* callBlock(consumer, [arr([currentKey as Value, arr(current)])], false);
+          yield* callBlock(consumer, [arr([key, arr([value])])], false);
+          current = [];
+          heldArrays[arrayMark] = current;
+          currentKey = undefined;
+          rt().held[keyMark] = NIL;
+          return;
+        }
+        if (currentKey !== undefined && !(yield* rEquals(currentKey, key))) {
+          yield* callBlock(consumer, [arr([currentKey, arr(current)])], false);
+          current = [];
+          heldArrays[arrayMark] = current;
+        }
+        if (current.length === 0) {
+          currentKey = key;
+          rt().held[keyMark] = key;
+        }
+        current.push(value);
+      } finally {
+        rt().held.length = valueMark;
       }
-      if (key instanceof RSymbol && key.name === '_alone') {
-        if (current.length > 0) yield* callBlock(consumer, [arr([currentKey as Value, arr(current)])], false);
-        yield* callBlock(consumer, [arr([key, arr([value])])], false);
-        current = [];
-        heldArrays[arrayMark] = current;
-        currentKey = undefined;
-        rt().held[keyMark] = NIL;
-        return;
-      }
-      if (currentKey !== undefined && !(yield* rEquals(currentKey, key))) {
-        yield* callBlock(consumer, [arr([currentKey, arr(current)])], false);
-        current = [];
-        heldArrays[arrayMark] = current;
-      }
-      if (current.length === 0) {
-        currentKey = key;
-        rt().held[keyMark] = key;
-      }
-      current.push(value);
     });
     if (current.length > 0) yield* callBlock(consumer, [arr([currentKey as Value, arr(current)])], false);
     return self;
@@ -896,18 +910,49 @@ def('Enumerable', 'to_h', [0, -1], function* (self, _args, block) {
   });
 });
 def('Enumerable', 'zip', [0, -1], function* (self, others, block) {
-  const lists: Value[][] = [];
-  for (const other of others) lists.push(yield* toArray(other));
-  const results: Value[] = [];
-  let index = 0;
-  yield* iterate(self, function* (value) {
-    const tuple = arr([value, ...lists.map((list) => list[index] ?? NIL)]);
-    index++;
-    if (block) yield* callBlock(block, [tuple], false);
-    else results.push(tuple);
-  });
-  return block ? NIL : arr(results);
+  return yield* zipCollections(self, others, block);
 });
+
+export function* zipCollections(self: Value, others: Value[], block: RProc | undefined): Gen<Value> {
+  const iterators = others.map((other) =>
+    other instanceof RArray
+      ? undefined
+      : (function* (): Gen<void> {
+          yield* iterate(other, function* (value) {
+            yield value;
+          });
+        })()
+  );
+  const results: Value[] = [];
+  const held = rt().held;
+  const mark = held.length;
+  held.push(...others);
+  let index = 0;
+  try {
+    yield* iterate(self, function* (value) {
+      const tuple: Value[] = [value];
+      const arrays = rt().heldArrays;
+      const arrayMark = arrays.length;
+      arrays.push(tuple);
+      try {
+        for (const [position, other] of others.entries()) {
+          const iterator = iterators[position];
+          const next = iterator?.next();
+          tuple.push(other instanceof RArray ? (other.items[index] ?? NIL) : next?.done ? NIL : (next?.value as Value));
+        }
+        index++;
+        if (block) yield* callBlock(block, [arr(tuple)], false);
+        else results.push(arr(tuple));
+      } finally {
+        arrays.length = arrayMark;
+      }
+    });
+    return block ? NIL : arr(results);
+  } finally {
+    for (const iterator of iterators) iterator?.return();
+    held.length = mark;
+  }
+}
 def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);
   const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : undefined;

@@ -48,6 +48,18 @@ test('empty repetitions stay within the execution budget', () => {
   });
 });
 
+test('wide character-set ranges charge the execution budget before expansion', () => {
+  expect(run(String.raw`p "a".count("\u0000-\u{10FFFF}")`)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'operations',
+  });
+});
+
+test('void expressions in value positions fail before execution', () => {
+  for (const source of ['def f;x ||= return 1;end;puts f', 'def f;p(return 1);end;puts f'])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+});
+
 test.each([
   [
     'Enumerable forwards iteration arguments',
@@ -86,6 +98,73 @@ test.each([
     '{1 => 3}\nTypeError\n',
   ],
   ['Proc arity includes keywords', 'p (->(x,y:1){}).arity,(->(x,y:){}).arity,(proc{|x,y:1|}).arity', '-2\n2\n1\n'],
+  [
+    'Hash and keyword splats convert through to_hash',
+    'class H;def to_hash;{a:1};end;end;def f(a:);p a;end;p({**H.new});f(**H.new)',
+    '{a: 1}\n1\n',
+  ],
+  [
+    'splat nil conversion and invalid destructuring',
+    'class A;def to_a;nil;end;def to_ary;1;end;end;a=A.new;p [*a].size;begin;x,y=a;rescue => e;p e.class;end',
+    '1\nTypeError\n',
+  ],
+  [
+    'frozen Hash rehash leaves entries intact',
+    'h={a:1}.freeze;begin;h.rehash;rescue => e;p e.class;end;p h[:a]',
+    'FrozenError\n1\n',
+  ],
+  [
+    'Array product yields before allocating every tuple',
+    'p Array.new(2000,1).product(Array.new(2000,2)) {|tuple| break :ok if tuple == [1,2]}',
+    ':ok\n',
+  ],
+  [
+    'Range to_s retains invalid endpoint bytes',
+    String.raw`p ("\xFF".."a").to_s.bytes, ("\xFF"..."a").to_s.bytes`,
+    '[255, 46, 46, 97]\n[255, 46, 46, 46, 97]\n',
+  ],
+  ['String subclass runs initialize', 'class S<String;attr_reader :n;def initialize;@n=7;end;end;p S.new.n', '7\n'],
+  [
+    'String slice mutation resolves its index once',
+    'class I;def initialize;@n=0;end;def to_int;@n+=1;@n-1;end;end;s="abc";p s.slice!(I.new),s',
+    '"a"\n"bc"\n',
+  ],
+  [
+    'invalid UTF-8 String patterns follow method-specific errors',
+    String.raw`begin;"a".count("\xFF");rescue => e;p e.class;end;begin;"a".gsub("\xFF","x");rescue => e;p e.class;end;begin;"a".split("\xFF");rescue => e;p e.class;end;p "a".partition("\xFF")`,
+    'ArgumentError\nRegexpError\nArgumentError\n["a", "", ""]\n',
+  ],
+  [
+    'invalid UTF-8 cannot form a Symbol',
+    String.raw`begin;p "a\xFFb".to_sym;rescue => e;p e.class,e.message;end`,
+    'EncodingError\n"invalid symbol in encoding UTF-8 :\\"a\\\\xFFb\\""\n',
+  ],
+  [
+    'scan and gsub detect receiver mutation',
+    's="aa";begin;s.scan("a"){|x|s<<"x"};rescue=>e;p e.class,e.message;end;s="aa";begin;s.gsub("a"){|x|s<<"x";"x"};rescue=>e;p e.class,e.message;end',
+    'RuntimeError\n"string modified"\nRuntimeError\n"string modified"\n',
+  ],
+  ['gsub reads Hash default proc', 'p "aaa".gsub("a",Hash.new{|h,k|"X"})', '"XXX"\n'],
+  [
+    'String padding checks encoding compatibility',
+    'begin;p 255.chr.center(3,"é");rescue=>e;p e.class;end',
+    'Encoding::CompatibilityError\n',
+  ],
+  [
+    'invalid UTF-8 successor advances the preceding Unicode character',
+    String.raw`p "aé\xFF".succ.bytes,"é\xFF".succ.bytes,"😀\xFF".succ.bytes`,
+    '[97, 195, 170, 255]\n[195, 170, 255]\n[240, 159, 152, 129, 255]\n',
+  ],
+  [
+    'invalid UTF-8 upto stops after byte-length growth',
+    String.raw`p "\xFE".upto("\xFF").to_a.map(&:bytes),"\xFE\xFE".upto("\xFF\xFF").to_a.map(&:bytes)`,
+    '[[254]]\n[[254, 254]]\n',
+  ],
+  [
+    'zip consumes only the receiver length from endless inputs',
+    'p [1,2].zip((1..).each),(1..2).zip((1..).each)',
+    '[[1, 1], [2, 2]]\n[[1, 1], [2, 2]]\n',
+  ],
   ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],
   ['cyclic array equality', 'a = []; a << a; b = []; b << b; p a == b', 'true\n'],

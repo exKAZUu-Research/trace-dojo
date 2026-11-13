@@ -50,6 +50,21 @@ function succInvalidBytes(source: Uint8Array): Uint8Array {
   if (source.length === 0) return source;
   const bytes = [...source];
   let index = bytes.findLastIndex(isAsciiAlnum);
+  let offset = 0;
+  let multibyte: { offset: number; width: number; point: number } | undefined;
+  for (const character of stringCharacters(stringFromBytes(source))) {
+    const width = stringBytes(character).length;
+    if (width > 1 && !character.rawBytes) multibyte = { offset, width, point: character.s.codePointAt(0) as number };
+    offset += width;
+  }
+  if (multibyte && multibyte.offset > index) {
+    const next = stringBytes(str(String.fromCodePoint(multibyte.point + 1)));
+    return Uint8Array.from([
+      ...bytes.slice(0, multibyte.offset),
+      ...next,
+      ...bytes.slice(multibyte.offset + multibyte.width),
+    ]);
+  }
   if (index < 0) return Uint8Array.from([1, ...bytes]);
   for (;;) {
     const byte = bytes[index];

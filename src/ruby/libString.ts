@@ -16,10 +16,19 @@ import {
   toStrValue,
 } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
+import {
+  argumentError,
+  frozenError,
+  implicitConversionError,
+  indexError,
+  rangeError,
+  rubyError,
+  runtimeError,
+  typeError,
+} from './errors';
 import { formatString } from './format';
 import { hashGet } from './hashes';
-import { callBlock, callMethod, type Gen, nativeProc, requireBlock } from './interp';
+import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
@@ -27,6 +36,7 @@ import { rt, UnsupportedFeatureError } from './runtime';
 import { transformInvalid } from './stringTransforms';
 import {
   arr,
+  classOf,
   isNil,
   joinStringCharacters,
   str,
@@ -80,6 +90,18 @@ function* stringArg(value: Value): Gen<string> {
 function* stringArgValue(value: Value): Gen<RString> {
   if (value instanceof RSymbol) throw implicitConversionError(value, 'String');
   return yield* toStrValue(value);
+}
+
+function* patternText(value: Value, kind: 'characters' | 'regexp'): Gen<string> {
+  const pattern = yield* stringArgValue(value);
+  if (pattern.rawBytes && !pattern.binary) {
+    if (kind === 'characters') throw argumentError('invalid byte sequence in UTF-8');
+    throw rubyError(
+      rt().c.RegexpError,
+      `invalid multibyte character: /${inspectRawBytes(pattern.rawBytes).slice(1, -1)}/`
+    );
+  }
+  return pattern.s;
 }
 
 function regexpUnsupported(value: Value): void {
@@ -141,11 +163,9 @@ sdef(
   'new',
   [0, 1],
   function* (self, args, _block, keywords) {
-    void keywords;
-    const source = args.length > 0 ? yield* toStrValue(args[0]) : str('');
-    const value = new RString(self, source.s);
-    value.binary = source.binary;
-    value.rawBytes = source.rawBytes ? Uint8Array.from(source.rawBytes) : undefined;
+    const value = new RString(self, '');
+    const initialize = classOf(value).findMethod('initialize');
+    if (initialize) yield* invoke(initialize, value, args, keywords, _block, false);
     return value;
   },
   { keywords: true }
@@ -202,7 +222,11 @@ function binaryInspect(text: string): string {
     (char) => `\\x${(char.codePointAt(0) as number).toString(16).toUpperCase()}`
   );
 }
-def('String', ['to_sym', 'intern'], 0, (self: RString) => sym(self.s));
+def('String', ['to_sym', 'intern'], 0, (self: RString) => {
+  if (self.rawBytes && !self.binary)
+    throw rubyError(rt().c.EncodingError, `invalid symbol in encoding UTF-8 :${inspectRawBytes(self.rawBytes)}`);
+  return sym(self.s);
+});
 def('String', 'to_i', [0, 1], function* (self: RString, args) {
   const base = args.length > 0 ? yield* toRubyInt(args[0]) : 10;
   if (base < 0 || base > 36 || base === 1) throw argumentError(`invalid radix ${base}`);
@@ -401,20 +425,24 @@ def('String', 'byteslice', [1, 2], function* (self: RString, args) {
 });
 def('String', 'slice!', [1, 2], function* (self: RString, args) {
   modify(self);
-  const result = yield* substring(self, args);
-  if (result === NIL) return NIL;
   const [first] = args;
   if (args.length === 1 && first instanceof RString) {
+    if (first.rawBytes && !first.binary && !self.binary) return NIL;
     const bytes = stringBytes(self);
     const found = byteIndex(bytes, stringBytes(first));
+    if (found < 0) return NIL;
     setBytes(self, spliceBytes(bytes, found, stringBytes(first).length, new Uint8Array()));
-    return result;
+    return stringFromBytes(stringBytes(first), self.binary);
   }
+  regexpUnsupported(first);
   const chars = stringCharacters(self);
   const range = yield* substringRange(chars.length, args);
-  if (range) chars.splice(range.start, range.count);
+  if (!range) return NIL;
+  const removed = chars.splice(range.start, range.count);
   setBytes(self, stringBytes(joinStringCharacters(chars, self.binary)));
-  return result;
+  return args.length === 1 && !(first instanceof RRange) && range.count === 1
+    ? removed[0]
+    : joinStringCharacters(removed, self.binary);
 });
 // code-gauge-allow functionCognitiveComplexity 17 -- String assignment supports substring, index, and Range selectors with different bounds errors.
 def('String', '[]=', [2, 3], function* (self: RString, args) {
@@ -691,14 +719,14 @@ def('String', 'rindex', [1, 2], function* (self: RString, args) {
 def('String', 'count', [1, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* stringArg(arg));
+  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
   const matches = characterSetMatcher(sets);
   return BigInt(charsOf(self.s).filter((char) => matches(char)).length);
 });
 def('String', 'delete', [1, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* stringArg(arg));
+  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
   const matches = characterSetMatcher(sets);
   return str(
     charsOf(self.s)
@@ -711,7 +739,7 @@ def('String', 'delete!', [1, -1], function* (self: RString, args) {
   if (self.s.length === 0) return NIL;
   modify(self);
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* stringArg(arg));
+  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
   const matches = characterSetMatcher(sets);
   const result = charsOf(self.s)
     .filter((char) => !matches(char))
@@ -736,14 +764,14 @@ function squeeze(text: string, sets: string[]): string {
 def('String', 'squeeze', [0, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* stringArg(arg));
+  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
   return str(squeeze(self.s, sets));
 });
 def('String', 'squeeze!', [0, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   modify(self);
   const sets: string[] = [];
-  for (const arg of args) sets.push(yield* stringArg(arg));
+  for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
   const result = squeeze(self.s, sets);
   if (result === self.s) return NIL;
   setText(self, result);
@@ -768,6 +796,8 @@ function expandSet(spec: string): { chars: string[]; negated: boolean } {
       if (from > to) {
         throw argumentError(`invalid range "${char}-${items[index + 2]}" in string transliteration`);
       }
+      rt().spend(to - from + 1);
+      rt().chargeSlots(to - from + 1);
       for (let code = from; code <= to; code++) expanded.push(String.fromCodePoint(code));
       index += 2;
       continue;
@@ -826,12 +856,14 @@ for (const [name, squeezeRuns] of [
 ] as const) {
   def('String', name, 2, function* (self: RString, [from, to]) {
     if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
-    return str(translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns).text);
+    return str(
+      translate(self.s, yield* patternText(from, 'characters'), yield* patternText(to, 'characters'), squeezeRuns).text
+    );
   });
   def('String', `${name}!`, 2, function* (self: RString, [from, to]) {
     if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
-    const source = yield* stringArg(from);
-    const replacement = yield* stringArg(to);
+    const source = yield* patternText(from, 'characters');
+    const replacement = yield* patternText(to, 'characters');
     if (self.s.length === 0) return NIL;
     modify(self);
     const result = translate(self.s, source, replacement, squeezeRuns);
@@ -877,7 +909,7 @@ function* substitute(
 ): Gen<{ text: string; matched: boolean }> {
   const [pattern, replacement] = args;
   regexpUnsupported(pattern);
-  const target = yield* stringArg(pattern);
+  const target = yield* patternText(pattern, 'regexp');
   if (replacement === undefined && !block) {
     if (global) throw new UnsupportedFeatureError('ブロックを渡さない gsub（Enumerator）');
     throw argumentError('wrong number of arguments (given 1, expected 2)');
@@ -892,8 +924,7 @@ function* substitute(
     matched = true;
     let piece: string;
     if (replacement instanceof RHash) {
-      const entry = yield* hashGet(replacement, str(target));
-      piece = yield* toS(entry ? entry.value : replacement.defaultValue);
+      piece = yield* toS(yield* callMethod(replacement, '[]', [str(target)]));
     } else if (replacement !== undefined) {
       piece = expandReplacement(
         yield* stringArg(replacement),
@@ -904,6 +935,7 @@ function* substitute(
     } else {
       piece = yield* toS(yield* callBlock(block as RProc, [str(target)]));
     }
+    if (self.s !== text) throw runtimeError('string modified');
     result += text.slice(position, found) + piece;
     position = found + target.length;
     if (target.length === 0) {
@@ -944,22 +976,26 @@ def('String', 'gsub!', [1, 2], function* (self: RString, args, block) {
 def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   regexpUnsupported(pattern);
-  const target = yield* stringArg(pattern);
+  const target = yield* patternText(pattern, 'regexp');
   const found: Value[] = [];
+  const text = self.s;
   let position = 0;
   for (;;) {
-    const index = self.s.indexOf(target, position);
+    const index = text.indexOf(target, position);
     if (index === -1) break;
-    found.push(str(target));
+    const match = str(target);
+    if (block) {
+      yield* callBlock(block, [match], false);
+      if (self.s !== text) throw runtimeError('string modified');
+    } else found.push(match);
     position =
       index +
-      (target.length === 0 && index < self.s.length
-        ? String.fromCodePoint(self.s.codePointAt(index) as number).length
+      (target.length === 0 && index < text.length
+        ? String.fromCodePoint(text.codePointAt(index) as number).length
         : Math.max(target.length, 1));
-    if (position > self.s.length) break;
+    if (position > text.length) break;
   }
   if (!block) return arr(found);
-  for (const item of found) yield* callBlock(block, [item], false);
   return self;
 });
 for (const name of ['match', 'match?', '=~']) {
@@ -1135,8 +1171,21 @@ export function succ(text: string): string {
 // code-gauge-allow functionCognitiveComplexity 20 -- upto uses numeric-string width rules or String successor iteration with exclusive bounds.
 def('String', 'upto', [1, 2], function* (self: RString, args, block) {
   if (!block) return makeEnumerator(self, 'upto', args);
-  const last = yield* stringArg(args[0]);
+  const end = yield* stringArgValue(args[0]);
+  const last = end.s;
   const exclusive = args.length > 1 && truthy(args[1]);
+  if ((self.rawBytes && !self.binary) || (end.rawBytes && !end.binary)) {
+    const limit = stringBytes(end);
+    let current = stringFromBytes(stringBytes(self), self.binary);
+    while (stringBytes(current).length <= limit.length && compareBytes(stringBytes(current), limit) <= 0) {
+      if (exclusive && compareBytes(stringBytes(current), limit) === 0) break;
+      yield* callBlock(block, [current], false);
+      if (compareBytes(stringBytes(current), limit) === 0) break;
+      current = current.rawBytes ? transformInvalid(current, 'succ', undefined) : str(succ(current.s));
+      rt().spend();
+    }
+    return self;
+  }
   if (/^\d+$/.test(self.s) && /^\d+$/.test(last)) {
     const width = self.s.length;
     for (let value = BigInt(self.s); exclusive ? value < BigInt(last) : value <= BigInt(last); value++) {
@@ -1165,14 +1214,19 @@ function* justify(self: RString, args: Value[], kind: 'left' | 'right' | 'center
   const chars = stringCharacters(self);
   const length = chars.length;
   if (width <= length) return stringFromBytes(stringBytes(self), self.binary);
+  const binary = combinedStringEncoding(
+    self.binary,
+    stringBytes(self).every((byte) => byte < 0x80),
+    padding
+  );
   rt().checkStringLength(width);
   const total = width - length;
   const fill = (count: number): RString[] =>
     Array.from({ length: count }, (_, index) => paddingChars[index % paddingChars.length]);
-  if (kind === 'left') return joinStringCharacters([...chars, ...fill(total)], self.binary);
-  if (kind === 'right') return joinStringCharacters([...fill(total), ...chars], self.binary);
+  if (kind === 'left') return joinStringCharacters([...chars, ...fill(total)], binary);
+  if (kind === 'right') return joinStringCharacters([...fill(total), ...chars], binary);
   const left = Math.floor(total / 2);
-  return joinStringCharacters([...fill(left), ...chars, ...fill(total - left)], self.binary);
+  return joinStringCharacters([...fill(left), ...chars, ...fill(total - left)], binary);
 }
 
 def('String', 'ljust', [1, 2], (self: RString, args) => justify(self, args, 'left'));
@@ -1200,7 +1254,7 @@ def('String', 'split', [0, 2], function* (self: RString, args, block) {
   if (isNil(pattern) || (pattern instanceof RString && pattern.s === ' ')) {
     parts = splitWhitespace(text, limit);
   } else {
-    const separator = yield* stringArg(pattern);
+    const separator = yield* patternText(pattern, 'characters');
     parts = separator === '' ? splitChars(text, limit) : splitString(text, separator, limit);
   }
   if (limit === 0) while (parts.length > 0 && parts.at(-1) === '') parts.pop();
@@ -1251,14 +1305,18 @@ function splitString(text: string, separator: string, limit: number): string[] {
 
 def('String', 'partition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
-  const text = yield* stringArg(separator);
+  const needle = yield* stringArgValue(separator);
+  if (needle.rawBytes && !needle.binary) return arr([str(self.s), str(''), str('')]);
+  const text = needle.s;
   const index = self.s.indexOf(text);
   if (index === -1) return arr([str(self.s), str(''), str('')]);
   return arr([str(self.s.slice(0, index)), str(text), str(self.s.slice(index + text.length))]);
 });
 def('String', 'rpartition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
-  const text = yield* stringArg(separator);
+  const needle = yield* stringArgValue(separator);
+  if (needle.rawBytes && !needle.binary) return arr([str(''), str(''), str(self.s)]);
+  const text = needle.s;
   const index = self.s.lastIndexOf(text);
   if (index === -1) return arr([str(''), str(''), str(self.s)]);
   return arr([str(self.s.slice(0, index)), str(text), str(self.s.slice(index + text.length))]);

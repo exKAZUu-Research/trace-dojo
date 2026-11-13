@@ -161,8 +161,14 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'range': {
       const from = e.from ? yield* ev(e.from, frame) : NIL;
-      const to = e.to ? yield* ev(e.to, frame) : NIL;
-      return yield* makeRange(from, to, e.exclusive);
+      const mark = frame.temporaries.length;
+      frame.temporaries.push(from);
+      try {
+        const to = e.to ? yield* ev(e.to, frame) : NIL;
+        return yield* makeRange(from, to, e.exclusive);
+      } finally {
+        frame.temporaries.length = mark;
+      }
     }
     case 'lvar': {
       return frame.scope.lookup(e.name, e.depth);
@@ -185,9 +191,15 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'asgn': {
       const prepared = yield* prepareAssignment(e.target, frame);
       if (prepared.skip) return NIL;
-      const value = yield* ev(e.value, frame);
-      yield* prepared.write(value);
-      return value;
+      const mark = frame.temporaries.length;
+      frame.temporaries.push(...prepared.roots);
+      try {
+        const value = yield* ev(e.value, frame);
+        yield* prepared.write(value);
+        return value;
+      } finally {
+        frame.temporaries.length = mark;
+      }
     }
     case 'opasgn': {
       return yield* operatorAssign(e, frame);
@@ -372,6 +384,7 @@ export function* splatItems(value: Value): Gen<Value[]> {
   if (respondsTo(value, 'to_a')) {
     const converted = yield* callMethod(value, 'to_a', []);
     if (converted instanceof RArray) return [...converted.items];
+    if (converted === NIL) return [value];
     throw typeError(
       `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_a gives ${realClassOf(converted).name})`
     );
@@ -394,14 +407,28 @@ function* evalHash(e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<RHash> {
 function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<void> {
   for (const item of e.items) {
     if ('splat' in item) {
-      const value = yield* ev(item.splat, frame);
+      let value = yield* ev(item.splat, frame);
       if (value === NIL) continue;
-      if (!(value instanceof RHash)) throw implicitConversionError(value, 'Hash');
+      if (!(value instanceof RHash)) {
+        const source = value;
+        if (!respondsTo(source, 'to_hash')) throw implicitConversionError(source, 'Hash');
+        value = yield* callMethod(source, 'to_hash', []);
+        if (!(value instanceof RHash))
+          throw typeError(
+            `can't convert ${realClassOf(source).name} to Hash (${realClassOf(source).name}#to_hash gives ${realClassOf(value).name})`
+          );
+      }
       for (const entry of snapshot(value.map.values())) yield* hashSet(hash, entry.key, entry.value);
       continue;
     }
     const key = yield* ev(item.key, frame);
-    yield* hashSet(hash, key, yield* ev(item.value, frame));
+    const mark = frame.temporaries.length;
+    frame.temporaries.push(key);
+    try {
+      yield* hashSet(hash, key, yield* ev(item.value, frame));
+    } finally {
+      frame.temporaries.length = mark;
+    }
   }
 }
 
@@ -565,15 +592,24 @@ function constSet(module: RClass, name: string, value: Value): void {
 
 interface PreparedAssignment {
   skip: boolean;
+  roots: Value[];
   write: (value: Value) => Gen<void>;
 }
 
 function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignment> {
   if (target.k === 'index') {
     const recv = yield* ev(target.recv, frame);
-    const { args } = yield* evalArgs(target.args, frame);
+    const mark = frame.temporaries.length;
+    frame.temporaries.push(recv);
+    let args: Value[];
+    try {
+      ({ args } = yield* evalArgs(target.args, frame));
+    } finally {
+      frame.temporaries.length = mark;
+    }
     return {
       skip: false,
+      roots: [recv, ...args],
       *write(value) {
         yield* atCallRow(target.row, () =>
           callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall: target.recv.k === 'self' })
@@ -585,6 +621,7 @@ function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignmen
     const recv = yield* ev(target.recv, frame);
     return {
       skip: target.safe && recv === NIL,
+      roots: [recv],
       *write(value) {
         yield* atCallRow(target.row, () =>
           callMethod(recv, `${target.name}=`, [value], undefined, undefined, { fcall: target.recv.k === 'self' })
@@ -596,6 +633,7 @@ function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignmen
     const module = yield* constantTargetModule(target, frame);
     return {
       skip: false,
+      roots: [module],
       *write(value) {
         yield* [];
         constSet(module, target.name, value);
@@ -604,10 +642,23 @@ function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignmen
   }
   if (target.k === 'mlhs') {
     const targets: PreparedAssignment[] = [];
-    for (const item of target.items) targets.push(yield* prepareAssignment(item, frame));
-    return { skip: false, write: (value) => assignPreparedMulti(target, targets, value) };
+    const mark = frame.temporaries.length;
+    try {
+      for (const item of target.items) {
+        const prepared = yield* prepareAssignment(item, frame);
+        targets.push(prepared);
+        frame.temporaries.push(...prepared.roots);
+      }
+    } finally {
+      frame.temporaries.length = mark;
+    }
+    return {
+      skip: false,
+      roots: targets.flatMap((prepared) => prepared.roots),
+      write: (value) => assignPreparedMulti(target, targets, value),
+    };
   }
-  return { skip: false, write: (value) => assign(target, value, frame) };
+  return { skip: false, roots: [], write: (value) => assign(target, value, frame) };
 }
 
 function* constantTargetModule(target: Extract<Target, { k: 'const' }>, frame: Frame): Gen<RClass> {
@@ -711,18 +762,33 @@ function* toAryForAssignment(value: Value): Gen<Value[]> {
   if (respondsTo(value, 'to_ary')) {
     const converted = yield* callMethod(value, 'to_ary', []);
     if (converted instanceof RArray) return converted.items;
+    if (converted !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
+      );
   }
   return [value];
 }
 
 function* operatorAssign(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): Gen {
+  const mark = frame.temporaries.length;
+  try {
+    return yield* operatorAssignInner(e, frame);
+  } finally {
+    frame.temporaries.length = mark;
+  }
+}
+
+function* operatorAssignInner(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): Gen {
   const { target, op } = e;
   let read: () => Gen;
   let write: (value: Value) => Gen<void>;
   switch (target.k) {
     case 'index': {
       const recv = yield* ev(target.recv, frame);
+      frame.temporaries.push(recv);
       const { args } = yield* evalArgs(target.args, frame);
+      frame.temporaries.push(...args);
       read = () => atCallRow(target.row, () => callMethod(recv, '[]', args));
       write = function* (value) {
         yield* atCallRow(target.row, () => callMethod(recv, '[]=', [...args, value]));
@@ -732,6 +798,7 @@ function* operatorAssign(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): Gen {
     case 'attr': {
       const recv = yield* ev(target.recv, frame);
       if (target.safe && recv === NIL) return NIL;
+      frame.temporaries.push(recv);
       const fcall = target.recv.k === 'self';
       read = () => atCallRow(target.row, () => callMethod(recv, target.name, [], undefined, undefined, { fcall }));
       write = function* (value) {

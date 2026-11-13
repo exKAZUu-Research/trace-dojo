@@ -25,8 +25,8 @@ import {
   sortBy,
   sortValues,
   sum,
-  toArray,
   uniqValues,
+  zipCollections,
 } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { randomIndex } from './libRandom';
@@ -639,31 +639,34 @@ def('Array', 'transpose', 0, function* (self: RArray) {
   return arr(result);
 });
 def('Array', 'zip', [0, -1], function* (self: RArray, others, block) {
-  const lists: Value[][] = [];
-  for (const other of others) lists.push(other instanceof RArray ? other.items : yield* toArray(other));
-  const results: Value[] = [];
-  for (const [index, item] of self.items.entries()) {
-    const tuple = arr([item, ...lists.map((list) => list[index] ?? NIL)]);
-    if (block) yield* call(block, tuple, false);
-    else results.push(tuple);
-  }
-  return block ? NIL : arr(results);
+  return yield* zipCollections(self, others, block);
 });
 def('Array', 'product', [0, -1], function* (self: RArray, others, block) {
+  const arrays = [self.items];
+  for (const other of others) arrays.push((yield* toAry(other)).items);
+  if (block) {
+    if (arrays.some((items) => items.length === 0)) return self;
+    const indexes = arrays.map(() => 0);
+    for (;;) {
+      rt().spend();
+      yield* call(block, arr(arrays.map((items, index) => items[indexes[index]])), false);
+      let position = indexes.length - 1;
+      while (position >= 0 && ++indexes[position] === arrays[position].length) {
+        indexes[position] = 0;
+        position--;
+      }
+      if (position < 0) return self;
+    }
+  }
   rt().chargeSlots(self.items.length);
   let tuples: Value[][] = self.items.map((item) => [item]);
-  for (const other of others) {
-    const items = (yield* toAry(other)).items;
+  for (const items of arrays.slice(1)) {
     const size = tuples.length * items.length;
     grow(size);
     rt().chargeSlots(size);
     const next: Value[][] = [];
     for (const tuple of tuples) for (const item of items) next.push([...tuple, item]);
     tuples = next;
-  }
-  if (block) {
-    for (const tuple of tuples) yield* call(block, arr(tuple), false);
-    return self;
   }
   return arr(tuples.map((tuple) => arr(tuple)));
 });

@@ -17,6 +17,23 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test('pending expression values remain visible in Turtle traces', () => {
+  const programs = [
+    'def v;x=1;42;end;h={Turtle.new=>v}',
+    'class P;def initialize(x);@t=Turtle.new(x,0);end;def <=>(o);0;end;end;r=P.new(0)..P.new(1)',
+    'class P;def initialize;@t=Turtle.new;end;def x=(v);$t=@t;@t.forward;end;end;def v;x=1;42;end;P.new.x=v',
+  ];
+  expect(programs.map((program) => traceProgram('ruby', program, program).finalTurtles.length)).toEqual([1, 2, 1]);
+});
+
+test('byte-bearing class literals record the same steps as text literals', () => {
+  const ordinary = rubyTrace('class C\n X="a"\nend').map(({ line }) => line);
+  const escaped = rubyTrace(String.raw`class C
+ X="\xFF"
+end`).map(({ line }) => line);
+  expect(escaped).toEqual(ordinary);
+});
+
 test.each([
   ['method', 'def f(x)\n marker = 1\nend\nf(begin\n  3\nend)', [4]],
   ['constructor', 'class C\n def initialize(x)\n  marker = 1\n end\nend\nC.new(begin\n  3\nend)', [6]],
@@ -271,7 +288,7 @@ h = { mk => 1 }`;
 test('collection builders keep Turtles alive across callbacks', () => {
   for (const program of [
     'h=[1,3].group_by do |x|\n Turtle.new(x,0)\nend\nh.keys.each { |t| t.forward }',
-    'h=[1,3].chunk do |x|\n Turtle.new(x,0)\nend\nh.each { |k,v| k.forward }',
+    'h=[1,3].chunk do |x|\n Turtle.new(x,0)\nend\nts=[]\nh.each { |k,v| ts << k; k.forward }',
   ]) {
     const items = rubyTrace(program);
     expect(items.some(({ turtles }) => turtles.length === 2 && turtles.every(({ y }) => y === 1))).toBe(true);

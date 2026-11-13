@@ -208,8 +208,8 @@ export class Converter {
         const to = node.childForFieldName('end');
         return {
           k: 'range',
-          from: from ? this.expr(from) : undefined,
-          to: to ? this.expr(to) : undefined,
+          from: from ? this.value(from) : undefined,
+          to: to ? this.value(to) : undefined,
           exclusive: node.childForFieldName('operator')?.text === '...',
         };
       }
@@ -489,7 +489,7 @@ export class Converter {
     for (const node of nodes) {
       if (node.type === 'comment') continue;
       if (node.type === 'hash_splat_argument') {
-        items.push({ splat: this.expr(onlyNamedChild(node)) });
+        items.push({ splat: this.value(onlyNamedChild(node)) });
         continue;
       }
       if (node.type !== 'pair') this.unsupportedNode(node);
@@ -508,17 +508,17 @@ export class Converter {
     } else if (!usesArrow) {
       this.unsupported(keyNode, '文字列で書いたシンボルのキー（"a b": 1）');
     } else {
-      key = this.expr(keyNode);
+      key = this.value(keyNode);
     }
-    if (valueNode) return { key, value: this.expr(valueNode) };
+    if (valueNode) return { key, value: this.value(valueNode) };
     // `{x:}` takes the value of the variable or method of that name.
     return { key, value: this.identifier(keyNode, 1) };
   }
 
   /** An argument, which may be a splat (`*a`) where a list of values is expected. */
   private argument(node: Node): Expr {
-    if (node.type === 'splat_argument') return { k: 'splat', e: this.expr(onlyNamedChild(node)) };
-    return this.expr(node);
+    if (node.type === 'splat_argument') return { k: 'splat', e: this.value(onlyNamedChild(node)) };
+    return this.value(node);
   }
 
   private argumentList(node: Node): { args: Expr[]; blockArg?: Expr } {
@@ -538,7 +538,7 @@ export class Converter {
         case 'block_argument': {
           const value = namedChildren(child)[0];
           if (!value) this.unsupported(child, '名前のない & 引数の受け渡し');
-          blockArg = this.expr(value);
+          blockArg = this.value(value);
           break;
         }
         case 'forward_argument': {
@@ -585,11 +585,17 @@ export class Converter {
     }
   }
 
+  private value(node: Node): Expr {
+    const value = this.expr(node);
+    this.checkValue(node, value);
+    return value;
+  }
+
   private operatorAssignment(node: Node): Expr {
     const left = required(node.childForFieldName('left'));
     const operator = required(node.childForFieldName('operator')).text;
     const target = this.target(left);
-    const value = this.expr(required(node.childForFieldName('right')));
+    const value = this.value(required(node.childForFieldName('right')));
     return { k: 'opasgn', target, op: operator.slice(0, -1), value, row: node.startPosition.row };
   }
 
@@ -749,8 +755,8 @@ export class Converter {
     const operator = required(node.childForFieldName('operator')).text;
     const leftNode = required(node.childForFieldName('left'));
     const rightNode = required(node.childForFieldName('right'));
-    const left = this.expr(leftNode);
-    const right = this.expr(rightNode);
+    const left = this.value(leftNode);
+    const right = this.value(rightNode);
     switch (operator) {
       case '&&':
       case 'and': {
@@ -791,7 +797,7 @@ export class Converter {
     const operandNode = required(node.childForFieldName('operand'));
     if (operator === 'defined?') this.unsupported(node, 'defined?');
     if ((operator === '-' || operator === '+') && (operandNode.type === 'integer' || operandNode.type === 'float')) {
-      const operand = this.expr(operandNode);
+      const operand = this.value(operandNode);
       const sign = operator === '-' && !/^\s/.test(this.source.slice(node.startIndex + 1, operandNode.startIndex));
       if (sign || operator === '+') {
         if (operator === '+') return operand;
@@ -799,7 +805,7 @@ export class Converter {
         if (operand.k === 'float') return { k: 'float', v: -operand.v };
       }
     }
-    const operand = this.expr(operandNode);
+    const operand = this.value(operandNode);
     switch (operator) {
       case '!':
       case 'not': {
@@ -977,7 +983,7 @@ export class Converter {
         case 'optional_parameter': {
           advance(child, 1);
           const name = declare(child, required(child.childForFieldName('name')).text);
-          params.optional.push({ name, value: this.expr(required(child.childForFieldName('value'))) });
+          params.optional.push({ name, value: this.value(required(child.childForFieldName('value'))) });
           break;
         }
         case 'splat_parameter': {
@@ -998,7 +1004,7 @@ export class Converter {
           advance(child, 4);
           const name = declare(child, required(child.childForFieldName('name')).text);
           const valueNode = child.childForFieldName('value');
-          params.keywords.push({ name, value: valueNode ? this.expr(valueNode) : undefined });
+          params.keywords.push({ name, value: valueNode ? this.value(valueNode) : undefined });
           break;
         }
         case 'block_parameter': {
@@ -1193,7 +1199,7 @@ function isLiteral(e: Expr): boolean {
       return true;
     }
     case 'str': {
-      return e.parts.every((part) => typeof part === 'string');
+      return e.parts.every((part) => typeof part === 'string' || ('text' in part && 'bytes' in part));
     }
     case 'array': {
       return e.items.every((item) => isLiteral(item));

@@ -1,4 +1,5 @@
 import {
+  combinedStringEncoding,
   compareValues,
   inspectRange,
   numericCompare,
@@ -7,7 +8,7 @@ import {
   rEquals,
   spaceship,
   toIndex,
-  toS,
+  toSValue,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
@@ -19,7 +20,7 @@ import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { succ } from './libString';
 import { NIL, type RProc, RRange, RString, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, realClassOf, str } from './values';
+import { arr, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 type Visit = (value: Value) => Gen<unknown>;
 
@@ -274,9 +275,30 @@ def('Range', 'inspect', 0, function* (self: RRange) {
   return str(yield* inspectRange(self));
 });
 def('Range', 'to_s', 0, function* (self: RRange) {
-  const begin = self.begin === NIL ? '' : yield* toS(self.begin);
-  const end = self.end === NIL ? '' : yield* toS(self.end);
-  return str(`${begin}${self.exclusive ? '...' : '..'}${end}`);
+  const parts = [
+    self.begin === NIL ? str('') : yield* toSValue(self.begin),
+    str(self.exclusive ? '...' : '..'),
+    self.end === NIL ? str('') : yield* toSValue(self.end),
+  ];
+  let binary = false;
+  let ascii = true;
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for (const part of parts) {
+    binary = combinedStringEncoding(binary, ascii, part);
+    const bytes = stringBytes(part);
+    chunks.push(bytes);
+    length += bytes.length;
+    ascii &&= bytes.every((byte) => byte < 0x80);
+  }
+  rt().checkStringLength(length);
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const bytes of chunks) {
+    result.set(bytes, offset);
+    offset += bytes.length;
+  }
+  return stringFromBytes(result, binary);
 });
 def('Range', '==', 1, (self: RRange, [other]) => rEquals(self, other));
 def('Range', 'eql?', 1, function* (self: RRange, [other]) {
