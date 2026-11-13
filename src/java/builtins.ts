@@ -116,7 +116,7 @@ function createBuiltins(): Builtins {
     ...standardStreamsOf(registry.classes.get('System') as ClassInfo),
   });
   defineSerializable(registry, collections);
-  retainClosureOperands(registry.classes.values(), objectClass, registry.classes.get('Collector') as ClassInfo);
+  retainClosureOperands(registry.qualifiedNames.keys(), objectClass, registry.classes.get('Collector') as ClassInfo);
   return {
     classes: registry.classes,
     objectClass,

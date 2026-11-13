@@ -1709,6 +1709,11 @@ test.each([
     '',
   ],
   [
+    'an entry comparator',
+    'Comparator<Map.Entry<Integer, Integer>> c = make(); int done = 1;',
+    'static Comparator<Map.Entry<Integer, Integer>> make() { Turtle t = new Turtle(); return Map.Entry.comparingByKey((a, b) -> { t.前に進む(); return 0; }); }',
+  ],
+  [
     'a toMap collector',
     'java.util.stream.Collector<Integer, ?, Map<Integer, Integer>> c = make(); int done = 1;',
     'static java.util.stream.Collector<Integer, ?, Map<Integer, Integer>> make() { Turtle t = new Turtle(); return java.util.stream.Collectors.toMap(x -> x, x -> x, (x, y) -> { t.前に進む(); return x; }); }',

@@ -59,7 +59,7 @@ export function defineText(
   defineStringJoiner(registry, objectClass, stringClass.type);
   definePatternSyntaxAccessors(registry, stringType);
   defineStringExtras(stringClass, collections);
-  defineStringVariants(stringClass, objectClass);
+  defineStringVariants(stringClass);
   defineStringIdentity(
     stringClass,
     ['StringBuilder', 'StringBuffer'].map((name) => registry.classes.get(name) as ClassInfo)
@@ -146,6 +146,28 @@ function defineCharSequence(registry: Registry, implementations: ClassInfo[]): v
     linkOverrides(implementation);
   }
   defineAppendable(registry, cls, implementations.slice(1));
+  defineSequenceReaders(cls, implementations);
+}
+
+/**
+ * `String.contentEquals` and the builders' `insert(int, CharSequence)`, which read any `CharSequence`, a program's
+ * own included, through its `length` and `charAt`.
+ */
+function defineSequenceReaders(charSequence: ClassInfo, [stringClass, ...builders]: ClassInfo[]): void {
+  addMethod(stringClass, 'contentEquals', [charSequence.type], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (other === undefined) return throwBuiltin(frame, 'NullPointerException');
+    const length = sequenceLength(frame, charSequence, other);
+    return length === text(receiver).length && charactersOf(frame, charSequence, other, 0, length) === text(receiver);
+  });
+  for (const builder of builders) {
+    addMethod(builder, 'insert', [INT, charSequence.type], builder.type, false, (frame, receiver, [offset, value]) => {
+      checkOffset(frame, offset as number, builderOf(receiver).length);
+      const sequence = value ?? new JavaString('null');
+      const inserted = charactersOf(frame, charSequence, sequence, 0, sequenceLength(frame, charSequence, sequence));
+      return spliceBuilder(frame, receiver, offset as number, offset as number, inserted);
+    });
+    linkOverrides(builder);
+  }
 }
 
 /**
@@ -547,7 +569,7 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
 }
 
 /** Variants of the common String methods: one-sided stripping, first-match replacement, and code points. */
-function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): void {
+function defineStringVariants(stringClass: ClassInfo): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'stripLeading', [], stringType, false, (frame, receiver) =>
     newString(frame, text(receiver).replace(LEADING_WHITESPACE, ''))
@@ -579,12 +601,6 @@ function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): v
       return replaceMatches(frame, receiver, pattern, requireString(frame, replacement));
     }
   );
-  // `contentEquals` takes a CharSequence, which these programs pass as a String or a StringBuilder.
-  addMethod(stringClass, 'contentEquals', [objectClass.type], BOOLEAN, false, (frame, receiver, [other]) => {
-    if (other instanceof JavaString) return other.value === text(receiver);
-    if (other instanceof JavaObject && other.builder !== undefined) return builderOf(other) === text(receiver);
-    return throwBuiltin(frame, 'NullPointerException');
-  });
   for (const searched of [stringType, INT]) {
     addMethod(stringClass, 'lastIndexOf', [searched, INT], INT, false, (frame, receiver, [target, from]) =>
       lastIndexFrom(frame, text(receiver), searched === INT ? target : requireString(frame, target), from as number)
