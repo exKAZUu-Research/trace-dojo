@@ -35,12 +35,9 @@ test.each([
 });
 
 test.each([
-  ['a regular expression', 'p "a" =~ /a/', '正規表現'],
-  ['pattern matching', 'case [1]\nin [x]\nend', 'パターンマッチ'],
-  ['a heredoc', 'x = <<~EOS\n  a\nEOS', 'ヒアドキュメント'],
-  ['a singleton class', 'class << self\nend', '特異クラス'],
-  ['a numbered block parameter', '[1].each { p _1 }', '番号指定パラメータ'],
-])('%s is refused before running in this stage', (_name, program, feature) => {
+  ['an imaginary number', 'p 2i', '虚数のリテラル'],
+  ['an external command', 'p `ls`', '外部コマンドの実行'],
+])('%s is refused before running', (_name, program, feature) => {
   const execution = run(program);
   expect(execution.kind).toBe('compileError');
   if (execution.kind === 'compileError') {
@@ -55,7 +52,13 @@ test.each([
   ['require', 'require "json"', 'require（ライブラリ・別のファイルの読み込み）は、この採点環境では使えません。'],
   ['a thread', 'Thread.new { }', 'スレッド（Thread）は、この採点環境では使えません。'],
   ['eval', 'eval("1")', '文字列の評価（eval）は、この採点環境では使えません。'],
-  ['send', '1.send(:+, 2)', 'send（名前によるメソッドの呼び出し）は、この採点環境では使えません。'],
+  [
+    'instance_eval with a string',
+    '1.instance_eval("1")',
+    '文字列の評価（instance_eval）は、この採点環境では使えません。',
+  ],
+  ['a fiber', 'Fiber.new { }', 'Fiber は、この採点環境では使えません。'],
+  ['binding', 'binding', 'binding は、この採点環境では使えません。'],
 ])(
   '%s stops the program with the unsupported-feature message, which rescue cannot catch',
   (_name, program, message) => {

@@ -197,3 +197,25 @@ c = Counter.new`);
     { '@count': 1, 'Counter.@@total': 1, $runs: 1 },
   ]);
 });
+
+test('a pattern binds its variables without a step of its own, as a condition records none', () => {
+  const items = rubyTrace(`t = Turtle.new
+moves = [[:forward, 2], [:turn]]
+moves.each do |move|
+  case move
+  in [:forward, n]
+    n.times { t.前に進む }
+  in [:turn]
+    t.右を向く
+  end
+end`);
+  expect(items.map(({ line, vars }) => [line, vars.n])).toEqual([
+    [0, undefined],
+    [1, undefined],
+    [2, undefined],
+    [6, 2],
+    [6, 2],
+    [8, undefined],
+  ]);
+  expect(items.at(-1)?.turtles).toEqual([{ x: 0, y: 2, color: '#', dir: 'E' }]);
+});

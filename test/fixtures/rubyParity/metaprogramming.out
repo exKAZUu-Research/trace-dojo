@@ -1,0 +1,54 @@
+"hello![1, 2]"
+true
+false
+"undefined method 'other' for an instance of Ghost"
+3
+"AB"
+[1, 3]
+42
+"private method 'hide' called for an instance of Secret"
+0
+10
+2
+6
+true
+3
+[:@alpha]
+false
+"wrong number of arguments (given 0, expected 1..2)"
+10
+15
+"HI!"
+"WOOF"
+[Loud, Dog, Object]
+8
+[10, 20]
+1
+:+
+Integer
+5
+"WOOF"
+true
+UnboundMethod
+Dog
+3.141592653589793
+true
+1
+[:@@n]
+true
+"hi from obj"
+2
+6
+"String"
+#<ArgumentError: wrong number of arguments (given 1, expected 0)>
+1
+[:@a, :@b]
+[:BAR, :BAZ]
+true
+true
+true
+Reflected
+0
+"assignment"
+"assignment"
+"assignment"

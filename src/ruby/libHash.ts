@@ -1,12 +1,12 @@
 import { inspect, inspectHash, rEql, rEquals } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, implicitConversionError, rubyError } from './errors';
+import { argumentError, frozenError, implicitConversionError, rubyError, runtimeError } from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, respondsTo } from './interp';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, type RProc, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt } from './runtime';
 import { arr, newHash, snapshot, str, truthy } from './values';
 
 function* modify(self: RHash): Gen<void> {
@@ -389,9 +389,15 @@ def('Hash', 'rehash', 0, (self: RHash) => {
   rehash(self);
   return self;
 });
-def('Hash', ['compare_by_identity'], 0, () => {
-  throw new UnsupportedFeatureError('compare_by_identity');
+def('Hash', 'compare_by_identity', 0, function* (self: RHash) {
+  if (self.byIdentity) return self;
+  yield* modify(self);
+  if (self.iterating > 0) throw runtimeError('compare_by_identity during iteration');
+  self.byIdentity = true;
+  rehash(self);
+  return self;
 });
+def('Hash', 'compare_by_identity?', 0, (self: RHash) => self.byIdentity);
 def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
   yield* modify(self);
   self.defaultProc = proc === NIL ? undefined : (proc as RProc);

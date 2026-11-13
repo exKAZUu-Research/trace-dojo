@@ -1,6 +1,6 @@
 import { def } from './define';
 import { callProc, type Gen, requireBlock } from './interp';
-import { type RString,NIL,RObject,type Value } from './objects';
+import { NIL, RObject, type RString, type Value } from './objects';
 import { rt, type Runtime } from './runtime';
 import { arr, str } from './values';
 
@@ -8,7 +8,8 @@ import { arr, str } from './values';
 export function installEncodings(runtime: Runtime): void {
   const encoding = runtime.c.Encoding;
   for (const [constant, name] of [
-    ['UTF_8', 'utf8'],
+    // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Ruby names the encoding this way.
+    ['UTF_8', 'UTF-8'],
     ['ASCII_8BIT', 'ASCII-8BIT'],
     ['BINARY', 'ASCII-8BIT'],
     ['US_ASCII', 'US-ASCII'],

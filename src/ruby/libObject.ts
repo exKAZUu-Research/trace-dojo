@@ -158,6 +158,7 @@ function* copyObject(self: Value, keepFrozen: boolean): Gen {
     for (const [key, entry] of self.map) hash.map.set(key, { ...entry });
     hash.defaultValue = self.defaultValue;
     hash.defaultProc = self.defaultProc;
+    hash.byIdentity = self.byIdentity;
     copy = hash;
   } else if (self instanceof RObject) {
     const object = new RObject(self.cls);

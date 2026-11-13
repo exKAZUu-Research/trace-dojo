@@ -1,18 +1,7 @@
 import { inspect } from './conversions';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
-import {
-  type HashEntry,
-  NIL,
-  RArray,
-  type RBasic,
-  RHash,
-  RObject,
-  RRange,
-  RString,
-  RSymbol,
-  type Value,
-} from './objects';
+import { type HashEntry, NIL, RArray, RBasic, RHash, RObject, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, snapshot, str, truthy } from './values';
 
@@ -57,7 +46,10 @@ export function* hashKeyOf(value: Value): Gen<string> {
     const hash = yield* callMethod(value, 'hash', []);
     return `u${typeof hash === 'bigint' ? hash : yield* hashKeyOf(hash)}`;
   }
-  const custom = value instanceof RObject ? (value.data as { hashKey?: () => string; hashParts?: () => Value[] } | undefined) : undefined;
+  const custom =
+    value instanceof RObject
+      ? (value.data as { hashKey?: () => string; hashParts?: () => Value[] } | undefined)
+      : undefined;
   if (custom?.hashKey) return custom.hashKey();
   if (custom?.hashParts) {
     const parts: string[] = [];
@@ -69,8 +61,12 @@ export function* hashKeyOf(value: Value): Gen<string> {
 
 /** Finds the entry for `key`, comparing keys whose objects define `hash` with their `eql?`. */
 function* findEntry(hash: RHash, key: Value): Gen<{ slot: string; entry: HashEntry | undefined }> {
+  if (hash.byIdentity && key instanceof RBasic && !(key instanceof RSymbol)) {
+    const slot = `o${key.id}`;
+    return { slot, entry: hash.map.get(slot) };
+  }
   const base = yield* hashKeyOf(key);
-  if (!base.startsWith('u')) return { slot: base, entry: hash.map.get(base) };
+  if (!base.startsWith('u') || hash.byIdentity) return { slot: base, entry: hash.map.get(base) };
   for (let index = 0; ; index++) {
     const slot = index === 0 ? base : `${base}#${index}`;
     const entry = hash.map.get(slot);
@@ -104,7 +100,7 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
   }
   if (hash.iterating > 0) throw runtimeError("can't add a new key into hash during iteration");
   rt().spend();
-  const stored = key instanceof RString && !key.frozen ? frozenCopy(key) : key;
+  const stored = key instanceof RString && !key.frozen && !hash.byIdentity ? frozenCopy(key) : key;
   hash.map.set(slot, { key: stored, value });
 }
 

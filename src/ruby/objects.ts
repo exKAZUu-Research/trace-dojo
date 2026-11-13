@@ -88,6 +88,8 @@ export class RHash extends RBasic {
   defaultProc?: RProc;
   /** How many iterations over the hash are in progress, during which adding a key is an error. */
   iterating = 0;
+  /** Whether keys compare by identity, after `compare_by_identity`. */
+  byIdentity = false;
 }
 
 export class RRange extends RBasic {

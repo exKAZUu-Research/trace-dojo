@@ -9,8 +9,8 @@ import {
   type Gen,
   invoke,
   ivarGet,
-  methodMissing,
   ivarSet,
+  methodMissing,
   nativeProc,
   requireBlock,
 } from './interp';
@@ -27,7 +27,7 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { rt } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, classOf, realClassOf, singletonClassOf, str, sym, truthy } from './values';
 
 /** The name a method takes as a Symbol or a String, raising as Ruby does for anything else. */
@@ -47,14 +47,26 @@ function* ivarName(value: Value): Gen<string> {
 
 // Calling by name ------------------------------------------------------------------------------------------------------
 
-def('Kernel', ['send', '__send__'], [1, -1], function* (self, args, block, keywords) {
-  const name = yield* nameOf(args[0]);
-  return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: true });
-}, { keywords: true });
-def('Kernel', 'public_send', [1, -1], function* (self, args, block, keywords) {
-  const name = yield* nameOf(args[0]);
-  return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: false });
-}, { keywords: true });
+def(
+  'Kernel',
+  ['send', '__send__'],
+  [1, -1],
+  function* (self, args, block, keywords) {
+    const name = yield* nameOf(args[0]);
+    return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: true });
+  },
+  { keywords: true }
+);
+def(
+  'Kernel',
+  'public_send',
+  [1, -1],
+  function* (self, args, block, keywords) {
+    const name = yield* nameOf(args[0]);
+    return yield* callMethod(self, name, args.slice(1), keywords, block, { fcall: false });
+  },
+  { keywords: true }
+);
 
 /** `respond_to?`: whether a public (or, with `include_all`, any) method answers, or `respond_to_missing?` says so. */
 export function* respondsToName(self: Value, name: string, includeAll: boolean): Gen<boolean> {
@@ -108,17 +120,26 @@ function* findForMethodObject(self: Value, name: string): Gen<RMethod> {
       },
     };
   }
-  const description = self === rt().mainObject ? "an instance of Object" : `${realClassOf(self).name === undefined ? '' : 'an instance of '}${realClassOf(self).name ?? ''}`;
+  const description =
+    self === rt().mainObject
+      ? 'an instance of Object'
+      : `${realClassOf(self).name === undefined ? '' : 'an instance of '}${realClassOf(self).name ?? ''}`;
   throw nameError(`undefined method '${name}' for ${description}`, self, name);
 }
 
 def('Kernel', ['method', 'public_method'], 1, function* (self, [name]) {
   return methodObject(self, yield* findForMethodObject(self, yield* nameOf(name)));
 });
-def('Method', ['call', '()', '[]', '==='], [0, -1], function* (self: RObject, args, block, keywords) {
-  const { recv, method } = self.data as MethodData;
-  return yield* invoke(method, recv, args, keywords, block, true);
-}, { keywords: true });
+def(
+  'Method',
+  ['call', '()', '[]', '==='],
+  [0, -1],
+  function* (self: RObject, args, block, keywords) {
+    const { recv, method } = self.data as MethodData;
+    return yield* invoke(method, recv, args, keywords, block, true);
+  },
+  { keywords: true }
+);
 def('Method', 'to_proc', 0, (self: RObject) => {
   const { recv, method } = self.data as MethodData;
   return nativeProc(methodArity(method), (args, block) => invoke(method, recv, args, undefined, block, true), true);
@@ -193,14 +214,28 @@ def('Kernel', 'remove_instance_variable', 1, function* (self, [name]) {
 
 // Evaluating blocks in another context ---------------------------------------------------------------------------------
 
-def('Kernel', ['instance_eval', 'instance_exec'], [0, -1], function* (self, args, block) {
+/** `instance_eval` and `class_eval` with a string of code, which this grader does not evaluate. */
+function refuseStringEval(name: string, args: Value[], block: RProc | undefined): RProc {
+  if (!block && args.length > 0) throw new UnsupportedFeatureError(`文字列の評価（${name}）`);
   if (!block) throw argumentError('wrong number of arguments (given 0, expected 1..3)');
+  if (args.length > 0) throw argumentError(`wrong number of arguments (given ${args.length}, expected 0)`);
+  return block;
+}
+
+def('Kernel', 'instance_eval', [0, -1], function* (self, args, block) {
+  const body = refuseStringEval('instance_eval', args, block);
   const definee = self instanceof RBasic ? singletonClassOf(self) : undefined;
-  return yield* callProc(block, args.length > 0 ? args : [self], { self, definee });
+  return yield* callProc(body, [self], { self, definee });
 });
-def('Module', ['class_eval', 'module_eval', 'class_exec', 'module_exec'], [0, -1], function* (self: RClass, args, block) {
-  if (!block) throw argumentError('wrong number of arguments (given 0, expected 1..3)');
-  return yield* callProc(block, args.length > 0 ? args : [self], { self, definee: self });
+def('Kernel', 'instance_exec', [0, -1], function* (self, args, block) {
+  const definee = self instanceof RBasic ? singletonClassOf(self) : undefined;
+  return yield* callProc(requireBlock(block), args, { self, definee });
+});
+def('Module', ['class_eval', 'module_eval'], [0, -1], function* (self: RClass, args, block) {
+  return yield* callProc(refuseStringEval('class_eval', args, block), [self], { self, definee: self });
+});
+def('Module', ['class_exec', 'module_exec'], [0, -1], function* (self: RClass, args, block) {
+  return yield* callProc(requireBlock(block), args, { self, definee: self });
 });
 def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
   if (!(self instanceof RBasic)) throw typeError("can't define singleton");
@@ -209,7 +244,12 @@ def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
 
 // Defining methods -----------------------------------------------------------------------------------------------------
 
-function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefined, visibility: 'public' | 'private'): Gen {
+function* defineMethodFrom(
+  owner: RClass,
+  args: Value[],
+  block: RProc | undefined,
+  visibility: 'public' | 'private'
+): Gen {
   const name = yield* nameOf(args[0]);
   const body = args.length > 1 ? args[1] : requireBlock(block);
   let method: RMethod;
@@ -226,7 +266,8 @@ function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefine
 
 def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   const frame = rt().frame;
-  const visibility = frame.kind === 'class' && frame.self === self && frame.defaultVisibility === 'private' ? 'private' : 'public';
+  const visibility =
+    frame.kind === 'class' && frame.self === self && frame.defaultVisibility === 'private' ? 'private' : 'public';
   return yield* defineMethodFrom(self, args, block, visibility);
 });
 def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
@@ -282,9 +323,15 @@ def('UnboundMethod', 'bind', 1, function* (self: RObject, [recv]) {
 });
 def('UnboundMethod', 'name', 0, (self: RObject) => sym((self.data as MethodData).method.name));
 def('UnboundMethod', 'owner', 0, (self: RObject) => (self.data as MethodData).method.owner);
-def('BasicObject', 'method_missing', [1, -1], (self, [name]) => {
-  methodMissing(self, (name as RSymbol).name, {});
-}, { visibility: 'private' });
+def(
+  'BasicObject',
+  'method_missing',
+  [1, -1],
+  (self, [name]) => {
+    methodMissing(self, (name as RSymbol).name, {});
+  },
+  { visibility: 'private' }
+);
 def('Module', 'prepend', [1, -1], function* (self: RClass, modules) {
   for (const module of modules) {
     if (!(module instanceof RClass) || !module.isModule) {
