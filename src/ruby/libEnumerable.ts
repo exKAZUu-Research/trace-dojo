@@ -1070,13 +1070,14 @@ def('Enumerable', 'zip', [0, -1], function* (self, others, block) {
 
 export function* zipCollections(self: Value, others: Value[], block: RProc | undefined): Gen<Value> {
   const inputs: Value[] = [];
+  const emptyArray = self instanceof RArray && self.items.length === 0;
   const arrays = rt().heldArrays;
   const arrayMark = arrays.length;
   arrays.push(inputs);
   try {
     for (const other of others) {
       const input = (yield* tryAry(other)) ?? other;
-      if (!(input instanceof RArray) && !respondsTo(input, 'each', true))
+      if (!emptyArray && !(input instanceof RArray) && !respondsTo(input, 'each', true))
         throw typeError(`wrong argument type ${realClassOf(input).name} (must respond to :each)`);
       inputs.push(input);
     }

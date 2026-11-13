@@ -1983,3 +1983,10 @@ test('Enumerator method names accept private implicit String conversion', () => 
     stdout: '[1, 2]\n[1, 2]\n',
   });
 });
+
+test('empty Array zip converts inputs without requiring fallback each', () => {
+  expect(run('p [].zip(5), [].zip(nil)')).toMatchObject({ stdout: '[]\n[]\n' });
+  expect(run('class A; def to_ary; puts :converted; nil; end; end; p [].zip(A.new)')).toMatchObject({
+    stdout: 'converted\n[]\n',
+  });
+});
