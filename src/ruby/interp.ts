@@ -193,17 +193,19 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return yield* operatorAssign(e, frame);
     }
     case 'call': {
-      return yield* evalCall(e, frame);
+      return yield* atCallRow(e.row, () => evalCall(e, frame));
     }
     case 'super': {
-      return yield* evalSuper(e, frame);
+      return yield* atCallRow(e.row, () => evalSuper(e, frame));
     }
     case 'yield': {
-      const { args, keywords } = yield* evalArgs(e.args, frame);
-      const block = frame.home.extra.block;
-      if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given (yield)');
-      const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
-      return yield* callProc(block, args, { keywords, used, callRow: rt().currentRow });
+      return yield* atCallRow(e.row, function* () {
+        const { args, keywords } = yield* evalArgs(e.args, frame);
+        const block = frame.home.extra.block;
+        if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given (yield)');
+        const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
+        return yield* callProc(block, args, { keywords, used, callRow: rt().currentRow });
+      });
     }
     case 'and': {
       const left = yield* ev(e.l, frame);
@@ -288,6 +290,17 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'blockpass': {
       throw new Error('A block argument outside a call');
     }
+  }
+}
+
+function* atCallRow<T>(row: number, action: () => Gen<T>): Gen<T> {
+  const runtime = rt();
+  const saved = runtime.currentRow;
+  runtime.currentRow = row;
+  try {
+    return yield* action();
+  } finally {
+    runtime.currentRow = saved;
   }
 }
 
@@ -557,7 +570,9 @@ function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignmen
     return {
       skip: false,
       *write(value) {
-        yield* callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall: target.recv.k === 'self' });
+        yield* atCallRow(target.row, () =>
+          callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall: target.recv.k === 'self' })
+        );
       },
     };
   }
@@ -566,7 +581,9 @@ function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignmen
     return {
       skip: target.safe && recv === NIL,
       *write(value) {
-        yield* callMethod(recv, `${target.name}=`, [value], undefined, undefined, { fcall: target.recv.k === 'self' });
+        yield* atCallRow(target.row, () =>
+          callMethod(recv, `${target.name}=`, [value], undefined, undefined, { fcall: target.recv.k === 'self' })
+        );
       },
     };
   }
@@ -648,13 +665,17 @@ export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
     case 'index': {
       const recv = yield* ev(target.recv, frame);
       const { args } = yield* evalArgs(target.args, frame);
-      yield* callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall: target.recv.k === 'self' });
+      yield* atCallRow(target.row, () =>
+        callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall: target.recv.k === 'self' })
+      );
       return;
     }
     case 'attr': {
       const recv = yield* ev(target.recv, frame);
       if (target.safe && recv === NIL) return;
-      yield* callMethod(recv, `${target.name}=`, [value], undefined, undefined, { fcall: target.recv.k === 'self' });
+      yield* atCallRow(target.row, () =>
+        callMethod(recv, `${target.name}=`, [value], undefined, undefined, { fcall: target.recv.k === 'self' })
+      );
       return;
     }
     case 'mlhs': {
@@ -697,9 +718,9 @@ function* operatorAssign(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): Gen {
     case 'index': {
       const recv = yield* ev(target.recv, frame);
       const { args } = yield* evalArgs(target.args, frame);
-      read = () => callMethod(recv, '[]', args);
+      read = () => atCallRow(target.row, () => callMethod(recv, '[]', args));
       write = function* (value) {
-        yield* callMethod(recv, '[]=', [...args, value]);
+        yield* atCallRow(target.row, () => callMethod(recv, '[]=', [...args, value]));
       };
       break;
     }
@@ -707,9 +728,11 @@ function* operatorAssign(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): Gen {
       const recv = yield* ev(target.recv, frame);
       if (target.safe && recv === NIL) return NIL;
       const fcall = target.recv.k === 'self';
-      read = () => callMethod(recv, target.name, [], undefined, undefined, { fcall });
+      read = () => atCallRow(target.row, () => callMethod(recv, target.name, [], undefined, undefined, { fcall }));
       write = function* (value) {
-        yield* callMethod(recv, `${target.name}=`, [value], undefined, undefined, { fcall });
+        yield* atCallRow(target.row, () =>
+          callMethod(recv, `${target.name}=`, [value], undefined, undefined, { fcall })
+        );
       };
       break;
     }

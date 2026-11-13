@@ -304,3 +304,8 @@ test('Hash insertion keeps pending values alive through custom hash callbacks', 
     ).toEqual(positions.map((x) => [x, 1]));
   }
 });
+
+test('a multiline call records its expression line', () => {
+  const items = rubyTrace('def f\n  x = 1\n  0\nend\nv = (\n  f\n)');
+  expect(items.find(({ vars }) => vars.x === 1)?.callLines).toEqual([6]);
+});
