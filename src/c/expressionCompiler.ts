@@ -110,7 +110,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // code-gauge-allow functionNcss 55 -- One case per C expression kind; helpers already isolate the nontrivial forms.
   expression(expression: Expression): Operand {
-    const { row } = expression;
+    const row = expression.operatorRow ?? expression.row;
     switch (expression.kind) {
       case 'identifier': {
         return this.identifier(expression.name, row);
@@ -647,7 +647,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Updating one resolved location must preserve bit-field, pointer, and prefix/postfix result semantics.
   private update(expression: Extract<Expression, { kind: 'update' }>): Operand {
-    const { row } = expression;
+    const row = expression.operatorRow ?? expression.row;
     const operand = this.expression(expression.operand);
     this.requireModifiable(operand, row, expression.operator);
     const type = unqualified(operand.type);
@@ -870,10 +870,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const callee = this.rvalue(expression.callee);
     const calleeType = callee.type;
     if (calleeType.kind !== 'pointer' || calleeType.to.kind !== 'function') {
-      this.error(row, `関数ではないもの（${typeName(callee.type)}）を呼び出しています。`);
+      this.error(expression.operatorRow ?? row, `関数ではないもの（${typeName(callee.type)}）を呼び出しています。`);
     }
     const fnType = calleeType.to;
-    const { args, argTypes } = this.arguments(fnType, expression.args, row, direct?.name);
+    const { args, argTypes } = this.arguments(fnType, expression.args, expression.operatorRow ?? row, direct?.name);
     return this.callOperand(fnType, callee.value as (frame: Frame) => number, direct, args, argTypes, row);
   }
 

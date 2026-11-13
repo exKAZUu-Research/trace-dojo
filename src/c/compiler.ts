@@ -576,7 +576,10 @@ export class Compiler extends StatementCompiler {
       const literal = stringLiteralOf(init);
       if (literal) return decodeStringLiteral(literal.parts, literal.row).length;
     }
-    if (init.kind !== 'list') this.error(init.row, '配列の初期化には { } か文字列リテラルを書いてください。');
+    if (init.kind !== 'list') {
+      this.validateInitializer(init);
+      this.error(init.row, '配列の初期化には { } か文字列リテラルを書いてください。');
+    }
     const cursor = { items: init.items, index: 0 };
     let count = 0;
     while (cursor.index < cursor.items.length) {
@@ -640,6 +643,7 @@ export class Compiler extends StatementCompiler {
           for (const { offset: at, write } of writes) write(frame, address + at);
         };
       }
+      this.unevaluated(() => this.rvalue(expression));
       this.error(expression.row, '配列の初期化には { } か文字列リテラルを書いてください。');
     }
     if (type.kind === 'record') {

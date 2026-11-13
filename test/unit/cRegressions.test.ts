@@ -1391,3 +1391,50 @@ test('a bare return without its semicolon points at the unexpected closing brace
     diagnostics: [expect.objectContaining({ row: 2 })],
   });
 });
+
+test.each([
+  ['s=i\n++s;', 3],
+  ['i++\n++n;', 3],
+  ['n=0\n--n;', 3],
+  ['s=i\n(void)s;', 3],
+  ['n=sizeof(arr)/sizeof(arr[0])\n++s;', 3],
+  ['s=sizeof(int)\ns=2;', 2],
+  ['char*msg="hi"\nprintf("%s",msg);', 2],
+  ['char*msg="hi"\ns=5;', 2],
+  ['int count=sizeof(arr)/sizeof(arr[0])\nL:s=1;', 2],
+  ['s=i\n(s);', 3],
+  ['s=i\n*p;', 3],
+  ['s=(i)\n++s;', 3],
+])('diagnostics use consumed tokens and scoped C names: %s', (body, row) => {
+  const source = `#include <stdio.h>\nint main(void){int i=1,s=0,n=0,arr[3]={1,2,3};int*p=&i;\n${body}\nreturn 0;\n}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row })],
+  });
+});
+
+test('scoped reparsing preserves ordinary values, array sizes and expression precedence', () => {
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>
+int main(void){int i=1,s=4,a[3]={2,3,4};int*p=a;printf("%d %zu %d",(i)+(s)*2,sizeof(a),*(p+(i)));}`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '9 12 3', uncaughtException: undefined });
+});
+
+test.each([
+  ['typedef int T;', 's=sizeof(T)\n++s;', 2],
+  ['typedef int T;', 's=sizeof(T)\n(s);', 2],
+  ['typedef int T;', 'int T=1;s=sizeof(T)\n++s;', 3],
+  ['', '++i\n++s;', 2],
+  ['', 'p=&i\n++s;', 2],
+  ['', 'char msg[4]="hi"\n(s);', 3],
+  ['', 's=(i)+(s)\n*p;', 3],
+])('C type names and non-lvalues keep their own diagnostic locations: %s %s', (prefix, body, row) => {
+  const source = `#include <stdio.h>\n${prefix}int main(void){int i=1,s=0;int*p=&i;\n${body}\nreturn 0;\n}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row })],
+  });
+});

@@ -1,5 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Declaration, TranslationUnit } from './ast';
@@ -7,7 +9,7 @@ import { Converter, declaredName, type HeaderDeclarations } from './convert';
 import { tokenize } from './lexer';
 import { lookupHeader, TURTLE_HEADER } from './library/headers';
 import { preprocess } from './preprocessor';
-import { cSyntaxDiagnostics } from './syntaxDiagnostics';
+import { cSyntaxDiagnostics, CSyntaxError } from './syntaxDiagnostics';
 
 const parser = await loadParser('@willbooster/tree-sitter-c/tree-sitter-c.wasm');
 
@@ -32,15 +34,77 @@ export function parseC(source: string): TranslationUnit {
     typedefNames.push(...parsed.typedefNames);
     headers.push({ row: header.row, name: header.name, ...parsed, items: headerItemsAt(parsed.items, header.row) });
   }
-  return parseSource(
-    parser,
-    text,
-    MISSING_TOKEN_NAMES,
-    (root) => ({
-      items: new Converter([], parser).convertUnit(root, headers),
-    }),
-    (root, errors) => cSyntaxDiagnostics(parser, text, root, errors, typedefNames)
-  );
+  return parseUnit(text, headers, typedefNames);
+}
+
+class ReparseRequired extends Error {
+  constructor(readonly source: string) {
+    super();
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- Conversion and syntax recovery share the same source, scopes, and bounded reparse loop.
+function parseUnit(text: string, headers: HeaderDeclarations[], typedefNames: readonly string[]): TranslationUnit {
+  const budget = new ExecutionBudget();
+  let current = text;
+  for (;;) {
+    budget.spend(current.length);
+    try {
+      return parseSource(
+        parser,
+        current,
+        MISSING_TOKEN_NAMES,
+        (root) => {
+          try {
+            return { items: new Converter([], parser).convertUnit(root, headers) };
+          } catch (error) {
+            if (!(error instanceof CompileError)) throw error;
+            const groups = resolveValueTypes(current, root, headers, budget);
+            if (!(error instanceof CSyntaxError)) throw error;
+            throw new CompileError(
+              cSyntaxDiagnostics(parser, current, root, error.diagnostics, {
+                headerTypes: typedefNames,
+                errorOffset: error.offset,
+                typeGroups: groups,
+              })
+            );
+          }
+        },
+        (root, errors) => {
+          if (errors.length === 0) return errors;
+          const groups = resolveValueTypes(current, root, headers, budget);
+          return cSyntaxDiagnostics(parser, current, root, errors, { headerTypes: typedefNames, typeGroups: groups });
+        }
+      );
+    } catch (error) {
+      if (!(error instanceof ReparseRequired)) throw error;
+      current = error.source;
+    }
+  }
+}
+
+function resolveValueTypes(
+  text: string,
+  root: Node,
+  headers: HeaderDeclarations[],
+  budget: ExecutionBudget
+): ReadonlySet<number> {
+  const converter = new Converter([], parser, undefined, true);
+  try {
+    converter.convertUnit(root, headers);
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+  }
+  if (converter.valueTypeRanges.size === 0) return converter.typeGroups;
+  budget.spend(text.length + converter.valueTypeRanges.size);
+  const chunks: string[] = [];
+  let at = 0;
+  for (const [start, end] of [...converter.valueTypeRanges].toSorted((a, b) => a[0] - b[0])) {
+    chunks.push(text.slice(at, start), '(', text.slice(start, end), ')');
+    at = end;
+  }
+  chunks.push(text.slice(at));
+  throw new ReparseRequired(chunks.join(''));
 }
 
 function headerItemsAt(source: Declaration[], row: number): Declaration[] {
