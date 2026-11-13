@@ -17,6 +17,18 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test('Turtles accumulated by map stay visible through later block steps', () => {
+  const program = `ts = [1, 3].map do |x|
+  t = Turtle.new(x, 0)
+  t
+end
+ts.each { |t| t.forward }`;
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([
+    { x: 1, y: 1 },
+    { x: 3, y: 1 },
+  ]);
+});
+
 /** Programs that behave alike in both languages, so Ruby must reproduce the Java interpreter's trace. */
 test.each([
   {

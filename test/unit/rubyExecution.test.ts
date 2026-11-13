@@ -31,6 +31,20 @@ test.each([
     'false\nfalse\ntrue\n',
   ],
   ['large Integer square root', 'p Integer.sqrt(10 ** 100)', `${'1' + '0'.repeat(50)}\n`],
+  ['assignment target evaluation order', 'a=[0,0]; i=0; a[i]=(i=1); p a', '[1, 0]\n'],
+  ['qualified constant initialization', 'module A; end; A::X ||= 1; p A::X', '1\n'],
+  ['qualified constant scope evaluation', 'module A; X=0; end; def f; puts "f"; A; end; f::X += 1; p A::X', 'f\n1\n'],
+  ['top-level return from a block', 'puts :before; 1.times { return }; puts :after', 'before\n'],
+  ['class-body return from a block', 'class Foo; [1].each { return }; end; puts "after"', ''],
+  ['block-local variable', 'p [[1,2]].map { |x; y| [x,y] }', '[[[1, 2], nil]]\n'],
+  [
+    'anonymous rest forwarded by super',
+    'class A; def f(*x); p x; end; end; class B < A; def f(*); super; end; end; B.new.f(1,2)',
+    '[1, 2]\n',
+  ],
+  ['UTF-8 escaped bytes', String.raw`p "\xC3\xA9"`, '"é"\n'],
+  ['invalid UTF-8 escaped byte', String.raw`p "\xFF"; p "\xFF".bytes`, '"\\xFF"\n[255]\n'],
+  ['Ruby control escape', String.raw`p "\C-a"`, '"\\u0001"\n'],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -59,6 +73,25 @@ test('Hash default_proc rejects non-Procs at assignment', () => {
 test('Hash mutation during in-place filtering raises an error', () => {
   expect(run('h = {a: 1}; h.delete_if { |k,v| h[:b] = 2; false }')).toMatchObject({
     uncaughtException: "can't add a new key into hash during iteration (RuntimeError)",
+  });
+});
+
+test('a private setter rejects an explicit receiver', () => {
+  expect(run('class A; private; attr_writer :x; end; A.new.x = 1')).toMatchObject({
+    uncaughtException: "private method 'x=' called for an instance of A (NoMethodError)",
+  });
+});
+
+test('ensure exposes and preserves a pending exception', () => {
+  expect(run('begin; raise "boom"; ensure; p $!; raise; end')).toMatchObject({
+    stdout: '#<RuntimeError: boom>\n',
+    uncaughtException: 'boom (RuntimeError)',
+  });
+});
+
+test('a block return after its class body has ended raises a Ruby error', () => {
+  expect(run('class Foo; PR = proc { return }; end; Foo::PR.call')).toMatchObject({
+    uncaughtException: 'unexpected return (LocalJumpError)',
   });
 });
 

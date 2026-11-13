@@ -294,7 +294,14 @@ def('String', 'chars', 0, (self: RString) => arr(charsOf(self.s).map((char) => s
 def('String', 'codepoints', 0, (self: RString) =>
   arr(charsOf(self.s).map((char) => BigInt(char.codePointAt(0) as number)))
 );
-def('String', 'bytes', 0, (self: RString) => arr([...new TextEncoder().encode(self.s)].map(BigInt)));
+def('String', 'bytes', 0, (self: RString) =>
+  arr(
+    (self.binary
+      ? [...self.s].map((char) => char.codePointAt(0) as number)
+      : [...new TextEncoder().encode(self.s)]
+    ).map(BigInt)
+  )
+);
 def('String', 'getbyte', 1, function* (self: RString, [index]) {
   const bytes = new TextEncoder().encode(self.s);
   let position = yield* toIndex(index);

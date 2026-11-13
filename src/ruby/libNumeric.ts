@@ -112,7 +112,7 @@ function floatPow(base: number, exponent: number): Value {
   return exactFloatPower(base, exponent) ?? base ** exponent;
 }
 
-// code-gauge-allow duplicateLines 18 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow duplicateLines 18 -- Ruby integer and float arithmetic use matching operator cases with different numeric representations.
 // code-gauge-allow functionNcss 31 -- Ruby's method takes these argument forms, which the branches mirror.
 function arithmetic(op: string, a: Num, b: Num): Value {
   if (typeof a === 'bigint' && typeof b === 'bigint') {
@@ -347,6 +347,7 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
 def('Integer', ['to_s', 'inspect'], [0, 1], function* (self: bigint, args) {
   const base = args.length > 0 ? Number(yield* toInt(args[0])) : 10;
   if (base < 2 || base > 36) throw argumentError(`invalid radix ${base}`);
+  rt().checkStringLength(Math.ceil(integerBits(self) / Math.log2(base)) + 1);
   return str(self.toString(base));
 });
 def('Integer', ['to_i', 'to_int'], 0, (self) => self);
@@ -373,6 +374,7 @@ def('Integer', '>>', 1, function* (self: bigint, [other]) {
 function shift(value: bigint, amount: bigint): bigint {
   if (amount >= 0n) {
     if (amount > 32_000_000n) throw rangeError('shift width too big');
+    chargeIntegerResult(integerBits(value) + Number(amount), integerBits(value) + Number(amount));
     return value << amount;
   }
   return value >> -amount;
@@ -432,7 +434,10 @@ def('Integer', 'digits', [0, 1], function* (self: bigint, args) {
   if (self < 0n) throw rubyError(rt().c['Math::DomainError'], 'out of domain');
   if (self === 0n) return arr([0n]);
   const digits: Value[] = [];
-  for (let value = self; value > 0n; value /= base) digits.push(value % base);
+  for (let value = self; value > 0n; value /= base) {
+    rt().spend();
+    digits.push(value % base);
+  }
   return arr(digits);
 });
 def('Integer', 'gcd', 1, (self: bigint, [other]) => {

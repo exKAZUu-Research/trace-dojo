@@ -11,6 +11,7 @@ export function collectGarbage(runtime: Runtime): void {
   for (const frame of runtime.frames) pushFrame(frame, pending);
   for (const value of runtime.globals.values()) pending.push(value);
   for (const value of runtime.held) pending.push(value);
+  for (const values of runtime.heldArrays) for (const value of values) pending.push(value);
   pending.push(runtime.c.Object);
   while (pending.length > 0) {
     const value = pending.pop() as Value;
@@ -36,8 +37,8 @@ function pushFrame(frame: Frame, pending: Value[]): void {
 }
 
 /** Pushes the values an object refers to. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Each language wires its own parser and runtime into the shared modules alike.
-// code-gauge-allow functionNcss 31 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow functionCognitiveComplexity 18 -- The walker visits each runtime value kind and its reachable fields.
+// code-gauge-allow functionNcss 31 -- The walker visits each runtime value kind and its reachable fields.
 function pushReferences(value: RBasic, pending: Value[]): void {
   if (value.ivars) for (const item of value.ivars.values()) pending.push(item);
   if (value.singleton) pending.push(value.singleton);

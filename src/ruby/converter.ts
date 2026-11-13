@@ -424,12 +424,13 @@ export class Converter {
         .join('');
       return { k: 'str', parts: [decodeSingleQuoted(content)] };
     }
-    return { k: 'str', parts: this.stringParts(node) };
+    return { k: 'str', ...this.stringParts(node) };
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of syntax node.
-  private stringParts(node: Node): StrPart[] {
+  private stringParts(node: Node): { parts: StrPart[]; binary: boolean } {
     const parts: StrPart[] = [];
+    let binary = false;
     let literal = '';
     for (const child of namedChildren(node)) {
       if (child.type === 'string_content') {
@@ -437,7 +438,11 @@ export class Converter {
       } else if (child.type === 'escape_sequence') {
         literal += child.text;
       } else if (child.type === 'interpolation') {
-        if (literal) parts.push(this.decode(node, literal));
+        if (literal) {
+          const decoded = this.decode(node, literal);
+          parts.push(decoded.text);
+          binary ||= decoded.binary;
+        }
         literal = '';
         const statements = this.body(namedChildren(child), 1);
         parts.push(
@@ -451,11 +456,15 @@ export class Converter {
         this.unsupportedNode(child);
       }
     }
-    if (literal) parts.push(this.decode(node, literal));
-    return parts;
+    if (literal) {
+      const decoded = this.decode(node, literal);
+      parts.push(decoded.text);
+      binary ||= decoded.binary;
+    }
+    return { parts, binary };
   }
 
-  private decode(node: Node, text: string): string {
+  private decode(node: Node, text: string): { text: string; binary: boolean } {
     const decoded = decodeDoubleQuoted(text);
     if (decoded === undefined) this.fail(node, '文字列のエスケープの書き方に誤りがあります。');
     return decoded;
@@ -950,7 +959,11 @@ export class Converter {
       this.ctx.scope.declareOwn(name);
       return name;
     };
+    const blockLocals = new Set<number>();
+    for (let index = 0; index < node.childCount; index++)
+      if (node.fieldNameForChild(index) === 'locals') blockLocals.add(required(node.child(index)).id);
     for (const child of namedChildren(node)) {
+      if (blockLocals.has(child.id)) continue;
       switch (child.type) {
         case 'comment': {
           break;

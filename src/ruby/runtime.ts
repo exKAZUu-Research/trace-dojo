@@ -42,7 +42,7 @@ export class Frame implements TracedFrame {
   /** The exception being handled by a `rescue` of this frame, which a bare `raise` re-raises. */
   handling: RObject[] = [];
 
-  // code-gauge-allow functionParameterCount 8 -- Each language wires its own parser and runtime into the shared modules alike.
+  // code-gauge-allow functionParameterCount 8 -- A frame carries the call context needed by Ruby method, block, and class execution.
   constructor(
     readonly kind: FrameKind,
     readonly self: Value,
@@ -138,6 +138,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly globals = new Map<string, Value>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
+  readonly heldArrays: Value[][] = [];
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];
   /** The row of the statement running now, which a call records as its frame's call row. */

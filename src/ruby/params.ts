@@ -9,8 +9,8 @@ import { arr, newHash } from './values';
 
 type BindMode = 'method' | 'lambda' | 'proc';
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Each language wires its own parser and runtime into the shared modules alike.
-// code-gauge-allow functionNcss 42 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow functionCognitiveComplexity 29 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
+// code-gauge-allow functionNcss 42 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
 export function* bindParams(
   params: Params,
   frame: Frame,
@@ -67,7 +67,7 @@ function autoSplats(params: Params): boolean {
   return positional > 1 || params.trailingComma || (params.rest !== undefined && positional > 0);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow functionCognitiveComplexity 22 -- Ruby parameter forms share arity and binding paths, which this function keeps in source order.
 function* bindKeywords(params: Params, frame: Frame, keywords: RHash | undefined): Gen<void> {
   const { scope } = frame;
   const given = new Map<string, Value>();

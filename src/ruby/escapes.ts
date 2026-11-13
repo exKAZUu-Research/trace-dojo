@@ -17,17 +17,54 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 };
 
 /** Decodes a double-quoted literal's text as Ruby does, or `undefined` for an escape Ruby rejects. */
-export function decodeDoubleQuoted(text: string): string | undefined {
+export function decodeDoubleQuoted(text: string): { text: string; binary: boolean } | undefined {
   let result = '';
+  let bytes: number[] = [];
+  let binary = false;
+  const flushBytes = (): void => {
+    if (bytes.length === 0) return;
+    try {
+      result += new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
+    } catch {
+      binary = true;
+      for (const byte of bytes) result += String.fromCodePoint(byte);
+    }
+    bytes = [];
+  };
   for (let index = 0; index < text.length; index++) {
     const char = text[index];
     if (char !== '\\') {
+      flushBytes();
       result += char;
       continue;
     }
     const next = text[++index];
     if (next === undefined) return undefined;
-    if (next in SIMPLE_ESCAPES) {
+    if (next === 'x') {
+      const hex = /^[\da-fA-F]{1,2}/.exec(text.slice(index + 1))?.[0];
+      if (!hex) return undefined;
+      bytes.push(Number.parseInt(hex, 16));
+      index += hex.length;
+      continue;
+    }
+    if (/[0-7]/.test(next)) {
+      const octal = /^[0-7]{1,3}/.exec(text.slice(index))?.[0] ?? next;
+      bytes.push(Number.parseInt(octal, 8) & 0xff);
+      index += octal.length - 1;
+      continue;
+    }
+    flushBytes();
+    if (next === 'C' && text[index + 1] === '-') {
+      const control = text[index + 2];
+      if (control === undefined) return undefined;
+      result += String.fromCodePoint(control === '?' ? 0x7f : control.codePointAt(0)! & 0x1f);
+      index += 2;
+    } else if (next === 'c') {
+      const control = text[index + 1];
+      if (control === undefined) return undefined;
+      result += String.fromCodePoint(control === '?' ? 0x7f : control.codePointAt(0)! & 0x1f);
+      index++;
+    } else if (next in SIMPLE_ESCAPES) {
       result += SIMPLE_ESCAPES[next];
     } else if (next === 'u') {
       if (text[index + 1] === '{') {
@@ -51,18 +88,10 @@ export function decodeDoubleQuoted(text: string): string | undefined {
         result += String.fromCodePoint(point);
         index += 4;
       }
-    } else if (next === 'x') {
-      const hex = /^[\da-fA-F]{1,2}/.exec(text.slice(index + 1))?.[0];
-      if (!hex) return undefined;
-      result += String.fromCodePoint(Number.parseInt(hex, 16));
-      index += hex.length;
-    } else if (/[0-7]/.test(next)) {
-      const octal = /^[0-7]{1,3}/.exec(text.slice(index))?.[0] ?? next;
-      result += String.fromCodePoint(Number.parseInt(octal, 8) & 0xff);
-      index += octal.length - 1;
     } else {
       result += next;
     }
   }
-  return result;
+  flushBytes();
+  return { text: result, binary };
 }

@@ -30,7 +30,7 @@ export function traceRubyProgram(program: string, trace: TraceOptions, input?: P
  * then, when `withContext`, the instance variables of `self` (as Java's `this.x`), the class variables of the
  * program's classes (as Java's static fields), and the global variables.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow functionCognitiveComplexity 16 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, value] of visibleLocals(frame)) addVariable(variables, name, value);
@@ -87,7 +87,7 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
 const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
-// code-gauge-allow duplicateLines 21 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow duplicateLines 21 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function scalarOf(value: Value, seen: Set<object>): Scalar | typeof NOT_SCALAR {
   switch (typeof value) {
     case 'bigint': {
@@ -156,7 +156,7 @@ function rangeText(value: RRange): string {
   return `${end(value.begin)}${value.exclusive ? '...' : '..'}${end(value.end)}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow functionCognitiveComplexity 16 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function containerNodeOf(value: RBasic, seen: Set<object>): DisplayNode {
   const entries: Record<string, DisplayNode> = {};
   if (value instanceof RArray) {

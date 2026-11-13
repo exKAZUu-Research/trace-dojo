@@ -79,11 +79,22 @@ function isOverridden(collection: RArray | RHash | RRange): boolean {
 export function* toArray(collection: Value): Gen<Value[]> {
   if (collection instanceof RArray && !isOverridden(collection)) return [...collection.items];
   const items: Value[] = [];
-  yield* iterate(collection, function* (value) {
+  yield* collectInto(collection, [items], function* (value) {
     items.push(value);
     yield* [];
   });
   return items;
+}
+
+function* collectInto(collection: Value, arrays: Value[][], visit: Visit): Gen<void> {
+  const held = rt().heldArrays;
+  const mark = held.length;
+  held.push(...arrays);
+  try {
+    yield* iterate(collection, visit);
+  } finally {
+    held.length = mark;
+  }
 }
 
 /** Calls a block with one element, splatting an array over several parameters as `yield` does. */
@@ -97,7 +108,7 @@ def('Enumerable', ['to_a', 'entries'], [0, -1], function* (self) {
 def('Enumerable', ['map', 'collect'], 0, function* (self, _args, block) {
   if (!block) return sizedEnumerator(self, 'map', [], () => sizeOf(self));
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     results.push(yield* call(block, value));
   });
   return arr(results);
@@ -105,7 +116,7 @@ def('Enumerable', ['map', 'collect'], 0, function* (self, _args, block) {
 def('Enumerable', ['flat_map', 'collect_concat'], 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'flat_map', []);
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     const mapped = yield* call(block, value);
     if (mapped instanceof RArray) for (const item of mapped.items) results.push(item);
     else results.push(mapped);
@@ -115,7 +126,7 @@ def('Enumerable', ['flat_map', 'collect_concat'], 0, function* (self, _args, blo
 def('Enumerable', ['select', 'filter', 'find_all'], 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'select', []);
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     if (truthy(yield* call(block, value))) results.push(value);
   });
   return arr(results);
@@ -123,7 +134,7 @@ def('Enumerable', ['select', 'filter', 'find_all'], 0, function* (self, _args, b
 def('Enumerable', 'filter_map', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'filter_map', []);
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     const mapped = yield* call(block, value);
     if (truthy(mapped)) results.push(mapped);
   });
@@ -132,7 +143,7 @@ def('Enumerable', 'filter_map', 0, function* (self, _args, block) {
 def('Enumerable', 'reject', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'reject', []);
   const results: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [results], function* (value) {
     if (!truthy(yield* call(block, value))) results.push(value);
   });
   return arr(results);
@@ -141,7 +152,7 @@ def('Enumerable', 'partition', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'partition', []);
   const accepted: Value[] = [];
   const rejected: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [accepted, rejected], function* (value) {
     (truthy(yield* call(block, value)) ? accepted : rejected).push(value);
   });
   return arr([arr(accepted), arr(rejected)]);

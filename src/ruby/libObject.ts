@@ -576,7 +576,7 @@ function* symbolNames(args: Value[]): Gen<string[]> {
   for (const arg of args) {
     if (arg instanceof RSymbol) names.push(arg.name);
     else if (arg instanceof RString) names.push(arg.s);
-    else if (arg instanceof RArray) names.push(...(yield* symbolNames(arg.items)));
+    else if (arg instanceof RArray) for (const name of yield* symbolNames(arg.items)) names.push(name);
     else throw typeError(`${yield* inspect(arg)} is not a symbol nor a string`);
   }
   return names;

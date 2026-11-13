@@ -25,7 +25,7 @@ import { isA } from './values';
 
 import './library';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow duplicateLines 15 -- The interpreter entry points mirror the other languages so callers use one contract.
 export function executeRubyProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
@@ -47,7 +47,7 @@ export function executeRubyProgram(source: string, input?: ProgramInput): Progra
  *
  * @param onEnd Called when the program ends, while its frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 23 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow duplicateLines 23 -- The interpreter entry points mirror the other languages so callers use one contract.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     bootstrap(runtime);
@@ -69,6 +69,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
         ...runtime.io.output(),
       };
     } finally {
+      frame.extra.finished = true;
       runtime.popFrame();
     }
   });
@@ -78,7 +79,7 @@ function describeUncaught(runtime: Runtime, error: unknown, frame: Frame): strin
   if (error instanceof UnsupportedFeatureError) return error.message;
   if (error === STACK_OVERFLOW) return 'stack level too deep (SystemStackError)';
   if (error instanceof ExitSignal) return undefined;
-  if (error instanceof ReturnSignal && error.target === frame) return undefined;
+  if (error instanceof ReturnSignal && (error.target === frame || error.target.kind === 'class')) return undefined;
   if (error instanceof RubyError) {
     if (isA(error.exception, runtime.c.SystemExit)) return undefined;
     return describeException(error.exception);

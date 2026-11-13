@@ -120,7 +120,9 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return frame.self;
     }
     case 'str': {
-      return str(yield* interpolate(e.parts, frame));
+      const value = str(yield* interpolate(e.parts, frame));
+      value.binary = e.binary ?? false;
+      return value;
     }
     case 'sym': {
       return RSymbol.of(e.name);
@@ -158,8 +160,10 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return arr(yield* splatItems(yield* ev(e.e, frame)));
     }
     case 'asgn': {
+      const prepared = yield* prepareAssignment(e.target, frame);
+      if (prepared.skip) return NIL;
       const value = yield* ev(e.value, frame);
-      yield* assign(e.target, value, frame);
+      yield* prepared.write(value);
       return value;
     }
     case 'opasgn': {
@@ -280,9 +284,16 @@ function* evalList(items: Expr[], frame: Frame): Gen<Value[]> {
   const mark = frame.temporaries.length;
   try {
     for (const item of items) {
-      if (item.k === 'splat') for (const value of yield* splatItems(yield* ev(item.e, frame))) values.push(value);
-      else values.push(yield* ev(item, frame));
-      frame.temporaries.push(values.at(-1) ?? NIL);
+      if (item.k === 'splat') {
+        for (const value of yield* splatItems(yield* ev(item.e, frame))) {
+          values.push(value);
+          frame.temporaries.push(value);
+        }
+      } else {
+        const value = yield* ev(item, frame);
+        values.push(value);
+        frame.temporaries.push(value);
+      }
     }
   } finally {
     frame.temporaries.length = mark;
@@ -476,6 +487,75 @@ function constSet(module: RClass, name: string, value: Value): void {
 
 // Assignment ----------------------------------------------------------------------------------------------------------
 
+interface PreparedAssignment {
+  skip: boolean;
+  write: (value: Value) => Gen<void>;
+}
+
+function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignment> {
+  if (target.k === 'index') {
+    const recv = yield* ev(target.recv, frame);
+    const { args } = yield* evalArgs(target.args, frame);
+    return {
+      skip: false,
+      *write(value) {
+        yield* callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall: target.recv.k === 'self' });
+      },
+    };
+  }
+  if (target.k === 'attr') {
+    const recv = yield* ev(target.recv, frame);
+    return {
+      skip: target.safe && recv === NIL,
+      *write(value) {
+        yield* callMethod(recv, `${target.name}=`, [value], undefined, undefined, { fcall: target.recv.k === 'self' });
+      },
+    };
+  }
+  if (target.k === 'const') {
+    const module = yield* constantTargetModule(target, frame);
+    return {
+      skip: false,
+      *write(value) {
+        yield* [];
+        constSet(module, target.name, value);
+      },
+    };
+  }
+  if (target.k === 'mlhs') {
+    const targets: PreparedAssignment[] = [];
+    for (const item of target.items) targets.push(yield* prepareAssignment(item, frame));
+    return { skip: false, write: (value) => assignPreparedMulti(target, targets, value) };
+  }
+  return { skip: false, write: (value) => assign(target, value, frame) };
+}
+
+function* constantTargetModule(target: Extract<Target, { k: 'const' }>, frame: Frame): Gen<RClass> {
+  if (!target.scope) return target.top ? rt().c.Object : frame.cref[0];
+  const scope = yield* ev(target.scope, frame);
+  if (!(scope instanceof RClass)) throw typeError(`${yield* inspect(scope)} is not a class/module`);
+  return scope;
+}
+
+function* assignPreparedMulti(target: MultiTarget, prepared: PreparedAssignment[], value: Value): Gen<void> {
+  const items = yield* toAryForAssignment(value);
+  const splat = target.splat;
+  if (splat === undefined) {
+    for (const [index, item] of prepared.entries()) if (!item.skip) yield* item.write(items[index] ?? NIL);
+    return;
+  }
+  const after = prepared.length - splat - 1;
+  for (let index = 0; index < splat; index++)
+    if (!prepared[index].skip) yield* prepared[index].write(items[index] ?? NIL);
+  const restEnd = Math.max(splat, items.length - after);
+  if (!prepared[splat].skip && (target.items[splat].k !== 'mlhs' || target.items[splat].items.length > 0))
+    yield* prepared[splat].write(arr(items.slice(splat, restEnd)));
+  for (let index = 0; index < after; index++) {
+    const item = prepared[splat + 1 + index];
+    if (!item.skip) yield* item.write(items[restEnd + index] ?? NIL);
+  }
+}
+
 // code-gauge-allow functionNcss 39 -- One case per kind of expression or Ruby rule.
 export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
   switch (target.k) {
@@ -576,16 +656,22 @@ function* operatorAssign(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): Gen {
       break;
     }
     case 'const': {
-      read = () => ev({ k: 'const', name: target.name, scope: target.scope, top: target.top, row: target.row }, frame);
-      write = (value) => assign(target, value, frame);
-      if (op === '||') {
-        const module = frame.cref[0];
-        if (!target.scope && !target.top && findConstInAncestors(module, target.name) === undefined) {
-          const value = yield* ev(e.value, frame);
-          yield* write(value);
-          return value;
+      const module = yield* constantTargetModule(target, frame);
+      read = function* () {
+        yield* [];
+        try {
+          return target.scope || target.top
+            ? constInModule(module, target.name)
+            : constLexical(frame.cref, target.name);
+        } catch (error) {
+          if (op === '||' && error instanceof RubyError && error.exception.cls === rt().c.NameError) return NIL;
+          throw error;
         }
-      }
+      };
+      write = function* (value) {
+        yield* [];
+        constSet(module, target.name, value);
+      };
       break;
     }
     case 'cvar': {
@@ -705,15 +791,13 @@ function* evalCase(e: Extract<Expr, { k: 'case' }>, frame: Frame): Gen {
 function returnTarget(frame: Frame): Frame {
   let target = frame;
   while (target.kind === 'block' && !target.extra.isLambda) target = target.extra.outer as Frame;
-  if (target.kind === 'main' && frame.kind === 'block') {
-    throw rubyError(rt().c.LocalJumpError, 'unexpected return');
-  }
   if (target.extra.finished) throw rubyError(rt().c.LocalJumpError, 'unexpected return');
   return target;
 }
 
 function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
   const runtime = rt();
+  let pendingException: RObject | undefined;
   try {
     for (;;) {
       let value: Value;
@@ -728,11 +812,26 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
       if (e.else) value = yield* evalBody(e.else, frame);
       return value;
     }
+  } catch (error) {
+    if (error instanceof RubyError) pendingException = error.exception;
+    throw error;
   } finally {
     if (e.ensure) {
       const saved = runtime.currentRow;
-      yield* evalBody(e.ensure, frame);
-      runtime.currentRow = saved;
+      const savedException = runtime.globals.get('$!') ?? NIL;
+      if (pendingException) {
+        frame.handling.push(pendingException);
+        runtime.globals.set('$!', pendingException);
+      }
+      try {
+        yield* evalBody(e.ensure, frame);
+      } finally {
+        if (pendingException) {
+          frame.handling.pop();
+          runtime.globals.set('$!', savedException);
+        }
+        runtime.currentRow = saved;
+      }
     }
   }
 }
@@ -904,6 +1003,7 @@ function* runModuleBody(module: RClass, body: Body, frame: Frame): Gen {
   try {
     return yield* evalBody(body, classFrame);
   } finally {
+    classFrame.extra.finished = true;
     runtime.popFrame();
   }
 }
@@ -999,7 +1099,7 @@ export function* callMethod(
   const method = classOf(recv).findMethod(name);
   if (!method) methodMissing(recv, name, options);
   if (method.visibility !== 'public' && !options.fcall) {
-    if (method.visibility === 'private' && !name.endsWith('=')) {
+    if (method.visibility === 'private') {
       throw noMethodError(`private method '${name}' called for ${receiverDescription(recv)}`, recv, name);
     }
     if (method.visibility === 'protected' && !isA(rt().frame.self, method.owner)) {
@@ -1165,21 +1265,30 @@ function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | und
   const def = frame.extra.def as MethodDef;
   const { params } = def;
   const scope = frame.scope;
-  const value = (name: ParamTarget): Value => (typeof name === 'string' ? scope.lookup(name, 0) : NIL);
-  const args: Value[] = [...params.required.map(value), ...params.optional.map((param) => value(param.name))];
+  const original = frame.extra.args ?? [];
+  const value = (name: ParamTarget, originalValue: Value): Value =>
+    typeof name === 'string' ? scope.lookup(name, 0) : originalValue;
+  const args: Value[] = params.required.map((param, index) => value(param, original[index] ?? NIL));
+  for (const param of params.optional) args.push(scope.lookup(param.name, 0));
   if (params.rest !== undefined) {
-    const rest = params.rest === '' ? NIL : scope.lookup(params.rest, 0);
-    if (rest instanceof RArray) args.push(...rest.items);
+    const passedOptional = Math.min(
+      params.optional.length,
+      Math.max(0, original.length - params.required.length - params.post.length)
+    );
+    const anonymous = original.slice(params.required.length + passedOptional, original.length - params.post.length);
+    const rest = params.rest === '' ? arr(anonymous) : scope.lookup(params.rest, 0);
+    if (rest instanceof RArray) for (const item of rest.items) args.push(item);
   }
-  args.push(...params.post.map(value));
+  for (const [index, param] of params.post.entries())
+    args.push(value(param, original[original.length - params.post.length + index] ?? NIL));
   let keywords: RHash | undefined;
   if (params.keywords.length > 0 || params.keywordRest) {
     keywords = newHash();
     for (const keyword of params.keywords) {
       runToEnd(hashSet(keywords, RSymbol.of(keyword.name), scope.lookup(keyword.name, 0)));
     }
-    if (params.keywordRest) {
-      const rest = scope.lookup(params.keywordRest, 0);
+    if (params.keywordRest !== undefined) {
+      const rest = params.keywordRest === '' ? frame.extra.keywords : scope.lookup(params.keywordRest, 0);
       if (rest instanceof RHash)
         for (const entry of rest.map.values()) runToEnd(hashSet(keywords, entry.key, entry.value));
     }
