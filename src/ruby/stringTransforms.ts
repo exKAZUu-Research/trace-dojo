@@ -48,11 +48,19 @@ function chompInvalidBytes(bytes: Uint8Array, separator: RString | RNil | undefi
 
 export function successorBytes(source: Uint8Array, binary = false): Uint8Array {
   if (source.length === 0) return source;
+  if (
+    binary &&
+    !source.some((byte) => (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122))
+  )
+    return incrementBinaryBytes(source);
   const parts: { bytes: Uint8Array; point: number | undefined }[] = stringCharacters(
     stringFromBytes(source, binary)
   ).map((character) => ({
     bytes: stringBytes(character),
-    point: character.rawBytes && !binary ? undefined : character.s.codePointAt(0),
+    point:
+      (character.rawBytes && !binary) || (binary && (character.s.codePointAt(0) as number) >= 128)
+        ? undefined
+        : character.s.codePointAt(0),
   }));
   const candidate = (part: (typeof parts)[number]): boolean =>
     part.point !== undefined && characterClass(part.point) !== undefined;
@@ -99,17 +107,6 @@ export function successorBytes(source: Uint8Array, binary = false): Uint8Array {
       carry = stringBytes(str(String.fromCodePoint(kind === 'digit' ? start + 1 : start)));
     } else {
       const byte = part.bytes[0];
-      if (byte === 255) {
-        part.bytes = Uint8Array.of(0);
-        carry = Uint8Array.of(1);
-        const previous = parts.slice(0, index).findLastIndex(candidate);
-        if (previous === -1) {
-          parts.unshift({ bytes: carry, point: undefined });
-          break;
-        }
-        index = previous;
-        continue;
-      }
       if (byte !== 57 && byte !== 90 && byte !== 122) {
         part.bytes = Uint8Array.of(byte + 1);
         break;
@@ -132,6 +129,18 @@ export function successorBytes(source: Uint8Array, binary = false): Uint8Array {
     index = previous;
   }
   return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
+}
+
+function incrementBinaryBytes(source: Uint8Array): Uint8Array {
+  const bytes = Uint8Array.from(source);
+  for (let index = bytes.length - 1; index >= 0; index--) {
+    if (bytes[index] < 255) {
+      bytes[index]++;
+      return bytes;
+    }
+    bytes[index] = 0;
+  }
+  return Uint8Array.from([1, ...bytes]);
 }
 
 function characterClass(point: number): 'digit' | 'letter' | undefined {

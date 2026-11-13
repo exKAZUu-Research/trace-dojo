@@ -1101,15 +1101,19 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
 });
 
 function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
-  const count = charLength(self.s) + 1;
   const sourceLength = stringBytes(self).length;
   const found: Value[] = [];
-  for (let index = 0; index < count; index++) {
+  for (let offset = 0; offset <= sourceLength;) {
+    const bytes = stringBytes(self);
+    const first = bytes[offset];
+    const width = self.binary || first < 0xc2 || first >= 0xf5 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
     const match = str('');
     if (block) {
       yield* callBlock(block, [match], false);
       if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
     } else found.push(match);
+    if (offset === sourceLength) break;
+    offset += width;
     rt().spend();
   }
   return block ? self : arr(found);

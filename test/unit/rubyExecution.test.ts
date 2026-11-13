@@ -2089,12 +2089,17 @@ test('String substitutions retain binary source and replacement bytes', () => {
 test('empty String scan retains original match count across equal-byte edits', () => {
   expect(run('s="bbaa";i=0;s.scan(""){i+=1;s[0,2]="é" if i==1};p i')).toMatchObject({ stdout: '5\n' });
   expect(run('s="éaaa";i=0;s.scan(""){i+=1;s[0]="bb" if i==1};p i')).toMatchObject({ stdout: '5\n' });
+  expect(run('s="aaaa";i=0;s.scan(""){i+=1;s[1,2]="é" if i==1};p i')).toMatchObject({ stdout: '4\n' });
+  expect(run('s="aaaaa";i=0;s.scan(""){i+=1;s[2,2]="é" if i==1};p i')).toMatchObject({ stdout: '5\n' });
 });
 
 test('endless String ranges retain binary bytes', () => {
   expect(run('p (233.chr..).first(2).map{|x|x.bytes}')).toMatchObject({ stdout: '[[233], [234]]\n' });
   expect(run('p (255.chr..).first(2).map{|x|x.bytes}')).toMatchObject({ stdout: '[[255], [1, 0]]\n' });
   expect(run('p 233.chr.succ.bytes, 255.chr.succ.bytes')).toMatchObject({ stdout: '[234]\n[1, 0]\n' });
+  expect(run('p (129.chr+255.chr).succ.bytes, ("a"+255.chr).succ.bytes')).toMatchObject({
+    stdout: '[130, 0]\n[98, 255]\n',
+  });
 });
 
 test('inclusive custom Ranges stop before the endpoint successor', () => {
