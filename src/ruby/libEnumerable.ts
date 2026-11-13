@@ -4,7 +4,7 @@ import { def } from './define';
 import { argumentCountError, argumentError, typeError } from './errors';
 import { eachEntry, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
-import { iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { customEnumerator, iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
@@ -674,12 +674,19 @@ def('Enumerable', 'group_by', 0, function* (self, _args, block) {
 });
 def('Enumerable', 'chunk_while', 0, function* (self, _args, block) {
   if (!block) throw argumentError('tried to create Proc object without a block');
-  return arr(yield* chunks(self, block as RProc, false));
+  return chunkEnumerator(self, block, false);
 });
 def('Enumerable', 'slice_when', 0, function* (self, _args, block) {
   if (!block) throw argumentError('tried to create Proc object without a block');
-  return arr(yield* chunks(self, block as RProc, true));
+  return chunkEnumerator(self, block, true);
 });
+
+function chunkEnumerator(self: Value, predicate: RProc, splitWhenTrue: boolean): RObject {
+  return customEnumerator(self, splitWhenTrue ? 'slice_when' : 'chunk_while', [predicate], function* (block) {
+    for (const chunk of yield* chunks(self, predicate, splitWhenTrue)) yield* callBlock(block, [chunk], false);
+    return self;
+  });
+}
 
 function* chunks(self: Value, block: RProc, splitWhenTrue: boolean): Gen<Value[]> {
   const result: Value[] = [];

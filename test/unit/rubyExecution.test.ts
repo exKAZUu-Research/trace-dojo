@@ -539,6 +539,16 @@ test.each([
     'p "ß".casecmp?("ss"), "ﬁ".casecmp?("fi"), "ς".casecmp?("σ"), "İ".casecmp?("i̇")',
     'true\ntrue\ntrue\ntrue\n',
   ],
+  [
+    'lazy slice_when Enumerator',
+    'e = [1, 2, 4].slice_when { |a, b| puts :test; b != a + 1 }; p e.class, e.size; p e.to_a',
+    'Enumerator\nnil\ntest\ntest\n[[1, 2], [4]]\n',
+  ],
+  [
+    'chunk_while Enumerator',
+    'e = [1, 2, 4].chunk_while { |a, b| b == a + 1 }; p e.class, e.size, e.to_a',
+    'Enumerator\nnil\n[[1, 2], [4]]\n',
+  ],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
