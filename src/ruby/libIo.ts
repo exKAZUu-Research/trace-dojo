@@ -7,7 +7,7 @@ import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { prettyInspect } from './prettyPrint';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, realClassOf, str, stringBytes } from './values';
+import { arr, classOf, realClassOf, str, stringBytes } from './values';
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
@@ -154,7 +154,8 @@ def(
   1,
   function* (_self, [value]) {
     const target = stdout();
-    if (respondsTo(target, 'putc', true)) {
+    const putc = classOf(target).findMethod('putc');
+    if (putc && putc.owner !== rt().c.Kernel) {
       return yield* callMethod(target, 'putc', [value], undefined, undefined, { fcall: true });
     }
     yield* write(target, yield* charOf(value));

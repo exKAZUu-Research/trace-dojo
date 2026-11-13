@@ -1603,3 +1603,11 @@ test('puts sends recursive array markers and newlines in separate writes', () =>
     stdout: '["[...]", "\\n"]\n',
   });
 });
+
+test('Kernel putc uses write for collectors inheriting Kernel putc', () => {
+  expect(
+    run('class W; def write(x); $v << x; end; end; $v=[]; $stdout=W.new; x=putc(65); $stdout=STDOUT; p x, $v')
+  ).toMatchObject({
+    stdout: '65\n["A"]\n',
+  });
+});
