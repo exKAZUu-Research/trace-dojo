@@ -32,6 +32,7 @@ import { hasUnbracketedLambda, isOperatorOperand } from './lambdaPositions';
 import { parseNumber } from './numberLiterals';
 import { fail, ScopeBuilder } from './scopes';
 import { markSuspendingExpression } from './suspension';
+import type { SyntaxStorage } from './syntaxStorage';
 import { unparseAnnotation } from './unparse';
 
 /** What a function body being converted allows, which its early errors depend on. */
@@ -65,6 +66,7 @@ interface ParameterOrder {
 const STRING_PREFIXES = new Set(['', 'r', 'u', 'b', 'f', 't', 'br', 'rb', 'fr', 'rf', 'tr', 'rt']);
 
 export abstract class ExpressionConverter {
+  syntaxStorage?: SyntaxStorage;
   protected context: Context;
   /** The scope of the type parameters of the function being defined, which its annotations belong to. */
   protected annotationContext: Context | undefined;
@@ -124,8 +126,13 @@ export abstract class ExpressionConverter {
 
   // Expressions -----------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of expression node, each delegating where it grows.
   expression(node: Node): Expression {
+    const expression = this.expressionValue(node);
+    return this.syntaxStorage?.account(expression) ?? expression;
+  }
+
+  // code-gauge-allow functionNcss 60 -- One case per kind of expression node, each delegating where it grows.
+  private expressionValue(node: Node): Expression {
     const row = rowOf(node);
     switch (node.type) {
       case 'identifier': {

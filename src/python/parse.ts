@@ -9,6 +9,8 @@ import { findFirstSyntaxError } from './headerColons';
 import { deepNestingError, isHostStackOverflow } from './hostStack';
 import { findIndentationError, logicalLines } from './indentation';
 import { ProgramConverter } from './programConverter';
+import { currentRuntime, runningProgram } from './runtimeContext';
+import { SyntaxStorage } from './syntaxStorage';
 
 const parser = await loadParser('@willbooster/tree-sitter-python/tree-sitter-python.wasm');
 
@@ -101,7 +103,7 @@ function parseSourceModule(
     source,
     MISSING_TOKEN_NAMES,
     (root) => {
-      const module = new ProgramConverter(
+      const converter = new ProgramConverter(
         source,
         trace,
         namesInLocals,
@@ -109,11 +111,14 @@ function parseSourceModule(
         futureFeatures,
         allowsTopLevelAwait,
         optimize
-      ).convert(root);
+      );
+      if (namesInLocals && runningProgram()) converter.syntaxStorage = new SyntaxStorage(currentRuntime());
+      const module = converter.convert(root);
       const nestingError = library ? undefined : findBlockNestingError(root);
       if (nestingError) throw new CompileError([nestingError]);
       // The standard library's sources, which are known to nest little, skip the walks that measure the nesting.
-      return library ? { ...module, source } : { ...module, source, nestingDepth: deepestNode(root).depth };
+      const parsed = library ? { ...module, source } : { ...module, source, nestingDepth: deepestNode(root).depth };
+      return converter.syntaxStorage?.account(parsed, true) ?? parsed;
     },
     // Past the deepest nesting CPython's parser and compiler accept, which a long chain such as `a.b.c...` reaches,
     // converting would only take long before the host's stack ran out.

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 876 -- The statement converter keeps one method per kind of statement node together.
+// code-gauge-allow-file fileNcss 880 -- The statement converter keeps one method per kind of statement node together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -98,15 +98,21 @@ export class ProgramConverter extends ExpressionConverter {
   // Statements ------------------------------------------------------------------------------------------------------
 
   private block(nodes: Node[]): Statement[] {
-    return nodes.flatMap((node) => this.statement(node));
+    const body = nodes.flatMap((node) => this.statement(node));
+    return this.syntaxStorage?.account(body) ?? body;
   }
 
   private body(node: Node): Statement[] {
     return this.block(node.type === 'block' ? namedChildren(node) : [node]);
   }
 
-  // code-gauge-allow functionNcss 56 -- One case per kind of statement node, each delegating where it grows.
   private statement(node: Node): Statement[] {
+    const statements = this.statementValue(node);
+    return this.syntaxStorage?.account(statements) ?? statements;
+  }
+
+  // code-gauge-allow functionNcss 56 -- One case per kind of statement node, each delegating where it grows.
+  private statementValue(node: Node): Statement[] {
     const row = rowOf(node);
     checkClauseLines(node);
     switch (node.type) {

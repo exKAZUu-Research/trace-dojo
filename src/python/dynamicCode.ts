@@ -19,6 +19,7 @@ import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import { checkNoNullCharacters, decodeSourceBytes } from './sourceEncoding';
 import { hideSubclass } from './subclasses';
+import { blocksOf } from './suspension';
 import { codeClass, type CodeInfo, functionCode, hasCode, noteUnwinding, registerCode } from './tracebacks';
 import {
   dictClass,
@@ -369,10 +370,13 @@ function compileCode(
   if (!module) {
     module = parseSource(source, filename, features, mode, topLevelAwait, optimize);
     checkMode(module, mode, filename);
+    if (mode === 'single') for (const statement of module.body) markDisplays(statement);
+    runtime.allocate(1);
     cache.set(key, module);
+    if (cache.size > 128) cache.delete(cache.keys().next().value as string);
   }
   return {
-    module: mode === 'single' ? { ...module, body: module.body.map(markDisplays) } : module,
+    module,
     mode,
     filename,
     optimize,
@@ -380,37 +384,12 @@ function compileCode(
 }
 
 /** Marks the expression statements that code compiled in 'single' mode shows, outside the functions and classes it defines. */
-function markDisplays(statement: Statement): Statement {
-  const mark = (body: Statement[]): Statement[] => body.map(markDisplays);
-  switch (statement.kind) {
-    case 'expression': {
-      return { ...statement, displays: true };
-    }
-    case 'if':
-    case 'while':
-    case 'for': {
-      return { ...statement, body: mark(statement.body), orelse: mark(statement.orelse) };
-    }
-    case 'try': {
-      const handlers = statement.handlers.map((handler) => ({ ...handler, body: mark(handler.body) }));
-      return {
-        ...statement,
-        body: mark(statement.body),
-        handlers,
-        orelse: mark(statement.orelse),
-        finalbody: mark(statement.finalbody),
-      };
-    }
-    case 'with': {
-      return { ...statement, body: mark(statement.body) };
-    }
-    case 'match': {
-      return { ...statement, cases: statement.cases.map((each) => ({ ...each, body: mark(each.body) })) };
-    }
-    default: {
-      return statement;
-    }
+function markDisplays(statement: Statement): void {
+  if (statement.kind === 'expression') {
+    currentRuntime().allocate(1);
+    statement.displays = true;
   }
+  for (const body of blocksOf(statement)) for (const child of body) markDisplays(child);
 }
 
 function parseSource(
