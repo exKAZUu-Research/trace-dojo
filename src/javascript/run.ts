@@ -7,6 +7,7 @@ import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
 import { JsThrow, Scope } from './values';
 
+// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeJavaScriptProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
