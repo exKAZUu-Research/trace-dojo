@@ -182,12 +182,14 @@ def('Array', 'values_at', [0, -1], function* (self: RArray, args) {
   const values: Value[] = [];
   for (const arg of args) {
     if (arg instanceof RRange) {
-      const bounds = yield* rangeBounds(arg, self.items.length);
-      if (!bounds) continue;
+      let start = arg.begin === NIL ? 0 : yield* toIndex(arg.begin);
+      if (start < 0) start += self.items.length;
+      if (start < 0) throw rangeError(`${yield* inspect(arg)} out of range`);
       let end = arg.end === NIL ? self.items.length : Number(yield* toIndex(arg.end));
       if (end < 0) end += self.items.length;
       if (!arg.exclusive && arg.end !== NIL) end++;
-      for (let index = bounds.start; index < end; index++) values.push(self.items[index] ?? NIL);
+      grow(values.length + Math.max(0, end - start));
+      for (let index = start; index < end; index++) values.push(self.items[index] ?? NIL);
     } else {
       values.push(yield* elementAt(self, arg));
     }
@@ -467,9 +469,10 @@ def('Array', 'fill', [0, 3], function* (self: RArray, args, block) {
   let start = 0;
   let end = self.items.length;
   if (values.length > 0 && values[0] instanceof RRange) {
-    const bounds = yield* rangeBounds(values[0], self.items.length);
-    start = bounds?.start ?? 0;
     const range = values[0];
+    start = range.begin === NIL ? 0 : yield* toIndex(range.begin);
+    if (start < 0) start += self.items.length;
+    if (start < 0) throw rangeError(`${yield* inspect(range)} out of range`);
     let last = range.end === NIL ? self.items.length : yield* toIndex(range.end);
     if (last < 0) last += self.items.length;
     end = range.exclusive || range.end === NIL ? last : last + 1;
@@ -479,7 +482,7 @@ def('Array', 'fill', [0, 3], function* (self: RArray, args, block) {
       if (start < 0) start = Math.max(0, start + self.items.length);
     }
     if (values.length > 1 && values[1] !== NIL) end = start + (yield* toIndex(values[1]));
-    else if (values.length > 0) end = Math.max(self.items.length, start);
+    else if (values.length > 0) end = self.items.length;
   }
   grow(end, self);
   while (self.items.length < end) self.items.push(NIL);
