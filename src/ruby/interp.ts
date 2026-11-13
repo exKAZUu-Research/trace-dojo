@@ -13,7 +13,7 @@ import type {
   StrPart,
   Target,
 } from './ast';
-import { caseEquals, combinedStringEncoding, inspect, toS, toSValue } from './conversions';
+import { caseEquals, combinedStringEncoding, inspect, numericCompare, toS, toSValue } from './conversions';
 import {
   argumentCountError,
   argumentError,
@@ -480,6 +480,8 @@ export function* makeRange(from: Value, to: Value, exclusive: boolean): Gen {
   if (from !== NIL && to !== NIL) {
     const comparable =
       (typeof from === 'bigint' || typeof from === 'number') && (typeof to === 'bigint' || typeof to === 'number');
+    if (comparable && numericCompare(from as bigint | number, to as bigint | number) === undefined)
+      throw argumentError('bad value for range');
     if (!comparable && !(from instanceof RString && to instanceof RString)) {
       const order = respondsTo(from, '<=>') ? yield* callMethod(from, '<=>', [to]) : NIL;
       if (order === NIL) throw argumentError('bad value for range');

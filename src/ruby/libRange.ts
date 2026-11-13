@@ -87,11 +87,14 @@ function* iterateSuccessors(range: RRange, visit: Visit): Gen<void> {
   let current: Value = range.begin;
   for (;;) {
     rt().spend();
+    let atEnd = false;
     if (end !== NIL) {
       const order = yield* compareValues(current, end);
       if (order > 0 || (exclusive && order === 0)) return;
+      atEnd = order === 0;
     }
     if ((yield* visit(current)) === STOP) return;
+    if (atEnd) return;
     current = yield* callMethod(current, 'succ', []);
   }
 }

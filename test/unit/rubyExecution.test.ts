@@ -2097,6 +2097,30 @@ test('endless String ranges retain binary bytes', () => {
   expect(run('p 233.chr.succ.bytes, 255.chr.succ.bytes')).toMatchObject({ stdout: '[234]\n[1, 0]\n' });
 });
 
+test('inclusive custom Ranges stop before the endpoint successor', () => {
+  expect(
+    run('class A; def <=>(o); 0; end; def succ; puts :succ; raise "bad"; end; end; a=A.new; (a..a).each{puts :yield}')
+  ).toMatchObject({
+    stdout: 'yield\n',
+  });
+});
+
+test('numeric Ranges reject unordered endpoints during construction', () => {
+  expect(run('begin; p (1..Float::NAN).size; rescue => e; p e.class,e.message; end')).toMatchObject({
+    stdout: 'ArgumentError\n"bad value for range"\n',
+  });
+  expect(run('begin; Range.new(Float::NAN, 1); rescue => e; p e.class; end')).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
+});
+
+test('binary String transforms retain bytes and use ASCII case mapping', () => {
+  expect(run('p 233.chr.upcase.bytes, 233.chr.chomp.bytes, 233.chr.succ.bytes')).toMatchObject({
+    stdout: '[233]\n[233]\n[234]\n',
+  });
+  expect(run('s=233.chr; s.upcase!; p s.bytes')).toMatchObject({ stdout: '[233]\n' });
+});
+
 test('non-mutating module hooks can run on frozen classes', () => {
   expect(
     run('module M; def self.append_features(x); puts :append; end; end; class C; end; C.freeze; C.include(M)')

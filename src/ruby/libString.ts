@@ -1202,10 +1202,10 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
     if (self.rawBytes && !self.binary) return transformInvalid(self, name, yield* invalidSeparator(name, selected));
     if (self.binary && (name === 'succ' || name === 'next'))
       return stringFromBytes(successorBytes(stringBytes(self), true), true);
-    if (name === 'chomp' && selected[0] === NIL) return str(self.s);
+    if (name === 'chomp' && selected[0] === NIL) return stringFromBytes(stringBytes(self), self.binary);
     const strings: string[] = [];
     for (const arg of selected) strings.push(yield* stringArg(arg));
-    return str(transform(self.s, strings));
+    return self.binary ? binaryTransform(self.s, name, strings, transform) : str(transform(self.s, strings));
   });
   def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
     const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
@@ -1235,6 +1235,15 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
     }
     const strings: string[] = [];
     for (const arg of selected) strings.push(yield* stringArg(arg));
+    if (self.binary) {
+      const result = binaryTransform(self.s, name, strings, transform);
+      if (result.s === self.s && name !== 'succ' && name !== 'next') {
+        modify(self);
+        return NIL;
+      }
+      setBytes(self, stringBytes(result), true);
+      return self;
+    }
     const result = transform(self.s, strings);
     if (name === 'succ' || name === 'next') {
       setText(self, result);
@@ -1247,6 +1256,35 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
     setText(self, result);
     return self;
   });
+}
+
+function binaryTransform(
+  text: string,
+  name: string,
+  args: string[],
+  transform: (text: string, args: string[]) => string
+): RString {
+  const result =
+    name === 'upcase'
+      ? asciiUpcase(text)
+      : name === 'downcase'
+        ? asciiDowncase(text)
+        : name === 'capitalize'
+          ? asciiUpcase(text.slice(0, 1)) + asciiDowncase(text.slice(1))
+          : name === 'swapcase'
+            ? text.replaceAll(/[a-zA-Z]/g, (char) => (char <= 'Z' ? char.toLowerCase() : char.toUpperCase()))
+            : transform(text, args);
+  const bytes = new Uint8Array(result.length);
+  for (let index = 0; index < result.length; index++) bytes[index] = result.codePointAt(index) as number;
+  return stringFromBytes(bytes, true);
+}
+
+function asciiUpcase(value: string): string {
+  return value.replaceAll(/[a-z]/g, (char) => char.toUpperCase());
+}
+
+function asciiDowncase(value: string): string {
+  return value.replaceAll(/[A-Z]/g, (char) => char.toLowerCase());
 }
 
 function* invalidSeparator(name: string, args: Value[]): Gen<RString | typeof NIL | undefined> {
