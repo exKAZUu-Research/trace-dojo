@@ -11,26 +11,28 @@ export function cSyntaxDiagnostics(
   headerTypes: readonly string[]
 ): SourceDiagnostic[] {
   if (errors.length === 0) return errors;
-  const failure = firstRecovery(parser, source);
+  const budget = new ExecutionBudget();
+  budget.spend(source.length);
+  const failure = firstRecovery(parser, source, budget);
   if (!failure) return errors;
   const illegal = firstIllegalConstruct(root, headerTypes);
-  const row = failure.missingSemicolon ? failure.row : nextTokenRow(source, failure.row, failure.column);
+  const next = nextToken(source, failure);
+  const semicolon = missingSemicolonRow(parser, source, next.offset, budget);
+  const row = semicolon ?? next.row;
   if (illegal && illegal.startPosition.row <= row)
     return [{ row: illegal.startPosition.row, message: 'ここには関数の定義や文を書けません。' }];
-  return [{ row, message: failure.missingSemicolon ? '「;」が足りません。' : errors[0].message }];
+  return [{ row, message: semicolon !== undefined ? '「;」が足りません。' : errors[0].message }];
 }
 
 interface RecoveryPosition {
   row: number;
   column: number;
-  missingSemicolon: boolean;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The logger callback tracks one recovery cycle and its parser versions; splitting it distributes that state.
-function firstRecovery(parser: Parser, source: string): RecoveryPosition | undefined {
+// code-gauge-allow functionCognitiveComplexity 17 -- One callback tracks the parser versions and first recovery cycle while its logger is installed.
+function firstRecovery(parser: Parser, source: string, budget: ExecutionBudget): RecoveryPosition | undefined {
   const previous = parser.getLogger();
   const positions = new Map<string, { row: number; column: number }>();
-  const budget = new ExecutionBudget();
   let failure: RecoveryPosition | undefined;
   let settled = false;
   // Branch-local failures are speculative; capture the parser's first resumed recovery cycle.
@@ -47,12 +49,12 @@ function firstRecovery(parser: Parser, source: string): RecoveryPosition | undef
     const resume = /^resume version:(\d+)/.exec(message);
     if (resume && !failure) {
       const position = positions.get(resume[1]);
-      if (position) failure = { ...position, missingSemicolon: false };
+      if (position) failure = position;
     }
-    if (failure && message.startsWith('recover_with_missing symbol:;,')) failure.missingSemicolon = true;
   });
   try {
     const tree = parser.parse(source);
+    if (tree && !tree.rootNode.hasError) failure = undefined;
     tree?.delete();
   } finally {
     parser.setLogger(previous ?? false);
@@ -60,15 +62,40 @@ function firstRecovery(parser: Parser, source: string): RecoveryPosition | undef
   return failure;
 }
 
-function nextTokenRow(source: string, row: number, column: number): number {
+function nextToken(source: string, position: RecoveryPosition): { offset: number; row: number } {
   const lines = source.split('\n');
-  let at = lines.slice(0, row).reduce((length, line) => length + line.length + 1, 0) + column;
-  let nextRow = row;
+  let at = lines.slice(0, position.row).reduce((length, line) => length + line.length + 1, 0) + position.column;
+  let row = position.row;
   while (at < source.length && /\s/.test(source[at])) {
-    if (source[at] === '\n') nextRow++;
+    if (source[at] === '\n') row++;
     at++;
   }
-  return at === source.length ? lines.length - (source.endsWith('\n') ? 2 : 1) : nextRow;
+  return { offset: at, row: at === source.length ? lines.length - (source.endsWith('\n') ? 2 : 1) : row };
+}
+
+function missingSemicolonRow(
+  parser: Parser,
+  source: string,
+  failureOffset: number,
+  budget: ExecutionBudget
+): number | undefined {
+  const prefix = source.slice(0, failureOffset);
+  const lines = prefix.split('\n');
+  let offset = prefix.lastIndexOf('\n');
+  for (let row = lines.length - 2; row >= 0; row--) {
+    const line = lines[row].trimEnd();
+    const end = offset - lines[row].length + line.length;
+    offset -= lines[row].length + 1;
+    if (line.endsWith(';')) return;
+    if (!line || line.endsWith('{') || /\breturn$/.test(line)) continue;
+    budget.spend(source.length);
+    const patched = source.slice(0, end) + ';' + source.slice(end);
+    const recovered = firstRecovery(parser, patched, budget);
+    if (!recovered) return row;
+    const next = nextToken(patched, recovered).offset;
+    if (next - (next > end ? 1 : 0) > failureOffset) return row;
+  }
+  return undefined;
 }
 
 function firstIllegalConstruct(root: Node, headerTypes: readonly string[]): Node | undefined {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 668 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
+// code-gauge-allow-file fileNcss 675 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -868,12 +868,7 @@ export class Converter {
         return prefix ? build(operand) : this.postfix(operand, build);
       }
       case 'cast_expression': {
-        return {
-          kind: 'cast',
-          typeName: this.typeName(field(node, 'type')),
-          operand: this.expression(field(node, 'value')),
-          row,
-        };
+        return this.cast(node);
       }
       case 'sizeof_expression': {
         return this.sizeof(node);
@@ -941,6 +936,17 @@ export class Converter {
     if (inner.length !== 1) throw new CompileError([{ row, message: '式の書き方に誤りがあります。' }]);
     if (inner[0].type === 'compound_statement') unsupported(row, '文の式（({ ... })）');
     return { kind: 'paren', expression: this.expression(inner[0]), row };
+  }
+
+  private cast(node: Node): Expression {
+    const row = node.startPosition.row;
+    const typeName = this.typeName(field(node, 'type'));
+    const value = field(node, 'value');
+    if (value.type === 'assignment_expression')
+      throw new CompileError([
+        { row: value.startPosition.row, message: '代入する左側には、変数や配列の要素などを書いてください。' },
+      ]);
+    return { kind: 'cast', typeName, operand: this.expression(value), row };
   }
 
   private sizeof(node: Node): Expression {

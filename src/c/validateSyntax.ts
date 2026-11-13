@@ -8,7 +8,6 @@ const RESTRICTED_OPERANDS: Record<string, readonly string[]> = {
   unary_expression: ['argument'],
   pointer_expression: ['argument'],
   update_expression: ['argument'],
-  cast_expression: ['value'],
   sizeof_expression: ['value'],
   conditional_expression: ['condition', 'alternative'],
 };

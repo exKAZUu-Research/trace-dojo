@@ -1367,3 +1367,27 @@ test.each(['typedef int T;T (*fp)(T);', 'typedef struct{int x;} S;S g(void);', '
     });
   }
 );
+
+test.each([
+  'int n=sizeof(arr)/sizeof(arr[0])\ns=5;',
+  's=sizeof(arr)\nreturn 1;',
+  's=(i)\ns=5;',
+  's=(int)(i)\nint k=1;',
+  's=(i)+(s)\ns=5;',
+  's=i\n1;',
+  'i++\n2.5;',
+  's=(i)\nL:s=1;',
+])('semicolon diagnostics are independent of cast ambiguity and recovery choice: %s', (body) => {
+  const source = `int main(void){\nint i=0,s=0,arr[3];\n${body}\nreturn 0;\n}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 2 })],
+  });
+});
+
+test('a bare return without its semicolon points at the unexpected closing brace', () => {
+  expect(executeProgram('c', 'int main(void){\nreturn\n}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 2 })],
+  });
+});
