@@ -15,8 +15,8 @@ function* modify(self: RHash): Gen<void> {
 
 function* toHash(value: Value): Gen<RHash> {
   if (value instanceof RHash) return value;
-  if (respondsTo(value, 'to_hash')) {
-    const converted = yield* callMethod(value, 'to_hash', []);
+  if (respondsTo(value, 'to_hash', true)) {
+    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
     if (converted instanceof RHash) return converted;
   }
   throw implicitConversionError(value, 'Hash');
@@ -73,16 +73,16 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
 
 function* hashLiteralSource(value: Value): Gen<RHash | RArray | undefined> {
   if (value instanceof RHash || value instanceof RArray) return value;
-  if (respondsTo(value, 'to_hash')) {
-    const converted = yield* callMethod(value, 'to_hash', []);
+  if (respondsTo(value, 'to_hash', true)) {
+    const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
     if (converted instanceof RHash) return converted;
     if (converted !== NIL)
       throw typeError(
         `can't convert ${realClassOf(value).name} to Hash (${realClassOf(value).name}#to_hash gives ${realClassOf(converted).name})`
       );
   }
-  if (respondsTo(value, 'to_ary')) {
-    const converted = yield* callMethod(value, 'to_ary', []);
+  if (respondsTo(value, 'to_ary', true)) {
+    const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
     if (converted instanceof RArray) return converted;
     if (converted !== NIL)
       throw typeError(

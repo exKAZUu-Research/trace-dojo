@@ -15,7 +15,7 @@ export function transformInvalid(self: RString, name: string, separator: RString
   if (name === 'rstrip' || name === 'strip')
     throw rubyError(rt().c['Encoding::CompatibilityError'], 'invalid byte sequence in UTF-8');
   const bytes = stringBytes(self);
-  if (name === 'succ' || name === 'next') return stringFromBytes(succInvalidBytes(bytes));
+  if (name === 'succ' || name === 'next') return stringFromBytes(successorBytes(bytes));
   if (name === 'chop') return chopInvalidBytes(self, bytes);
   return chompInvalidBytes(bytes, separator);
 }
@@ -46,41 +46,43 @@ function chompInvalidBytes(bytes: Uint8Array, separator: RString | RNil | undefi
   return stringFromBytes(bytes.slice(0, matches ? bytes.length - suffix.length : bytes.length));
 }
 
-function succInvalidBytes(source: Uint8Array): Uint8Array {
+export function successorBytes(source: Uint8Array): Uint8Array {
   if (source.length === 0) return source;
-  const bytes = [...source];
-  let index = bytes.findLastIndex(isAsciiAlnum);
-  let offset = 0;
-  let multibyte: { offset: number; width: number; point: number } | undefined;
-  for (const character of stringCharacters(stringFromBytes(source))) {
-    const width = stringBytes(character).length;
-    if (width > 1 && !character.rawBytes) multibyte = { offset, width, point: character.s.codePointAt(0) as number };
-    offset += width;
+  const parts = stringCharacters(stringFromBytes(source)).map((character) => ({
+    bytes: stringBytes(character),
+    point: character.rawBytes ? undefined : character.s.codePointAt(0),
+  }));
+  const candidate = (part: (typeof parts)[number]): boolean =>
+    part.point !== undefined && (part.bytes.length > 1 || isAsciiAlnum(part.bytes[0]));
+  let index = parts.findLastIndex(candidate);
+  if (index < 0) {
+    const last = parts.at(-1) as (typeof parts)[number];
+    if (last.point === undefined) return Uint8Array.from([1, ...source]);
+    last.bytes = stringBytes(str(String.fromCodePoint(last.point + 1)));
+    return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
   }
-  if (multibyte && multibyte.offset > index) {
-    const next = stringBytes(str(String.fromCodePoint(multibyte.point + 1)));
-    return Uint8Array.from([
-      ...bytes.slice(0, multibyte.offset),
-      ...next,
-      ...bytes.slice(multibyte.offset + multibyte.width),
-    ]);
-  }
-  if (index < 0) return Uint8Array.from([1, ...bytes]);
+  let carry = 1;
   for (;;) {
-    const byte = bytes[index];
-    if (byte !== 57 && byte !== 90 && byte !== 122) {
-      bytes[index]++;
-      return Uint8Array.from(bytes);
+    const part = parts[index];
+    if (part.bytes.length > 1) {
+      part.bytes = stringBytes(str(String.fromCodePoint((part.point as number) + 1)));
+      break;
     }
-    const carry = byte === 57 ? 49 : byte === 90 ? 65 : 97;
-    bytes[index] = byte === 57 ? 48 : byte === 90 ? 65 : 97;
-    const previous = bytes.slice(0, index).findLastIndex(isAsciiAlnum);
+    const byte = part.bytes[0];
+    if (byte !== 57 && byte !== 90 && byte !== 122) {
+      part.bytes = Uint8Array.of(byte + 1);
+      break;
+    }
+    carry = byte === 57 ? 49 : byte === 90 ? 65 : 97;
+    part.bytes = Uint8Array.of(byte === 57 ? 48 : byte === 90 ? 65 : 97);
+    const previous = parts.slice(0, index).findLastIndex(candidate);
     if (previous === -1) {
-      bytes.splice(index, 0, carry);
-      return Uint8Array.from(bytes);
+      parts.splice(index, 0, { bytes: Uint8Array.of(carry), point: carry });
+      break;
     }
     index = previous;
   }
+  return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
 }
 
 function isAsciiAlnum(byte: number): boolean {

@@ -388,7 +388,7 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
   const by = Number(step);
   const end = limit === NIL ? (by > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY) : Number(limit);
   const count = floatStepCount(begin, end, by);
-  if (Number.isNaN(count)) throw floatDomainError('NaN');
+  if (Number.isNaN(count)) return self;
   if (!Number.isFinite(count)) {
     for (let index = 0; ; index++) yield* callBlock(block, [fusedMultiplyAdd(index, by, begin)], false);
   }

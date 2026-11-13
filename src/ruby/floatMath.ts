@@ -29,6 +29,7 @@ export function floatFraction(value: number): { numerator: bigint | number; deno
 }
 
 export function floatStepCount(begin: number, end: number, step: number, exclusive = false): number {
+  if (Number.isNaN(begin) || Number.isNaN(end) || Number.isNaN(step)) return Number.NaN;
   if (step === 0) return Number.POSITIVE_INFINITY;
   if (!Number.isFinite(step)) return step > 0 ? Number(begin <= end) : Number(begin >= end);
   let count = (end - begin) / step;
@@ -38,9 +39,12 @@ export function floatStepCount(begin: number, end: number, step: number, exclusi
   );
   if (exclusive) {
     if (count <= 0) return 0;
-    count = count < 1 ? 0 : Math.floor(count - error);
-    const next = (count + 1) * step + begin;
-    if ((begin < end && next < end) || (begin > end && next > end)) count++;
+    count = Math.floor(count + error) + 1;
+    const inside = (index: number): boolean =>
+      step > 0 ? fusedMultiplyAdd(index, step, begin) < end : fusedMultiplyAdd(index, step, begin) > end;
+    while (count > 0 && !inside(count - 1)) count--;
+    while (inside(count)) count++;
+    return count;
   } else {
     if (count < 0) return 0;
     count = Math.floor(count + error);

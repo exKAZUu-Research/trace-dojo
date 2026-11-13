@@ -20,8 +20,8 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
   const visit = function* (value: Value, seen: Set<RArray>): Gen<void> {
     rt().spend();
     let array = value instanceof RArray ? value : undefined;
-    if (!array && respondsTo(value, 'to_ary')) {
-      const converted = yield* callMethod(value, 'to_ary', []);
+    if (!array && respondsTo(value, 'to_ary', true)) {
+      const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
       if (converted instanceof RArray) array = converted;
       else if (converted !== NIL) {
         throw typeError(

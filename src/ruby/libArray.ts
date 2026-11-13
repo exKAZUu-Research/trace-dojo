@@ -8,6 +8,7 @@ import {
   rEquals,
   spaceship,
   toIndex,
+  toIndexExact,
   toInt,
   toStrValue,
   toSValue,
@@ -53,8 +54,8 @@ function* toAry(value: Value): Gen<RArray> {
 
 export function* tryAry(value: Value): Gen<RArray | undefined> {
   if (value instanceof RArray) return value;
-  if (respondsTo(value, 'to_ary')) {
-    const converted = yield* callMethod(value, 'to_ary', []);
+  if (respondsTo(value, 'to_ary', true)) {
+    const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
     if (converted instanceof RArray) return converted;
     if (converted !== NIL)
       throw typeError(
@@ -189,12 +190,12 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   return value;
 });
 def('Array', 'fetch', [1, 2], function* (self: RArray, args, block) {
-  const raw = yield* toIndex(args[0]);
+  const { number: raw, integer: exact } = yield* toIndexExact(args[0]);
   const index = raw < 0 ? raw + self.items.length : raw;
   if (index >= 0 && index < self.items.length) return self.items[index];
   if (block) return yield* call(block, args[0]);
   if (args.length > 1) return args[1];
-  throw indexError(`index ${raw} outside of array bounds: ${-self.items.length}...${self.items.length}`);
+  throw indexError(`index ${exact} outside of array bounds: ${-self.items.length}...${self.items.length}`);
 });
 def('Array', 'dig', [1, -1], function* (self: RArray, args) {
   const value = yield* elementAt(self, args[0]);
@@ -654,8 +655,8 @@ def('Array', 'zip', [0, -1], function* (self: RArray, others, block) {
   return yield* zipCollections(self, others, block);
 });
 def('Array', 'product', [0, -1], function* (self: RArray, others, block) {
-  const arrays = [self.items];
-  for (const other of others) arrays.push((yield* toAry(other)).items);
+  const arrays = [[...self.items]];
+  for (const other of others) arrays.push([...(yield* toAry(other)).items]);
   if (block) {
     if (arrays.some((items) => items.length === 0)) return self;
     const indexes = arrays.map(() => 0);

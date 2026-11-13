@@ -930,8 +930,8 @@ def('Enumerable', 'tally', [0, 1], function* (self, args) {
   let counts: RHash;
   if (args.length === 0) counts = newHash();
   else if (args[0] instanceof RHash) counts = args[0];
-  else if (respondsTo(args[0], 'to_hash')) {
-    const converted = yield* callMethod(args[0], 'to_hash', []);
+  else if (respondsTo(args[0], 'to_hash', true)) {
+    const converted = yield* callMethod(args[0], 'to_hash', [], undefined, undefined, { fcall: true });
     if (!(converted instanceof RHash)) throw typeError('to_hash must return Hash');
     counts = converted;
   } else throw typeError(`no implicit conversion of ${realClassOf(args[0]).name} into Hash`);

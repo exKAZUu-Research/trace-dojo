@@ -488,13 +488,13 @@ def(
   function* (_self, [value]) {
     if (value instanceof RArray) return value;
     if (value === NIL) return arr([]);
-    if (respondsTo(value, 'to_ary')) {
-      const converted = yield* callMethod(value, 'to_ary', []);
+    if (respondsTo(value, 'to_ary', true)) {
+      const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
       if (converted instanceof RArray) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_ary');
     }
-    if (respondsTo(value, 'to_a')) {
-      const converted = yield* callMethod(value, 'to_a', []);
+    if (respondsTo(value, 'to_a', true)) {
+      const converted = yield* callMethod(value, 'to_a', [], undefined, undefined, { fcall: true });
       if (converted instanceof RArray) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_a');
     }
@@ -509,8 +509,8 @@ def(
   function* (_self, [value]) {
     if (value instanceof RHash) return value;
     if (value === NIL || (value instanceof RArray && value.items.length === 0)) return newHash();
-    if (respondsTo(value, 'to_hash')) {
-      const converted = yield* callMethod(value, 'to_hash', []);
+    if (respondsTo(value, 'to_hash', true)) {
+      const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
       if (converted instanceof RHash) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Hash', 'to_hash');
     }

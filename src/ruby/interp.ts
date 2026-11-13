@@ -417,8 +417,8 @@ function* evalList(items: Expr[], frame: Frame): Gen<Value[]> {
 export function* splatItems(value: Value): Gen<Value[]> {
   if (value instanceof RArray) return [...value.items];
   if (value === NIL) return [];
-  if (respondsTo(value, 'to_a')) {
-    const converted = yield* callMethod(value, 'to_a', []);
+  if (respondsTo(value, 'to_a', true)) {
+    const converted = yield* callMethod(value, 'to_a', [], undefined, undefined, { fcall: true });
     if (converted instanceof RArray) return [...converted.items];
     if (converted === NIL) return [value];
     throw typeError(
@@ -447,8 +447,8 @@ function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): 
       if (value === NIL) continue;
       if (!(value instanceof RHash)) {
         const source = value;
-        if (!respondsTo(source, 'to_hash')) throw implicitConversionError(source, 'Hash');
-        value = yield* callMethod(source, 'to_hash', []);
+        if (!respondsTo(source, 'to_hash', true)) throw implicitConversionError(source, 'Hash');
+        value = yield* callMethod(source, 'to_hash', [], undefined, undefined, { fcall: true });
         if (!(value instanceof RHash))
           throw typeError(
             `can't convert ${realClassOf(source).name} to Hash (${realClassOf(source).name}#to_hash gives ${realClassOf(value).name})`
@@ -795,8 +795,8 @@ export function* destructure(target: MultiTarget, value: Value, frame: Frame): G
 
 function* toAryForAssignment(value: Value): Gen<Value[]> {
   if (value instanceof RArray) return value.items;
-  if (respondsTo(value, 'to_ary')) {
-    const converted = yield* callMethod(value, 'to_ary', []);
+  if (respondsTo(value, 'to_ary', true)) {
+    const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
     if (converted instanceof RArray) return converted.items;
     if (converted !== NIL)
       throw typeError(

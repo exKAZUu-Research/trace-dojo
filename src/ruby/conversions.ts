@@ -55,11 +55,15 @@ export function* toInt(value: Value): Gen<bigint> {
 }
 
 export function* toIndex(value: Value): Gen<number> {
+  return (yield* toIndexExact(value)).number;
+}
+
+export function* toIndexExact(value: Value): Gen<{ number: number; integer: bigint }> {
   const integer = yield* toInt(value);
   if (integer > 9_223_372_036_854_775_807n || integer < -9_223_372_036_854_775_808n) {
     throw rangeError(`bignum too big to convert into 'long'`);
   }
-  return Number(integer);
+  return { number: Number(integer), integer };
 }
 
 export function* toRubyInt(value: Value): Gen<number> {

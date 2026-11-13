@@ -1,7 +1,7 @@
 import { addressOf, inspect, numericCompare, toInt } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError } from './errors';
-import { floatStepCount } from './floatMath';
+import { floatStepCount, fusedMultiplyAdd } from './floatMath';
 import { callMethod, callProc, type Gen, nativeProc } from './interp';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
@@ -291,9 +291,16 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
   if (end === NIL) throw rangeError('cannot get the last element of endless arithmetic sequence');
-  for (const value of [start, end, step])
+  for (const value of [start, end])
     if (typeof value === 'number' && !Number.isFinite(value))
       throw floatDomainError(Number.isNaN(value) ? 'NaN' : value > 0 ? 'Infinity' : '-Infinity');
+  if (typeof step === 'number' && !Number.isFinite(step)) {
+    if (Number.isNaN(step)) throw floatDomainError('NaN');
+    if (args.length === 0) return Number.NaN;
+    const requested = yield* toInt(args[0]);
+    if (requested < 0n) throw argumentError('negative array size');
+    return arr(requested === 0n ? [] : [Number.NaN]);
+  }
   const index = arithmeticLastIndex(
     start as bigint | number,
     end as bigint | number,
@@ -310,7 +317,9 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
       )
     )
       return NIL;
-    return arithmeticValue(start as bigint | number, step as bigint | number, index);
+    return exclusive && (typeof start === 'number' || typeof step === 'number')
+      ? fusedMultiplyAdd(Number(index), Number(step), Number(start))
+      : arithmeticValue(start as bigint | number, step as bigint | number, index);
   }
   const requested = yield* toInt(args[0]);
   if (requested < 0n) throw argumentError('negative array size');
@@ -355,9 +364,8 @@ function arithmeticLastIndex(
     if (exclusive && start + index * step === end) index--;
     return index;
   }
-  let index = Math.floor((Number(end) - Number(start)) / Number(step));
-  if (exclusive && Number(start) + Number(step) * index === Number(end)) index--;
-  return BigInt(index);
+  if (exclusive) return BigInt(floatStepCount(Number(start), Number(end), Number(step), true) - 1);
+  return BigInt(Math.floor((Number(end) - Number(start)) / Number(step)));
 }
 
 function arithmeticValue(start: bigint | number, step: bigint | number, index: bigint): Value {

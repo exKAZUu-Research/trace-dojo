@@ -33,7 +33,7 @@ import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { transformInvalid } from './stringTransforms';
+import { successorBytes, transformInvalid } from './stringTransforms';
 import {
   arr,
   classOf,
@@ -161,7 +161,7 @@ def(
 sdef(
   'String',
   'new',
-  [0, 1],
+  [0, -1],
   function* (self, args, _block, keywords) {
     const value = new RString(self, '');
     const initialize = classOf(value).findMethod('initialize');
@@ -725,6 +725,7 @@ def('String', 'count', [1, -1], function* (self: RString, args) {
 });
 def('String', 'delete', [1, -1], function* (self: RString, args) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+  if (self.s.length === 0) return stringFromBytes(stringBytes(self), self.binary);
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* patternText(arg, 'characters'));
   const matches = characterSetMatcher(sets);
@@ -856,15 +857,24 @@ for (const [name, squeezeRuns] of [
 ] as const) {
   def('String', name, 2, function* (self: RString, [from, to]) {
     if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+    if (self.s.length === 0) {
+      if (!(from instanceof RString)) yield* stringArgValue(from);
+      if (!(to instanceof RString)) yield* stringArgValue(to);
+      return stringFromBytes(stringBytes(self), self.binary);
+    }
     return str(
       translate(self.s, yield* patternText(from, 'characters'), yield* patternText(to, 'characters'), squeezeRuns).text
     );
   });
   def('String', `${name}!`, 2, function* (self: RString, [from, to]) {
     if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+    if (self.s.length === 0) {
+      if (!(from instanceof RString)) yield* stringArgValue(from);
+      if (!(to instanceof RString)) yield* stringArgValue(to);
+      return NIL;
+    }
     const source = yield* patternText(from, 'characters');
     const replacement = yield* patternText(to, 'characters');
-    if (self.s.length === 0) return NIL;
     modify(self);
     const result = translate(self.s, source, replacement, squeezeRuns);
     if (!result.matched) return NIL;
@@ -915,6 +925,7 @@ function* substitute(
     throw argumentError('wrong number of arguments (given 1, expected 2)');
   }
   const text = self.s;
+  const sourceLength = stringBytes(self).length;
   let result = '';
   let position = 0;
   let matched = false;
@@ -935,7 +946,7 @@ function* substitute(
     } else {
       piece = yield* toS(yield* callBlock(block as RProc, [str(target)]));
     }
-    if (self.s !== text) throw runtimeError('string modified');
+    if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
     result += text.slice(position, found) + piece;
     position = found + target.length;
     if (target.length === 0) {
@@ -979,6 +990,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   const target = yield* patternText(pattern, 'regexp');
   const found: Value[] = [];
   const text = self.s;
+  const sourceLength = stringBytes(self).length;
   let position = 0;
   for (;;) {
     const index = text.indexOf(target, position);
@@ -986,7 +998,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     const match = str(target);
     if (block) {
       yield* callBlock(block, [match], false);
-      if (self.s !== text) throw runtimeError('string modified');
+      if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
     } else found.push(match);
     position =
       index +
@@ -1123,49 +1135,10 @@ def('String', 'reverse!', 0, (self: RString) => {
   return self;
 });
 
-/** The successor of a string: its rightmost alphanumeric character incremented, carrying leftward. */
-const isAlnum = (char: string): boolean => /^[A-Za-z0-9]$/.test(char);
 const isSpace = (char: string): boolean => ' \t\n\v\f\r'.includes(char);
 
-// code-gauge-allow functionCognitiveComplexity 23 -- String successor carries across alphanumeric runs and handles non-alphanumeric tails.
-// code-gauge-allow functionNcss 40 -- String successor carries across alphanumeric runs and handles non-alphanumeric tails.
 export function succ(text: string): string {
-  if (text.length === 0) return '';
-  const chars = charsOf(text);
-  let index = chars.length - 1;
-  while (index >= 0 && !isAlnum(chars[index])) index--;
-  if (index < 0) {
-    let position = chars.length - 1;
-    for (;;) {
-      const code = chars[position].codePointAt(0) as number;
-      if (code < 0x10_ff_ff) {
-        chars[position] = String.fromCodePoint(code + 1);
-        return chars.join('');
-      }
-      chars[position] = '\u0001';
-      if (--position < 0) return `\u0001${chars.join('')}`;
-    }
-  }
-  let carry = '';
-  for (;;) {
-    const char = chars[index];
-    let next: string;
-    if (char === 'z') [next, carry] = ['a', 'a'];
-    else if (char === 'Z') [next, carry] = ['A', 'A'];
-    else if (char === '9') [next, carry] = ['0', '1'];
-    else {
-      chars[index] = String.fromCodePoint((char.codePointAt(0) as number) + 1);
-      return chars.join('');
-    }
-    chars[index] = next;
-    let left = index - 1;
-    while (left >= 0 && !isAlnum(chars[left])) left--;
-    if (left < 0) {
-      chars.splice(index, 0, carry);
-      return chars.join('');
-    }
-    index = left;
-  }
+  return stringFromBytes(successorBytes(stringBytes(str(text)))).s;
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- upto uses numeric-string width rules or String successor iteration with exclusive bounds.
@@ -1174,18 +1147,6 @@ def('String', 'upto', [1, 2], function* (self: RString, args, block) {
   const end = yield* stringArgValue(args[0]);
   const last = end.s;
   const exclusive = args.length > 1 && truthy(args[1]);
-  if ((self.rawBytes && !self.binary) || (end.rawBytes && !end.binary)) {
-    const limit = stringBytes(end);
-    let current = stringFromBytes(stringBytes(self), self.binary);
-    while (stringBytes(current).length <= limit.length && compareBytes(stringBytes(current), limit) <= 0) {
-      if (exclusive && compareBytes(stringBytes(current), limit) === 0) break;
-      yield* callBlock(block, [current], false);
-      if (compareBytes(stringBytes(current), limit) === 0) break;
-      current = current.rawBytes ? transformInvalid(current, 'succ', undefined) : str(succ(current.s));
-      rt().spend();
-    }
-    return self;
-  }
   if (/^\d+$/.test(self.s) && /^\d+$/.test(last)) {
     const width = self.s.length;
     for (let value = BigInt(self.s); exclusive ? value < BigInt(last) : value <= BigInt(last); value++) {
@@ -1193,15 +1154,19 @@ def('String', 'upto', [1, 2], function* (self: RString, args, block) {
     }
     return self;
   }
-  let current = self.s;
-  const lastLength = charLength(last);
-  if (compareStrings(current, last) > 0 && charLength(current) >= lastLength) return self;
+  let current = stringFromBytes(stringBytes(self), self.binary);
+  const limit = stringBytes(end);
+  if (compareBytes(stringBytes(current), limit) > 0 && stringBytes(current).length >= limit.length) return self;
+  const afterEnd = successorBytes(limit);
   for (;;) {
-    if (exclusive && current === last) break;
-    yield* callBlock(block, [str(current)], false);
-    if (current === last || charLength(current) > lastLength) break;
-    current = succ(current);
-    if (charLength(current) > lastLength) break;
+    const bytes = stringBytes(current);
+    if (compareBytes(bytes, afterEnd) === 0 || (exclusive && compareBytes(bytes, limit) === 0)) break;
+    yield* callBlock(block, [current], false);
+    if (compareBytes(bytes, limit) === 0) break;
+    const next = successorBytes(bytes);
+    if (next.length > limit.length) break;
+    current = stringFromBytes(next, self.binary);
+    rt().spend();
   }
   return self;
 });
@@ -1213,12 +1178,12 @@ function* justify(self: RString, args: Value[], kind: 'left' | 'right' | 'center
   if (paddingChars.length === 0) throw argumentError('zero width padding');
   const chars = stringCharacters(self);
   const length = chars.length;
-  if (width <= length) return stringFromBytes(stringBytes(self), self.binary);
   const binary = combinedStringEncoding(
     self.binary,
     stringBytes(self).every((byte) => byte < 0x80),
     padding
   );
+  if (width <= length) return stringFromBytes(stringBytes(self), self.binary);
   rt().checkStringLength(width);
   const total = width - length;
   const fill = (count: number): RString[] =>

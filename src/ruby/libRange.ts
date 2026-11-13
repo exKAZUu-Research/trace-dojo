@@ -494,6 +494,7 @@ function* stepCustomRange(self: RRange, step: bigint | number, block: RProc): Ge
     }
     const next = yield* callMethod(value, '+', [step]);
     yield* spaceship(value, next);
+    if (initialOrder === undefined || initialOrder > 0) return self;
   }
   for (;;) {
     rt().spend();

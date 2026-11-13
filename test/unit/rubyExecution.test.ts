@@ -228,6 +228,67 @@ test.each([
     's=Set[1,2,3];p s.classify{|x|x%2};p Set[Set[1,2],3].flatten;s.subtract([2]);p s;s.map!{|x|x*2};p s,s.join(",")',
     '{1 => Set[1, 3], 0 => Set[2]}\nSet[1, 2, 3]\nSet[1, 3]\nSet[2, 6]\n"2,6"\n',
   ],
+  [
+    'String padding validates encoding at every width',
+    'begin;255.chr.center(0,"é");rescue=>e;p e.class;end',
+    'Encoding::CompatibilityError\n',
+  ],
+  [
+    'same-length String edits remain valid during callbacks',
+    's="aaa";s.scan("a"){s[0]="b";puts :hit};s="aaa";p s.gsub("a"){s[0]="b";"x"}',
+    'hit\nhit\nhit\n"xxx"\n',
+  ],
+  ['product snapshots inputs before yielding', 'a=[3,4];[1].product(a){|x|p x;a[1]=9}', '[1, 3]\n[1, 4]\n'],
+  [
+    'infinite arithmetic steps have a NaN last value',
+    'e=1.0.step(3.0,-Float::INFINITY);p e.last(2),e.last',
+    '[NaN]\nNaN\n',
+  ],
+  [
+    'String subclass initializer owns its arity',
+    'class S<String;def initialize(a,b);@n=a+b;end;attr_reader :n;end;p S.new(2,3).n',
+    '5\n',
+  ],
+  [
+    'long Array fetch errors preserve the exact index',
+    'begin;[1].fetch(9007199254740993);rescue=>e;p e.message;end',
+    '"index 9007199254740993 outside of array bounds: -1...1"\n',
+  ],
+  [
+    'exclusive Float steps retain a value below a nearby endpoint',
+    'e=(0.1...1.5000000000000002).step(0.1);p e.size,e.to_a.size,e.last',
+    '15\n15\n1.5\n',
+  ],
+  [
+    'Unicode and invalid-byte String upto share successor rules',
+    String.raw`p "aé".upto("aê").to_a,"a日".upto("a旦").to_a,"ab".upto("a\xFF").to_a.size,"a\xFF".upto("b").to_a.map(&:bytes)`,
+    '["aé", "aê"]\n["a日", "a旦"]\n675\n[[97, 255]]\n',
+  ],
+  [
+    'empty String translations skip invalid patterns',
+    String.raw`p "".tr("\xFF","x"),"".tr_s("\xFF","x"),"".tr!("\xFF","x"),"".delete("\xFF")`,
+    '""\n""\nnil\n""\n',
+  ],
+  [
+    'String successor carries into a preceding Unicode character',
+    String.raw`p "日9\xFF".succ.bytes,"é9\xFF".succ.bytes,"日z\xFF".succ.bytes`,
+    '[230, 151, 166, 48, 255]\n[195, 170, 48, 255]\n[230, 151, 166, 97, 255]\n',
+  ],
+  [
+    'NaN Numeric steps iterate nothing but have invalid size',
+    'e=0.0.step(Float::NAN,1.0);p e.to_a;begin;p e.size;rescue=>x;p x.class;end;begin;p 2.0.step(1.0,Float::NAN).size;rescue=>x;p x.class;end',
+    '[]\nFloatDomainError\nFloatDomainError\n',
+  ],
+  [
+    'private collection conversions are invoked implicitly',
+    'class A;private;def to_hash;{a:1};end;def to_a;[2,3];end;def to_ary;[4,5];end;end;a=A.new;p({**a});p([*a]);x,y=a;p x,y',
+    '{a: 1}\n[2, 3]\n4\n5\n',
+  ],
+  [
+    'empty custom Range step stops after preflight',
+    'class A;attr_reader :n;def initialize(n);@n=n;end;def <=>(o);puts :cmp;n<=>o.n;end;def +(v);puts :plus;A.new(n+v);end;end;(A.new(3)..A.new(1)).step(1){|x|p x.n}',
+    'cmp\ncmp\nplus\ncmp\n',
+  ],
   ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],
   ['cyclic array equality', 'a = []; a << a; b = []; b << b; p a == b', 'true\n'],
