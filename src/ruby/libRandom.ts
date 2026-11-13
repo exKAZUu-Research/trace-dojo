@@ -16,7 +16,11 @@ export class MersenneTwister {
     this.seed = seed;
     const magnitude = seed < 0n ? -seed : seed;
     const words: number[] = [];
-    for (let rest = magnitude; rest > 0n; rest >>= 32n) words.push(Number(rest & 0xff_ff_ff_ffn));
+    const digits = magnitude.toString(16);
+    for (let end = digits.length; end > 0; end -= 8) {
+      words.push(Number.parseInt(digits.slice(Math.max(0, end - 8), end), 16));
+      if (words.length % 256 === 0) rt().spend(256);
+    }
     if (words.length <= 1) this.initGenrand(words[0] ?? 0);
     else {
       if (words.at(-1) === 1) words.pop();
@@ -47,6 +51,7 @@ export class MersenneTwister {
     let i = 1;
     let j = 0;
     for (let k = Math.max(624, key.length); k > 0; k--) {
+      if (k % 256 === 0) rt().spend(256);
       const previous = mt[i - 1] ^ (mt[i - 1] >>> 30);
       mt[i] = ((mt[i] ^ Math.imul(previous, 1_664_525)) + key[j] + j) >>> 0;
       i++;

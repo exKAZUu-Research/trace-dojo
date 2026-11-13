@@ -1810,3 +1810,7 @@ test('singleton repeated selection sizes retain large Integer counts', () => {
     stdout: '1\n1\n',
   });
 });
+
+test('large random seeds stay within the execution deadline', () => {
+  expect(run('Random.new(2**5000000); puts :ok')).toMatchObject({ stdout: 'ok\n' });
+});
