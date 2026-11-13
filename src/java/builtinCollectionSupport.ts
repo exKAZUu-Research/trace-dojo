@@ -2,7 +2,7 @@ import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
 import { type BoxableKind, hashOf, type Wrappers } from './builtinWrappers';
-import { type Frame, throwBuiltin } from './runtime';
+import { type Frame, JavaThrow, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   type ClassInfo,
@@ -397,7 +397,14 @@ function readSourceOf(collection: JavaObject, name: string): [JavaObject, string
  */
 function looksUpThroughMap(collection: Value): boolean {
   const view = mapViewSources.get(collection as JavaObject);
-  return view?.isKeySet === true && !unmodifiableClasses.has(view.map.cls);
+  return view?.isKeySet === true && !unmodifiableClasses.has(lookupMapOf(view).cls);
+}
+
+/** The map whose lookup a key set asks: its map, or the map an unmodifiable wrapper of it wraps. */
+function lookupMapOf(view: MapViewSource): JavaObject {
+  let { map } = view;
+  while (unmodifiableWrappers.has(map)) map = map.retained?.[0] as JavaObject;
+  return map;
 }
 
 /** The list a sublist views, through any nesting of sublists, or the collection itself when it is not a sublist. */
@@ -736,19 +743,28 @@ export function defineSetEquality(cls: ClassInfo, context: Context, setClass: Cl
     if (other === receiver) return true;
     if (!(other instanceof JavaObject) || !frame.runtime.isInstance(other, setClass)) return false;
     if (!other.store && !other.elements) return false;
-    return sameElements(frame, itemsOf(frame, receiver), itemsOf(frame, other));
+    return containsAllOf(frame, receiver, itemsOf(frame, other), itemsOf(frame, receiver).length);
   });
   addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => sumOfHashes(frame, itemsOf(frame, receiver)));
 }
 
-/** Whether two sets' elements are equal, found by their hashes as a hash set's `containsAll` finds them. */
-function sameElements(frame: Frame, mine: Value[], theirs: Value[]): boolean {
-  if (mine.length !== theirs.length) return false;
-  const hashOf = (item: Value): number => (item === undefined ? 0 : javaHash(frame, item));
-  const byHash = Map.groupBy(mine, hashOf);
-  return theirs.every((item) =>
-    (byHash.get(hashOf(item)) ?? []).some((candidate) => javaEquals(frame, item, candidate))
-  );
+/**
+ * Whether a set of `size` elements equals a set of `theirs`, as `AbstractSet.equals` decides: as many elements, each of
+ * them found by the set's own `contains`, so a sorted set or key set finds them by its comparator; a lookup that
+ * rejects an element with `NullPointerException` or `ClassCastException` makes the sets unequal.
+ */
+function containsAllOf(frame: Frame, set: Value, theirs: readonly Value[], size: number): boolean {
+  if (theirs.length !== size) return false;
+  const { collectionClass } = frame.runtime.builtins.collections;
+  try {
+    return theirs.every(
+      (item) => frame.runtime.invokeVirtual(frame, collectionClass, 'contains', set, [item]) === true
+    );
+  } catch (error) {
+    const name = error instanceof JavaThrow ? error.value.cls.name : undefined;
+    if (name === 'NullPointerException' || name === 'ClassCastException') return false;
+    throw error;
+  }
 }
 
 /** The sum of the elements' hashes that `Set.hashCode` specifies. */

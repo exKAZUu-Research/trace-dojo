@@ -306,6 +306,13 @@ function isEnumMember(collection: Value, value: Value): boolean {
   return first === undefined || enumOf(first.key as JavaObject) === enumOf(value);
 }
 
+/** The builtin class of a collection, which a program's subclass of it inherits its rules from. */
+function builtinClassOf(collection: Value): ClassInfo {
+  let { cls } = collection as JavaObject;
+  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
+  return cls;
+}
+
 /** The enum a constant belongs to, whose subclass a constant with a body is. */
 function enumOf(constant: JavaObject): ClassInfo | undefined {
   let cls: ClassInfo | undefined = constant.cls;
@@ -917,7 +924,7 @@ export function storeOf(receiver: Value): HashStore {
 }
 
 export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore['entries'][number] | undefined {
-  if (enumCollectionClasses.has((receiver as JavaObject).cls) && !isEnumMember(receiver, key)) return undefined;
+  if (enumCollectionClasses.has(builtinClassOf(receiver)) && !isEnumMember(receiver, key)) return undefined;
   const store = storeOf(receiver);
   if (store.compare) {
     const { index, isFound } = store.positionOf(frame, key);
@@ -937,7 +944,7 @@ export function putEntry(
   atBucketHead = false,
   evicts = true
 ): Value | typeof NO_ENTRY {
-  if (key === undefined && enumMapClasses.has((receiver as JavaObject).cls)) {
+  if (key === undefined && enumMapClasses.has(builtinClassOf(receiver))) {
     throwBuiltin(frame, 'NullPointerException', 'Cannot invoke "Object.getClass()" because "key" is null');
   }
   const store = storeOf(receiver);

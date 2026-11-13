@@ -2198,3 +2198,35 @@ public class Main {
 }`;
   expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\nfalse\nNPE\n' });
 });
+
+test("Java's sets compare as AbstractSet.equals does, through their own lookups", () => {
+  const program = `import java.util.*;
+
+public class Main {
+  public static void main(String[] args) {
+    TreeMap<String, Integer> ci = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    ci.put("Ab", 1);
+    Set<String> keys = ci.keySet();
+    System.out.println(keys.contains("AB"));
+    System.out.println(keys.equals(Set.of("ab")));
+    System.out.println(Collections.unmodifiableMap(ci).keySet().contains("AB"));
+    System.out.println(Collections.unmodifiableMap(ci).keySet().containsAll(List.of("AB")));
+    System.out.println(true);
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\ntrue\ntrue\n' });
+});
+
+test("Java's EnumMap subclasses look keys up as EnumMap does", () => {
+  const program = `import java.util.*;
+public class Main {
+ enum Color { RED, BLUE }
+ static class ColorMap extends EnumMap<Color,Integer> { ColorMap() { super(Color.class); } }
+ public static void main(String[] args) {
+  ColorMap m = new ColorMap(); m.put(Color.RED, 1);
+  System.out.println(m.get(null));
+  System.out.println(m.containsKey(null));
+ }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'null\nfalse\n' });
+});
