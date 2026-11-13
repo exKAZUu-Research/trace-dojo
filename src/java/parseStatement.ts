@@ -45,9 +45,7 @@ export function convertBlock(node: Node): Block {
 
 /** The statements among `node`'s children, including empty statements, which the grammar leaves unnamed. */
 function statementNodes(node: Node): Node[] {
-  return node.children.filter(
-    (child): child is Node => !!child && ((child.isNamed && !isComment(child)) || child.type === ';')
-  );
+  return node.children.filter((child) => (child.isNamed && !isComment(child)) || child.type === ';');
 }
 
 export function convertDeclarator(node: Node): VariableDeclarator {
@@ -220,7 +218,7 @@ function convertSwitchGroup(groupNode: Node, isExpression: boolean): SwitchGroup
 /** `undefined` stands for `default`. */
 function convertSwitchLabel(label: Node): (Expression | PatternLabel | undefined)[] {
   const values = namedChildren(label);
-  const isDefault = label.children.some((child) => child?.type === 'default');
+  const isDefault = label.children.some((child) => child.type === 'default');
   const guardNode = values.find((value) => value.type === 'guard');
   const labels = values
     .filter((value) => value.type !== 'guard')

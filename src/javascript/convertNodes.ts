@@ -4,14 +4,12 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { Expression, PropertyName } from './ast';
 
 export function namedChildren(node: Node): Node[] {
-  return node.namedChildren.filter((child): child is Node => child !== null && child.type !== 'comment');
+  return node.namedChildren.filter((child) => child.type !== 'comment');
 }
 
 /** The first named child in a field, skipping the `;` and empty statements that the `for` header puts there. */
 export function namedField(node: Node, name: string): Node | undefined {
-  return node
-    .childrenForFieldName(name)
-    .find((child): child is Node => child !== null && child.isNamed && child.type !== 'empty_statement');
+  return node.childrenForFieldName(name).find((child) => child.isNamed && child.type !== 'empty_statement');
 }
 
 export function field(node: Node, name: string): Node {
@@ -21,11 +19,7 @@ export function field(node: Node, name: string): Node {
 }
 
 export function hasChild(node: Node, type: string): boolean {
-  return node.children.some((child) => child?.type === type);
-}
-
-export function isPresent(node: Node | null): node is Node {
-  return node !== null && node.type !== 'comment';
+  return node.children.some((child) => child.type === type);
 }
 
 export function rowOf(node: Node): number {

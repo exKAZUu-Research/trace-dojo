@@ -18,16 +18,7 @@ import type {
   Target,
 } from './ast';
 import { BITWISE_PRECEDENCE, groupBitwise } from './bitwisePrecedence';
-import {
-  children,
-  decodeEscapes,
-  field,
-  fieldNodes,
-  hasToken,
-  namedChildren,
-  rowOf,
-  unsupported,
-} from './convertNodes';
+import { children, decodeEscapes, field, hasToken, namedChildren, rowOf, unsupported } from './convertNodes';
 import { hasUnbracketedLambda, isOperatorOperand } from './lambdaPositions';
 import { parseNumber } from './numberLiterals';
 import { fail, ScopeBuilder } from './scopes';
@@ -270,11 +261,11 @@ export abstract class ExpressionConverter {
   }
 
   private comparison(node: Node): Expression {
-    const operators = fieldNodes(node, 'operators').map((operator) => operator.type);
+    const operators = node.childrenForFieldName('operators').map((operator) => operator.type);
     if (operators.includes('<>')) fail(rowOf(node), '演算子 <> は Python 3 では使えません。!= を使ってください。');
     return {
       kind: 'compare',
-      operands: fieldNodes(node, 'operands').map((operand) => this.expression(operand)),
+      operands: node.childrenForFieldName('operands').map((operand) => this.expression(operand)),
       operators: operators as CompareOperator[],
       row: rowOf(node),
     };
@@ -296,7 +287,7 @@ export abstract class ExpressionConverter {
   }
 
   private subscriptIndex(node: Node): Expression {
-    const indexes = fieldNodes(node, 'subscript');
+    const indexes = node.childrenForFieldName('subscript');
     const hasTrailingComma = children(node).some((child) => child.type === ',');
     if (indexes.length === 1 && !hasTrailingComma) return this.expression(indexes[0]);
     return { kind: 'tuple', elements: indexes.map((index) => this.element(index)), row: rowOf(node) };
@@ -529,7 +520,7 @@ export abstract class ExpressionConverter {
         continue;
       }
       if (hasToken(clause, 'async')) unsupported(clause, 'async for');
-      const rights = fieldNodes(clause, 'right');
+      const rights = clause.childrenForFieldName('right');
       if (rights.length > 1 || hasToken(clause, ',')) {
         fail(rowOf(clause), '内包表記の in の後に複数の式を書くときは、( ) で囲んでください。');
       }
