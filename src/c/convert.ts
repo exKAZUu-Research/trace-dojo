@@ -15,6 +15,7 @@ import {
   type Parameter,
   type Specifiers,
   type Statement,
+  type StaticAssert,
   type StorageClass,
   type TypeName,
   type TypeSpecifier,
@@ -25,17 +26,9 @@ import { unsupported } from './unsupported';
 const UNSUPPORTED_NODES: Record<string, string> = {
   initializer_pair: '要素を指定した初期化（.x = 1 や [2] = 5）',
   compound_literal_expression: '複合リテラル（(int[]){1, 2} など）',
-  alignof_expression: '_Alignof',
-  alignas_qualifier: '_Alignas',
   generic_expression: '_Generic',
   atomic_type_specifier: '_Atomic',
-  typeof_specifier: '__typeof__',
   bit_int_specifier: '_BitInt',
-  attribute_specifier: '__attribute__',
-  attribute_declaration: '属性（[[...]]）',
-  attributed_statement: '属性（[[...]]）',
-  attributed_declarator: '属性（[[...]]）',
-  extension_expression: '__extension__',
   macro_type_specifier: 'マクロを型として使う書き方',
   gnu_asm_expression: 'インラインアセンブリ（asm）',
   builtin_available_expression: '__builtin_available',
@@ -46,7 +39,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   ms_call_modifier: '呼び出し規約の指定',
   ms_pointer_modifier: 'ポインタの修飾（__ptr32 など）',
   ms_unaligned_ptr_modifier: '__unaligned',
-  pragma_operator: '_Pragma',
   subscript_range_designator: '範囲を指定した初期化（[0 ... 3] = 1）',
 };
 
@@ -157,13 +149,46 @@ export class Converter {
       }
       case 'expression_statement': {
         if (node.namedChildCount === 0) return [];
+        const staticAssert = this.staticAssert(node);
+        if (staticAssert) return [staticAssert];
         break;
+      }
+      case 'attributed_statement': {
+        // A file-scope attribute declaration, such as `[[maybe_unused]];`, declares nothing.
+        return namedChildren(node).flatMap((child) =>
+          child.type === 'attribute_declaration' ? [] : this.externalDeclaration(child)
+        );
       }
     }
     this.checkUnsupported(node);
     throw new CompileError([
       { row: node.startPosition.row, message: '関数の外には、宣言と関数の定義だけを書けます。' },
     ]);
+  }
+
+  /** `_Static_assert(condition, "message")`, which tree-sitter parses as a call. */
+  private staticAssert(node: Node): StaticAssert | undefined {
+    const call = namedChildren(node).find((child) => child.type !== 'comment');
+    const callee = call?.childForFieldName('function');
+    if (call?.type !== 'call_expression' || (callee?.text !== '_Static_assert' && callee?.text !== 'static_assert'))
+      return undefined;
+    const row = node.startPosition.row;
+    const [condition, message, ...rest] = namedChildren(field(call, 'arguments')).filter(
+      (child) => child.type !== 'comment'
+    );
+    if (
+      !condition ||
+      rest.length > 0 ||
+      (message && message.type !== 'string_literal' && message.type !== 'concatenated_string')
+    ) {
+      throw new CompileError([{ row, message: '_Static_assert には、条件と文字列リテラルを書いてください。' }]);
+    }
+    const parts = message
+      ? message.type === 'string_literal'
+        ? [message.text]
+        : namedChildren(message).map((child) => child.text)
+      : undefined;
+    return { kind: 'staticAssert', condition: this.expression(condition), ...(parts ? { message: parts } : {}), row };
   }
 
   private functionDefinition(node: Node): ExternalDeclaration {
@@ -241,19 +266,24 @@ export class Converter {
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of declaration specifier.
   private specifiers(node: Node): Specifiers {
     let storage: StorageClass | undefined;
+    let isInline = false;
+    let alignas: Specifiers['alignas'];
     const qualifiers = { isConst: false, isVolatile: false };
     for (const child of node.namedChildren) {
       if (!child) continue;
       this.checkUnsupported(child);
       if (child.type === 'storage_class_specifier') {
         const word = child.text;
-        if (word === 'inline' || word === '__inline' || word === '__inline__')
-          unsupported(child.startPosition.row, 'inline');
+        if (word === 'inline' || word === '__inline' || word === '__inline__') {
+          isInline = true;
+          continue;
+        }
+        // _Noreturn only lets the compiler assume that the function never returns.
+        if (word === '_Noreturn' || word === 'noreturn') continue;
         if (word === '_Thread_local' || word === 'thread_local' || word === '__thread') {
           unsupported(child.startPosition.row, '_Thread_local');
         }
         if (word === 'constexpr') unsupported(child.startPosition.row, 'constexpr');
-        if (word === '_Noreturn' || word === 'noreturn') unsupported(child.startPosition.row, '_Noreturn');
         if (storage) {
           throw new CompileError([
             { row: child.startPosition.row, message: '記憶域の指定（static など）は1つだけ書けます。' },
@@ -261,29 +291,89 @@ export class Converter {
         }
         storage = word as StorageClass;
       } else if (child.type === 'type_qualifier') {
-        this.qualifier(child, qualifiers);
+        alignas = this.qualifier(child, qualifiers) ?? alignas;
+      } else if (child.type === 'attribute_specifier' || child.type === 'attribute_declaration') {
+        this.attributes(child);
       }
     }
     const typeNode = field(node, 'type');
-    for (const child of typeNode.namedChildren) if (child?.type === 'type_qualifier') this.qualifier(child, qualifiers);
-    return { storage, qualifiers, type: this.typeSpecifier(typeNode), row: node.startPosition.row };
+    for (const child of typeNode.namedChildren) {
+      if (child?.type === 'type_qualifier') alignas = this.qualifier(child, qualifiers) ?? alignas;
+    }
+    return {
+      storage,
+      qualifiers,
+      type: this.typeSpecifier(typeNode),
+      row: node.startPosition.row,
+      ...(alignas ? { alignas } : {}),
+      ...(isInline ? { isInline } : {}),
+    };
   }
 
-  private qualifier(node: Node, qualifiers: { isConst: boolean; isVolatile: boolean }): void {
+  /** Records a type qualifier, returning the alignment of `_Alignas`, which is no qualifier in C but parses as one. */
+  private qualifier(node: Node, qualifiers: { isConst: boolean; isVolatile: boolean }): Specifiers['alignas'] {
     this.checkUnsupported(node);
     const word = node.text;
+    const row = node.startPosition.row;
+    const alignas = namedChildren(node).find((child) => child.type === 'alignas_qualifier');
+    if (alignas) {
+      const operand = namedChildren(alignas).find((child) => child.type !== 'comment');
+      if (!operand) throw new CompileError([{ row, message: '_Alignas には、大きさか型を書いてください。' }]);
+      return operand.type === 'type_descriptor'
+        ? { typeName: this.typeName(operand), row }
+        : { expression: this.expression(operand), row };
+    }
     if (word === 'const') qualifiers.isConst = true;
     else if (word === 'volatile') qualifiers.isVolatile = true;
-    else if (word === 'restrict' || word === '__restrict' || word === '__restrict__')
-      unsupported(node.startPosition.row, 'restrict');
-    else if (word === '_Atomic') unsupported(node.startPosition.row, '_Atomic');
-    else unsupported(node.startPosition.row, /^\w+/.exec(word)?.[0] ?? word);
+    // restrict, _Noreturn, and the nullability qualifiers only promise things the compiler may use to optimize.
+    else if (
+      [
+        '_Noreturn',
+        'noreturn',
+        'restrict',
+        '__restrict',
+        '__restrict__',
+        '_Nonnull',
+        '_Nullable',
+        '_Null_unspecified',
+      ].includes(word)
+    )
+      return undefined;
+    else if (word === '_Atomic') unsupported(row, '_Atomic');
+    else unsupported(row, /^\w+/.exec(word)?.[0] ?? word);
+    return undefined;
+  }
+
+  /**
+   * Accepts attributes, which only change warnings and optimizations, except those that change a struct's layout,
+   * which the interpreter leaves out.
+   */
+  private attributes(node: Node): void {
+    const text = node.text;
+    if (/\b(?:packed|aligned|__packed__|__aligned__|vector_size|mode|transparent_union)\b/.test(text)) {
+      unsupported(
+        node.startPosition.row,
+        `配置や型を変える属性（${/\b(?:packed|aligned|__packed__|__aligned__|vector_size|mode|transparent_union)\b/.exec(text)?.[0]}）`
+      );
+    }
   }
 
   private typeSpecifier(node: Node): TypeSpecifier {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
     switch (node.type) {
+      case 'typeof_specifier': {
+        if (/^typeof\b/.test(node.text)) {
+          throw new CompileError([
+            { row, message: '関数「typeof」は宣言されていません（C17 では __typeof__ と書きます）。' },
+          ]);
+        }
+        const operand = namedChildren(node).find((child) => child.type !== 'comment');
+        if (!operand) throw new CompileError([{ row, message: '__typeof__ には、式か型を書いてください。' }]);
+        return operand.type === 'type_descriptor'
+          ? { kind: 'typeof', typeName: this.typeName(operand), row }
+          : { kind: 'typeof', operand: this.expression(operand), row };
+      }
       case 'primitive_type': {
         const word = node.text;
         if (!BUILTIN_WORDS.has(word) && this.scope.isType(word)) return { kind: 'typedefName', name: word, row };
@@ -321,7 +411,6 @@ export class Converter {
       this.checkUnsupported(inner);
       words.push(inner.type === 'primitive_type' ? primitiveWord(inner) : inner.text);
     }
-    if (!this.fromHeader && words.filter((word) => word === 'long').length > 1) unsupported(row, 'long long');
     return { kind: 'builtin', words, row };
   }
 
@@ -425,6 +514,14 @@ export class Converter {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
     switch (node.type) {
+      case 'attributed_declarator': {
+        for (const child of namedChildren(node)) if (child.type === 'attribute_declaration') this.attributes(child);
+        const inner = namedChildren(node).find(
+          (child) => child.type !== 'attribute_declaration' && child.type !== 'comment'
+        );
+        if (!inner) throw new CompileError([{ row, message: '宣言の書き方に誤りがあります。' }]);
+        return this.declarator(inner);
+      }
       case 'identifier':
       case 'field_identifier':
       case 'type_identifier':
@@ -438,6 +535,7 @@ export class Converter {
           if (!child) continue;
           this.checkUnsupported(child);
           if (child.type === 'type_qualifier') this.qualifier(child, qualifiers);
+          if (child.type === 'attribute_specifier' || child.type === 'attribute_declaration') this.attributes(child);
         }
         return { kind: 'pointer', qualifiers, inner: this.innerDeclarator(node), row };
       }
@@ -525,7 +623,7 @@ export class Converter {
     const outer = this.scope;
     this.scope = new NameScope(outer);
     try {
-      const items: (Statement | Declaration)[] = [];
+      const items: (Statement | Declaration | StaticAssert)[] = [];
       for (const child of namedChildren(node)) {
         if (child.type === 'comment') continue;
         items.push(...this.blockItem(child));
@@ -537,8 +635,12 @@ export class Converter {
   }
 
   /** A block item, where a `case` label's statements become the statements after the label. */
-  private blockItem(node: Node): (Statement | Declaration)[] {
+  private blockItem(node: Node): (Statement | Declaration | StaticAssert)[] {
     if (node.type === 'declaration' || node.type === 'type_definition') return this.declarationOrExpression(node);
+    if (node.type === 'expression_statement') {
+      const staticAssert = this.staticAssert(node);
+      if (staticAssert) return [staticAssert];
+    }
     if (node.type === 'struct_specifier' || node.type === 'union_specifier' || node.type === 'enum_specifier') {
       return this.externalDeclaration(node) as Declaration[];
     }
@@ -547,16 +649,20 @@ export class Converter {
     }
     if (node.type === 'case_statement') {
       const row = node.startPosition.row;
-      if (node.childForFieldName('end_value')) unsupported(row, '範囲を指定した case（case 1 ... 3:）');
       const valueNode = node.childForFieldName('value');
+      const endNode = node.childForFieldName('end_value');
       const value = valueNode ? this.expression(valueNode) : undefined;
-      const body = namedChildren(node).filter((child) => child.id !== valueNode?.id && child.type !== 'comment');
+      const endValue = endNode ? this.expression(endNode) : undefined;
+      const body = namedChildren(node).filter(
+        (child) => child.id !== valueNode?.id && child.id !== endNode?.id && child.type !== 'comment'
+      );
       const converted = body.flatMap((child) => this.blockItem(child));
       const [first, ...rest] = converted;
       const labeled: Statement = {
         kind: 'case',
         ...(value ? { value } : {}),
-        body: first ?? { kind: 'expression', row },
+        ...(endValue ? { endValue } : {}),
+        body: (first as Statement | Declaration | undefined) ?? { kind: 'expression', row },
         row,
       };
       return [labeled, ...rest];
@@ -609,6 +715,12 @@ export class Converter {
     switch (node.type) {
       case 'compound_statement': {
         return this.compoundItems(node);
+      }
+      case 'attributed_statement': {
+        const inner = namedChildren(node).find(
+          (child) => child.type !== 'attribute_declaration' && child.type !== 'comment'
+        );
+        return inner ? this.statement(inner) : { kind: 'expression', row };
       }
       case 'expression_statement': {
         const child = namedChildren(node).find((item) => item.type !== 'comment');
@@ -678,7 +790,12 @@ export class Converter {
         if (converted.length > 1) {
           throw new CompileError([{ row, message: 'ラベルの書き方に誤りがあります。' }]);
         }
-        return { kind: 'labeled', label, body: converted[0] ?? { kind: 'expression', row }, row };
+        return {
+          kind: 'labeled',
+          label,
+          body: (converted[0] as Statement | Declaration | undefined) ?? { kind: 'expression', row },
+          row,
+        };
       }
       case 'case_statement': {
         return this.blockItem(node)[0] as Statement;
@@ -854,6 +971,12 @@ export class Converter {
           row,
         };
       }
+      case 'alignof_expression': {
+        return { kind: 'alignof', typeName: this.typeName(field(node, 'type')), row };
+      }
+      case 'extension_expression': {
+        return this.expression(namedChildren(node).find((child) => child.type !== 'comment') ?? field(node, 'value'));
+      }
       case 'va_arg_expression': {
         return {
           kind: 'vaArg',
@@ -907,11 +1030,10 @@ export class Converter {
   private conditional(node: Node): Expression {
     const row = node.startPosition.row;
     const consequence = node.childForFieldName('consequence');
-    if (!consequence) unsupported(row, '? と : の間を省いた条件演算子（x ?: y）');
     return {
       kind: 'conditional',
       condition: this.expression(field(node, 'condition')),
-      consequent: this.expression(consequence),
+      ...(consequence ? { consequent: this.expression(consequence) } : {}),
       alternative: this.expression(field(node, 'alternative')),
       row,
     };

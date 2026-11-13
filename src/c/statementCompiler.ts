@@ -1,10 +1,10 @@
 import type { Scalar, Value } from './arith';
 import { convertScalar } from './arith';
-import type { Compound, Declaration, Expression, Statement } from './ast';
+import type { Compound, Declaration, Expression, Statement, StaticAssert } from './ast';
 import type { FunctionContext, SwitchContext } from './compilerBase';
 import { ExpressionCompiler } from './expressionCompiler';
 import { Completion, type Exec, type Frame, type LocalInfo } from './runtime';
-import { INT_PROPERTIES, isInteger, promote, typeName, unqualified } from './types';
+import { type CType, isInteger, promote, typeName, unqualified } from './types';
 
 /** A compiled statement and the labels inside it, where a `goto` or `switch` may enter it. */
 export interface Compiled {
@@ -38,11 +38,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Running a block from a label, and leaving its scope.
-  private blockItems(items: (Statement | Declaration)[], endsScope: boolean): Compiled {
+  private blockItems(items: (Statement | Declaration | StaticAssert)[], endsScope: boolean): Compiled {
     const firstLocal = this.context.info.locals.length;
-    const children = items.map((item) =>
-      item.kind === 'declaration' ? this.localDeclaration(item) : this.statement(item)
-    );
+    const children = items.map((item): Compiled => {
+      if (item.kind === 'declaration') return this.localDeclaration(item);
+      if (item.kind === 'staticAssert') {
+        this.staticAssert(item);
+        return NOOP;
+      }
+      return this.statement(item);
+    });
     const locals = this.context.info.locals.slice(firstLocal);
     const labels = new Set<number>();
     const childOfLabel = new Map<number, number>();
@@ -327,7 +332,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.error(row, `switch 文の値には整数を書いてください（${typeName(operand.type)}）。`);
     const type = promote(operand.type);
     const value = this.converted(operand, type);
-    const context: SwitchContext = { type, cases: new Map() };
+    const context: SwitchContext = { type, cases: new Map(), ranges: [] };
     this.context.switches.push(context);
     let body: Compiled;
     try {
@@ -336,19 +341,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.context.switches.pop();
     }
     const run = body.exec;
-    const { cases, defaultLabel } = context;
-    const isWide = INT_PROPERTIES[type.name].size === 8;
+    const { cases, defaultLabel, ranges } = context;
     const exec: Exec = (frame, entry) => {
       let label = entry;
       if (label === undefined) {
         const selected = value(frame) as Scalar;
-        label = cases.get(isWide ? String(selected) : String(selected)) ?? defaultLabel;
+        label = cases.get(String(selected)) ?? rangeLabel(ranges, selected) ?? defaultLabel;
         if (label === undefined) return Completion.Normal;
       }
       const completion = run(frame, label);
       return completion === Completion.Break ? Completion.Normal : completion;
     };
-    const ownLabels = new Set([...cases.values(), ...(defaultLabel === undefined ? [] : [defaultLabel])]);
+    const ownLabels = new Set([
+      ...cases.values(),
+      ...ranges.map((range) => range.label),
+      ...(defaultLabel === undefined ? [] : [defaultLabel]),
+    ]);
     return { exec, labels: new Set([...body.labels].filter((label) => !ownLabels.has(label))) };
   }
 
@@ -363,13 +371,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       );
     }
     if (statement.value) {
-      const operand = this.rvalue(statement.value);
-      if (operand.constant === undefined || operand.type.kind !== 'int')
-        this.error(row, 'case の値には、整数の定数を書いてください。');
-      const value = convertScalar(operand.constant, operand.type, context.type);
-      const key = String(value);
-      if (context.cases.has(key)) this.error(row, `case の値「${key}」が2つあります。`);
-      context.cases.set(key, id);
+      const value = this.caseValue(statement.value, context.type, row);
+      const end = statement.endValue ? this.caseValue(statement.endValue, context.type, row) : value;
+      const overlapping = context.ranges.find(
+        (range) => BigInt(range.low) <= BigInt(end) && BigInt(value) <= BigInt(range.high)
+      );
+      // clang reports a value that a range already covers at the range.
+      if (overlapping)
+        this.error(
+          overlapping.row,
+          `case の値「${String(BigInt(value) > BigInt(overlapping.low) ? value : overlapping.low)}」が2つあります。`
+        );
+      if (context.cases.has(String(value))) this.error(row, `case の値「${String(value)}」が2つあります。`);
+      // An empty range (5 ... 3) is only a warning in clang, and no value selects it.
+      if (statement.endValue && BigInt(end) >= BigInt(value))
+        context.ranges.push({ low: value, high: end, label: id, row });
+      else context.cases.set(String(value), id);
     } else {
       // clang reports a second default at the first one.
       if (context.defaultLabel !== undefined)
@@ -378,6 +395,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       context.defaultRow = row;
     }
     return this.labeled(id, this.statementOrDeclaration(statement.body));
+  }
+
+  private caseValue(expression: Expression, type: CType, row: number): Scalar {
+    const operand = this.rvalue(expression);
+    if (operand.constant === undefined || operand.type.kind !== 'int')
+      this.error(row, 'case の値には、整数の定数を書いてください。');
+    return convertScalar(operand.constant, operand.type, type);
   }
 
   private returnStatement(statement: Extract<Statement, { kind: 'return' }>): Compiled {
@@ -414,6 +438,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       labels: NO_LABELS,
     };
   }
+}
+
+/** The label of GNU's `case low ... high:` that a value falls in. */
+function rangeLabel(ranges: SwitchContext['ranges'], value: Scalar): number | undefined {
+  if (ranges.length === 0) return undefined;
+  const number = BigInt(value);
+  return ranges.find((range) => BigInt(range.low) <= number && number <= BigInt(range.high))?.label;
 }
 
 /** Ends the scope of a block's variables: the trace no longer shows them, and their values are gone. */

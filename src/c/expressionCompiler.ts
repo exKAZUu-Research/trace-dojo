@@ -16,7 +16,9 @@ import { CRuntimeError } from './errors';
 import { decodeCharLiteral, decodeStringLiteral, parseNumber } from './literals';
 import { type Frame, type FunctionInfo, loaderOf, loadRecord, storeRecord, storerOf } from './runtime';
 import {
+  alignOf,
   BOOL,
+  CHAR,
   commonType,
   compatible,
   type CType,
@@ -68,6 +70,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected abstract specialCall(name: string): SpecialCall | undefined;
   /** Rejects a library function the interpreter leaves out, when the program refers to it. */
   protected abstract checkFunctionUse(fn: FunctionInfo, row: number): void;
+
+  protected typeOfExpression(expression: Expression): CType {
+    return unqualified(this.expression(expression).type);
+  }
 
   protected constantOperand(expression: Expression): Operand | undefined {
     const operand = this.expression(expression);
@@ -157,6 +163,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'vaArg': {
         return this.vaArg(expression);
       }
+      case 'alignof': {
+        const type = this.typeOfName(expression.typeName);
+        if (type.kind !== 'void' && !isComplete(type))
+          this.error(row, `中身が決まっていない型（${typeName(type)}）に _Alignof は使えません。`);
+        return constantOperand(SIZE_T, BigInt(alignOf(type)));
+      }
       case 'offsetof': {
         return this.offsetof(expression);
       }
@@ -222,6 +234,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const feature = UNSUPPORTED_NAMES[name];
     if (feature && !this.scope.lookup(name)) unsupported(row, feature);
     const entity = this.scope.lookup(name);
+    if (!entity && FUNCTION_NAMES.has(name)) {
+      // clang gives __func__ outside a function an empty name, with a warning.
+      const bytes = new TextEncoder().encode(this.currentFunction?.name ?? '');
+      const operand = this.stringLiteral([JSON.stringify(new TextDecoder().decode(bytes))], row);
+      return { ...operand, type: { ...operand.type, of: { ...CHAR, isConst: true } } as CType };
+    }
     if (!entity) this.error(row, `「${name}」は宣言されていません。`);
     return this.entityOperand(entity, name, row);
   }
@@ -657,6 +675,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const condition = this.rvalue(expression.condition);
     this.requireScalar(condition, row, '?');
     const truth = this.truthOf(condition);
+    if (!expression.consequent) return this.elvis(condition, this.rvalue(expression.alternative), row);
     const whenTrue = this.rvalue(expression.consequent);
     const whenFalse = this.rvalue(expression.alternative);
     const type = this.conditionalType(whenTrue, whenFalse, row);
@@ -670,6 +689,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
     }
     return { type, value };
+  }
+
+  /** GNU's `c ?: b`, which evaluates `c` once and gives it when it is true. */
+  private elvis(condition: Operand, whenFalse: Operand, row: number): Operand {
+    const type = this.conditionalType(condition, whenFalse, row);
+    const value = condition.value;
+    const conditionType = condition.type;
+    const isTrue =
+      conditionType.kind === 'int' && INT_PROPERTIES[conditionType.name].size === 8
+        ? (v: Value) => v !== 0n
+        : (v: Value) => v !== 0;
+    const otherwise = this.converted(whenFalse, type);
+    return {
+      type,
+      value: (frame) => {
+        const result = value(frame) as Scalar;
+        return isTrue(result) ? convertScalar(result, conditionType, type) : otherwise(frame);
+      },
+    };
   }
 
   private conditionalType(a: Operand, b: Operand, row: number): CType {
@@ -1037,13 +1075,10 @@ function checkVararg(frame: Frame, address: number, type: CType): void {
 const RELATIONAL = new Set<string>(['<', '>', '<=', '>=']);
 
 /** Names that clang defines in C17 for features the interpreter leaves out. */
-const UNSUPPORTED_NAMES: Record<string, string> = {
-  __func__: '__func__',
-  __FUNCTION__: '__FUNCTION__',
-  __PRETTY_FUNCTION__: '__PRETTY_FUNCTION__',
-  _Static_assert: '_Static_assert',
-  static_assert: '_Static_assert',
-};
+const UNSUPPORTED_NAMES: Record<string, string> = {};
+
+/** The names of the current function's name, which C defines as if a `static const char[]` held it. */
+const FUNCTION_NAMES = new Set(['__func__', '__FUNCTION__', '__PRETTY_FUNCTION__']);
 
 // Helpers -------------------------------------------------------------------------------------------------------------
 

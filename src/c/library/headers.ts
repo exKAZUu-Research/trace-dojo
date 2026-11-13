@@ -568,6 +568,7 @@ const ASSERT = `
 #define assert(e) ((e) ? (void)0 : __assert_rtn(#e, __LINE__))
 #endif
 void __assert_rtn(const char *expression, int line);
+#define static_assert _Static_assert
 `;
 
 const ERRNO = `

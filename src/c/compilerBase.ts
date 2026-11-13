@@ -1,9 +1,19 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
-import type { Declarator, Expression, FieldDeclaration, Specifiers, TypeName, TypeSpecifier } from './ast';
+import type {
+  Declarator,
+  Expression,
+  FieldDeclaration,
+  Specifiers,
+  StaticAssert,
+  TypeName,
+  TypeSpecifier,
+} from './ast';
+import { decodeStringLiteral } from './literals';
 import type { Frame, FunctionInfo, GlobalInfo, LocalInfo } from './runtime';
 import {
+  alignOf,
   builtinType,
   type CType,
   type EnumInfo,
@@ -98,6 +108,7 @@ export interface FunctionContext {
 export interface SwitchContext {
   type: CType;
   cases: Map<string, number>;
+  ranges: { low: Scalar; high: Scalar; label: number; row: number }[];
   defaultLabel?: number;
   defaultRow?: number;
 }
@@ -181,7 +192,38 @@ export abstract class CompilerBase {
       case 'enum': {
         return this.enumType(specifier);
       }
+      case 'typeof': {
+        // __typeof__ names the type of its operand without evaluating it.
+        return specifier.typeName
+          ? this.typeOfName(specifier.typeName)
+          : this.typeOfExpression(specifier.operand as Expression);
+      }
     }
+  }
+
+  protected abstract typeOfExpression(expression: Expression): CType;
+
+  /** `_Static_assert`, which stops compiling when its constant condition is 0. */
+  protected staticAssert(item: StaticAssert): void {
+    const condition = this.constantOperand(item.condition);
+    if (condition?.constant === undefined || condition.type.kind !== 'int') {
+      this.error(item.row, '_Static_assert の条件には、整数の定数を書いてください。');
+    }
+    if (condition.constant === 0 || condition.constant === 0n) {
+      const message = item.message
+        ? `（${new TextDecoder().decode(decodeStringLiteral(item.message, item.row).slice(0, -1))}）`
+        : '';
+      this.error(item.row, `_Static_assert の条件が成り立ちません${message}。`);
+    }
+  }
+
+  /** The alignment that `_Alignas` asks for, which must be a power of two. */
+  protected requestedAlignment(alignas: NonNullable<Specifiers['alignas']>): number {
+    if (alignas.typeName) return alignOf(this.typeOfName(alignas.typeName));
+    const value = this.integerConstant(alignas.expression as Expression, '_Alignas の大きさ');
+    if (value !== 0 && (value < 0 || (value & (value - 1)) !== 0))
+      this.error(alignas.row, '_Alignas の大きさは、2 のべき乗にしてください。');
+    return value;
   }
 
   private recordInfo(specifier: Extract<TypeSpecifier, { kind: 'struct' | 'union' }>): RecordInfo {
@@ -209,11 +251,14 @@ export abstract class CompilerBase {
   }
 
   private defineRecord(info: RecordInfo, fields: FieldDeclaration[], row: number): void {
-    const members: { name?: string; type: CType; bitWidth?: number }[] = [];
+    const members: { name?: string; type: CType; bitWidth?: number; align?: number }[] = [];
     const names = new Set<string>();
+    const declarators = fields.flatMap((field) => field.declarators);
+    const last = declarators.at(-1);
     for (const field of fields) {
       const base = this.baseType(field.specifiers);
       if (field.specifiers.storage) this.error(field.row, '構造体のメンバに記憶域の指定（static など）は書けません。');
+      const align = field.specifiers.alignas ? this.requestedAlignment(field.specifiers.alignas) : undefined;
       for (const declarator of field.declarators) {
         const { type, name } = this.declaredType(base, declarator.declarator);
         const memberRow = declarator.row;
@@ -221,7 +266,9 @@ export abstract class CompilerBase {
           if (names.has(name)) this.error(memberRow, `メンバ「${name}」が2回宣言されています。`);
           names.add(name);
         }
-        this.checkMemberType(info, type, name, memberRow);
+        const isFlexible = type.kind === 'array' && type.length === undefined;
+        if (isFlexible) this.checkFlexibleMember(info, declarator === last, name, memberRow);
+        else this.checkMemberType(info, type, name, memberRow);
         const bitWidth =
           declarator.bitWidth === undefined
             ? undefined
@@ -230,6 +277,7 @@ export abstract class CompilerBase {
           ...(name === undefined ? {} : { name }),
           type,
           ...(bitWidth === undefined ? {} : { bitWidth }),
+          ...(align === undefined ? {} : { align }),
         });
       }
     }
@@ -237,10 +285,15 @@ export abstract class CompilerBase {
     layoutRecord(info, members);
   }
 
+  /** A flexible array member, `int a[];`, which only the last member of a struct with other members may be. */
+  private checkFlexibleMember(info: RecordInfo, isLast: boolean, name: string | undefined, row: number): void {
+    if (info.kind === 'union')
+      this.error(row, `共用体のメンバ「${name ?? ''}」には、大きさを書かない配列を使えません。`);
+    if (!isLast) this.error(row, `大きさを書かない配列のメンバ「${name ?? ''}」は、構造体の最後にしか書けません。`);
+  }
+
   private checkMemberType(info: RecordInfo, type: CType, name: string | undefined, row: number): void {
     if (type.kind === 'function') this.error(row, '構造体のメンバを関数にはできません（関数ポインタにしてください）。');
-    if (type.kind === 'array' && type.length === undefined)
-      unsupported(row, '大きさを書かない配列のメンバ（柔軟な配列メンバ）');
     if (!isComplete(type)) {
       if (type.kind === 'record' && type.info === info)
         this.error(row, '構造体の中に、同じ構造体そのものは入れられません（ポインタにしてください）。');
@@ -337,7 +390,6 @@ export abstract class CompilerBase {
     }
     const length = Number(operand.constant);
     if (length < 0) this.error(size.row, '配列の大きさに負の数は使えません。');
-    if (length === 0) unsupported(size.row, '大きさが 0 の配列');
     return length;
   }
 

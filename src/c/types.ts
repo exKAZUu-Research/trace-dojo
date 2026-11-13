@@ -455,7 +455,10 @@ function hasOnly(counts: ReadonlyMap<string, number>, ...allowed: string[]): boo
 }
 
 /** Lays out the members of a struct or union as clang does on arm64. */
-export function layoutRecord(info: RecordInfo, members: { name?: string; type: CType; bitWidth?: number }[]): void {
+export function layoutRecord(
+  info: RecordInfo,
+  members: { name?: string; type: CType; bitWidth?: number; align?: number }[]
+): void {
   const fields: Field[] = [];
   let offset = 0;
   let bitPosition = 0;
@@ -463,7 +466,7 @@ export function layoutRecord(info: RecordInfo, members: { name?: string; type: C
   let size = 0;
   for (const member of members) {
     const memberSize = sizeOf(member.type);
-    const memberAlign = alignOf(member.type);
+    const memberAlign = Math.max(alignOf(member.type), member.align ?? 0);
     if (member.bitWidth !== undefined) {
       if (member.bitWidth === 0) {
         // A zero-width bit-field ends the current storage unit.

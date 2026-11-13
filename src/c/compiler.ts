@@ -76,7 +76,10 @@ export class Compiler extends StatementCompiler {
     if (main?.kind !== 'function' || !main.fn.isDefined)
       this.error(0, 'main 関数がありません（int main(void) { ... } を書いてください）。');
     for (const fn of this.functions) {
-      if (fn.referencedAt !== undefined && !fn.isDefined && !fn.native && fn.header === undefined) {
+      // A definition that only `inline` declares is an inline definition, which gives the function no external
+      // definition; clang does not inline at -O0, so the program fails to link.
+      const lacksDefinition = !fn.isDefined || (fn.isInlineDefinition && !fn.hasExternalDeclaration);
+      if (fn.referencedAt !== undefined && lacksDefinition && !fn.native && fn.header === undefined) {
         this.error(fn.referencedAt, `関数「${fn.name}」は宣言されていますが、定義されていません。`);
       }
     }
@@ -100,6 +103,10 @@ export class Compiler extends StatementCompiler {
       this.functionDefinition(item);
       return;
     }
+    if (item.kind === 'staticAssert') {
+      this.staticAssert(item);
+      return;
+    }
     this.fileScopeDeclaration(item);
   }
 
@@ -111,6 +118,7 @@ export class Compiler extends StatementCompiler {
       this.error(declaration.row, `関数の外の宣言には ${specifiers.storage} を付けられません。`);
     }
     const base = this.baseType(specifiers);
+    if (specifiers.alignas) this.requestedAlignment(specifiers.alignas);
     for (const declarator of declaration.declarators) {
       const { type, name, row } = this.declaredType(base, declarator.declarator);
       if (name === undefined) this.error(row, '宣言する名前を書いてください。');
@@ -120,7 +128,8 @@ export class Compiler extends StatementCompiler {
       }
       if (type.kind === 'function') {
         if (declarator.init) this.error(row, `関数「${name}」には初期値を書けません。`);
-        this.declareFunction(name, type, row, specifiers.storage === 'static', declaration.fromHeader);
+        const fn = this.declareFunction(name, type, row, specifiers.storage === 'static', declaration.fromHeader);
+        if (!specifiers.isInline || specifiers.storage === 'extern') fn.hasExternalDeclaration = true;
         continue;
       }
       this.declareGlobal(name, type, row, specifiers.storage, declarator.init, declaration.fromHeader);
@@ -275,6 +284,8 @@ export class Compiler extends StatementCompiler {
       this.error(row, `戻り値の型（${typeName(ret)}）の中身が定義されていません。`);
     if (name === 'main') this.checkMain(type, row);
     const info = this.declareFunction(name, type, row, specifiers.storage === 'static', undefined);
+    if (specifiers.isInline && specifiers.storage === undefined) info.isInlineDefinition = true;
+    else info.hasExternalDeclaration = true;
     if (info.isDefined) this.error(row, `関数「${name}」が2回定義されています。`);
     if (info.header !== undefined)
       this.error(row, `関数「${name}」は標準ライブラリにあるので、同じ名前の関数は定義できません。`);
@@ -364,6 +375,7 @@ export class Compiler extends StatementCompiler {
   protected localDeclaration(declaration: Declaration): Compiled {
     const { specifiers, row } = declaration;
     const base = this.baseType(specifiers);
+    if (specifiers.alignas) this.requestedAlignment(specifiers.alignas);
     const parts: LocalPart[] = [];
     for (const declarator of declaration.declarators) {
       const part = this.localDeclarator(specifiers.storage, base, declarator);
@@ -514,7 +526,8 @@ export class Compiler extends StatementCompiler {
   /** The expression initializing a scalar, which braces may enclose once. */
   private singleExpression(type: CType, init: Initializer): Expression {
     if (init.kind === 'expression') return init.expression;
-    if (init.items.length === 0) unsupported(init.row, '空の { } による初期化');
+    // An empty initializer (C23, which clang accepts in C17) initializes a scalar to 0.
+    if (init.items.length === 0) return { kind: 'number', text: '0', row: init.row };
     const [first] = init.items;
     if (first.kind === 'list') this.error(first.row, `${typeName(type)} の初期化に、{ } を重ねて書けません。`);
     return first.expression;
@@ -538,7 +551,6 @@ export class Compiler extends StatementCompiler {
       }
       count = Math.max(count, Math.ceil(position - 1e-9));
     }
-    if (count === 0) unsupported(init.row, '空の { } による初期化');
     return count;
   }
 
@@ -556,7 +568,6 @@ export class Compiler extends StatementCompiler {
       const value = this.convertForAssignment(operand, unqualified(type), 'initialization', expression.row);
       return (frame, address) => storeValue(frame.runtime, address, unqualified(type), value(frame));
     }
-    if (init.items.length === 0) unsupported(init.row, '空の { } による初期化');
     const cursor = { items: init.items, index: 0 };
     this.aggregate(type, cursor, 0, writes, isStatic, true);
     if (cursor.index < cursor.items.length) {

@@ -70,6 +70,10 @@ export interface FunctionInfo {
   header?: string;
   /** The row where the program first refers to the function, which must then be defined. */
   referencedAt?: number;
+  /** Whether the definition says `inline` without `static` or `extern`, which alone defines no external function. */
+  isInlineDefinition?: boolean;
+  /** Whether a declaration without `inline` (or with `extern`) makes the definition an external one. */
+  hasExternalDeclaration?: boolean;
 }
 
 export class Frame implements TracedFrame {

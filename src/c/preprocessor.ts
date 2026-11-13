@@ -61,6 +61,8 @@ class Preprocessor {
   private readonly includes: IncludedHeader[] = [];
   private readonly included = new Set<string>();
   private readonly errors: SourceDiagnostic[] = [];
+  /** The #line directives, in order. */
+  private readonly lines: { fromRow: number; line: number; file?: string }[] = [];
   /** Whether a header is being read, whose macros may use what learners cannot. */
   private inHeader = false;
 
@@ -186,7 +188,6 @@ class Preprocessor {
   }
 
   private elif(name: string, rest: PPToken[], row: number, conditionals: Conditional[]): void {
-    if (name !== 'elif' && !this.inHeader) unsupported(row, `#${name}`);
     const top = conditionals.at(-1);
     if (!top) throw new CompileError([{ row, message: `#${name} に対応する #if がありません。` }]);
     if (top.sawElse) throw new CompileError([{ row, message: `#else の後に #${name} は書けません。` }]);
@@ -221,9 +222,18 @@ class Preprocessor {
         return;
       }
       case 'pragma':
-      case 'error':
-      case 'warning':
-      case 'line':
+      case 'warning': {
+        // A pragma tells the compiler things it may ignore (#pragma once changes nothing in one file), and a warning
+        // is no error.
+        return;
+      }
+      case 'error': {
+        throw new CompileError([{ row, message: `#error で止まりました: ${spell(rest)}` }]);
+      }
+      case 'line': {
+        this.setLine(this.expand(rest), row);
+        return;
+      }
       case 'ident':
       case 'sccs':
       case 'assert':
@@ -234,8 +244,35 @@ class Preprocessor {
         return;
       }
     }
-    if (nameToken?.kind === 'number' && !this.inHeader) unsupported(row, '# の後に行番号を書く指令');
+    if (nameToken?.kind === 'number') {
+      // GNU's line marker, `# 12 "file.c"`, is #line in another spelling.
+      this.setLine([nameToken, ...rest], row);
+      return;
+    }
     throw new CompileError([{ row, message: `「#${name}」という指令はありません。` }]);
+  }
+
+  /** `#line N "file"`: the next line is line N of that file, for __LINE__ and __FILE__. */
+  private setLine(tokens: PPToken[], row: number): void {
+    const [number, file] = tokens;
+    if (number?.kind !== 'number' || !/^\d+$/.test(number.text)) {
+      throw new CompileError([{ row, message: '#line の後には行番号を書いてください。' }]);
+    }
+    if (file && file.kind !== 'string')
+      throw new CompileError([{ row, message: '#line のファイル名は文字列で書いてください。' }]);
+    this.lines.push({ fromRow: row + 1, line: Number(number.text), file: file?.text });
+  }
+
+  /** The line number and the file name of a row, as #line set them. */
+  private lineOf(row: number): { line: number; file: string } {
+    let line = row + 1;
+    let file = JSON.stringify(FILE_NAME);
+    for (const entry of this.lines) {
+      if (entry.fromRow > row) break;
+      line = entry.line + (row - entry.fromRow);
+      file = entry.file ?? file;
+    }
+    return { line, file };
   }
 
   private define(tokens: PPToken[], row: number): void {
@@ -251,7 +288,6 @@ class Preprocessor {
     // A function-like macro's parameters follow its name with no space between.
     if (rest[0]?.text === '(' && !rest[0].space) {
       ({ params, variadic, body } = macroParameters(rest, row));
-      if (variadic && !this.inHeader) unsupported(row, '可変長の引数をとるマクロ（...）');
     }
     if (body[0]?.text === '##' || body.at(-1)?.text === '##') {
       throw new CompileError([{ row, message: '## はマクロの本体の最初と最後には書けません。' }]);
@@ -332,6 +368,26 @@ class Preprocessor {
 
   // Expansion -----------------------------------------------------------------------------------------------------
 
+  /** The value of __LINE__, __FILE__, __DATE__, or __TIME__. */
+  private builtinMacro(token: PPToken): PPToken | undefined {
+    switch (token.text) {
+      case '__LINE__': {
+        return { ...token, kind: 'number', text: String(this.lineOf(token.row).line) };
+      }
+      case '__FILE__': {
+        return { ...token, kind: 'string', text: this.lineOf(token.row).file };
+      }
+      // A real build shows when it was built; every run here was built at the time time() gives.
+      case '__DATE__': {
+        return { ...token, kind: 'string', text: '"Jan  1 2026"' };
+      }
+      case '__TIME__': {
+        return { ...token, kind: 'string', text: '"00:00:00"' };
+      }
+    }
+    return undefined;
+  }
+
   /** Expands the macros in a list of tokens, as C's rescanning with hide sets does. */
   private expand(input: PPToken[]): PPToken[] {
     const output: PPToken[] = [];
@@ -340,16 +396,19 @@ class Preprocessor {
     while (index < queue.length) {
       const token = queue[index++];
       const macro = token.kind === 'identifier' ? this.macros.get(token.text) : undefined;
-      if (token.kind === 'identifier' && token.text === '__LINE__' && !token.hide?.has('__LINE__')) {
-        output.push({ ...token, kind: 'number', text: String(token.row + 1) });
+      const builtin = token.kind === 'identifier' ? this.builtinMacro(token) : undefined;
+      if (builtin) {
+        output.push(builtin);
         continue;
       }
-      if (token.kind === 'identifier' && token.text === '__FILE__') {
-        output.push({ ...token, kind: 'string', text: JSON.stringify(FILE_NAME) });
+      if (token.kind === 'identifier' && token.text === '_Pragma' && queue[index]?.text === '(') {
+        // _Pragma("...") is a #pragma written in an expression, which the interpreter ignores alike.
+        const close = queue.findIndex((item, position) => position > index && item.text === ')');
+        if (close === -1 || queue[index + 1]?.kind !== 'string') {
+          throw new CompileError([{ row: token.row, message: '_Pragma の後には ( と文字列と ) を書いてください。' }]);
+        }
+        index = close + 1;
         continue;
-      }
-      if (token.kind === 'identifier' && (token.text === '__DATE__' || token.text === '__TIME__')) {
-        unsupported(token.row, token.text);
       }
       if (!macro || token.hide?.has(macro.name)) {
         output.push(token);
@@ -422,7 +481,7 @@ class Preprocessor {
       return position === -1 ? undefined : args[position];
     };
     const result: PPToken[] = [];
-    const body = macro.body;
+    const body = macro.variadic ? withVaOpt(macro.body, (args.at(-1) ?? []).length > 0, call.row) : macro.body;
     for (let index = 0; index < body.length; index++) {
       const token = body[index];
       if (token.text === '#' && macro.params) {
@@ -442,6 +501,12 @@ class Preprocessor {
             space: position === 0 ? token.space : item.space,
           }))
         : [{ ...token, row: call.row }];
+      // GNU's `, ## __VA_ARGS__` drops the comma when no extra arguments are given.
+      if (pastedPrevious && arg && token.text === '__VA_ARGS__' && result.at(-1)?.text === ',') {
+        if (copies.length === 0) result.pop();
+        else result.push(...copies);
+        continue;
+      }
       if (pastedPrevious && result.length > 0 && copies.length > 0) {
         result.push(paste(result.pop() as PPToken, copies[0], call.row), ...copies.slice(1));
       } else {
@@ -454,6 +519,29 @@ class Preprocessor {
       hide: new Set([...(token.hide ?? []), ...hide]),
     }));
   }
+}
+
+/** A variadic macro's body with each `__VA_OPT__(...)` replaced by its content, or removed when no extra arguments. */
+function withVaOpt(body: PPToken[], hasExtra: boolean, row: number): PPToken[] {
+  const result: PPToken[] = [];
+  for (let index = 0; index < body.length; index++) {
+    const token = body[index];
+    if (token.text !== '__VA_OPT__') {
+      result.push(token);
+      continue;
+    }
+    if (body[index + 1]?.text !== '(')
+      throw new CompileError([{ row, message: '__VA_OPT__ の後には ( を書いてください。' }]);
+    let depth = 0;
+    let end = index + 1;
+    for (; end < body.length; end++) {
+      if (body[end].text === '(') depth++;
+      if (body[end].text === ')' && --depth === 0) break;
+    }
+    if (hasExtra) result.push(...body.slice(index + 2, end));
+    index = end;
+  }
+  return result;
 }
 
 function macroParameters(rest: PPToken[], row: number): { params: string[]; variadic: boolean; body: PPToken[] } {

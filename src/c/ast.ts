@@ -16,6 +16,10 @@ export interface Specifiers extends Span {
   storage?: StorageClass;
   qualifiers: Qualifiers;
   type: TypeSpecifier;
+  /** `_Alignas(N)` or `_Alignas(T)`, which raises the alignment of a struct member. */
+  alignas?: { expression?: Expression; typeName?: TypeName; row: number };
+  /** Whether `inline` qualifies a function, whose definition alone then gives the function no external definition. */
+  isInline?: boolean;
 }
 
 export type TypeSpecifier =
@@ -23,7 +27,9 @@ export type TypeSpecifier =
   | ({ kind: 'builtin'; words: string[] } & Span)
   | ({ kind: 'typedefName'; name: string } & Span)
   | ({ kind: 'struct' | 'union'; tag?: string; fields?: FieldDeclaration[] } & Span)
-  | ({ kind: 'enum'; tag?: string; enumerators?: Enumerator[] } & Span);
+  | ({ kind: 'enum'; tag?: string; enumerators?: Enumerator[] } & Span)
+  /** `__typeof__(x)` or `__typeof__(T)`. */
+  | ({ kind: 'typeof'; operand?: Expression; typeName?: TypeName } & Span);
 
 export interface FieldDeclaration extends Span {
   specifiers: Specifiers;
@@ -84,7 +90,14 @@ export interface FunctionDefinition extends Span {
   bodyRow: number;
 }
 
-export type ExternalDeclaration = Declaration | FunctionDefinition;
+/** `_Static_assert(condition, "message")`, a declaration that clang checks while compiling. */
+export interface StaticAssert extends Span {
+  kind: 'staticAssert';
+  condition: Expression;
+  message?: string[];
+}
+
+export type ExternalDeclaration = Declaration | FunctionDefinition | StaticAssert;
 
 export interface TranslationUnit {
   items: ExternalDeclaration[];
@@ -94,7 +107,7 @@ export interface TranslationUnit {
 
 export interface Compound extends Span {
   kind: 'compound';
-  items: (Statement | Declaration)[];
+  items: (Statement | Declaration | StaticAssert)[];
 }
 
 export type Statement =
@@ -112,7 +125,7 @@ export type Statement =
     } & Span)
   | ({ kind: 'switch'; condition: Expression; body: Statement } & Span)
   /** `case value:` or `default:` (no value), labeling the statement after it. */
-  | ({ kind: 'case'; value?: Expression; body: Statement | Declaration } & Span)
+  | ({ kind: 'case'; value?: Expression; endValue?: Expression; body: Statement | Declaration } & Span)
   | ({ kind: 'break' } & Span)
   | ({ kind: 'continue' } & Span)
   | ({ kind: 'return'; value?: Expression } & Span)
@@ -156,7 +169,9 @@ export type Expression =
   | ({ kind: 'cast'; typeName: TypeName; operand: Expression } & Span)
   | ({ kind: 'sizeofType'; typeName: TypeName } & Span)
   | ({ kind: 'sizeofExpression'; operand: Expression } & Span)
-  | ({ kind: 'conditional'; condition: Expression; consequent: Expression; alternative: Expression } & Span)
+  /** `c ? a : b`, or GNU's `c ?: b` without `consequent`, which gives `c` itself when it is true. */
+  | ({ kind: 'conditional'; condition: Expression; consequent?: Expression; alternative: Expression } & Span)
+  | ({ kind: 'alignof'; typeName: TypeName } & Span)
   | ({ kind: 'comma'; left: Expression; right: Expression } & Span)
   | ({ kind: 'call'; callee: Expression; args: Expression[] } & Span)
   | ({ kind: 'subscript'; array: Expression; index: Expression } & Span)
