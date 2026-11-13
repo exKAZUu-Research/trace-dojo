@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 435 -- The set and map classes, which share one hash and tree store and its views.
+// code-gauge-allow-file fileNcss 439 -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
 import {
   checkModifiable,
