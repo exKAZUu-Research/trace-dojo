@@ -1772,3 +1772,11 @@ test('String scan and substitution observe permitted same-length callback edits'
   expect(run('s="aaa"; s.scan("a") { s.replace("bbb"); puts :hit }')).toMatchObject({ stdout: 'hit\n' });
   expect(run('s="aaa"; p s.gsub("a") { s[1]="b"; "x" }')).toMatchObject({ stdout: '"xbx"\n' });
 });
+
+test('large Array samples retain the pre-callback snapshot', () => {
+  expect(
+    run('class R; def rand(n); $a.replace([8,9]); 0; end; end; $a=(1..20).to_a; p $a.sample(11,random:R.new)')
+  ).toMatchObject({
+    stdout: '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]\n',
+  });
+});

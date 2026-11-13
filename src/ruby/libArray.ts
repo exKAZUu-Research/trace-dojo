@@ -1116,16 +1116,16 @@ def(
         const i2 = memo.get(i) ?? i;
         const j2 = memo.get(j) ?? j;
         memo.set(j, i2);
-        const item = self.items[j2];
+        const item = items[j2];
         if (item !== undefined) result.push(item);
       }
       return arr(result);
     }
+    const result = [...items];
     const draws: number[] = [];
     for (let i = 0; i < n; i++) {
       draws.push((yield* randomIndex(randomizer, length - i)) + i);
     }
-    const result = [...self.items];
     for (let i = 0; i < Math.min(n, result.length); i++) {
       const j = draws[i];
       if (j >= result.length) continue;
