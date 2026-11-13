@@ -1125,3 +1125,59 @@ test.each([
 ])('a library loop proportional to its argument spends operations: %s', (_, program) => {
   expect(executeProgram('go', program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+// Go 1.27.3 prints these: text/template's actions, functions, nested templates, options, and its parse and execution
+// errors, which name the failing action.
+test('text/template executes templates as Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"text/template"
+)
+
+type Item struct {
+	Name  string
+	Price float64
+	Tags  []string
+}
+
+func (i Item) Label() string { return strings.ToUpper(i.Name) }
+
+func show(t *template.Template, data any) {
+	err := t.Execute(os.Stdout, data)
+	fmt.Println("|", err)
+}
+
+func main() {
+	funcs := template.FuncMap{
+		"join": strings.Join,
+		"half": func(x float64) (float64, error) {
+			if x < 0 {
+				return 0, errors.New("negative")
+			}
+			return x / 2, nil
+		},
+	}
+	t := template.Must(template.New("item").Funcs(funcs).Parse(
+		"{{define \"tags\"}}[{{join . \",\"}}]{{end}}{{.Label}} {{printf \"%.2f\" .Price}} {{half .Price}} {{template \"tags\" .Tags}}" +
+			"{{range $i, $t := .Tags}}{{if eq $t \"skip\"}}{{continue}}{{end}} {{$i}}:{{$t}}{{end}}"))
+	show(t, Item{"pen", 1.5, []string{"a", "skip", "b"}})
+	show(t, &Item{"ink", -3, nil})
+	m := template.Must(template.New("m").Option("missingkey=error").Parse("{{range $k, $v := .}}{{$k}}={{$v}} {{end}}{{.zz}}"))
+	show(m, map[string]int{"b": 2, "a": 1})
+	show(template.Must(template.New("r").Parse("{{range 5}}{{if eq . 3}}{{break}}{{end}}{{.}}{{end}} {{.Missing}}")), Item{})
+	_, err := template.New("bad").Parse("{{if .X}}{{.Y}")
+	fmt.Println(err)
+	fmt.Println(template.HTMLEscapeString("<a href=\"x\">"), template.JSEscapeString("it's"))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'PEN 1.50 0.75 [a,skip,b] 0:a 2:b| <nil>\nINK -3.00 | template: item:1:78: executing "item" at <half .Price>: error calling half: negative\na=1 b=2 | template: m:1:44: executing "m" at <.zz>: map has no entry for key "zz"\n012 | template: r:1:55: executing "r" at <.Missing>: can\'t evaluate field Missing in type main.Item\ntemplate: bad:1: bad character U+007D \'}\'\n&lt;a href=&#34;x&#34;&gt; it\\\'s\n',
+  });
+});

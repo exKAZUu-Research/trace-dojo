@@ -15,6 +15,7 @@ import { RAND_PACKAGE, RAND_V2_PACKAGE } from './rand';
 import { REGEXP_PACKAGE } from './regexp';
 import { STRCONV_PACKAGE } from './strconv';
 import { STRINGS_PACKAGE } from './strings';
+import { TEXT_TEMPLATE_PACKAGE } from './template';
 import { TIME_PACKAGE } from './time';
 import { UNICODE_PACKAGE, UTF8_PACKAGE } from './unicode';
 
@@ -33,6 +34,7 @@ const PACKAGES = new Map<string, GoPackage>(
     RAND_V2_PACKAGE,
     REGEXP_PACKAGE,
     RUNTIME_PACKAGE,
+    TEXT_TEMPLATE_PACKAGE,
     TIME_PACKAGE,
     ERRORS_PACKAGE,
     FMT_PACKAGE,

@@ -158,7 +158,7 @@ export function parseFloat(text: string, bitSize: number): [number, Value] {
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- A transcription of Go's ParseComplex.
-function parseComplex(text: string, bitSize: number): [Complex, Value] {
+export function parseComplex(text: string, bitSize: number): [Complex, Value] {
   const size = bitSize === 64 ? 32 : 64;
   const syntaxError: [Complex, Value] = [new Complex(0, 0), numError('ParseComplex', text, ERR_SYNTAX)];
   let pending: Value;
@@ -501,7 +501,7 @@ const HEX_ESCAPE_DIGITS: Partial<Record<string, number>> = { x: 2, u: 4, U: 8 };
 
 /** `strconv.UnquoteChar`: the first character of an escaped literal body, whether it needs multiple bytes, and the rest. */
 // code-gauge-allow functionCognitiveComplexity 25 -- A transcription of Go's UnquoteChar.
-function unquoteChar(text: string, quoteByte: number): [number, boolean, string, Value] {
+export function unquoteChar(text: string, quoteByte: number): [number, boolean, string, Value] {
   const failure: [number, boolean, string, Value] = [0, false, '', ERR_SYNTAX];
   if (text === '') return failure;
   const first = text.charCodeAt(0);
