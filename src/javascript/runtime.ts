@@ -597,27 +597,25 @@ export class Runtime {
   }
 
   /**
-   * Notes a read of the clock, returning whether it polls, as a busy wait does: whether the innermost running loop, in
-   * this frame or a caller of it, that is not counted (its end may depend on the clock) has read the clock in more than
+   * Notes a read of the clock, returning whether it polls, as a busy wait does: whether a running loop, in this frame or
+   * a caller of it, that is not counted (its end may depend on the clock) has read the clock in more than
    * POLLING_ITERATIONS of its iterations. A loop timing a few rounds of work reads it in a handful, while a busy wait
    * reads it again and again, whatever decides its end.
    */
   pollsClock(): boolean {
-    // Every running loop the read happens in counts it, and the innermost loop the clock may end decides: a counted
-    // loop inside it, such as a batch of work, may be where the clock is read for the loop around it.
-    let decides: LoopState | undefined;
-    for (let index = this.frames.length - 1; index >= 0; index--) {
-      const { loops } = this.frames[index];
-      for (let at = loops.length - 1; at >= 0; at--) {
-        const loop = loops[at];
+    // Every running loop the read happens in counts it, and any of them the clock may end can make it poll: the read
+    // may be in a batch of work, or a short inner loop made anew each time, inside the loop it ends.
+    let polls = false;
+    for (const { loops } of this.frames) {
+      for (const loop of loops) {
         if (loop.lastClockRead !== loop.iteration) {
           loop.lastClockRead = loop.iteration;
           loop.clockReadIterations++;
         }
-        if (!decides && !loop.counted) decides = loop;
+        if (!loop.counted && loop.clockReadIterations > POLLING_ITERATIONS) polls = true;
       }
     }
-    return decides !== undefined && decides.clockReadIterations > POLLING_ITERATIONS;
+    return polls;
   }
 
   pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {

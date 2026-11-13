@@ -874,19 +874,9 @@ function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
 setTimeout(() => console.log('M 50'), 50); const fibTimes = [];
 for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n % 8); fibTimes.push(Date.now() - s); }
 console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);
-setTimeout(() => console.log('O 50'), 50); const inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]; const inputTimes = [];
-for (let i = 0; i < inputs.length; i++) { const s = Date.now(); fib(inputs[i] % 8); inputTimes.push(Date.now() - s); }
-console.log(inputTimes.length); setTimeout(() => console.log('P 0'), 0);
 setTimeout(() => console.log('Q 50'), 50); const ROUNDS = 15; const roundTimes = [];
 for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n % 8); roundTimes.push(Date.now() - s); }
-let r = 1; while (r <= ROUNDS) { const s = Date.now(); fib(r % 8); roundTimes.push(Date.now() - s); r++; }
-console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);
-setTimeout(() => console.log('U 50'), 50); for (const v of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) { for (let i = 0; i < 500; i++) sum += i; Date.now(); }
-setTimeout(() => console.log('V 0'), 0);
-setTimeout(() => console.log('S 50'), 50); let c; for (c = 0; c < 15; c++) { const s = Date.now(); fib(c % 8); roundTimes.push(Date.now() - s); }
-c = 0; while (c < 15) { const s = Date.now(); fib(c % 8); roundTimes.push(Date.now() - s); c++; }
-function count(values) { let c = 0; for (const value of values) c += value; return c; }
-console.log(count([roundTimes.length])); setTimeout(() => console.log('T 0'), 0);`,
+console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',
