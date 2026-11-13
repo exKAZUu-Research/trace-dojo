@@ -9,6 +9,7 @@ import {
   namedType,
   nativeFunction,
   perRun,
+  typeEntity,
 } from '../native';
 import { ProgramExit } from '../runtime';
 import { BASIC, ERROR_TYPE, pointerTo, sliceOf } from '../types';
@@ -96,6 +97,7 @@ export function currentStdout(): Value {
 }
 
 const members: Record<string, Entity> = {
+  File: typeEntity(FILE),
   Stdout: STDOUT,
   Stderr: fileVariable('Stderr', 2),
   Exit: nativeFunction('Exit', fn([BASIC.int], []), ([code]) => {
@@ -130,7 +132,6 @@ export const OS_PACKAGE = definePackage('os', members, [
   'Rename',
   'TempDir',
   'UserHomeDir',
-  'File',
   'FileInfo',
   'FileMode',
   'DirEntry',

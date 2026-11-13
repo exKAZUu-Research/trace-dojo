@@ -14,7 +14,7 @@ import {
 import { canBackquote, quote } from '../quote';
 import { nilPointerPanic } from '../runtimeErrors';
 import { grownCapacity } from '../sliceOps';
-import { ERROR_TYPE, type FuncType, pointerTo, sliceOf, type Type } from '../types';
+import { ERROR_TYPE, type FuncType, pointerTo, sliceOf, type Type, underlying } from '../types';
 import { Cell, GoStruct, Iface, type NativeState, Pointer, Slice, type Value } from '../values';
 import { IO_RUNE_READER } from './io';
 import { find, type Input, type Matcher, ReaderInput, StringInput } from './regexpExec';
@@ -244,7 +244,9 @@ function collect(values: Value[], element: Type): Slice | undefined {
   );
   currentRuntime().allocate(capacity);
   const array = [...values];
-  while (array.length < capacity) array.push(undefined);
+  // The elements are strings or slices, whose zero values are "" and nil.
+  const zero = underlying(element).kind === 'basic' ? '' : undefined;
+  while (array.length < capacity) array.push(zero);
   return new Slice(array, 0, values.length, capacity);
 }
 
