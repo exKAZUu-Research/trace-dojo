@@ -23,22 +23,27 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
   const template = yield* toStr(formatValue);
   let result = '';
   let next = 0;
-  let argumentMode: 'none' | 'numbered' | 'unnumbered' = 'none';
+  let argumentMode: 'none' | 'numbered' | 'unnumbered' | 'named' = 'none';
   let hashArg: RHash | undefined;
   const takeArg = (): Value => {
     if (argumentMode === 'numbered') throw argumentError(`unnumbered(${next + 1}) mixed with numbered`);
+    if (argumentMode === 'named') throw argumentError(`unnumbered(${next + 1}) mixed with named`);
     argumentMode = 'unnumbered';
     if (next >= args.length) throw argumentError('too few arguments');
     return args[next++];
   };
   const numberedArg = (digits: string): Value => {
     if (argumentMode === 'unnumbered') throw argumentError(`numbered(${Number(digits)}) after unnumbered(${next})`);
+    if (argumentMode === 'named') throw argumentError(`numbered(${Number(digits)}) after named`);
     argumentMode = 'numbered';
     const value = args[Number(digits) - 1];
     if (value === undefined) throw argumentError(`invalid index - ${digits}$`);
     return value;
   };
   const namedArg = function* (name: string): Gen {
+    if (argumentMode === 'unnumbered') throw argumentError(`named{${name}} after unnumbered(${next})`);
+    if (argumentMode === 'numbered') throw argumentError(`named{${name}} after numbered`);
+    argumentMode = 'named';
     hashArg ??= args.length === 1 && args[0] instanceof RHash ? args[0] : undefined;
     if (!hashArg) throw argumentError('one hash required');
     const entry = yield* hashGet(hashArg, RSymbol.of(name));
@@ -92,10 +97,12 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
       digits = /^\d+/.exec(template.slice(index))?.[0];
     }
     if (template[index] === '*') {
-      const width = Number(yield* intArg(takeArg()));
+      index++;
+      const selected = /^(\d+)\$/.exec(template.slice(index));
+      const width = Number(yield* intArg(selected ? numberedArg(selected[1]) : takeArg()));
       if (width < 0) spec.minus = true;
       spec.width = Math.abs(width);
-      index++;
+      if (selected) index += selected[0].length;
     } else if (digits) {
       spec.width = Number(digits);
       index += digits.length;
@@ -103,9 +110,11 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     if (template[index] === '.') {
       index++;
       if (template[index] === '*') {
-        const precision = Number(yield* intArg(takeArg()));
-        spec.precision = precision < 0 ? undefined : precision;
         index++;
+        const selected = /^(\d+)\$/.exec(template.slice(index));
+        const precision = Number(yield* intArg(selected ? numberedArg(selected[1]) : takeArg()));
+        spec.precision = precision < 0 ? undefined : precision;
+        if (selected) index += selected[0].length;
       } else {
         const precision = /^\d*/.exec(template.slice(index))?.[0] ?? '';
         spec.precision = Number(precision || '0');
@@ -357,8 +366,15 @@ function fixedFromDigits(digits: string, decpt: number, decimals: number): strin
 
 function hexFloat(value: number, precision: number | undefined): string {
   if (value === 0) return `0x0${precision ? `.${'0'.repeat(precision)}` : ''}p+0`;
-  let exponent = Math.floor(Math.log2(value));
+  // Ruby 4.0.9 rounds the largest finite Float upward through 13 explicit hex digits.
+  if (value === Number.MAX_VALUE && precision !== undefined && precision <= 13)
+    return `0x1${precision ? `.${'0'.repeat(precision)}` : ''}p+1024`;
+  let exponent = Math.min(1023, Math.floor(Math.log2(value)));
   let mantissa = value / 2 ** exponent;
+  while (mantissa < 1) {
+    mantissa *= 2;
+    exponent--;
+  }
   if (mantissa >= 2) {
     mantissa /= 2;
     exponent++;

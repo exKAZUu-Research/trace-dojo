@@ -489,6 +489,16 @@ test.each([
   ],
   ['endless Float Range steps', 'p (1..).step(1.5) { |x| break x if x > 2 }', '2.5\n'],
   ['large splat into native Array method', 'a = Array.new(200000, 0); b = []; b.push(*a); p b.size', '200000\n'],
+  [
+    'numbered format widths and precision',
+    'p format("%2$*1$d", 4, 12), format("%2$.*1$f", 2, 1.234)',
+    '"  12"\n"1.23"\n',
+  ],
+  [
+    'hexadecimal Float maximum rounding',
+    'p format("%.1a", Float::MAX), format("%.13a", Float::MAX)',
+    '"0x1.0p+1024"\n"0x1.0000000000000p+1024"\n',
+  ],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -520,6 +530,12 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   });
   expect(run('p "".tr_s!("a", 2)')).toMatchObject({
     uncaughtException: 'no implicit conversion of Integer into String (TypeError)',
+  });
+  expect(run('p format("%{a} %p", {a: 1})')).toMatchObject({
+    uncaughtException: 'unnumbered(1) mixed with named (ArgumentError)',
+  });
+  expect(run('p format("%p %{a}", {a: 1})')).toMatchObject({
+    uncaughtException: 'named{a} after unnumbered(1) (ArgumentError)',
   });
 });
 
