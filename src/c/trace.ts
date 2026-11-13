@@ -207,6 +207,12 @@ class Snapshotter {
         seen.add(where.address);
         const entries: Record<string, DisplayNode> = {};
         for (const field of type.info.fields ?? []) {
+          if (field.isAnonymous) {
+            // An unnamed member's members show as the struct's own, as the program names them.
+            const inner = this.nodeOf(field.type, { address: where.address + field.offset }, seen);
+            if (inner?.kind === 'object') Object.assign(entries, inner.entries);
+            continue;
+          }
           if (field.name === undefined) continue;
           const node =
             field.bitWidth === undefined

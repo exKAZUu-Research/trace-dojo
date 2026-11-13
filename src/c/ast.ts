@@ -66,7 +66,13 @@ export interface TypeName extends Span {
 
 export type Initializer =
   | ({ kind: 'expression'; expression: Expression } & Span)
-  | ({ kind: 'list'; items: Initializer[] } & Span);
+  | ({ kind: 'list'; items: Initializer[] } & Span)
+  /** `.x = v`, `[2] = v`, or GNU's `[0 ... 3] = v` in a braced list. */
+  | ({ kind: 'designated'; designators: Designator[]; value: Initializer } & Span);
+
+export type Designator =
+  | ({ kind: 'field'; name: string } & Span)
+  | ({ kind: 'index'; index: Expression; end?: Expression } & Span);
 
 export interface InitDeclarator extends Span {
   declarator: Declarator;
@@ -172,6 +178,8 @@ export type Expression =
   /** `c ? a : b`, or GNU's `c ?: b` without `consequent`, which gives `c` itself when it is true. */
   | ({ kind: 'conditional'; condition: Expression; consequent?: Expression; alternative: Expression } & Span)
   | ({ kind: 'alignof'; typeName: TypeName } & Span)
+  /** `(T){...}`, an unnamed object initialized by a braced list. */
+  | ({ kind: 'compoundLiteral'; typeName: TypeName; init: Initializer } & Span)
   | ({ kind: 'comma'; left: Expression; right: Expression } & Span)
   | ({ kind: 'call'; callee: Expression; args: Expression[] } & Span)
   | ({ kind: 'subscript'; array: Expression; index: Expression } & Span)

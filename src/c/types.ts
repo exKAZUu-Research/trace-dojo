@@ -44,6 +44,8 @@ export interface Field {
   offset: number;
   bitOffset?: number;
   bitWidth?: number;
+  /** Whether the member is an unnamed struct or union, whose own members are members of this one (C11). */
+  isAnonymous?: boolean;
 }
 
 let nextRecordId = 0;
@@ -66,8 +68,24 @@ export class RecordInfo {
     return this.fields !== undefined;
   }
 
+  /** A member by name, including the members of unnamed struct and union members, at its offset in this one. */
   field(name: string): Field | undefined {
-    return this.fields?.find((member) => member.name === name);
+    for (const member of this.fields ?? []) {
+      if (member.name === name) return member;
+      if (member.isAnonymous && member.type.kind === 'record') {
+        const inner = member.type.info.field(name);
+        if (inner) return { ...inner, offset: member.offset + inner.offset };
+      }
+    }
+    return undefined;
+  }
+
+  /** The names of the members, including those of unnamed members, to check that no name is declared twice. */
+  memberNames(): string[] {
+    return (this.fields ?? []).flatMap((member) => {
+      if (member.isAnonymous && member.type.kind === 'record') return member.type.info.memberNames();
+      return member.name === undefined ? [] : [member.name];
+    });
   }
 }
 
@@ -457,7 +475,7 @@ function hasOnly(counts: ReadonlyMap<string, number>, ...allowed: string[]): boo
 /** Lays out the members of a struct or union as clang does on arm64. */
 export function layoutRecord(
   info: RecordInfo,
-  members: { name?: string; type: CType; bitWidth?: number; align?: number }[]
+  members: { name?: string; type: CType; bitWidth?: number; align?: number; isAnonymous?: boolean }[]
 ): void {
   const fields: Field[] = [];
   let offset = 0;
@@ -501,13 +519,14 @@ export function layoutRecord(
       size = Math.max(size, offset);
       continue;
     }
+    const anonymous = member.isAnonymous ? { isAnonymous: true } : {};
     if (info.kind === 'union') {
-      fields.push({ name: member.name, type: member.type, offset: 0 });
+      fields.push({ name: member.name, type: member.type, offset: 0, ...anonymous });
       size = Math.max(size, memberSize);
     } else {
       offset = Math.max(offset, Math.ceil(bitPosition / 8));
       offset = Math.ceil(offset / memberAlign) * memberAlign;
-      fields.push({ name: member.name, type: member.type, offset });
+      fields.push({ name: member.name, type: member.type, offset, ...anonymous });
       offset += memberSize;
       bitPosition = offset * 8;
       size = offset;

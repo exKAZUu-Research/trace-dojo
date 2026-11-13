@@ -251,7 +251,7 @@ export abstract class CompilerBase {
   }
 
   private defineRecord(info: RecordInfo, fields: FieldDeclaration[], row: number): void {
-    const members: { name?: string; type: CType; bitWidth?: number; align?: number }[] = [];
+    const members: { name?: string; type: CType; bitWidth?: number; align?: number; isAnonymous?: boolean }[] = [];
     const names = new Set<string>();
     const declarators = fields.flatMap((field) => field.declarators);
     const last = declarators.at(-1);
@@ -259,6 +259,17 @@ export abstract class CompilerBase {
       const base = this.baseType(field.specifiers);
       if (field.specifiers.storage) this.error(field.row, '構造体のメンバに記憶域の指定（static など）は書けません。');
       const align = field.specifiers.alignas ? this.requestedAlignment(field.specifiers.alignas) : undefined;
+      if (field.declarators.length === 0 && base.kind === 'record' && field.specifiers.type.kind !== 'typedefName') {
+        // An unnamed struct or union member (C11), whose members belong to this struct; a tagged one declares nothing.
+        const specifier = field.specifiers.type as { tag?: string };
+        if (specifier.tag !== undefined) continue;
+        for (const name of base.info.memberNames()) {
+          if (names.has(name)) this.error(field.row, `メンバ「${name}」が2回宣言されています。`);
+          names.add(name);
+        }
+        members.push({ type: base, isAnonymous: true, ...(align === undefined ? {} : { align }) });
+        continue;
+      }
       for (const declarator of field.declarators) {
         const { type, name } = this.declaredType(base, declarator.declarator);
         const memberRow = declarator.row;

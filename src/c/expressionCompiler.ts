@@ -163,6 +163,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'vaArg': {
         return this.vaArg(expression);
       }
+      case 'compoundLiteral': {
+        return this.compoundLiteral(expression);
+      }
       case 'alignof': {
         const type = this.typeOfName(expression.typeName);
         if (type.kind !== 'void' && !isComplete(type))
@@ -187,6 +190,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (field.bitWidth !== undefined) this.error(row, 'ビットフィールドに offsetof は使えません。');
     return constantOperand(SIZE_T, BigInt(field.offset));
   }
+
+  /** Creates the unnamed object of a compound literal, which lives as long as the block or program around it. */
+  protected abstract compoundLiteral(expression: Extract<Expression, { kind: 'compoundLiteral' }>): Operand;
 
   /** `va_arg(ap, T)`: reads the next extra argument of a variadic call and moves `ap` past it. */
   private vaArg(expression: Extract<Expression, { kind: 'vaArg' }>): Operand {

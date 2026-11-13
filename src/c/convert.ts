@@ -6,6 +6,7 @@ import {
   type Compound,
   type Declaration,
   type Declarator,
+  type Designator,
   type Enumerator,
   type Expression,
   type ExternalDeclaration,
@@ -24,8 +25,6 @@ import { unsupported } from './unsupported';
 
 /** What learners call the syntax that the converter leaves out, by tree-sitter's node type. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  initializer_pair: '要素を指定した初期化（.x = 1 や [2] = 5）',
-  compound_literal_expression: '複合リテラル（(int[]){1, 2} など）',
   generic_expression: '_Generic',
   atomic_type_specifier: '_Atomic',
   bit_int_specifier: '_BitInt',
@@ -39,7 +38,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   ms_call_modifier: '呼び出し規約の指定',
   ms_pointer_modifier: 'ポインタの修飾（__ptr32 など）',
   ms_unaligned_ptr_modifier: '__unaligned',
-  subscript_range_designator: '範囲を指定した初期化（[0 ... 3] = 1）',
 };
 
 /** Names a statement that clang reads as an undeclared identifier in C17, as these keywords are not C17's. */
@@ -250,7 +248,41 @@ export class Converter {
     if (name) this.scope.declare(name, storage === 'typedef' ? 'type' : 'value');
   }
 
+  private designator(node: Node): Designator {
+    const row = node.startPosition.row;
+    switch (node.type) {
+      case 'field_designator': {
+        return { kind: 'field', name: (namedChildren(node)[0] ?? node).text, row };
+      }
+      // GNU's old form `x: 1`.
+      case 'field_identifier': {
+        return { kind: 'field', name: node.text, row };
+      }
+      case 'subscript_designator': {
+        return { kind: 'index', index: this.expression(namedChildren(node)[0] ?? node), row };
+      }
+      case 'subscript_range_designator': {
+        return {
+          kind: 'index',
+          index: this.expression(field(node, 'start')),
+          end: this.expression(field(node, 'end')),
+          row,
+        };
+      }
+    }
+    throw new CompileError([{ row, message: '初期化の指定の書き方に誤りがあります。' }]);
+  }
+
   private initializer(node: Node): Initializer {
+    if (node.type === 'initializer_pair') {
+      const designators = node.childrenForFieldName('designator').map((designator) => this.designator(designator));
+      return {
+        kind: 'designated',
+        designators,
+        value: this.initializer(field(node, 'value')),
+        row: node.startPosition.row,
+      };
+    }
     if (node.type !== 'initializer_list') {
       return { kind: 'expression', expression: this.expression(node), row: node.startPosition.row };
     }
@@ -455,9 +487,6 @@ export class Converter {
         const declaratorNodes = child.childrenForFieldName('declarator');
         const bitfields = child.namedChildren.filter((item): item is Node => item?.type === 'bitfield_clause');
         if (declaratorNodes.length === 0 && bitfields.length === 0) {
-          if (specifiers.type.kind === 'struct' || specifiers.type.kind === 'union') {
-            unsupported(child.startPosition.row, '名前のない構造体・共用体のメンバ');
-          }
           return { specifiers, declarators: [], row: child.startPosition.row };
         }
         const declarators = this.fieldDeclarators(child);
@@ -968,6 +997,16 @@ export class Converter {
           object: this.expression(field(node, 'argument')),
           field: field(node, 'field').text,
           arrow: field(node, 'operator').type === '->',
+          row,
+        };
+      }
+      case 'compound_literal_expression': {
+        if (node.childrenForFieldName('storage_class').length > 0)
+          unsupported(row, '記憶域の指定のある複合リテラル（C23）');
+        return {
+          kind: 'compoundLiteral',
+          typeName: this.typeName(field(node, 'type')),
+          init: this.initializer(field(node, 'value')),
           row,
         };
       }

@@ -3,6 +3,7 @@ import type {
   Compound,
   Declaration,
   Declarator,
+  Designator,
   Expression,
   ExternalDeclaration,
   FunctionDefinition,
@@ -11,7 +12,7 @@ import type {
   StorageClass,
   TranslationUnit,
 } from './ast';
-import type { CompileOptions, Entity, FunctionContext, Operand } from './compilerBase';
+import type { CompileOptions, Entity, FunctionContext, LValue, Operand } from './compilerBase';
 import { declaredName, findFunctionDeclarator } from './convert';
 import { isNullConstant, type SpecialCall } from './expressionCompiler';
 import { decodeStringLiteral } from './literals';
@@ -31,6 +32,7 @@ import {
   compatible,
   composite,
   type CType,
+  type Field,
   type FunctionType,
   INT,
   isCharArray,
@@ -56,6 +58,64 @@ export interface CompiledProgram {
 
 /** Writes an initializer's values into an object at an address. */
 type Writer = (frame: Frame, address: number) => void;
+
+/** A value an initializer writes at an offset in the object. */
+interface Write {
+  offset: number;
+  write: Writer;
+}
+
+/** The subobject of an aggregate that an initializer list fills next. */
+interface Cursor {
+  type: CType;
+  index: number;
+  offset: number;
+}
+
+interface Member {
+  type: CType;
+  offset: number;
+  field?: Field;
+}
+
+/** The named members of a struct or union, which an initializer list fills. */
+function namedFields(type: Extract<CType, { kind: 'record' }>): Field[] {
+  return (type.info.fields ?? []).filter((field) => field.name !== undefined || field.isAnonymous);
+}
+
+/** The subobject a cursor is at, or undefined past the end of its aggregate. */
+function memberAt(cursor: Cursor): Member | undefined {
+  const { type, index } = cursor;
+  if (type.kind === 'array') {
+    if (type.length !== undefined && index >= type.length) return undefined;
+    return { type: type.of, offset: cursor.offset + index * sizeOf(type.of) };
+  }
+  if (type.kind !== 'record') return undefined;
+  const field = namedFields(type)[index];
+  return field ? { type: field.type, offset: cursor.offset + field.offset, field } : undefined;
+}
+
+/** Moves past the subobject just filled: to the next element or member, or past a union's one member. */
+function advance(cursor: Cursor): void {
+  cursor.index =
+    cursor.type.kind === 'record' && cursor.type.info.kind === 'union' ? Number.POSITIVE_INFINITY : cursor.index + 1;
+}
+
+/** The number of elements of the outermost aggregate that the items so far reached, for an array of unknown length. */
+function filledLength(stack: Cursor[]): number {
+  // While a nested subobject is open, the outer element holding it counts; otherwise the cursor is already past it.
+  return stack.length > 1 ? stack[0].index + 1 : stack[0].index;
+}
+
+function zeroedWriter(size: number, writes: Write[]): Writer {
+  return (frame, address) => {
+    const block = frame.runtime.memory.locate(address, size);
+    const offset = address - block.base;
+    block.bytes.fill(0, offset, offset + size);
+    block.initialized.fill(1, offset, offset + size);
+    for (const { offset: at, write } of writes) write(frame, address + at);
+  };
+}
 
 interface LocalPart {
   run: (frame: Frame) => void;
@@ -516,6 +576,46 @@ export class Compiler extends StatementCompiler {
     if (constant !== undefined && entity?.kind === 'local') entity.constant = constant;
   }
 
+  protected compoundLiteral(expression: Extract<Expression, { kind: 'compoundLiteral' }>): Operand {
+    const { row, init } = expression;
+    let type = this.typeOfName(expression.typeName);
+    if (type.kind === 'array' && type.length === undefined)
+      type = { ...type, length: this.initializerLength(type, init) };
+    if (type.kind === 'function' || type.kind === 'void' || !isComplete(type)) {
+      this.error(row, `複合リテラルの型（${typeName(type)}）の中身が決まっていません。`);
+    }
+    const name = `\0literal${row}:${this.globals.length}`;
+    if (!this.fn) {
+      // At file scope, the object is static, so its address is a constant.
+      const global = this.declareGlobal(name, type, row, 'static', init, undefined);
+      global.isShown = false;
+      const index = global.index;
+      const operand = this.memoryOperand(type, (frame) => frame.runtime.globals[index].base);
+      return { ...operand, isAddressConstant: true, lvalue: { ...(operand.lvalue as LValue), isStatic: true } };
+    }
+    const local = this.addLocal(name, type, row, false);
+    local.inMemory = true;
+    local.size = sizeOf(type);
+    const writer = this.initializer(type, init, false);
+    const index = local.index;
+    const operand = this.memoryOperand(type, (frame) => frame.bases[index]);
+    const value = operand.value;
+    return {
+      ...operand,
+      value: (frame) => {
+        writer(frame, frame.bases[index]);
+        return value(frame);
+      },
+      lvalue: {
+        ...(operand.lvalue as LValue),
+        address: (frame) => {
+          writer(frame, frame.bases[index]);
+          return frame.bases[index];
+        },
+      },
+    };
+  }
+
   // Initializers ------------------------------------------------------------------------------------------------------
 
   private scalarInitializer(type: CType, init: Initializer): (frame: Frame) => Value {
@@ -526,10 +626,13 @@ export class Compiler extends StatementCompiler {
   /** The expression initializing a scalar, which braces may enclose once. */
   private singleExpression(type: CType, init: Initializer): Expression {
     if (init.kind === 'expression') return init.expression;
+    if (init.kind === 'designated')
+      return this.error(init.row, `${typeName(type)} の初期化に、要素の指定は書けません。`);
     // An empty initializer (C23, which clang accepts in C17) initializes a scalar to 0.
     if (init.items.length === 0) return { kind: 'number', text: '0', row: init.row };
     const [first] = init.items;
-    if (first.kind === 'list') this.error(first.row, `${typeName(type)} の初期化に、{ } を重ねて書けません。`);
+    if (first.kind !== 'expression')
+      return this.error(first.row, `${typeName(type)} の初期化に、{ } や要素の指定は書けません。`);
     return first.expression;
   }
 
@@ -540,23 +643,13 @@ export class Compiler extends StatementCompiler {
       if (literal) return decodeStringLiteral(literal.parts, literal.row).length;
     }
     if (init.kind !== 'list') this.error(init.row, '配列の初期化には { } か文字列リテラルを書いてください。');
-    const elementSize = elementCount(type.of);
-    let count = 0;
-    let position = 0;
-    for (const item of init.items) {
-      if (item.kind === 'list' || elementSize === 1) {
-        position++;
-      } else {
-        position += 1 / elementSize;
-      }
-      count = Math.max(count, Math.ceil(position - 1e-9));
-    }
-    return count;
+    return this.braced(type, init.items, 0, [], false);
   }
 
   /** Compiles an initializer into a writer that zeroes the object and stores the given values in it. */
   protected initializer(type: CType, init: Initializer, isStatic: boolean): Writer {
-    const writes: { offset: number; write: Writer }[] = [];
+    const writes: Write[] = [];
+    if (init.kind === 'designated') this.error(init.row, '初期化の指定（.x = や [n] =）は、{ } の中にしか書けません。');
     if (isScalar(type) || init.kind === 'expression') {
       if (!isScalar(type) && init.kind === 'expression') {
         const writer = this.aggregateFromExpression(type, init.expression, isStatic);
@@ -568,36 +661,18 @@ export class Compiler extends StatementCompiler {
       const value = this.convertForAssignment(operand, unqualified(type), 'initialization', expression.row);
       return (frame, address) => storeValue(frame.runtime, address, unqualified(type), value(frame));
     }
-    const cursor = { items: init.items, index: 0 };
-    this.aggregate(type, cursor, 0, writes, isStatic, true);
-    if (cursor.index < cursor.items.length) {
-      // clang warns about excess initializers and ignores them, but still checks their types.
-      for (const item of cursor.items.slice(cursor.index)) if (item.kind === 'expression') this.rvalue(item.expression);
-    }
-    const size = sizeOf(type);
-    return (frame, address) => {
-      const block = frame.runtime.memory.locate(address, size);
-      const offset = address - block.base;
-      block.bytes.fill(0, offset, offset + size);
-      block.initialized.fill(1, offset, offset + size);
-      for (const { offset: at, write } of writes) write(frame, address + at);
-    };
+    this.braced(type, init.items, 0, writes, isStatic);
+    return zeroedWriter(sizeOf(type), writes);
   }
 
   /** `struct P q = p;` or `char s[] = "abc";`: an aggregate initialized from one expression. */
   private aggregateFromExpression(type: CType, expression: Expression, isStatic: boolean): Writer | undefined {
     if (type.kind === 'array') {
-      if (isCharArray(type) && stringOf(expression)) {
-        const writes: { offset: number; write: Writer }[] = [];
-        this.stringInto(type, stringOf(expression) as Extract<Expression, { kind: 'string' }>, 0, writes);
-        const size = sizeOf(type);
-        return (frame, address) => {
-          const block = frame.runtime.memory.locate(address, size);
-          const offset = address - block.base;
-          block.bytes.fill(0, offset, offset + size);
-          block.initialized.fill(1, offset, offset + size);
-          for (const { offset: at, write } of writes) write(frame, address + at);
-        };
+      const literal = stringOf(expression);
+      if (isCharArray(type) && literal) {
+        const writes: Write[] = [];
+        this.stringInto(type, literal, 0, writes);
+        return zeroedWriter(sizeOf(type), writes);
       }
       this.error(expression.row, '配列の初期化には { } か文字列リテラルを書いてください。');
     }
@@ -610,101 +685,184 @@ export class Compiler extends StatementCompiler {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- C's rules for braces and brace elision.
-  private aggregate(
-    type: CType,
-    cursor: { items: Initializer[]; index: number },
-    offset: number,
-    writes: { offset: number; write: Writer }[],
-    isStatic: boolean,
-    braced: boolean
-  ): void {
-    if (type.kind === 'array') {
-      const length = type.length ?? 0;
-      const elementSize = sizeOf(type.of);
-      if (isCharArray(type) && cursor.index < cursor.items.length) {
-        const literal = stringLiteralOf(cursor.items[cursor.index]);
-        if (literal) {
-          cursor.index++;
-          this.stringInto(type, literal, offset, writes);
-          return;
-        }
-      }
-      for (let index = 0; index < length && cursor.index < cursor.items.length; index++) {
-        this.element(type.of, cursor, offset + index * elementSize, writes, isStatic);
-      }
-      return;
+  /**
+   * Compiles a braced list for an aggregate, as C17 6.7.9 walks it: items fill the current subobject in order, braces
+   * may be left out for nested aggregates, and a designator moves to the subobject it names.
+   *
+   * @returns The number of elements the list gives an array of unknown length.
+   */
+  private braced(type: CType, items: Initializer[], offset: number, writes: Write[], isStatic: boolean): number {
+    // `char s[] = {"abc"}`: a string literal may initialize a character array in braces of its own.
+    const literal = items.length === 1 && items[0].kind === 'expression' ? stringOf(items[0].expression) : undefined;
+    if (isCharArray(type) && literal) {
+      this.stringInto(type, literal, offset, writes);
+      return decodeStringLiteral(literal.parts, literal.row).length;
     }
-    if (type.kind === 'record') {
-      const fields = type.info.fields ?? [];
-      const members =
-        type.info.kind === 'union' ? fields.slice(0, 1) : fields.filter((field) => field.name !== undefined);
-      for (const field of members) {
-        if (cursor.index >= cursor.items.length) break;
-        if (field.bitWidth !== undefined) {
-          const item = cursor.items[cursor.index++];
-          const expression = this.singleExpression(field.type, item);
-          const operand = this.rvalue(expression);
-          this.checkStatic(operand, expression, isStatic);
-          const value = this.convertForAssignment(operand, field.type, 'initialization', expression.row);
-          const store = this.bitFieldStore(field);
-          writes.push({
-            offset: offset + field.offset,
-            write: (frame, address) => store(frame, address, value(frame)),
-          });
+    const stack: Cursor[] = [{ type, index: 0, offset }];
+    let length = 0;
+    for (const item of items) {
+      let value = item;
+      if (item.kind === 'designated') {
+        const target = this.designate(stack, item);
+        value = item.value;
+        if (target.end !== undefined) {
+          // GNU's [low ... high] = v gives every element of the range the same value.
+          for (let index = target.index; index <= target.end; index++) {
+            (stack.at(-1) as Cursor).index = index;
+            this.place(stack, value, writes, isStatic);
+          }
+          length = Math.max(length, filledLength(stack));
           continue;
         }
-        this.element(field.type, cursor, offset + field.offset, writes, isStatic);
       }
-      return;
+      this.place(stack, value, writes, isStatic);
+      length = Math.max(length, filledLength(stack));
     }
-    void braced;
+    return length;
   }
 
-  /** One element or member: a braced list for it, an expression of its type, or the start of its elided braces. */
-  private element(
-    type: CType,
-    cursor: { items: Initializer[]; index: number },
-    offset: number,
-    writes: { offset: number; write: Writer }[],
-    isStatic: boolean
-  ): void {
-    const item = cursor.items[cursor.index];
-    if (isScalar(type)) {
-      cursor.index++;
-      const expression = this.singleExpression(type, item);
-      const operand = this.rvalue(expression);
-      this.checkStatic(operand, expression, isStatic);
-      const value = this.convertForAssignment(operand, unqualified(type), 'initialization', expression.row);
-      const target = unqualified(type);
-      writes.push({ offset, write: (frame, address) => storeValue(frame.runtime, address, target, value(frame)) });
-      return;
-    }
-    if (item.kind === 'list') {
-      cursor.index++;
-      const inner = { items: item.items, index: 0 };
-      this.aggregate(type, inner, offset, writes, isStatic, true);
-      return;
-    }
-    if (type.kind === 'record') {
-      // A struct may also be initialized from an expression of its own type, without braces.
-      const operand = this.rvalue(item.expression);
-      if (operand.type.kind === 'record' && operand.type.info === type.info) {
-        cursor.index++;
-        this.checkStatic(operand, item.expression, isStatic);
-        const value = operand.value;
-        writes.push({ offset, write: (frame, address) => storeValue(frame.runtime, address, type, value(frame)) });
-        return;
+  /** Moves the cursor to the subobject that a designation names. */
+  private designate(
+    stack: Cursor[],
+    item: Extract<Initializer, { kind: 'designated' }>
+  ): { index: number; end?: number } {
+    stack.length = 1;
+    let result: { index: number; end?: number } = { index: 0 };
+    for (const [position, designator] of item.designators.entries()) {
+      let cursor = stack.at(-1) as Cursor;
+      // A member of an unnamed member is reached through that member, as if the designation named it too.
+      for (const index of this.anonymousPath(cursor.type, designator)) {
+        cursor.index = index;
+        const member = memberAt(cursor) as Member;
+        stack.push({ type: member.type, index: 0, offset: member.offset });
+        cursor = stack.at(-1) as Cursor;
+      }
+      result = this.designatorIndex(cursor.type, designator);
+      cursor.index = result.index;
+      if (position < item.designators.length - 1) {
+        const member = memberAt(cursor);
+        if (!member || (member.type.kind !== 'array' && member.type.kind !== 'record')) {
+          this.error(designator.row, '初期化の指定で、配列でも構造体でもないものの中を指定しています。');
+        }
+        stack.push({ type: member.type, index: 0, offset: member.offset });
       }
     }
-    this.aggregate(type, cursor, offset, writes, isStatic, false);
+    return result;
+  }
+
+  /** The indexes of the unnamed members leading to a member that a `.name` designator names, outermost first. */
+  private anonymousPath(type: CType, designator: Designator): number[] {
+    if (designator.kind !== 'field' || type.kind !== 'record') return [];
+    const fields = namedFields(type);
+    if (fields.some((field) => field.name === designator.name)) return [];
+    for (const [index, field] of fields.entries()) {
+      if (field.isAnonymous && field.type.kind === 'record' && field.type.info.field(designator.name)) {
+        return [index, ...this.anonymousPath(field.type, designator)];
+      }
+    }
+    return [];
+  }
+
+  private designatorIndex(type: CType, designator: Designator): { index: number; end?: number } {
+    if (designator.kind === 'field') {
+      if (type.kind !== 'record')
+        this.error(
+          designator.row,
+          `構造体・共用体ではないもの（${typeName(type)}）に .${designator.name} は指定できません。`
+        );
+      const index = namedFields(type).findIndex((field) => field.name === designator.name);
+      if (index === -1)
+        this.error(designator.row, `「${typeName(type)}」にはメンバ「${designator.name}」がありません。`);
+      return { index };
+    }
+    if (type.kind !== 'array')
+      this.error(designator.row, `配列ではないもの（${typeName(type)}）に [ ] は指定できません。`);
+    const index = this.integerConstant(designator.index, '配列の初期化の添字');
+    const end = designator.end === undefined ? undefined : this.integerConstant(designator.end, '配列の初期化の添字');
+    const last = end ?? index;
+    if (index < 0 || (type.length !== undefined && last >= type.length)) {
+      this.error(designator.row, `配列の初期化の添字「${last}」が、配列の大きさを超えています。`);
+    }
+    if (end !== undefined && end < index) this.error(designator.row, '初期化の範囲（[a ... b]）が空です。');
+    return { index, ...(end === undefined ? {} : { end }) };
+  }
+
+  /** Initializes the current subobject with one item, entering nested aggregates whose braces the list leaves out. */
+  // code-gauge-allow functionCognitiveComplexity 25 -- The cases of C's brace elision.
+  private place(stack: Cursor[], item: Initializer, writes: Write[], isStatic: boolean): void {
+    for (;;) {
+      const cursor = stack.at(-1) as Cursor;
+      const member = memberAt(cursor);
+      if (!member) {
+        if (stack.length === 1) {
+          // clang warns about excess initializers and ignores them, but still checks their types.
+          if (item.kind === 'expression') this.rvalue(item.expression);
+          return;
+        }
+        stack.pop();
+        advance(stack.at(-1) as Cursor);
+        continue;
+      }
+      if (item.kind === 'list') {
+        if (isScalar(member.type)) this.scalarInto(member, this.singleExpression(member.type, item), writes, isStatic);
+        else this.braced(member.type, item.items, member.offset, writes, isStatic);
+        advance(cursor);
+        return;
+      }
+      if (item.kind === 'designated') this.error(item.row, '初期化の指定の書き方に誤りがあります。');
+      if (this.placeWhole(member, item.expression, writes, isStatic)) {
+        advance(cursor);
+        return;
+      }
+      stack.push({ type: member.type, index: 0, offset: member.offset });
+    }
+  }
+
+  /** Initializes a member from one expression when it can take one: a scalar, a struct of its type, or a string. */
+  private placeWhole(member: Member, expression: Expression, writes: Write[], isStatic: boolean): boolean {
+    const { type } = member;
+    if (isScalar(type)) {
+      this.scalarInto(member, expression, writes, isStatic);
+      return true;
+    }
+    const literal = stringOf(expression);
+    if (isCharArray(type) && literal) {
+      this.stringInto(type, literal, member.offset, writes);
+      return true;
+    }
+    if (type.kind !== 'record') return false;
+    const operand = this.rvalue(expression);
+    if (operand.type.kind !== 'record' || operand.type.info !== type.info) return false;
+    this.checkStatic(operand, expression, isStatic);
+    const value = operand.value;
+    writes.push({
+      offset: member.offset,
+      write: (frame, address) => storeValue(frame.runtime, address, type, value(frame)),
+    });
+    return true;
+  }
+
+  private scalarInto(member: Member, expression: Expression, writes: Write[], isStatic: boolean): void {
+    const operand = this.rvalue(expression);
+    this.checkStatic(operand, expression, isStatic);
+    const target = unqualified(member.type);
+    const value = this.convertForAssignment(operand, target, 'initialization', expression.row);
+    if (member.field?.bitWidth !== undefined) {
+      const store = this.bitFieldStore(member.field);
+      writes.push({ offset: member.offset, write: (frame, address) => store(frame, address, value(frame)) });
+      return;
+    }
+    writes.push({
+      offset: member.offset,
+      write: (frame, address) => storeValue(frame.runtime, address, target, value(frame)),
+    });
   }
 
   private stringInto(
     type: Extract<CType, { kind: 'array' }>,
     literal: Extract<Expression, { kind: 'string' }>,
     offset: number,
-    writes: { offset: number; write: Writer }[]
+    writes: Write[]
   ): void {
     const bytes = decodeStringLiteral(literal.parts, literal.row);
     // clang warns when the literal is longer than the array and copies only what fits.
@@ -760,19 +918,10 @@ function stringOf(expression: Expression): Extract<Expression, { kind: 'string' 
 /** The string literal of an initializer, which braces may enclose once. */
 function stringLiteralOf(init: Initializer): Extract<Expression, { kind: 'string' }> | undefined {
   if (init.kind === 'expression') return stringOf(init.expression);
-  if (init.items.length === 1 && init.items[0].kind === 'expression') return stringOf(init.items[0].expression);
-  return undefined;
-}
-
-/** The number of scalars in a type, for the length an elided initializer list gives an array. */
-function elementCount(type: CType): number {
-  if (type.kind === 'array') return (type.length ?? 0) * elementCount(type.of);
-  if (type.kind === 'record') {
-    const fields = type.info.fields ?? [];
-    if (type.info.kind === 'union') return fields.length > 0 ? elementCount(fields[0].type) : 1;
-    return fields.filter((field) => field.name !== undefined).reduce((sum, field) => sum + elementCount(field.type), 0);
+  if (init.kind === 'list' && init.items.length === 1 && init.items[0].kind === 'expression') {
+    return stringOf(init.items[0].expression);
   }
-  return 1;
+  return undefined;
 }
 
 function functionBody(exec: Exec, isMain: boolean): Exec {
