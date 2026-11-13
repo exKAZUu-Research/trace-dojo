@@ -35,7 +35,7 @@ import { fma } from './fma';
 import { utf8Decode } from './literals';
 import { currentRuntime, libraryCell } from './native';
 import type { Operand, SsaConstant, Storage } from './operand';
-import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
+import { arithmetic, bitwiseNot, complexProduct, negate, ordering, shift } from './operators';
 import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
 import { boxesByAddress, isPointerShaped, moveToHeap, sizeOf } from './sliceOps';
@@ -1033,6 +1033,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (this.hasTypeParam(type)) return { mode: 'value', type, span: expression, eval: () => {} };
     const fused = this.fusedMultiplyAdd(expression, operator, left, right, type);
     if (fused) return fused;
+    if (operator === '*' && isComplex(type) && !isUntyped(type))
+      return this.complexProduct(expression, left, right, type);
     const apply = arithmetic(operator, type);
     const readLeft = left.eval;
     const readRight = right.eval;
@@ -1066,6 +1068,28 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type,
       span: expression,
       eval: (frame) => apply(readLeft(frame), readRight(frame)),
+      ssaConstant,
+    };
+  }
+
+  /** A complex product, whose imaginary part is a float64 sum of two products like those `fusedMultiplyAdd` fuses. */
+  private complexProduct(span: Span, left: Operand, right: Operand, type: Type): Operand {
+    const fn = this.fn;
+    const ssaConstant = bothConstant(left, right);
+    if (fn) fn.sumsOfProducts.push(() => !ssaConstant?.(undefined));
+    const contexts = this.functionContexts;
+    const single = isBasic(type, 'complex64');
+    const readLeft = left.eval;
+    const readRight = right.eval;
+    return {
+      mode: 'value',
+      type,
+      span,
+      eval: (frame) => {
+        const x = readLeft(frame) as Complex;
+        const y = readRight(frame) as Complex;
+        return complexProduct(x, y, fn !== undefined && sumsGrouped(contexts, fn, frame), single);
+      },
       ssaConstant,
     };
   }

@@ -65,19 +65,7 @@ import {
 import { Cell, Complex, copyValue, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
 
 /** Builtins whose call has a value that a statement must use, as Go reports `len(s) (value) is not used`. */
-export const VALUE_BUILTINS = new Set([
-  'append',
-  'cap',
-  'complex',
-  'imag',
-  'len',
-  'make',
-  'max',
-  'min',
-  'new',
-  'real',
-  'NewTurtle',
-]);
+export const VALUE_BUILTINS = new Set(['append', 'cap', 'complex', 'imag', 'len', 'make', 'max', 'min', 'new', 'real']);
 
 /** Builtins whose call neither calls the runtime nor stores to memory. */
 const MEMORYLESS_BUILTINS = new Set(['cap', 'complex', 'imag', 'len', 'max', 'min', 'real']);

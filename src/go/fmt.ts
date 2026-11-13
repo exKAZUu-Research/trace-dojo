@@ -548,7 +548,10 @@ export class Printer {
       return;
     }
     if (this.flags.sharpV) {
-      this.buffer += typeString(type);
+      // Go's printArg hands a []byte argument itself to fmtBytes, which spells its type []byte.
+      const topLevelBytes =
+        depth === 0 && type.kind === 'slice' && under.element.kind === 'basic' && under.element.basic === 'uint8';
+      this.buffer += topLevelBytes ? '[]byte' : typeString(type);
       if (under.kind === 'slice' && value === undefined) {
         this.buffer += '(nil)';
         return;

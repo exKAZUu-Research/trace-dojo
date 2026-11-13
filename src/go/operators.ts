@@ -98,18 +98,24 @@ function complexArithmetic(operator: string, single: boolean): Binary {
       return (a, b) => make((a as Complex).re - (b as Complex).re, (a as Complex).im - (b as Complex).im);
     }
     case '*': {
-      return (a, b) => {
-        const x = a as Complex;
-        const y = b as Complex;
-        // Go's arm64 code fuses one product of each part, complex64 included (it multiplies in float64).
-        return make(fma(-x.im, y.im, x.re * y.re), fma(x.im, y.re, x.re * y.im));
-      };
+      return (a, b) => complexProduct(a as Complex, b as Complex, false, single);
     }
     case '/': {
       return (a, b) => complexDivide(a as Complex, b as Complex, make);
     }
   }
   throw new Error(`Invalid complex operator ${operator}`);
+}
+
+/**
+ * Multiplies as Go's arm64 code does, complex64 included (it multiplies in float64): the real part fuses its second
+ * product, and the imaginary part, a sum of two products, fuses `im(x)*re(y)`, or `re(x)*im(y)` when common
+ * subexpression elimination orders the function's sums of products (`groupedSums`).
+ */
+export function complexProduct(x: Complex, y: Complex, groupedSums: boolean, single: boolean): Complex {
+  const round = single ? Math.fround : (value: number): number => value;
+  const im = groupedSums ? fma(x.re, y.im, x.im * y.re) : fma(x.im, y.re, x.re * y.im);
+  return new Complex(round(fma(-x.im, y.im, x.re * y.re)), round(im));
 }
 
 /** Divides as Go's runtime does (complex128div), including its handling of infinities and NaNs. */
