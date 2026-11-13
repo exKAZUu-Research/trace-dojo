@@ -31,6 +31,8 @@ export const UNSUPPORTED_CONSTANTS: Record<string, string> = {
   ObjectSpace: 'ObjectSpace',
   TracePoint: 'TracePoint',
   GC: 'ごみ集めの操作（GC）',
+  Errno: 'システムのエラー（Errno）',
+  FileTest: 'ファイルの検査（FileTest）',
   RubyVM: 'RubyVM',
   Binding: 'Binding',
   Struct: 'Struct',
@@ -76,3 +78,33 @@ export const UNSUPPORTED_CONSTANTS: Record<string, string> = {
   RUBY_COPYRIGHT: 'RUBY_COPYRIGHT',
   RUBY_DESCRIPTION: 'RUBY_DESCRIPTION',
 };
+
+/** Modules Ruby defines that this grader leaves out, which a program cannot define as classes. */
+export const CORE_MODULES = new Set(['Signal', 'Process', 'GC', 'ObjectSpace', 'Marshal', 'FileTest', 'Warning', 'Errno']);
+
+/** Classes Ruby defines that this grader leaves out, which a program would reopen rather than define. */
+export const CORE_CLASSES = new Set([
+  'Thread',
+  'Mutex',
+  'Queue',
+  'SizedQueue',
+  'ConditionVariable',
+  'Fiber',
+  'Ractor',
+  'Struct',
+  'Data',
+  'Time',
+  'File',
+  'Dir',
+  'IO',
+  'Regexp',
+  'MatchData',
+  'Rational',
+  'Complex',
+  'Method',
+  'UnboundMethod',
+  'Binding',
+  'TracePoint',
+  'Encoding',
+  'RubyVM',
+]);

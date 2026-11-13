@@ -10,7 +10,7 @@ import { realClassOf } from './values';
 export function describeException(exception: RObject): string {
   const name = realClassOf(exception).name ?? '';
   const message = runToEnd(toS(runToEnd(callMethod(exception, 'message', []))));
-  if (message === '') return `unhandled exception`;
+  if (message === "") return name;
   const [first, ...rest] = message.split('\n');
   if (first === name) return [`${first} (${name})`, ...rest].join('\n');
   return [`${first} (${name})`, ...rest].join('\n');

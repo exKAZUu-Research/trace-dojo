@@ -40,7 +40,7 @@ import {
   Scope,
   UnsupportedFeatureError,
 } from './runtime';
-import { UNSUPPORTED_CONSTANTS } from './unsupportedNames';
+import { CORE_CLASSES, CORE_MODULES, UNSUPPORTED_CONSTANTS } from './unsupportedNames';
 import { arr, classOf, isA, newHash, range, realClassOf, singletonClassOf, str, sym, truthy } from './values';
 
 export type Gen<T = Value> = Generator<unknown, T, unknown>;
@@ -844,6 +844,7 @@ function* defineClass(e: Extract<Expr, { k: 'class' }>, frame: Frame): Gen {
     throw typeError(`superclass must be an instance of Class (given an instance of ${realClassOf(superclass).name})`);
   }
   const existing = container.constants.get(e.name);
+  if (existing === undefined && container === runtime.c.Object) checkCoreName(e.name, 'class');
   let cls: RClass;
   if (existing !== undefined) {
     if (!(existing instanceof RClass) || existing.isModule) throw typeError(`${e.name} is not a class`);
@@ -863,6 +864,14 @@ function* defineClass(e: Extract<Expr, { k: 'class' }>, frame: Frame): Gen {
   return yield* runModuleBody(cls, e.body, frame);
 }
 
+/** Rejects defining a class or module that Ruby already has but this grader leaves out, as Ruby would reopen it. */
+function checkCoreName(name: string, kind: 'class' | 'module'): void {
+  const isModule = CORE_MODULES.has(name);
+  if (!isModule && !CORE_CLASSES.has(name)) return;
+  if (isModule !== (kind === 'module')) throw typeError(`${name} is not a ${kind}`);
+  throw new UnsupportedFeatureError(UNSUPPORTED_CONSTANTS[name] ?? name);
+}
+
 function* callHook(target: RClass, name: string, args: Value[]): Gen<void> {
   const method = classOf(target).findMethod(name);
   if (method && method.body.kind === 'user') yield* invoke(method, target, args, undefined, undefined, false);
@@ -872,6 +881,7 @@ function* defineModule(e: Extract<Expr, { k: 'module' }>, frame: Frame): Gen {
   const runtime = rt();
   const container = yield* moduleContainer(e, frame);
   const existing = container.constants.get(e.name);
+  if (existing === undefined && container === runtime.c.Object) checkCoreName(e.name, 'module');
   let module: RClass;
   if (existing !== undefined) {
     if (!(existing instanceof RClass) || !existing.isModule) throw typeError(`${e.name} is not a module`);
