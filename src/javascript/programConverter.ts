@@ -21,7 +21,6 @@ import {
   fail,
   field,
   hasChild,
-  isPresent,
   keyName,
   namedChildren,
   namedField,
@@ -318,7 +317,7 @@ export class ProgramConverter extends ExpressionConverter {
           const valueNode = caseNode.childForFieldName('value');
           return {
             test: valueNode ? this.expression(valueNode) : undefined,
-            body: this.caseBody(caseNode.childrenForFieldName('body').filter(isPresent)),
+            body: this.caseBody(caseNode.childrenForFieldName('body').filter((child) => child.type !== 'comment')),
           };
         });
         return { kind: 'switch', discriminant, cases, scope, row: rowOf(node) };
@@ -457,7 +456,7 @@ export class ProgramConverter extends ExpressionConverter {
       return { kind, isStatic, key, fn: this.functionNode(member, kind, keyName(key)) };
     }
     if (member.type === 'field_definition') {
-      const key = this.propertyName(field(member, 'property'));
+      const key = this.propertyName(field(member, 'name'));
       checkMemberName(member, key, isStatic, true);
       const valueNode = member.childForFieldName('value');
       // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
@@ -529,7 +528,7 @@ function declaredPrivateNames(members: Node[]): Set<string> {
 }
 
 function privateNameNode(member: Node): Node | undefined {
-  const nameNode = member.type === 'method_definition' ? field(member, 'name') : member.childForFieldName('property');
+  const nameNode = member.childForFieldName('name');
   return nameNode?.type === 'private_property_identifier' ? nameNode : undefined;
 }
 

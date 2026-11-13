@@ -41,7 +41,7 @@ export function convertTypeDeclaration(node: Node): ClassDeclaration {
   const kind = kinds[node.type as keyof typeof kinds] ?? ('enum' as const);
   const superclassNode = node.childForFieldName('superclass');
   const interfacesNode =
-    node.childForFieldName('interfaces') ?? node.children.find((child) => child?.type === 'extends_interfaces');
+    node.childForFieldName('interfaces') ?? node.children.find((child) => child.type === 'extends_interfaces');
   const body = field(node, 'body');
   const enumConstants: EnumConstant[] = [];
   const members: MemberDeclaration[] = [];
@@ -110,7 +110,7 @@ function desugarRecord(node: Node, header: Node, members: MemberDeclaration[]): 
   const componentNodes = namedChildren(header);
   const components = componentNodes.map((component, index) => {
     const typeNode = field(component, 'type');
-    const isVarargs = component.children.some((child) => child?.type === '...');
+    const isVarargs = component.children.some((child) => child.type === '...');
     if (isVarargs && index !== componentNodes.length - 1) throw varargsNotLastError(component);
     const type = convertType(typeNode);
     return {
@@ -336,7 +336,7 @@ export function convertVarargsParameter(parameter: Node): Parameter {
 }
 
 function convertThrows(node: Node): TypeSyntax[] {
-  const throwsNode = node.children.find((child) => child?.type === 'throws');
+  const throwsNode = node.children.find((child) => child.type === 'throws');
   return throwsNode ? namedChildren(throwsNode).map((type) => convertType(type)) : [];
 }
 

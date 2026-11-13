@@ -1,7 +1,5 @@
-import type { Node } from '@willbooster/web-tree-sitter';
-
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
-import { loadParser, parseSource } from '../interpreter/treeSitter';
+import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
 import { ProgramConverter } from './programConverter';
 
@@ -21,19 +19,5 @@ export function parseJavaScript(source: string, trace?: TraceOptions): Program {
 
 /** The `// atomic` annotations of a script, read from its comment tokens. */
 export function findJavaScriptTraceAnnotations(source: string): TraceAnnotation[] {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The JavaScript parser returned no tree');
-  try {
-    const comments: TraceAnnotation[] = [];
-    const visit = (node: Node): void => {
-      if (node.type === 'comment' && node.text.startsWith('//')) {
-        comments.push({ index: node.startIndex, text: node.text });
-      }
-      for (const child of node.children) if (child) visit(child);
-    };
-    visit(tree.rootNode);
-    return traceAnnotationsIn(comments);
-  } finally {
-    tree.delete();
-  }
+  return traceAnnotationsIn(commentTokens(parser, source).filter((comment) => comment.text.startsWith('//')));
 }
