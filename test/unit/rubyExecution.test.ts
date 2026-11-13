@@ -30,6 +30,15 @@ test.each([
   ['else without rescue', 'begin\n  1\nelse\n  2\nend'],
   ['a lowercase class name', 'class foo; end'],
   ['a command call as an operand', 'p 1 && p 2'],
+  ['an argument that is a return', 'p((return))'],
+  ['an argument that is a rightward pattern match', 'p((5 => x))'],
+  ['an assigned rightward pattern match', 'y = (1; 5 => x)'],
+  ['a condition that is a rightward pattern match', 'if (5 => x) then 1 end'],
+  ['a receiver that is a rightward pattern match', '(5 => x).to_s'],
+  ['a left operand that is a rightward pattern match', '(5 => x) && 1'],
+  ['an unparenthesized in as an argument', 'p(5 in Integer)'],
+  ['a case without clauses', 'case 1\nend'],
+  ['a one-line case/in whose in tests the subject', 'case 1 in Integer then p 1 end'],
 ])('%s is a compile error', (_name, program) => {
   expect(run(program).kind).toBe('compileError');
 });
@@ -66,6 +75,23 @@ test.each([
     expect(execution).toMatchObject({ kind: 'executed', stdout: 'before\n', uncaughtException: message });
   }
 );
+
+// Ruby 4.0.9 accepts each of these, with the output shown.
+test.each([
+  ['a parenthesized in as an argument', 'p((5 in Integer))', 'true\n'],
+  ['a rightward pattern match as a statement', '(5 => x)\np x', '5\n'],
+  ['a rightward pattern match on the right of &&', 'y = 1 && (5 => x)\np [x, y]', '[5, nil]\n'],
+  ['a rightward pattern match before a rescue clause', 'p(begin; 5 => x; rescue; end)', 'nil\n'],
+  [
+    'a one-line case/in whose subject is the in',
+    'x = case 1 in String\nin true then "t"\nin false then "f"\nend\np x',
+    '"f"\n',
+  ],
+])('%s runs', (_name, program, stdout) => {
+  const execution = run(program);
+  expect(execution.kind).toBe('executed');
+  if (execution.kind === 'executed') expect(execution.stdout).toBe(stdout);
+});
 
 test('a class Ruby defines as a module cannot be defined as a class', () => {
   expect(run('class Signal\nend')).toMatchObject({ uncaughtException: 'Signal is not a class (TypeError)' });

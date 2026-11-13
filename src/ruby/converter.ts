@@ -226,8 +226,8 @@ export class Converter {
         const to = node.childForFieldName('end');
         return {
           k: 'range',
-          from: from ? this.expr(from) : undefined,
-          to: to ? this.expr(to) : undefined,
+          from: from ? this.valueExpr(from) : undefined,
+          to: to ? this.valueExpr(to) : undefined,
           exclusive: node.childForFieldName('operator')?.text === '...',
         };
       }
@@ -276,7 +276,7 @@ export class Converter {
       case 'conditional': {
         return {
           k: 'if',
-          cond: this.expr(required(node.childForFieldName('condition'))),
+          cond: this.valueExpr(required(node.childForFieldName('condition'))),
           consequent: [this.statement(required(node.childForFieldName('consequence')), use)],
           alternative: [this.statement(required(node.childForFieldName('alternative')), use)],
         };
@@ -289,21 +289,21 @@ export class Converter {
       case 'if_modifier':
       case 'unless_modifier': {
         const body = [this.statement(required(node.childForFieldName('body')), use)];
-        const cond = this.expr(required(node.childForFieldName('condition')));
+        const cond = this.valueExpr(required(node.childForFieldName('condition')));
         return node.type === 'if_modifier'
           ? { k: 'if', cond, consequent: body }
           : { k: 'if', cond, consequent: [], alternative: body };
       }
       case 'while':
       case 'until': {
-        const cond = this.expr(required(node.childForFieldName('condition')));
+        const cond = this.valueExpr(required(node.childForFieldName('condition')));
         const body = this.loopBody(() => this.bodyOf(node.childForFieldName('body'), 0));
         return { k: 'while', cond, body, until: node.type === 'until', doWhile: false };
       }
       case 'while_modifier':
       case 'until_modifier': {
         const bodyNode = required(node.childForFieldName('body'));
-        const cond = this.expr(required(node.childForFieldName('condition')));
+        const cond = this.valueExpr(required(node.childForFieldName('condition')));
         const doWhile = bodyNode.type === 'begin' && !namedChildren(bodyNode).some((c) => RESCUE_CLAUSES.has(c.type));
         const body = this.loopBody(() =>
           doWhile ? this.body(namedChildren(bodyNode), 0) : [this.statement(bodyNode, 0)]
@@ -652,7 +652,7 @@ export class Converter {
     } else {
       key = this.expr(keyNode);
     }
-    if (valueNode) return { key, value: this.expr(valueNode) };
+    if (valueNode) return { key, value: this.valueExpr(valueNode) };
     // `{x:}` takes the value of the variable or method of that name.
     return { key, value: this.identifier(keyNode, 1) };
   }
@@ -660,13 +660,16 @@ export class Converter {
   /** An argument, which may be a splat (`*a`) where a list of values is expected. */
   private argument(node: Node): Expr {
     if (node.type === 'splat_argument') return { k: 'splat', e: this.anonymousOr(node, FORWARD_REST) };
-    return this.expr(node);
+    // Ruby reads `p(5 in Integer)` as a call whose argument list ends before `in`.
+    if (node.type === 'test_pattern')
+      this.fail(node, 'in のパターンマッチを引数や要素に書くときは、( ) で囲んでください。');
+    return this.valueExpr(node);
   }
 
   /** The value an argument such as `*a` passes, or for a bare `*`, `**`, or `&`, what the method received there. */
   private anonymousOr(node: Node, name: string): Expr {
     const value = namedChildren(node).find((child) => child.type !== 'comment');
-    if (value) return this.expr(value);
+    if (value) return this.valueExpr(value);
     const depth = this.ctx.scope.depthOf(name);
     if (depth < 0) this.fail(node, `名前のない ${name} 引数を受け取っていないので、${name} だけでは渡せません。`);
     return { k: 'lvar', name, depth };
@@ -729,23 +732,31 @@ export class Converter {
       return { k: 'array', items: namedChildren(node).map((child) => this.argument(child)) };
     }
     if (node.type === 'splat_argument') return { k: 'array', items: [this.argument(node)] };
-    const value = this.expr(node);
-    this.checkValue(node, value);
+    const value = this.valueExpr(node);
     return multiple ? value : value;
   }
 
-  /** Rejects a value that leaves the expression, such as `x = return`, as Ruby's "void value expression" does. */
+  /** Converts an expression whose value is used, rejecting one that has none as Ruby does. */
+  private valueExpr(node: Node): Expr {
+    const value = this.expr(node);
+    this.checkValue(node, value);
+    return value;
+  }
+
+  /**
+   * Rejects a value that leaves the expression or has none, such as `x = return` or `p((5 => x))`, as Ruby's "void
+   * value expression" does.
+   */
   private checkValue(node: Node, value: Expr): void {
-    if (value.k === 'return' || value.k === 'break' || value.k === 'next' || value.k === 'retry') {
-      this.fail(node, `${value.k} は値として使えません。`);
-    }
+    const kind = voidKindOf(value);
+    if (kind) this.fail(node, `${kind}は値として使えません。`);
   }
 
   private operatorAssignment(node: Node): Expr {
     const left = required(node.childForFieldName('left'));
     const operator = required(node.childForFieldName('operator')).text;
     const target = this.target(left);
-    const value = this.expr(required(node.childForFieldName('right')));
+    const value = this.valueExpr(required(node.childForFieldName('right')));
     return { k: 'opasgn', target, op: operator.slice(0, -1), value, row: node.startPosition.row };
   }
 
@@ -847,7 +858,7 @@ export class Converter {
       return { k: 'super', args, blockArg, block, used: use, row: node.startPosition.row };
     }
     const name = methodNode ? methodNode.text : 'call';
-    const recv = receiverNode ? this.expr(receiverNode) : undefined;
+    const recv = receiverNode ? this.valueExpr(receiverNode) : undefined;
     const block = blockNode ? this.block(blockNode, false) : undefined;
     if (block && blockArg) this.fail(node, 'ブロックと & 引数を同時に渡すことはできません。');
     const call: Call = {
@@ -870,18 +881,7 @@ export class Converter {
     const object = required(node.childForFieldName('object'));
     const rest = namedChildren(node).filter((child) => child.id !== object.id && child.type !== 'comment');
     const { args, blockArg } = this.argumentListFrom(rest);
-    return {
-      k: 'call',
-      recv: this.expr(object),
-      name: '[]',
-      args,
-      blockArg,
-      safe: false,
-      fcall: false,
-      vcall: false,
-      used: use,
-      row: node.startPosition.row,
-    };
+    return { ...this.plainCall(node, this.valueExpr(object), '[]', args, use), blockArg };
   }
 
   private argumentListFrom(nodes: Node[]): { args: Expr[]; blockArg?: Expr } {
@@ -900,8 +900,9 @@ export class Converter {
     const operator = required(node.childForFieldName('operator')).text;
     const leftNode = required(node.childForFieldName('left'));
     const rightNode = required(node.childForFieldName('right'));
-    const left = this.expr(leftNode);
-    const right = this.expr(rightNode);
+    const left = this.valueExpr(leftNode);
+    // Ruby checks only the left operand of `&&` and `||` for a value.
+    const right = LOGICAL_OPERATORS.has(operator) ? this.expr(rightNode) : this.valueExpr(rightNode);
     switch (operator) {
       case '&&':
       case 'and': {
@@ -922,6 +923,11 @@ export class Converter {
   }
 
   private operatorCall(node: Node, recv: Expr, name: string, args: Expr[]): Expr {
+    return this.plainCall(node, recv, name, args, 1);
+  }
+
+  /** A call with a receiver, written without `&.`. */
+  private plainCall(node: Node, recv: Expr, name: string, args: Expr[], used: Use): Call {
     return {
       k: 'call',
       recv,
@@ -930,7 +936,7 @@ export class Converter {
       safe: false,
       fcall: false,
       vcall: false,
-      used: 1,
+      used,
       row: node.startPosition.row,
     };
   }
@@ -949,7 +955,7 @@ export class Converter {
         if (operand.k === 'float') return { k: 'float', v: -operand.v };
       }
     }
-    const operand = this.expr(operandNode);
+    const operand = this.valueExpr(operandNode);
     switch (operator) {
       case '!':
       case 'not': {
@@ -971,7 +977,7 @@ export class Converter {
   // Control structures ------------------------------------------------------------------------------------------------
 
   private ifNode(node: Node, use: Use): Expr {
-    const cond = this.expr(required(node.childForFieldName('condition')));
+    const cond = this.valueExpr(required(node.childForFieldName('condition')));
     const consequence = this.bodyOf(node.childForFieldName('consequence'), use);
     const alternativeNode = node.childForFieldName('alternative');
     let alternative: Body | undefined;
@@ -1009,7 +1015,7 @@ export class Converter {
 
   private caseNode(node: Node, use: Use): Expr {
     const valueNode = node.childForFieldName('value');
-    const subject = valueNode ? this.expr(valueNode) : undefined;
+    const subject = valueNode ? this.valueExpr(valueNode) : undefined;
     const whens: { conds: Expr[]; body: Body; row: number }[] = [];
     let elseBody: Body | undefined;
     for (const child of namedChildren(node)) {
@@ -1022,6 +1028,7 @@ export class Converter {
         elseBody = this.bodyOf(child, use);
       }
     }
+    if (whens.length === 0) this.fail(node, 'case には when か in の節が1つ以上必要です。');
     return { k: 'case', subject, whens, else: elseBody };
   }
 
@@ -1110,7 +1117,7 @@ export class Converter {
         }
         case 'optional_parameter': {
           const name = declare(child, required(child.childForFieldName('name')).text);
-          params.optional.push({ name, value: this.expr(required(child.childForFieldName('value'))) });
+          params.optional.push({ name, value: this.valueExpr(required(child.childForFieldName('value'))) });
           break;
         }
         case 'splat_parameter': {
@@ -1127,7 +1134,7 @@ export class Converter {
         case 'keyword_parameter': {
           const name = declare(child, required(child.childForFieldName('name')).text);
           const valueNode = child.childForFieldName('value');
-          params.keywords.push({ name, value: valueNode ? this.expr(valueNode) : undefined });
+          params.keywords.push({ name, value: valueNode ? this.valueExpr(valueNode) : undefined });
           break;
         }
         case 'block_parameter': {
@@ -1258,10 +1265,12 @@ export class Converter {
   // Pattern matching --------------------------------------------------------------------------------------------------
 
   private caseMatch(node: Node, use: Use): Expr {
-    const subject = this.expr(required(node.childForFieldName('value')));
+    const valueNode = required(node.childForFieldName('value'));
+    const { subject, testedBy } = this.caseMatchSubject(node, valueNode);
     const clauses: InClause[] = [];
     let elseBody: Body | undefined;
     for (const child of namedChildren(node)) {
+      if (child.id === testedBy?.id) continue;
       if (child.type === 'in_clause') {
         const guardNode = child.childForFieldName('guard');
         const pattern = this.pattern(required(child.childForFieldName('pattern')));
@@ -1282,6 +1291,25 @@ export class Converter {
       }
     }
     return { k: 'caseIn', subject, clauses, else: elseBody, row: node.startPosition.row };
+  }
+
+  /**
+   * The subject of a `case`/`in`. Ruby reads `case x in pat` on one line as `case (x in pat)`, whose subject is whether
+   * `x` matches, so an `in` on the subject's line belongs to the subject and the clauses start at the next `in`.
+   */
+  private caseMatchSubject(node: Node, valueNode: Node): { subject: Expr; testedBy?: Node } {
+    const subject = this.valueExpr(valueNode);
+    const inClauses = namedChildren(node).filter((child) => child.type === 'in_clause');
+    const first = inClauses.at(0);
+    if (!first || /[\n;]/.test(this.source.slice(valueNode.endIndex, first.startIndex))) return { subject };
+    if (first.childForFieldName('guard') || first.childForFieldName('body') || inClauses.length === 1) {
+      this.fail(
+        first,
+        'case の値に続けて同じ行に in を書くと、値を in で調べる式になります。in の前で改行してください。'
+      );
+    }
+    const pattern = this.pattern(required(first.childForFieldName('pattern')));
+    return { subject: { k: 'matchPattern', value: subject, pattern, raise: false }, testedBy: first };
   }
 
   private bindTarget(node: Node): LocalRef | undefined {
@@ -1681,6 +1709,40 @@ function childrenOf(e: Expr): Expr[] {
     }
     default: {
       return [];
+    }
+  }
+}
+
+const LOGICAL_OPERATORS = new Set(['&&', '||', 'and', 'or']);
+
+/** What makes a value void in Ruby's sense (`return`, `=>`, ...), named for the error, or `undefined` for a value. */
+function voidKindOf(value: Expr): string | undefined {
+  switch (value.k) {
+    case 'return':
+    case 'break':
+    case 'next':
+    case 'retry':
+    case 'redo': {
+      return `${value.k} `;
+    }
+    case 'matchPattern': {
+      return value.raise ? '=> のパターンマッチ' : undefined;
+    }
+    case 'seq': {
+      const last = value.body.at(-1);
+      return last ? voidKindOf(last.e) : undefined;
+    }
+    case 'begin': {
+      // A `rescue` clause gives the expression a value even when its body has none.
+      if (value.rescues.length > 0) return undefined;
+      const last = value.body.at(-1);
+      return last ? voidKindOf(last.e) : undefined;
+    }
+    case 'rescueMod': {
+      return voidKindOf(value.body);
+    }
+    default: {
+      return undefined;
     }
   }
 }
