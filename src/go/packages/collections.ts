@@ -29,7 +29,8 @@ import {
   type TypeParamType,
   underlying,
 } from '../types';
-import { Cell, Complex, copyValue, GoArray, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { Cell, copyValue, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { zeroValue } from './reflection';
 import { pdqsort, type SortData, stableSort } from './sorting';
 import {
   BOOL,
@@ -693,23 +694,7 @@ function overwrite(slice: Slice, kept: Value[], types: Type[]): Slice {
 }
 
 function zeroValueOf(type: Type): () => Value {
-  const under = underlying(type);
-  if (under.kind === 'basic') {
-    if (under.basic === 'string') return () => '';
-    if (under.basic === 'bool') return () => false;
-    if (under.basic.startsWith('float')) return () => 0;
-    if (under.basic.startsWith('complex')) return () => new Complex(0, 0);
-    if (under.basic.startsWith('int') || under.basic.startsWith('uint')) return () => 0n;
-  }
-  if (under.kind === 'struct') {
-    const zeros = under.fields.map((field) => zeroValueOf(field.type));
-    return () => new GoStruct(zeros.map((zero) => zero()));
-  }
-  if (under.kind === 'array') {
-    const zero = zeroValueOf(under.element);
-    return () => new GoArray(Array.from({ length: under.length }, zero));
-  }
-  return () => {};
+  return () => zeroValue(type);
 }
 
 function allocate(count: number): void {

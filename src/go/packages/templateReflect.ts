@@ -19,7 +19,8 @@ import {
   typeString,
   underlying,
 } from '../types';
-import { Complex, copyValue, GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { copyValue, GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { zeroValue } from './reflection';
 import { stringPanic } from './support';
 import { isUpper } from './unicodeSupport';
 
@@ -121,44 +122,6 @@ export function toGoValue(value: RValue, to: Type): Value {
   if (!value) return zeroValue(to);
   if (isInterface(to) && !isInterface(value.type)) return new Iface(value.type, copyValue(value.value));
   return copyValue(value.value);
-}
-
-export function zeroValue(type: Type): Value {
-  const under = underlying(type);
-  switch (under.kind) {
-    case 'basic': {
-      switch (typeKind(under)) {
-        case 'bool': {
-          return false;
-        }
-        case 'string': {
-          return '';
-        }
-        case 'int':
-        case 'uint': {
-          return 0n;
-        }
-        case 'float': {
-          return 0;
-        }
-        case 'complex': {
-          return new Complex(0, 0);
-        }
-        default: {
-          return undefined;
-        }
-      }
-    }
-    case 'struct': {
-      return new GoStruct(under.fields.map((field) => zeroValue(field.type)));
-    }
-    case 'array': {
-      return new GoArray(Array.from({ length: under.length }, () => zeroValue(under.element)));
-    }
-    default: {
-      return undefined;
-    }
-  }
 }
 
 /** `reflect.Zero`, where the zero `reflect.Value` holds the invalid value. */

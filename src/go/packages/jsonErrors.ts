@@ -31,9 +31,10 @@ import {
   UNEXPECTED_EOF,
   unquote,
 } from './jsonWire';
-import { kindOf, typeName } from './reflection';
+import { typeName } from './reflection';
 import { STRCONV_PACKAGE } from './strconv';
 import { errorText, receiverStruct, STRING } from './support';
+import { typeKind } from './templateReflect';
 
 const INT64 = BASIC.int64;
 
@@ -145,7 +146,7 @@ export const INVALID_UNMARSHAL_ERROR = errorType('InvalidUnmarshalError', [['Typ
   if (type === undefined) return 'json: Unmarshal(nil)';
   const native = ((type as Iface).value as Pointer).load() as GoStruct;
   const goType = (native.native as { type: Type }).type;
-  if (kindOf(goType) !== 'pointer') return `json: Unmarshal(non-pointer ${typeString(goType)})`;
+  if (typeKind(goType) !== 'pointer') return `json: Unmarshal(non-pointer ${typeString(goType)})`;
   return `json: Unmarshal(nil ${typeString(goType)})`;
 });
 
@@ -279,7 +280,7 @@ export function unmarshalErrorToGo(root: Value, err: LibError): Value {
   if (err.value.length > 0) {
     let jsonValue = err.value;
     const isStrconvError = inner === STRCONV_RANGE || inner === STRCONV_SYNTAX;
-    const numeric = err.goType !== undefined && ['int', 'uint', 'float'].includes(kindOf(err.goType));
+    const numeric = err.goType !== undefined && ['int', 'uint', 'float'].includes(typeKind(err.goType));
     if (isStrconvError && numeric) {
       value = 'number';
       if (err.kind === '"') jsonValue = unquote(jsonValue)[0];
@@ -291,7 +292,7 @@ export function unmarshalErrorToGo(root: Value, err: LibError): Value {
   const rootIface = root as Iface | undefined;
   if (rootIface !== undefined && err.pointer !== '') {
     let type = rootIface.type;
-    if (kindOf(type) === 'pointer') type = (underlying(type) as PointerType).element;
+    if (typeKind(type) === 'pointer') type = (underlying(type) as PointerType).element;
     rootName = typeName(type);
   }
   const field = err.pointer.replace(/^\//, '').replaceAll('/', '.');

@@ -2,7 +2,7 @@ import type { Entity } from '../entities';
 import { addMethod, currentRuntime, fn, namedType, nativeFunction, typeEntity } from '../native';
 import type { Runtime } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
-import { BASIC, ERROR_TYPE, type NamedType, pointerTo, sliceOf } from '../types';
+import { BASIC, ERROR_TYPE, type NamedType, pointerTo } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Slice, type Value } from '../values';
 import { libraryVariable, makeBytes, subslice } from './io';
 import { parseAddr, V4_IN_V6_PREFIX } from './netAddrParse';
@@ -506,5 +506,3 @@ export const NET_IP_MEMBERS: Record<string, Entity> = {
     return bytes ? [newBytes(bytes), undefined] : [undefined, errorValue(ADDR_ERROR, ['invalid MAC address', s])];
   }),
 };
-
-export const IP_SLICE = sliceOf(IP);

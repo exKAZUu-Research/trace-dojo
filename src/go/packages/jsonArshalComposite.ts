@@ -2,7 +2,17 @@
 import { mapKeyOf } from '../equality';
 import { currentRuntime } from '../native';
 import { grownCapacity } from '../sliceOps';
-import { ANY, BASIC, type MapType, type NamedType, sliceOf, type Type, typeIdentityKey, underlying } from '../types';
+import {
+  ANY,
+  BASIC,
+  isExported,
+  type MapType,
+  type NamedType,
+  sliceOf,
+  type Type,
+  typeIdentityKey,
+  underlying,
+} from '../types';
 import { type GoArray, GoMap, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import {
   ALL_MARSHALER_TYPES,
@@ -30,18 +40,10 @@ import {
 } from './jsonArshalCore';
 import { type DecoderState, type EncoderState, ERR_NON_STRING_NAME, SyntacticError } from './jsonText';
 import { type LibError, TextError, unquoteMayCopy } from './jsonWire';
-import {
-  callValueMethod,
-  exported,
-  fieldName,
-  implementsVia,
-  kindOf,
-  newVariable,
-  structOf,
-  zeroValue,
-} from './reflection';
+import { callValueMethod, fieldName, implementsVia, newVariable, structOf, zeroValue } from './reflection';
 import { equalFold } from './strings';
 import { bytesOf } from './support';
+import { typeKind } from './templateReflect';
 
 /** Finds the arshaler of a type, which the composite arshalers use for their elements. */
 export type Lookup = (type: Type) => Arshaler;
@@ -86,7 +88,7 @@ export function makeMapArshaler(type: Type, lookup: Lookup): Arshaler {
   const mapType = underlying(type) as MapType;
   const keyFncs = lookup(mapType.key);
   const valFncs = lookup(mapType.value);
-  const sortByKey = kindOf(mapType.key) === 'string' && !keyFncs.nonDefault;
+  const sortByKey = typeKind(mapType.key) === 'string' && !keyFncs.nonDefault;
   return {
     nonDefault: false,
     marshal: (enc, ref, mo) => {
@@ -233,15 +235,15 @@ function collectFields(entry: QueueEntry, queue: QueueEntry[], seen: Set<string>
   const struct = structOf(entry.type);
   if (!struct) return;
   for (const [i, field] of struct.fields.entries()) {
-    const isExported = exported(field.name);
-    if (!isExported && !field.embedded) continue;
+    const fieldExported = isExported(field.name);
+    if (!fieldExported && !field.embedded) continue;
     const index = [...entry.index, i];
     const embedded = field.type.kind === 'pointer' ? field.type.element : field.type;
-    if (field.embedded && kindOf(embedded) === 'struct') {
+    if (field.embedded && typeKind(embedded) === 'struct') {
       const key = typeIdentityKey(embedded);
       if (entry.visitChildren) queue.push({ type: embedded, index, visitChildren: !seen.has(key) });
       seen.add(key);
-    } else if (isExported) {
+    } else if (fieldExported) {
       const name = fieldName(field.name);
       allFields.push({ id: allFields.length, index, type: field.type, name, quotedName: `"${name}"` });
     }
@@ -337,7 +339,7 @@ function walkField(ref: Ref, type: Type, field: StructField, mayAlloc: boolean):
   let current = ref;
   let currentType = type;
   for (const [step, i] of field.index.entries()) {
-    if (step > 0 && kindOf(currentType) === 'pointer') {
+    if (step > 0 && typeKind(currentType) === 'pointer') {
       let target = current.get() as Pointer | undefined;
       if (target === undefined) {
         if (!mayAlloc || readOnlyAt(type, field, step)) return undefined;
@@ -359,9 +361,9 @@ function walkField(ref: Ref, type: Type, field: StructField, mayAlloc: boolean):
 function readOnlyAt(type: Type, field: StructField, step: number): boolean {
   let currentType = type;
   for (const i of field.index.slice(0, step)) {
-    if (kindOf(currentType) === 'pointer') currentType = elementOf(currentType);
+    if (typeKind(currentType) === 'pointer') currentType = elementOf(currentType);
     const struct = structOf(currentType);
-    if (!struct || !exported(struct.fields[i].name)) return true;
+    if (!struct || !isExported(struct.fields[i].name)) return true;
     currentType = struct.fields[i].type;
   }
   return false;
@@ -370,7 +372,7 @@ function readOnlyAt(type: Type, field: StructField, step: number): boolean {
 // Slices, arrays, and pointers ------------------------------------------------------------------------------------------
 
 export function makeListArshaler(type: Type, lookup: Lookup): Arshaler {
-  const isArray = kindOf(type) === 'array';
+  const isArray = typeKind(type) === 'array';
   const element = elementOf(type);
   const valFncs = lookup(element);
   return {
@@ -502,7 +504,7 @@ export function makeInterfaceArshaler(type: Type, lookup: Lookup): Arshaler {
     marshal: (enc, ref, mo) => {
       const iface = ref.get() as Iface | undefined;
       if (iface === undefined) return enc.writeToken('n');
-      if (legacyMarshaler && kindOf(iface.type) === 'pointer' && iface.value === undefined) {
+      if (legacyMarshaler && typeKind(iface.type) === 'pointer' && iface.value === undefined) {
         return marshalNilPointerWithMethod(enc, iface, legacyMarshaler);
       }
       return lookup(iface.type).marshal(enc, newRef(iface.type, iface.value), mo);
@@ -528,12 +530,12 @@ export function makeInterfaceArshaler(type: Type, lookup: Lookup): Arshaler {
  */
 function unmarshalNullInterface(dec: DecoderState, ref: Ref): LibError | undefined | 'not null' {
   const current = ref.get() as Iface | undefined;
-  const mergeable = current !== undefined && kindOf(current.type) === 'pointer' && current.value !== undefined;
+  const mergeable = current !== undefined && typeKind(current.type) === 'pointer' && current.value !== undefined;
   if (current !== undefined && !mergeable) ref.set(undefined);
   if (dec.peekKind() !== 'n') return 'not null';
   const [, err] = dec.readToken();
   if (err) return err;
-  if (mergeable && kindOf(elementOf(current.type)) === 'pointer') (current.value as Pointer).store(undefined);
+  if (mergeable && typeKind(elementOf(current.type)) === 'pointer') (current.value as Pointer).store(undefined);
   else ref.set(undefined);
   return undefined;
 }

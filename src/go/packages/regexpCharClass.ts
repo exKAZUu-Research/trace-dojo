@@ -70,18 +70,6 @@ export function cleanClass(runes: RuneClass): RuneClass {
   return result;
 }
 
-export function inCharClass(rune: number, runes: RuneClass): boolean {
-  let lo = 0;
-  let hi = runes.length / 2;
-  while (lo < hi) {
-    const middle = (lo + hi) >>> 1;
-    if (rune > runes[2 * middle + 1]) lo = middle + 1;
-    else if (rune < runes[2 * middle]) hi = middle;
-    else return true;
-  }
-  return false;
-}
-
 export function appendLiteral(runes: RuneClass, rune: number, foldCase: boolean): RuneClass {
   return foldCase ? appendFoldedRange(runes, rune, rune) : appendRange(runes, rune, rune);
 }

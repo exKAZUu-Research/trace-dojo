@@ -232,10 +232,6 @@ export function tagPathError(type: Type, field1: string, field2: string): Value 
   return pointerError(TAG_PATH_ERROR, [reflectType(type), field1, '', field2, '']);
 }
 
-export function unmarshalError(text: string): Value {
-  return new Iface(UNMARSHAL_ERROR, text);
-}
-
 export function plainError(text: string): Value {
   return newError(text);
 }

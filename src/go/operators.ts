@@ -101,7 +101,8 @@ function complexArithmetic(operator: string, single: boolean): Binary {
       return (a, b) => {
         const x = a as Complex;
         const y = b as Complex;
-        return make(x.re * y.re - x.im * y.im, x.re * y.im + x.im * y.re);
+        // Go's arm64 code fuses one product of each part, complex64 included (it multiplies in float64).
+        return make(fma(-x.im, y.im, x.re * y.re), fma(x.im, y.re, x.re * y.im));
       };
     }
     case '/': {

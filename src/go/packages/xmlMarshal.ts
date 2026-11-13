@@ -3,22 +3,13 @@
 import { formatFloat } from '../floatFormat';
 import { decodeRune, RUNE_ERROR } from '../literals';
 import { currentRuntime } from '../native';
-import { type Field, pointerTo, type Type, typeIdentityKey, typeString, underlying } from '../types';
+import { type Field, isExported, pointerTo, type Type, typeIdentityKey, typeString, underlying } from '../types';
 import { type GoArray, GoStruct, type Iface, Pointer, Slice, type Value } from '../values';
 import { ERR_SHORT_WRITE } from './io';
 import { TEXT_MARSHALER } from './jsonArshalCore';
-import {
-  bitsOf,
-  callValueMethod,
-  exported,
-  fieldName,
-  implementsInterface,
-  kindOf,
-  newVariable,
-  structOf,
-  typeName,
-} from './reflection';
+import { bitsOf, callValueMethod, fieldName, implementsInterface, newVariable, structOf, typeName } from './reflection';
 import { byteSlice, bytesOf, callMethod } from './support';
+import { typeKind } from './templateReflect';
 import { isInCharacterRange, isName, XML_URL } from './xmlDecoder';
 import {
   attrsToGo,
@@ -67,9 +58,9 @@ export function getTypeInfo(type: Type): TypeInfo | { err: Value } {
 
 /** Adds a struct field, or the fields an embedded struct promotes, returning a TagPathError for a conflict. */
 function addField(type: Type, info: TypeInfo, i: number, field: Field): Value {
-  if (!exported(field.name) && !field.embedded) return undefined;
-  const inner = kindOf(field.type) === 'pointer' ? elementType(field.type) : field.type;
-  if (field.embedded && kindOf(inner) === 'struct') {
+  if (!isExported(field.name) && !field.embedded) return undefined;
+  const inner = typeKind(field.type) === 'pointer' ? elementType(field.type) : field.type;
+  if (field.embedded && typeKind(inner) === 'struct') {
     const innerInfo = getTypeInfo(inner);
     if ('err' in innerInfo) return innerInfo.err;
     info.xmlname ??= innerInfo.xmlname;
@@ -107,7 +98,7 @@ function fieldNameAt(type: Type, idx: number[]): string {
   let current = type;
   let name = '';
   for (const i of idx) {
-    if (kindOf(current) === 'pointer') current = elementType(current);
+    if (typeKind(current) === 'pointer') current = elementType(current);
     const field = (structOf(current) as { fields: { name: string; type: Type }[] }).fields[i];
     name = fieldName(field.name);
     current = field.type;
@@ -132,7 +123,7 @@ export interface XVal {
 export function fieldValue(val: XVal, finfo: FieldInfo, initNilPointers: boolean): XVal | undefined {
   let current = val;
   for (const [step, i] of finfo.idx.entries()) {
-    if (step > 0 && kindOf(current.type) === 'pointer' && kindOf(elementType(current.type)) === 'struct') {
+    if (step > 0 && typeKind(current.type) === 'pointer' && typeKind(elementType(current.type)) === 'struct') {
       if (current.value === undefined) {
         if (!initNilPointers) return undefined;
         const target = newVariable(elementType(current.type));
@@ -148,7 +139,7 @@ export function fieldValue(val: XVal, finfo: FieldInfo, initNilPointers: boolean
       type: field.type,
       value: struct.fields[i],
       pointer: current.pointer ? new Pointer(struct.fields, i) : undefined,
-      readOnly: current.readOnly || (!exported(field.name) && kindOf(field.type) !== 'struct'),
+      readOnly: current.readOnly || (!isExported(field.name) && typeKind(field.type) !== 'struct'),
     };
   }
   return current;
@@ -406,7 +397,7 @@ export class Printer {
     const val = initial && indirect(initial);
     if (val === undefined) return undefined;
     const { type } = val;
-    const kind = kindOf(type);
+    const kind = typeKind(type);
     const methodResult = this.marshalWithMethods(val, finfo, startTemplate);
     if (methodResult !== NO_METHOD) return methodResult;
     if ((kind === 'slice' || kind === 'array') && !isByteKind(elementType(type))) {
@@ -541,7 +532,7 @@ const NO_METHOD = Symbol('no method');
 function indirect(initial: XVal): XVal | undefined {
   let val = initial;
   for (;;) {
-    const kind = kindOf(val.type);
+    const kind = typeKind(val.type);
     if (kind !== 'interface' && kind !== 'pointer') return val;
     if (val.value === undefined) return undefined;
     if (kind === 'interface') {
@@ -555,7 +546,7 @@ function indirect(initial: XVal): XVal | undefined {
 }
 
 function isByteKind(type: Type): boolean {
-  return kindOf(type) === 'uint' && bitsOf(type) === 8;
+  return typeKind(type) === 'uint' && bitsOf(type) === 8;
 }
 
 /** `defaultStart`: the start element for a value marshaled by its methods. */
@@ -573,7 +564,7 @@ function defaultStart(
 /** `marshalSimple`: the text of a basic value or byte array, or UnsupportedTypeError. */
 function marshalSimple(val: XVal): [string, Value] {
   const { type, value } = val;
-  switch (kindOf(type)) {
+  switch (typeKind(type)) {
     case 'int':
     case 'uint': {
       return [String(value as bigint), undefined];

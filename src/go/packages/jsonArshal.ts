@@ -48,9 +48,10 @@ import {
   UNEXPECTED_EOF,
   unquoteMayCopy,
 } from './jsonWire';
-import { bitsOf, callPointerMethod, implementsVia, kindOf } from './reflection';
+import { bitsOf, callPointerMethod, implementsVia } from './reflection';
 import { parseFloat } from './strconv';
 import { byteSlice, bytesOf, errorText } from './support';
+import { typeKind } from './templateReflect';
 
 const arshalerCache = new Map<string, Arshaler>();
 
@@ -78,7 +79,7 @@ function lazy(make: () => Arshaler): Arshaler {
 
 function makeDefaultArshaler(type: Type): Arshaler {
   if (type.kind === 'named' && type === NUMBER) return makeNumberArshaler(type);
-  switch (kindOf(type)) {
+  switch (typeKind(type)) {
     case 'bool': {
       return makeBoolArshaler(type);
     }
@@ -102,7 +103,7 @@ function makeDefaultArshaler(type: Type): Arshaler {
     case 'array': {
       const element = (underlying(type) as SliceType).element;
       const list = lazy(() => makeListArshaler(type, lookupArshaler));
-      if (kindOf(element) === 'uint' && bitsOf(element) === 8 && underlying(element).kind === 'basic') {
+      if (typeKind(element) === 'uint' && bitsOf(element) === 8 && underlying(element).kind === 'basic') {
         return makeBytesArshaler(type, list);
       }
       return list;
@@ -157,7 +158,7 @@ function makeStringArshaler(type: Type): Arshaler {
 // code-gauge-allow functionCognitiveComplexity 22 -- A transcription of Go's makeIntArshaler, step by step.
 function makeIntArshaler(type: Type): Arshaler {
   const bits = bitsOf(type);
-  const signed = kindOf(type) === 'int';
+  const signed = typeKind(type) === 'int';
   return {
     nonDefault: false,
     marshal: (enc, ref) => {
@@ -267,7 +268,7 @@ function parseFloatText(text: string, bits: 32 | 64): [number, LibError | undefi
 
 // code-gauge-allow functionCognitiveComplexity 17 -- A transcription of Go's makeBytesArshaler, step by step.
 function makeBytesArshaler(type: Type, list: Arshaler): Arshaler {
-  const isArray = kindOf(type) === 'array';
+  const isArray = typeKind(type) === 'array';
   const element = (underlying(type) as SliceType).element;
   const hasMarshaler = ALL_METHOD_TYPES.slice(0, 3).some((iface) => implementsVia(element, iface));
   return {
@@ -368,7 +369,7 @@ function makeInvalidArshaler(type: Type): Arshaler {
 /** `makeMethodArshaler`: the program's MarshalJSON, MarshalText, UnmarshalJSON, and UnmarshalText methods. */
 // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's makeMethodArshaler, step by step.
 function makeMethodArshaler(fncs: Arshaler, type: Type): Arshaler {
-  const kind = kindOf(type);
+  const kind = typeKind(type);
   if (kind === 'pointer' || kind === 'interface' || type === NUMBER) return fncs;
   const result = { ...fncs };
   const pointerType = pointerTo(type);
@@ -414,7 +415,7 @@ function addMarshalMethod(
   if (!via) return;
   result.nonDefault = true;
   const previous = result.marshal;
-  const fallbackAtName = iface === MARSHALER || kindOf(type) === 'string';
+  const fallbackAtName = iface === MARSHALER || typeKind(type) === 'string';
   result.marshal = (enc, ref, mo) => {
     if ((via === 'pointer' && ref.forcedAddr) || (enc.tokens.last.needObjectName && fallbackAtName)) {
       return previous(enc, ref, mo);
@@ -451,11 +452,11 @@ function unmarshalText(dec: DecoderState, ref: Ref, type: Type): LibError | unde
 /** `marshalEncode`: writes the JSON encoding of an `any` argument. */
 export function marshalEncode(enc: EncoderState, value: Value): LibError | undefined {
   const iface = value as Iface | undefined;
-  if (iface === undefined || (kindOf(iface.type) === 'pointer' && iface.value === undefined)) {
+  if (iface === undefined || (typeKind(iface.type) === 'pointer' && iface.value === undefined)) {
     return enc.writeToken('n');
   }
   const mo: MarshalOptions = { seen: new Set() };
-  if (kindOf(iface.type) === 'pointer') {
+  if (typeKind(iface.type) === 'pointer') {
     return lookupArshaler(elementOf(iface.type)).marshal(enc, new Ref(iface.value as Pointer, false), mo);
   }
   return lookupArshaler(iface.type).marshal(enc, newRef(iface.type, iface.value), mo);
@@ -469,7 +470,7 @@ export function unmarshalDecode(
   last: boolean
 ): LibError | undefined {
   const iface = value as Iface | undefined;
-  if (iface === undefined || kindOf(iface.type) !== 'pointer' || iface.value === undefined) {
+  if (iface === undefined || typeKind(iface.type) !== 'pointer' || iface.value === undefined) {
     return new SemanticError('unmarshal', 0, '', '', '', iface?.type, ERR_NON_NIL_REFERENCE);
   }
   const unexpectedEnd = (): LibError =>

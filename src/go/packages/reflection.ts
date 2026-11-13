@@ -3,7 +3,6 @@ import { dynamicMethod } from '../methods';
 import { currentRuntime } from '../native';
 import {
   type InterfaceType,
-  isExported,
   missingMethod,
   type NamedType,
   pointerTo,
@@ -12,13 +11,8 @@ import {
   typeString,
   underlying,
 } from '../types';
-import { Cell, Complex, GoArray, GoStruct, Iface, Pointer, type Value } from '../values';
-import { type Kind, typeKind } from './templateReflect';
-
-/** reflect's kind of a type, as `reflect.Type.Kind` names it. */
-export function kindOf(type: Type): Kind {
-  return typeKind(type);
-}
+import { Cell, Complex, GoArray, GoStruct, Pointer, type Value } from '../values';
+import { typeKind } from './templateReflect';
 
 /** The bit size of an integer or float type, as `reflect.Type.Bits`. */
 export function bitsOf(type: Type): number {
@@ -78,7 +72,7 @@ export function implementsInterface(type: Type, iface: NamedType | InterfaceType
 /** How a type implements an interface: by its values, only through pointers to it, or not at all. */
 export function implementsVia(type: Type, iface: NamedType): 'value' | 'pointer' | undefined {
   if (implementsInterface(type, iface)) return 'value';
-  if (kindOf(type) !== 'pointer' && kindOf(type) !== 'interface' && implementsInterface(pointerTo(type), iface)) {
+  if (typeKind(type) !== 'pointer' && typeKind(type) !== 'interface' && implementsInterface(pointerTo(type), iface)) {
     return 'pointer';
   }
   return undefined;
@@ -107,13 +101,4 @@ export function structOf(type: Type): StructType | undefined {
 /** The name of a struct field as Go spells it in UTF-8. */
 export function fieldName(name: string): string {
   return utf8Encode(name);
-}
-
-export function exported(name: string): boolean {
-  return isExported(name);
-}
-
-/** An interface value holding a copy of `value`, or nil for a nil interface. */
-export function boxValue(type: Type, value: Value): Value {
-  return kindOf(type) === 'interface' ? value : new Iface(type, value);
 }

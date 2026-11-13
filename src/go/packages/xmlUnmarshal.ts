@@ -5,9 +5,10 @@ import { grownCapacity } from '../sliceOps';
 import { pointerTo, type Type, typeString } from '../types';
 import { GoStruct, type Iface, Pointer, Slice, type Value } from '../values';
 import { TEXT_UNMARSHALER } from './jsonArshalCore';
-import { bitsOf, callValueMethod, implementsInterface, kindOf, newVariable, typeName, zeroValue } from './reflection';
+import { bitsOf, callValueMethod, implementsInterface, newVariable, typeName, zeroValue } from './reflection';
 import { parseFloat, parseInt, parseUint, STRCONV_PACKAGE } from './strconv';
 import { byteSlice } from './support';
+import { typeKind } from './templateReflect';
 import { isSpace } from './unicodeSupport';
 import type { XmlDecoder } from './xmlDecoder';
 import { elementType, fieldValue, getTypeInfo, type TypeInfo, type XVal } from './xmlMarshal';
@@ -25,7 +26,7 @@ export class XmlUnmarshaler {
   /** `DecodeElement`. */
   decodeElement(v: Value, start: StartToken | undefined): Value {
     const iface = v as Iface | undefined;
-    if (iface === undefined || kindOf(iface.type) !== 'pointer') return plainError('non-pointer passed to Unmarshal');
+    if (iface === undefined || typeKind(iface.type) !== 'pointer') return plainError('non-pointer passed to Unmarshal');
     if (iface.value === undefined) return plainError('nil pointer passed to Unmarshal');
     const pointer = iface.value as Pointer;
     return this.unmarshal({ type: elementType(iface.type), value: pointer.load(), pointer, readOnly: false }, start);
@@ -59,7 +60,7 @@ export class XmlUnmarshaler {
     const val = this.target(initial);
     const methodResult = this.unmarshalWithMethods(val, start);
     if (methodResult !== NO_METHOD) return methodResult;
-    switch (kindOf(val.type)) {
+    switch (typeKind(val.type)) {
       case 'interface': {
         return this.skip();
       }
@@ -86,11 +87,11 @@ export class XmlUnmarshaler {
   /** The value to decode into: the pointer a non-nil interface holds, and what a pointer points to, allocated if nil. */
   private target(initial: XVal): XVal {
     let val = initial;
-    const inner = kindOf(val.type) === 'interface' ? (val.value as Iface | undefined) : undefined;
-    if (inner !== undefined && kindOf(inner.type) === 'pointer' && inner.value !== undefined) {
+    const inner = typeKind(val.type) === 'interface' ? (val.value as Iface | undefined) : undefined;
+    if (inner !== undefined && typeKind(inner.type) === 'pointer' && inner.value !== undefined) {
       val = { type: inner.type, value: inner.value, readOnly: val.readOnly };
     }
-    if (kindOf(val.type) !== 'pointer') return val;
+    if (typeKind(val.type) !== 'pointer') return val;
     let target = val.value as Pointer | undefined;
     if (target === undefined) {
       target = newVariable(elementType(val.type));
@@ -232,7 +233,7 @@ export class XmlUnmarshaler {
 const NO_METHOD = Symbol('no method');
 
 function isByteKind(type: Type): boolean {
-  return kindOf(type) === 'uint' && bitsOf(type) === 8;
+  return typeKind(type) === 'uint' && bitsOf(type) === 8;
 }
 
 /** `strings.TrimSpace` of UTF-8 bytes. */
@@ -258,7 +259,7 @@ export function trimSpace(s: string): string {
 // code-gauge-allow functionNcss 40 -- A transcription of Go's copyValue, step by step.
 function copyValue(dst0: XVal, src: string): Value {
   let dst = dst0;
-  if (kindOf(dst.type) === 'pointer') {
+  if (typeKind(dst.type) === 'pointer') {
     let target = dst.value as Pointer | undefined;
     if (target === undefined) {
       target = newVariable(elementType(dst.type));
@@ -271,7 +272,7 @@ function copyValue(dst0: XVal, src: string): Value {
     return undefined;
   };
   const bits = bitsOf(dst.type);
-  switch (kindOf(dst.type)) {
+  switch (typeKind(dst.type)) {
     case 'int': {
       if (src.length === 0) return set(0n);
       const [value, err] = parseInt(trimSpace(src), 10, bits, 'ParseInt');
