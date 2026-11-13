@@ -442,3 +442,9 @@ test('Enumerable cycle retains cached Turtles through replay', () => {
     'class E; include Enumerable; def each; yield 1; yield Turtle.new; end; end; $n=0; E.new.cycle(2) { |x| $n+=1; $saved=x if $n==4 }';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
+
+test('zip retains earlier converted inputs during later conversions', () => {
+  const program =
+    'class A; def to_ary; [Turtle.new]; end; end; class B; def to_ary; x=1; [2]; end; end; v=[1].zip(A.new,B.new)';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});

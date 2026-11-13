@@ -1920,3 +1920,17 @@ test('Hash equality permits mutation of the lookup operand', () => {
     stdout: 'false\n2\n',
   });
 });
+
+test('percent-p exports binary inspect bytes as Ruby escapes', () => {
+  expect(
+    run('class A; def inspect; 255.chr; end; end; p format("%p",A.new).bytes, format("é%p",A.new).bytes')
+  ).toMatchObject({
+    stdout: '[92, 120, 70, 70]\n[195, 169, 92, 120, 70, 70]\n',
+  });
+});
+
+test('String successor propagates maximum Unicode carry leftward', () => {
+  expect(run(String.raw`p "!\u{10ffff}".succ.bytes, "\u{10ffff}\u{10ffff}".succ.bytes`)).toMatchObject({
+    stdout: '[34, 240, 144, 128, 128]\n[1, 240, 144, 128, 128, 240, 144, 128, 128]\n',
+  });
+});

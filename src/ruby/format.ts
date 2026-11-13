@@ -249,7 +249,8 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RS
       return padStringValue(yield* toSValue(arg()), spec);
     }
     case 'p': {
-      return padStringValue(yield* inspectValue(arg()), spec);
+      const inspected = yield* inspectValue(arg());
+      return padStringValue(inspected.binary ? exportBinaryInspect(inspected) : inspected, spec);
     }
     case 'c': {
       const value = arg();
@@ -288,6 +289,34 @@ function padStringValue(value: RString, spec: Spec): RString {
   bytes.fill(0x20);
   bytes.set(content, spec.minus ? 0 : padding);
   return stringFromBytes(bytes, value.binary);
+}
+
+function exportBinaryInspect(value: RString): RString {
+  const bytes = stringBytes(value);
+  if (bytes.every((byte) => byte < 0x80)) return value;
+  let text = '';
+  const escapes: Record<number, string> = {
+    0: String.raw`\0`,
+    7: String.raw`\a`,
+    8: String.raw`\b`,
+    9: String.raw`\t`,
+    10: String.raw`\n`,
+    11: String.raw`\v`,
+    12: String.raw`\f`,
+    13: String.raw`\r`,
+    27: String.raw`\e`,
+    127: String.raw`\c?`,
+  };
+  for (const [index, byte] of bytes.entries()) {
+    if (index % 256 === 0) rt().spend(256);
+    text +=
+      escapes[byte] ??
+      (byte < 32 || byte >= 128
+        ? `\\x${byte.toString(16).toUpperCase().padStart(2, '0')}`
+        : String.fromCodePoint(byte));
+  }
+  rt().checkStringLength(text.length);
+  return stringFromBytes(new TextEncoder().encode(text));
 }
 
 function* intArg(value: Value): Gen<bigint> {

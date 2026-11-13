@@ -1070,50 +1070,51 @@ def('Enumerable', 'zip', [0, -1], function* (self, others, block) {
 
 export function* zipCollections(self: Value, others: Value[], block: RProc | undefined): Gen<Value> {
   const inputs: Value[] = [];
-  for (const other of others) inputs.push((yield* tryAry(other)) ?? other);
-  const iterators = inputs.map((other) =>
-    other instanceof RArray
-      ? undefined
-      : flattenGenerator(
-          (function* (): Gen<void> {
-            yield* iterate(other, function* (value) {
-              yield value;
-            });
-          })()
-        )
-  );
-  const results: Value[] = [];
-  const held = rt().held;
-  const mark = held.length;
-  held.push(...inputs);
   const arrays = rt().heldArrays;
   const arrayMark = arrays.length;
-  arrays.push(results);
-  let index = 0;
+  arrays.push(inputs);
   try {
-    yield* iterate(self, function* (value) {
-      const tuple: Value[] = [value];
-      const arrays = rt().heldArrays;
-      const arrayMark = arrays.length;
-      arrays.push(tuple);
-      try {
-        for (const [position, other] of inputs.entries()) {
-          const iterator = iterators[position];
-          const next = iterator?.next();
-          tuple.push(other instanceof RArray ? (other.items[index] ?? NIL) : next?.done ? NIL : (next?.value as Value));
+    for (const other of others) inputs.push((yield* tryAry(other)) ?? other);
+    const iterators = inputs.map((other) =>
+      other instanceof RArray
+        ? undefined
+        : flattenGenerator(
+            (function* (): Gen<void> {
+              yield* iterate(other, function* (value) {
+                yield value;
+              });
+            })()
+          )
+    );
+    const results: Value[] = [];
+    arrays.push(results);
+    let index = 0;
+    try {
+      yield* iterate(self, function* (value) {
+        const tuple: Value[] = [value];
+        const tupleMark = arrays.length;
+        arrays.push(tuple);
+        try {
+          for (const [position, other] of inputs.entries()) {
+            const iterator = iterators[position];
+            const next = iterator?.next();
+            tuple.push(
+              other instanceof RArray ? (other.items[index] ?? NIL) : next?.done ? NIL : (next?.value as Value)
+            );
+          }
+          index++;
+          if (block) yield* callBlock(block, [arr(tuple)], false);
+          else results.push(arr(tuple));
+        } finally {
+          arrays.length = tupleMark;
         }
-        index++;
-        if (block) yield* callBlock(block, [arr(tuple)], false);
-        else results.push(arr(tuple));
-      } finally {
-        arrays.length = arrayMark;
-      }
-    });
-    return block ? NIL : arr(results);
+      });
+      return block ? NIL : arr(results);
+    } finally {
+      for (const iterator of iterators) iterator?.return();
+    }
   } finally {
-    for (const iterator of iterators) iterator?.return();
     arrays.length = arrayMark;
-    held.length = mark;
   }
 }
 def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
