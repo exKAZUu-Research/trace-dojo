@@ -12,7 +12,7 @@ import { EOF, sameError } from './io';
 import { equalFold } from './strings';
 import { byteSlice, bytesOf, callFunction, callMethod, sliceValues, stringPanic } from './support';
 import { NAME_FIRST, NAME_SECOND } from './xmlTables';
-import { plainError, syntaxError, tokenFromGo, type XName, type XToken } from './xmlTypes';
+import { plainError, syntaxError, tokenFromGo, type XAttr, type XName, type XToken } from './xmlTypes';
 
 export const XML_URL = 'http://www.w3.org/XML/1998/namespace';
 const XMLNS_PREFIX = 'xmlns';
@@ -131,6 +131,15 @@ interface StackEntry {
   name: XName;
   ok: boolean;
 }
+
+interface DirectiveState {
+  data: string;
+  inquote: number;
+  depth: number;
+}
+
+const DIRECTIVE_DONE = -1;
+const DIRECTIVE_ERROR = -2;
 
 const ENTITIES: Record<string, string> = { lt: '<', gt: '>', amp: '&', apos: "'", quot: '"' };
 
@@ -323,7 +332,7 @@ export class XmlDecoder {
   }
 
   /** `RawToken`'s tokenizer. */
-  // code-gauge-allow functionCognitiveComplexity 60 -- A transcription of Go's Decoder.rawToken.
+  /** `RawToken`'s tokenizer. */
   rawToken(): [XToken | undefined, Value] {
     if (this.tokenReader !== undefined) {
       const [token, err] = callMethod(this.tokenReader, 'Token') as [Value, Value];
@@ -334,218 +343,213 @@ export class XmlDecoder {
       this.needClose = false;
       return [{ kind: 'end', name: this.toClose }, undefined];
     }
-    let b = this.getc();
+    const b = this.getc();
     if (b < 0) return [undefined, this.err];
-    if (b !== 0x3c) {
+    let token: XToken | undefined;
+    if (b === 0x3c) {
+      token = this.markup();
+    } else {
       this.ungetc(b);
       const data = this.text(-1, false);
-      if (data === undefined) return [undefined, this.err];
-      return [{ kind: 'chardata', data }, undefined];
+      token = data === undefined ? undefined : { kind: 'chardata', data };
     }
-    if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-    switch (b) {
-      case 0x2f: {
-        const name = this.nsname();
-        if (!name) {
-          this.err ??= this.syntaxError('expected element name after </');
-          return [undefined, this.err];
-        }
-        this.space();
-        if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-        if (b !== 0x3e) {
-          this.err = this.syntaxError(`invalid characters between </${name.local} and >`);
-          return [undefined, this.err];
-        }
-        return [{ kind: 'end', name }, undefined];
-      }
-      case 0x3f: {
-        return this.procInst();
-      }
-      case 0x21: {
-        return this.bang();
-      }
-    }
+    return token === undefined ? [undefined, this.err] : [token, undefined];
+  }
+
+  /** The token after `<`, or undefined with the error stored. */
+  private markup(): XToken | undefined {
+    const b = this.mustgetc();
+    if (b < 0) return undefined;
+    if (b === 0x2f) return this.endElement();
+    if (b === 0x3f) return this.procInst();
+    if (b === 0x21) return this.bang();
     this.ungetc(b);
+    return this.startElement();
+  }
+
+  private endElement(): XToken | undefined {
     const name = this.nsname();
-    if (!name) {
-      this.err ??= this.syntaxError('expected element name after <');
-      return [undefined, this.err];
-    }
-    const attr: { name: XName; value: string }[] = [];
-    let empty = false;
+    if (!name) return this.failUnlessErr('expected element name after </');
+    this.space();
+    const b = this.mustgetc();
+    if (b < 0) return undefined;
+    if (b !== 0x3e) return this.fail(`invalid characters between </${name.local} and >`);
+    return { kind: 'end', name };
+  }
+
+  /** Records a syntax error unless reading already stored one, and returns undefined. */
+  private failUnlessErr(msg: string): undefined {
+    this.err ??= this.syntaxError(msg);
+    return undefined;
+  }
+
+  private startElement(): XToken | undefined {
+    const name = this.nsname();
+    if (!name) return this.failUnlessErr('expected element name after <');
+    const attr: XAttr[] = [];
     for (;;) {
       this.space();
-      if ((b = this.mustgetc()) < 0) return [undefined, this.err];
+      let b = this.mustgetc();
+      if (b < 0) return undefined;
       if (b === 0x2f) {
-        empty = true;
-        if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-        if (b !== 0x3e) {
-          this.err = this.syntaxError('expected /> in element');
-          return [undefined, this.err];
-        }
+        if ((b = this.mustgetc()) < 0) return undefined;
+        if (b !== 0x3e) return this.fail('expected /> in element');
+        this.needClose = true;
+        this.toClose = name;
         break;
       }
       if (b === 0x3e) break;
       this.ungetc(b);
-      const attrName = this.nsname();
-      if (!attrName) {
-        this.err ??= this.syntaxError('expected attribute name in element');
-        return [undefined, this.err];
-      }
-      this.space();
-      if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-      let value: string;
-      if (b === 0x3d) {
-        this.space();
-        const data = this.attrval();
-        if (data === undefined) return [undefined, this.err];
-        value = data;
-      } else {
-        if (this.strict) {
-          this.err = this.syntaxError('attribute name without = in element');
-          return [undefined, this.err];
-        }
-        this.ungetc(b);
-        value = attrName.local;
-      }
-      attr.push({ name: attrName, value });
+      const a = this.attribute();
+      if (a === undefined) return undefined;
+      attr.push(a);
     }
-    if (empty) {
-      this.needClose = true;
-      this.toClose = name;
-    }
-    return [{ kind: 'start', name, attr }, undefined];
+    return { kind: 'start', name, attr };
   }
 
-  private procInst(): [XToken | undefined, Value] {
-    const target = this.name();
-    if (target === undefined) {
-      this.err ??= this.syntaxError('expected target name after <?');
-      return [undefined, this.err];
+  private attribute(): XAttr | undefined {
+    const name = this.nsname();
+    if (!name) return this.failUnlessErr('expected attribute name in element');
+    this.space();
+    const b = this.mustgetc();
+    if (b < 0) return undefined;
+    if (b !== 0x3d) {
+      if (this.strict) return this.fail('attribute name without = in element');
+      this.ungetc(b);
+      return { name, value: name.local };
     }
+    this.space();
+    const value = this.attrval();
+    return value === undefined ? undefined : { name, value };
+  }
+
+  private procInst(): XToken | undefined {
+    const target = this.name();
+    if (target === undefined) return this.failUnlessErr('expected target name after <?');
     this.space();
     let data = '';
     let b0 = -1;
     for (;;) {
       const b = this.mustgetc();
-      if (b < 0) return [undefined, this.err];
+      if (b < 0) return undefined;
       data += String.fromCharCode(b);
       if (b0 === 0x3f && b === 0x3e) break;
       b0 = b;
     }
     data = data.slice(0, -2);
-    if (target === 'xml') {
-      const ver = procInstParam('version', data);
-      if (ver !== '' && ver !== '1.0') {
-        this.err = plainError(`xml: unsupported version ${quote(ver)}; only version 1.0 is supported`);
-        return [undefined, this.err];
-      }
-      const enc = procInstParam('encoding', data);
-      // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Go compares the declared name with "utf-8".
-      if (enc !== '' && !equalFold(enc, 'utf-8')) {
-        if (this.struct.fields[3] === undefined) {
-          this.err = plainError(`xml: encoding ${quote(enc)} declared but Decoder.CharsetReader is nil`);
-          return [undefined, this.err];
-        }
-        const [reader, err] = callFunction(this.struct.fields[3], [enc, (this.source as ByteSource).reader()]) as [
-          Value,
-          Value,
-        ];
-        if (err !== undefined) {
-          this.err = errorf('xml: opening charset %q: %w', [new Iface(BASIC.string, enc), err]);
-          return [undefined, this.err];
-        }
-        if (reader === undefined) stringPanic(`CharsetReader returned a nil Reader for charset ${enc}`);
-        this.source = sourceOf(reader);
-      }
-    }
-    return [{ kind: 'procinst', target, inst: data }, undefined];
+    if (target === 'xml' && !this.checkDeclaration(data)) return undefined;
+    return { kind: 'procinst', target, inst: data };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- A transcription of the `<!` part of Go's Decoder.rawToken.
-  private bang(): [XToken | undefined, Value] {
-    let b = this.mustgetc();
-    if (b < 0) return [undefined, this.err];
-    if (b === 0x2d) {
-      if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-      if (b !== 0x2d) {
-        this.err = this.syntaxError('invalid sequence <!- not part of <!--');
-        return [undefined, this.err];
-      }
-      let data = '';
-      let b0 = -1;
-      let b1 = -1;
-      for (;;) {
-        if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-        data += String.fromCharCode(b);
-        if (b0 === 0x2d && b1 === 0x2d) {
-          if (b !== 0x3e) {
-            this.err = this.syntaxError('invalid sequence "--" not allowed in comments');
-            return [undefined, this.err];
-          }
-          break;
-        }
-        b0 = b1;
-        b1 = b;
-      }
-      return [{ kind: 'comment', data: data.slice(0, -3) }, undefined];
+  /** Checks the version and encoding of an `<?xml` declaration, switching to the CharsetReader's reader if needed. */
+  private checkDeclaration(data: string): boolean {
+    const ver = procInstParam('version', data);
+    if (ver !== '' && ver !== '1.0') {
+      this.err = plainError(`xml: unsupported version ${quote(ver)}; only version 1.0 is supported`);
+      return false;
     }
+    const enc = procInstParam('encoding', data);
+    // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Go compares the declared name with "utf-8".
+    if (enc === '' || equalFold(enc, 'utf-8')) return true;
+    if (this.struct.fields[3] === undefined) {
+      this.err = plainError(`xml: encoding ${quote(enc)} declared but Decoder.CharsetReader is nil`);
+      return false;
+    }
+    const [reader, err] = callFunction(this.struct.fields[3], [enc, (this.source as ByteSource).reader()]) as [
+      Value,
+      Value,
+    ];
+    if (err !== undefined) {
+      this.err = errorf('xml: opening charset %q: %w', [new Iface(BASIC.string, enc), err]);
+      return false;
+    }
+    if (reader === undefined) stringPanic(`CharsetReader returned a nil Reader for charset ${enc}`);
+    this.source = sourceOf(reader);
+    return true;
+  }
+
+  /** The token after `<!`: a comment, a CDATA section, or a directive. */
+  private bang(): XToken | undefined {
+    const b = this.mustgetc();
+    if (b < 0) return undefined;
+    if (b === 0x2d) return this.comment();
     if (b === 0x5b) {
       for (let i = 0; i < 6; i++) {
-        if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-        if (b !== 'CDATA['.charCodeAt(i)) {
-          this.err = this.syntaxError('invalid <![ sequence');
-          return [undefined, this.err];
-        }
+        const c = this.mustgetc();
+        if (c < 0) return undefined;
+        if (c !== 'CDATA['.charCodeAt(i)) return this.fail('invalid <![ sequence');
       }
       const data = this.text(-1, true);
-      if (data === undefined) return [undefined, this.err];
-      return [{ kind: 'chardata', data }, undefined];
+      return data === undefined ? undefined : { kind: 'chardata', data };
     }
-    let data = String.fromCharCode(b);
-    let inquote = 0;
-    let depth = 0;
+    return this.directive(b);
+  }
+
+  private comment(): XToken | undefined {
+    let b = this.mustgetc();
+    if (b < 0) return undefined;
+    if (b !== 0x2d) return this.fail('invalid sequence <!- not part of <!--');
+    let data = '';
+    let b0 = -1;
+    let b1 = -1;
     for (;;) {
-      if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-      if (inquote === 0 && b === 0x3e && depth === 0) break;
-      let handle = true;
-      while (handle) {
-        handle = false;
-        data += String.fromCharCode(b);
-        if (b === inquote) inquote = 0;
-        else if (inquote !== 0) {
-          // Inside a quoted string.
-        } else if (b === 0x27 || b === 0x22) inquote = b;
-        else if (b === 0x3e) depth--;
-        else if (b === 0x3c) {
-          const s = '!--';
-          let matched = true;
-          for (let i = 0; i < s.length; i++) {
-            if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-            if (b !== s.charCodeAt(i)) {
-              data += s.slice(0, i);
-              depth++;
-              matched = false;
-              handle = true;
-              break;
-            }
-          }
-          if (matched) {
-            data = data.slice(0, -1);
-            let b0 = -1;
-            let b1 = -1;
-            for (;;) {
-              if ((b = this.mustgetc()) < 0) return [undefined, this.err];
-              if (b0 === 0x2d && b1 === 0x2d && b === 0x3e) break;
-              b0 = b1;
-              b1 = b;
-            }
-            data += ' ';
-          }
-        }
+      if ((b = this.mustgetc()) < 0) return undefined;
+      data += String.fromCharCode(b);
+      if (b0 === 0x2d && b1 === 0x2d) {
+        if (b !== 0x3e) return this.fail('invalid sequence "--" not allowed in comments');
+        return { kind: 'comment', data: data.slice(0, -3) };
+      }
+      b0 = b1;
+      b1 = b;
+    }
+  }
+
+  /** A directive after `<!` and its first byte, skipping comments inside it as Go does. */
+  private directive(first: number): XToken | undefined {
+    const state: DirectiveState = { data: String.fromCharCode(first), inquote: 0, depth: 0 };
+    for (;;) {
+      let b = this.mustgetc();
+      if (b < 0) return undefined;
+      if (state.inquote === 0 && b === 0x3e && state.depth === 0) return { kind: 'directive', data: state.data };
+      while (b >= 0) b = this.directiveByte(state, b);
+      if (b === DIRECTIVE_ERROR) return undefined;
+    }
+  }
+
+  /** Adds a byte to a directive: returns the next byte to handle, DIRECTIVE_DONE, or DIRECTIVE_ERROR. */
+  private directiveByte(state: DirectiveState, b: number): number {
+    state.data += String.fromCharCode(b);
+    if (b === state.inquote) state.inquote = 0;
+    else if (state.inquote !== 0) return DIRECTIVE_DONE;
+    else if (b === 0x27 || b === 0x22) state.inquote = b;
+    else if (b === 0x3e) state.depth--;
+    else if (b === 0x3c) return this.directiveComment(state);
+    return DIRECTIVE_DONE;
+  }
+
+  /** After `<` in a directive: skips a comment, or counts the nesting and returns the byte that ends `<!--`. */
+  private directiveComment(state: DirectiveState): number {
+    for (let i = 0; i < 3; i++) {
+      const c = this.mustgetc();
+      if (c < 0) return DIRECTIVE_ERROR;
+      if (c !== '!--'.charCodeAt(i)) {
+        state.data += '!--'.slice(0, i);
+        state.depth++;
+        return c;
       }
     }
-    return [{ kind: 'directive', data }, undefined];
+    state.data = state.data.slice(0, -1);
+    let b0 = -1;
+    let b1 = -1;
+    for (;;) {
+      const b = this.mustgetc();
+      if (b < 0) return DIRECTIVE_ERROR;
+      if (b0 === 0x2d && b1 === 0x2d && b === 0x3e) break;
+      b0 = b1;
+      b1 = b;
+    }
+    state.data += ' ';
+    return DIRECTIVE_DONE;
   }
 
   private attrval(): string | undefined {
@@ -624,7 +628,6 @@ export class XmlDecoder {
   }
 
   /** `text`: character data up to `<`, the closing quote, or the end of a CDATA section, with entities replaced. */
-  // code-gauge-allow functionCognitiveComplexity 60 -- A transcription of Go's Decoder.text.
   private text(quoteChar: number, cdata: boolean): string | undefined {
     let b0 = 0;
     let b1 = 0;
@@ -632,90 +635,30 @@ export class XmlDecoder {
     let buf = '';
     for (;;) {
       currentRuntime().spend();
-      let b = this.getc();
+      const b = this.getc();
       if (b < 0) {
-        if (cdata) {
-          if (sameError(this.err, EOF)) this.err = this.syntaxError('unexpected EOF in CDATA section');
-          return undefined;
-        }
-        break;
-      }
-      if (quoteChar < 0 && b0 === 0x5d && b1 === 0x5d && b === 0x3e) {
-        if (cdata) {
-          trunc = 2;
-          break;
-        }
-        this.err = this.syntaxError('unescaped ]]> not in CDATA section');
+        if (!cdata) break;
+        if (sameError(this.err, EOF)) this.err = this.syntaxError('unexpected EOF in CDATA section');
         return undefined;
       }
+      if (quoteChar < 0 && b0 === 0x5d && b1 === 0x5d && b === 0x3e) {
+        if (!cdata) return this.fail('unescaped ]]> not in CDATA section');
+        trunc = 2;
+        break;
+      }
       if (b === 0x3c && !cdata) {
-        if (quoteChar >= 0) {
-          this.err = this.syntaxError('unescaped < inside quoted string');
-          return undefined;
-        }
+        if (quoteChar >= 0) return this.fail('unescaped < inside quoted string');
         this.ungetc(0x3c);
         break;
       }
       if (quoteChar >= 0 && b === quoteChar) break;
       if (b === 0x26 && !cdata) {
-        const before = buf.length;
-        buf += '&';
-        let text: string | undefined;
-        if ((b = this.mustgetc()) < 0) return undefined;
-        if (b === 0x23) {
-          buf += '#';
-          if ((b = this.mustgetc()) < 0) return undefined;
-          let base = 10;
-          if (b === 0x78) {
-            base = 16;
-            buf += 'x';
-            if ((b = this.mustgetc()) < 0) return undefined;
-          }
-          const start = buf.length;
-          const isDigit = (c: number): boolean =>
-            (c >= 0x30 && c <= 0x39) || (base === 16 && ((c >= 0x61 && c <= 0x66) || (c >= 0x41 && c <= 0x46)));
-          while (isDigit(b)) {
-            buf += String.fromCharCode(b);
-            if ((b = this.mustgetc()) < 0) return undefined;
-          }
-          if (b === 0x3b) {
-            const s = buf.slice(start);
-            buf += ';';
-            const n = s === '' ? -1n : BigInt(base === 16 ? `0x${s}` : s);
-            if (n >= 0n && n <= 0x10_ff_ffn) text = encodeRune(n >= 0xd8_00n && n < 0xe0_00n ? RUNE_ERROR : Number(n));
-          } else {
-            this.ungetc(b);
-          }
-        } else {
-          this.ungetc(b);
-          this.buf = '';
-          const nameOk = this.readName();
-          if (!nameOk && this.err !== undefined) return undefined;
-          buf += this.buf;
-          if ((b = this.mustgetc()) < 0) return undefined;
-          if (b === 0x3b) {
-            const name = buf.slice(before + 1);
-            buf += ';';
-            if (isName(name)) text = ENTITIES[name] ?? this.entity(name);
-          } else {
-            this.ungetc(b);
-          }
-        }
-        if (text !== undefined) {
-          buf = buf.slice(0, before) + text;
-          b0 = 0;
-          b1 = 0;
-          continue;
-        }
-        if (!this.strict) {
-          b0 = 0;
-          b1 = 0;
-          continue;
-        }
-        let ent = buf.slice(before);
-        if (!ent.endsWith(';')) ent += ' (no semicolon)';
-        this.err = this.syntaxError(`invalid character entity ${ent}`);
-        return undefined;
+        const entity = this.entityReference();
+        if (entity === undefined) return undefined;
+        buf += entity;
+        b0 = 0;
+        b1 = 0;
+        continue;
       }
       if (b === 0x0d) buf += '\n';
       else if (!(b1 === 0x0d && b === 0x0a)) buf += String.fromCharCode(b);
@@ -723,19 +666,84 @@ export class XmlDecoder {
       b1 = b;
     }
     const data = buf.slice(0, buf.length - trunc);
-    for (let i = 0; i < data.length;) {
-      const { rune, size } = decodeRune(data, i);
-      if (rune === RUNE_ERROR && size === 1) {
-        this.err = this.syntaxError('invalid UTF-8');
-        return undefined;
-      }
-      i += size;
-      if (!isInCharacterRange(rune)) {
-        this.err = this.syntaxError(`illegal character code U+${rune.toString(16).toUpperCase().padStart(4, '0')}`);
-        return undefined;
+    return this.checkCharacters(data) ? data : undefined;
+  }
+
+  /** Records a syntax error and returns undefined, for the parsers that report failure so. */
+  private fail(msg: string): undefined {
+    this.err = this.syntaxError(msg);
+    return undefined;
+  }
+
+  /**
+   * The text of the entity or character reference after `&`, its raw text when it is unknown and the decoder is not
+   * strict, or undefined with the error stored.
+   */
+  private entityReference(): string | undefined {
+    let raw = '&';
+    let b = this.mustgetc();
+    if (b < 0) return undefined;
+    let text: string | undefined;
+    if (b === 0x23) {
+      const reference = this.characterReference();
+      if (reference === undefined) return undefined;
+      raw += reference.raw;
+      text = reference.text;
+    } else {
+      this.ungetc(b);
+      this.buf = '';
+      if (!this.readName() && this.err !== undefined) return undefined;
+      raw += this.buf;
+      if ((b = this.mustgetc()) < 0) return undefined;
+      if (b === 0x3b) {
+        const name = raw.slice(1);
+        raw += ';';
+        if (isName(name)) text = ENTITIES[name] ?? this.entity(name);
+      } else {
+        this.ungetc(b);
       }
     }
-    return data;
+    if (text !== undefined || !this.strict) return text ?? raw;
+    return this.fail(`invalid character entity ${raw.endsWith(';') ? raw : `${raw} (no semicolon)`}`);
+  }
+
+  /** The raw text after `&` of a `#` reference, and the character it stands for when it is valid. */
+  private characterReference(): { raw: string; text?: string } | undefined {
+    let raw = '#';
+    let b = this.mustgetc();
+    if (b < 0) return undefined;
+    let base = 10;
+    if (b === 0x78) {
+      base = 16;
+      raw += 'x';
+      if ((b = this.mustgetc()) < 0) return undefined;
+    }
+    let digits = '';
+    while ((b >= 0x30 && b <= 0x39) || (base === 16 && /^[a-fA-F]$/.test(String.fromCharCode(b)))) {
+      digits += String.fromCharCode(b);
+      if ((b = this.mustgetc()) < 0) return undefined;
+    }
+    raw += digits;
+    if (b !== 0x3b) {
+      this.ungetc(b);
+      return { raw };
+    }
+    const n = digits === '' ? -1n : BigInt(base === 16 ? `0x${digits}` : digits);
+    if (n < 0n || n > 0x10_ff_ffn) return { raw: `${raw};` };
+    return { raw: `${raw};`, text: encodeRune(n >= 0xd8_00n && n < 0xe0_00n ? RUNE_ERROR : Number(n)) };
+  }
+
+  /** Whether character data is valid UTF-8 of XML characters, storing the syntax error when it is not. */
+  private checkCharacters(data: string): boolean {
+    for (let i = 0; i < data.length; ) {
+      const { rune, size } = decodeRune(data, i);
+      if (rune === RUNE_ERROR && size === 1) return this.fail('invalid UTF-8') ?? false;
+      i += size;
+      if (!isInCharacterRange(rune)) {
+        return this.fail(`illegal character code U+${rune.toString(16).toUpperCase().padStart(4, '0')}`) ?? false;
+      }
+    }
+    return true;
   }
 
   private nsname(): XName | undefined {

@@ -362,38 +362,16 @@ function makeInvalidArshaler(type: Type): Arshaler {
 // Methods ---
 
 /** `makeMethodArshaler`: the program's MarshalJSON, MarshalText, UnmarshalJSON, and UnmarshalText methods. */
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per method that Go's makeMethodArshaler handles.
 function makeMethodArshaler(fncs: Arshaler, type: Type): Arshaler {
   const kind = kindOf(type);
   if (kind === 'pointer' || kind === 'interface' || type === NUMBER) return fncs;
   const result = { ...fncs };
   const pointerType = pointerTo(type);
-  const addMarshal = (iface: NamedType, call: (enc: EncoderState, pointer: Pointer) => LibError | undefined): void => {
-    const via = implementsVia(type, iface);
-    if (!via) return;
-    result.nonDefault = true;
-    const previous = result.marshal;
-    const isString = kind === 'string';
-    result.marshal = (enc, ref, mo) => {
-      const atName = enc.tokens.last.needObjectName;
-      const textLike = iface !== MARSHALER;
-      if ((via === 'pointer' && ref.forcedAddr) || (atName && (!textLike || isString))) {
-        return previous(enc, ref, mo);
-      }
-      return call(enc, ref.pointer);
-    };
-  };
-  addMarshal(TEXT_MARSHALER, (enc, pointer) => {
-    const [text, err] = callPointerMethod(type, pointer, 'MarshalText', []) as [Value, Value];
-    if (err !== undefined) return new MarshalerError(pointerType, goError(err), 'MarshalText');
-    return enc.appendRaw('"', bytesOf(text));
-  });
-  addMarshal(TEXT_APPENDER, (enc, pointer) => {
-    const [text, err] = callPointerMethod(type, pointer, 'AppendText', [undefined]) as [Value, Value];
-    if (err !== undefined) return new MarshalerError(pointerType, goError(err), 'AppendText');
-    return enc.appendRaw('"', bytesOf(text));
-  });
-  addMarshal(MARSHALER, (enc, pointer) => {
+  addMarshalMethod(result, type, TEXT_MARSHALER, (enc, pointer) => marshalText(enc, type, pointer, 'MarshalText', []));
+  addMarshalMethod(result, type, TEXT_APPENDER, (enc, pointer) =>
+    marshalText(enc, type, pointer, 'AppendText', [undefined])
+  );
+  addMarshalMethod(result, type, MARSHALER, (enc, pointer) => {
     const [val, err] = callPointerMethod(type, pointer, 'MarshalJSON', []) as [Value, Value];
     if (err !== undefined) return new MarshalerError(pointerType, goError(err), 'MarshalJSON');
     const writeErr = enc.writeValue(bytesOf(val));
@@ -401,16 +379,7 @@ function makeMethodArshaler(fncs: Arshaler, type: Type): Arshaler {
   });
   if (implementsVia(type, TEXT_UNMARSHALER)) {
     result.nonDefault = true;
-    result.unmarshal = (dec, ref) => {
-      const flags = { nonVerbatim: false };
-      const [val, err] = dec.readValue(flags);
-      if (err) return err;
-      if (val[0] === 'n') return;
-      if (val[0] !== '"') return newUnmarshalErrorAfter(dec, type, ERR_NON_STRING_VALUE);
-      const text = unquoteMayCopy(val, !flags.nonVerbatim);
-      const callErr = callPointerMethod(type, ref.pointer, 'UnmarshalText', [byteSlice(text)]) as Value;
-      return callErr === undefined ? undefined : goError(callErr);
-    };
+    result.unmarshal = (dec, ref) => unmarshalText(dec, ref, type);
   }
   if (implementsVia(type, UNMARSHALER)) {
     result.nonDefault = true;
@@ -424,6 +393,52 @@ function makeMethodArshaler(fncs: Arshaler, type: Type): Arshaler {
     };
   }
   return result;
+}
+
+/**
+ * Makes `result` marshal with a method of the interface when the type has it, falling back to the previous function
+ * as v1 does: for a pointer method of a value that is not addressable, and for object names other than text.
+ */
+function addMarshalMethod(
+  result: Arshaler,
+  type: Type,
+  iface: NamedType,
+  call: (enc: EncoderState, pointer: Pointer) => LibError | undefined
+): void {
+  const via = implementsVia(type, iface);
+  if (!via) return;
+  result.nonDefault = true;
+  const previous = result.marshal;
+  const fallbackAtName = iface === MARSHALER || kindOf(type) === 'string';
+  result.marshal = (enc, ref, mo) => {
+    if ((via === 'pointer' && ref.forcedAddr) || (enc.tokens.last.needObjectName && fallbackAtName)) {
+      return previous(enc, ref, mo);
+    }
+    return call(enc, ref.pointer);
+  };
+}
+
+function marshalText(
+  enc: EncoderState,
+  type: Type,
+  pointer: Pointer,
+  method: string,
+  args: Value[]
+): LibError | undefined {
+  const [text, err] = callPointerMethod(type, pointer, method, args) as [Value, Value];
+  if (err !== undefined) return new MarshalerError(pointerTo(type), goError(err), method);
+  return enc.appendRaw('"', bytesOf(text));
+}
+
+function unmarshalText(dec: DecoderState, ref: Ref, type: Type): LibError | undefined {
+  const flags = { nonVerbatim: false };
+  const [val, err] = dec.readValue(flags);
+  if (err) return err;
+  if (val[0] === 'n') return undefined;
+  if (val[0] !== '"') return newUnmarshalErrorAfter(dec, type, ERR_NON_STRING_VALUE);
+  const text = unquoteMayCopy(val, !flags.nonVerbatim);
+  const callErr = callPointerMethod(type, ref.pointer, 'UnmarshalText', [byteSlice(text)]) as Value;
+  return callErr === undefined ? undefined : goError(callErr);
 }
 
 // Entry points ----------------------------------------------------------------------------------------------------------
