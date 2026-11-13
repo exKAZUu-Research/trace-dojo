@@ -5,7 +5,7 @@ import { callValue, getAttribute } from '../objects';
 import { isInstanceOf, None, NotImplemented, pyError, strClass, typeError, typeName } from '../types';
 import { type Kwargs, PyInstance, type PyValue } from '../values';
 import { datetimeClass, defineConstants, valueHash } from './datetimeClasses';
-import { isTimedelta, newTimedelta, type PyTimedelta, timedeltaRepr } from './datetimeDelta';
+import { hashOfMicroseconds, isTimedelta, newTimedelta, type PyTimedelta, timedeltaRepr } from './datetimeDelta';
 
 const US_PER_DAY = 86_400_000_000n;
 
@@ -167,10 +167,7 @@ method(timezoneClass, '__str__', 'none', 0, 0, (self) => timezoneName(zone(self)
 method(timezoneClass, '__eq__', 'one', 1, 1, (self, [other]) =>
   other instanceof PyTimezone ? zone(self).offset.totalMicroseconds === other.offset.totalMicroseconds : NotImplemented
 );
-valueHash(timezoneClass, (self) => {
-  const offset = zone(self).offset;
-  return BigInt(offset.days * 86_400 + offset.seconds) * 1_000_003n + BigInt(offset.microseconds);
-});
+valueHash(timezoneClass, (self) => hashOfMicroseconds(zone(self).offset.totalMicroseconds));
 defineConstants(timezoneClass, () => ({
   utc: UTC,
   min: new PyTimezone(newTimedelta(-(US_PER_DAY - 60_000_000n)), undefined),

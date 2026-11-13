@@ -238,9 +238,11 @@ function resetToken(variable: PyOpaque, token: PyOpaque): void {
   }
   const context = currentContext();
   if (data.context !== context) throw pyError('ValueError', `${pyRepr(token)} was created in a different Context`);
+  const displaced = context.data.values.get(variable);
   if (data.old === MISSING) context.data.values.delete(variable);
   else setContextValue(context.data.values, variable, data.old);
   data.used = true;
+  currentRuntime().finalizer.release([displaced]);
 }
 
 // Token -------------------------------------------------------------------------------------------------------------

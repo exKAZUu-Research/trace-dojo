@@ -6,7 +6,7 @@ import { lessThan } from '../operators';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { iterStr } from '../strings';
-import { nativeFunction, newList, None, typeError, typeName, valueError } from '../types';
+import { nativeFunction, newList, None, typeError, typeName, unbox, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
 import { bindArguments } from './numberSupport';
@@ -153,7 +153,7 @@ function fspath(value: PyValue): PyValue {
 
 /** `os.fsencode`: a path as bytes in the file system encoding of macOS, UTF-8 with surrogateescape. */
 function fsencode(value: PyValue): PyValue {
-  const path = fspath(value);
+  const path = unbox(fspath(value));
   return typeof path === 'string' ? newBytes(encodeString(path, 'utf8', 'surrogateescape')) : path;
 }
 

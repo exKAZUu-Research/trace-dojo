@@ -8,11 +8,15 @@ type Chars = readonly string[];
 function utf8Units(text: string): Chars {
   const units: string[] = [];
   for (const char of text) {
-    const code = char.codePointAt(0) as number;
-    const length = code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
+    const length = utf8UnitLength(char);
     units.push(char, ...Array.from<string>({ length: length - 1 }).fill('￿'));
   }
   return units;
+}
+
+function utf8UnitLength(char: string): number {
+  const code = char.codePointAt(0) as number;
+  return code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
 }
 
 const isDigit = (char: string | undefined): boolean => char !== undefined && char >= '0' && char <= '9';
@@ -168,6 +172,6 @@ export function parseIsoDateTime(text: string): { date: [number, number, number]
   const date = parseDate(chars, separator);
   if (!date) return undefined;
   if (chars.length <= separator) return { date, time: { hour: 0, minute: 0, second: 0, microsecond: 0 } };
-  const time = parseIsoTime(chars, separator + 1);
+  const time = parseIsoTime(chars, separator + utf8UnitLength(chars[separator]));
   return time && { date, time };
 }

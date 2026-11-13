@@ -1281,33 +1281,7 @@ def _get_slots(cls):
 
 
 def _update_func_cell_for__class__(f, oldcls, newcls):
-    # Returns True if we update a cell, else False.
     return _update_class_cell(f, oldcls, newcls)
-    if f is None:
-        # f will be None in the case of a property where not all of
-        # fget, fset, and fdel are used.  Nothing to do in that case.
-        return False
-    try:
-        idx = f.__code__.co_freevars.index("__class__")
-    except ValueError:
-        # This function doesn't reference __class__, so nothing to do.
-        return False
-    # Fix the cell to point to the new class, if it's already pointing
-    # at the old class.
-    closure = f.__closure__[idx]
-
-    try:
-        contents = closure.cell_contents
-    except ValueError:
-        # Cell is empty
-        return False
-
-    # This check makes it so we avoid updating an incorrect cell if the
-    # class body contains a function that was defined in a different class.
-    if contents is oldcls:
-        closure.cell_contents = newcls
-        return True
-    return False
 
 
 def _create_slots(defined_fields, inherited_slots, field_names, weakref_slot):

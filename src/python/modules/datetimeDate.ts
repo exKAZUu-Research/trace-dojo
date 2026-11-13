@@ -5,7 +5,7 @@ import { method } from '../define';
 import { tupleHash } from '../hashing';
 import { floorDivInt } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
-import { intClass, isInstanceOf, None, NotImplemented, pyError, typeError, typeName } from '../types';
+import { intClass, isInstanceOf, None, NotImplemented, pyError, typeError, typeName, unbox } from '../types';
 import type { Kwargs, PyClass, PyValue } from '../values';
 import {
   dayOfYear,
@@ -50,15 +50,16 @@ dateClass.construct = (cls, args, kwargs) => {
 
 /** Splits a timestamp into whole seconds and microseconds, rounding halves to even as `_PyTime_ObjectToTimeval` does. */
 export function splitTimestamp(value: PyValue): [bigint, number] {
+  const numeric = unbox(value);
   if (isInstanceOf(value, intClass)) {
-    const seconds = typeof value === 'boolean' ? BigInt(value) : (value as bigint);
+    const seconds = typeof numeric === 'boolean' ? BigInt(numeric) : (numeric as bigint);
     checkTimeT(seconds);
     return [seconds, 0];
   }
-  if (typeof value !== 'number') throw typeError(`argument must be int or float, not ${typeName(value)}`);
-  if (Number.isNaN(value)) throw pyError('ValueError', 'Invalid value NaN (not a number)');
-  let whole = Math.trunc(value);
-  let fraction = roundHalfEven((value - whole) * 1e6);
+  if (typeof numeric !== 'number') throw typeError(`argument must be int or float, not ${typeName(value)}`);
+  if (Number.isNaN(numeric)) throw pyError('ValueError', 'Invalid value NaN (not a number)');
+  let whole = Math.trunc(numeric);
+  let fraction = roundHalfEven((numeric - whole) * 1e6);
   if (fraction >= 1e6) {
     fraction -= 1e6;
     whole += 1;

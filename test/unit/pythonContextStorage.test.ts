@@ -56,3 +56,28 @@ print(vars(sys.implementation)['extra'])`;
     uncaughtException: undefined,
   });
 });
+
+test.each([false, true])(
+  'context resets release displaced values after restoring the binding (with=%s)',
+  (withToken) => {
+    const program = `import contextvars
+value = contextvars.ContextVar('value')
+class Resource:
+    def __init__(self, name): self.name = name
+    def __del__(self): print('released', self.name, value.get('missing'))
+${withToken ? "with value.set(Resource('scoped')):\n    print('inside')" : "token = value.set(Resource('scoped'))\nvalue.reset(token)"}
+print('reset')
+previous = value.set('old')
+token = value.set(Resource('copied'))
+copy = contextvars.copy_context()
+value.reset(token)
+print(value.get(), type(copy[value]).__name__)
+del copy
+print('end')`;
+    expect(executeProgram('python', program)).toMatchObject({
+      kind: 'executed',
+      stdout: `${withToken ? 'inside\n' : ''}released scoped missing\nreset\nold Resource\nreleased copied old\nend\n`,
+      uncaughtException: undefined,
+    });
+  }
+);
