@@ -27,6 +27,8 @@ function integerDigits(magnitude: number): number {
 }
 
 /** `strconv.FormatFloat(value, format, precision, bitSize)`, which `fmt` also uses. */
+// code-gauge-allow functionCognitiveComplexity 25 -- Go's format verbs select precision before rendering their sign, digits and exponent.
+// code-gauge-allow functionNcss 47 -- Go's format verbs select precision before rendering their sign, digits and exponent.
 export function formatFloat(value: number, format: string, precision: number, bitSize: 32 | 64): string {
   if (Number.isNaN(value)) return 'NaN';
   if (value === Infinity) return '+Inf';
@@ -82,6 +84,7 @@ export function formatFloat(value: number, format: string, precision: number, bi
   return (negative ? '-' : '') + formatDigits(digits, format, prec, shortest);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Go's general format selects fixed or exponent notation from the rounded precision.
 function formatDigits(digits: Decimal, format: string, precision: number, shortest: boolean): string {
   switch (format) {
     case 'e':
@@ -148,6 +151,7 @@ function parseDecimal(exponential: string): Decimal {
 }
 
 /** The exact decimal expansion of a finite non-negative double. */
+// code-gauge-allow duplicateLines 20 -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
 function exactDecimal(value: number): Decimal {
   if (value === 0) return { digits: '', point: 0 };
   const view = new DataView(new ArrayBuffer(8));
@@ -212,6 +216,8 @@ function binaryExponent(value: number, bitSize: 32 | 64): string {
 }
 
 /** `strconv.fmtX`: the %x form of a non-negative float, with the leading 1 at bit 60 while it rounds. */
+// code-gauge-allow functionCognitiveComplexity 24 -- Go's hexadecimal format keeps IEEE normalization, rounding and digit extraction together.
+// code-gauge-allow functionNcss 52 -- Go's hexadecimal format keeps IEEE normalization, rounding and digit extraction together.
 function hexFloat(value: number, precision: number, bitSize: 32 | 64, upper: boolean): string {
   const mantissaBits = bitSize === 32 ? 23 : 52;
   const view = new DataView(new ArrayBuffer(8));
