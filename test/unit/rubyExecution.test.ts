@@ -374,6 +374,10 @@ test('an endless loop exceeds the operation limit, and endless recursion raises 
   });
 });
 
+test('pretty printing a shared graph is bounded before expanding its output', () => {
+  expect(run('a = ["x"]; 25.times { a = [a, a] }; pp a')).toEqual({ kind: 'limitExceeded', limit: 'output' });
+});
+
 test('standard error is accepted but not shown, and exit ends the program normally', () => {
   expect(run('warn "w"\n$stderr.puts "e"\nputs "out"\nexit\nputs "after"')).toMatchObject({
     stdout: 'out\n',

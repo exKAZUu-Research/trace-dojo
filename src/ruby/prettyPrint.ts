@@ -1,6 +1,8 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { addressOf, anonymousClassName, inspect, strInspect, symInspect } from './conversions';
 import type { Gen } from './interp';
 import { RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } from './objects';
+import { rt } from './runtime';
 import { classOf, realClassOf } from './values';
 
 /** A document for Ruby's PrettyPrint: text, a breakable space, or a group whose breakables break together. */
@@ -14,7 +16,7 @@ const WIDTH = 79;
 
 /** The text `pp` writes for a value: its inspect, broken over lines as Ruby's PP does when it does not fit. */
 export function* prettyInspect(value: Value): Gen<string> {
-  const doc = yield* build(value, new Set());
+  const doc = yield* build(value, new Set(), { count: 0 });
   return `${layout(doc)}\n`;
 }
 
@@ -36,14 +38,16 @@ function showsItself(value: Value): boolean {
   return method !== undefined && method.body.kind !== 'native';
 }
 
-function* build(value: Value, seen: Set<object>): Gen<Doc> {
+function* build(value: Value, seen: Set<object>, budget: { count: number }): Gen<Doc> {
+  rt().spend();
+  if (++budget.count > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
   if (value instanceof RArray && !showsItself(value)) {
     if (seen.has(value)) return text('[...]');
     seen.add(value);
     const parts: Doc[] = [];
     for (const [index, item] of value.items.entries()) {
       if (index > 0) parts.push(text(','), breakable());
-      parts.push(yield* build(item, seen));
+      parts.push(yield* build(item, seen, budget));
     }
     seen.delete(value);
     return group(1, '[', parts, ']');
@@ -56,7 +60,7 @@ function* build(value: Value, seen: Set<object>): Gen<Doc> {
     for (const { key, value: item } of value.map.values()) {
       if (!first) parts.push(text(','), breakable());
       first = false;
-      parts.push({ kind: 'group', indent: 0, parts: yield* pair(key, item, seen) });
+      parts.push({ kind: 'group', indent: 0, parts: yield* pair(key, item, seen, budget) });
     }
     seen.delete(value);
     return group(1, '{', parts, '}');
@@ -92,7 +96,7 @@ function* build(value: Value, seen: Set<object>): Gen<Doc> {
       parts.push(breakable(), text(`${name}=`), {
         kind: 'group',
         indent: 1,
-        parts: [breakable(''), yield* build(item, seen)],
+        parts: [breakable(''), yield* build(item, seen, budget)],
       });
     }
     seen.delete(value);
@@ -101,16 +105,16 @@ function* build(value: Value, seen: Set<object>): Gen<Doc> {
   return text(yield* inspect(value));
 }
 
-function* pair(key: Value, value: Value, seen: Set<object>): Gen<Doc[]> {
+function* pair(key: Value, value: Value, seen: Set<object>, budget: { count: number }): Gen<Doc[]> {
   const parts: Doc[] = [];
   if (key instanceof RSymbol) {
     const shown = symInspect(key.name);
     const simple = !/^:["$@]|[%&*+\-/<=>@\]^`|~]$/.test(shown);
     parts.push(text(`${simple ? key.name : strInspect(key.name)}:`));
   } else {
-    parts.push(yield* build(key, seen), text(' '), text('=>'));
+    parts.push(yield* build(key, seen, budget), text(' '), text('=>'));
   }
-  parts.push({ kind: 'group', indent: 1, parts: [breakable(), yield* build(value, seen)] });
+  parts.push({ kind: 'group', indent: 1, parts: [breakable(), yield* build(value, seen, budget)] });
   return parts;
 }
 
@@ -119,6 +123,7 @@ function layout(doc: Doc): string {
   let output = '';
   let column = 0;
   const visit = (node: Doc, indent: number, flat: boolean, rest: Doc[]): void => {
+    rt().spend();
     switch (node.kind) {
       case 'text': {
         output += node.text;
@@ -149,6 +154,7 @@ function layout(doc: Doc): string {
 }
 
 function flatWidth(doc: Doc): number {
+  rt().spend();
   if (doc.kind !== 'group') return doc.text.length;
   return doc.parts.reduce((sum, part) => sum + flatWidth(part), 0);
 }
@@ -157,6 +163,7 @@ function flatWidth(doc: Doc): number {
 function trailingWidth(rest: Doc[]): number {
   let width = 0;
   for (const doc of rest) {
+    rt().spend();
     if (doc.kind === 'break') return width;
     if (doc.kind === 'text') {
       width += doc.text.length;
