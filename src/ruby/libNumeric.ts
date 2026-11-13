@@ -208,8 +208,8 @@ for (const owner of ['Integer', 'Float']) {
       const order = numericCompare(self, other);
       return order === undefined ? NIL : BigInt(order);
     }
-    if (respondsTo(other, 'coerce')) {
-      const pair = yield* callMethod(other, 'coerce', [self]);
+    if (respondsTo(other, 'coerce', true)) {
+      const pair = yield* callMethod(other, 'coerce', [self], undefined, undefined, { fcall: true });
       if (pair instanceof RArray && pair.items.length === 2)
         return yield* callMethod(pair.items[0], '<=>', pair.items.slice(1));
     }
@@ -444,6 +444,7 @@ function shift(value: bigint, amount: bigint): bigint {
 def('Integer', '[]', [1, 2], function* (self: bigint, args) {
   if (args.length === 1 && args[0] instanceof RRange) {
     const range = args[0];
+    if (self === 0n) return 0n;
     if (range.begin === NIL) throw argumentError('The beginless range for Integer#[] results in infinity');
     const start = yield* toInt(range.begin);
     if (range.end === NIL) return shift(self, -start);

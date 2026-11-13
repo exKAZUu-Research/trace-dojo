@@ -2036,6 +2036,32 @@ test('Enumerable tally rejects non-Integer existing counts without callbacks', (
   });
 });
 
+test('Hash structural hashing repeats child callbacks and guards insertion', () => {
+  for (const nested of ['[X.new]', '{a:X.new}']) {
+    expect(run(`class X; def hash; puts :hash; 0; end; end; t=${nested}; [t,t].hash`)).toMatchObject({
+      stdout: 'hash\nhash\n',
+    });
+  }
+  expect(
+    run(
+      'class V; def hash; $h[:x]=1; 0; end; end; $h={a:V.new}; begin; $h.hash; rescue => e; p e.class,e.message; end; p $h.size'
+    )
+  ).toMatchObject({ stdout: 'RuntimeError\n"can\'t add a new key into hash during iteration"\n1\n' });
+});
+
+test('tally rejects a negative existing count without changing its Hash', () => {
+  expect(run('h={1=>-1};begin;[1].tally(h);rescue=>e;p e.class,e.message;end;p h')).toMatchObject({
+    stdout: 'TypeError\n"wrong argument type Integer (expected Integer)"\n{1 => -1}\n',
+  });
+});
+
+test('zero beginless bit slices and private numeric coercion follow Ruby', () => {
+  expect(run('p 0[..10],0[...-1],0[..0]')).toMatchObject({ stdout: '0\n0\n0\n' });
+  expect(run('class A; private; def coerce(x); [x,2]; end; end; p 5<=>A.new, 5.0<=>A.new')).toMatchObject({
+    stdout: '1\n1\n',
+  });
+});
+
 test('Hash pair collections identify non-array elements', () => {
   expect(
     run(

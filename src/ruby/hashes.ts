@@ -5,74 +5,77 @@ import { type HashEntry, RArray, RBasic, RHash, RRange, RString, type Value } fr
 import { rt } from './runtime';
 import { classOf, snapshot, str, truthy } from './values';
 
+interface HashTraversal {
+  cycle: boolean;
+  callbacks: number;
+  memo: WeakMap<RBasic, { key: string; callbacks: number }>;
+}
+
 /** A bounded structural digest for container hash methods, based on each child's public hash. */
 // code-gauge-allow functionCognitiveComplexity 23 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
 // code-gauge-allow functionNcss 34 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
-export function* hashKeyOf(
-  value: Value,
-  ancestors: RBasic[] = [],
-  cycle?: { found: boolean },
-  memo?: WeakMap<RBasic, string>
-): Gen<string> {
-  cycle ??= { found: false };
-  memo ??= new WeakMap();
+export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], traversal?: HashTraversal): Gen<string> {
+  traversal ??= { cycle: false, callbacks: 0, memo: new WeakMap() };
   rt().spend();
   if (value instanceof RBasic && ancestors.includes(value)) {
-    cycle.found = true;
+    traversal.cycle = true;
     return 'cycle';
   }
   const method = classOf(value).findMethod('hash');
   if (method && method.body.kind === 'user') {
+    traversal.callbacks++;
     const hash = yield* callMethod(value, 'hash', []);
     return digest(String(yield* toInt(hash)));
   }
   if (value instanceof RArray || value instanceof RRange || value instanceof RHash) {
-    const cached = memo.get(value);
-    if (cached) return cached;
+    const cached = traversal.memo.get(value);
+    if (cached?.callbacks === traversal.callbacks) return cached.key;
+    const callbacks = traversal.callbacks;
     ancestors.push(value);
     try {
-      const hash = yield* structuralHash(value, ancestors, cycle, memo);
-      const key = digest(String(cycle.found ? 0n : hash));
-      memo.set(value, key);
+      const hash = yield* structuralHash(value, ancestors, traversal);
+      const key = digest(String(traversal.cycle ? 0n : hash));
+      if (callbacks === traversal.callbacks) traversal.memo.set(value, { key, callbacks });
       return key;
     } finally {
       ancestors.pop();
     }
   }
+  if (value instanceof RBasic && !(value instanceof RString)) traversal.callbacks++;
   return digest(String(yield* toInt(yield* callMethod(value, 'hash', []))));
 }
 
 export function* structuralHashValue(value: RArray | RRange | RHash): Gen<bigint> {
-  const cycle = { found: false };
-  const hash = yield* structuralHash(value, [value], cycle, new WeakMap());
-  return cycle.found ? 0n : hash;
+  const traversal: HashTraversal = { cycle: false, callbacks: 0, memo: new WeakMap() };
+  const hash = yield* structuralHash(value, [value], traversal);
+  return traversal.cycle ? 0n : hash;
 }
 
-function* structuralHash(
-  value: RArray | RRange | RHash,
-  ancestors: RBasic[],
-  cycle: { found: boolean },
-  memo: WeakMap<RBasic, string>
-): Gen<bigint> {
+function* structuralHash(value: RArray | RRange | RHash, ancestors: RBasic[], traversal: HashTraversal): Gen<bigint> {
   let parts: string[];
   if (value instanceof RArray) {
     parts = [];
-    for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, cycle, memo));
+    for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, traversal));
   } else if (value instanceof RRange) {
     parts = [
-      yield* hashKeyOf(value.begin, ancestors, cycle, memo),
+      yield* hashKeyOf(value.begin, ancestors, traversal),
       value.exclusive ? 'exclusive' : 'inclusive',
-      yield* hashKeyOf(value.end, ancestors, cycle, memo),
+      yield* hashKeyOf(value.end, ancestors, traversal),
     ];
   } else {
     parts = [];
-    for (const entry of value.map.values())
-      parts.push(
-        JSON.stringify([
-          yield* hashKeyOf(entry.key, ancestors, cycle, memo),
-          yield* hashKeyOf(entry.value, ancestors, cycle, memo),
-        ])
-      );
+    value.iterating++;
+    try {
+      for (const entry of value.map.values())
+        parts.push(
+          JSON.stringify([
+            yield* hashKeyOf(entry.key, ancestors, traversal),
+            yield* hashKeyOf(entry.value, ancestors, traversal),
+          ])
+        );
+    } finally {
+      value.iterating--;
+    }
     parts.sort();
   }
   return BigInt(`0x${digest(JSON.stringify(parts))}`);

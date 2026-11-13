@@ -1019,7 +1019,7 @@ def('Enumerable', 'tally', [0, 1], function* (self, args) {
     yield* iterate(self, function* (value) {
       const entry = yield* hashGet(counts, value);
       const previous = entry?.value;
-      if (previous !== undefined && typeof previous !== 'bigint')
+      if (previous !== undefined && (typeof previous !== 'bigint' || previous < 0n))
         throw typeError(`wrong argument type ${realClassOf(previous).name} (expected Integer)`);
       yield* hashSet(counts, value, previous === undefined ? 1n : previous + 1n);
     });
