@@ -17,16 +17,7 @@ import type {
   Target,
   WithItem,
 } from './ast';
-import {
-  checkClauseLines,
-  children,
-  field,
-  fieldNodes,
-  hasToken,
-  namedChildren,
-  rowOf,
-  unsupported,
-} from './convertNodes';
+import { checkClauseLines, children, field, hasToken, namedChildren, rowOf, unsupported } from './convertNodes';
 import { ExpressionConverter } from './expressionConverter';
 import { isSupportedModule, unsupportedModuleFeature } from './moduleNames';
 import { literalKeyId } from './patternKeys';
@@ -359,7 +350,13 @@ export class ProgramConverter extends ExpressionConverter {
   private ifStatement(node: Node): Statement {
     const test = this.expression(field(node, 'condition'));
     const body = this.body(field(node, 'consequence'));
-    return { kind: 'if', test, body, orelse: this.elifChain(fieldNodes(node, 'alternative')), row: rowOf(node) };
+    return {
+      kind: 'if',
+      test,
+      body,
+      orelse: this.elifChain(node.childrenForFieldName('alternative')),
+      row: rowOf(node),
+    };
   }
 
   /** Converts elif and else clauses in source order, which the scope analysis depends on. */
@@ -450,7 +447,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   /** Converts an except clause, checking the rules CPython applies to it. */
   private exceptHandler(handler: Node, isLast: boolean, isGroup: boolean): ExceptHandler {
-    const typeNodes = fieldNodes(handler, 'value');
+    const typeNodes = handler.childrenForFieldName('value');
     const aliasNode = handler.childForFieldName('alias');
     const row = rowOf(handler);
     if (typeNodes.length === 0 && !isLast) fail(row, '型を書かない except: は、最後にしか書けません。');
@@ -581,7 +578,7 @@ export class ProgramConverter extends ExpressionConverter {
 
   private importStatement(node: Node): Statement {
     refuseTrailingComma(node);
-    const names: ImportName[] = fieldNodes(node, 'name').map((nameNode) => {
+    const names: ImportName[] = node.childrenForFieldName('name').map((nameNode) => {
       const aliased = nameNode.type === 'aliased_import';
       const dotted = aliased ? field(nameNode, 'name') : nameNode;
       const module = dotted.text.replaceAll(/\s/g, '');
@@ -603,7 +600,7 @@ export class ProgramConverter extends ExpressionConverter {
       if (this.context.scope.info.kind !== 'module') fail(row, 'import * はモジュールの最上位にしか書けません。');
       return { kind: 'importStar', module, row };
     }
-    const names = fieldNodes(node, 'name').map((nameNode) => {
+    const names = node.childrenForFieldName('name').map((nameNode) => {
       const aliased = nameNode.type === 'aliased_import';
       const nameText = (aliased ? field(nameNode, 'name') : nameNode).text;
       if (nameText.includes('.')) fail(rowOf(nameNode), 'from ... import の後の名前には . を書けません。');
@@ -621,13 +618,13 @@ export class ProgramConverter extends ExpressionConverter {
   // Match -----------------------------------------------------------------------------------------------------------
 
   private matchStatement(node: Node): Statement {
-    const subjects = fieldNodes(node, 'subject');
+    const subjects = node.childrenForFieldName('subject');
     const row = rowOf(node);
     const subject: Expression =
       subjects.length === 1 && !children(node).some((child) => child.type === ',')
         ? this.expression(subjects[0])
         : { kind: 'tuple', elements: subjects.map((child) => this.expression(child)), row };
-    const caseNodes = fieldNodes(field(node, 'body'), 'alternative');
+    const caseNodes = field(node, 'body').childrenForFieldName('alternative');
     // The parser moves a body without case clauses out of the match, which CPython refuses as invalid syntax.
     if (caseNodes.length === 0) fail(row, 'match 文の中には、case を1つ以上書いてください。');
     const cases: MatchCase[] = caseNodes.map((caseNode, index) => {
@@ -750,10 +747,10 @@ export class ProgramConverter extends ExpressionConverter {
     const keys: Expression[] = [];
     const patterns: Pattern[] = [];
     const keyIds = new Set<string>();
-    const valueNodes = fieldNodes(node, 'value');
+    const valueNodes = node.childrenForFieldName('value');
     let sign: Node | undefined;
     // The sign of a negative number is a key node of its own, before the number's.
-    for (const keyNode of fieldNodes(node, 'key')) {
+    for (const keyNode of node.childrenForFieldName('key')) {
       if (keyNode.type === '-') {
         sign = keyNode;
         continue;

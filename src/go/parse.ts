@@ -2,7 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
-import { loadParser, parseSource } from '../interpreter/treeSitter';
+import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { File } from './ast';
 import { Converter } from './convert';
 
@@ -24,23 +24,9 @@ const MISSING_TOKEN_NAMES = {
   package_identifier: 'パッケージの名前',
 };
 
-/** The `// atomic` annotations of a file, read from its comment tokens. */
+/** The `// atomic` annotations of a file, read from its line comments. */
 export function findGoTraceAnnotations(source: string): TraceAnnotation[] {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The Go parser returned no tree');
-  try {
-    const comments: TraceAnnotation[] = [];
-    const visit = (node: Node): void => {
-      if (node.type === 'comment' && node.text.startsWith('//')) {
-        comments.push({ index: node.startIndex, text: node.text });
-      }
-      for (const child of node.children) if (child) visit(child);
-    };
-    visit(tree.rootNode);
-    return traceAnnotationsIn(comments);
-  } finally {
-    tree.delete();
-  }
+  return traceAnnotationsIn(commentTokens(parser, source).filter((comment) => comment.text.startsWith('//')));
 }
 
 /** The tokens after which Go's lexer ends a statement at a newline. */
@@ -107,7 +93,7 @@ function findMisplacedNewlines(root: Node): SourceDiagnostic[] {
       leaves.push(node);
       return;
     }
-    for (const child of node.children) if (child) collect(child);
+    for (const child of node.children) collect(child);
   };
   collect(root);
   const errors: SourceDiagnostic[] = [];
