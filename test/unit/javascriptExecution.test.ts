@@ -853,6 +853,8 @@ let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 
 while (!ticked) tick(); console.log('ticked');
 function sleep(ms) { const start = Date.now(); while (Date.now() - start < ms) { for (let i = 0; i < 500; i++) sum += i; } }
 sleep(300); sleep(300); sleep(300); sleep(300); console.log('slept four times');
+function* items() { while (true) yield 0; } const k = Date.now();
+try { items().forEach(() => { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - k >= 300) throw new Error('consumed'); }); } catch (error) { console.log(error.message); }
 let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');`,
   ],
   [

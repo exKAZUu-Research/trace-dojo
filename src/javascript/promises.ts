@@ -48,12 +48,14 @@ interface TimerList {
 }
 
 /**
- * How a read of the clock moves it forward. A read that polls it, as a busy wait does (see Runtime.pollsClock), moves it
- * by the operations spent since the previous read at OPERATIONS_PER_MILLISECOND, so a busy wait as long as a run's time
- * limit spends a fifth of the operation budget once it polls, whatever its body costs. Any other read, such as a
- * timestamp of a loop's rounds, moves it by CLOCK_STEP alone: the interpreter's operations are far slower than Node.js's, where such
- * computation takes next to no time, and a timestamp after it must not push timers scheduled after it past earlier ones.
+ * How a read of the clock moves it forward. Once a run has spent POLLING_OPERATIONS, a read moves it by the operations
+ * spent since the previous read at OPERATIONS_PER_MILLISECOND, so that a busy wait, whatever its body costs, reaches a
+ * deadline as long as the time limit within the budget. Before that, a read, such as a timestamp of a loop's rounds,
+ * moves it by CLOCK_STEP alone: the interpreter's operations are far slower than Node.js's, where such computation takes
+ * next to no time, and a timestamp after it must not push timers scheduled after it past earlier ones. Telling a busy
+ * wait from timed computation by how its loop is written kept missing ways a busy wait ends.
  */
+const POLLING_OPERATIONS = LIMITS.maxOperations / 4;
 const OPERATIONS_PER_MILLISECOND = LIMITS.maxOperations / (LIMITS.maxMilliseconds * 5);
 const CLOCK_STEP = 10 / OPERATIONS_PER_MILLISECOND;
 
@@ -85,11 +87,11 @@ export class EventLoop {
 
   /** Reads the clock for `Date`, which moves it forward as the constants above say: the whole milliseconds so far. */
   readClock(): number {
-    const { runtime } = this;
-    const { spent } = runtime.budget;
-    this.now += runtime.pollsClock()
-      ? Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND)
-      : CLOCK_STEP;
+    const { spent } = this.runtime.budget;
+    this.now +=
+      spent > POLLING_OPERATIONS
+        ? Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND)
+        : CLOCK_STEP;
     this.spentAtNow = spent;
     return Math.floor(this.now);
   }

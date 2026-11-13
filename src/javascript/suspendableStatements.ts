@@ -294,18 +294,12 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     statement: Extract<Statement, { kind: 'while' | 'doWhile' }>,
     labels: string[]
   ): Steps<Completion> {
-    const { runtime } = this;
-    runtime.enterLoop();
-    try {
-      for (let first = true; ; first = false) {
-        if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
-          return undefined;
-        const result = yield* this.loopBodySteps(statement.body, labels);
-        if (result !== 'next') return result;
-        runtime.spend();
-      }
-    } finally {
-      runtime.exitLoop();
+    for (let first = true; ; first = false) {
+      if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
+        return undefined;
+      const result = yield* this.loopBodySteps(statement.body, labels);
+      if (result !== 'next') return result;
+      this.runtime.spend();
     }
   }
 
@@ -329,7 +323,6 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         yield* this.forInitSteps(statement);
         const frame = runtime.frame;
         const outer = frame.scope;
-        runtime.enterLoop();
         try {
           this.copyIterationScope(perIterationNames);
           for (;;) {
@@ -344,7 +337,6 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
             runtime.spend();
           }
         } finally {
-          runtime.exitLoop();
           frame.scope = outer;
         }
       }.bind(this)
@@ -412,7 +404,6 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
-    runtime.enterLoop();
     try {
       for (;;) {
         const value = yield* iterator.next();
@@ -450,7 +441,6 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       }
       throw error;
     } finally {
-      runtime.exitLoop();
       // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks, while the value the loop
       // returns or throws stays reachable.
       if (!isExhausted) yield* this.holdingValue(pending, () => iterator.close(completion));

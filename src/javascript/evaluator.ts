@@ -111,16 +111,11 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
       case 'while':
       case 'doWhile': {
-        runtime.enterLoop();
-        try {
-          for (let first = true; ; first = false) {
-            if (!(first && statement.kind === 'doWhile') && !toBoolean(this.evaluate(statement.test))) return undefined;
-            const result = this.loopBody(statement.body, labels);
-            if (result !== 'next') return result;
-            runtime.spend();
-          }
-        } finally {
-          runtime.exitLoop();
+        for (let first = true; ; first = false) {
+          if (!(first && statement.kind === 'doWhile') && !toBoolean(this.evaluate(statement.test))) return undefined;
+          const result = this.loopBody(statement.body, labels);
+          if (result !== 'next') return result;
+          runtime.spend();
         }
       }
       case 'break':
@@ -233,7 +228,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
       this.forInit(statement);
       const frame = runtime.frame;
       const outer = frame.scope;
-      runtime.enterLoop();
       try {
         this.copyIterationScope(perIterationNames);
         for (;;) {
@@ -248,7 +242,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
           runtime.spend();
         }
       } finally {
-        runtime.exitLoop();
         frame.scope = outer;
       }
     });
@@ -294,7 +287,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
-    runtime.enterLoop();
     try {
       for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
         runtime.spend();
@@ -332,7 +324,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
       throw error;
     } finally {
-      runtime.exitLoop();
       // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks, while the value the loop
       // returns or throws stays reachable.
       try {

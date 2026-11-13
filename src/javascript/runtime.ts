@@ -42,8 +42,6 @@ export class Frame {
   readonly iterations = new Set<ValueIterator>();
   /** How many builtins run in the frame now, which keep what the program's code returns to them in its temporaries. */
   builtinsRunning = 0;
-  /** The budget spent when each loop running in the frame began, innermost last. */
-  readonly loopStarts: number[] = [];
 
   constructor(
     public scope: Scope,
@@ -61,19 +59,11 @@ export class Frame {
   }
 }
 
-/**
- * How many operations a loop must spend before a clock read in it polls: a quarter of the budget, more than a loop
- * timing rounds of work usually spends, and little enough that a busy wait, whatever its body costs, then reaches a
- * deadline as long as the time limit within the budget.
- */
-const POLLING_OPERATIONS = LIMITS.maxOperations / 4;
-
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 
 export class Runtime {
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
-  private hasPolledClock = false;
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   readonly eventLoop = new EventLoop(this);
@@ -575,31 +565,6 @@ export class Runtime {
     if (!newTarget) return fallback;
     const prototype = this.get(newTarget, 'prototype');
     return isObject(prototype) ? prototype : fallback;
-  }
-
-  /** Starts a loop in the current frame, which runs until the caller calls {@link exitLoop}. */
-  enterLoop(): void {
-    this.frame.loopStarts.push(this.budget.spent);
-  }
-
-  exitLoop(): void {
-    this.frame.loopStarts.pop();
-  }
-
-  /**
-   * Whether a clock read polls, as a busy wait does: whether a running loop, in this frame or a caller of it, has spent
-   * more than POLLING_OPERATIONS, or one has before in the run. Telling a busy wait from timed computation by how its end
-   * is written kept missing ways a busy wait ends, while a loop that runs that long would take real time on Node.js too.
-   * Once one has, every later read polls, so that a program waiting again, as a sleep helper called repeatedly does,
-   * spends the budget telling a busy wait only once.
-   */
-  pollsClock(): boolean {
-    if (this.hasPolledClock) return true;
-    const { spent } = this.budget;
-    this.hasPolledClock = this.frames.some(({ loopStarts }) =>
-      loopStarts.some((start) => spent - start > POLLING_OPERATIONS)
-    );
-    return this.hasPolledClock;
   }
 
   pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {
