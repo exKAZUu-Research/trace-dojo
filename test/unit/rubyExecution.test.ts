@@ -2162,6 +2162,22 @@ test('implicit super forwards changed named keywords with anonymous rest', () =>
   });
 });
 
+test('begin modifier loops remain post-tested with rescue and ensure', () => {
+  expect(run('begin; puts :body; rescue; end while false')).toMatchObject({ stdout: 'body\n' });
+  expect(run('begin; puts :body; ensure; puts :ensure; end until true')).toMatchObject({
+    stdout: 'body\nensure\n',
+  });
+});
+
+test('invalid trailing Array elements and repeated rest targets fail before execution', () => {
+  for (const source of ['p [a:1,2]', 'p [a:1,*[2]]', 'a,*b,*c=[1,2,3]', '[1].each{|(a,*b,*c)|p a}'])
+    expect(run(source).kind).toBe('compileError');
+});
+
+test('duplicate block-local names fail before execution', () => {
+  for (const source of ['[1].each{|a;a|p a}', '[1].each{|;a,a|p 1}']) expect(run(source).kind).toBe('compileError');
+});
+
 test('non-mutating module hooks can run on frozen classes', () => {
   expect(
     run('module M; def self.append_features(x); puts :append; end; end; class C; end; C.freeze; C.include(M)')

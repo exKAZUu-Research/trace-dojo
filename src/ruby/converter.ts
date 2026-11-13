@@ -286,9 +286,10 @@ export class Converter {
       case 'until_modifier': {
         const bodyNode = required(node.childForFieldName('body'));
         const cond = this.value(required(node.childForFieldName('condition')));
-        const doWhile = bodyNode.type === 'begin' && !namedChildren(bodyNode).some((c) => RESCUE_CLAUSES.has(c.type));
+        const doWhile = bodyNode.type === 'begin';
+        const flattenBegin = doWhile && !namedChildren(bodyNode).some((c) => RESCUE_CLAUSES.has(c.type));
         const body = this.loopBody(() =>
-          doWhile ? this.body(namedChildren(bodyNode), 0) : [this.statement(bodyNode, 0)]
+          flattenBegin ? this.body(namedChildren(bodyNode), 0) : [this.statement(bodyNode, 0)]
         );
         return { k: 'while', cond, body, until: node.type === 'until_modifier', doWhile };
       }
@@ -478,6 +479,7 @@ export class Converter {
         pairs.push(node);
         continue;
       }
+      if (pairs.length > 0) this.fail(node, 'Hash の要素の後に配列の要素は書けません。');
       items.push(this.argument(node));
     }
     if (pairs.length > 0) items.push({ k: 'hash', items: this.hashItems(pairs), braces: false });
@@ -617,6 +619,7 @@ export class Converter {
     for (const child of namedChildren(node)) {
       if (child.type === 'comment') continue;
       if (child.type === 'rest_assignment') {
+        if (splat !== undefined) this.fail(child, '* の代入先は1つしか書けません。');
         splat = items.length;
         const inner = namedChildren(child)[0];
         items.push(inner ? this.target(inner) : { k: 'mlhs', items: [] });
@@ -1048,6 +1051,7 @@ export class Converter {
     }
     const lastToken = node.children.at(-2);
     if (isBlock && lastToken?.type === ',') params.trailingComma = true;
+    for (const child of namedChildren(node)) if (blockLocals.has(child.id)) declare(child, child.text);
     return params;
   }
 
@@ -1060,6 +1064,7 @@ export class Converter {
       if (child.type === 'identifier') {
         items.push({ k: 'lvar', name: declare(child, child.text), depth: 0 });
       } else if (child.type === 'splat_parameter') {
+        if (splat !== undefined) this.fail(child, '* の引数は1つしか書けません。');
         splat = items.length;
         const nameNode = child.childForFieldName('name');
         items.push(nameNode ? { k: 'lvar', name: declare(child, nameNode.text), depth: 0 } : { k: 'mlhs', items: [] });
@@ -1081,7 +1086,6 @@ export class Converter {
       let params: Params | undefined;
       if (parametersNode) {
         params = this.params(parametersNode, !isLambdaLiteral);
-        this.declareBlockLocals(parametersNode, scope);
       }
       let bodyNode = node.childForFieldName('body');
       if (isLambdaLiteral && bodyNode && (bodyNode.type === 'block' || bodyNode.type === 'do_block')) {
@@ -1091,14 +1095,6 @@ export class Converter {
       return { params, locals: scope.names, body, row: node.startPosition.row, isLambdaLiteral };
     } finally {
       this.ctx = outer;
-    }
-  }
-
-  private declareBlockLocals(parametersNode: Node, scope: LocalScope): void {
-    for (let index = 0; index < parametersNode.childCount; index++) {
-      if (parametersNode.fieldNameForChild(index) !== 'locals') continue;
-      const local = parametersNode.child(index);
-      if (local) scope.declareOwn(local.text);
     }
   }
 
