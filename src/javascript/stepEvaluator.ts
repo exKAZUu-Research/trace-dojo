@@ -11,6 +11,7 @@ import {
   isObject,
   JsFunction,
   type JsObject,
+  type Key,
   toBoolean,
   type Value,
 } from './values';
@@ -213,23 +214,24 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
   private *referenceSteps(target: MemberExpression): Steps<Reference | typeof SHORT_CIRCUIT> {
     const { runtime } = this;
     const { object, property } = target;
-    const computedKey = (base: Value, key: Expression): Steps<Value> =>
-      this.holdingSteps([base], () => this.evaluateSteps(key));
+    // The base stays held through the key's conversion too, which may run the program's toString.
+    const computedKey = (base: Value, key: Expression): Steps<Key> =>
+      this.holdingSteps(
+        [base],
+        function* (this: StepEvaluator): Steps<Key> {
+          return runtime.toPropertyKey(yield* this.evaluateSteps(key));
+        }.bind(this)
+      );
     if (object.kind === 'super') {
       const thisValue = this.thisValue();
       const key =
-        property.kind === 'computed'
-          ? runtime.toPropertyKey(yield* computedKey(thisValue, property.expression))
-          : this.propertyKey(property);
+        property.kind === 'computed' ? yield* computedKey(thisValue, property.expression) : this.propertyKey(property);
       return { kind: 'super', key, thisValue };
     }
     const base = yield* this.chainSteps(object);
     if (base === SHORT_CIRCUIT || (target.optional && (base === undefined || base === null))) return SHORT_CIRCUIT;
     if (property.kind === 'private') return { kind: 'private', base, name: this.privateKey(property.name) };
-    const key =
-      property.kind === 'computed'
-        ? runtime.toPropertyKey(yield* computedKey(base, property.expression))
-        : property.key;
+    const key = property.kind === 'computed' ? yield* computedKey(base, property.expression) : property.key;
     return { kind: 'property', base, key };
   }
 

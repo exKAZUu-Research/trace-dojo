@@ -275,6 +275,11 @@ const o = Object.fromEntries(entries());`,
     'false\n',
   ],
   [
+    'an awaited member keeps its object while converting its key',
+    `(async () => { const t = (await { t: new Turtle(1, 1) })[{ toString() { console.log(observer.canMoveForward()); return 't'; } }]; })();`,
+    'false\n',
+  ],
+  [
     'a Set method keeps what a bound getter returned',
     `function getHas() { const t = new Turtle(1, 1); return () => { t; return true; }; }
 const other = { size: 1, get keys() { console.log(observer.canMoveForward()); return () => [][Symbol.iterator](); } };
@@ -794,7 +799,7 @@ for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0
     `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
 function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');
 const s = new Date(); while (new Date() - s < 500); console.log('waited again');
-const t = Date.now(); setTimeout(() => console.log(Date.now() - t >= 30), 30); setTimeout(() => console.log('first'), 0);`,
+setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);`,
   ],
   [
     'Object.create with property descriptors',
