@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 465 -- The state of a run and the operations the interpreter reaches through it.
+// code-gauge-allow-file fileNcss 466 -- The state of a run and the operations the interpreter reaches through it.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
