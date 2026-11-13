@@ -800,7 +800,9 @@ for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0
 function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');
 const s = new Date(); while (new Date() - s < 500); console.log('waited again');
 setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);
-setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);`,
+setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);
+setTimeout(() => console.log('long'), 50); for (let i = 0; i < 1000; i++) new Date(0); setTimeout(() => console.log('short'), 0);
+const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');`,
   ],
   [
     'Object.create with property descriptors',

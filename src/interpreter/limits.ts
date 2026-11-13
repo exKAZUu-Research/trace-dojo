@@ -26,6 +26,11 @@ const OPERATIONS_PER_CLOCK_CHECK = 1024;
 export class ExecutionBudget {
   private operations = 0;
 
+  /** The operations charged so far. */
+  get spent(): number {
+    return this.operations;
+  }
+
   private nextClockCheck = OPERATIONS_PER_CLOCK_CHECK;
   private readonly deadline = performance.now() + LIMITS.maxMilliseconds;
 
