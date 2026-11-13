@@ -2172,6 +2172,12 @@ test('p escapes binary inspect results before writing to replacement stdout', ()
   });
 });
 
+test('puts follows Array mutations during element conversion', () => {
+  expect(run('class X;def to_s;$a.clear;"x";end;end;$a=[X.new,2,3];puts $a')).toMatchObject({
+    stdout: 'x\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

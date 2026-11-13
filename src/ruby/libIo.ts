@@ -6,7 +6,7 @@ import { exportBinaryInspect, formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { prettyInspect } from './prettyPrint';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, classOf, realClassOf, str, stringBytes } from './values';
 
 const PRIVATE = { visibility: 'private' as Visibility };
@@ -35,13 +35,14 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
         yield* write(target, '\n');
         return;
       }
-      seen.add(array);
-      try {
-        for (const item of array.items) yield* visit(item, seen);
-      } finally {
-        seen.delete(array);
-      }
-      return;
+      return yield* whileHeld(array, function* () {
+        seen.add(array);
+        try {
+          for (let index = 0; index < array.items.length; index++) yield* visit(array.items[index], seen);
+        } finally {
+          seen.delete(array);
+        }
+      });
     }
     const line = value instanceof RString ? value : yield* toSValue(value);
     if (line.s.length > 0) yield* write(target, line);
