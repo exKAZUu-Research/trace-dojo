@@ -427,6 +427,7 @@ function better(frame: Frame, kind: StreamKind, order: Value, sign: number, valu
 }
 
 /** The operations only a `Stream` of objects has: mapping, sorting with a comparator, reducing, and collecting. */
+// code-gauge-allow functionNcss 31 -- One registration per Stream operation, each a small native.
 function defineReferenceOperations(context: Context, types: StreamTypes, tType: JavaType, collector: ClassInfo): void {
   const { objectType, collections, fn } = context;
   const { stream, streamImpl, intStream, intStreamImpl } = types;

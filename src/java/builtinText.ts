@@ -171,7 +171,10 @@ function defineSequenceReaders(charSequence: ClassInfo, [stringClass, ...builder
     addMethod(builder, 'insert', [INT, charSequence.type], builder.type, false, (frame, receiver, [offset, value]) => {
       checkOffset(frame, offset as number, builderOf(receiver).length);
       const sequence = value ?? new JavaString('null');
-      const inserted = charactersOf(frame, charSequence, sequence, 0, sequenceLength(frame, charSequence, sequence));
+      const inserted =
+        sequence === receiver
+          ? selfInserted(builderOf(receiver), offset as number)
+          : charactersOf(frame, charSequence, sequence, 0, sequenceLength(frame, charSequence, sequence));
       return spliceBuilder(frame, receiver, offset as number, offset as number, inserted);
     });
     linkOverrides(builder);
@@ -218,6 +221,17 @@ function defineAppendable(registry: Registry, charSequence: ClassInfo, builders:
     addInterface(builder, { kind: 'class', cls });
     linkOverrides(builder);
   }
+}
+
+/**
+ * The text a builder inserts at `offset` when it inserts itself: as the JDK's, it moves its tail first and then copies
+ * its own chars one by one, so that a copied char may be one written moments before.
+ */
+function selfInserted(text: string, offset: number): string {
+  const chars = text.split('');
+  // A char read from the gap is one this copy has just written there.
+  for (let index = 0; index < text.length; index++) chars[offset + index] = chars[index] as string;
+  return chars.slice(offset, offset + text.length).join('');
 }
 
 /** The length of a non-null `CharSequence`, which a program's own implementation gives through `length()`. */
