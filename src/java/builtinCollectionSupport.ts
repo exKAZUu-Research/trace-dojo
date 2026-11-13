@@ -9,6 +9,7 @@ import {
   type ClassType,
   INT,
   type JavaType,
+  type NativeMethod,
   sameErasure,
   superinterfacesOf,
   VOID,
@@ -316,33 +317,52 @@ export const nullTolerantLists = new WeakSet<JavaObject>();
  */
 const nullRejectingClasses = new WeakMap<ClassInfo, (collection: JavaObject, name: string) => string | undefined>();
 
-/**
- * Makes the lookups `names` of `cls` throw `NullPointerException` for a null argument when the collection they read
- * rejects null, as those of `ImmutableCollections` do but for the lists `Stream.toList` returns: the collection itself
- * when `rejects`, or the one an unmodifiable wrapper, a sublist, or a map's key set or values reads, whose class may be
- * shared by both. `messageOf` gives the message of a rejecting class.
- */
+/** Marks a class of `ImmutableCollections`, whose lookups reject a null argument with the message `messageOf` gives. */
 export function rejectNullLookups(
   cls: ClassInfo,
-  names: readonly string[],
-  rejects: boolean,
   messageOf: (receiver: JavaObject, name: string) => string | undefined = () => {}
 ): void {
-  if (rejects) nullRejectingClasses.set(cls, messageOf);
-  for (const method of cls.methods) {
-    const { native, name } = method;
-    if (!native || !names.includes(name) || method.parameterTypes[0]?.kind === 'int') continue;
-    method.native = (frame, receiver, args) => {
-      if (args[0] === undefined) {
-        const [source, lookup] = readSourceOf(receiver as JavaObject, name);
-        const messageOfSource = nullRejectingClasses.get(source.cls);
-        if (messageOfSource && !nullTolerantLists.has(source)) {
-          throwBuiltin(frame, 'NullPointerException', messageOfSource(source, lookup));
-        }
+  nullRejectingClasses.set(cls, messageOf);
+}
+
+const NULL_CHECKED_LOOKUPS = new Set([
+  'contains',
+  'indexOf',
+  'lastIndexOf',
+  'get',
+  'containsKey',
+  'containsValue',
+  'getOrDefault',
+]);
+
+/**
+ * Makes the value lookups of every builtin collection and map class throw `NullPointerException` for a null argument
+ * when the collection they read rejects null: the collection itself, or the one an unmodifiable wrapper, a sublist,
+ * or a map's key set or values reads, whose class may be shared with a collection that accepts null.
+ */
+export function checkNullLookups(classes: Iterable<ClassInfo>, collectionClass: ClassInfo, mapClass: ClassInfo): void {
+  for (const cls of classes) {
+    const parents = superinterfacesOf(cls);
+    if (cls.kind === 'interface' || !(parents.includes(collectionClass) || parents.includes(mapClass))) continue;
+    for (const method of cls.methods) {
+      const { native, name } = method;
+      if (native && NULL_CHECKED_LOOKUPS.has(name) && method.parameterTypes[0]?.kind !== 'int') {
+        method.native = checkingNull(native, name);
       }
-      return native(frame, receiver, args);
-    };
+    }
   }
+}
+
+function checkingNull(native: NativeMethod, name: string): NativeMethod {
+  return (frame, receiver, args) => {
+    if (args[0] === undefined) {
+      const [source, lookup] = readSourceOf(receiver as JavaObject, name);
+      const messageOf = nullRejectingClasses.get(source.cls);
+      if (messageOf && !nullTolerantLists.has(source))
+        throwBuiltin(frame, 'NullPointerException', messageOf(source, lookup));
+    }
+    return native(frame, receiver, args);
+  };
 }
 
 /**

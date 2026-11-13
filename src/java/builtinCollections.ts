@@ -152,8 +152,6 @@ export function defineCollections(
   defineSetEquality(snapshotSet, context, setClass);
   linkOverrides(snapshotSet);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
-  // A map's key set and values look a value up as the map does.
-  for (const cls of [snapshotSet, snapshotCollection]) rejectNullLookups(cls, ['contains'], false);
   const unmodifiableViewSet = defineUnmodifiableViewSet(context, setClass, itrClass);
   const sets = defineSets(context, setClass, collectionClass, itrClass);
   const { mapClass, ...maps } = defineHashMap(context, {
@@ -218,10 +216,7 @@ function defineRestrictedLists(
   );
   immutableCollectionsLists.add(immutableList);
   immutableCollectionsLists.add(pairList);
-  for (const cls of [immutableList, pairList]) rejectNullLookups(cls, NULL_REJECTING_LIST_LOOKUPS, true);
-  for (const cls of [unmodifiableList, unmodifiableRandomAccessList]) {
-    rejectNullLookups(cls, NULL_REJECTING_LIST_LOOKUPS, false);
-  }
+  for (const cls of [immutableList, pairList]) rejectNullLookups(cls);
   singletonClasses.add(singletonList);
   // Arrays.asList writes through to its array, so it may set elements but not change its size.
   const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, 'fixedSize', 'Arrays$');
@@ -281,11 +276,7 @@ function defineSubListClasses(
   const randomAccess = defineArrayList(context, 'RandomAccessSubList', lists, 'AbstractList$RandomAccessSubList');
   const immutable = defineRestrictedList(context, 'SubList', lists, 'eager', 'ImmutableCollections$');
   immutableCollectionsLists.add(immutable);
-  rejectNullLookups(immutable, NULL_REJECTING_LIST_LOOKUPS, true);
-  // A view of a List.of list, or of a wrapper of one, reads that list.
-  for (const view of [subListClasses.arrayList, subListClasses.other, randomAccess]) {
-    rejectNullLookups(view, NULL_REJECTING_LIST_LOOKUPS, false);
-  }
+  rejectNullLookups(immutable);
   for (const [listClasses, view] of [
     [[registry.classes.get('ArrayList') as ClassInfo, subListClasses.arrayList], subListClasses.arrayList],
     [[registry.classes.get('Stack') as ClassInfo, subListClasses.synchronized], subListClasses.synchronized],
@@ -522,8 +513,6 @@ function defineRestrictedList(
 }
 
 const MUTATORS = new Set(['add', 'addAll', 'set', 'remove', 'clear']);
-
-const NULL_REJECTING_LIST_LOOKUPS = ['contains', 'indexOf', 'lastIndexOf'] as const;
 
 function declareCollectionMethods(cls: ClassInfo, element: JavaType, context: Context): void {
   const { objectType } = context;

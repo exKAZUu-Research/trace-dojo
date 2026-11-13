@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 402 -- The String, builder, and CharSequence methods, which share their text helpers.
 import type { Collections } from './builtinCollections';
 import { linkOverrides, subListChecks } from './builtinCollectionSupport';
 import { defineLocale } from './builtinLocale';
