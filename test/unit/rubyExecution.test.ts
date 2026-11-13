@@ -524,6 +524,11 @@ test.each([
     'p format("%.1a", Float::MAX), format("%.13a", Float::MAX)',
     '"0x1.0p+1024"\n"0x1.0000000000000p+1024"\n',
   ],
+  [
+    'surrogate format bytes',
+    'p format("%c", 55296).bytes, format("%c", 57343).bytes',
+    '[237, 160, 128]\n[237, 191, 191]\n',
+  ],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });

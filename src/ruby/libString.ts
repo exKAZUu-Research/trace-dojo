@@ -14,7 +14,7 @@ import {
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
-import { format } from './format';
+import { formatString } from './format';
 import { hashGet } from './hashes';
 import { callBlock, callMethod, type Gen, nativeProc, requireBlock } from './interp';
 import { makeEnumerator } from './libEnumerator';
@@ -272,7 +272,7 @@ def('String', '*', 1, function* (self: RString, [count]) {
   return stringFromBytes(repeated, self.binary);
 });
 def('String', '%', 1, function* (self: RString, [value]) {
-  return str(yield* format(self, value instanceof RArray ? value.items : [value]));
+  return yield* formatString(self, value instanceof RArray ? value.items : [value]);
 });
 def('String', '-@', 0, (self: RString) => {
   if (self.frozen) return self;

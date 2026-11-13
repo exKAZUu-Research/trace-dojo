@@ -2,7 +2,7 @@ import type { OutputChannel } from '../interpreter/programIo';
 import { inspect, toInt, toS, toSValue } from './conversions';
 import { def } from './define';
 import { typeError } from './errors';
-import { format } from './format';
+import { format, formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { prettyInspect } from './prettyPrint';
@@ -122,7 +122,7 @@ def(
   ['format', 'sprintf'],
   [1, -1],
   function* (_self, args) {
-    return str(yield* format(args[0], args.slice(1)));
+    return yield* formatString(args[0], args.slice(1));
   },
   PRIVATE
 );

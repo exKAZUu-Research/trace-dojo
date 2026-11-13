@@ -6,7 +6,7 @@ import { callMethod, type Gen } from './interp';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import { NIL, RHash, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { realClassOf } from './values';
+import { realClassOf, stringFromBytes } from './values';
 
 interface Spec {
   minus: boolean;
@@ -134,6 +134,27 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     rt().checkStringLength(result.length);
   }
   return result;
+}
+
+export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
+  const text = yield* format(formatValue, args);
+  const bytes: number[] = [];
+  for (let index = 0; index < text.length; index++) {
+    const point = text.codePointAt(index) as number;
+    if (point > 0xff_ff) index++;
+    if (point < 0x80) bytes.push(point);
+    else if (point < 0x8_00) bytes.push(0xc0 | (point >> 6), 0x80 | (point & 0x3f));
+    else if (point < 0x1_00_00) bytes.push(0xe0 | (point >> 12), 0x80 | ((point >> 6) & 0x3f), 0x80 | (point & 0x3f));
+    else
+      bytes.push(
+        0xf0 | (point >> 18),
+        0x80 | ((point >> 12) & 0x3f),
+        0x80 | ((point >> 6) & 0x3f),
+        0x80 | (point & 0x3f)
+      );
+  }
+  rt().checkStringLength(bytes.length);
+  return stringFromBytes(Uint8Array.from(bytes));
 }
 
 // code-gauge-allow functionNcss 43 -- Ruby's format directives and flags.
