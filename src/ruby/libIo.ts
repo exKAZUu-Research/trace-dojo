@@ -5,7 +5,7 @@ import { argumentError, typeError } from './errors';
 import { exportBinaryInspect, formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
-import { prettyInspect } from './prettyPrint';
+import { writePretty } from './prettyPrint';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, classOf, realClassOf, str, stringBytes, stringCharacters, stringFromBytes } from './values';
 
@@ -121,7 +121,10 @@ def(
   'pp',
   [0, -1],
   function* (_self, args) {
-    for (const arg of args) yield* write(stdout(), yield* prettyInspect(arg));
+    for (const arg of args) {
+      const target = stdout();
+      yield* writePretty(arg, (part) => write(target, part));
+    }
     if (args.length === 0) return NIL;
     return args.length === 1 ? args[0] : arr(args);
   },

@@ -2221,6 +2221,30 @@ test('pp inspects binary and invalid UTF-8 String bytes', () => {
   expect(run(String.raw`pp "\xFF"`)).toMatchObject({ stdout: '"\\xFF"\n' });
 });
 
+test('pp guards Hash entries during callback inspection', () => {
+  expect(
+    run('class A;def inspect;$h[:b]=2;"x";end;end;$h={a:A.new};begin;pp $h;rescue=>e;p e.class;end;p $h.size')
+  ).toMatchObject({
+    stdout: '{a:RuntimeError\n1\n',
+  });
+});
+
+test('pp follows Array mutations during element inspection', () => {
+  expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
+});
+
+test('pp emits container prefixes before user inspect callbacks', () => {
+  expect(run('class A;def inspect;puts :side;"a";end;end;pp [A.new]')).toMatchObject({
+    stdout: '[side\na]\n',
+  });
+  expect(run('class A;def inspect;puts :side;"a";end;end;pp [1,A.new]')).toMatchObject({
+    stdout: '[1,side\n a]\n',
+  });
+  expect(run('class A;def inspect;puts :side;"a";end;end;pp ["x"*76,A.new]')).toMatchObject({
+    stdout: `["${'x'.repeat(76)}",\n side\na]\n`,
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

@@ -20,9 +20,33 @@ export function* prettyInspect(value: Value): Gen<string> {
   return `${layout(doc)}\n`;
 }
 
+export function* writePretty(value: Value, write: (part: string) => Gen<void>): Gen<void> {
+  if (!hasInspectionCallbacks(value, new Set(), { nodes: 0, textLength: 0 })) {
+    yield* write(yield* prettyInspect(value));
+    return;
+  }
+  const budget: BuildBudget = { nodes: 0, textLength: 0 };
+  const state = { column: 0 };
+  const emit = function* (part: string): Gen<void> {
+    text(part, budget);
+    yield* write(part);
+    const newline = part.lastIndexOf('\n');
+    state.column = newline === -1 ? state.column + part.length : part.length - newline - 1;
+  };
+  yield* streamPretty(value, { emit, seen: new Set(), budget, state }, 0);
+  yield* emit('\n');
+}
+
 interface BuildBudget {
   nodes: number;
   textLength: number;
+}
+
+interface StreamContext {
+  emit: (part: string) => Gen<void>;
+  seen: Set<object>;
+  budget: BuildBudget;
+  state: { column: number };
 }
 
 function text(value: string, budget: BuildBudget): Doc {
@@ -51,26 +75,34 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> 
   if (value instanceof RArray && !showsItself(value)) {
     if (seen.has(value)) return text('[...]', budget);
     seen.add(value);
-    const parts: Doc[] = [];
-    for (const [index, item] of value.items.entries()) {
-      if (index > 0) parts.push(text(',', budget), breakable());
-      parts.push(yield* build(item, seen, budget));
+    try {
+      const parts: Doc[] = [];
+      for (let index = 0; index < value.items.length; index++) {
+        if (index > 0) parts.push(text(',', budget), breakable());
+        parts.push(yield* build(value.items[index], seen, budget));
+      }
+      return group(1, '[', parts, ']', budget);
+    } finally {
+      seen.delete(value);
     }
-    seen.delete(value);
-    return group(1, '[', parts, ']', budget);
   }
   if (value instanceof RHash && !showsItself(value)) {
     if (seen.has(value)) return text('{...}', budget);
     seen.add(value);
-    const parts: Doc[] = [];
-    let first = true;
-    for (const { key, value: item } of value.map.values()) {
-      if (!first) parts.push(text(',', budget), breakable());
-      first = false;
-      parts.push({ kind: 'group', indent: 0, parts: yield* pair(key, item, seen, budget) });
+    value.iterating++;
+    try {
+      const parts: Doc[] = [];
+      let first = true;
+      for (const { key, value: item } of value.map.values()) {
+        if (!first) parts.push(text(',', budget), breakable());
+        first = false;
+        parts.push({ kind: 'group', indent: 0, parts: yield* pair(key, item, seen, budget) });
+      }
+      return group(1, '{', parts, '}', budget);
+    } finally {
+      value.iterating--;
+      seen.delete(value);
     }
-    seen.delete(value);
-    return group(1, '{', parts, '}', budget);
   }
   if (value instanceof RString && !showsItself(value)) {
     const lines = stringLines(value);
@@ -112,6 +144,122 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> 
   return text(yield* inspect(value), budget);
 }
 
+function hasInspectionCallbacks(value: Value, seen: Set<object>, budget: BuildBudget): boolean {
+  rt().spend();
+  if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
+  if (showsItself(value)) return true;
+  if (!(value instanceof RBasic) || seen.has(value)) return false;
+  seen.add(value);
+  if (value instanceof RArray) {
+    for (const item of value.items) if (hasInspectionCallbacks(item, seen, budget)) return true;
+  } else if (value instanceof RHash) {
+    for (const entry of value.map.values())
+      if (hasInspectionCallbacks(entry.key, seen, budget) || hasInspectionCallbacks(entry.value, seen, budget))
+        return true;
+  } else {
+    for (const item of value.ivars?.values() ?? []) if (hasInspectionCallbacks(item, seen, budget)) return true;
+  }
+  return false;
+}
+
+function* streamPretty(value: Value, context: StreamContext, indent: number): Gen<void> {
+  rt().spend();
+  if (++context.budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
+  if (value instanceof RArray && !showsItself(value)) return yield* streamArray(value, context, indent);
+  if (value instanceof RHash && !showsItself(value)) return yield* streamHash(value, context, indent);
+  if (
+    value instanceof RObject &&
+    !value.exception &&
+    value.data === undefined &&
+    !showsItself(value) &&
+    classOf(value).findMethod('to_s')?.body.kind === 'native' &&
+    value.ivars &&
+    value.ivars.size > 0
+  )
+    return yield* streamObject(value, context, indent);
+  yield* context.emit(
+    value instanceof RString && !showsItself(value)
+      ? layout(yield* build(value, new Set(), { nodes: 0, textLength: 0 }))
+      : yield* inspect(value)
+  );
+}
+
+function* streamArray(value: RArray, context: StreamContext, indent: number): Gen<void> {
+  const { emit, seen } = context;
+  if (seen.has(value)) return yield* emit('[...]');
+  seen.add(value);
+  yield* emit('[');
+  try {
+    for (let index = 0; index < value.items.length; index++) {
+      if (index > 0) yield* emit(',');
+      yield* streamPrettyPart(value.items[index], index > 0, context, indent + 1);
+    }
+  } finally {
+    seen.delete(value);
+  }
+  yield* emit(']');
+}
+
+function* streamHash(value: RHash, context: StreamContext, indent: number): Gen<void> {
+  const { emit, seen } = context;
+  if (seen.has(value)) return yield* emit('{...}');
+  seen.add(value);
+  value.iterating++;
+  yield* emit('{');
+  try {
+    let index = 0;
+    for (const { key, value: item } of value.map.values()) {
+      if (index++ > 0) yield* emit(',');
+      if (key instanceof RSymbol) yield* emit(`${isSimplePrettySymbol(key) ? key.name : strInspect(key.name)}:`);
+      else {
+        yield* streamPrettyPart(key, false, context, indent + 1);
+        yield* emit(' =>');
+      }
+      yield* streamPrettyPart(item, true, context, indent + 1);
+    }
+  } finally {
+    value.iterating--;
+    seen.delete(value);
+  }
+  yield* emit('}');
+}
+
+function* streamObject(value: RObject, context: StreamContext, indent: number): Gen<void> {
+  const { emit, seen } = context;
+  if (seen.has(value)) return yield* emit(yield* inspect(value));
+  seen.add(value);
+  const cls = realClassOf(value);
+  yield* emit(`#<${cls.name ?? anonymousClassName(cls)}:${addressOf(value)}`);
+  try {
+    for (const [name, item] of value.ivars ?? []) {
+      if (name.startsWith('@__')) continue;
+      yield* emit(` ${name}=`);
+      yield* streamPretty(item, context, indent + 1);
+    }
+  } finally {
+    seen.delete(value);
+  }
+  yield* emit('>');
+}
+
+function* streamPrettyPart(value: Value, separated: boolean, context: StreamContext, indent: number): Gen<void> {
+  const { emit, state } = context;
+  if (showsItself(value)) {
+    const breakBefore = separated && state.column + 2 > WIDTH;
+    if (breakBefore) yield* emit(`\n${' '.repeat(indent)}`);
+    const shown = yield* inspect(value);
+    if (separated && !breakBefore) yield* emit(' '.repeat(indent));
+    yield* emit(shown);
+    return;
+  }
+  if (separated) yield* emit(state.column + 2 > WIDTH ? `\n${' '.repeat(indent)}` : ' ');
+  yield* streamPretty(value, context, indent);
+}
+
+function isSimplePrettySymbol(key: RSymbol): boolean {
+  return !/^:["$@]|[%&*+\-/<=>@\]^`|~]$/.test(symInspect(key.name));
+}
+
 function stringLines(value: RString): RString[] {
   const bytes = stringBytes(value);
   const lines: RString[] = [];
@@ -128,9 +276,7 @@ function stringLines(value: RString): RString[] {
 function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc[]> {
   const parts: Doc[] = [];
   if (key instanceof RSymbol) {
-    const shown = symInspect(key.name);
-    const simple = !/^:["$@]|[%&*+\-/<=>@\]^`|~]$/.test(shown);
-    parts.push(text(`${simple ? key.name : strInspect(key.name)}:`, budget));
+    parts.push(text(`${isSimplePrettySymbol(key) ? key.name : strInspect(key.name)}:`, budget));
   } else {
     parts.push(yield* build(key, seen, budget), text(' ', budget), text('=>', budget));
   }
