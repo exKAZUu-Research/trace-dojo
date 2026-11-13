@@ -6,7 +6,7 @@
  * through a pointer.
  */
 import type { FunctionContext, ProductSource, VarEntity } from './entities';
-import type { SsaConstant, StaticValue } from './operand';
+import { gateFacts, type SsaConstant, type SsaFields, type StaticValue } from './operand';
 
 export interface SsaValues {
   definitions: Map<VarEntity, Definition>;
@@ -19,6 +19,7 @@ export interface SsaValues {
 
 export interface Definition {
   constant?: SsaConstant;
+  fields?: SsaFields;
   /** The hidden slots holding the factors of the multiplication the value is, which an addition using it fuses. */
   factors?: ProductFactors;
   /** The number of regions the definition lies in. */
@@ -45,6 +46,7 @@ interface Region {
 /** The value a use of a variable sees. */
 export interface ReachingValue {
   constant?: SsaConstant;
+  fields?: SsaFields;
   factors?: ProductFactors;
   version?: number;
 }
@@ -64,7 +66,15 @@ export function newSsaValues(): SsaValues {
 export function define(
   fn: FunctionContext | undefined,
   variable: VarEntity,
-  { static: resolved, ...value }: { constant?: SsaConstant; factors?: ProductFactors; static?: StaticValue } = {}
+  {
+    static: resolved,
+    ...value
+  }: {
+    constant?: SsaConstant;
+    fields?: SsaFields;
+    factors?: ProductFactors;
+    static?: StaticValue;
+  } = {}
 ): void {
   if (variable.defined) variable.reassigned = true;
   else variable.static = resolved;
@@ -86,15 +96,23 @@ export function clobberMemory(fn: FunctionContext | undefined): void {
   for (const region of fn.ssa.regions) region.written.add(MEMORY);
 }
 
-/** Records a store into a local variable's memory, which Go's compiler tells apart from package-level variables. */
-export function storeLocalMemory(fn: FunctionContext | undefined): void {
-  if (fn) fn.ssa.stores++;
+/**
+ * Records a store into part of a local variable, which Go's compiler tells apart from package-level variables; the
+ * constants the variable held no longer reach later uses.
+ */
+export function storeLocalMemory(fn: FunctionContext | undefined, variable: VarEntity): void {
+  if (!fn) return;
+  fn.ssa.stores++;
+  const definition = fn.ssa.definitions.get(variable);
+  if (!definition?.constant && !definition?.fields) return;
+  fn.ssa.definitions.set(variable, { ...definition, constant: undefined, fields: undefined });
+  for (const region of fn.ssa.regions) region.written.add(variable);
 }
 
 export function reachingValue(fn: FunctionContext | undefined, variable: VarEntity): ReachingValue {
   const definition = fn?.ssa.definitions.get(variable);
   if (!fn || !definition) return {};
-  const { constant, factors, version } = definition;
+  const { constant, factors, fields, version } = definition;
   if (!variable.owner && fn.ssa.stores - definition.stores > FORWARDED_STORES) return { version };
   const local = variable.owner !== undefined;
   const loops = fn.ssa.regions.slice(definition.depth).filter((region) => region.loop);
@@ -104,6 +122,7 @@ export function reachingValue(fn: FunctionContext | undefined, variable: VarEnti
   return {
     constant: constant && ((frame) => reaches() && constant(frame)),
     factors: factors && { ...factors, enabled: () => reaches() && (factors.enabled?.() ?? true) },
+    fields: fields && gateFacts({ ssaFields: fields }, reaches).ssaFields,
     version,
   };
 }

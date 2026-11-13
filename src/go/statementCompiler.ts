@@ -29,7 +29,7 @@ import { equalityOf } from './equality';
 import { describeMissingMethod, incomparableMessage } from './expressionCompiler';
 import { runesOf } from './literals';
 import { dynamicMethod, invokeMethod, receiverFor } from './methods';
-import type { Operand, SsaConstant } from './operand';
+import { keyedFields, type Operand, type SsaConstant } from './operand';
 import { arithmetic } from './operators';
 import {
   BREAK,
@@ -625,7 +625,7 @@ export abstract class StatementCompiler extends CallCompiler {
   /** Records a write of an assignment's target: a definition of a variable Go's SSA form tracks, else a store. */
   private defineTarget(
     target: Operand | undefined,
-    value: Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'static'> | undefined,
+    value: Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'ssaFields' | 'static'> | undefined,
     values?: Eval[],
     index = 0
   ): void {
@@ -637,7 +637,7 @@ export abstract class StatementCompiler extends CallCompiler {
     // A closure assigning a variable it captures.
     const captured = target.variable?.entity;
     if (captured) captured.reassigned = true;
-    if (target.ssaRoot && !target.ssaRoot.boxed) storeLocalMemory(this.fn);
+    if (target.ssaRoot && !target.ssaRoot.boxed) storeLocalMemory(this.fn, target.ssaRoot);
     else clobberMemory(this.fn);
   }
 
@@ -648,7 +648,7 @@ export abstract class StatementCompiler extends CallCompiler {
    */
   private defineFromValue(
     variable: VarEntity,
-    operand: Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'static'> | undefined,
+    operand: Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'ssaFields' | 'static'> | undefined,
     values: Eval[] | undefined,
     index: number
   ): void {
@@ -661,7 +661,11 @@ export abstract class StatementCompiler extends CallCompiler {
       isUntyped(operand.type) ||
       operand.type !== variable.type
     ) {
-      define(this.fn, variable, { constant: operand?.ssaConstant, static: operand?.static });
+      define(this.fn, variable, {
+        constant: operand?.ssaConstant,
+        fields: operand?.ssaFields,
+        static: operand?.static,
+      });
       return;
     }
     const left = this.hiddenSlot();
@@ -1305,7 +1309,8 @@ export abstract class StatementCompiler extends CallCompiler {
         () => holder
       )
     );
-    fn.returnedValues.push(results.length === 1 && !fn.hasNamedResults ? compiled[0]?.static : undefined);
+    const returned = results.length === 1 && !fn.hasNamedResults ? compiled[0] : undefined;
+    fn.returnedValues.push(returned && { ...returned.static, fields: returned.ssaFields });
     if (!values) return () => RETURN;
     const slots = fn.info.resultSlots;
     return (frame) => {
@@ -1578,7 +1583,8 @@ export abstract class StatementCompiler extends CallCompiler {
         }
         for (const [index, param] of fn.params.entries()) {
           const constant: SsaConstant = (params) => params?.constantParam(index) ?? false;
-          define(fn, param, { constant, static: { constant } });
+          const fields = keyedFields(param, param.type, [], []);
+          define(fn, param, { constant, fields, static: { constant, fields } });
         }
         fn.info.params.push(...fn.params);
         fn.results = type.results;

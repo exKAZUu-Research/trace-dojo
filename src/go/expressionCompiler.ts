@@ -34,7 +34,7 @@ import { checkKeyHashable, equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
 import { currentRuntime, libraryCell } from './native';
-import type { Operand, SsaConstant, Storage } from './operand';
+import { allConstant, gateFacts, keyedFields, type Operand, type SsaFacts, ssaFactsAt, type Storage } from './operand';
 import { arithmetic, bitwiseNot, complexProduct, foldedComplexProduct, negate, ordering, shift } from './operators';
 import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
@@ -588,6 +588,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type: entity.type,
       span,
       ssaConstant: (params) => params?.constantCapture?.(entity) ?? false,
+      ssaFields: keyedFields(entity, entity.type),
       static: staticValueOf(entity, false),
       variable: { markUsed, entity },
       backingVars: [entity],
@@ -604,8 +605,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** What Go's SSA form knows of a variable's value at this use, from the definition that reaches it. */
-  private reachingOperand(entity: VarEntity): Pick<Operand, 'product' | 'ssaConstant' | 'ssaVersion'> {
-    const { constant, factors, version } = reachingValue(this.fn, entity);
+  private reachingOperand(entity: VarEntity): Pick<Operand, 'product' | 'ssaConstant' | 'ssaFields' | 'ssaVersion'> {
+    const { constant, factors, fields, version } = reachingValue(this.fn, entity);
     return {
       product: factors && {
         left: (frame) => frame.locals[factors.left] as Value,
@@ -615,6 +616,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         source: factors.source,
       },
       ssaConstant: constant,
+      ssaFields: fields,
       ssaVersion: version,
     };
   }
@@ -1038,7 +1040,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const apply = arithmetic(operator, type);
     const readLeft = left.eval;
     const readRight = right.eval;
-    const ssaConstant = bothConstant(left, right);
+    const ssaConstant = allConstant(left, right);
     const factors = isFloat(type) && !isUntyped(type) ? fusableFactors(operator, left, right) : undefined;
     if (factors) {
       return {
@@ -1075,7 +1077,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** A complex product, whose imaginary part is a float64 sum of two products like those `fusedMultiplyAdd` fuses. */
   private complexProduct(span: Span, left: Operand, right: Operand, type: Type): Operand {
     const fn = this.fn;
-    const ssaConstant = bothConstant(left, right);
+    const ssaConstant = allConstant(left, right);
     if (fn) fn.sumsOfProducts.push(() => !ssaConstant?.(undefined));
     const contexts = this.functionContexts;
     const single = isBasic(type, 'complex64');
@@ -1162,7 +1164,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (rightFuses) return (fuseRight as Eval)(frame);
         return plain(frame);
       },
-      ssaConstant: bothConstant(left, right),
+      ssaConstant: allConstant(left, right),
     };
   }
 
@@ -1645,6 +1647,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
           }
         : undefined,
       addressOf: addressable ? () => (frame) => new Pointer(container(frame).fields, last) : undefined,
+      ...(throughPointer || viaPointer ? {} : ssaFieldAt(operand, path)),
       addressStorage,
       backingVars: throughPointer ? undefined : operand.backingVars,
       ssaRoot: throughPointer ? undefined : operand.ssaRoot,
@@ -2381,6 +2384,8 @@ function constantFactor(operand: Operand): number | undefined {
 }
 
 const STATIC_CONSTANT = { constant: always };
+const SSA_MAX_BYTES = 32;
+const SSA_MAX_STRUCT_FIELDS = 4;
 
 /** Multiplying by these, Go's compiler adds, copies, or negates instead, which leaves nothing to fuse. */
 function isTrivialFactor(value: number | undefined): boolean {
@@ -2436,11 +2441,25 @@ function fuses(product: NonNullable<Operand['product']>, frame: Frame | undefine
   return enabled() && !constant(frame);
 }
 
-/** Whether both operands are constants to Go's compiler, which then computes the operation before the program runs. */
-function bothConstant(left: Operand, right: Operand): SsaConstant | undefined {
-  const { ssaConstant: a } = left;
-  const { ssaConstant: b } = right;
-  return a && b && ((frame) => a(frame) && b(frame));
+/**
+ * What Go's compiler knows of a field reached in a struct value: it keeps a struct in SSA form, field by field, only
+ * when the struct is small (ssa.CanSSA) and a variable holding it never has its address taken.
+ */
+function ssaFieldAt(struct: Operand, path: number[]): SsaFacts {
+  if (!canSsa(struct.type)) return {};
+  const facts = ssaFactsAt(struct, path);
+  const variable = struct.ssaRoot;
+  return facts ? gateFacts(facts, () => !variable?.addressTaken) : {};
+}
+
+/** Whether Go's compiler may keep a value of the type in SSA values rather than memory (ssa.CanSSA). */
+function canSsa(type: Type): boolean {
+  const under = underlying(type);
+  if (sizeOf(under) > SSA_MAX_BYTES) return false;
+  if (under.kind === 'array') return under.length <= 1 && canSsa(under.element);
+  if (under.kind === 'struct')
+    return under.fields.length <= SSA_MAX_STRUCT_FIELDS && under.fields.every((field) => canSsa(field.type));
+  return true;
 }
 
 function isNil(operand: Operand): boolean {

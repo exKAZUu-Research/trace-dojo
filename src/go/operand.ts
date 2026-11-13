@@ -2,7 +2,7 @@ import type { Span } from './ast';
 import type { Constant } from './constants';
 import type { FuncEntity, PackageEntity, ProductSource, StaticCallee, Temporary, VarEntity } from './entities';
 import type { Eval, Frame } from './runtime';
-import type { Selection, Type } from './types';
+import { type Selection, type Type, underlying } from './types';
 import type { Pointer, Value } from './values';
 
 /** The local storage a value or an address may refer to, which Go's escape analysis follows. */
@@ -93,6 +93,8 @@ export interface Operand extends Storage {
    * the value is computed in, which is undefined for the function itself rather than one of its calls.
    */
   ssaConstant?: SsaConstant;
+  /** For a struct value, what Go's compiler knows of each field when it keeps the struct in SSA form. */
+  ssaFields?: SsaFields;
   /** What Go's compiler resolves the value to through names it sees defined once (see `StaticValue`). */
   static?: StaticValue;
   /** How many values the statement's first pass evaluates before this expression's place (`hoistingCalls`). */
@@ -113,6 +115,86 @@ export interface Operand extends Storage {
  */
 export type SsaConstant = (params: ConstantParams | undefined) => boolean;
 
+/** Whether all operands are constants to Go's compiler, which then computes an operation on them before the program runs. */
+export function allConstant(...operands: readonly Pick<Operand, 'ssaConstant'>[]): SsaConstant | undefined {
+  const parts = operands.map((operand) => operand.ssaConstant);
+  if (!parts.every(Boolean)) return undefined;
+  return (params) => parts.every((part) => part?.(params));
+}
+
+/** What Go's compiler knows of each field of a struct value; a field of a constant struct is itself a constant. */
+export type SsaFields = (SsaFacts | undefined)[];
+
+export type SsaFacts = Pick<Operand, 'ssaConstant' | 'ssaFields'>;
+
+/** What Go's compiler knows of a field of a struct value. */
+export function ssaFieldFacts(struct: SsaFacts, index: number): SsaFacts | undefined {
+  return struct.ssaFields?.[index] ?? (struct.ssaConstant && { ssaConstant: struct.ssaConstant });
+}
+
+/** Facts that hold only while `holds` does. */
+export function gateFacts(facts: SsaFacts, holds: () => boolean): SsaFacts {
+  const { ssaConstant, ssaFields } = facts;
+  return {
+    ssaConstant: ssaConstant && ((params) => holds() && ssaConstant(params)),
+    ssaFields: ssaFields?.map((field) => field && gateFacts(field, holds)),
+  };
+}
+
+const fieldKeys = new WeakMap<object, Map<string, object>>();
+
+/** Stands for a field of a captured struct variable in `ConstantParams.constantCapture`. */
+export function capturedFieldKey(variable: object, path: readonly number[]): object {
+  let keys = fieldKeys.get(variable);
+  if (!keys) fieldKeys.set(variable, (keys = new Map()));
+  const name = path.join('.');
+  let key = keys.get(name);
+  if (!key) keys.set(name, (key = {}));
+  return key;
+}
+
+/**
+ * What a call Go's compiler inlines knows of the fields of a struct variable, a parameter or one its callee captures,
+ * through `ConstantParams.constantCapture` of the fields' `capturedFieldKey`s.
+ */
+export function keyedFields(
+  variable: object,
+  type: Type,
+  path: number[] = [],
+  enclosing: object[] = [variable]
+): SsaFields | undefined {
+  const under = underlying(type);
+  if (under.kind !== 'struct') return undefined;
+  return under.fields.map((field, index) => {
+    // A field of a constant struct is a constant too.
+    const keys = [...enclosing, capturedFieldKey(variable, [...path, index])];
+    return {
+      ssaConstant: (params) => keys.some((key) => params?.constantCapture?.(key)),
+      ssaFields: keyedFields(variable, field.type, [...path, index], keys),
+    };
+  });
+}
+
+/** Adds the constant fields of a struct variable to `constants`, keyed by their `capturedFieldKey`. */
+export function addFieldConstants(
+  constants: Map<object, SsaConstant>,
+  variable: object,
+  fields: SsaFields | undefined,
+  path: number[] = []
+): void {
+  for (const [index, facts] of fields?.entries() ?? []) {
+    if (facts?.ssaConstant) constants.set(capturedFieldKey(variable, [...path, index]), facts.ssaConstant);
+    addFieldConstants(constants, variable, facts?.ssaFields, [...path, index]);
+  }
+}
+
+/** What Go's compiler knows of the part of a value at `path`, a list of field indices. */
+export function ssaFactsAt(value: SsaFacts | undefined, path: readonly number[]): SsaFacts | undefined {
+  let facts = value;
+  for (const index of path) facts = facts && ssaFieldFacts(facts, index);
+  return facts;
+}
+
 export interface ConstantParams {
   constantParam(index: number): boolean;
   constantCapture?(variable: object): boolean;
@@ -125,5 +207,7 @@ export interface ConstantParams {
  */
 export interface StaticValue {
   constant?: SsaConstant;
+  /** For a struct value, what Go's compiler knows of its fields. */
+  fields?: SsaFields;
   callee?: StaticCallee;
 }

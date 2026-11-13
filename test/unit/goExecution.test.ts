@@ -1274,6 +1274,47 @@ func main() {
   });
 });
 
+// Go's compiler keeps a small struct that never has its address taken in SSA values, field by field, and folds products
+// of the constants it finds there as it does those built by complex() from constant-valued variables.
+test('constants reach products through complex numbers and struct fields', () => {
+  const program = `package main
+
+import "fmt"
+
+type P struct{ X, Y float64 }
+
+type N struct {
+	In P
+	K  float64
+}
+
+var v = []float64{0.7}
+
+func dot(p P) float64 { return p.X*p.Y + v[0] }
+
+func main() {
+	c := v[0]
+	f, g := 1.3, 2.1
+	z := complex(f, g)
+	fmt.Println(z*z, real(z)*2.1+c)
+	p := P{1.3, 2.1}
+	n := N{P{1.3, 2.1}, 1.3}
+	fmt.Println(p.X*p.Y+c, n.In.X*n.In.Y+c, dot(P{1.3, 2.1}))
+	t := P{1.3, 2.1}
+	fmt.Println(func() float64 { return t.X*t.Y + c }())
+	p.X = c
+	q := &P{1.3, 2.1}
+	fmt.Println(p.X*p.Y+c, q.X*q.Y+c)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '(-2.7199999999999998+5.460000000000001i) 3.4300000000000006\n' +
+      '3.4300000000000006 3.4300000000000006 3.4300000000000006\n3.4300000000000006\n2.17 3.43\n',
+  });
+});
+
 // Go 1.27.3 gives an append the 32-byte stack buffer when the array it allocates stays in the function, also for a
 // slice no variable holds and for a field of a local struct it keeps in registers; it updates a variable whose address
 // the program takes, a large struct's field, or an array's element in memory, which never uses the buffer. An element

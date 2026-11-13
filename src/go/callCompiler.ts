@@ -23,7 +23,16 @@ import { describeConstant, largerUntyped, sameUntypedFamily } from './expression
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
 import { currentRuntime } from './native';
-import type { Operand, SsaConstant, Storage } from './operand';
+import {
+  addFieldConstants,
+  allConstant,
+  type ConstantParams,
+  type Operand,
+  type SsaConstant,
+  ssaFactsAt,
+  type SsaFields,
+  type Storage,
+} from './operand';
 import { ordering } from './operators';
 import {
   type Eval,
@@ -152,8 +161,10 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (variadic) return this.variadicArguments(expression, operands, signature, name);
     if (!callee || operands.length !== params.length) return this.listArguments(expression, operands, signature, name);
     const { target, receivers } = callee;
-    for (const [index, { ssaConstant }] of operands.entries())
+    for (const [index, { ssaConstant, ssaFields }] of operands.entries()) {
       if (ssaConstant) callee.constantArgs[receivers + index] = ssaConstant;
+      if (ssaFields) callee.argFields[receivers + index] = ssaFields;
+    }
     operands = operands.map((operand, index) =>
       isInterface(params[index])
         ? operand
@@ -167,12 +178,13 @@ export abstract class CallCompiler extends CompositeCompiler {
   /** A call of a function of the program that Go's compiler resolves, with what stands for its result in the caller. */
   private programCall(target: StaticCallee | undefined, receivers: number): ProgramCall | undefined {
     if (!target) return undefined;
-    const constantCaptures = new Map<VarEntity, SsaConstant>();
+    const constantCaptures = new Map<object, SsaConstant>();
     for (const variable of target.summary.context?.captures.keys() ?? []) {
-      const { constant } = variable.owner === this.fn ? reachingValue(this.fn, variable) : {};
+      const { constant, fields } = variable.owner === this.fn ? reachingValue(this.fn, variable) : {};
       if (constant) constantCaptures.set(variable, constant);
+      addFieldConstants(constantCaptures, variable, fields);
     }
-    return { target, receivers, result: this.hiddenVariable(), constantArgs: [], constantCaptures };
+    return { target, receivers, result: this.hiddenVariable(), constantArgs: [], argFields: [], constantCaptures };
   }
 
   /**
@@ -1187,6 +1199,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       type,
       span: expression,
       eval: (frame) => new Complex(readRe(frame) as number, readIm(frame) as number),
+      ssaConstant: allConstant(re, im),
     };
   }
 
@@ -1223,6 +1236,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       type,
       span: expression,
       eval: (frame) => (read(frame) as Complex)[name === 'real' ? 're' : 'im'],
+      ssaConstant: operand.ssaConstant,
     };
   }
 
@@ -1268,8 +1282,11 @@ interface ProgramCall {
   result: VarEntity;
   /** Whether each argument is a constant to Go's compiler, by parameter index. */
   constantArgs: SsaConstant[];
+  /** What Go's compiler knows of the fields of each struct argument, by parameter index. */
+  argFields: (SsaFields | undefined)[];
   /** Whether each variable the callee captures is a constant to Go's compiler where the call is. */
-  constantCaptures: Map<VarEntity, SsaConstant>;
+  /** Keyed by the variable, or by `capturedFieldKey` for a field of a struct variable. */
+  constantCaptures: Map<object, SsaConstant>;
 }
 
 /** The function whose compilation settles every callee resolved in `fn`, as no code outside it assigns its locals. */
@@ -1286,16 +1303,46 @@ function outermost(fn: FunctionContext): FunctionContext {
 function programCallResult(
   call: ProgramCall,
   results: Type[]
-): Pick<Operand, 'backingVars' | 'ssaConstant' | 'static'> {
+): Pick<Operand, 'backingVars' | 'ssaConstant' | 'ssaFields' | 'static'> {
   const backingVars = [call.result];
   if (results.length !== 1) return { backingVars };
-  const { target, constantArgs } = call;
-  const constant: SsaConstant = (params) => {
-    const returned = inlinedCall(target) ? target.summary.context?.returnedValues : undefined;
-    if (returned?.length !== 1) return false;
-    return returned[0]?.constant?.({ constantParam: (index) => constantArgs[index]?.(params) ?? false }) ?? false;
+  const partAt =
+    (path: number[]): SsaConstant =>
+    (params) => {
+      const returned = inlinedCall(call.target) ? call.target.summary.context?.returnedValues : undefined;
+      if (returned?.length !== 1 || !returned[0]) return false;
+      const { constant, fields } = returned[0];
+      const facts = ssaFactsAt({ ssaConstant: constant, ssaFields: fields }, path);
+      return facts?.ssaConstant?.(boundParams(call, params)) ?? false;
+    };
+  const resultFields = (type: Type, path: number[]): SsaFields | undefined => {
+    const under = underlying(type);
+    if (under.kind !== 'struct') return undefined;
+    return under.fields.map((field, index) => ({
+      ssaConstant: partAt([...path, index]),
+      ssaFields: resultFields(field.type, [...path, index]),
+    }));
   };
-  return { backingVars, ssaConstant: constant, static: { constant } };
+  const constant = partAt([]);
+  const ssaFields = resultFields(results[0], []);
+  return { backingVars, ssaConstant: constant, ssaFields, static: { constant, fields: ssaFields } };
+}
+
+/** What a call that Go's compiler inlines knows of its parameters, from the arguments in a frame of the caller. */
+function boundParams(call: ProgramCall, caller: ConstantParams | undefined): ConstantParams {
+  return {
+    constantParam: (index) => call.constantArgs[index]?.(caller) ?? false,
+    constantCapture: (key) => argFieldConstants(call).get(key)?.(caller) ?? false,
+  };
+}
+
+/** The fields of struct arguments that may be constants, keyed by `capturedFieldKey` of the parameter's fields. */
+function argFieldConstants(call: ProgramCall): Map<object, SsaConstant> {
+  const constants = new Map<object, SsaConstant>();
+  const params = call.target.summary.context?.params ?? [];
+  for (const [index, fields] of call.argFields.entries())
+    if (params[index]) addFieldConstants(constants, params[index], fields);
+  return constants;
 }
 
 /** The stack buffers a call shares with the caller when Go's compiler inlines it, one set per call site. */
@@ -1306,7 +1353,9 @@ function inlinedStackBuffers(call: ProgramCall | undefined): (frame: Frame) => S
       ? frame.inlinedStackBuffers(site, staysLocal(call.result, frame), (caller) => ({
           params: Array.from(call.constantArgs, (constant) => constant?.(caller) ?? false),
           captures: new Set(
-            [...call.constantCaptures].flatMap(([variable, constant]) => (constant(caller) ? [variable] : []))
+            [...call.constantCaptures, ...argFieldConstants(call)].flatMap(([key, constant]) =>
+              constant(caller) ? [key] : []
+            )
           ),
         }))
       : undefined;

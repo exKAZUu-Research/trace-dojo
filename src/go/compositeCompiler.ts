@@ -1,9 +1,9 @@
 import { constantIdentityKey, represent } from './assignability';
 import type { CompositeLiteral, Expression } from './ast';
-import type { VarEntity } from './entities';
+import { always, type VarEntity } from './entities';
 import { mapKeyOf } from './equality';
 import { describeConstant, ExpressionCompiler } from './expressionCompiler';
-import type { Operand } from './operand';
+import type { Operand, SsaFacts, SsaFields } from './operand';
 import { type Eval, type Frame, withTemporary } from './runtime';
 import {
   BASIC,
@@ -18,6 +18,9 @@ import {
   underlying,
 } from './types';
 import { Cell, GoArray, GoMap, GoStruct, Pointer, Slice, type Value } from './values';
+
+/** A field a struct literal leaves out, which holds the zero value: a constant. */
+const ZERO_FIELD: SsaFacts = { ssaConstant: always };
 
 /** Compiles composite literals: structs, arrays, slices, and maps, whose nested literals may elide their types. */
 export abstract class CompositeCompiler extends ExpressionCompiler {
@@ -86,9 +89,18 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
    * An element of a composite literal, whose own literal may elide its type; `holder` stands for the literal, or is
    * absent for an element that escapes, as a map's does.
    */
-  private element(expression: Expression, type: Type, context: string, holder?: VarEntity): Eval {
-    if (expression.kind === 'composite' && !expression.type)
-      return this.assign(this.composite(expression, type), type, context, holder);
+  private element(
+    expression: Expression,
+    type: Type,
+    context: string,
+    holder?: VarEntity,
+    onFacts?: (facts: SsaFacts) => void
+  ): Eval {
+    if (expression.kind === 'composite' && !expression.type) {
+      const literal = this.composite(expression, type);
+      onFacts?.(literal);
+      return this.assign(literal, type, context, holder);
+    }
     if (
       expression.kind === 'unary' &&
       expression.operator === '&' &&
@@ -104,7 +116,9 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         return (frame) => new Pointer(new Cell(read(frame)), 'v');
       }
     }
-    return this.assign(this.expression(expression), type, context, holder);
+    const operand = this.expression(expression);
+    onFacts?.(operand);
+    return this.assign(operand, type, context, holder);
   }
 
   // code-gauge-allow functionCognitiveComplexity 35 -- Keyed and unkeyed struct literals with promoted fields and evaluation order.
@@ -119,6 +133,13 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     const seenPaths: number[][] = [];
     const lookupTarget = type.kind === 'typeParam' ? struct : type;
     const keyed = expression.elements.some((element) => element.key);
+    const fieldFacts: SsaFields = fields.map(() => ZERO_FIELD);
+    const constantAt = (path: number[]): ((facts: SsaFacts) => void) => {
+      if (path.length > 0) fieldFacts[path[0]] = undefined;
+      return ({ ssaConstant, ssaFields }) => {
+        if (path.length === 1) fieldFacts[path[0]] = { ssaConstant, ssaFields };
+      };
+    };
     if (keyed) {
       for (const element of expression.elements) {
         if (element.key?.kind !== 'name') {
@@ -170,7 +191,7 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         }
         entries.push({
           path: selection.path,
-          value: this.element(element.value, selection.type, 'フィールド', holder),
+          value: this.element(element.value, selection.type, 'フィールド', holder, constantAt(selection.path)),
         });
       }
     } else if (expression.elements.length > 0) {
@@ -191,9 +212,10 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
             `${fieldName} は ${type.pkg} パッケージの外から使えないフィールドなので、値を書けません。`
           );
         }
-        const value = this.element(element.value, fields[index].type, 'フィールド', holder);
         // Go evaluates the value of a blank field for its effects but leaves the field zero.
-        entries.push({ path: fields[index].name === '_' ? [] : [index], value });
+        const path = fields[index].name === '_' ? [] : [index];
+        const value = this.element(element.value, fields[index].type, 'フィールド', holder, constantAt(path));
+        entries.push({ path, value });
       }
       if (expression.elements.length < fields.length) {
         this.error({ row: expression.endRow, column: 0 }, `${describeType(type)} 型のフィールドの値が足りません。`);
@@ -204,6 +226,7 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
       mode: 'value',
       type,
       span: expression,
+      ssaFields: fieldFacts,
       eval: (frame) => {
         frame.runtime.allocate(fields.length);
         const evaluated = Array.from<Value>({ length: fields.length });
