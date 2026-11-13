@@ -182,7 +182,7 @@ function replace(s: string, old: string, replacement: string, count: number): st
   return appendBounded(result, s.slice(start));
 }
 
-function equalFold(s: string, t: string): boolean {
+export function equalFold(s: string, t: string): boolean {
   let sa = 0;
   let ta = 0;
   while (sa < s.length && ta < t.length) {
@@ -206,7 +206,7 @@ function equalFold(s: string, t: string): boolean {
 }
 
 /** The separators of words for `strings.Title`, as its isSeparator decides. */
-function isWordSeparator(rune: number): boolean {
+export function isWordSeparator(rune: number): boolean {
   if (rune <= 0x7f) {
     const char = String.fromCodePoint(rune);
     return !/[\dA-Za-z_]/.test(char);

@@ -23,6 +23,8 @@ const STRINGER = {
   ],
 } as const;
 
+const GO_STRINGER = { kind: 'interface', methods: [{ ...STRINGER.methods[0], name: 'GoString' }] } as const;
+
 const LOWER_DIGITS = '0123456789abcdefx';
 const UPPER_DIGITS = '0123456789ABCDEFX';
 
@@ -323,10 +325,14 @@ export class Printer {
 
   /** Prints with the value's Error or String method, for the verbs that use them. */
   private handleMethods(iface: Iface, verb: string): boolean {
-    if (this.flags.sharpV) return false;
-    if (!['v', 's', 'x', 'X', 'q'].includes(verb)) return false;
-    const errorMethod = !missingMethod(iface.type, ERROR_TYPE.underlying as never) ? 'Error' : undefined;
-    const method = errorMethod ?? (!missingMethod(iface.type, STRINGER as never) ? 'String' : undefined);
+    let method: string | undefined;
+    if (this.flags.sharpV) {
+      method = missingMethod(iface.type, GO_STRINGER as never) ? undefined : 'GoString';
+    } else {
+      if (!['v', 's', 'x', 'X', 'q'].includes(verb)) return false;
+      const errorMethod = !missingMethod(iface.type, ERROR_TYPE.underlying as never) ? 'Error' : undefined;
+      method = errorMethod ?? (!missingMethod(iface.type, STRINGER as never) ? 'String' : undefined);
+    }
     if (!method) return false;
     const call = dynamicMethod(iface.type, method);
     if (!call) return false;
@@ -344,7 +350,7 @@ export class Printer {
     } finally {
       this.depth--;
     }
-    this.fmtString(text, verb);
+    this.fmtString(text, method === 'GoString' ? 's' : verb);
     return true;
   }
 

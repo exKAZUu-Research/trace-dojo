@@ -681,3 +681,53 @@ test.each([
     uncaughtException: expect.stringContaining('out of memory'),
   });
 });
+
+// Go 1.27.3 on arm64 prints these with TZ=UTC: time's calendar arithmetic, layouts, and parsing; math/rand's reseeded
+// generator, ziggurat draws, and Zipf; math/rand/v2's ChaCha8; and the bits of math's special functions. Sleep returns
+// at once but moves the clock that Since reads.
+test('time, math/rand, and math special functions compute what Go computes', () => {
+  const program = String.raw`package main
+
+import (
+	"fmt"
+	"math"
+	"math/rand"
+	v2 "math/rand/v2"
+	"time"
+)
+
+func main() {
+	t := time.Date(2024, time.February, 29, 23, 59, 58, 999999999, time.FixedZone("JST", 9*60*60))
+	u := t.Add(90*time.Minute + 2*time.Second).AddDate(0, 12, 0)
+	fmt.Println(t, u.UTC(), u.Sub(t), u.Weekday(), u.YearDay(), u.Unix())
+	fmt.Println(t.Format(time.RFC1123Z), t.Format("Mon Jan _2 3:04:05.000 PM 2006 MST"), t.Truncate(time.Hour), t.Round(time.Second))
+	p, err := time.Parse(time.RFC3339, "2006-01-02T15:04:05.5+07:00")
+	fmt.Println(p, err, p.Location())
+	_, err = time.Parse(time.DateOnly, "2023-02-29")
+	fmt.Println(err)
+	d, _ := time.ParseDuration("1h15m30.918273645s")
+	fmt.Println(d, d.Round(time.Millisecond), d.Truncate(time.Minute), d.Minutes(), time.Duration(1500)*time.Microsecond)
+	start := time.Now()
+	time.Sleep(time.Hour)
+	fmt.Println(time.Since(start) >= time.Hour)
+
+	r := rand.New(rand.NewSource(1))
+	r.Seed(7)
+	fmt.Println(r.Intn(100), r.Intn(100), math.Float64bits(r.NormFloat64()), math.Float64bits(r.ExpFloat64()))
+	z := rand.NewZipf(r, 1.5, 2, 1000)
+	fmt.Println(z.Uint64(), z.Uint64(), z.Uint64())
+	var seed [32]byte
+	c := v2.New(v2.NewChaCha8(seed))
+	fmt.Println(c.Uint64(), c.IntN(1000), math.Float64bits(c.NormFloat64()))
+
+	fmt.Println(math.Float64bits(math.Gamma(4.7)), math.Float64bits(math.Erf(0.3)), math.Float64bits(math.J0(2.5)), math.Float64bits(math.Yn(3, 7.1)))
+	lg, sign := math.Lgamma(-2.5)
+	fmt.Println(math.Float64bits(lg), sign, math.Float64bits(math.Erfinv(0.9)), math.Float64bits(math.Cbrt(10)))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
+  });
+});
