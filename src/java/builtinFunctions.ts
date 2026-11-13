@@ -442,8 +442,9 @@ function definePredicateFactories(cls: ClassInfo, objectType: JavaType): void {
     classType(cls, typeOf(negated)),
     true,
     (frame, _, [target]) => {
+      // As the JDK's, it returns target.negate(), which a program's predicate may override.
       if (target === undefined) throwBuiltin(frame, 'NullPointerException');
-      return functionObject(frame, cls, (callFrame, [value]) => callFunction(callFrame, cls, target, [value]) !== true);
+      return frame.runtime.invokeVirtual(frame, cls, 'negate', target, []);
     }
   ).typeParameters = [negated];
 }
