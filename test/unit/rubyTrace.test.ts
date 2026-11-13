@@ -246,3 +246,20 @@ end
 h = { mk => 1 }`;
   expect(JSON.stringify(rubyTrace(program)).length).toBeLessThan(100_000);
 });
+
+test('collection builders keep Turtles alive across callbacks', () => {
+  for (const program of [
+    'h=[1,3].group_by do |x|\n Turtle.new(x,0)\nend\nh.keys.each { |t| t.forward }',
+    'h=[1,3].chunk do |x|\n Turtle.new(x,0)\nend\nh.each { |k,v| k.forward }',
+  ]) {
+    const items = rubyTrace(program);
+    expect(items.some(({ turtles }) => turtles.length === 2 && turtles.every(({ y }) => y === 1))).toBe(true);
+  }
+});
+
+test('positional Turtles stay alive while keyword arguments evaluate', () => {
+  const items = rubyTrace(
+    'def f(*ts,k:)\n ts.each { |t| t.forward }\nend\nf(Turtle.new(1,0),Turtle.new(3,0),k: [1].map { |x| x })'
+  );
+  expect(items.some(({ turtles }) => turtles.length === 2 && turtles.every(({ y }) => y === 1))).toBe(true);
+});

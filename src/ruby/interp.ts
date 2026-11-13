@@ -1089,30 +1089,28 @@ function* evalCall(e: Call, frame: Frame): Gen {
   }
   const mark = frame.temporaries.length;
   frame.temporaries.push(recv);
-  let evaluated: { args: Value[]; keywords: RHash | undefined };
   try {
-    evaluated = yield* evalArgs(e.args, frame);
+    const { args, keywords } = yield* evalArgs(e.args, frame);
+    for (const arg of args) frame.temporaries.push(arg);
+    if (keywords) frame.temporaries.push(keywords);
+    let block: RProc | undefined;
+    if (e.block) block = makeBlock(e.block, frame);
+    else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
+    const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
+    if (!e.block)
+      return yield* callMethod(recv, e.name, args, keywords, block, { fcall: e.fcall, vcall: e.vcall, used });
+    const proc = block as RProc;
+    proc.callSiteActive = true;
+    try {
+      return yield* callMethod(recv, e.name, args, keywords, proc, { fcall: e.fcall, vcall: e.vcall, used });
+    } catch (error) {
+      if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
+      throw error;
+    } finally {
+      proc.callSiteActive = false;
+    }
   } finally {
     frame.temporaries.length = mark;
-  }
-  const { args, keywords } = evaluated;
-  let block: RProc | undefined;
-  if (e.block) {
-    block = makeBlock(e.block, frame);
-  } else if (e.blockArg) {
-    block = yield* toBlock(yield* ev(e.blockArg, frame));
-  }
-  const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
-  if (!e.block) return yield* callMethod(recv, e.name, args, keywords, block, { fcall: e.fcall, vcall: e.vcall, used });
-  const proc = block as RProc;
-  proc.callSiteActive = true;
-  try {
-    return yield* callMethod(recv, e.name, args, keywords, proc, { fcall: e.fcall, vcall: e.vcall, used });
-  } catch (error) {
-    if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
-    throw error;
-  } finally {
-    proc.callSiteActive = false;
   }
 }
 
@@ -1134,8 +1132,14 @@ export function* evalArgs(items: Expr[], frame: Frame): Gen<{ args: Value[]; key
   const last = items.at(-1);
   if (last?.k === 'hash' && !last.braces) {
     const args = yield* evalList(items.slice(0, -1), frame);
-    const keywords = yield* evalHash(last, frame);
-    return { args, keywords: keywords.map.size > 0 ? keywords : undefined };
+    const mark = frame.temporaries.length;
+    for (const arg of args) frame.temporaries.push(arg);
+    try {
+      const keywords = yield* evalHash(last, frame);
+      return { args, keywords: keywords.map.size > 0 ? keywords : undefined };
+    } finally {
+      frame.temporaries.length = mark;
+    }
   }
   return { args: yield* evalList(items, frame), keywords: undefined };
 }

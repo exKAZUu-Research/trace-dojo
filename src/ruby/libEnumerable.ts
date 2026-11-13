@@ -6,7 +6,7 @@ import { eachEntry, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { customEnumerator, iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
 import { arr, newHash, realClassOf, truthy } from './values';
 
@@ -662,15 +662,17 @@ def('Enumerable', 'minmax_by', 0, function* (self, _args, block) {
 def('Enumerable', 'group_by', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'group_by', []);
   const groups = newHash();
-  yield* iterate(self, function* (value) {
-    const key = yield* call(block, value);
-    const entry = yield* hashGet(groups, key);
-    if (entry) {
-      rt().chargeSlots(1);
-      (entry.value as RArray).items.push(value);
-    } else yield* hashSet(groups, key, arr([value]));
+  return yield* whileHeld(groups, function* () {
+    yield* iterate(self, function* (value) {
+      const key = yield* call(block, value);
+      const entry = yield* hashGet(groups, key);
+      if (entry) {
+        rt().chargeSlots(1);
+        (entry.value as RArray).items.push(value);
+      } else yield* hashSet(groups, key, arr([value]));
+    });
+    return groups;
   });
-  return groups;
 });
 def('Enumerable', 'chunk_while', 0, function* (self, _args, block) {
   if (!block) throw argumentError('tried to create Proc object without a block');
@@ -692,19 +694,27 @@ function* chunks(self: Value, block: RProc, splitWhenTrue: boolean): Gen<Value[]
   const result: Value[] = [];
   let current: Value[] = [];
   let previous: Value | undefined;
-  yield* iterate(self, function* (value) {
-    if (previous !== undefined) {
-      const split = truthy(yield* callBlock(block, [previous, value])) === splitWhenTrue;
-      if (split) {
-        result.push(arr(current));
-        current = [];
+  const held = rt().heldArrays;
+  const mark = held.length;
+  held.push(result, current);
+  try {
+    yield* iterate(self, function* (value) {
+      if (previous !== undefined) {
+        const split = truthy(yield* callBlock(block, [previous, value])) === splitWhenTrue;
+        if (split) {
+          result.push(arr(current));
+          current = [];
+          held[mark + 1] = current;
+        }
       }
-    }
-    current.push(value);
-    previous = value;
-  });
-  if (current.length > 0) result.push(arr(current));
-  return result;
+      current.push(value);
+      previous = value;
+    });
+    if (current.length > 0) result.push(arr(current));
+    return result;
+  } finally {
+    held.length = mark;
+  }
 }
 
 def('Enumerable', 'each_slice', 1, function* (self, [sizeValue], block) {
@@ -740,30 +750,48 @@ def('Enumerable', 'chunk', 0, function* (self, _args, block) {
   const result: Value[] = [];
   let currentKey: Value | undefined;
   let current: Value[] = [];
-  yield* iterate(self, function* (value) {
-    const key = yield* call(block, value);
-    if (key === NIL || (key instanceof RSymbol && key.name === '_separator')) {
-      if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
-      current = [];
-      currentKey = undefined;
-      return;
-    }
-    if (key instanceof RSymbol && key.name === '_alone') {
-      if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
-      result.push(arr([key, arr([value])]));
-      current = [];
-      currentKey = undefined;
-      return;
-    }
-    if (currentKey !== undefined && !(yield* rEquals(currentKey, key))) {
-      result.push(arr([currentKey, arr(current)]));
-      current = [];
-    }
-    if (current.length === 0) currentKey = key;
-    current.push(value);
-  });
-  if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
-  return arr(result);
+  const heldArrays = rt().heldArrays;
+  const arrayMark = heldArrays.length;
+  const keyMark = rt().held.length;
+  heldArrays.push(result, current);
+  rt().held.push(NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      const key = yield* call(block, value);
+      if (key === NIL || (key instanceof RSymbol && key.name === '_separator')) {
+        if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
+        current = [];
+        heldArrays[arrayMark + 1] = current;
+        currentKey = undefined;
+        rt().held[keyMark] = NIL;
+        return;
+      }
+      if (key instanceof RSymbol && key.name === '_alone') {
+        if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
+        result.push(arr([key, arr([value])]));
+        current = [];
+        heldArrays[arrayMark + 1] = current;
+        currentKey = undefined;
+        rt().held[keyMark] = NIL;
+        return;
+      }
+      if (currentKey !== undefined && !(yield* rEquals(currentKey, key))) {
+        result.push(arr([currentKey, arr(current)]));
+        current = [];
+        heldArrays[arrayMark + 1] = current;
+      }
+      if (current.length === 0) {
+        currentKey = key;
+        rt().held[keyMark] = key;
+      }
+      current.push(value);
+    });
+    if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
+    return arr(result);
+  } finally {
+    heldArrays.length = arrayMark;
+    rt().held.length = keyMark;
+  }
 });
 def('Enumerable', 'tally', [0, 1], function* (self, args) {
   const counts = args.length > 0 && args[0] instanceof RHash ? args[0] : newHash();
