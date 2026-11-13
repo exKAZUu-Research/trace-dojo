@@ -6,6 +6,7 @@ import type { Exec, FunctionInfo, LocalInfo } from './runtime';
 import { Scope } from './scope';
 import { sizeOf, STACK_BUFFER_SIZE } from './sliceOps';
 import { newSliceTracking } from './slicePass';
+import { newSsaValues } from './ssaValues';
 import {
   BASIC,
   COMPARABLE,
@@ -48,6 +49,11 @@ export abstract class CompilerBase {
   /** The compiled functions by their runtime information, for finding the function a frame runs. */
   protected readonly functionContexts = new Map<FunctionInfo, FunctionContext>();
   protected runtimeCallCount = 0;
+  /**
+   * Whether the expression being compiled is an element of a slice that Go's compiler allocates before evaluating
+   * the elements, apart from the calls it hoists, which keeps it from forwarding stores to package-level variables.
+   */
+  protected inAllocatedSlice = false;
   protected readonly builtinPanicCalls = new WeakSet<Expression>();
 
   constructor(protected readonly trace: TraceSettings | undefined) {}
@@ -160,6 +166,7 @@ export abstract class CompilerBase {
   /** The index of a captured variable in a function's cells, capturing it through every enclosing closure. */
   protected capture(entity: VarEntity, fn: FunctionContext): number {
     entity.boxed = true;
+    entity.captured = true;
     const existing = fn.captures.get(entity);
     if (existing !== undefined) return existing;
     // Go's slice optimization pass gives up on a variable that a closure refers to.
@@ -196,6 +203,7 @@ export abstract class CompilerBase {
       references: new Set(),
       products: new Map(),
       sumsOfProducts: [],
+      ssa: newSsaValues(),
       loopDepth: 0,
       breakDepth: 0,
       recordsSteps: this.trace !== undefined,

@@ -42,9 +42,18 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         operand = this.structLiteral(expression, literalType, under);
         break;
       }
-      case 'array':
-      case 'slice': {
+      case 'array': {
         operand = this.arrayLiteral(expression, literalType, under);
+        break;
+      }
+      case 'slice': {
+        const outer = this.inAllocatedSlice;
+        this.inAllocatedSlice = true;
+        try {
+          operand = this.arrayLiteral(expression, literalType, under);
+        } finally {
+          this.inAllocatedSlice = outer;
+        }
         break;
       }
       case 'map': {

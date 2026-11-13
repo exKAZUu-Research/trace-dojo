@@ -80,21 +80,25 @@ export interface Operand extends Storage {
   product?: {
     left: Eval;
     right: Eval;
-    /** Whether the product still fuses when the program runs, for a variable that may be assigned again. */
+    /** Whether the product still reaches the use, for a variable whose definition a loop may replace. */
     enabled?: () => boolean;
     /** Whether both factors are constants to Go's compiler, which computes the product before the program runs. */
     constant?: SsaConstant;
     source: ProductSource;
   };
   /**
-   * Whether Go's compiler knows the value as a constant: a constant, or a local variable defined once from one, which
-   * its optimizer propagates, or a parameter of a call inlined with a constant argument. Decided when the program runs,
-   * once every assignment is known, for the frame the value is computed in, which is undefined for the function itself
+   * Whether Go's compiler knows the value as a constant: a constant, or a variable whose reaching definition is one
+   * (see ssaValues.ts), or a parameter of a call inlined with a constant argument. Decided when the program runs, once
+   * every loop's writes are known, for the frame the value is computed in, which is undefined for the function itself
    * rather than one of its calls.
    */
   ssaConstant?: SsaConstant;
   /** How many values the statement's first pass evaluates before this expression's place (`hoistingCalls`). */
   firstPass?: number;
+  /** The variable whose definitions reach this use, and which an assignment to it defines. */
+  ssaVariable?: VarEntity;
+  /** Which definition of the variable reaches this use. */
+  ssaVersion?: number;
   /** The variable a name refers to, for marking it used or assigned. */
   variable?: { markUsed(): void; entity?: VarEntity };
 }
