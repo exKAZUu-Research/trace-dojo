@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 472 -- The native random generator and the methods random.py's module functions run.
+// code-gauge-allow-file fileNcss 476 -- The native random generator and the methods random.py's module functions run.
 import { setAttribute } from '../attributes';
 import { bytesClass, latin1Text, newBytes, PyBytes } from '../bytesValues';
 import { pyStr } from '../conversions';
@@ -580,15 +580,21 @@ function seedMethod(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs)
   return None;
 }
 
-/** `Random.randbytes(n)`: the bytes of `getrandbits(n * 8)`, least significant first. */
+/**
+ * `Random.randbytes(n)`, as CPython's C code makes it: each 32-bit word of the generator gives four bytes, least
+ * significant first, and a last partial word gives its most significant bytes.
+ */
 function randbytes(generator: MersenneTwister, n: PyValue): PyValue {
   const count = Number(toIndex(n));
   if (count < 0) throw valueError('Cannot convert negative int');
-  let value = generator.getrandbits(count * 8);
+  const runtime = currentRuntime();
+  runtime.ensureStringFits(count);
+  runtime.spend(Math.ceil(count / 64));
   const data = new Uint8Array(count);
-  for (let index = 0; index < count; index++) {
-    data[index] = Number(value & 0xffn);
-    value >>= 8n;
+  for (let offset = 0; offset < count; offset += 4) {
+    const left = count - offset;
+    const word = left < 4 ? generator.nextUint32() >>> (32 - left * 8) : generator.nextUint32();
+    for (let index = 0; index < Math.min(left, 4); index++) data[offset + index] = (word >>> (index * 8)) & 0xff;
   }
   return newBytes(data);
 }

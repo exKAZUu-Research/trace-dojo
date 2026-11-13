@@ -6,6 +6,7 @@ import type { Module } from './ast';
 import { describeException } from './describe';
 import { SAFE_NESTING_DEPTH } from './hostStack';
 import { runExitCallbacks } from './modules/atexit';
+import { builtinImporterClass } from './modules/sysInfo';
 import { callValue, isExceptionOf } from './objects';
 import { parsePython } from './parse';
 import { programSourceOf } from './programSource';
@@ -13,7 +14,6 @@ import { Frame, hostRefusal, Runtime } from './runtime';
 import { withRuntime } from './runtimeContext';
 import { DeadlockError, WaitRequest } from './threads';
 import { None } from './types';
-import { unavailableValue } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
 import { PyError, type PyValue } from './values';
 
@@ -107,7 +107,7 @@ function mainGlobals(runtime: Runtime, module: Module): Map<string, PyValue> {
     ['__name__', '__main__'],
     ['__doc__', module.doc ?? None],
     ['__package__', None],
-    ['__loader__', unavailableValue('__loader__（プログラムを読み込んだローダー）')],
+    ['__loader__', builtinImporterClass],
     ['__spec__', None],
     ['__builtins__', runtime.importModule('builtins')],
   ]);

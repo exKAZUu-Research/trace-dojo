@@ -193,6 +193,7 @@ function a85encode(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 // code-gauge-allow functionCognitiveComplexity 29 -- Transcribes base64.a85decode.
+// code-gauge-allow functionNcss 31 -- Transcribes base64.a85decode.
 function a85decode(args: PyValue[], kwargs: Kwargs): PyValue {
   let text = latin1Text(decodeData(args[0]));
   const ignore = kwargs?.has('ignorechars')
@@ -217,6 +218,8 @@ function a85decode(args: PyValue[], kwargs: Kwargs): PyValue {
       }
     } else if (char === 'z' || (foldSpaces && char === 'y')) {
       if (current.length > 0) throw valueError(`${char} inside Ascii85 5-tuple`);
+      // A single character stands for four bytes, so the result is checked as it grows.
+      currentRuntime().ensureStringFits(decoded.length + 4);
       decoded.push(...Array.from({ length: 4 }, () => (char === 'z' ? 0 : 0x20)));
     } else if (!ignore.includes(char)) {
       throw valueError(`Non-Ascii85 digit found: ${char}`);

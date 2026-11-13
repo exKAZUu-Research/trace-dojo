@@ -256,31 +256,30 @@ if log != expected:
     raise ValueError(log)`);
 });
 
-test("a thread busy-waiting on a flag lets the virtual clock reach another thread's timeout", () => {
+test("busy threads advance the virtual clock by the work they do, as CPython's take real time", () => {
   expectSameAsCPython(`import threading, time
-running = True
+stop = False
 def spin():
-    while running:
+    while not stop:
         pass
-spinner = threading.Thread(target=spin)
-spinner.start()
-time.sleep(0.1)
-running = False
-spinner.join()
-flag = []
-def wait_for_flag():
-    while not flag:
-        pass
-def set_flag():
-    time.sleep(0.05)
-    flag.append(1)
-threads = [threading.Thread(target=wait_for_flag), threading.Thread(target=set_flag)]
-for thread in threads:
-    thread.start()
-for thread in threads:
-    thread.join()
-if flag != [1]:
-    raise AssertionError(flag)
+spinners = [threading.Thread(target=spin) for _ in range(2)]
+for spinner in spinners:
+    spinner.start()
+time.sleep(0.01)
+stop = True
+for spinner in spinners:
+    spinner.join()
+total = 0
+def work():
+    global total
+    for i in range(200000):
+        total += i
+worker = threading.Thread(target=work)
+worker.start()
+time.sleep(1)
+if total != 19999900000:
+    raise AssertionError(total)
+worker.join()
 `);
 });
 

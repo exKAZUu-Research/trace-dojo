@@ -147,7 +147,11 @@ function moduleTable(runtime: Runtime): Map<string, PyValue> {
   return table;
 }
 
-/** The `__main__` module, whose repr names the loader of CPython running a program with `-c`. */
+/** The loader of the `__main__` module of CPython running a program with `-c`, as `__loader__` gives it. */
+export const builtinImporterClass = builtinClass('BuiltinImporter');
+builtinImporterClass.module = '_frozen_importlib';
+
+/** The `__main__` module, whose repr names its loader. */
 const mainModuleClass = builtinClass('module', moduleClass);
 hideSubclass(mainModuleClass);
 method(

@@ -213,14 +213,14 @@ export class Scheduler {
     this.queue.push(me);
     this.save(me);
     try {
-      if (request === PREEMPTION) this.passSlice(me, me);
+      if (request === PREEMPTION) this.passSlice();
       for (;;) {
         this.runtime.spend();
         const next = this.pick(me);
         if (next === me) break;
         if (next) {
           this.runSlice(next);
-          if (next.wait === PREEMPTION) this.passSlice(next, me);
+          if (next.wait === PREEMPTION) this.passSlice();
           continue;
         }
         this.advanceClock(me);
@@ -295,13 +295,11 @@ export class Scheduler {
   }
 
   /**
-   * Lets the virtual clock reach the earliest timeout after `preempted` used its slice, when no other thread is ready:
-   * CPython's busy thread takes real time, which brings that timeout, so a busy loop cannot starve a sleeping thread.
+   * Advances the virtual clock by the switch interval for a slice a thread used up, the time CPython's thread takes to
+   * run it, so that busy threads bring a sleeping thread's timeout as their work brings it in CPython.
    */
-  private passSlice(preempted: PyThreadState, me: PyThreadState): void {
-    const others = this.queue.filter((thread) => thread !== preempted && (!thread.pinned || thread === me));
-    if (others.some((thread) => this.isReady(thread))) return;
-    if (others.some((thread) => thread.wait?.deadline !== undefined)) this.advanceClock(me);
+  private passSlice(): void {
+    sleepFor(this.runtime, BigInt(Math.round(this.runtime.switchInterval * 1000)));
   }
 
   /** Runs a stopped thread until it waits or ends. */

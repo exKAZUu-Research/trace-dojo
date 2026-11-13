@@ -597,6 +597,8 @@ function quantiles(dataValue: PyValue, nValue: PyValue, method: PyValue): PyValu
     if (ld === 1) return binaryOp('*', newList(data), binaryOp('-', nValue, 1n));
     throw statisticsError('must have at least one data point');
   }
+  // The n - 1 cut points are a list the program asked for, refused before any is computed when it cannot be held.
+  currentRuntime().ensureRoom(n - 1);
   const result: PyValue[] = [];
   const interpolate = (low: PyValue, high: PyValue, delta: bigint): PyValue =>
     binaryOp('/', binaryOp('+', binaryOp('*', low, binaryOp('-', nValue, delta)), binaryOp('*', high, delta)), nValue);
