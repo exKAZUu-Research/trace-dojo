@@ -707,7 +707,8 @@ export class Runtime {
 
   /** Keeps a value reachable while the native code it is handed to runs, if Python code hands it to native code. */
   handToNative(value: unknown): void {
-    if (this.nativeCalls > (this.frames.at(-1)?.nativeCalls ?? 0)) this.nativeRoots.push(value);
+    if (typeof value === 'object' && value !== null && this.nativeCalls > (this.frames.at(-1)?.nativeCalls ?? 0))
+      this.nativeRoots.push(value);
   }
 
   /** Removes the turtles that no variable, object, pending value, or running native code can reach any more. */

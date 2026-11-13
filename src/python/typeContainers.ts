@@ -58,7 +58,6 @@ import {
   None,
   pyError,
   rangeClass,
-  resultClassOf,
   setClass,
   tupleClass,
   valueError,
@@ -522,8 +521,8 @@ method(dictClass, 'clear', 'none', 0, 0, (self) => {
   return None;
 });
 method(dictClass, 'copy', 'none', 0, 0, (self) => {
-  const copy = new PyDict(resultClassOf(dictOf(self).cls), new DictStore(), dictOf(self).defaultFactory);
-  for (const entry of dictOf(self).store.ordered()) copy.store.set(entry.key, entry.value);
+  const copy = new PyDict(dictClass, new DictStore());
+  updateDict(copy, self);
   return copy;
 });
 method(

@@ -53,6 +53,7 @@ const finishedRows = new WeakMap<Frame, number>();
 
 /** Adds an entry for `frame` at `row` in front of an exception's traceback, as raising it there does. */
 export function prependTraceback(state: ExceptionState, frame: Frame, row: number | undefined): void {
+  currentRuntime().finalizer.locals.retainFrame(frame);
   const head = state.traceback;
   state.traceback = new PyTraceback(frame, row ?? 0, head ?? None);
 }
@@ -106,6 +107,7 @@ const frameObjects = new WeakMap<Frame, PyOpaque>();
 export function frameObject(frame: Frame): PyOpaque {
   // The program can now read the frames' variables as objects.
   currentRuntime().finalizer.locals.expose();
+  currentRuntime().finalizer.locals.retainFrame(frame);
   let object = frameObjects.get(frame);
   if (!object) {
     object = new PyOpaque(frameClass, '', frame);

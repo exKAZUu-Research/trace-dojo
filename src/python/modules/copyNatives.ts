@@ -1,5 +1,6 @@
 import { callValue, getAttribute, getItem, setItem } from '../objects';
 import type { Runtime } from '../runtime';
+import { currentRuntime } from '../runtimeContext';
 import { classOf, nativeFunction, newDict, newList, newTuple, None } from '../types';
 import { type Kwargs, PyDict, PyError, PyList, PySet, PyTuple, type PyValue } from '../values';
 import { bindArguments, type PythonSignature } from './numberSupport';
@@ -101,7 +102,11 @@ function copyContainer(
   if (copier === global('_deepcopy_dict') && x instanceof PyDict) {
     const dict = newDict();
     setItem(memo, id, dict);
-    for (const entry of x.store.ordered()) setItem(dict, copy(entry.key), copy(entry.value));
+    for (const entry of x.store.ordered()) {
+      const value = copy(entry.value);
+      currentRuntime().handToNative(value);
+      setItem(dict, copy(entry.key), value);
+    }
     return { value: dict, done: false };
   }
   return { value: undefined, done: false };

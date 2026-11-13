@@ -47,7 +47,7 @@ import {
 } from '../types';
 import { type PyClass, PyFunction, type PyModule, type PyValue } from '../values';
 import { nativeCheckCaller } from './abc';
-import { counterClass, defaultdictClass, dequeClass, orderedDictClass } from './collections';
+import { defaultdictClass, dequeClass, orderedDictClass } from './collections';
 import { isTypedDict, TYPING_CLASSES } from './typingClasses';
 import { getTypeHints, newTypeClass } from './typingTypeVars';
 
@@ -1124,7 +1124,7 @@ function aliases(abc: PyModule, collections: PyModule, re: PyModule): [string, P
     ['Deque', newSpecialAlias(dequeClass, 1, { name: 'Deque' })],
     ['DefaultDict', newSpecialAlias(defaultdictClass, 2, { name: 'DefaultDict' })],
     ['OrderedDict', newSpecialAlias(orderedDictClass, 2, { name: 'OrderedDict' })],
-    ['Counter', newSpecialAlias(counterClass, 1, { name: 'Counter' })],
+    ['Counter', newSpecialAlias(collections.dict.get('Counter') as PyValue, 1, { name: 'Counter' })],
     ['ChainMap', newSpecialAlias(collections.dict.get('ChainMap') as PyValue, 2, { name: 'ChainMap' })],
     [
       'ContextManager',

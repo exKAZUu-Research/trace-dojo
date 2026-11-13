@@ -117,13 +117,20 @@ const KEEPING_ITS_OWN = new Set([
  * Expressions hand their values on by default, so a value is local only where the evaluator says it stays in the
  * frame: assigned to a name, stored in a local object, passed to a Python function, discarded, returned to the
  * expression that called the function, or used where the operation reads it and keeps nothing, such as an operand.
- * Once the program reads a frame's variables as objects, through a frame object or `locals()`, nothing is local.
+ * Reflection hands general objects on. Cached item tuples track frame transfers separately, so yielding one does
+ * not require walking unrelated data on every item.
  */
 export class LocalReferences {
   /** Whether objects with observable ownership are being followed. */
   marking = false;
   /** Whether the program read the frames' variables as objects, which makes every object reachable some other way. */
   private exposed = false;
+  private readonly itemTuples = new WeakSet<PyObject>();
+  private readonly exposedFrames = new WeakSet<Frame>();
+  private readonly retainedFrames = new WeakSet<Frame>();
+  private readonly tupleFrames = new WeakMap<PyObject, Map<number, WeakRef<Frame>>>();
+  private readonly frameIds = new WeakMap<Frame, number>();
+  private nextFrameId = 0;
   private readonly local = new WeakSet<PyObject>();
   private readonly owners = new WeakMap<PyObject, Set<PyObject>>();
   /** The builtins that keep nothing they are passed, found once following starts. */
@@ -139,6 +146,49 @@ export class LocalReferences {
     if (!this.exposed) this.local.add(object);
   }
 
+  bornItemTuple(tuple: PyTuple): void {
+    this.marking = true;
+    this.itemTuples.add(tuple);
+    this.local.add(tuple);
+  }
+
+  retainFrame(frame: Frame): void {
+    this.exposedFrames.add(frame);
+    this.retainedFrames.add(frame);
+    for (const value of nativeReferences(frame.localValues())) this.binding(frame, value);
+  }
+
+  finishFrame(frame: Frame): void {
+    if (!this.exposedFrames.has(frame)) this.retainedFrames.delete(frame);
+  }
+
+  binding(frame: Frame, value: unknown): void {
+    if (!(value instanceof PyObject) || !this.itemTuples.has(value) || !this.retainedFrames.has(frame)) return;
+    let id = this.frameIds.get(frame);
+    if (id === undefined) this.frameIds.set(frame, (id = this.nextFrameId++));
+    let frames = this.tupleFrames.get(value);
+    if (!frames) this.tupleFrames.set(value, (frames = new Map()));
+    frames.set(id, new WeakRef(frame));
+  }
+
+  canLocateItemTuple(tuple: PyTuple): boolean {
+    if (!this.isLocal(tuple)) return false;
+    for (const [id, reference] of this.tupleFrames.get(tuple) ?? []) {
+      const frame = reference.deref();
+      if (!frame) {
+        this.tupleFrames.get(tuple)?.delete(id);
+        continue;
+      }
+      if (
+        this.retainedFrames.has(frame) &&
+        !this.runtime.frames.includes(frame) &&
+        nativeReferences(frame.localValues()).includes(tuple)
+      )
+        return false;
+    }
+    return true;
+  }
+
   /** Follows a container the evaluator created, holding `items`, while objects are followed. */
   bornContainer(container: PyValue, items: Iterable<PyValue>): void {
     if (!(container instanceof PyObject)) return;
@@ -147,7 +197,7 @@ export class LocalReferences {
   }
 
   isLocal(object: object): boolean {
-    return !this.exposed && this.local.has(object as PyObject);
+    return (!this.exposed || this.itemTuples.has(object as PyObject)) && this.local.has(object as PyObject);
   }
 
   /** Whether an object is local, or a method bound to a local object, which only the running frames hold too. */
@@ -198,7 +248,12 @@ export class LocalReferences {
   /** Hands on what a frame holds, which something besides the running frames keeps from now on. */
   escapeFrame(frame: Frame): void {
     if (!this.marking) return;
-    for (const value of nativeReferences(frameReferences(frame))) this.escape(value);
+    for (const value of nativeReferences(frameReferences(frame))) {
+      if (value instanceof PyObject && this.itemTuples.has(value)) {
+        this.retainedFrames.add(frame);
+        this.binding(frame, value);
+      } else this.escape(value);
+    }
   }
 
   /** Hands on the parameters a function's closures capture, whose cells the closures share. */
@@ -218,8 +273,10 @@ export class LocalReferences {
     this.local.add(generator);
   }
 
-  /** Stops following objects for good, since the program can read the frames' variables as objects. */
   expose(): void {
+    for (const frame of this.runtime.frames) {
+      for (const value of nativeReferences(frame.localValues())) this.escape(value);
+    }
     this.exposed = true;
   }
 

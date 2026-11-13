@@ -255,7 +255,14 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     expression: Extract<Expression, { kind: 'yield' | 'yieldFrom' | 'await' }>,
     frame: Frame
   ): Suspension {
-    const value = expression.value ? yield* this.evaluateSuspending(expression.value, frame) : None;
+    let value: PyValue = None;
+    if (expression.value) {
+      if (expression.kind === 'yield') {
+        value = expression.value.suspends
+          ? yield* this.suspendingValue(expression.value, frame)
+          : this.evaluateValue(expression.value, frame);
+      } else value = yield* this.evaluateSuspending(expression.value, frame);
+    }
     if (expression.kind === 'yieldFrom') return yield* delegateTo(value, frame);
     if (expression.kind === 'await') return yield* awaitValue(value, frame, expression.row);
     return yield frame.scope.isAsync ? asyncYield(value) : value;

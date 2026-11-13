@@ -498,7 +498,7 @@ export class Evaluator extends AsyncEvaluator {
     const { expression } = statement;
     // A `yield` statement, the most common one that suspends, needs no generator of its own.
     if (expression.kind === 'yield' && !expression.value?.suspends) {
-      const value = expression.value ? this.evaluate(expression.value, frame) : None;
+      const value = expression.value ? this.evaluateValue(expression.value, frame) : None;
       yield frame.scope.isAsync ? asyncYield(value) : value;
       this.runtime.steps.step(statement.stepRow);
       return undefined;

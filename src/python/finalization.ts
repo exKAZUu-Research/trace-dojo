@@ -118,8 +118,8 @@ export class GeneratorFinalizer {
 
   /** Tracks a generator after it ran, depending on whether it suspended inside a `try` or `with` statement. */
   update(generator: PyGenerator, frame: Frame, finished: boolean): void {
-    // A generator's frame leaves the stack while the generator keeps it: what it holds is no longer local.
     if (this.locals.marking) this.locals.escapeFrame(frame);
+    if (finished) this.locals.finishFrame(frame);
     // An async generator with a finalizer from the hooks calls it when unfinished, wherever it suspended.
     if (!finished && (frame.protectedDepth > 0 || hasAsyncGeneratorFinalizer(generator))) {
       this.pending.add(generator);

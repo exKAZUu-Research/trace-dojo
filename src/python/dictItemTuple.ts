@@ -1,14 +1,15 @@
 import type { DictEntry } from './dictStore';
+import { referencesOf } from './garbageCollection';
 import { currentRuntime } from './runtimeContext';
 import { newTuple, None } from './types';
-import type { PyTuple, PyValue } from './values';
+import { PyDict, PyList, PyObject, PyTuple, type PyValue } from './values';
 
 export class DictItemTuple {
   private readonly tuple = newTuple([None, None]);
   private checking = false;
 
   constructor() {
-    currentRuntime().finalizer.locals.born(this.tuple);
+    currentRuntime().finalizer.locals.bornItemTuple(this.tuple);
   }
 
   holds(): PyTuple[] {
@@ -22,8 +23,8 @@ export class DictItemTuple {
     try {
       const locals = runtime.finalizer.locals;
       shared =
-        runtime.heldByNative().includes(this.tuple) ||
-        (locals.isLocal(this.tuple)
+        runtime.heldByNative().some((root) => directlyHolds(root, this.tuple)) ||
+        (locals.canLocateItemTuple(this.tuple)
           ? locals.aliveAmong([this.tuple], runtime.heldByNative()).has(this.tuple)
           : runtime.reachableObjects([], new Set([this.tuple])).has(this.tuple));
     } finally {
@@ -47,4 +48,13 @@ export function dictItemValue(entry: DictEntry, view: 'keys' | 'values' | 'items
   if (view === 'keys') return entry.key;
   if (view === 'values') return entry.value;
   return newTuple([entry.key, entry.value]);
+}
+
+function directlyHolds(root: unknown, tuple: PyTuple): boolean {
+  if (root === tuple) return true;
+  if (Array.isArray(root)) return root.includes(tuple);
+  if (root instanceof PyList || root instanceof PyTuple) return root.items.includes(tuple);
+  if (root instanceof PyDict)
+    return root.store.liveEntries().some((entry) => entry.key === tuple || entry.value === tuple);
+  return root instanceof PyObject && referencesOf(root).includes(tuple);
 }

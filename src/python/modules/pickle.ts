@@ -5,7 +5,7 @@ import { registerSourceModule } from '../sourceModules';
 import { nativeFunction, newTuple, None } from '../types';
 import { PyBuiltinFunction, PyClass, type PyValue } from '../values';
 import { cInt, clinicArgs } from './clinicArgs';
-import { counterClass, defaultdictClass, dequeClass } from './collections';
+import { defaultdictClass, dequeClass } from './collections';
 import { COMPAT_PICKLE_SOURCE } from './compatPickleSource';
 import { decimalClass } from './decimal';
 import { fractionClass } from './fractions';
@@ -21,7 +21,7 @@ const strings = (value: PyValue): string[] => toArray(value) as string[];
 /** The C types CPython creates from specs, whose `__module__` each type holds as a str object of its own. */
 const HEAP_C_TYPES: ReadonlySet<PyClass> = new Set([dequeClass, defaultdictClass, decimalClass, partialClass]);
 /** The classes this interpreter writes natively but CPython in Python, whose names are interned str objects. */
-const PYTHON_CLASSES: ReadonlySet<PyClass> = new Set([counterClass, fractionClass]);
+const PYTHON_CLASSES: ReadonlySet<PyClass> = new Set([fractionClass]);
 let freshNames = 0n;
 const fresh = (): PyValue => newTuple(['fresh', freshNames++]);
 

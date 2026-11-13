@@ -156,3 +156,32 @@ print('traversed')`;
     uncaughtException: undefined,
   });
 });
+
+test.each([false, true])('item tuples stay efficient through generators after frame exposure (%s)', (expose) => {
+  const program = `${expose ? 'locals()' : 'pass'}
+d = {i: [i] for i in range(6000)}
+def pairs():
+    for pair in d.items(): yield pair
+total = 0
+for key, value in pairs(): total += value[0]
+assert total == 17997000
+it = iter({1: 'one', 2: 'two', 3: 'three'}.items())
+def forward():
+    pair = next(it)
+    yield pair
+g = forward()
+first = next(g)
+assert next(it) == (2, 'two')
+assert first == (1, 'one')
+assert next(g, None) is None
+del first
+assert next(it) == (3, 'three')
+source = iter({1: 'one', 2: 'two', 3: 'three'}.items())
+assert list(source) == [(1, 'one'), (2, 'two'), (3, 'three')]
+print('forwarded')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'forwarded\n',
+    uncaughtException: undefined,
+  });
+});

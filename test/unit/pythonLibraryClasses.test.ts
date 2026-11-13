@@ -3,11 +3,11 @@ import { expect, test } from 'vitest';
 import { executeProgram } from '../../src/interpreter/program';
 
 test('shared mutable library classes cannot leak changes to another program', () => {
-  for (const operation of ["Counter.marker = 'leaked'", 'del Counter.update']) {
+  for (const operation of ["Enum.marker = 'leaked'", 'del Enum.__new__']) {
     expect(
       executeProgram(
         'python',
-        `from collections import Counter
+        `from enum import Enum
 try:
     ${operation}
 except Exception:
@@ -17,14 +17,14 @@ print('after')`
     ).toMatchObject({
       kind: 'executed',
       stdout: '',
-      uncaughtException: '標準ライブラリのクラス collections.Counter の属性の書き換えは、この採点環境では使えません。',
+      uncaughtException: '標準ライブラリのクラス enum.Enum の属性の書き換えは、この採点環境では使えません。',
     });
     expect(
       executeProgram(
         'python',
-        `from collections import Counter
-assert not hasattr(Counter, 'marker')
-assert Counter('aa')['a'] == 2
+        `from enum import Enum
+assert not hasattr(Enum, 'marker')
+assert Enum('Kind', 'one').one.name == 'one'
 print('isolated')`
       )
     ).toMatchObject({ kind: 'executed', stdout: 'isolated\n', uncaughtException: undefined });

@@ -26,10 +26,6 @@ test.each([
     "a = {'v': 0}\nb = {'v': 0}\nfor i in range(27):\n    a = {'x': a, 'y': a}\n    b = {'x': b, 'y': b}\na == b",
   ],
   [
-    'splitting a deeply shared exception group',
-    'g = ExceptionGroup("x", [ValueError()])\nfor i in range(27):\n    g = ExceptionGroup("x", [g, g])\ntry:\n    raise g\nexcept* TypeError:\n    pass',
-  ],
-  [
     'repeated decimal conversions of a huge int with the digit limit off',
     'import sys\nsys.set_int_max_str_digits(0)\nn = 1 << 3000000\nfor i in range(100):\n    x = str(n)',
   ],

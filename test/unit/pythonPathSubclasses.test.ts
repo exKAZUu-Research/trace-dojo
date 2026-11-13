@@ -79,3 +79,21 @@ print('joined')`;
     uncaughtException: undefined,
   });
 });
+
+test('string-valued enum paths use string payloads and preserve a single join argument', () => {
+  const program = `import os.path
+from enum import Enum
+class Path(str, Enum): A = 'a'
+assert os.fspath(Path.A) is Path.A
+assert os.path.join(Path.A) is Path.A
+assert os.path.split(Path.A) == ('', 'a')
+assert os.path.join('x', Path.A) == 'x/a'
+assert os.fsencode(Path.A) == b'a'
+assert os.fsdecode(Path.A) is Path.A
+print('enum paths')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'enum paths\n',
+    uncaughtException: undefined,
+  });
+});

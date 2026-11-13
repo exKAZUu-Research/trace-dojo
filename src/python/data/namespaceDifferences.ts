@@ -358,8 +358,6 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '_generate_next_value_ __module__ __firstlineno__ __static_attributes__ _new_member_ _use_args_ _member_names_ _member_map_ _value2member_map_ _hashable_values_ _unhashable_values_ _unhashable_values_map_ _member_type_ _value_repr_ __doc__ MONDAY TUESDAY WEDNESDAY THURSDAY FRIDAY SATURDAY SUNDAY __format__ __new__ __repr__',
   'calendar.Month':
     '_generate_next_value_ __module__ __firstlineno__ __static_attributes__ _new_member_ _use_args_ _member_names_ _member_map_ _value2member_map_ _hashable_values_ _unhashable_values_ _unhashable_values_map_ _member_type_ _value_repr_ __doc__ JANUARY FEBRUARY MARCH APRIL MAY JUNE JULY AUGUST SEPTEMBER OCTOBER NOVEMBER DECEMBER __format__ __new__ __repr__',
-  'collections.Counter':
-    '__module__ __firstlineno__ __doc__ __init__ __missing__ total most_common elements fromkeys update subtract copy __reduce__ __delitem__ __repr__ __eq__ __ne__ __le__ __lt__ __ge__ __gt__ __add__ __sub__ __or__ __and__ __pos__ __neg__ _keep_positive __iadd__ __isub__ __ior__ __iand__ __static_attributes__ __dict__ __weakref__ __hash__',
   'collections.OrderedDict':
     '__repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __or__ __ror__ __ior__ __setitem__ __delitem__ fromkeys __sizeof__ __reduce__ setdefault pop popitem keys values items update clear copy __reversed__ move_to_end __dict__ __doc__ __hash__',
   'collections._deque_iterator':
@@ -1408,11 +1406,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ],
       [],
     ],
-    'collections.Counter': [['__doc__', '__hash__'], []],
-    'collections.OrderedDict': [
-      ['__iter__', '__ior__', '__setitem__', '__delitem__', 'fromkeys', '__sizeof__', '__hash__'],
-      [],
-    ],
+    'collections.OrderedDict': [['__ior__', '__setitem__', '__delitem__', 'fromkeys', '__sizeof__', '__hash__'], []],
     'collections._deque_iterator': [['__getattribute__', '__reduce__', '__module__'], []],
     'collections._deque_reverse_iterator': [['__getattribute__', '__reduce__', '__module__'], []],
     'collections.abc.ByteString': [['_removal_version'], []],
@@ -1792,7 +1786,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     'itertools.permutations': [['__new__', '__getattribute__', '__sizeof__', '__doc__'], []],
     'itertools.product': [['__new__', '__getattribute__', '__sizeof__', '__doc__'], []],
     'itertools.repeat': [['__getattribute__', '__length_hint__'], []],
-    'itertools.starmap': [['__new__', '__getattribute__', '__doc__'], []],
+    'itertools.starmap': [['__getattribute__'], []],
     'itertools.takewhile': [['__new__', '__getattribute__', '__doc__'], []],
     'itertools.zip_longest': [['__new__', '__getattribute__', '__doc__'], []],
     'logging.Handler': [['_at_fork_reinit'], []],

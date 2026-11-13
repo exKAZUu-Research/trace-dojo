@@ -383,6 +383,7 @@ export class ExpressionEvaluator {
     const { finalizer } = this.runtime;
     const { locals } = finalizer;
     if (locals.marking && !locals.bindsLocally(frame, ref.access)) locals.escape(value);
+    if (locals.marking) locals.binding(frame, value);
     if (finalizer.pending.size === 0) {
       bindName(ref, value, frame);
       return;

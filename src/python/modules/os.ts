@@ -8,7 +8,7 @@ import { registerSourceModule } from '../sourceModules';
 import { iterStr } from '../strings';
 import { nativeFunction, newList, None, typeError, typeName, unbox, valueError } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import { PyError, PyInstance, PyTuple, type PyValue } from '../values';
+import { PyError, PyTuple, type PyValue } from '../values';
 import { bindArguments } from './numberSupport';
 
 // os ----------------------------------------------------------------------------------------------------------------
@@ -274,7 +274,7 @@ function text(value: PyValue | undefined): string {
   if (bytesPaths === undefined) bytesPaths = isBytes;
   else if (bytesPaths !== isBytes) throw typeError("Can't mix strings and bytes in path components");
   if (path instanceof PyBytes) return Array.from(path.data, (byte) => String.fromCodePoint(byte)).join('');
-  return typeof path === 'string' ? path : ((path as PyInstance).primitive as string);
+  return unbox(path) as string;
 }
 
 /** A path that `readsEnvironment` says needs no environment variable, as it is; any other is not supported. */
@@ -299,6 +299,10 @@ function join(args: PyValue[], kwargs: Map<string, PyValue> | undefined): PyValu
     if (error instanceof PyError && error.exception.cls.name === 'TypeError') checkArgTypes('join', [start, ...rest]);
     throw error;
   }
+  if (rest.length === 0) {
+    text(start);
+    return start;
+  }
   let path = text(start);
   for (const part of parts.map((each) => text(each))) {
     if (part.startsWith('/') || path === '') path = part;
@@ -322,7 +326,7 @@ function checkArgTypes(name: string, values: PyValue[]): void {
   let hasString = false;
   let hasBytes = false;
   for (const value of values) {
-    if (typeof value === 'string' || (value instanceof PyInstance && typeof value.primitive === 'string')) {
+    if (typeof unbox(value) === 'string') {
       hasString = true;
     } else if (isPath(value)) {
       hasBytes = true;

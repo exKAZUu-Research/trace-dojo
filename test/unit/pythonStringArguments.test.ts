@@ -16,6 +16,11 @@ assert datetime.time.fromisoformat(Text('03:04:05')) == datetime.time(3, 4, 5)
 assert time.strftime(Text('%Y'), time.gmtime(0)) == '1970'
 assert datetime.date(2024, 1, 2).strftime(Text('%Y')) == '2024'
 assert next(csv.reader([Text('a,b')])) == ['a', 'b']
+reader = csv.reader(['a;b'], delimiter=Text(';'))
+assert type(reader.dialect.delimiter) is str
+assert next(reader) == ['a', 'b']
+assert next(csv.reader(['"a,b",c'], quotechar=Text('"'))) == ['a,b', 'c']
+assert next(csv.reader(['a!;b;c'], delimiter=Text(';'), escapechar=Text('!'))) == ['a;b', 'c']
 assert ET.fromstring(Text('<a/>')).tag == 'a'
 try: ET.fromstring(3)
 except TypeError as error: assert str(error) == "a bytes-like object is required, not 'int'"

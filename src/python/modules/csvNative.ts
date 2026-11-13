@@ -31,6 +31,7 @@ def _set_char(name, src, default):
         return default
     if not isinstance(src, str):
         raise TypeError(f'"{name}" must be a unicode character, not {type(src).__name__}')
+    src = str.__str__(src)
     if len(src) != 1:
         raise TypeError(f'"{name}" must be a unicode character, not a string of length {len(src)}')
     return src
@@ -43,6 +44,7 @@ def _set_char_or_none(name, src, default):
         return None
     if not isinstance(src, str):
         raise TypeError(f'"{name}" must be a unicode character or None, not {type(src).__name__}')
+    src = str.__str__(src)
     if len(src) != 1:
         raise TypeError(f'"{name}" must be a unicode character or None, not a string of length {len(src)}')
     return src

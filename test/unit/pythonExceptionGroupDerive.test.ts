@@ -38,3 +38,11 @@ else: raise AssertionError('invalid derive')`;
     uncaughtException: undefined,
   });
 });
+
+test('derived partitions of deeply shared groups obey the storage budget', () => {
+  const program = `group = ExceptionGroup('leaf', [ValueError()])
+for i in range(27): group = ExceptionGroup('nested', [group, group])
+try: raise group
+except* TypeError: pass`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: 'MemoryError' });
+});

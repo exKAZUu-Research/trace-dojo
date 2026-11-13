@@ -20,7 +20,7 @@ import {
   typeError,
 } from '../types';
 import { type PyDeque, PyDict, type PyOpaque, PyTuple, type PyValue } from '../values';
-import { counterClass, defaultdictClass, dequeClass, orderedDictClass } from './collections';
+import { defaultdictClass, dequeClass, orderedDictClass } from './collections';
 import { decimalClass } from './decimal';
 import { fractionClass, type PyFraction } from './fractions';
 import { type Partial, partialClass } from './functools';
@@ -29,9 +29,6 @@ const itemsIterator = (self: PyValue): PyValue => getIterator(callValue(getAttri
 
 method(orderedDictClass, '__reduce__', 'none', 0, 0, (self) =>
   newTuple([classOf(self), newTuple([]), objectState(self, false), None, itemsIterator(self)])
-);
-method(counterClass, '__reduce__', 'none', 0, 0, (self) =>
-  newTuple([classOf(self), newTuple([callValue(dictClass, [self])])])
 );
 method(defaultdictClass, '__reduce__', 'none', 0, 0, (self) => {
   const factory = (self as PyDict).defaultFactory;
