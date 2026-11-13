@@ -431,6 +431,9 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   expect(run('p 1.round(-(10**30))')).toMatchObject({
     uncaughtException: "bignum too big to convert into 'long' (RangeError)",
   });
+  expect(run('p 1.0.remainder(0.0)')).toMatchObject({
+    uncaughtException: 'divided by 0 (ZeroDivisionError)',
+  });
 });
 
 test('unsupported conversion cannot be hidden with exception false', () => {

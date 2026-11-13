@@ -250,6 +250,7 @@ for (const owner of ['Integer', 'Float']) {
       if (other === 0n) throw zeroDivisionError();
       return self % other;
     }
+    if (other === 0) throw zeroDivisionError();
     return Number(self) % Number(other);
   });
   def(owner, ['abs', 'magnitude'], 0, (self: Num) =>
