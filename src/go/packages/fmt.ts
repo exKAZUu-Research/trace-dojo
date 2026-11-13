@@ -42,7 +42,7 @@ function structOf(receiver: Value): GoStruct {
 }
 
 /** `Errorf`: formats as Sprintf does, and wraps the errors that %w verbs refer to. */
-function errorf(format: string, args: Value[]): Value {
+export function errorf(format: string, args: Value[]): Value {
   const printer = new Printer(true);
   const message = printer.printf(format, args);
   const { wrapped } = printer;

@@ -1024,3 +1024,59 @@ func main() {
       '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
   });
 });
+
+// Go 1.27.3 prints these: text/template's actions, functions, nested templates, options, and its parse and execution
+// errors, which name the failing action.
+test('text/template executes templates as Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"text/template"
+)
+
+type Item struct {
+	Name  string
+	Price float64
+	Tags  []string
+}
+
+func (i Item) Label() string { return strings.ToUpper(i.Name) }
+
+func show(t *template.Template, data any) {
+	err := t.Execute(os.Stdout, data)
+	fmt.Println("|", err)
+}
+
+func main() {
+	funcs := template.FuncMap{
+		"join": strings.Join,
+		"half": func(x float64) (float64, error) {
+			if x < 0 {
+				return 0, errors.New("negative")
+			}
+			return x / 2, nil
+		},
+	}
+	t := template.Must(template.New("item").Funcs(funcs).Parse(
+		"{{define \"tags\"}}[{{join . \",\"}}]{{end}}{{.Label}} {{printf \"%.2f\" .Price}} {{half .Price}} {{template \"tags\" .Tags}}" +
+			"{{range $i, $t := .Tags}}{{if eq $t \"skip\"}}{{continue}}{{end}} {{$i}}:{{$t}}{{end}}"))
+	show(t, Item{"pen", 1.5, []string{"a", "skip", "b"}})
+	show(t, &Item{"ink", -3, nil})
+	m := template.Must(template.New("m").Option("missingkey=error").Parse("{{range $k, $v := .}}{{$k}}={{$v}} {{end}}{{.zz}}"))
+	show(m, map[string]int{"b": 2, "a": 1})
+	show(template.Must(template.New("r").Parse("{{range 5}}{{if eq . 3}}{{break}}{{end}}{{.}}{{end}} {{.Missing}}")), Item{})
+	_, err := template.New("bad").Parse("{{if .X}}{{.Y}")
+	fmt.Println(err)
+	fmt.Println(template.HTMLEscapeString("<a href=\"x\">"), template.JSEscapeString("it's"))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'PEN 1.50 0.75 [a,skip,b] 0:a 2:b| <nil>\nINK -3.00 | template: item:1:78: executing "item" at <half .Price>: error calling half: negative\na=1 b=2 | template: m:1:44: executing "m" at <.zz>: map has no entry for key "zz"\n012 | template: r:1:55: executing "r" at <.Missing>: can\'t evaluate field Missing in type main.Item\ntemplate: bad:1: bad character U+007D \'}\'\n&lt;a href=&#34;x&#34;&gt; it\\\'s\n',
+  });
+});
