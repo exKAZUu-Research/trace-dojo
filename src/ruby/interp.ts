@@ -1129,12 +1129,12 @@ function* rescueClause(
       runtime.currentRow = rescue.row;
       let matched = false;
       if (rescue.classes.length === 0) {
-        matched = isA(exception, runtime.c.StandardError);
+        matched = truthy(yield* callMethod(runtime.c.StandardError, '===', [exception]));
       } else {
         const classes = yield* evalList(rescue.classes, frame);
         for (const cls of classes) {
           if (!(cls instanceof RClass)) throw typeError('class or module required for rescue clause');
-          if (isA(exception, cls)) {
+          if (truthy(yield* callMethod(cls, '===', [exception]))) {
             matched = true;
             break;
           }

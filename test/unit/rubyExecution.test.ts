@@ -2141,6 +2141,11 @@ test('rescue selectors see and root the active exception', () => {
   expect(run('def c; p $!.class; StandardError; end; begin; raise "bad"; rescue c; end')).toMatchObject({
     stdout: 'RuntimeError\n',
   });
+  expect(
+    run('class E<StandardError;def self.===(x);puts :called;true;end;end;begin;raise "bad";rescue E;puts :handled;end')
+  ).toMatchObject({
+    stdout: 'called\nhandled\n',
+  });
 });
 
 test('implicit block conversion invokes private to_proc', () => {
