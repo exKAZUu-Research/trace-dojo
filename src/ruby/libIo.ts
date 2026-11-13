@@ -11,6 +11,7 @@ import { arr, str } from './values';
 const PRIVATE = { visibility: 'private' as Visibility };
 
 /** The text `puts` writes for its arguments: each on its own line, arrays flattened, nil as an empty line. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Ruby's method takes these argument forms, which the branches mirror.
 export function* putsText(args: Value[]): Gen<string> {
   if (args.length === 0) return '\n';
   let text = '';

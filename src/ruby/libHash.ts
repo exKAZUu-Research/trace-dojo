@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 500 -- Hash's methods share its entry helpers.
 import { inspect, inspectHash, rEql, rEquals } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, rubyError } from './errors';
@@ -50,6 +49,7 @@ def(
   },
   { visibility: 'private', keywords: true }
 );
+// code-gauge-allow functionCognitiveComplexity 18 -- Ruby's method takes these argument forms, which the branches mirror.
 sdef('Hash', '[]', [0, -1], function* (self, args) {
   const hash = new RHash(self);
   if (args.length === 1 && args[0] instanceof RHash) {

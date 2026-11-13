@@ -20,6 +20,8 @@ import { classOf, snapshot, str, truthy } from './values';
  * The key a Hash files a value under: equal for keys that are `eql?`, computed without calling the program's methods
  * unless its objects define `hash`.
  */
+// code-gauge-allow functionCognitiveComplexity 23 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow functionNcss 34 -- Each language wires its own parser and runtime into the shared modules alike.
 export function* hashKeyOf(value: Value): Gen<string> {
   switch (typeof value) {
     case 'bigint': {

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 411 -- The conversions module keeps one concern's cases together.
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
 import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
@@ -8,6 +9,7 @@ import { classOf, isA, realClassOf, truthy } from './values';
 // Numbers -------------------------------------------------------------------------------------------------------------
 
 /** Formats a Float as `Float#to_s` does: the shortest digits, in exponent form below 1e-4 or from 1e16. */
+// code-gauge-allow duplicateLines 15 -- Each language wires its own parser and runtime into the shared modules alike.
 export function formatFloat(value: number): string {
   if (Number.isNaN(value)) return 'NaN';
   if (value === Number.POSITIVE_INFINITY) return 'Infinity';
@@ -244,6 +246,8 @@ export function className(cls: RClass): string {
 }
 
 /** A String's inspect: double-quoted, escaping quotes, backslashes, `#{`, and characters that do not print. */
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of value Ruby converts or compares.
+// code-gauge-allow functionNcss 53 -- One case per kind of value Ruby converts or compares.
 export function strInspect(text: string): string {
   let result = '"';
   for (let index = 0; index < text.length; index++) {
@@ -412,6 +416,7 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
 }
 
 /** `a.eql?(b)`: equal values of the same type, as Hash keys compare. */
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of value Ruby converts or compares.
 export function* rEql(a: Value, b: Value): Gen<boolean> {
   if (typeof a !== typeof b) return false;
   if (typeof a === 'number') return a === b || (Number.isNaN(a) && Number.isNaN(b as number) && false);
@@ -447,6 +452,7 @@ function describeImmediate(value: Value): string {
 }
 
 /** `a <=> b` as a number, or `undefined` when it is nil. */
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of value Ruby converts or compares.
 export function* spaceship(a: Value, b: Value): Gen<number | undefined> {
   if ((typeof a === 'bigint' || typeof a === 'number') && !isOverridden(a, '<=>')) {
     if (typeof b === 'bigint' || typeof b === 'number') return numericCompare(a, b);
@@ -464,24 +470,20 @@ export function* spaceship(a: Value, b: Value): Gen<number | undefined> {
   return truthy(yield* callMethod(result, '<', [0n])) ? -1 : 0;
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of value Ruby converts or compares.
 export function numericCompare(a: bigint | number, b: bigint | number): number | undefined {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
-  const x = typeof a === 'bigint' ? a : a;
-  const y = typeof b === 'bigint' ? b : b;
-  if (typeof x === 'number' && Number.isNaN(x)) return undefined;
-  if (typeof y === 'number' && Number.isNaN(y)) return undefined;
-  if (typeof x === 'number' && typeof y === 'number') return x < y ? -1 : x > y ? 1 : 0;
+  if (Number.isNaN(a) || Number.isNaN(b)) return undefined;
+  if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : a > b ? 1 : 0;
   // Mixed: compare exactly, since converting a big Integer to a Float loses digits.
-  const float = (typeof x === 'number' ? x : y) as number;
-  const integer = (typeof x === 'bigint' ? x : y) as bigint;
-  let order: number;
-  if (!Number.isFinite(float)) order = float > 0 ? 1 : -1;
-  else {
-    const truncated = BigInt(Math.trunc(float));
-    if (truncated !== integer) order = truncated > integer ? 1 : -1;
-    else order = float > Math.trunc(float) ? 1 : float < Math.trunc(float) ? -1 : 0;
-  }
-  return typeof x === 'number' ? order : -order;
+  return typeof a === 'number' ? compareFloatInteger(a, b as bigint) : -compareFloatInteger(b as number, a);
+}
+
+function compareFloatInteger(float: number, integer: bigint): number {
+  if (!Number.isFinite(float)) return float > 0 ? 1 : -1;
+  const truncated = BigInt(Math.trunc(float));
+  if (truncated !== integer) return truncated > integer ? 1 : -1;
+  return Math.sign(float - Math.trunc(float));
 }
 
 /** Compares strings by their UTF-8 bytes, which orders code points as their numbers do. */

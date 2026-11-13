@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 848 -- The converter module keeps one concern's cases together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -176,8 +177,6 @@ export class Converter {
 
   // Expressions -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 250 -- One case per kind of node.
-  // code-gauge-allow functionCognitiveComplexity 80 -- One case per kind of node.
   private expr(node: Node, use: Use = 1): Expr {
     switch (node.type) {
       case 'integer': {
@@ -428,6 +427,7 @@ export class Converter {
     return { k: 'str', parts: this.stringParts(node) };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of syntax node.
   private stringParts(node: Node): StrPart[] {
     const parts: StrPart[] = [];
     let literal = '';
@@ -603,7 +603,7 @@ export class Converter {
     return { k: 'mlhs', items, splat };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of target.
+  // code-gauge-allow functionNcss 40 -- One case per kind of syntax node.
   private target(node: Node): Target {
     switch (node.type) {
       case 'identifier': {
@@ -774,6 +774,7 @@ export class Converter {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of syntax node.
   private unary(node: Node): Expr {
     const operator = required(node.childForFieldName('operator')).text;
     const operandNode = required(node.childForFieldName('operand'));
@@ -930,7 +931,6 @@ export class Converter {
     return false;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of parameter.
   private params(node: Node | null, isBlock: boolean): Params {
     const params: Params = { required: [], optional: [], post: [], keywords: [], trailingComma: false };
     if (!node) return params;
@@ -1230,7 +1230,6 @@ function someChild(e: Expr, test: (child: Expr) => boolean): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of expression.
 function childrenOf(e: Expr): Expr[] {
   switch (e.k) {
     case 'str':

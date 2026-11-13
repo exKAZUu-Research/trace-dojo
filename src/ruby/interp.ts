@@ -1,10 +1,9 @@
-// code-gauge-allow-file fileNcss 900 -- The evaluator keeps one function per kind of node together.
+// code-gauge-allow-file fileNcss 931 -- The interp module keeps one concern's cases together.
 import type { BlockDef, Body, Call, Expr, MethodDef, MultiTarget, Params, ParamTarget, Stmt, Target } from './ast';
 import { caseEquals, inspect, toS } from './conversions';
 import {
   argumentCountError,
   argumentError,
-  expectedArity,
   frozenError,
   implicitConversionError,
   nameError,
@@ -29,6 +28,7 @@ import {
   type Value,
   type Visibility,
 } from './objects';
+import { bindParams } from './params';
 import {
   BreakSignal,
   Frame,
@@ -99,8 +99,6 @@ function createsObjects(e: Expr): boolean {
 
 // Expressions ---------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 150 -- One case per kind of expression.
-// code-gauge-allow functionCognitiveComplexity 60 -- One case per kind of expression.
 export function* ev(e: Expr, frame: Frame): Gen {
   switch (e.k) {
     case 'int': {
@@ -477,6 +475,7 @@ function constSet(module: RClass, name: string, value: Value): void {
 
 // Assignment ----------------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionNcss 39 -- One case per kind of expression or Ruby rule.
 export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
   switch (target.k) {
     case 'lvar': {
@@ -525,7 +524,7 @@ export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
   }
 }
 
-function* destructure(target: MultiTarget, value: Value, frame: Frame): Gen<void> {
+export function* destructure(target: MultiTarget, value: Value, frame: Frame): Gen<void> {
   const items = yield* toAryForAssignment(value);
   const { splat } = target;
   if (splat === undefined) {
@@ -684,6 +683,7 @@ export function storesAnswer(value: Value): boolean {
   return typeof value !== 'object' || value instanceof RString || value instanceof RSymbol;
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of expression or Ruby rule.
 function* evalCase(e: Extract<Expr, { k: 'case' }>, frame: Frame): Gen {
   const runtime = rt();
   const subject = e.subject ? yield* ev(e.subject, frame) : undefined;
@@ -738,6 +738,8 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
 
 const RETRY = Symbol('retry');
 
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionNcss 33 -- One case per kind of expression or Ruby rule.
 function* rescueClause(
   e: Extract<Expr, { k: 'begin' }>,
   error: RubyError,
@@ -834,6 +836,7 @@ function* moduleContainer(e: { scope?: Expr; top?: boolean }, frame: Frame): Gen
   return frame.cref[0];
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of expression or Ruby rule.
 function* defineClass(e: Extract<Expr, { k: 'class' }>, frame: Frame): Gen {
   const runtime = rt();
   const container = yield* moduleContainer(e, frame);
@@ -915,6 +918,7 @@ export interface CallOptions {
   used?: boolean;
 }
 
+// code-gauge-allow functionNcss 33 -- One case per kind of expression or Ruby rule.
 function* evalCall(e: Call, frame: Frame): Gen {
   let recv: Value;
   if (e.recv) {
@@ -1012,6 +1016,8 @@ function methodMissing(recv: Value, name: string, options: CallOptions): never {
 }
 
 /** Calls a method that lookup found. */
+// code-gauge-allow functionNcss 34 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of expression or Ruby rule.
 export function* invoke(
   method: RMethod,
   recv: Value,
@@ -1060,6 +1066,7 @@ export function* invoke(
   }
 }
 
+// code-gauge-allow functionParameterCount 8 -- One case per kind of expression or Ruby rule.
 function* invokeUser(
   method: RMethod,
   def: MethodDef,
@@ -1099,7 +1106,8 @@ function* invokeUser(
  * error becomes one only after unwinding some calls, since building it needs stack.
  */
 function hostStackOverflow(error: unknown, depth: number): unknown {
-  const isOverflow = error === STACK_OVERFLOW || (error instanceof RangeError && error.message.startsWith('Maximum call stack'));
+  const isOverflow =
+    error === STACK_OVERFLOW || (error instanceof RangeError && error.message.startsWith('Maximum call stack'));
   if (!isOverflow) return error;
   overflowDepth ??= depth;
   if (depth > overflowDepth - 32) return STACK_OVERFLOW;
@@ -1111,6 +1119,7 @@ function hostStackOverflow(error: unknown, depth: number): unknown {
 export const STACK_OVERFLOW = { stackOverflow: true };
 let overflowDepth: number | undefined;
 
+// code-gauge-allow functionNcss 32 -- One case per kind of expression or Ruby rule.
 function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   const home = frame.home;
   const method = home.extra.method;
@@ -1150,6 +1159,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
 }
 
 /** The arguments `super` without parentheses passes: the method's parameters' current values. */
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of expression or Ruby rule.
 function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | undefined } {
   const def = frame.extra.def as MethodDef;
   const { params } = def;
@@ -1175,100 +1185,6 @@ function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | und
     if (keywords.map.size === 0) keywords = undefined;
   }
   return { args, keywords };
-}
-
-// Parameters ----------------------------------------------------------------------------------------------------------
-
-type BindMode = 'method' | 'lambda' | 'proc';
-
-// code-gauge-allow functionCognitiveComplexity 40 -- Ruby's argument binding rules.
-export function* bindParams(
-  params: Params,
-  frame: Frame,
-  given: Value[],
-  keywords: RHash | undefined,
-  mode: BindMode
-): Gen<void> {
-  const { scope } = frame;
-  const takesKeywords = params.keywords.length > 0 || params.keywordRest !== undefined;
-  let args = given;
-  if (keywords && !takesKeywords) {
-    args = [...args, keywords];
-    keywords = undefined;
-  }
-  const required = params.required.length + params.post.length;
-  const optional = params.optional.length;
-  if (mode === 'proc') {
-    if (args.length === 1 && args[0] instanceof RArray && autoSplats(params)) args = [...args[0].items];
-  } else if (args.length < required || (params.rest === undefined && args.length > required + optional)) {
-    const missingKeywords = params.keywords.filter((keyword) => !keyword.value).map((keyword) => keyword.name);
-    const max = params.rest === undefined ? required + optional : -1;
-    let message = `wrong number of arguments (given ${args.length}, expected ${expectedArity(required, max)}`;
-    if (missingKeywords.length > 0 && !keywords) {
-      message += `; required keyword${missingKeywords.length > 1 ? 's' : ''}: ${missingKeywords.join(', ')}`;
-    }
-    throw argumentError(`${message})`);
-  }
-  let index = 0;
-  for (const param of params.required) yield* bindParam(param, args[index++] ?? NIL, frame);
-  const available = Math.max(0, args.length - required);
-  const optionalCount = Math.min(optional, available);
-  for (const [position, param] of params.optional.entries()) {
-    if (position < optionalCount) scope.vars.set(param.name, args[index++]);
-    else scope.vars.set(param.name, yield* ev(param.value, frame));
-  }
-  if (params.rest !== undefined) {
-    const restCount = Math.max(0, args.length - index - params.post.length);
-    const rest = arr(args.slice(index, index + restCount));
-    if (params.rest !== '') scope.vars.set(params.rest, rest);
-    index += restCount;
-  }
-  for (const param of params.post) yield* bindParam(param, args[index++] ?? NIL, frame);
-  if (takesKeywords) yield* bindKeywords(params, frame, keywords);
-  if (params.block !== undefined) scope.vars.set(params.block, frame.extra.block ?? NIL);
-}
-
-function* bindParam(param: ParamTarget, value: Value, frame: Frame): Gen<void> {
-  if (typeof param === 'string') frame.scope.vars.set(param, value);
-  else yield* destructure(param, value, frame);
-}
-
-function autoSplats(params: Params): boolean {
-  const positional = params.required.length + params.optional.length + params.post.length;
-  return positional > 1 || params.trailingComma || (params.rest !== undefined && positional > 0);
-}
-
-function* bindKeywords(params: Params, frame: Frame, keywords: RHash | undefined): Gen<void> {
-  const { scope } = frame;
-  const given = new Map<string, Value>();
-  const extra = newHash();
-  if (keywords) {
-    for (const entry of keywords.map.values()) {
-      if (
-        entry.key instanceof RSymbol &&
-        params.keywords.some((keyword) => keyword.name === (entry.key as RSymbol).name)
-      ) {
-        given.set(entry.key.name, entry.value);
-      } else {
-        yield* hashSet(extra, entry.key, entry.value);
-      }
-    }
-  }
-  const missing = params.keywords.filter((keyword) => !keyword.value && !given.has(keyword.name));
-  if (missing.length > 0) {
-    const names = missing.map((keyword) => `:${keyword.name}`).join(', ');
-    throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${names}`);
-  }
-  if (params.keywordRest === undefined && extra.map.size > 0) {
-    const names = [];
-    for (const entry of extra.map.values()) names.push(yield* inspect(entry.key));
-    throw argumentError(`unknown keyword${names.length > 1 ? 's' : ''}: ${names.join(', ')}`);
-  }
-  for (const keyword of params.keywords) {
-    const value = given.get(keyword.name);
-    scope.vars.set(keyword.name, value ?? (keyword.value ? yield* ev(keyword.value, frame) : NIL));
-  }
-  if (params.keywordRest) scope.vars.set(params.keywordRest, extra);
 }
 
 // Blocks --------------------------------------------------------------------------------------------------------------
@@ -1304,6 +1220,8 @@ export interface ProcCallOptions {
 }
 
 /** Calls a block or proc with arguments, binding them as a block (or a lambda) does. */
+// code-gauge-allow functionNcss 36 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of expression or Ruby rule.
 export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions = {}): Gen {
   const runtime = rt();
   runtime.spend();

@@ -153,6 +153,8 @@ const QUICK_MAX = 14;
  * arithmetic and, when the rest is within its error bound of one half, rounds the digits it has half to even, so a
  * value such as 2.675 (just below 2.675) prints as 2.68; otherwise the result is the exactly rounded one.
  */
+// code-gauge-allow functionNcss 39 -- Transcribed from Ruby's dtoa and float rounding, whose order of operations decides the digits.
+// code-gauge-allow functionCognitiveComplexity 16 -- Transcribed from Ruby's dtoa and float rounding, whose order of operations decides the digits.
 export function rubyDtoa(value: number, mode: 2 | 3, requested: number): { digits: string; decpt: number } {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value);

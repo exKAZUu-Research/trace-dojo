@@ -56,10 +56,13 @@ test.each([
   ['a thread', 'Thread.new { }', 'スレッド（Thread）は、この採点環境では使えません。'],
   ['eval', 'eval("1")', '文字列の評価（eval）は、この採点環境では使えません。'],
   ['send', '1.send(:+, 2)', 'send（名前によるメソッドの呼び出し）は、この採点環境では使えません。'],
-])('%s stops the program with the unsupported-feature message, which rescue cannot catch', (_name, program, message) => {
-  const execution = run(`puts "before"\nbegin\n  ${program}\nrescue Exception\n  puts "rescued"\nend`);
-  expect(execution).toMatchObject({ kind: 'executed', stdout: 'before\n', uncaughtException: message });
-});
+])(
+  '%s stops the program with the unsupported-feature message, which rescue cannot catch',
+  (_name, program, message) => {
+    const execution = run(`puts "before"\nbegin\n  ${program}\nrescue Exception\n  puts "rescued"\nend`);
+    expect(execution).toMatchObject({ kind: 'executed', stdout: 'before\n', uncaughtException: message });
+  }
+);
 
 test('a class Ruby defines as a module cannot be defined as a class', () => {
   expect(run('class Signal\nend')).toMatchObject({ uncaughtException: 'Signal is not a class (TypeError)' });

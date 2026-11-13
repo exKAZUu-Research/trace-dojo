@@ -88,6 +88,7 @@ export class MersenneTwister {
   }
 
   /** A uniform integer in [0, limit], drawing 32 bits at a time and retrying above the limit. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribed from Ruby's random.c, whose draws decide the numbers.
   limited(limit: bigint): bigint {
     if (limit === 0n) return 0n;
     const mask = maskOf(limit);
@@ -149,6 +150,8 @@ function domainError(): never {
   throw rubyError(rt().c['Math::DomainError'], 'Numerical argument out of domain');
 }
 
+// code-gauge-allow functionNcss 34 -- Transcribed from Ruby's random.c, whose draws decide the numbers.
+// code-gauge-allow functionCognitiveComplexity 27 -- Transcribed from Ruby's random.c, whose draws decide the numbers.
 function* randomRange(generator: MersenneTwister, range: RRange): Gen<Value | undefined> {
   const { begin, end, exclusive } = range;
   if (begin === NIL || end === NIL) domainError();

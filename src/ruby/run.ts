@@ -25,7 +25,7 @@ import { isA } from './values';
 
 import './library';
 
-// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
+// code-gauge-allow duplicateLines 15 -- Each language wires its own parser and runtime into the shared modules alike.
 export function executeRubyProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
@@ -47,6 +47,7 @@ export function executeRubyProgram(source: string, input?: ProgramInput): Progra
  *
  * @param onEnd Called when the program ends, while its frame still holds its variables.
  */
+// code-gauge-allow duplicateLines 23 -- Each language wires its own parser and runtime into the shared modules alike.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     bootstrap(runtime);

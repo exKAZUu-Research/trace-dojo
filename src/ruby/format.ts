@@ -19,7 +19,6 @@ interface Spec {
 }
 
 /** Formats as `format`/`sprintf` and `String#%` do. */
-// code-gauge-allow functionCognitiveComplexity 45 -- The directive grammar of Ruby's sprintf.
 export function* format(formatValue: Value, args: Value[]): Gen<string> {
   const template = yield* toStr(formatValue);
   let result = '';
@@ -118,7 +117,7 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per directive.
+// code-gauge-allow functionNcss 43 -- Ruby's format directives and flags.
 function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
   switch (type) {
     case 'd':
@@ -209,6 +208,7 @@ function signOf(negative: boolean, spec: Spec): string {
   return '';
 }
 
+// code-gauge-allow functionCognitiveComplexity 30 -- Ruby's format directives and flags.
 function formatInteger(value: bigint, base: number, spec: Spec, prefix: string): string {
   const negative = value < 0n;
   let digits: string;

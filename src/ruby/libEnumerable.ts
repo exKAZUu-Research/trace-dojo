@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 900 -- Enumerable's methods share the iteration helpers.
+// code-gauge-allow-file fileNcss 677 -- The libEnumerable module keeps one concern's cases together.
 import { caseEquals, compareValues, inspect, rEquals, spaceship, toIndex, toInt } from './conversions';
 import { def } from './define';
 import { argumentError, typeError } from './errors';

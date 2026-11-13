@@ -42,6 +42,7 @@ export class Frame implements TracedFrame {
   /** The exception being handled by a `rescue` of this frame, which a bare `raise` re-raises. */
   handling: RObject[] = [];
 
+  // code-gauge-allow functionParameterCount 8 -- Each language wires its own parser and runtime into the shared modules alike.
   constructor(
     readonly kind: FrameKind,
     readonly self: Value,

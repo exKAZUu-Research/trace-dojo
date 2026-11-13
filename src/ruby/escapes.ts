@@ -17,7 +17,6 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 };
 
 /** Decodes a double-quoted literal's text as Ruby does, or `undefined` for an escape Ruby rejects. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of escape.
 export function decodeDoubleQuoted(text: string): string | undefined {
   let result = '';
   for (let index = 0; index < text.length; index++) {

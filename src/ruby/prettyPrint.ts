@@ -36,7 +36,6 @@ function showsItself(value: Value): boolean {
   return method !== undefined && method.body.kind !== 'native';
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of value PP lays out.
 function* build(value: Value, seen: Set<object>): Gen<Doc> {
   if (value instanceof RArray && !showsItself(value)) {
     if (seen.has(value)) return text('[...]');
