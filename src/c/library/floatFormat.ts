@@ -1,3 +1,5 @@
+import { exactParts } from './binaryFloat';
+
 /**
  * Formats doubles as macOS's libc does for `%f`, `%e`, `%g`, and `%a`: from the exact binary value, rounded to the
  * requested digits with ties to even.
@@ -5,18 +7,7 @@
 
 /** The exact decimal digits of a finite positive double, and the power of ten of the first digit. */
 function exactDigits(value: number): { digits: string; exponent: number } {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, value);
-  const bits = view.getBigUint64(0);
-  const biasedExponent = Number((bits >> 52n) & 0x7_ffn);
-  let mantissa = bits & ((1n << 52n) - 1n);
-  let exponent: number;
-  if (biasedExponent === 0) {
-    exponent = -1074;
-  } else {
-    mantissa |= 1n << 52n;
-    exponent = biasedExponent - 1075;
-  }
+  const { mantissa, exponent } = exactParts(value);
   let digits: string;
   let pointPosition: number;
   if (exponent >= 0) {

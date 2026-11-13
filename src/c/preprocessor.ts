@@ -544,14 +544,14 @@ class ConditionParser {
     return this.tokens[this.index]?.text;
   }
 
-  private conditional(): bigint {
-    const condition = this.binary(0);
+  private conditional(evaluate = true): bigint {
+    const condition = this.binary(0, evaluate);
     if (this.peek() !== '?') return condition;
     this.index++;
-    const whenTrue = this.conditional();
+    const whenTrue = this.conditional(evaluate && condition !== 0n);
     if (this.peek() !== ':') this.fail();
     this.index++;
-    const whenFalse = this.conditional();
+    const whenFalse = this.conditional(evaluate && condition === 0n);
     return condition === 0n ? whenFalse : whenTrue;
   }
 
@@ -568,15 +568,16 @@ class ConditionParser {
     ['*', '/', '%'],
   ];
 
-  private binary(level: number): bigint {
-    if (level >= ConditionParser.LEVELS.length) return this.unary();
-    let left = this.binary(level + 1);
+  private binary(level: number, evaluate: boolean): bigint {
+    if (level >= ConditionParser.LEVELS.length) return this.unary(evaluate);
+    let left = this.binary(level + 1, evaluate);
     for (;;) {
       const operator = this.peek();
       if (operator === undefined || !ConditionParser.LEVELS[level].includes(operator)) return left;
       this.index++;
-      const right = this.binary(level + 1);
-      left = this.apply(operator, left, right);
+      const skipped = (operator === '&&' && left === 0n) || (operator === '||' && left !== 0n);
+      const right = this.binary(level + 1, evaluate && !skipped);
+      left = evaluate ? this.apply(operator, left, right) : 0n;
     }
   }
 
@@ -637,24 +638,24 @@ class ConditionParser {
     }
   }
 
-  private unary(): bigint {
+  private unary(evaluate: boolean): bigint {
     const token = this.tokens[this.index++];
     if (!token) this.fail();
     switch (token.text) {
       case '-': {
-        return -this.unary();
+        return -this.unary(evaluate);
       }
       case '+': {
-        return this.unary();
+        return this.unary(evaluate);
       }
       case '!': {
-        return this.unary() === 0n ? 1n : 0n;
+        return this.unary(evaluate) === 0n ? 1n : 0n;
       }
       case '~': {
-        return ~this.unary();
+        return ~this.unary(evaluate);
       }
       case '(': {
-        const value = this.conditional();
+        const value = this.conditional(evaluate);
         if (this.peek() !== ')') this.fail();
         this.index++;
         return value;

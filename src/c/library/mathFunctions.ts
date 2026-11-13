@@ -1,6 +1,7 @@
 import { type Scalar, toInt32 } from '../arith';
 import { CRuntimeError } from '../errors';
 import type { NativeFunction, Runtime } from '../runtime';
+import { exactParts, roundBinary } from './binaryFloat';
 import { asAddress, asNumber, writeBytes } from './support';
 
 /** Rounds half away from zero, as C's `round` does. */
@@ -73,39 +74,8 @@ function pow(x: number, y: number): number {
   // |x|^n = mantissa^n * 2^(exponent * n)
   const numerator = mantissa ** BigInt(n);
   const power = exponent * n;
-  const magnitude = y > 0 ? scaledToDouble(numerator, 1n, power) : scaledToDouble(1n, numerator, -power);
+  const magnitude = y > 0 ? roundBinary(numerator, 1n, power) : roundBinary(1n, numerator, -power);
   return negative ? -magnitude : magnitude;
-}
-
-function exactParts(value: number): { mantissa: bigint; exponent: number } {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, value);
-  const bits = view.getBigUint64(0);
-  const biased = Number((bits >> 52n) & 0x7_ffn);
-  const fraction = bits & ((1n << 52n) - 1n);
-  return biased === 0
-    ? { mantissa: fraction, exponent: -1074 }
-    : { mantissa: fraction | (1n << 52n), exponent: biased - 1075 };
-}
-
-/** numerator / denominator × 2^exponent, rounded to the nearest double with ties to even. */
-function scaledToDouble(numerator: bigint, denominator: bigint, exponent: number): number {
-  // Find the binary exponent e of the quotient q, so that 2^e <= q < 2^(e+1).
-  let e = numerator.toString(2).length - denominator.toString(2).length;
-  if ((e >= 0 ? numerator : numerator << BigInt(-e)) < (e >= 0 ? denominator << BigInt(e) : denominator)) e--;
-  const total = e + exponent;
-  if (total > 1023) return Number.POSITIVE_INFINITY;
-  // Keep 53 significant bits, or fewer for a subnormal result.
-  const precision = total < -1022 ? 53 - (-1022 - total) : 53;
-  if (precision <= 0 && total < -1075) return 0;
-  const shift = precision - 1 - e;
-  const scaledNumerator = shift >= 0 ? numerator << BigInt(shift) : numerator;
-  const scaledDenominator = shift >= 0 ? denominator : denominator << BigInt(-shift);
-  let quotient = scaledNumerator / scaledDenominator;
-  const remainder = scaledNumerator % scaledDenominator;
-  const twice = remainder * 2n;
-  if (twice > scaledDenominator || (twice === scaledDenominator && (quotient & 1n) === 1n)) quotient++;
-  return Number(quotient) * 2 ** (exponent - shift);
 }
 
 function remainder(x: number, y: number): number {
@@ -156,17 +126,34 @@ function storeDouble(runtime: Runtime, address: number, value: number, isFloat: 
 
 function frexp(x: number): { mantissa: number; exponent: number } {
   if (x === 0 || !Number.isFinite(x)) return { mantissa: x, exponent: 0 };
-  let exponent = Math.max(-1073, Math.floor(Math.log2(Math.abs(x))) + 1);
-  let mantissa = x * 2 ** -exponent;
-  while (Math.abs(mantissa) < 0.5) {
-    mantissa *= 2;
-    exponent--;
-  }
-  while (Math.abs(mantissa) >= 1) {
-    mantissa /= 2;
-    exponent++;
-  }
-  return { mantissa, exponent };
+  const parts = exactParts(Math.abs(x));
+  const bits = parts.mantissa.toString(2).length;
+  return {
+    mantissa: Math.sign(x) * Number(parts.mantissa) * 2 ** -bits,
+    exponent: parts.exponent + bits,
+  };
+}
+
+function ldexp(x: number, exponent: number, isFloat = false): number {
+  if (x === 0 || !Number.isFinite(x)) return x;
+  const parts = exactParts(Math.abs(x));
+  return Math.sign(x) * roundBinary(parts.mantissa, 1n, parts.exponent + exponent, isFloat);
+}
+
+function fma(x: number, y: number, z: number, isFloat = false): number {
+  if (![x, y, z].every(Number.isFinite)) return x * y + z;
+  const a = exactParts(Math.abs(x));
+  const b = exactParts(Math.abs(y));
+  const c = exactParts(Math.abs(z));
+  const productExponent = a.exponent + b.exponent;
+  const exponent = Math.min(productExponent, c.exponent);
+  const product = a.mantissa * b.mantissa * BigInt(Math.sign(x) * Math.sign(y));
+  const addend = c.mantissa * BigInt(Math.sign(z));
+  const sum = (product << BigInt(productExponent - exponent)) + (addend << BigInt(c.exponent - exponent));
+  if (sum === 0n) return x * y === 0 && z === 0 ? x * y + z : 0;
+  const negative = sum < 0n;
+  const rounded = roundBinary(negative ? -sum : sum, 1n, exponent, isFloat);
+  return negative ? -rounded : rounded;
 }
 
 function toLong(value: number): bigint {
@@ -182,8 +169,8 @@ function fpClassify(x: number): number {
 }
 
 export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
-  fma: (_runtime, [x, y, z]) => (x as number) * (y as number) + (z as number),
-  fmaf: (_runtime, [x, y, z]) => Math.fround((x as number) * (y as number) + (z as number)),
+  fma: (_runtime, [x, y, z]) => fma(x as number, y as number, z as number),
+  fmaf: (_runtime, [x, y, z]) => fma(x as number, y as number, z as number, true),
   lround: (_runtime, [x]) => toLong(roundHalfAway(x as number)),
   lroundf: (_runtime, [x]) => toLong(roundHalfAway(x as number)),
   llround: (_runtime, [x]) => toLong(roundHalfAway(x as number)),
@@ -218,9 +205,9 @@ export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
     storeInt(runtime, asAddress(exponent), result.exponent);
     return Math.fround(result.mantissa);
   },
-  ldexp: (_runtime, [x, exponent]) => (x as number) * 2 ** asNumber(exponent),
-  ldexpf: (_runtime, [x, exponent]) => Math.fround((x as number) * 2 ** asNumber(exponent)),
-  scalbn: (_runtime, [x, exponent]) => (x as number) * 2 ** asNumber(exponent),
+  ldexp: (_runtime, [x, exponent]) => ldexp(x as number, asNumber(exponent)),
+  ldexpf: (_runtime, [x, exponent]) => ldexp(x as number, asNumber(exponent), true),
+  scalbn: (_runtime, [x, exponent]) => ldexp(x as number, asNumber(exponent)),
   ilogb: (_runtime, [x]) => {
     const value = x as number;
     if (value === 0) return -2_147_483_648;

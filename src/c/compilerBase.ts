@@ -56,6 +56,7 @@ export interface Operand {
   /** Computes the value, after an lvalue's conversion and the decay of arrays and functions. */
   value: (frame: Frame) => Value;
   lvalue?: LValue;
+  bitWidth?: number;
   /** The value of an arithmetic constant expression. */
   constant?: Scalar;
   /** Whether the value is an address known before the program runs, as static initializers require. */
@@ -68,9 +69,13 @@ export interface Operand {
   isParenthesized?: boolean;
 }
 
+export interface Location {
+  load: () => Value;
+  store: (value: Value) => void;
+}
+
 export interface LValue {
-  load: (frame: Frame) => Value;
-  store: (frame: Frame, value: Value) => void;
+  resolve: (frame: Frame) => Location;
   /** The address of an object in memory; undefined for a variable that lives outside memory. */
   address?: (frame: Frame) => number;
   isBitField?: boolean;

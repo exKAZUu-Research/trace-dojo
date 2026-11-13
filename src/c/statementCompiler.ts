@@ -39,11 +39,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Running a block from a label, and leaving its scope.
   private blockItems(items: (Statement | Declaration)[], endsScope: boolean): Compiled {
-    const firstLocal = this.context.info.locals.length;
     const children = items.map((item) =>
       item.kind === 'declaration' ? this.localDeclaration(item) : this.statement(item)
     );
-    const locals = this.context.info.locals.slice(firstLocal);
+    const locals = this.scopeLocals().filter((local) => !local.isParameter);
     const labels = new Set<number>();
     const childOfLabel = new Map<number, number>();
     for (const [index, child] of children.entries()) {
@@ -54,8 +53,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const execs = children.map((child) => child.exec);
     const count = execs.length;
-    const leave = endsScope ? scopeExit(locals) : undefined;
     const exec: Exec = (frame, entry) => {
+      frame.enterScope(locals);
       let start = 0;
       let enter = entry;
       if (entry !== undefined) start = childOfLabel.get(entry) ?? count;
@@ -76,10 +75,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         }
         return Completion.Normal;
       } finally {
-        leave?.(frame);
+        if (endsScope) frame.exitScope(locals);
       }
     };
     return { exec, labels };
+  }
+
+  private scopeLocals(): LocalInfo[] {
+    return [...this.scope.ordinary.values()].flatMap((entity) => (entity.kind === 'local' ? [entity.local] : []));
   }
 
   protected statement(statement: Statement): Compiled {
@@ -127,6 +130,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         const id = label.id;
         return {
           exec: (frame) => {
+            frame.runtime.spend();
             frame.gotoLabel = id;
             return Completion.Goto;
           },
@@ -257,16 +261,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- The parts of a for statement, each optional, and their steps.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>): Compiled {
     const row = this.stepRow(statement.row);
-    const firstLocal = this.context.info.locals.length;
     const init = statement.init === undefined ? undefined : this.forInit(statement.init);
     const condition = statement.condition ? this.condition(statement.condition, 'for 文') : undefined;
     const update = statement.update ? this.rvalue(statement.update) : undefined;
     const updateEffect = update ? (update.effect ?? update.value) : undefined;
     const body = this.loopBody(statement.body);
     const run = body.exec;
-    const leave = scopeExit(this.context.info.locals.slice(firstLocal));
+    const locals = this.scopeLocals();
     const exec: Exec = (frame, entry) => {
       const { steps } = frame.runtime;
+      frame.enterScope(locals);
       let enter = entry;
       try {
         if (enter === undefined && init) {
@@ -288,7 +292,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           }
         }
       } finally {
-        leave?.(frame);
+        frame.exitScope(locals);
       }
     };
     return { exec, labels: body.labels };
@@ -414,18 +418,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       labels: NO_LABELS,
     };
   }
-}
-
-/** Ends the scope of a block's variables: the trace no longer shows them, and their values are gone. */
-export function scopeExit(locals: readonly LocalInfo[]): ((frame: Frame) => void) | undefined {
-  if (locals.length === 0) return undefined;
-  const indexes = locals.map((local) => local.index);
-  return (frame) => {
-    for (const index of indexes) {
-      frame.live[index] = false;
-      frame.slots[index] = undefined;
-    }
-  };
 }
 
 export type { Value };

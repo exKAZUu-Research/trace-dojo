@@ -73,10 +73,11 @@ export function formatPrintf(runtime: Runtime, format: Uint8Array, values: Value
     index = readSpec(format, index, spec, args);
     if (index >= format.length) break;
     spec.conversion = String.fromCodePoint(format[index++]);
+    runtime.spend(Math.max(spec.width ?? 0, /[diuoxXfFeEgGaA]/.test(spec.conversion) ? (spec.precision ?? 0) : 0));
     const field = convert(runtime, spec, args, out.length);
     if (field === undefined) continue;
     if (typeof field === 'string') pushText(pad(spec, field));
-    else out.push(...padBytes(spec, field));
+    else for (const byte of padBytes(spec, field)) out.push(byte);
   }
   return out;
 }
@@ -297,9 +298,10 @@ function pad(spec: Spec, text: string): string {
   return spec.flags.includes('-') ? text.padEnd(width, ' ') : text.padStart(width, ' ');
 }
 
-function padBytes(spec: Spec, bytes: Uint8Array): number[] {
+function padBytes(spec: Spec, bytes: Uint8Array): Uint8Array {
   const width = spec.width ?? 0;
   const padding = Math.max(width - bytes.length, 0);
-  const spaces = Array.from({ length: padding }, () => 0x20);
-  return spec.flags.includes('-') ? [...bytes, ...spaces] : [...spaces, ...bytes];
+  const result = new Uint8Array(bytes.length + padding).fill(0x20);
+  result.set(bytes, spec.flags.includes('-') ? 0 : padding);
+  return result;
 }

@@ -76,7 +76,7 @@ export class Frame implements TracedFrame {
   readonly slots: (Scalar | undefined)[];
   /** The addresses of the function's variables that live in memory, by local index. */
   readonly bases: number[] = [];
-  readonly blocks: Allocation[] = [];
+  readonly blocks = new Map<number, Allocation>();
   /** Which variables are in scope, by local index, for the trace. */
   readonly live: boolean[] = [];
   returnValue: Value | undefined;
@@ -89,6 +89,29 @@ export class Frame implements TracedFrame {
     readonly callRow: number | undefined
   ) {
     this.slots = Array.from({ length: fn.slotCount });
+  }
+  enterScope(locals: readonly LocalInfo[]): void {
+    for (const local of locals) {
+      if (!local.inMemory || local.staticGlobal) continue;
+      const block = this.runtime.allocate(local.size, 'stack');
+      block.type = local.type;
+      block.name = local.name;
+      this.bases[local.index] = block.base;
+      this.blocks.set(local.index, block);
+    }
+  }
+
+  exitScope(locals: readonly LocalInfo[]): void {
+    for (const local of locals) {
+      const index = local.index;
+      this.live[index] = false;
+      this.slots[index] = undefined;
+      const block = this.blocks.get(index);
+      if (block) {
+        this.runtime.memory.release(block);
+        this.blocks.delete(index);
+      }
+    }
   }
 }
 
@@ -184,14 +207,7 @@ export class Runtime implements TracedRuntime<Frame> {
     if (!fn.body) throw new CRuntimeError('custom', `関数「${fn.name}」が定義されていません。`);
     if (this.frames.length >= LIMITS.maxCallDepth) throw new CRuntimeError('stackOverflow');
     const frame = new Frame(this, fn, callRow);
-    for (const local of fn.locals) {
-      if (!local.inMemory || local.staticGlobal) continue;
-      const block = this.allocate(local.size, 'stack');
-      block.type = local.type;
-      block.name = local.name;
-      frame.bases[local.index] = block.base;
-      frame.blocks.push(block);
-    }
+    frame.enterScope(fn.params);
     for (const [index, param] of fn.params.entries()) {
       bindParameter(frame, param, args[index]);
     }
@@ -201,7 +217,7 @@ export class Runtime implements TracedRuntime<Frame> {
       onReturn?.(frame);
     } finally {
       this.frames.pop();
-      for (const block of frame.blocks) this.memory.release(block);
+      for (const block of frame.blocks.values()) this.memory.release(block);
     }
     if (fn.isAtomic) this.steps.completeAtomicCall();
     return frame.returnValue;

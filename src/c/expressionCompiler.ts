@@ -11,7 +11,7 @@ import {
   type Value,
 } from './arith';
 import type { BinaryOperator, Expression } from './ast';
-import { CompilerBase, type Entity, type LValue, type Operand } from './compilerBase';
+import { CompilerBase, type Entity, type Location, type LValue, type Operand } from './compilerBase';
 import { CRuntimeError } from './errors';
 import { decodeCharLiteral, decodeStringLiteral, parseNumber } from './literals';
 import { type Frame, type FunctionInfo, loaderOf, loadRecord, storeRecord, storerOf } from './runtime';
@@ -76,7 +76,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** An expression as an rvalue: arrays and functions decay to pointers. */
   rvalue(expression: Expression): Operand {
     const operand = this.expression(expression);
-    return { ...operand, type: decay(operand.type) };
+    return { ...operand, type: rvalueType(operand) };
   }
 
   expression(expression: Expression): Operand {
@@ -236,10 +236,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
           value: load,
           ...folded,
           lvalue: {
-            load,
-            store: (frame, value) => {
-              frame.slots[index] = value as Scalar;
-            },
+            resolve: (frame) => ({
+              load: () => load(frame),
+              store: (value) => {
+                frame.slots[index] = value as Scalar;
+              },
+            }),
             local,
             isRegister: this.fn?.registerLocals.has(local) ?? false,
           },
@@ -248,39 +250,22 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  /** An object in memory at a computed address, read and written as its type. */
   protected memoryOperand(type: CType, address: (frame: Frame) => number): Operand {
-    if (type.kind === 'array' || type.kind === 'function') {
+    const resolve = (frame: Frame): Location => {
+      const at = address(frame);
+      if (type.kind === 'array' || type.kind === 'function') return { load: () => at, store: () => {} };
+      if (type.kind === 'record')
+        return {
+          load: () => loadRecord(frame.runtime, at, sizeOf(type)),
+          store: (value) => storeRecord(frame.runtime, at, value as RecordValue),
+        };
+      if (type.kind === 'void') return { load: () => 0, store: () => {} };
       return {
-        type,
-        value: address,
-        lvalue: { load: address, store: () => {}, address },
+        load: () => loaderOf(type)(frame.runtime, at),
+        store: (value) => storerOf(type)(frame.runtime, at, value as Scalar),
       };
-    }
-    if (type.kind === 'record') {
-      const size = sizeOf(type);
-      const load = (frame: Frame): Value => loadRecord(frame.runtime, address(frame), size);
-      return {
-        type,
-        value: load,
-        lvalue: {
-          load,
-          store: (frame, value) => storeRecord(frame.runtime, address(frame), value as RecordValue),
-          address,
-        },
-      };
-    }
-    if (type.kind === 'void') {
-      return { type, value: () => 0, lvalue: { load: () => 0, store: () => {}, address } };
-    }
-    const loader = loaderOf(type);
-    const storer = storerOf(type);
-    const load = (frame: Frame): Value => loader(frame.runtime, address(frame));
-    return {
-      type,
-      value: load,
-      lvalue: { load, store: (frame, value) => storer(frame.runtime, address(frame), value as Scalar), address },
     };
+    return { type, value: (frame) => resolve(frame).load(), lvalue: { resolve, address } };
   }
 
   private stringLiteral(parts: string[], row: number): Operand {
@@ -326,40 +311,47 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   private arithmetic(operator: BinaryOperator, left: Operand, right: Operand, row: number): Operand {
-    const lt = left.type as IntType | FloatType;
-    const rt = right.type as IntType | FloatType;
-    const integerOnly = ['%', '<<', '>>', '&', '|', '^'].includes(operator);
-    if (integerOnly && (lt.kind !== 'int' || rt.kind !== 'int')) {
-      this.error(row, `「${operator}」は整数どうしでしか計算できません（${typeName(lt)} と ${typeName(rt)}）。`);
-    }
+    const operation = this.arithmeticOperation(
+      operator,
+      left.type as IntType | FloatType,
+      right.type as IntType | FloatType,
+      row
+    );
+    const a = this.converted(left, operation.left);
+    const b = this.converted(right, operation.right);
+    return foldBinary(operation.type, (frame) => operation.run(a(frame) as Scalar, b(frame) as Scalar), left, right);
+  }
+
+  private arithmeticOperation(
+    operator: BinaryOperator,
+    left: IntType | FloatType,
+    right: IntType | FloatType,
+    row: number
+  ): {
+    type: CType;
+    left: CType;
+    right: CType;
+    run: (a: Scalar, b: Scalar) => Scalar;
+  } {
+    if (['%', '<<', '>>', '&', '|', '^'].includes(operator) && (left.kind !== 'int' || right.kind !== 'int'))
+      this.error(row, `「${operator}」は整数どうしでしか計算できません（${typeName(left)} と ${typeName(right)}）。`);
     if (operator === '<<' || operator === '>>') {
-      // A shift has the type of its promoted left operand.
-      const type = promote(lt as IntType);
-      const operation = binaryOperation(operator, type);
-      const a = this.converted(left, type);
-      const b = this.converted(right, LONG);
-      const count = (frame: Frame): Scalar => Number(b(frame) as Scalar);
-      return foldBinary(type, (frame) => operation(a(frame) as Scalar, count(frame)), left, right);
+      const type = promote(left as IntType);
+      const run = binaryOperation(operator, type);
+      return { type, left: type, right: LONG, run: (a, b) => run(a, Number(b)) };
     }
-    const common = commonType(lt, rt);
-    const operation = binaryOperation(operator, common);
-    const a = this.converted(left, common);
-    const b = this.converted(right, common);
-    const isComparison = ['==', '!=', '<', '<=', '>', '>='].includes(operator);
-    const type = isComparison ? INT : common;
-    return foldBinary(type, (frame) => operation(a(frame) as Scalar, b(frame) as Scalar), left, right);
+    const common = commonType(left, right);
+    return {
+      type: ['==', '!=', '<', '<=', '>', '>='].includes(operator) ? INT : common,
+      left: common,
+      right: common,
+      run: binaryOperation(operator, common),
+    };
   }
 
   private pointerOffset(pointer: Operand, offset: Operand, sign: 1 | -1, row: number): Operand {
     const type = pointer.type as Extract<CType, { kind: 'pointer' }>;
-    if (type.to.kind === 'function') this.error(row, '関数ポインタには、整数を足したり引いたりできません。');
-    if (!isComplete(type.to) && type.to.kind !== 'void') {
-      this.error(
-        row,
-        `中身が定義されていない型（${typeName(type.to)}）へのポインタには、整数を足したり引いたりできません。`
-      );
-    }
-    const size = sizeOf(type.to);
+    const size = this.pointerElementSize(type, row);
     const base = pointer.value;
     const index = this.converted(offset, LONG);
     const value = (frame: Frame): Value => {
@@ -368,6 +360,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return offsetAddress(frame, address, delta);
     };
     return { type, value, isAddressConstant: pointer.isAddressConstant && offset.constant !== undefined };
+  }
+
+  private pointerElementSize(type: Extract<CType, { kind: 'pointer' }>, row: number): number {
+    if (type.to.kind === 'function') this.error(row, '関数ポインタには、整数を足したり引いたりできません。');
+    if (!isComplete(type.to) && type.to.kind !== 'void') {
+      this.error(
+        row,
+        `中身が定義されていない型（${typeName(type.to)}）へのポインタには、整数を足したり引いたりできません。`
+      );
+    }
+    return sizeOf(type.to);
   }
 
   private pointerDifference(left: Operand, right: Operand, row: number): Operand {
@@ -454,7 +457,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return {
         type: target,
         value: () => this.error(row, '中身が定義されていない型の値は使えません。'),
-        lvalue: { load: () => 0, store: () => {}, address },
+        lvalue: { resolve: () => ({ load: () => 0, store: () => {} }), address },
       };
     }
     return this.memoryOperand(target, address);
@@ -479,42 +482,38 @@ export abstract class ExpressionCompiler extends CompilerBase {
     this.requireModifiable(operand, row, expression.operator);
     const type = unqualified(operand.type);
     const lvalue = operand.lvalue as LValue;
-    const sign = expression.operator === '++' ? 1 : -1;
-    let step: (value: Scalar, frame: Frame) => Scalar;
+    const step = this.updateOperation(type, expression.operator, row);
+    const value = (frame: Frame): Value => {
+      const location = lvalue.resolve(frame);
+      const previous = location.load() as Scalar;
+      const next = step(previous, frame);
+      location.store(next);
+      return expression.prefix ? (lvalue.isBitField ? location.load() : next) : previous;
+    };
+    return { type, value, bitWidth: operand.bitWidth };
+  }
+
+  private updateOperation(type: CType, operator: '++' | '--', row: number): (value: Scalar, frame: Frame) => Scalar {
+    const sign = operator === '++' ? 1 : -1;
     if (type.kind === 'pointer') {
       if (!isComplete(type.to) && type.to.kind !== 'void') {
-        this.error(
-          row,
-          `中身が定義されていない型（${typeName(type.to)}）へのポインタには、${expression.operator} を使えません。`
-        );
+        this.error(row, `中身が定義されていない型（${typeName(type.to)}）へのポインタには、${operator} を使えません。`);
       }
       const size = sizeOf(type.to) * sign;
-      step = (value, frame) => offsetAddress(frame, value as number, size);
-    } else if (isArithmetic(type)) {
+      return (value, frame) => offsetAddress(frame, value as number, size);
+    }
+    if (isArithmetic(type)) {
       if (type.kind === 'int' && type.name === 'bool') {
-        step = (value) => (sign === 1 ? 1 : value === 0 ? 1 : 0);
+        return (value) => (sign === 1 ? 1 : value === 0 ? 1 : 0);
       } else {
         const common = type.kind === 'int' ? commonType(type, INT) : type;
         const operation = binaryOperation(sign === 1 ? '+' : '-', common);
         const one = oneOf(common);
-        step = (value) => convertScalar(operation(convertScalar(value, type, common), one), common, type);
+        return (value) => convertScalar(operation(convertScalar(value, type, common), one), common, type);
       }
     } else {
-      this.error(row, `「${expression.operator}」は数かポインタにしか使えません（${typeName(type)}）。`);
+      this.error(row, `「${operator}」は数かポインタにしか使えません（${typeName(type)}）。`);
     }
-    const { load, store } = lvalue;
-    const value = expression.prefix
-      ? (frame: Frame): Value => {
-          const next = step(load(frame) as Scalar, frame);
-          store(frame, next);
-          return next;
-        }
-      : (frame: Frame): Value => {
-          const previous = load(frame) as Scalar;
-          store(frame, step(previous, frame));
-          return previous;
-        };
-    return { type, value };
   }
 
   private assignment(expression: Extract<Expression, { kind: 'assign' }>): Operand {
@@ -523,51 +522,46 @@ export abstract class ExpressionCompiler extends CompilerBase {
     this.requireModifiable(target, row, operator ? `${operator}=` : '=');
     const type = unqualified(target.type);
     const lvalue = target.lvalue as LValue;
-    if (!operator) {
-      const source = this.rvalue(expression.right);
-      const value = this.convertForAssignment(source, type, 'assignment', row);
-      const { store } = lvalue;
-      const truncate = lvalue.isBitField ? lvalue.load : undefined;
-      return {
-        type,
-        value: truncate
-          ? (frame) => {
-              store(frame, value(frame));
-              return truncate(frame);
-            }
-          : (frame) => {
-              const result = value(frame);
-              store(frame, result);
-              return result;
-            },
-      };
-    }
-    // `a op= b` is `a = a op b` with `a` evaluated once.
-    const current: Operand = { type, value: lvalue.load };
-    const right = this.rvalue(expression.right);
-    let combined: Operand;
-    if (type.kind === 'pointer' && (operator === '+' || operator === '-') && isInteger(right.type)) {
-      combined = this.pointerOffset(current, right, operator === '+' ? 1 : -1, row);
-    } else {
-      if (!isArithmetic(type) || !isArithmetic(right.type)) {
-        this.error(
-          row,
-          `「${operator}=」の左右の型（${typeName(type)} と ${typeName(right.type)}）では計算できません。`
-        );
-      }
-      combined = this.arithmetic(operator, current, right, row);
-    }
-    const value = this.converted(combined, type);
-    const { store } = lvalue;
-    const read = lvalue.isBitField ? lvalue.load : undefined;
+    const source = this.rvalue(expression.right);
+    const calculate = operator ? this.compoundOperation(operator, rvalueType(target), source, row) : undefined;
+    const value = calculate ? undefined : this.convertForAssignment(source, type, 'assignment', row);
     return {
       type,
+      bitWidth: target.bitWidth,
       value: (frame) => {
-        const result = value(frame);
-        store(frame, result);
-        return read ? read(frame) : result;
+        const location = lvalue.resolve(frame);
+        const result = calculate
+          ? convertScalar(calculate(frame, location.load() as Scalar), calculate.type, type)
+          : (value as (frame: Frame) => Value)(frame);
+        location.store(result);
+        return lvalue.isBitField ? location.load() : result;
       },
     };
+  }
+
+  private compoundOperation(
+    operator: BinaryOperator,
+    type: CType,
+    right: Operand,
+    row: number
+  ): ((frame: Frame, previous: Scalar) => Scalar) & { type: CType } {
+    if (type.kind === 'pointer' && (operator === '+' || operator === '-') && isInteger(right.type)) {
+      const size = this.pointerElementSize(type, row) * (operator === '+' ? 1 : -1);
+      const offset = this.converted(right, LONG);
+      return Object.assign(
+        (frame: Frame, previous: Scalar) => offsetAddress(frame, previous as number, Number(offset(frame)) * size),
+        { type }
+      );
+    }
+    if (!isArithmetic(type) || !isArithmetic(right.type))
+      this.error(row, `「${operator}=」の左右の型（${typeName(type)} と ${typeName(right.type)}）では計算できません。`);
+    const operation = this.arithmeticOperation(operator, type, right.type, row);
+    const value = this.converted(right, operation.right);
+    return Object.assign(
+      (frame: Frame, previous: Scalar) =>
+        operation.run(convertScalar(previous, type, operation.left), value(frame) as Scalar),
+      { type: operation.type }
+    );
   }
 
   private cast(target: CType, operand: Operand, row: number): Operand {
@@ -819,7 +813,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
           return readBits(record.bytes, offset, field.bitOffset ?? 0, field.bitWidth, field.type as IntType);
         return readFromBytes(record, offset, size, field.type);
       };
-      return { type: fieldType as CType, value: temporary };
+      return { type: fieldType as CType, value: temporary, bitWidth: field.bitWidth };
     }
     const base = address;
     const offset = field.offset;
@@ -841,24 +835,32 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   private bitFieldOperand(type: IntType, unit: (frame: Frame) => number, bitOffset: number, width: number): Operand {
     const size = sizeOf(type);
-    const load = (frame: Frame): Value => {
+    const resolve = (frame: Frame): Location => {
       const address = unit(frame);
-      const block = frame.runtime.memory.locate(address, size);
-      const offset = address - block.base;
-      for (let index = 0; index < size; index++) {
-        if (block.initialized[offset + index] === 0) throw new CRuntimeError('uninitialized');
-      }
-      return readBits(block.bytes, offset, bitOffset, width, type);
+      return {
+        load: () => {
+          const block = frame.runtime.memory.locate(address, size);
+          const offset = address - block.base;
+          for (let index = 0; index < size; index++) {
+            if (block.initialized[offset + index] === 0) throw new CRuntimeError('uninitialized');
+          }
+          return readBits(block.bytes, offset, bitOffset, width, type);
+        },
+        store: (value) => {
+          const block = frame.runtime.memory.locate(address, size);
+          if (block.isReadOnly) throw new CRuntimeError('readOnly');
+          const offset = address - block.base;
+          writeBits(block.bytes, offset, bitOffset, width, value as Scalar);
+          block.initialized.fill(1, offset, offset + size);
+        },
+      };
     };
-    const store = (frame: Frame, value: Value): void => {
-      const address = unit(frame);
-      const block = frame.runtime.memory.locate(address, size);
-      if (block.isReadOnly) throw new CRuntimeError('readOnly');
-      const offset = address - block.base;
-      writeBits(block.bytes, offset, bitOffset, width, value as Scalar);
-      block.initialized.fill(1, offset, offset + size);
+    return {
+      type,
+      bitWidth: width,
+      value: (frame) => resolve(frame).load(),
+      lvalue: { resolve, address: unit, isBitField: true },
     };
-    return { type, value: load, lvalue: { load, store, address: unit, isBitField: true } };
   }
 
   // Conversions -----------------------------------------------------------------------------------------------------
@@ -964,6 +966,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
 /** A name that stddef.h declares, telling that the program included it and may use offsetof. */
 export const OFFSETOF_MARKER = '__offsetof_is_declared';
+
+function rvalueType(operand: Operand): CType {
+  return operand.bitWidth !== undefined &&
+    operand.type.kind === 'int' &&
+    ['bool', 'int', 'uint'].includes(operand.type.name) &&
+    operand.bitWidth < 32
+    ? INT
+    : decay(operand.type);
+}
 
 const RELATIONAL = new Set<string>(['<', '>', '<=', '>=']);
 
