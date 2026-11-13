@@ -81,9 +81,14 @@ for operation in (raw.tell, lambda: raw.seek(0)):
     else: raise AssertionError('seekable stdin')
 stream.close()
 assert stream.closed and stream.buffer.closed and raw.closed
-for operation in (input, stream.read, stream.buffer.read, raw.read):
+for operation, message in (
+    (input, 'I/O operation on closed file.'),
+    (stream.read, 'I/O operation on closed file.'),
+    (stream.buffer.read, 'read of closed file'),
+    (raw.read, 'I/O operation on closed file'),
+):
     try: operation()
-    except ValueError: pass
+    except ValueError as error: assert str(error) == message
     else: raise AssertionError('closed stdin remained readable')
 print('closed')`;
   expect(executeProgram('python', program, { stdin: 'abcdef' })).toMatchObject({

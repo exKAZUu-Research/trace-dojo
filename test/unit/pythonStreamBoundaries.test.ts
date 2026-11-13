@@ -183,3 +183,60 @@ print('iterated')`;
     uncaughtException: undefined,
   });
 });
+
+test('closed text and buffered operations report their own boundary before delegating', () => {
+  const program = `import io
+for kind in (io.TextIOWrapper, io.BufferedReader, io.BufferedWriter, io.BufferedRandom):
+    stream = kind(io.BytesIO(b'abc'))
+    stream.close()
+    operations = [('seek', (0,)), ('truncate', ())]
+    if kind is io.TextIOWrapper:
+        operations += [('read', ()), ('write', ('x',))]
+    elif kind is not io.BufferedWriter:
+        operations += [('readinto', (bytearray(2),)), ('readinto1', (bytearray(2),)), ('peek', ())]
+    for name, args in operations:
+        try: getattr(stream, name)(*args)
+        except ValueError as error: print(kind.__name__, name, str(error))
+        else: raise AssertionError('closed operation succeeded')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `TextIOWrapper seek I/O operation on closed file.
+TextIOWrapper truncate I/O operation on closed file.
+TextIOWrapper read I/O operation on closed file.
+TextIOWrapper write I/O operation on closed file.
+BufferedReader seek seek of closed file
+BufferedReader truncate truncate of closed file
+BufferedReader readinto readinto of closed file
+BufferedReader readinto1 readinto of closed file
+BufferedReader peek peek of closed file
+BufferedWriter seek seek of closed file
+BufferedWriter truncate truncate of closed file
+BufferedRandom seek seek of closed file
+BufferedRandom truncate truncate of closed file
+BufferedRandom readinto readinto of closed file
+BufferedRandom readinto1 readinto of closed file
+BufferedRandom peek peek of closed file
+`,
+    uncaughtException: undefined,
+  });
+});
+
+test('buffered readinto retains its concrete implementation when a subclass overrides read', () => {
+  const program = `import io
+class Stream(io.BufferedReader):
+    def read(self, size=-1): raise AssertionError('read override')
+stream = Stream(io.BytesIO(b'abcde'), 2)
+target = bytearray(3)
+assert stream.peek() == b'ab'
+assert stream.read1(1) == b'a'
+assert stream.readinto1(target) == 1 and target == bytes([98, 0, 0])
+assert stream.readinto(target) == 3 and target == b'cde'
+assert stream.readinto1(target) == 0
+stream.close()
+print('buffered')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'buffered\n',
+    uncaughtException: undefined,
+  });
+});

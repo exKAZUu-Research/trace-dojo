@@ -1,13 +1,14 @@
 import { defineAttribute } from '../attributeDescriptors';
-import { bytesLikeData, newByteArray, newBytes, PyBytes } from '../bytesValues';
+import type { PyBytes } from '../bytesValues';
+import { bytesLikeData, newByteArray, newBytes } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { method } from '../define';
 import { builtinClassesWithDict } from '../descriptors';
 import { createFileIOClass } from '../inputStream';
-import { viewOf } from '../memoryview';
+import { isCContiguous, viewOf } from '../memoryview';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { callValue, getAttribute, iterate, lookupSpecial } from '../objects';
+import { callValue, getAttribute, isTruthy, iterate, lookupSpecial } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { iterStr } from '../strings';
@@ -22,6 +23,7 @@ import {
   None,
   propertyClass,
   pyError,
+  stringValue,
   typeClass,
   typeError,
   typeName,
@@ -353,12 +355,16 @@ function defineBytesIO(cls: PyClass): void {
   method(cls, 'read1', 'expected', 0, 1, (self, [size]) => readFrom(binaryStream(self), sizeArgument(size)));
   method(cls, 'readinto', 'one', 1, 1, (self, [target]) => {
     const stream = binaryStream(self);
-    if (!(target instanceof PyBytes) || !target.isMutable) {
-      throw typeError(`readinto() argument must be read-write bytes-like object, not ${typeName(target)}`);
+    const view = viewOf(target);
+    try {
+      if (view.readonly || !isCContiguous(view))
+        throw typeError(`readinto() argument must be read-write bytes-like object, not ${typeName(target)}`);
+      const data = readFrom(stream, view.nbytes) as PyBytes;
+      view.source.data.set(data.data, view.offset);
+      return BigInt(data.length);
+    } finally {
+      view.release();
     }
-    const data = readFrom(stream, target.length) as PyBytes;
-    target.data.set(data.data);
-    return BigInt(data.length);
   });
   method(cls, 'getvalue', 'none', 0, 0, (self) => {
     const stream = binaryStream(self);
@@ -415,11 +421,22 @@ function clinicInitializer(cls: PyClass): void {
   const required = params.length - initialize.defaults.length;
   const text = cls.name === 'TextIOWrapper';
   defineAttribute(cls, 'closed', (self) => underlyingClosed(self as PyInstance, text));
+  method(cls, '_checkCClosed', 'expected', 0, 1, (self, [operation]) =>
+    checkCClosed(self as PyInstance, text, operation)
+  );
   if (text) defineTextReadline(cls);
   defineMethod(cls, '__init__', (self, args, kwargs) => {
     unpackKeywords(cls.name, params, required, args, kwargs);
     return callValue(initialize, [self, ...args], kwargs);
   });
+}
+
+function checkCClosed(self: PyInstance, text: boolean, operation: PyValue | undefined): PyValue {
+  if (text && !self.dict.has('_buffer')) throw valueError('I/O operation on uninitialized object');
+  if (!isTruthy(getAttribute(self, 'closed'))) return None;
+  const name = stringValue(operation);
+  if (text || name === undefined) throw valueError('I/O operation on closed file.');
+  throw valueError(`${name} ${name === 'write' ? 'to' : 'of'} closed file`);
 }
 
 function underlyingClosed(self: PyInstance, text: boolean): PyValue {

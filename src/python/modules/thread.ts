@@ -55,7 +55,7 @@ interface LockState {
   count: number;
 }
 
-const lockClass = builtinClassWithBase('lock', objectClass, '_thread');
+const lockClass = builtinClassWithBase('lock', objectClass, '_thread', false);
 lockClass.typeName = '_thread.lock';
 const rlockClass = builtinClassWithBase('RLock', objectClass, '_thread');
 rlockClass.typeName = '_thread.RLock';

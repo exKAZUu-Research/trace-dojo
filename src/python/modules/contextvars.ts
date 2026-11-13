@@ -22,6 +22,7 @@ import {
   typeName,
 } from '../types';
 import { DONE, type PyBuiltinFunction, PyError, PyIterator, PyOpaque, type PyValue } from '../values';
+import { unpackCArguments } from './clinicArgs';
 import { defineProperty } from './numberSupport';
 
 const contextClass = builtinClass('Context');
@@ -187,17 +188,15 @@ function iterate(items: PyValue[]): PyIterator {
 // ContextVar --------------------------------------------------------------------------------------------------------
 
 contextVarClass.construct = (_cls, args, kwargs) => {
-  if (args.length !== 1) {
-    throw typeError(`ContextVar() takes exactly 1 positional argument (${args.length} given)`);
-  }
-  for (const key of kwargs?.keys() ?? []) {
-    if (key !== 'default') throw typeError(`ContextVar() got an unexpected keyword argument '${key}'`);
-  }
-  const [name] = args;
-  if (stringValue(name) === undefined) throw typeError('context variable name must be a str');
+  const [name, fallback] = unpackCArguments(
+    { name: 'ContextVar', params: ['name'], required: 1, positionalOnly: 1, keywordOnly: ['default'], legacy: true },
+    args,
+    kwargs
+  );
+  if (name === undefined || stringValue(name) === undefined) throw typeError('context variable name must be a str');
   return new PyOpaque(contextVarClass, stringValue(name) as string, {
     name,
-    default: kwargs?.get('default'),
+    default: fallback,
   } satisfies ContextVar);
 };
 defineProperty(contextVarClass, 'name', (self) => variableOf(self).name);

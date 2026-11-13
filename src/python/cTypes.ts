@@ -3,7 +3,7 @@ import { builtinClassLayout } from './builtinDocs';
 import { unsupportedSizeof } from './define';
 import { builtinClassesWithDict, fieldedCTypes } from './descriptors';
 import { defineNew } from './instances';
-import { bindValue, callValue } from './objects';
+import { callValue } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { defineMethod, None, propertyClass, staticmethodClass, typeClass } from './types';
 import { type Kwargs, type PyClass, PyDescriptor, PyFunction, PyInstance, type PyValue } from './values';
@@ -82,10 +82,7 @@ function hidePrivateHelpers(cls: PyClass, names: Set<string | undefined>): void 
   }
   if (helpers.size === 0) return;
   for (const name of helpers.keys()) cls.dict.delete(name);
-  cls.missingAttribute = (self, name) => {
-    const helper = helpers.get(name);
-    return helper === undefined ? undefined : bindValue(helper, self);
-  };
+  cls.implementationAttributes = helpers;
 }
 
 /**

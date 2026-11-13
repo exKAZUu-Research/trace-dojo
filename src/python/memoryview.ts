@@ -5,7 +5,8 @@ import { method } from './define';
 import { pyHash } from './hashing';
 import { sliceIndices } from './items';
 import { withState } from './iteratorStates';
-import { argument, checkArgs } from './nativeArgs';
+import { unpackKeywords } from './modules/clinicArgs';
+import { argument } from './nativeArgs';
 import { toIndex } from './numbers';
 import { bindValue, callValue, lookupSpecial, nativeIterator } from './objects';
 import { equals } from './operators';
@@ -30,8 +31,8 @@ import { UnsupportedFeatureError } from './unsupported';
 import { DONE, PyDescriptor, PyList, type PyObject, PySlice, PyTuple, type PyValue } from './values';
 
 memoryviewClass.construct = (_cls, args, kwargs) => {
-  checkArgs({ qualified: 'memoryview', min: 1, max: 1, style: 'takes', keywords: ['object'] }, args, kwargs);
-  return viewOf(argument(args, kwargs, 0, 'object') as PyValue);
+  const [object] = unpackKeywords('memoryview', ['object'], 1, args, kwargs);
+  return viewOf(object as PyValue);
 };
 
 /** A memoryview of a bytes-like object, which for a memoryview views the same memory. */

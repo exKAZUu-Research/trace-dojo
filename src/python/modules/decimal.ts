@@ -19,6 +19,7 @@ import {
 } from '../types';
 import { type Kwargs, PyClass, PyComplex, PyList, PyNumberInstance, PyTuple, type PyValue } from '../values';
 import { abcRegister } from './abc';
+import { unpackCArguments } from './clinicArgs';
 import { makeNamedTupleClass } from './collections';
 import {
   absolute,
@@ -111,12 +112,11 @@ export function inContext<T>(context: PyContext, run: (state: DecimalContext) =>
 // Construction -------------------------------------------------------------------------------------------------------
 
 decimalClass.construct = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => {
-  if (args.length > 2) throw typeError(`function takes at most 2 arguments (${args.length} given)`);
-  const value = args[0] ?? kwargs?.get('value') ?? '0';
-  const context = args[1] ?? kwargs?.get('context');
-  for (const key of kwargs?.keys() ?? []) {
-    if (key !== 'value' && key !== 'context') throw typeError(`'${key}' is an invalid keyword argument for Decimal()`);
-  }
+  const [value = '0', context] = unpackCArguments(
+    { params: ['value', 'context'], required: 0, positionalOnly: 0, legacy: true },
+    args,
+    kwargs
+  );
   return newDecimal(convertExact(value, contextArgument(context)), cls);
 };
 

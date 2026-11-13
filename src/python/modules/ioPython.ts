@@ -618,7 +618,7 @@ class _BufferedIOMixin(_BufferedIOBase):
         return pos
 
     def truncate(self, pos=None):
-        self._checkClosed()
+        self._checkCClosed("truncate")
         self._checkWritable()
 
         # Flush the stream.  We're mixing buffered I/O with lower-level I/O,
@@ -739,7 +739,7 @@ class BufferedReader(_BufferedIOMixin):
         mode. If size is negative, read until EOF or until read() would
         block.
         """
-        self._checkClosed("read of closed file")
+        self._checkCClosed("read")
         if size is not None and size < -1:
             raise ValueError("invalid number of bytes to read")
         with self._read_lock:
@@ -804,7 +804,7 @@ class BufferedReader(_BufferedIOMixin):
         do at most one raw read to satisfy it.  We never return more
         than self.buffer_size.
         """
-        self._checkClosed("peek of closed file")
+        self._checkCClosed("peek")
         with self._read_lock:
             return self._peek_unlocked(size)
 
@@ -817,14 +817,14 @@ class BufferedReader(_BufferedIOMixin):
         return self._read_buf[self._read_pos:]
 
     def readline(self, size=-1):
-        self._checkClosed("readline of closed file")
+        self._checkCClosed("readline")
         return super().readline(size)
 
     def read1(self, size=-1):
         """Reads up to size bytes, with at most one read() system call."""
         # Returns up to size bytes.  If at least one byte is buffered, we
         # only return buffered bytes.  Otherwise, we do one raw read.
-        self._checkClosed("read of closed file")
+        self._checkCClosed("read")
         if size < 0:
             size = self.buffer_size
         if size == 0:
@@ -845,7 +845,7 @@ class BufferedReader(_BufferedIOMixin):
     def _readinto(self, buf, read1):
         """Read data into *buf* with at most one system call."""
 
-        self._checkClosed("readinto of closed file")
+        self._checkCClosed("readinto")
 
         # Need to create a memoryview object of type 'b', otherwise
         # we may not be able to assign bytes to it, and slicing it
@@ -897,7 +897,7 @@ class BufferedReader(_BufferedIOMixin):
     def seek(self, pos, whence=0):
         if whence not in valid_seek_flags:
             raise ValueError("invalid whence value")
-        self._checkClosed("seek of closed file")
+        self._checkCClosed("seek")
         with self._read_lock:
             if whence == 1:
                 pos -= len(self._read_buf) - self._read_pos
@@ -966,6 +966,7 @@ class BufferedWriter(_BufferedIOMixin):
             return written
 
     def truncate(self, pos=None):
+        self._checkCClosed("truncate")
         with self._write_lock:
             self._flush_unlocked()
             if pos is None:
@@ -999,6 +1000,7 @@ class BufferedWriter(_BufferedIOMixin):
     def seek(self, pos, whence=0):
         if whence not in valid_seek_flags:
             raise ValueError("invalid whence value")
+        self._checkCClosed("seek")
         with self._write_lock:
             self._flush_unlocked()
             return _BufferedIOMixin.seek(self, pos, whence)
@@ -1110,6 +1112,7 @@ class BufferedRandom(BufferedWriter, BufferedReader):
     def seek(self, pos, whence=0):
         if whence not in valid_seek_flags:
             raise ValueError("invalid whence value")
+        self._checkCClosed("seek")
         self.flush()
         if self._read_buf:
             # Undo read ahead.
@@ -1131,6 +1134,7 @@ class BufferedRandom(BufferedWriter, BufferedReader):
             return BufferedReader.tell(self)
 
     def truncate(self, pos=None):
+        self._checkCClosed("truncate")
         if pos is None:
             pos = self.tell()
         # Use seek to flush the read buffer.
@@ -1139,22 +1143,27 @@ class BufferedRandom(BufferedWriter, BufferedReader):
     def read(self, size=None):
         if size is None:
             size = -1
+        self._checkCClosed("read")
         self.flush()
         return BufferedReader.read(self, size)
 
     def readinto(self, b):
+        self._checkCClosed("readinto")
         self.flush()
         return BufferedReader.readinto(self, b)
 
     def peek(self, size=0):
+        self._checkCClosed("peek")
         self.flush()
         return BufferedReader.peek(self, size)
 
     def read1(self, size=-1):
+        self._checkCClosed("read")
         self.flush()
         return BufferedReader.read1(self, size)
 
     def readinto1(self, b):
+        self._checkCClosed("readinto")
         self.flush()
         return BufferedReader.readinto1(self, b)
 
@@ -1525,8 +1534,7 @@ class TextIOWrapper(_TextIOBase):
                         line_buffering, write_through)
 
     def seekable(self):
-        if self.closed:
-            raise ValueError("I/O operation on closed file.")
+        self._checkCClosed()
         return self._seekable
 
     def readable(self):
@@ -1536,8 +1544,7 @@ class TextIOWrapper(_TextIOBase):
         return self.buffer.writable()
 
     def flush(self):
-        if self.closed:
-            raise ValueError("I/O operation on closed file.")
+        self._checkCClosed()
         self._telling = self._seekable
         self._writeflush()
         self.buffer.flush()
@@ -1575,8 +1582,7 @@ class TextIOWrapper(_TextIOBase):
 
     def write(self, s):
         'Write data, where s is a str'
-        if self.closed:
-            raise ValueError("write to closed file")
+        self._checkCClosed()
         if not isinstance(s, str):
             raise TypeError("can't write %s to text stream" %
                             s.__class__.__name__)
@@ -1704,6 +1710,7 @@ class TextIOWrapper(_TextIOBase):
         return position, dec_flags, bytes_to_feed, bool(need_eof), chars_to_skip
 
     def tell(self):
+        self._checkCClosed()
         if not self._seekable:
             raise UnsupportedOperation("underlying stream is not seekable")
         if not self._telling:
@@ -1830,8 +1837,7 @@ class TextIOWrapper(_TextIOBase):
                 else:
                     encoder.reset()
 
-        if self.closed:
-            raise ValueError("tell on closed file")
+        self._checkCClosed()
         if not self._seekable:
             raise UnsupportedOperation("underlying stream is not seekable")
         if whence == SEEK_CUR:
@@ -1892,6 +1898,7 @@ class TextIOWrapper(_TextIOBase):
         return cookie
 
     def read(self, size=None):
+        self._checkCClosed()
         self._checkReadable()
         if size is None:
             size = -1
@@ -1934,8 +1941,7 @@ class TextIOWrapper(_TextIOBase):
         return line
 
     def readline(self, size=None):
-        if self.closed:
-            raise ValueError("I/O operation on closed file.")
+        self._checkCClosed()
         if size is None:
             size = -1
         else:

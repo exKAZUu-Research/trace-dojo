@@ -112,6 +112,7 @@ export interface ClassLayout {
 export class PyClass extends PyObject {
   mro: PyClass[] = [];
   readonly dict: Map<string, PyValue> = new NamespaceMap();
+  implementationAttributes?: Map<string, PyValue>;
   module = 'builtins';
   qualifiedName: string;
   /** The name that messages of builtin code show for a type of a C extension module, such as `decimal.Decimal`. */
@@ -180,14 +181,16 @@ export class PyClass extends PyObject {
   }
 
   /** Looks up an attribute along the method resolution order. */
-  lookup(name: string): PyValue | undefined {
+  lookup(name: string, implementation = false): PyValue | undefined {
     if (typeof name !== 'string')
       return lookupNamedKey(
-        this.mro.map((cls) => cls.dict),
+        this.mro.flatMap((cls) =>
+          implementation && cls.implementationAttributes ? [cls.dict, cls.implementationAttributes] : [cls.dict]
+        ),
         name
       );
     for (const cls of this.mro) {
-      const value = cls.dict.get(name);
+      const value = cls.dict.get(name) ?? (implementation ? cls.implementationAttributes?.get(name) : undefined);
       if (value !== undefined) return value;
     }
     return undefined;

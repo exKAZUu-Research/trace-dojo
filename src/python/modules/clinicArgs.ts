@@ -1,13 +1,11 @@
+import { keywordEntries, unicodeKeywords } from '../callArguments';
+import { pyStr } from '../conversions';
 import { bestSuggestion } from '../describe';
 import { toIndex } from '../numbers';
-import { defineMethod, nativeFunction, pyError, typeError } from '../types';
+import { equals } from '../operators';
+import { defineMethod, nativeFunction, pyError, stringValue, typeError } from '../types';
 import type { Kwargs, PyBuiltinFunction, PyClass, PyValue } from '../values';
 
-/**
- * Reads the arguments of a builtin method whose parameters may be passed by position or keyword, with the errors of
- * CPython's Argument Clinic (`_PyArg_UnpackKeywords`).
- */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows the checks of CPython's _PyArg_UnpackKeywords in their order.
 export function unpackKeywords(
   name: string,
   params: readonly string[],
@@ -15,33 +13,7 @@ export function unpackKeywords(
   args: readonly PyValue[],
   kwargs: Kwargs
 ): (PyValue | undefined)[] {
-  const keywordCount = kwargs?.size ?? 0;
-  const max = params.length;
-  const given = args.length + keywordCount;
-  if (given > max) {
-    const keyword = args.length === 0 ? 'keyword ' : '';
-    throw typeError(`${name}() takes at most ${max} ${keyword}argument${max === 1 ? '' : 's'} (${given} given)`);
-  }
-  const values: (PyValue | undefined)[] = [...args];
-  let remaining = keywordCount;
-  for (let index = args.length; index < max; index++) {
-    const value = remaining > 0 ? kwargs?.get(params[index]) : undefined;
-    if (value !== undefined) {
-      values[index] = value;
-      remaining--;
-    } else if (index < required) {
-      throw typeError(`${name}() missing required argument '${params[index]}' (pos ${index + 1})`);
-    }
-  }
-  if (remaining > 0) {
-    for (let index = 0; index < args.length; index++) {
-      if (kwargs?.has(params[index]))
-        throw typeError(`argument for ${name}() given by name ('${params[index]}') and position (${index + 1})`);
-    }
-    const unexpected = [...(kwargs?.keys() ?? [])].find((key) => !params.includes(key));
-    throw typeError(`${name}() got an unexpected keyword argument '${unexpected}'`);
-  }
-  return values;
+  return unpackCArguments({ name, params, required, positionalOnly: 0 }, args, kwargs);
 }
 
 /** The parameters of a builtin whose arguments CPython's Argument Clinic parses. */
@@ -58,44 +30,80 @@ export interface ClinicSpec {
 
 const plural = (count: number): string => (count === 1 ? '' : 's');
 
-/** Binds the arguments of a call to `spec`'s parameters, raising Argument Clinic's errors. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Raises each of the errors of CPython's argument clinic parser in its order.
+export interface CKeywordSpec extends Omit<ClinicSpec, 'name'> {
+  name?: string;
+  legacy?: boolean;
+}
+
 export function clinicArgs(spec: ClinicSpec, args: readonly PyValue[], kwargs: Kwargs): (PyValue | undefined)[] {
+  return unpackCArguments(spec, args, unicodeKeywords(kwargs, spec.name));
+}
+
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps CPython's argument count, required parameter and keyword checks in precedence order.
+// code-gauge-allow functionNcss 31 -- Keeps CPython's argument count, required parameter and keyword checks in precedence order.
+export function unpackCArguments(
+  spec: CKeywordSpec,
+  args: readonly PyValue[],
+  kwargs: Kwargs
+): (PyValue | undefined)[] {
   const { name, params, positionalOnly, required, keywordOnly = [] } = spec;
-  if (args.length > params.length) {
-    const exact = required === params.length;
-    const kind = exact || keywordOnly.length > 0 ? 'positional ' : '';
+  const names = [...params, ...keywordOnly];
+  const label = name === undefined ? 'function' : `${name}()`;
+  const keywordCount = kwargs?.size ?? 0;
+  const given = args.length + keywordCount;
+  if (given > names.length) {
+    const keyword = args.length === 0 ? 'keyword ' : '';
     throw typeError(
-      `${name}() takes ${exact ? 'exactly' : 'at most'} ${params.length} ${kind}argument${plural(params.length)} (${args.length} given)`
+      `${label} takes at most ${names.length} ${keyword}argument${plural(names.length)} (${given} given)`
+    );
+  }
+  if (args.length > params.length) {
+    if (params.length === 0) throw typeError(`${label} takes no positional arguments`);
+    const exact = required === (spec.legacy ? names.length : params.length);
+    throw typeError(
+      `${label} takes ${exact ? 'exactly' : 'at most'} ${params.length} positional argument${plural(params.length)} (${args.length} given)`
     );
   }
   const requiredPositional = Math.min(required, positionalOnly);
   if (args.length < requiredPositional) {
     const exact = requiredPositional === params.length;
     throw typeError(
-      `${name}() takes ${exact ? 'exactly' : 'at least'} ${requiredPositional} positional argument${plural(requiredPositional)} (${args.length} given)`
+      `${label} takes ${exact ? 'exactly' : 'at least'} ${requiredPositional} positional argument${plural(requiredPositional)} (${args.length} given)`
     );
   }
-  const names = [...params, ...keywordOnly];
-  const bound: (PyValue | undefined)[] = names.map((_, index) => args[index]);
-  for (const [key, value] of kwargs ?? []) {
-    const index = names.indexOf(key);
-    if (index < positionalOnly) {
-      const suggestion = bestSuggestion(key, names.slice(positionalOnly));
-      throw typeError(
-        `${name}() got an unexpected keyword argument '${key}'${suggestion ? `. Did you mean '${suggestion}'?` : ''}`
-      );
+  const bound: (PyValue | undefined)[] = [...args];
+  let remaining = keywordCount;
+  for (let index = Math.max(args.length, positionalOnly); index < names.length; index++) {
+    const value = remaining > 0 ? kwargs?.get(names[index]) : undefined;
+    if (value !== undefined) {
+      bound[index] = value;
+      remaining--;
+    } else if (index < required) {
+      throw typeError(`${label} missing required argument '${names[index]}' (pos ${index + 1})`);
     }
-    if (index < args.length) {
-      throw typeError(`argument for ${name}() given by name ('${key}') and position (${index + 1})`);
-    }
-    bound[index] = value;
   }
-  for (let index = 0; index < required; index++) {
-    if (bound[index] !== undefined) continue;
-    throw typeError(`${name}() missing required argument '${params[index]}' (pos ${index + 1})`);
-  }
+  if (remaining > 0) rejectRemainingKeywords(spec, args.length, kwargs);
   return bound;
+}
+
+function rejectRemainingKeywords(spec: CKeywordSpec, positional: number, kwargs: Kwargs): never {
+  const { name, params, positionalOnly, keywordOnly = [] } = spec;
+  const label = name === undefined ? 'function' : `${name}()`;
+  for (let index = positionalOnly; index < positional; index++) {
+    if (kwargs?.has(params[index]))
+      throw typeError(`argument for ${label} given by name ('${params[index]}') and position (${index + 1})`);
+  }
+  const accepted = [...params.slice(positionalOnly), ...keywordOnly];
+  const unexpected = keywordEntries(kwargs).find(([key]) =>
+    spec.legacy ? !accepted.includes(stringValue(key) as string) : !accepted.some((name) => equals(name, key))
+  );
+  const callable = name === undefined ? 'this function' : `${name}()`;
+  if (unexpected === undefined) throw typeError(`invalid keyword argument for ${callable}`);
+  const key = unexpected[0];
+  const suggestion = bestSuggestion(stringValue(key) as string, accepted);
+  throw typeError(
+    `${callable} got an unexpected keyword argument '${pyStr(key)}'${suggestion ? `. Did you mean '${suggestion}'?` : ''}`
+  );
 }
 
 /** A builtin function whose arguments Argument Clinic parses into `spec`'s parameters. */

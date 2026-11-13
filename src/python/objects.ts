@@ -252,7 +252,7 @@ function findAttribute(value: PyValue, name: string, nameValue: PyValue = name):
   const cls = classOf(value);
   const special = specialAttribute(value, name);
   if (special !== undefined) return special;
-  const attribute = cls.lookup(key);
+  const attribute = cls.lookup(key, true);
   if (attribute === undefined) return ownDict(value)?.get(key) ?? typeDocOf(cls, name);
   if (attribute instanceof PyAttribute) {
     // A descriptor standing for what this grader's objects keep natively finds nothing where they keep nothing.
