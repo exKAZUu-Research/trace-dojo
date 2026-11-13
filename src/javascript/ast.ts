@@ -11,8 +11,11 @@ export interface Program {
 /** The names a function body or block declares, which its scope creates before running its statements. */
 export interface ScopeDeclarations {
   /** `let`, `const`, and `class` names, which stay uninitialized until their declaration runs. */
-  /** `kind` names an immutable binding in the TypeError an assignment to it throws: `constant`, `using`, and so on. */
-  lexical: { name: string; kind?: 'constant' | 'using' | 'await using' }[];
+  lexical: {
+    name: string;
+    /** Names an immutable binding in the TypeError an assignment to it throws; undefined for a mutable one. */
+    kind?: 'constant' | 'using' | 'await using';
+  }[];
   /** Function declarations, which are initialized before anything runs. */
   functions: FunctionNode[];
   /** `var` names of a function body or the program, which start as `undefined`. */

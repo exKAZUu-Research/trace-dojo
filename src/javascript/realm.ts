@@ -15,6 +15,7 @@ import { defineNodeBuiltins } from './realmNode';
 import { defineObjectBuiltins } from './realmObjects';
 import { defineRegExpBuiltins } from './realmRegExp';
 import { defineStringBuiltins } from './realmStrings';
+import { defineStructuredClone } from './realmStructuredClone';
 import type { Runtime } from './runtime';
 import { JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
 
@@ -123,10 +124,10 @@ export class RealmBuilder {
     return fn;
   }
 
-  getter(object: JsObject, name: Key, run: NativeFunction): void {
+  getter(object: JsObject, name: Key, run: NativeFunction, set?: NativeFunction): void {
     object.properties.set(name, {
       get: this.function(`get ${functionNameOf(name)}`, 0, run),
-      set: undefined,
+      set: set && this.function(`set ${functionNameOf(name)}`, 1, set),
       enumerable: false,
       configurable: true,
     });
@@ -192,6 +193,7 @@ export function createRealm(runtime: Runtime): Realm {
   defineBigIntBuiltins(builder);
   defineCollectionBuiltins(builder);
   defineJsonBuiltins(builder);
+  defineStructuredClone(builder);
   defineIteratorHelpers(builder);
   defineAsyncBuiltins(builder);
   defineDateBuiltins(builder);

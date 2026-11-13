@@ -4,6 +4,7 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { parseJavaScript } from './parse';
+import { dateValueOf, inspectDate } from './realmDate';
 import { runProgram } from './run';
 import { Runtime } from './runtime';
 import {
@@ -105,6 +106,7 @@ type Scalar = TraceItemVariable[string];
 function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR {
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'bigint' || typeof value === 'symbol') return displayedPrimitive(value);
+  if (value instanceof JsObject && value.primitive !== undefined) return scalarOf(value.primitive, seen);
   if (!(value instanceof JsArray) || seen.has(value)) return NOT_SCALAR;
   seen.add(value);
   const items: Scalar[] = [];
@@ -125,13 +127,12 @@ function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One check per kind of value, as learners see each.
+// code-gauge-allow functionCognitiveComplexity 19 -- One check per kind of value, as learners see each.
 function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefined {
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
     return { kind: 'value', value };
-  if (typeof value === 'bigint' || typeof value === 'symbol')
-    return { kind: 'value', value: displayedPrimitive(value) };
+  if (typeof value === 'bigint' || typeof value === 'symbol') return primitiveNode(value);
   if (value instanceof JsFunction || seen.has(value)) return undefined;
   if (value.turtle) {
     if (!value.turtle.isAlive) return undefined;
@@ -140,6 +141,8 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
       entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
     };
   }
+  const builtin = builtinNodeOf(value, seen);
+  if (builtin) return builtin;
   seen.add(value);
   const entries: Record<string, DisplayNode> = {};
   for (const [key, item] of value instanceof JsArray
@@ -151,6 +154,53 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
   }
   seen.delete(value);
   return { kind: value instanceof JsArray ? 'array' : 'object', entries };
+}
+
+/**
+ * How a builtin object holding state of its own shows: a boxed primitive as its primitive, a Date or a RegExp as the
+ * text console.log prints, a Set as an array of its values, and a Map as an object keyed by its keys' text, or as an
+ * array of key-value pairs when keys are objects, integers, or show alike.
+ */
+function builtinNodeOf(object: JsObject, seen: Set<JsObject>): DisplayNode | undefined {
+  if (object.primitive !== undefined) return displayNodeOf(object.primitive, seen);
+  const time = dateValueOf(object);
+  if (time !== undefined) return { kind: 'value', value: inspectDate(time), verbatim: true };
+  if (object.regexp) return { kind: 'value', value: String(object.regexp), verbatim: true };
+  const { collection } = object;
+  if (!collection || collection.isWeak) return undefined;
+  seen.add(object);
+  const items = collection.entries.filter((entry) => entry !== undefined);
+  const node = (value: Value): DisplayNode => displayNodeOf(value, seen) ?? NULL_NODE;
+  let result: DisplayNode;
+  if (collection.kind === 'Set') {
+    result = { kind: 'array', entries: Object.fromEntries(items.map((entry, index) => [index, node(entry.key)])) };
+  } else {
+    const keys = items.map((entry) => node(entry.key));
+    // An object key, even one shown as a value (a Date or a box), keeps its pair so it is not taken for text.
+    const texts = items.map((entry, index) => {
+      const key = keys[index];
+      return key.kind === 'value' && !(entry.key instanceof JsObject) ? String(key.value) : undefined;
+    });
+    // Integer-like keys would be listed first in an object, out of the Map's order.
+    result =
+      texts.every((text) => text !== undefined && !/^(?:0|[1-9]\d*)$/.test(text)) &&
+      new Set(texts).size === texts.length
+        ? {
+            kind: 'object',
+            entries: Object.fromEntries(items.map((entry, index) => [texts[index], node(entry.value)])),
+          }
+        : {
+            kind: 'array',
+            entries: Object.fromEntries(
+              items.map((entry, index) => [
+                index,
+                { kind: 'array', entries: { 0: keys[index], 1: node(entry.value) } } satisfies DisplayNode,
+              ])
+            ),
+          };
+  }
+  seen.delete(object);
+  return result;
 }
 
 /**
@@ -195,8 +245,15 @@ function displayedEntries(object: JsObject): [string, Value][] {
   return entries;
 }
 
-/** A BigInt as the number it equals while that is exact, else its digits; a symbol as its description text. */
-function displayedPrimitive(value: bigint | symbol): number | string {
+function primitiveNode(value: bigint | symbol): DisplayNode {
+  return typeof value === 'symbol'
+    ? { kind: 'value', value: value.toString(), verbatim: true }
+    : { kind: 'value', value: displayedPrimitive(value) };
+}
+
+/** A BigInt as the number it equals while that is exact, else itself; a symbol as its description text. */
+function displayedPrimitive(value: bigint | symbol): number | bigint | string {
   if (typeof value === 'symbol') return value.toString();
-  return Number.isSafeInteger(Number(value)) ? Number(value) : String(value);
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : value;
 }

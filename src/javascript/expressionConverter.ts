@@ -11,6 +11,8 @@ import {
   keyName,
   nameAnonymous,
   namedChildren,
+  nameOf,
+  optionalNameOf,
   rowOf,
   unsupported,
   unsupportedFeatures,
@@ -23,6 +25,9 @@ type ExpressionConverterFunction = (node: Node) => Expression;
 const assignableTypes = new Set(['identifier', 'member_expression', 'subscript_expression']);
 
 export abstract class ExpressionConverter extends ConverterBase {
+  /** The `#name`s each enclosing class body declares, innermost last, which every `#name` use must find. */
+  protected readonly privateNames: Set<string>[] = [];
+
   private readonly expressionConverters: Record<string, ExpressionConverterFunction> = {
     number: (node) => ({ kind: 'literal', value: this.number(node), row: rowOf(node) }),
     string: (node) => ({
@@ -36,7 +41,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     false: (node) => ({ kind: 'literal', value: false, row: rowOf(node) }),
     // oxlint-disable-next-line unicorn/no-null -- JavaScript null is a value of the interpreted language.
     null: (node) => ({ kind: 'literal', value: null, row: rowOf(node) }),
-    undefined: (node) => ({ kind: 'identifier', name: node.text, row: rowOf(node) }),
+    undefined: (node) => ({ kind: 'identifier', name: nameOf(node), row: rowOf(node) }),
     identifier: (node) => this.identifierRead(node),
     this: (node) => ({ kind: 'this', row: rowOf(node) }),
     super: (node) => fail(node, 'super は super(...) か super.メソッド名 の形でしか書けません。'),
@@ -61,7 +66,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     }),
     class: (node) => ({
       kind: 'classExpression',
-      cls: this.classNode(node, node.childForFieldName('name')?.text ?? ''),
+      cls: this.classNode(node, optionalNameOf(node.childForFieldName('name'))),
       row: rowOf(node),
     }),
     member_expression: (node) => this.member(node),
@@ -106,6 +111,11 @@ export abstract class ExpressionConverter extends ConverterBase {
     return expression;
   }
 
+  private checkPrivateName(node: Node): void {
+    if (!this.privateNames.some((names) => names.has(nameOf(node))))
+      fail(node, `${node.text} は、それを宣言したクラスの中でしか使えません。`);
+  }
+
   private awaitExpression(node: Node): Expression {
     // The grammar also parses `await` in a static block or a field initializer, where JavaScript reserves it.
     if (!this.context.isAsync) fail(node, 'await は async 関数の中にしか書けません。');
@@ -131,13 +141,13 @@ export abstract class ExpressionConverter extends ConverterBase {
 
   /** Reads a variable by name, noting a read of `arguments`, which the enclosing function then creates. */
   private identifierRead(node: Node): Expression {
-    this.checkContextualName(node, node.text);
-    if (node.text === 'arguments') {
+    this.checkContextualName(node, nameOf(node));
+    if (nameOf(node) === 'arguments') {
       if (this.context.argumentsUse.isForbidden)
         fail(node, 'フィールドの初期値や static ブロックの中では arguments を使えません。');
       this.context.argumentsUse.isUsed = true;
     }
-    return { kind: 'identifier', name: node.text, row: rowOf(node) };
+    return { kind: 'identifier', name: nameOf(node), row: rowOf(node) };
   }
 
   protected parenthesized(node: Node): Expression {
@@ -230,8 +240,12 @@ export abstract class ExpressionConverter extends ConverterBase {
   private unary(node: Node): Expression {
     const operator = field(node, 'operator').text;
     const argument = field(node, 'argument');
-    if (operator === 'delete' && unwrapParentheses(argument).type === 'identifier')
-      fail(node, '変数は delete できません。');
+    if (operator === 'delete') {
+      const target = unwrapParentheses(argument);
+      if (target.type === 'identifier') fail(node, '変数は delete できません。');
+      if (target.type === 'member_expression' && field(target, 'property').type === 'private_property_identifier')
+        fail(node, '# で始まる名前のフィールドは delete できません。');
+    }
     return { kind: 'unary', operator, argument: this.expression(argument), row: rowOf(node) };
   }
 
@@ -240,9 +254,10 @@ export abstract class ExpressionConverter extends ConverterBase {
     const leftNode = field(node, 'left');
     if (leftNode.type === 'private_property_identifier') {
       if (operator !== 'in') fail(leftNode, '# で始まる名前は、in の左か「.」の後ろにしか書けません。');
+      this.checkPrivateName(leftNode);
       return {
         kind: 'privateIn',
-        name: leftNode.text,
+        name: nameOf(leftNode),
         right: this.expression(field(node, 'right')),
         row: rowOf(node),
       };
@@ -279,7 +294,7 @@ export abstract class ExpressionConverter extends ConverterBase {
         case 'shorthand_property_identifier': {
           return {
             kind: 'property',
-            key: { kind: 'key', key: member.text },
+            key: { kind: 'key', key: nameOf(member) },
             value: this.identifierRead(member),
           };
         }
@@ -313,10 +328,11 @@ export abstract class ExpressionConverter extends ConverterBase {
     let property: PropertyName;
     if (node.type === 'member_expression') {
       const propertyNode = field(node, 'property');
+      if (propertyNode.type === 'private_property_identifier') this.checkPrivateName(propertyNode);
       property =
         propertyNode.type === 'private_property_identifier'
-          ? { kind: 'private', name: propertyNode.text }
-          : { kind: 'key', key: propertyNode.text };
+          ? { kind: 'private', name: nameOf(propertyNode) }
+          : { kind: 'key', key: nameOf(propertyNode) };
       if (property.kind === 'private' && object.kind === 'super') fail(node, 'super.#name とは書けません。');
     } else {
       property = { kind: 'computed', expression: this.expression(field(node, 'index')) };
@@ -377,10 +393,10 @@ export abstract class ExpressionConverter extends ConverterBase {
     switch (node.type) {
       case 'property_identifier':
       case 'identifier': {
-        return { kind: 'key', key: node.text };
+        return { kind: 'key', key: nameOf(node) };
       }
       case 'private_property_identifier': {
-        return { kind: 'private', name: node.text };
+        return { kind: 'private', name: nameOf(node) };
       }
       case 'string': {
         return { kind: 'key', key: decodeStringLiteral(node.text) };
@@ -406,8 +422,8 @@ export abstract class ExpressionConverter extends ConverterBase {
         fail(target, '宣言では変数名しか書けません。');
       }
       checkBindingName(target);
-      declare(target, target.text);
-      return { kind: 'identifier', name: target.text, row: rowOf(target) };
+      declare(target, nameOf(target));
+      return { kind: 'identifier', name: nameOf(target), row: rowOf(target) };
     });
   }
 
@@ -417,7 +433,7 @@ export abstract class ExpressionConverter extends ConverterBase {
       const unwrapped = unwrapParentheses(target);
       if (unwrapped.type === 'identifier' || unwrapped.type === 'shorthand_property_identifier_pattern') {
         checkBindingName(unwrapped);
-        return { kind: 'identifier', name: unwrapped.text, row: rowOf(unwrapped) };
+        return { kind: 'identifier', name: nameOf(unwrapped), row: rowOf(unwrapped) };
       }
       if (unwrapped.type !== 'member_expression' && unwrapped.type !== 'subscript_expression') {
         return fail(target, 'この式には代入できません。');
@@ -477,12 +493,12 @@ export abstract class ExpressionConverter extends ConverterBase {
       switch (child.type) {
         case 'shorthand_property_identifier_pattern':
         case 'shorthand_property_identifier': {
-          properties.push({ key: { kind: 'key', key: child.text }, value: leaf(child) });
+          properties.push({ key: { kind: 'key', key: nameOf(child) }, value: leaf(child) });
           break;
         }
         case 'object_assignment_pattern': {
           properties.push({
-            key: { kind: 'key', key: field(child, 'left').text },
+            key: { kind: 'key', key: nameOf(field(child, 'left')) },
             value: this.pattern(child, leaf),
           });
           break;
@@ -535,6 +551,9 @@ function canSuspendIn(expression: Expression): boolean {
     case 'assign': {
       // A member target evaluates its parts step by step, but a destructuring target binds in one go.
       return expression.target.kind === 'member' || !patternSuspends(expression.target);
+    }
+    case 'update': {
+      return expression.target.kind === 'member';
     }
     case 'call': {
       return expression.callee.kind !== 'super';
