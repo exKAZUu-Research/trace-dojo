@@ -14,3 +14,5 @@ import './libMeta';
 import './libStruct';
 import './libRegexp';
 import './libTime';
+import './libRational';
+import './libEncoding';

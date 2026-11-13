@@ -113,6 +113,8 @@ export class ReturnSignal {
 
 export class RetrySignal {}
 
+export class RedoSignal {}
+
 export class ThrowSignal {
   constructor(
     readonly tag: Value,
@@ -144,6 +146,8 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly held: Value[] = [];
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];
+  /** The blocks `at_exit` and `END` registered, which run when the program ends, the last first. */
+  readonly atExit: RProc[] = [];
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */

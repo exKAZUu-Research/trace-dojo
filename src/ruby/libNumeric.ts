@@ -16,6 +16,7 @@ import { roundFloatDigits, roundHalfAway } from './floatFormat';
 import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { makeRational } from './libRational';
 import { NIL, RArray, type RHash, type RProc, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str, truthy } from './values';
@@ -86,7 +87,7 @@ function intPow(base: bigint, exponent: bigint): Value {
     if (base === 1n) return 1n;
     if (base === -1n) return exponent % 2n === 0n ? 1n : -1n;
     if (base === 0n) throw zeroDivisionError();
-    throw new UnsupportedFeatureError('負の指数の累乗（結果が有理数になるもの）');
+    return makeRational(1n, base ** -exponent);
   }
   const bits = BigInt(base < 0n ? -base : base).toString(2).length;
   if (base !== 0n && base !== 1n && base !== -1n && BigInt(bits) * exponent > 32_000_000n) {
@@ -221,12 +222,6 @@ for (const owner of ['Integer', 'Float']) {
     if (!isNum(other)) throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
     return Number(self) / Number(other);
   });
-  def(owner, 'quo', 1, (self: Num, [other]) => {
-    if (typeof self === 'bigint' && typeof other === 'bigint') {
-      throw new UnsupportedFeatureError('Integer#quo（有理数）');
-    }
-    return Number(self) / Number(other as Num);
-  });
   def(owner, 'remainder', 1, (self: Num, [other]) => {
     if (!isNum(other)) throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
     if (typeof self === 'bigint' && typeof other === 'bigint') {
@@ -253,9 +248,6 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, 'to_f', 0, Number);
   def(owner, 'to_c', 0, () => {
     throw new UnsupportedFeatureError('to_c（複素数）');
-  });
-  def(owner, ['to_r', 'rationalize'], [0, 1], () => {
-    throw new UnsupportedFeatureError('to_r（有理数）');
   });
   def(
     owner,

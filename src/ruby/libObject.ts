@@ -206,8 +206,6 @@ def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args) {
   return makeEnumerator(self, method.name, rest);
 });
 
-
-
 // Kernel functions ----------------------------------------------------------------------------------------------------
 
 const PRIVATE = { visibility: 'private' as Visibility };
@@ -437,7 +435,6 @@ for (const [name, feature] of [
   ['binding', 'binding'],
   ['caller', '呼び出し履歴（caller）'],
   ['caller_locations', '呼び出し履歴（caller_locations）'],
-  ['at_exit', 'at_exit'],
   ['set_trace_func', 'set_trace_func'],
   ['select', 'select'],
   ['syscall', 'syscall'],
@@ -517,13 +514,7 @@ def('Module', 'include', [1, -1], function* (self: RClass, modules) {
   return self;
 });
 
-for (const name of [
-  'instance_methods',
-  'public_instance_methods',
-  'private_instance_methods',
-  'refine',
-  'using',
-]) {
+for (const name of ['instance_methods', 'public_instance_methods', 'private_instance_methods', 'refine', 'using']) {
   def('Module', name, [0, -1], () => {
     throw new UnsupportedFeatureError(name);
   });

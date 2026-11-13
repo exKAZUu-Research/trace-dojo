@@ -6,6 +6,7 @@ import type { Program } from './ast';
 import { bootstrap } from './bootstrap';
 import { describeException } from './describe';
 import { evalBody, runToEnd, STACK_OVERFLOW } from './interp';
+import { makeData, runAtExit } from './libEncoding';
 import { parseRuby } from './parse';
 import {
   BreakSignal,
@@ -55,10 +56,16 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
     runtime.pushFrame(frame);
     try {
       let uncaughtException: string | undefined;
+      if (program.data !== undefined) runtime.c.Object.constants.set('DATA', makeData(program.data));
       try {
         runToEnd(evalBody(program.body, frame));
       } catch (error) {
         uncaughtException = describeUncaught(runtime, error, frame);
+      }
+      try {
+        runToEnd(runAtExit());
+      } catch (error) {
+        uncaughtException ??= describeUncaught(runtime, error, frame);
       }
       onEnd?.(frame);
       runtime.collectGarbage();

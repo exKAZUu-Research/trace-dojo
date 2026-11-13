@@ -13,6 +13,8 @@ import {
   typeError,
 } from './errors';
 import { hashGet, hashSet } from './hashes';
+import { makeRational } from './libRational';
+import { isRegexp, makeRegexp, matchGlobal } from './libRegexp';
 import {
   invalidateMethodCaches,
   NIL,
@@ -28,12 +30,13 @@ import {
   type Value,
   type Visibility,
 } from './objects';
-import { isRegexp, makeRegexp, matchGlobal } from './libRegexp';
 import { bindParams } from './params';
+import { guardFailed, matchPattern, noMatchingPattern } from './patterns';
 import {
   BreakSignal,
   Frame,
   NextSignal,
+  RedoSignal,
   RetrySignal,
   ReturnSignal,
   rt,
@@ -262,6 +265,67 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'blockpass': {
       throw new Error('A block argument outside a call');
     }
+    case 'sclass': {
+      const target = yield* ev(e.target, frame);
+      if (!(target instanceof RBasic)) throw typeError("can't define singleton");
+      return yield* runModuleBody(singletonClassOf(target), e.body, frame);
+    }
+    case 'alias': {
+      const owner = frame.kind === 'class' ? (frame.self as RClass) : (frame.extra.definee ?? frame.cref[0]);
+      const method = owner.findMethod(e.oldName);
+      if (!method) {
+        throw nameError(`undefined method '${e.oldName}' for class '${owner.name}'`, owner, e.oldName);
+      }
+      owner.methods.set(e.newName, { ...method });
+      invalidateMethodCaches();
+      return NIL;
+    }
+    case 'undef': {
+      const owner = frame.kind === 'class' ? (frame.self as RClass) : frame.cref[0];
+      for (const name of e.names) {
+        if (!owner.findMethod(name))
+          throw nameError(`undefined method '${name}' for class '${owner.name}'`, owner, name);
+        addMethod(owner, { name, owner, visibility: 'public', body: { kind: 'undefined' } });
+      }
+      return NIL;
+    }
+    case 'redo': {
+      throw new RedoSignal();
+    }
+    case 'defined': {
+      return yield* definedText(e.e, frame);
+    }
+    case 'caseIn': {
+      const subject = yield* ev(e.subject, frame);
+      for (const clause of e.clauses) {
+        rt().currentRow = clause.row;
+        if (!(yield* matchPattern(clause.pattern, subject, frame))) continue;
+        if (clause.guard && truthy(yield* ev(clause.guard.cond, frame)) === clause.guard.unless) {
+          guardFailed();
+          continue;
+        }
+        return yield* evalBody(clause.body, frame);
+      }
+      if (e.else) return yield* evalBody(e.else, frame);
+      throw yield* noMatchingPattern(subject, e.clauses.length === 1);
+    }
+    case 'matchPattern': {
+      const value = yield* ev(e.value, frame);
+      const matched = yield* matchPattern(e.pattern, value, frame);
+      if (e.raise && !matched) throw yield* noMatchingPattern(value, true);
+      return e.raise ? NIL : matched;
+    }
+    case 'rational': {
+      return makeRational(e.numerator, e.denominator);
+    }
+    case 'atExit': {
+      const proc = makeBlock(e.block, frame);
+      rt().atExit.push(proc);
+      return proc;
+    }
+    case 'encoding': {
+      return constInModule(rt().c.Encoding, 'UTF_8');
+    }
     case 'regex': {
       let source = '';
       for (const part of e.parts) {
@@ -271,7 +335,11 @@ export function* ev(e: Expr, frame: Frame): Gen {
           source += isRegexp(value) ? (value.data as { source: string }).source : yield* toS(value);
         }
       }
-      return makeRegexp(source, { ignoreCase: e.flags.includes('i'), multiline: e.flags.includes('m'), extended: e.flags.includes('x') });
+      return makeRegexp(source, {
+        ignoreCase: e.flags.includes('i'),
+        multiline: e.flags.includes('m'),
+        extended: e.flags.includes('x'),
+      });
     }
   }
 }
@@ -651,7 +719,7 @@ function* evalWhile(e: Extract<Expr, { k: 'while' }>, frame: Frame): Gen {
     }
     first = false;
     try {
-      yield* evalBody(e.body, frame);
+      yield* evalRedoable(e.body, frame);
     } catch (error) {
       if (error instanceof BreakSignal && error.tag === undefined) return error.value;
       if (error instanceof NextSignal) continue;
@@ -659,6 +727,87 @@ function* evalWhile(e: Extract<Expr, { k: 'while' }>, frame: Frame): Gen {
     }
   }
   return NIL;
+}
+
+/** Runs a loop's or block's body, running it again from its start on `redo`. */
+function* evalRedoable(body: Body, frame: Frame): Gen {
+  for (;;) {
+    try {
+      return yield* evalBody(body, frame);
+    } catch (error) {
+      if (error instanceof RedoSignal) continue;
+      throw error;
+    }
+  }
+}
+
+/** What `defined?` says an expression is, without evaluating it except for a receiver. */
+// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of expression defined? tells.
+function text(value: string | undefined): Value {
+  return value === undefined ? NIL : str(value);
+}
+
+function* definedText(e: Expr, frame: Frame): Gen {
+  switch (e.k) {
+    case 'seq': {
+      return e.body.length === 1 ? yield* definedText(e.body[0].e, frame) : text('expression');
+    }
+    case 'lvar': {
+      return text('local-variable');
+    }
+    case 'ivar': {
+      return text(frame.self instanceof RBasic && frame.self.ivars?.has(e.name) ? 'instance-variable' : undefined);
+    }
+    case 'gvar': {
+      return text(rt().globals.has(e.name) ? 'global-variable' : undefined);
+    }
+    case 'cvar': {
+      const holder = frame.cref[0];
+      return text(
+        holder.ancestors().some((module) => module.classVariables.has(e.name)) ? 'class variable' : undefined
+      );
+    }
+    case 'const': {
+      try {
+        yield* ev(e, frame);
+        return text('constant');
+      } catch (error) {
+        if (error instanceof RubyError) return NIL;
+        throw error;
+      }
+    }
+    case 'call': {
+      let recv: Value = frame.self;
+      if (e.recv) {
+        try {
+          recv = yield* ev(e.recv, frame);
+        } catch (error) {
+          if (error instanceof RubyError) return NIL;
+          throw error;
+        }
+      }
+      const method = classOf(recv).findMethod(e.name);
+      if (!method || (method.visibility === 'private' && !e.fcall)) return NIL;
+      return text('method');
+    }
+    case 'yield': {
+      return text(frame.home.extra.block ? 'yield' : undefined);
+    }
+    case 'super': {
+      const method = frame.home.extra.method;
+      return text(method && classOf(frame.home.self).findSuperMethod(method.name, method.owner) ? 'super' : undefined);
+    }
+    case 'self': {
+      return text('self');
+    }
+    case 'asgn':
+    case 'opasgn': {
+      return text('assignment');
+    }
+    default: {
+      return text('expression');
+    }
+  }
 }
 
 function* evalFor(e: Extract<Expr, { k: 'for' }>, frame: Frame): Gen {
@@ -669,7 +818,7 @@ function* evalFor(e: Extract<Expr, { k: 'for' }>, frame: Frame): Gen {
     yield* assign(e.target, item, frame);
     runtime.steps.stepBinding(e.row, e.target.k === 'mlhs' || storesAnswer(item));
     try {
-      yield* evalBody(e.body, frame);
+      yield* evalRedoable(e.body, frame);
     } catch (error) {
       if (error instanceof NextSignal) return NIL;
       throw error;
@@ -1301,13 +1450,19 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       throw argumentCountError(args.length + (options.keywords ? 1 : 0), 0, 0);
     }
     if (def.params) {
-      yield* bindParams(def.params, frame, args, options.keywords, proc.isLambda || options.lambdaArgs ? 'lambda' : 'proc');
+      yield* bindParams(
+        def.params,
+        frame,
+        args,
+        options.keywords,
+        proc.isLambda || options.lambdaArgs ? 'lambda' : 'proc'
+      );
       if (hasParams(def.params)) {
         runtime.currentRow = def.row;
         runtime.steps.stepBinding(def.row, storesAnswers(def.params, frame));
       }
     }
-    return yield* evalBody(def.body, frame);
+    return yield* evalRedoable(def.body, frame);
   } catch (error) {
     if (error instanceof NextSignal) return error.value;
     if (proc.isLambda) {

@@ -8,10 +8,13 @@ import type {
   Call,
   Expr,
   HashItem,
+  InClause,
+  LocalRef,
   MethodDef,
   MultiTarget,
   Params,
   ParamTarget,
+  Pattern,
   Program,
   Rescue,
   StepKind,
@@ -75,7 +78,8 @@ interface Context {
   inBlock: boolean;
   inRescue: boolean;
   inClassBody: boolean;
-  /** Whether a block's body is a lambda literal, where `return` and `break` leave the lambda. */
+  /** The numbered parameters (`_1`) or `it` a block without parameters uses, which become its parameters. */
+  implicit?: Set<string>;
 }
 
 const ASSIGNABLE_KEYWORDS: Record<string, string> = {
@@ -107,8 +111,21 @@ export class Converter {
   readonly claimedAtomicRows = new Set<number>();
 
   convertProgram(root: Node): Program {
-    const body = this.body(namedChildren(root), 0);
-    return { body, locals: this.ctx.scope.names };
+    this.collectHeredocs(root);
+    const children = namedChildren(root);
+    const data = children.find((child) => child.type === 'uninterpreted');
+    const beginBlocks = children.filter((child) => child.type === 'begin_block');
+    const rest = children.filter((child) => child.type !== 'uninterpreted' && child.type !== 'begin_block');
+    const body = [...beginBlocks.flatMap((block) => this.body(namedChildren(block), 0)), ...this.body(rest, 0)];
+    return { body, locals: this.ctx.scope.names, data: data ? data.text.replace(/^\n/, '') : undefined };
+  }
+
+  /** The bodies of the heredocs, in the order their openings appear, which the tree places after their lines. */
+  private readonly heredocBodies: Node[] = [];
+  private heredocIndex = 0;
+
+  private collectHeredocs(root: Node): void {
+    for (const node of root.descendantsOfType('heredoc_body')) if (node) this.heredocBodies.push(node);
   }
 
   // Statements --------------------------------------------------------------------------------------------------------
@@ -117,7 +134,9 @@ export class Converter {
    * Converts a sequence of statements whose value is used as `use` says: only the last statement's value can be.
    */
   private body(nodes: Node[], use: Use): Body {
-    const statements = nodes.filter((node) => node.type !== 'comment' && node.type !== 'empty_statement');
+    const statements = nodes.filter(
+      (node) => node.type !== 'comment' && node.type !== 'empty_statement' && node.type !== 'heredoc_body'
+    );
     return statements.map((node, index) => this.statement(node, index === statements.length - 1 ? use : 0));
   }
 
@@ -352,6 +371,95 @@ export class Converter {
       case 'regex': {
         return this.regex(node);
       }
+      case 'singleton_class': {
+        return {
+          k: 'sclass',
+          target: this.expr(required(node.childForFieldName('value'))),
+          body: this.classBody(node),
+          row: node.startPosition.row,
+        };
+      }
+      case 'alias': {
+        const names = [node.childForFieldName('name'), node.childForFieldName('alias')].map((part) => required(part));
+        if (names.some((part) => part.type === 'global_variable')) this.unsupported(node, 'グローバル変数の別名');
+        const [newName, oldName] = names.map((part) => methodNameOf(part));
+        return { k: 'alias', newName, oldName };
+      }
+      case 'undef': {
+        return {
+          k: 'undef',
+          names: namedChildren(node)
+            .filter((c) => c.type !== 'comment')
+            .map((c) => methodNameOf(c)),
+        };
+      }
+      case 'redo': {
+        if (!this.ctx.inLoop && !this.ctx.inBlock) this.fail(node, 'redo は、ループかブロックの中でしか使えません。');
+        return { k: 'redo' };
+      }
+      case 'case_match': {
+        return this.caseMatch(node, use);
+      }
+      case 'match_pattern':
+      case 'test_pattern': {
+        return {
+          k: 'matchPattern',
+          value: this.expr(required(node.childForFieldName('value'))),
+          pattern: this.pattern(required(node.childForFieldName('pattern'))),
+          raise: node.type === 'match_pattern',
+        };
+      }
+      case 'character': {
+        return { k: 'str', parts: [this.decode(node, node.text.slice(1))] };
+      }
+      case 'chained_string': {
+        return {
+          k: 'str',
+          parts: namedChildren(node).flatMap((part) => (this.string(part) as { parts: StrPart[] }).parts),
+        };
+      }
+      case 'string_array':
+      case 'symbol_array': {
+        const interpolates = /^%[WI]/.test(node.text);
+        const items = namedChildren(node)
+          .filter((child) => child.type !== 'comment')
+          .map((child): Expr => {
+            const parts: StrPart[] = interpolates ? this.stringParts(child) : [decodeSingleQuoted(child.text)];
+            return node.type === 'symbol_array' ? { k: 'dsym', parts } : { k: 'str', parts };
+          });
+        return { k: 'array', items };
+      }
+      case 'delimited_symbol': {
+        return {
+          k: 'dsym',
+          parts: node.text.startsWith(":'") ? [decodeSingleQuoted(node.text.slice(2, -1))] : this.stringParts(node),
+        };
+      }
+      case 'rational': {
+        return this.rational(node);
+      }
+      case 'heredoc_beginning': {
+        return this.heredoc(node);
+      }
+      case 'file': {
+        return { k: 'str', parts: ['main.rb'] };
+      }
+      case 'line': {
+        return { k: 'int', v: BigInt(node.startPosition.row + 1) };
+      }
+      case 'encoding': {
+        return { k: 'encoding' };
+      }
+      case 'end_block': {
+        const block: BlockDef = {
+          params: undefined,
+          locals: [],
+          body: this.body(namedChildren(node), 0),
+          row: node.startPosition.row,
+          isLambdaLiteral: false,
+        };
+        return { k: 'atExit', block };
+      }
       default: {
         return this.unsupportedNode(node);
       }
@@ -368,9 +476,14 @@ export class Converter {
     const name = node.text;
     const depth = this.ctx.scope.depthOf(name);
     if (depth >= 0) return { k: 'lvar', name, depth };
-    if (this.ctx.inBlock && (name === 'it' || /^_[1-9]$/.test(name))) {
-      this.unsupported(node, name === 'it' ? 'ブロックの it' : '番号指定パラメータ（_1 など）');
+    if (this.ctx.implicit && (name === 'it' || /^_[1-9]$/.test(name))) {
+      this.ctx.implicit.add(name);
+      this.ctx.scope.declareOwn(name);
+      return { k: 'lvar', name, depth: 0 };
     }
+    if (name === '__FILE__') return { k: 'str', parts: ['main.rb'] };
+    if (name === '__LINE__') return { k: 'int', v: BigInt(node.startPosition.row + 1) };
+    if (name === '__ENCODING__') return { k: 'encoding' };
     return {
       k: 'call',
       name,
@@ -405,22 +518,30 @@ export class Converter {
   }
 
   private integerValue(node: Node): bigint {
-    const text = node.text.replaceAll('_', '');
-    if (/^0[xXbBoOdD0-9]/.test(text) && text !== '0') {
-      this.unsupported(node, '10進数以外の整数のリテラル（0x・0b・0o など）');
-    }
+    const text = node.text.replaceAll('_', '').toLowerCase();
+    if (/^0[0-7]+$/.test(text)) return BigInt(`0o${text.slice(1)}`);
+    if (text.startsWith('0d')) return BigInt(text.slice(2));
     return BigInt(text);
   }
 
   private floatValue(node: Node): number {
-    const text = node.text.replaceAll('_', '');
-    if (/[eE]/.test(text)) this.unsupported(node, '指数表記の小数のリテラル（1e3 など）');
-    return Number(text);
+    return Number(node.text.replaceAll('_', ''));
   }
 
   private string(node: Node): Expr {
     const text = node.text;
-    if (text.startsWith('%')) this.unsupported(node, '% 記法の文字列（%q() など）');
+    if (text.startsWith('%q')) {
+      return {
+        k: 'str',
+        parts: [
+          decodeSingleQuoted(
+            namedChildren(node)
+              .map((child) => child.text)
+              .join('')
+          ),
+        ],
+      };
+    }
     if (text.startsWith("'")) {
       const content = namedChildren(node)
         .map((child) => child.text)
@@ -506,6 +627,10 @@ export class Converter {
         items.push({ splat: this.expr(onlyNamedChild(node)) });
         continue;
       }
+      if (node.type === 'forward_argument') {
+        items.push({ splat: { k: 'lvar', name: FORWARD_KEYWORDS, depth: this.ctx.scope.depthOf(FORWARD_KEYWORDS) } });
+        continue;
+      }
       if (node.type !== 'pair') this.unsupportedNode(node);
       items.push(this.pair(node));
     }
@@ -520,7 +645,10 @@ export class Converter {
     if (keyNode.type === 'hash_key_symbol') {
       key = { k: 'sym', name: keyNode.text };
     } else if (!usesArrow) {
-      this.unsupported(keyNode, '文字列で書いたシンボルのキー（"a b": 1）');
+      const parts = keyNode.text.startsWith("'")
+        ? [decodeSingleQuoted(keyNode.text.slice(1, -1))]
+        : this.stringParts(keyNode);
+      key = { k: 'dsym', parts };
     } else {
       key = this.expr(keyNode);
     }
@@ -556,7 +684,12 @@ export class Converter {
           break;
         }
         case 'forward_argument': {
-          this.unsupported(child, '引数の転送（...）');
+          if (this.ctx.scope.depthOf(FORWARD_REST) < 0)
+            this.fail(child, '引数を転送する ... は、... を受け取るメソッドの中でしか使えません。');
+          const reference = (name: string): Expr => ({ k: 'lvar', name, depth: this.ctx.scope.depthOf(name) });
+          args.push({ k: 'splat', e: reference(FORWARD_REST) });
+          pairs.push(child);
+          blockArg = reference(FORWARD_BLOCK);
           break;
         }
         default: {
@@ -799,7 +932,7 @@ export class Converter {
   private unary(node: Node): Expr {
     const operator = required(node.childForFieldName('operator')).text;
     const operandNode = required(node.childForFieldName('operand'));
-    if (operator === 'defined?') this.unsupported(node, 'defined?');
+    if (operator === 'defined?') return { k: 'defined', e: this.expr(operandNode) };
     if ((operator === '-' || operator === '+') && (operandNode.type === 'integer' || operandNode.type === 'float')) {
       const operand = this.expr(operandNode);
       const sign = operator === '-' && !/^\s/.test(this.source.slice(node.startIndex + 1, operandNode.startIndex));
@@ -912,9 +1045,6 @@ export class Converter {
 
   private singletonMethod(node: Node): Expr {
     const objectNode = required(node.childForFieldName('object'));
-    if (objectNode.type !== 'self' && objectNode.type !== 'constant') {
-      this.unsupported(objectNode, 'オブジェクトの特異メソッドの定義（def obj.m）');
-    }
     return { k: 'def', def: this.methodDef(node), singleton: this.expr(objectNode) };
   }
 
@@ -1005,11 +1135,13 @@ export class Converter {
           break;
         }
         case 'forward_parameter': {
-          this.unsupported(child, '引数の転送（...）');
+          params.rest = declare(child, FORWARD_REST);
+          params.keywordRest = declare(child, FORWARD_KEYWORDS);
+          params.block = declare(child, FORWARD_BLOCK);
           break;
         }
         case 'hash_splat_nil': {
-          this.unsupported(child, '**nil');
+          params.noKeywords = true;
           break;
         }
         default: {
@@ -1046,9 +1178,9 @@ export class Converter {
   private block(node: Node, isLambdaLiteral: boolean): BlockDef {
     const outer = this.ctx;
     const scope = new LocalScope('block', outer.scope);
-    this.ctx = { ...outer, scope, inBlock: true, inLoop: false };
+    const parametersNode = node.childForFieldName('parameters');
+    this.ctx = { ...outer, scope, inBlock: true, inLoop: false, implicit: parametersNode ? undefined : new Set() };
     try {
-      const parametersNode = node.childForFieldName('parameters');
       let params: Params | undefined;
       if (parametersNode) {
         params = this.params(parametersNode, !isLambdaLiteral);
@@ -1059,6 +1191,8 @@ export class Converter {
         bodyNode = bodyNode.childForFieldName('body');
       }
       const body = this.rescueBody(bodyNode, 2);
+      const implicit = this.ctx.implicit;
+      if (implicit && implicit.size > 0) params = implicitParams(implicit);
       return { params, locals: scope.names, body, row: node.startPosition.row, isLambdaLiteral };
     } finally {
       this.ctx = outer;
@@ -1114,6 +1248,195 @@ export class Converter {
     }
   }
 
+  // Pattern matching --------------------------------------------------------------------------------------------------
+
+  private caseMatch(node: Node, use: Use): Expr {
+    const subject = this.expr(required(node.childForFieldName('value')));
+    const clauses: InClause[] = [];
+    let elseBody: Body | undefined;
+    for (const child of namedChildren(node)) {
+      if (child.type === 'in_clause') {
+        const guardNode = child.childForFieldName('guard');
+        const pattern = this.pattern(required(child.childForFieldName('pattern')));
+        const guard = guardNode
+          ? {
+              cond: this.expr(required(guardNode.childForFieldName('condition'))),
+              unless: guardNode.type === 'unless_guard',
+            }
+          : undefined;
+        clauses.push({
+          pattern,
+          guard,
+          body: this.bodyOf(child.childForFieldName('body'), use),
+          row: child.startPosition.row,
+        });
+      } else if (child.type === 'else') {
+        elseBody = this.bodyOf(child, use);
+      }
+    }
+    return { k: 'caseIn', subject, clauses, else: elseBody, row: node.startPosition.row };
+  }
+
+  private bindTarget(node: Node): LocalRef | undefined {
+    const name = node.text;
+    if (name === '_') {
+      this.ctx.scope.declare(name);
+      return undefined;
+    }
+    return { k: 'lvar', name, depth: this.ctx.scope.declare(name) };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of pattern.
+  private pattern(node: Node): Pattern {
+    switch (node.type) {
+      case 'identifier': {
+        return { k: 'bind', target: this.bindTarget(node) };
+      }
+      case 'as_pattern': {
+        const target = this.bindTarget(required(node.childForFieldName('name')));
+        const pattern = this.pattern(required(node.childForFieldName('value')));
+        return target ? { k: 'as', pattern, target } : pattern;
+      }
+      case 'alternative_pattern': {
+        return {
+          k: 'alt',
+          options: namedChildren(node)
+            .filter((c) => c.type !== 'comment')
+            .map((c) => this.pattern(c)),
+        };
+      }
+      case 'parenthesized_pattern': {
+        return this.pattern(onlyNamedChild(node));
+      }
+      case 'variable_reference_pattern': {
+        return { k: 'pin', e: this.expr(required(node.childForFieldName('name'))) };
+      }
+      case 'expression_reference_pattern': {
+        return { k: 'pin', e: this.expr(required(node.childForFieldName('value'))) };
+      }
+      case 'array_pattern': {
+        return this.arrayPattern(node);
+      }
+      case 'find_pattern': {
+        return this.findPattern(node);
+      }
+      case 'hash_pattern': {
+        return this.hashPattern(node);
+      }
+      default: {
+        return { k: 'value', e: this.expr(node) };
+      }
+    }
+  }
+
+  private patternClass(node: Node): Expr | undefined {
+    const cls = node.childForFieldName('class');
+    return cls ? this.expr(cls) : undefined;
+  }
+
+  private arrayPattern(node: Node): Pattern {
+    const cls = this.patternClass(node);
+    const pre: Pattern[] = [];
+    const post: Pattern[] = [];
+    let rest: { target: LocalRef | undefined } | undefined;
+    for (const child of namedChildren(node)) {
+      if (child.type === 'comment' || child.id === node.childForFieldName('class')?.id) continue;
+      if (child.type === 'splat_parameter') {
+        const name = child.childForFieldName('name');
+        rest = { target: name ? this.bindTarget(name) : undefined };
+        continue;
+      }
+      (rest ? post : pre).push(this.pattern(child));
+    }
+    return { k: 'array', cls, pre, rest, post };
+  }
+
+  private findPattern(node: Node): Pattern {
+    const cls = this.patternClass(node);
+    const parts = namedChildren(node).filter(
+      (child) => child.type !== 'comment' && child.id !== node.childForFieldName('class')?.id
+    );
+    const splatTarget = (child: Node): LocalRef | undefined => {
+      const name = child.childForFieldName('name');
+      return name ? this.bindTarget(name) : undefined;
+    };
+    return {
+      k: 'find',
+      cls,
+      before: splatTarget(parts[0]),
+      middle: parts.slice(1, -1).map((child) => this.pattern(child)),
+      after: splatTarget(parts.at(-1) as Node),
+    };
+  }
+
+  private hashPattern(node: Node): Pattern {
+    const cls = this.patternClass(node);
+    const pairs: { key: string; pattern?: Pattern; target?: LocalRef }[] = [];
+    let rest: LocalRef | 'nil' | 'any' | undefined;
+    for (const child of namedChildren(node)) {
+      if (child.type === 'comment' || child.id === node.childForFieldName('class')?.id) continue;
+      if (child.type === 'hash_splat_nil') {
+        rest = 'nil';
+        continue;
+      }
+      if (child.type === 'hash_splat_parameter') {
+        const name = child.childForFieldName('name');
+        rest = name ? (this.bindTarget(name) ?? 'any') : 'any';
+        continue;
+      }
+      const keyNode = required(child.childForFieldName('key'));
+      const key = keyNode.type === 'hash_key_symbol' ? keyNode.text : keyNode.text.replaceAll(/^["']|["']:?$/g, '');
+      const valueNode = child.childForFieldName('value');
+      if (valueNode) pairs.push({ key, pattern: this.pattern(valueNode) });
+      else pairs.push({ key, target: { k: 'lvar', name: key, depth: this.ctx.scope.declare(key) } });
+    }
+    return { k: 'hash', cls, pairs, rest };
+  }
+
+  // Other literals ----------------------------------------------------------------------------------------------------
+
+  private rational(node: Node): Expr {
+    const number = onlyNamedChild(node);
+    const text = number.text.replaceAll('_', '');
+    if (number.type === 'integer') return { k: 'rational', numerator: this.integerValue(number), denominator: 1n };
+    if (!/^\d+\.\d+$/.test(text)) this.fail(node, '有理数のリテラルの書き方に誤りがあります。');
+    const [whole, fraction] = text.split('.');
+    return { k: 'rational', numerator: BigInt(whole + fraction), denominator: 10n ** BigInt(fraction.length) };
+  }
+
+  /** A heredoc's text, from the body the tree placed after its line; `<<~` removes the common indentation. */
+  private heredoc(node: Node): Expr {
+    const body = this.heredocBodies[this.heredocIndex++];
+    if (!body) this.fail(node, 'ヒアドキュメントの終わりがありません。');
+    const opening = node.text;
+    const raw = /^<<[-~]?(['`])/.exec(opening)?.[1];
+    if (raw === '`') this.unsupported(node, '外部コマンドの実行（`...`）');
+    const pieces: (string | Node)[] = [];
+    for (const child of namedChildren(body)) {
+      if (child.type === 'heredoc_content' || child.type === 'escape_sequence') {
+        const last = pieces.at(-1);
+        if (typeof last === 'string') pieces[pieces.length - 1] = last + child.text;
+        else pieces.push(child.text);
+      } else if (child.type === 'interpolation') {
+        pieces.push(child);
+      }
+    }
+    if (typeof pieces[0] === 'string') pieces[0] = pieces[0].replace(/^\n/, '');
+    // The indentation before an indented terminator (`<<-` and `<<~`) is not part of the text.
+    const last = pieces.at(-1);
+    if (typeof last === 'string') pieces[pieces.length - 1] = last.replace(/(^|\n)[ \t]+$/, '$1');
+    if (opening.startsWith('<<~')) dedent(pieces);
+    const parts: StrPart[] = [];
+    for (const piece of pieces) {
+      if (typeof piece === 'string') parts.push(raw === "'" ? piece : this.decode(node, piece));
+      else {
+        const statements = this.body(namedChildren(piece), 1);
+        parts.push(statements.length === 1 ? statements[0].e : { k: 'seq', body: statements });
+      }
+    }
+    return { k: 'str', parts };
+  }
+
   // Errors ------------------------------------------------------------------------------------------------------------
 
   private fail(node: Node, message: string): never {
@@ -1122,6 +1445,58 @@ export class Converter {
 
   private unsupported(node: Node, feature: string): never {
     this.fail(node, `${feature}${/[!-~]$/.test(feature) ? ' ' : ''}は、この採点環境では使えません。`);
+  }
+}
+
+const FORWARD_REST = '__forwarded_rest';
+const FORWARD_KEYWORDS = '__forwarded_keywords';
+const FORWARD_BLOCK = '__forwarded_block';
+
+/** The parameters of a block that uses numbered parameters or `it`: `_1` alone binds as `|x|` does. */
+function implicitParams(names: Set<string>): Params {
+  const params: Params = { required: [], optional: [], post: [], keywords: [], trailingComma: false };
+  if (names.has('it')) {
+    params.required.push('it');
+    return params;
+  }
+  const highest = Math.max(...[...names].map((name) => Number(name.slice(1))));
+  for (let index = 1; index <= highest; index++) params.required.push(`_${index}`);
+  return params;
+}
+
+function methodNameOf(node: Node): string {
+  return node.type === 'simple_symbol' ? node.text.slice(1) : node.text;
+}
+
+/** Removes the indentation that every line of a `<<~` heredoc shares, from the starts of its lines. */
+function dedent(pieces: (string | Node)[]): void {
+  let atLineStart = true;
+  let indent = Number.POSITIVE_INFINITY;
+  for (const piece of pieces) {
+    if (typeof piece !== 'string') {
+      atLineStart = false;
+      continue;
+    }
+    for (const [index, line] of piece.split('\n').entries()) {
+      if (index > 0) atLineStart = true;
+      if (!atLineStart) continue;
+      const blanks = /^[ \t]*/.exec(line)?.[0].length ?? 0;
+      if (blanks < line.length) indent = Math.min(indent, blanks);
+      atLineStart = false;
+    }
+  }
+  if (!Number.isFinite(indent) || indent === 0) return;
+  atLineStart = true;
+  for (const [position, piece] of pieces.entries()) {
+    if (typeof piece !== 'string') {
+      atLineStart = false;
+      continue;
+    }
+    pieces[position] = piece
+      .split('\n')
+      .map((line, index) => (index > 0 || atLineStart ? line.replace(new RegExp(`^[ \\t]{0,${indent}}`), '') : line))
+      .join('\n');
+    atLineStart = piece.endsWith('\n');
   }
 }
 
@@ -1150,7 +1525,13 @@ function stepKindOf(e: Expr): StepKind {
     case 'seq':
     case 'def':
     case 'class':
-    case 'module': {
+    case 'module':
+    case 'sclass':
+    case 'alias':
+    case 'undef':
+    case 'redo':
+    case 'caseIn':
+    case 'atExit': {
       return 'none';
     }
     default: {
@@ -1295,29 +1676,8 @@ const BODY_CONTAINERS = new Set(['then', 'else', 'do', 'body_statement', 'block_
 const RESCUE_CLAUSES = new Set(['rescue', 'else', 'ensure']);
 
 const UNSUPPORTED_NODES: Record<string, string> = {
-  rational: '有理数のリテラル（3r）',
   complex: '虚数のリテラル（2i）',
-  character: '文字のリテラル（?a）',
-  chained_string: '隣り合う文字列の連結（"a" "b"）',
-  heredoc_beginning: 'ヒアドキュメント（<<~EOS）',
-  string_array: '% 記法の配列（%w[]）',
-  symbol_array: '% 記法の配列（%i[]）',
-  delimited_symbol: '文字列で書いたシンボル（:"a b"）',
   subshell: '外部コマンドの実行（`...`）',
-  file: '__FILE__',
-  line: '__LINE__',
-  encoding: '__ENCODING__',
-  redo: 'redo',
-  case_match: 'パターンマッチ（case/in）',
-  match_pattern: 'パターンマッチ（=>）',
-  test_pattern: 'パターンマッチ（in）',
-  singleton_class: '特異クラス（class << self）',
-  alias: 'alias',
-  undef: 'undef',
-  begin_block: 'BEGIN',
-  end_block: 'END',
-  uninterpreted: '__END__',
-  forward_argument: '引数の転送（...）',
 };
 
 function namedChildren(node: Node): Node[] {

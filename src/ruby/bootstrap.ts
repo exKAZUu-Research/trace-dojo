@@ -1,5 +1,6 @@
 import { installNatives, setSingletonFactory } from './define';
 import { rubyError } from './errors';
+import { installEncodings } from './libEncoding';
 import { installMathConstants } from './libNumeric';
 import { defineMainObject } from './libObject';
 import { NIL, RClass, RObject, type Value } from './objects';
@@ -145,12 +146,19 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('Regexp', object);
   defineClass('MatchData', object);
   defineClass('Time', object).includes.push(c.Comparable);
+  defineClass('Rational', numeric).instanceKind = 'none';
+  defineClass('Encoding', object).instanceKind = 'none';
+  defineClass('NoMatchingPatternError', c.StandardError);
+  defineClass('NoMatchingPatternKeyError', c.NoMatchingPatternError);
+  defineClass('File', c.IO);
+  object.constants.delete('File');
   const set = defineClass('Set', object);
   set.includes.push(c.Enumerable);
 
   setSingletonFactory(singletonClassOf);
   installNatives(runtime);
   installMathConstants();
+  installEncodings(runtime);
   object.constants.delete('IO');
 
   const main = new RObject(object);

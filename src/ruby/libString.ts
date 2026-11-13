@@ -666,7 +666,6 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   return self;
 });
 
-
 // Case and whitespace -------------------------------------------------------------------------------------------------
 
 function capitalize(text: string): string {
@@ -919,18 +918,7 @@ def('String', 'rpartition', 1, function* (self: RString, [separator]) {
 def('String', 'each_grapheme_cluster', 0, () => {
   throw new UnsupportedFeatureError('each_grapheme_cluster');
 });
-for (const name of [
-  'encoding',
-  'force_encoding',
-  'encode',
-  'unicode_normalize',
-  'unpack',
-  'unpack1',
-  'crypt',
-  'b',
-  'scrub',
-  'valid_encoding?',
-]) {
+for (const name of ['force_encoding', 'encode', 'unicode_normalize', 'unpack', 'unpack1', 'crypt', 'b', 'scrub']) {
   def('String', name, [0, -1], () => {
     throw new UnsupportedFeatureError(`String#${name}（文字コード）`);
   });

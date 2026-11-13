@@ -21,6 +21,7 @@ export function* bindParams(
   const { scope } = frame;
   const takesKeywords = params.keywords.length > 0 || params.keywordRest !== undefined;
   let args = given;
+  if (keywords && params.noKeywords) throw argumentError('no keywords accepted');
   if (keywords && !takesKeywords) {
     args = [...args, keywords];
     keywords = undefined;
