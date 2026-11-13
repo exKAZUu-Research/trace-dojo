@@ -874,9 +874,10 @@ function* operatorAssignInner(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): 
       frame.temporaries.push(recv);
       const { args } = yield* evalArgs(target.args, frame);
       frame.temporaries.push(...args);
-      read = () => atCallRow(target.row, () => callMethod(recv, '[]', args));
+      const fcall = target.recv.k === 'self';
+      read = () => atCallRow(target.row, () => callMethod(recv, '[]', args, undefined, undefined, { fcall }));
       write = function* (value) {
-        yield* atCallRow(target.row, () => callMethod(recv, '[]=', [...args, value]));
+        yield* atCallRow(target.row, () => callMethod(recv, '[]=', [...args, value], undefined, undefined, { fcall }));
       };
       break;
     }
@@ -1120,40 +1121,42 @@ function* rescueClause(
 ): Gen<{ value: Value } | typeof RETRY> {
   const runtime = rt();
   const { exception } = error;
-  for (const rescue of e.rescues) {
-    runtime.currentRow = rescue.row;
-    let matched = false;
-    if (rescue.classes.length === 0) {
-      matched = isA(exception, runtime.c.StandardError);
-    } else {
-      const classes = yield* evalList(rescue.classes, frame);
-      for (const cls of classes) {
-        if (!(cls instanceof RClass)) throw typeError('class or module required for rescue clause');
-        if (isA(exception, cls)) {
-          matched = true;
-          break;
+  const savedError = runtime.globals.get('$!') ?? NIL;
+  runtime.globals.set('$!', exception);
+  frame.handling.push(exception);
+  try {
+    for (const rescue of e.rescues) {
+      runtime.currentRow = rescue.row;
+      let matched = false;
+      if (rescue.classes.length === 0) {
+        matched = isA(exception, runtime.c.StandardError);
+      } else {
+        const classes = yield* evalList(rescue.classes, frame);
+        for (const cls of classes) {
+          if (!(cls instanceof RClass)) throw typeError('class or module required for rescue clause');
+          if (isA(exception, cls)) {
+            matched = true;
+            break;
+          }
         }
       }
-    }
-    if (!matched) continue;
-    const savedError = runtime.globals.get('$!') ?? NIL;
-    runtime.globals.set('$!', exception);
-    frame.handling.push(exception);
-    try {
-      if (rescue.variable) {
-        yield* assign(rescue.variable, exception, frame);
-        runtime.steps.stepBinding(rescue.row, false);
+      if (!matched) continue;
+      try {
+        if (rescue.variable) {
+          yield* assign(rescue.variable, exception, frame);
+          runtime.steps.stepBinding(rescue.row, false);
+        }
+        return { value: yield* evalBody(rescue.body, frame) };
+      } catch (error_) {
+        if (error_ instanceof RetrySignal) return RETRY;
+        throw error_;
       }
-      return { value: yield* evalBody(rescue.body, frame) };
-    } catch (error_) {
-      if (error_ instanceof RetrySignal) return RETRY;
-      throw error_;
-    } finally {
-      frame.handling.pop();
-      runtime.globals.set('$!', savedError);
     }
+    throw error;
+  } finally {
+    frame.handling.pop();
+    runtime.globals.set('$!', savedError);
   }
-  throw error;
 }
 
 // Definitions ---------------------------------------------------------------------------------------------------------
@@ -1341,8 +1344,8 @@ function* evalCall(e: Call, frame: Frame): Gen {
 export function* toBlock(value: Value): Gen<RProc | undefined> {
   if (value === NIL) return undefined;
   if (value instanceof RProc) return value;
-  if (respondsTo(value, 'to_proc')) {
-    const converted = yield* callMethod(value, 'to_proc', []);
+  if (respondsTo(value, 'to_proc', true)) {
+    const converted = yield* callMethod(value, 'to_proc', [], undefined, undefined, { fcall: true });
     if (converted instanceof RProc) return converted;
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to Proc (${name}#to_proc gives ${realClassOf(converted).name})`);

@@ -2126,6 +2126,29 @@ test('binary String transforms retain bytes and use ASCII case mapping', () => {
   expect(run('s=233.chr; s.upcase!; p s.bytes')).toMatchObject({ stdout: '[233]\n' });
 });
 
+test('explicit self can call private operators and index methods', () => {
+  expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
+    stdout: '42\n',
+  });
+  expect(
+    run('class A; def f; self[0]+=1; end; private; def [](i); 2; end; def []=(i,x); p x; end; end; A.new.f')
+  ).toMatchObject({
+    stdout: '3\n',
+  });
+});
+
+test('rescue selectors see and root the active exception', () => {
+  expect(run('def c; p $!.class; StandardError; end; begin; raise "bad"; rescue c; end')).toMatchObject({
+    stdout: 'RuntimeError\n',
+  });
+});
+
+test('implicit block conversion invokes private to_proc', () => {
+  expect(run('class A; private; def to_proc; proc{|x|x+1}; end; end; p [1].map(&A.new)')).toMatchObject({
+    stdout: '[2]\n',
+  });
+});
+
 test('non-mutating module hooks can run on frozen classes', () => {
   expect(
     run('module M; def self.append_features(x); puts :append; end; end; class C; end; C.freeze; C.include(M)')

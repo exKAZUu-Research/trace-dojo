@@ -410,6 +410,12 @@ test('large flat Arrays remain visible in final trace variables', () => {
   expect(display).toMatchObject({ kind: 'array', entries: { '1999': { kind: 'value', value: '…' } } });
 });
 
+test('rescue selection keeps the active exception and its Turtle reachable', () => {
+  const program =
+    'class E<StandardError;def initialize;@t=Turtle.new;end;end;def c;x=1;E;end;begin;raise E.new;rescue c=>e;$saved=e;end';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('converted Hash sources keep later Turtle values alive during insertion', () => {
   for (const operation of ['h={**A.new}', 'h={}.merge(A.new)']) {
     const program = `class K; def hash; x=1; 0; end; end; class A; def to_hash; {K.new=>1, 2=>Turtle.new}; end; end; ${operation}`;
