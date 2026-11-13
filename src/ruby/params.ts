@@ -1,11 +1,11 @@
 import type { Params, ParamTarget } from './ast';
 import { inspect } from './conversions';
-import { argumentError, expectedArity } from './errors';
+import { argumentError, expectedArity, typeError } from './errors';
 import { hashSet } from './hashes';
-import { destructure, ev, type Gen } from './interp';
+import { callMethod, destructure, ev, type Gen, respondsTo } from './interp';
 import { NIL, RArray, type RHash, RSymbol, type Value } from './objects';
 import type { Frame } from './runtime';
-import { arr, newHash } from './values';
+import { arr, newHash, realClassOf } from './values';
 
 type BindMode = 'method' | 'lambda' | 'proc';
 
@@ -28,7 +28,19 @@ export function* bindParams(
   const required = params.required.length + params.post.length;
   const optional = params.optional.length;
   if (mode === 'proc') {
-    if (args.length === 1 && args[0] instanceof RArray && autoSplats(params)) args = [...args[0].items];
+    if (args.length === 1 && autoSplats(params)) {
+      const value = args[0];
+      let array = value instanceof RArray ? value : undefined;
+      if (!array && respondsTo(value, 'to_ary')) {
+        const converted = yield* callMethod(value, 'to_ary', []);
+        if (converted instanceof RArray) array = converted;
+        else if (converted !== NIL)
+          throw typeError(
+            `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
+          );
+      }
+      if (array) args = [...array.items];
+    }
   } else if (args.length < required || (params.rest === undefined && args.length > required + optional)) {
     const missingKeywords = params.keywords.filter((keyword) => !keyword.value).map((keyword) => keyword.name);
     const max = params.rest === undefined ? required + optional : -1;

@@ -2,6 +2,8 @@ import { foldCase } from './caseFold';
 // code-gauge-allow-file fileNcss 796 -- The libString module keeps one concern's cases together.
 import {
   combinedStringEncoding,
+  compareBytes,
+  compareRubyStrings,
   compareStrings,
   inspect,
   rangeCovers,
@@ -56,8 +58,9 @@ function setText(self: RString, text: string): void {
   modify(self);
   if (text.length > 1_000_000) throw rangeError('string size too big');
   rt().spend(Math.floor(text.length / 256));
-  self.s = text;
-  self.rawBytes = undefined;
+  const value = str(text);
+  self.s = value.s;
+  self.rawBytes = value.rawBytes;
 }
 
 function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void {
@@ -234,25 +237,26 @@ def('String', ['==', '===', 'eql?'], 1, function* (self: RString, [other]) {
 });
 def('String', '<=>', 1, (self: RString, [other]) => {
   if (!(other instanceof RString)) return NIL;
-  return BigInt(compareStrings(self.s, other.s));
+  return BigInt(compareRubyStrings(self, other));
 });
 def('String', 'casecmp', 1, function* (self: RString, [other]) {
   if (!(other instanceof RString)) {
     if (other instanceof RSymbol) throw implicitConversionError(other, 'String');
     return NIL;
   }
-  return BigInt(compareStrings(foldAscii(self.s), foldAscii(other.s)));
+  return BigInt(compareBytes(foldAsciiBytes(self), foldAsciiBytes(other)));
 });
 def('String', 'casecmp?', 1, function* (self: RString, [other]) {
   if (!(other instanceof RString)) {
     if (other instanceof RSymbol) throw implicitConversionError(other, 'String');
     return NIL;
   }
+  if ((self.rawBytes && !self.binary) || (other.rawBytes && !other.binary)) throw argumentError('input string invalid');
   return foldCase(self.s) === foldCase(other.s);
 });
 
-function foldAscii(text: string): string {
-  return text.replaceAll(/[A-Z]/g, (char) => char.toLowerCase());
+function foldAsciiBytes(value: RString): Uint8Array {
+  return stringBytes(value).map((byte) => (byte >= 65 && byte <= 90 ? byte + 32 : byte));
 }
 
 def('String', '+', 1, function* (self: RString, [other]) {
@@ -390,6 +394,11 @@ function* substring(self: RString, args: Value[]): Gen {
 }
 
 def('String', ['[]', 'slice'], [1, 2], (self: RString, args) => substring(self, args));
+def('String', 'byteslice', [1, 2], function* (self: RString, args) {
+  const bytes = stringBytes(self);
+  const range = yield* substringRange(bytes.length, args);
+  return range ? stringFromBytes(bytes.slice(range.start, range.start + range.count), self.binary) : NIL;
+});
 def('String', 'slice!', [1, 2], function* (self: RString, args) {
   modify(self);
   const result = yield* substring(self, args);
@@ -491,6 +500,23 @@ def('String', 'each_char', 0, function* (self: RString, _args, block) {
   for (const char of stringCharacters(self)) yield* callBlock(block, [char], false);
   return self;
 });
+def('String', 'each_codepoint', 0, function* (self: RString, _args, block) {
+  if (!block) return makeEnumerator(self, 'each_codepoint', []);
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+  for (const char of stringCharacters(self)) yield* callBlock(block, [BigInt(char.s.codePointAt(0) as number)], false);
+  return self;
+});
+def('String', 'grapheme_clusters', 0, function* (self: RString, _args, block) {
+  const segments = new Intl.Segmenter('und', { granularity: 'grapheme' }).segment(self.s);
+  const values: Value[] = [];
+  for (const { segment } of segments) {
+    rt().spend();
+    const value = str(segment);
+    if (block) yield* callBlock(block, [value], false);
+    else values.push(value);
+  }
+  return block ? self : arr(values);
+});
 def('String', 'each_byte', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_byte', []);
   for (const byte of stringBytes(self)) yield* callBlock(block, [BigInt(byte)], false);
@@ -533,7 +559,8 @@ function* lineOptions(
   args: Value[],
   keywords: RHash | undefined
 ): Gen<{ separator: string | undefined; chomp: boolean }> {
-  const separator = args[0] === NIL ? undefined : args.length > 0 ? yield* stringArg(args[0]) : '\n';
+  const selected = args.length > 0 ? args[0] : (rt().globals.get('$/') ?? NIL);
+  const separator = selected === NIL ? undefined : yield* stringArg(selected);
   let chomp = false;
   if (keywords) {
     const entry = yield* hashGet(keywords, sym('chomp'));
@@ -568,8 +595,19 @@ def(
 // Searching -----------------------------------------------------------------------------------------------------------
 
 def('String', 'include?', 1, function* (self: RString, [other]) {
-  return self.s.includes(yield* stringArg(other));
+  const target = yield* searchString(self, other);
+  return !(target.rawBytes && !target.binary) && self.s.includes(target.s);
 });
+
+function* searchString(self: RString, value: Value): Gen<RString> {
+  const target = yield* stringArgValue(value);
+  combinedStringEncoding(
+    self.binary,
+    stringBytes(self).every((byte) => byte < 0x80),
+    target
+  );
+  return target;
+}
 def('String', 'start_with?', [0, -1], function* (self: RString, args) {
   for (const arg of args) {
     regexpUnsupported(arg);
@@ -582,13 +620,40 @@ def('String', 'end_with?', [0, -1], function* (self: RString, args) {
   return false;
 });
 def('String', 'delete_prefix', 1, function* (self: RString, [prefix]) {
-  const text = yield* stringArg(prefix);
-  return str(self.s.startsWith(text) ? self.s.slice(text.length) : self.s);
+  const bytes = yield* withoutAffix(self, prefix, true);
+  return stringFromBytes(bytes ?? stringBytes(self), self.binary);
 });
 def('String', 'delete_suffix', 1, function* (self: RString, [suffix]) {
-  const text = yield* stringArg(suffix);
-  return str(text && self.s.endsWith(text) ? self.s.slice(0, -text.length) : self.s);
+  const bytes = yield* withoutAffix(self, suffix, false);
+  return stringFromBytes(bytes ?? stringBytes(self), self.binary);
 });
+for (const [name, prefix] of [
+  ['delete_prefix!', true],
+  ['delete_suffix!', false],
+] as const) {
+  def('String', name, 1, function* (self: RString, [affix]) {
+    modify(self);
+    const bytes = yield* withoutAffix(self, affix, prefix);
+    if (!bytes) return NIL;
+    setBytes(self, bytes);
+    return self;
+  });
+}
+
+function* withoutAffix(self: RString, value: Value, prefix: boolean): Gen<Uint8Array | undefined> {
+  const affix = yield* stringArgValue(value);
+  const source = stringBytes(self);
+  combinedStringEncoding(
+    self.binary,
+    source.every((byte) => byte < 0x80),
+    affix
+  );
+  const target = stringBytes(affix);
+  if (target.length === 0 || target.length > source.length) return undefined;
+  const offset = prefix ? 0 : source.length - target.length;
+  if (!target.every((byte, index) => byte === source[offset + index])) return undefined;
+  return prefix ? source.slice(target.length) : source.slice(0, offset);
+}
 
 /** The code unit offset of a character position, for strings with characters outside the BMP. */
 function unitOffset(text: string, position: number): number {
@@ -603,22 +668,24 @@ function charPosition(text: string, offset: number): number {
 
 def('String', 'index', [1, 2], function* (self: RString, args) {
   regexpUnsupported(args[0]);
-  const target = yield* stringArg(args[0]);
+  const target = yield* searchString(self, args[0]);
   const length = charLength(self.s);
   let start = args.length > 1 ? yield* toIndex(args[1]) : 0;
   if (start < 0) start += length;
   if (start < 0 || start > length) return NIL;
-  const found = self.s.indexOf(target, unitOffset(self.s, start));
+  if (target.rawBytes && !target.binary) return NIL;
+  const found = self.s.indexOf(target.s, unitOffset(self.s, start));
   return found === -1 ? NIL : BigInt(charPosition(self.s, found));
 });
 def('String', 'rindex', [1, 2], function* (self: RString, args) {
   regexpUnsupported(args[0]);
-  const target = yield* stringArg(args[0]);
+  const target = yield* searchString(self, args[0]);
   const length = charLength(self.s);
   let start = args.length > 1 ? yield* toIndex(args[1]) : length;
   if (start < 0) start += length;
   if (start < 0) return NIL;
-  const found = self.s.lastIndexOf(target, unitOffset(self.s, Math.min(start, length)));
+  if (target.rawBytes && !target.binary) return NIL;
+  const found = self.s.lastIndexOf(target.s, unitOffset(self.s, Math.min(start, length)));
   return found === -1 ? NIL : BigInt(charPosition(self.s, found));
 });
 def('String', 'count', [1, -1], function* (self: RString, args) {
@@ -667,11 +734,13 @@ function squeeze(text: string, sets: string[]): string {
 }
 
 def('String', 'squeeze', [0, -1], function* (self: RString, args) {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* stringArg(arg));
   return str(squeeze(self.s, sets));
 });
 def('String', 'squeeze!', [0, -1], function* (self: RString, args) {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   modify(self);
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* stringArg(arg));
@@ -756,9 +825,11 @@ for (const [name, squeezeRuns] of [
   ['tr_s', true],
 ] as const) {
   def('String', name, 2, function* (self: RString, [from, to]) {
+    if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
     return str(translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns).text);
   });
   def('String', `${name}!`, 2, function* (self: RString, [from, to]) {
+    if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
     const source = yield* stringArg(from);
     const replacement = yield* stringArg(to);
     if (self.s.length === 0) return NIL;
@@ -871,6 +942,7 @@ def('String', 'gsub!', [1, 2], function* (self: RString, args, block) {
   return self;
 });
 def('String', 'scan', 1, function* (self: RString, [pattern], block) {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   regexpUnsupported(pattern);
   const target = yield* stringArg(pattern);
   const found: Value[] = [];
@@ -925,7 +997,8 @@ function rstrip(text: string): string {
 }
 
 function chomp(text: string, separator: string | undefined): string {
-  if (separator === undefined) {
+  if (separator === undefined) return text;
+  if (separator === '\n') {
     if (text.endsWith('\r\n')) return text.slice(0, -2);
     if (text.endsWith('\n') || text.endsWith('\r')) return text.slice(0, -1);
     return text;
@@ -956,15 +1029,17 @@ const TRANSFORMS: [string, (text: string, args: string[]) => string, number][] =
 
 for (const [name, transform, maxArgs] of TRANSFORMS) {
   def('String', name, [0, maxArgs], function* (self: RString, args) {
-    if (self.rawBytes && !self.binary) return transformInvalid(self, name, yield* invalidSeparator(name, args));
-    if (name === 'chomp' && args[0] === NIL) return str(self.s);
+    const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
+    if (self.rawBytes && !self.binary) return transformInvalid(self, name, yield* invalidSeparator(name, selected));
+    if (name === 'chomp' && selected[0] === NIL) return str(self.s);
     const strings: string[] = [];
-    for (const arg of args) strings.push(yield* stringArg(arg));
+    for (const arg of selected) strings.push(yield* stringArg(arg));
     return str(transform(self.s, strings));
   });
   def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
+    const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
     if (self.rawBytes && !self.binary) {
-      const result = transformInvalid(self, name, yield* invalidSeparator(name, args));
+      const result = transformInvalid(self, name, yield* invalidSeparator(name, selected));
       const before = stringBytes(self);
       const after = stringBytes(result);
       if (
@@ -979,12 +1054,12 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
       setBytes(self, after);
       return self;
     }
-    if (name === 'chomp' && args[0] === NIL) {
+    if (name === 'chomp' && selected[0] === NIL) {
       modify(self);
       return NIL;
     }
     const strings: string[] = [];
-    for (const arg of args) strings.push(yield* stringArg(arg));
+    for (const arg of selected) strings.push(yield* stringArg(arg));
     const result = transform(self.s, strings);
     if (name === 'succ' || name === 'next') {
       setText(self, result);

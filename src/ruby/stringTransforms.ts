@@ -5,8 +5,15 @@ import { str, stringBytes, stringCharacters, stringFromBytes } from './values';
 
 export function transformInvalid(self: RString, name: string, separator: RString | RNil | undefined): RString {
   if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) throw argumentError('input string invalid');
-  if (name === 'rstrip') throw rubyError(rt().c['Encoding::CompatibilityError'], 'invalid byte sequence in UTF-8');
-  if (name === 'strip' || name === 'lstrip') throw argumentError('invalid byte sequence in UTF-8');
+  if (name === 'strip' || name === 'lstrip') {
+    let start = 0;
+    while (start < self.s.length && '\t\n\v\f\r '.includes(self.s[start])) start++;
+    const point = self.s.codePointAt(start) ?? -1;
+    if (point >= 0xdc_80 && point <= 0xdc_ff) throw argumentError('invalid byte sequence in UTF-8');
+    if (name === 'lstrip') return str(self.s.slice(start));
+  }
+  if (name === 'rstrip' || name === 'strip')
+    throw rubyError(rt().c['Encoding::CompatibilityError'], 'invalid byte sequence in UTF-8');
   const bytes = stringBytes(self);
   if (name === 'succ' || name === 'next') return stringFromBytes(succInvalidBytes(bytes));
   if (name === 'chop') return chopInvalidBytes(self, bytes);

@@ -471,6 +471,7 @@ function globalSet(name: string, value: Value): void {
   if ((name === '$stdout' || name === '$stderr') && !respondsTo(value, 'write')) {
     throw typeError(`${name} must have write method, ${realClassOf(value).name} given`);
   }
+  if (name === '$/' && value !== NIL && !(value instanceof RString)) throw typeError('value of $/ must be String');
   rt().globals.set(name, value);
 }
 

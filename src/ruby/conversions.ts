@@ -554,7 +554,7 @@ export function* spaceship(a: Value, b: Value): Gen<number | undefined> {
     return undefined;
   }
   if (a instanceof RString && b instanceof RString && !isOverridden(a, '<=>')) {
-    return compareStrings(a.s, b.s);
+    return compareRubyStrings(a, b);
   }
   const result = yield* callMethod(a, '<=>', [b]);
   if (result === NIL) return undefined;
@@ -589,6 +589,18 @@ export function compareStrings(a: string, b: string): number {
     const y = b.codePointAt(index) as number;
     if (x !== y) return x < y ? -1 : 1;
     if (x > 0xff_ff) index++;
+  }
+  return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
+}
+
+export function compareRubyStrings(a: RString, b: RString): number {
+  return compareBytes(stringBytes(a), stringBytes(b));
+}
+
+export function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    if (a[index] !== b[index]) return a[index] < b[index] ? -1 : 1;
   }
   return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
 }

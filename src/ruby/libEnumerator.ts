@@ -133,6 +133,7 @@ function stepSize(recv: Value, args: Value[], keywords?: RHash): Value {
     return adjusted < 0n ? 0n : adjusted / (step > 0n ? step : -step) + 1n;
   }
   const distance = (Number(end) - Number(start)) / Number(step);
+  if (Number.isNaN(distance)) throw floatDomainError('NaN');
   if (!Number.isFinite(distance)) return distance > 0 ? Number.POSITIVE_INFINITY : 0n;
   const count = exclusive ? Math.ceil(distance - 1e-12) : Math.floor(distance + 1e-12) + 1;
   return BigInt(Math.max(0, count));
@@ -199,6 +200,7 @@ const FIXED_SIZE_METHODS = new Set([
   'transform_keys!',
   'each_char',
   'each_byte',
+  'each_codepoint',
 ]);
 const NIL_SIZE_METHODS = new Set(['find', 'find_index', 'take_while', 'drop_while', 'bsearch', 'each_line']);
 const ARRAY_SELECTION_METHODS = new Set(['combination', 'permutation', 'repeated_combination', 'repeated_permutation']);

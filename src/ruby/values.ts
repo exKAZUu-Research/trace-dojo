@@ -16,7 +16,16 @@ import { rt } from './runtime';
 
 export function str(s: string): RString {
   rt().checkStringLength(s.length);
-  return new RString(rt().c.String, s);
+  const value = new RString(rt().c.String, s);
+  if (
+    /[\uDC80-\uDCFF]/.test(s) &&
+    [...s].some((char) => {
+      const point = char.codePointAt(0) as number;
+      return point >= 0xdc_80 && point <= 0xdc_ff;
+    })
+  )
+    value.rawBytes = encodeInvalidText(s);
+  return value;
 }
 
 export function stringBytes(value: RString): Uint8Array {
@@ -41,11 +50,56 @@ export function stringFromBytes(bytes: Uint8Array, binary = false): RString {
   } catch {
     invalid = true;
   }
-  const value = str(new TextDecoder().decode(bytes));
+  const text = invalid ? decodeInvalidBytes(bytes) : new TextDecoder().decode(bytes);
+  rt().checkStringLength(text.length);
+  const value = new RString(rt().c.String, text);
   if (invalid) {
     value.rawBytes = Uint8Array.from(bytes);
   }
   return value;
+}
+
+function decodeInvalidBytes(bytes: Uint8Array): string {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let text = '';
+  for (let index = 0; index < bytes.length;) {
+    const first = bytes[index];
+    const width = first < 0x80 ? 1 : first >= 0xc2 && first < 0xe0 ? 2 : first < 0xf0 ? 3 : first < 0xf5 ? 4 : 0;
+    if (width > 0 && index + width <= bytes.length) {
+      try {
+        text += decoder.decode(bytes.subarray(index, index + width));
+        index += width;
+        continue;
+      } catch {
+        // An invalid byte remains one byte in the String's internal text.
+      }
+    }
+    text += String.fromCodePoint(0xdc_00 + first);
+    index++;
+  }
+  return text;
+}
+
+function encodeInvalidText(text: string): Uint8Array {
+  const bytes: number[] = [];
+  const encoder = new TextEncoder();
+  let valid = '';
+  const flush = (): void => {
+    if (valid) bytes.push(...encoder.encode(valid));
+    valid = '';
+  };
+  for (const char of text) {
+    const point = char.codePointAt(0) as number;
+    if (point >= 0xdc_80 && point <= 0xdc_ff) {
+      flush();
+      bytes.push(point - 0xdc_00);
+    } else {
+      valid += char;
+      if (valid.length >= 4096) flush();
+    }
+  }
+  flush();
+  return Uint8Array.from(bytes);
 }
 
 export function stringCharacters(value: RString): RString[] {

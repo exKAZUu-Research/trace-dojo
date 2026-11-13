@@ -151,6 +151,17 @@ test.each([
     '[0.7, 0.7999999999999999, 0.8999999999999999]\n[0.20000000000000004, 0.10000000000000003, 2.7755575615628914e-17]\ntrue\nfalse\nnil\nFloatDomainError\n',
   ],
   [
+    'NaN ArithmeticSequence size reports Ruby error',
+    'begin; 1.0.step(Float::NAN,1).size; rescue => e; p [e.class,e.message]; end',
+    '[FloatDomainError, "NaN"]\n',
+  ],
+  ['block arguments use to_ary', 'class A; def to_ary; [1,2]; end; end; [A.new].each { |a,b| p [a,b] }', '[1, 2]\n'],
+  [
+    'String separators use the input record separator',
+    'p $/; $/="x"; p "abx".chomp, "abx".lines, "abx".each_line.to_a; $/=nil; p "abx".chomp',
+    '"\\n"\n"ab"\n["abx"]\n["abx"]\n"abx"\n',
+  ],
+  [
     'Integer iteration near Float precision boundary',
     'a=2**53; p a.upto(a.to_f).to_a, (a+1).upto(a.to_f).to_a, (a+1).downto(a.to_f).to_a',
     '[9007199254740992]\n[]\n[9007199254740993, 9007199254740992]\n',
@@ -177,6 +188,31 @@ test.each([
   ],
   ['underscores in Float exponents', 'p "1e2_1".to_f, "1e2__1".to_f', '1.0e+21\n100.0\n'],
   ['Cherokee full case folding', 'p "Ꭱ".casecmp?("ꭱ")', 'true\n'],
+  [
+    'invalid UTF-8 bytes survive String operations',
+    String.raw`p "a\xFFb".lines, "a\xFFb".sub("b","c"), "a\xFFb".delete_prefix("a"), "a\xFFb".delete_suffix("b")`,
+    '["a\\xFFb"]\n"a\\xFFc"\n"\\xFFb"\n"a\\xFF"\n',
+  ],
+  [
+    'invalid UTF-8 search and transform behavior',
+    String.raw`p "a\xFFb".include?("\xFF"), "a\xFFb".index("\xFF"), "\xFF" <=> "\xFE", "\x80" <=> "é"; begin; "a\xFFb".tr("b","c"); rescue => e; p e.class; end`,
+    'false\nnil\n1\n-1\nArgumentError\n',
+  ],
+  [
+    'invalid UTF-8 strip positions',
+    String.raw`p "a\xFFb".lstrip.bytes; begin; "a\xFF".strip; rescue => e; p e.class; end; begin; "\xFFa".lstrip; rescue => e; p e.class; end`,
+    '[97, 255, 98]\nEncoding::CompatibilityError\nArgumentError\n',
+  ],
+  [
+    'byte slicing, codepoints, and grapheme clusters',
+    String.raw`p "é".byteslice(0).bytes, "é".byteslice(1).bytes, "abc".byteslice(1,2), "abc".each_codepoint.to_a, "e\u0301a".grapheme_clusters`,
+    '[195]\n[169]\n"bc"\n[97, 98, 99]\n["é", "a"]\n',
+  ],
+  [
+    'byte-preserving prefix and suffix mutation',
+    String.raw`s="\xFFa"; p s.delete_prefix("\xFF").bytes, s.delete_suffix("a").bytes; p s.delete_prefix!("\xFF").bytes, s.bytes`,
+    '[97]\n[255]\n[97]\n[97]\n',
+  ],
   [
     'String sum long bound',
     'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',
