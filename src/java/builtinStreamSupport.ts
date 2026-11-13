@@ -50,13 +50,16 @@ const CLOSED_MESSAGE = 'stream has already been operated upon or closed';
 
 const sources = new WeakMap<JavaObject, StreamState>();
 
-/** A stream of a copy of an array's elements, which fails for a null array as `Arrays.stream` does. */
+/**
+ * A stream of an array's elements, which reads each when the pipeline reaches it, so that it sees an earlier stage's
+ * writes to the array, and fails for a null array as `Arrays.stream` does.
+ */
 export function arrayStream(frame: Frame, cls: ClassInfo, array: Value, retained: Value[] = []): JavaObject {
   if (!(array instanceof JavaArray)) return throwBuiltin(frame, 'NullPointerException');
   return createStream(
     frame,
     cls,
-    () => [...array.values][Symbol.iterator](),
+    () => array.values[Symbol.iterator](),
     retained,
     () => BigInt(array.values.length)
   );

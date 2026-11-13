@@ -2,7 +2,7 @@ import { removeEntry } from './builtinCollections';
 import {
   batchRemovalClasses,
   checkModifiable,
-  defaultRemoveClasses,
+  checkRemovable,
   elementsOf,
   itemsOf,
   type MapViewSource,
@@ -94,8 +94,7 @@ function removeThroughListIterator(
       continue;
     }
     if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
-    if (defaultRemoveClasses.has(collection.cls)) throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
-    checkModifiable(frame, collection, true);
+    checkRemovable(frame, collection);
     const position = index;
     removeElements(frame, collection, (_, candidate) => candidate === position);
     expectedModCount = collection.modCount;
@@ -116,8 +115,9 @@ function removeFromView(
   for (const entry of view.entries()) {
     if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
     if (!matches(view.elementOf(entry))) continue;
-    // The iterator's remove checks for a change the predicate made first.
+    // The iterator's remove checks for a change the predicate made first, then rejects as its iterator does.
     if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+    checkRemovable(frame, collection);
     view.remove(frame, entry);
     expectedModCount = collection.modCount;
     isRemoved = true;
@@ -128,7 +128,7 @@ function removeFromView(
 /** Removes the items in `removed` from a list, a set, or a view of a map, returning whether there were any. */
 export function removeAllOf(frame: Frame, receiver: Value, removed: Value[]): boolean {
   if (removed.length === 0) return false;
-  checkModifiable(frame, receiver, true);
+  checkRemovable(frame, receiver);
   const object = receiver as JavaObject;
   if (object.elements) return removeElements(frame, receiver, (item) => removed.includes(item));
   for (const item of removed) removeEntry(frame, receiver, item);

@@ -169,9 +169,13 @@ export class Runtime {
     }
   }
 
-  /** Reports a use of a class whose initialization failed, with the cause that the JDK records. */
+  /**
+   * Reports a use of a class whose initialization failed, with the cause that the JDK records, which the JVM describes
+   * from the failure's class and detail message without calling the program's `toString` or `getMessage`.
+   */
   private throwUninitialized(frame: Frame, cls: ClassInfo, failure: JavaObject): never {
-    const description = this.invokeToString(frame, failure)?.value ?? 'null';
+    const name = this.builtins.qualifiedNames.get(failure.cls) ?? failure.cls.binaryName;
+    const description = `${name}${failure.message ? `: ${failure.message.value}` : ''}`;
     const cause = new JavaObject(this.builtins.classes.get('ExceptionInInitializerError') as ClassInfo);
     cause.message = new JavaString(`Exception ${description} [in thread "main"]`);
     return throwBuiltin(frame, 'NoClassDefFoundError', `Could not initialize class ${cls.binaryName}`, cause);

@@ -808,4 +808,8 @@ class Main {
   const result = traceProgram('java', program, program);
   expect(result.stdout).toBe('ok\n');
   expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.at(-1)?.referenceVars?.b).toEqual({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value: 2 } },
+  });
 });
