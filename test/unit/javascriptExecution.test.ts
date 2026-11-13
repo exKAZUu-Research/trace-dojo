@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 
-import { expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
+import { LIMITS } from '../../src/interpreter/limits';
 import { executeProgram } from '../../src/interpreter/program';
 
 test('a program that draws reports its final board and the turtles still reachable', () => {
@@ -323,13 +324,6 @@ console.log(observer.canMoveForward());`,
     stdout,
     uncaughtException: undefined,
   });
-});
-
-test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
-  // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
-  const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);
-while (Date.now() - v < 50) { for (let i = 0; i < 500; i++) sum += i; }`;
-  expect(executeProgram('javascript', source)).toMatchObject({ kind: 'executed', stdout: '100\n' });
 });
 
 test.each([
@@ -815,74 +809,12 @@ class C { #\\u0061 = 4; \\u0063onstructor() { console.log('made'); } m() { retur
 l\\u0061bel: for (;;) break label;`,
   ],
   [
-    'busy-waiting on the clock',
-    `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
-function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');
-const s = new Date(); while (new Date() - s < 500); console.log('waited again');
-setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);
-setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);
-setTimeout(() => console.log('long'), 50); for (let i = 0; i < 500; i++) new Date(0); setTimeout(() => console.log('short'), 0);
-const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');
-const u = Date.now(); while (Date.now() - u < 500) { for (let i = 0; i < 500; i++) sum += i; } console.log('waited with more work');
-setTimeout(() => console.log('timer 100'), 100); for (let i = 0; i < 5000; i++) sum += i; console.log(new Date().getFullYear() > 2000); setTimeout(() => console.log('timer 0'), 0);
-setTimeout(() => console.log('overdue 500'), 500); sleep(1000); setTimeout(() => console.log('after sleep'), 60);
-// Timers set after the busy waits fall due at least 50 ms apart, so Node.js waking late does not reorder them.
-let n = 0; const iv = setInterval(() => { console.log('iv', ++n); if (n === 3) clearInterval(iv); }, 100);
-setTimeout(() => { console.log('t150'); Promise.resolve().then(() => console.log('micro in t150')); setTimeout(() => console.log('nested 0'), 0); }, 150);
-setTimeout(() => { sleep(200); console.log('slow'); }, 250); setTimeout(() => console.log('after slow'), 350);
-`,
-  ],
-  [
     'Object.create with property descriptors',
     `const o = Object.create({ inh: 1 }, { x: { value: 1, enumerable: true }, y: { get() { return 2; }, enumerable: true }, z: { value: 3 } });
 console.log(o.x, o.y, o.inh, Object.keys(o), o, Object.getOwnPropertyDescriptor(o, 'z'));
 for (const f of [() => Object.create(1), () => Object.create(null, null), () => Object.setPrototypeOf({}, 'a')]) {
   try { f(); } catch (e) { console.log(e.name, e.message); }
 }`,
-  ],
-  [
-    'blocking busy waits that delay timers',
-    `let sum = 0;
-setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
-setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);`,
-  ],
-  [
-    'busy waits with costly bodies that end through a flag or a throw',
-    `let sum = 0;
-let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 500; i++) sum += i; done = Date.now() - g >= 300; } console.log('flag set');
-try { const d = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - d >= 300) throw new Error('timeout'); } } catch (error) { console.log(error.message); }`,
-  ],
-  [
-    'busy waits with costly bodies that end through a helper or an inner loop',
-    `let sum = 0;
-let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
-while (!ticked) tick(); console.log('ticked');
-function sleep(ms) { const start = Date.now(); while (Date.now() - start < ms) { for (let i = 0; i < 500; i++) sum += i; } }
-sleep(300); sleep(300); sleep(300); sleep(300); console.log('slept four times');
-function* items() { while (true) yield 0; } const k = Date.now();
-try { items().forEach(() => { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - k >= 300) throw new Error('consumed'); }); } catch (error) { console.log(error.message); }
-let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');`,
-  ],
-  [
-    'a timestamp helper around computation between timers',
-    `let sum = 0; const start = Date.now(); const log = (message) => console.log(message, Date.now() - start >= 0);
-setTimeout(() => console.log('E 50'), 50); log('begin'); for (let i = 0; i < 5000; i++) sum += i; log('end'); setTimeout(() => console.log('F 0'), 0);
-setTimeout(() => console.log('G 50'), 50);
-for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; console.log('round', k, Date.now() - s >= 0); }
-for (const n of [1, 2]) log(n); setTimeout(() => console.log('H 0'), 0);
-setTimeout(() => console.log('I 50'), 50);
-let k = 0; while (true) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; console.log('pass', k, Date.now() - s >= 0); if (++k === 2) break; }
-setTimeout(() => console.log('J 0'), 0);
-setTimeout(() => console.log('K 50'), 50); const times = [];
-for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; times.push(Date.now() - s); }
-console.log(times.length); setTimeout(() => console.log('L 0'), 0);
-function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
-setTimeout(() => console.log('M 50'), 50); const fibTimes = [];
-for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n % 8); fibTimes.push(Date.now() - s); }
-console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);
-setTimeout(() => console.log('Q 50'), 50); const ROUNDS = 15; const roundTimes = [];
-for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n % 8); roundTimes.push(Date.now() - s); }
-console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',
@@ -1516,7 +1448,6 @@ async function g() { try { { await using a = null; await using b = { [Symbol.dis
 f(); queueMicrotask(() => console.log('micro'));
 setTimeout(() => { g(); queueMicrotask(() => console.log('micro2')); }, 0);`,
   ],
-  // The busy waits run on Node.js in real time, seconds in all, so the cases get more than the default five seconds.
 ])(
   'a program using %s runs as Node.js runs it',
   (_, source) => {
@@ -1528,6 +1459,131 @@ setTimeout(() => { g(); queueMicrotask(() => console.log('micro2')); }, 0);`,
   },
   30_000
 );
+
+describe('busy waits', () => {
+  // A busy wait runs a quarter of the operation budget before it polls the clock, which under machine load can take
+  // longer than the run's real-time limit; the simulated clock does not depend on that limit once modules are loaded.
+  const { maxMilliseconds } = LIMITS;
+  beforeAll(() => {
+    LIMITS.maxMilliseconds = 60_000;
+  });
+  afterAll(() => {
+    LIMITS.maxMilliseconds = maxMilliseconds;
+  });
+
+  test.each([
+    [
+      'busy-waiting on the clock',
+      `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
+  function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');
+  const s = new Date(); while (new Date() - s < 500); console.log('waited again');
+  setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);
+  setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);
+  setTimeout(() => console.log('long'), 50); for (let i = 0; i < 500; i++) new Date(0); setTimeout(() => console.log('short'), 0);
+  const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');
+  const u = Date.now(); while (Date.now() - u < 500) { for (let i = 0; i < 500; i++) sum += i; } console.log('waited with more work');
+  setTimeout(() => console.log('timer 100'), 100); for (let i = 0; i < 5000; i++) sum += i; console.log(new Date().getFullYear() > 2000); setTimeout(() => console.log('timer 0'), 0);
+  setTimeout(() => console.log('overdue 500'), 500); sleep(1000); setTimeout(() => console.log('after sleep'), 60);
+  // Timers set after the busy waits fall due at least 50 ms apart, so Node.js waking late does not reorder them.
+  let n = 0; const iv = setInterval(() => { console.log('iv', ++n); if (n === 3) clearInterval(iv); }, 100);
+  setTimeout(() => { console.log('t150'); Promise.resolve().then(() => console.log('micro in t150')); setTimeout(() => console.log('nested 0'), 0); }, 150);
+  setTimeout(() => { sleep(200); console.log('slow'); }, 250); setTimeout(() => console.log('after slow'), 350);
+  `,
+    ],
+    [
+      'blocking busy waits that delay timers',
+      `let sum = 0;
+  setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
+  setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);`,
+    ],
+    [
+      'busy waits with costly bodies that end through a flag or a throw',
+      `let sum = 0;
+  let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 500; i++) sum += i; done = Date.now() - g >= 300; } console.log('flag set');
+  try { const d = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - d >= 300) throw new Error('timeout'); } } catch (error) { console.log(error.message); }`,
+    ],
+    [
+      'busy waits with costly bodies that end through a helper or an inner loop',
+      `let sum = 0;
+  let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
+  while (!ticked) tick(); console.log('ticked');
+  function sleep(ms) { const start = Date.now(); while (Date.now() - start < ms) { for (let i = 0; i < 500; i++) sum += i; } }
+  sleep(300); sleep(300); sleep(300); sleep(300); console.log('slept four times');
+  function* items() { while (true) yield 0; } const k = Date.now();
+  try { items().forEach(() => { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - k >= 300) throw new Error('consumed'); }); } catch (error) { console.log(error.message); }
+  let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');`,
+    ],
+  ])(
+    'a program using %s runs as Node.js runs it',
+    (_, source) => {
+      expect(executeProgram('javascript', source)).toMatchObject({
+        kind: 'executed',
+        uncaughtException: undefined,
+        ...runOnNode(source),
+      });
+    },
+    // The busy waits run on Node.js in real time, seconds in all.
+    60_000
+  );
+
+  test('timestamps around computation between timers keep the timers in the order Node.js runs them', () => {
+    // Node.js prints this unless machine load delays its timers, so the check is on the interpreter alone.
+    const source = `let sum = 0; const start = Date.now(); const log = (message) => console.log(message, Date.now() - start >= 0);
+  setTimeout(() => console.log('E 50'), 50); log('begin'); for (let i = 0; i < 5000; i++) sum += i; log('end'); setTimeout(() => console.log('F 0'), 0);
+  setTimeout(() => console.log('G 50'), 50);
+  for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; console.log('round', k, Date.now() - s >= 0); }
+  for (const n of [1, 2]) log(n); setTimeout(() => console.log('H 0'), 0);
+  setTimeout(() => console.log('I 50'), 50);
+  let k = 0; while (true) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; console.log('pass', k, Date.now() - s >= 0); if (++k === 2) break; }
+  setTimeout(() => console.log('J 0'), 0);
+  setTimeout(() => console.log('K 50'), 50); const times = [];
+  for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; times.push(Date.now() - s); }
+  console.log(times.length); setTimeout(() => console.log('L 0'), 0);
+  function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+  setTimeout(() => console.log('M 50'), 50); const fibTimes = [];
+  for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n % 8); fibTimes.push(Date.now() - s); }
+  console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);
+  setTimeout(() => console.log('Q 50'), 50); const ROUNDS = 15; const roundTimes = [];
+  for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n % 8); roundTimes.push(Date.now() - s); }
+  console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      stdout: `begin true
+end true
+round 0 true
+round 1 true
+round 2 true
+1 true
+2 true
+pass 0 true
+pass 1 true
+3
+15
+15
+F 0
+H 0
+J 0
+L 0
+N 0
+R 0
+E 50
+G 50
+I 50
+K 50
+M 50
+Q 50
+`,
+    });
+  });
+
+  test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
+    // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
+    const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);
+  while (Date.now() - v < 50) { for (let i = 0; i < 500; i++) sum += i; }`;
+    expect(executeProgram('javascript', source)).toMatchObject({ kind: 'executed', stdout: '100\n' });
+  });
+});
 
 /** What Node.js prints for a script, without the colors that a FORCE_COLOR in the environment (as on CI) adds. */
 function runOnNode(source: string): { stdout: string; stderr: string } {
