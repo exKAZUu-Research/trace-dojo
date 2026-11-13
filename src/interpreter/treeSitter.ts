@@ -32,7 +32,11 @@ export function parseSource<T>(
   source: string,
   missingTokenNames: Record<string, string>,
   convert: (root: Node) => T,
-  { maxNestingDepth = MAX_NESTING_DEPTH, tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。' } = {}
+  {
+    maxNestingDepth = MAX_NESTING_DEPTH,
+    tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。',
+    locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
+  } = {}
 ): T {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The parser returned no tree');
@@ -41,7 +45,7 @@ export function parseSource<T>(
     if (tooDeep) {
       throw new CompileError([{ row: tooDeep.startPosition.row, message: tooDeepMessage }]);
     }
-    const syntaxErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, false);
+    const syntaxErrors = locateErrors(tree.rootNode, collectSyntaxErrors(tree.rootNode, missingTokenNames, false));
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     const converted = convert(tree.rootNode);
     // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.

@@ -41,7 +41,7 @@ export function executePythonProgram(source: string, input?: ProgramInput): Prog
  *
  * @param onEnd Called when the module ends, while its frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own runtime and collects the same output contract.
+// code-gauge-allow duplicateLines 16 -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     const globals = mainGlobals(runtime, module);
