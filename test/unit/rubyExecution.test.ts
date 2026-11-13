@@ -1569,3 +1569,13 @@ test('equal Sets hash independently of deleted collision slots', () => {
     stdout: 'true\ntrue\n42\n',
   });
 });
+
+test('Set mapping callbacks reject insertion during iteration', () => {
+  for (const method of ['map!', 'classify']) {
+    expect(
+      run(`s=Set[1,2]; begin; s.${method} { |x| s.add(3) if x==1; x }; rescue => e; p e.class, e.message; end; p s`)
+    ).toMatchObject({
+      stdout: 'RuntimeError\n"can\'t add a new item into set during iteration"\nSet[1, 2]\n',
+    });
+  }
+});

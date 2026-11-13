@@ -231,7 +231,9 @@ def('Set', ['map!', 'collect!'], 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'map!', []);
   yield* modify(self);
   const mapped: Value[] = [];
-  for (const entry of membersOf(self).map.values()) mapped.push(yield* callBlock(block, [entry.key]));
+  yield* eachEntry(membersOf(self), function* (entry) {
+    mapped.push(yield* callBlock(block, [entry.key]));
+  });
   membersOf(self).map.clear();
   for (const value of mapped) yield* hashSet(membersOf(self), value, true);
   return self;
@@ -256,13 +258,13 @@ def('Set', 'classify', 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'classify', []);
   const groups = newHash();
   return yield* whileHeld(groups, function* () {
-    for (const entry of membersOf(self).map.values()) {
+    yield* eachEntry(membersOf(self), function* (entry) {
       const key = yield* callBlock(block, [entry.key]);
       const group = yield* hashGet(groups, key);
       const values = group ? (group.value as RObject) : yield* newSet([]);
       yield* hashSet(membersOf(values), entry.key, true);
       if (!group) yield* hashSet(groups, key, values);
-    }
+    });
     return groups;
   });
 });
