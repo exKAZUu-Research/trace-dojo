@@ -845,7 +845,9 @@ let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 2000
 const h = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; const elapsed = Date.now() - h; if (elapsed >= 300) break; } console.log('elapsed variable');
 const o = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - o < 300) continue; break; } console.log('continue wait');
 let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
-while (!ticked) tick(); console.log('ticked');`,
+while (!ticked) tick(); console.log('ticked');
+let level = 0; const z = Date.now(); const bump = () => { if (Date.now() - z > 300) level = 99; };
+while (level < 5) { for (let i = 0; i < 2000; i++) sum += i; bump(); } console.log('closure counter');`,
   ],
   [
     'a timestamp helper around computation between timers',
@@ -870,7 +872,11 @@ console.log(inputTimes.length); setTimeout(() => console.log('P 0'), 0);
 setTimeout(() => console.log('Q 50'), 50); const ROUNDS = 15; const roundTimes = [];
 for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n); roundTimes.push(Date.now() - s); }
 let r = 1; while (r <= ROUNDS) { const s = Date.now(); fib(r); roundTimes.push(Date.now() - s); r++; }
-console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);`,
+console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);
+setTimeout(() => console.log('S 50'), 50); let c; for (c = 0; c < 15; c++) { const s = Date.now(); fib(c); roundTimes.push(Date.now() - s); }
+c = 0; while (c < 15) { const s = Date.now(); fib(c); roundTimes.push(Date.now() - s); c++; }
+function count(values) { let c = 0; for (const value of values) c += value; return c; }
+console.log(count([roundTimes.length])); setTimeout(() => console.log('T 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',
