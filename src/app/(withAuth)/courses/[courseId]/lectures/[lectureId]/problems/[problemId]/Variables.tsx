@@ -11,7 +11,7 @@ import {
   Thead,
   Tr,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { DisplayNode, TraceItemVariable } from '../../../../../../../../problems/trace';
+import type { DisplayNode, TraceItemVariable, TraceScalar } from '../../../../../../../../problems/trace';
 
 interface VariablesProps {
   traceItemVars: TraceItemVariable;
@@ -177,5 +177,5 @@ const formatPreview = (node: DisplayNode, depth = 0): string => {
   return node.kind === 'array' ? `[${preview}${suffix}]` : `{${preview}${suffix}}`;
 };
 
-const formatScalar = (value: number | string | boolean | null): string =>
+const formatScalar = (value: TraceScalar): string =>
   typeof value === 'string' ? JSON.stringify(value) : String(value);
