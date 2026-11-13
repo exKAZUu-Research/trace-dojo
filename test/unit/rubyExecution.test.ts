@@ -1547,3 +1547,15 @@ test('ArithmeticSequence last reports FloatDomainError for overflowing mixed bou
     uncaughtException: 'Infinity (FloatDomainError)',
   });
 });
+
+test('ArithmeticSequence last errors name the nonfinite ratio', () => {
+  for (const source of ['Float::INFINITY.step(1.0, 1).last', 'Float::INFINITY.step(1, 1).last(2)']) {
+    expect(run(`p ${source}`)).toMatchObject({ uncaughtException: '-Infinity (FloatDomainError)' });
+  }
+  expect(run('p (-Float::INFINITY).step(1.0, 1).last')).toMatchObject({
+    uncaughtException: 'Infinity (FloatDomainError)',
+  });
+  expect(run('p (10**400).step(Float::INFINITY, 0.5).last')).toMatchObject({
+    uncaughtException: 'NaN (FloatDomainError)',
+  });
+});

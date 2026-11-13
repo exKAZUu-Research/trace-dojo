@@ -321,9 +321,6 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
   if (end === NIL) throw rangeError('cannot get the last element of endless arithmetic sequence');
-  for (const value of [start, end])
-    if (typeof value === 'number' && !Number.isFinite(value))
-      throw floatDomainError(Number.isNaN(value) ? 'NaN' : value > 0 ? 'Infinity' : '-Infinity');
   if (typeof step === 'number' && !Number.isFinite(step)) {
     if (Number.isNaN(step)) throw floatDomainError('NaN');
     if (args.length === 0) return Number.NaN;
