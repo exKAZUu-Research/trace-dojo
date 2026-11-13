@@ -30,6 +30,7 @@ import {
  * to it, which this grader tells by whether the program can still reach it when the reference is called.
  */
 export const weakrefClass = builtinClass('ReferenceType');
+weakrefClass.typeName = 'weakref.ReferenceType';
 weakrefClass.module = 'weakref';
 weakrefClass.isBaseType = true;
 

@@ -45,7 +45,9 @@ interface LockState {
 }
 
 const lockClass = builtinClassWithBase('lock', objectClass, '_thread');
+lockClass.typeName = '_thread.lock';
 const rlockClass = builtinClassWithBase('RLock', objectClass, '_thread');
+rlockClass.typeName = '_thread.RLock';
 const handleClass = builtinClassWithBase('_ThreadHandle', objectClass, '_thread');
 
 const stateOf = (self: PyValue): LockState => (self as PyOpaque).data as LockState;

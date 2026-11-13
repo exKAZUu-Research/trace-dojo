@@ -94,9 +94,13 @@ function parseFormat(format: string): Layout {
   return { format, items, size, little: order.little, arity };
 }
 
-/** The layouts of the formats used last, shared by every run, so that runs cannot grow it: CPython also caches 100. */
+/**
+ * The layouts of the short formats used last, shared by every run, so that runs cannot grow it: CPython also caches
+ * 100. A longer format's layout is the run's own, charged as it is built.
+ */
 const layouts = new Map<string, Layout>();
 const MAX_CACHED_LAYOUTS = 100;
+const MAX_CACHED_FORMAT_LENGTH = 256;
 
 function layoutOf(formatValue: PyValue): Layout {
   const format = unbox(formatValue);
@@ -104,12 +108,15 @@ function layoutOf(formatValue: PyValue): Layout {
   if (typeof format === 'string') text = format;
   else if (format instanceof PyBytes) text = latin1Text(format.data);
   else throw typeError(`Struct() argument 1 must be a str or bytes object, not ${typeName(format)}`);
-  let layout = layouts.get(text);
-  if (!layout) {
-    layout = parseFormat(text);
-    if (layouts.size >= MAX_CACHED_LAYOUTS) layouts.delete(layouts.keys().next().value as string);
-    layouts.set(text, layout);
+  const cached = layouts.get(text);
+  if (cached) return cached;
+  const layout = parseFormat(text);
+  if (text.length > MAX_CACHED_FORMAT_LENGTH) {
+    currentRuntime().allocate(layout.items.length);
+    return layout;
   }
+  if (layouts.size >= MAX_CACHED_LAYOUTS) layouts.delete(layouts.keys().next().value as string);
+  layouts.set(text, layout);
   return layout;
 }
 

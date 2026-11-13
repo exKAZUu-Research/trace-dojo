@@ -182,6 +182,7 @@ export function structSeq(
 ): PyTuple {
   const cls = builtinClass(name, tupleClass);
   cls.module = module;
+  cls.typeName = `${module}.${name}`;
   const all = [...fields, ...hidden];
   const extra = new WeakMap<PyTuple, PyValue[]>();
   for (const [index, [field]] of fields.entries()) {

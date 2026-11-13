@@ -420,6 +420,8 @@ registerSourceModule(
           defineBytesIO(bytesIO);
           builtinClassesWithDict.add(stringIO);
           builtinClassesWithDict.add(bytesIO);
+          stringIO.typeName = '_io.StringIO';
+          bytesIO.typeName = '_io.BytesIO';
           return newTuple([stringIO, bytesIO]);
         }),
       ],
