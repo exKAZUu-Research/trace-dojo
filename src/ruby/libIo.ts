@@ -153,10 +153,10 @@ def(
   1,
   function* (_self, [value]) {
     const target = stdout();
-    const action = respondsTo(target, 'putc')
-      ? callMethod(target, 'putc', [value])
-      : write(target, yield* charOf(value));
-    yield* action;
+    if (respondsTo(target, 'putc', true)) {
+      return yield* callMethod(target, 'putc', [value], undefined, undefined, { fcall: true });
+    }
+    yield* write(target, yield* charOf(value));
     return value;
   },
   PRIVATE

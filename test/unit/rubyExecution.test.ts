@@ -1455,3 +1455,25 @@ test('begin rescue and ensure enforce Ruby value-position rules', () => {
   expect(run('def f; p(begin; 1; ensure; return 2; end); end; p f').kind).toBe('compileError');
   expect(run('def f; p(begin; return 2; ensure; 1; end); end; p f').kind).toBe('compileError');
 });
+
+test('Kernel putc delegates to replacement stream methods and returns their result', () => {
+  expect(
+    run('class W; def write(x); end; def putc(x); 99; end; end; $stdout=W.new; x=putc(65); $stdout=STDOUT; p x')
+  ).toMatchObject({
+    stdout: '99\n',
+  });
+  expect(
+    run(
+      'class W; def write(x); $v<<[:write,x]; end; private; def putc(x); $v<<[:putc,x]; nil; end; end; $v=[]; $stdout=W.new; x=putc(65); $stdout=STDOUT; p x, $v'
+    )
+  ).toMatchObject({
+    stdout: 'nil\n[[:putc, 65]]\n',
+  });
+});
+
+test('input record separator stores a frozen copy', () => {
+  expect(run('s="x"; $/=s; s<<"y"; p $/.frozen?, $/')).toMatchObject({ stdout: 'true\n"x"\n' });
+  expect(run('$/="x"; begin; $/ << "y"; rescue => e; p e.class; end')).toMatchObject({
+    stdout: 'FrozenError\n',
+  });
+});

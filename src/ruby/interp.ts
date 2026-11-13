@@ -543,10 +543,13 @@ function globalSet(name: string, value: Value): void {
   if ((name === '$,' || name === '$\\') && value !== NIL && !(value instanceof RString)) {
     throw typeError(`value of ${name} must be String`);
   }
-  rt().globals.set(
-    name,
-    name === '$/' && value instanceof RString ? stringFromBytes(stringBytes(value), value.binary) : value
-  );
+  if (name === '$/' && value instanceof RString) {
+    const separator = stringFromBytes(stringBytes(value), value.binary);
+    separator.frozen = true;
+    rt().globals.set(name, separator);
+    return;
+  }
+  rt().globals.set(name, value);
 }
 
 /** The class whose class variables a frame sees: the innermost module of its lexical scope. */
