@@ -8,9 +8,10 @@ import { runProgram } from './execute';
 import { formatFloat } from './floatFormat';
 import { utf8Decode } from './literals';
 import { compareMapKeys } from './mapOrder';
+import { BUILDER } from './packages/strings';
 import { parseGo } from './parse';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
-import { type Type, underlying } from './types';
+import { lookupFieldOrMethod, type Type, underlying } from './types';
 import { Cell, Complex, GoArray, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
@@ -81,20 +82,43 @@ function addVariable(variables: TraceVariables, name: string, value: Value, type
   if (node) variables.referenceVars[name] = node;
 }
 
-/** A receiver's fields show as `t.x`, as Java shows `this.x`. */
+/** A receiver's fields, including promoted embedded fields, show as `t.x`, as Java shows `this.x`. */
 function addReceiverFields(variables: TraceVariables, name: string, value: Value, type: Type): void {
   let struct: Value = value;
   let structType = type;
   if (value instanceof Pointer) {
     struct = value.load();
     structType = (underlying(type) as { element: Type }).element;
+  } else if (underlying(type).kind === 'pointer') {
+    return;
   }
-  const under = underlying(structType);
-  if (!(struct instanceof GoStruct) || under.kind !== 'struct') return;
-  for (const [index, field] of under.fields.entries()) {
-    const scalar = scalarOf(struct.fields[index], field.type);
-    if (scalar !== NOT_SCALAR) variables.vars[`${name}.${field.name}`] = scalar;
-  }
+  const seen = new Set<unknown>();
+  const walkStruct = (current: Value, currentType: Type, pathPrefix: readonly number[]): void => {
+    const under = underlying(currentType);
+    if (!(current instanceof GoStruct) || under.kind !== 'struct' || seen.has(current)) return;
+    seen.add(current);
+    for (const [index, field] of under.fields.entries()) {
+      const path = [...pathPrefix, index];
+      const selection = lookupFieldOrMethod(type, field.name);
+      if (
+        selection.kind === 'field' &&
+        selection.path.length === path.length &&
+        selection.path.every((step, at) => step === path[at])
+      ) {
+        const scalar = scalarOf(current.fields[index], field.type);
+        if (scalar !== NOT_SCALAR) variables.vars[`${name}.${field.name}`] = scalar;
+      }
+      if (!field.embedded) continue;
+      const fieldValue = current.fields[index];
+      const fieldUnder = underlying(field.type);
+      if (fieldUnder.kind === 'pointer') {
+        if (fieldValue instanceof Pointer) walkStruct(fieldValue.load(), fieldUnder.element, path);
+      } else {
+        walkStruct(fieldValue, field.type, path);
+      }
+    }
+  };
+  walkStruct(struct, structType, []);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type.
@@ -153,6 +177,10 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   if (under.kind === 'basic') return { kind: 'value', value: basicScalar(value) };
   if (value instanceof Iface) return displayNodeOf(value.value, value.type, seen);
   if (value instanceof Pointer) return pointerNodeOf(value, (under as { element: Type }).element, seen);
+  if (type === BUILDER && value instanceof GoStruct) {
+    const builder = (value.native?.builder as string | undefined) ?? '';
+    return { kind: 'value', value: utf8Decode(builder) };
+  }
   if (seen.has(value)) return undefined;
   seen.add(value);
   try {

@@ -11,6 +11,7 @@ const MIN_SIZE_FOR_MALLOC_HEADER = 512;
  * slice does not escape, which shows in the capacity after that append.
  */
 const STACK_BUFFER_SIZE = 32;
+const stackArrays = new WeakSet<Value[]>();
 
 /** The size of a value of the type in bytes on a 64-bit platform, as `unsafe.Sizeof` reports it. */
 export function sizeOf(type: Type): number {
@@ -134,10 +135,29 @@ export function appendValues(
     for (const [index, value] of values.entries()) slice.set(length + index, copyValue(value));
     return new Slice(slice.array, slice.offset, newLength, capacity);
   }
+  const size = sizeOf(element);
+  const usedStack = onStack && capacity === 0 && size > 0 && newLength * size <= STACK_BUFFER_SIZE;
   const newCapacity = grownCapacity(capacity, newLength, element, onStack);
   allocate(newCapacity);
   const array: Value[] = slice ? slice.values().map(copyValue) : [];
   for (const value of values) array.push(copyValue(value));
   while (array.length < newCapacity) array.push(zero());
+  if (usedStack) stackArrays.add(array);
   return new Slice(array, 0, newLength, newCapacity);
+}
+
+/** Copies a stack-backed slice to a size-classed heap array when returning it cannot keep the stack buffer. */
+export function moveSliceToHeap(
+  slice: Slice | undefined,
+  element: Type,
+  zero: () => Value,
+  allocate: (count: number) => void
+): Slice | undefined {
+  if (!slice || !stackArrays.has(slice.array)) return slice;
+  const length = slice.length;
+  const capacity = grownCapacity(0, Math.max(length, 1), element, false);
+  allocate(capacity);
+  const array: Value[] = slice.values().map(copyValue);
+  while (array.length < capacity) array.push(zero());
+  return new Slice(array, 0, length, capacity);
 }

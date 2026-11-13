@@ -83,6 +83,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per expression kind.
   expression(expression: Expression): Operand {
+    if (this.fn) this.fn.nodeCount++;
     switch (expression.kind) {
       case 'name': {
         return this.name(expression, true);
@@ -339,11 +340,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
       mode: 'variable',
       type: entity.type,
       span,
-      variable: { markUsed },
+      variable: { markUsed, entity },
+      backingVars: [entity],
       eval: (frame) => frame.cells[index].v,
       prepareStore,
       store: (frame, value) => prepareStore(frame)(value),
-      addressOf: () => (frame) => new Pointer(frame.cells[index], 'v'),
+      addressOf: () => {
+        markEscapes(entity);
+        return (frame) => new Pointer(frame.cells[index], 'v');
+      },
     };
   }
 
@@ -353,7 +358,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (operand.backingVars) {
       for (const entity of operand.backingVars) markEscapes(entity);
     }
-    if (operand.nonEscaping) operand.nonEscaping.escapes = true;
+    if (operand.nonEscaping) {
+      operand.nonEscaping.escapes = true;
+      operand.nonEscaping.onEscape?.();
+    }
   }
 
   protected recordLocalEscapeAlias(operand: Operand, target: VarEntity): void {
@@ -362,8 +370,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const nonEscaping = operand.nonEscaping;
     if (nonEscaping) {
-      linkEscapeHook(() => {
+      linkEscapeHook((viaReturn) => {
+        if (viaReturn && !nonEscaping.onEscape) {
+          nonEscaping.viaReturn = true;
+          return;
+        }
         nonEscaping.escapes = true;
+        nonEscaping.onEscape?.();
       }, target);
     }
   }
@@ -440,6 +453,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (!fits) this.error(operand.span, `定数は ${target.name} 型の${context}には使えません。`);
         return () => {};
       }
+      const representation = represent(constant, type);
+      if ('error' in representation) {
+        this.reportRepresentation(operand, type, representation.error, context);
+        return () => {};
+      }
       const failure = assignFailure(type, target);
       if (failure) {
         this.error(
@@ -448,7 +466,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         );
         return () => {};
       }
-      const value = new Iface(type, constantValue(constant, type));
+      const value = new Iface(type, constantValue(representation.constant, type));
       return () => value;
     }
     const representation = represent(constant, target);
@@ -1327,6 +1345,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.error(expression, `添字 ${value} は範囲の外です（長さは ${length} です）。`);
         return undefined;
       }
+      if ('error' in represent(operand.constant, BASIC.int)) {
+        this.error(expression, `定数 ${describeConstant(operand.constant)} は int 型に収まりません。`);
+        return undefined;
+      }
       const index = Number(value);
       return () => index;
     }
@@ -1850,11 +1872,6 @@ function elementOperand(
   };
 }
 
-/**
- * The factors of a float operation that Go's compiler turns into a multiplication it can fuse: `x*y`, except by 2, 1,
- * or -1, which become `x+x`, `x`, or `-x`, and `x/c` for a constant c whose reciprocal is exact, which becomes
- * `x*(1/c)`.
- */
 /** What tells apart the factors of products, for finding the same product again: a variable or a constant. */
 function productKeyOf(operand: Operand): string | undefined {
   const entity = operand.variable?.entity;
@@ -1863,15 +1880,11 @@ function productKeyOf(operand: Operand): string | undefined {
   return undefined;
 }
 
-function constantFactor(operand: Operand): number | undefined {
-  return operand.mode === 'constant' ? (operand.eval({} as Frame) as number) : undefined;
-}
-
-/** Multiplying by these, Go's compiler adds, copies, or negates instead, which leaves nothing to fuse. */
-function isTrivialFactor(value: number | undefined): boolean {
-  return value === 2 || value === 1 || value === -1;
-}
-
+/**
+ * The factors of a float operation that Go's compiler turns into a multiplication it can fuse: `x*y`, except by 2, 1,
+ * or -1, which become `x+x`, `x`, or `-x`, and `x/c` for a constant c whose reciprocal is exact, which becomes
+ * `x*(1/c)`.
+ */
 function fusableFactors(operator: string, left: Operand, right: Operand): { left: Eval; right: Eval } | undefined {
   if (operator === '*') {
     if (isTrivialFactor(constantFactor(left)) || isTrivialFactor(constantFactor(right))) return undefined;
@@ -1886,6 +1899,15 @@ function fusableFactors(operator: string, left: Operand, right: Operand): { left
     return undefined;
   if (isTrivialFactor(reciprocal)) return undefined;
   return { left: left.eval, right: () => reciprocal };
+}
+
+function constantFactor(operand: Operand): number | undefined {
+  return operand.mode === 'constant' ? (operand.eval({} as Frame) as number) : undefined;
+}
+
+/** Multiplying by these, Go's compiler adds, copies, or negates instead, which leaves nothing to fuse. */
+function isTrivialFactor(value: number | undefined): boolean {
+  return value === 2 || value === 1 || value === -1;
 }
 
 const always = (): boolean => true;

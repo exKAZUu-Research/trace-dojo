@@ -676,12 +676,15 @@ export class Printer {
   }
 
   private fmtUnicode(value: bigint): void {
-    let text = value.toString(16).toUpperCase();
+    const unsigned = BigInt.asUintN(64, value);
+    let text = unsigned.toString(16).toUpperCase();
     const precision = Math.max(this.flags.precision ?? 4, 4);
     if (text.length < precision) text = '0'.repeat(precision - text.length) + text;
     text = `U+${text}`;
-    const rune = Number(value);
-    if (this.flags.sharp && value <= 0x10_ff_ffn && isPrint(rune)) text += ` '${encodeRune(rune)}'`;
+    if (this.flags.sharp && unsigned <= 0x10_ff_ffn) {
+      const rune = Number(unsigned);
+      if (isPrint(rune)) text += ` '${encodeRune(rune)}'`;
+    }
     const zero = this.flags.zero;
     this.flags.zero = false;
     this.pad(text);

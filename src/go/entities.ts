@@ -38,10 +38,14 @@ export interface VarEntity {
    * to an interface, stores it elsewhere, returns it, passes it to a function, or captures or takes its address.
    */
   escapes?: boolean;
+  /** Whether the variable's value leaves the function through a `return` statement. */
+  escapesViaReturn?: boolean;
+  /** Weighted count of `s = append(s, ...)` writes, as Go's slice optimization pass counts them. */
+  appendWeight?: number;
   /** Local variables whose backing storage may be shared by this variable's value. */
   escapeSources?: Set<VarEntity>;
-  /** Callbacks to run if this variable's value ever escapes. */
-  escapeHooks?: (() => void)[];
+  /** Callbacks to run if this variable's value escapes (`viaReturn` distinguishes return-only escape). */
+  escapeHooks?: ((viaReturn: boolean) => void)[];
   /** The number of assignments after the declaration, which decide whether the declared value reaches each use. */
   writes?: number;
   /**
@@ -86,7 +90,7 @@ export interface FuncEntity {
   /** The function value, for a call through a variable or a deferred call. */
   value(): GoFunc;
   /** Calls the function directly, which skips creating a function value. */
-  direct?: (args: Value[], callRow: number | undefined) => Value | Value[];
+  direct?: (args: Value[], callRow: number | undefined, resultStaysOnStack?: boolean) => Value | Value[];
   generic?: GenericFunc;
   declaration?: FunctionDeclaration;
 }
@@ -125,7 +129,10 @@ export interface FunctionContext {
   /** The result types and, for named results, their variables. */
   results: Type[];
   resultVariables: (VarEntity | undefined)[];
+  returnHolders: VarEntity[];
   hasNamedResults: boolean;
+  hasDefer: boolean;
+  nodeCount: number;
   /** The package-level variables and functions that the body refers to, which decide initialization order. */
   references: Set<unknown>;
   /** The order in which the function first computes each product, by the variables or constants it multiplies. */
@@ -139,11 +146,23 @@ export function markEscapes(entity: VarEntity): void {
   if (entity.escapes) return;
   entity.escapes = true;
   if (entity.escapeHooks) {
-    for (const hook of entity.escapeHooks) hook();
+    for (const hook of entity.escapeHooks) hook(false);
     entity.escapeHooks = undefined;
   }
   if (entity.escapeSources) {
     for (const source of entity.escapeSources) markEscapes(source);
+  }
+}
+
+export function markEscapesViaReturn(entity: VarEntity, seen = new Set<VarEntity>()): void {
+  if (seen.has(entity)) return;
+  seen.add(entity);
+  entity.escapesViaReturn = true;
+  if (entity.escapeHooks) {
+    for (const hook of entity.escapeHooks) hook(true);
+  }
+  if (entity.escapeSources) {
+    for (const source of entity.escapeSources) markEscapesViaReturn(source, seen);
   }
 }
 
@@ -156,9 +175,9 @@ export function linkEscapeSource(source: VarEntity, target: VarEntity): void {
   (target.escapeSources ??= new Set()).add(source);
 }
 
-export function linkEscapeHook(hook: () => void, target: VarEntity): void {
+export function linkEscapeHook(hook: (viaReturn: boolean) => void, target: VarEntity): void {
   if (target.escapes) {
-    hook();
+    hook(false);
     return;
   }
   (target.escapeHooks ??= []).push(hook);

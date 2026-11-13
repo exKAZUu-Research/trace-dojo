@@ -6,7 +6,7 @@ import { CompositeCompiler } from './compositeCompiler';
 import { binaryConstant, type Constant, exactInteger, type Rational } from './constants';
 import { toInterface } from './conversions';
 import type { FuncEntity, GenericFunc } from './entities';
-import { largerUntyped, sameUntypedFamily } from './expressionCompiler';
+import { describeConstant, largerUntyped, sameUntypedFamily } from './expressionCompiler';
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
 import { currentRuntime } from './native';
@@ -39,7 +39,7 @@ import {
   type TypeParamType,
   underlying,
 } from './types';
-import { Complex, copyValue, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
+import { Cell, Complex, copyValue, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
 
 /** Builtins whose call has a value that a statement must use, as Go reports `len(s) (value) is not used`. */
 const VALUE_BUILTINS = new Set([
@@ -74,17 +74,22 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
       case 'builtin': {
         const result = this.builtin(expression, callee.builtin as string);
+        if (result.mode !== 'constant') this.runtimeCallCount++;
         return { ...result, isCall: true, pureValue: VALUE_BUILTINS.has(callee.builtin as string) } as Operand;
       }
       case 'method': {
-        return { ...this.methodCall(expression, callee), isCall: true };
+        const result = this.methodCall(expression, callee);
+        if (result.mode !== 'constant') this.runtimeCallCount++;
+        return { ...result, isCall: true };
       }
       case 'package': {
         this.asValue(callee);
         return this.invalid(expression);
       }
       default: {
-        return { ...this.functionCall(expression, this.asValue(callee)), isCall: true };
+        const result = this.functionCall(expression, this.asValue(callee));
+        if (result.mode !== 'constant') this.runtimeCallCount++;
+        return { ...result, isCall: true };
       }
     }
   }
@@ -190,6 +195,17 @@ export abstract class CallCompiler extends CompositeCompiler {
     return { mode: 'value', type: { kind: 'tuple', types: results }, span, eval: call, isCall: true };
   }
 
+  protected sliceResultOperand(
+    span: Span,
+    results: Type[],
+    evaluate: (frame: Frame, resultStaysOnStack: boolean) => Value | Value[]
+  ): Operand {
+    const nonEscaping: Operand['nonEscaping'] =
+      results.length === 1 && underlying(results[0]).kind === 'slice' ? { escapes: false } : undefined;
+    const operand = this.resultOperand(span, results, (frame) => evaluate(frame, staysOnStack(nonEscaping, frame)));
+    return nonEscaping ? { ...operand, nonEscaping } : operand;
+  }
+
   // code-gauge-allow functionCognitiveComplexity 20 -- Generic and ordinary calls of functions and function values.
   private functionCall(expression: Extract<Expression, { kind: 'call' }>, callee: Operand): Operand {
     if (this.isInvalid(callee)) return callee;
@@ -205,7 +221,9 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (!args) return this.invalid(expression);
     const row = expression.row;
     const direct = callee.func?.direct;
-    if (direct) return this.resultOperand(expression, signature.results, (frame) => direct(args(frame), row));
+    if (direct) {
+      return this.sliceResultOperand(expression, signature.results, (frame, stays) => direct(args(frame), row, stays));
+    }
     const read = callee.eval;
     return this.resultOperand(expression, signature.results, (frame) => {
       const fn = read(frame);
@@ -243,7 +261,9 @@ export abstract class CallCompiler extends CompositeCompiler {
     const { instance, args, results } = prepared;
     if (!instance) return this.resultOperand(expression, results, () => {});
     const row = expression.row;
-    return this.resultOperand(expression, results, (frame) => instance.call(args(frame), row));
+    return this.sliceResultOperand(expression, results, (frame, stays) =>
+      instance.call(args(frame), row, undefined, stays)
+    );
   }
 
   /** Infers the type arguments of a generic call from its arguments: typed ones first, then untyped defaults. */
@@ -336,7 +356,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     const { method, path } = selection;
     let readReceiver: Eval;
     if (method.pointerReceiver) {
-      const pointer = this.pointerReceiver(expression, receiver, path);
+      const pointer = this.pointerReceiver(expression, receiver, path, selection.indirect);
       if (!pointer) return this.invalid(expression);
       readReceiver = pointer;
     } else {
@@ -344,10 +364,10 @@ export abstract class CallCompiler extends CompositeCompiler {
       const viaPointer = underlying(receiver.type).kind === 'pointer';
       readReceiver = (frame) => receiverFor(read(frame), path, method, viaPointer);
     }
-    return this.resultOperand(expression, methodType.results, (frame) => {
+    return this.sliceResultOperand(expression, methodType.results, (frame, stays) => {
       const value = readReceiver(frame);
       const argValues = withTemporary(frame, value, () => args(frame));
-      return invokeMethod(method, value, argValues, row);
+      return invokeMethod(method, value, argValues, row, undefined, stays);
     });
   }
 
@@ -367,12 +387,17 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** The pointer a method with a pointer receiver receives, taking the address of an addressable value. */
-  protected pointerReceiver(span: Span, receiver: Operand, path: readonly number[]): Eval | undefined {
+  protected pointerReceiver(
+    span: Span,
+    receiver: Operand,
+    path: readonly number[],
+    indirect = false
+  ): Eval | undefined {
     const read = receiver.eval;
     if (path.length > 0) {
       // Reaching the embedded field goes through the receiver's struct, which must be addressable unless a pointer
       // leads there.
-      const throughPointer = underlying(receiver.type).kind === 'pointer';
+      const throughPointer = indirect || underlying(receiver.type).kind === 'pointer';
       if (!throughPointer && receiver.mode !== 'variable') {
         this.error(span, 'アドレスを取れない値なので、ポインタのレシーバを持つメソッドは呼び出せません。');
         return undefined;
@@ -417,21 +442,13 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
       case 'new': {
         if (!count(1)) return this.invalid(expression);
-        const type = this.typeArgument(args[0]);
-        if (!type) return this.invalid(expression);
-        const zero = this.zeroOf(type);
-        return {
-          mode: 'value',
-          type: { kind: 'pointer', element: type },
-          span: expression,
-          createsObject: true,
-          eval: () => new Pointer({ v: zero() } as never, 'v'),
-        };
+        return this.newBuiltin(expression, args[0]);
       }
       case 'delete': {
         return count(2) ? this.deleteBuiltin(expression) : this.invalid(expression);
       }
       case 'panic': {
+        this.builtinPanicCalls.add(expression);
         if (!count(1)) return this.invalid(expression);
         const value = this.assign(this.expression(args[0]), ANY, '引数');
         return {
@@ -498,6 +515,43 @@ export abstract class CallCompiler extends CompositeCompiler {
     };
   }
 
+  private newBuiltin(expression: Extract<Expression, { kind: 'call' }>, arg: Expression): Operand {
+    const operand = this.expression(arg);
+    if (this.isInvalid(operand)) return operand;
+    if (operand.mode === 'type') {
+      const zero = this.zeroOf(operand.type);
+      return {
+        mode: 'value',
+        type: { kind: 'pointer', element: operand.type },
+        span: expression,
+        createsObject: true,
+        eval: (frame) => {
+          frame.runtime.allocate(1);
+          return new Pointer(new Cell(zero()), 'v');
+        },
+      };
+    }
+    const value = this.defaulted(this.asValue(operand));
+    if (this.isInvalid(value)) return value;
+    if (isUntyped(value.type)) {
+      this.error(arg, 'new の引数に型の決まらない nil は使えません。');
+      return this.invalid(expression);
+    }
+    this.escapeOperand(value);
+    const read = value.eval;
+    return {
+      mode: 'value',
+      type: { kind: 'pointer', element: value.type },
+      span: expression,
+      createsObject: true,
+      eval: (frame) => {
+        const evaluated = copyValue(read(frame));
+        frame.runtime.allocate(1);
+        return new Pointer(new Cell(evaluated), 'v');
+      },
+    };
+  }
+
   private typeArgument(expression: Expression): Type | undefined {
     const operand = this.expression(expression);
     if (this.isInvalid(operand)) return undefined;
@@ -510,7 +564,7 @@ export abstract class CallCompiler extends CompositeCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 25 -- len and cap of each kind of operand, with Go's constant rules.
   private lengthBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'len' | 'cap'): Operand {
-    const operand = this.value(expression.args[0]);
+    const { result: operand, hasRuntimeCall } = this.withRuntimeCallTracking(() => this.value(expression.args[0]));
     if (this.isInvalid(operand)) return operand;
     let type = coreType(operand.type) ?? operand.type;
     const read = operand.eval;
@@ -528,7 +582,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (type.kind === 'pointer' && underlying(type.element).kind === 'array') type = underlying(type.element);
     if (type.kind === 'array') {
       // The length of an array is a constant, unless the expression calls a function.
-      if (!containsCall(expression.args[0])) {
+      if (!hasRuntimeCall) {
         return this.constant({ kind: 'int', value: BigInt(type.length) }, BASIC.int, expression);
       }
       const length = BigInt(type.length);
@@ -585,6 +639,10 @@ export abstract class CallCompiler extends CompositeCompiler {
     const zero = this.zeroOf(element);
     // A local slice variable that never escapes gets its first array on the stack, as Go's compiler allocates it.
     const backing = slice.backingVars;
+    const baseEntity = slice.variable?.entity;
+    if (baseEntity?.owner !== undefined) {
+      baseEntity.appendWeight = (baseEntity.appendWeight ?? 0) + ((this.fn?.loopDepth ?? 0) > 0 ? 2 : 1);
+    }
     const onStack = (): boolean =>
       backing !== undefined &&
       backing.length > 0 &&
@@ -655,7 +713,7 @@ export abstract class CallCompiler extends CompositeCompiler {
         span: expression,
         createsObject: true,
         eval: (frame) => {
-          if (length && (length(frame) as bigint) < 0n) runtimeErrorPanic('makemap: size out of range');
+          if (length) length(frame);
           return new GoMap(keyOf);
         },
       };
@@ -686,6 +744,10 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
       if (value < 0n) {
         this.error(expression, `大きさに負の数 ${value} は使えません。`);
+        return undefined;
+      }
+      if ('error' in represent(operand.constant, BASIC.int)) {
+        this.error(expression, `定数 ${describeConstant(operand.constant)} は int 型に収まりません。`);
         return undefined;
       }
       return () => value;
@@ -995,37 +1057,16 @@ export abstract class CallCompiler extends CompositeCompiler {
   protected static readonly GoArray = GoArray;
 }
 
+function staysOnStack(nonEscaping: Operand['nonEscaping'], frame: Frame): boolean {
+  return (
+    nonEscaping !== undefined && !nonEscaping.escapes && (!nonEscaping.viaReturn || Boolean(frame.resultStaysOnStack))
+  );
+}
+
 function calleeName(expression: Expression): string {
   if (expression.kind === 'name') return expression.name;
   if (expression.kind === 'selector') return expression.field;
   return '関数';
-}
-
-function containsCall(expression: Expression): boolean {
-  switch (expression.kind) {
-    case 'call':
-    case 'funcLiteral': {
-      return true;
-    }
-    case 'paren': {
-      return containsCall(expression.expression);
-    }
-    case 'selector': {
-      return containsCall(expression.operand);
-    }
-    case 'index': {
-      return containsCall(expression.operand) || expression.indices.some(containsCall);
-    }
-    case 'unary': {
-      return containsCall(expression.operand);
-    }
-    case 'binary': {
-      return containsCall(expression.left) || containsCall(expression.right);
-    }
-    default: {
-      return false;
-    }
-  }
 }
 
 /** Picks the smaller or larger of two ordered values. */

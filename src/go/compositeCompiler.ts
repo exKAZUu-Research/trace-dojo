@@ -3,8 +3,18 @@ import type { CompositeLiteral, Expression } from './ast';
 import { mapKeyOf } from './equality';
 import { describeConstant, ExpressionCompiler } from './expressionCompiler';
 import type { Operand } from './operand';
-import type { Eval, Frame } from './runtime';
-import { BASIC, coreType, defaultType, describeType, isInterface, isUntyped, type Type, underlying } from './types';
+import { type Eval, type Frame, withTemporary } from './runtime';
+import {
+  BASIC,
+  coreType,
+  defaultType,
+  describeType,
+  isInterface,
+  isUntyped,
+  lookupFieldOrMethod,
+  type Type,
+  underlying,
+} from './types';
 import { Cell, GoArray, GoMap, GoStruct, Pointer, Slice, type Value } from './values';
 
 /** Compiles composite literals: structs, arrays, slices, and maps, whose nested literals may elide their types. */
@@ -76,11 +86,12 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     return this.assign(this.expression(expression), type, context);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Keyed and unkeyed struct literals with Go's checks and evaluation order.
+  // code-gauge-allow functionCognitiveComplexity 35 -- Keyed and unkeyed struct literals with promoted fields and evaluation order.
   private structLiteral(expression: CompositeLiteral, type: Type, struct: Extract<Type, { kind: 'struct' }>): Operand {
     const { fields } = struct;
-    const entries: { index: number; value: Eval }[] = [];
-    const seen = new Set<number>();
+    const entries: { path: number[]; value: Eval }[] = [];
+    const seenPaths: number[][] = [];
+    const lookupTarget = type.kind === 'typeParam' ? struct : type;
     const keyed = expression.elements.some((element) => element.key);
     if (keyed) {
       for (const element of expression.elements) {
@@ -93,15 +104,37 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
           this.expression(element.value);
           continue;
         }
-        const index = fields.findIndex((field) => field.name === (element.key as { name: string }).name);
-        if (index === -1) {
+        const selection = lookupFieldOrMethod(lookupTarget, element.key.name);
+        if (selection.kind === 'ambiguous') {
+          this.error(element.key, `${element.key.name} は埋め込んだ複数の型にあるので、どれか決められません。`);
+          this.expression(element.value);
+          continue;
+        }
+        if (selection.kind !== 'field') {
           this.error(element.key, `${describeType(type)} 型には ${element.key.name} というフィールドがありません。`);
           this.expression(element.value);
           continue;
         }
-        if (seen.has(index)) this.error(element, `フィールド ${element.key.name} に2回値を書いています。`);
-        seen.add(index);
-        entries.push({ index, value: this.element(element.value, fields[index].type, 'フィールド') });
+        if (selection.indirect) {
+          this.error(
+            element.key,
+            `ポインタで埋め込んだフィールドを通るので、複合リテラルでは ${element.key.name} を直接指定できません。`
+          );
+          this.expression(element.value);
+          continue;
+        }
+        const conflict = seenPaths.find((previous) => pathsOverlap(previous, selection.path));
+        if (conflict) {
+          this.error(
+            element,
+            conflict.length === selection.path.length
+              ? `フィールド ${element.key.name} に2回値を書いています。`
+              : '埋め込んだ構造体のフィールドと昇格したフィールドを同じリテラルで同時には指定できません。'
+          );
+        } else {
+          seenPaths.push(selection.path);
+        }
+        entries.push({ path: selection.path, value: this.element(element.value, selection.type, 'フィールド') });
       }
     } else if (expression.elements.length > 0) {
       let reportedExcess = false;
@@ -114,7 +147,7 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
           this.expression(element.value);
           continue;
         }
-        entries.push({ index, value: this.element(element.value, fields[index].type, 'フィールド') });
+        entries.push({ path: [index], value: this.element(element.value, fields[index].type, 'フィールド') });
       }
       if (expression.elements.length < fields.length) {
         this.error({ row: expression.endRow, column: 0 }, `${describeType(type)} 型のフィールドの値が足りません。`);
@@ -131,9 +164,23 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         const filled = new Set<number>();
         frame.temporaries.push(evaluated);
         try {
-          for (const { index, value } of entries) {
-            evaluated[index] = value(frame);
-            filled.add(index);
+          for (const { path, value } of entries) {
+            const fieldValue = value(frame);
+            const root = path[0];
+            if (path.length === 1) {
+              evaluated[root] = fieldValue;
+              filled.add(root);
+              continue;
+            }
+            if (!filled.has(root)) {
+              evaluated[root] = zeros[root]();
+              filled.add(root);
+            }
+            let current = evaluated[root] as GoStruct;
+            for (let step = 1; step < path.length - 1; step++) {
+              current = current.fields[path[step]] as GoStruct;
+            }
+            current.fields[path.at(-1) as number] = fieldValue;
           }
         } finally {
           frame.temporaries.pop();
@@ -162,6 +209,11 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         const key = this.constantExpression(element.key);
         if (key.value === undefined || key.value < 0n) {
           this.error(element.key, '配列やスライスのリテラルのキーには、0 以上の整数の定数を書いてください。');
+          this.expression(element.value);
+          continue;
+        }
+        if ('error' in represent({ kind: 'int', value: key.value }, BASIC.int)) {
+          this.error(element.key, `定数 ${key.value} は int 型に収まりません。`);
           this.expression(element.value);
           continue;
         }
@@ -250,7 +302,8 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         try {
           for (const { key, value } of entries) {
             const keyValue = key(frame);
-            map.entries.set(keyOf(keyValue), { key: keyValue, value: value(frame) });
+            const evaluatedValue = withTemporary(frame, keyValue, () => value(frame));
+            map.entries.set(keyOf(keyValue), { key: keyValue, value: evaluatedValue });
           }
         } finally {
           frame.temporaries.pop();
@@ -259,4 +312,12 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
       },
     };
   }
+}
+
+function pathsOverlap(a: readonly number[], b: readonly number[]): boolean {
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
 }

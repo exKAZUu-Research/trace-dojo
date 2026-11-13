@@ -1,13 +1,6 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeExpression, TypeParameter } from './ast';
-import {
-  type Entity,
-  type FunctionContext,
-  markEscapes,
-  type PackageEntity,
-  type TypeEntity,
-  type VarEntity,
-} from './entities';
+import { type Entity, type FunctionContext, type PackageEntity, type TypeEntity, type VarEntity } from './entities';
 import { substituteInterface } from './generics';
 import type { Exec, FunctionInfo, LocalInfo } from './runtime';
 import { Scope } from './scope';
@@ -47,8 +40,16 @@ export abstract class CompilerBase {
   protected fn: FunctionContext | undefined;
   /** Whether errors are being reported; instances of generic code were checked once already. */
   protected reporting = true;
+  protected runtimeCallCount = 0;
+  protected readonly builtinPanicCalls = new WeakSet<Expression>();
 
   constructor(protected readonly trace: TraceSettings | undefined) {}
+
+  protected withRuntimeCallTracking<T>(run: () => T): { result: T; hasRuntimeCall: boolean } {
+    const before = this.runtimeCallCount;
+    const result = run();
+    return { result, hasRuntimeCall: this.runtimeCallCount > before };
+  }
 
   // Diagnostics ---------------------------------------------------------------------------------------------------
 
@@ -143,7 +144,6 @@ export abstract class CompilerBase {
   /** The index of a captured variable in a function's cells, capturing it through every enclosing closure. */
   protected capture(entity: VarEntity, fn: FunctionContext): number {
     entity.boxed = true;
-    markEscapes(entity);
     const existing = fn.captures.get(entity);
     if (existing !== undefined) return existing;
     if (fn.parent && fn.parent !== entity.owner) this.capture(entity, fn.parent);
@@ -170,7 +170,10 @@ export abstract class CompilerBase {
       captures: new Map(),
       results: [],
       resultVariables: [],
+      returnHolders: [],
       hasNamedResults: false,
+      hasDefer: false,
+      nodeCount: 0,
       references: new Set(),
       productOrders: new Map(),
       loopDepth: 0,

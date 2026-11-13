@@ -64,6 +64,7 @@ export class ProgramCompiler extends StatementCompiler {
   private totalGenericInstances = 0;
   private readonly methodSpecs = new Map<string, FunctionDeclaration[]>();
   private readonly functionReferences = new Map<unknown, Set<unknown>>();
+  private readonly inlineCandidates: { key: unknown; info: FunctionInfo; eligible: boolean }[] = [];
   private readonly claimedAtomicRows = new Set<number>();
 
   constructor(
@@ -91,6 +92,7 @@ export class ProgramCompiler extends StatementCompiler {
     while (this.pendingGenericChecks.length > 0) (this.pendingGenericChecks.shift() as () => void)();
     for (const initializer of this.globals) initializer.pending?.();
     this.runPending();
+    this.finalizeInlineCandidates();
     this.checkImportsUsed();
     this.checkAtomicAnnotations();
     const main = this.mainFunction();
@@ -107,6 +109,25 @@ export class ProgramCompiler extends StatementCompiler {
 
   private runPending(): void {
     while (this.pendingBodies.length > 0) (this.pendingBodies.shift() as () => void)();
+  }
+
+  private finalizeInlineCandidates(): void {
+    for (const { key, info, eligible } of this.inlineCandidates) {
+      info.canInline = eligible && !this.isRecursiveFunction(key);
+    }
+  }
+
+  private isRecursiveFunction(target: unknown): boolean {
+    const seen = new Set<unknown>();
+    const stack = [...(this.functionReferences.get(target) ?? [])];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (current === target) return true;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      for (const next of this.functionReferences.get(current) ?? []) stack.push(next);
+    }
+    return false;
   }
 
   // Imports -------------------------------------------------------------------------------------------------------
@@ -537,12 +558,23 @@ export class ProgramCompiler extends StatementCompiler {
         this.functionReferences.set(method, fn.references);
         if (params.length > 0 && !isInstance) return;
         const { info } = fn;
+        this.inlineCandidates.push({ key: method, info, eligible: !fn.hasDefer && fn.nodeCount <= 80 });
         (method.code as { call?: unknown }).call = (
           receiverValue: Value,
           argValues: Value[],
           callRow?: number,
-          deferredFor?: unknown
-        ) => currentRuntime().call(info, [], [receiverValue, ...argValues], callRow, deferredFor as never);
+          deferredFor?: unknown,
+          resultStaysOnStack?: boolean
+        ) =>
+          currentRuntime().call(
+            info,
+            [],
+            [receiverValue, ...argValues],
+            callRow,
+            deferredFor as never,
+            undefined,
+            resultStaysOnStack
+          );
       });
     } finally {
       this.reporting = outerReporting;
@@ -568,8 +600,21 @@ export class ProgramCompiler extends StatementCompiler {
     const state: FunctionDeclarationState['entity'] = {};
     let type: FuncType = funcType([], []);
     let value: GoFunc | undefined;
-    const call = (args: Value[], callRow?: number, deferredFor?: unknown): Value | Value[] =>
-      currentRuntime().call(state.info as FunctionInfo, [], args, callRow, deferredFor as never);
+    const call = (
+      args: Value[],
+      callRow?: number,
+      deferredFor?: unknown,
+      resultStaysOnStack?: boolean
+    ): Value | Value[] =>
+      currentRuntime().call(
+        state.info as FunctionInfo,
+        [],
+        args,
+        callRow,
+        deferredFor as never,
+        undefined,
+        resultStaysOnStack
+      );
     const entity = {
       kind: 'func' as const,
       name,
@@ -577,7 +622,8 @@ export class ProgramCompiler extends StatementCompiler {
       span: declaration,
       declaration,
       value: () => (value ??= new GoFunc(call)),
-      direct: (args: Value[], callRow: number | undefined) => call(args, callRow),
+      direct: (args: Value[], callRow: number | undefined, resultStaysOnStack?: boolean) =>
+        call(args, callRow, undefined, resultStaysOnStack),
     };
     this.declarePackageName(name, entity, declaration.nameSpan);
     this.pendingSignatures.push(() => {
@@ -598,6 +644,7 @@ export class ProgramCompiler extends StatementCompiler {
       );
       state.info = fn.info;
       this.functionReferences.set(entity, fn.references);
+      this.inlineCandidates.push({ key: entity, info: fn.info, eligible: !fn.hasDefer && fn.nodeCount <= 80 });
     });
     if (name === 'main') this.mainEntity = { entity, state, declaration };
   }
@@ -630,8 +677,16 @@ export class ProgramCompiler extends StatementCompiler {
         if (this.hasGenericCycle) return new GoFunc(() => {});
         this.countGenericInstance(declaration);
         const state: { info?: FunctionInfo } = {};
-        const instance = new GoFunc((argValues, callRow, deferredFor) =>
-          currentRuntime().call(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never)
+        const instance = new GoFunc((argValues, callRow, deferredFor, resultStaysOnStack) =>
+          currentRuntime().call(
+            state.info as FunctionInfo,
+            [],
+            argValues,
+            callRow,
+            deferredFor as never,
+            undefined,
+            resultStaysOnStack
+          )
         );
         cache.set(key, instance);
         this.pendingBodies.push(() => {
@@ -647,14 +702,20 @@ export class ProgramCompiler extends StatementCompiler {
               () => {
                 const type = this.resolveSignature(declaration.signature).type;
                 this.fn = undefined;
-                state.info = this.functionBody(
+                const fn = this.functionBody(
                   name,
                   declaration.signature,
                   type,
                   declaration.body as NonNullable<FunctionDeclaration['body']>,
                   undefined,
                   this.isAtomic(declaration)
-                ).info;
+                );
+                state.info = fn.info;
+                this.inlineCandidates.push({
+                  key: entity,
+                  info: fn.info,
+                  eligible: !fn.hasDefer && fn.nodeCount <= 80,
+                });
               }
             );
           } finally {

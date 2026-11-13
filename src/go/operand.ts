@@ -39,8 +39,8 @@ export interface Operand {
   escapeAddress?: () => void;
   /** Local variables whose backing storage this value may share (such as `s[1:]` or `a[:]`). */
   backingVars?: VarEntity[];
-  /** Tracks whether a temporary allocation (such as `[]rune(s)`) escapes the current function. */
-  nonEscaping?: { escapes: boolean };
+  /** Tracks whether a temporary allocation, closure, or inlined call result escapes the current function. */
+  nonEscaping?: { escapes: boolean; viaReturn?: boolean; onEscape?: () => void };
   /** Evaluates `v, ok` forms: a map index or a type assertion. */
   commaOk?: (frame: Frame) => [Value, boolean];
   builtin?: string;

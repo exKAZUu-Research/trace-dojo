@@ -108,7 +108,12 @@ export class GoFunc {
      * Runs the function. `callRow` is the row of the call, for the trace; `deferredFor` is the frame whose deferred
      * call this is, where `recover` works.
      */
-    readonly call: (args: Value[], callRow?: number, deferredFor?: unknown) => Value | Value[],
+    readonly call: (
+      args: Value[],
+      callRow?: number,
+      deferredFor?: unknown,
+      resultStaysOnStack?: boolean
+    ) => Value | Value[],
     /** The values the function keeps alive, which garbage collection follows. */
     readonly captured: readonly unknown[] = []
   ) {}
