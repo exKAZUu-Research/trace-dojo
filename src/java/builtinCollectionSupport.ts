@@ -336,9 +336,11 @@ const NULL_CHECKED_LOOKUPS = new Set([
 ]);
 
 /**
- * Makes the value lookups of every builtin collection and map class throw `NullPointerException` for a null argument
- * when the collection they read rejects null: the collection itself, or the one an unmodifiable wrapper, a sublist,
- * or a map's key set or values reads, whose class may be shared with a collection that accepts null.
+ * Makes the value lookups of every builtin collection and map class behave as their JDK classes' do: an unmodifiable
+ * wrapper asks the collection it wraps, as `Collections.UnmodifiableCollection` delegates, so that the wrapped class's
+ * own rules hold; and a lookup throws `NullPointerException` for a null argument when the collection it reads rejects
+ * null, which may be the one a sublist or a map's key set or values reads, whose class may be shared with a
+ * collection that accepts null.
  */
 export function checkNullLookups(classes: Iterable<ClassInfo>, collectionClass: ClassInfo, mapClass: ClassInfo): void {
   for (const cls of classes) {
@@ -347,16 +349,22 @@ export function checkNullLookups(classes: Iterable<ClassInfo>, collectionClass: 
     for (const method of cls.methods) {
       const { native, name } = method;
       if (native && NULL_CHECKED_LOOKUPS.has(name) && method.parameterTypes[0]?.kind !== 'int') {
-        method.native = checkingNull(native, name);
+        method.native = lookingUp(native, name);
       }
     }
   }
 }
 
-function checkingNull(native: NativeMethod, name: string): NativeMethod {
+function lookingUp(native: NativeMethod, name: string): NativeMethod {
   return (frame, receiver, args) => {
+    const object = receiver as JavaObject;
+    if (unmodifiableWrappers.has(object)) {
+      const { collectionClass, listClass, mapClass } = frame.runtime.builtins.collections;
+      const owner = name === 'contains' ? collectionClass : name.endsWith('ndexOf') ? listClass : mapClass;
+      return frame.runtime.invokeVirtual(frame, owner, name, object.retained?.[0], args);
+    }
     if (args[0] === undefined) {
-      const [source, lookup] = readSourceOf(receiver as JavaObject, name);
+      const [source, lookup] = readSourceOf(object, name);
       const messageOf = nullRejectingClasses.get(source.cls);
       if (messageOf && !nullTolerantLists.has(source))
         throwBuiltin(frame, 'NullPointerException', messageOf(source, lookup));

@@ -2102,3 +2102,19 @@ public class Main { enum E { A, B, C } static void t(String n, Supplier<Object> 
       'ksr false {A=1, B=2, C=3}\nksra true {A=1, C=3}\nget null\nck false\nrm null\ngod 9\ncv false\nother null\nput java.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\n',
   });
 });
+
+test("Java's unmodifiable wrappers look values up through the collection they wrap", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { enum E { A, B, C } enum F { X } static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { Set<E> u = Collections.unmodifiableSet(EnumSet.of(E.A, E.B, E.C));
+  t("d1", () -> Collections.disjoint(u, Collections.singletonList(null))); t("d2", () -> Collections.disjoint(u, List.of(F.X))); t("c", () -> u.contains(null) + " " + u.contains(F.X) + " " + u.contains(E.A) + " " + u);
+  Map<E, Integer> m = Collections.unmodifiableMap(new EnumMap<>(Map.of(E.A, 1))); t("m", () -> m.get(null) + " " + m.containsKey(F.X) + " " + m.getOrDefault(F.X, 5) + " " + m.containsValue(1));
+  Set<Integer> ts = Collections.unmodifiableSet(new TreeSet<>(List.of(1))); t("ts", () -> ts.contains(null));
+  List<Integer> ul = Collections.unmodifiableList(new ArrayList<>(List.of(1, 2))); t("ul", () -> ul.indexOf(2) + " " + ul.contains(null) + " " + ul.lastIndexOf(1));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'd1 true\nd2 true\nc false false true [A, B, C]\nm null false 5 true\nts java.lang.NullPointerException\nul 1 false 0\n',
+  });
+});
