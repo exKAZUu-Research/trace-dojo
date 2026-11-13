@@ -2,8 +2,17 @@ import { pyRepr } from './conversions';
 import { method } from './define';
 import { identityHash } from './hashing';
 import { argument, checkArgs } from './nativeArgs';
-import { bindValue, callValue, getIterator, setAttribute, toArray } from './objects';
+import {
+  bindValue,
+  callValue,
+  getAttribute,
+  getAttributeOrUndefined,
+  getIterator,
+  setAttribute,
+  toArray,
+} from './objects';
 import { equals } from './operators';
+import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import { newGenericAlias, typeConvert } from './typeHints';
 import {
@@ -199,35 +208,61 @@ export function typeText(value: PyValue): string {
 /** `cls[key]` for a class that derives from Generic, as `Generic.__class_getitem__` checks it. */
 export function subscriptGeneric(cls: PyClass, key: PyValue): PyValue {
   const args = (key instanceof PyTuple ? [...key.items] : [key]).map(typeConvert);
+  return cachedAlias(cls, args, () => specializeGenericArgs(cls, args));
+}
+
+function specializeGenericArgs(cls: PyClass, args: PyValue[]): PyValue[] {
   if (parameterDeclaringClasses.has(cls)) {
-    const { name } = cls;
-    if (args.length === 0) throw typeError(`Parameter list to ${name}[...] cannot be empty`);
-    if (!args.every((arg) => isGenericParameter(arg))) {
-      throw typeError(`Parameters to ${name}[...] must all be type variables or parameter specification variables.`);
-    }
-    const params = args.map((arg) => (arg instanceof PyTypingAlias ? arg.origin : arg));
-    if (new Set(params).size !== params.length) throw typeError(`Parameters to ${name}[...] must all be unique`);
-    return cachedAlias(cls, args);
+    checkParameterDeclaration(cls, args);
+    return args;
   }
   const params = parametersOf(cls);
   if (params.length === 0) throw typeError(`${classText(cls)} is not a generic class`);
-  checkArgumentCount(cls, params, args);
-  return cachedAlias(cls, args);
+  let prepared = newTuple(args);
+  for (const param of params) {
+    const prepare = getAttributeOrUndefined(param, '__typing_prepare_subst__');
+    if (prepare !== undefined) prepared = callValue(prepare, [cls, prepared]) as PyTuple;
+  }
+  checkArgumentCount(cls, params, [...prepared.items]);
+  const completed: PyValue[] = [];
+  for (const [index, param] of params.entries()) {
+    const value = prepared.items[index];
+    if (isKind('TypeVarTuple')(param)) completed.push(...toArray(value));
+    else completed.push(value);
+  }
+  return completed;
 }
 
-const aliasCache = new WeakMap<PyClass, PyTypingAlias[]>();
+function checkParameterDeclaration(cls: PyClass, args: PyValue[]): void {
+  const { name } = cls;
+  if (args.length === 0) throw typeError(`Parameter list to ${name}[...] cannot be empty`);
+  if (!args.every((arg) => isGenericParameter(arg))) {
+    throw typeError(`Parameters to ${name}[...] must all be type variables or parameter specification variables.`);
+  }
+  const params = args.map((arg) => (arg instanceof PyTypingAlias ? arg.origin : arg));
+  if (new Set(params).size !== params.length) throw typeError(`Parameters to ${name}[...] must all be unique`);
+}
 
-/** The alias of a class subscripted with `args`, the same object each time, as typing's cache gives. */
-function cachedAlias(cls: PyClass, args: PyValue[]): PyTypingAlias {
-  const known = aliasCache.get(cls) ?? [];
-  aliasCache.set(cls, known);
-  const found = known.find(
-    (alias) => alias.args.length === args.length && alias.args.every((arg, index) => arg === args[index])
+interface AliasEntry {
+  cls: PyClass;
+  key: readonly PyValue[];
+  alias: PyTypingAlias;
+}
+
+const aliasCache = new WeakMap<Runtime, AliasEntry[]>();
+
+/** The per-run bounded LRU used by typing's generic subscription cache. */
+function cachedAlias(cls: PyClass, key: PyValue[], args: () => PyValue[]): PyTypingAlias {
+  const runtime = currentRuntime();
+  const entries = aliasCache.get(runtime) ?? [];
+  aliasCache.set(runtime, entries);
+  const index = entries.findIndex(
+    (entry) => entry.cls === cls && entry.key.length === key.length && entry.key.every((arg, i) => arg === key[i])
   );
-  if (found) return found;
-  const alias = new PyTypingAlias(cls, args);
-  known.push(alias);
-  return alias;
+  const entry = index === -1 ? { cls, key, alias: new PyTypingAlias(cls, args()) } : entries.splice(index, 1)[0];
+  entries.push(entry);
+  if (entries.length > 128) entries.shift();
+  return entry.alias;
 }
 
 function isGenericParameter(value: PyValue): boolean {
@@ -350,6 +385,26 @@ for (const cls of [typeVarClass, typeVarTupleClass, paramSpecClass]) {
   property(cls, '__name__', (self) => (self as PyTypeParam).name);
   property(cls, '__module__', () => '__main__');
   property(cls, '__default__', (self) => (self as PyTypeParam).part('default', NoDefault));
+}
+method(typeVarClass, '__typing_prepare_subst__', 'expected', 2, 2, (self, [alias, supplied]) => {
+  const param = self as PyTypeParam;
+  const params = toArray(getAttribute(alias, '__parameters__'));
+  const index = params.indexOf(param);
+  const args = supplied as PyTuple;
+  if (index < args.items.length) return args;
+  const fallback = param.part('default', NoDefault);
+  if (index === args.items.length && fallback !== NoDefault) return newTuple([...args.items, fallback]);
+  throw typeError(
+    `Too few arguments for ${pyRepr(alias)}; actual ${args.items.length}, expected at least ${index + 1}`
+  );
+});
+for (const [cls, helper] of [
+  [paramSpecClass, '_paramspec_prepare_subst'],
+  [typeVarTupleClass, '_typevartuple_prepare_subst'],
+] as const) {
+  method(cls, '__typing_prepare_subst__', 'expected', 2, 2, (self, args) =>
+    callValue(currentRuntime().importModule('typing').dict.get(helper) as PyValue, [self, ...args])
+  );
 }
 property(typeVarClass, '__bound__', (self) => (self as PyTypeParam).part('bound', None));
 property(typeVarClass, '__constraints__', (self) => (self as PyTypeParam).part('constraints', newTuple([])));

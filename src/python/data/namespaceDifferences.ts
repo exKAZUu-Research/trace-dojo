@@ -2047,12 +2047,12 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ],
       [],
     ],
-    'typing.ParamSpec': [['__typing_subst__', '__typing_prepare_subst__', '__reduce__'], []],
+    'typing.ParamSpec': [['__typing_subst__', '__reduce__'], []],
     'typing.ParamSpecArgs': [['__module__'], []],
     'typing.ParamSpecKwargs': [['__module__'], []],
     'typing.TypeAliasType': [['__iter__', '__reduce__'], []],
     'typing.TypeVar': [['__reduce__'], []],
-    'typing.TypeVarTuple': [['__typing_subst__', '__typing_prepare_subst__', '__reduce__'], []],
+    'typing.TypeVarTuple': [['__typing_subst__', '__reduce__'], []],
     'unicodedata.UCD': [['__getattribute__', '__module__'], []],
     'uuid.SafeUUID': [
       [
