@@ -102,13 +102,6 @@ export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
     builtin('take_asyncgens', 'none', 0, 0, () => newList(takeUnfinishedAsyncGenerators(runtime)))
   );
   define(
-    'report',
-    builtin('report', 'one', 1, 1, ([message]) => {
-      pyStr(message as PyValue);
-      return None;
-    })
-  );
-  define(
     'coroutine_repr',
     builtin('coroutine_repr', 'one', 1, 1, ([coroutine]) => {
       if (!(coroutine instanceof PyGenerator)) return pyStr(getAttribute(coroutine as PyValue, '__qualname__'));

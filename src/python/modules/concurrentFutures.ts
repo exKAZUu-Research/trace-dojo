@@ -8,6 +8,8 @@ import { registerSourceModule } from '../sourceModules';
 const BASE_SOURCE = String.raw`
 __author__ = 'Brian Quinlan (brian@sweetapp.com)'
 import collections
+import logging
+import weakref
 import threading
 from _thread import _monotonic
 from itertools import islice
@@ -27,12 +29,7 @@ _STATE_TO_DESCRIPTION_MAP = {
     CANCELLED_AND_NOTIFIED: "cancelled",
     FINISHED: "finished"
 }
-class _Logger:
-    def critical(self, *args, **kwargs):
-        pass
-    def exception(self, *args, **kwargs):
-        pass
-LOGGER = _Logger()
+LOGGER = logging.getLogger('concurrent.futures')
 class Error(Exception):
     """Base class for all future-related exceptions."""
 class CancelledError(Error):
@@ -351,7 +348,7 @@ class Executor(object):
             )
         else:
             fs = [self.submit(fn, *args) for args in zipped_iterables]
-        executor_weakref = lambda: self
+        executor_weakref = weakref.ref(self)
         def result_iterator():
             try:
                 fs.reverse()
@@ -389,6 +386,7 @@ __author__ = 'Brian Quinlan (brian@sweetapp.com)'
 from concurrent.futures import _base
 import itertools
 import queue
+import weakref
 import threading
 _CPU_COUNT = 8
 _threads_queues = {}
@@ -444,6 +442,7 @@ def _worker(executor_reference, ctx, work_queue):
     try:
         ctx.initialize()
     except BaseException:
+        _base.LOGGER.critical('Exception in initializer:', exc_info=True)
         executor = executor_reference()
         if executor is not None:
             executor._initializer_failed()
@@ -517,12 +516,14 @@ class ThreadPoolExecutor(_base.Executor):
     def _adjust_thread_count(self):
         if self._idle_semaphore.acquire(timeout=0):
             return
+        def weakref_cb(_, q=self._work_queue):
+            q.put(None)
         num_threads = len(self._threads)
         if num_threads < self._max_workers:
             thread_name = '%s_%d' % (self._thread_name_prefix or self,
                                      num_threads)
             t = threading.Thread(name=thread_name, target=_worker,
-                                 args=(lambda: self,
+                                 args=(weakref.ref(self, weakref_cb),
                                        self._create_worker_context(),
                                        self._work_queue))
             t.start()

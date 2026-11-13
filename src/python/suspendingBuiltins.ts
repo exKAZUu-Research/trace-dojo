@@ -11,7 +11,7 @@ import { SetTable } from './setTable';
 import type { Suspension } from './suspendingEvaluator';
 import { callSuspending, itemsSuspending, iterateSuspending } from './threadIteration';
 import { registerSuspendingConstructor, registerSuspendingVariant, type SuspendingNative } from './threads';
-import { addUpdatePair, sortByKeys } from './typeContainers';
+import { addUpdatePair, DetachedListSort, sortByKeys } from './typeContainers';
 import {
   dictClass,
   frozensetClass,
@@ -128,17 +128,19 @@ function* sortSuspending(list: PyList, kwargs: Kwargs): Suspension<void> {
   if (unexpected !== undefined) throw typeError(`sort() got an unexpected keyword argument '${unexpected}'`);
   const key = kwargs?.get('key') ?? None;
   const reverse = isTruthy(kwargs?.get('reverse') ?? false);
-  const original = list.replaceItems([]);
-  currentRuntime().handToNative(original);
+  const sorting = new DetachedListSort(list);
+  const original = sorting.items;
   try {
     const keys: PyValue[] = [];
     if (key === None) keys.push(...original);
     else for (const item of original) keys.push(yield* callSuspending(key, [item]));
-    sortByKeys(list, original, keys, reverse);
+    sortByKeys(original, keys, reverse);
   } catch (error) {
-    if (list.items.length === 0) list.replaceItems(original);
-    throw error;
+    throw sorting.capture(error);
+  } finally {
+    sorting.restore();
   }
+  sorting.checkMutation();
 }
 
 // Builtins that read an iterable item by item ------------------------------------------------------------------------------

@@ -39,6 +39,7 @@ import {
 } from './setOperations';
 import { SetTable } from './setTable';
 import { StringBuilder } from './stringBuilder';
+import { TemporaryScope } from './temporaryScope';
 import { timsort } from './timsort';
 import {
   addNote,
@@ -220,41 +221,65 @@ function indexBound(value: PyValue | undefined, fallback: number, length: number
 
 /** Sorts a list in place, stably, with keys computed once each, as `list.sort` does. */
 export function sortList(list: PyList, key: PyValue, reverse: boolean): void {
-  let modified = false;
-  // CPython also reports a list that was filled and emptied again during the sort, which the final length hides.
-  const itemsDuringSort = new Proxy<PyValue[]>([], {
-    set(target, property, value: unknown) {
-      if (property !== 'length') modified = true;
+  const sorting = new DetachedListSort(list);
+  try {
+    sortDetachedItems(sorting.items, key, reverse);
+  } catch (error) {
+    throw sorting.capture(error);
+  } finally {
+    sorting.restore();
+  }
+  sorting.checkMutation();
+}
+
+export class DetachedListSort {
+  readonly items: PyValue[];
+  private modified = false;
+  private readonly scope = new TemporaryScope(currentRuntime().frame.temporaries);
+  private readonly temporaryItems = new Proxy<PyValue[]>([], {
+    set: (target, property, value: unknown) => {
+      if (property !== 'length') this.modified = true;
       return Reflect.set(target, property, value);
     },
   });
-  const items = list.replaceItems(itemsDuringSort);
-  // The list no longer holds its items while the key function and the comparisons run.
-  currentRuntime().handToNative(items);
-  try {
-    sortDetachedItems(items, key, reverse);
-    modified ||= list.items !== itemsDuringSort;
-  } finally {
-    list.replaceItems(items);
+
+  constructor(private readonly list: PyList) {
+    this.items = list.replaceItems(this.temporaryItems);
+    currentRuntime().handToNative(this.items);
   }
-  if (modified) throw valueError('list modified during sort');
+
+  capture(error: unknown): unknown {
+    return this.scope.capture(error);
+  }
+
+  restore(): void {
+    this.modified ||= this.list.items !== this.temporaryItems;
+    const discarded = this.list.replaceItems(this.items);
+    this.scope.release(discarded);
+  }
+
+  checkMutation(): void {
+    if (this.modified) throw valueError('list modified during sort');
+  }
 }
 
-/** Puts the items `sortSuspending` took out of a list back in the order of their keys, stably. */
-export function sortByKeys(list: PyList, original: PyValue[], keys: PyValue[], reverse: boolean): void {
+/** Sorts detached list items by precomputed keys, restoring their current order even when comparison raises. */
+export function sortByKeys(original: PyValue[], keys: PyValue[], reverse: boolean): void {
   const runtime = currentRuntime();
+  const values = [...original];
   const order = original.map((_, index) => index);
-  timsort(
-    order,
-    (left: number, right: number) => {
-      runtime.spend();
-      return lessThan(keys[left], keys[right]);
-    },
-    reverse
-  );
-  const modified = list.items.length > 0;
-  list.replaceItems(order.map((index) => original[index]));
-  if (modified) throw valueError('list modified during sort');
+  try {
+    timsort(
+      order,
+      (left: number, right: number) => {
+        runtime.spend();
+        return lessThan(keys[left], keys[right]);
+      },
+      reverse
+    );
+  } finally {
+    for (const [index, source] of order.entries()) original[index] = values[source];
+  }
 }
 
 function sortDetachedItems(items: PyValue[], key: PyValue, reverse: boolean): void {

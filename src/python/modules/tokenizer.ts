@@ -288,9 +288,9 @@ export class Tokenizer {
     const line = this.lines[this.row];
     const text = line.slice(this.index);
     const start = this.position();
-    const end: [number, number] = [start[0], start[1] + 1];
+    const end: [number, number] = [start[0], start[1] + (text.length || 1)];
     const type = blank || this.depth > 0 || !this.lineHasTokens ? TOKEN_TYPES.NL : TOKEN_TYPES.NEWLINE;
-    const token = this.make(type, text.replace(/^\r/, ''), start, end, this.row);
+    const token = this.make(type, text, start, end, this.row);
     if (type === TOKEN_TYPES.NEWLINE) this.lineHasTokens = false;
     this.nextLine(this.depth === 0);
     return token;
@@ -385,6 +385,7 @@ export class Tokenizer {
     yield this.plainString(quoteStart, quote, prefix);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Quote endings and escaped physical newlines share one lexical cursor and EOF handling.
   private plainString(quoteStart: number, quote: string, prefix: string): Token {
     const firstRow = this.row;
     const start = this.position();
@@ -392,26 +393,18 @@ export class Tokenizer {
     for (;;) {
       const line = this.lines[this.row];
       if (index >= line.length || (quote.length === 1 && line[index] === '\n')) {
-        if (quote.length === 1) {
-          throw new TokenizeError(
-            `unterminated string literal (detected at line ${this.row + 1})`,
-            start[0],
-            start[1] + prefix.length + 1
-          );
-        }
-        this.row++;
+        if (quote.length === 1) throw this.unterminatedString(quote, start, prefix);
+        this.nextStringLine(quote, start, prefix);
         index = 0;
-        if (!this.ensureLine()) {
-          throw new TokenizeError(
-            `unterminated triple-quoted string literal (detected at line ${this.row})`,
-            start[0],
-            start[1] + prefix.length + 1
-          );
-        }
         continue;
       }
-      if (line[index] === '\\') index += 2;
-      else if (line.startsWith(quote, index)) break;
+      if (line[index] === '\\') {
+        const newline = line[index + 1] === '\n' || line.slice(index + 1, index + 3) === '\r\n';
+        if (newline) {
+          this.nextStringLine(quote, start, prefix);
+          index = 0;
+        } else index += 2;
+      } else if (line.startsWith(quote, index)) break;
       else index++;
     }
     this.index = index + quote.length;
@@ -421,6 +414,25 @@ export class Tokenizer {
       start,
       this.position(),
       firstRow
+    );
+  }
+
+  private nextStringLine(quote: string, start: [number, number], prefix: string): void {
+    this.row++;
+    if (!this.ensureLine()) throw this.unterminatedString(quote, start, prefix, this.row);
+  }
+
+  private unterminatedString(
+    quote: string,
+    start: [number, number],
+    prefix: string,
+    line = this.row + 1
+  ): TokenizeError {
+    const kind = quote.length === 1 ? 'string' : 'triple-quoted string';
+    return new TokenizeError(
+      `unterminated ${kind} literal (detected at line ${line})`,
+      start[0],
+      start[1] + prefix.length + 1
     );
   }
 
