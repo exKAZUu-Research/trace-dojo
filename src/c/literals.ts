@@ -4,7 +4,7 @@ import { type CType, DOUBLE, FLOAT, INT, INT_PROPERTIES, type IntName, LDOUBLE }
 import { unsupported } from './unsupported';
 
 /** The type and value of a number literal, as C17's rules for integer constants choose the type. */
-export function parseNumber(text: string, row: number): { type: CType; value: Scalar } {
+export function parseNumber(text: string, row: number, preprocessing = false): { type: CType; value: Scalar } {
   const fail = (): never => {
     throw new CompileError([{ row, message: `数「${text}」の書き方に誤りがあります。` }]);
   };
@@ -15,7 +15,7 @@ export function parseNumber(text: string, row: number): { type: CType; value: Sc
     if (isHex) unsupported(row, '16進数の浮動小数点数のリテラル');
     return parseFloating(text, fail);
   }
-  return parseInteger(text, row, isHex, fail);
+  return parseInteger(text, row, isHex, fail, preprocessing);
 }
 
 function parseFloating(text: string, fail: () => never): { type: CType; value: Scalar } {
@@ -27,8 +27,14 @@ function parseFloating(text: string, fail: () => never): { type: CType; value: S
   return { type: suffix === 'l' ? LDOUBLE : DOUBLE, value };
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- C suffix and radix rules choose from one ordered set of integer types; splitting them obscures that selection.
-function parseInteger(text: string, row: number, isHex: boolean, fail: () => never): { type: CType; value: Scalar } {
+// code-gauge-allow functionCognitiveComplexity 19 -- C suffix and radix rules choose from one ordered set of integer types; splitting them obscures that selection.
+function parseInteger(
+  text: string,
+  row: number,
+  isHex: boolean,
+  fail: () => never,
+  preprocessing: boolean
+): { type: CType; value: Scalar } {
   const match = /^(0[xX][\da-fA-F]+|\d+)([uUlL]*)$/.exec(text);
   if (!match) return fail();
   const [, digits, rawSuffix] = match;
@@ -40,14 +46,19 @@ function parseInteger(text: string, row: number, isHex: boolean, fail: () => nev
   if (isOctal && /[89]/.test(digits)) fail();
   const value = BigInt(isOctal ? `0o${digits.slice(1)}` : digits);
   for (const name of integerCandidates(suffix.includes('u'), suffix.includes('l'), !isHex && !isOctal)) {
-    if (value <= INT_PROPERTIES[name].max) {
-      const type: CType = { kind: 'int', name };
-      return { type, value: INT_PROPERTIES[name].size === 8 ? value : Number(value) };
+    const candidate = preprocessing ? widestCandidate(name) : name;
+    if (value <= INT_PROPERTIES[candidate].max) {
+      const type: CType = { kind: 'int', name: candidate };
+      return { type, value: INT_PROPERTIES[candidate].size === 8 ? value : Number(value) };
     }
   }
   // clang gives a decimal literal too large for long long the type unsigned long long, with a warning.
   if (value <= INT_PROPERTIES.ullong.max) return { type: { kind: 'int', name: 'ulong' }, value };
   throw new CompileError([{ row, message: `数「${text}」は大きすぎて、どの整数の型にも入りません。` }]);
+}
+
+function widestCandidate(name: IntName): IntName {
+  return INT_PROPERTIES[name].signed ? 'long' : 'ulong';
 }
 
 /** The types an integer constant may have, in the order C17 tries them. */

@@ -1,6 +1,8 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { type LogicalLine, type PPToken, spell, tokenize } from './lexer';
 import { evaluatePreprocessorCondition } from './preprocessorCondition';
+import { TokenStream } from './tokenStream';
 import { unsupported } from './unsupported';
 
 /** A macro, as `#define` records it. */
@@ -59,6 +61,7 @@ interface Conditional {
 const CONDITIONAL_DIRECTIVES = new Set(['if', 'ifdef', 'ifndef', 'elif', 'elifdef', 'elifndef', 'else', 'endif']);
 
 class Preprocessor {
+  private readonly budget = new ExecutionBudget();
   private readonly macros = new Map<string, Macro>();
   private readonly includes: IncludedHeader[] = [];
   private readonly included = new Set<string>();
@@ -92,7 +95,7 @@ class Preprocessor {
   }
 
   run(source: string): PreprocessedSource {
-    const { lines, rowCount } = tokenize(source);
+    const { lines, rowCount } = tokenize(source, this.budget);
     const output: string[][] = Array.from({ length: rowCount }, () => []);
     const emit = (tokens: PPToken[]): void => {
       for (const token of tokens) output[token.row]?.push(token.text);
@@ -294,7 +297,7 @@ class Preprocessor {
     const wasInHeader = this.inHeader;
     this.inHeader = true;
     try {
-      const { lines } = tokenize(found.text);
+      const { lines } = tokenize(found.text, this.budget);
       // A header's tokens all take the row of its #include, where its declarations become visible.
       for (const line of lines) {
         line.row = row;
@@ -348,10 +351,8 @@ class Preprocessor {
   // code-gauge-allow functionCognitiveComplexity 23 -- Macro recursion, hide sets, and argument substitution share the token worklist.
   private expand(input: PPToken[]): PPToken[] {
     const output: PPToken[] = [];
-    const queue = [...input];
-    let index = 0;
-    while (index < queue.length) {
-      const token = queue[index++];
+    const queue = new TokenStream(input, this.budget);
+    for (let token = queue.take(); token; token = queue.take()) {
       const macro = token.kind === 'identifier' ? this.macros.get(token.text) : undefined;
       if (macro?.dynamic && !token.hide?.has(macro.name)) {
         output.push({
@@ -371,48 +372,45 @@ class Preprocessor {
       if (!macro.params) {
         const hide = new Set([...(token.hide ?? []), macro.name]);
         const replacement = this.substitute(macro, [], hide, token);
-        queue.splice(index, 0, ...replacement);
+        queue.prepend(replacement);
         continue;
       }
-      if (queue[index]?.text !== '(') {
+      if (queue.peek()?.text !== '(') {
         output.push(token);
         continue;
       }
-      const { args, end } = this.collectArguments(queue, index, macro, token.row);
-      const closing = queue[end];
+      const { args, closing } = this.collectArguments(queue, macro, token.row);
       const hide = new Set([...[...(token.hide ?? [])].filter((name) => closing.hide?.has(name) ?? false), macro.name]);
       const replacement = this.substitute(macro, args, hide, token);
-      queue.splice(index - 1, end - index + 2, ...replacement);
-      index--;
+      queue.prepend(replacement);
     }
     return output;
   }
 
+  // code-gauge-allow functionNcss 31 -- Nested argument scanning and its final arity check share the macro invocation.
   // code-gauge-allow functionCognitiveComplexity 23 -- Nested parentheses, separators, and the closing token share one argument cursor.
-  private collectArguments(
-    queue: PPToken[],
-    open: number,
-    macro: Macro,
-    row: number
-  ): { args: PPToken[][]; end: number } {
+  private collectArguments(queue: TokenStream, macro: Macro, row: number): { args: PPToken[][]; closing: PPToken } {
     const params = macro.params as string[];
     const args: PPToken[][] = [[]];
     let depth = 0;
-    let index = open + 1;
+    queue.take();
+    let closing: PPToken;
     for (;;) {
-      const token = queue[index];
+      const token = queue.take();
       if (!token) {
         throw new CompileError([{ row, message: `マクロ「${macro.name}」の呼び出しが ) で閉じられていません。` }]);
       }
       if (token.text === '(') depth++;
       if (token.text === ')') {
-        if (depth === 0) break;
+        if (depth === 0) {
+          closing = token;
+          break;
+        }
         depth--;
       }
       const isSeparator = token.text === ',' && depth === 0 && !(macro.variadic && args.length > params.length);
       if (isSeparator) args.push([]);
       else (args.at(-1) as PPToken[]).push(token);
-      index++;
     }
     const expected = params.length + (macro.variadic ? 1 : 0);
     if (args.length === 1 && args[0].length === 0 && params.length === 0) args.length = 0;
@@ -424,7 +422,7 @@ class Preprocessor {
           : `マクロ「${macro.name}」の引数が多すぎます。`;
       throw new CompileError([{ row, message }]);
     }
-    return { args, end: index };
+    return { args, closing };
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- C's substitution rules for #, ##, and arguments.
@@ -440,9 +438,10 @@ class Preprocessor {
     const body = macro.body;
     for (let index = 0; index < body.length; index++) {
       const token = body[index];
+      this.budget.spend(1 + hide.size);
       if (token.text === '#' && macro.params) {
         const arg = argumentOf(body[index + 1]) as PPToken[];
-        result.push({ kind: 'string', text: stringify(arg), row: call.row, space: token.space });
+        result.push({ kind: 'string', text: stringify(arg, this.budget), row: call.row, space: token.space });
         index++;
         continue;
       }
@@ -451,23 +450,38 @@ class Preprocessor {
       if (token.text === '##') continue;
       const arg = argumentOf(token);
       const copies = arg
-        ? copyArgument(pastesNext || pastedPrevious ? arg : this.expand(arg), call.row, token.space)
+        ? copyArgument(pastesNext || pastedPrevious ? arg : this.expand(arg), call.row, token.space, this.budget)
         : [{ ...token, row: call.row }];
-      if (pastedPrevious) {
-        const previous = result.pop();
-        const next = copies[0];
-        result.push(previous && next ? paste(previous, next, call.row) : (previous ?? next), ...copies.slice(1));
-      } else if (copies.length === 0 && pastesNext) result.push(undefined);
-      else result.push(...copies);
+      appendSubstitution(result, copies, pastedPrevious, pastesNext, call.row, this.budget);
     }
     return result
       .filter((token): token is PPToken => token !== undefined)
-      .map((token, position) => ({
-        ...token,
-        space: position === 0 ? call.space : token.space,
-        hide: new Set([...(token.hide ?? []), ...hide]),
-      }));
+      .map((token, position) => {
+        this.budget.spend(1 + (token.hide?.size ?? 0) + hide.size);
+        return {
+          ...token,
+          space: position === 0 ? call.space : token.space,
+          hide: new Set([...(token.hide ?? []), ...hide]),
+        };
+      });
   }
+}
+
+function appendSubstitution(
+  result: (PPToken | undefined)[],
+  copies: PPToken[],
+  pastedPrevious: boolean,
+  pastesNext: boolean,
+  row: number,
+  budget: ExecutionBudget
+): void {
+  if (pastedPrevious) {
+    const previous = result.pop();
+    const next = copies[0];
+    result.push(previous && next ? paste(previous, next, row, budget) : (previous ?? next));
+    for (let i = 1; i < copies.length; i++) result.push(copies[i]);
+  } else if (copies.length === 0 && pastesNext) result.push(undefined);
+  else for (const copy of copies) result.push(copy);
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Parameter names and variadic placement are validated in one sequential macro signature.
@@ -511,7 +525,8 @@ function checkStringizing(body: PPToken[], params: string[], variadic: boolean, 
   }
 }
 
-function stringify(tokens: PPToken[]): string {
+function stringify(tokens: PPToken[], budget: ExecutionBudget): string {
+  for (const token of tokens) budget.spend(token.text.length);
   const text = tokens
     .map((token, index) => {
       const spelled =
@@ -524,9 +539,9 @@ function stringify(tokens: PPToken[]): string {
   return `"${text}"`;
 }
 
-function paste(left: PPToken, right: PPToken, row: number): PPToken {
+function paste(left: PPToken, right: PPToken, row: number, budget: ExecutionBudget): PPToken {
   const text = left.text + right.text;
-  const { lines } = tokenize(text);
+  const { lines } = tokenize(text, budget);
   const tokens = lines.flatMap((line) => line.tokens);
   if (tokens.length !== 1) {
     throw new CompileError([{ row, message: `## でつないだ「${text}」は、1つの字句になりません。` }]);
@@ -539,6 +554,7 @@ function rejectTrigraphs(tokens: PPToken[]): void {
   if (token) unsupported(token.row, 'トライグラフ');
 }
 
-function copyArgument(tokens: PPToken[], row: number, space: boolean): PPToken[] {
+function copyArgument(tokens: PPToken[], row: number, space: boolean, budget: ExecutionBudget): PPToken[] {
+  budget.spend(tokens.length);
   return tokens.map((token, index) => ({ ...token, row, space: index === 0 ? space : token.space }));
 }

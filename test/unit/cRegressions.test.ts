@@ -1163,3 +1163,36 @@ test('leading BOM and supplementary C17 identifier characters are accepted', () 
   });
   expect(executeProgram('c', 'int ☃=1;int main(void){}').kind).toBe('compileError');
 });
+
+test('preprocessor integer candidates use intmax widths before choosing signedness', () => {
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>
+#if 0xffffffff < -1
+#define A 1
+#else
+#define A 0
+#endif
+#if ~037777777777 < 0
+#define B 1
+#else
+#define B 0
+#endif
+#if 0xffffffffU < -1
+#define C 1
+#else
+#define C 0
+#endif
+int main(void){printf("%d %d %d\\n",A,B,C);}`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '0 1 1\n', uncaughtException: undefined });
+});
+
+test.each(['object', 'function'])('macro expansion obeys the operation budget: %s', (form) => {
+  const definitions = Array.from({ length: 24 }, (_, i) =>
+    form === 'object' ? `#define M${i} M${i + 1} M${i + 1}` : `#define M${i}(x) M${i + 1}(x) M${i + 1}(x)`
+  );
+  const source = `${definitions.join('\n')}\n#define M24${form === 'function' ? '(x) x' : ' 1'}\nint main(void){int x=M0${form === 'function' ? '(1)' : ''};}`;
+  expect(executeProgram('c', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});

@@ -140,7 +140,7 @@ class ConditionParser {
       }
     }
     if (token.kind === 'number') {
-      const parsed = parseNumber(token.text, this.row);
+      const parsed = parseNumber(token.text, this.row, true);
       if (parsed.type.kind !== 'int') this.fail();
       return conditionValue(BigInt(parsed.value), !INT_PROPERTIES[parsed.type.name].signed);
     }

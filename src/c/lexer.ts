@@ -1,4 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { isUnicodeIdentifier, isUnicodeSpace } from './unicode';
 import { unsupported } from './unsupported';
 
@@ -100,8 +101,11 @@ function isIdentifierPart(char: string): boolean {
  * Splits a source into logical lines of preprocessing tokens, removing comments and backslash-newlines as C's
  * translation phases 1–3 do, while keeping the row where each token starts.
  */
-export function tokenize(source: string): { lines: LogicalLine[]; comments: SourceComment[]; rowCount: number } {
-  return new Lexer(source).tokenize();
+export function tokenize(
+  source: string,
+  budget = new ExecutionBudget()
+): { lines: LogicalLine[]; comments: SourceComment[]; rowCount: number } {
+  return new Lexer(source, budget).tokenize();
 }
 
 const TRIGRAPHS: Record<string, string> = {
@@ -129,12 +133,17 @@ class Lexer {
   private current: LogicalLine = { tokens: [], row: 0 };
   private space = false;
 
-  constructor(source: string) {
+  constructor(
+    source: string,
+    private readonly budget: ExecutionBudget
+  ) {
+    budget.spend(source.length);
     const splice = /\?\?\/(?:\r?\n)/.exec(source);
     if (splice) unsupported(source.slice(0, splice.index).split('\n').length - 1, 'トライグラフ');
     this.original = source;
     let translated = '';
     for (let index = 0; index < source.length; index++) {
+      if (index % 64 === 0) budget.spend(0);
       this.origins.push(index);
       const replacement = source.startsWith('??', index) ? TRIGRAPHS[source[index + 2]] : undefined;
       translated += replacement ?? source[index];
@@ -144,11 +153,12 @@ class Lexer {
     this.source = translated;
   }
 
-  // code-gauge-allow functionNcss 34 -- Logical-line and comment handling share row and splice state; splitting the scanner loop would distribute that state.
+  // code-gauge-allow functionNcss 35 -- Logical-line and comment handling share row and splice state; splitting the scanner loop would distribute that state.
   tokenize(): { lines: LogicalLine[]; comments: SourceComment[]; rowCount: number } {
     const { source } = this;
     const length = source.length;
     while (this.index < length) {
+      this.budget.spend();
       this.skipSplices();
       if (this.index >= length) break;
       const char = this.peek();
@@ -215,6 +225,7 @@ class Lexer {
   };
 
   private readonly take = (): string => {
+    if (this.index % 64 === 0) this.budget.spend(0);
     this.skipSplices();
     const char = this.peek();
     this.index += char.length;
