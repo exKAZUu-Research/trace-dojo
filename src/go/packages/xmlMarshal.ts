@@ -5,7 +5,7 @@ import { currentRuntime } from '../native';
 import { pointerTo, type Type, typeIdentityKey, typeString, underlying } from '../types';
 import { type GoArray, GoStruct, type Iface, Pointer, type Slice, type Value } from '../values';
 import { ERR_SHORT_WRITE } from './io';
-import { TEXT_MARSHALER } from './jsonArshal';
+import { TEXT_MARSHALER } from './jsonArshalCore';
 import {
   bitsOf,
   callValueMethod,

@@ -20,7 +20,7 @@ import {
   ERR_UNKNOWN_NAME,
   MarshalerError,
   SemanticError,
-} from './jsonArshal';
+} from './jsonArshalCore';
 import { IoError, pointerLastToken, SyntacticError } from './jsonText';
 import {
   EOF_ERROR,

@@ -8,15 +8,8 @@ import { ANY, BASIC, ERROR_TYPE, pointerTo, sliceOf, type Type } from '../types'
 import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { BUFFER, BYTES_PACKAGE } from './bytes';
 import { IO_READER, IO_WRITER } from './io';
-import {
-  marshalEncode,
-  MARSHALER,
-  NUMBER,
-  RAW_MESSAGE,
-  unmarshalDecode,
-  UNMARSHALER,
-  type UnmarshalOptions,
-} from './jsonArshal';
+import { marshalEncode, unmarshalDecode } from './jsonArshal';
+import { MARSHALER, NUMBER, RAW_MESSAGE, UNMARSHALER, type UnmarshalOptions } from './jsonArshalCore';
 import {
   INVALID_UNMARSHAL_ERROR,
   INVALID_UTF8_ERROR,

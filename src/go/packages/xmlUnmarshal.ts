@@ -4,7 +4,7 @@ import { currentRuntime } from '../native';
 import { grownCapacity } from '../sliceOps';
 import { pointerTo, type Type, typeString } from '../types';
 import { GoStruct, type Iface, Pointer, Slice, type Value } from '../values';
-import { TEXT_UNMARSHALER } from './jsonArshal';
+import { TEXT_UNMARSHALER } from './jsonArshalCore';
 import { bitsOf, callValueMethod, implementsInterface, kindOf, newVariable, typeName, zeroValue } from './reflection';
 import { parseFloat, parseInt, parseUint, STRCONV_PACKAGE } from './strconv';
 import { byteSlice } from './support';

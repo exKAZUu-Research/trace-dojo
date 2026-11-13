@@ -1,7 +1,8 @@
 import { encodeRune, RUNE_ERROR } from '../literals';
 import { type Type } from '../types';
 import type { Value } from '../values';
-import { marshalEncode, MARSHALER } from './jsonArshal';
+import { marshalEncode } from './jsonArshal';
+import { MARSHALER } from './jsonArshalCore';
 import { marshalErrorToGo } from './jsonErrors';
 import { EncoderState } from './jsonText';
 import { formatJSONFloat } from './jsonWire';
