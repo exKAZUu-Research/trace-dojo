@@ -1,7 +1,7 @@
 import { compareValues, inspectRange, rangeCovers, rEql, rEquals, spaceship, toIndex, toS } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
-import { hashKeyOf } from './hashes';
+import { structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -274,7 +274,7 @@ def('Range', 'eql?', 1, function* (self: RRange, [other]) {
   );
 });
 def('Range', 'hash', 0, function* (self: RRange) {
-  return BigInt((yield* hashKeyOf(self)).length);
+  return yield* structuralHashValue(self);
 });
 // code-gauge-allow functionNcss 31 -- Ruby's method takes these argument forms, which the branches mirror.
 // code-gauge-allow functionCognitiveComplexity 27 -- Ruby's method takes these argument forms, which the branches mirror.

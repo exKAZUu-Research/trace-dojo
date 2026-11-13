@@ -1,7 +1,7 @@
 import { inspect, inspectHash, rEql, rEquals } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, rubyError, typeError } from './errors';
-import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash } from './hashes';
+import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash, structuralHashValue } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, respondsTo } from './interp';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -396,7 +396,7 @@ def('Hash', 'sum', [0, 1], function* (self: RHash, args, block) {
   return yield* sum(self, args, block);
 });
 
-def('Hash', 'hash', 0, (self: RHash) => BigInt(self.map.size));
+def('Hash', 'hash', 0, (self: RHash) => structuralHashValue(self));
 def('Hash', 'rehash', 0, (self: RHash) => {
   rehash(self);
   return self;

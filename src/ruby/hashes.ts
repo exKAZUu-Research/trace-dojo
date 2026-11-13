@@ -1,14 +1,11 @@
 import { inspect, toInt } from './conversions';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
-import { type HashEntry, NIL, RArray, RBasic, RHash, RObject, RRange, RString, RSymbol, type Value } from './objects';
+import { type HashEntry, RArray, RBasic, RHash, RRange, RString, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, snapshot, str, truthy } from './values';
 
-/**
- * The key a Hash files a value under: equal for keys that are `eql?`, computed without calling the program's methods
- * unless its objects define `hash`.
- */
+/** A bounded structural digest for container hash methods, based on each child's public hash. */
 // code-gauge-allow functionCognitiveComplexity 23 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
 // code-gauge-allow functionNcss 34 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
 export function* hashKeyOf(
@@ -22,69 +19,63 @@ export function* hashKeyOf(
   rt().spend();
   if (value instanceof RBasic && ancestors.includes(value)) {
     cycle.found = true;
-    return 'recursive';
+    return 'cycle';
   }
   const method = classOf(value).findMethod('hash');
   if (method && method.body.kind === 'user') {
     const hash = yield* callMethod(value, 'hash', []);
-    return `u${digest(String(yield* toInt(hash)))}`;
+    return digest(String(yield* toInt(hash)));
   }
-  switch (typeof value) {
-    case 'bigint': {
-      return `i${digest(String(value))}`;
-    }
-    case 'number': {
-      return value === 0 ? 'f0' : `f${digest(String(value))}`;
-    }
-    case 'boolean': {
-      return value ? 'T' : 'F';
-    }
-  }
-  if (value === NIL) return 'N';
-  if (value instanceof RSymbol) return `y${digest(value.name)}`;
-  if (value instanceof RString) return `s${digest(value.s)}`;
   if (value instanceof RArray || value instanceof RRange || value instanceof RHash) {
-    const root = ancestors.length === 0;
     const cached = memo.get(value);
-    if (cached) return root && cycle.found ? 'recursive' : cached;
+    if (cached) return cached;
     ancestors.push(value);
     try {
-      if (value instanceof RArray) {
-        const parts: string[] = [];
-        for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, cycle, memo));
-        const key = `a${digest(JSON.stringify(parts))}`;
-        memo.set(value, key);
-        return root && cycle.found ? 'recursive' : key;
-      }
-      if (value instanceof RRange) {
-        const encoded = `r${JSON.stringify([
-          yield* hashKeyOf(value.begin, ancestors, cycle, memo),
-          value.exclusive,
-          yield* hashKeyOf(value.end, ancestors, cycle, memo),
-        ])}`;
-        const key = `r${digest(encoded)}`;
-        memo.set(value, key);
-        return root && cycle.found ? 'recursive' : key;
-      }
-      const parts: string[] = [];
-      for (const entry of value.map.values()) {
-        parts.push(
-          JSON.stringify([
-            yield* hashKeyOf(entry.key, ancestors, cycle, memo),
-            yield* hashKeyOf(entry.value, ancestors, cycle, memo),
-          ])
-        );
-      }
-      const key = `h${digest(JSON.stringify(parts.toSorted()))}`;
+      const hash = yield* structuralHash(value, ancestors, cycle, memo);
+      const key = digest(String(cycle.found ? 0n : hash));
       memo.set(value, key);
-      return root && cycle.found ? 'recursive' : key;
+      return key;
     } finally {
       ancestors.pop();
     }
   }
-  const custom = value instanceof RObject ? (value.data as { hashKey?: () => string } | undefined) : undefined;
-  if (custom?.hashKey) return custom.hashKey();
-  return `o${(value as RBasic).id}`;
+  return digest(String(yield* toInt(yield* callMethod(value, 'hash', []))));
+}
+
+export function* structuralHashValue(value: RArray | RRange | RHash): Gen<bigint> {
+  const cycle = { found: false };
+  const hash = yield* structuralHash(value, [value], cycle, new WeakMap());
+  return cycle.found ? 0n : hash;
+}
+
+function* structuralHash(
+  value: RArray | RRange | RHash,
+  ancestors: RBasic[],
+  cycle: { found: boolean },
+  memo: WeakMap<RBasic, string>
+): Gen<bigint> {
+  let parts: string[];
+  if (value instanceof RArray) {
+    parts = [];
+    for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, cycle, memo));
+  } else if (value instanceof RRange) {
+    parts = [
+      yield* hashKeyOf(value.begin, ancestors, cycle, memo),
+      value.exclusive ? 'exclusive' : 'inclusive',
+      yield* hashKeyOf(value.end, ancestors, cycle, memo),
+    ];
+  } else {
+    parts = [];
+    for (const entry of value.map.values())
+      parts.push(
+        JSON.stringify([
+          yield* hashKeyOf(entry.key, ancestors, cycle, memo),
+          yield* hashKeyOf(entry.value, ancestors, cycle, memo),
+        ])
+      );
+    parts.sort();
+  }
+  return BigInt(`0x${digest(JSON.stringify(parts))}`);
 }
 
 function digest(text: string): string {
@@ -96,7 +87,7 @@ function digest(text: string): string {
 
 /** Finds the entry for `key`, checking equality even when distinct keys have the same hash. */
 function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; entry: HashEntry | undefined }> {
-  const base = yield* hashKeyOf(key);
+  const base = `h${digest(String(yield* toInt(yield* callMethod(key, 'hash', []))))}`;
   if (hash.bucketVersion !== hash.map.version) rebuildBuckets(hash);
   for (const slot of hash.buckets.get(base) ?? []) {
     const entry = hash.map.get(slot);
@@ -146,7 +137,7 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
   if (hash.iterating > 0) throw runtimeError(hash.iterationError ?? "can't add a new key into hash during iteration");
   rt().chargeSlots(1);
   rt().spend();
-  const stored = key instanceof RString && !key.frozen ? frozenCopy(key) : key;
+  const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
   hash.map.set(slot, { key: stored, value });
   const bucket = hash.buckets.get(base) ?? [];
   bucket.push(slot);

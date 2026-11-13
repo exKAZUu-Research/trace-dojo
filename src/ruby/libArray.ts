@@ -13,7 +13,7 @@ import {
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
-import { hashGet, hashKeyOf, hashSet } from './hashes';
+import { hashGet, hashSet, structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { inject, iterate, nmin, sortBy, sortValues, sum, toArray, uniqValues } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -204,10 +204,7 @@ def('Array', ['inspect', 'to_s'], 0, function* (self: RArray) {
   return str(yield* inspectArray(self));
 });
 def('Array', 'hash', 0, function* (self: RArray) {
-  const key = yield* hashKeyOf(self);
-  let hash = 17n;
-  for (const char of key) hash = (hash * 31n + BigInt(char.codePointAt(0) as number)) % 2_305_843_009_213_693_951n;
-  return hash;
+  return yield* structuralHashValue(self);
 });
 def('Array', '==', 1, function* (self: RArray, [other]) {
   if (!(other instanceof RArray)) {

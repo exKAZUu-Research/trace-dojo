@@ -464,10 +464,10 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
 
 /** `a.eql?(b)`: equal values of the same type, as Hash keys compare. */
 export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
+  if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
   if (typeof a !== typeof b) return false;
   if (typeof a === 'number') return a === b;
   if (a instanceof RString) return b instanceof RString && truthy(yield* callMethod(a, 'eql?', [b]));
-  if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
   if (a instanceof RArray) return b instanceof RArray && (yield* eqlArray(a, b, pairs));
   if (a instanceof RHash) return b instanceof RHash && (yield* eqlHash(a, b, pairs));
   if (a instanceof RRange) return b instanceof RRange && (yield* eqlRange(a, b, pairs));

@@ -16,7 +16,7 @@ import {
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, nameError, rubyError, typeError } from './errors';
-import { hashKeyOf, hashSet } from './hashes';
+import { hashSet } from './hashes';
 import {
   addMethod,
   callMethod,
@@ -123,9 +123,7 @@ def('Kernel', '===', 1, function* (self, [other]) {
 def('Kernel', 'eql?', 1, function* (self, [other]) {
   return yield* rEql(self, other);
 });
-def('Kernel', 'hash', 0, function* (self) {
-  return BigInt(hashString(yield* hashKeyOf(self)));
-});
+def('Kernel', 'hash', 0, (self) => BigInt(hashString(String(objectId(self)))));
 def('Kernel', '<=>', 1, function* (self, [other]) {
   if (classOf(self).findMethod('==')?.owner === rt().c.Comparable) return self === other ? 0n : NIL;
   return self === other || (yield* rEquals(self, other)) ? 0n : NIL;

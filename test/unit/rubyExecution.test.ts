@@ -305,6 +305,31 @@ test.each([
   ['equivalent cyclic graphs', 'a = []; a << a; b = []; c = []; b << c; c << b; h = {a => 1}; p h[b]', '1\n'],
   ['a hash containing itself as a value', 'a = {}\na[:self] = a\nh = {}\nh[a] = 1\np h[a]', '1\n'],
   [
+    'a custom key matching an Integer hash',
+    'class K; def hash = 1.hash; def eql?(x) = x == 1; end; h = {1 => 42}; p h[K.new]',
+    '42\n',
+  ],
+  [
+    'a custom key matching a String hash',
+    'class K; def hash = "a".hash; def eql?(x) = x == "a"; end; h = {"a" => 42}; p h[K.new]',
+    '42\n',
+  ],
+  [
+    'an Array of a custom key matching an Integer Array',
+    'class K; def hash = 1.hash; def eql?(x) = x == 1; end; h = {[1] => 42}; p h[[K.new]]',
+    '42\n',
+  ],
+  [
+    'an Array of a custom key matching a nested Array',
+    'class K; def hash = [1].hash; def eql?(x) = x == [1]; end; h = {[[1]] => 42}; p h[[K.new]]',
+    '42\n',
+  ],
+  [
+    'a String subclass kept as a key',
+    'class S < String; end; s = S.new("a"); h = {s => 1}; k = h.keys[0]; p k.class, k.equal?(s), k.frozen?',
+    'S\ntrue\nfalse\n',
+  ],
+  [
     'a colliding key after deletion',
     'class Key; def hash; 1; end; end; a = Key.new; b = Key.new; h = {}; h[a] = 1; h[b] = 2; h.delete(a); p h[b]; p h.size',
     '2\n1\n',
