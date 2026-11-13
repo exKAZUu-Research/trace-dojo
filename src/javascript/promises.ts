@@ -37,16 +37,17 @@ interface Timer extends Job {
 }
 
 /**
- * How many operations make a millisecond pass on the simulated clock: a busy wait as long as a run's time limit then
- * spends a fifth of the operation budget, so a wait the limits allow ends instead of running out of operations.
+ * The milliseconds each read of the clock moves it forward. A busy wait as long as a run's time limit then reads it
+ * `maxMilliseconds / CLOCK_STEP` times, which at about ten operations per poll spends a fifth of the operation budget,
+ * while two reads in a row still mostly see the same millisecond, as on Node.js.
  */
-const OPERATIONS_PER_MILLISECOND = LIMITS.maxOperations / (LIMITS.maxMilliseconds * 5);
+const CLOCK_STEP = (LIMITS.maxMilliseconds * 10 * 5) / LIMITS.maxOperations;
 
 /**
  * The event loop of one run: the microtasks promises queue and the timers `setTimeout` schedules, which run after the
  * program's statements in Node.js's order on a simulated clock, so a program never waits for real time. The clock jumps
- * to each timer it runs and otherwise advances with the operations the program spends, so a loop polling `Date.now()`
- * sees time pass and ends, the same way on every run.
+ * to each timer it runs and otherwise advances only when the program reads it, so a loop polling `Date.now()` sees time
+ * pass and ends, while computation that does not read it leaves timers in the order their delays give.
  */
 export class EventLoop {
   private readonly microtasks: Job[] = [];
@@ -54,18 +55,18 @@ export class EventLoop {
   /** The jobs running now, innermost last. */
   private readonly running: Job[] = [];
   private readonly rejections = new Set<JsObject>();
-  /** The clock's time when it last jumped to a timer, and the operations spent by then. */
+  /** The milliseconds the simulated clock has advanced since the program started, in fractions of a millisecond. */
   private now = 0;
-  private spentAtNow = 0;
   /** The timer whose callback is running, which clearing stops from running again. */
   private runningTimer: Timer | undefined;
   private nextTimerId = 1;
 
   constructor(private readonly runtime: Runtime) {}
 
-  /** The milliseconds the simulated clock has advanced since the program started. */
-  get time(): number {
-    return this.now + Math.floor((this.runtime.budget.spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND);
+  /** Reads the clock for `Date`, which moves it forward by a step: the whole milliseconds since the program started. */
+  readClock(): number {
+    this.now += CLOCK_STEP;
+    return Math.floor(this.now);
   }
 
   enqueue(job: Job): void {
@@ -75,7 +76,7 @@ export class EventLoop {
   addTimer(delay: number, job: Job, repeats: boolean): number {
     const id = this.nextTimerId++;
     const interval = Math.max(1, delay);
-    this.timers.push({ ...job, id, time: this.time + interval, interval: repeats ? interval : undefined });
+    this.timers.push({ ...job, id, time: this.now + interval, interval: repeats ? interval : undefined });
     return id;
   }
 
@@ -99,9 +100,8 @@ export class EventLoop {
       this.drainMicrotasks();
       const timer = this.nextTimer();
       if (!timer) return;
-      // A timer due while the program was busy runs late, as in Node.js, and the clock never goes back.
-      this.now = Math.max(timer.time, this.time);
-      this.spentAtNow = this.runtime.budget.spent;
+      // A timer due while the program was polling the clock runs late, as in Node.js, and the clock never goes back.
+      this.now = Math.max(timer.time, this.now);
       this.runningTimer = timer;
       this.runJob(timer);
       if (this.runningTimer && timer.interval !== undefined)

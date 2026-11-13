@@ -26,12 +26,12 @@ export function newDate(runtime: Runtime, time: number, prototype: JsObject): Js
 
 /**
  * Defines Date, whose calendar arithmetic, parsing, and formatting the host's Date performs on the time value. Local
- * time is the host's time zone, as it is Node.js's, and `Date.now()` advances with the event loop's simulated clock.
+ * time is the host's time zone, as it is Node.js's, and `Date.now()` reads the event loop's simulated clock.
  */
 export function defineDateBuiltins(builder: RealmBuilder): void {
   const prototype = builder.realm.datePrototype;
   const startTime = Date.now();
-  const now = (runtime: Runtime): number => startTime + runtime.eventLoop.time;
+  const now = (runtime: Runtime): number => startTime + runtime.eventLoop.readClock();
   const dateConstructor = builder.defineClass('Date', 7, prototype, (call) => {
     const { runtime, newTarget } = call;
     if (!newTarget) return new Date(now(runtime)).toString();

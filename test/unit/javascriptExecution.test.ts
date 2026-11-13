@@ -799,7 +799,8 @@ for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0
     `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
 function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');
 const s = new Date(); while (new Date() - s < 500); console.log('waited again');
-setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);`,
+setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);
+setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);`,
   ],
   [
     'Object.create with property descriptors',
