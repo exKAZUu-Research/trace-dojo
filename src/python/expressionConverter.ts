@@ -24,7 +24,6 @@ import {
   decodeBytesEscapes,
   decodeEscapes,
   field,
-  fieldNodes,
   hasToken,
   namedChildren,
   rowOf,
@@ -301,7 +300,7 @@ export abstract class ExpressionConverter {
   }
 
   private comparison(node: Node): Expression {
-    let operators = fieldNodes(node, 'operators').map((operator) => operator.type);
+    let operators = node.childrenForFieldName('operators').map((operator) => operator.type);
     if (this.futureFeatures.has('barry_as_FLUFL')) {
       if (operators.includes('!='))
         fail(rowOf(node), 'from __future__ import barry_as_FLUFL の後では、!= の代わりに <> を使ってください。');
@@ -310,7 +309,7 @@ export abstract class ExpressionConverter {
     if (operators.includes('<>')) fail(rowOf(node), '演算子 <> は Python 3 では使えません。!= を使ってください。');
     return {
       kind: 'compare',
-      operands: fieldNodes(node, 'operands').map((operand) => this.expression(operand)),
+      operands: node.childrenForFieldName('operands').map((operand) => this.expression(operand)),
       operators: operators as CompareOperator[],
       row: rowOf(node),
     };
@@ -332,7 +331,7 @@ export abstract class ExpressionConverter {
   }
 
   private subscriptIndex(node: Node): Expression {
-    const indexes = fieldNodes(node, 'subscript');
+    const indexes = node.childrenForFieldName('subscript');
     const hasTrailingComma = children(node).some((child) => child.type === ',');
     // `x[*a]` indexes with the tuple `(*a,)`, as a starred item always makes one.
     if (indexes.length === 1 && !hasTrailingComma && indexes[0].type !== 'list_splat') {
@@ -661,7 +660,7 @@ export abstract class ExpressionConverter {
         this.context = { ...outer, scope };
         this.enterAsync(rowOf(clause), 'async for を使う内包表記は、async def の関数の中にしか書けません。');
       }
-      const rights = fieldNodes(clause, 'right');
+      const rights = clause.childrenForFieldName('right');
       if (rights.length > 1 || hasToken(clause, ',')) {
         fail(rowOf(clause), '内包表記の in の後に複数の式を書くときは、( ) で囲んでください。');
       }

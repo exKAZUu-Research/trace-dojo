@@ -2,7 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
-import { findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
+import { commentTokens, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Module } from './ast';
 import { findBlockNestingError } from './blockNesting';
 import { findFirstSyntaxError } from './headerColons';
@@ -196,7 +196,6 @@ function normalizeIdentifiers(source: string): string {
     let result = '';
     let copied = 0;
     for (const node of tree.rootNode.descendantsOfType('identifier')) {
-      if (!node) continue;
       const normalized = node.text.normalize('NFKC');
       if (normalized === node.text || KEYWORDS.has(normalized)) continue;
       result += source.slice(copied, node.startIndex) + normalized;
@@ -216,21 +215,8 @@ function syntaxErrorsOf(text: string): SourceDiagnostic[] {
 const PYTHON_ANNOTATION_PATTERN = /#[ \t]*atomic[ \t]*$/;
 
 /** The `# atomic` annotations of a module, read from its comment tokens. */
-// code-gauge-allow duplicateLines 15 -- Each language reads its own comment tokens with its own parser.
 export function findPythonTraceAnnotations(source: string): TraceAnnotation[] {
-  const tree = parser.parse(source);
-  if (!tree) throw new Error('The Python parser returned no tree');
-  try {
-    const comments: TraceAnnotation[] = [];
-    const visit = (node: Node): void => {
-      if (node.type === 'comment') comments.push({ index: node.startIndex, text: node.text });
-      for (const child of node.children) if (child) visit(child);
-    };
-    visit(tree.rootNode);
-    return traceAnnotationsIn(comments, PYTHON_ANNOTATION_PATTERN);
-  } finally {
-    tree.delete();
-  }
+  return traceAnnotationsIn(commentTokens(parser, source), PYTHON_ANNOTATION_PATTERN);
 }
 
 /** Parses source text and hands its syntax tree to `use` while the tree is alive. */

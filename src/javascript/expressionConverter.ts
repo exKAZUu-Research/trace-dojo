@@ -8,6 +8,7 @@ import {
   checkBindingName,
   fail,
   field,
+  hasChild,
   keyName,
   nameAnonymous,
   namedChildren,
@@ -128,7 +129,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     if (!this.context.isGenerator) fail(node, 'yield はジェネレータ関数の中にしか書けません。');
     const argumentNode = namedChildren(node).at(0);
     const argument = argumentNode ? this.expression(argumentNode) : undefined;
-    const delegate = node.children.some((child) => child?.type === '*');
+    const delegate = hasChild(node, '*');
     this.context.suspensionCount++;
     return { kind: 'yield', argument, delegate, isAsync: this.context.isAsync, row: rowOf(node) };
   }
@@ -182,10 +183,10 @@ export abstract class ExpressionConverter extends ConverterBase {
     const raw: string[] = [''];
     const expressions: Expression[] = [];
     for (const child of node.children) {
-      if (child?.type === 'template_substitution') {
+      if (child.type === 'template_substitution') {
         expressions.push(this.expression(namedChildren(child)[0]));
         raw.push('');
-      } else if (child?.type === 'string_fragment' || child?.type === 'escape_sequence') {
+      } else if (child.type === 'string_fragment' || child.type === 'escape_sequence') {
         raw[raw.length - 1] += child.text.replaceAll(/\r\n?/g, '\n');
       }
     }
@@ -619,7 +620,7 @@ function elementsOf<T>(node: Node, convert: (child: Node) => T): (T | undefined)
   const elements: (T | undefined)[] = [];
   let expectsElement = true;
   for (const child of node.children) {
-    if (!child || child.type === '[' || child.type === ']' || child.type === 'comment') continue;
+    if (child.type === '[' || child.type === ']' || child.type === 'comment') continue;
     if (child.type === ',') {
       if (expectsElement) elements.push(undefined);
       expectsElement = true;

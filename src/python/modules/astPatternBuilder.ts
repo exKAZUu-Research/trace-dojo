@@ -1,7 +1,7 @@
 // Builds the match statements of CPython's `ast` module, with their patterns.
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import { children, field, fieldNodes, namedChildren } from '../convertNodes';
+import { children, field, namedChildren } from '../convertNodes';
 import { Ellipsis, newList, None } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import type { PyValue } from '../values';
@@ -13,23 +13,25 @@ export abstract class AstPatternBuilder extends AstExpressionBuilder {
   protected abstract endOf(node: Node): Node;
 
   protected matchStatement(node: Node): PyValue {
-    const cases = fieldNodes(field(node, 'body'), 'alternative').map((clause) => {
-      const patterns = namedChildren(clause).filter((child) => child.type === 'case_pattern');
-      const pattern =
-        patterns.length === 1
-          ? this.pattern(patterns[0])
-          : this.make(
-              'MatchSequence',
-              { patterns: newList(patterns.map((each) => this.pattern(each))) },
-              this.location(patterns[0], patterns.at(-1) as Node)
-            );
-      const guard = clause.childForFieldName('guard');
-      return this.make('match_case', {
-        pattern,
-        guard: guard ? this.expr(namedChildren(guard)[0]) : None,
-        body: this.body(field(clause, 'consequence')),
+    const cases = field(node, 'body')
+      .childrenForFieldName('alternative')
+      .map((clause) => {
+        const patterns = namedChildren(clause).filter((child) => child.type === 'case_pattern');
+        const pattern =
+          patterns.length === 1
+            ? this.pattern(patterns[0])
+            : this.make(
+                'MatchSequence',
+                { patterns: newList(patterns.map((each) => this.pattern(each))) },
+                this.location(patterns[0], patterns.at(-1) as Node)
+              );
+        const guard = clause.childForFieldName('guard');
+        return this.make('match_case', {
+          pattern,
+          guard: guard ? this.expr(namedChildren(guard)[0]) : None,
+          body: this.body(field(clause, 'consequence')),
+        });
       });
-    });
     return this.make(
       'Match',
       { subject: this.expr(field(node, 'subject')), cases: newList(cases) },

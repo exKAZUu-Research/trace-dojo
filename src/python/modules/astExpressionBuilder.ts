@@ -3,7 +3,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { newBytes } from '../bytesValues';
-import { children, decodeBytesEscapes, decodeEscapes, field, fieldNodes, namedChildren } from '../convertNodes';
+import { children, decodeBytesEscapes, decodeEscapes, field, namedChildren } from '../convertNodes';
 import { constantOf } from '../expressionConverter';
 import { complexClass, Ellipsis, newList, None } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
@@ -293,8 +293,8 @@ export class AstExpressionBuilder {
   }
 
   private comparison(node: Node, at: Location): PyValue {
-    const operands = fieldNodes(node, 'operands');
-    const operators = fieldNodes(node, 'operators').map((operator) => operator.text.replaceAll(/\s+/g, ' '));
+    const operands = node.childrenForFieldName('operands');
+    const operators = node.childrenForFieldName('operators').map((operator) => operator.text.replaceAll(/\s+/g, ' '));
     return this.make(
       'Compare',
       {
@@ -337,7 +337,7 @@ export class AstExpressionBuilder {
 
   private subscript(node: Node, ctx: Context, at: Location): PyValue {
     const value = this.expr(field(node, 'value'));
-    const parts = fieldNodes(node, 'subscript');
+    const parts = node.childrenForFieldName('subscript');
     const trailingComma = children(node).some(
       (child, index, all) => child.type === ',' && all[index + 1]?.type === ']'
     );
@@ -412,7 +412,7 @@ export class AstExpressionBuilder {
         ifs.push(this.expr(namedChildren(clause)[0]));
       } else if (clause.type === 'for_in_clause') {
         ifs = [];
-        const rights = fieldNodes(clause, 'right');
+        const rights = clause.childrenForFieldName('right');
         const iter = rights.length === 1 ? this.expr(rights[0]) : this.tuple(rights, 'Load', clause);
         generators.push(
           this.make('comprehension', {

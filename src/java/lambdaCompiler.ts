@@ -1,10 +1,11 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Block, Expression, Lambda, MethodReference, Parameter, Span, TypeSyntax } from './ast';
-import { functionalMethodOf, functionObject } from './builtinFunctions';
+import { functionObject } from './builtinFunctions';
 import { boxedTypeOf } from './builtinWrappers';
 import type { CompiledValue, Exec, MethodContext } from './compilerBase';
 import { infer, inferFromTarget, memberBindings, methodView, rawify } from './conversions';
 import { checkDefiniteAssignment } from './definiteAssignment';
+import { functionalMethodOf } from './functionalInterfaces';
 import { castOperation } from './operators';
 import { PatternCompiler } from './patternCompiler';
 import { type LambdaShape, lambdaShapeOf, passesFunction } from './polyExpressions';

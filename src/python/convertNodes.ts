@@ -9,26 +9,17 @@ export function rowOf(node: Node): number {
 
 /** The named children except extras: comments and backslash line continuations, which may appear anywhere. */
 export function namedChildren(node: Node): Node[] {
-  return node.namedChildren.filter((child): child is Node => child !== null && !isExtra(child));
+  return node.namedChildren.filter((child) => !child.isExtra);
 }
 
 export function children(node: Node): Node[] {
-  return node.children.filter((child): child is Node => child !== null && !isExtra(child));
-}
-
-/** Whether a node is a comment or a backslash continuation, which the grammar allows between any two tokens. */
-function isExtra(node: Node): boolean {
-  return node.type === 'comment' || node.type === 'line_continuation';
+  return node.children.filter((child) => !child.isExtra);
 }
 
 export function field(node: Node, name: string): Node {
   const child = node.childForFieldName(name);
   if (!child) throw new Error(`The ${node.type} node has no ${name}`);
   return child;
-}
-
-export function fieldNodes(node: Node, name: string): Node[] {
-  return node.childrenForFieldName(name).filter((child): child is Node => child !== null);
 }
 
 const CLAUSE_TYPES = new Set(['elif_clause', 'else_clause', 'except_clause', 'finally_clause']);
@@ -54,7 +45,7 @@ export function checkClauseLines(node: Node): void {
 }
 
 export function hasToken(node: Node, token: string): boolean {
-  return node.children.some((child) => child?.type === token);
+  return node.children.some((child) => child.type === token);
 }
 
 /** Rejects a construct this grader does not support, naming it for learners. */

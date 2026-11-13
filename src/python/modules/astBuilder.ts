@@ -1,7 +1,7 @@
 // Builds the trees of CPython's `ast` module from the syntax tree, as `compile(..., PyCF_ONLY_AST)` returns them.
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import { children, field, fieldNodes, namedChildren } from '../convertNodes';
+import { children, field, namedChildren } from '../convertNodes';
 import { newList, None } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
 import type { PyValue } from '../values';
@@ -105,7 +105,13 @@ export class AstBuilder extends AstPatternBuilder {
         return [this.make(node.type === 'global_statement' ? 'Global' : 'Nonlocal', { names }, at)];
       }
       case 'import_statement': {
-        return [this.make('Import', { names: newList(fieldNodes(node, 'name').map((name) => this.alias(name))) }, at)];
+        return [
+          this.make(
+            'Import',
+            { names: newList(node.childrenForFieldName('name').map((name) => this.alias(name))) },
+            at
+          ),
+        ];
       }
       case 'import_from_statement':
       case 'future_import_statement': {
@@ -234,7 +240,7 @@ export class AstBuilder extends AstPatternBuilder {
     const wildcard = namedChildren(node).find((child) => child.type === 'wildcard_import');
     const names = wildcard
       ? [this.make('alias', { name: '*', asname: None }, this.location(wildcard))]
-      : fieldNodes(node, 'name').map((name) => this.alias(name));
+      : node.childrenForFieldName('name').map((name) => this.alias(name));
     return this.make('ImportFrom', { module, names: newList(names), level: BigInt(level) }, at);
   }
 
@@ -245,7 +251,7 @@ export class AstBuilder extends AstPatternBuilder {
   }
 
   private ifStatement(node: Node, start: Node): PyValue {
-    const alternatives = fieldNodes(node, 'alternative');
+    const alternatives = node.childrenForFieldName('alternative');
     let orelse: PyValue = newList([]);
     // The elif clauses nest, each an If in the orelse of the one before.
     for (const alternative of alternatives.toReversed()) {
@@ -266,7 +272,7 @@ export class AstBuilder extends AstPatternBuilder {
 
   private forStatement(node: Node): PyValue {
     const isAsync = children(node)[0].type === 'async';
-    const rights = fieldNodes(node, 'right');
+    const rights = node.childrenForFieldName('right');
     const iter = rights.length === 1 ? this.expr(rights[0]) : this.tuple(rights, 'Load', node);
     return this.make(
       isAsync ? 'AsyncFor' : 'For',

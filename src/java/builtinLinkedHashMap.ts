@@ -1,5 +1,5 @@
-import { classType, touch, unmodifiableWrappers } from './builtinCollectionSupport';
-import { createStore, findEntry, nodeEntries, nodeMaps, removeEntry, storeOf, tableSizeFor } from './builtinMaps';
+import { classType, touch, unwrapped } from './builtinCollectionSupport';
+import { createEntryNode, createStore, findEntry, removeEntry, storeOf, tableSizeFor } from './builtinMaps';
 import { addConstructor, addMethod } from './builtinSupport';
 import { findImplementation, type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, FLOAT, INT, type JavaType } from './types';
@@ -24,8 +24,7 @@ export function evictionOf(cls: ClassInfo): ((frame: Frame, map: JavaObject) => 
  */
 export function recordAccess(map: Value, entry: HashEntry): void {
   // An unmodifiable wrapper reads through its backing map, which records the access.
-  let owner = map as JavaObject;
-  while (unmodifiableWrappers.has(owner)) owner = owner.retained?.[0] as JavaObject;
+  const owner = unwrapped(map as JavaObject);
   if (!accessOrderedMaps.has(owner)) return;
   if (storeOf(owner).moveToEnd(entry)) touch(owner);
 }
@@ -41,6 +40,7 @@ export function accessedEntry(frame: Frame, map: Value, key: Value): HashEntry |
  * The constructors that choose a `LinkedHashMap`'s order, and `removeEldestEntry`, which it asks after each addition
  * whether to remove its eldest entry, as an LRU cache that overrides it does.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- The order constructors and the eviction hook, each a small native.
 export function defineLinkedHashMapOrder(cls: ClassInfo, entryClass: ClassInfo, nodeClass: ClassInfo): void {
   const [key, value] = cls.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
   for (const parameterTypes of [
@@ -73,9 +73,7 @@ export function defineLinkedHashMapOrder(cls: ClassInfo, entryClass: ClassInfo, 
     // An insertion-ordered store keeps its entries in iteration order, the eldest first.
     const eldest = storeOf(map).entries[0];
     if (!eldest) return;
-    const node = frame.runtime.allocateObject(frame, nodeClass);
-    nodeEntries.set(node, eldest);
-    nodeMaps.set(node, map);
+    const node = createEntryNode(frame, nodeClass, eldest, map);
     if (frame.runtime.invokeVirtual(frame, cls, 'removeEldestEntry', map, [node]) === true) {
       removeEntry(frame, map, eldest.key);
     }

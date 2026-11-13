@@ -68,6 +68,17 @@ export function findSyntaxErrors(
   }
 }
 
+/** The `comment` tokens of `source`, in source order. */
+export function commentTokens(parser: Parser, source: string): { index: number; text: string }[] {
+  const tree = parser.parse(source);
+  if (!tree) throw new Error('The parser returned no tree');
+  try {
+    return tree.rootNode.descendantsOfType('comment').map((node) => ({ index: node.startIndex, text: node.text }));
+  } finally {
+    tree.delete();
+  }
+}
+
 /** Converting, compiling, and running recurse into nested constructs, so deeper nesting would exhaust the stack. */
 const MAX_NESTING_DEPTH = 300;
 
@@ -112,7 +123,7 @@ function collectSyntaxErrors(
     }
     if (!node.hasError) return;
     const found = errors.length;
-    for (const child of node.children) if (child) visit(child);
+    for (const child of node.children) visit(child);
     if (includeHidden && errors.length === found) {
       errors.push({ row: hiddenErrorRow(node), message: '書き方に誤りがあります。' });
     }
@@ -134,9 +145,9 @@ function ownError(node: Node, missingTokenNames: Record<string, string>): Source
  * nothing between them, as two statements do when the newline between them is missing, or else the node's own row.
  */
 function hiddenErrorRow(node: Node): number {
-  const parts = node.children.filter((child): child is Node => child !== null);
-  for (const [index, part] of parts.slice(1).entries()) {
-    const previous = parts[index];
+  const { children } = node;
+  for (const [index, part] of children.slice(1).entries()) {
+    const previous = children[index];
     if (previous.isNamed && part.isNamed && previous.endPosition.row === part.startPosition.row) {
       return part.startPosition.row;
     }

@@ -1,14 +1,16 @@
+// code-gauge-allow-file fileNcss 424 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
 import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
 import { type BoxableKind, hashOf, type Wrappers } from './builtinWrappers';
-import { type Frame, throwBuiltin } from './runtime';
+import { type Frame, JavaThrow, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
   type ClassInfo,
   type ClassType,
   INT,
   type JavaType,
+  type NativeMethod,
   sameErasure,
   superinterfacesOf,
   VOID,
@@ -54,19 +56,21 @@ export function defineIteratorClass(context: Context, iteratorClass: ClassInfo):
 /** `Iterator.remove`, which removes the element the last `next()` returned, as the JDK's iterators check it. */
 function removeThroughIterator(frame: Frame, receiver: Value): Value {
   const state = iteratorState(receiver);
-  // An unmodifiable or fixed-size collection's iterator rejects every removal, before checking its own state.
   // A read-only wrapper rejects removal without a message, before its backing iterator's own rule.
   if (unmodifiableWrappers.has(state.source)) throwBuiltin(frame, 'UnsupportedOperationException');
   const owner = mapViewSources.get(state.source)?.map ?? state.source;
+  // The iterators of ImmutableCollections and of the singletons reject every removal before checking their state;
+  // those AbstractList and AbstractSet give check it first, and then reach the removal their collection rejects.
   if (defaultRemoveClasses.has(owner.cls) && !unmodifiableWrappers.has(owner)) {
     throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
   }
-  // A sublist's iterator is its list's ListItr, which checks its own state before the list rejects the removal.
-  if (subListChecks.has(owner) && state.removed) throwBuiltin(frame, 'IllegalStateException');
-  checkModifiable(frame, owner, true);
+  if (eagerlyRejectingClasses.has(owner.cls) || singletonClasses.has(owner.cls)) {
+    throwBuiltin(frame, 'UnsupportedOperationException');
+  }
   // Only the element the last next() returned may be removed, once.
   if (state.removed) throwBuiltin(frame, 'IllegalStateException');
   if (state.source.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+  checkModifiable(frame, owner, true);
   // A list's later elements move back over the removed one, which a fixed sequence of elements keeps.
   if (state.isFixed) state.remove(frame, state.index - 1);
   else state.remove(frame, --state.index);
@@ -149,6 +153,10 @@ export interface MapViewSource {
   elementOf: (entry: HashStore['entries'][number]) => Value;
   /** Whether the view is a key set, which a sorted map's is a `SortedSet` with the map's comparator. */
   isKeySet?: boolean;
+  /** The map's lookup that the view's `contains` makes, as `AbstractMap`'s key set and values make one. */
+  lookup?: 'containsKey' | 'containsValue';
+  /** An entry set's `contains`, which looks the entry's key up in the map, or `undefined` to compare each entry. */
+  containsEntry?: (frame: Frame, value: Value) => boolean | undefined;
   remove: (frame: Frame, entry: HashStore['entries'][number]) => void;
 }
 
@@ -201,8 +209,26 @@ function mapViewIterator(frame: Frame, itrClass: ClassInfo, view: JavaObject, so
   );
 }
 
-/** The classes of the collections that reject every change: `List.of`, `Set.of`, `Map.of`, and unmodifiable views. */
+/**
+ * The classes of the collections that reject every change: those of `List.of`, `Set.of`, `Map.of`, the unmodifiable
+ * views, and `Collections`' empty, singleton, and `nCopies` collections.
+ */
 export const unmodifiableClasses = new WeakSet<ClassInfo>();
+
+/**
+ * The classes among `unmodifiableClasses` whose every mutator, inherited defaults included, throws before it reads its
+ * arguments, as `ImmutableCollections` and the `Collections.unmodifiable` wrappers override each one. The other
+ * restricted classes extend `AbstractList`, `AbstractSet`, or `AbstractMap`, whose methods reject a call only when it
+ * reaches the change it would make, so that a call that changes nothing succeeds.
+ */
+export const eagerlyRejectingClasses = new WeakSet<ClassInfo>();
+
+/**
+ * `Collections.singletonList` and `singleton`, which override `removeIf` and `replaceAll` to throw at once and whose
+ * iterators reject removal before checking their state, unlike the defaults their `AbstractList` and `AbstractSet`
+ * would give.
+ */
+export const singletonClasses = new WeakSet<ClassInfo>();
 
 /** The classes of the lists that may change elements but not their size, as `Arrays.asList` returns. */
 export const fixedSizeClasses = new WeakSet<ClassInfo>();
@@ -250,10 +276,159 @@ export function wrapUnmodifiable(view: JavaObject, source: JavaObject): JavaObje
  * @param changesSize Whether the change adds or removes elements, which a fixed-size list rejects too.
  */
 export function checkModifiable(frame: Frame, collection: Value, changesSize: boolean): void {
-  const cls = (collection as JavaObject).cls;
+  // A sublist changes its list, which rejects the change as it rejects its own.
+  const { cls } = rootListOf(collection as JavaObject);
   if (unmodifiableClasses.has(cls) || (changesSize && fixedSizeClasses.has(cls))) {
     throwBuiltin(frame, 'UnsupportedOperationException');
   }
+}
+
+/** Throws at the start of a mutator of a collection whose class rejects every call, before its arguments are read. */
+export function rejectEagerly(frame: Frame, collection: Value): void {
+  const object = collection as JavaObject;
+  const view = mapViewSources.get(object);
+  // A view of an unmodifiable map wrapper is the JDK's UnmodifiableSet or UnmodifiableCollection of the map's view,
+  // and the entry set of a one-entry Map.of is Set.of of its entry, which ImmutableCollections makes reject at once.
+  const isImmutableEntrySet =
+    view?.containsEntry !== undefined && eagerlyRejectingClasses.has(view.map.cls) && view.entries().length === 1;
+  if (eagerlyRejectingClasses.has(object.cls) || (view && unmodifiableWrappers.has(view.map)) || isImmutableEntrySet) {
+    throwBuiltin(frame, 'UnsupportedOperationException');
+  }
+}
+
+/**
+ * Checks a removal that `AbstractCollection` makes through the collection's iterator, which rejects it with the message
+ * of `Iterator.remove`'s default for the classes whose iterators keep it.
+ */
+export function checkRemovable(frame: Frame, collection: Value): void {
+  const owner = mapViewSources.get(collection as JavaObject)?.map ?? (collection as JavaObject);
+  if (defaultRemoveClasses.has(owner.cls) && !unmodifiableWrappers.has(owner)) {
+    throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
+  }
+  checkModifiable(frame, collection, true);
+}
+
+/**
+ * Whether clearing `list` while it is empty counts as a change: `ArrayList`'s, `LinkedList`'s, and `Vector`'s own
+ * `clear` count it, and so does a sublist whose list's `removeRange` counts it, as `ArrayList`'s and `Vector`'s do; a
+ * sublist of a `LinkedList` or of a restricted list clears through `AbstractList.removeRange`, which counts nothing
+ * when it removes nothing, and a restricted list's own `clear` changes nothing.
+ */
+export function countsEmptyClear(list: Value): boolean {
+  const root = rootListOf(list as JavaObject);
+  if (unmodifiableClasses.has(root.cls) || fixedSizeClasses.has(root.cls)) return false;
+  return root === list || checkingClassOf(root).name !== 'LinkedList';
+}
+
+/** The lists of `Stream.toList`, which are of `List.of`'s class but may hold and look up null. */
+export const nullTolerantLists = new WeakSet<JavaObject>();
+
+/**
+ * The classes of `ImmutableCollections`, whose lookups reject a null argument, with the message their JDK
+ * implementation class of a collection's size gives.
+ */
+const nullRejectingClasses = new WeakMap<ClassInfo, (collection: JavaObject, name: string) => string | undefined>();
+
+/** Marks a class of `ImmutableCollections`, whose lookups reject a null argument with the message `messageOf` gives. */
+export function rejectNullLookups(
+  cls: ClassInfo,
+  messageOf: (receiver: JavaObject, name: string) => string | undefined = () => {}
+): void {
+  nullRejectingClasses.set(cls, messageOf);
+}
+
+const NULL_CHECKED_LOOKUPS = new Set([
+  'contains',
+  'indexOf',
+  'lastIndexOf',
+  'get',
+  'containsKey',
+  'containsValue',
+  'getOrDefault',
+]);
+
+/**
+ * Makes the value lookups of every builtin collection and map class behave as their JDK classes' do: an unmodifiable
+ * wrapper asks the collection it wraps, as `Collections.UnmodifiableCollection` delegates, so that the wrapped class's
+ * own rules hold; and a lookup throws `NullPointerException` for a null argument when the collection it reads rejects
+ * null, which may be the one a sublist or a map's key set or values reads, whose class may be shared with a
+ * collection that accepts null.
+ */
+export function checkNullLookups(classes: Iterable<ClassInfo>, collectionClass: ClassInfo, mapClass: ClassInfo): void {
+  for (const cls of classes) {
+    const parents = superinterfacesOf(cls);
+    if (cls.kind === 'interface' || !(parents.includes(collectionClass) || parents.includes(mapClass))) continue;
+    for (const method of cls.methods) {
+      const { native, name } = method;
+      if (native && NULL_CHECKED_LOOKUPS.has(name) && method.parameterTypes[0]?.kind !== 'int') {
+        method.native = lookingUp(native, name);
+      }
+    }
+  }
+}
+
+function lookingUp(native: NativeMethod, name: string): NativeMethod {
+  return (frame, receiver, args) => {
+    const object = receiver as JavaObject;
+    if (unmodifiableWrappers.has(object)) {
+      const { collectionClass, listClass, mapClass } = frame.runtime.builtins.collections;
+      const owner = name === 'contains' ? collectionClass : name.endsWith('ndexOf') ? listClass : mapClass;
+      return frame.runtime.invokeVirtual(frame, owner, name, object.retained?.[0], args);
+    }
+    if (args[0] === undefined) {
+      const [source, lookup] = readSourceOf(object, name);
+      const messageOf = nullRejectingClasses.get(source.cls);
+      if (messageOf && !nullTolerantLists.has(source))
+        throwBuiltin(frame, 'NullPointerException', messageOf(source, lookup));
+    }
+    return native(frame, receiver, args);
+  };
+}
+
+/**
+ * The collection a lookup `name` reaches through any nesting of unmodifiable wrappers, sublists, and a map's key set
+ * or values, which look up through the map, and the lookup it makes there.
+ */
+function readSourceOf(collection: JavaObject, name: string): [JavaObject, string] {
+  let [source, lookup] = [collection, name];
+  for (;;) {
+    const view = mapViewSources.get(source);
+    if (view?.lookup) {
+      [source, lookup] = [view.map, view.lookup];
+      continue;
+    }
+    const next = unmodifiableWrappers.has(source) || subListChecks.has(source) ? source.retained?.[0] : undefined;
+    if (!(next instanceof JavaObject)) return [source, lookup];
+    source = next;
+  }
+}
+
+/**
+ * Whether `collection` is the key set of a `HashMap` or `TreeMap`, whose membership its map's `containsKey` decides,
+ * which a TreeMap does by its comparator; the restricted maps' key sets are AbstractMap's, which compare by equals.
+ */
+function looksUpThroughMap(collection: Value): boolean {
+  const view = mapViewSources.get(collection as JavaObject);
+  return view?.isKeySet === true && !unmodifiableClasses.has(lookupMapOf(view).cls);
+}
+
+/** The map whose lookup a key set asks: its map, or the map an unmodifiable wrapper of it wraps. */
+function lookupMapOf(view: MapViewSource): JavaObject {
+  return unwrapped(view.map);
+}
+
+/** The list a sublist views, through any nesting of sublists, or the collection itself when it is not a sublist. */
+function rootListOf(collection: JavaObject): JavaObject {
+  let list = collection;
+  while (subListChecks.has(list) && !unmodifiableWrappers.has(list)) list = list.retained?.[0] as JavaObject;
+  return list;
+}
+
+/** The collection or map an unmodifiable wrapper wraps, through any nesting of wrappers, or `collection` itself. */
+export function unwrapped(collection: JavaObject): JavaObject {
+  let backing = collection;
+  while (unmodifiableWrappers.has(backing)) backing = backing.retained?.[0] as JavaObject;
+  return backing;
 }
 
 export function elementsOf(receiver: Value): Value[] {
@@ -267,7 +442,17 @@ export const subListChecks = new WeakMap<JavaObject, () => void>();
 export function touch(receiver: Value): void {
   const object = receiver as JavaObject;
   object.modCount = (object.modCount ?? 0) + 1;
+  // A sublist grows the array of the Stack it views.
+  const stack = rootListOf(object);
+  const capacity = vectorCapacities.get(stack);
+  if (capacity === undefined) return;
+  // Vector grows its array to twice its length, or to the size needed if that is more, and never shrinks it.
+  const size = (stack.elements as Value[]).length;
+  if (size > capacity) vectorCapacities.set(stack, Math.max(capacity * 2, size));
 }
+
+/** The length of each `Stack`'s array, which its index messages report. */
+export const vectorCapacities = new WeakMap<JavaObject, number>();
 
 /** The methods that read a collection whose `elements` hold its items in iteration order. */
 export function defineReadMethods(
@@ -285,7 +470,17 @@ export function defineReadMethods(
     [context.objectType],
     BOOLEAN,
     false,
-    (frame, receiver, [value]) => indexOf(frame, elementsOf(receiver), value) !== -1
+    (frame, receiver, [value]) =>
+      mapViewSources.get(receiver as JavaObject)?.containsEntry?.(frame, value) ??
+      (looksUpThroughMap(receiver)
+        ? frame.runtime.invokeVirtual(
+            frame,
+            frame.runtime.builtins.collections.mapClass,
+            'containsKey',
+            mapViewSources.get(receiver as JavaObject)?.map,
+            [value]
+          )
+        : indexOf(frame, elementsOf(receiver), value) !== -1)
   );
   addMethod(cls, 'iterator', [], { kind: 'class', cls: itrClass, args: [element] }, false, (frame, receiver) => {
     const view = mapViewSources.get(receiver as JavaObject);
@@ -328,16 +523,47 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
   ] as const) {
     addMethod(cls, name, [parameter], BOOLEAN, false, (frame) => throwBuiltin(frame, 'UnsupportedOperationException'));
   }
-  addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
-    const index = indexOf(frame, elementsOf(receiver), value);
-    if (index !== -1) removeElements(frame, receiver, (_, position) => position === index);
-    return index !== -1;
-  });
+  addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) =>
+    removeFromView(frame, receiver as JavaObject, value)
+  );
   addMethod(cls, 'clear', [], VOID, false, (frame, receiver) => {
-    removeElements(frame, receiver, () => true);
+    clearView(frame, receiver as JavaObject);
   });
   linkOverrides(cls);
   return cls;
+}
+
+/** A view's `remove`, which a HashMap's or TreeMap's key set makes through its map's lookup. */
+function removeFromView(frame: Frame, receiver: JavaObject, value: Value): boolean {
+  rejectEagerly(frame, receiver);
+  const view = mapViewSources.get(receiver);
+  if (view && looksUpThroughMap(receiver)) {
+    const { mapClass } = frame.runtime.builtins.collections;
+    if (frame.runtime.invokeVirtual(frame, mapClass, 'containsKey', view.map, [value]) !== true) return false;
+    // TreeMap.KeySet removes through its map, which finds the key by its comparator rather than by equals.
+    if (view.store().compare) {
+      frame.runtime.invokeVirtual(frame, mapClass, 'remove', view.map, [value]);
+      return true;
+    }
+  }
+  const index = indexOf(frame, elementsOf(receiver), value);
+  if (index === -1) return false;
+  // As AbstractCollection.remove does, it removes through the view's iterator.
+  checkRemovable(frame, receiver);
+  removeElements(frame, receiver, (_, position) => position === index);
+  return true;
+}
+
+/** A view's `clear`; AbstractMap's key set and values clear through their map, which Map.of rejects at once. */
+function clearView(frame: Frame, receiver: JavaObject): void {
+  rejectEagerly(frame, receiver);
+  const view = mapViewSources.get(receiver);
+  if (view?.lookup && eagerlyRejectingClasses.has(unwrapped(view.map).cls)) {
+    throwBuiltin(frame, 'UnsupportedOperationException');
+  }
+  // Otherwise it clears through its iterator, as AbstractCollection.clear does, rejecting as the iterator does.
+  if (elementsOf(receiver).length > 0) checkRemovable(frame, receiver);
+  removeElements(frame, receiver, () => true);
 }
 
 /**
@@ -438,7 +664,10 @@ export function compareNatural(frame: Frame, a: Value, b: Value): number {
 }
 
 /** How a list class reports an index outside it, as the JDK implementation it stands for checks the index. */
-export const indexFailures = new Map<ClassInfo, (frame: Frame, index: number, length: number) => never>();
+export const indexFailures = new Map<
+  ClassInfo,
+  (frame: Frame, index: number, length: number, list: JavaObject) => never
+>();
 
 /** The classes of `List.of`, whose position checks write their messages without a comma. */
 export const immutableCollectionsLists = new WeakSet<ClassInfo>();
@@ -446,33 +675,38 @@ export const immutableCollectionsLists = new WeakSet<ClassInfo>();
 /** Checks the index of an element of `list`, which an unmodifiable wrapper leaves to the list it wraps. */
 export function checkListIndex(frame: Frame, list: Value, index: number, length: number): void {
   if (index >= 0 && index < length) return;
-  indexFailures.get(checkingClassOf(list))?.(frame, index, length);
+  indexFailures.get(checkingClassOf(list))?.(frame, index, length, list as JavaObject);
   checkIndex(frame, index, length);
 }
 
 /** Checks the position `listIterator` starts at, which may be the size of the list. */
 export function checkListPosition(frame: Frame, list: Value, index: number, length: number): void {
   if (index >= 0 && index <= length) return;
-  const separator = immutableCollectionsLists.has(checkingClassOf(list)) ? '' : ',';
+  const cls = checkingClassOf(list);
+  // Vector.listIterator names only the index.
+  if (cls.name === 'Stack') throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}`);
+  const separator = immutableCollectionsLists.has(cls) ? '' : ',';
   throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}${separator} Size: ${length}`);
 }
 
 /** The class whose checks a list's methods make, which is that of the list an unmodifiable wrapper wraps. */
 function checkingClassOf(list: Value): ClassInfo {
-  const object = list as JavaObject;
-  // A program's subclass of a list inherits its builtin superclass's checks.
-  let backing = object;
-  while (unmodifiableWrappers.has(backing)) backing = backing.retained?.[0] as JavaObject;
-  let { cls } = backing;
-  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
-  return cls;
+  return builtinClassOf(unwrapped(list as JavaObject).cls);
+}
+
+/** The builtin class `cls` is or extends, which a program's subclass inherits its rules from. */
+export function builtinClassOf(cls: ClassInfo): ClassInfo {
+  let builtin = cls;
+  while (!builtin.isBuiltin && builtin.superclass) builtin = builtin.superclass;
+  return builtin;
 }
 
 /**
- * Whether sorting `list` counts as a structural change, as `ArrayList.sort` and `Vector.sort` count it, unlike
- * `List.sort`'s default, which sublists, `LinkedList`, and `Arrays.asList` use.
+ * Whether a sort, a `replaceAll`, or an `addAll` of nothing counts as a structural change of `list`, as `ArrayList` and
+ * `Vector` count them, unlike sublists, `LinkedList`, and the `AbstractList` classes of `Arrays.asList` and
+ * `Collections`.
  */
-export function countsSortAsChange(list: Value): boolean {
+export function countsNoOpChanges(list: Value): boolean {
   if (subListChecks.has(list as JavaObject)) return false;
   const cls = checkingClassOf(list);
   return (cls.name === 'ArrayList' && !fixedSizeClasses.has(cls)) || cls.name === 'Stack';
@@ -493,12 +727,10 @@ export function defineIndexFailures(lists: Record<string, ClassInfo>, registry: 
   );
   indexFailures.set(lists.singletonList, sizedIndexFailure);
   indexFailures.set(registry.classes.get('LinkedList') as ClassInfo, sizedIndexFailure);
-  // A Vector checks only the upper bound and reads its array, whose capacity starts at 10 and doubles.
-  indexFailures.set(registry.classes.get('Stack') as ClassInfo, (frame, index, length) => {
+  // A Vector checks only the upper bound and reads its array.
+  indexFailures.set(registry.classes.get('Stack') as ClassInfo, (frame, index, length, list) => {
     if (index >= length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${index}`);
-    let capacity = 10;
-    while (capacity < length) capacity *= 2;
-    return arrayAccessFailure(frame, index, capacity);
+    return arrayAccessFailure(frame, index, vectorCapacities.get(unwrapped(list)) ?? 10);
   });
 }
 
@@ -516,6 +748,27 @@ export function checkIndex(frame: Frame, index: number, length: number): void {
   }
 }
 
+/**
+ * Checks the position `add(int, E)` or, when `isBulk`, `addAll(int, Collection)` inserts at, which a `Stack` reports
+ * as `Vector.insertElementAt` and `Vector.addAll` do, with array messages, and the other lists as `ArrayList` does.
+ */
+export function checkInsertPosition(frame: Frame, list: Value, index: number, length: number, isBulk: boolean): void {
+  if (index >= 0 && index <= length) return;
+  if (checkingClassOf(list).name === 'Stack') {
+    if (isBulk) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${index}`);
+    if (index > length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `${index} > ${length}`);
+    // insertElementAt grows a full array before its arraycopy rejects the negative index.
+    const capacity = vectorCapacities.get(unwrapped(list as JavaObject)) ?? 10;
+    const grown = length === capacity ? Math.max(capacity * 2, length + 1) : capacity;
+    throwBuiltin(
+      frame,
+      'ArrayIndexOutOfBoundsException',
+      `arraycopy: source index ${index} out of bounds for object array[${grown}]`
+    );
+  }
+  checkPosition(frame, index, length);
+}
+
 export function checkPosition(frame: Frame, index: number, length: number): void {
   if (index < 0 || index > length) throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${length}`);
 }
@@ -529,19 +782,28 @@ export function defineSetEquality(cls: ClassInfo, context: Context, setClass: Cl
     if (other === receiver) return true;
     if (!(other instanceof JavaObject) || !frame.runtime.isInstance(other, setClass)) return false;
     if (!other.store && !other.elements) return false;
-    return sameElements(frame, itemsOf(frame, receiver), itemsOf(frame, other));
+    return containsAllOf(frame, receiver, itemsOf(frame, other), itemsOf(frame, receiver).length);
   });
   addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => sumOfHashes(frame, itemsOf(frame, receiver)));
 }
 
-/** Whether two sets' elements are equal, found by their hashes as a hash set's `containsAll` finds them. */
-function sameElements(frame: Frame, mine: Value[], theirs: Value[]): boolean {
-  if (mine.length !== theirs.length) return false;
-  const hashOf = (item: Value): number => (item === undefined ? 0 : javaHash(frame, item));
-  const byHash = Map.groupBy(mine, hashOf);
-  return theirs.every((item) =>
-    (byHash.get(hashOf(item)) ?? []).some((candidate) => javaEquals(frame, item, candidate))
-  );
+/**
+ * Whether a set of `size` elements equals a set of `theirs`, as `AbstractSet.equals` decides: as many elements, each of
+ * them found by the set's own `contains`, so a sorted set or key set finds them by its comparator; a lookup that
+ * rejects an element with `NullPointerException` or `ClassCastException` makes the sets unequal.
+ */
+function containsAllOf(frame: Frame, set: Value, theirs: readonly Value[], size: number): boolean {
+  if (theirs.length !== size) return false;
+  const { collectionClass } = frame.runtime.builtins.collections;
+  try {
+    return theirs.every(
+      (item) => frame.runtime.invokeVirtual(frame, collectionClass, 'contains', set, [item]) === true
+    );
+  } catch (error) {
+    const name = error instanceof JavaThrow ? error.value.cls.name : undefined;
+    if (name === 'NullPointerException' || name === 'ClassCastException') return false;
+    throw error;
+  }
 }
 
 /** The sum of the elements' hashes that `Set.hashCode` specifies. */

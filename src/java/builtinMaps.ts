@@ -1,22 +1,28 @@
+// code-gauge-allow-file fileNcss 463 -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
-import type { Context } from './builtinCollectionSupport';
 import {
+  builtinClassOf,
   checkModifiable,
   classType,
   compareNatural,
+  type Context,
   createIterator,
   defaultRemoveClasses,
   defineSetEquality,
   describe,
+  eagerlyRejectingClasses,
   itemsOf,
   javaEquals,
   javaHash,
   linkOverrides,
+  type MapViewSource,
   mapViewSources,
+  rejectNullLookups,
+  singletonClasses,
   touch,
   uncountedMapClasses,
   unmodifiableClasses,
-  unmodifiableWrappers,
+  unwrapped,
 } from './builtinCollectionSupport';
 import { callFunction } from './builtinFunctions';
 import { accessedEntry, defineLinkedHashMapOrder, evictionOf, recordAccess } from './builtinLinkedHashMap';
@@ -64,6 +70,8 @@ export function defineSets(
       name,
       true
     );
+  const singletonSet = collectionsSet('SingletonSet');
+  singletonClasses.add(singletonSet);
   return {
     immutableSet: restrictToImmutable(
       context.registry,
@@ -71,7 +79,7 @@ export function defineSets(
       'SetN'
     ),
     emptySet: collectionsSet('EmptySet'),
-    singletonSet: collectionsSet('SingletonSet'),
+    singletonSet,
   };
 }
 
@@ -174,6 +182,7 @@ function defineSetClass(
   return cls;
 }
 
+// code-gauge-allow functionNcss 31 -- One registration per map class and view, each a short call.
 export function defineHashMap(
   context: Context,
   views: { setClass: ClassInfo; collectionClass: ClassInfo; snapshotSet: ClassInfo; snapshotCollection: ClassInfo }
@@ -240,7 +249,7 @@ function mapView(
   map: Value,
   viewClass: ClassInfo,
   elementOf: (entry: HashStore['entries'][number]) => Value,
-  isKeySet = false
+  { isKeySet = false, lookup, containsEntry }: Pick<MapViewSource, 'isKeySet' | 'lookup' | 'containsEntry'> = {}
 ): JavaObject {
   const view = frame.runtime.allocateObject(frame, viewClass);
   // A view reads the map's entries whenever it is used, so that it follows every later change to the map.
@@ -260,6 +269,8 @@ function mapView(
     entries: () => storeOf(map).ordered(),
     elementOf,
     isKeySet,
+    lookup,
+    containsEntry,
     remove: (removeFrame, entry) => {
       checkModifiable(removeFrame, map, true);
       removeEntry(removeFrame, map, entry.key);
@@ -277,11 +288,37 @@ function defineEnumMap(cls: ClassInfo, classClass: ClassInfo): void {
   addConstructor(cls, [classType(classClass, { kind: 'typeVar', variable: key })], (_, receiver) =>
     createStore(receiver)
   );
+  enumMapClasses.add(cls);
+  enumCollectionClasses.add(cls);
+}
+
+/** The classes of `EnumMap`, which checks a key's class before it puts the key, whichever method puts it. */
+const enumMapClasses = new WeakSet<ClassInfo>();
+
+/**
+ * The classes of `EnumSet` and `EnumMap`, whose lookups find no value that is not a constant of their enum, as
+ * `EnumMap.isValidKey` decides, without comparing it with the constants they hold.
+ */
+const enumCollectionClasses = new WeakSet<ClassInfo>();
+
+/** Whether `value` is a constant of the enum whose constants an EnumSet or EnumMap holds, or may hold when empty. */
+function isEnumMember(collection: Value, value: Value): boolean {
+  if (!(value instanceof JavaObject) || !enumOf(value)) return false;
+  const [first] = storeOf(collection).entries;
+  return first === undefined || enumOf(first.key as JavaObject) === enumOf(value);
+}
+
+/** The enum a constant belongs to, whose subclass a constant with a body is. */
+function enumOf(constant: JavaObject): ClassInfo | undefined {
+  let cls: ClassInfo | undefined = constant.cls;
+  while (cls && cls.superclass?.name !== 'Enum') cls = cls.superclass;
+  return cls;
 }
 
 /** `EnumSet`, a set of an enum's constants in their order, which only its static methods create. */
 function defineEnumSet(context: Context, cls: ClassInfo, collectionClass: ClassInfo): void {
   cls.constructors = [];
+  enumCollectionClasses.add(cls);
   const classClass = context.registry.classes.get('Class') as ClassInfo;
   const create = (frame: Frame, values: Iterable<Value>): JavaObject => createEnumSet(frame, cls, values);
   const generic = (
@@ -371,26 +408,41 @@ function constantsOf(frame: Frame, type: Value): Value[] {
 /** The view `entrySet` returns, in which each entry keeps one node, so that reading it again keeps identities. */
 function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass: ClassInfo): JavaObject {
   const nodes = new WeakMap<HashStore['entries'][number], JavaObject>();
-  return mapView(frame, map, viewClass, (entry) => {
-    let node = nodes.get(entry);
-    if (!node) {
-      node = frame.runtime.allocateObject(frame, nodeClass);
-      nodeEntries.set(node, entry);
-      nodeMaps.set(node, map as JavaObject);
-      Object.defineProperty(node, 'elements', { get: () => [entry.key, entry.value] });
-      nodes.set(entry, node);
-    }
-    return node;
-  });
+  const entryClass = nodeClass.interfaces[0] as ClassInfo;
+  // As HashMap's and TreeMap's entry sets do, contains looks the entry's key up in the map and compares its value; the
+  // restricted maps' entry sets compare the entries one by one, which `undefined` leaves to the view.
+  const containsEntry = (lookupFrame: Frame, value: Value): boolean | undefined => {
+    if (unmodifiableClasses.has(unwrapped(map as JavaObject).cls)) return undefined;
+    if (!(value instanceof JavaObject) || !lookupFrame.runtime.isInstance(value, entryClass)) return false;
+    const { runtime } = lookupFrame;
+    const key = runtime.invokeVirtual(lookupFrame, entryClass, 'getKey', value, []);
+    const found = findEntry(lookupFrame, unwrapped(map as JavaObject), key);
+    if (!found) return false;
+    return javaEquals(lookupFrame, runtime.invokeVirtual(lookupFrame, entryClass, 'getValue', value, []), found.value);
+  };
+  return mapView(
+    frame,
+    map,
+    viewClass,
+    (entry) => {
+      let node = nodes.get(entry);
+      if (!node) {
+        node = createEntryNode(frame, nodeClass, entry, map as JavaObject);
+        nodes.set(entry, node);
+      }
+      return node;
+    },
+    { containsEntry }
+  );
 }
 
 /** `equals` and `hashCode` of a map, which compare and hash its entries as `AbstractMap` does. */
+// code-gauge-allow functionCognitiveComplexity 20 -- AbstractMap.equals and hashCode, with the wrapper and access-order cases they need.
 function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo): void {
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
     if (other === receiver) return true;
     // An unmodifiable wrapper compares as its backing map does.
-    let map = receiver as JavaObject;
-    while (unmodifiableWrappers.has(map)) map = map.retained?.[0] as JavaObject;
+    const map = unwrapped(receiver as JavaObject);
     if (other === map) return true;
     if (!(other instanceof JavaObject) || !other.store || !frame.runtime.isInstance(other, mapClass)) return false;
     const entries = storeOf(map).ordered();
@@ -428,9 +480,7 @@ function defineMapEntry(mapClass: ClassInfo, entryClass: ClassInfo, nodeClass: C
     true,
     (frame, _, [key, value]) => {
       if (key === undefined || value === undefined) throwBuiltin(frame, 'NullPointerException');
-      const node = frame.runtime.allocateObject(frame, nodeClass);
-      nodeEntries.set(node, { key, value });
-      return node;
+      return createEntryNode(frame, nodeClass, { key, value });
     }
   );
   method.typeParameters = [k, v];
@@ -448,8 +498,13 @@ export function restrictToImmutable(
 ): ClassInfo {
   registry.classes.delete(cls.name);
   unmodifiableClasses.add(cls);
-  // The iterators of Collections' sets inherit no remove, so they reject it as their sets do, without a message.
-  if (!changesOnlyOnUse) defaultRemoveClasses.add(cls);
+  // ImmutableCollections' sets and maps reject every call at once, and their iterators keep Iterator.remove's
+  // default; Collections' reject only a change, and their iterators reject removal without a message.
+  if (!changesOnlyOnUse) {
+    defaultRemoveClasses.add(cls);
+    eagerlyRejectingClasses.add(cls);
+    rejectNullLookups(cls, nullLookupMessage);
+  }
   cls.name = name;
   cls.constructors = [];
   for (const method of cls.methods) {
@@ -469,6 +524,32 @@ export function restrictToImmutable(
         : (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
   }
   return cls;
+}
+
+/** A map's copy constructor, which fills a table for the entries in the source's order, as `putMapEntries` does. */
+function copyMap(frame: Frame, receiver: Value, [source]: Value[]): Value {
+  if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+  // Like the other builtins, it reads only the builtin maps, which keep a store.
+  if (!source.store) return throwBuiltin(frame, 'UnsupportedOperationException');
+  const entries = source.store.ordered();
+  createStore(receiver, entries.length === 0 ? 16 : tableSizeFor(Math.ceil(entries.length / 0.75)));
+  // As the JDK's constructor does, the copy asks no `removeEldestEntry` override to evict.
+  for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value, false, false);
+  return undefined;
+}
+
+/**
+ * The message of a null lookup in a set or map of `Set.of` or `Map.of`: `Set12` and `Map1` compare the argument with
+ * `equals`, and a non-empty `MapN` hashes the key it gets; the other lookups require a non-null argument.
+ */
+function nullLookupMessage(receiver: JavaObject, name: string): string | undefined {
+  const size = storeOf(receiver).entries.length;
+  const isMap = name !== 'contains';
+  if (isMap ? size === 1 : size === 1 || size === 2) return 'Cannot invoke "Object.equals(Object)" because "o" is null';
+  if (isMap && size > 0 && (name === 'get' || name === 'getOrDefault')) {
+    return 'Cannot invoke "Object.hashCode()" because "pk" is null';
+  }
+  return undefined;
 }
 
 /**
@@ -560,6 +641,23 @@ export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassI
 
 export const nodeEntries = new WeakMap<JavaObject, { key: Value; value: Value }>();
 
+/**
+ * A `Map.Entry` object of `entry`, a map's live entry when `map` is given; it shows its key and value to the
+ * reachability walk, which cannot see into `nodeEntries`.
+ */
+export function createEntryNode(
+  frame: Frame,
+  nodeClass: ClassInfo,
+  entry: { key: Value; value: Value },
+  map?: JavaObject
+): JavaObject {
+  const node = frame.runtime.allocateObject(frame, nodeClass);
+  nodeEntries.set(node, entry);
+  if (map) nodeMaps.set(node, map);
+  Object.defineProperty(node, 'elements', { get: () => [entry.key, entry.value] });
+  return node;
+}
+
 // code-gauge-allow functionCognitiveComplexity 21 -- One registration per builtin method, each a small native.
 // code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
 export function defineMapMethods(
@@ -596,15 +694,7 @@ export function defineMapMethods(
         { kind: 'wildcard', bound: value, isSuper: false }
       ),
     ],
-    (frame, receiver, [source]) => {
-      if (!(source instanceof JavaObject) || !source.store) return throwBuiltin(frame, 'NullPointerException');
-      // As HashMap.putMapEntries does: a table for the entries, filled in the source's iteration order.
-      const entries = source.store.ordered();
-      createStore(receiver, entries.length === 0 ? 16 : tableSizeFor(Math.ceil(entries.length / 0.75)));
-      // As the JDK's constructor does, the copy asks no `removeEldestEntry` override to evict.
-      for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value, false, false);
-      return;
-    }
+    copyMap
   );
   addMethod(cls, 'put', [key, value], value, false, (frame, receiver, [keyValue, newValue]) => {
     const previous = putEntry(frame, receiver, keyValue, false, newValue);
@@ -651,10 +741,14 @@ export function defineMapMethods(
     touch(receiver);
   });
   addMethod(cls, 'keySet', [], classType(views.setClass, key), false, (frame, receiver) =>
-    cachedView(receiver, 'keySet', () => mapView(frame, receiver, views.snapshotSet, (entry) => entry.key, true))
+    cachedView(receiver, 'keySet', () =>
+      mapView(frame, receiver, views.snapshotSet, (entry) => entry.key, { isKeySet: true, lookup: 'containsKey' })
+    )
   );
   addMethod(cls, 'values', [], classType(views.collectionClass, value), false, (frame, receiver) =>
-    cachedView(receiver, 'values', () => mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value))
+    cachedView(receiver, 'values', () =>
+      mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value, { lookup: 'containsValue' })
+    )
   );
   addMethod(
     cls,
@@ -757,9 +851,7 @@ export function defineNavigation(cls: ClassInfo, key: JavaType, isMap: boolean):
 function defineEntryNavigation(cls: ClassInfo, key: JavaType, entryType: JavaType, nodeClass: ClassInfo): void {
   const snapshot = (frame: Frame, entry: { key: Value; value: Value } | undefined): Value => {
     if (!entry) return undefined;
-    const node = frame.runtime.allocateObject(frame, nodeClass);
-    nodeEntries.set(node, { key: entry.key, value: entry.value });
-    return node;
+    return createEntryNode(frame, nodeClass, { key: entry.key, value: entry.value });
   };
   for (const [name, isFirst, removes] of [
     ['firstEntry', true, false],
@@ -845,6 +937,8 @@ export function storeOf(receiver: Value): HashStore {
 }
 
 export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore['entries'][number] | undefined {
+  if (enumCollectionClasses.has(builtinClassOf((receiver as JavaObject).cls)) && !isEnumMember(receiver, key))
+    return undefined;
   const store = storeOf(receiver);
   if (store.compare) {
     const { index, isFound } = store.positionOf(frame, key);
@@ -855,6 +949,7 @@ export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore[
 }
 
 /** Adds or replaces an entry, returning the value it replaced or `NO_ENTRY`; a set keeps an existing entry. */
+// code-gauge-allow functionParameterCount 7 -- Each flag is a distinct JDK put path (sets, bucket heads, eviction), passed by its callers.
 export function putEntry(
   frame: Frame,
   receiver: Value,
@@ -864,6 +959,9 @@ export function putEntry(
   atBucketHead = false,
   evicts = true
 ): Value | typeof NO_ENTRY {
+  if (key === undefined && enumMapClasses.has(builtinClassOf((receiver as JavaObject).cls))) {
+    throwBuiltin(frame, 'NullPointerException', 'Cannot invoke "Object.getClass()" because "key" is null');
+  }
   const store = storeOf(receiver);
   // Comparing a key with itself rejects null and keys that are not comparable, even in an empty map.
   if (store.compare && store.entries.length === 0) store.compare(frame, key, key);
