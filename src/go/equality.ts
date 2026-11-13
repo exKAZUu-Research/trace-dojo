@@ -1,6 +1,6 @@
-import { runtimeErrorPanic } from './runtimeErrors';
+import { runtimeErrorPanic, unhashableKeyPanic } from './runtimeErrors';
 import { identical, isComparable, type Type, typeIdentityKey, typeString, underlying } from './types';
-import { type Complex, type GoArray, type GoStruct, type Iface, type Pointer, type Value } from './values';
+import { type Complex, type GoArray, type GoStruct, Iface, type Pointer, type Value } from './values';
 
 type Equal = (a: Value, b: Value) => boolean;
 
@@ -84,6 +84,25 @@ export function mapKeyOf(type: Type): KeyOf {
   const keyOf = buildKey(type);
   keyCache.set(type, keyOf);
   return keyOf;
+}
+
+/**
+ * Panics as Go's map lookup and delete do on a nil or empty map, which check the key without hashing it: with
+ * `maps.unhashableTypeError` for the first dynamic value of an unhashable type the key holds (Go's mapKeyError).
+ */
+export function checkKeyHashable(type: Type, value: Value): void {
+  const under = underlying(type);
+  if (under.kind === 'interface') {
+    if (!(value instanceof Iface)) return;
+    if (!isComparable(value.type)) unhashableKeyPanic(typeString(value.type));
+    checkKeyHashable(value.type, value.value);
+  } else if (under.kind === 'array') {
+    for (const element of (value as GoArray).elements) checkKeyHashable(under.element, element);
+  } else if (under.kind === 'struct') {
+    for (const [index, field] of under.fields.entries()) {
+      if (field.name !== '_') checkKeyHashable(field.type, (value as GoStruct).fields[index]);
+    }
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of comparable type.

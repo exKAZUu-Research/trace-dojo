@@ -14,6 +14,7 @@ import {
   staysLocal,
   type VarEntity,
 } from './entities';
+import { checkKeyHashable } from './equality';
 import { describeConstant, largerUntyped, sameUntypedFamily } from './expressionCompiler';
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
@@ -900,8 +901,8 @@ export abstract class CallCompiler extends CompositeCompiler {
       eval: (frame) => {
         const target = read(frame) as GoMap | undefined;
         const keyValue = key(frame);
-        target?.entries.delete(target.keyOf(keyValue));
-        return;
+        if (!target || target.entries.size === 0) checkKeyHashable(under.key, keyValue);
+        else target.entries.delete(target.keyOf(keyValue));
       },
     };
   }

@@ -27,7 +27,7 @@ import {
   type Temporary,
   type VarEntity,
 } from './entities';
-import { equalityOf, mapKeyOf } from './equality';
+import { checkKeyHashable, equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
 import { currentRuntime } from './native';
@@ -1635,7 +1635,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const zero = this.zeroOf(valueType);
     const lookup = (frame: Frame): [Value, boolean] => {
       const map = read(frame) as GoMap | undefined;
-      const entry = map?.entries.get(keyOf(key(frame)));
+      const keyValue = key(frame);
+      if (!map || map.entries.size === 0) {
+        checkKeyHashable(keyType, keyValue);
+        return [zero(), false];
+      }
+      const entry = map.entries.get(keyOf(keyValue));
       return entry ? [entry.value, true] : [zero(), false];
     };
     const prepareStore = (frame: Frame): ((value: Value) => void) => {
