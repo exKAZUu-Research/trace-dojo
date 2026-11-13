@@ -1,6 +1,9 @@
 import { executeCProgram } from '../c/execute';
 import { findCTraceAnnotations } from '../c/parse';
 import { traceCProgram } from '../c/trace';
+import { executeGoProgram } from '../go/execute';
+import { findGoTraceAnnotations } from '../go/parse';
+import { traceGoProgram } from '../go/trace';
 import { executeJavaProgram } from '../java/execute';
 import { traceJavaProgram } from '../java/trace';
 import { findJavaScriptTraceAnnotations } from '../javascript/parse';
@@ -56,6 +59,7 @@ interface Interpreter {
 }
 
 const interpreters = {
+  go: { findTraceAnnotations: findGoTraceAnnotations, record: traceGoProgram, execute: executeGoProgram },
   java: { findTraceAnnotations: findJavaTraceAnnotations, record: traceJavaProgram, execute: executeJavaProgram },
   javascript: {
     findTraceAnnotations: findJavaScriptTraceAnnotations,
