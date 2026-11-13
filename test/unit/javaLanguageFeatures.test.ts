@@ -2269,3 +2269,15 @@ public class Main { static void t(String n, Supplier<Object> s) { try { System.o
       'ra java.lang.UnsupportedOperationException: remove\nva java.lang.UnsupportedOperationException: remove\nkr java.lang.UnsupportedOperationException: remove\nvr java.lang.UnsupportedOperationException: remove\nri java.lang.UnsupportedOperationException: remove\nal java.lang.UnsupportedOperationException: remove\n',
   });
 });
+
+test("Java's one-entry Map.of entry set rejects every change at once, as Set.of does", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { Map<Integer,Integer> one = Map.of(1, 1); t("r", () -> one.entrySet().remove(Map.entry(1, 1))); t("rt", () -> one.entrySet().retainAll(List.of())); t("ri", () -> one.entrySet().removeIf(e -> true)); t("rif", () -> one.entrySet().removeIf(e -> false)); t("ra", () -> one.entrySet().removeAll(List.of()));
+  t("two", () -> Map.of(1, 1, 2, 2).entrySet().removeIf(e -> e.getKey() == 2)); t("c", () -> one.entrySet().contains(Map.entry(1, 1)) + " " + one.entrySet()); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'r java.lang.UnsupportedOperationException\nrt java.lang.UnsupportedOperationException\nri java.lang.UnsupportedOperationException\nrif java.lang.UnsupportedOperationException\nra java.lang.UnsupportedOperationException\ntwo java.lang.UnsupportedOperationException: remove\nc true [1=1]\n',
+  });
+});

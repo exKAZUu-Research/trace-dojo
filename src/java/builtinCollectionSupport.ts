@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 421 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
+// code-gauge-allow-file fileNcss 422 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
 import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
@@ -286,9 +286,12 @@ export function checkModifiable(frame: Frame, collection: Value, changesSize: bo
 /** Throws at the start of a mutator of a collection whose class rejects every call, before its arguments are read. */
 export function rejectEagerly(frame: Frame, collection: Value): void {
   const object = collection as JavaObject;
-  // A view of an unmodifiable map wrapper is the JDK's UnmodifiableSet or UnmodifiableCollection of the map's view.
-  const viewed = mapViewSources.get(object)?.map;
-  if (eagerlyRejectingClasses.has(object.cls) || (viewed && unmodifiableWrappers.has(viewed))) {
+  const view = mapViewSources.get(object);
+  // A view of an unmodifiable map wrapper is the JDK's UnmodifiableSet or UnmodifiableCollection of the map's view,
+  // and the entry set of a one-entry Map.of is Set.of of its entry, which ImmutableCollections makes reject at once.
+  const isImmutableEntrySet =
+    view?.containsEntry !== undefined && eagerlyRejectingClasses.has(view.map.cls) && view.entries().length === 1;
+  if (eagerlyRejectingClasses.has(object.cls) || (view && unmodifiableWrappers.has(view.map)) || isImmutableEntrySet) {
     throwBuiltin(frame, 'UnsupportedOperationException');
   }
 }
