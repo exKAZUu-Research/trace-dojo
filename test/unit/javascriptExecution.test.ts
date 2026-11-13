@@ -840,7 +840,10 @@ for (const f of [() => Object.create(1), () => Object.create(null, null), () => 
 setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
 setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);
 let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 0; i < 2000; i++) sum += i; last = Date.now(); } console.log('polled twice per pass');
-let running = true; const f = Date.now(); while (running) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - f >= 300) running = false; } console.log('flag wait');`,
+let running = true; const f = Date.now(); while (running) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - f >= 300) running = false; } console.log('flag wait');
+let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 2000; i++) sum += i; done = Date.now() - g >= 300; } console.log('flag set');
+const h = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; const elapsed = Date.now() - h; if (elapsed >= 300) break; } console.log('elapsed variable');
+const o = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - o < 300) continue; break; } console.log('continue wait');`,
   ],
   [
     'a timestamp helper around computation between timers',

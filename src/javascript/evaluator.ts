@@ -3,7 +3,6 @@ import type {
   Block,
   ClassMember,
   ClassNode,
-  Expression,
   FunctionNode,
   Program,
   ScopeDeclarations,
@@ -22,7 +21,6 @@ import {
   privateMethodProperty,
 } from './memberProperties';
 import { startAsyncFunction } from './promises';
-import type { LoopState } from './runtime';
 import { isObjectCreation, onlyCalls, onlyCreates } from './stepRules';
 import {
   type Completion,
@@ -98,10 +96,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         return { kind: 'return', value: statement.value ? this.evaluate(statement.value) : undefined };
       }
       case 'if': {
-        const passes = statement.exitsLoop
-          ? this.exitConditionPasses(runtime.frame.loops.at(-1), statement.test)
-          : toBoolean(this.evaluate(statement.test));
-        if (passes) return this.statement(statement.consequent, []);
+        if (toBoolean(this.evaluate(statement.test))) return this.statement(statement.consequent, []);
         return statement.alternate ? this.statement(statement.alternate, []) : undefined;
       }
       case 'block': {
@@ -119,8 +114,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         const loop = runtime.enterLoop();
         try {
           for (let first = true; ; first = false, loop.iteration++) {
-            if (!(first && statement.kind === 'doWhile') && !this.exitConditionPasses(loop, statement.test))
-              return undefined;
+            if (!(first && statement.kind === 'doWhile') && !toBoolean(this.evaluate(statement.test))) return undefined;
             const result = this.loopBody(statement.body, labels);
             if (result !== 'next') return result;
             runtime.spend();
@@ -221,19 +215,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
   }
 
-  /**
-   * Evaluates a condition that can end `loop`, its test or an `if` that leaves it, so that a clock read in it tells that
-   * the clock decides when the loop ends; only the condition runs here, so branches add no host frames.
-   */
-  private exitConditionPasses(loop: LoopState | undefined, condition: Expression): boolean {
-    if (loop) loop.inExitCondition = true;
-    try {
-      return toBoolean(this.evaluate(condition));
-    } finally {
-      if (loop) loop.inExitCondition = false;
-    }
-  }
-
   /** Runs a loop body, returning `'next'` to continue the loop or the completion that ends it. */
   private loopBody(body: Statement, labels: string[]): 'next' | Completion {
     const completion = this.statement(body, []);
@@ -256,7 +237,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       try {
         this.copyIterationScope(perIterationNames);
         for (; ; loop.iteration++) {
-          if (statement.test && !this.exitConditionPasses(loop, statement.test)) return;
+          if (statement.test && !toBoolean(this.evaluate(statement.test))) return;
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
           this.copyIterationScope(perIterationNames);

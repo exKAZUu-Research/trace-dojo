@@ -30,7 +30,6 @@ import {
   unsupportedFeatures,
 } from './convertNodes';
 import { ExpressionConverter, patternSuspends } from './expressionConverter';
-import { markLoopExits } from './loopExits';
 import { isConstantExpression } from './stepRules';
 
 type StatementConverter = (node: Node) => Statement;
@@ -131,9 +130,7 @@ export class ProgramConverter extends ExpressionConverter {
   private statement(node: Node): Statement {
     const convert = this.statementConverters[node.type] as StatementConverter | undefined;
     if (!convert) return unsupported(node, unsupportedFeatures[node.type] ?? `構文「${node.type}」`);
-    const statement = convert(node);
-    markLoopExits(statement);
-    return statement;
+    return convert(node);
   }
 
   /** Lets a statement record the step of its row. */

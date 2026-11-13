@@ -62,15 +62,17 @@ export class Frame {
 }
 
 /**
- * A running loop: the iteration it is in, the first iteration that read the clock, and whether a clock read decides when
- * it ends, as a busy wait's does: a read in its test or in the condition of an `if` that can end it.
+ * How many iterations of a loop must read the clock before its reads count as polling: more than a loop timing rounds
+ * of work usually runs, and few enough that a busy wait whose body costs ten thousand operations a poll spends a tenth
+ * of the operation budget before its polls move the clock by all their work.
  */
+const POLLING_ITERATIONS = 10;
+
+/** A running loop: the iteration it is in, the last iteration that read the clock, and how many iterations did. */
 export interface LoopState {
   iteration: number;
-  firstClockRead?: number;
-  clockEndsIt: boolean;
-  /** Whether a condition that can end the loop is being evaluated now. */
-  inExitCondition: boolean;
+  lastClockRead?: number;
+  clockReadIterations: number;
 }
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
@@ -583,7 +585,7 @@ export class Runtime {
 
   /** Starts a loop in the current frame, whose iterations the caller counts until it calls {@link exitLoop}. */
   enterLoop(): LoopState {
-    const loop: LoopState = { iteration: 0, clockEndsIt: false, inExitCondition: false };
+    const loop: LoopState = { iteration: 0, clockReadIterations: 0 };
     this.frame.loops.push(loop);
     return loop;
   }
@@ -594,15 +596,18 @@ export class Runtime {
 
   /**
    * Notes a read of the clock, returning whether it polls, as a busy wait does: whether the innermost running loop, in
-   * this frame or a caller of it, is one whose end a clock read decides, and read the clock in an earlier iteration.
+   * this frame or a caller of it, has read the clock in more than POLLING_ITERATIONS of its iterations. A loop timing a
+   * few rounds of work reads it in a handful, while a busy wait reads it again and again, whatever decides its end.
    */
   pollsClock(): boolean {
     for (let index = this.frames.length - 1; index >= 0; index--) {
       const loop = this.frames[index].loops.at(-1);
       if (!loop) continue;
-      if (loop.inExitCondition) loop.clockEndsIt = true;
-      loop.firstClockRead ??= loop.iteration;
-      return loop.clockEndsIt && loop.firstClockRead < loop.iteration;
+      if (loop.lastClockRead !== loop.iteration) {
+        loop.lastClockRead = loop.iteration;
+        loop.clockReadIterations++;
+      }
+      return loop.clockReadIterations > POLLING_ITERATIONS;
     }
     return false;
   }

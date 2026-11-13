@@ -12,7 +12,7 @@ import { Awaiting, GeneratorReturn, resumedValue, runToEnd, type Steps } from '.
 import { DONE, ValueIterator } from './iteration';
 import { asyncIteratorOf } from './iteratorProtocol';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
-import type { LoopState, Runtime } from './runtime';
+import type { Runtime } from './runtime';
 import { StepEvaluator } from './stepEvaluator';
 import { onlyCalls, onlyCreates, storesReference } from './stepRules';
 import {
@@ -96,8 +96,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         return { kind: 'return', value: statement.awaitsValue ? resumedValue(yield new Awaiting(value)) : value };
       }
       case 'if': {
-        const loop = statement.exitsLoop ? runtime.frame.loops.at(-1) : undefined;
-        if (yield* this.exitConditionSteps(loop, statement.test))
+        if (toBoolean(yield* this.valueSteps(statement.test)))
           return yield* this.statementSteps(statement.consequent, []);
         return statement.alternate ? yield* this.statementSteps(statement.alternate, []) : undefined;
       }
@@ -299,7 +298,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     const loop = runtime.enterLoop();
     try {
       for (let first = true; ; first = false, loop.iteration++) {
-        if (!(first && statement.kind === 'doWhile') && !(yield* this.exitConditionSteps(loop, statement.test)))
+        if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
           return undefined;
         const result = yield* this.loopBodySteps(statement.body, labels);
         if (result !== 'next') return result;
@@ -307,16 +306,6 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       }
     } finally {
       runtime.exitLoop();
-    }
-  }
-
-  /** Evaluates a condition, which when `loop` is given can end it, so that a clock read in it marks the loop. */
-  private *exitConditionSteps(loop: LoopState | undefined, condition: Expression): Steps<boolean> {
-    if (loop) loop.inExitCondition = true;
-    try {
-      return toBoolean(yield* this.valueSteps(condition));
-    } finally {
-      if (loop) loop.inExitCondition = false;
     }
   }
 
@@ -344,7 +333,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         try {
           this.copyIterationScope(perIterationNames);
           for (; ; loop.iteration++) {
-            if (statement.test && !(yield* this.exitConditionSteps(loop, statement.test))) return;
+            if (statement.test && !toBoolean(yield* this.valueSteps(statement.test))) return;
             const result = yield* this.loopBodySteps(statement.body, labels);
             if (result !== 'next') return result;
             this.copyIterationScope(perIterationNames);
