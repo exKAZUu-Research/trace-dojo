@@ -2370,6 +2370,25 @@ test('Array comparison converts array-like values and handles callback shrinkage
   });
 });
 
+test('Array join follows receiver mutation during element conversion', () => {
+  expect(run('class A;def to_str;$a.replace([8]);"x";end;end;$a=[A.new,2,3];p $a.join(","),$a')).toMatchObject({
+    stdout: '"8"\n[8]\n',
+  });
+  expect(run('class A;def to_ary;$a.clear;[1];end;end;$a=[A.new,2];p $a.join(",")')).toMatchObject({
+    stdout: '"1"\n',
+  });
+});
+
+test('Array structural hash stops after callback removes later elements', () => {
+  expect(
+    run(
+      'class A;def hash;puts :one;$a.clear;0;end;end;class B;def hash;puts :two;0;end;end;$a=[A.new,B.new];$a.hash;p $a'
+    )
+  ).toMatchObject({
+    stdout: 'one\n[]\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

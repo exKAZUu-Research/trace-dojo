@@ -55,7 +55,8 @@ function* structuralHash(value: RArray | RRange | RHash, ancestors: RBasic[], tr
   let parts: string[];
   if (value instanceof RArray) {
     parts = [];
-    for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, traversal));
+    for (let index = 0; index < value.items.length; index++)
+      parts.push(yield* hashKeyOf(value.items[index], ancestors, traversal));
   } else if (value instanceof RRange) {
     parts = [
       yield* hashKeyOf(value.begin, ancestors, traversal),

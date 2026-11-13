@@ -607,9 +607,10 @@ function* join(self: RArray, separator: RString, seen = new Set<RArray>()): Gen<
   let binary = false;
   let ascii = true;
   try {
-    for (const [index, item] of self.items.entries()) {
+    yield* preflightJoinFirst(self);
+    for (let index = 0; index < self.items.length; index++) {
       if (index > 0) append(separator);
-      append(yield* joinValue(item, separator, seen));
+      append(yield* joinValue(self.items[index], separator, seen));
     }
   } finally {
     seen.delete(self);
@@ -630,6 +631,17 @@ function* join(self: RArray, separator: RString, seen = new Set<RArray>()): Gen<
     chunks.push(bytes);
     ascii &&= bytes.every((byte) => byte < 0x80);
   }
+}
+
+function* preflightJoinFirst(self: RArray): Gen<void> {
+  const first = self.items[0];
+  if (
+    first !== undefined &&
+    !(first instanceof RString) &&
+    !(first instanceof RArray) &&
+    respondsTo(first, 'to_str', true)
+  )
+    yield* callMethod(first, 'to_str', [], undefined, undefined, { fcall: true });
 }
 
 def('Array', 'join', [0, 1], function* (self: RArray, args) {
