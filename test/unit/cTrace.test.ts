@@ -83,3 +83,49 @@ int main(void) {
     },
   });
 });
+
+test('the references show nested structs, flexible array members, and function pointers, and leave out a va_list', () => {
+  const program = `#include <stdarg.h>
+#include <stdlib.h>
+struct animal { const char *name; };
+struct dog { struct animal base; int (*speak)(int); };
+struct list { int count; int items[]; };
+int twice(int x) { return x * 2; }
+int sum(int count, ...) {
+  va_list ap;
+  va_start(ap, count);
+  int total = va_arg(ap, int);
+  va_end(ap);
+  return total;
+}
+int main(void) {
+  struct dog d = { { "Pochi" }, twice };
+  struct list *l = malloc(sizeof(struct list) + 2 * sizeof(int));
+  l->count = 2;
+  l->items[0] = 5;
+  int s = sum(1, 7);
+  free(l);
+  return 0;
+}`;
+  const trace = traceProgram('c', program, program);
+  // oxlint-disable-next-line unicorn/no-null -- The trace format shows values never written as null.
+  const unset = { kind: 'value', value: null };
+  const atList = trace.traceItems.find((item) => item.line === 19);
+  expect(atList?.referenceVars.d).toEqual({
+    kind: 'object',
+    entries: {
+      base: { kind: 'object', entries: { name: { kind: 'value', value: 'Pochi' } } },
+      speak: { kind: 'value', value: 'twice' },
+    },
+  });
+  expect(atList?.referenceVars.l).toEqual({
+    kind: 'object',
+    entries: {
+      count: { kind: 'value', value: 2 },
+      items: { kind: 'array', entries: { 0: { kind: 'value', value: 5 }, 1: unset } },
+    },
+  });
+  const inSum = trace.traceItems.filter((item) => item.callLines.length === 1);
+  expect(inSum.length).toBeGreaterThan(0);
+  for (const item of inSum) expect(Object.keys(item.vars)).not.toContain('ap');
+});
