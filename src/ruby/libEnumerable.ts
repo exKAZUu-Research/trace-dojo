@@ -1,5 +1,14 @@
 // code-gauge-allow-file fileNcss 677 -- The libEnumerable module keeps one concern's cases together.
-import { caseEquals, compareValues, inspect, rEquals, spaceship, toIndex, toInt } from './conversions';
+import {
+  caseEquals,
+  compareValues,
+  comparisonFailed,
+  inspect,
+  rEquals,
+  spaceship,
+  toIndex,
+  toInt,
+} from './conversions';
 import { def } from './define';
 import { argumentCountError, argumentError, typeError } from './errors';
 import { eachEntry, hashGet, hashSet } from './hashes';
@@ -216,6 +225,7 @@ def('Enumerable', 'reverse_each', [0, -1], function* (self, _args, block) {
 
 /** `inject`/`reduce`: folds with a block or with the method a symbol names, from an initial value or the first. */
 export function* inject(self: Value, args: Value[], block: RProc | undefined): Gen {
+  if (args.length > 2) throw argumentCountError(args.length, 1, 2);
   if (args.length === 0 && !block) throw argumentCountError(0, 1, 2);
   let accumulator: Value | undefined;
   let operator: string | undefined;
@@ -250,7 +260,7 @@ function* fastOperator(left: Value, operator: string, right: Value): Gen {
   return yield* callMethod(left, operator, [right]);
 }
 
-def('Enumerable', ['inject', 'reduce'], [0, 2], (self, args, block) => inject(self, args, block));
+def('Enumerable', ['inject', 'reduce'], [0, -1], (self, args, block) => inject(self, args, block));
 
 /** `sum`, adding Integers exactly and Floats with Kahan-Babuska compensation as Ruby does. */
 export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen {
@@ -441,9 +451,9 @@ def('Enumerable', 'drop_while', 0, function* (self, _args, block) {
 
 // Ordering ------------------------------------------------------------------------------------------------------------
 
-function* blockCompare(block: RProc, a: Value, b: Value): Gen<number> {
+export function* blockCompare(block: RProc, a: Value, b: Value): Gen<number> {
   const result = yield* callBlock(block, [a, b]);
-  if (result === NIL) throw argumentError(`comparison of ${className(a)} with ${className(b)} failed`);
+  if (result === NIL) throw comparisonFailed(a, b);
   if (typeof result === 'bigint') return result > 0n ? 1 : result < 0n ? -1 : 0;
   if (typeof result === 'number') return Math.sign(result);
   if (truthy(yield* callMethod(result, '>', [0n]))) return 1;

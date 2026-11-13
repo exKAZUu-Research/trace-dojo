@@ -15,7 +15,7 @@ import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
 import { hashGet, hashSet, structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
-import { inject, iterate, nmin, sortBy, sortValues, sum, toArray, uniqValues } from './libEnumerable';
+import { blockCompare, inject, iterate, nmin, sortBy, sortValues, sum, toArray, uniqValues } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { randomIndex } from './libRandom';
 import { rangeBounds } from './libString';
@@ -773,13 +773,14 @@ def('Array', 'drop', 1, function* (self: RArray, [countValue]) {
   return arr(self.items.slice(count));
 });
 def('Array', 'sum', [0, 1], (self: RArray, args, block) => sum(self, args, block));
-def('Array', ['inject', 'reduce'], [0, 2], (self: RArray, args, block) => inject(self, args, block));
+def('Array', ['inject', 'reduce'], [0, -1], (self: RArray, args, block) => inject(self, args, block));
 def('Array', 'max', [0, 1], function* (self: RArray, args, block) {
   if (args.length > 0 && args[0] !== NIL) return yield* nmin(self.items, args[0], undefined, block, true);
   let result: Value | undefined;
   for (const item of self.items) {
     if (result === undefined) result = item;
-    else if ((block ? yield* blockOrder(block, result, item) : yield* compareValues(result, item)) < 0) result = item;
+    else if (block ? (yield* blockCompare(block, item, result)) > 0 : (yield* compareValues(result, item)) < 0)
+      result = item;
   }
   return result ?? NIL;
 });
@@ -788,17 +789,11 @@ def('Array', 'min', [0, 1], function* (self: RArray, args, block) {
   let result: Value | undefined;
   for (const item of self.items) {
     if (result === undefined) result = item;
-    else if ((block ? yield* blockOrder(block, result, item) : yield* compareValues(result, item)) > 0) result = item;
+    else if (block ? (yield* blockCompare(block, item, result)) < 0 : (yield* compareValues(result, item)) > 0)
+      result = item;
   }
   return result ?? NIL;
 });
-
-function* blockOrder(block: RProc, a: Value, b: Value): Gen<number> {
-  const result = yield* callBlock(block, [a, b]);
-  if (typeof result === 'bigint') return result > 0n ? 1 : result < 0n ? -1 : 0;
-  if (typeof result === 'number') return Math.sign(result);
-  return yield* compareValues(result, 0n);
-}
 
 def('Array', 'cycle', [0, 1], function* (self: RArray, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);

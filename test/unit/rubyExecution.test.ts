@@ -407,6 +407,18 @@ test('Array extrema report comparison operands in Ruby order', () => {
   expect(run('begin; [nil, 1].min; rescue => e; puts e.message; end')).toMatchObject({
     stdout: 'comparison of NilClass with 1 failed\n',
   });
+  expect(run('p [[1, :x], [1, :y]].max { |a, b| a[0] > b[0] ? 1 : -1 }')).toMatchObject({
+    stdout: '[1, :x]\n',
+  });
+  expect(run('p [1, 2, 3].max { |a, b| p [a, b]; a <=> b }')).toMatchObject({
+    stdout: '[2, 1]\n[3, 2]\n3\n',
+  });
+  expect(run('begin; [1, nil].max { |a, b| a <=> b }; rescue => e; puts e.message; end')).toMatchObject({
+    stdout: 'comparison of NilClass with 1 failed\n',
+  });
+  expect(run('begin; [1, nil].sort { |a, b| a <=> b }; rescue => e; puts e.message; end')).toMatchObject({
+    stdout: 'comparison of Integer with nil failed\n',
+  });
 });
 
 test('Comparable equality stops recursive comparisons for the same pair', () => {
@@ -618,6 +630,9 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   });
   expect(run('p [1, 2].inject')).toMatchObject({
     uncaughtException: 'wrong number of arguments (given 0, expected 1..2) (ArgumentError)',
+  });
+  expect(run('p [1, 2].inject(1, :+, 3)')).toMatchObject({
+    uncaughtException: 'wrong number of arguments (given 3, expected 1..2) (ArgumentError)',
   });
   expect(run('p "".tr_s!("a", 2)')).toMatchObject({
     uncaughtException: 'no implicit conversion of Integer into String (TypeError)',
