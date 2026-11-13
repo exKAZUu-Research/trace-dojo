@@ -809,6 +809,12 @@ for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0
 }`,
   ],
   [
+    'identifiers and private names spelled with Unicode escapes',
+    `let \\u0061 = 1; const o = { \\u0062: 2, \\u0069f: 3 }; const { \\u0062: q } = o; console.log(a, o.\\u0062, q, o.if);
+class C { #\\u0061 = 4; \\u0063onstructor() { console.log('made'); } m() { return this.#a + (#\\u0061 in this); } } console.log(new C().m());
+l\\u0061bel: for (;;) break label;`,
+  ],
+  [
     'busy-waiting on the clock',
     `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
 function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');

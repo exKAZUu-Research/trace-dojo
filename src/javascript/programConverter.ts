@@ -25,6 +25,8 @@ import {
   keyName,
   namedChildren,
   namedField,
+  nameOf,
+  optionalNameOf,
   rowOf,
   unsupported,
   unsupportedFeatures,
@@ -61,7 +63,7 @@ export class ProgramConverter extends ExpressionConverter {
     function_declaration: (node) => this.functionDeclaration(node),
     generator_function_declaration: (node) => this.functionDeclaration(node),
     class_declaration: (node) => {
-      const name = field(node, 'name').text;
+      const name = nameOf(field(node, 'name'));
       this.declareLexical(node, name);
       const suspensionsBefore = this.context.suspensionCount;
       const cls = this.classNode(node, name);
@@ -268,7 +270,8 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   private jump(node: Node, kind: 'break' | 'continue'): Statement {
-    const label = node.childForFieldName('label')?.text;
+    const labelNode = node.childForFieldName('label');
+    const label = labelNode ? nameOf(labelNode) : undefined;
     const { context } = this;
     if (label !== undefined) {
       const isLoop = context.labels.get(label);
@@ -286,7 +289,7 @@ export class ProgramConverter extends ExpressionConverter {
     const labels: string[] = [];
     let current = node;
     while (current.type === 'labeled_statement') {
-      const label = field(current, 'label').text;
+      const label = nameOf(field(current, 'label'));
       if (this.context.labels.has(label) || labels.includes(label))
         fail(current, `ラベル ${label} はすでに使われています。`);
       labels.push(label);
@@ -348,15 +351,10 @@ export class ProgramConverter extends ExpressionConverter {
 
   // Functions and classes -------------------------------------------------------------------------------------------
 
-  functionNode(node: Node, kind: FunctionKind, name = node.childForFieldName('name')?.text ?? ''): FunctionNode {
+  functionNode(node: Node, kind: FunctionKind, name = optionalNameOf(node.childForFieldName('name'))): FunctionNode {
     const isGenerator = hasChild(node, '*');
     const isAsync = hasChild(node, 'async');
-    if (kind === 'classConstructor' && (isAsync || isGenerator)) {
-      fail(node, 'constructor には async や * を付けられません。');
-    }
-    if ((kind === 'getter' || kind === 'setter') && (isAsync || isGenerator)) {
-      fail(node, 'get や set には async や * を付けられません。');
-    }
+    if (isAsync || isGenerator) checkCanSuspend(node, kind);
     const bodyNode = field(node, 'body');
     const outer = this.context;
     const isArrow = kind === 'arrow';
@@ -510,6 +508,12 @@ function recordsHeaderStep(
   return init.kind !== 'declaration' || init.declarators.some((declarator) => declarator.init);
 }
 
+/** Rejects `async` or `*` on a function kind that cannot take them. */
+function checkCanSuspend(node: Node, kind: FunctionKind): void {
+  if (kind === 'classConstructor') fail(node, 'constructor には async や * を付けられません。');
+  if (kind === 'getter' || kind === 'setter') fail(node, 'get や set には async や * を付けられません。');
+}
+
 /**
  * The `#name`s a class body declares, which it may declare once each, or twice as a getter and a setter that are both
  * static or both not.
@@ -519,7 +523,7 @@ function declaredPrivateNames(members: Node[]): Set<string> {
   const declared = new Map<string, string>();
   for (const member of members) {
     const nameNode = privateNameNode(member);
-    if (nameNode) declared.set(nameNode.text, privateDeclaration(member, nameNode, declared.get(nameNode.text)));
+    if (nameNode) declared.set(nameOf(nameNode), privateDeclaration(member, nameNode, declared.get(nameOf(nameNode))));
   }
   return new Set(declared.keys());
 }
@@ -531,7 +535,7 @@ function privateNameNode(member: Node): Node | undefined {
 
 /** What a `#name` declares once `member` declares it again after `previous`, rejecting what JavaScript rejects. */
 function privateDeclaration(member: Node, nameNode: Node, previous: string | undefined): string {
-  const { text: name } = nameNode;
+  const name = nameOf(nameNode);
   if (name === '#constructor') fail(nameNode, '#constructor という名前は使えません。');
   const placement = hasChild(member, 'static') ? 'static' : 'instance';
   const accessor = member.type === 'method_definition' ? accessorOf(member) : undefined;
@@ -550,5 +554,5 @@ function checkMemberName(member: Node, key: PropertyName, isStatic: boolean, isF
 function isConstructorDefinition(member: Node): boolean {
   if (member.type !== 'method_definition' || hasChild(member, 'static')) return false;
   const name = member.childForFieldName('name');
-  return name?.type === 'property_identifier' && name.text === 'constructor';
+  return name?.type === 'property_identifier' && nameOf(name) === 'constructor';
 }

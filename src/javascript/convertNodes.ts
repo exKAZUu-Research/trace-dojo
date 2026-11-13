@@ -66,7 +66,31 @@ export function accessorOf(node: Node): 'getter' | 'setter' | undefined {
 const reservedBindingNames = new Set(['eval', 'arguments']);
 
 export function checkBindingName(node: Node): void {
-  if (reservedBindingNames.has(node.text)) fail(node, `${node.text} は変数名に使えません。`);
+  if (reservedBindingNames.has(nameOf(node))) fail(node, `${node.text} は変数名に使えません。`);
+}
+
+/** The words JavaScript reserves, which an identifier spelling one with an escape may not stand for. */
+const reservedWords = new Set(
+  'break case catch class const continue debugger default delete do else enum export extends false finally for function if import in instanceof new null return super switch this throw true try typeof var void while with'.split(
+    ' '
+  )
+);
+
+/** The name an identifier, a property name, or a `#name` spells, with its `\\u` escapes decoded. */
+export function nameOf(node: Node): string {
+  const { text } = node;
+  if (!text.includes('\\')) return text;
+  const name = text.replaceAll(/\\u(?:\{([\dA-Fa-f]+)\}|([\dA-Fa-f]{4}))/g, (_, braced?: string, fixed?: string) =>
+    String.fromCodePoint(Number.parseInt(braced ?? fixed ?? '', 16))
+  );
+  const isReference = node.type === 'identifier' || node.type.startsWith('shorthand_property_identifier');
+  if (isReference && reservedWords.has(name)) fail(node, `予約語 ${name} は、エスケープを含めて書けません。`);
+  return name;
+}
+
+/** The name a node spells, or an empty one when there is no node, as for an anonymous function. */
+export function optionalNameOf(node: Node | null | undefined): string {
+  return node ? nameOf(node) : '';
 }
 
 export function fail(node: Node, message: string): never {
