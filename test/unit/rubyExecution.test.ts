@@ -1969,3 +1969,9 @@ test('memoized Array sampling reads current receiver contents', () => {
     stdout: '[]\n',
   });
 });
+
+test('exclusive Float sequence sizes keep Ruby large-boundary tolerance', () => {
+  expect(run('p (0.0...1.0).step(0.0000000000000002).size, (0.0...2.0).step(0.0000000000000004).size')).toMatchObject({
+    stdout: '5000000000000001\n5000000000000001\n',
+  });
+});

@@ -79,7 +79,7 @@ export function floatStepCount(begin: number, end: number, step: number, exclusi
   if (exclusive) {
     if (count <= 0) return 0;
     count = Math.floor(count + error) + 1;
-    if (!Number.isSafeInteger(count)) return count;
+    if (!Number.isSafeInteger(count) || error === 0.5) return count;
     const inside = (index: number): boolean =>
       step > 0 ? fusedMultiplyAdd(index, step, begin) < end : fusedMultiplyAdd(index, step, begin) > end;
     while (count > 0 && !inside(count - 1)) {
