@@ -9,7 +9,7 @@ import { compileC, runProgram } from './execute';
 import { readScalar } from './expressionCompiler';
 import type { Allocation } from './memory';
 import { type Frame, Runtime } from './runtime';
-import { type CType, INT_PROPERTIES, isCharType, sizeIn, sizeOf } from './types';
+import { type CType, hasVla, INT_PROPERTIES, isCharType, sizeIn, sizeOf } from './types';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -163,7 +163,8 @@ class Snapshotter {
     if (!isScalarElement(type)) return NOT_SCALAR;
     const block = this.runtime.memory.find(address);
     if (!block) return NOT_SCALAR;
-    const size = sizeOf(type);
+    const size = sizeIn(type, this.vla);
+    if (size === 0) return NOT_SCALAR;
     const items: Scalarish[] = [];
     for (let at = address; at + size <= block.end; at += size) {
       const item = this.scalarOf(type, { address: at });
@@ -183,7 +184,6 @@ class Snapshotter {
     return new TextDecoder().decode(block.bytes.subarray(start, end));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
   private nodeOf(type: CType, where: Where, seen: Set<number>): DisplayNode | undefined {
     switch (type.kind) {
       case 'int':
@@ -200,42 +200,51 @@ class Snapshotter {
         return this.pointeeNode(type.to, value as number, seen);
       }
       case 'array': {
-        if (!('address' in where)) return undefined;
-        if (isCharType(type.of))
-          return { kind: 'value', value: this.stringAt(where.address, sizeIn(type, this.vla)) ?? '' };
-        const size = sizeIn(type.of, this.vla);
-        const entries: Record<string, DisplayNode> = {};
-        for (let index = 0; index < this.lengthOf(type); index++) {
-          entries[index] = this.nodeOf(type.of, { address: where.address + index * size }, seen) ?? NULL_NODE;
-        }
-        return { kind: 'array', entries };
+        return 'address' in where ? this.arrayNode(type, where.address, seen) : undefined;
       }
       case 'record': {
-        if (!('address' in where)) return undefined;
-        if (seen.has(where.address)) return undefined;
-        seen.add(where.address);
-        const entries: Record<string, DisplayNode> = {};
-        for (const field of type.info.fields ?? []) {
-          if (field.isAnonymous) {
-            // An unnamed member's members show as the struct's own, as the program names them.
-            const inner = this.nodeOf(field.type, { address: where.address + field.offset }, seen);
-            if (inner?.kind === 'object') Object.assign(entries, inner.entries);
-            continue;
-          }
-          if (field.name === undefined) continue;
-          const node =
-            field.bitWidth === undefined
-              ? this.nodeOf(field.type, { address: where.address + field.offset }, seen)
-              : this.bitFieldNode(type, field.name, where.address);
-          entries[field.name] = node ?? NULL_NODE;
-        }
-        seen.delete(where.address);
-        return { kind: 'object', entries };
+        return 'address' in where ? this.recordNode(type, where.address, seen) : undefined;
       }
       default: {
         return undefined;
       }
     }
+  }
+
+  private arrayNode(type: Extract<CType, { kind: 'array' }>, address: number, seen: Set<number>): DisplayNode {
+    if (isCharType(type.of)) return { kind: 'value', value: this.stringAt(address, sizeIn(type, this.vla)) ?? '' };
+    const size = sizeIn(type.of, this.vla);
+    const entries: Record<string, DisplayNode> = {};
+    for (let index = 0; index < this.lengthOf(type); index++) {
+      entries[index] = this.nodeOf(type.of, { address: address + index * size }, seen) ?? NULL_NODE;
+    }
+    return { kind: 'array', entries };
+  }
+
+  private recordNode(
+    type: Extract<CType, { kind: 'record' }>,
+    address: number,
+    seen: Set<number>
+  ): DisplayNode | undefined {
+    if (seen.has(address)) return undefined;
+    seen.add(address);
+    const entries: Record<string, DisplayNode> = {};
+    for (const field of type.info.fields ?? []) {
+      if (field.isAnonymous) {
+        // An unnamed member's members show as the struct's own, as the program names them.
+        const inner = this.nodeOf(field.type, { address: address + field.offset }, seen);
+        if (inner?.kind === 'object') Object.assign(entries, inner.entries);
+        continue;
+      }
+      if (field.name === undefined) continue;
+      const node =
+        field.bitWidth === undefined
+          ? this.nodeOf(field.type, { address: address + field.offset }, seen)
+          : this.bitFieldNode(type, field.name, address);
+      entries[field.name] = node ?? NULL_NODE;
+    }
+    seen.delete(address);
+    return { kind: 'object', entries };
   }
 
   private bitFieldNode(type: Extract<CType, { kind: 'record' }>, name: string, address: number): DisplayNode {
@@ -270,8 +279,8 @@ class Snapshotter {
     }
     if (type.kind === 'function' || type.kind === 'void') return undefined;
     if (isCharType(type)) return { kind: 'value', value: this.stringAt(address) ?? '' };
-    if (blockIsArray(block, type) && type.kind !== 'record') {
-      const size = sizeOf(type);
+    const size = sizeIn(type, this.vla);
+    if (size > 0 && blockIsArray(block, type) && type.kind !== 'record') {
       const entries: Record<string, DisplayNode> = {};
       let index = 0;
       for (let at = address; at + size <= block.end; at += size)
@@ -320,7 +329,9 @@ function hasScalarElements(type: CType): boolean {
 function blockIsArray(block: Allocation, type: CType): boolean {
   if (block.isHeap) return true;
   const declared = block.type;
-  return declared?.kind === 'array' && sizeOf(type) <= sizeOf(declared.of) * 1;
+  if (declared?.kind !== 'array') return false;
+  // A variable-length array's element size is known only in its frame, and a pointer into it reaches its elements.
+  return hasVla(declared.of) || hasVla(type) || sizeOf(type) <= sizeOf(declared.of);
 }
 
 /** Whether a pointer variable points into an array of scalars, which learners see as the elements it reaches. */

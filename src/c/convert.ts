@@ -305,23 +305,16 @@ export class Converter {
       if (!child) continue;
       this.checkUnsupported(child);
       if (child.type === 'storage_class_specifier') {
-        const word = child.text;
-        if (word === 'inline' || word === '__inline' || word === '__inline__') {
-          isInline = true;
-          continue;
+        const word = this.storageClass(child);
+        if (word === 'inline') isInline = true;
+        else if (word !== undefined) {
+          if (storage) {
+            throw new CompileError([
+              { row: child.startPosition.row, message: '記憶域の指定（static など）は1つだけ書けます。' },
+            ]);
+          }
+          storage = word;
         }
-        // _Noreturn only lets the compiler assume that the function never returns.
-        if (word === '_Noreturn' || word === 'noreturn') continue;
-        if (word === '_Thread_local' || word === 'thread_local' || word === '__thread') {
-          unsupported(child.startPosition.row, '_Thread_local');
-        }
-        if (word === 'constexpr') unsupported(child.startPosition.row, 'constexpr');
-        if (storage) {
-          throw new CompileError([
-            { row: child.startPosition.row, message: '記憶域の指定（static など）は1つだけ書けます。' },
-          ]);
-        }
-        storage = word as StorageClass;
       } else if (child.type === 'type_qualifier') {
         alignas = this.qualifier(child, qualifiers) ?? alignas;
       } else if (child.type === 'attribute_specifier' || child.type === 'attribute_declaration') {
@@ -340,6 +333,18 @@ export class Converter {
       ...(alignas ? { alignas } : {}),
       ...(isInline ? { isInline } : {}),
     };
+  }
+
+  private storageClass(node: Node): StorageClass | 'inline' | undefined {
+    const word = node.text;
+    if (word === 'inline' || word === '__inline' || word === '__inline__') return 'inline';
+    // _Noreturn only lets the compiler assume that the function never returns.
+    if (word === '_Noreturn' || word === 'noreturn') return undefined;
+    if (word === '_Thread_local' || word === 'thread_local' || word === '__thread') {
+      unsupported(node.startPosition.row, '_Thread_local');
+    }
+    if (word === 'constexpr') unsupported(node.startPosition.row, 'constexpr');
+    return word as StorageClass;
   }
 
   /** Records a type qualifier, returning the alignment of `_Alignas`, which is no qualifier in C but parses as one. */
@@ -538,7 +543,6 @@ export class Converter {
       });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of declarator.
   private declarator(node: Node): Declarator {
     const row = node.startPosition.row;
     this.checkUnsupported(node);
@@ -559,29 +563,11 @@ export class Converter {
       }
       case 'pointer_declarator':
       case 'abstract_pointer_declarator': {
-        const qualifiers = { isConst: false, isVolatile: false };
-        for (const child of node.namedChildren) {
-          if (!child) continue;
-          this.checkUnsupported(child);
-          if (child.type === 'type_qualifier') this.qualifier(child, qualifiers);
-          if (child.type === 'attribute_specifier' || child.type === 'attribute_declaration') this.attributes(child);
-        }
-        return { kind: 'pointer', qualifiers, inner: this.innerDeclarator(node), row };
+        return this.pointerDeclarator(node);
       }
       case 'array_declarator':
       case 'abstract_array_declarator': {
-        for (const child of node.namedChildren) {
-          if (child?.type === 'type_qualifier') unsupported(row, '配列の引数の型修飾子');
-        }
-        if (node.children.some((child) => child?.type === 'static')) unsupported(row, '配列の引数の static');
-        const size = node.childForFieldName('size');
-        if (size?.type === '*') unsupported(row, '可変長配列（[*]）');
-        return {
-          kind: 'array',
-          ...(size ? { size: this.expression(size) } : {}),
-          inner: this.innerDeclarator(node),
-          row,
-        };
+        return this.arrayDeclarator(node);
       }
       case 'function_declarator':
       case 'abstract_function_declarator': {
@@ -594,6 +580,33 @@ export class Converter {
       }
     }
     throw new CompileError([{ row, message: '宣言の書き方に誤りがあります。' }]);
+  }
+
+  private pointerDeclarator(node: Node): Declarator {
+    const qualifiers = { isConst: false, isVolatile: false };
+    for (const child of node.namedChildren) {
+      if (!child) continue;
+      this.checkUnsupported(child);
+      if (child.type === 'type_qualifier') this.qualifier(child, qualifiers);
+      if (child.type === 'attribute_specifier' || child.type === 'attribute_declaration') this.attributes(child);
+    }
+    return { kind: 'pointer', qualifiers, inner: this.innerDeclarator(node), row: node.startPosition.row };
+  }
+
+  private arrayDeclarator(node: Node): Declarator {
+    const row = node.startPosition.row;
+    for (const child of node.namedChildren) {
+      if (child?.type === 'type_qualifier') unsupported(row, '配列の引数の型修飾子');
+    }
+    if (node.children.some((child) => child?.type === 'static')) unsupported(row, '配列の引数の static');
+    const size = node.childForFieldName('size');
+    if (size?.type === '*') unsupported(row, '可変長配列（[*]）');
+    return {
+      kind: 'array',
+      ...(size ? { size: this.expression(size) } : {}),
+      inner: this.innerDeclarator(node),
+      row,
+    };
   }
 
   private innerDeclarator(node: Node): Declarator {
@@ -924,14 +937,7 @@ export class Converter {
         return this.binary(node);
       }
       case 'assignment_expression': {
-        const operator = field(node, 'operator').type;
-        return {
-          kind: 'assign',
-          operator: operator === '=' ? undefined : (operator.slice(0, -1) as BinaryOperator),
-          left: this.expression(field(node, 'left')),
-          right: this.expression(field(node, 'right')),
-          row,
-        };
+        return this.assignment(node);
       }
       case 'unary_expression': {
         return {
@@ -948,15 +954,7 @@ export class Converter {
           : { kind: 'address', operand, row };
       }
       case 'update_expression': {
-        const operator = field(node, 'operator');
-        const argument = field(node, 'argument');
-        return {
-          kind: 'update',
-          operator: operator.type as '++' | '--',
-          prefix: operator.startIndex < argument.startIndex,
-          operand: this.expression(argument),
-          row,
-        };
+        return this.update(node);
       }
       case 'cast_expression': {
         return {
@@ -1001,14 +999,7 @@ export class Converter {
         };
       }
       case 'compound_literal_expression': {
-        if (node.childrenForFieldName('storage_class').length > 0)
-          unsupported(row, '記憶域の指定のある複合リテラル（C23）');
-        return {
-          kind: 'compoundLiteral',
-          typeName: this.typeName(field(node, 'type')),
-          init: this.initializer(field(node, 'value')),
-          row,
-        };
+        return this.compoundLiteral(node);
       }
       case 'alignof_expression': {
         return { kind: 'alignof', typeName: this.typeName(field(node, 'type')), row };
@@ -1037,6 +1028,41 @@ export class Converter {
       }
     }
     throw new CompileError([{ row, message: '式の書き方に誤りがあります。' }]);
+  }
+
+  private assignment(node: Node): Expression {
+    const operator = field(node, 'operator').type;
+    return {
+      kind: 'assign',
+      operator: operator === '=' ? undefined : (operator.slice(0, -1) as BinaryOperator),
+      left: this.expression(field(node, 'left')),
+      right: this.expression(field(node, 'right')),
+      row: node.startPosition.row,
+    };
+  }
+
+  private update(node: Node): Expression {
+    const operator = field(node, 'operator');
+    const argument = field(node, 'argument');
+    return {
+      kind: 'update',
+      operator: operator.type as '++' | '--',
+      prefix: operator.startIndex < argument.startIndex,
+      operand: this.expression(argument),
+      row: node.startPosition.row,
+    };
+  }
+
+  private compoundLiteral(node: Node): Expression {
+    const row = node.startPosition.row;
+    if (node.childrenForFieldName('storage_class').length > 0)
+      unsupported(row, '記憶域の指定のある複合リテラル（C23）');
+    return {
+      kind: 'compoundLiteral',
+      typeName: this.typeName(field(node, 'type')),
+      init: this.initializer(field(node, 'value')),
+      row,
+    };
   }
 
   private concatenatedString(node: Node): Expression {

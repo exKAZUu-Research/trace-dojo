@@ -112,14 +112,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return { ...this.expression(expression.expression), isParenthesized: true };
       }
       case 'binary': {
-        const left = expression.left;
-        if (RELATIONAL.has(expression.operator) && left.kind === 'binary' && RELATIONAL.has(left.operator)) {
-          this.error(
-            row,
-            `比較「${left.operator}」と「${expression.operator}」をつなげて書くと、数学の式とは違う意味になります（&& でつないでください）。`
-          );
-        }
-        return this.binary(expression.operator, this.rvalue(expression.left), this.rvalue(expression.right), row);
+        return this.binaryExpression(expression);
       }
       case 'assign': {
         return this.assignment(expression);
@@ -153,11 +146,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.conditional(expression);
       }
       case 'comma': {
-        const left = this.rvalue(expression.left);
-        const right = this.rvalue(expression.right);
-        const leftEffect = left.effect ?? left.value;
-        const value = right.value;
-        return { type: right.type, value: (frame) => (leftEffect(frame), value(frame)) };
+        return this.comma(expression);
       }
       case 'call': {
         return this.call(expression);
@@ -175,15 +164,38 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.compoundLiteral(expression);
       }
       case 'alignof': {
-        const type = this.typeOfName(expression.typeName);
-        if (type.kind !== 'void' && !isComplete(type))
-          this.error(row, `中身が決まっていない型（${typeName(type)}）に _Alignof は使えません。`);
-        return constantOperand(SIZE_T, BigInt(alignOf(type)));
+        return this.alignof(expression);
       }
       case 'offsetof': {
         return this.offsetof(expression);
       }
     }
+  }
+
+  private binaryExpression(expression: Extract<Expression, { kind: 'binary' }>): Operand {
+    const { left, row } = expression;
+    if (RELATIONAL.has(expression.operator) && left.kind === 'binary' && RELATIONAL.has(left.operator)) {
+      this.error(
+        row,
+        `比較「${left.operator}」と「${expression.operator}」をつなげて書くと、数学の式とは違う意味になります（&& でつないでください）。`
+      );
+    }
+    return this.binary(expression.operator, this.rvalue(expression.left), this.rvalue(expression.right), row);
+  }
+
+  private comma(expression: Extract<Expression, { kind: 'comma' }>): Operand {
+    const left = this.rvalue(expression.left);
+    const right = this.rvalue(expression.right);
+    const leftEffect = left.effect ?? left.value;
+    const value = right.value;
+    return { type: right.type, value: (frame) => (leftEffect(frame), value(frame)) };
+  }
+
+  private alignof(expression: Extract<Expression, { kind: 'alignof' }>): Operand {
+    const type = this.typeOfName(expression.typeName);
+    if (type.kind !== 'void' && !isComplete(type))
+      this.error(expression.row, `中身が決まっていない型（${typeName(type)}）に _Alignof は使えません。`);
+    return constantOperand(SIZE_T, BigInt(alignOf(type)));
   }
 
   /** `offsetof(T, m)`, which stddef.h provides and tree-sitter parses as an expression of its own. */

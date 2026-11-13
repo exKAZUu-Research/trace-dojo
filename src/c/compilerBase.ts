@@ -23,6 +23,7 @@ import {
   layoutRecord,
   LONG,
   RecordInfo,
+  type RecordMember,
   sizeOf,
   typeName,
   UINT,
@@ -259,10 +260,9 @@ export abstract class CompilerBase {
   }
 
   private defineRecord(info: RecordInfo, fields: FieldDeclaration[], row: number): void {
-    const members: { name?: string; type: CType; bitWidth?: number; align?: number; isAnonymous?: boolean }[] = [];
+    const members: RecordMember[] = [];
     const names = new Set<string>();
-    const declarators = fields.flatMap((field) => field.declarators);
-    const last = declarators.at(-1);
+    const last = fields.flatMap((field) => field.declarators).at(-1);
     for (const field of fields) {
       const base = this.baseType(field.specifiers);
       if (field.specifiers.storage) this.error(field.row, '構造体のメンバに記憶域の指定（static など）は書けません。');
@@ -271,37 +271,45 @@ export abstract class CompilerBase {
         // An unnamed struct or union member (C11), whose members belong to this struct; a tagged one declares nothing.
         const specifier = field.specifiers.type as { tag?: string };
         if (specifier.tag !== undefined) continue;
-        for (const name of base.info.memberNames()) {
-          if (names.has(name)) this.error(field.row, `メンバ「${name}」が2回宣言されています。`);
-          names.add(name);
-        }
+        for (const name of base.info.memberNames()) this.claimMemberName(names, name, field.row);
         members.push({ type: base, isAnonymous: true, ...(align === undefined ? {} : { align }) });
         continue;
       }
       for (const declarator of field.declarators) {
-        const { type, name } = this.declaredType(base, declarator.declarator);
-        const memberRow = declarator.row;
-        if (name !== undefined) {
-          if (names.has(name)) this.error(memberRow, `メンバ「${name}」が2回宣言されています。`);
-          names.add(name);
-        }
-        const isFlexible = type.kind === 'array' && type.length === undefined;
-        if (isFlexible) this.checkFlexibleMember(info, declarator === last, name, memberRow);
-        else this.checkMemberType(info, type, name, memberRow);
-        const bitWidth =
-          declarator.bitWidth === undefined
-            ? undefined
-            : this.bitFieldWidth(declarator.bitWidth, type, name, memberRow);
-        members.push({
-          ...(name === undefined ? {} : { name }),
-          type,
-          ...(bitWidth === undefined ? {} : { bitWidth }),
-          ...(align === undefined ? {} : { align }),
-        });
+        members.push(this.recordMember(info, base, declarator, declarator === last, names, align));
       }
     }
     if (members.length === 0) this.error(row, '構造体・共用体には、メンバを1つ以上書いてください。');
     layoutRecord(info, members);
+  }
+
+  private recordMember(
+    info: RecordInfo,
+    base: CType,
+    declarator: FieldDeclaration['declarators'][number],
+    isLast: boolean,
+    names: Set<string>,
+    align: number | undefined
+  ): RecordMember {
+    const { type, name } = this.declaredType(base, declarator.declarator);
+    const memberRow = declarator.row;
+    if (name !== undefined) this.claimMemberName(names, name, memberRow);
+    const isFlexible = type.kind === 'array' && type.length === undefined;
+    if (isFlexible) this.checkFlexibleMember(info, isLast, name, memberRow);
+    else this.checkMemberType(info, type, name, memberRow);
+    const bitWidth =
+      declarator.bitWidth === undefined ? undefined : this.bitFieldWidth(declarator.bitWidth, type, name, memberRow);
+    return {
+      ...(name === undefined ? {} : { name }),
+      type,
+      ...(bitWidth === undefined ? {} : { bitWidth }),
+      ...(align === undefined ? {} : { align }),
+    };
+  }
+
+  private claimMemberName(names: Set<string>, name: string, row: number): void {
+    if (names.has(name)) this.error(row, `メンバ「${name}」が2回宣言されています。`);
+    names.add(name);
   }
 
   /** A flexible array member, `int a[];`, which only the last member of a struct with other members may be. */

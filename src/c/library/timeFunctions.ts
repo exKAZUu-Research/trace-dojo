@@ -134,127 +134,61 @@ function isoWeek(fields: BrokenDown): { year: number; week: number } {
   return { year, week: Math.floor(thursday / 7) + 1 };
 }
 
-/** One `strftime` conversion in the C locale, or undefined for one this interpreter leaves as it is. */
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per conversion, as the C standard lists them.
-function conversion(letter: string, fields: BrokenDown): string | undefined {
-  const hour12 = fields.hour % 12 === 0 ? 12 : fields.hour % 12;
-  switch (letter) {
-    case 'a': {
-      return WEEKDAYS[fields.weekday].slice(0, 3);
-    }
-    case 'A': {
-      return WEEKDAYS[fields.weekday];
-    }
-    case 'b':
-    case 'h': {
-      return MONTHS[fields.month].slice(0, 3);
-    }
-    case 'B': {
-      return MONTHS[fields.month];
-    }
-    case 'c': {
-      return asctimeText(fields).trimEnd();
-    }
-    case 'C': {
-      return pad(Math.floor((fields.year + 1900) / 100), 2);
-    }
-    case 'd': {
-      return pad(fields.day, 2);
-    }
-    case 'D':
-    case 'x': {
-      return `${pad(fields.month + 1, 2)}/${pad(fields.day, 2)}/${pad((fields.year + 1900) % 100, 2)}`;
-    }
-    case 'e': {
-      return pad(fields.day, 2, ' ');
-    }
-    case 'F': {
-      return `${fields.year + 1900}-${pad(fields.month + 1, 2)}-${pad(fields.day, 2)}`;
-    }
-    case 'g': {
-      return pad(isoWeek(fields).year % 100, 2);
-    }
-    case 'G': {
-      return String(isoWeek(fields).year);
-    }
-    case 'H': {
-      return pad(fields.hour, 2);
-    }
-    case 'I': {
-      return pad(hour12, 2);
-    }
-    case 'j': {
-      return pad(fields.yearDay + 1, 3);
-    }
-    case 'k': {
-      return pad(fields.hour, 2, ' ');
-    }
-    case 'l': {
-      return pad(hour12, 2, ' ');
-    }
-    case 'm': {
-      return pad(fields.month + 1, 2);
-    }
-    case 'M': {
-      return pad(fields.minute, 2);
-    }
-    case 'n': {
-      return '\n';
-    }
-    case 'p': {
-      return fields.hour < 12 ? 'AM' : 'PM';
-    }
-    case 'r': {
-      return `${pad(hour12, 2)}:${pad(fields.minute, 2)}:${pad(fields.second, 2)} ${fields.hour < 12 ? 'AM' : 'PM'}`;
-    }
-    case 'R': {
-      return `${pad(fields.hour, 2)}:${pad(fields.minute, 2)}`;
-    }
-    case 's': {
-      return String(toTime(fields));
-    }
-    case 'S': {
-      return pad(fields.second, 2);
-    }
-    case 't': {
-      return '\t';
-    }
-    case 'T':
-    case 'X': {
-      return `${pad(fields.hour, 2)}:${pad(fields.minute, 2)}:${pad(fields.second, 2)}`;
-    }
-    case 'u': {
-      return String(fields.weekday === 0 ? 7 : fields.weekday);
-    }
-    case 'U': {
-      return pad(Math.floor((fields.yearDay + 7 - fields.weekday) / 7), 2);
-    }
-    case 'V': {
-      return pad(isoWeek(fields).week, 2);
-    }
-    case 'w': {
-      return String(fields.weekday);
-    }
-    case 'W': {
-      return pad(Math.floor((fields.yearDay + 7 - ((fields.weekday + 6) % 7)) / 7), 2);
-    }
-    case 'y': {
-      return pad((fields.year + 1900) % 100, 2);
-    }
-    case 'Y': {
-      return String(fields.year + 1900);
-    }
-    case 'z': {
-      return '+0000';
-    }
-    case 'Z': {
-      return 'UTC';
-    }
-    case '%': {
-      return '%';
-    }
-  }
-  return undefined;
+/** The `strftime` conversions in the C locale; this interpreter leaves any other one as it is. */
+const CONVERSIONS: Record<string, (fields: BrokenDown) => string> = {
+  a: (fields) => WEEKDAYS[fields.weekday].slice(0, 3),
+  A: (fields) => WEEKDAYS[fields.weekday],
+  b: (fields) => MONTHS[fields.month].slice(0, 3),
+  h: (fields) => MONTHS[fields.month].slice(0, 3),
+  B: (fields) => MONTHS[fields.month],
+  c: (fields) => asctimeText(fields).trimEnd(),
+  C: (fields) => pad(Math.floor((fields.year + 1900) / 100), 2),
+  d: (fields) => pad(fields.day, 2),
+  D: (fields) => monthDayYear(fields),
+  x: (fields) => monthDayYear(fields),
+  e: (fields) => pad(fields.day, 2, ' '),
+  F: (fields) => `${fields.year + 1900}-${pad(fields.month + 1, 2)}-${pad(fields.day, 2)}`,
+  g: (fields) => pad(isoWeek(fields).year % 100, 2),
+  G: (fields) => String(isoWeek(fields).year),
+  H: (fields) => pad(fields.hour, 2),
+  I: (fields) => pad(hour12(fields), 2),
+  j: (fields) => pad(fields.yearDay + 1, 3),
+  k: (fields) => pad(fields.hour, 2, ' '),
+  l: (fields) => pad(hour12(fields), 2, ' '),
+  m: (fields) => pad(fields.month + 1, 2),
+  M: (fields) => pad(fields.minute, 2),
+  n: () => '\n',
+  p: (fields) => (fields.hour < 12 ? 'AM' : 'PM'),
+  r: (fields) =>
+    `${pad(hour12(fields), 2)}:${pad(fields.minute, 2)}:${pad(fields.second, 2)} ${fields.hour < 12 ? 'AM' : 'PM'}`,
+  R: (fields) => `${pad(fields.hour, 2)}:${pad(fields.minute, 2)}`,
+  s: (fields) => String(toTime(fields)),
+  S: (fields) => pad(fields.second, 2),
+  t: () => '\t',
+  T: (fields) => hourMinuteSecond(fields),
+  X: (fields) => hourMinuteSecond(fields),
+  u: (fields) => String(fields.weekday === 0 ? 7 : fields.weekday),
+  U: (fields) => pad(Math.floor((fields.yearDay + 7 - fields.weekday) / 7), 2),
+  V: (fields) => pad(isoWeek(fields).week, 2),
+  w: (fields) => String(fields.weekday),
+  W: (fields) => pad(Math.floor((fields.yearDay + 7 - ((fields.weekday + 6) % 7)) / 7), 2),
+  y: (fields) => pad((fields.year + 1900) % 100, 2),
+  Y: (fields) => String(fields.year + 1900),
+  z: () => '+0000',
+  Z: () => 'UTC',
+  '%': () => '%',
+};
+
+function hour12(fields: BrokenDown): number {
+  return fields.hour % 12 === 0 ? 12 : fields.hour % 12;
+}
+
+function monthDayYear(fields: BrokenDown): string {
+  return `${pad(fields.month + 1, 2)}/${pad(fields.day, 2)}/${pad((fields.year + 1900) % 100, 2)}`;
+}
+
+function hourMinuteSecond(fields: BrokenDown): string {
+  return `${pad(fields.hour, 2)}:${pad(fields.minute, 2)}:${pad(fields.second, 2)}`;
 }
 
 function strftime(format: string, fields: BrokenDown): string {
@@ -266,7 +200,7 @@ function strftime(format: string, fields: BrokenDown): string {
       continue;
     }
     const letter = format[++index];
-    text += conversion(letter, fields) ?? `%${letter}`;
+    text += CONVERSIONS[letter]?.(fields) ?? `%${letter}`;
   }
   return text;
 }

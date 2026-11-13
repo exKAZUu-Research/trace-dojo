@@ -495,29 +495,45 @@ class Preprocessor {
       if (token.text === '##') continue;
       const arg = argumentOf(token);
       const copies = arg
-        ? (pastesNext || pastedPrevious ? arg : this.expand(arg)).map((item, position) => ({
-            ...item,
-            row: call.row,
-            space: position === 0 ? token.space : item.space,
-          }))
+        ? this.argumentCopies(arg, pastesNext || pastedPrevious, token.space, call.row)
         : [{ ...token, row: call.row }];
-      // GNU's `, ## __VA_ARGS__` drops the comma when no extra arguments are given.
-      if (pastedPrevious && arg && token.text === '__VA_ARGS__' && result.at(-1)?.text === ',') {
-        if (copies.length === 0) result.pop();
-        else result.push(...copies);
-        continue;
-      }
-      if (pastedPrevious && result.length > 0 && copies.length > 0) {
-        result.push(paste(result.pop() as PPToken, copies[0], call.row), ...copies.slice(1));
-      } else {
-        result.push(...copies);
-      }
+      appendCopies(result, copies, pastedPrevious, arg !== undefined && token.text === '__VA_ARGS__', call.row);
     }
     return result.map((token, position) => ({
       ...token,
       space: position === 0 ? call.space : token.space,
       hide: new Set([...(token.hide ?? []), ...hide]),
     }));
+  }
+
+  /** An argument's tokens in place of a parameter, macro-expanded unless next to `##`. */
+  private argumentCopies(arg: PPToken[], isPasted: boolean, space: PPToken['space'], row: number): PPToken[] {
+    return (isPasted ? arg : this.expand(arg)).map((item, position) => ({
+      ...item,
+      row,
+      space: position === 0 ? space : item.space,
+    }));
+  }
+}
+
+/** Appends a replacement's tokens, pasting the first onto the last token so far when `##` comes before it. */
+function appendCopies(
+  result: PPToken[],
+  copies: PPToken[],
+  pastedPrevious: boolean,
+  isVaArgs: boolean,
+  row: number
+): void {
+  // GNU's `, ## __VA_ARGS__` drops the comma when no extra arguments are given.
+  if (pastedPrevious && isVaArgs && result.at(-1)?.text === ',') {
+    if (copies.length === 0) result.pop();
+    else result.push(...copies);
+    return;
+  }
+  if (pastedPrevious && result.length > 0 && copies.length > 0) {
+    result.push(paste(result.pop() as PPToken, copies[0], row), ...copies.slice(1));
+  } else {
+    result.push(...copies);
   }
 }
 

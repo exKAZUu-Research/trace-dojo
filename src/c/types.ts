@@ -477,10 +477,15 @@ function hasOnly(counts: ReadonlyMap<string, number>, ...allowed: string[]): boo
 }
 
 /** Lays out the members of a struct or union as clang does on arm64. */
-export function layoutRecord(
-  info: RecordInfo,
-  members: { name?: string; type: CType; bitWidth?: number; align?: number; isAnonymous?: boolean }[]
-): void {
+export interface RecordMember {
+  name?: string;
+  type: CType;
+  bitWidth?: number;
+  align?: number;
+  isAnonymous?: boolean;
+}
+
+export function layoutRecord(info: RecordInfo, members: RecordMember[]): void {
   const fields: Field[] = [];
   let offset = 0;
   let bitPosition = 0;

@@ -83,65 +83,70 @@ const SIMPLE_ESCAPES: Record<string, number> = {
   e: 27,
 };
 
+const ENCODER = new TextEncoder();
+
 /** The bytes of a literal's body, with escapes decoded and other characters in UTF-8. */
 function decodeBody(body: string, row: number): number[] {
   const bytes: number[] = [];
-  const encoder = new TextEncoder();
   for (let index = 0; index < body.length;) {
-    const char = body[index];
-    if (char !== '\\') {
-      const codePoint = body.codePointAt(index) as number;
-      const text = String.fromCodePoint(codePoint);
-      bytes.push(...encoder.encode(text));
+    if (body[index] !== '\\') {
+      const text = String.fromCodePoint(body.codePointAt(index) as number);
+      bytes.push(...ENCODER.encode(text));
       index += text.length;
       continue;
     }
-    const next = body[index + 1];
-    if (next in SIMPLE_ESCAPES) {
-      bytes.push(SIMPLE_ESCAPES[next]);
-      index += 2;
-      continue;
-    }
-    if (/[0-7]/.test(next)) {
-      const octal = /^[0-7]{1,3}/.exec(body.slice(index + 1))?.[0] as string;
-      const value = Number.parseInt(octal, 8);
-      if (value > 255) throw new CompileError([{ row, message: '8進数のエスケープシーケンスの値が大きすぎます。' }]);
-      bytes.push(value);
-      index += 1 + octal.length;
-      continue;
-    }
-    if (next === 'x') {
-      const hex = /^[\da-fA-F]+/.exec(body.slice(index + 2))?.[0];
-      if (!hex) throw new CompileError([{ row, message: String.raw`\x の後には16進数を書いてください。` }]);
-      const value = Number.parseInt(hex, 16);
-      if (hex.replace(/^0+/, '').length > 2)
-        throw new CompileError([{ row, message: '16進数のエスケープシーケンスの値が大きすぎます。' }]);
-      bytes.push(value);
-      index += 2 + hex.length;
-      continue;
-    }
-    if (next === 'u' || next === 'U') {
-      const digits = next === 'u' ? 4 : 8;
-      const hex = body.slice(index + 2, index + 2 + digits);
-      if (!new RegExp(`^[\\da-fA-F]{${digits}}$`).test(hex)) {
-        throw new CompileError([{ row, message: `\\${next} の後には16進数を${digits}桁書いてください。` }]);
-      }
-      const codePoint = Number.parseInt(hex, 16);
-      const allowed = codePoint >= 0xa0 || codePoint === 0x24 || codePoint === 0x40 || codePoint === 0x60;
-      if (!allowed || (codePoint >= 0xd8_00 && codePoint <= 0xdf_ff) || codePoint > 0x10_ff_ff) {
-        throw new CompileError([{ row, message: `ユニバーサル文字名「\\${next}${hex}」では、この文字は書けません。` }]);
-      }
-      bytes.push(...encoder.encode(String.fromCodePoint(codePoint)));
-      index += 2 + digits;
-      continue;
-    }
-    // clang warns about an unknown escape and keeps the character after the backslash.
-    const codePoint = body.codePointAt(index + 1) as number;
-    const text = String.fromCodePoint(codePoint);
-    bytes.push(...encoder.encode(text));
-    index += 1 + text.length;
+    const escape = decodeEscape(body, index + 1, row);
+    bytes.push(...escape.bytes);
+    index += 1 + escape.length;
   }
   return bytes;
+}
+
+interface DecodedEscape {
+  bytes: number[];
+  /** The number of characters after the backslash. */
+  length: number;
+}
+
+function decodeEscape(body: string, start: number, row: number): DecodedEscape {
+  const next = body[start];
+  if (next in SIMPLE_ESCAPES) return { bytes: [SIMPLE_ESCAPES[next]], length: 1 };
+  if (/[0-7]/.test(next)) return octalEscape(body.slice(start), row);
+  if (next === 'x') return hexEscape(body.slice(start + 1), row);
+  if (next === 'u' || next === 'U') return universalCharacterName(next, body.slice(start + 1), row);
+  // clang warns about an unknown escape and keeps the character after the backslash.
+  const text = String.fromCodePoint(body.codePointAt(start) as number);
+  return { bytes: [...ENCODER.encode(text)], length: text.length };
+}
+
+function octalEscape(rest: string, row: number): DecodedEscape {
+  const octal = /^[0-7]{1,3}/.exec(rest)?.[0] as string;
+  const value = Number.parseInt(octal, 8);
+  if (value > 255) throw new CompileError([{ row, message: '8進数のエスケープシーケンスの値が大きすぎます。' }]);
+  return { bytes: [value], length: octal.length };
+}
+
+function hexEscape(rest: string, row: number): DecodedEscape {
+  const hex = /^[\da-fA-F]+/.exec(rest)?.[0];
+  if (!hex) throw new CompileError([{ row, message: String.raw`\x の後には16進数を書いてください。` }]);
+  const value = Number.parseInt(hex, 16);
+  if (hex.replace(/^0+/, '').length > 2)
+    throw new CompileError([{ row, message: '16進数のエスケープシーケンスの値が大きすぎます。' }]);
+  return { bytes: [value], length: 1 + hex.length };
+}
+
+function universalCharacterName(letter: 'u' | 'U', rest: string, row: number): DecodedEscape {
+  const digits = letter === 'u' ? 4 : 8;
+  const hex = rest.slice(0, digits);
+  if (!new RegExp(`^[\\da-fA-F]{${digits}}$`).test(hex)) {
+    throw new CompileError([{ row, message: `\\${letter} の後には16進数を${digits}桁書いてください。` }]);
+  }
+  const codePoint = Number.parseInt(hex, 16);
+  const allowed = codePoint >= 0xa0 || codePoint === 0x24 || codePoint === 0x40 || codePoint === 0x60;
+  if (!allowed || (codePoint >= 0xd8_00 && codePoint <= 0xdf_ff) || codePoint > 0x10_ff_ff) {
+    throw new CompileError([{ row, message: `ユニバーサル文字名「\\${letter}${hex}」では、この文字は書けません。` }]);
+  }
+  return { bytes: [...ENCODER.encode(String.fromCodePoint(codePoint))], length: 1 + digits };
 }
 
 /** The body of a literal without its quotes, rejecting the prefixes of wide characters, which need wchar.h. */

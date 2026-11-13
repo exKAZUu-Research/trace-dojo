@@ -9,6 +9,7 @@ import type {
   FunctionDefinition,
   InitDeclarator,
   Initializer,
+  Parameter,
   StorageClass,
   TranslationUnit,
 } from './ast';
@@ -375,17 +376,7 @@ export class Compiler extends StatementCompiler {
       this.withScope(() => {
         // `(void)` declares no parameters.
         const params = (type.params ?? []).length === 0 ? [] : (declarator.params ?? []);
-        for (const param of params) {
-          const { type: paramType, name: declaredParam } = this.parameterType(param);
-          // clang accepts an unnamed parameter in a definition, as C23 does; the function cannot read it.
-          const paramName = declaredParam ?? `\0${param.row}:${info.params.length}`;
-          if (!isComplete(paramType))
-            this.error(param.row, `引数「${paramName}」の型（${typeName(paramType)}）の中身が定義されていません。`);
-          if (this.scope.ordinary.has(paramName)) this.error(param.row, `引数「${paramName}」が2つあります。`);
-          const local = this.addLocal(paramName, paramType, param.row, true);
-          if (param.specifiers.storage === 'register') context.registerLocals.add(local);
-          info.params.push(local);
-        }
+        for (const param of params) this.declareParameter(param, context);
         // Parameters of variably modified types, such as `int a[rows][cols]`, get their lengths on entry.
         const parameterLengths = this.takePendingVla();
         const body = this.compound(definition.body, true);
@@ -397,6 +388,19 @@ export class Compiler extends StatementCompiler {
     } finally {
       this.fn = outer;
     }
+  }
+
+  private declareParameter(param: Parameter, context: FunctionContext): void {
+    const { info } = context;
+    const { type: paramType, name: declaredParam } = this.parameterType(param);
+    // clang accepts an unnamed parameter in a definition, as C23 does; the function cannot read it.
+    const paramName = declaredParam ?? `\0${param.row}:${info.params.length}`;
+    if (!isComplete(paramType))
+      this.error(param.row, `引数「${paramName}」の型（${typeName(paramType)}）の中身が定義されていません。`);
+    if (this.scope.ordinary.has(paramName)) this.error(param.row, `引数「${paramName}」が2つあります。`);
+    const local = this.addLocal(paramName, paramType, param.row, true);
+    if (param.specifiers.storage === 'register') context.registerLocals.add(local);
+    info.params.push(local);
   }
 
   private checkMain(type: FunctionType, row: number): void {

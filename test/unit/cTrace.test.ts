@@ -61,3 +61,25 @@ int main(void) {
     },
   });
 });
+
+test('a pointer to rows of a variable-length array shows the rows it reaches', () => {
+  const program = `void fill(int rows, int cols, int m[rows][cols]) {
+  m[1][0] = 7;
+}
+int main(void) {
+  int rows = 2, cols = 2;
+  int m[rows][cols];
+  fill(rows, cols, m);
+  return 0;
+}`;
+  const trace = traceProgram('c', program, program);
+  // oxlint-disable-next-line unicorn/no-null -- The trace format shows values never written as null.
+  const unset = { kind: 'value', value: null };
+  expect(trace.traceItems.find((item) => item.line === 2)?.referenceVars.m).toEqual({
+    kind: 'array',
+    entries: {
+      0: { kind: 'array', entries: { 0: unset, 1: unset } },
+      1: { kind: 'array', entries: { 0: { kind: 'value', value: 7 }, 1: unset } },
+    },
+  });
+});
