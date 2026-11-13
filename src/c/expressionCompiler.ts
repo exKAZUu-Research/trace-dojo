@@ -1162,7 +1162,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 /** A name that stddef.h declares, telling that the program included it and may use offsetof. */
 export const OFFSETOF_MARKER = '__offsetof_is_declared';
 
-function convertedConstant(value: Scalar, source: CType, target: CType): Scalar | undefined {
+export function convertedConstant(value: Scalar, source: CType, target: CType): Scalar | undefined {
   try {
     return convertScalar(value, source, target);
   } catch (error) {

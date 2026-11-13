@@ -125,12 +125,13 @@ export function libraryEntry(name: string): LibraryEntry | undefined {
   if (name.startsWith('__trace_platform_'))
     return { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name.slice('__trace_platform_'.length)}）` };
   const canDefine = EXTENSIONS.has(name) && !UNMODELED.has(name) && !PLATFORM_DEFINED_FUNCTIONS.has(name);
+  const declaration = { canDefine, hasDefinition: PLATFORM_DEFINED_FUNCTIONS.has(name) };
   const feature = UNSUPPORTED[name];
   if (feature)
     return {
       kind: 'unsupported',
       feature,
-      canDefine,
+      ...declaration,
     };
   const run = NATIVES[name];
   if (!run)
@@ -138,13 +139,13 @@ export function libraryEntry(name: string): LibraryEntry | undefined {
       ? {
           kind: 'unsupported',
           feature: `標準 C ライブラリ以外の関数（${name}）`,
-          canDefine,
+          ...declaration,
         }
       : undefined;
   return {
     kind: 'native',
     run,
-    canDefine,
+    ...declaration,
     ...(name in SPECIAL_CALLS ? { special: SPECIAL_CALLS[name as keyof typeof SPECIAL_CALLS] } : {}),
   };
 }

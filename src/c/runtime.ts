@@ -353,7 +353,7 @@ export function storeValue(
     return;
   }
   storerOf(type)(runtime, address, value);
-  const metadata = bytes?.size ? bytes : range ? pointerBytesOf(range) : undefined;
+  const metadata = bytes?.size ? bytes : range ? pointerBytesOf(range, value) : undefined;
   if (metadata) {
     const size = sizeOf(type);
     const block = runtime.memory.locate(address, size);

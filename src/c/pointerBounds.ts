@@ -14,6 +14,7 @@ export type Address = number | BoundedAddress;
 
 export type PointerRange = Pick<BoundedAddress, 'start' | 'end'>;
 interface PointerOrigin {
+  representation: bigint;
   range: PointerRange;
 }
 interface PointerByte {
@@ -139,8 +140,8 @@ export function replacePointerBytes(bytes: PointerBytes, offset: number, size: n
   for (const [at, byte] of source ?? []) if (at >= 0 && at < size) bytes.set(offset + at, byte);
 }
 
-export function pointerBytesOf(range: PointerRange): PointerBytes {
-  const origin = { range };
+export function pointerBytesOf(range: PointerRange, value: Scalar): PointerBytes {
+  const origin = { range, representation: BigInt.asUintN(64, BigInt(value)) };
   return new Map(Array.from({ length: 8 }, (_, index) => [index, { origin, index }]));
 }
 
@@ -149,7 +150,14 @@ export function rangeOfBytes(bytes: PointerBytes | undefined, offset = 0): Point
   if (!first || first.index !== 0) return;
   for (let i = 1; i < 8; i++) {
     const byte = bytes!.get(offset + i);
-    if (byte?.origin !== first.origin || byte.index !== i) return;
+    if (
+      !byte ||
+      byte.index !== i ||
+      byte.origin.representation !== first.origin.representation ||
+      byte.origin.range.start !== first.origin.range.start ||
+      byte.origin.range.end !== first.origin.range.end
+    )
+      return;
   }
   return first.origin.range;
 }

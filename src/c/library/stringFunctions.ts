@@ -1,6 +1,5 @@
-import { convertScalar } from '../arith';
 import { CRuntimeError } from '../errors';
-import type { SpecialCall } from '../expressionCompiler';
+import { convertedConstant, type SpecialCall } from '../expressionCompiler';
 import { loaderOf, type NativeFunction, type Runtime } from '../runtime';
 import { INT, SIZE_T, UCHAR } from '../types';
 import { errorMessage } from './appleErrno';
@@ -40,7 +39,7 @@ function span(bytes: Uint8Array, set: Uint8Array, inSet: boolean): number {
   return index;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Constant-folding eligibility and safe comparison bounds must agree before bypassing the runtime call.
+// code-gauge-allow functionCognitiveComplexity 21 -- Constant-folding eligibility and safe comparison bounds must agree before bypassing the runtime call.
 export const comparisonCall: SpecialCall = (compiler, call, fn) => {
   const count = fn.name === 'strcmp' ? 2 : 3;
   if (call.args.length !== count) return;
@@ -50,7 +49,9 @@ export const comparisonCall: SpecialCall = (compiler, call, fn) => {
   if (!a || !b) return;
   const n = count === 2 ? Math.max(a.length, b.length) : operands[2].constant;
   if (n === undefined || Number(n) < 0) return;
-  const length = Number(count === 2 ? n : convertScalar(n, operands[2].type, SIZE_T));
+  const converted = count === 2 ? n : convertedConstant(n, operands[2].type, SIZE_T);
+  if (converted === undefined) return;
+  const length = Number(converted);
   if (fn.name === 'memcmp' && (length > a.length || length > b.length)) return;
   if (fn.name !== 'memcmp' && (!a.includes(0) || !b.includes(0))) return;
   let result = 0;

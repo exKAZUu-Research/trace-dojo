@@ -1028,3 +1028,30 @@ test('integer pointer arithmetic preserves valid offsets and character represent
 int main(void){int a[2][2]={{1,2},{3,4}};uintptr_t n=(uintptr_t)(a[0]+2);n-=sizeof(int);int*q=(int*)n;int*r;for(int i=0;i<8;i++)((unsigned char*)&r)[i]=((unsigned char*)&q)[i]+0;printf("%d\\n",*r);}`;
   expect(executeProgram('c', source)).toMatchObject({ kind: 'executed', stdout: '2\n', uncaughtException: undefined });
 });
+
+test.each([
+  'int*p=a[0]+2,*r=a[0]+2,*q;memcpy(&q,&p,4);memcpy((char*)&q+4,(char*)&r+4,4);',
+  'int*p=a[0]+2,*q;memcpy(&q,&p,4);p=a[0]+2;memcpy((char*)&q+4,(char*)&p+4,4);',
+])('equivalent pointer stores preserve byte reconstruction origins: %s', (copy) => {
+  const result = executeProgram(
+    'c',
+    `#include <stdio.h>\n#include <string.h>\nint main(void){int a[2][2]={{1,2},{3,4}};${copy}printf("%d\\n",*q);}`
+  );
+  expect(result).toMatchObject({ kind: 'executed', stdout: '' });
+  expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+});
+
+test.each(['strncmp("a","b",1e300)', 'memcmp("a","b",0.0/0.0)'])(
+  'invalid comparison counts stay inside the runtime boundary: %s',
+  (call) => {
+    const result = executeProgram('c', `#include <string.h>\nint main(void){return ${call};}`);
+    expect(result).toMatchObject({ kind: 'executed' });
+    expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+  }
+);
+
+test.each(['isascii', 'isalpha', 'digittoint'])('SDK inline definitions reject either inclusion order: %s', (name) => {
+  expect(executeProgram('c', `int ${name}(int c){return 1;}\n#include <ctype.h>\nint main(void){}`).kind).toBe(
+    'compileError'
+  );
+});

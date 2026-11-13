@@ -50,7 +50,7 @@ import { unsupported } from './unsupported';
 export type LibraryEntry = (
   | { kind: 'native'; run: NonNullable<FunctionInfo['native']>; special?: SpecialCall }
   | { kind: 'unsupported'; feature: string }
-) & { canDefine?: boolean };
+) & { canDefine?: boolean; hasDefinition?: boolean };
 
 export interface CompiledProgram {
   globals: GlobalInfo[];
@@ -180,6 +180,7 @@ export class Compiler extends StatementCompiler {
     if (existing?.kind === 'function' && isStatic && !existing.fn.isStatic && header === undefined)
       this.error(row, `関数「${name}」は外部リンケージで宣言されているので static にできません。`);
     if (existing && existing.kind === 'function') {
+      if (existing.fn.isDefined && entry?.hasDefinition) this.error(row, `関数「${name}」が2回定義されています。`);
       if (!compatible(existing.type, type)) {
         this.error(row, `関数「${name}」の型が、前の宣言（${typeName(existing.type)}）と合いません。`);
       }
