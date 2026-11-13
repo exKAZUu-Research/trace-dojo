@@ -1998,6 +1998,16 @@ test('String callbacks resume at byte offsets after equal-byte-length edits', ()
   expect(run('s="éaa"; s.scan("a") { s[0]="bb" if s[0]=="é"; puts :hit }')).toMatchObject({
     stdout: 'hit\nhit\n',
   });
+  for (const method of ['gsub', 'gsub!']) {
+    expect(run(`s="aaaa"; p s.${method}("a") { s[0,2]="é" if s[0]=="a"; "x" }.bytes`)).toMatchObject({
+      stdout: '[120, 169, 120, 120]\n',
+    });
+  }
+  expect(run('s="éaaa"; s.scan("") { s[0]="bb" if s[0]=="é"; puts :hit }')).toMatchObject({
+    stdout: 'hit\nhit\nhit\nhit\nhit\n',
+  });
+  expect(run('s="aaa"; p s.sub("a") { s[1]="b"; "x" }')).toMatchObject({ stdout: '"xaa"\n' });
+  expect(run('s="aaa"; p s.sub!("a") { s[1]="b"; "x" }')).toMatchObject({ stdout: '"xba"\n' });
 });
 
 test('Enumerable tally reports invalid Hash conversion results', () => {

@@ -406,6 +406,8 @@ test('large flat Arrays remain visible in final trace variables', () => {
   expect(Array.isArray(values)).toBe(true);
   expect((values as unknown[]).length).toBe(2001);
   expect((values as unknown[]).at(-1)).toBe(1);
+  const display = traceProgram('ruby', program, program).traceItems.at(-1)?.referenceVars.a;
+  expect(display).toMatchObject({ kind: 'array', entries: { '1999': { kind: 'value', value: '…' } } });
 });
 
 test('converted Hash sources keep later Turtle values alive during insertion', () => {

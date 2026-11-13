@@ -1,5 +1,6 @@
-import { foldCase } from './caseFold';
 // code-gauge-allow-file fileNcss 796 -- The libString module keeps one concern's cases together.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { foldCase } from './caseFold';
 import {
   combinedStringEncoding,
   compareBytes,
@@ -930,8 +931,9 @@ function* substitute(
   self: RString,
   args: Value[],
   block: RProc | undefined,
-  global: boolean
-): Gen<{ text: string; matched: boolean }> {
+  global: boolean,
+  mutating = false
+): Gen<{ value: RString; matched: boolean }> {
   const [pattern, replacement] = args;
   regexpUnsupported(pattern);
   const target = yield* patternText(pattern, 'regexp');
@@ -940,8 +942,18 @@ function* substitute(
     throw argumentError('wrong number of arguments (given 1, expected 2)');
   }
   let text = self.s;
-  const sourceLength = stringBytes(self).length;
-  let result = '';
+  const source = stringBytes(self);
+  const sourceLength = source.length;
+  const sourceBinary = self.binary;
+  let active = source;
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  const append = (bytes: Uint8Array): void => {
+    length += bytes.length;
+    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(bytes.length / 256));
+    chunks.push(bytes);
+  };
   let position = 0;
   let positionByte = 0;
   let matched = false;
@@ -949,32 +961,46 @@ function* substitute(
     const found = text.indexOf(target, position);
     if (found === -1) break;
     const raw = self.binary || self.rawBytes !== undefined;
-    const foundByte = positionByte + textByteLength(text.slice(position, found), raw);
+    const foundByte = textByteLength(text.slice(0, found), raw);
     matched = true;
     const piece = yield* substitutionPiece(target, replacement, block, text, found);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
-    const modified = self.s !== text;
-    text = self.s;
-    result +=
-      (modified
-        ? text.slice(textIndexAtByte(text, positionByte, raw), textIndexAtByte(text, foundByte, raw))
-        : text.slice(position, found)) + piece;
+    const modified = (global || mutating) && self.s !== text;
+    if (global || mutating) {
+      text = self.s;
+      active = stringBytes(self);
+    }
+    append(active.slice(positionByte, foundByte));
+    append(stringBytes(str(piece)));
     positionByte = foundByte + textByteLength(target, raw);
     position = modified ? textIndexAtByte(text, positionByte, raw) : found + target.length;
     if (target.length === 0) {
-      if (position < text.length) {
-        const char = String.fromCodePoint(text.codePointAt(position) as number);
-        result += char;
-        position += char.length;
-      } else position++;
+      position = advanceEmptySubstitution(text, position, append);
       positionByte = textByteLength(text.slice(0, position), raw);
       if (position > text.length) break;
     }
     if (!global) break;
     rt().spend();
   }
-  if (position <= text.length) result += text.slice(position);
-  return { text: result, matched };
+  if (positionByte <= sourceLength) append(active.slice(positionByte));
+  return { value: stringFromBytes(joinChunks(chunks, length), sourceBinary), matched };
+}
+
+function advanceEmptySubstitution(text: string, position: number, append: (bytes: Uint8Array) => void): number {
+  if (position >= text.length) return position + 1;
+  const char = String.fromCodePoint(text.codePointAt(position) as number);
+  append(stringBytes(str(char)));
+  return position + char.length;
+}
+
+function joinChunks(chunks: Uint8Array[], length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
 }
 
 function* substitutionPiece(
@@ -1002,23 +1028,23 @@ function* substitutionPiece(
 }
 
 def('String', 'sub', [1, 2], function* (self: RString, args, block) {
-  return str((yield* substitute(self, args, block, false)).text);
+  return (yield* substitute(self, args, block, false)).value;
 });
 def('String', 'gsub', [1, 2], function* (self: RString, args, block) {
-  return str((yield* substitute(self, args, block, true)).text);
+  return (yield* substitute(self, args, block, true)).value;
 });
 def('String', 'sub!', [1, 2], function* (self: RString, args, block) {
   modify(self);
-  const result = yield* substitute(self, args, block, false);
+  const result = yield* substitute(self, args, block, false, true);
   if (!result.matched) return NIL;
-  setText(self, result.text);
+  setBytes(self, stringBytes(result.value), result.value.binary);
   return self;
 });
 def('String', 'gsub!', [1, 2], function* (self: RString, args, block) {
   modify(self);
-  const result = yield* substitute(self, args, block, true);
+  const result = yield* substitute(self, args, block, true, true);
   if (!result.matched) return NIL;
-  setText(self, result.text);
+  setBytes(self, stringBytes(result.value), result.value.binary);
   return self;
 });
 def('String', 'scan', 1, function* (self: RString, [pattern], block) {
@@ -1028,13 +1054,16 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   const found: Value[] = [];
   let text = self.s;
   const sourceLength = stringBytes(self).length;
+  const emptyMatchLimit = charLength(text) + 1;
+  let matches = 0;
   let position = 0;
-  let positionByte = 0;
   for (;;) {
+    if (target.length === 0 && matches >= emptyMatchLimit) break;
     const index = text.indexOf(target, position);
     if (index === -1) break;
     const raw = self.binary || self.rawBytes !== undefined;
-    const foundByte = positionByte + textByteLength(text.slice(position, index), raw);
+    const foundByte = textByteLength(text.slice(0, index), raw);
+    matches++;
     const match = str(target);
     let modified = false;
     if (block) {
@@ -1053,7 +1082,6 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
           ? String.fromCodePoint(text.codePointAt(start) as number).length
           : Math.max(target.length, 1));
     }
-    positionByte = target.length === 0 ? textByteLength(text.slice(0, position), raw) : nextByte;
     if (position > text.length) break;
   }
   if (!block) return arr(found);

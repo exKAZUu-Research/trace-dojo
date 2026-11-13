@@ -184,7 +184,10 @@ function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: 
   if (value instanceof RArray) {
     for (const [index, item] of value.items.entries()) {
       entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
-      if (budget.remaining <= 0) break;
+      if (budget.remaining <= 0) {
+        if (index + 1 < value.items.length) markTruncated(entries, String(index + 1));
+        break;
+      }
     }
     return { kind: 'array', entries };
   }
@@ -198,17 +201,36 @@ function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: 
         configurable: true,
         writable: true,
       });
-      if (budget.remaining <= 0) break;
+      if (budget.remaining <= 0) {
+        if (index + 1 < ordered.length) markTruncated(entries, labels[index + 1]);
+        break;
+      }
     }
-  } else {
-    for (const [key, item] of value.ivars ?? []) {
-      if (key.startsWith('@__') || !isVariableValue(item)) continue;
-      const node = displayNodeOf(item, seen, budget);
-      if (node) entries[key] = node;
-      if (budget.remaining <= 0) break;
-    }
-  }
+  } else addInstanceEntries(entries, value, seen, budget);
   return { kind: 'object', entries };
+}
+
+function addInstanceEntries(
+  entries: Record<string, DisplayNode>,
+  value: RBasic,
+  seen: Set<object>,
+  budget: { remaining: number }
+): void {
+  for (const [key, item] of value.ivars ?? []) {
+    if (key.startsWith('@__') || !isVariableValue(item)) continue;
+    const node = displayNodeOf(item, seen, budget);
+    if (node) entries[key] = node;
+    if (budget.remaining <= 0) break;
+  }
+}
+
+function markTruncated(entries: Record<string, DisplayNode>, key: string): void {
+  Object.defineProperty(entries, key, {
+    value: { kind: 'value', value: '…' },
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 /**
