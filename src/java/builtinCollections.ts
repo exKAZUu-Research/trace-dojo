@@ -4,9 +4,9 @@ import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
   batchRemovalClasses,
+  checkInsertPosition,
   checkListIndex,
   checkModifiable,
-  checkPosition,
   checkRemovable,
   classType,
   countsEmptyClear,
@@ -617,7 +617,7 @@ function defineListAdditions(
     return true;
   });
   addMethod(cls, 'add', [INT, element], VOID, false, (frame, receiver, [index, value]) => {
-    checkPosition(frame, index as number, elementsOf(receiver).length);
+    checkInsertPosition(frame, receiver, index as number, elementsOf(receiver).length, false);
     checkModifiable(frame, receiver, true);
     frame.runtime.allocateArray(frame, 1);
     elementsOf(receiver).splice(index as number, 0, value);
@@ -628,7 +628,7 @@ function defineListAdditions(
     insertAll(frame, receiver, elementsOf(receiver).length, source)
   );
   addMethod(cls, 'addAll', [INT, sourceType], BOOLEAN, false, (frame, receiver, [index, source]) => {
-    checkPosition(frame, index as number, elementsOf(receiver).length);
+    checkInsertPosition(frame, receiver, index as number, elementsOf(receiver).length, true);
     return insertAll(frame, receiver, index as number, source);
   });
   addMethod(

@@ -591,6 +591,27 @@ export function checkIndex(frame: Frame, index: number, length: number): void {
   }
 }
 
+/**
+ * Checks the position `add(int, E)` or, when `isBulk`, `addAll(int, Collection)` inserts at, which a `Stack` reports
+ * as `Vector.insertElementAt` and `Vector.addAll` do, with array messages, and the other lists as `ArrayList` does.
+ */
+export function checkInsertPosition(frame: Frame, list: Value, index: number, length: number, isBulk: boolean): void {
+  if (index >= 0 && index <= length) return;
+  if (checkingClassOf(list).name === 'Stack') {
+    if (isBulk) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `Array index out of range: ${index}`);
+    if (index > length) throwBuiltin(frame, 'ArrayIndexOutOfBoundsException', `${index} > ${length}`);
+    // insertElementAt grows a full array before its arraycopy rejects the negative index.
+    const capacity = vectorCapacities.get(unwrapped(list as JavaObject)) ?? 10;
+    const grown = length === capacity ? Math.max(capacity * 2, length + 1) : capacity;
+    throwBuiltin(
+      frame,
+      'ArrayIndexOutOfBoundsException',
+      `arraycopy: source index ${index} out of bounds for object array[${grown}]`
+    );
+  }
+  checkPosition(frame, index, length);
+}
+
 export function checkPosition(frame: Frame, index: number, length: number): void {
   if (index < 0 || index > length) throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${length}`);
 }
