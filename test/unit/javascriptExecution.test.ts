@@ -223,6 +223,39 @@ const groups = Map.groupBy([1, 2], (v) => {
 });
 
 test.each([
+  [
+    'a wrapper keeps the next method it calls',
+    `const t = { get next() { const t = new Turtle(1, 1); return () => { t; return { done: true }; }; } };
+const wrapper = Iterator.from(t);
+console.log(observer.canMoveForward());`,
+    'false\n',
+  ],
+  [
+    'a helper keeps the next method it calls until it is done',
+    `const helper = { __proto__: Iterator.prototype, get next() { const t = new Turtle(1, 1); return () => { t; return { done: true }; }; } }.map((x) => x);
+console.log(observer.canMoveForward());
+helper.next();
+console.log(observer.canMoveForward());`,
+    'false\ntrue\n',
+  ],
+  [
+    'flatMap releases an exhausted inner iterator',
+    `Iterator.from([1, 2]).flatMap((x) => {
+  if (x === 1) return { t: new Turtle(1, 1), [Symbol.iterator]() { return this; }, next() { return { done: true }; } };
+  console.log(observer.canMoveForward());
+  return [];
+}).next();`,
+    'true\n',
+  ],
+])('%s, keeping the turtles it holds on the board', (_, source, stdout) => {
+  expect(executeProgram('javascript', `const observer = new Turtle(1, 0);\n${source}`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['an infinite loop', 'while (true) {}', { kind: 'limitExceeded', limit: 'operations' }],
   ['an infinite loop of empty statements', 'for (;;);', { kind: 'limitExceeded', limit: 'operations' }],
   ['endless output', "for (;;) console.log('x'.repeat(1000));", { kind: 'limitExceeded', limit: 'output' }],
@@ -628,6 +661,18 @@ for (const bad of [() => 1n + 1, () => +1n, () => 1n / 0n, () => 2n ** -1n, () =
 console.log(BigInt.asIntN(8, 255n), BigInt.asUintN(8, -1n), [3n, 1n, 2n].sort(), [10n, 9n].sort((a, b) => (a < b ? -1 : 1)), Object.prototype.toString.call(1n));
 let n = 5n; n++; n += 2n; console.log(n, n-- , --n, 3n * -1n, (123n).toLocaleString(), 12345678901234567890n.toLocaleString());
 console.log(1n + '1', '' + 2n, [1n].includes(1n), 1n.valueOf === BigInt.prototype.valueOf);`,
+  ],
+  [
+    'the __proto__ accessor',
+    `class A {} class B extends A {}
+const o = { __proto__: { x: 1 } };
+console.log(o.x, o.__proto__, B.__proto__ === A, [].__proto__ === Array.prototype, (1).__proto__ === Number.prototype);
+const p = {}; p.__proto__ = { y: 2 }; p.__proto__ = 5; console.log(p.y, Object.keys(p));
+const n = Object.create(null); n.__proto__ = 3; console.log(n.__proto__, Object.keys(n), JSON.parse('{"__proto__": 1}'));
+for (const bad of [() => { p.__proto__ = p; }, () => { Object.freeze(p).__proto__ = {}; }]) {
+  try { bad(); } catch (e) { console.log(e.name, e.message); }
+}
+console.log(Object.getOwnPropertyDescriptor(Object.prototype, '__proto__'));`,
   ],
   [
     'boxed primitives',

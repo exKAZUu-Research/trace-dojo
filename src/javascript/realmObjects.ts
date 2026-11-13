@@ -29,6 +29,19 @@ export function defineObjectBuiltins(builder: RealmBuilder): void {
   defineReflection(method);
   defineIntegrity(method);
   const { objectPrototype } = builder.realm;
+  builder.getter(
+    objectPrototype,
+    '__proto__',
+    ({ runtime, thisValue }) => runtime.toObject(thisValue).proto,
+    ({ runtime, thisValue, args }) => {
+      if (thisValue === undefined || thisValue === null) {
+        return runtime.throwError('TypeError', 'Object.prototype.__proto__ called on null or undefined');
+      }
+      const [proto] = args;
+      if (isObject(thisValue) && (proto === null || isObject(proto))) changePrototype(runtime, thisValue, proto);
+      return;
+    }
+  );
   builder.method(objectPrototype, 'isPrototypeOf', 1, ({ runtime, thisValue, args }) => {
     if (!isObject(args[0])) return false;
     const object = runtime.toObject(thisValue);
@@ -147,7 +160,13 @@ function setPrototypeOf(runtime: Runtime, args: Value[]): Value {
       `Object prototype may only be an Object or null: ${runtime.describe(proto)}`
     );
   }
-  if (!isObject(object) || object.proto === proto) return object;
+  if (isObject(object)) changePrototype(runtime, object, proto);
+  return object;
+}
+
+/** The spec's OrdinarySetPrototypeOf, throwing where Object.setPrototypeOf and the `__proto__` setter throw. */
+function changePrototype(runtime: Runtime, object: JsObject, proto: JsObject | null): void {
+  if (object.proto === proto) return;
   if (object === runtime.realm.objectPrototype) {
     runtime.throwError('TypeError', "Immutable prototype object 'Object.prototype' cannot have their prototype set");
   }
@@ -156,7 +175,6 @@ function setPrototypeOf(runtime: Runtime, args: Value[]): Value {
     if (current === object) runtime.throwError('TypeError', 'Cyclic __proto__ value');
   }
   object.proto = proto;
-  return object;
 }
 
 function primitiveText(value: Exclude<Value, JsObject>): string {

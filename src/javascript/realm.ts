@@ -124,10 +124,10 @@ export class RealmBuilder {
     return fn;
   }
 
-  getter(object: JsObject, name: Key, run: NativeFunction): void {
+  getter(object: JsObject, name: Key, run: NativeFunction, set?: NativeFunction): void {
     object.properties.set(name, {
       get: this.function(`get ${functionNameOf(name)}`, 0, run),
-      set: undefined,
+      set: set && this.function(`set ${functionNameOf(name)}`, 1, set),
       enumerable: false,
       configurable: true,
     });
