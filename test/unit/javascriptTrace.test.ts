@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 
 import { traceProgram } from '../../src/interpreter/program';
-import type { TraceItem } from '../../src/problems/trace';
+import type { DisplayNode, TraceItem } from '../../src/problems/trace';
 
 const javaMain = (body: string, members = ''): string => `public class Main {
   public static void main(String[] args) {
@@ -785,4 +785,50 @@ const total = left + { turtle: new Turtle(), valueOf: () => 2 };`;
   expect(traceProgram('javascript', program, program).traceItems.find(({ line }) => line === 3)?.turtles).toHaveLength(
     1
   );
+});
+
+test('a BigInt too large for a number stays a bigint and a symbol shows its text unquoted inside an object', () => {
+  const program = "const o = { big: 9007199254740993n, small: 5n, s: Symbol('k') };";
+  const trace = traceProgram('javascript', program, program);
+  expect(trace.traceItems.at(-1)?.referenceVars).toEqual({
+    o: {
+      kind: 'object',
+      entries: {
+        big: { kind: 'value', value: 9_007_199_254_740_993n },
+        small: { kind: 'value', value: 5 },
+        s: { kind: 'value', value: 'Symbol(k)', verbatim: true },
+      },
+    },
+  });
+});
+
+const value = (v: string | number): DisplayNode => ({ kind: 'value', value: v });
+
+test('a trace shows the contents of Maps and Sets and the text of Dates and regular expressions', () => {
+  const program = `const m = new Map([['a', 1]]);
+const n = new Map([[2, 'b']]);
+const s = new Set([1, 'b']);
+const d = new Date(0);
+const r = /a+/g;
+const k = new Map([[new Date(0), 1]]);`;
+  const trace = traceProgram('javascript', program, program);
+  expect(trace.traceItems.at(-1)?.referenceVars).toEqual({
+    m: { kind: 'object', entries: { a: value(1) } },
+    n: { kind: 'array', entries: { 0: { kind: 'array', entries: { 0: value(2), 1: value('b') } } } },
+    s: { kind: 'array', entries: { 0: value(1), 1: value('b') } },
+    d: { kind: 'value', value: '1970-01-01T00:00:00.000Z', verbatim: true },
+    r: { kind: 'value', value: '/a+/g', verbatim: true },
+    k: {
+      kind: 'array',
+      entries: {
+        0: {
+          kind: 'array',
+          entries: { 0: { kind: 'value', value: '1970-01-01T00:00:00.000Z', verbatim: true }, 1: value(1) },
+        },
+      },
+    },
+  });
+  expect(traceProgram('javascript', 'const x = new Number(3);', 'const x = new Number(3);').finalVars).toEqual({
+    x: 3,
+  });
 });

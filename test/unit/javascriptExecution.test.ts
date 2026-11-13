@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 
-import { expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 
+import { LIMITS } from '../../src/interpreter/limits';
 import { executeProgram } from '../../src/interpreter/program';
 
 test('a program that draws reports its final board and the turtles still reachable', () => {
@@ -31,6 +32,24 @@ test.each([
   ['a duplicate declaration', 'let a = 1;\nlet a = 2;', 1, 'a はすでに宣言されています。'],
   ['a let that redeclares a var in its block', '{\n  var a = 1;\n  let a = 2;\n}', 2, 'a はすでに宣言されています。'],
   ['a var that redeclares a let', 'let a = 1;\n{ var a = 2; }', 1, 'a はすでに宣言されています。'],
+  [
+    'an identifier escape beyond U+10FFFF',
+    String.raw`let \u{110000} = 1;`,
+    0,
+    String.raw`\u{110000} は、この位置の名前に使える文字を表していません。`,
+  ],
+  [
+    'an escaped reserved word as a label',
+    String.raw`\u0069f: for (;;) break \u0069f;`,
+    0,
+    '予約語 if は、エスケープを含めて書けません。',
+  ],
+  [
+    'a #name escape of a digit first',
+    String.raw`class C { #\u0030a = 1; }`,
+    0,
+    String.raw`\u0030 は、この位置の名前に使える文字を表していません。`,
+  ],
   [
     'a static method named prototype',
     'class A {\n  static prototype() {}\n}',
@@ -134,6 +153,19 @@ test.each([
   ['a stray comma in an object pattern', 'const { a,, b } = { a: 1, b: 2 };', 0, '書き方に誤りがあります。'],
   ['a function statement without a name', 'function () {}', 0, '書き方に誤りがあります。'],
   ['a class statement without a name', 'class {}', 0, '書き方に誤りがあります。'],
+  [
+    'an undeclared #name',
+    'class A {\n  m(o) {\n    return #z in o;\n  }\n}',
+    2,
+    '#z は、それを宣言したクラスの中でしか使えません。',
+  ],
+  ['a #name declared twice', 'class A {\n  #a;\n  #a() {}\n}', 2, '#a は、このクラスの中ですでに宣言されています。'],
+  [
+    'a deleted #name',
+    'class A {\n  #a;\n  m() {\n    delete this.#a;\n  }\n}',
+    3,
+    '# で始まる名前のフィールドは delete できません。',
+  ],
 ])('%s is a compile error', (_, source, row, message) => {
   expect(executeProgram('javascript', source)).toEqual({ kind: 'compileError', diagnostics: [{ row, message }] });
 });
@@ -223,6 +255,96 @@ const groups = Map.groupBy([1, 2], (v) => {
 });
 
 test.each([
+  [
+    'a wrapper keeps the next method it calls',
+    `const t = { get next() { const t = new Turtle(1, 1); return () => { t; return { done: true }; }; } };
+const wrapper = Iterator.from(t);
+console.log(observer.canMoveForward());`,
+    'false\n',
+  ],
+  [
+    'a helper keeps the next method it calls until it is done',
+    `const helper = { __proto__: Iterator.prototype, get next() { const t = new Turtle(1, 1); return () => { t; return { done: true }; }; } }.map((x) => x);
+console.log(observer.canMoveForward());
+helper.next();
+console.log(observer.canMoveForward());`,
+    'false\ntrue\n',
+  ],
+  [
+    'Object.create keeps the descriptors it has read',
+    `const props = { get a() { return { value: new Turtle(1, 1) }; }, get b() { console.log(observer.canMoveForward()); return { value: 2 }; } };
+const result = Object.create(null, props);`,
+    'false\n',
+  ],
+  [
+    'Object.defineProperty keeps the descriptor fields it has read',
+    `const other = Object.defineProperty({}, 'c', { get value() { return new Turtle(1, 1); }, get writable() { console.log(observer.canMoveForward()); return true; } });`,
+    'false\n',
+  ],
+  [
+    'for await keeps its iterator while reading next',
+    `const source = { [Symbol.asyncIterator]() { return Object.defineProperty({ t: new Turtle(1, 1) }, 'next', { get: () => { console.log(observer.canMoveForward()); return () => Promise.resolve({ done: true }); } }); } };
+(async () => { for await (const x of source); })();`,
+    'false\n',
+  ],
+  [
+    'Object.fromEntries keeps a generated entry while converting its key',
+    `function* entries() { yield [{ toString() { console.log(observer.canMoveForward()); return 'a'; } }, new Turtle(1, 1)]; }
+const o = Object.fromEntries(entries());`,
+    'false\n',
+  ],
+  [
+    'an awaited member keeps its object while converting its key',
+    `(async () => { const t = (await { t: new Turtle(1, 1) })[{ toString() { console.log(observer.canMoveForward()); return 't'; } }]; })();`,
+    'false\n',
+  ],
+  [
+    'a Set method keeps what a bound getter returned',
+    `function getHas() { const t = new Turtle(1, 1); return () => { t; return true; }; }
+const other = { size: 1, get keys() { console.log(observer.canMoveForward()); return () => [][Symbol.iterator](); } };
+Object.defineProperty(other, 'has', { get: getHas.bind(null) });
+new Set([1]).isSubsetOf(other);`,
+    'false\n',
+  ],
+  [
+    'an eager iterator consumer keeps the next method it calls',
+    `const it = { __proto__: Iterator.prototype, get next() { const t = new Turtle(1, 1); let i = 0; return () => { t; return { value: i++, done: i > 1 }; }; } };
+it.forEach(() => console.log(observer.canMoveForward()));
+console.log(observer.canMoveForward());`,
+    'false\ntrue\n',
+  ],
+  [
+    'a Set method keeps the methods it read from a set-like argument',
+    `const other = { size: 1, get has() { const t = new Turtle(1, 1); return () => { t; return true; }; }, get keys() { console.log(observer.canMoveForward()); return () => [][Symbol.iterator](); } };
+new Set([1]).isSubsetOf(other);`,
+    'false\n',
+  ],
+  [
+    'a spread keeps its iterable while reading its iterator method',
+    `const out = [...Object.defineProperty({ t: new Turtle(1, 1) }, Symbol.iterator, { get: () => { console.log(observer.canMoveForward()); return () => [][Symbol.iterator](); } })];`,
+    'false\n',
+  ],
+  [
+    'a spread keeps its iterable while making its iterator',
+    `const out = [...{ t: new Turtle(1, 1), [Symbol.iterator]: () => { console.log(observer.canMoveForward()); return [][Symbol.iterator](); } }];`,
+    'false\n',
+  ],
+  [
+    'flatMap releases an exhausted inner iterator once its step returns',
+    `const it = Iterator.from([1]).flatMap(() => ({ t: new Turtle(1, 1), [Symbol.iterator]() { return this; }, next() { return { done: true }; } }));
+it.next();
+console.log(observer.canMoveForward());`,
+    'true\n',
+  ],
+])('%s, keeping the turtles it holds on the board', (_, source, stdout) => {
+  expect(executeProgram('javascript', `const observer = new Turtle(1, 0);\n${source}`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['an infinite loop', 'while (true) {}', { kind: 'limitExceeded', limit: 'operations' }],
   ['an infinite loop of empty statements', 'for (;;);', { kind: 'limitExceeded', limit: 'operations' }],
   ['endless output', "for (;;) console.log('x'.repeat(1000));", { kind: 'limitExceeded', limit: 'output' }],
@@ -251,6 +373,21 @@ test.each([
     'concatenating an array with itself many times',
     'const a = new Array(100000).fill(0);\na.concat(...new Array(100000).fill(a));',
     { kind: 'executed', uncaughtException: 'RangeError: Out of memory' },
+  ],
+  [
+    'replacing with many captures per match',
+    'const s = "a".repeat(1000000).replace(new RegExp("a" + "()".repeat(1000), "g"), "");',
+    { kind: 'executed', uncaughtException: 'RangeError: Out of memory' },
+  ],
+  [
+    'splitting a long text with a regular expression',
+    'const s = "word ".repeat(200000); console.log(s.split(/ /).length, s.split(" ").length);',
+    { kind: 'executed', stdout: '200001 200001\n' },
+  ],
+  [
+    'splitting with many captures per match',
+    'const s = "a".repeat(1000000).split(new RegExp("a" + "()".repeat(1000)));',
+    { kind: 'limitExceeded' },
   ],
   [
     'flatMap to a large array',
@@ -628,6 +765,85 @@ for (const bad of [() => 1n + 1, () => +1n, () => 1n / 0n, () => 2n ** -1n, () =
 console.log(BigInt.asIntN(8, 255n), BigInt.asUintN(8, -1n), [3n, 1n, 2n].sort(), [10n, 9n].sort((a, b) => (a < b ? -1 : 1)), Object.prototype.toString.call(1n));
 let n = 5n; n++; n += 2n; console.log(n, n-- , --n, 3n * -1n, (123n).toLocaleString(), 12345678901234567890n.toLocaleString());
 console.log(1n + '1', '' + 2n, [1n].includes(1n), 1n.valueOf === BigInt.prototype.valueOf);`,
+  ],
+  [
+    'the __proto__ accessor',
+    `class A {} class B extends A {}
+const o = { __proto__: { x: 1 } };
+console.log(o.x, o.__proto__, B.__proto__ === A, [].__proto__ === Array.prototype, (1).__proto__ === Number.prototype);
+const p = {}; p.__proto__ = { y: 2 }; p.__proto__ = 5; console.log(p.y, Object.keys(p));
+const n = Object.create(null); n.__proto__ = 3; console.log(n.__proto__, Object.keys(n), JSON.parse('{"__proto__": 1}'));
+for (const bad of [() => { p.__proto__ = p; }, () => { Object.freeze(p).__proto__ = {}; }]) {
+  try { bad(); } catch (e) { console.log(e.name, e.message); }
+}
+console.log(Object.getOwnPropertyDescriptor(Object.prototype, '__proto__'));`,
+  ],
+  [
+    'boxed primitives',
+    `const b = Object(1n);
+console.log(BigInt.prototype.toString.call(b), b.valueOf(), typeof b, b + 2n, b == 1n, Object(3).toFixed(1), Object(Symbol('q')).description);
+console.log(b, Object(-0), Object(true), Object(Symbol('a')), [Object(3)], Object.assign(Object(5), { extra: 1 }));
+console.log(Object.prototype.toString.call(Object(1)), Object.prototype.toString.call(Object(1n)), JSON.stringify([Object(1), Object(false)]));
+console.log(Object.getPrototypeOf(1) === Number.prototype, Object(1n) instanceof BigInt, structuredClone([Object(2n), Object(1)]));
+try { structuredClone(Object(Symbol('a'))); } catch (e) { console.log(e.name, e.message); }
+const s = Object('ab'); s[5] = 'z';
+console.log(s, Object.getOwnPropertyNames(s), Object.getOwnPropertyDescriptor(s, '0'), String(s), JSON.stringify([s]), s instanceof String, Array.isArray(s), [...s], { ...s });
+console.log(Object.prototype.toString.call(s), structuredClone(Object('q')), Object.getPrototypeOf('a') === String.prototype, Object.entries('ab'));
+const sym = Symbol('x'); console.log({ [Object(sym)]: 3 }[sym], Object.getOwnPropertyDescriptor(Symbol.prototype, Symbol.toPrimitive));
+for (const f of [() => String(Object(sym)), () => Symbol.prototype.toString.call(1), () => String.prototype.valueOf.call({})]) {
+  try { f(); } catch (e) { console.log(e.name, e.message); }
+}`,
+  ],
+  [
+    'splitting with regular expressions',
+    `for (const [s, r] of [['abc', /(?:)/], ['a1b2c3', /(\\d)/], ['', /x/], ['', /(?:)/], ['😀a😀', /(?:)/u], ['😀a😀', /(?:)/], ['aaa', /a*?/], ['ab', /$/], ['abc', /(b)|(z)/]]) {
+  console.log(JSON.stringify(s.split(r)), JSON.stringify(s.split(r, 2)), JSON.stringify(s.split(r, 0)));
+}`,
+  ],
+  [
+    'updating members whose key awaits or yields',
+    `async function h() {
+  const o = { k: 1, n: 5n }; ++o[await 'k'];
+  console.log(o.k, o[await 'k']++, o.k, --o[await Promise.resolve('n')], (await Promise.resolve(o)).k--, o.k);
+}
+function* g() { const o = { a: 1 }; o[yield 'key']++; console.log(o.a); }
+h().then(() => { const it = g(); it.next(); it.next('a'); });`,
+  ],
+  [
+    'primitive wrapper constructors',
+    `const n = new Number(1), s = new String('ab'), b = new Boolean(false);
+console.log(typeof n, typeof s, n, s, b, n + 1, s + 'c', b ? 'truthy' : 'falsy', s.length, n instanceof Number, new Number(), new String());
+class N extends Number { twice() { return this * 2; } } const x = new N(4); console.log(x, x.twice(), x instanceof N);
+console.log(JSON.stringify({ a: 1, b: 2 }, [new String('a'), new Number(1)]), JSON.stringify({ a: 1 }, null, new Number(2)));
+Object.defineProperty(s, '0', { value: 'a' }); Object.defineProperty(s, 'length', { value: 2 }); console.log(Object.keys(s), Object.getOwnPropertyNames(s));
+for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0), () => new Symbol(), () => { class T extends String { length = 5; } new T('ab'); }]) {
+  try { console.log(f()); } catch (e) { console.log(e.name, e.message); }
+}`,
+  ],
+  [
+    'identifiers and private names spelled with Unicode escapes',
+    `let \\u0061 = 1; const o = { \\u0062: 2, \\u0069f: 3 }; const { \\u0062: q } = o; console.log(a, o.\\u0062, q, o.if);
+class C { #\\u0061 = 4; \\u0063onstructor() { console.log('made'); } m() { return this.#a + (#\\u0061 in this); } } console.log(new C().m());
+l\\u0061bel: for (;;) break label;`,
+  ],
+  [
+    'for...in over objects whose prototype has a length',
+    `const s = Object('ab'); Object.setPrototypeOf(s, { length: 4, extra: 1 }); for (const k in s) console.log(k);
+const a = [7]; Object.setPrototypeOf(a, { length: 9, more: 2 }); for (const k in a) console.log(k);
+const t = Object('a'); t[4294967295] = 2; t[3] = 1; console.log(Object.getOwnPropertyNames(t));`,
+  ],
+  [
+    'Object.create with property descriptors',
+    `const o = Object.create({ inh: 1 }, { x: { value: 1, enumerable: true }, y: { get() { return 2; }, enumerable: true }, z: { value: 3 } });
+console.log(o.x, o.y, o.inh, Object.keys(o), o, Object.getOwnPropertyDescriptor(o, 'z'));
+for (const f of [() => Object.create(1), () => Object.create(null, null), () => Object.setPrototypeOf({}, 'a')]) {
+  try { f(); } catch (e) { console.log(e.name, e.message); }
+}`,
+  ],
+  [
+    'microtasks that clear and schedule timers between timers',
+    `let b; setTimeout(() => { console.log('a'); Promise.resolve().then(() => { clearTimeout(b); setTimeout(() => console.log('d'), 0); }); }, 0);
+b = setTimeout(() => console.log('b'), 0); setTimeout(() => console.log('c'), 0);`,
   ],
   [
     'async generators and for await',
@@ -1256,11 +1472,140 @@ async function g() { try { { await using a = null; await using b = { [Symbol.dis
 f(); queueMicrotask(() => console.log('micro'));
 setTimeout(() => { g(); queueMicrotask(() => console.log('micro2')); }, 0);`,
   ],
-])('a program using %s runs as Node.js runs it', (_, source) => {
-  expect(executeProgram('javascript', source)).toMatchObject({
-    kind: 'executed',
-    uncaughtException: undefined,
-    ...runOnNode(source),
+])(
+  'a program using %s runs as Node.js runs it',
+  (_, source) => {
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      ...runOnNode(source),
+    });
+  },
+  30_000
+);
+
+describe('busy waits', () => {
+  // A busy wait runs a quarter of the operation budget before it polls the clock, which under machine load can take
+  // longer than the run's real-time limit; the simulated clock does not depend on that limit once modules are loaded.
+  const { maxMilliseconds } = LIMITS;
+  beforeAll(() => {
+    LIMITS.maxMilliseconds = 60_000;
+  });
+  afterAll(() => {
+    LIMITS.maxMilliseconds = maxMilliseconds;
+  });
+
+  test.each([
+    [
+      'busy-waiting on the clock',
+      `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
+  function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');
+  const s = new Date(); while (new Date() - s < 500); console.log('waited again');
+  setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);
+  setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);
+  setTimeout(() => console.log('long'), 50); for (let i = 0; i < 500; i++) new Date(0); setTimeout(() => console.log('short'), 0);
+  const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');
+  const u = Date.now(); while (Date.now() - u < 500) { for (let i = 0; i < 500; i++) sum += i; } console.log('waited with more work');
+  setTimeout(() => console.log('timer 100'), 100); for (let i = 0; i < 5000; i++) sum += i; console.log(new Date().getFullYear() > 2000); setTimeout(() => console.log('timer 0'), 0);
+  setTimeout(() => console.log('overdue 500'), 500); sleep(1000); setTimeout(() => console.log('after sleep'), 60);
+  // Timers set after the busy waits fall due at least 50 ms apart, so Node.js waking late does not reorder them.
+  let n = 0; const iv = setInterval(() => { console.log('iv', ++n); if (n === 3) clearInterval(iv); }, 100);
+  setTimeout(() => { console.log('t150'); Promise.resolve().then(() => console.log('micro in t150')); setTimeout(() => console.log('nested 0'), 0); }, 150);
+  setTimeout(() => { sleep(200); console.log('slow'); }, 250); setTimeout(() => console.log('after slow'), 350);
+  `,
+    ],
+    [
+      'blocking busy waits that delay timers',
+      `let sum = 0;
+  setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
+  setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);`,
+    ],
+    [
+      'busy waits with costly bodies that end through a flag or a throw',
+      `let sum = 0;
+  let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 500; i++) sum += i; done = Date.now() - g >= 300; } console.log('flag set');
+  try { const d = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - d >= 300) throw new Error('timeout'); } } catch (error) { console.log(error.message); }`,
+    ],
+    [
+      'busy waits with costly bodies that end through a helper or an inner loop',
+      `let sum = 0;
+  let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
+  while (!ticked) tick(); console.log('ticked');
+  function sleep(ms) { const start = Date.now(); while (Date.now() - start < ms) { for (let i = 0; i < 500; i++) sum += i; } }
+  sleep(300); sleep(300); sleep(300); sleep(300); console.log('slept four times');
+  function* items() { while (true) yield 0; } const k = Date.now();
+  try { items().forEach(() => { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - k >= 300) throw new Error('consumed'); }); } catch (error) { console.log(error.message); }
+  let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');`,
+    ],
+  ])(
+    'a program using %s runs as Node.js runs it',
+    (_, source) => {
+      expect(executeProgram('javascript', source)).toMatchObject({
+        kind: 'executed',
+        uncaughtException: undefined,
+        ...runOnNode(source),
+      });
+    },
+    // The busy waits run on Node.js in real time, seconds in all.
+    60_000
+  );
+
+  test('timestamps around computation between timers keep the timers in the order Node.js runs them', () => {
+    // Node.js prints this unless machine load delays its timers, so the check is on the interpreter alone.
+    const source = `let sum = 0; const start = Date.now(); const log = (message) => console.log(message, Date.now() - start >= 0);
+  setTimeout(() => console.log('E 50'), 50); log('begin'); for (let i = 0; i < 5000; i++) sum += i; log('end'); setTimeout(() => console.log('F 0'), 0);
+  setTimeout(() => console.log('G 50'), 50);
+  for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; console.log('round', k, Date.now() - s >= 0); }
+  for (const n of [1, 2]) log(n); setTimeout(() => console.log('H 0'), 0);
+  setTimeout(() => console.log('I 50'), 50);
+  let k = 0; while (true) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; console.log('pass', k, Date.now() - s >= 0); if (++k === 2) break; }
+  setTimeout(() => console.log('J 0'), 0);
+  setTimeout(() => console.log('K 50'), 50); const times = [];
+  for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; times.push(Date.now() - s); }
+  console.log(times.length); setTimeout(() => console.log('L 0'), 0);
+  function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+  setTimeout(() => console.log('M 50'), 50); const fibTimes = [];
+  for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n % 8); fibTimes.push(Date.now() - s); }
+  console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);
+  setTimeout(() => console.log('Q 50'), 50); const ROUNDS = 15; const roundTimes = [];
+  for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n % 8); roundTimes.push(Date.now() - s); }
+  console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      stdout: `begin true
+end true
+round 0 true
+round 1 true
+round 2 true
+1 true
+2 true
+pass 0 true
+pass 1 true
+3
+15
+15
+F 0
+H 0
+J 0
+L 0
+N 0
+R 0
+E 50
+G 50
+I 50
+K 50
+M 50
+Q 50
+`,
+    });
+  });
+
+  test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
+    // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
+    const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);
+  while (Date.now() - v < 50) { for (let i = 0; i < 500; i++) sum += i; }`;
+    expect(executeProgram('javascript', source)).toMatchObject({ kind: 'executed', stdout: '100\n' });
   });
 });
 
