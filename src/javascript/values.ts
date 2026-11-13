@@ -65,8 +65,15 @@ export class JsObject {
   promise?: PromiseState;
   /** Set on a Map, Set, WeakMap, or WeakSet. */
   collection?: CollectionState;
+  /** Set on a primitive boxed by `Object(value)`, whose prototype methods read it; a string's are its own indices. */
+  primitive?: string | number | boolean | bigint | symbol;
 
   constructor(public proto: JsObject | null) {}
+}
+
+/** The primitive a boxed primitive holds, or the value itself otherwise. */
+export function unboxed(value: Value): Value {
+  return value instanceof JsObject && value.primitive !== undefined ? value.primitive : value;
 }
 
 /** An array index without an element, which reads as `undefined` but which most array methods skip. */

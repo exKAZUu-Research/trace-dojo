@@ -10,8 +10,8 @@ import {
   putEntry,
 } from './builtinCollections';
 import {
+  builtinClassOf,
   checkModifiable,
-  countsSortAsChange,
   mapViewSources,
   sortedValues,
   subListChecks,
@@ -348,18 +348,7 @@ function defineCollectionViews(
         [readOnly(owner, ...types)],
         classOf(owner, ...types),
         true,
-        (frame, _, [source]) => {
-          if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
-          // As the JDK's, an unmodifiable set or map is returned as it is rather than wrapped again.
-          if (unmodifiableWrappers.has(source) && frame.runtime.isInstance(source, owner)) return source;
-          // A set without a store of its own, such as a map's key set, shares its elements, which it reads afresh.
-          const view = frame.runtime.allocateObject(frame, source.store ? immutable : collections.unmodifiableViewSet);
-          view.store = source.store;
-          // A map's view keeps its map's iterators, which traverse the entries they started with.
-          const mapSource = mapViewSources.get(source);
-          if (mapSource) mapViewSources.set(view, mapSource);
-          return wrapUnmodifiable(view, source);
-        }
+        (frame, _, [source]) => unmodifiableSetOrMap(frame, source, owner, immutable, collections)
       )
     );
   }
@@ -375,13 +364,34 @@ function defineCollectionViews(
   ).typeParameters = [keyVariable];
 }
 
+/** `Collections.unmodifiableSet` or `unmodifiableMap` of `source`, a set or map as `owner` tells. */
+function unmodifiableSetOrMap(
+  frame: Frame,
+  source: Value,
+  owner: ClassInfo,
+  immutable: ClassInfo,
+  collections: Collections
+): JavaObject {
+  if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+  // As the JDK's, an unmodifiable set or map is returned as it is rather than wrapped again.
+  if (unmodifiableWrappers.has(source) && frame.runtime.isInstance(source, owner)) return source;
+  // Like the other builtins, a wrapper reads only the builtin collections, whose elements it can share.
+  if (!source.store && !source.elements && !mapViewSources.has(source)) itemsOf(frame, source);
+  // A set without a store of its own, such as a map's key set, shares its elements, which it reads afresh.
+  const view = frame.runtime.allocateObject(frame, source.store ? immutable : collections.unmodifiableViewSet);
+  view.store = source.store;
+  // A map's view keeps its map's iterators, which traverse the entries they started with.
+  const mapSource = mapViewSources.get(source);
+  if (mapSource) mapViewSources.set(view, mapSource);
+  return wrapUnmodifiable(view, source);
+}
+
 /**
  * The class of `Collections.unmodifiableList` of `list`, which tells the lists that implement `RandomAccess`, as every
  * list of the JDK's here but `LinkedList` and its views do, from the others.
  */
 function unmodifiableListClass(collections: Collections, list: JavaObject): ClassInfo {
-  let cls = list.cls;
-  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
+  const cls = builtinClassOf(list.cls);
   return cls.name === 'LinkedList' || cls.name === 'Object' || cls === collections.sequentialSubList
     ? collections.unmodifiableList
     : collections.unmodifiableRandomAccessList;
@@ -564,15 +574,9 @@ function elementsOf(frame: Frame, value: Value): Value[] {
   return value.elements ?? itemsOf(frame, value);
 }
 
-function touch(value: Value): void {
-  const object = value as JavaObject;
-  object.modCount = (object.modCount ?? 0) + 1;
-}
-
 /**
  * `Collections.rotate`, which moves each element `distance` places on, cyclically, writing only when it moves any,
- * `Collections.fill`, which sets each element in order, and `Collections.disjoint`, which asks the second collection
- * whether it contains each element of the first.
+ * `Collections.fill`, which sets each element in order, and `Collections.disjoint`.
  */
 function defineListUtilities(cls: ClassInfo, collections: Collections): void {
   const t: TypeVariable = { name: 'T', bounds: [collections.collectionClass.typeParameters[0].bounds[0] as JavaType] };
@@ -609,12 +613,25 @@ function defineListUtilities(cls: ClassInfo, collections: Collections): void {
     [anyOf(collections.collectionClass), anyOf(collections.collectionClass)],
     BOOLEAN,
     true,
-    (frame, _, [first, second]) => {
-      if (first === undefined || second === undefined) throwBuiltin(frame, 'NullPointerException');
-      return elementsOf(frame, first).every(
-        (value) => frame.runtime.invokeVirtual(frame, collections.collectionClass, 'contains', second, [value]) !== true
-      );
-    }
+    (frame, _, [first, second]) => disjoint(frame, collections, first, second)
+  );
+}
+
+/** `Collections.disjoint`, which, as the JDK's, looks up in a set or else in the larger collection and iterates the other. */
+function disjoint(frame: Frame, collections: Collections, first: Value, second: Value): boolean {
+  if (first === undefined || second === undefined) throwBuiltin(frame, 'NullPointerException');
+  const { collectionClass, setClass } = collections;
+  const sizeOf = (collection: Value): number =>
+    frame.runtime.invokeVirtual(frame, collectionClass, 'size', collection, []) as number;
+  let [iterated, searched] = [first, second];
+  if (frame.runtime.isInstance(first, setClass)) [iterated, searched] = [second, first];
+  else if (!frame.runtime.isInstance(second, setClass)) {
+    const [firstSize, secondSize] = [sizeOf(first), sizeOf(second)];
+    if (firstSize === 0 || secondSize === 0) return true;
+    if (firstSize > secondSize) [iterated, searched] = [second, first];
+  }
+  return elementsOf(frame, iterated).every(
+    (value) => frame.runtime.invokeVirtual(frame, collectionClass, 'contains', searched, [value]) !== true
   );
 }
 
@@ -681,14 +698,8 @@ function defineCollectionsClass(
     ['T'],
     objectType,
     (element) => ({ parameterTypes: [listOf(element)], returnType: VOID }),
-    (frame, _, [list]) => {
-      checkModifiable(frame, list, false);
-      const values = elementsOf(frame, list);
-      frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
-      const sorted = sortedValues(values, (a, b) => compareNatural(frame, a, b));
-      values.splice(0, values.length, ...sorted);
-      if (countsSortAsChange(list)) touch(list);
-    }
+    // As the JDK's, it sorts through the list's own sort, which a class may override.
+    (frame, _, [list]) => frame.runtime.invokeVirtual(frame, collections.listClass, 'sort', list, [undefined])
   );
   comparableBound((sort.typeParameters as TypeVariable[])[0]);
   for (const [name, sign] of [
@@ -770,15 +781,12 @@ function defineCollectionsClass(
     ['T'],
     objectType,
     (element) => ({ parameterTypes: [listOf(element), INT, INT], returnType: VOID }),
+    // As the JDK's l.set(i, l.set(j, l.get(i))), through the list's own methods, which check the indexes and changes.
     (frame, _, [list, i, j]) => {
-      checkModifiable(frame, list, false);
-      const values = elementsOf(frame, list);
-      for (const index of [i, j] as number[]) {
-        if (index < 0 || index >= values.length) {
-          throwBuiltin(frame, 'IndexOutOfBoundsException', `Index ${index} out of bounds for length ${values.length}`);
-        }
-      }
-      [values[i as number], values[j as number]] = [values[j as number], values[i as number]];
+      const { listClass } = collections;
+      const value = frame.runtime.invokeVirtual(frame, listClass, 'get', list, [i]);
+      const replaced = frame.runtime.invokeVirtual(frame, listClass, 'set', list, [j, value]);
+      frame.runtime.invokeVirtual(frame, listClass, 'set', list, [i, replaced]);
     }
   );
   addGenericStatic(

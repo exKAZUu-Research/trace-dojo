@@ -84,9 +84,9 @@ function implicitClass(members: MemberDeclaration[]): ClassDeclaration {
 function convertImport(node: Node): ImportDeclaration {
   const name = namedChildren(node).find((child) => child.type === 'scoped_identifier' || child.type === 'identifier');
   return {
-    isStatic: node.children.some((child) => child?.type === 'static'),
+    isStatic: node.children.some((child) => child.type === 'static'),
     names: (name?.text ?? '').split('.').map((part) => part.trim()),
-    isWildcard: node.children.some((child) => child?.type === 'asterisk'),
+    isWildcard: node.children.some((child) => child.type === 'asterisk'),
     ...span(node),
   };
 }

@@ -27,11 +27,11 @@
         "@willbooster/shared-lib": "11.1.0",
         "@willbooster/shared-lib-react": "6.3.0",
         "@willbooster/tree-sitter-c": "34.0.2",
-        "@willbooster/tree-sitter-java": "32.0.1",
-        "@willbooster/tree-sitter-javascript": "22.0.1",
-        "@willbooster/tree-sitter-python": "17.0.0",
+        "@willbooster/tree-sitter-java": "34.0.0",
+        "@willbooster/tree-sitter-javascript": "25.0.0",
+        "@willbooster/tree-sitter-python": "19.0.0",
         "@willbooster/wb": "23.3.0",
-        "@willbooster/web-tree-sitter": "18.0.2",
+        "@willbooster/web-tree-sitter": "20.0.0",
         "at-decorators": "7.1.3",
         "codemirror": "6.0.2",
         "csv-parse": "7.0.3",
@@ -707,15 +707,15 @@
 
     "@willbooster/tree-sitter-c": ["@willbooster/tree-sitter-c@34.0.2", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^17.0.1" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-kCyaTFXnNxjbpXokQ4y88zKtM86ARvZr26kmmlBweRd7A2JBJ3vNgq39SGZKYS+FZy+sYuPZ+bhbNt+nWt7VbA=="],
 
-    "@willbooster/tree-sitter-java": ["@willbooster/tree-sitter-java@32.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^17.0.1" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-CAYc6JHxV8VlwhSGl3hJxoZA3i1lmQpvk1Gqnj0pawIpzb2GBzg9NHOt5Kw6nN9GgYyxWGUlgZiu6FcSAk1VTA=="],
+    "@willbooster/tree-sitter-java": ["@willbooster/tree-sitter-java@34.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^20.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-YfjKNxknUOoKTe6cmf7QhAXkagDwBeSBN4qcgHVBsB/Aw/Ri6y0ICE+RzkgvMqNyss46Jw/SaOHH+7u9RCQt0g=="],
 
-    "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@22.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^17.0.1" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-XS3k+sGfj3Jko3bllNz91FpjFjaQHbzOmXP+9VJixkaWrwJxKsr00HnwP4FZcXJG/Aabl3VMB38GSccni4fn7w=="],
+    "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@25.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^20.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-wnrl+e7pSQFY1prnXN+RW7l49rP3DB8eN2Jhb1LmOBnFKY+BhN9XsYgCV4JaH2vaiTPujbx2ddrG+vlWcRJpjg=="],
 
-    "@willbooster/tree-sitter-python": ["@willbooster/tree-sitter-python@17.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^17.0.1 || ^18.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-7b/G7uGlJS6cENITTiSxO1llnmnCLfMl9C7kizeZKuft2GPKisV3Sf1iaQyUsefeOvDm7E6MLS0Kutbgk1/HFw=="],
+    "@willbooster/tree-sitter-python": ["@willbooster/tree-sitter-python@19.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^20.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-xVMfTI5YOZqq12i0hJGHbRClUI1VugESZ38r6MNz+FoK5aTyxrT6hBeurc7VHWYdH3b/KA72Zk1TkjFwoT0XKg=="],
 
     "@willbooster/wb": ["@willbooster/wb@23.3.0", "", { "dependencies": { "@textlint-rule/textlint-rule-no-invalid-control-character": "3.0.0", "@textlint/kernel": "15.8.0", "@textlint/module-interop": "15.8.0", "@textlint/textlint-plugin-markdown": "15.8.0", "chalk": "6.0.1", "code-gauge": "10.3.0", "dotenv": "18.0.9", "dotenv-expand": "13.0.0", "fast-glob": "3.3.3", "fastest-levenshtein": "1.0.16", "globby": "16.2.4", "jsonc-parser": "3.3.1", "minimal-promise-pool": "6.0.4", "semver": "7.8.5", "smol-toml": "1.9.1", "textlint-filter-rule-node-types": "1.1.0", "textlint-rule-ja-space-between-half-and-full-width": "3.0.4", "textlint-rule-no-zero-width-spaces": "1.0.1", "yargs": "18.2.0", "zod": "4.6.7" }, "bin": { "wb": "bin/index.js" } }, "sha512-TEE0qbT1Px9QavVHNMyB7G/eRtLU8Wqm2j+xVwYrUBoIF+RBzy63cW0NvM7Pm9vyNDR/GZMmsBqE4D0xmiVg3A=="],
 
-    "@willbooster/web-tree-sitter": ["@willbooster/web-tree-sitter@18.0.2", "", { "dependencies": { "@types/emscripten": "^1.41.5" } }, "sha512-5GgsN4PL9egp2YnGDqaoXru2V8qyDBCjDfl+iu3tgX3RmK4K1NXn9EK2yXpvV+p/5a90G9nSs4+g1oVFaW0iHA=="],
+    "@willbooster/web-tree-sitter": ["@willbooster/web-tree-sitter@20.0.0", "", { "dependencies": { "@types/emscripten": "^1.41.5" } }, "sha512-sykvor5aRETQvwbNRhMI2jk8qsh1jGezsrnP/S/pPRkALRHWPsfMErbsxGSF+YSzPh0aRjz8wcFGgO+xoJKcCg=="],
 
     "@zag-js/dom-query": ["@zag-js/dom-query@0.31.1", "", {}, "sha512-oiuohEXAXhBxpzzNm9k2VHGEOLC1SXlXSbRPcfBZ9so5NRQUA++zCE7cyQJqGLTZR0t3itFLlZqDbYEXRrefwg=="],
 

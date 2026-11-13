@@ -4,14 +4,12 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { Expression, PropertyName } from './ast';
 
 export function namedChildren(node: Node): Node[] {
-  return node.namedChildren.filter((child): child is Node => child !== null && child.type !== 'comment');
+  return node.namedChildren.filter((child) => child.type !== 'comment');
 }
 
 /** The first named child in a field, skipping the `;` and empty statements that the `for` header puts there. */
 export function namedField(node: Node, name: string): Node | undefined {
-  return node
-    .childrenForFieldName(name)
-    .find((child): child is Node => child !== null && child.isNamed && child.type !== 'empty_statement');
+  return node.childrenForFieldName(name).find((child) => child.isNamed && child.type !== 'empty_statement');
 }
 
 export function field(node: Node, name: string): Node {
@@ -21,11 +19,7 @@ export function field(node: Node, name: string): Node {
 }
 
 export function hasChild(node: Node, type: string): boolean {
-  return node.children.some((child) => child?.type === type);
-}
-
-export function isPresent(node: Node | null): node is Node {
-  return node !== null && node.type !== 'comment';
+  return node.children.some((child) => child.type === type);
 }
 
 export function rowOf(node: Node): number {
@@ -66,7 +60,41 @@ export function accessorOf(node: Node): 'getter' | 'setter' | undefined {
 const reservedBindingNames = new Set(['eval', 'arguments']);
 
 export function checkBindingName(node: Node): void {
-  if (reservedBindingNames.has(node.text)) fail(node, `${node.text} は変数名に使えません。`);
+  if (reservedBindingNames.has(nameOf(node))) fail(node, `${node.text} は変数名に使えません。`);
+}
+
+/** The words JavaScript reserves, which an identifier spelling one with an escape may not stand for. */
+const reservedWords = new Set(
+  'break case catch class const continue debugger default delete do else enum export extends false finally for function if import in instanceof new null return super switch this throw true try typeof var void while with'.split(
+    ' '
+  )
+);
+
+/** The name an identifier, a property name, or a `#name` spells, with its `\\u` escapes decoded. */
+export function nameOf(node: Node): string {
+  const { text } = node;
+  if (!text.includes('\\')) return text;
+  const start = text.startsWith('#') ? 1 : 0;
+  const name = text.replaceAll(
+    /\\u(?:\{([\dA-Fa-f]+)\}|([\dA-Fa-f]{4}))/g,
+    (escape: string, braced: string | undefined, fixed: string | undefined, offset: number) => {
+      const codePoint = Number.parseInt(braced ?? fixed ?? '', 16);
+      const character = codePoint <= 0x10_ff_ff ? String.fromCodePoint(codePoint) : '';
+      // An escape must spell a character the name may hold where it stands, as one written plainly would be.
+      const allowed = offset === start ? /^[\p{ID_Start}$_]$/u : /^[\p{ID_Continue}$‌‍]$/u;
+      if (!allowed.test(character)) fail(node, `${escape} は、この位置の名前に使える文字を表していません。`);
+      return character;
+    }
+  );
+  // Property names and #names may be reserved words; variables and labels may not.
+  const mayBeReserved = node.type.startsWith('property_identifier') || node.type === 'private_property_identifier';
+  if (!mayBeReserved && reservedWords.has(name)) fail(node, `予約語 ${name} は、エスケープを含めて書けません。`);
+  return name;
+}
+
+/** The name a node spells, or an empty one when there is no node, as for an anonymous function. */
+export function optionalNameOf(node: Node | null | undefined): string {
+  return node ? nameOf(node) : '';
 }
 
 export function fail(node: Node, message: string): never {

@@ -45,7 +45,7 @@ export function defineIteratorHelpers(builder: RealmBuilder): void {
       if (current === iteratorPrototype) return record.iterator;
     }
     const wrapper = newHostIterator(runtime, wrapperPrototype, {
-      source: record.iterator,
+      source: recordRoots(runtime, record),
       next: () => step(runtime, record),
       close: () => closeIterator(runtime, record),
     });
@@ -200,7 +200,12 @@ function startLimited(call: NativeCall, name: string): { record: IteratorRecord;
   return { record, limit: integer };
 }
 
-/** Creates a helper over `record`, whose roots keep the underlying iterator and the callback alive. */
+/** What a helper over `record` keeps reachable while it runs: the iterator, its `next`, and `others`. */
+function recordRoots(runtime: Runtime, record: IteratorRecord, ...others: Value[]): JsArray {
+  return runtime.newArray([record.iterator, record.next, ...others]);
+}
+
+/** Creates a helper over `record`, whose roots keep what it steps through and calls alive. */
 function newHelper(
   runtime: Runtime,
   prototype: JsObject,
@@ -240,7 +245,7 @@ function defineLazyHelpers(builder: RealmBuilder, helperPrototype: JsObject): vo
       const { runtime } = call;
       const { record, callback } = startHelper(call, name);
       let counter = 0;
-      return newHelper(runtime, helperPrototype, record, runtime.newArray([record.iterator, callback]), () => {
+      return newHelper(runtime, helperPrototype, record, recordRoots(runtime, record, callback), () => {
         for (;;) {
           const value = step(runtime, record);
           if (value === DONE) return DONE;
@@ -263,7 +268,7 @@ function defineLimitHelpers(builder: RealmBuilder, helperPrototype: JsObject): v
     const { runtime } = call;
     const { record, limit } = startLimited(call, 'take');
     let remaining = limit;
-    return newHelper(runtime, helperPrototype, record, runtime.newArray([record.iterator]), () => {
+    return newHelper(runtime, helperPrototype, record, recordRoots(runtime, record), () => {
       if (remaining === 0) {
         closeIterator(runtime, record);
         return DONE;
@@ -276,7 +281,7 @@ function defineLimitHelpers(builder: RealmBuilder, helperPrototype: JsObject): v
     const { runtime } = call;
     const { record, limit } = startLimited(call, 'drop');
     let remaining = limit;
-    return newHelper(runtime, helperPrototype, record, runtime.newArray([record.iterator]), () => {
+    return newHelper(runtime, helperPrototype, record, recordRoots(runtime, record), () => {
       for (; remaining > 0; remaining--) if (step(runtime, record) === DONE) return DONE;
       return step(runtime, record);
     });
@@ -288,43 +293,53 @@ function flatMap(call: NativeCall, helperPrototype: JsObject): JsObject {
   const { record, callback } = startHelper(call, 'flatMap');
   let counter = 0;
   let inner: IteratorRecord | undefined;
-  const roots = runtime.newArray([record.iterator, callback, undefined]);
+  // The inner iterator and its `next` fill the last two slots while the helper steps through them.
+  const roots = recordRoots(runtime, record, callback, undefined, undefined);
+  const setInner = (current: IteratorRecord | undefined): void => {
+    inner = current;
+    roots.elements[3] = current?.iterator;
+    roots.elements[4] = current?.next;
+  };
   const flatMapped = newHelper(runtime, helperPrototype, record, roots, () => {
     for (;;) {
       if (inner) {
         const current = inner;
         const value = closingOnThrow(runtime, record, () => step(runtime, current));
         if (value !== DONE) return value;
-        inner = undefined;
+        setInner(undefined);
       }
       const value = step(runtime, record);
       if (value === DONE) return DONE;
-      inner = closingOnThrow(runtime, record, () => {
-        const mapped = runtime.call(callback, undefined, [value, counter++], runtime.currentRow);
-        return flattenable(runtime, mapped, false, 'Iterator.prototype.flatMap');
-      });
-      roots.elements[2] = inner.iterator;
+      setInner(
+        closingOnThrow(runtime, record, () => {
+          const mapped = runtime.call(callback, undefined, [value, counter++], runtime.currentRow);
+          return flattenable(runtime, mapped, false, 'Iterator.prototype.flatMap');
+        })
+      );
     }
   });
   const iteration = flatMapped.hostIterator as HostIterator;
   const closeOuter = iteration.close;
-  iteration.close = () => {
-    try {
-      if (inner) closeIterator(runtime, inner);
-    } catch (error) {
-      // A failing inner close still closes the outer iterator, whose own failure gives way to the inner one's.
-      if (error instanceof JsThrow) {
-        try {
-          closeOuter?.();
-        } catch (outerError) {
-          if (!(outerError instanceof JsThrow)) throw outerError;
-        }
-      }
-      throw error;
-    }
-    closeOuter?.();
-  };
+  iteration.close = () => closeBoth(runtime, inner, () => closeOuter?.());
   return flatMapped;
+}
+
+/** Closes flatMap's inner iterator and then its outer one, which a failing inner close still closes. */
+function closeBoth(runtime: Runtime, inner: IteratorRecord | undefined, closeOuter: () => void): void {
+  try {
+    if (inner) closeIterator(runtime, inner);
+  } catch (error) {
+    // The outer iterator's own failure gives way to the inner one's.
+    if (error instanceof JsThrow) {
+      try {
+        closeOuter();
+      } catch (outerError) {
+        if (!(outerError instanceof JsThrow)) throw outerError;
+      }
+    }
+    throw error;
+  }
+  closeOuter();
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.

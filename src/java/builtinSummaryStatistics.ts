@@ -166,10 +166,13 @@ function accept(state: Statistics, value: Value): void {
 
 function combine(state: Statistics, other: Statistics): void {
   if (state.kind === 'Double') {
+    // The other may be these statistics themselves: as the JDK's, this reads its simple sum and sum before adding,
+    // and its compensation after the first addition.
     const { simpleSum } = state.total;
-    addWithCompensation(state.total, other.total.sum);
+    const { sum, simpleSum: otherSimpleSum } = other.total;
+    addWithCompensation(state.total, sum);
     addWithCompensation(state.total, -other.total.compensation);
-    state.total.simpleSum = simpleSum + other.total.simpleSum;
+    state.total.simpleSum = simpleSum + otherSimpleSum;
   } else {
     state.integerSum = BigInt.asIntN(64, state.integerSum + other.integerSum);
   }

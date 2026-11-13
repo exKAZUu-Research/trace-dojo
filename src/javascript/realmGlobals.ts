@@ -14,6 +14,7 @@ import {
   JsObject,
   type NativeCall,
   toBoolean,
+  unboxed,
   type Value,
 } from './values';
 
@@ -62,15 +63,20 @@ function defineObject(builder: RealmBuilder): void {
 function tagOf(value: Value): string {
   if (value === undefined) return 'Undefined';
   if (value === null) return 'Null';
-  if (value instanceof JsArray) return 'Array';
-  if (value instanceof JsFunction) return 'Function';
-  if (value instanceof JsObject) {
-    if (value.regexp) return 'RegExp';
-    if (dateValueOf(value) !== undefined) return 'Date';
-    return value.isError ? 'Error' : 'Object';
-  }
-  if (typeof value === 'string') return 'String';
-  return typeof value === 'number' ? 'Number' : 'Boolean';
+  if (value instanceof JsObject) return objectTagOf(value);
+  // A BigInt or symbol has no builtin tag of its own, only its prototype's Symbol.toStringTag.
+  return PRIMITIVE_TAGS[typeof value] ?? 'Object';
+}
+
+const PRIMITIVE_TAGS: Partial<Record<string, string>> = { string: 'String', number: 'Number', boolean: 'Boolean' };
+
+function objectTagOf(object: JsObject): string {
+  if (object instanceof JsArray) return 'Array';
+  if (object instanceof JsFunction) return 'Function';
+  if (object.primitive !== undefined) return tagOf(object.primitive);
+  if (object.regexp) return 'RegExp';
+  if (dateValueOf(object) !== undefined) return 'Date';
+  return object.isError ? 'Error' : 'Object';
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Lists the builtin methods, each a small closure of its own.
@@ -95,13 +101,6 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
     return target;
   });
   builder.method(objectConstructor, 'getPrototypeOf', 1, ({ runtime, args }) => runtime.toObject(args[0]).proto);
-  builder.method(objectConstructor, 'create', 1, ({ runtime, args }) => {
-    const proto = args[0];
-    if (proto !== null && !isObject(proto)) {
-      return runtime.throwError('TypeError', 'Object prototype may only be an Object or null');
-    }
-    return runtime.newObject(proto);
-  });
   builder.method(objectConstructor, 'freeze', 1, ({ args }) => {
     const object = args[0];
     if (isObject(object)) freeze(object);
@@ -257,18 +256,7 @@ function createAggregateError(call: NativeCall, prototype: JsObject): JsObject {
 // code-gauge-allow functionNcss 33 -- Lists the builtin methods, each a small closure of its own.
 function defineNumber(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
-  const numberConstructor = builder.defineClass(
-    'Number',
-    1,
-    numberPrototype,
-    ({ runtime, args }) => {
-      if (args.length === 0) return 0;
-      // Number converts a BigInt, which the implicit conversion of arithmetic rejects.
-      const numeric = runtime.toNumeric(args[0]);
-      return typeof numeric === 'bigint' ? Number(numeric) : numeric;
-    },
-    false
-  );
+  const numberConstructor = builder.defineClass('Number', 1, numberPrototype, constructNumber);
   for (const [name, value] of [
     ['MAX_SAFE_INTEGER', Number.MAX_SAFE_INTEGER],
     ['MIN_SAFE_INTEGER', Number.MIN_SAFE_INTEGER],
@@ -313,7 +301,7 @@ function defineNumber(builder: RealmBuilder): void {
     const value = thisNumber(runtime, thisValue);
     const radix = args[0] === undefined ? 10 : runtime.toNumber(args[0]);
     if (!Number.isInteger(radix) || radix < 2 || radix > 36)
-      runtime.throwError('RangeError', 'toString() radix must be between 2 and 36');
+      runtime.throwError('RangeError', 'toString() radix argument must be between 2 and 36');
     return value.toString(radix);
   });
   builder.method(numberPrototype, 'toFixed', 1, ({ runtime, thisValue, args }) => {
@@ -349,19 +337,29 @@ function defineNumberFormats(builder: RealmBuilder): void {
   });
 }
 
+function constructNumber({ runtime, args, newTarget }: NativeCall): Value {
+  // Number converts a BigInt, which the implicit conversion of arithmetic rejects.
+  const numeric = args.length === 0 ? 0 : runtime.toNumeric(args[0]);
+  return runtime.primitiveOrBox(typeof numeric === 'bigint' ? Number(numeric) : numeric, newTarget);
+}
+
 function thisNumber(runtime: Runtime, value: Value): number {
-  if (typeof value !== 'number') return runtime.throwError('TypeError', 'This method requires a number');
-  return value;
+  const primitive = unboxed(value);
+  if (typeof primitive !== 'number') return runtime.throwError('TypeError', 'This method requires a number');
+  return primitive;
 }
 
 function thisBoolean(runtime: Runtime, value: Value): boolean {
-  if (typeof value !== 'boolean') return runtime.throwError('TypeError', 'This method requires a boolean');
-  return value;
+  const primitive = unboxed(value);
+  if (typeof primitive !== 'boolean') return runtime.throwError('TypeError', 'This method requires a boolean');
+  return primitive;
 }
 
 function defineBoolean(builder: RealmBuilder): void {
   const { booleanPrototype } = builder.realm;
-  builder.defineClass('Boolean', 1, booleanPrototype, ({ args }) => toBoolean(args[0]), false);
+  builder.defineClass('Boolean', 1, booleanPrototype, ({ runtime, args, newTarget }) =>
+    runtime.primitiveOrBox(toBoolean(args[0]), newTarget)
+  );
   builder.method(booleanPrototype, 'toString', 0, ({ runtime, thisValue }) => String(thisBoolean(runtime, thisValue)));
   builder.method(booleanPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisBoolean(runtime, thisValue));
 }
