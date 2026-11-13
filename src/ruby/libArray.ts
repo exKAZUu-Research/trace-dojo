@@ -20,7 +20,7 @@ import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { randomIndex } from './libRandom';
 import { rangeBounds } from './libString';
 import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, newHash, snapshot, str, truthy } from './values';
 
 function* modify(self: RArray): Gen<void> {
@@ -836,19 +836,21 @@ def('Array', 'bsearch', 0, function* (self: RArray, _args, block) {
 });
 def('Array', 'to_h', 0, function* (self: RArray, _args, block) {
   const hash = newHash();
-  for (const [index, item] of self.items.entries()) {
-    const pair = block ? yield* call(block, item) : item;
-    if (!(pair instanceof RArray)) {
-      throw typeError(
-        `wrong element type ${pair === NIL ? 'nil' : yield* className(pair)} at ${index} (expected array)`
-      );
+  return yield* whileHeld(hash, function* () {
+    for (const [index, item] of self.items.entries()) {
+      const pair = block ? yield* call(block, item) : item;
+      if (!(pair instanceof RArray)) {
+        throw typeError(
+          `wrong element type ${pair === NIL ? 'nil' : yield* className(pair)} at ${index} (expected array)`
+        );
+      }
+      if (pair.items.length !== 2) {
+        throw argumentError(`wrong array length at ${index} (expected 2, was ${pair.items.length})`);
+      }
+      yield* hashSet(hash, pair.items[0], pair.items[1]);
     }
-    if (pair.items.length !== 2) {
-      throw argumentError(`wrong array length at ${index} (expected 2, was ${pair.items.length})`);
-    }
-    yield* hashSet(hash, pair.items[0], pair.items[1]);
-  }
-  return hash;
+    return hash;
+  });
 });
 
 function* className(value: Value): Gen<string> {

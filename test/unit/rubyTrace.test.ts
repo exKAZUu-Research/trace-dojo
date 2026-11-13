@@ -263,3 +263,30 @@ test('positional Turtles stay alive while keyword arguments evaluate', () => {
   );
   expect(items.some(({ turtles }) => turtles.length === 2 && turtles.every(({ y }) => y === 1))).toBe(true);
 });
+
+test('Array to_h and chunk Enumerators retain accumulated Turtles through callbacks', () => {
+  const programs = [
+    'h=[1,3].to_h do |x|\n [x,Turtle.new(x,0)]\nend\nh.values.each { |t| t.forward }',
+    ...['chunk_while { |a,b| false }', 'slice_when { |a,b| true }'].map(
+      (method) =>
+        `class C\n include Enumerable\n def each\n  yield Turtle.new(1,0)\n  yield Turtle.new(3,0)\n end\nend\nts=[]\nC.new.${method}.each do |c|\n ts << c[0]\n c[0].forward\nend\nts.each { |t| t.forward }`
+    ),
+  ];
+  expect(
+    rubyTrace(programs[0])
+      .at(-1)
+      ?.turtles.map(({ x, y }) => [x, y])
+  ).toEqual([
+    [1, 1],
+    [3, 1],
+  ]);
+  for (const program of programs.slice(1))
+    expect(
+      rubyTrace(program)
+        .at(-1)
+        ?.turtles.map(({ x, y }) => [x, y])
+    ).toEqual([
+      [1, 2],
+      [3, 2],
+    ]);
+});

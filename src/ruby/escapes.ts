@@ -38,6 +38,7 @@ function modifiedByte(text: string, index: number): { byte: number; end: number 
   }
   const operand = kind === 'c' ? index + 2 : text[index + 2] === '-' ? index + 3 : -1;
   if (kind !== 'c' && kind !== 'C' && kind !== 'M') {
+    if (kind === 'u') return undefined;
     const byte = kind.codePointAt(0) as number;
     return byte <= 0xff ? { byte, end: index + 1 } : undefined;
   }

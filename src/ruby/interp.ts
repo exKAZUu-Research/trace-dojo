@@ -13,7 +13,7 @@ import type {
   StrPart,
   Target,
 } from './ast';
-import { caseEquals, inspect, toS, toSValue } from './conversions';
+import { caseEquals, combinedStringEncoding, inspect, toS, toSValue } from './conversions';
 import {
   argumentCountError,
   argumentError,
@@ -303,17 +303,21 @@ function* interpolate(parts: StrPart[], frame: Frame): Gen<string> {
 function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {
   const chunks: Uint8Array[] = [];
   let length = 0;
+  let binary = false;
+  let ascii = true;
   for (const part of parts) {
-    let bytes: Uint8Array;
-    if (typeof part === 'string') bytes = new TextEncoder().encode(part);
-    else if ('text' in part) bytes = Uint8Array.from(part.bytes);
-    else {
-      const value = yield* ev(part, frame);
-      bytes = stringBytes(yield* toSValue(value));
-    }
+    const segment =
+      typeof part === 'string'
+        ? stringFromBytes(new TextEncoder().encode(part))
+        : 'text' in part
+          ? stringFromBytes(Uint8Array.from(part.bytes))
+          : yield* toSValue(yield* ev(part, frame));
+    binary = combinedStringEncoding(binary, ascii, segment);
+    const bytes = stringBytes(segment);
     length += bytes.length;
     rt().checkStringLength(length);
     chunks.push(bytes);
+    ascii &&= bytes.every((byte) => byte < 0x80);
   }
   const joined = new Uint8Array(length);
   let offset = 0;
@@ -321,7 +325,7 @@ function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {
     joined.set(bytes, offset);
     offset += bytes.length;
   }
-  return stringFromBytes(joined);
+  return stringFromBytes(joined, binary);
 }
 
 /** The values of a list of expressions, with splats (`*a`) expanded. */

@@ -356,6 +356,8 @@ test.each([
   ['else without rescue', 'begin\n  1\nelse\n  2\nend'],
   ['a lowercase class name', 'class foo; end'],
   ['a command call as an operand', 'p 1 && p 2'],
+  ['Unicode escape as a control operand', String.raw`p "\C-\u0041".bytes`],
+  ['Unicode escape as a meta operand', String.raw`p "\M-\u0041".bytes`],
 ])('%s is a compile error', (_name, program) => {
   expect(run(program).kind).toBe('compileError');
 });
@@ -509,6 +511,11 @@ test.each([
     '[97, 98, 255]\n',
   ],
   ['raw byte counts from IO', String.raw`p $stderr.write("\xFF")`, '1\n'],
+  [
+    'Hash distinguishes incompatible String encodings',
+    String.raw`a=255.chr; b="\xFF"; h={a=>1,b=>2}; p h.size,h[a],h[b]`,
+    '2\n1\n2\n',
+  ],
   ['invalid UTF-8 character slicing', String.raw`p "\xFF".chars, "\xFF"[0].bytes`, '["\\xFF"]\n[255]\n'],
   ['invalid UTF-8 character lengths', String.raw`p "a\xFF".chars.map(&:bytesize)`, '[1, 1]\n'],
   [
@@ -535,10 +542,16 @@ test.each([
     '"0x1.0p+1024"\n"0x1.0000000000000p+1024"\n',
   ],
   [
+    'hexadecimal rounding near exponent boundaries',
+    'p format("%.13a", 1.0.prev_float), format("%.13a", 2.0.prev_float)',
+    '"0x1.0000000000000p+0"\n"0x1.0000000000000p+1"\n',
+  ],
+  [
     'surrogate format bytes',
     'p format("%c", 55296).bytes, format("%c", 57343).bytes',
     '[237, 160, 128]\n[237, 191, 191]\n',
   ],
+  ['adjacent surrogate format bytes', 'p format("%c%c", 55296, 56320).bytes', '[237, 160, 128, 237, 176, 128]\n'],
   [
     'Float steps for custom arithmetic ranges',
     'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); n <=> o.n; end; def succ; A.new(n+1); end; def +(v); A.new(n+v); end; end; (A.new(0)..A.new(3)).step(1.5) { |x| p x.n }',
@@ -584,6 +597,9 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   for (const program of ['p Integer("1", 10**30)', 'p "1".to_i(10**30)', 'p format("%c", -(10**30))']) {
     expect(run(program)).toMatchObject({ uncaughtException: "bignum too big to convert into 'long' (RangeError)" });
   }
+  expect(run('p Integer("1", 2147483648)')).toMatchObject({
+    uncaughtException: "integer 2147483648 too big to convert to 'int' (RangeError)",
+  });
   expect(run('p (...3.0).max')).toMatchObject({
     uncaughtException: 'cannot exclude non Integer end value (TypeError)',
   });
@@ -601,6 +617,9 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   });
   expect(run('s = 255.chr; s << 256')).toMatchObject({
     uncaughtException: '256 out of char range (RangeError)',
+  });
+  expect(run('class A; def to_s; 255.chr; end; end; p "é#{A.new}"')).toMatchObject({
+    uncaughtException: 'incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT) (Encoding::CompatibilityError)',
   });
   expect(run('p format("%{a} %p", {a: 1})')).toMatchObject({
     uncaughtException: 'unnumbered(1) mixed with named (ArgumentError)',

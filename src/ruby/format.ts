@@ -428,9 +428,6 @@ function fixedFromDigits(digits: string, decpt: number, decimals: number): strin
 
 function hexFloat(value: number, precision: number | undefined): string {
   if (value === 0) return `0x0${precision ? `.${'0'.repeat(precision)}` : ''}p+0`;
-  // Ruby 4.0.9 rounds the largest finite Float upward through 13 explicit hex digits.
-  if (value === Number.MAX_VALUE && precision !== undefined && precision <= 13)
-    return `0x1${precision ? `.${'0'.repeat(precision)}` : ''}p+1024`;
   let exponent = Math.min(1023, Math.floor(Math.log2(value)));
   let mantissa = value / 2 ** exponent;
   while (mantissa < 1) {
@@ -440,6 +437,10 @@ function hexFloat(value: number, precision: number | undefined): string {
   if (mantissa >= 2) {
     mantissa /= 2;
     exponent++;
+  }
+  if (precision !== undefined && precision <= 13 && mantissa === 2 - Number.EPSILON) {
+    const next = exponent + 1;
+    return `0x1${precision ? `.${'0'.repeat(precision)}` : ''}p${next < 0 ? '-' : '+'}${Math.abs(next)}`;
   }
   let fraction = '';
   let rest = mantissa - 1;

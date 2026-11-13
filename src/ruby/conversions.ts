@@ -5,7 +5,7 @@ import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, respondsTo, runToEnd } from './interp';
 import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { classOf, isA, realClassOf, str, truthy } from './values';
+import { classOf, isA, realClassOf, str, stringBytes, truthy } from './values';
 
 // Numbers -------------------------------------------------------------------------------------------------------------
 
@@ -63,11 +63,13 @@ export function* toIndex(value: Value): Gen<number> {
   return Number(integer);
 }
 
-export function* toRubyLong(value: Value): Gen<number> {
+export function* toRubyInt(value: Value): Gen<number> {
   const integer = yield* toInt(value);
   if (integer < -9_223_372_036_854_775_808n || integer > 9_223_372_036_854_775_807n) {
     throw rangeError("bignum too big to convert into 'long'");
   }
+  if (integer < -2_147_483_648n) throw rangeError(`integer ${integer} too small to convert to 'int'`);
+  if (integer > 2_147_483_647n) throw rangeError(`integer ${integer} too big to convert to 'int'`);
   return Number(integer);
 }
 
@@ -87,6 +89,20 @@ export function* toStrValue(value: Value): Gen<RString> {
     if (converted instanceof RString) return converted;
   }
   throw implicitConversionError(value, 'String');
+}
+
+export function combinedStringEncoding(leftBinary: boolean, leftAscii: boolean, right: RString): boolean {
+  if (leftBinary === right.binary) return leftBinary;
+  const rightAscii = stringBytes(right).every((byte) => byte < 0x80);
+  if (!leftAscii && !rightAscii) {
+    const leftName = leftBinary ? 'BINARY (ASCII-8BIT)' : String.raw`UTF-8`;
+    const rightName = right.binary ? 'BINARY (ASCII-8BIT)' : String.raw`UTF-8`;
+    throw rubyError(
+      rt().c['Encoding::CompatibilityError'],
+      `incompatible character encodings: ${leftName} and ${rightName}`
+    );
+  }
+  return leftAscii && !rightAscii ? right.binary : leftBinary;
 }
 
 export function toStrSync(value: Value): string {

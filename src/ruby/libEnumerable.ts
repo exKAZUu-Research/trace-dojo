@@ -685,8 +685,15 @@ def('Enumerable', 'slice_when', 0, function* (self, _args, block) {
 
 function chunkEnumerator(self: Value, predicate: RProc, splitWhenTrue: boolean): RObject {
   return customEnumerator(self, splitWhenTrue ? 'slice_when' : 'chunk_while', [predicate], function* (block) {
-    for (const chunk of yield* chunks(self, predicate, splitWhenTrue)) yield* callBlock(block, [chunk], false);
-    return self;
+    const result = yield* chunks(self, predicate, splitWhenTrue);
+    const held = rt().heldArrays;
+    held.push(result);
+    try {
+      for (const chunk of result) yield* callBlock(block, [chunk], false);
+      return self;
+    } finally {
+      held.pop();
+    }
   });
 }
 
@@ -819,17 +826,19 @@ export function* uniqValues(items: Value[], block: RProc | undefined): Gen<Value
 
 def('Enumerable', 'to_h', [0, -1], function* (self, _args, block) {
   const hash = newHash();
-  yield* iterate(self, function* (value) {
-    const pair = block ? yield* call(block, value) : value;
-    if (!(pair instanceof RArray)) {
-      throw typeError(`wrong element type ${className(pair)} (expected array)`);
-    }
-    if (pair.items.length !== 2) {
-      throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
-    }
-    yield* hashSet(hash, pair.items[0], pair.items[1]);
+  return yield* whileHeld(hash, function* () {
+    yield* iterate(self, function* (value) {
+      const pair = block ? yield* call(block, value) : value;
+      if (!(pair instanceof RArray)) {
+        throw typeError(`wrong element type ${className(pair)} (expected array)`);
+      }
+      if (pair.items.length !== 2) {
+        throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
+      }
+      yield* hashSet(hash, pair.items[0], pair.items[1]);
+    });
+    return hash;
   });
-  return hash;
 });
 def('Enumerable', 'zip', [0, -1], function* (self, others, block) {
   const lists: Value[][] = [];

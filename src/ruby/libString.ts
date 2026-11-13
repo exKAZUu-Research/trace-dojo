@@ -1,6 +1,7 @@
 import { foldCase } from './caseFold';
 // code-gauge-allow-file fileNcss 796 -- The libString module keeps one concern's cases together.
 import {
+  combinedStringEncoding,
   compareStrings,
   inspect,
   rangeCovers,
@@ -8,21 +9,13 @@ import {
   symInspect,
   toIndex,
   toInt,
-  toRubyLong,
+  toRubyInt,
   toS,
   toStr,
   toStrValue,
 } from './conversions';
 import { def, sdef } from './define';
-import {
-  argumentError,
-  frozenError,
-  implicitConversionError,
-  indexError,
-  rangeError,
-  rubyError,
-  typeError,
-} from './errors';
+import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
 import { formatString } from './format';
 import { hashGet } from './hashes';
 import { callBlock, callMethod, type Gen, nativeProc, requireBlock } from './interp';
@@ -84,20 +77,6 @@ function* stringArg(value: Value): Gen<string> {
 function* stringArgValue(value: Value): Gen<RString> {
   if (value instanceof RSymbol) throw implicitConversionError(value, 'String');
   return yield* toStrValue(value);
-}
-
-function combinedBinary(leftBinary: boolean, leftAscii: boolean, right: RString): boolean {
-  if (leftBinary === right.binary) return leftBinary;
-  const rightAscii = stringBytes(right).every((byte) => byte < 0x80);
-  if (!leftAscii && !rightAscii) {
-    const leftName = leftBinary ? 'BINARY (ASCII-8BIT)' : 'utf8';
-    const rightName = right.binary ? 'BINARY (ASCII-8BIT)' : 'utf8';
-    throw rubyError(
-      rt().c['Encoding::CompatibilityError'],
-      `incompatible character encodings: ${leftName} and ${rightName}`
-    );
-  }
-  return leftAscii && !rightAscii ? right.binary : leftBinary;
 }
 
 function regexpUnsupported(value: Value): void {
@@ -222,7 +201,7 @@ function binaryInspect(text: string): string {
 }
 def('String', ['to_sym', 'intern'], 0, (self: RString) => sym(self.s));
 def('String', 'to_i', [0, 1], function* (self: RString, args) {
-  const base = args.length > 0 ? yield* toRubyLong(args[0]) : 10;
+  const base = args.length > 0 ? yield* toRubyInt(args[0]) : 10;
   if (base < 0 || base > 36 || base === 1) throw argumentError(`invalid radix ${base}`);
   return parseIntegerLenient(self.s, base);
 });
@@ -245,9 +224,10 @@ def('String', 'hash', 0, (self: RString) => {
 });
 def('String', ['==', '===', 'eql?'], 1, function* (self: RString, [other]) {
   if (other instanceof RString) {
-    if (!self.rawBytes && !other.rawBytes) return self.s === other.s;
+    if (!self.binary && !other.binary && !self.rawBytes && !other.rawBytes) return self.s === other.s;
     const left = stringBytes(self);
     const right = stringBytes(other);
+    if (self.binary !== other.binary && left.some((byte) => byte >= 0x80)) return false;
     return left.length === right.length && left.every((byte, index) => byte === right[index]);
   }
   return false;
@@ -279,7 +259,7 @@ def('String', '+', 1, function* (self: RString, [other]) {
   const source = yield* stringArgValue(other);
   const right = stringBytes(source);
   const left = stringBytes(self);
-  const binary = combinedBinary(
+  const binary = combinedStringEncoding(
     self.binary,
     left.every((byte) => byte < 0x80),
     source
@@ -331,7 +311,7 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
           : new TextEncoder().encode(String.fromCodePoint(Number(arg)));
     } else {
       const source = yield* stringArgValue(arg);
-      binary = combinedBinary(binary, ascii, source);
+      binary = combinedStringEncoding(binary, ascii, source);
       chunk = stringBytes(source);
     }
     length += chunk.length;
@@ -365,7 +345,7 @@ def('String', 'insert', 2, function* (self: RString, [index, other]) {
   const chars = stringCharacters(self);
   let position = yield* toIndex(index);
   const value = yield* stringArgValue(other);
-  const binary = combinedBinary(
+  const binary = combinedStringEncoding(
     self.binary,
     stringBytes(self).every((byte) => byte < 0x80),
     value
@@ -382,7 +362,7 @@ def('String', 'prepend', [0, -1], function* (self: RString, args) {
   let ascii = stringBytes(self).every((byte) => byte < 0x80);
   for (const arg of args) {
     const value = yield* stringArgValue(arg);
-    binary = combinedBinary(binary, ascii, value);
+    binary = combinedStringEncoding(binary, ascii, value);
     ascii &&= stringBytes(value).every((byte) => byte < 0x80);
     values.push(value);
   }
