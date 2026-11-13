@@ -46,11 +46,11 @@ export function stringFromBytes(bytes: Uint8Array, binary = false): RString {
   }
   let invalid = false;
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
     invalid = true;
   }
-  const text = invalid ? decodeInvalidBytes(bytes) : new TextDecoder().decode(bytes);
+  const text = invalid ? decodeInvalidBytes(bytes) : new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
   rt().checkStringLength(text.length);
   const value = new RString(rt().c.String, text);
   if (invalid) {
@@ -60,7 +60,7 @@ export function stringFromBytes(bytes: Uint8Array, binary = false): RString {
 }
 
 function decodeInvalidBytes(bytes: Uint8Array): string {
-  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let text = '';
   for (let index = 0; index < bytes.length;) {
     const first = bytes[index];
@@ -114,7 +114,7 @@ export function stringCharacters(value: RString): RString[] {
     let valid = value.binary || first < 0x80;
     if (!valid && segment.length === width) {
       try {
-        new TextDecoder('utf-8', { fatal: true }).decode(segment);
+        new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(segment);
         valid = true;
       } catch {
         valid = false;

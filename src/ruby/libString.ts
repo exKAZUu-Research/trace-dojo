@@ -198,7 +198,7 @@ def('String', 'dump', 0, (self: RString) => {
 });
 
 function inspectRawBytes(bytes: Uint8Array): string {
-  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let text = '';
   let result = '"';
   const flush = (): void => {

@@ -2126,6 +2126,12 @@ test('binary String transforms retain bytes and use ASCII case mapping', () => {
   expect(run('s=233.chr; s.upcase!; p s.bytes')).toMatchObject({ stdout: '[233]\n' });
 });
 
+test('Ruby Strings retain UTF-8 BOM characters from literals and escapes', () => {
+  expect(run(String.raw`p "\u{feff}a".bytes, "a\xEF\xBB\xBFb".bytes`)).toMatchObject({
+    stdout: '[239, 187, 191, 97]\n[97, 239, 187, 191, 98]\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

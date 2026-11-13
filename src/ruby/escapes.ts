@@ -63,7 +63,7 @@ export function decodeDoubleQuoted(text: string): { text: string; binary: boolea
   const flushBytes = (): void => {
     if (bytes.length === 0) return;
     try {
-      result += new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
+      result += new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Uint8Array.from(bytes));
     } catch {
       binary = true;
       for (const byte of bytes) result += String.fromCodePoint(byte);

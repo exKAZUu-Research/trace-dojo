@@ -110,7 +110,8 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: FormatPar
     }
     return entry.value;
   };
-  const nameAt = (start: number, end: number): string => new TextDecoder().decode(templateBytes.subarray(start, end));
+  const nameAt = (start: number, end: number): string =>
+    new TextDecoder('utf-8', { ignoreBOM: true }).decode(templateBytes.subarray(start, end));
   for (let index = 0; index < template.length; index++) {
     const char = template[index];
     if (char !== '%') {
