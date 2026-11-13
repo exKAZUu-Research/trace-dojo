@@ -1224,3 +1224,21 @@ int main(void){int b=4,a[2]={1,2};struct S s={7},*p=&s;long r=${expression};prin
   if (expected === undefined) expect(result.kind).toBe('compileError');
   else expect(result).toMatchObject({ kind: 'executed', stdout: expected, uncaughtException: undefined });
 });
+
+test.each([
+  ['int main(void){\nint i=0;\nprintf("a")\ni=1;\n}', 2],
+  ['int main(void){\nint i=0;\nprintf("a")\nputs("b");\n}', 2],
+  ['int main(void){\nint i=0;\ni++\ni++;\n}', 2],
+  ['int main(void){\nif(1>0\n{ return 0; }\n}', 2],
+  ['int f(int a,int b\n{ return a+b; }\nint main(void){}', 1],
+  ['int main(void){\nint a[2];\nreturn a[1\n;\n}', 3],
+  ['int main(void){\ndo {}\nputs("a");\n}', 2],
+  ['void f(void){\nputs("a");\nint main(void){\nreturn 0;\n}\n', 2],
+  ['int main(void){\nfor(int i=0;i<3;i++) puts("a");\n}\nreturn 0;\n}', 3],
+  ['int main(void){}\nprintf("a");\n}', 1],
+])('syntax recovery points at the line clang diagnoses: %s', (body, row) => {
+  expect(executeProgram('c', `#include <stdio.h>\n${body}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: row + 1 })],
+  });
+});

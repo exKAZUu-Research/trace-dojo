@@ -1,6 +1,5 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import { CompileError } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Declaration, TranslationUnit } from './ast';
@@ -8,6 +7,7 @@ import { Converter, declaredName, type HeaderDeclarations } from './convert';
 import { tokenize } from './lexer';
 import { lookupHeader, TURTLE_HEADER } from './library/headers';
 import { preprocess } from './preprocessor';
+import { cSyntaxDiagnostics } from './syntaxDiagnostics';
 
 const parser = await loadParser('@willbooster/tree-sitter-c/tree-sitter-c.wasm');
 
@@ -32,13 +32,15 @@ export function parseC(source: string): TranslationUnit {
     typedefNames.push(...parsed.typedefNames);
     headers.push({ row: header.row, name: header.name, ...parsed, items: headerItemsAt(parsed.items, header.row) });
   }
-  try {
-    return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => ({
+  return parseSource(
+    parser,
+    text,
+    MISSING_TOKEN_NAMES,
+    (root) => ({
       items: new Converter([], parser).convertUnit(root, headers),
-    }));
-  } catch (error) {
-    throw atEndOfFile(error, text);
-  }
+    }),
+    cSyntaxDiagnostics
+  );
 }
 
 function headerItemsAt(source: Declaration[], row: number): Declaration[] {
@@ -50,17 +52,6 @@ function headerItemsAt(source: Declaration[], row: number): Declaration[] {
     for (const child of Object.values(item)) if (child && typeof child === 'object') pending.push(child);
   }
   return items;
-}
-
-/** clang reports a `}` missing at the end of the file at the end of the file, after the last line. */
-function atEndOfFile(error: unknown, text: string): unknown {
-  if (!(error instanceof CompileError)) return error;
-  const [first] = error.diagnostics;
-  if (first?.message !== '「}」が足りません。' || text.slice(text.lastIndexOf('}') + 1).trim() !== '') return error;
-  // clang places the end of a file that ends with a newline on the last line, not after it.
-  const newlines = text.split('\n').length - 1;
-  const lastRow = text.endsWith('\n') ? newlines - 1 : newlines;
-  return new CompileError([{ ...first, row: lastRow }]);
 }
 
 const headerCache = new Map<string, { items: Declaration[]; typedefNames: string[] }>();
