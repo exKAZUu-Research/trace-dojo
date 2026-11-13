@@ -1121,15 +1121,22 @@ def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
   const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : undefined;
   if (times !== undefined && times <= 0n) return NIL;
   const items: Value[] = [];
-  yield* collectInto(self, [items], function* (value) {
-    items.push(value);
-    yield* callBlock(block, [value], false);
-  });
-  if (items.length === 0) return NIL;
-  for (let round = 1n; times === undefined || round < times; round++) {
-    for (const item of items) yield* callBlock(block, [item], false);
+  const held = rt().heldArrays;
+  const mark = held.length;
+  held.push(items);
+  try {
+    yield* iterate(self, function* (value) {
+      items.push(value);
+      yield* callBlock(block, [value], false);
+    });
+    if (items.length === 0) return NIL;
+    for (let round = 1n; times === undefined || round < times; round++) {
+      for (const item of items) yield* callBlock(block, [item], false);
+    }
+    return NIL;
+  } finally {
+    held.length = mark;
   }
-  return NIL;
 });
 def('Enumerable', 'chain', [0, -1], (self, others) => {
   const sources = [self, ...others];

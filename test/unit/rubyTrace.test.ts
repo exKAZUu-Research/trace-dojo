@@ -436,3 +436,9 @@ test('ensure keeps pending return and break values reachable', () => {
   const broken = 't=loop do; begin; break Turtle.new; ensure; x=1; end; end';
   expect(traceProgram('ruby', broken, broken).finalTurtles).toHaveLength(1);
 });
+
+test('Enumerable cycle retains cached Turtles through replay', () => {
+  const program =
+    'class E; include Enumerable; def each; yield 1; yield Turtle.new; end; end; $n=0; E.new.cycle(2) { |x| $n+=1; $saved=x if $n==4 }';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
