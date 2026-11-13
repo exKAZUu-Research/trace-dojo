@@ -333,14 +333,19 @@ def('Array', 'clear', 0, function* (self: RArray) {
 });
 def('Array', 'delete', 1, function* (self: RArray, [target], block) {
   let found: Value | undefined;
-  const kept: Value[] = [];
-  for (const item of self.items) {
-    if (yield* rEquals(item, target)) found = item;
-    else kept.push(item);
+  let read = 0;
+  let write = 0;
+  try {
+    for (; read < self.items.length; read++) {
+      const item = self.items[read];
+      if (yield* rEquals(item, target)) found = item;
+      else self.items[write++] = item;
+    }
+  } finally {
+    if (write < read) self.items = [...self.items.slice(0, write), ...self.items.slice(read)];
   }
   if (found === undefined) return block ? yield* call(block, target) : NIL;
   yield* modify(self);
-  self.items = kept;
   return found;
 });
 def('Array', 'delete_at', 1, function* (self: RArray, [indexValue]) {
@@ -395,7 +400,10 @@ def('Array', 'keep_if', 0, function* (self: RArray, _args, block) {
 def('Array', ['map!', 'collect!'], 0, function* (self: RArray, _args, block) {
   if (!block) return makeEnumerator(self, 'map!', []);
   yield* modify(self);
-  for (let index = 0; index < self.items.length; index++) self.items[index] = yield* call(block, self.items[index]);
+  for (let index = 0; index < self.items.length; index++) {
+    const value = yield* call(block, self.items[index]);
+    self.items[index] = value;
+  }
   return self;
 });
 def('Array', 'compact', 0, (self: RArray) => arr(self.items.filter((item) => item !== NIL)));
@@ -509,8 +517,10 @@ def('Array', 'fill', [0, 3], function* (self: RArray, args, block) {
   }
   grow(end, self);
   while (self.items.length < end) self.items.push(NIL);
-  for (let index = start; index < end; index++) {
-    self.items[index] = block ? yield* call(block, BigInt(index)) : (value as Value);
+  for (let index = start; index < end && index < self.items.length; index++) {
+    const next = block ? yield* call(block, BigInt(index)) : (value as Value);
+    if (index >= self.items.length) break;
+    self.items[index] = next;
   }
   return self;
 });
@@ -531,6 +541,14 @@ def('Array', ['-', 'difference'], [0, -1], function* (self: RArray, others) {
 });
 def('Array', '*', 1, function* (self: RArray, [count]) {
   if (count instanceof RString) return yield* join(self, count);
+  if (respondsTo(count, 'to_str', true)) {
+    const separator = yield* callMethod(count, 'to_str', [], undefined, undefined, { fcall: true });
+    if (separator instanceof RString) return yield* join(self, separator);
+    if (separator !== NIL) {
+      const name = realClassOf(count).name;
+      throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(separator).name})`);
+    }
+  }
   const times = yield* toIndex(count);
   if (times < 0) throw argumentError('negative argument');
   if (self.items.length === 0) return arr([]);
@@ -604,8 +622,8 @@ def('Array', 'join', [0, 1], function* (self: RArray, args) {
 function* joinValue(value: Value, separator: RString, seen: Set<RArray>): Gen<RString> {
   if (value instanceof RString) return value;
   if (value instanceof RArray) return yield* join(value, separator, seen);
-  if (respondsTo(value, 'to_str')) {
-    const converted = yield* callMethod(value, 'to_str', []);
+  if (respondsTo(value, 'to_str', true)) {
+    const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
     if (converted instanceof RString) return converted;
     if (converted !== NIL)
       throw typeError(
@@ -635,8 +653,11 @@ def('Array', 'fetch_values', [0, -1], function* (self: RArray, indexes, block) {
 });
 def('Array', 'rfind', [0, 1], function* (self: RArray, args, block) {
   if (!block) return makeEnumerator(self, 'rfind', args);
-  for (let index = self.items.length - 1; index >= 0; index--)
-    if (truthy(yield* call(block, self.items[index]))) return self.items[index];
+  for (let index = self.items.length - 1; index >= 0; index--) {
+    if (index >= self.items.length) continue;
+    const item = self.items[index];
+    if (truthy(yield* call(block, item))) return item;
+  }
   return args.length > 0 && args[0] !== NIL ? yield* callMethod(args[0], 'call', []) : NIL;
 });
 def('Array', 'transpose', 0, function* (self: RArray) {
@@ -700,24 +721,52 @@ function* combinations(items: Value[], size: number, visit: (combination: Value[
 
 function* permutations(items: Value[], size: number, visit: (permutation: Value[]) => Gen<void>): Gen<void> {
   if (size > items.length || size < 0) return;
-  const used = Array.from({ length: items.length }, () => false);
-  const current: Value[] = [];
-  const recurse = function* (): Gen<void> {
-    if (current.length === size) {
-      rt().spend();
-      yield* visit([...current]);
-      return;
-    }
-    for (let index = 0; index < items.length; index++) {
-      if (used[index]) continue;
-      used[index] = true;
-      current.push(items[index]);
-      yield* recurse();
-      current.pop();
-      used[index] = false;
-    }
+  const limit = items.length;
+  const next = Array.from({ length: limit }, (_, index) => index + 1);
+  const previous = Array.from({ length: limit }, (_, index) => index - 1);
+  const selected: number[] = [];
+  const successors: number[] = [];
+  const predecessors: number[] = [];
+  const following: number[] = [];
+  let head = 0;
+  let depth = 0;
+  const restore = (level: number): void => {
+    const index = selected[level];
+    const before = predecessors[level];
+    const after = following[level];
+    if (before < 0) head = index;
+    else next[before] = index;
+    if (after < limit) previous[after] = index;
+    previous[index] = before;
+    next[index] = after;
   };
-  yield* recurse();
+  successors[0] = head;
+  while (depth >= 0) {
+    if (depth === size) {
+      rt().spend();
+      yield* visit(selected.map((index) => items[index]));
+      depth--;
+      if (depth >= 0) restore(depth);
+      continue;
+    }
+    const index = successors[depth];
+    if (index === limit) {
+      depth--;
+      if (depth >= 0) restore(depth);
+      continue;
+    }
+    const before = previous[index];
+    const after = next[index];
+    successors[depth] = after;
+    predecessors[depth] = before;
+    following[depth] = after;
+    if (before < 0) head = after;
+    else next[before] = after;
+    if (after < limit) previous[after] = before;
+    selected[depth] = index;
+    depth++;
+    successors[depth] = head;
+  }
 }
 
 for (const [name, generate] of [
@@ -908,21 +957,23 @@ function* arrayBsearch(self: RArray, block: RProc, indexOnly: boolean): Gen {
   let found: number | undefined;
   while (low < high) {
     const middle = low + Math.floor((high - low) / 2);
-    const result = yield* call(block, self.items[middle]);
+    const result = yield* call(block, self.items[middle] ?? NIL);
+    high = Math.min(high, self.items.length);
     if (result === true) {
       found = middle;
       high = middle;
     } else if (result === false || result === NIL) {
       low = middle + 1;
     } else if (typeof result === 'bigint' || typeof result === 'number') {
-      if (Number(result) === 0) return indexOnly ? BigInt(middle) : self.items[middle];
+      if (Number(result) === 0)
+        return middle >= self.items.length ? NIL : indexOnly ? BigInt(middle) : self.items[middle];
       if (Number(result) < 0) high = middle;
       else low = middle + 1;
     } else {
       throw typeError(`wrong argument type ${yield* inspect(result)} (must be numeric, true, false or nil)`);
     }
   }
-  return found === undefined ? NIL : indexOnly ? BigInt(found) : self.items[found];
+  return found === undefined || found >= self.items.length ? NIL : indexOnly ? BigInt(found) : self.items[found];
 }
 def('Array', 'to_h', 0, function* (self: RArray, _args, block) {
   const hash = newHash();
@@ -995,7 +1046,7 @@ def(
     if (args.length === 0) {
       if (items.length === 0) return NIL;
       const index = items.length < 2 ? 0 : yield* randomIndex(randomizer, items.length);
-      return items[index] ?? NIL;
+      return self.items[index] ?? NIL;
     }
     let n = yield* toIndex(args[0]);
     if (n < 0) throw argumentError('negative sample number');
@@ -1005,6 +1056,7 @@ def(
     if (n <= 10) {
       const draws: number[] = [];
       for (let i = 0; i < n; i++) draws.push(yield* randomIndex(randomizer, length - i));
+      if (self.items !== items || self.items.length !== length) return arr(self.items.slice(0, n));
       if (n === 1) return arr([items[draws[0]]]);
       if (n === 2) {
         const i = draws[0];
@@ -1052,6 +1104,7 @@ def(
       const result: Value[] = [];
       const draws: number[] = [];
       for (let i = 0; i < n; i++) draws.push((yield* randomIndex(randomizer, length - i)) + i);
+      if (self.items !== items || self.items.length !== length) return arr(self.items.slice(0, n));
       for (let i = 0; i < n; i++) {
         const j = draws[i];
         const i2 = memo.get(i) ?? i;
@@ -1064,6 +1117,7 @@ def(
     const result = [...items];
     for (let i = 0; i < n; i++) {
       const j = (yield* randomIndex(randomizer, length - i)) + i;
+      if (self.items !== items || self.items.length !== length) return arr(self.items.slice(0, n));
       [result[i], result[j]] = [result[j], result[i]];
     }
     return arr(result.slice(0, n));

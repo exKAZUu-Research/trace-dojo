@@ -1,12 +1,12 @@
 import { inspect, inspectHash, rEql, rEquals } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, implicitConversionError, rubyError, typeError } from './errors';
+import { argumentError, frozenError, implicitConversionError, rubyError, runtimeError, typeError } from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash, structuralHashValue } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { tryAry } from './libArray';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
+import { type HashEntry, NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, newHash, realClassOf, snapshot, str, truthy } from './values';
 
@@ -115,13 +115,21 @@ def('Hash', ['key?', 'has_key?', 'include?', 'member?'], 1, function* (self: RHa
   return (yield* hashGet(self, key)) !== undefined;
 });
 def('Hash', ['value?', 'has_value?'], 1, function* (self: RHash, [value]) {
-  for (const entry of self.map.values()) if (yield* rEquals(entry.value, value)) return true;
-  return false;
+  return (yield* findValue(self, value)) !== undefined;
 });
 def('Hash', 'key', 1, function* (self: RHash, [value]) {
-  for (const entry of self.map.values()) if (yield* rEquals(entry.value, value)) return entry.key;
-  return NIL;
+  return (yield* findValue(self, value))?.key ?? NIL;
 });
+
+function* findValue(self: RHash, value: Value): Gen<HashEntry | undefined> {
+  self.iterating++;
+  try {
+    for (const entry of self.map.values()) if (yield* rEquals(entry.value, value)) return entry;
+    return undefined;
+  } finally {
+    self.iterating--;
+  }
+}
 def('Hash', 'keys', 0, (self: RHash) => arr([...self.map.values()].map((entry) => entry.key)));
 def('Hash', 'values', 0, (self: RHash) => arr([...self.map.values()].map((entry) => entry.value)));
 def('Hash', 'values_at', [0, -1], function* (self: RHash, keys) {
@@ -140,7 +148,7 @@ def('Hash', ['to_s', 'inspect'], 0, function* (self: RHash) {
   return str(yield* inspectHash(self));
 });
 def('Hash', 'to_h', 0, function* (self: RHash, _args, block) {
-  if (!block) return self.cls === rt().c.Hash ? self : yield* copy(self);
+  if (!block) return self.cls === rt().c.Hash ? self : copy(self);
   const hash = newHash();
   yield* eachEntry(self, function* (entry) {
     const result = yield* pair(block, entry.key, entry.value);
@@ -175,11 +183,14 @@ def('Hash', 'default=', 1, function* (self: RHash, [value]) {
 });
 def('Hash', 'default_proc', 0, (self: RHash) => self.defaultProc ?? NIL);
 
-function* copy(self: RHash): Gen<RHash> {
+function copy(self: RHash): RHash {
   const hash = newHash();
   hash.defaultValue = self.defaultValue;
   hash.defaultProc = self.defaultProc;
-  for (const entry of self.map.values()) yield* hashSet(hash, entry.key, entry.value);
+  for (const [slot, entry] of self.map) {
+    rt().chargeSlots(1);
+    hash.map.set(slot, { ...entry });
+  }
   return hash;
 }
 
@@ -265,10 +276,12 @@ def('Hash', 'clear', 0, function* (self: RHash) {
 });
 def('Hash', 'replace', 1, function* (self: RHash, [other]) {
   yield* modify(self);
+  if (self.iterating > 0) throw runtimeError("can't replace hash during iteration");
   const source = yield* toHash(other);
-  const entries = [...source.map.values()];
-  self.map.clear();
-  for (const entry of entries) yield* hashSet(self, entry.key, entry.value);
+  const replacement = copy(source);
+  self.map = replacement.map;
+  self.buckets = replacement.buckets;
+  self.bucketVersion = replacement.bucketVersion;
   self.defaultValue = source.defaultValue;
   self.defaultProc = source.defaultProc;
   return self;
@@ -314,7 +327,7 @@ function* merge(target: RHash, others: Value[], block: RProc | undefined): Gen<R
 }
 
 def('Hash', 'merge', [0, -1], function* (self: RHash, others, block) {
-  const result = yield* copy(self);
+  const result = copy(self);
   result.defaultValue = self.defaultValue;
   result.defaultProc = self.defaultProc;
   return yield* merge(result, others, block);
@@ -381,7 +394,7 @@ def('Hash', 'slice', [0, -1], function* (self: RHash, keys) {
   return hash;
 });
 def('Hash', 'except', [0, -1], function* (self: RHash, keys) {
-  const hash = yield* copy(self);
+  const hash = copy(self);
   hash.defaultValue = NIL;
   hash.defaultProc = undefined;
   for (const key of keys) yield* hashDelete(hash, key);

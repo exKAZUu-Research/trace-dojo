@@ -1620,3 +1620,118 @@ test('Array slice assignment accepts large replacements within storage limits', 
     stdout: '490000\n2\n2\n',
   });
 });
+
+test('Array deletion respects receiver changes from equality callbacks', () => {
+  expect(run('class A; def ==(x); $a.clear; true; end; end; $a=[A.new,2,3]; $a.delete(0); p $a')).toMatchObject({
+    stdout: '[]\n',
+  });
+  expect(run('class A; def ==(x); $a.replace([8]); true; end; end; $a=[A.new,2,3]; $a.delete(0); p $a')).toMatchObject({
+    stdout: '[]\n',
+  });
+});
+
+test('ArithmeticSequence last computes ratios before infinite-step results', () => {
+  for (const source of [
+    'Float::INFINITY.step(1.0, Float::INFINITY).last',
+    'Float::NAN.step(1.0, Float::INFINITY).last(2)',
+    'Float::INFINITY.step(1.0, Float::INFINITY).last(0)',
+  ]) {
+    expect(run(`p ${source}`)).toMatchObject({ uncaughtException: 'NaN (FloatDomainError)' });
+  }
+  expect(
+    run(
+      'p 1.0.step(3.0, Float::INFINITY).last, 1.0.step(3.0, Float::INFINITY).last(2), 1.0.step(3.0, Float::INFINITY).last(0)'
+    )
+  ).toMatchObject({
+    stdout: 'NaN\n[NaN]\n[]\n',
+  });
+});
+
+test('Array multiplication accepts implicit String separators', () => {
+  expect(run('class A; def to_str; ","; end; end; p [1,2] * A.new')).toMatchObject({ stdout: '"1,2"\n' });
+  expect(run('class A; private; def to_str; "-"; end; end; p [1,2] * A.new')).toMatchObject({ stdout: '"1-2"\n' });
+  expect(run('class A; def to_str; nil; end; def to_int; 2; end; end; p [1,2] * A.new')).toMatchObject({
+    stdout: '[1, 2, 1, 2]\n',
+  });
+});
+
+test('Array fill follows receiver changes from callbacks', () => {
+  expect(run('a=[1,2,3]; a.fill { |i| a.clear if i==0; 9 }; p a')).toMatchObject({ stdout: '[]\n' });
+  expect(run('a=[1,2,3]; a.fill { |i| a.replace([8]) if i==0; 9 }; p a')).toMatchObject({ stdout: '[9]\n' });
+});
+
+test('Array map writes callback results to the current receiver', () => {
+  expect(run('a=[1,2,3]; a.map! { |x| a.clear if x==1; x }; p a')).toMatchObject({ stdout: '[1]\n' });
+  expect(run('a=[1,2,3]; a.map! { |x| a.replace([8]) if x==1; x }; p a')).toMatchObject({ stdout: '[1]\n' });
+});
+
+test('Array join invokes private implicit String conversions', () => {
+  expect(
+    run('class A; private; def to_str; "yes"; end; public; def to_s; "no"; end; end; p [A.new].join')
+  ).toMatchObject({
+    stdout: '"yes"\n',
+  });
+});
+
+test('Array permutation uses a bounded host stack and preserves order', () => {
+  expect(run('p [1,2,3].permutation(2).to_a')).toMatchObject({
+    stdout: '[[1, 2], [1, 3], [2, 1], [2, 3], [3, 1], [3, 2]]\n',
+  });
+  expect(run('Array.new(20000,1).permutation(20000) { break }; puts :ok')).toMatchObject({ stdout: 'ok\n' });
+});
+
+test('Array reverse find returns the yielded value after receiver mutation', () => {
+  expect(run('a=[1,2]; p a.rfind { |x| a.clear; true }')).toMatchObject({ stdout: '2\n' });
+  expect(run('a=[1,2]; p a.rfind { |x| a[1]=9; true }')).toMatchObject({ stdout: '2\n' });
+});
+
+test('Array sample observes receiver mutation by custom randomizers', () => {
+  expect(
+    run('class R; def rand(n); $a.clear; 0; end; end; $a=[1,2,3]; p $a.sample(random:R.new), $a.sample(2,random:R.new)')
+  ).toMatchObject({
+    stdout: 'nil\n[]\n',
+  });
+  expect(
+    run('class R; def rand(n); $a.replace([8]); 0; end; end; $a=[1,2,3]; p $a.sample(2,random:R.new), $a')
+  ).toMatchObject({
+    stdout: '[8]\n[8]\n',
+  });
+});
+
+test('Array binary search returns nil after callback shrinkage', () => {
+  expect(run('a=[1,2,3]; p a.bsearch { |x| a.clear; 0 }')).toMatchObject({ stdout: 'nil\n' });
+  expect(run('a=[1,2,3]; p a.bsearch { |x| a.clear; true }')).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('Hash value searches reject insertion during equality callbacks', () => {
+  for (const method of ['value?', 'key']) {
+    expect(
+      run(
+        `class A; def ==(x); $h[:b]=2; false; end; end; $h={a:A.new}; begin; p $h.${method}(0); rescue => e; p e.class, e.message; end; p $h.size`
+      )
+    ).toMatchObject({
+      stdout: 'RuntimeError\n"can\'t add a new key into hash during iteration"\n1\n',
+    });
+  }
+});
+
+test('Hash replacement rejects iteration before changing entries', () => {
+  expect(
+    run('h={a:1,b:2}; begin; h.each { h.replace({c:3}) }; rescue => e; p e.class, e.message; end; p h')
+  ).toMatchObject({
+    stdout: 'RuntimeError\n"can\'t replace hash during iteration"\n{a: 1, b: 2}\n',
+  });
+  expect(run('h={a:1}; begin; h.each_key { h.replace({}) }; rescue => e; p e.class; end; p h')).toMatchObject({
+    stdout: 'RuntimeError\n{a: 1}\n',
+  });
+});
+
+test('Hash copies preserve indexed entries without key hash callbacks', () => {
+  expect(
+    run(
+      'class K; attr_accessor :bad; def hash; raise "bad" if @bad; 0; end; end; k=K.new; h={k=>1}; k.bad=true; p h.merge({}).size, h.except.size; d={a:2}; d.replace(h); p d.size'
+    )
+  ).toMatchObject({
+    stdout: '1\n1\n1\n',
+  });
+});

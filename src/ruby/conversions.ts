@@ -88,7 +88,7 @@ export function* toStr(value: Value): Gen<string> {
 export function* toStrValue(value: Value): Gen<RString> {
   if (value instanceof RString) return value;
   if (value instanceof RBasic && classOf(value).findMethod('to_str')) {
-    const converted = yield* callMethod(value, 'to_str', []);
+    const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
     if (converted instanceof RString) return converted;
   }
   throw implicitConversionError(value, 'String');

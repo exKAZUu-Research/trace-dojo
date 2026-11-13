@@ -321,13 +321,7 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
   if (end === NIL) throw rangeError('cannot get the last element of endless arithmetic sequence');
-  if (typeof step === 'number' && !Number.isFinite(step)) {
-    if (Number.isNaN(step)) throw floatDomainError('NaN');
-    if (args.length === 0) return Number.NaN;
-    const requested = yield* toInt(args[0]);
-    if (requested < 0n) throw argumentError('negative array size');
-    return arr(requested === 0n ? [] : [Number.NaN]);
-  }
+  if (typeof step === 'number' && Number.isNaN(step)) throw floatDomainError('NaN');
   const index = arithmeticLastIndex(
     start as bigint | number,
     end as bigint | number,
