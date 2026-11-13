@@ -64,18 +64,32 @@ export abstract class EvaluatorBase {
 
   /** Runs `run` in a new scope with `declarations`, or in the current one when nothing is declared. */
   withScope<T>(declarations: ScopeDeclarations, run: () => T): T {
-    if (declarations.lexical.length === 0 && declarations.functions.length === 0 && declarations.vars.length === 0) {
+    const outer = this.enterScope(declarations);
+    try {
       return run();
+    } finally {
+      if (outer) this.runtime.frame.scope = outer;
+    }
+  }
+
+  /**
+   * Makes the current frame's scope a new one with `declarations`, returning the scope to restore afterwards, or
+   * undefined when nothing is declared and the scope stays.
+   */
+  protected enterScope(declarations: ScopeDeclarations): Scope | undefined {
+    if (declarations.lexical.length === 0 && declarations.functions.length === 0 && declarations.vars.length === 0) {
+      return undefined;
     }
     const frame = this.runtime.frame;
     const outer = frame.scope;
     frame.scope = new Scope(outer);
     try {
       this.instantiate(frame.scope, declarations);
-      return run();
-    } finally {
+    } catch (error) {
       frame.scope = outer;
+      throw error;
     }
+    return outer;
   }
 
   /** Runs `run` with the current frame in `scope`. */
