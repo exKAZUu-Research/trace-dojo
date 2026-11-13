@@ -777,7 +777,9 @@ def('Module', 'public_class_method', [0, -1], function* (self: RClass, args) {
   yield* setVisibility(singletonClassOf(self), args, 'public');
   return NIL;
 });
-def('Module', 'private_constant', [0, -1], () => NIL);
+def('Module', 'private_constant', [0, -1], () => {
+  throw new UnsupportedFeatureError('Module#private_constant');
+});
 def('Module', 'freeze', 0, (self: RClass) => {
   self.frozen = true;
   return self;
@@ -1019,11 +1021,12 @@ export function procArity(proc: RProc): number {
   if (proc.body.kind === 'native') return proc.body.arity;
   const { params } = proc.body.def;
   if (!params) return proc.isLambda ? 0 : -1;
-  const required = params.required.length + params.post.length;
+  const positional = params.required.length + params.post.length;
   const requiredKeywords = params.keywords.some((keyword) => !keyword.value);
-  if (params.rest !== undefined || (params.optional.length > 0 && proc.isLambda)) return -required - 1;
-  if (!proc.isLambda && params.optional.length > 0) return -required - 1;
-  if (requiredKeywords && required === 0) return 1;
+  const required = positional + Number(requiredKeywords);
+  if (params.rest !== undefined || params.optional.length > 0) return -required - 1;
+  if (proc.isLambda && !requiredKeywords && (params.keywords.length > 0 || params.keywordRest !== undefined))
+    return -positional - 1;
   return required;
 }
 

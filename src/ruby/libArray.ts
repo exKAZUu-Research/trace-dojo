@@ -51,7 +51,7 @@ function* toAry(value: Value): Gen<RArray> {
   throw implicitConversionError(value, 'Array');
 }
 
-function* tryAry(value: Value): Gen<RArray | undefined> {
+export function* tryAry(value: Value): Gen<RArray | undefined> {
   if (value instanceof RArray) return value;
   if (respondsTo(value, 'to_ary')) {
     const converted = yield* callMethod(value, 'to_ary', []);
@@ -409,11 +409,12 @@ def('Array', 'compact!', 0, function* (self: RArray) {
 function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]> {
   const result: Value[] = [];
   for (const item of items) {
-    if (item instanceof RArray && depth !== 0) {
-      if (seen.has(item)) throw argumentError('tried to flatten recursive array');
-      seen.add(item);
-      for (const nested of yield* flatten(item.items, depth - 1, seen)) result.push(nested);
-      seen.delete(item);
+    const nested = depth !== 0 ? yield* tryAry(item) : undefined;
+    if (nested) {
+      if (seen.has(nested)) throw argumentError('tried to flatten recursive array');
+      seen.add(nested);
+      for (const value of yield* flatten(nested.items, depth - 1, seen)) result.push(value);
+      seen.delete(nested);
     } else {
       result.push(item);
     }
@@ -430,7 +431,7 @@ def('Array', 'flatten!', [0, 1], function* (self: RArray, args) {
   yield* modify(self);
   const depth = args.length > 0 && args[0] !== NIL ? yield* toIndex(args[0]) : -1;
   const flattened = yield* flatten(self.items, depth, new Set([self]));
-  const changed = self.items.some((item) => item instanceof RArray) && depth !== 0;
+  const changed = flattened.length !== self.items.length || flattened.some((item, index) => item !== self.items[index]);
   grow(flattened.length, self);
   self.items = flattened;
   return changed ? self : NIL;

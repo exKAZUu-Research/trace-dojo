@@ -49,6 +49,43 @@ test('empty repetitions stay within the execution budget', () => {
 });
 
 test.each([
+  [
+    'Enumerable forwards iteration arguments',
+    'class E;include Enumerable;def each(n);yield n;end;end;p E.new.to_a(3),E.new.each_with_index(4).to_a,E.new.each_entry(5).to_a,E.new.reverse_each(6).to_a',
+    '[3]\n[[4, 0]]\n[5]\n[6]\n',
+  ],
+  [
+    'array-like flattening',
+    'class A;def to_ary;[1,2];end;end;p [A.new].flatten,[0].flat_map { A.new }',
+    '[1, 2]\n[1, 2]\n',
+  ],
+  ['sort_by evaluates keys while iterating', 'a=[2,1];p a.sort_by{|x|a<<3 if x==2;x}', '[1, 2, 3]\n'],
+  [
+    'sum interleaves mapped values and arithmetic',
+    'class N;def +(x);$n+=1;self;end;end;$n=0;[1,2].sum(N.new){|x|puts $n;x}',
+    '0\n1\n',
+  ],
+  [
+    'cycle yields during source iteration',
+    'class E;include Enumerable;def each;puts :before;yield 1;puts :after;end;end;E.new.cycle(1){puts :block}',
+    'before\nblock\nafter\n',
+  ],
+  [
+    'grouping enumerators stop at the first boundary',
+    'p [1,2,3].slice_when{|a,b|puts b;true}.first;p [1,2,3].chunk_while{|a,b|puts b;false}.first',
+    '2\n[1]\n2\n[1]\n',
+  ],
+  [
+    'chunk defers classification until consumed',
+    'e=[1,2,3].chunk{|x|puts x;x};p e.class;p e.first',
+    'Enumerator\n1\n2\n[1, [1]]\n',
+  ],
+  [
+    'tally converts its accumulator',
+    'class H;def to_hash;{1=>2};end;end;p [1].tally(H.new);begin;[1].tally(5);rescue => e;p e.class;end',
+    '{1 => 3}\nTypeError\n',
+  ],
+  ['Proc arity includes keywords', 'p (->(x,y:1){}).arity,(->(x,y:){}).arity,(proc{|x,y:1|}).arity', '-2\n2\n1\n'],
   ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],
   ['cyclic array equality', 'a = []; a << a; b = []; b << b; p a == b', 'true\n'],
