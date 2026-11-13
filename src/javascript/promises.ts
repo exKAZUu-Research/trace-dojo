@@ -49,10 +49,11 @@ interface TimerList {
 
 /**
  * How a read of the clock moves it forward: by the operations spent since the previous read at
- * OPERATIONS_PER_MILLISECOND, and by at least CLOCK_STEP, so a busy wait as long as a run's time limit spends at most a
- * fifth of the operation budget whatever its body costs. Of each advance, at most MAX_CLOCK_ADVANCE moves the clock
- * timers are scheduled on, so a read after long computation moves timers scheduled after it by at most Node.js's clock
- * resolution, and they keep the order their delays give.
+ * OPERATIONS_PER_MILLISECOND, and by at least CLOCK_STEP. A read from the call site of the previous read polls the clock,
+ * as a busy wait does, and takes the whole advance, so a busy wait as long as a run's time limit spends at most a fifth
+ * of the operation budget whatever its body costs; any other read takes at most MAX_CLOCK_ADVANCE, Node.js's clock
+ * resolution, since the interpreter's operations are far slower than Node.js's and a timestamp after computation must
+ * not push timers scheduled after it past earlier ones.
  */
 const OPERATIONS_PER_MILLISECOND = LIMITS.maxOperations / (LIMITS.maxMilliseconds * 5);
 const CLOCK_STEP = 10 / OPERATIONS_PER_MILLISECOND;
@@ -73,10 +74,10 @@ export class EventLoop {
   /** The jobs running now, innermost last. */
   private readonly running: Job[] = [];
   private readonly rejections = new Set<JsObject>();
-  /** The milliseconds the clock timers are scheduled on has advanced since the program started, in fractions. */
+  /** The milliseconds the simulated clock has advanced since the program started, in fractions of a millisecond. */
   private now = 0;
-  /** How far `Date` is ahead of `now`: the work polling reads observed beyond what moved `now`. */
-  private observed = 0;
+  /** The row of the call that read the clock last, whose repetition marks a polling loop. */
+  private lastReadRow: number | undefined;
   /** The operations spent when the clock last moved, by a read or a jump to a timer. */
   private spentAtNow = 0;
   /** The timer whose callback is running, which clearing stops from running again. */
@@ -87,15 +88,18 @@ export class EventLoop {
 
   constructor(private readonly runtime: Runtime) {}
 
-  /** Reads the clock for `Date`, which moves it forward as the constants above say: the whole milliseconds so far. */
-  readClock(): number {
+  /**
+   * Reads the clock for `Date` at the call on `row`, which moves it forward as the constants above say: the whole
+   * milliseconds so far.
+   */
+  readClock(row: number | undefined): number {
     const { spent } = this.runtime.budget;
     const advance = Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND);
-    const scheduled = Math.min(MAX_CLOCK_ADVANCE, advance);
-    this.now += scheduled;
-    this.observed += advance - scheduled;
+    const polls = row !== undefined && row === this.lastReadRow;
+    this.now += polls ? advance : Math.min(MAX_CLOCK_ADVANCE, advance);
     this.spentAtNow = spent;
-    return Math.floor(this.now + this.observed);
+    this.lastReadRow = row;
+    return Math.floor(this.now);
   }
 
   enqueue(job: Job): void {
@@ -147,8 +151,6 @@ export class EventLoop {
       if (!first) return;
       // The loop waits for the first list due, unless the program's polling already took the clock past it.
       if (first.expiry > this.now) {
-        // Time Date has already shown beyond the scheduling clock counts toward the wait, so Date never jumps twice.
-        this.observed = Math.max(0, this.observed - (first.expiry - this.now));
         this.now = first.expiry;
         this.spentAtNow = this.runtime.budget.spent;
       }

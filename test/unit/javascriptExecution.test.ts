@@ -829,6 +829,12 @@ for (const f of [() => Object.create(1), () => Object.create(null, null), () => 
 }`,
   ],
   [
+    'blocking busy waits that delay timers',
+    `let sum = 0;
+setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
+setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);`,
+  ],
+  [
     'microtasks that clear and schedule timers between timers',
     `let b; setTimeout(() => { console.log('a'); Promise.resolve().then(() => { clearTimeout(b); setTimeout(() => console.log('d'), 0); }); }, 0);
 b = setTimeout(() => console.log('b'), 0); setTimeout(() => console.log('c'), 0);`,
