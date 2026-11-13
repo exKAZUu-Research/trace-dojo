@@ -1,4 +1,4 @@
-import { floatToInt, formatFloat, inspect, toS, toStr } from './conversions';
+import { floatToInt, formatFloat, inspect, toStr, toSValue } from './conversions';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
@@ -6,7 +6,7 @@ import { callMethod, type Gen } from './interp';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import { NIL, RHash, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { realClassOf, stringFromBytes } from './values';
+import { joinStringCharacters, realClassOf, stringBytes, stringCharacters, stringFromBytes } from './values';
 
 interface Spec {
   minus: boolean;
@@ -20,8 +20,38 @@ interface Spec {
 
 /** Formats as `format`/`sprintf` and `String#%` do. */
 export function* format(formatValue: Value, args: Value[]): Gen<string> {
+  return (yield* formatParts(formatValue, args)).text;
+}
+
+export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
+  const { parts } = yield* formatParts(formatValue, args);
+  const chunks = parts.map((part) => (part instanceof RString ? stringBytes(part) : encodeCodePoints(part)));
+  const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  rt().checkStringLength(length);
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return stringFromBytes(bytes);
+}
+
+function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; parts: (string | RString)[] }> {
   const template = yield* toStr(formatValue);
   let result = '';
+  let literal = '';
+  const parts: (string | RString)[] = [];
+  const flush = (): void => {
+    if (literal) parts.push(literal);
+    literal = '';
+  };
+  const append = (part: string | RString): void => {
+    flush();
+    parts.push(part);
+    result += part instanceof RString ? part.s : part;
+    rt().checkStringLength(result.length);
+  };
   let next = 0;
   let argumentMode: 'none' | 'numbered' | 'unnumbered' | 'named' = 'none';
   let hashArg: RHash | undefined;
@@ -56,12 +86,14 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     const char = template[index];
     if (char !== '%') {
       result += char;
+      literal += char;
       continue;
     }
     index++;
     if (index >= template.length) throw argumentError('incomplete format specifier; use %% (double %) instead');
     if (template[index] === '%') {
       result += '%';
+      literal += '%';
       continue;
     }
     const spec: Spec = { minus: false, plus: false, space: false, zero: false, sharp: false };
@@ -81,7 +113,7 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
         const named = yield* namedArg(name);
         index = close;
         if (flag === '{') {
-          result += pad(yield* toS(named), spec, false);
+          append(padStringValue(yield* toSValue(named), spec));
           braceSubstitution = true;
           break;
         }
@@ -130,14 +162,13 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     if (type === undefined) throw argumentError('incomplete format specifier; use %% (double %) instead');
     rt().checkStringLength(Math.max(spec.width ?? 0, spec.precision ?? 0));
     const arg = (): Value => value ?? takeArg();
-    result += yield* directive(type, spec, arg);
-    rt().checkStringLength(result.length);
+    append(yield* directive(type, spec, arg));
   }
-  return result;
+  flush();
+  return { text: result, parts };
 }
 
-export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
-  const text = yield* format(formatValue, args);
+function encodeCodePoints(text: string): Uint8Array {
   const bytes: number[] = [];
   for (let index = 0; index < text.length; index++) {
     const point = text.codePointAt(index) as number;
@@ -153,12 +184,11 @@ export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
         0x80 | (point & 0x3f)
       );
   }
-  rt().checkStringLength(bytes.length);
-  return stringFromBytes(Uint8Array.from(bytes));
+  return Uint8Array.from(bytes);
 }
 
 // code-gauge-allow functionNcss 43 -- Ruby's format directives and flags.
-function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
+function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RString> {
   switch (type) {
     case 'd':
     case 'i':
@@ -189,9 +219,7 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
       return formatFloatDirective(type, yield* floatArg(arg()), spec);
     }
     case 's': {
-      let text = yield* toS(arg());
-      if (spec.precision !== undefined) text = [...text].slice(0, spec.precision).join('');
-      return pad(text, spec, false);
+      return padStringValue(yield* toSValue(arg()), spec);
     }
     case 'p': {
       let text = yield* inspect(arg());
@@ -201,7 +229,8 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
     case 'c': {
       const value = arg();
       let text: string;
-      if (value instanceof RString) text = [...value.s][0] ?? '';
+      if (value instanceof RString)
+        return padStringValue(stringCharacters(value)[0] ?? stringFromBytes(new Uint8Array()), spec);
       else {
         const point = yield* intArg(value);
         if (point < -0x80_00_00_00_00_00_00_00n || point > 0x7f_ff_ff_ff_ff_ff_ff_ffn)
@@ -219,6 +248,18 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
       throw argumentError(`malformed format string - %${type}`);
     }
   }
+}
+
+function padStringValue(value: RString, spec: Spec): RString {
+  const chars = stringCharacters(value);
+  const selected = spec.precision === undefined ? chars : chars.slice(0, spec.precision);
+  const content = stringBytes(joinStringCharacters(selected, value.binary));
+  const padding = Math.max(0, (spec.width ?? 0) - selected.length);
+  rt().checkStringLength(content.length + padding);
+  const bytes = new Uint8Array(content.length + padding);
+  bytes.fill(0x20);
+  bytes.set(content, spec.minus ? 0 : padding);
+  return stringFromBytes(bytes, value.binary);
 }
 
 function* intArg(value: Value): Gen<bigint> {

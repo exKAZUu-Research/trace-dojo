@@ -498,6 +498,16 @@ test.each([
   ],
   ['UTF-8 Integer concatenation', 's = ""; s << 233; p s.bytes, s', '[195, 169]\n"é"\n'],
   ['Integer concatenation after an invalid byte', String.raw`p "\xFF".concat(233).bytes`, '[255, 195, 169]\n'],
+  [
+    'raw bytes in String formatting',
+    String.raw`p format("%c", "\xFF").bytes, format("%s", "\xFF").bytes, ("%c" % "\xFF").bytes`,
+    '[255]\n[255]\n[255]\n',
+  ],
+  [
+    'raw bytes in insertion and prepend',
+    String.raw`s="\xFF"; s.prepend("a"); s.insert(1,"b"); p s.bytes`,
+    '[97, 98, 255]\n',
+  ],
   ['raw byte counts from IO', String.raw`p $stderr.write("\xFF")`, '1\n'],
   ['invalid UTF-8 character slicing', String.raw`p "\xFF".chars, "\xFF"[0].bytes`, '["\\xFF"]\n[255]\n'],
   ['invalid UTF-8 character lengths', String.raw`p "a\xFF".chars.map(&:bytesize)`, '[1, 1]\n'],
@@ -533,6 +543,11 @@ test.each([
     'Float steps for custom arithmetic ranges',
     'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); n <=> o.n; end; def succ; A.new(n+1); end; def +(v); A.new(n+v); end; end; (A.new(0)..A.new(3)).step(1.5) { |x| p x.n }',
     '0\n1.5\n3.0\n',
+  ],
+  [
+    'custom Range arithmetic before each callback',
+    'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); n <=> o.n; end; def succ; puts :succ; A.new(n+1); end; def +(v); puts :plus; A.new(n+v); end; end; (A.new(0)..A.new(3)).step(1.5) { |x| p x.n }',
+    'plus\n0\nplus\n1.5\nplus\n3.0\n',
   ],
   [
     'Unicode case folding',
@@ -580,6 +595,12 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   });
   expect(run('p "".tr_s!("a", 2)')).toMatchObject({
     uncaughtException: 'no implicit conversion of Integer into String (TypeError)',
+  });
+  expect(run('p (255.chr + "é").bytes')).toMatchObject({
+    uncaughtException: 'incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8 (Encoding::CompatibilityError)',
+  });
+  expect(run('s = 255.chr; s << 256')).toMatchObject({
+    uncaughtException: '256 out of char range (RangeError)',
   });
   expect(run('p format("%{a} %p", {a: 1})')).toMatchObject({
     uncaughtException: 'unnumbered(1) mixed with named (ArgumentError)',

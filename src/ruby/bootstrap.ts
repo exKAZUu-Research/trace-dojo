@@ -128,6 +128,8 @@ export function bootstrap(runtime: Runtime): void {
   const exception = defineClass('Exception', object);
   exception.instanceKind = 'exception';
   for (const [name, parent] of EXCEPTION_TREE) defineClass(name, c[parent]);
+  const encoding = defineModule('Encoding');
+  defineClass('CompatibilityError', c.EncodingError, encoding);
   const math = defineModule('Math');
   defineClass('DomainError', c.ArgumentError, math);
   defineClass('Random', object);

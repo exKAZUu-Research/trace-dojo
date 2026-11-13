@@ -14,7 +14,15 @@ import {
   toStrValue,
 } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
+import {
+  argumentError,
+  frozenError,
+  implicitConversionError,
+  indexError,
+  rangeError,
+  rubyError,
+  typeError,
+} from './errors';
 import { formatString } from './format';
 import { hashGet } from './hashes';
 import { callBlock, callMethod, type Gen, nativeProc, requireBlock } from './interp';
@@ -76,6 +84,20 @@ function* stringArg(value: Value): Gen<string> {
 function* stringArgValue(value: Value): Gen<RString> {
   if (value instanceof RSymbol) throw implicitConversionError(value, 'String');
   return yield* toStrValue(value);
+}
+
+function combinedBinary(leftBinary: boolean, leftAscii: boolean, right: RString): boolean {
+  if (leftBinary === right.binary) return leftBinary;
+  const rightAscii = stringBytes(right).every((byte) => byte < 0x80);
+  if (!leftAscii && !rightAscii) {
+    const leftName = leftBinary ? 'BINARY (ASCII-8BIT)' : 'utf8';
+    const rightName = right.binary ? 'BINARY (ASCII-8BIT)' : 'utf8';
+    throw rubyError(
+      rt().c['Encoding::CompatibilityError'],
+      `incompatible character encodings: ${leftName} and ${rightName}`
+    );
+  }
+  return leftAscii && !rightAscii ? right.binary : leftBinary;
 }
 
 function regexpUnsupported(value: Value): void {
@@ -254,13 +276,19 @@ function foldAscii(text: string): string {
 }
 
 def('String', '+', 1, function* (self: RString, [other]) {
-  const right = stringBytes(yield* stringArgValue(other));
+  const source = yield* stringArgValue(other);
+  const right = stringBytes(source);
   const left = stringBytes(self);
+  const binary = combinedBinary(
+    self.binary,
+    left.every((byte) => byte < 0x80),
+    source
+  );
   rt().checkStringLength(left.length + right.length);
   const joined = new Uint8Array(left.length + right.length);
   joined.set(left);
   joined.set(right, left.length);
-  return stringFromBytes(joined, self.binary);
+  return stringFromBytes(joined, binary);
 });
 def('String', '*', 1, function* (self: RString, [count]) {
   const times = yield* toIndex(count);
@@ -286,24 +314,30 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   modify(self);
   const chunks: Uint8Array[] = [stringBytes(self)];
   let length = chunks[0].length;
+  let binary = self.binary;
+  let ascii = chunks[0].every((byte) => byte < 0x80);
   for (const arg of args) {
     let chunk: Uint8Array;
     if (typeof arg === 'bigint') {
       if (arg < 0n) throw rangeError(`${arg} out of char range`);
       if (arg > 0x7f_ff_ff_ff_ff_ff_ff_ffn) throw rangeError('bignum out of char range');
       if (arg > 0x10_ff_ffn) throw rangeError(`${arg} out of char range`);
+      if (binary && arg > 255n) throw rangeError(`${arg} out of char range`);
       if (arg >= 0xd8_00n && arg <= 0xdf_ffn)
         throw rangeError(`invalid codepoint 0x${arg.toString(16).toUpperCase()} in UTF-8`);
       chunk =
-        self.binary && arg <= 255n
+        binary && arg <= 255n
           ? Uint8Array.of(Number(arg))
           : new TextEncoder().encode(String.fromCodePoint(Number(arg)));
     } else {
-      chunk = stringBytes(yield* stringArgValue(arg));
+      const source = yield* stringArgValue(arg);
+      binary = combinedBinary(binary, ascii, source);
+      chunk = stringBytes(source);
     }
     length += chunk.length;
     rt().checkStringLength(length);
     chunks.push(chunk);
+    ascii &&= chunk.every((byte) => byte < 0x80);
   }
   const bytes = new Uint8Array(length);
   let offset = 0;
@@ -311,7 +345,7 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
     bytes.set(chunk, offset);
     offset += chunk.length;
   }
-  const result = stringFromBytes(bytes, self.binary);
+  const result = stringFromBytes(bytes, binary);
   self.s = result.s;
   self.binary = result.binary;
   self.rawBytes = result.rawBytes;
@@ -328,19 +362,32 @@ def('String', 'clear', 0, (self: RString) => {
   return self;
 });
 def('String', 'insert', 2, function* (self: RString, [index, other]) {
-  const chars = charsOf(self.s);
+  const chars = stringCharacters(self);
   let position = yield* toIndex(index);
-  const text = yield* stringArg(other);
+  const value = yield* stringArgValue(other);
+  const binary = combinedBinary(
+    self.binary,
+    stringBytes(self).every((byte) => byte < 0x80),
+    value
+  );
   if (position < 0) position += chars.length + 1;
   if (position < 0 || position > chars.length) throw indexError(`index ${yield* toIndex(index)} out of string`);
-  chars.splice(position, 0, text);
-  setText(self, chars.join(''));
+  chars.splice(position, 0, value);
+  setBytes(self, stringBytes(joinStringCharacters(chars, binary)), binary);
   return self;
 });
 def('String', 'prepend', [0, -1], function* (self: RString, args) {
-  let prefix = '';
-  for (const arg of args) prefix += yield* stringArg(arg);
-  setText(self, prefix + self.s);
+  const values: RString[] = [];
+  let binary = self.binary;
+  let ascii = stringBytes(self).every((byte) => byte < 0x80);
+  for (const arg of args) {
+    const value = yield* stringArgValue(arg);
+    binary = combinedBinary(binary, ascii, value);
+    ascii &&= stringBytes(value).every((byte) => byte < 0x80);
+    values.push(value);
+  }
+  values.push(self);
+  setBytes(self, stringBytes(joinStringCharacters(values, binary)), binary);
   return self;
 });
 

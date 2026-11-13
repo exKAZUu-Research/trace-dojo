@@ -297,8 +297,7 @@ function* stepRange(self: RRange, step: bigint | number, block: RProc): Gen {
   ) {
     return yield* stepNumericRange(self, Number(begin), Number(step), block);
   }
-  if (begin !== NIL && !(begin instanceof RString) && typeof step === 'number')
-    return yield* stepCustomRange(self, step, block);
+  if (begin !== NIL && !(begin instanceof RString)) return yield* stepCustomRange(self, step, block);
   if (typeof step !== 'bigint') throw typeError('no implicit conversion of Float into String');
   return yield* stepSuccessorRange(self, step, block);
 }
@@ -326,7 +325,7 @@ function* stepNumericRange(self: RRange, start: number, by: number, block: RProc
   return self;
 }
 
-function* stepCustomRange(self: RRange, step: number, block: RProc): Gen {
+function* stepCustomRange(self: RRange, step: bigint | number, block: RProc): Gen {
   const { end, exclusive } = self;
   let value = self.begin;
   for (;;) {
@@ -335,8 +334,9 @@ function* stepCustomRange(self: RRange, step: number, block: RProc): Gen {
       const order = yield* spaceship(value, end);
       if (order === undefined || order > 0 || (exclusive && order === 0)) break;
     }
+    const next = yield* callMethod(value, '+', [step]);
     yield* callBlock(block, [value], false);
-    value = yield* callMethod(value, '+', [step]);
+    value = next;
   }
   return self;
 }
