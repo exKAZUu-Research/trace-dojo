@@ -2045,6 +2045,8 @@ def _c_class(cls, name):
 
 
 Pickler, Unpickler = _c_class(_Pickler, 'Pickler'), _c_class(_Unpickler, 'Unpickler')
+_c_type_name(Pickler, '_pickle.Pickler')
+_c_type_name(Unpickler, '_pickle.Unpickler')
 del _c_class
 _pickler_arguments = _clinic('Pickler', ('file', 'protocol'), 0, 1, ('fix_imports', 'buffer_callback'),
                              lambda file, protocol=None, *, fix_imports=True, buffer_callback=None:

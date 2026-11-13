@@ -343,6 +343,7 @@ method(unpackIteratorClass, '__length_hint__', 'none', 0, 0, (self) =>
 // The Struct class --------------------------------------------------------------------------------------------------
 
 const structClass = builtinClass('Struct');
+structClass.typeName = '_struct.Struct';
 structClass.module = '_struct';
 const layoutOfStruct = (self: PyValue): Layout => (self as PyOpaque).data as Layout;
 

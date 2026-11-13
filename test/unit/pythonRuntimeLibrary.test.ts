@@ -124,3 +124,23 @@ assert quopri.encodestring(b'caf\\xe9 = ok') == b'caf=E9 =3D ok'
 assert repr(random.randint).startswith('<bound method Random.randint of <random.Random object at ')
 `);
 });
+
+test("the messages of native objects name their types as CPython's C types name themselves", () => {
+  const program = `import io, sys, threading, weakref, queue, struct, pickle, zlib, hashlib, time
+values = [io.StringIO(), io.BytesIO(), sys.flags, sys.float_info, sys.version_info, threading.Lock(), threading.RLock(),
+          weakref.ref(int), queue.SimpleQueue(), struct.Struct('i'), pickle.Pickler(io.BytesIO()),
+          pickle.Unpickler(io.BytesIO()), io.BufferedReader(io.BytesIO()), io.BufferedWriter(io.BytesIO()),
+          io.TextIOWrapper(io.BytesIO()), zlib.compressobj(), zlib.decompressobj(), hashlib.md5(), hashlib.shake_128(),
+          time.localtime(0), queue.Queue()]
+for value in values:
+    try:
+        value.__missing__
+    except AttributeError as error:
+        print(error)
+`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "'_io.StringIO' object has no attribute '__missing__'\n'_io.BytesIO' object has no attribute '__missing__'\n'sys.flags' object has no attribute '__missing__'\n'sys.float_info' object has no attribute '__missing__'\n'sys.version_info' object has no attribute '__missing__'\n'_thread.lock' object has no attribute '__missing__'\n'_thread.RLock' object has no attribute '__missing__'\n'weakref.ReferenceType' object has no attribute '__missing__'\n'_queue.SimpleQueue' object has no attribute '__missing__'\n'_struct.Struct' object has no attribute '__missing__'\n'_pickle.Pickler' object has no attribute '__missing__'\n'_pickle.Unpickler' object has no attribute '__missing__'\n'_io.BufferedReader' object has no attribute '__missing__'\n'_io.BufferedWriter' object has no attribute '__missing__'\n'_io.TextIOWrapper' object has no attribute '__missing__'\n'zlib.Compress' object has no attribute '__missing__'\n'zlib.Decompress' object has no attribute '__missing__'\n'_hashlib.HASH' object has no attribute '__missing__'\n'_hashlib.HASHXOF' object has no attribute '__missing__'\n'time.struct_time' object has no attribute '__missing__'\n'Queue' object has no attribute '__missing__'\n",
+  });
+});

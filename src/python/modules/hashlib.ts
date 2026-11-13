@@ -96,8 +96,10 @@ interface HashState {
 }
 
 const hashClass = builtinClass('HASH');
+hashClass.typeName = '_hashlib.HASH';
 hashClass.module = '_hashlib';
 const hashXofClass = builtinClass('HASHXOF', hashClass);
+hashXofClass.typeName = '_hashlib.HASHXOF';
 hashXofClass.module = '_hashlib';
 
 const stateOf = (self: PyValue): HashState => (self as PyOpaque).data as HashState;

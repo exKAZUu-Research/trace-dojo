@@ -2080,6 +2080,7 @@ def _check_methods(C, *methods):
 for _cls in (BufferedRWPair, BufferedRandom, BufferedReader, BufferedWriter, IncrementalNewlineDecoder, TextIOWrapper,
              _IOBase, _RawIOBase, _BufferedIOBase, _TextIOBase):
     _cls.__module__ = '_io'
+    _c_type_name(_cls, '_io.' + _cls.__name__)
     _c_type(_cls)
 del _cls
 

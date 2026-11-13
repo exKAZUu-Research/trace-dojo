@@ -67,9 +67,18 @@ export function readInteger(bytes: Uint8Array, little: boolean, signed: boolean)
 /** Writes the low `size` bytes of an integer in two's complement. */
 export function writeInteger(value: bigint, size: number, little: boolean, out: Uint8Array, offset: number): void {
   let rest = BigInt.asUintN(size * 8, value);
+  if (size <= 8) {
+    for (let index = 0; index < size; index++) {
+      out[offset + (little ? index : size - 1 - index)] = Number(rest & 0xffn);
+      rest >>= 8n;
+    }
+    return;
+  }
+  // Shifting a long integer once per byte copies it each time, so its digits are converted once, as readInteger does.
+  const hex = rest.toString(16).padStart(size * 2, '0');
   for (let index = 0; index < size; index++) {
-    out[offset + (little ? index : size - 1 - index)] = Number(rest & 0xffn);
-    rest >>= 8n;
+    const byte = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+    out[offset + (little ? size - 1 - index : index)] = byte;
   }
 }
 

@@ -220,8 +220,10 @@ function decompress(args: PyValue[], kwargs: Kwargs): PyValue {
 // Compression objects ---------------------------------------------------------------------------------------------
 
 const compressClass = builtinClass('Compress');
+compressClass.typeName = 'zlib.Compress';
 compressClass.module = 'zlib';
 const decompressClass = builtinClass('Decompress');
+decompressClass.typeName = 'zlib.Decompress';
 decompressClass.module = 'zlib';
 for (const cls of [compressClass, decompressClass]) {
   cls.construct = () => {
