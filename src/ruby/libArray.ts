@@ -338,8 +338,10 @@ def('Array', 'delete', 1, function* (self: RArray, [target], block) {
   try {
     for (; read < self.items.length; read++) {
       const item = self.items[read];
-      if (yield* rEquals(item, target)) found = item;
-      else self.items[write++] = item;
+      if (yield* rEquals(item, target)) {
+        yield* modify(self);
+        found = item;
+      } else self.items[write++] = item;
     }
   } finally {
     if (write < read) self.items = [...self.items.slice(0, write), ...self.items.slice(read)];
@@ -1036,6 +1038,10 @@ function* shuffle(items: Value[], randomizer: Value | undefined): Gen<void> {
   }
 }
 
+function sampledItems(items: Value[], indexes: number[]): RArray {
+  return arr(indexes.flatMap((index) => (items[index] === undefined ? [] : [items[index]])));
+}
+
 def(
   'Array',
   'sample',
@@ -1056,13 +1062,12 @@ def(
     if (n <= 10) {
       const draws: number[] = [];
       for (let i = 0; i < n; i++) draws.push(yield* randomIndex(randomizer, length - i));
-      if (self.items !== items || self.items.length !== length) return arr(self.items.slice(0, n));
-      if (n === 1) return arr([items[draws[0]]]);
+      if (n === 1) return sampledItems(self.items, [draws[0]]);
       if (n === 2) {
         const i = draws[0];
         let j = draws[1];
         if (j >= i) j++;
-        return arr([items[i], items[j]]);
+        return sampledItems(self.items, [i, j]);
       }
       if (n === 3) {
         const i = draws[0];
@@ -1075,7 +1080,7 @@ def(
           g = ++j;
         }
         if (k >= l && ++k >= g) ++k;
-        return arr([items[i], items[j], items[k]]);
+        return sampledItems(self.items, [i, j, k]);
       }
       const sorted: number[] = [draws[0]];
       const chosen: number[] = [draws[0]];
@@ -1089,7 +1094,7 @@ def(
         sorted.splice(j, 0, k);
         chosen.push(k);
       }
-      return arr(chosen.map((index) => items[index]));
+      return sampledItems(self.items, chosen);
     }
     const memoThreshold =
       length < 2560
@@ -1104,20 +1109,24 @@ def(
       const result: Value[] = [];
       const draws: number[] = [];
       for (let i = 0; i < n; i++) draws.push((yield* randomIndex(randomizer, length - i)) + i);
-      if (self.items !== items || self.items.length !== length) return arr(self.items.slice(0, n));
       for (let i = 0; i < n; i++) {
         const j = draws[i];
         const i2 = memo.get(i) ?? i;
         const j2 = memo.get(j) ?? j;
         memo.set(j, i2);
-        result.push(items[j2]);
+        const item = self.items[j2];
+        if (item !== undefined) result.push(item);
       }
       return arr(result);
     }
-    const result = [...items];
+    const draws: number[] = [];
     for (let i = 0; i < n; i++) {
-      const j = (yield* randomIndex(randomizer, length - i)) + i;
-      if (self.items !== items || self.items.length !== length) return arr(self.items.slice(0, n));
+      draws.push((yield* randomIndex(randomizer, length - i)) + i);
+    }
+    const result = [...self.items];
+    for (let i = 0; i < Math.min(n, result.length); i++) {
+      const j = draws[i];
+      if (j >= result.length) continue;
       [result[i], result[j]] = [result[j], result[i]];
     }
     return arr(result.slice(0, n));

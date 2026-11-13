@@ -1735,3 +1735,28 @@ test('Hash copies preserve indexed entries without key hash callbacks', () => {
     stdout: '1\n1\n1\n',
   });
 });
+
+test('Array delete preserves frozen contents on a matching value', () => {
+  expect(run('a=[1,2,1].freeze; begin; a.delete(1); rescue => e; p e.class; end; p a')).toMatchObject({
+    stdout: 'FrozenError\n[1, 2, 1]\n',
+  });
+  expect(run('p [1,2].freeze.delete(3)')).toMatchObject({ stdout: 'nil\n' });
+});
+
+test('Array sample applies draws to same-length replacements', () => {
+  expect(
+    run('class R; def rand(n); $a.replace([8,9,10]); n-1; end; end; $a=[1,2,3]; p $a.sample(2,random:R.new)')
+  ).toMatchObject({
+    stdout: '[10, 9]\n',
+  });
+});
+
+test('Hash equality guards both operands during key callbacks', () => {
+  expect(
+    run(
+      'class A; attr_accessor :on; def hash; $h[:x]=1 if @on; 0; end; end; k=A.new; $h={k=>1}; g={k=>1}; k.on=true; begin; p $h.eql?(g); rescue => e; p e.class,e.message; end; p $h.size'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n"can\'t add a new key into hash during iteration"\n1\n',
+  });
+});

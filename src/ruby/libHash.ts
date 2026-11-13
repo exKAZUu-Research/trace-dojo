@@ -165,11 +165,18 @@ def('Hash', 'to_a', 0, (self: RHash) => arr([...self.map.values()].map((entry) =
 def('Hash', '==', 1, (self: RHash, [other]) => rEquals(self, other));
 def('Hash', 'eql?', 1, function* (self: RHash, [other]) {
   if (!(other instanceof RHash) || self.map.size !== other.map.size) return false;
-  for (const entry of self.map.values()) {
-    const match = yield* hashGet(other, entry.key);
-    if (!match || !(yield* rEql(entry.value, match.value))) return false;
+  self.iterating++;
+  other.iterating++;
+  try {
+    for (const entry of self.map.values()) {
+      const match = yield* hashGet(other, entry.key);
+      if (!match || !(yield* rEql(entry.value, match.value))) return false;
+    }
+    return true;
+  } finally {
+    self.iterating--;
+    other.iterating--;
   }
-  return true;
 });
 def('Hash', 'default', [0, 1], function* (self: RHash, args) {
   if (args.length > 0 && self.defaultProc) return yield* hashDefault(self, args[0]);
