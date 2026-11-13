@@ -939,7 +939,7 @@ function* substitute(
     if (global) throw new UnsupportedFeatureError('ブロックを渡さない gsub（Enumerator）');
     throw argumentError('wrong number of arguments (given 1, expected 2)');
   }
-  const text = self.s;
+  let text = self.s;
   const sourceLength = stringBytes(self).length;
   let result = '';
   let position = 0;
@@ -966,6 +966,7 @@ function* substitute(
       piece = yield* toS(yield* callBlock(block as RProc, [str(target)]));
     }
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
+    text = self.s;
     result += text.slice(position, found) + piece;
     position = found + target.length;
     if (target.length === 0) {
@@ -1008,7 +1009,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   regexpUnsupported(pattern);
   const target = yield* patternText(pattern, 'regexp');
   const found: Value[] = [];
-  const text = self.s;
+  let text = self.s;
   const sourceLength = stringBytes(self).length;
   let position = 0;
   for (;;) {
@@ -1018,6 +1019,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     if (block) {
       yield* callBlock(block, [match], false);
       if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
+      text = self.s;
     } else found.push(match);
     position =
       index +

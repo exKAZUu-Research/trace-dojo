@@ -1767,3 +1767,8 @@ test('Array map fills cleared positions with Ruby nil', () => {
     stdout: '[nil, nil, 3]\n',
   });
 });
+
+test('String scan and substitution observe permitted same-length callback edits', () => {
+  expect(run('s="aaa"; s.scan("a") { s.replace("bbb"); puts :hit }')).toMatchObject({ stdout: 'hit\n' });
+  expect(run('s="aaa"; p s.gsub("a") { s[1]="b"; "x" }')).toMatchObject({ stdout: '"xbx"\n' });
+});
