@@ -23,6 +23,19 @@ function modifiedByte(text: string, index: number): { byte: number; end: number 
     return byte <= 0xff ? { byte, end: index } : undefined;
   }
   const kind = text[index + 1];
+  if (kind === undefined) return undefined;
+  if (kind in SIMPLE_ESCAPES) {
+    const escaped = SIMPLE_ESCAPES[kind];
+    return escaped.length === 1 ? { byte: escaped.codePointAt(0) as number, end: index + 1 } : undefined;
+  }
+  if (kind === 'x') {
+    const hex = /^[\da-fA-F]{1,2}/.exec(text.slice(index + 2))?.[0];
+    return hex ? { byte: Number.parseInt(hex, 16), end: index + 1 + hex.length } : undefined;
+  }
+  if (/[0-7]/.test(kind)) {
+    const octal = /^[0-7]{1,3}/.exec(text.slice(index + 1))?.[0] ?? kind;
+    return { byte: Number.parseInt(octal, 8) & 0xff, end: index + octal.length };
+  }
   const operand = kind === 'c' ? index + 2 : text[index + 2] === '-' ? index + 3 : -1;
   if (operand < 0 || (kind !== 'c' && kind !== 'C' && kind !== 'M')) return undefined;
   const nested = modifiedByte(text, operand);

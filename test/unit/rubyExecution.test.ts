@@ -64,6 +64,16 @@ test.each([
   ],
   ['index receiver before index locals', '(a = [0])[a.size - 1] = 7; p a', '[7]\n'],
   [
+    'escaped bytes through interpolation',
+    String.raw`p "\xFF#{1}é"; p "\xFF#{1}é".bytes`,
+    '"\\xFF1é"\n[255, 49, 195, 169]\n',
+  ],
+  [
+    'escaped bytes through concatenation and repetition',
+    String.raw`p ("\xFF" + "a").bytes; p ("\xFF" * 2).bytes`,
+    '[255, 97]\n[255, 255]\n',
+  ],
+  [
     'mixed UTF-8 text and escaped bytes',
     String.raw`p "é\xFF", "\xFFé"; p "\xFFé".bytes; p "\xFFé".bytesize`,
     '"é\\xFF"\n"\\xFFé"\n[255, 195, 169]\n3\n',

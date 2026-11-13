@@ -19,6 +19,28 @@ export function str(s: string): RString {
   return new RString(rt().c.String, s);
 }
 
+export function stringBytes(value: RString): Uint8Array {
+  if (value.rawBytes) return value.rawBytes;
+  return value.binary
+    ? Uint8Array.from([...value.s].map((char) => char.codePointAt(0) as number))
+    : new TextEncoder().encode(value.s);
+}
+
+export function stringFromBytes(bytes: Uint8Array): RString {
+  let invalid = false;
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    invalid = true;
+  }
+  const value = str(new TextDecoder().decode(bytes));
+  if (invalid) {
+    value.binary = true;
+    value.rawBytes = Uint8Array.from(bytes);
+  }
+  return value;
+}
+
 export function arr(items: Value[]): RArray {
   rt().spend(Math.floor(items.length / 64));
   return new RArray(rt().c.Array, items);

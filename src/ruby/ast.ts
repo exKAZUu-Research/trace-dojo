@@ -21,7 +21,7 @@ export interface Stmt {
 
 export type Body = Stmt[];
 
-export type StrPart = string | Expr;
+export type StrPart = string | Expr | { text: string; bytes: number[] };
 
 /** A local variable, found `depth` block scopes out from the scope that refers to it. */
 export interface LocalRef {
@@ -97,7 +97,7 @@ export type Expr =
   | { k: 'self' }
   | { k: 'int'; v: bigint }
   | { k: 'float'; v: number }
-  | { k: 'str'; parts: StrPart[]; binary?: boolean; bytes?: number[] }
+  | { k: 'str'; parts: StrPart[] }
   | { k: 'sym'; name: string }
   | { k: 'dsym'; parts: StrPart[] }
   | { k: 'array'; items: Expr[] }

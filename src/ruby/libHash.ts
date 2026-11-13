@@ -190,6 +190,7 @@ function* filterInPlace(self: RHash, block: RProc, keep: boolean): Gen<boolean> 
   self.iterating++;
   try {
     for (const [slot, entry] of snapshot(self.map)) {
+      if (self.map.get(slot) !== entry) continue;
       if (truthy(yield* pair(block, entry.key, entry.value)) !== keep) {
         self.map.delete(slot);
         changed = true;

@@ -11,8 +11,15 @@ import { classOf, snapshot, str, truthy } from './values';
  */
 // code-gauge-allow functionCognitiveComplexity 23 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
 // code-gauge-allow functionNcss 34 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
-export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { found: boolean }): Gen<string> {
+export function* hashKeyOf(
+  value: Value,
+  ancestors: RBasic[] = [],
+  cycle?: { found: boolean },
+  memo?: WeakMap<RBasic, string>
+): Gen<string> {
   cycle ??= { found: false };
+  memo ??= new WeakMap();
+  rt().spend();
   if (value instanceof RBasic && ancestors.includes(value)) {
     cycle.found = true;
     return 'recursive';
@@ -22,7 +29,7 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
     if (value instanceof RBasic) ancestors.push(value);
     try {
       const hash = yield* callMethod(value, 'hash', []);
-      return `u${digest(typeof hash === 'bigint' ? String(hash) : yield* hashKeyOf(hash, ancestors, cycle))}`;
+      return `u${digest(typeof hash === 'bigint' ? String(hash) : yield* hashKeyOf(hash, ancestors, cycle, memo))}`;
     } finally {
       if (value instanceof RBasic) ancestors.pop();
     }
@@ -43,31 +50,39 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
   if (value instanceof RString) return `s${digest(value.s)}`;
   if (value instanceof RArray || value instanceof RRange || value instanceof RHash) {
     const root = ancestors.length === 0;
+    const cached = memo.get(value);
+    if (cached) return root && cycle.found ? 'recursive' : cached;
     ancestors.push(value);
     try {
       if (value instanceof RArray) {
         const parts: string[] = [];
-        for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, cycle));
-        return root && cycle.found ? 'recursive' : `a${digest(JSON.stringify(parts))}`;
+        for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, cycle, memo));
+        const key = `a${digest(JSON.stringify(parts))}`;
+        memo.set(value, key);
+        return root && cycle.found ? 'recursive' : key;
       }
       if (value instanceof RRange) {
         const encoded = `r${JSON.stringify([
-          yield* hashKeyOf(value.begin, ancestors, cycle),
+          yield* hashKeyOf(value.begin, ancestors, cycle, memo),
           value.exclusive,
-          yield* hashKeyOf(value.end, ancestors, cycle),
+          yield* hashKeyOf(value.end, ancestors, cycle, memo),
         ])}`;
-        return root && cycle.found ? 'recursive' : `r${digest(encoded)}`;
+        const key = `r${digest(encoded)}`;
+        memo.set(value, key);
+        return root && cycle.found ? 'recursive' : key;
       }
       const parts: string[] = [];
       for (const entry of value.map.values()) {
         parts.push(
           JSON.stringify([
-            yield* hashKeyOf(entry.key, ancestors, cycle),
-            yield* hashKeyOf(entry.value, ancestors, cycle),
+            yield* hashKeyOf(entry.key, ancestors, cycle, memo),
+            yield* hashKeyOf(entry.value, ancestors, cycle, memo),
           ])
         );
       }
-      return root && cycle.found ? 'recursive' : `h${digest(JSON.stringify(parts.toSorted()))}`;
+      const key = `h${digest(JSON.stringify(parts.toSorted()))}`;
+      memo.set(value, key);
+      return root && cycle.found ? 'recursive' : key;
     } finally {
       ancestors.pop();
     }

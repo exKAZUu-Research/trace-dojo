@@ -1,6 +1,18 @@
 import { ExecutionLimitError } from '../interpreter/limits';
 // code-gauge-allow-file fileNcss 931 -- The interp module keeps one concern's cases together.
-import type { BlockDef, Body, Call, Expr, MethodDef, MultiTarget, Params, ParamTarget, Stmt, Target } from './ast';
+import type {
+  BlockDef,
+  Body,
+  Call,
+  Expr,
+  MethodDef,
+  MultiTarget,
+  Params,
+  ParamTarget,
+  Stmt,
+  StrPart,
+  Target,
+} from './ast';
 import { caseEquals, inspect, toS } from './conversions';
 import {
   argumentCountError,
@@ -42,7 +54,19 @@ import {
   UnsupportedFeatureError,
 } from './runtime';
 import { CORE_CLASSES, CORE_MODULES, UNSUPPORTED_CONSTANTS } from './unsupportedNames';
-import { arr, classOf, isA, newHash, range, realClassOf, singletonClassOf, snapshot, str, truthy } from './values';
+import {
+  arr,
+  classOf,
+  isA,
+  newHash,
+  range,
+  realClassOf,
+  singletonClassOf,
+  snapshot,
+  stringBytes,
+  stringFromBytes,
+  truthy,
+} from './values';
 
 export type Gen<T = Value> = Generator<unknown, T, unknown>;
 
@@ -121,10 +145,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       return frame.self;
     }
     case 'str': {
-      const value = str(yield* interpolate(e.parts, frame));
-      value.binary = e.binary ?? false;
-      if (e.bytes) value.rawBytes = Uint8Array.from(e.bytes);
-      return value;
+      return yield* interpolateString(e.parts, frame);
     }
     case 'sym': {
       return RSymbol.of(e.name);
@@ -270,13 +291,37 @@ export function* ev(e: Expr, frame: Frame): Gen {
   }
 }
 
-function* interpolate(parts: (string | Expr)[], frame: Frame): Gen<string> {
+function* interpolate(parts: StrPart[], frame: Frame): Gen<string> {
   let text = '';
   for (const part of parts) {
-    text += typeof part === 'string' ? part : yield* toS(yield* ev(part, frame));
+    text += typeof part === 'string' ? part : 'text' in part ? part.text : yield* toS(yield* ev(part, frame));
   }
   if (text.length > 1_000_000) throw rubyError(rt().c.NoMemoryError, 'failed to allocate memory');
   return text;
+}
+
+function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for (const part of parts) {
+    let bytes: Uint8Array;
+    if (typeof part === 'string') bytes = new TextEncoder().encode(part);
+    else if ('text' in part) bytes = Uint8Array.from(part.bytes);
+    else {
+      const value = yield* ev(part, frame);
+      bytes = value instanceof RString ? stringBytes(value) : new TextEncoder().encode(yield* toS(value));
+    }
+    length += bytes.length;
+    rt().checkStringLength(length);
+    chunks.push(bytes);
+  }
+  const joined = new Uint8Array(length);
+  let offset = 0;
+  for (const bytes of chunks) {
+    joined.set(bytes, offset);
+    offset += bytes.length;
+  }
+  return stringFromBytes(joined);
 }
 
 /** The values of a list of expressions, with splats (`*a`) expanded. */

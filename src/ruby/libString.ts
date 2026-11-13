@@ -19,7 +19,7 @@ import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, isNil, str, sym, truthy } from './values';
+import { arr, isNil, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
 // Characters ----------------------------------------------------------------------------------------------------------
 
@@ -179,18 +179,18 @@ def('String', 'to_r', 0, () => {
 def('String', 'hex', 0, (self: RString) => parseIntegerLenient(self.s, 16));
 def('String', 'oct', 0, (self: RString) => parseIntegerLenient(self.s, 8));
 def('String', ['length', 'size'], 0, (self: RString) => BigInt(charLength(self.s)));
-def('String', 'bytesize', 0, (self: RString) => BigInt(bytesOf(self).length));
+def('String', 'bytesize', 0, (self: RString) => BigInt(stringBytes(self).length));
 def('String', 'empty?', 0, (self: RString) => self.s.length === 0);
 def('String', 'hash', 0, (self: RString) => {
   let hash = 7n;
-  for (const byte of bytesOf(self)) hash = (hash * 31n + BigInt(byte)) % 2_305_843_009_213_693_951n;
+  for (const byte of stringBytes(self)) hash = (hash * 31n + BigInt(byte)) % 2_305_843_009_213_693_951n;
   return hash;
 });
 def('String', ['==', '===', 'eql?'], 1, function* (self: RString, [other]) {
   if (other instanceof RString) {
     if (!self.rawBytes && !other.rawBytes) return self.s === other.s;
-    const left = bytesOf(self);
-    const right = bytesOf(other);
+    const left = stringBytes(self);
+    const right = stringBytes(other);
     return left.length === right.length && left.every((byte, index) => byte === right[index]);
   }
   return false;
@@ -219,16 +219,23 @@ function foldAscii(text: string): string {
 }
 
 def('String', '+', 1, function* (self: RString, [other]) {
-  const text = self.s + (yield* stringArg(other));
-  if (text.length > 1_000_000) throw argumentError('string size too big');
-  return str(text);
+  const right = other instanceof RString ? stringBytes(other) : new TextEncoder().encode(yield* stringArg(other));
+  const left = stringBytes(self);
+  rt().checkStringLength(left.length + right.length);
+  const joined = new Uint8Array(left.length + right.length);
+  joined.set(left);
+  joined.set(right, left.length);
+  return stringFromBytes(joined);
 });
 def('String', '*', 1, function* (self: RString, [count]) {
   const times = yield* toIndex(count);
   if (times < 0) throw argumentError('negative argument');
-  if (self.s.length * times > 1_000_000) throw argumentError('argument too big');
-  rt().spend(Math.floor((self.s.length * times) / 256));
-  return str(self.s.repeat(times));
+  const source = stringBytes(self);
+  if (source.length * times > 1_000_000) throw argumentError('argument too big');
+  rt().spend(Math.floor((source.length * times) / 256));
+  const repeated = new Uint8Array(source.length * times);
+  for (let index = 0; index < times; index++) repeated.set(source, index * source.length);
+  return stringFromBytes(repeated);
 });
 def('String', '%', 1, function* (self: RString, [value]) {
   return str(yield* format(self, value instanceof RArray ? value.items : [value]));
@@ -241,24 +248,44 @@ def('String', '-@', 0, (self: RString) => {
 });
 def('String', '+@', 0, (self: RString) => (self.frozen ? str(self.s) : self));
 def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
-  let text = self.s;
+  modify(self);
+  const chunks: Uint8Array[] = [stringBytes(self)];
+  let length = chunks[0].length;
   for (const arg of args) {
+    let chunk: Uint8Array;
     if (typeof arg === 'bigint') {
       if (arg < 0n) throw rangeError(`${arg} out of char range`);
       if (arg > 0x7f_ff_ff_ff_ff_ff_ff_ffn) throw rangeError('bignum out of char range');
       if (arg > 0x10_ff_ffn) throw rangeError(`${arg} out of char range`);
       if (arg >= 0xd8_00n && arg <= 0xdf_ffn)
         throw rangeError(`invalid codepoint 0x${arg.toString(16).toUpperCase()} in UTF-8`);
-      text += String.fromCodePoint(Number(arg));
+      chunk = arg <= 255n ? Uint8Array.of(Number(arg)) : new TextEncoder().encode(String.fromCodePoint(Number(arg)));
     } else {
-      text += yield* stringArg(arg);
+      chunk = arg instanceof RString ? stringBytes(arg) : new TextEncoder().encode(yield* stringArg(arg));
     }
+    length += chunk.length;
+    rt().checkStringLength(length);
+    chunks.push(chunk);
   }
-  setText(self, text);
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  const result = stringFromBytes(bytes);
+  self.s = result.s;
+  self.binary = result.binary;
+  self.rawBytes = result.rawBytes;
   return self;
 });
 def('String', 'replace', 1, function* (self: RString, [other]) {
-  setText(self, yield* stringArg(other));
+  modify(self);
+  const source = other instanceof RString ? other : str(yield* stringArg(other));
+  const result = stringFromBytes(stringBytes(source));
+  self.s = result.s;
+  self.binary = result.binary;
+  self.rawBytes = result.rawBytes;
   return self;
 });
 def('String', 'clear', 0, (self: RString) => {
@@ -345,16 +372,9 @@ def('String', 'chars', 0, (self: RString) => arr(charsOf(self.s).map((char) => s
 def('String', 'codepoints', 0, (self: RString) =>
   arr(charsOf(self.s).map((char) => BigInt(char.codePointAt(0) as number)))
 );
-function bytesOf(self: RString): Uint8Array {
-  if (self.rawBytes) return self.rawBytes;
-  return self.binary
-    ? Uint8Array.from([...self.s].map((char) => char.codePointAt(0) as number))
-    : new TextEncoder().encode(self.s);
-}
-
-def('String', 'bytes', 0, (self: RString) => arr([...bytesOf(self)].map(BigInt)));
+def('String', 'bytes', 0, (self: RString) => arr([...stringBytes(self)].map(BigInt)));
 def('String', 'getbyte', 1, function* (self: RString, [index]) {
-  const bytes = bytesOf(self);
+  const bytes = stringBytes(self);
   let position = yield* toIndex(index);
   if (position < 0) position += bytes.length;
   return position >= 0 && position < bytes.length ? BigInt(bytes[position]) : NIL;
@@ -366,7 +386,7 @@ def('String', 'each_char', 0, function* (self: RString, _args, block) {
 });
 def('String', 'each_byte', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_byte', []);
-  for (const byte of bytesOf(self)) yield* callBlock(block, [BigInt(byte)], false);
+  for (const byte of stringBytes(self)) yield* callBlock(block, [BigInt(byte)], false);
   return self;
 });
 def('String', 'ord', 0, (self: RString) => {
@@ -376,7 +396,7 @@ def('String', 'ord', 0, (self: RString) => {
 def('String', 'chr', 0, (self: RString) => str(charsOf(self.s)[0] ?? ''));
 def('String', 'sum', [0, 1], (self: RString) => {
   let total = 0n;
-  for (const byte of bytesOf(self)) total += BigInt(byte);
+  for (const byte of stringBytes(self)) total += BigInt(byte);
   return total & 0xff_ffn;
 });
 

@@ -426,14 +426,12 @@ export class Converter {
         .join('');
       return { k: 'str', parts: [decodeSingleQuoted(content)] };
     }
-    return { k: 'str', ...this.stringParts(node) };
+    return { k: 'str', parts: this.stringParts(node) };
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of syntax node.
-  private stringParts(node: Node): { parts: StrPart[]; binary: boolean; bytes?: number[] } {
+  private stringParts(node: Node): StrPart[] {
     const parts: StrPart[] = [];
-    let binary = false;
-    let bytes: number[] | undefined;
     let literal = '';
     for (const child of namedChildren(node)) {
       if (child.type === 'string_content') {
@@ -443,9 +441,7 @@ export class Converter {
       } else if (child.type === 'interpolation') {
         if (literal) {
           const decoded = this.decode(node, literal);
-          parts.push(decoded.text);
-          binary ||= decoded.binary;
-          bytes = undefined;
+          parts.push(decoded.bytes ? { text: decoded.text, bytes: decoded.bytes } : decoded.text);
         }
         literal = '';
         const statements = this.body(namedChildren(child), 1);
@@ -462,11 +458,9 @@ export class Converter {
     }
     if (literal) {
       const decoded = this.decode(node, literal);
-      parts.push(decoded.text);
-      binary ||= decoded.binary;
-      if (parts.length === 1) bytes = decoded.bytes;
+      parts.push(decoded.bytes ? { text: decoded.text, bytes: decoded.bytes } : decoded.text);
     }
-    return { parts, binary, bytes };
+    return parts;
   }
 
   private decode(node: Node, text: string): { text: string; binary: boolean; bytes?: number[] } {
