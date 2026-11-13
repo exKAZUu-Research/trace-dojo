@@ -1060,3 +1060,46 @@ func main() {
     stdout: '-0.19\n-0.09000000000000001 0.19\n0.45000000000000007 0.33999999999999997 0.34\n-Inf +Inf NaN\n',
   });
 });
+
+// Go 1.27.3 gives an append the 32-byte stack buffer when the array it allocates stays in the function, also for a
+// slice no variable holds and for a field of a local struct it keeps in registers; it updates a variable whose address
+// the program takes, a large struct's field, or an array's element in memory, which never uses the buffer.
+test('append capacities follow where Go keeps the slice', () => {
+  const program = `package main
+
+import "fmt"
+
+type box struct{ items []int }
+
+type big struct {
+	items []int
+	a, b  int
+}
+
+type stack []int
+
+func (s *stack) push(v int) { *s = append(*s, v) }
+
+func main() {
+	x := append([]int{}, 1)
+	y := append(make([]byte, 0), 1)
+	var k []int
+	k = append(k, 1)
+	p := &k
+	*p = append(*p, 2)
+	var st stack
+	st.push(1)
+	var b box
+	b.items = append(b.items, 1)
+	var g big
+	g.items = append(g.items, 1)
+	var a [2][]int
+	a[0] = append(a[0], 1)
+	fmt.Println(cap(x), cap(y), cap(k), cap(st), cap(b.items), cap(g.items), cap(a[0]))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '4 32 2 1 4 1 1\n',
+  });
+});

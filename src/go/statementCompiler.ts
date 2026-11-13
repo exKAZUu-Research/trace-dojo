@@ -38,6 +38,7 @@ import {
 } from './runtime';
 import { nilPointerPanic, panicNilValue } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
+import { sizeOf } from './sliceOps';
 import type { SliceTracking } from './slicePass';
 import {
   ANY,
@@ -314,11 +315,14 @@ export abstract class StatementCompiler extends CallCompiler {
       run,
     } = this.hoistingCalls(() => {
       const compiledTargets = left.map((target) => this.assignmentTarget(target));
+      if (left.length === 1 && right.length === 1) this.markInPlaceAppend(left[0], right[0], compiledTargets[0]);
       const typeOf = (index: number): Type | undefined => compiledTargets[index]?.type;
       const localAt = (index: number): VarEntity | 'discard' | undefined => {
         const inner = stripParens(left[index]);
         if (inner.kind === 'name' && inner.name === '_') return 'discard';
-        return inner.kind === 'name' ? compiledTargets[index]?.variable?.entity : undefined;
+        const target = compiledTargets[index];
+        // A field or array element of a local variable holds what the variable holds, as Go's escape analysis sees it.
+        return inner.kind === 'name' ? target?.variable?.entity : target?.ssaRoot;
       };
       return [
         compiledTargets,
@@ -381,6 +385,16 @@ export abstract class StatementCompiler extends CallCompiler {
       this.understandSlice(inner.args[0]);
       tracking.appendWeight += 1 + (this.fn as FunctionContext).loopDepth - tracking.declDepth;
     }
+  }
+
+  /** Records `x = append(x, ...)`, which Go's compiler compiles as an update of x in memory unless x can be in registers. */
+  private markInPlaceAppend(target: Expression, value: Expression, compiled: Operand | undefined): void {
+    const inner = stripParens(value);
+    if (inner.kind !== 'call' || !compiled || !sameSafeExpression(target, inner.args[0])) return;
+    const callee = stripParens(inner.callee);
+    if (callee.kind !== 'name' || this.lookup(callee.name)?.kind !== 'builtin' || callee.name !== 'append') return;
+    const root = compiled.ssaRoot;
+    this.inPlaceAppends.set(inner, () => !root || root.addressTaken === true || !fitsRegisters(root.type));
   }
 
   /** Whether an expression only creates an object, which `Operand.createsObject` recorded when it compiled. */
@@ -1736,3 +1750,71 @@ function hasBreak(statements: Statement[]): boolean {
 }
 
 export type { Completion, Slice };
+
+/** Go's ir.SameSafeExpr: whether two expressions denote the same value without calls or other side effects. */
+function sameSafeExpression(a: Expression | undefined, b: Expression | undefined): boolean {
+  if (!a || !b) return false;
+  const x = stripParens(a);
+  const y = stripParens(b);
+  switch (x.kind) {
+    case 'name': {
+      return y.kind === 'name' && x.name === y.name;
+    }
+    case 'selector': {
+      return y.kind === 'selector' && x.field === y.field && sameSafeExpression(x.operand, y.operand);
+    }
+    case 'unary': {
+      return (
+        y.kind === 'unary' &&
+        x.operator === y.operator &&
+        x.operator !== '&' &&
+        x.operator !== '<-' &&
+        sameSafeExpression(x.operand, y.operand)
+      );
+    }
+    case 'index': {
+      return (
+        y.kind === 'index' &&
+        x.indices.length === 1 &&
+        y.indices.length === 1 &&
+        sameSafeExpression(x.operand, y.operand) &&
+        sameSafeExpression(x.indices[0], y.indices[0])
+      );
+    }
+    case 'binary': {
+      return (
+        y.kind === 'binary' &&
+        x.operator === y.operator &&
+        ARITHMETIC_OPERATORS.has(x.operator) &&
+        sameSafeExpression(x.left, y.left) &&
+        sameSafeExpression(x.right, y.right)
+      );
+    }
+    case 'int':
+    case 'float':
+    case 'imaginary': {
+      return y.kind === x.kind && x.text === (y as typeof x).text;
+    }
+    case 'rune':
+    case 'string': {
+      return y.kind === x.kind && x.value === (y as typeof x).value;
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+const ARITHMETIC_OPERATORS = new Set(['+', '-', '|', '^', '*', '<<', '>>', '&', '&^', '/', '%']);
+
+/** Go's ssa.CanSSA: whether its compiler can keep a value of the type in registers. */
+function fitsRegisters(type: Type): boolean {
+  const size = sizeOf(type);
+  if (size === 0) return true;
+  if (size > 32) return false;
+  const under = underlying(type);
+  if (under.kind === 'array') return under.length <= 1 && fitsRegisters(under.element);
+  if (under.kind === 'struct')
+    return under.fields.length <= 4 && under.fields.every((field) => fitsRegisters(field.type));
+  return true;
+}

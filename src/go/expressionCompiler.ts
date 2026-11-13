@@ -458,6 +458,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
         variable: { markUsed, entity },
         backingVars: [entity],
         addressStorage: { backingVars: [entity] },
+        ssaRoot: entity,
+        addressTaken: () => {
+          entity.addressTaken = true;
+        },
         eval: (frame) => readLocal(frame, slot),
         prepareStore: (frame) => (value) => writeLocal(frame, slot, value),
         store: (frame, value) => writeLocal(frame, slot, value),
@@ -481,6 +485,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
       variable: { markUsed, entity },
       backingVars: [entity],
       addressStorage: { backingVars: [entity] },
+      ssaRoot: entity,
+      addressTaken: () => {
+        entity.addressTaken = true;
+      },
       eval: (frame) => frame.cells[index].v,
       prepareStore,
       store: (frame, value) => prepareStore(frame)(value),
@@ -1480,6 +1488,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
         : undefined,
       addressOf: addressable ? () => (frame) => new Pointer(container(frame).fields, last) : undefined,
       addressStorage,
+      backingVars: throughPointer ? undefined : operand.backingVars,
+      ssaRoot: throughPointer ? undefined : operand.ssaRoot,
       addressTaken: throughPointer ? undefined : operand.addressTaken,
       onWrite: throughPointer ? undefined : operand.onWrite,
     };
@@ -1566,6 +1576,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
         locateElement,
         {
           storage: viaPointer ? operand : operand.addressStorage,
+          backingVars: viaPointer ? undefined : operand.backingVars,
+          ssaRoot: viaPointer ? undefined : operand.ssaRoot,
           addressTaken: viaPointer ? undefined : operand.addressTaken,
           onWrite: viaPointer ? undefined : operand.onWrite,
         }
@@ -2038,7 +2050,13 @@ function elementOperand(
   operand: Operand,
   addressable: boolean,
   locateElement: (frame: Frame) => () => [Value[], number],
-  address: { storage?: Storage; addressTaken?: () => void; onWrite?: () => void }
+  address: {
+    storage?: Storage;
+    backingVars?: VarEntity[];
+    ssaRoot?: VarEntity;
+    addressTaken?: () => void;
+    onWrite?: () => void;
+  }
 ): Operand {
   const element = (frame: Frame): [Value[], number] => locateElement(frame)();
   return {
@@ -2076,6 +2094,8 @@ function elementOperand(
       : undefined,
     addressOf: addressable ? () => (frame) => new Pointer(...element(frame)) : undefined,
     addressStorage: address.storage,
+    backingVars: address.backingVars,
+    ssaRoot: address.ssaRoot,
     addressTaken: address.addressTaken,
     onWrite: address.onWrite,
   };

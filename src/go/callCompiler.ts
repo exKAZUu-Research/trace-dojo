@@ -12,6 +12,7 @@ import {
   INLINE_CALL_COST,
   linkArgument,
   staysLocal,
+  type Temporary,
   type VarEntity,
 } from './entities';
 import { describeConstant, largerUntyped, sameUntypedFamily } from './expressionCompiler';
@@ -730,13 +731,16 @@ export abstract class CallCompiler extends CompositeCompiler {
     this.writeOperand(slice);
     const read = slice.eval;
     const zero = this.zeroOf(element);
-    const stackBuffer = this.appendStackBuffer(first, slice);
+    // The array that appending to a slice no variable holds allocates escapes where the append's result goes.
+    const nonEscaping: Temporary | undefined =
+      slice.nonEscaping ?? (slice.backingVars ? undefined : { escapes: false, written: false });
+    const stackBuffer = this.appendStackBuffer(first, { ...slice, nonEscaping }, this.inPlaceAppends.get(expression));
     return {
       mode: 'value',
       type: slice.type,
       span: expression,
       backingVars: slice.backingVars,
-      nonEscaping: slice.nonEscaping,
+      nonEscaping,
       eval: (frame) => {
         const target = read(frame) as Slice | undefined;
         const added = evaluateAll(frame, values);
@@ -751,20 +755,31 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /**
+   * `x = append(x, ...)` statements by their append, with whether Go's compiler updates x in memory, which it does when x
+   * is not a local variable, or a part of one, that it can keep in registers; such an append never uses the buffer.
+   */
+  protected readonly inPlaceAppends = new WeakMap<Expression, () => boolean>();
+
+  /**
    * How an append may use the stack buffer, as Go's compiler decides it: the slice optimization pass decides for a
    * variable it optimizes, and otherwise an empty slice whose array stays in the function gets the whole buffer once
-   * per call, at the variable's first append.
+   * per call, at the variable's first append or at an append to a slice no variable holds.
    */
-  private appendStackBuffer(syntax: Expression, slice: Operand): (frame: Frame) => StackBuffer | undefined {
+  private appendStackBuffer(
+    syntax: Expression,
+    slice: Operand,
+    inPlace: (() => boolean) | undefined
+  ): (frame: Frame) => StackBuffer | undefined {
     const tracking = this.sliceUseOf(syntax)?.tracking;
     const site = {};
     if (tracking) tracking.firstAppend ??= site;
-    const backing = slice.backingVars;
+    const { backingVars: backing, nonEscaping } = slice;
     const local = (frame: Frame): boolean =>
-      backing !== undefined &&
-      backing.length > 0 &&
-      backing.every((variable) => variable.owner !== undefined && staysLocal(variable, frame));
+      backing !== undefined && backing.length > 0
+        ? backing.every((variable) => variable.owner !== undefined && staysLocal(variable, frame))
+        : nonEscaping !== undefined && staysLocal(nonEscaping, frame);
     const plan = (frame: Frame): StackBuffer | undefined => {
+      if (inPlace?.()) return undefined;
       if (tracking) {
         const mode = sliceMode(tracking);
         if (mode === 'buffer') return 'buffer';

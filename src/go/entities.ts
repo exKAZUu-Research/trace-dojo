@@ -60,6 +60,8 @@ export interface VarEntity {
    * fuses with, as Go's compiler does through a variable whose value comes from that single definition.
    */
   productFactors?: { left: number; right: number; source: ProductSource };
+  /** Whether the program takes the address of the variable or of a part of it, which keeps it out of registers. */
+  addressTaken?: boolean;
   /** Whether the declaration's value is a constant to Go's compiler. */
   definedAsConstant?: SsaConstant;
 }

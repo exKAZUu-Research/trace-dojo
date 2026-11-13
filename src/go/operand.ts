@@ -53,6 +53,11 @@ export interface Operand extends Storage {
   addressOf?: () => (frame: Frame) => Pointer;
   /** The storage the address of this variable, field, or element refers to. */
   addressStorage?: Storage;
+  /**
+   * The local variable this variable, field, or array element lies in with no pointer, slice, or map between, which
+   * Go's compiler may keep in registers as a whole.
+   */
+  ssaRoot?: VarEntity;
   /** What the program taking the address of this value, or of a part of it, does to escape analysis. */
   addressTaken?: () => void;
   /** Records a store into this field or element, which writes the array it lives in. */
