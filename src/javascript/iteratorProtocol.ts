@@ -167,7 +167,8 @@ function iteratorObject(runtime: Runtime, iterable: Value, key: symbol, factory:
     const what = key === WELL_KNOWN_SYMBOLS.iterator ? 'iterable' : 'async iterable';
     return runtime.throwError('TypeError', `${runtime.describe(iterable)} is not ${what}`);
   }
-  const iterator = runtime.call(factory, iterable, [], runtime.currentRow);
+  // The iterable stays reachable while the program's code creates its iterator.
+  const iterator = runtime.hold(iterable, () => runtime.call(factory, iterable, [], runtime.currentRow));
   if (!isObject(iterator))
     return runtime.throwError('TypeError', `Result of the ${key.description} method is not an object`);
   return iterator;

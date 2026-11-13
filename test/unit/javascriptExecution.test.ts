@@ -254,9 +254,18 @@ console.log(observer.canMoveForward());`,
   [
     'Object.create keeps the descriptors it has read',
     `const props = { get a() { return { value: new Turtle(1, 1) }; }, get b() { console.log(observer.canMoveForward()); return { value: 2 }; } };
-const result = Object.create(null, props);
-const other = Object.defineProperty({}, 'c', { get value() { return new Turtle(1, 1); }, get writable() { console.log(observer.canMoveForward()); return true; } });`,
-    'false\nfalse\n',
+const result = Object.create(null, props);`,
+    'false\n',
+  ],
+  [
+    'Object.defineProperty keeps the descriptor fields it has read',
+    `const other = Object.defineProperty({}, 'c', { get value() { return new Turtle(1, 1); }, get writable() { console.log(observer.canMoveForward()); return true; } });`,
+    'false\n',
+  ],
+  [
+    'a spread keeps its iterable while making its iterator',
+    `const out = [...{ t: new Turtle(1, 1), [Symbol.iterator]: () => { console.log(observer.canMoveForward()); return [][Symbol.iterator](); } }];`,
+    'false\n',
   ],
   [
     'flatMap releases an exhausted inner iterator',

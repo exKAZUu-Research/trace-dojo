@@ -670,10 +670,11 @@ export class Runtime {
     method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator)
   ): ValueIterator {
     if (!isCallable(method)) return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
-    const iterator = this.call(method, value, [], this.currentRow);
+    // The iterable, and then its iterator, stay reachable while the program's code creates and reads them.
+    const iterator = this.hold(value, () => this.call(method, value, [], this.currentRow));
     if (!isObject(iterator))
       return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
-    const next = this.get(iterator, 'next');
+    const next = this.hold(iterator, () => this.get(iterator, 'next'));
     const { hostIterator } = iterator;
     if (!hostIterator || !(next instanceof JsFunction) || !this.realm.hostIteratorMethods.has(next)) {
       return this.tracked(this.protocolIteration(iterator, next), [iterator, next]);
