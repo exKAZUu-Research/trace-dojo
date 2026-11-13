@@ -371,8 +371,3 @@ export function referenceBase(reference: Reference): Value {
   if (reference.kind === 'super') return reference.thisValue;
   return undefined;
 }
-
-/** Whether a loop's test is a literal that always passes, as in `while (true)`, so only a `break` ends the loop. */
-export function isConstantlyTrue(test: Expression): boolean {
-  return test.kind === 'literal' && Boolean(test.value);
-}

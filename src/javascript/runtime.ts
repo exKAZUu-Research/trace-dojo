@@ -62,15 +62,13 @@ export class Frame {
 }
 
 /**
- * A running loop: the iteration it is in, the first iteration that read the clock, and whether the clock decides when it
- * ends, as a busy wait's does: its test read the clock, or it has no test and ends by a `break`.
+ * A running loop: the iteration it is in, the first iteration that read the clock, and the last iteration in which a
+ * read found the program had written output or scheduled a timer since the previous read.
  */
 export interface LoopState {
   iteration: number;
   firstClockRead?: number;
-  readsClockToEnd: boolean;
-  /** Whether the loop's test is being evaluated now. */
-  inTest: boolean;
+  observedIteration?: number;
 }
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
@@ -581,12 +579,9 @@ export class Runtime {
     return isObject(prototype) ? prototype : fallback;
   }
 
-  /**
-   * Starts a loop in the current frame, whose iterations and test the caller marks until it calls {@link exitLoop}; a
-   * loop without a test of its own, such as `while (true)`, ends by a `break` the clock may decide.
-   */
-  enterLoop(hasTest: boolean): LoopState {
-    const loop: LoopState = { iteration: 0, readsClockToEnd: !hasTest, inTest: false };
+  /** Starts a loop in the current frame, whose iterations the caller counts until it calls {@link exitLoop}. */
+  enterLoop(): LoopState {
+    const loop: LoopState = { iteration: 0 };
     this.frame.loops.push(loop);
     return loop;
   }
@@ -596,16 +591,17 @@ export class Runtime {
   }
 
   /**
-   * Notes a read of the clock, returning whether it polls: whether the innermost running loop, in this frame or a caller
-   * of it, is one the clock ends and read the clock in an earlier iteration, as a busy wait does.
+   * Notes a read of the clock, returning whether it polls, as a busy wait does: whether the innermost running loop, in
+   * this frame or a caller of it, read the clock in an earlier iteration, and has done nothing observable in this one,
+   * whose reads would then time the rounds of a loop rather than wait.
    */
-  readsClockInLoop(): boolean {
+  pollsClock(observedSinceLastRead: boolean): boolean {
     for (let index = this.frames.length - 1; index >= 0; index--) {
       const loop = this.frames[index].loops.at(-1);
       if (!loop) continue;
-      if (loop.inTest) loop.readsClockToEnd = true;
       loop.firstClockRead ??= loop.iteration;
-      return loop.readsClockToEnd && loop.firstClockRead < loop.iteration;
+      if (observedSinceLastRead) loop.observedIteration = loop.iteration;
+      return loop.firstClockRead < loop.iteration && loop.observedIteration !== loop.iteration;
     }
     return false;
   }

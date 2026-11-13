@@ -3,7 +3,6 @@ import type {
   Block,
   ClassMember,
   ClassNode,
-  Expression,
   FunctionNode,
   Program,
   ScopeDeclarations,
@@ -11,7 +10,7 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { createAsyncGeneratorObject } from './asyncGenerators';
-import { isConstantlyTrue, nameFunction, patternNames } from './evaluatorBase';
+import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor } from './expressionEvaluator';
 import { createGeneratorObject, type Steps } from './generators';
 import { DONE, ValueIterator } from './iteration';
@@ -22,7 +21,6 @@ import {
   privateMethodProperty,
 } from './memberProperties';
 import { startAsyncFunction } from './promises';
-import type { LoopState } from './runtime';
 import { isObjectCreation, onlyCalls, onlyCreates } from './stepRules';
 import {
   type Completion,
@@ -113,11 +111,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
       case 'while':
       case 'doWhile': {
-        const loop = runtime.enterLoop(!isConstantlyTrue(statement.test));
+        const loop = runtime.enterLoop();
         try {
           for (let first = true; ; first = false, loop.iteration++) {
-            if (!(first && statement.kind === 'doWhile') && !this.loopTestPasses(loop, statement.test))
-              return undefined;
+            if (!(first && statement.kind === 'doWhile') && !toBoolean(this.evaluate(statement.test))) return undefined;
             const result = this.loopBody(statement.body, labels);
             if (result !== 'next') return result;
             runtime.spend();
@@ -218,16 +215,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
   }
 
-  /** Evaluates a loop's test, marking it so that a clock read in it tells the loop is one the clock ends. */
-  private loopTestPasses(loop: LoopState, test: Expression): boolean {
-    loop.inTest = true;
-    try {
-      return toBoolean(this.evaluate(test));
-    } finally {
-      loop.inTest = false;
-    }
-  }
-
   /** Runs a loop body, returning `'next'` to continue the loop or the completion that ends it. */
   private loopBody(body: Statement, labels: string[]): 'next' | Completion {
     const completion = this.statement(body, []);
@@ -246,11 +233,11 @@ export class Evaluator extends SuspendableStatementEvaluator {
       this.forInit(statement);
       const frame = runtime.frame;
       const outer = frame.scope;
-      const loop = runtime.enterLoop(statement.test !== undefined && !isConstantlyTrue(statement.test));
+      const loop = runtime.enterLoop();
       try {
         this.copyIterationScope(perIterationNames);
         for (; ; loop.iteration++) {
-          if (statement.test && !this.loopTestPasses(loop, statement.test)) return;
+          if (statement.test && !toBoolean(this.evaluate(statement.test))) return;
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
           this.copyIterationScope(perIterationNames);
@@ -307,8 +294,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
-    // The values it steps through end it, never the clock.
-    const loop = runtime.enterLoop(true);
+    const loop = runtime.enterLoop();
     try {
       for (let value = iterator.next(); value !== DONE; value = iterator.next(), loop.iteration++) {
         runtime.spend();

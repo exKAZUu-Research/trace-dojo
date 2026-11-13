@@ -8,12 +8,11 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { AwaitingIterator, type LoopIterator } from './asyncGenerators';
-import { isConstantlyTrue } from './evaluatorBase';
 import { Awaiting, GeneratorReturn, resumedValue, runToEnd, type Steps } from './generators';
 import { DONE, ValueIterator } from './iteration';
 import { asyncIteratorOf } from './iteratorProtocol';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
-import type { LoopState, Runtime } from './runtime';
+import type { Runtime } from './runtime';
 import { StepEvaluator } from './stepEvaluator';
 import { onlyCalls, onlyCreates, storesReference } from './stepRules';
 import {
@@ -296,10 +295,10 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     labels: string[]
   ): Steps<Completion> {
     const { runtime } = this;
-    const loop = runtime.enterLoop(!isConstantlyTrue(statement.test));
+    const loop = runtime.enterLoop();
     try {
       for (let first = true; ; first = false, loop.iteration++) {
-        if (!(first && statement.kind === 'doWhile') && !(yield* this.loopTestSteps(loop, statement.test)))
+        if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
           return undefined;
         const result = yield* this.loopBodySteps(statement.body, labels);
         if (result !== 'next') return result;
@@ -307,16 +306,6 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       }
     } finally {
       runtime.exitLoop();
-    }
-  }
-
-  /** Evaluates a loop's test, marking it so that a clock read in it tells the loop is one the clock ends. */
-  private *loopTestSteps(loop: LoopState, test: Expression): Steps<boolean> {
-    loop.inTest = true;
-    try {
-      return toBoolean(yield* this.valueSteps(test));
-    } finally {
-      loop.inTest = false;
     }
   }
 
@@ -340,11 +329,11 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         yield* this.forInitSteps(statement);
         const frame = runtime.frame;
         const outer = frame.scope;
-        const loop = runtime.enterLoop(statement.test !== undefined && !isConstantlyTrue(statement.test));
+        const loop = runtime.enterLoop();
         try {
           this.copyIterationScope(perIterationNames);
           for (; ; loop.iteration++) {
-            if (statement.test && !(yield* this.loopTestSteps(loop, statement.test))) return;
+            if (statement.test && !toBoolean(yield* this.valueSteps(statement.test))) return;
             const result = yield* this.loopBodySteps(statement.body, labels);
             if (result !== 'next') return result;
             this.copyIterationScope(perIterationNames);
@@ -423,8 +412,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
-    // The values it steps through end it, never the clock.
-    const loop = runtime.enterLoop(true);
+    const loop = runtime.enterLoop();
     try {
       for (; ; loop.iteration++) {
         const value = yield* iterator.next();

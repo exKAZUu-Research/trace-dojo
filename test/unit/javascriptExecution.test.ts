@@ -839,7 +839,8 @@ for (const f of [() => Object.create(1), () => Object.create(null, null), () => 
     `let sum = 0;
 setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
 setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);
-let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 0; i < 2000; i++) sum += i; last = Date.now(); } console.log('polled twice per pass');`,
+let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 0; i < 2000; i++) sum += i; last = Date.now(); } console.log('polled twice per pass');
+let running = true; const f = Date.now(); while (running) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - f >= 300) running = false; } console.log('flag wait');`,
   ],
   [
     'a timestamp helper around computation between timers',
@@ -847,7 +848,10 @@ let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 
 setTimeout(() => console.log('E 50'), 50); log('begin'); for (let i = 0; i < 20000; i++) sum += i; log('end'); setTimeout(() => console.log('F 0'), 0);
 setTimeout(() => console.log('G 50'), 50);
 for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; console.log('round', k, Date.now() - s >= 0); }
-for (const n of [1, 2]) log(n); setTimeout(() => console.log('H 0'), 0);`,
+for (const n of [1, 2]) log(n); setTimeout(() => console.log('H 0'), 0);
+setTimeout(() => console.log('I 50'), 50);
+let k = 0; while (true) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; console.log('pass', k, Date.now() - s >= 0); if (++k === 2) break; }
+setTimeout(() => console.log('J 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',
