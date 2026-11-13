@@ -17,6 +17,19 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test.each([
+  ['method', 'def f(x)\n marker = 1\nend\nf(begin\n  3\nend)', [4]],
+  ['constructor', 'class C\n def initialize(x)\n  marker = 1\n end\nend\nC.new(begin\n  3\nend)', [6]],
+  [
+    'super',
+    'class A\n def f(x)\n  marker = 1\n end\nend\nclass B < A\n def f(x)\n  super(begin\n   3\n  end)\n end\nend\nB.new.f(1)',
+    [13, 8],
+  ],
+  ['yield', 'def f\n yield(begin\n  3\n end)\nend\nf do |x|\n marker = 1\nend', [6, 2]],
+])('%s call row survives argument statements', (_name, program, expected) => {
+  expect(rubyTrace(program).find((item) => item.vars.marker === 1)?.callLines).toEqual(expected);
+});
+
 test('a recursive Array Hash key remains traceable', () => {
   const program = 'a=[]; a << a; h={}; h[a]=1; p h.size';
   expect(traceProgram('ruby', program, program).stdout).toBe('1\n');

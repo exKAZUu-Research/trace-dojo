@@ -49,7 +49,7 @@ export function stringFromBytes(bytes: Uint8Array, binary = false): RString {
 }
 
 export function stringCharacters(value: RString): RString[] {
-  if (!value.rawBytes) return [...value.s].map((char) => str(char));
+  if (!value.rawBytes && !value.binary) return [...value.s].map((char) => str(char));
   const bytes = stringBytes(value);
   const characters: RString[] = [];
   for (let index = 0; index < bytes.length;) {

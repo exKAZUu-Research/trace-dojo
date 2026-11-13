@@ -204,6 +204,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
         const block = frame.home.extra.block;
         if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given (yield)');
         const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
+        rt().currentRow = e.row;
         return yield* callProc(block, args, { keywords, used, callRow: rt().currentRow });
       });
     }
@@ -1124,6 +1125,7 @@ function* evalCall(e: Call, frame: Frame): Gen {
     if (e.block) block = makeBlock(e.block, frame);
     else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
     const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
+    rt().currentRow = e.row;
     if (!e.block)
       return yield* callMethod(recv, e.name, args, keywords, block, { fcall: e.fcall, vcall: e.vcall, used });
     const proc = block as RProc;
@@ -1337,6 +1339,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     );
   }
   const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
+  rt().currentRow = e.row;
   if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used);
   const proc = block as RProc;
   proc.callSiteActive = true;

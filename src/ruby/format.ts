@@ -1,4 +1,4 @@
-import { floatToInt, formatFloat, inspect, toStrValue, toSValue } from './conversions';
+import { combinedStringEncoding, floatToInt, formatFloat, inspect, toStrValue, toSValue } from './conversions';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
@@ -18,14 +18,27 @@ interface Spec {
   precision?: number;
 }
 
+interface FormatPart {
+  value: string | RString;
+  literal: boolean;
+}
+
 /** Formats as `format`/`sprintf` and `String#%` do. */
 export function* format(formatValue: Value, args: Value[]): Gen<string> {
   return (yield* formatParts(formatValue, args)).text;
 }
 
 export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
-  const { parts } = yield* formatParts(formatValue, args);
-  const chunks = parts.map((part) => (part instanceof RString ? stringBytes(part) : encodeCodePoints(part)));
+  const { parts, source } = yield* formatParts(formatValue, args);
+  let binary = source.binary;
+  let ascii = true;
+  const chunks = parts.map(({ value, literal }) => {
+    const part = value instanceof RString ? value : stringFromBytes(encodeCodePoints(value));
+    if (!literal) binary = combinedStringEncoding(binary, ascii, part);
+    const bytes = stringBytes(part);
+    ascii &&= bytes.every((byte) => byte < 0x80);
+    return bytes;
+  });
   const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
   rt().checkStringLength(length);
   const bytes = new Uint8Array(length);
@@ -34,20 +47,20 @@ export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
     bytes.set(chunk, offset);
     offset += chunk.length;
   }
-  return stringFromBytes(bytes);
+  return stringFromBytes(bytes, binary);
 }
 
-function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; parts: (string | RString)[] }> {
+function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; parts: FormatPart[]; source: RString }> {
   const source = yield* toStrValue(formatValue);
   const templateBytes = stringBytes(source);
   const template = new TextDecoder('latin1').decode(templateBytes);
   let result = '';
   let literal: number[] = [];
-  const parts: (string | RString)[] = [];
+  const parts: FormatPart[] = [];
   const flush = (): void => {
     if (literal.length > 0) {
       const value = stringFromBytes(Uint8Array.from(literal), source.binary);
-      parts.push(value);
+      parts.push({ value, literal: true });
       result += value.s;
       rt().checkStringLength(result.length);
     }
@@ -55,7 +68,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; pa
   };
   const append = (part: string | RString): void => {
     flush();
-    parts.push(part);
+    parts.push({ value: part, literal: false });
     result += part instanceof RString ? part.s : part;
     rt().checkStringLength(result.length);
   };
@@ -171,7 +184,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; pa
     append(yield* directive(type, spec, arg));
   }
   flush();
-  return { text: result, parts };
+  return { text: result, parts, source };
 }
 
 function encodeCodePoints(text: string): Uint8Array {

@@ -27,6 +27,12 @@ test.each([
     'p Math.erf(0.5), Math.erf(5), Math.erfc(6), Math.erfc(-6), Math.erf(Float::INFINITY)',
     '0.5204998778130465\n0.9999999999984626\n2.1519736712498913e-17\n2.0\n1.0\n',
   ],
+  [
+    'formatted binary String encoding',
+    's=255.chr; p format("%s", s).bytes; p format("%sé", s).bytes; begin; format("é%s", s); rescue Encoding::CompatibilityError; puts :incompatible; end',
+    '[255]\n[255, 195, 169]\nincompatible\n',
+  ],
+  ['Float remainder by Integer zero', 'begin; 1.0.remainder(0); rescue ZeroDivisionError; puts :zero; end', 'zero\n'],
   ['receiver local in index', 'p (a = [10, 20])[a.size - 1]', '20\n'],
   ['character indexes after emoji', 's = "😀a😀b"; p s.index("b"); p s.rindex("a")', '3\n1\n'],
   ['named format substitution', 'p format("%{name}!", name: "Ruby")', '"Ruby!"\n'],
