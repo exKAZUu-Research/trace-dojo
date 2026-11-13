@@ -786,3 +786,18 @@ const total = left + { turtle: new Turtle(), valueOf: () => 2 };`;
     1
   );
 });
+
+test('a BigInt too large for a number and a symbol show their text unquoted inside an object', () => {
+  const program = "const o = { big: 9007199254740993n, small: 5n, s: Symbol('k') };";
+  const trace = traceProgram('javascript', program, program);
+  expect(trace.traceItems.at(-1)?.referenceVars).toEqual({
+    o: {
+      kind: 'object',
+      entries: {
+        big: { kind: 'value', value: '9007199254740993', verbatim: true },
+        small: { kind: 'value', value: 5 },
+        s: { kind: 'value', value: 'Symbol(k)', verbatim: true },
+      },
+    },
+  });
+});

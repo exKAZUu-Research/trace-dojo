@@ -10,7 +10,8 @@ export interface TurtleTrace {
 }
 
 export type DisplayNode =
-  | { kind: 'value'; value: number | string | boolean | null }
+  /** A value; `verbatim` text, such as a BigInt's digits or a symbol's description, is shown without quotes. */
+  | { kind: 'value'; value: number | string | boolean | null; verbatim?: true }
   | { kind: 'object' | 'array'; entries: Record<string, DisplayNode> };
 
 export interface TraceItem {

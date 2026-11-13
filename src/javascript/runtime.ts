@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 523 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 529 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -52,7 +52,7 @@ export class Frame {
   /** What the frame keeps reachable: its scope, its temporaries, and its unfinished iterations' roots. */
   reachableValues(): unknown[] {
     const values: unknown[] = [this.scope, ...this.temporaries];
-    for (const iteration of this.iterations) values.push(...iteration.roots);
+    for (const iteration of this.iterations) appendAll(values, iteration.roots);
     return values;
   }
 }
@@ -454,9 +454,16 @@ export class Runtime {
     this.spend();
     const { behavior } = fn;
     if (behavior.kind === 'native') {
-      return this.holdingAll([fn, thisValue, ...args], () =>
-        behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow })
-      );
+      // Held inline rather than through holdingAll, whose callback would cost every callback recursion depth.
+      const { temporaries } = this.frame;
+      const held = temporaries.length;
+      temporaries.push(fn, thisValue);
+      appendAll(temporaries, args);
+      try {
+        return behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
+      } finally {
+        temporaries.length = held;
+      }
     }
     if (behavior.kind === 'class') {
       return this.throwError('TypeError', `Class constructor ${this.functionName(fn)} cannot be invoked without 'new'`);

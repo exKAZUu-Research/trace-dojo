@@ -125,13 +125,12 @@ function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 16 -- One check per kind of value, as learners see each.
+// code-gauge-allow functionCognitiveComplexity 18 -- One check per kind of value, as learners see each.
 function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefined {
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
     return { kind: 'value', value };
-  if (typeof value === 'bigint' || typeof value === 'symbol')
-    return { kind: 'value', value: displayedPrimitive(value) };
+  if (typeof value === 'bigint' || typeof value === 'symbol') return primitiveNode(value);
   if (value instanceof JsFunction || seen.has(value)) return undefined;
   if (value.turtle) {
     if (!value.turtle.isAlive) return undefined;
@@ -193,6 +192,13 @@ function displayedEntries(object: JsObject): [string, Value][] {
   const labels = privateLabels(fields.map(([key]) => key));
   for (const [index, [, property]] of fields.entries()) entries.push([labels[index], (property as DataProperty).value]);
   return entries;
+}
+
+function primitiveNode(value: bigint | symbol): DisplayNode {
+  const displayed = displayedPrimitive(value);
+  return typeof displayed === 'string'
+    ? { kind: 'value', value: displayed, verbatim: true }
+    : { kind: 'value', value: displayed };
 }
 
 /** A BigInt as the number it equals while that is exact, else its digits; a symbol as its description text. */

@@ -104,7 +104,13 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return this.unary(expression.operator, expression.argument);
       }
       case 'binary': {
-        return this.binaryExpression(expression);
+        // Inline rather than a method of its own, whose frame would cost recursion depth through every operand.
+        const left = this.evaluate(expression.left);
+        // Both operands stay reachable while the operator's conversions may run the program's code.
+        return runtime.hold(left, () => {
+          const right = this.evaluate(expression.right);
+          return runtime.hold(right, () => this.binary(expression.operator, left, right));
+        });
       }
       case 'privateIn': {
         return this.hasPrivate(expression.name, this.evaluate(expression.right));
@@ -149,16 +155,6 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     );
     this.putReference(reference, newValue);
     return expression.prefix ? newValue : oldValue;
-  }
-
-  private binaryExpression(expression: Extract<Expression, { kind: 'binary' }>): Value {
-    const { runtime } = this;
-    const left = this.evaluate(expression.left);
-    // Both operands stay reachable while the operator's conversions may run the program's code.
-    return runtime.hold(left, () => {
-      const right = this.evaluate(expression.right);
-      return runtime.hold(right, () => this.binary(expression.operator, left, right));
-    });
   }
 
   /** Tests `#name in object`, whether the object has the private member. */
