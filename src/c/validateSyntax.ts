@@ -2,6 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import type { TranslationUnit } from './ast';
+import { CSyntaxError } from './syntaxDiagnostics';
 
 const RESTRICTED_OPERANDS: Record<string, readonly string[]> = {
   binary_expression: ['left', 'right'],
@@ -26,7 +27,7 @@ export function validateSyntax(root: Node): void {
     for (const name of RESTRICTED_OPERANDS[node.type] ?? []) {
       const operand = node.childForFieldName(name);
       if (operand?.type === 'assignment_expression')
-        fail(operand, '代入する左側には、変数や配列の要素などを書いてください。');
+        throw new CSyntaxError(operand, '代入する左側には、変数や配列の要素などを書いてください。');
     }
     if (node.type === 'argument_list') {
       const children = node.children.filter((child) => child?.type !== 'comment');

@@ -1438,3 +1438,18 @@ test.each([
     diagnostics: [expect.objectContaining({ row })],
   });
 });
+
+test.each([
+  's=sizeof(int)\nT v=2;',
+  's=sizeof(int)\nT a[2];',
+  's=sizeof(T)\nenum E{A}e;',
+  's=sizeof(struct P)\nT v=2;',
+  'char*m="x"\nPT*w=&st;',
+  's=sizeof(int)\nPT*w=&st;',
+])('declarations after complete C types and strings preserve the separator location: %s', (body) => {
+  const source = `#include <stdio.h>\ntypedef int T;typedef struct P{int x;}PT;\nint main(void){int s=0;PT st={1};\n${body}\nreturn 0;\n}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 3 })],
+  });
+});

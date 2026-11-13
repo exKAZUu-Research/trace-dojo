@@ -166,11 +166,14 @@ function invalidSizeofTokens(
   if (!value) return [];
   if (value.type === 'cast_expression') {
     const type = value.childForFieldName('type')?.childForFieldName('type');
-    const operand = value.childForFieldName('value');
+    const children = value.children.filter((child) => child.type !== 'comment');
+    const close = children.findIndex((child) => child.type === ')');
+    const following = children[close + 1];
     return type &&
-      operand &&
+      following &&
+      close !== -1 &&
       (type.type !== 'type_identifier' || types.has(source.slice(type.startIndex, type.endIndex).trim()))
-      ? [operand]
+      ? [following]
       : [];
   }
   let current = value;
