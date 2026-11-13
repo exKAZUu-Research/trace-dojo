@@ -6,11 +6,14 @@ import { CompositeCompiler } from './compositeCompiler';
 import { binaryConstant, type Constant, exactInteger, type Rational } from './constants';
 import { toInterface } from './conversions';
 import {
-  type CalleeSummary,
+  always,
   type FuncEntity,
+  type FunctionContext,
   type GenericFunc,
   INLINE_CALL_COST,
+  inlinedCall,
   linkArgument,
+  type StaticCallee,
   staysLocal,
   type Temporary,
   type VarEntity,
@@ -35,7 +38,7 @@ import { nilPointerPanic, panicNilValue, runtimeErrorPanic } from './runtimeErro
 import { runtimePrint } from './runtimePrint';
 import { appendValues, inStackBuffer, type StackBuffer } from './sliceOps';
 import { sliceMode } from './slicePass';
-import { clobberMemory } from './ssaValues';
+import { clobberMemory, reachingValue } from './ssaValues';
 import { newTurtle, TURTLE_POINTER } from './turtle';
 import {
   ANY,
@@ -160,23 +163,50 @@ export abstract class CallCompiler extends CompositeCompiler {
     }
     if (variadic) return this.variadicArguments(expression, operands, signature, name);
     if (!callee || operands.length !== params.length) return this.listArguments(expression, operands, signature, name);
-    const { summary, receivers } = callee;
+    const { target, receivers } = callee;
     for (const [index, { ssaConstant }] of operands.entries())
       if (ssaConstant) callee.constantArgs[receivers + index] = ssaConstant;
     operands = operands.map((operand, index) =>
       isInterface(params[index])
         ? operand
-        : this.sliceArgument(expression.args[index], operand, summary, receivers + index)
+        : this.sliceArgument(expression.args[index], operand, target, receivers + index)
     );
     return this.listArguments(expression, operands, signature, name, (index) => (value) => {
-      linkToParameter(callee, receivers + index, value);
+      this.linkToParameter(callee, receivers + index, value);
     });
   }
 
-  /** A call of a function or method the program declares, with what stands for its result in the caller. */
-  private programCall(summary: CalleeSummary | undefined, receivers: number): ProgramCall | undefined {
-    if (!summary) return undefined;
-    return { summary, receivers, result: this.hiddenVariable(), constantArgs: [] };
+  /** A call of a function of the program that Go's compiler resolves, with what stands for its result in the caller. */
+  private programCall(target: StaticCallee | undefined, receivers: number): ProgramCall | undefined {
+    if (!target) return undefined;
+    const constantCaptures = new Map<VarEntity, SsaConstant>();
+    for (const variable of target.summary.context?.captures.keys() ?? []) {
+      const { constant } = variable.owner === this.fn ? reachingValue(this.fn, variable) : {};
+      if (constant) constantCaptures.set(variable, constant);
+    }
+    return { target, receivers, result: this.hiddenVariable(), constantArgs: [], constantCaptures };
+  }
+
+  /**
+   * Makes a value passed to a function of the program share what the body does with the parameter, once the callee
+   * is settled; a callee that turns out not to be the call's lets the value escape.
+   */
+  private linkToParameter(call: ProgramCall, index: number, value: Storage): void {
+    const { target } = call;
+    const toParam = (params: VarEntity[]): void => {
+      const param = params[index];
+      if (param) linkArgument(param, value, call.result);
+    };
+    const link = (holds: boolean): void => {
+      if (!holds) {
+        this.escapeOperand(value);
+        return;
+      }
+      if (target.summary.params) toParam(target.summary.params);
+      else target.summary.pending.push(toParam);
+    };
+    if (target.holds === always || !this.fn) link(target.holds());
+    else outermost(this.fn).onComplete.push(() => link(target.holds()));
   }
 
   private listArguments(
@@ -202,12 +232,13 @@ export abstract class CallCompiler extends CompositeCompiler {
    * lets its array be shared, and otherwise the slice optimization pass understands passing it to a parameter that does
    * not escape, which reads its capacity.
    */
-  protected sliceArgument(syntax: Expression, operand: Operand, summary: CalleeSummary, index: number): Operand {
+  protected sliceArgument(syntax: Expression, operand: Operand, target: StaticCallee, index: number): Operand {
     const tracking = this.sliceUseOf(syntax)?.tracking;
     if (!tracking) return operand;
-    const transition = this.sliceTransition(syntax, operand, () => summary.inlinable());
-    this.understandSlice(syntax, () => summary.inlinable() || !summary.params?.[index]?.escapes);
-    tracking.capReads.push(() => !summary.inlinable());
+    const inlined = (): boolean => inlinedCall(target);
+    const transition = this.sliceTransition(syntax, operand, inlined);
+    this.understandSlice(syntax, () => inlined() || (target.holds() && !target.summary.params?.[index]?.escapes));
+    tracking.capReads.push(() => !inlined());
     return transition;
   }
 
@@ -295,27 +326,28 @@ export abstract class CallCompiler extends CompositeCompiler {
       return this.invalid(expression);
     }
     const name = calleeName(expression.callee);
-    const summary = callee.func?.summary;
-    this.chargeCall(summary, callee.func ? libraryCallCost(callee.func.name) : INLINE_CALL_COST);
-    const call = this.programCall(summary, 0);
+    const target = this.callSite(callee.static?.callee);
+    this.chargeCall(target, callee.func ? libraryCallCost(callee.func.name) : INLINE_CALL_COST);
+    const call = this.programCall(target, 0);
     const args = this.argumentsFor(expression, signature, name, call);
     if (!args) return this.invalid(expression);
     const row = expression.row;
+    const buffers = inlinedStackBuffers(call);
     const direct = callee.func?.direct;
-    if (direct) {
-      const buffers = inlinedStackBuffers(call);
-      return {
-        ...this.resultOperand(expression, signature.results, (frame) => direct(args(frame), row, buffers(frame))),
-        backingVars: call && [call.result],
-      };
-    }
     const read = callee.eval;
-    return this.resultOperand(expression, signature.results, (frame) => {
-      const fn = read(frame);
-      const argValues = withTemporary(frame, fn, () => args(frame));
-      if (!(fn instanceof GoFunc)) nilPointerPanic();
-      return fn.call(argValues, row);
-    });
+    const result = this.resultOperand(
+      expression,
+      signature.results,
+      direct
+        ? (frame) => direct(args(frame), row, buffers(frame))
+        : (frame) => {
+            const fn = read(frame);
+            const argValues = withTemporary(frame, fn, () => args(frame));
+            if (!(fn instanceof GoFunc)) nilPointerPanic();
+            return fn.call(argValues, row, undefined, buffers(frame));
+          }
+    );
+    return call ? { ...result, ...programCallResult(call, signature.results) } : result;
   }
 
   protected prepareGenericCall(
@@ -355,10 +387,18 @@ export abstract class CallCompiler extends CompositeCompiler {
     return this.resultOperand(expression, results, (frame) => instance.call(args(frame), row));
   }
 
+  /** A call of `target` in the function being compiled, counting the calls of a function literal. */
+  private callSite(target: StaticCallee | undefined): StaticCallee | undefined {
+    if (!target?.summary.closure || !this.fn) return target;
+    const sites = this.fn.closureCalls;
+    sites.set(target.summary, (sites.get(target.summary) ?? 0) + 1);
+    return { ...target, sites };
+  }
+
   /** Adds a call to the inlining cost of the function being compiled: a function of the program's own, or `cost`. */
-  private chargeCall(summary: CalleeSummary | undefined, cost: number): void {
+  private chargeCall(target: StaticCallee | undefined, cost: number): void {
     if (!this.fn) return;
-    if (summary) this.fn.callees.push(summary);
+    if (target) this.fn.callees.push(target);
     else this.fn.inlineCost += cost;
   }
 
@@ -436,8 +476,9 @@ export abstract class CallCompiler extends CompositeCompiler {
     const name = (expression.callee as { field?: string }).field ?? selection.method.name;
     const summary = selection.kind === 'method' ? selection.method.code?.summary : undefined;
     if (summary) this.fn?.references.add(selection.method);
-    this.chargeCall(summary, INLINE_CALL_COST);
-    const call = this.programCall(summary, 1);
+    const target = summary && { summary, holds: always };
+    this.chargeCall(target, INLINE_CALL_COST);
+    const call = this.programCall(target, 1);
     const args = this.argumentsFor(expression, methodType, name, call);
     if (!args) return this.invalid(expression);
     const row = expression.row;
@@ -465,17 +506,15 @@ export abstract class CallCompiler extends CompositeCompiler {
       readReceiver = (frame) => receiverFor(read(frame), path, method, viaPointer);
     }
     const storage = this.receiverStorage(receiver, path, method.pointerReceiver);
-    if (storage && call) linkToParameter(call, 0, storage);
+    if (storage && call) this.linkToParameter(call, 0, storage);
     else if (storage) this.escapeOperand(storage);
     const buffers = inlinedStackBuffers(call);
-    return {
-      ...this.resultOperand(expression, methodType.results, (frame) => {
-        const value = readReceiver(frame);
-        const argValues = withTemporary(frame, value, () => args(frame));
-        return invokeMethod(method, value, argValues, row, undefined, buffers(frame));
-      }),
-      backingVars: call && [call.result],
-    };
+    const result = this.resultOperand(expression, methodType.results, (frame) => {
+      const value = readReceiver(frame);
+      const argValues = withTemporary(frame, value, () => args(frame));
+      return invokeMethod(method, value, argValues, row, undefined, buffers(frame));
+    });
+    return call ? { ...result, ...programCallResult(call, methodType.results) } : result;
   }
 
   /**
@@ -1232,35 +1271,56 @@ export abstract class CallCompiler extends CompositeCompiler {
 }
 
 /**
- * A call of a function or method the program declares: `receivers` leading parameters come before the arguments, and
- * `result` stands for the call's result in the caller, which what the callee returns shares.
+ * A call of a function of the program that Go's compiler resolves: `receivers` leading parameters come before the
+ * arguments, and `result` stands for the call's result in the caller, which what the callee returns shares.
  */
 interface ProgramCall {
-  summary: CalleeSummary;
+  target: StaticCallee;
   receivers: number;
   result: VarEntity;
   /** Whether each argument is a constant to Go's compiler, by parameter index. */
   constantArgs: SsaConstant[];
+  /** Whether each variable the callee captures is a constant to Go's compiler where the call is. */
+  constantCaptures: Map<VarEntity, SsaConstant>;
 }
 
-/** Makes a value passed to a function of the program share what the body does with the parameter. */
-function linkToParameter(call: ProgramCall, index: number, value: Storage): void {
-  const link = (params: VarEntity[]): void => {
-    const param = params[index];
-    if (param) linkArgument(param, value, call.result);
+/** The function whose compilation settles every callee resolved in `fn`, as no code outside it assigns its locals. */
+function outermost(fn: FunctionContext): FunctionContext {
+  let root = fn;
+  while (root.parent) root = root.parent;
+  return root;
+}
+
+/**
+ * What the result of a call of a function of the program shares, and what Go's compiler resolves it to once it
+ * inlines the call: the value of the callee's one `return` statement, with the parameters bound to the arguments.
+ */
+function programCallResult(
+  call: ProgramCall,
+  results: Type[]
+): Pick<Operand, 'backingVars' | 'ssaConstant' | 'static'> {
+  const backingVars = [call.result];
+  if (results.length !== 1) return { backingVars };
+  const { target, constantArgs } = call;
+  const constant: SsaConstant = (params) => {
+    const returned = inlinedCall(target) ? target.summary.context?.returnedValues : undefined;
+    if (returned?.length !== 1) return false;
+    return returned[0]?.constant?.({ constantParam: (index) => constantArgs[index]?.(params) ?? false }) ?? false;
   };
-  if (call.summary.params) link(call.summary.params);
-  else call.summary.pending.push(link);
+  return { backingVars, ssaConstant: constant, static: { constant } };
 }
 
 /** The stack buffers a call shares with the caller when Go's compiler inlines it, one set per call site. */
 function inlinedStackBuffers(call: ProgramCall | undefined): (frame: Frame) => StackBuffers | undefined {
   const site = {};
   return (frame) =>
-    call?.summary.inlinable()
-      ? frame.inlinedStackBuffers(site, staysLocal(call.result, frame), (caller) =>
-          Array.from(call.constantArgs, (constant) => constant?.(caller) ?? false)
-        )
+    call && inlinedCall(call.target)
+      ? frame.inlinedStackBuffers(site, staysLocal(call.result, frame), (caller) => ({
+          params: Array.from(call.constantArgs, (constant) => constant?.(caller) ?? false),
+          captures: new Set(
+            [...call.constantCaptures].flatMap(([variable, constant]) => (constant(caller) ? [variable] : []))
+          ),
+        }))
       : undefined;
 }
 

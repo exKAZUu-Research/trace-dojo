@@ -14,12 +14,22 @@ import {
   type VarDeclaration,
 } from './ast';
 import { CallCompiler, VALUE_BUILTINS } from './callCompiler';
-import { type FunctionContext, linkEscapeSource, linkTemporary, markReturned, type VarEntity } from './entities';
+import {
+  always,
+  completeCalleeSummary,
+  type FunctionContext,
+  linkEscapeSource,
+  linkTemporary,
+  markReturned,
+  never,
+  newCalleeSummary,
+  type VarEntity,
+} from './entities';
 import { equalityOf } from './equality';
 import { describeMissingMethod, incomparableMessage } from './expressionCompiler';
 import { runesOf } from './literals';
 import { dynamicMethod, invokeMethod, receiverFor } from './methods';
-import type { Operand } from './operand';
+import type { Operand, SsaConstant } from './operand';
 import { arithmetic } from './operators';
 import {
   BREAK,
@@ -615,13 +625,19 @@ export abstract class StatementCompiler extends CallCompiler {
   /** Records a write of an assignment's target: a definition of a variable Go's SSA form tracks, else a store. */
   private defineTarget(
     target: Operand | undefined,
-    value: Pick<Operand, 'type' | 'product' | 'ssaConstant'> | undefined,
+    value: Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'static'> | undefined,
     values?: Eval[],
     index = 0
   ): void {
     if (!target) return;
-    if (target.ssaVariable) this.defineFromValue(target.ssaVariable, value, values, index);
-    else if (target.ssaRoot && !target.ssaRoot.boxed) storeLocalMemory(this.fn);
+    if (target.ssaVariable) {
+      this.defineFromValue(target.ssaVariable, value, values, index);
+      return;
+    }
+    // A closure assigning a variable it captures.
+    const captured = target.variable?.entity;
+    if (captured) captured.reassigned = true;
+    if (target.ssaRoot && !target.ssaRoot.boxed) storeLocalMemory(this.fn);
     else clobberMemory(this.fn);
   }
 
@@ -632,7 +648,7 @@ export abstract class StatementCompiler extends CallCompiler {
    */
   private defineFromValue(
     variable: VarEntity,
-    operand: Pick<Operand, 'type' | 'product' | 'ssaConstant'> | undefined,
+    operand: Pick<Operand, 'type' | 'product' | 'ssaConstant' | 'static'> | undefined,
     values: Eval[] | undefined,
     index: number
   ): void {
@@ -645,7 +661,7 @@ export abstract class StatementCompiler extends CallCompiler {
       isUntyped(operand.type) ||
       operand.type !== variable.type
     ) {
-      define(this.fn, variable, { constant: operand?.ssaConstant });
+      define(this.fn, variable, { constant: operand?.ssaConstant, static: operand?.static });
       return;
     }
     const left = this.hiddenSlot();
@@ -660,6 +676,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     define(this.fn, variable, {
       constant: operand.ssaConstant,
+      static: operand.static,
       factors: { left, right, source: product.source, enabled: product.enabled },
     });
   }
@@ -1259,6 +1276,7 @@ export abstract class StatementCompiler extends CallCompiler {
       if (results.length > 0 && !fn.hasNamedResults) {
         this.error(statement, 'return 文に値が足りません。');
       }
+      fn.returnedValues.push(undefined);
       if (!fn.hasNamedResults) return () => RETURN;
       this.checkShadowedResults(statement);
       const moves = fn.resultVariables.flatMap((variable) =>
@@ -1275,6 +1293,7 @@ export abstract class StatementCompiler extends CallCompiler {
       return () => RETURN;
     }
     const holder = (fn.resultHolder ??= this.resultHolder());
+    const compiled: Operand[] = [];
     const { result: values, run } = this.hoistingCalls(() =>
       this.rightSide(
         statement,
@@ -1282,10 +1301,11 @@ export abstract class StatementCompiler extends CallCompiler {
         results.length,
         (index) => results[index],
         undefined,
-        undefined,
+        compiled,
         () => holder
       )
     );
+    fn.returnedValues.push(results.length === 1 && !fn.hasNamedResults ? compiled[0]?.static : undefined);
     if (!values) return () => RETURN;
     const slots = fn.info.resultSlots;
     return (frame) => {
@@ -1556,8 +1576,10 @@ export abstract class StatementCompiler extends CallCompiler {
         for (const [index, parameter] of signature.parameters.entries()) {
           fn.params.push(this.declareParameter(parameter, type.params[index]));
         }
-        for (const [index, param] of fn.params.entries())
-          define(fn, param, { constant: (frame) => frame?.constantParam(index) ?? false });
+        for (const [index, param] of fn.params.entries()) {
+          const constant: SsaConstant = (params) => params?.constantParam(index) ?? false;
+          define(fn, param, { constant, static: { constant } });
+        }
         fn.info.params.push(...fn.params);
         fn.results = type.results;
         fn.hasNamedResults = signature.results.some((result) => result.name !== undefined);
@@ -1597,6 +1619,7 @@ export abstract class StatementCompiler extends CallCompiler {
       this.fn = outer;
       this.inAllocatedSlice = outerInAllocatedSlice;
     }
+    if (!outer) for (const settle of fn.onComplete) settle();
     return fn;
   }
 
@@ -1609,6 +1632,10 @@ export abstract class StatementCompiler extends CallCompiler {
   protected compileFuncLiteral(expression: Extract<Expression, { kind: 'funcLiteral' }>): Operand {
     const type = this.resolveSignature(expression.signature).type;
     const fn = this.functionBody('func', expression.signature, type, expression.body, undefined, false);
+    const summary = newCalleeSummary();
+    // Unlike a declared function's body, the literal's does not take the summary as its own (fn.summary), which would
+    // make it decide as inlined everywhere: calls through values Go's compiler does not resolve run it apart.
+    completeCalleeSummary(summary, fn, never, true);
     const outer = this.fn as FunctionContext;
     const cellReaders = [...fn.captures.keys()].map((variable) => {
       if (variable.owner === outer) return (frame: Frame) => frame.locals[variable.slot] as Cell;
@@ -1622,11 +1649,13 @@ export abstract class StatementCompiler extends CallCompiler {
       span: expression,
       // The closure refers to the variables it captures, which escape with it.
       backingVars: [...fn.captures.keys()],
+      static: { callee: { summary, holds: always } },
       eval: (frame) => {
         const cells = cellReaders.map((readCell) => readCell(frame));
         const runtime = frame.runtime;
         return new GoFunc(
-          (args, callRow, deferredFor) => runtime.call(info, cells, args, callRow, deferredFor as Frame | undefined),
+          (args, callRow, deferredFor, stackBuffers) =>
+            runtime.call(info, cells, args, callRow, deferredFor as Frame | undefined, undefined, stackBuffers),
           cells
         );
       },

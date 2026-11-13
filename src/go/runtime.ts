@@ -59,17 +59,28 @@ export interface FunctionInfo {
 /**
  * The stack buffers of a function's call, and those of the calls inlined into it, by call site; `resultStaysLocal`
  * tells whether the result of an inlined call stays in the caller, which lets what the callee returns live on its stack,
- * and `constantParams` which parameters of an inlined call Go's compiler knows as constants from the arguments.
+ * and `constants` what of an inlined call Go's compiler knows as constants from the caller.
  */
 export interface StackBuffers {
   used: WeakSet<object>;
   inlined: WeakMap<object, StackBuffers>;
   resultStaysLocal: boolean;
-  constantParams: readonly boolean[];
+  constants: InlinedConstants;
 }
 
-function newStackBuffers(resultStaysLocal = false, constantParams: readonly boolean[] = []): StackBuffers {
-  return { used: new WeakSet(), inlined: new WeakMap(), resultStaysLocal, constantParams };
+/**
+ * What Go's compiler knows as constants in a call it inlines: the parameters, by index, from the arguments, and the
+ * variables the callee captures, from their definitions reaching the call.
+ */
+export interface InlinedConstants {
+  params: readonly boolean[];
+  captures: ReadonlySet<object>;
+}
+
+const NO_CONSTANTS: InlinedConstants = { params: [], captures: new Set() };
+
+function newStackBuffers(resultStaysLocal = false, constants = NO_CONSTANTS): StackBuffers {
+  return { used: new WeakSet(), inlined: new WeakMap(), resultStaysLocal, constants };
 }
 
 /** Marks a local whose scope has not begun or has ended. */
@@ -120,19 +131,24 @@ export class Frame implements TracedFrame {
 
   /** Whether Go's compiler knows the parameter at `index` as a constant, from the argument of the call it inlined. */
   constantParam(index: number): boolean {
-    return this.stackBuffers?.constantParams[index] ?? false;
+    return this.stackBuffers?.constants.params[index] ?? false;
+  }
+
+  /** Whether Go's compiler knows a variable the function captures as a constant, in the call it inlined. */
+  constantCapture(variable: object): boolean {
+    return this.stackBuffers?.constants.captures.has(variable) ?? false;
   }
 
   /** The stack buffers of a call at `site` that Go's compiler inlines into this function. */
   inlinedStackBuffers(
     site: object,
     resultStaysLocal: boolean,
-    constantParams: (frame: Frame) => readonly boolean[]
+    constants: (frame: Frame) => InlinedConstants
   ): StackBuffers {
     const { inlined } = (this.stackBuffers ??= newStackBuffers());
     let buffers = inlined.get(site);
     if (!buffers) {
-      buffers = newStackBuffers(resultStaysLocal, constantParams(this));
+      buffers = newStackBuffers(resultStaysLocal, constants(this));
       inlined.set(site, buffers);
     }
     return buffers;

@@ -1,4 +1,5 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
+import type { StackBuffers } from './runtime';
 import type { Type } from './types';
 
 /**
@@ -108,9 +109,14 @@ export class GoFunc {
   constructor(
     /**
      * Runs the function. `callRow` is the row of the call, for the trace; `deferredFor` is the frame whose deferred
-     * call this is, where `recover` works.
+     * call this is, where `recover` works; `stackBuffers` are the caller's for a call Go's compiler inlines.
      */
-    readonly call: (args: Value[], callRow?: number, deferredFor?: unknown) => Value | Value[],
+    readonly call: (
+      args: Value[],
+      callRow?: number,
+      deferredFor?: unknown,
+      stackBuffers?: StackBuffers
+    ) => Value | Value[],
     /** The values the function keeps alive, which garbage collection follows. */
     readonly captured: readonly unknown[] = []
   ) {}

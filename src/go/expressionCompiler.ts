@@ -16,13 +16,16 @@ import {
 } from './constants';
 import { conversion, stringToBytesWithMode, stringToRunesWithMode, toInterface } from './conversions';
 import {
+  always,
   type Entity,
   type FunctionContext,
   linkEscapeSource,
   linkTemporary,
   markEscapes,
   markWritten,
+  never,
   type ProductSource,
+  staticValueOf,
   staysLocal,
   type Temporary,
   type VarEntity,
@@ -169,15 +172,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       CONSTANT_IFACES.add(constantIface);
       return () => constantIface;
     }
-    const entity = value.mode === 'variable' ? value.variable?.entity : undefined;
-    // Go's compiler converts a local it sees as a constant (ir.StaticValue: defined once, from a constant, and never
-    // assigned again or addressed) as it converts the constant itself.
-    const boxed: Eval = entity
+    // Go's compiler converts a value it resolves to a constant (a local or an inlined call's result) as it converts
+    // the constant itself.
+    const constant = value.static?.constant;
+    const boxed: Eval = constant
       ? (frame) => {
           const iface = box(read(frame)) as Iface;
-          if (!entity.reassigned && !entity.addressTaken && entity.staticConstant?.(undefined)) {
-            CONSTANT_IFACES.add(iface);
-          }
+          if (constant(frame)) CONSTANT_IFACES.add(iface);
           return iface;
         }
       : (frame) => box(read(frame));
@@ -335,7 +336,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const runtimeType = defaultType(type);
     const value = this.representsDefault(constant, runtimeType);
-    return { mode: 'constant', type, span, constant, eval: () => value, ssaConstant: always };
+    return { mode: 'constant', type, span, constant, eval: () => value, ssaConstant: always, static: STATIC_CONSTANT };
   }
 
   private representsDefault(constant: Constant, type: Type): Value {
@@ -487,7 +488,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (entity.generic) {
           return { mode: 'value', type: entity.generic.type, span, eval: () => {}, func: entity };
         }
-        return { mode: 'value', type: entity.type, span, eval: () => entity.value(), func: entity };
+        return {
+          mode: 'value',
+          type: entity.type,
+          span,
+          eval: () => entity.value(),
+          func: entity,
+          static: entity.summary && { callee: { summary: entity.summary, holds: always } },
+        };
       }
       case 'builtin': {
         return { mode: 'builtin', type: NO_VALUE, span, builtin: entity.name, eval: () => {} };
@@ -550,6 +558,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type: entity.type,
         span,
         ...this.reachingOperand(entity),
+        static: staticValueOf(entity, true),
         variable: { markUsed, entity },
         ssaVariable: entity,
         backingVars: [entity],
@@ -578,6 +587,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       mode: 'variable',
       type: entity.type,
       span,
+      ssaConstant: (params) => params?.constantCapture?.(entity) ?? false,
+      static: staticValueOf(entity, false),
       variable: { markUsed, entity },
       backingVars: [entity],
       addressStorage: { backingVars: [entity] },
@@ -879,6 +890,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         mode: 'value',
         type: { kind: 'pointer', element: literal.type },
         span: expression,
+        backingVars: literal.backingVars,
         createsObject: true,
         eval: (frame) => new Pointer(new Cell(read(frame)), 'v'),
       };
@@ -2343,13 +2355,12 @@ function constantFactor(operand: Operand): number | undefined {
   return operand.mode === 'constant' ? (operand.eval({} as Frame) as number) : undefined;
 }
 
+const STATIC_CONSTANT = { constant: always };
+
 /** Multiplying by these, Go's compiler adds, copies, or negates instead, which leaves nothing to fuse. */
 function isTrivialFactor(value: number | undefined): boolean {
   return value === 2 || value === 1 || value === -1;
 }
-
-const always = (): boolean => true;
-const never = (): boolean => false;
 
 const groupedSums = new WeakMap<FunctionContext, number>();
 
@@ -2363,7 +2374,8 @@ function sumsGrouped(contexts: ReadonlyMap<FunctionInfo, FunctionContext>, fn: F
   const { frames } = frame.runtime;
   for (let index = frames.lastIndexOf(frame) - 1; index >= 0 && inlinable(root); index--) {
     const caller = contexts.get(frames[index].info);
-    if (!caller || !root.summary || !caller.callees.includes(root.summary)) break;
+    const { summary } = root;
+    if (!caller?.callees.some((callee) => callee.summary === summary && callee.holds())) break;
     root = caller;
   }
   let count = groupedSums.get(root);
@@ -2377,8 +2389,9 @@ function sumsGrouped(contexts: ReadonlyMap<FunctionInfo, FunctionContext>, fn: F
 /** The float64 additions of two products in a function, counting each call inlined into it once per call. */
 function countSums(fn: FunctionContext, inlining: ReadonlySet<FunctionContext>): number {
   let count = fn.sumsOfProducts.filter((sum) => sum()).length;
-  for (const { context } of fn.callees) {
-    if (context && !inlining.has(context) && inlinable(context)) {
+  for (const callee of fn.callees) {
+    const { context } = callee.summary;
+    if (context && !inlining.has(context) && callee.holds() && inlinable(context)) {
       count += countSums(context, new Set([...inlining, fn]));
     }
   }
