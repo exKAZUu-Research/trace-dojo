@@ -20,6 +20,12 @@ _ITEMSIZE = {'b': 1, 'B': 1, 'u': 4, 'w': 4, 'h': 2, 'H': 2, 'i': 4, 'I': 4,
              'l': 8, 'L': 8, 'q': 8, 'Q': 8, 'f': 4, 'd': 8}
 
 
+def _subscript(index):
+    if not hasattr(type(index), '__index__'):
+        raise TypeError('array indices must be integers')
+    return _index(index)
+
+
 def _code(typecode):
     return 'I' if typecode in 'uw' else typecode
 
@@ -125,7 +131,7 @@ class array:
     def __getitem__(self, index):
         if isinstance(index, slice):
             return _new(self._typecode, self._items()[index])
-        offset = self._position(_index(index), 'array index out of range')
+        offset = self._position(_subscript(index), 'array index out of range')
         value = _struct.unpack_from(_code(self._typecode), self._data, offset)[0]
         return chr(value) if self._typecode in 'uw' else value
 
@@ -140,18 +146,20 @@ class array:
             self._store(items)
             return
         converted = _convert(self._typecode, value)
-        offset = self._position(_index(index), 'array assignment index out of range')
+        offset = self._position(_subscript(index), 'array assignment index out of range')
         if self._typecode in 'uw':
             converted = ord(converted)
         _struct.pack_into(_code(self._typecode), self._data, offset, converted)
 
     def __delitem__(self, index):
-        items = self._items()
-        try:
+        if isinstance(index, slice):
+            items = self._items()
             del items[index]
-        except IndexError:
-            raise IndexError('array assignment index out of range') from None
-        self._store(items)
+            self._store(items)
+            return
+        offset = self._position(_subscript(index), 'array assignment index out of range')
+        self._check_resize()
+        del self._data[offset:offset + _ITEMSIZE[self._typecode]]
 
     def _same_kind(self, other, message):
         if not isinstance(other, array):
@@ -229,28 +237,30 @@ class array:
             self.append(item)
 
     def insert(self, index, value, /):
-        items = self._items()
-        items.insert(index, _convert(self._typecode, value))
-        self._store(items)
+        index = _index(index)
+        converted = _convert(self._typecode, value)
+        count = len(self)
+        index = min(max(index + count, 0) if index < 0 else index, count)
+        self._check_resize()
+        offset = index * _ITEMSIZE[self._typecode]
+        self._data[offset:offset] = _encode(self._typecode, [converted])
 
     def pop(self, index=-1, /):
-        items = self._items()
-        if not items:
+        index = _index(index)
+        if not len(self):
             raise IndexError('pop from empty array')
-        try:
-            value = items.pop(index)
-        except IndexError:
-            raise IndexError('pop index out of range') from None
-        self._store(items)
+        offset = self._position(index, 'pop index out of range')
+        value = self[offset // _ITEMSIZE[self._typecode]]
+        self._check_resize()
+        del self._data[offset:offset + _ITEMSIZE[self._typecode]]
         return value
 
     def remove(self, value, /):
-        items = self._items()
         try:
-            items.remove(value)
+            index = self._items().index(value)
         except ValueError:
             raise ValueError('array.remove(x): x not in array') from None
-        self._store(items)
+        del self[index]
 
     def index(self, value, start=0, stop=None, /):
         items = self._items()

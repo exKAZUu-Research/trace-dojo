@@ -22,6 +22,8 @@ try:
     f.__annotations__
 except NameError as e:
     assert str(e) == "name 'Undefined' is not defined"
+else:
+    raise AssertionError('no NameError')
 `);
 });
 
@@ -78,6 +80,8 @@ try:
     Color(7)
 except ValueError as e:
     assert str(e).startswith('<flag \\'Color\\'> invalid value 7'), str(e)
+else:
+    raise AssertionError('no ValueError')
 `);
 });
 
@@ -91,6 +95,8 @@ try:
     b'\\x81'.decode('big5')
 except UnicodeDecodeError as e:
     assert (e.start, e.end, e.reason) == (0, 1, 'incomplete multibyte sequence')
+else:
+    raise AssertionError('no UnicodeDecodeError')
 assert codecs.charmap_decode(b'\\x00\\x01', 'strict', {0: 'ab', 1: 66}) == ('abB', 2)
 assert unicodedata.ucd_3_2_0.category('ȡ') == 'Cn' and unicodedata.category('ȡ') == 'Ll'
 `);

@@ -398,6 +398,7 @@ function scryptFunction(args: PyValue[], kwargs: Kwargs): PyValue {
   if (memory > SCRYPT_MAX_MEMORY) {
     throw new UnsupportedFeatureError('maxmem で 32 MiB より多くのメモリを使わせる hashlib.scrypt()');
   }
+  currentRuntime().ensureRoom(Math.ceil(dklen / 8));
   currentRuntime().spend(Math.ceil(memory / 1024));
   return newBytes(scrypt(hmacHash('sha256'), password, salt, { n, r, p, length: dklen }));
 }

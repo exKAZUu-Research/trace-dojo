@@ -13,6 +13,9 @@ import {
 } from './types';
 import { type PyClass, PyError, PyObject, type PyValue } from './values';
 
+/** The host buffers some bytes object has charged its run for. */
+const chargedBuffers = new WeakSet<ArrayBufferLike>();
+
 /** A `bytes` or `bytearray` object, whose bytes a bytearray may change and resize in place. */
 export class PyBytes extends PyObject {
   private buffer: Uint8Array;
@@ -22,7 +25,11 @@ export class PyBytes extends PyObject {
 
   constructor(cls: PyClass, data: Uint8Array) {
     super(cls);
-    chargeSlots(bytesSlots(data.length));
+    // Objects that wrap memory already charged, such as a decompressor's unused input read again, charge nothing.
+    if (!chargedBuffers.has(data.buffer)) {
+      chargedBuffers.add(data.buffer);
+      chargeSlots(bytesSlots(data.length));
+    }
     this.buffer = data;
     this.size = data.length;
   }
