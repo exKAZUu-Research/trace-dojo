@@ -437,7 +437,7 @@ def('Enumerable', 'first', [0, 1], function* (self, args) {
   if (count < 0) throw argumentError('attempt to take negative size');
   const items: Value[] = [];
   if (count === 0) return arr([]);
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [items], function* (value) {
     items.push(value);
     if (items.length >= count) return STOP;
   });
@@ -448,7 +448,7 @@ def('Enumerable', 'take', 1, function* (self, [countValue]) {
   if (count < 0) throw argumentError('attempt to take negative size');
   const items: Value[] = [];
   if (count === 0) return arr([]);
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [items], function* (value) {
     items.push(value);
     if (items.length >= count) return STOP;
   });
@@ -457,7 +457,7 @@ def('Enumerable', 'take', 1, function* (self, [countValue]) {
 def('Enumerable', 'take_while', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'take_while', []);
   const items: Value[] = [];
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [items], function* (value) {
     if (!truthy(yield* call(block, value))) return STOP;
     items.push(value);
   });
@@ -472,7 +472,7 @@ def('Enumerable', 'drop_while', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'drop_while', []);
   const items: Value[] = [];
   let dropping = true;
-  yield* iterate(self, function* (value) {
+  yield* collectInto(self, [items], function* (value) {
     if (dropping && truthy(yield* call(block, value))) return;
     dropping = false;
     items.push(value);
@@ -499,15 +499,30 @@ function className(value: Value): string {
 /** Sorts values as `sort` does: by `<=>`, or by the block's comparison. */
 export function* sortValues(items: Value[], block: RProc | undefined): Gen<Value[]> {
   const sorted = [...items];
-  yield* platformSort(sorted, block ? (a, b) => blockCompare(block, a, b) : compareValues);
-  return sorted;
+  rt().heldArrays.push(sorted);
+  try {
+    yield* platformSort(sorted, block ? (a, b) => blockCompare(block, a, b) : compareValues);
+    return sorted;
+  } finally {
+    rt().heldArrays.pop();
+  }
 }
 
 /** Sorts values by keys a block computes, as `sort_by` does. */
 export function* sortBy(items: Value[], block: RProc): Gen<Value[]> {
   const pairs: { key: Value; value: Value }[] = [];
-  for (const value of items) pairs.push({ key: yield* call(block, value), value });
-  return yield* sortKeyed(pairs);
+  const roots = [...items];
+  rt().heldArrays.push(roots);
+  try {
+    for (const value of items) {
+      const key = yield* call(block, value);
+      roots.push(key);
+      pairs.push({ key, value });
+    }
+    return yield* sortKeyed(pairs);
+  } finally {
+    rt().heldArrays.pop();
+  }
 }
 
 function* sortKeyed(pairs: { key: Value; value: Value }[]): Gen<Value[]> {
@@ -525,10 +540,19 @@ def('Enumerable', 'sort', 0, function* (self, _args, block) {
 def('Enumerable', 'sort_by', 0, function* (self, _args, block) {
   if (!block) return sizedEnumerator(self, 'sort_by', [], () => sizeOf(self));
   const pairs: { key: Value; value: Value }[] = [];
-  yield* iterate(self, function* (value) {
-    pairs.push({ key: yield* call(block, value), value });
-  });
-  return arr(yield* sortKeyed(pairs));
+  const roots: Value[] = [];
+  rt().heldArrays.push(roots);
+  try {
+    yield* iterate(self, function* (value) {
+      roots.push(value);
+      const key = yield* call(block, value);
+      roots.push(key);
+      pairs.push({ key, value });
+    });
+    return arr(yield* sortKeyed(pairs));
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 
 /** The n smallest (or largest with `reverse`) elements, as Ruby's `rb_nmin_run` selects and orders them. */
@@ -948,13 +972,20 @@ def('Enumerable', 'uniq', 0, function* (self, _args, block) {
 export function* uniqValues(items: Value[], block: RProc | undefined): Gen<Value[]> {
   const seen = newHash();
   const result: Value[] = [];
-  for (const value of items) {
-    const key = block ? yield* call(block, value) : value;
-    if (yield* hashGet(seen, key)) continue;
-    yield* hashSet(seen, key, true);
-    result.push(value);
+  rt().heldArrays.push(items, result);
+  try {
+    return yield* whileHeld(seen, function* () {
+      for (const value of items) {
+        const key = block ? yield* call(block, value) : value;
+        if (yield* hashGet(seen, key)) continue;
+        yield* hashSet(seen, key, true);
+        result.push(value);
+      }
+      return result;
+    });
+  } finally {
+    rt().heldArrays.length -= 2;
   }
-  return result;
 }
 
 def('Enumerable', 'to_h', [0, -1], function* (self, _args, block) {

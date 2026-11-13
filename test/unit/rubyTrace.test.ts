@@ -357,3 +357,20 @@ test('a multiline call records its expression line', () => {
   const items = rubyTrace('def f\n  x = 1\n  0\nend\nv = (\n  f\n)');
   expect(items.find(({ vars }) => vars.x === 1)?.callLines).toEqual([6]);
 });
+
+test('Enumerable collectors retain yielded Turtles through later callbacks', () => {
+  for (const call of [
+    'sort_by { 1 }',
+    'take(2)',
+    'take_while { true }',
+    'drop_while { false }',
+    'sort { 0 }',
+    'uniq',
+  ]) {
+    const program = `class E; include Enumerable; def each; yield Turtle.new(1,0); x=1; yield Turtle.new(2,0); end; end; a=E.new.${call}`;
+    expect(traceProgram('ruby', program, program).finalTurtles.map(({ x, y }) => [x, y])).toEqual([
+      [1, 0],
+      [2, 0],
+    ]);
+  }
+});
