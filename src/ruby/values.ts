@@ -15,6 +15,7 @@ import {
 import { rt } from './runtime';
 
 export function str(s: string): RString {
+  rt().checkStringLength(s.length);
   return new RString(rt().c.String, s);
 }
 

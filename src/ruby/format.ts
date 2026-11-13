@@ -109,8 +109,10 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     }
     const type = template[index];
     if (type === undefined) throw argumentError('incomplete format specifier; use %% (double %) instead');
+    rt().checkStringLength(Math.max(spec.width ?? 0, spec.precision ?? 0));
     const arg = (): Value => value ?? takeArg();
     result += yield* directive(type, spec, arg);
+    rt().checkStringLength(result.length);
   }
   return result;
 }

@@ -1,4 +1,4 @@
-import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
@@ -148,6 +148,7 @@ export class Runtime implements TracedRuntime<Frame> {
   mainObject!: RObject;
   /** The state of the default random number generator, which `srand` reseeds. */
   random: unknown;
+  private allocatedSlots = 0;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -155,6 +156,16 @@ export class Runtime implements TracedRuntime<Frame> {
 
   spend(cost = 1): void {
     this.budget.spend(cost);
+  }
+
+  chargeSlots(count: number): void {
+    this.allocatedSlots += count;
+    if (this.allocatedSlots > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+  }
+
+  checkStringLength(length: number): void {
+    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    this.spend(Math.ceil(length / 256));
   }
 
   pushFrame(frame: Frame): void {

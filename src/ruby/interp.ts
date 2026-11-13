@@ -280,7 +280,7 @@ function* evalList(items: Expr[], frame: Frame): Gen<Value[]> {
   const mark = frame.temporaries.length;
   try {
     for (const item of items) {
-      if (item.k === 'splat') values.push(...(yield* splatItems(yield* ev(item.e, frame))));
+      if (item.k === 'splat') for (const value of yield* splatItems(yield* ev(item.e, frame))) values.push(value);
       else values.push(yield* ev(item, frame));
       frame.temporaries.push(values.at(-1) ?? NIL);
     }
@@ -353,6 +353,7 @@ export function ivarSet(self: Value, name: string, value: Value): void {
   }
   if (self.frozen) throw frozenError(self, inspectForFrozen(self));
   self.ivars ??= new Map();
+  if (!self.ivars.has(name)) rt().chargeSlots(1);
   self.ivars.set(name, value);
 }
 

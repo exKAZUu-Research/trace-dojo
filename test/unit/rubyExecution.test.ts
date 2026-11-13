@@ -22,6 +22,15 @@ test.each([
   ['named format substitution', 'p format("%{name}!", name: "Ruby")', '"Ruby!"\n'],
   ['negative Float integer formatting', 'p format("%d", -1.2)', '"-1"\n'],
   ['hexadecimal Float rounding', 'p format("%.1a", 1.99); p format("%.0a", 1.75)', '"0x1.0p+1"\n"0x1p+1"\n'],
+  ['a default for Hash shift', 'p Hash.new(5).shift; p Hash.new { |h,k| 7 }.shift', '5\n7\n'],
+  ['an overridden Hash default', 'class H < Hash; def default(k = nil); 42; end; end; p H.new[:x]', '42\n'],
+  ['leading-dot Float conversion', 'p ".5".to_f; p "-.5".to_f', '0.5\n-0.5\n'],
+  [
+    'Range membership',
+    'p ("a".."e").include?("bb"), (1..5).include?(2..3), (1..5).cover?(2..3)',
+    'false\nfalse\ntrue\n',
+  ],
+  ['large Integer square root', 'p Integer.sqrt(10 ** 100)', `${'1' + '0'.repeat(50)}\n`],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -36,8 +45,50 @@ test('a positional splat after keyword arguments is rejected before execution', 
   expect(run('puts "before"; def f(*a, **k); end; f(a: 1, *[])')).toMatchObject({ kind: 'compileError' });
 });
 
+test('invalid Unicode scalar escapes are compile errors', () => {
+  expect(run(String.raw`puts "\u{110000}"`)).toMatchObject({ kind: 'compileError' });
+  expect(run(String.raw`puts "\uD800"`)).toMatchObject({ kind: 'compileError' });
+});
+
+test('Hash default_proc rejects non-Procs at assignment', () => {
+  expect(run('h = {}; h.default_proc = 3')).toMatchObject({
+    uncaughtException: 'wrong default_proc type Integer (expected Proc) (TypeError)',
+  });
+});
+
+test('Hash mutation during in-place filtering raises an error', () => {
+  expect(run('h = {a: 1}; h.delete_if { |k,v| h[:b] = 2; false }')).toMatchObject({
+    uncaughtException: "can't add a new key into hash during iteration (RuntimeError)",
+  });
+});
+
 test('puts limits exponentially nested output before flattening it', () => {
   expect(run('a = ["x"]\n25.times { a = [a, a] }\nputs a')).toEqual({ kind: 'limitExceeded', limit: 'output' });
+});
+
+test('repeated big integer multiplication respects the operation limit', () => {
+  expect(run('x = 2; 30.times { x = x * x }')).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('Ruby array allocation respects the shared storage limit', () => {
+  expect(run('a = Array.new(1000001); puts a.size')).toEqual({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('large formatting and array products stop before building oversized results', () => {
+  expect(run('p "a".ljust(10**9).size')).toEqual({ kind: 'limitExceeded', limit: 'storage' });
+  expect(run('p format("%1000000000d", 1).size')).toEqual({ kind: 'limitExceeded', limit: 'storage' });
+  expect(run('a = [0] * 3000; p a.product(a, a).size')).toEqual({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('large arrays remain traceable within the storage limit', () => {
+  expect(run('t = Turtle.new; a = Array.new(200000, 0); t.forward; p a.size')).toMatchObject({
+    kind: 'executed',
+    stdout: '200000\n',
+  });
+  expect(run('a = Array.new(200000, 0); p (a * 2).size')).toMatchObject({
+    kind: 'executed',
+    stdout: '400000\n',
+  });
 });
 
 test.each([
@@ -48,7 +99,13 @@ test.each([
   ],
   ['a recursive array key', 'a = []\na << a\nh = {}\nh[a] = 1\np h[a]', '1\n'],
   ['equivalent recursive array keys', 'a = []\na << a\nb = []\nb << b\nh = {}\nh[a] = 1\np h[b]', '1\n'],
+  ['equivalent cyclic graphs', 'a = []; a << a; b = []; c = []; b << c; c << b; h = {a => 1}; p h[b]', '1\n'],
   ['a hash containing itself as a value', 'a = {}\na[:self] = a\nh = {}\nh[a] = 1\np h[a]', '1\n'],
+  [
+    'a colliding key after deletion',
+    'class Key; def hash; 1; end; end; a = Key.new; b = Key.new; h = {}; h[a] = 1; h[b] = 2; h.delete(a); p h[b]; p h.size',
+    '2\n1\n',
+  ],
 ])('%s retains its Hash entry', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });

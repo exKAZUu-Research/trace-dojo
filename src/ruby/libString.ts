@@ -829,6 +829,7 @@ function* justify(self: RString, args: Value[], kind: 'left' | 'right' | 'center
   if (padding.length === 0) throw argumentError('zero width padding');
   const length = charLength(self.s);
   if (width <= length) return str(self.s);
+  rt().checkStringLength(width);
   const total = width - length;
   const fill = (count: number): string => {
     const chars = charsOf(padding);

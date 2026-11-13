@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { BlockDef, MethodDef } from './ast';
+import { rt } from './runtime';
 
 /**
  * A Ruby value. Integers are bigints and floats are numbers, so that the two stay distinct and integers have no size
@@ -73,6 +74,7 @@ export class RArray extends RBasic {
     public items: Value[]
   ) {
     super(cls);
+    rt().chargeSlots(items.length);
   }
 }
 

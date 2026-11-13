@@ -107,7 +107,7 @@ def('Enumerable', ['flat_map', 'collect_concat'], 0, function* (self, _args, blo
   const results: Value[] = [];
   yield* iterate(self, function* (value) {
     const mapped = yield* call(block, value);
-    if (mapped instanceof RArray) results.push(...mapped.items);
+    if (mapped instanceof RArray) for (const item of mapped.items) results.push(item);
     else results.push(mapped);
   });
   return arr(results);

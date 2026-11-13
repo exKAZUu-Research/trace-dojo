@@ -9,7 +9,9 @@ export function collectGarbage(runtime: Runtime): void {
   const visited = new Set<object>();
   const pending: Value[] = [];
   for (const frame of runtime.frames) pushFrame(frame, pending);
-  pending.push(...runtime.globals.values(), ...runtime.held, runtime.c.Object);
+  for (const value of runtime.globals.values()) pending.push(value);
+  for (const value of runtime.held) pending.push(value);
+  pending.push(runtime.c.Object);
   while (pending.length > 0) {
     const value = pending.pop() as Value;
     if (!(value instanceof RBasic) || visited.has(value)) continue;
@@ -21,11 +23,14 @@ export function collectGarbage(runtime: Runtime): void {
 }
 
 function pushFrame(frame: Frame, pending: Value[]): void {
-  pending.push(frame.self, ...frame.temporaries, ...frame.handling);
-  for (let scope: Scope | undefined = frame.scope; scope; scope = scope.parent) pending.push(...scope.vars.values());
+  pending.push(frame.self);
+  for (const value of frame.temporaries) pending.push(value);
+  for (const value of frame.handling) pending.push(value);
+  for (let scope: Scope | undefined = frame.scope; scope; scope = scope.parent)
+    for (const value of scope.vars.values()) pending.push(value);
   const { extra } = frame;
   if (extra.block) pending.push(extra.block);
-  if (extra.args) pending.push(...extra.args);
+  if (extra.args) for (const arg of extra.args) pending.push(arg);
   if (extra.keywords) pending.push(extra.keywords);
   if (extra.proc) pending.push(extra.proc);
 }
@@ -34,13 +39,13 @@ function pushFrame(frame: Frame, pending: Value[]): void {
 // code-gauge-allow functionCognitiveComplexity 18 -- Each language wires its own parser and runtime into the shared modules alike.
 // code-gauge-allow functionNcss 31 -- Each language wires its own parser and runtime into the shared modules alike.
 function pushReferences(value: RBasic, pending: Value[]): void {
-  if (value.ivars) pending.push(...value.ivars.values());
+  if (value.ivars) for (const item of value.ivars.values()) pending.push(item);
   if (value.singleton) pending.push(value.singleton);
   if (value instanceof RObject) {
     if (value.exception) pending.push(value.exception.message, value.exception.cause);
     pushData(value.data, pending);
   } else if (value instanceof RArray) {
-    pending.push(...value.items);
+    for (const item of value.items) pending.push(item);
   } else if (value instanceof RHash) {
     for (const entry of value.map.values()) pending.push(entry.key, entry.value);
     pending.push(value.defaultValue, ...(value.defaultProc ? [value.defaultProc] : []));
@@ -51,7 +56,10 @@ function pushReferences(value: RBasic, pending: Value[]): void {
     const outer = value.outer as unknown as Frame | undefined;
     if (outer) pushFrame(outer, pending);
   } else if (value instanceof RClass) {
-    pending.push(...value.constants.values(), ...value.classVariables.values(), ...value.includes, ...value.prepends);
+    for (const item of value.constants.values()) pending.push(item);
+    for (const item of value.classVariables.values()) pending.push(item);
+    for (const item of value.includes) pending.push(item);
+    for (const item of value.prepends) pending.push(item);
     if (value.superclass) pending.push(value.superclass);
   }
 }
@@ -60,5 +68,5 @@ function pushReferences(value: RBasic, pending: Value[]): void {
 function pushData(data: unknown, pending: Value[]): void {
   if (!data || typeof data !== 'object') return;
   const held = (data as { held?: () => Value[] }).held;
-  if (typeof held === 'function') pending.push(...held.call(data));
+  if (typeof held === 'function') for (const item of held.call(data)) pending.push(item);
 }

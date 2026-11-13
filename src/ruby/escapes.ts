@@ -38,13 +38,17 @@ export function decodeDoubleQuoted(text: string): string | undefined {
           .trim()
           .split(/\s+/)) {
           if (!/^[\da-fA-F]{1,6}$/.test(hex)) return undefined;
-          result += String.fromCodePoint(Number.parseInt(hex, 16));
+          const point = Number.parseInt(hex, 16);
+          if (point > 0x10_ff_ff || (point >= 0xd8_00 && point <= 0xdf_ff)) return undefined;
+          result += String.fromCodePoint(point);
         }
         index = end;
       } else {
         const hex = text.slice(index + 1, index + 5);
         if (!/^[\da-fA-F]{4}$/.test(hex)) return undefined;
-        result += String.fromCodePoint(Number.parseInt(hex, 16));
+        const point = Number.parseInt(hex, 16);
+        if (point >= 0xd8_00 && point <= 0xdf_ff) return undefined;
+        result += String.fromCodePoint(point);
         index += 4;
       }
     } else if (next === 'x') {

@@ -27,8 +27,9 @@ function* modify(self: RArray): Gen<void> {
   if (self.frozen) throw frozenError(self, yield* inspectArray(self));
 }
 
-function grow(length: number): void {
+function grow(length: number, self?: RArray): void {
   if (length > 10_000_000) throw argumentError('array size too big');
+  if (self) rt().chargeSlots(Math.max(0, length - self.items.length));
   rt().spend(Math.floor(length / 64));
 }
 
@@ -58,12 +59,13 @@ def(
       return NIL;
     }
     if (args.length === 1 && args[0] instanceof RArray) {
+      grow(args[0].items.length, self);
       self.items = [...args[0].items];
       return NIL;
     }
     const size = yield* toIndex(args[0]);
     if (size < 0) throw argumentError('negative array size');
-    grow(size);
+    grow(size, self);
     const items: Value[] = [];
     if (block) {
       self.items = items;
@@ -115,7 +117,7 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
       index += length;
       if (index < 0) throw indexError(`index ${index - length} too small for array; minimum: -${length}`);
     }
-    grow(index);
+    grow(index + 1, self);
     while (self.items.length < index) self.items.push(NIL);
     self.items[index] = value;
     return value;
@@ -142,9 +144,11 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
     if (!range.exclusive && range.end !== NIL) end++;
     count = Math.max(0, end - start);
   }
-  grow(start);
-  while (self.items.length < start) self.items.push(NIL);
   const replacement = value instanceof RArray ? [...value.items] : [value];
+  const filled = Math.max(self.items.length, start);
+  const removed = Math.min(count, Math.max(0, filled - start));
+  grow(filled - removed + replacement.length, self);
+  while (self.items.length < start) self.items.push(NIL);
   self.items.splice(start, count, ...replacement);
   return value;
 });
@@ -225,13 +229,13 @@ def('Array', '<=>', 1, function* (self: RArray, [other]) {
 
 def('Array', ['push', 'append'], [0, -1], function* (self: RArray, args) {
   yield* modify(self);
-  grow(self.items.length + args.length);
-  self.items.push(...args);
+  grow(self.items.length + args.length, self);
+  for (const arg of args) self.items.push(arg);
   return self;
 });
 def('Array', '<<', 1, function* (self: RArray, [value]) {
   yield* modify(self);
-  grow(self.items.length + 1);
+  grow(self.items.length + 1, self);
   self.items.push(value);
   return self;
 });
@@ -272,9 +276,9 @@ def('Array', 'insert', [1, -1], function* (self: RArray, args) {
 def('Array', 'concat', [0, -1], function* (self: RArray, args) {
   yield* modify(self);
   const additions: Value[] = [];
-  for (const arg of args) additions.push(...(yield* toAry(arg)).items);
-  grow(self.items.length + additions.length);
-  self.items.push(...additions);
+  for (const arg of args) for (const item of (yield* toAry(arg)).items) additions.push(item);
+  grow(self.items.length + additions.length, self);
+  for (const item of additions) self.items.push(item);
   return self;
 });
 def('Array', 'replace', 1, function* (self: RArray, [other]) {
@@ -380,7 +384,7 @@ function* flatten(items: Value[], depth: number, seen: Set<RArray>): Gen<Value[]
     if (item instanceof RArray && depth !== 0) {
       if (seen.has(item)) throw argumentError('tried to flatten recursive array');
       seen.add(item);
-      result.push(...(yield* flatten(item.items, depth - 1, seen)));
+      for (const nested of yield* flatten(item.items, depth - 1, seen)) result.push(nested);
       seen.delete(item);
     } else {
       result.push(item);
@@ -471,7 +475,7 @@ def('Array', 'fill', [0, 3], function* (self: RArray, args, block) {
     if (values.length > 1 && values[1] !== NIL) end = start + (yield* toIndex(values[1]));
     else if (values.length > 0) end = Math.max(self.items.length, start);
   }
-  grow(end);
+  grow(end, self);
   while (self.items.length < end) self.items.push(NIL);
   for (let index = start; index < end; index++) {
     self.items[index] = block ? yield* call(block, BigInt(index)) : (value as Value);
@@ -499,7 +503,7 @@ def('Array', '*', 1, function* (self: RArray, [count]) {
   if (times < 0) throw argumentError('negative argument');
   grow(self.items.length * times);
   const items: Value[] = [];
-  for (let index = 0; index < times; index++) items.push(...self.items);
+  for (let index = 0; index < times; index++) for (const item of self.items) items.push(item);
   return arr(items);
 });
 def('Array', ['&', 'intersection'], [0, -1], function* (self: RArray, others) {
@@ -515,7 +519,7 @@ def('Array', ['&', 'intersection'], [0, -1], function* (self: RArray, others) {
 });
 def('Array', ['|', 'union'], [0, -1], function* (self: RArray, others) {
   const all = [...self.items];
-  for (const other of others) all.push(...(yield* toAry(other)).items);
+  for (const other of others) for (const item of (yield* toAry(other)).items) all.push(item);
   return arr(yield* uniqValues(all, undefined));
 });
 def('Array', 'intersect?', 1, function* (self: RArray, [other]) {
@@ -584,12 +588,15 @@ def('Array', 'zip', [0, -1], function* (self: RArray, others, block) {
   return block ? NIL : arr(results);
 });
 def('Array', 'product', [0, -1], function* (self: RArray, others, block) {
+  rt().chargeSlots(self.items.length);
   let tuples: Value[][] = self.items.map((item) => [item]);
   for (const other of others) {
     const items = (yield* toAry(other)).items;
+    const size = tuples.length * items.length;
+    grow(size);
+    rt().chargeSlots(size);
     const next: Value[][] = [];
     for (const tuple of tuples) for (const item of items) next.push([...tuple, item]);
-    grow(next.length);
     tuples = next;
   }
   if (block) {

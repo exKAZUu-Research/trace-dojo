@@ -22,7 +22,8 @@ import { classOf, snapshot, str, truthy } from './values';
  */
 // code-gauge-allow functionCognitiveComplexity 23 -- Each language wires its own parser and runtime into the shared modules alike.
 // code-gauge-allow functionNcss 34 -- Each language wires its own parser and runtime into the shared modules alike.
-export function* hashKeyOf(value: Value, ancestors: RBasic[] = []): Gen<string> {
+export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { found: boolean }): Gen<string> {
+  cycle ??= { found: false };
   switch (typeof value) {
     case 'bigint': {
       return `i${value}`;
@@ -38,27 +39,37 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = []): Gen<string> 
   if (value instanceof RSymbol) return `y${value.name}`;
   if (value instanceof RString) return `s${value.s}`;
   if (value instanceof RArray || value instanceof RRange || value instanceof RHash) {
-    const cycle = ancestors.indexOf(value);
-    if (cycle !== -1) return `c${cycle}`;
+    const cycleIndex = ancestors.indexOf(value);
+    if (cycleIndex !== -1) {
+      cycle.found = true;
+      return `c${cycleIndex}`;
+    }
+    const root = ancestors.length === 0;
     ancestors.push(value);
     try {
       if (value instanceof RArray) {
         const parts: string[] = [];
-        for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors));
-        return `a${JSON.stringify(parts)}`;
+        for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, cycle));
+        return root && cycle.found ? 'recursive' : `a${JSON.stringify(parts)}`;
       }
       if (value instanceof RRange) {
-        return `r${JSON.stringify([
-          yield* hashKeyOf(value.begin, ancestors),
+        const encoded = `r${JSON.stringify([
+          yield* hashKeyOf(value.begin, ancestors, cycle),
           value.exclusive,
-          yield* hashKeyOf(value.end, ancestors),
+          yield* hashKeyOf(value.end, ancestors, cycle),
         ])}`;
+        return root && cycle.found ? 'recursive' : encoded;
       }
       const parts: string[] = [];
       for (const entry of value.map.values()) {
-        parts.push(JSON.stringify([yield* hashKeyOf(entry.key, ancestors), yield* hashKeyOf(entry.value, ancestors)]));
+        parts.push(
+          JSON.stringify([
+            yield* hashKeyOf(entry.key, ancestors, cycle),
+            yield* hashKeyOf(entry.value, ancestors, cycle),
+          ])
+        );
       }
-      return `h${JSON.stringify(parts.toSorted())}`;
+      return root && cycle.found ? 'recursive' : `h${JSON.stringify(parts.toSorted())}`;
     } finally {
       ancestors.pop();
     }
@@ -66,7 +77,7 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = []): Gen<string> 
   const method = classOf(value).findMethod('hash');
   if (method && method.body.kind === 'user') {
     const hash = yield* callMethod(value, 'hash', []);
-    return `u${typeof hash === 'bigint' ? hash : yield* hashKeyOf(hash, ancestors)}`;
+    return `u${typeof hash === 'bigint' ? hash : yield* hashKeyOf(hash, ancestors, cycle)}`;
   }
   const custom = value instanceof RObject ? (value.data as { hashKey?: () => string } | undefined) : undefined;
   if (custom?.hashKey) return custom.hashKey();
@@ -76,11 +87,14 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = []): Gen<string> 
 /** Finds the entry for `key`, checking equality even when distinct keys have the same hash. */
 function* findEntry(hash: RHash, key: Value): Gen<{ slot: string; entry: HashEntry | undefined }> {
   const base = yield* hashKeyOf(key);
+  const prefix = `[${JSON.stringify(base)},`;
+  for (const [slot, entry] of hash.map) {
+    if (slot.startsWith(prefix) && (entry.key === key || truthy(yield* callMethod(key, 'eql?', [entry.key]))))
+      return { slot, entry };
+  }
   for (let index = 0; ; index++) {
     const slot = JSON.stringify([base, index]);
-    const entry = hash.map.get(slot);
-    if (!entry) return { slot, entry: undefined };
-    if (entry.key === key || truthy(yield* callMethod(key, 'eql?', [entry.key]))) return { slot, entry };
+    if (!hash.map.has(slot)) return { slot, entry: undefined };
   }
 }
 
@@ -92,7 +106,7 @@ export function* hashGet(hash: RHash, key: Value): Gen<HashEntry | undefined> {
 export function* hashFetch(hash: RHash, key: Value): Gen {
   const entry = yield* hashGet(hash, key);
   if (entry) return entry.value;
-  return yield* hashDefault(hash, key);
+  return yield* callMethod(hash, 'default', [key]);
 }
 
 export function* hashDefault(hash: RHash, key: Value): Gen {
@@ -108,6 +122,7 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
     return;
   }
   if (hash.iterating > 0) throw runtimeError("can't add a new key into hash during iteration");
+  rt().chargeSlots(1);
   rt().spend();
   const stored = key instanceof RString && !key.frozen ? frozenCopy(key) : key;
   hash.map.set(slot, { key: stored, value });

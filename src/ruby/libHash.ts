@@ -1,13 +1,13 @@
 import { inspect, inspectHash, rEql, rEquals } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, implicitConversionError, rubyError } from './errors';
+import { argumentError, frozenError, implicitConversionError, rubyError, typeError } from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, respondsTo } from './interp';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { NIL, RArray, RHash, type RProc, RSymbol, type Value } from './objects';
+import { NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, newHash, snapshot, str, truthy } from './values';
+import { arr, newHash, realClassOf, snapshot, str, truthy } from './values';
 
 function* modify(self: RHash): Gen<void> {
   if (self.frozen) throw frozenError(self, yield* inspectHash(self));
@@ -187,11 +187,16 @@ function* filtered(self: RHash, block: RProc, keep: boolean): Gen<RHash> {
 function* filterInPlace(self: RHash, block: RProc, keep: boolean): Gen<boolean> {
   yield* modify(self);
   let changed = false;
-  for (const [slot, entry] of snapshot(self.map)) {
-    if (truthy(yield* pair(block, entry.key, entry.value)) !== keep) {
-      self.map.delete(slot);
-      changed = true;
+  self.iterating++;
+  try {
+    for (const [slot, entry] of snapshot(self.map)) {
+      if (truthy(yield* pair(block, entry.key, entry.value)) !== keep) {
+        self.map.delete(slot);
+        changed = true;
+      }
     }
+  } finally {
+    self.iterating--;
   }
   return changed;
 }
@@ -245,7 +250,7 @@ def('Hash', 'replace', 1, function* (self: RHash, [other]) {
 def('Hash', 'shift', 0, function* (self: RHash) {
   yield* modify(self);
   const first = self.map.entries().next();
-  if (first.done) return NIL;
+  if (first.done) return yield* callMethod(self, 'default', [NIL]);
   self.map.delete(first.value[0]);
   return arr([first.value[1].key, first.value[1].value]);
 });
@@ -394,7 +399,27 @@ def('Hash', ['compare_by_identity'], 0, () => {
 });
 def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
   yield* modify(self);
-  self.defaultProc = proc === NIL ? undefined : (proc as RProc);
+  if (proc === NIL) {
+    self.defaultProc = undefined;
+    return proc;
+  }
+  const converted =
+    proc instanceof RProc ? proc : respondsTo(proc, 'to_proc') ? yield* callMethod(proc, 'to_proc', []) : proc;
+  if (!(converted instanceof RProc))
+    throw typeError(`wrong default_proc type ${realClassOf(proc).name} (expected Proc)`);
+  if (converted.isLambda) {
+    const body = converted.body;
+    const params = body.kind === 'block' ? body.def.params : undefined;
+    const min = params ? params.required.length + params.post.length : body.kind === 'native' ? body.arity : 0;
+    const max =
+      params && params.rest === undefined
+        ? min + params.optional.length
+        : body.kind === 'native'
+          ? body.arity
+          : Infinity;
+    if (min > 2 || max < 2) throw typeError(`default_proc takes two arguments (2 for ${min})`);
+  }
+  self.defaultProc = converted;
   return proc;
 });
 def('Hash', 'group_by', 0, function* (self: RHash, _args, block) {

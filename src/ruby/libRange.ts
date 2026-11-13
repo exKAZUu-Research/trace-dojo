@@ -199,7 +199,24 @@ def('Range', 'count', [0, 1], function* (self: RRange, args, block) {
   return yield* callEnumerable(self, 'count', args, block);
 });
 def('Range', 'exclude_end?', 0, (self: RRange) => self.exclusive);
-def('Range', ['include?', 'member?', '===', 'cover?'], 1, function* (self: RRange, [value]) {
+def('Range', ['include?', 'member?'], 1, function* (self: RRange, [value]) {
+  if (value instanceof RRange) return false;
+  if (typeof self.begin === 'bigint' || typeof self.begin === 'number' || self.begin === NIL)
+    return yield* rangeCovers(self, value);
+  let found = false;
+  yield* iterateRange(self, function* (item) {
+    if (yield* rEquals(item, value)) {
+      found = true;
+      return STOP;
+    }
+  });
+  return found;
+});
+def('Range', '===', 1, function* (self: RRange, [value]) {
+  if (value instanceof RRange) return false;
+  return yield* rangeCovers(self, value);
+});
+def('Range', 'cover?', 1, function* (self: RRange, [value]) {
   if (value instanceof RRange) {
     const coversBegin = value.begin === NIL ? self.begin === NIL : yield* rangeCovers(self, value.begin);
     if (!coversBegin) return false;

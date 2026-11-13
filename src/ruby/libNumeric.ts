@@ -88,12 +88,21 @@ function intPow(base: bigint, exponent: bigint): Value {
     if (base === 0n) throw zeroDivisionError();
     throw new UnsupportedFeatureError('負の指数の累乗（結果が有理数になるもの）');
   }
-  const bits = BigInt(base < 0n ? -base : base).toString(2).length;
+  const bits = integerBits(base);
   if (base !== 0n && base !== 1n && base !== -1n && BigInt(bits) * exponent > 32_000_000n) {
     throw argumentError('exponent is too large');
   }
   rt().spend(Number((BigInt(bits) * exponent) / 4096n));
   return base ** exponent;
+}
+
+function integerBits(value: bigint): number {
+  return (value < 0n ? -value : value).toString(2).length;
+}
+
+function chargeIntegerResult(bits: number, cost: number): void {
+  if (bits > 32_000_000) throw argumentError('integer size too large');
+  rt().spend(Math.ceil(cost / 4096));
 }
 
 function floatPow(base: number, exponent: number): Value {
@@ -107,6 +116,10 @@ function floatPow(base: number, exponent: number): Value {
 // code-gauge-allow functionNcss 31 -- Ruby's method takes these argument forms, which the branches mirror.
 function arithmetic(op: string, a: Num, b: Num): Value {
   if (typeof a === 'bigint' && typeof b === 'bigint') {
+    const bitsA = integerBits(a);
+    const bitsB = integerBits(b);
+    if (op === '+' || op === '-') chargeIntegerResult(Math.max(bitsA, bitsB) + 1, bitsA + bitsB);
+    if (op === '*') chargeIntegerResult(bitsA + bitsB, (bitsA * bitsB) / 1024);
     switch (op) {
       case '+': {
         return a + b;
@@ -525,10 +538,14 @@ sdef('Integer', 'sqrt', 1, function* (_self, [value]) {
 
 function isqrt(n: bigint): bigint {
   if (n < 2n) return n;
-  let x = BigInt(Math.floor(Math.sqrt(Number(n))));
-  while (x * x > n) x--;
-  while ((x + 1n) * (x + 1n) <= n) x++;
-  return x;
+  const bits = integerBits(n);
+  let estimate = 1n << BigInt(Math.ceil(bits / 2));
+  for (;;) {
+    rt().spend(Math.ceil(bits / 4096));
+    const next = (estimate + n / estimate) >> 1n;
+    if (next >= estimate) return estimate;
+    estimate = next;
+  }
 }
 
 // Float ---------------------------------------------------------------------------------------------------------------
@@ -736,7 +753,7 @@ export function parseIntegerLenient(text: string, base = 10): bigint {
 export function parseFloatLenient(text: string): number {
   const match = /^[\t\n\v\f\r ]*([+-]?(?:\d+(?:_\d+)*)?(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+)?)/.exec(text);
   const body = match?.[1].replaceAll('_', '') ?? '';
-  if (!/\d/.test(body) || /^[+-]?\./.test(body)) {
+  if (!/\d/.test(body)) {
     const leading = /^[\t\n\v\f\r ]*([+-]?\d+(?:_\d+)*)/.exec(text);
     return leading ? Number(leading[1].replaceAll('_', '')) : 0;
   }
