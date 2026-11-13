@@ -988,20 +988,24 @@ export function* uniqValues(items: Value[], block: RProc | undefined): Gen<Value
   }
 }
 
-def('Enumerable', 'to_h', [0, -1], function* (self, _args, block) {
+def('Enumerable', 'to_h', [0, -1], function* (self, args, block) {
   const hash = newHash();
   return yield* whileHeld(hash, function* () {
-    yield* iterate(self, function* (value) {
-      const item = block ? yield* call(block, value) : value;
-      const pair = yield* tryAry(item);
-      if (!pair) {
-        throw typeError(`wrong element type ${className(item)} (expected array)`);
-      }
-      if (pair.items.length !== 2) {
-        throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
-      }
-      yield* hashSet(hash, pair.items[0], pair.items[1]);
-    });
+    yield* iterate(
+      self,
+      function* (value) {
+        const item = block ? yield* call(block, value) : value;
+        const pair = yield* tryAry(item);
+        if (!pair) {
+          throw typeError(`wrong element type ${className(item)} (expected array)`);
+        }
+        if (pair.items.length !== 2) {
+          throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);
+        }
+        yield* hashSet(hash, pair.items[0], pair.items[1]);
+      },
+      args
+    );
     return hash;
   });
 });
@@ -1010,7 +1014,9 @@ def('Enumerable', 'zip', [0, -1], function* (self, others, block) {
 });
 
 export function* zipCollections(self: Value, others: Value[], block: RProc | undefined): Gen<Value> {
-  const iterators = others.map((other) =>
+  const inputs: Value[] = [];
+  for (const other of others) inputs.push((yield* tryAry(other)) ?? other);
+  const iterators = inputs.map((other) =>
     other instanceof RArray
       ? undefined
       : flattenGenerator(
@@ -1024,7 +1030,7 @@ export function* zipCollections(self: Value, others: Value[], block: RProc | und
   const results: Value[] = [];
   const held = rt().held;
   const mark = held.length;
-  held.push(...others);
+  held.push(...inputs);
   let index = 0;
   try {
     yield* iterate(self, function* (value) {
@@ -1033,7 +1039,7 @@ export function* zipCollections(self: Value, others: Value[], block: RProc | und
       const arrayMark = arrays.length;
       arrays.push(tuple);
       try {
-        for (const [position, other] of others.entries()) {
+        for (const [position, other] of inputs.entries()) {
           const iterator = iterators[position];
           const next = iterator?.next();
           tuple.push(other instanceof RArray ? (other.items[index] ?? NIL) : next?.done ? NIL : (next?.value as Value));

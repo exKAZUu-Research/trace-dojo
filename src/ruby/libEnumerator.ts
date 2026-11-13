@@ -89,6 +89,7 @@ export function receiverSize(recv: Value): Value {
 
 function arraySelectionSize(length: number, method: string, requested: Value | undefined): Value {
   if (requested !== undefined && typeof requested !== 'bigint') return NIL;
+  if (requested !== undefined && requested >= 0n && length === 1 && method.startsWith('repeated_')) return 1n;
   const size = requested === undefined ? length : Number(requested);
   if (!Number.isSafeInteger(size)) return 0n;
   if (size < 0 || ((method === 'combination' || method === 'permutation') && size > length)) return 0n;

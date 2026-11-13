@@ -1786,3 +1786,27 @@ test('String successor carries the maximum Unicode code point without host error
     stdout: '[1, 240, 144, 128, 128]\n[1, 240, 144, 128, 128, 255]\n',
   });
 });
+
+test('Enumerable to_h forwards arguments to custom each', () => {
+  expect(
+    run(
+      'class A; include Enumerable; def each(n); yield [:a,n]; end; end; p A.new.to_h(3), A.new.to_h(4) { |pair| [:b, pair[1]] }'
+    )
+  ).toMatchObject({
+    stdout: '{a: 3}\n{b: 4}\n',
+  });
+});
+
+test('zip accepts implicit Array conversions including private to_ary', () => {
+  expect(run('class A; private; def to_ary; [3,4]; end; end; p [1,2].zip(A.new), (1..2).zip(A.new)')).toMatchObject({
+    stdout: '[[1, 3], [2, 4]]\n[[1, 3], [2, 4]]\n',
+  });
+});
+
+test('singleton repeated selection sizes retain large Integer counts', () => {
+  expect(
+    run('p [1].repeated_permutation(9007199254740992).size, [1].repeated_combination(9007199254740992).size')
+  ).toMatchObject({
+    stdout: '1\n1\n',
+  });
+});
