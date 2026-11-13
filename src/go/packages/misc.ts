@@ -2,8 +2,8 @@ import type { Entity } from '../entities';
 import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { divideByZeroPanic } from '../runtimeErrors';
 import { BASIC, type NamedType } from '../types';
-import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
-import { INT, STRING } from './support';
+import { Cell, copyValue, GoStruct, Iface, type NativeState, Pointer, type Value } from '../values';
+import { callMethod, INT, receiverStruct, STRING } from './support';
 
 // runtime -------------------------------------------------------------------------------------------------------
 
@@ -102,15 +102,8 @@ const RGBA_MODEL = new Iface(
 
 function toRGBA(color: Value): Value {
   if (color instanceof Iface && color.type === RGBA) return color;
-  const [r, g, b, a] = callRGBA(color);
+  const [r, g, b, a] = callMethod(color, 'RGBA') as bigint[];
   return new Iface(RGBA, new GoStruct([r >> 8n, g >> 8n, b >> 8n, a >> 8n]));
-}
-
-function callRGBA(color: Value): bigint[] {
-  const iface = color as Iface;
-  const method =
-    iface.type.kind === 'named' ? iface.type.methods.find((candidate) => candidate.name === 'RGBA') : undefined;
-  return method?.code?.call?.(iface.value, []) as bigint[];
 }
 
 const colorMembers: Record<string, Entity> = {
@@ -259,18 +252,29 @@ const IMAGE = namedType('image', 'Image', {
 
 /** `*image.RGBA`, whose pixels this keeps as RGBA values by position. */
 const IMAGE_RGBA = namedType('image', 'RGBA', { kind: 'struct', fields: [] });
-interface PixelState {
+interface PixelState extends NativeState {
   bounds: GoStruct;
   pixels: Map<string, Value>;
 }
-const pixelsOf = (receiver: Value): PixelState =>
-  ((receiver as Pointer).load() as GoStruct).native?.image as PixelState;
+function createPixelState(bounds: GoStruct, pixels: Map<string, Value>): PixelState {
+  const state: PixelState = {
+    bounds,
+    pixels,
+    clone: () => createPixelState(copyValue(state.bounds) as GoStruct, state.pixels),
+  };
+  return state;
+}
+const pixelsOf = (receiver: Value): PixelState => {
+  const struct = receiverStruct(receiver);
+  struct.native ??= createPixelState(rectangle(0n, 0n, 0n, 0n), new Map());
+  return struct.native as PixelState;
+};
 function inside(state: PixelState, x: bigint, y: bigint): boolean {
   const [x0, y0] = corner(state.bounds, 0);
   const [x1, y1] = corner(state.bounds, 1);
   return x >= x0 && x < x1 && y >= y0 && y < y1;
 }
-addMethod(IMAGE_RGBA, 'Bounds', fn([], [RECTANGLE]), (receiver) => pixelsOf(receiver).bounds, true);
+addMethod(IMAGE_RGBA, 'Bounds', fn([], [RECTANGLE]), (receiver) => copyValue(pixelsOf(receiver).bounds), true);
 addMethod(IMAGE_RGBA, 'ColorModel', fn([], [MODEL]), () => RGBA_MODEL, true);
 addMethod(
   IMAGE_RGBA,
@@ -306,10 +310,7 @@ const imageMembers: Record<string, Entity> = {
   Pt: nativeFunction('Pt', fn([INT, INT], [POINT]), ([x, y]) => new GoStruct([x, y])),
   NewRGBA: nativeFunction('NewRGBA', fn([RECTANGLE], [{ kind: 'pointer', element: IMAGE_RGBA }]), ([bounds]) => {
     currentRuntime().spend();
-    return new Pointer(
-      new Cell(new GoStruct([], { image: { bounds: bounds as GoStruct, pixels: new Map() } satisfies PixelState })),
-      'v'
-    );
+    return new Pointer(new Cell(new GoStruct([], createPixelState(copyValue(bounds) as GoStruct, new Map()))), 'v');
   }),
 };
 

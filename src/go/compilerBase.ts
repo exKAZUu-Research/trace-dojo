@@ -1,6 +1,13 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeExpression, TypeParameter } from './ast';
-import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
+import {
+  type Entity,
+  type FunctionContext,
+  markEscapes,
+  type PackageEntity,
+  type TypeEntity,
+  type VarEntity,
+} from './entities';
 import { substituteInterface } from './generics';
 import type { Exec, FunctionInfo, LocalInfo } from './runtime';
 import { Scope } from './scope';
@@ -136,7 +143,7 @@ export abstract class CompilerBase {
   /** The index of a captured variable in a function's cells, capturing it through every enclosing closure. */
   protected capture(entity: VarEntity, fn: FunctionContext): number {
     entity.boxed = true;
-    entity.escapes = true;
+    markEscapes(entity);
     const existing = fn.captures.get(entity);
     if (existing !== undefined) return existing;
     if (fn.parent && fn.parent !== entity.owner) this.capture(entity, fn.parent);
@@ -205,7 +212,7 @@ export abstract class CompilerBase {
       case 'map': {
         const key = this.resolveType(syntax.key);
         const value = this.resolveType(syntax.value);
-        if (key !== BASIC.invalid && !this.isComparableKey(key)) {
+        if (key !== BASIC.invalid && !this.isComparableKey(key, syntax.key)) {
           this.error(syntax.key, `${describeType(key)} は比較できない型なので、map のキーには使えません。`);
         }
         return { kind: 'map', key, value };
@@ -222,14 +229,68 @@ export abstract class CompilerBase {
     }
   }
 
-  private isComparableKey(type: Type): boolean {
-    // A named type still being declared is checked when it is complete.
-    if (type.kind === 'named' && type.underlying === BASIC.invalid) return true;
+  private isComparableKey(type: Type, span?: Span): boolean {
+    // A named type still being declared is checked once its declaration completes.
+    if (type.kind === 'named' && type.underlying === BASIC.invalid) {
+      if (span) this.deferredMapKeys.push({ key: type, span });
+      return true;
+    }
     return isComparable(type);
   }
 
-  /** Types whose declarations are being resolved, for detecting `type T struct { t T }`. */
+  protected readonly deferredMapKeys: { key: Type; span: Span }[] = [];
+
+  /** Types whose declarations are currently resolving, so generic instances wait until `underlying` is ready. */
   protected readonly resolvingTypes = new Set<NamedType>();
+  protected readonly genericEdges = new Map<number, { target: number; expanding: boolean }[]>();
+  protected hasGenericCycle = false;
+
+  protected recordGenericInstantiation(params: TypeParamType[], args: Type[], span: Span): boolean {
+    let added = false;
+    for (const [index, param] of params.entries()) {
+      const arg = args[index];
+      if (!arg) continue;
+      const mentioned = new Set<TypeParamType>();
+      collectTypeParams(arg, mentioned);
+      for (const source of mentioned) {
+        const expanding = arg !== source;
+        const list = this.genericEdges.get(source.id) ?? [];
+        if (!list.some((edge) => edge.target === param.id && edge.expanding === expanding)) {
+          list.push({ target: param.id, expanding });
+          this.genericEdges.set(source.id, list);
+          added = true;
+        }
+      }
+    }
+    if (added && this.findExpandingGenericCycle()) {
+      this.hasGenericCycle = true;
+      this.error(span, '型引数のインスタンス化が循環しています。');
+      return false;
+    }
+    return true;
+  }
+
+  private findExpandingGenericCycle(): boolean {
+    for (const [source, edges] of this.genericEdges) {
+      for (const edge of edges) {
+        if (edge.expanding && this.canReachTypeParam(edge.target, source)) return true;
+      }
+    }
+    return false;
+  }
+
+  private canReachTypeParam(from: number, goal: number): boolean {
+    const seen = new Set<number>();
+    const stack = [from];
+    while (stack.length > 0) {
+      const current = stack.pop() as number;
+      if (current === goal) return true;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      for (const edge of this.genericEdges.get(current) ?? []) stack.push(edge.target);
+    }
+    return false;
+  }
 
   private resolveNamedType(syntax: Extract<TypeExpression, { kind: 'name' }>, direct: boolean): Type {
     let entity: Entity | undefined;
@@ -254,14 +315,12 @@ export abstract class CompilerBase {
         return this.error(syntax, `型 ${syntax.name} の型引数の数が合いません。`);
       }
       if (!this.checkTypeArguments(entity.generic.typeParams, args, syntax)) return BASIC.invalid;
+      if (!this.recordGenericInstantiation(entity.generic.typeParams, args, syntax)) return BASIC.invalid;
       return entity.generic.instantiate(args, syntax);
     }
     if (syntax.typeArguments.length > 0) return this.error(syntax, `${syntax.name} は型引数を持たない型です。`);
-    const type = entity.type;
-    if (direct && type.kind === 'named' && this.resolvingTypes.has(type)) {
-      return this.error(type.span ?? syntax, `型 ${type.name} が自分自身を直接含んでいます。`);
-    }
-    return type;
+    void direct;
+    return entity.type;
   }
 
   /** Completes a type entity whose declaration has not been resolved yet. */
@@ -414,4 +473,52 @@ function describeConstraint(constraint: InterfaceType): string {
     return 'comparable';
   if (constraint === EMPTY_INTERFACE) return 'any';
   return describeType(constraint);
+}
+
+// code-gauge-allow functionCognitiveComplexity 25 -- Traverses all composite type constructors.
+function collectTypeParams(type: Type, out: Set<TypeParamType>, seen = new Set<Type>()): void {
+  if (seen.has(type)) return;
+  seen.add(type);
+  switch (type.kind) {
+    case 'typeParam': {
+      out.add(type);
+      return;
+    }
+    case 'named': {
+      for (const arg of type.typeArgs ?? []) collectTypeParams(arg, out, seen);
+      return;
+    }
+    case 'pointer':
+    case 'slice':
+    case 'array': {
+      collectTypeParams(type.element, out, seen);
+      return;
+    }
+    case 'map': {
+      collectTypeParams(type.key, out, seen);
+      collectTypeParams(type.value, out, seen);
+      return;
+    }
+    case 'struct': {
+      for (const field of type.fields) collectTypeParams(field.type, out, seen);
+      return;
+    }
+    case 'func': {
+      for (const param of type.params) collectTypeParams(param, out, seen);
+      for (const result of type.results) collectTypeParams(result, out, seen);
+      return;
+    }
+    case 'interface': {
+      for (const method of type.methods) collectTypeParams(method.type, out, seen);
+      for (const term of type.typeSet?.terms ?? []) collectTypeParams(term.type, out, seen);
+      return;
+    }
+    case 'tuple': {
+      for (const element of type.types) collectTypeParams(element, out, seen);
+      return;
+    }
+    default: {
+      return;
+    }
+  }
 }

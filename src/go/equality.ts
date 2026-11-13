@@ -1,5 +1,5 @@
 import { runtimeErrorPanic } from './runtimeErrors';
-import { identical, isComparable, type Type, typeString, underlying } from './types';
+import { identical, isComparable, type Type, typeIdentityKey, typeString, underlying } from './types';
 import { type Complex, type GoArray, type GoStruct, type Iface, type Pointer, type Value } from './values';
 
 type Equal = (a: Value, b: Value) => boolean;
@@ -92,7 +92,10 @@ function buildKey(type: Type): KeyOf {
   switch (under.kind) {
     case 'basic': {
       if (under.basic === 'complex64' || under.basic === 'complex128') {
-        return (value) => `${(value as Complex).re},${(value as Complex).im}`;
+        return (value) => {
+          const { re, im } = value as Complex;
+          return Number.isNaN(re) || Number.isNaN(im) ? Symbol('NaN') : `${re},${im}`;
+        };
       }
       if (under.basic === 'float32' || under.basic === 'float64') {
         // Each NaN is a distinct key in Go, and 0 and -0 are the same key, as in Map.
@@ -118,8 +121,7 @@ function buildKey(type: Type): KeyOf {
         if (value === undefined) return 'nil';
         const iface = value as Iface;
         if (!isComparable(iface.type)) runtimeErrorPanic(`hash of unhashable type ${typeString(iface.type)}`);
-        // Type names tell the dynamic types apart, except for types declared alike in two functions.
-        return `${typeString(iface.type)}|${stringKey(mapKeyOf(iface.type)(iface.value))}`;
+        return `${typeIdentityKey(iface.type)}|${stringKey(mapKeyOf(iface.type)(iface.value))}`;
       };
     }
     default: {

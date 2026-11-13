@@ -437,6 +437,77 @@ function identicalTerms(a: TypeSet['terms'], b: TypeSet['terms']): boolean {
   );
 }
 
+const namedTypeIds = new WeakMap<NamedType, number>();
+let nextNamedTypeId = 0;
+
+/** A canonical key that agrees with Go's `identical(a, b)` for every type, including local named types. */
+// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type, matching identical.
+export function typeIdentityKey(type: Type, seen = new Set<Type>()): string {
+  switch (type.kind) {
+    case 'basic': {
+      return `b:${type.basic}`;
+    }
+    case 'named': {
+      const base = type.origin ?? type;
+      const id = namedTypeId(base);
+      if (!type.origin || !type.typeArgs) return `n:${id}`;
+      if (seen.has(type)) return `n:${id}[...]`;
+      seen.add(type);
+      const args = type.typeArgs.map((arg) => typeIdentityKey(arg, seen)).join(',');
+      seen.delete(type);
+      return `n:${id}[${args}]`;
+    }
+    case 'pointer': {
+      return `*${typeIdentityKey(type.element, seen)}`;
+    }
+    case 'slice': {
+      return `[]${typeIdentityKey(type.element, seen)}`;
+    }
+    case 'array': {
+      return `[${type.length}]${typeIdentityKey(type.element, seen)}`;
+    }
+    case 'map': {
+      return `map[${typeIdentityKey(type.key, seen)}]${typeIdentityKey(type.value, seen)}`;
+    }
+    case 'struct': {
+      const fields = type.fields
+        .map(
+          (field) => `${field.embedded ? '^' : ''}${JSON.stringify(field.name)}:${typeIdentityKey(field.type, seen)}`
+        )
+        .join(';');
+      return `struct{${fields}}`;
+    }
+    case 'func': {
+      const params = type.params.map((param) => typeIdentityKey(param, seen)).join(',');
+      const results = type.results.map((result) => typeIdentityKey(result, seen)).join(',');
+      return `func(${type.variadic ? '...' : ''};${params})(${results})`;
+    }
+    case 'interface': {
+      const methods = type.methods.map((method) => `${method.name}:${typeIdentityKey(method.type, seen)}`).join(';');
+      const comparable = type.typeSet?.comparable ? 'c' : '';
+      const terms = (type.typeSet?.terms ?? [])
+        .map((term) => `${term.tilde ? '~' : ''}${typeIdentityKey(term.type, seen)}`)
+        .join('|');
+      return `interface{${methods}|${comparable}|${terms}}`;
+    }
+    case 'tuple': {
+      return `tuple(${type.types.map((element) => typeIdentityKey(element, seen)).join(',')})`;
+    }
+    case 'typeParam': {
+      return `tp:${type.id}`;
+    }
+  }
+}
+
+function namedTypeId(type: NamedType): number {
+  let id = namedTypeIds.get(type);
+  if (id === undefined) {
+    id = nextNamedTypeId++;
+    namedTypeIds.set(type, id);
+  }
+  return id;
+}
+
 // Names -----------------------------------------------------------------------------------------------------------------
 
 /**
@@ -551,33 +622,46 @@ export type Selection =
 
 export type LookupResult = Selection | { kind: 'ambiguous' } | { kind: 'notFound' };
 
+interface EmbeddedEntry {
+  type: Type;
+  path: number[];
+  indirect: boolean;
+  multiples: boolean;
+}
+
 /**
  * Finds a field or method by name through embedded fields, as a selector does: the shallowest depth wins, and two at
  * the same depth make the name ambiguous. `path` lists the embedded fields to go through and then the field itself.
  */
-// code-gauge-allow functionCognitiveComplexity 30 -- A breadth-first search over embedded fields, as the specification describes.
 export function lookupFieldOrMethod(type: Type, name: string): LookupResult {
   if (name === '_') return { kind: 'notFound' };
+  if (type.kind === 'named' && type.underlying.kind === 'pointer') {
+    const result = lookupFieldOrMethod(type.underlying, name);
+    return result.kind === 'field' || result.kind === 'ambiguous' ? result : { kind: 'notFound' };
+  }
   let start = type;
   let indirect = false;
   if (start.kind === 'pointer') {
     start = start.element;
     indirect = true;
+    if (start.kind === 'typeParam' || underlying(start).kind === 'interface') return { kind: 'notFound' };
   }
-  let current: { type: Type; path: number[]; indirect: boolean }[] = [{ type: start, path: [], indirect }];
-  const visited = new Set<Type>();
+  let current: EmbeddedEntry[] = [{ type: start, path: [], indirect, multiples: false }];
+  const seen = new Set<string>();
   while (current.length > 0) {
-    const found: Selection[] = [];
-    const next: typeof current = [];
+    let found: Selection | undefined;
+    const next: EmbeddedEntry[] = [];
     for (const entry of current) {
       let entryType = entry.type;
       if (entryType.kind === 'typeParam') entryType = entryType.constraint;
       if (entryType.kind === 'named') {
-        if (visited.has(entryType)) continue;
-        visited.add(entryType);
+        const key = typeIdentityKey(entryType);
+        if (seen.has(key)) continue;
+        seen.add(key);
         const method = entryType.methods.find((candidate) => candidate.name === name);
         if (method) {
-          found.push({ kind: 'method', path: entry.path, method, receiverBase: entryType, indirect: entry.indirect });
+          if (found || entry.multiples) return { kind: 'ambiguous' };
+          found = { kind: 'method', path: entry.path, method, receiverBase: entryType, indirect: entry.indirect };
           continue;
         }
       }
@@ -585,26 +669,47 @@ export function lookupFieldOrMethod(type: Type, name: string): LookupResult {
       if (under.kind === 'struct') {
         for (const [index, field] of under.fields.entries()) {
           if (field.name === name) {
-            found.push({ kind: 'field', path: [...entry.path, index], type: field.type, indirect: entry.indirect });
-          } else if (field.embedded) {
+            if (found || entry.multiples) return { kind: 'ambiguous' };
+            found = { kind: 'field', path: [...entry.path, index], type: field.type, indirect: entry.indirect };
+          } else if (!found && field.embedded) {
             const embedded = field.type.kind === 'pointer' ? field.type.element : field.type;
             next.push({
               type: embedded,
               path: [...entry.path, index],
               indirect: entry.indirect || field.type.kind === 'pointer',
+              multiples: entry.multiples,
             });
           }
         }
       } else if (under.kind === 'interface') {
         const method = under.methods.find((candidate) => candidate.name === name);
-        if (method) found.push({ kind: 'interfaceMethod', path: entry.path, method, indirect: entry.indirect });
+        if (method) {
+          if (found || entry.multiples) return { kind: 'ambiguous' };
+          found = { kind: 'interfaceMethod', path: entry.path, method, indirect: entry.indirect };
+        }
       }
     }
-    if (found.length > 1) return { kind: 'ambiguous' };
-    if (found.length === 1) return found[0];
-    current = next;
+    if (found) return found;
+    current = consolidateMultiples(next);
   }
   return { kind: 'notFound' };
+}
+
+function consolidateMultiples(entries: EmbeddedEntry[]): EmbeddedEntry[] {
+  if (entries.length <= 1) return entries;
+  const result: EmbeddedEntry[] = [];
+  const byKey = new Map<string, number>();
+  for (const entry of entries) {
+    const key = typeIdentityKey(entry.type);
+    const previous = byKey.get(key);
+    if (previous === undefined) {
+      byKey.set(key, result.length);
+      result.push(entry);
+    } else {
+      result[previous].multiples = true;
+    }
+  }
+  return result;
 }
 
 /** A method that a type's method set lacks for an interface, and why. */

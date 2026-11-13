@@ -173,3 +173,34 @@ func main() {
     [6, { sum: 7, v: 4 }],
   ]);
 });
+
+test('a turtle captured by an evaluated callee stays reachable while call arguments run', () => {
+  const program = `package main
+
+func maker() func(int) {
+	t := NewTurtle(0, 0)
+	return func(n int) { t.Forward() }
+}
+
+func arg() int {
+	x := 1
+	return x
+}
+
+func main() {
+	maker()(arg())
+}`;
+  const { traceItems } = traceProgram('go', program, program);
+  expect(traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 1, 1, 1, 0]);
+});
+
+test('integers beyond safe number precision remain exact bigints in trace snapshots', () => {
+  const program = `package main
+
+func main() {
+	x := uint64(9007199254740993)
+	_ = x
+}`;
+  const { finalVars } = traceProgram('go', program, program);
+  expect(finalVars.x).toBe(9_007_199_254_740_993n);
+});

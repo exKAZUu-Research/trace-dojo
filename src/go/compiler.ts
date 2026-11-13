@@ -1,10 +1,10 @@
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
-import { represent } from './assignability';
+import { assignFailure, represent } from './assignability';
 import type { ConstDeclaration, File, FunctionDeclaration, Span, TypeDeclaration, TypeSpec, VarSpec } from './ast';
 import type { TraceSettings } from './compilerBase';
 import type { ConstEntity, FunctionContext, GenericFunc, TypeEntity, VarEntity } from './entities';
 import { mapKeyOf } from './equality';
-import { substitute } from './generics';
+import { containsTypeParam, substitute } from './generics';
 import { currentRuntime } from './native';
 import { lookupPackage } from './packages/index';
 import type { FunctionInfo, LocalInfo } from './runtime';
@@ -17,15 +17,17 @@ import {
   type FuncType,
   funcType,
   type InterfaceMethod,
+  isComparable,
   isUntyped,
   type Method,
   missingMethod,
   type NamedType,
   type Type,
+  typeIdentityKey,
   type TypeParamType,
   underlying,
 } from './types';
-import { GoFunc, type Value } from './values';
+import { GoFunc, type Value, writeInPlace } from './values';
 
 export interface CompiledProgram {
   main: FunctionInfo;
@@ -54,7 +56,12 @@ export class ProgramCompiler extends StatementCompiler {
   }[] = [];
   /** Code that must compile once every declaration is known: function bodies and instances of generic code. */
   private readonly pendingBodies: (() => void)[] = [];
+  private readonly pendingGenericChecks: (() => void)[] = [];
   private readonly typeStates = new Map<TypeEntity, { spec: TypeSpec; resolved: boolean }>();
+  private readonly namedRhs = new Map<NamedType, Type>();
+  private readonly newlyResolvedTypes: TypeEntity[] = [];
+  private useTypeDepth = 0;
+  private totalGenericInstances = 0;
   private readonly methodSpecs = new Map<string, FunctionDeclaration[]>();
   private readonly functionReferences = new Map<unknown, Set<unknown>>();
   private readonly claimedAtomicRows = new Set<number>();
@@ -81,6 +88,7 @@ export class ProgramCompiler extends StatementCompiler {
     for (const entity of this.instances.keys()) this.completeInstances(entity);
     for (const resolve of this.pendingSignatures) resolve();
     for (const entity of this.packageScope.entities.values()) if (entity.kind === 'const') entity.pending?.();
+    while (this.pendingGenericChecks.length > 0) (this.pendingGenericChecks.shift() as () => void)();
     for (const initializer of this.globals) initializer.pending?.();
     this.runPending();
     this.checkImportsUsed();
@@ -191,7 +199,7 @@ export class ProgramCompiler extends StatementCompiler {
       this.instances.set(entity, cache);
       entity.generic = {
         typeParams: [],
-        instantiate: (args) => this.instantiateGeneric(entity, shell, args, cache),
+        instantiate: (args, span) => this.instantiateGeneric(entity, shell, args, cache, span),
       };
     }
     if (scope === this.packageScope) this.declarePackageName(spec.name, entity, spec);
@@ -208,13 +216,17 @@ export class ProgramCompiler extends StatementCompiler {
     const outerScope = this.scope;
     const outerFn = this.fn;
     this.scope = new Scope(entity.generic ? this.scopeOfType(entity) : this.scope);
+    this.useTypeDepth++;
+    this.newlyResolvedTypes.push(entity);
     try {
       if (entity.generic) {
         entity.generic.typeParams = this.declareTypeParameters(state.spec.typeParameters);
         shell.typeParams = entity.generic.typeParams;
       }
       this.resolvingTypes.add(shell);
-      const underlyingType = underlying(this.resolveType(state.spec.type, true));
+      const rawType = this.resolveType(state.spec.type, true);
+      this.namedRhs.set(shell, rawType);
+      const underlyingType = underlying(rawType);
       this.resolvingTypes.delete(shell);
       shell.underlying = underlyingType.kind === 'named' ? underlying(underlyingType) : underlyingType;
       if (entity.generic) this.completeInstances(entity);
@@ -224,6 +236,86 @@ export class ProgramCompiler extends StatementCompiler {
     } finally {
       this.scope = outerScope;
       this.fn = outerFn;
+      this.useTypeDepth--;
+      if (this.useTypeDepth === 0) this.finishResolvedTypes();
+    }
+  }
+
+  private finishResolvedTypes(): void {
+    const batch = this.newlyResolvedTypes.splice(0);
+    const cyclic = new Set<TypeEntity>();
+    for (const entity of batch) {
+      const shell = entity.type as NamedType;
+      if (this.reachesDirectly(shell)) cyclic.add(entity);
+    }
+    for (const entity of cyclic) {
+      const shell = entity.type as NamedType;
+      const state = this.typeStates.get(entity);
+      shell.underlying = BASIC.invalid;
+      this.namedRhs.delete(shell);
+      for (const instance of this.instances.get(entity)?.values() ?? []) instance.underlying = BASIC.invalid;
+      this.error(shell.span ?? state?.spec ?? { row: 0, column: 0 }, `型 ${shell.name} が自分自身を直接含んでいます。`);
+    }
+    for (const entity of batch) {
+      if (cyclic.has(entity)) continue;
+      const shell = entity.type as NamedType;
+      let target = this.namedRhs.get(shell);
+      if (target?.kind === 'named') {
+        const seen = new Set<Type>([shell]);
+        while (target?.kind === 'named' && !seen.has(target) && this.namedRhs.has(target)) {
+          seen.add(target);
+          target = this.namedRhs.get(target);
+        }
+        if (target) {
+          const under = underlying(target);
+          shell.underlying = under.kind === 'named' ? underlying(under) : under;
+        }
+      }
+      if (entity.generic) this.completeInstances(entity);
+    }
+    for (const { key, span } of this.deferredMapKeys.splice(0)) {
+      if (key !== BASIC.invalid && !(key.kind === 'named' && key.underlying === BASIC.invalid) && !isComparable(key)) {
+        this.error(span, `${describeType(key)} は比較できない型なので、map のキーには使えません。`);
+      }
+    }
+  }
+
+  private reachesDirectly(start: NamedType): boolean {
+    const seen = new Set<Type>();
+    const stack: Type[] = [];
+    const pushDirect = (type: Type | undefined): void => {
+      if (type && type !== BASIC.invalid) stack.push(type);
+    };
+    pushDirect(this.namedRhs.get(start));
+    pushDirect(start.underlying);
+    while (stack.length > 0) {
+      const current = stack.pop() as Type;
+      if (
+        current === start ||
+        (current.kind === 'named' &&
+          current.origin === start &&
+          current.typeArgs?.every((arg, index) => arg === start.typeParams?.[index]))
+      ) {
+        return true;
+      }
+      if (seen.has(current)) continue;
+      seen.add(current);
+      if (current.kind === 'named') {
+        pushDirect(this.namedRhs.get(current));
+        pushDirect(current.underlying);
+      } else if (current.kind === 'struct') {
+        for (const field of current.fields) pushDirect(field.type);
+      } else if (current.kind === 'array') {
+        pushDirect(current.element);
+      }
+    }
+    return false;
+  }
+
+  private countGenericInstance(span: Span): void {
+    if (++this.totalGenericInstances > 1024) {
+      this.error(span, 'ジェネリックのインスタンスが多すぎます。');
+      this.throwIfErrors();
     }
   }
 
@@ -238,12 +330,16 @@ export class ProgramCompiler extends StatementCompiler {
     entity: TypeEntity,
     shell: NamedType,
     args: Type[],
-    cache: Map<string, NamedType>
+    cache: Map<string, NamedType>,
+    span?: Span
   ): NamedType {
     this.useType(entity);
-    const key = args.map((arg) => typeKey(arg)).join(',');
+    const key = args.map((arg) => typeIdentityKey(arg)).join(',');
     const cached = cache.get(key);
     if (cached) return cached;
+    if (!args.some((arg) => containsTypeParam(arg))) {
+      this.countGenericInstance(span ?? shell.span ?? { row: 0, column: 0 });
+    }
     const instance: NamedType = {
       kind: 'named',
       name: shell.name,
@@ -255,7 +351,7 @@ export class ProgramCompiler extends StatementCompiler {
       span: shell.span,
     };
     cache.set(key, instance);
-    this.completeInstance(entity, instance);
+    if (!this.hasGenericCycle) this.completeInstance(entity, instance);
     return instance;
   }
 
@@ -289,14 +385,17 @@ export class ProgramCompiler extends StatementCompiler {
       };
       instance.methods.push(instanceMethod);
       const declaration = this.genericMethodDeclarations.get(method);
-      if (declaration && !args.some((arg) => containsTypeParams(arg))) {
-        this.pendingBodies.push(() => this.compileMethod(declaration, instance, instanceMethod, args));
+      if (declaration?.body && !this.hasGenericCycle && !args.some((arg) => containsTypeParam(arg))) {
+        this.pendingBodies.push(() => {
+          if (!this.hasGenericCycle) this.compileMethod(declaration, instance, instanceMethod, args);
+        });
       }
     }
   }
 
   /** Completes the instances of a generic type created while its declaration or its methods were incomplete. */
   private completeInstances(entity: TypeEntity): void {
+    if (this.hasGenericCycle) return;
     for (const instance of this.instances.get(entity)?.values() ?? []) this.completeInstance(entity, instance);
   }
 
@@ -304,8 +403,10 @@ export class ProgramCompiler extends StatementCompiler {
 
   protected instantiateNamed(named: NamedType, args: Type[]): NamedType {
     const entity = [...this.typeStates.keys()].find((candidate) => candidate.type === named);
-    if (!entity?.generic) return named;
-    return entity.generic.instantiate(args, named.span ?? { row: 0, column: 0 });
+    if (!entity?.generic || this.hasGenericCycle) return named;
+    const span = named.span ?? { row: 0, column: 0 };
+    if (!this.recordGenericInstantiation(entity.generic.typeParams, args, span)) return named;
+    return entity.generic.instantiate(args, span);
   }
 
   private readonly genericMethodDeclarations = new Map<Method, FunctionDeclaration>();
@@ -371,10 +472,14 @@ export class ProgramCompiler extends StatementCompiler {
           span: declaration,
         };
         shell.methods.push(method);
+        if (!declaration.body) {
+          this.error(declaration, `メソッド ${declaration.name} に本体がありません。`);
+          continue;
+        }
         if (generic) {
           this.genericMethodDeclarations.set(method, declaration);
           // The generic method's body is checked once with its type parameters.
-          this.pendingBodies.push(() => this.compileMethod(declaration, shell, method, undefined));
+          this.pendingGenericChecks.push(() => this.compileMethod(declaration, shell, method, undefined));
         } else {
           this.pendingBodies.push(() => this.compileMethod(declaration, shell, method, undefined));
         }
@@ -443,7 +548,6 @@ export class ProgramCompiler extends StatementCompiler {
       this.reporting = outerReporting;
       this.fn = outerFn;
     }
-    if (!declaration.body) this.error(declaration, `メソッド ${declaration.name} に本体がありません。`);
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Functions, generic or not, and the checks of main and init.
@@ -520,15 +624,18 @@ export class ProgramCompiler extends StatementCompiler {
       typeParams: [],
       type: funcType([], []),
       instantiate: (args) => {
-        const key = args.map((arg) => typeKey(arg)).join(',');
+        const key = args.map((arg) => typeIdentityKey(arg)).join(',');
         const cached = cache.get(key);
         if (cached) return cached;
+        if (this.hasGenericCycle) return new GoFunc(() => {});
+        this.countGenericInstance(declaration);
         const state: { info?: FunctionInfo } = {};
         const instance = new GoFunc((argValues, callRow, deferredFor) =>
           currentRuntime().call(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never)
         );
         cache.set(key, instance);
         this.pendingBodies.push(() => {
+          if (this.hasGenericCycle) return;
           const outerReporting = this.reporting;
           const outerFn = this.fn;
           this.reporting = false;
@@ -555,7 +662,6 @@ export class ProgramCompiler extends StatementCompiler {
             this.fn = outerFn;
           }
         });
-        if (this.pendingBodies.length > 10_000) throw new Error('Too many generic instances');
         return instance;
       },
     };
@@ -576,7 +682,7 @@ export class ProgramCompiler extends StatementCompiler {
         entity.type = generic.type;
       });
     });
-    this.pendingBodies.push(() => {
+    this.pendingGenericChecks.push(() => {
       this.fn = undefined;
       this.withTypeArguments(
         generic.typeParams,
@@ -694,8 +800,10 @@ export class ProgramCompiler extends StatementCompiler {
       const run = (frame: Parameters<(typeof values)[0]>[0]): void => {
         const evaluate = (): void => {
           const evaluated = values.map((value) => value(frame));
-          for (const [index, variable] of variables.entries())
-            frame.runtime.globals[variable.slot].v = evaluated[index];
+          for (const [index, variable] of variables.entries()) {
+            const cell = frame.runtime.globals[variable.slot];
+            cell.v = writeInPlace(cell.v, evaluated[index]);
+          }
         };
         if (row === undefined) evaluate();
         else frame.runtime.steps.runStatement(row, createsObjects, evaluate);
@@ -767,7 +875,9 @@ export class ProgramCompiler extends StatementCompiler {
       seen.add(item);
       if ((item as VarEntity).kind === 'var' && !(item as VarEntity).owner) variables.add(item as VarEntity);
       const inner = this.functionReferences.get(item);
-      if (inner) stack.push(...inner);
+      if (inner) {
+        for (const next of inner) stack.push(next);
+      }
     }
     return variables;
   }
@@ -847,6 +957,13 @@ export class ProgramCompiler extends StatementCompiler {
         continue;
       }
       if (declaredType === BASIC.invalid) continue;
+      if (!isUntyped(operand.type) && assignFailure(operand.type, declaredType)) {
+        this.error(
+          operand.span,
+          `${describeType(operand.type)} 型の定数は、${describeType(declaredType)} 型の定数には使えません。`
+        );
+        continue;
+      }
       const representation = represent(operand.constant, declaredType);
       if ('error' in representation) {
         this.reportRepresentation(operand, declaredType, representation.error, '定数');
@@ -886,41 +1003,6 @@ export class ProgramCompiler extends StatementCompiler {
 export function compileProgram(file: File, trace?: TraceSettings): CompiledProgram {
   const compiler = new ProgramCompiler(file, trace);
   return compiler.compile();
-}
-
-/** A key that tells apart non-identical type arguments, including type parameters of the same name. */
-function typeKey(type: Type): string {
-  switch (type.kind) {
-    case 'typeParam': {
-      return `${type.name}#${type.id}`;
-    }
-    case 'named': {
-      const args = type.typeArgs ? `[${type.typeArgs.map(typeKey).join(',')}]` : '';
-      return `${describeType(type)}@${type.span?.row ?? ''}:${type.span?.column ?? ''}${args}`;
-    }
-    case 'pointer':
-    case 'slice': {
-      return `${type.kind}(${typeKey(type.element)})`;
-    }
-    case 'array': {
-      return `[${type.length}](${typeKey(type.element)})`;
-    }
-    case 'map': {
-      return `map(${typeKey(type.key)},${typeKey(type.value)})`;
-    }
-    default: {
-      return describeType(type);
-    }
-  }
-}
-
-function containsTypeParams(type: Type): boolean {
-  if (type.kind === 'typeParam') return true;
-  if (type.kind === 'named') return (type.typeArgs ?? []).some(containsTypeParams);
-  if (type.kind === 'pointer' || type.kind === 'slice' || type.kind === 'array')
-    return containsTypeParams(type.element);
-  if (type.kind === 'map') return containsTypeParams(type.key) || containsTypeParams(type.value);
-  return false;
 }
 
 export { declareValue };

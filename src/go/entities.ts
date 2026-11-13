@@ -38,6 +38,10 @@ export interface VarEntity {
    * to an interface, stores it elsewhere, returns it, passes it to a function, or captures or takes its address.
    */
   escapes?: boolean;
+  /** Local variables whose backing storage may be shared by this variable's value. */
+  escapeSources?: Set<VarEntity>;
+  /** Callbacks to run if this variable's value ever escapes. */
+  escapeHooks?: (() => void)[];
   /** The number of assignments after the declaration, which decide whether the declared value reaches each use. */
   writes?: number;
   /**
@@ -129,4 +133,33 @@ export interface FunctionContext {
   loopDepth: number;
   breakDepth: number;
   recordsSteps: boolean;
+}
+
+export function markEscapes(entity: VarEntity): void {
+  if (entity.escapes) return;
+  entity.escapes = true;
+  if (entity.escapeHooks) {
+    for (const hook of entity.escapeHooks) hook();
+    entity.escapeHooks = undefined;
+  }
+  if (entity.escapeSources) {
+    for (const source of entity.escapeSources) markEscapes(source);
+  }
+}
+
+export function linkEscapeSource(source: VarEntity, target: VarEntity): void {
+  if (source === target) return;
+  if (target.escapes) {
+    markEscapes(source);
+    return;
+  }
+  (target.escapeSources ??= new Set()).add(source);
+}
+
+export function linkEscapeHook(hook: () => void, target: VarEntity): void {
+  if (target.escapes) {
+    hook();
+    return;
+  }
+  (target.escapeHooks ??= []).push(hook);
 }

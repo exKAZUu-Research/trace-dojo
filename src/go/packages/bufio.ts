@@ -2,27 +2,40 @@
 import type { Entity } from '../entities';
 import { newError } from '../errorValues';
 import { decodeRune, encodeRune, RUNE_ERROR } from '../literals';
-import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
-import { GoPanic } from '../runtime';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, ERROR_TYPE, funcType, pointerTo, RUNE, sliceOf } from '../types';
-import { Cell, GoStruct, Pointer, type Value } from '../values';
-import { EOF, IO_READER, IO_WRITER } from './io';
-import { BOOL, byteSlice, bytesOf, callMethod, INT, STRING } from './support';
+import { Cell, GoStruct, type NativeState, Pointer, type Slice, type Value } from '../values';
+import { EOF, ERR_SHORT_WRITE, IO_READER, IO_WRITER } from './io';
+import { BOOL, byteSlice, bytesOf, callMethod, INT, receiverStruct, STRING, stringPanic } from './support';
 import { isSpace } from './unicodeSupport';
 
 // Writer: transcribed from Go's bufio.go, with a buffer of 4096 bytes by default ------------------------------------
 
 const WRITER = namedType('bufio', 'Writer', { kind: 'struct', fields: [] });
 
-interface WriterState {
+interface WriterState extends NativeState {
   writer: Value;
   buffer: string;
   size: number;
   error: Value;
 }
 
+function createWriterState(writer?: Value, size = 0, buffer = '', error?: Value): WriterState {
+  const state: WriterState = {
+    writer,
+    buffer,
+    size,
+    error,
+    clone: () => createWriterState(state.writer, state.size, state.buffer, state.error),
+  };
+  return state;
+}
+
 function writerOf(receiver: Value): WriterState {
-  return ((receiver as Pointer).load() as GoStruct).native?.bufioWriter as WriterState;
+  const struct = receiverStruct(receiver);
+  struct.native ??= createWriterState();
+  return struct.native as WriterState;
 }
 
 function writeThrough(state: WriterState, bytes: string): number {
@@ -35,7 +48,7 @@ function flush(state: WriterState): Value {
   if (state.error !== undefined) return state.error;
   if (state.buffer.length === 0) return undefined;
   const written = writeThrough(state, state.buffer);
-  if (written < state.buffer.length && state.error === undefined) state.error = newError('short write');
+  if (written < state.buffer.length && state.error === undefined) state.error = ERR_SHORT_WRITE;
   state.buffer = state.error === undefined ? '' : state.buffer.slice(written);
   return state.error;
 }
@@ -103,8 +116,7 @@ addMethod(
 addMethod(WRITER, 'Size', fn([], [INT]), (receiver) => BigInt(writerOf(receiver).size), true);
 
 function newWriter(writer: Value, size: number): Value {
-  const state: WriterState = { writer, buffer: '', size: size <= 0 ? 4096 : size, error: undefined };
-  return new Pointer(new Cell(new GoStruct([], { bufioWriter: state })), 'v');
+  return new Pointer(new Cell(new GoStruct([], createWriterState(writer, size <= 0 ? 4096 : size))), 'v');
 }
 
 // Scanner over a reader such as strings.Reader; standard input is not available here ------------------------------
@@ -115,16 +127,24 @@ const SPLIT_FUNC = namedType(
   'SplitFunc',
   funcType([sliceOf(BASIC.uint8), BOOL], [INT, sliceOf(BASIC.uint8), ERROR_TYPE])
 );
+const MAX_SCAN_TOKEN_SIZE = 65_536;
+const START_BUF_SIZE = 4096;
+const MAX_CONSECUTIVE_EMPTY_READS = 100;
+const ERR_TOO_LONG = newError('bufio.Scanner: token too long');
+const ERR_BAD_READ_COUNT = newError('bufio.Scanner: Read returned impossible count');
+const ERR_NO_PROGRESS = newError('multiple Read calls return no data or error');
 
 type Splitter = (data: string, atEOF: boolean) => [number, string | undefined];
 
-interface ScannerState {
+interface ScannerState extends NativeState {
   reader: Value;
   data: string;
+  bufLen: number;
+  maxTokenSize: number;
   eof: boolean;
   token: string;
   error: Value;
-  split: Splitter;
+  split: Splitter | undefined;
   done: boolean;
   scanned: boolean;
 }
@@ -178,32 +198,97 @@ const SPLITTERS = new Map<string, Splitter>([
   ['ScanBytes', scanBytes],
 ]);
 
+function createScannerState(reader?: Value, split?: Splitter, maxTokenSize = 0): ScannerState {
+  const cloneFrom = (source: ScannerState): ScannerState => {
+    const copy: ScannerState = {
+      ...source,
+      clone: () => cloneFrom(copy),
+    };
+    return copy;
+  };
+  const state: ScannerState = {
+    reader,
+    data: '',
+    bufLen: 0,
+    maxTokenSize,
+    eof: false,
+    token: '',
+    error: undefined,
+    split,
+    done: false,
+    scanned: false,
+    clone: () => cloneFrom(state),
+  };
+  return state;
+}
+
 function scannerOf(receiver: Value): ScannerState {
-  return ((receiver as Pointer).load() as GoStruct).native?.scanner as ScannerState;
+  const struct = receiverStruct(receiver);
+  struct.native ??= createScannerState();
+  return struct.native as ScannerState;
+}
+
+function recordScannerError(state: ScannerState, error: Value): void {
+  state.error ??= error;
 }
 
 function scan(state: ScannerState): boolean {
   if (state.done) return false;
   state.scanned = true;
+  const runtime = currentRuntime();
   for (;;) {
-    const [advance, token] = state.split(state.data, state.eof);
-    if (token !== undefined) {
+    runtime.spend();
+    if (state.data.length > 0 || state.eof) {
+      if (!state.split) nilPointerPanic();
+      const [advance, token] = state.split(state.data, state.eof);
       state.data = state.data.slice(advance);
-      state.token = token;
-      return true;
+      if (token !== undefined) {
+        state.token = token;
+        return true;
+      }
     }
-    state.data = state.data.slice(advance);
     if (state.eof) {
       state.done = true;
       state.token = '';
       return false;
     }
-    const buffer = byteSlice('\0'.repeat(4096));
-    const [count, error] = callMethod(state.reader, 'Read', [buffer]) as [bigint, Value];
-    state.data += bytesOf(buffer).slice(0, Number(count));
-    if (error !== undefined) {
-      state.eof = true;
-      if (error !== EOF) state.error = error;
+    if (state.data.length >= state.bufLen) {
+      if (state.bufLen >= state.maxTokenSize) {
+        recordScannerError(state, ERR_TOO_LONG);
+        state.done = true;
+        state.token = '';
+        return false;
+      }
+      let newSize = state.bufLen * 2;
+      if (newSize === 0) newSize = START_BUF_SIZE;
+      newSize = Math.min(newSize, state.maxTokenSize);
+      runtime.checkStringLength(newSize);
+      state.bufLen = newSize;
+    }
+    for (let loop = 0; ;) {
+      runtime.spend();
+      const space = state.bufLen - state.data.length;
+      const buffer = byteSlice('\0'.repeat(space));
+      const [count, error] = callMethod(state.reader, 'Read', [buffer]) as [bigint, Value];
+      const readCount = Number(count);
+      if (readCount < 0 || readCount > space) {
+        recordScannerError(state, ERR_BAD_READ_COUNT);
+        state.eof = true;
+        break;
+      }
+      state.data += bytesOf(buffer).slice(0, readCount);
+      if (error !== undefined) {
+        state.eof = true;
+        if (error !== EOF) recordScannerError(state, error);
+        break;
+      }
+      if (readCount > 0) break;
+      loop++;
+      if (loop > MAX_CONSECUTIVE_EMPTY_READS) {
+        recordScannerError(state, ERR_NO_PROGRESS);
+        state.eof = true;
+        break;
+      }
     }
   }
 }
@@ -212,18 +297,36 @@ addMethod(SCANNER, 'Scan', fn([], [BOOL]), (receiver) => scan(scannerOf(receiver
 addMethod(SCANNER, 'Text', fn([], [STRING]), (receiver) => scannerOf(receiver).token, true);
 addMethod(SCANNER, 'Bytes', fn([], [sliceOf(BASIC.uint8)]), (receiver) => byteSlice(scannerOf(receiver).token), true);
 addMethod(SCANNER, 'Err', fn([], [ERROR_TYPE]), (receiver) => scannerOf(receiver).error, true);
-addMethod(SCANNER, 'Buffer', fn([sliceOf(BASIC.uint8), INT], []), () => {}, true);
+addMethod(
+  SCANNER,
+  'Buffer',
+  fn([sliceOf(BASIC.uint8), INT], []),
+  (receiver, [buf, max]) => {
+    const state = scannerOf(receiver);
+    if (state.scanned) stringPanic('Buffer called after Scan');
+    const cap = (buf as Slice | undefined)?.capacity ?? 0;
+    currentRuntime().checkStringLength(cap);
+    state.bufLen = cap;
+    state.maxTokenSize = Number(max as bigint);
+    return;
+  },
+  true
+);
 addMethod(
   SCANNER,
   'Split',
   fn([SPLIT_FUNC], []),
   (receiver, [split]) => {
     const state = scannerOf(receiver);
-    if (state.scanned) throw new GoPanic(newError('Split called after Scan'));
+    if (state.scanned) stringPanic('Split called after Scan');
+    if (split === undefined) {
+      state.split = undefined;
+      return;
+    }
     const name = [...SPLITTERS.entries()].find(
       ([, splitter]) => (split as { splitter?: Splitter } | undefined)?.splitter === splitter
     )?.[0];
-    if (!name) throw new GoPanic(newError('bufio.Scanner.Split: own split functions are not available here'));
+    if (!name) stringPanic('bufio.Scanner.Split: own split functions are not available here');
     state.split = SPLITTERS.get(name) as Splitter;
     return;
   },
@@ -249,28 +352,32 @@ const members: Record<string, Entity> = {
   NewWriterSize: nativeFunction('NewWriterSize', fn([IO_WRITER, INT], [pointerTo(WRITER)]), ([writer, size]) =>
     newWriter(writer, Number(size as bigint))
   ),
-  NewScanner: nativeFunction('NewScanner', fn([IO_READER], [pointerTo(SCANNER)]), ([reader]) => {
-    const state: ScannerState = {
-      reader,
-      data: '',
-      eof: false,
-      token: '',
-      error: undefined,
-      split: scanLines,
-      done: false,
-      scanned: false,
-    };
-    return new Pointer(new Cell(new GoStruct([], { scanner: state })), 'v');
-  }),
+  NewScanner: nativeFunction(
+    'NewScanner',
+    fn([IO_READER], [pointerTo(SCANNER)]),
+    ([reader]) =>
+      new Pointer(new Cell(new GoStruct([], createScannerState(reader, scanLines, MAX_SCAN_TOKEN_SIZE))), 'v')
+  ),
   ScanLines: splitFunction('ScanLines'),
   ScanWords: splitFunction('ScanWords'),
   ScanRunes: splitFunction('ScanRunes'),
   ScanBytes: splitFunction('ScanBytes'),
+  ErrTooLong: {
+    kind: 'var',
+    name: 'ErrTooLong',
+    type: ERROR_TYPE,
+    span: { row: 0, column: 0 },
+    used: true,
+    boxed: false,
+    owner: undefined,
+    slot: -1,
+    library: () => ERR_TOO_LONG,
+  },
   MaxScanTokenSize: {
     kind: 'const',
     name: 'MaxScanTokenSize',
     type: BASIC.untypedInt,
-    value: { kind: 'int', value: 65_536n },
+    value: { kind: 'int', value: BigInt(MAX_SCAN_TOKEN_SIZE) },
     span: { row: 0, column: 0 },
     used: true,
   },
@@ -282,5 +389,4 @@ export const BUFIO_PACKAGE = definePackage('bufio', members, [
   'NewReaderSize',
   'ReadWriter',
   'NewReadWriter',
-  'ErrTooLong',
 ]);

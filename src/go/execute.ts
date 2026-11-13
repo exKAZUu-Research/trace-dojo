@@ -32,9 +32,9 @@ export function executeGoProgram(source: string, input?: ProgramInput): ProgramE
  */
 export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
-    runtime.globals = program.globalZeros.map((zero) => new Cell(zero()));
     let uncaughtException: string | undefined;
     try {
+      runtime.globals = program.globalZeros.map((zero) => new Cell(zero()));
       runtime.call(program.initializer, [], [], undefined);
       // The turtles that main's variables still reach when it ends are the final ones, as in Java.
       runtime.call(program.main, [], [], undefined, undefined, (frame) => {
@@ -44,6 +44,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     } catch (error) {
       uncaughtException = describeUncaught(error);
     }
+    runtime.flushOutput();
     return {
       finalBoard: runtime.world.boardText(),
       finalTurtles: runtime.world.turtleTraces(),

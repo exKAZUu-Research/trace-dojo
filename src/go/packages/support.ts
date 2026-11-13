@@ -1,10 +1,11 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { utf8Decode, utf8Encode } from '../literals';
+import { utf8Encode } from '../literals';
 import { callDynamic } from '../methods';
 import { currentRuntime } from '../native';
+import { GoPanic } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { ANY, BASIC, ERROR_TYPE, sliceOf, type Type } from '../types';
-import { copyValue, GoFunc, Iface, Slice, type Value } from '../values';
+import { copyValue, GoFunc, type GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 
 export const INT = BASIC.int;
 export const STRING = BASIC.string;
@@ -16,12 +17,23 @@ export { ANY, ERROR_TYPE };
 
 /** Writes UTF-8 bytes to standard output. */
 export function writeStdout(bytes: string): void {
-  currentRuntime().io.stdout.write(utf8Decode(bytes));
+  currentRuntime().writeStdout(bytes);
 }
 
 /** Writes UTF-8 bytes to standard error. */
 export function writeStderr(bytes: string): void {
-  currentRuntime().io.stderr.write(utf8Decode(bytes));
+  currentRuntime().writeStderr(bytes);
+}
+
+/** Panics with a plain `string` value, as Go's library `panic("...")` calls do. */
+export function stringPanic(message: string): never {
+  throw new GoPanic(new Iface(BASIC.string, message));
+}
+
+/** Loads the struct behind a pointer receiver, raising Go's nil-pointer panic when the receiver is nil. */
+export function receiverStruct(receiver: Value): GoStruct {
+  if (!(receiver instanceof Pointer)) nilPointerPanic();
+  return receiver.load() as GoStruct;
 }
 
 /** Spends operations in proportion to the work a library call does on `size` items. */

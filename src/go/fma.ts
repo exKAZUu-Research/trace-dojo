@@ -5,8 +5,8 @@ import { scaleToFloat } from './constants';
  * additions and subtractions that use them (FMADD, FMSUB, FNMSUB).
  */
 export function fma(a: number, b: number, c: number): number {
-  const product = a * b;
-  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || product === 0 || c === 0) return product + c;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || a === 0 || b === 0) return a * b + c;
+  if (c === 0) return a * b;
   const x = exactBinary(a);
   const y = exactBinary(b);
   const z = exactBinary(c);

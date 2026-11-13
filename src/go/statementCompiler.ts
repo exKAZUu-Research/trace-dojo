@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import { constantIdentityKey, represent } from './assignability';
 import type {
   Block,
   ConstDeclaration,
@@ -12,10 +13,10 @@ import type {
   VarDeclaration,
 } from './ast';
 import { CallCompiler } from './callCompiler';
-import type { FunctionContext, VarEntity } from './entities';
+import { type FunctionContext, linkEscapeHook, linkEscapeSource, type VarEntity } from './entities';
 import { equalityOf } from './equality';
 import { runesOf } from './literals';
-import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
+import { dynamicMethod, invokeMethod, receiverFor } from './methods';
 import type { Operand } from './operand';
 import { arithmetic } from './operators';
 import {
@@ -31,12 +32,15 @@ import {
   readLocal,
   RETURN,
   UNASSIGNED,
+  withTemporary,
 } from './runtime';
 import { nilPointerPanic, panicNilValue } from './runtimeErrors';
+import { runtimePrint } from './runtimePrint';
 import {
   ANY,
   BASIC,
   coreType,
+  defaultType,
   describeType,
   type FuncType,
   identical,
@@ -47,6 +51,7 @@ import {
   isString,
   isUntyped,
   type Type,
+  typeIdentityKey,
   underlying,
 } from './types';
 import {
@@ -59,6 +64,7 @@ import {
   Pointer,
   type Slice,
   type Value,
+  writeInPlace,
 } from './values';
 
 /** Function names that, by Go's convention, construct a value, as Java's `new` does for the step rules. */
@@ -255,6 +261,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** Reads and writes a target once, evaluating its operands once, for `x++` and `x op= y`. */
   private updater(target: Operand, syntax: Expression): (frame: Frame, change: (value: Value) => Value) => void {
+    if (target.mapUpdate) return target.mapUpdate;
     const store = target.store as NonNullable<Operand['store']>;
     if (stripParens(syntax).kind === 'name' || target.mode === 'mapIndex' || !target.addressOf) {
       const read = target.eval;
@@ -297,31 +304,32 @@ export abstract class StatementCompiler extends CallCompiler {
     const { operator, left, right } = statement;
     if (operator !== '=') return this.compoundAssignment(statement);
     const targets = left.map((target) => this.assignmentTarget(target));
-    const stores = (index: number, value: Eval): ((frame: Frame, value: Value) => void) => {
-      void value;
+    const prepareFor = (index: number): ((frame: Frame) => (value: Value) => void) => {
       const target = targets[index];
-      if (!target || this.isInvalid(target)) return () => {};
-      return target.store as NonNullable<Operand['store']>;
+      if (!target || this.isInvalid(target)) return () => () => {};
+      if (target.prepareStore) return target.prepareStore;
+      const store = target.store as NonNullable<Operand['store']>;
+      return (frame) => (value) => store(frame, value);
     };
     const typeOf = (index: number): Type | undefined => {
       const target = targets[index];
       if (!target) return undefined;
       return target.type;
     };
-    const values = this.rightSide(statement, right, left.length, typeOf);
+    const localAt = (index: number): VarEntity | 'discard' | undefined => {
+      const inner = stripParens(left[index]);
+      if (inner.kind === 'name' && inner.name === '_') return 'discard';
+      return inner.kind === 'name' ? targets[index]?.variable?.entity : undefined;
+    };
+    const values = this.rightSide(statement, right, left.length, typeOf, undefined, undefined, localAt);
     if (!values) return () => {};
-    const storeFns = values.map((value, index) => stores(index, value));
-    const exec: Exec =
-      values.length === 1
-        ? (frame) => {
-            storeFns[0](frame, values[0](frame));
-            return;
-          }
-        : (frame) => {
-            const evaluated = evaluateAll(frame, values);
-            for (const [index, store] of storeFns.entries()) store(frame, evaluated[index]);
-            return;
-          };
+    const prepares = values.map((_, index) => prepareFor(index));
+    const exec: Exec = (frame) => {
+      const writers = prepares.map((prepare) => prepare(frame));
+      const evaluated = evaluateAll(frame, values);
+      for (const [index, write] of writers.entries()) write(evaluated[index]);
+      return;
+    };
     const createsObjects = right.length === left.length && right.every((value) => this.createsObject(value));
     return this.withStep(statement, exec, createsObjects);
   }
@@ -337,7 +345,6 @@ export abstract class StatementCompiler extends CallCompiler {
    * Compiles the right side of an assignment or declaration for `count` targets: one value per target, a call with
    * several results, or a comma-ok form. `typeOf` gives each target's type, or undefined for `_` and new variables.
    */
-  // code-gauge-allow functionCognitiveComplexity 30 -- The forms of right sides that Go allows.
   protected rightSide(
     span: Span,
     right: Expression[],
@@ -345,17 +352,30 @@ export abstract class StatementCompiler extends CallCompiler {
     typeOf: (index: number) => Type | undefined,
     defineTypes?: Type[],
     /** The first value, when the caller has compiled it already. */
-    precompiled?: Operand
+    precompiled?: Operand,
+    targetLocal?: (index: number) => VarEntity | 'discard' | undefined
   ): Eval[] | undefined {
     const convert = (operand: Operand, index: number): Eval => {
+      const local = targetLocal?.(index);
       const type = typeOf(index);
-      if (type) return this.assign(operand, type, '変数');
+      if (type) {
+        const assignTarget = local === 'discard' ? this.discardTarget(span) : local;
+        return this.assign(operand, type, '変数', assignTarget);
+      }
       const value = this.asValue(operand);
+      if (local === 'discard') {
+        // Assigning to `_` evaluates and discards without escaping the operand.
+      } else if (local && local.owner !== undefined) {
+        this.recordLocalEscapeAlias(value, local);
+      } else {
+        this.escapeOperand(value);
+      }
       if (value.type === BASIC.untypedNil && !defineTypes) return value.eval;
       const defaulted = this.defaulted(value);
       if (defineTypes) defineTypes[index] = defaulted.type;
       if (isInterface(defaulted.type) || !isValueKind(defaulted.type)) return defaulted.eval;
-      return this.assign(defaulted, defaulted.type, '変数');
+      const read = defaulted.eval;
+      return (frame) => copyValue(read(frame));
     };
     if (right.length === count) {
       return right.map((expression, index) => {
@@ -384,6 +404,10 @@ export abstract class StatementCompiler extends CallCompiler {
     for (const expression of right) this.expression(expression);
     this.error(span, `左辺は ${count} 個ですが、右辺の値は ${right.length} 個です。`);
     return undefined;
+  }
+
+  private discardTarget(span: Span): VarEntity {
+    return { kind: 'var', name: '_', type: BASIC.invalid, span, used: true, boxed: false, owner: this.fn, slot: -1 };
   }
 
   private isConstructorCall(expression: Expression): boolean {
@@ -457,6 +481,12 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     const types: Type[] = [];
     const definedAsConstant = first?.ssaConstant;
+    const holders = names.map(({ name, span }, index): VarEntity | 'discard' => {
+      if (name === '_') return 'discard';
+      const current = existing[index];
+      if (current?.kind === 'var') return current;
+      return this.discardTarget(span);
+    });
     const values = this.rightSide(
       statement,
       right,
@@ -466,42 +496,40 @@ export abstract class StatementCompiler extends CallCompiler {
         return entity?.kind === 'var' ? entity.type : undefined;
       },
       types,
-      first
+      first,
+      (index) => holders[index]
     );
     if (!values) {
       for (const [index, { name, span }] of names.entries())
         if (!existing[index] && name !== '_') this.declareLocal(name, BASIC.invalid, span).used = true;
       return () => {};
     }
-    const targets: ((frame: Frame, value: Value) => void)[] = names.map(({ name, span }, index) => {
+    const prepares: ((frame: Frame) => (value: Value) => void)[] = names.map(({ name, span }, index) => {
       const entity = existing[index];
-      if (name === '_') return () => {};
+      if (name === '_') return () => () => {};
       if (entity) {
         if (entity.kind !== 'var') {
           this.error(span, `${name} は変数ではないので代入できません。`);
-          return () => {};
+          return () => () => {};
         }
         const operand = this.variableOperand(entity, span);
         countWrite(operand);
-        return operand.store as NonNullable<Operand['store']>;
+        return operand.prepareStore ?? ((frame) => (value) => operand.store?.(frame, value));
       }
       const type = types[index] ?? BASIC.invalid;
       if (isUntyped(type)) this.error(span, `${name} の型を決められません（nil には型がありません）。`);
       const variable = this.declareLocal(name, type, span);
+      const holder = holders[index];
+      if (holder !== 'discard') transferEscapeLinks(holder, variable);
       if (single) variable.definedAsConstant = definedAsConstant;
-      return (frame, value) => declareValue(frame, variable, value);
+      return (frame) => (value) => declareValue(frame, variable, value);
     });
-    const exec: Exec =
-      values.length === 1
-        ? (frame) => {
-            targets[0](frame, values[0](frame));
-            return;
-          }
-        : (frame) => {
-            const evaluated = evaluateAll(frame, values);
-            for (const [index, target] of targets.entries()) target(frame, evaluated[index]);
-            return;
-          };
+    const exec: Exec = (frame) => {
+      const writers = prepares.map((prepare) => prepare(frame));
+      const evaluated = evaluateAll(frame, values);
+      for (const [index, write] of writers.entries()) write(evaluated[index]);
+      return;
+    };
     const createsObjects = right.length === left.length && right.every((value) => this.createsObject(value));
     return this.withStep(statement, exec, createsObjects);
   }
@@ -547,11 +575,25 @@ export abstract class StatementCompiler extends CallCompiler {
         continue;
       }
       const types: Type[] = [];
-      const values = this.rightSide(spec, spec.values, spec.names.length, () => declaredType, types);
+      const holders = spec.names.map((name): VarEntity | 'discard' =>
+        name.name === '_' ? 'discard' : this.discardTarget(name)
+      );
+      const values = this.rightSide(
+        spec,
+        spec.values,
+        spec.names.length,
+        () => declaredType,
+        types,
+        undefined,
+        (index) => holders[index]
+      );
       const variables = spec.names.map((name, index) => {
         const type = declaredType ?? types[index] ?? BASIC.invalid;
         if (isUntyped(type)) this.error(name, `${name.name} の型を決められません（nil には型がありません）。`);
-        return this.declareLocal(name.name, type, name);
+        const variable = this.declareLocal(name.name, type, name);
+        const holder = holders[index];
+        if (holder !== 'discard') transferEscapeLinks(holder, variable);
+        return variable;
       });
       if (!values) continue;
       const exec: Exec = (frame) => {
@@ -758,7 +800,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const targets = [statement.key, statement.value];
     const types = [keyType, valueType];
     let answered = false;
-    const stores = targets.map((target, index): ((frame: Frame, value: Value) => void) | undefined => {
+    const prepares = targets.map((target, index): ((frame: Frame) => (value: Value) => void) | undefined => {
       if (!target) return undefined;
       const type = types[index];
       if (stripParens(target).kind === 'name' && (stripParens(target) as { name: string }).name === '_')
@@ -771,31 +813,38 @@ export abstract class StatementCompiler extends CallCompiler {
         }
         const variable = this.declareLocal(target.name, type, target);
         const copy = isValueKind(type);
-        return (frame, value) => declareValue(frame, variable, copy ? copyValue(value) : value);
+        return (frame) => (value) => declareValue(frame, variable, copy ? copyValue(value) : value);
       }
       const operand = this.assignmentTarget(target);
       if (!operand || this.isInvalid(operand)) return undefined;
+      const localTarget = stripParens(target).kind === 'name' ? operand.variable?.entity : undefined;
       const convert = this.assign(
         { mode: 'value', type, span: target, eval: (frame) => frame.temporaries.at(-1) as Value },
         operand.type,
-        '変数'
+        '変数',
+        localTarget
       );
-      const store = operand.store as NonNullable<Operand['store']>;
-      return (frame, value) => {
-        frame.temporaries.push(value);
-        try {
-          store(frame, convert(frame));
-        } finally {
-          frame.temporaries.pop();
-        }
+      const prepare = operand.prepareStore ?? ((frame: Frame) => (value: Value) => operand.store?.(frame, value));
+      return (frame) => {
+        const write = prepare(frame);
+        return (value) => {
+          frame.temporaries.push(value);
+          try {
+            write(convert(frame));
+          } finally {
+            frame.temporaries.pop();
+          }
+        };
       };
     });
-    const [storeKey, storeValue] = stores;
+    const [prepareKey, prepareValue] = prepares;
     return {
       answered,
       assign: (frame, key, value) => {
-        storeKey?.(frame, key);
-        storeValue?.(frame, value);
+        const writeKey = prepareKey?.(frame);
+        const writeValue = prepareValue?.(frame);
+        writeKey?.(key);
+        writeValue?.(value);
       },
     };
   }
@@ -843,6 +892,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 30 -- Case values, untyped conversions, and duplicate constant checks.
   private caseTest(
     expression: Expression,
     tag: Operand | undefined,
@@ -852,6 +902,10 @@ export abstract class StatementCompiler extends CallCompiler {
     let operand = this.value(expression);
     if (this.isInvalid(operand) || tagType === BASIC.invalid) return () => false;
     if (!tag) {
+      if (operand.resolveUntyped) {
+        operand = operand.resolveUntyped(BASIC.bool);
+        if (this.isInvalid(operand)) return () => false;
+      }
       if (!isBoolean(operand.type)) {
         this.error(
           expression,
@@ -862,11 +916,39 @@ export abstract class StatementCompiler extends CallCompiler {
       const read = operand.eval;
       return (frame) => read(frame) === true;
     }
+    const concreteType = isInterface(tagType)
+      ? isUntyped(operand.type)
+        ? defaultType(operand.type)
+        : operand.type
+      : tagType;
     if (isUntyped(operand.type)) {
       const read = this.assign(operand, tagType, 'case の値');
-      operand = { ...operand, type: tagType, eval: read };
+      if (operand.mode === 'constant' && operand.constant) {
+        const rep = represent(operand.constant, concreteType);
+        operand = {
+          ...operand,
+          type: tagType,
+          constant: 'constant' in rep ? rep.constant : undefined,
+          eval: read,
+        };
+      } else {
+        operand = { ...operand, mode: 'value', type: tagType, eval: read };
+      }
     }
     if (!identical(operand.type, tagType) && !isInterface(tagType) && !isInterface(operand.type)) {
+      const allowed = !StatementCompiler.assignFailure(operand.type, tagType);
+      if (!allowed) {
+        this.error(
+          expression,
+          `case の値の型 ${describeType(operand.type)} が、switch の値の型 ${describeType(tagType)} と違います。`
+        );
+        return () => false;
+      }
+    } else if (
+      isInterface(tagType) &&
+      !isInterface(operand.type) &&
+      StatementCompiler.assignFailure(operand.type, tagType)
+    ) {
       this.error(
         expression,
         `case の値の型 ${describeType(operand.type)} が、switch の値の型 ${describeType(tagType)} と違います。`
@@ -874,7 +956,7 @@ export abstract class StatementCompiler extends CallCompiler {
       return () => false;
     }
     if (operand.mode === 'constant' && operand.constant) {
-      const key = `${operand.constant.kind}:${String((operand.constant as { value?: unknown }).value ?? JSON.stringify(operand.constant))}`;
+      const key = constantIdentityKey(operand.constant, concreteType);
       const previous = seen.get(key);
       if (previous)
         this.error(
@@ -913,7 +995,10 @@ export abstract class StatementCompiler extends CallCompiler {
     const defaults = statement.cases.filter((typeCase) => !typeCase.types);
     if (defaults.length > 1) this.error(defaults[1], 'switch 文に default が2つあります。');
     const bindings: VarEntity[] = [];
-    const cases = statement.cases.map((typeCase) => this.typeSwitchCase(statement, typeCase, operand.type, bindings));
+    const seenTypes = new Set<string>();
+    const cases = statement.cases.map((typeCase) =>
+      this.typeSwitchCase(statement, typeCase, operand.type, bindings, seenTypes)
+    );
     if (statement.binding && bindings.length > 0 && bindings.every((binding) => !binding.used)) {
       this.error(statement.binding, `宣言した変数 ${statement.binding.name} を使っていません。`);
     }
@@ -933,11 +1018,13 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** One clause of a type switch, with the variable it binds to the value as its single type, or as the operand. */
+  // code-gauge-allow functionCognitiveComplexity 25 -- Type switch clause checking including duplicate types and nil.
   private typeSwitchCase(
     statement: Extract<Statement, { kind: 'typeSwitch' }>,
     typeCase: Extract<Statement, { kind: 'typeSwitch' }>['cases'][number],
     operandType: Type,
-    bindings: VarEntity[]
+    bindings: VarEntity[],
+    seenTypes: Set<string>
   ): {
     matched: (value: Value) => boolean;
     body: Exec;
@@ -945,7 +1032,20 @@ export abstract class StatementCompiler extends CallCompiler {
     extract: (value: Value) => Value;
     isDefault: boolean;
   } {
-    const types = (typeCase.types ?? []).map((syntax) => (syntax ? this.resolveType(syntax) : undefined));
+    const types = (typeCase.types ?? []).map((syntax) => {
+      if (!syntax) {
+        if (seenTypes.has('nil')) this.error(typeCase, '型の switch に nil が2回書かれています。');
+        seenTypes.add('nil');
+        return;
+      }
+      const resolved = this.resolveType(syntax);
+      if (resolved !== BASIC.invalid) {
+        const key = typeIdentityKey(resolved);
+        if (seenTypes.has(key)) this.error(syntax, `型の switch に ${describeType(resolved)} が2回書かれています。`);
+        seenTypes.add(key);
+      }
+      return resolved;
+    });
     const tests = types.map((type) =>
       type === undefined || type === BASIC.invalid ? undefined : this.assertionTest(type)
     );
@@ -1002,8 +1102,8 @@ export abstract class StatementCompiler extends CallCompiler {
       const evaluated = evaluateAll(frame, values);
       for (const [index, slot] of slots.entries()) {
         const current = frame.locals[slot];
-        if (current instanceof Cell) current.v = evaluated[index];
-        else frame.locals[slot] = evaluated[index];
+        if (current instanceof Cell) current.v = writeInPlace(current.v, evaluated[index]);
+        else frame.locals[slot] = writeInPlace(current as Value, evaluated[index]);
       }
       return RETURN;
     };
@@ -1019,10 +1119,11 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Deferred calls of functions, methods, and builtins.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Deferred calls of functions, generic functions, methods, and builtins.
   private deferStatement(statement: Extract<Statement, { kind: 'defer' }>): Exec {
     const call = stripParens(statement.call);
     if (call.kind !== 'call') {
+      this.expression(statement.call);
       this.error(statement, 'defer には関数の呼び出しを書いてください。');
       return () => {};
     }
@@ -1034,22 +1135,29 @@ export abstract class StatementCompiler extends CallCompiler {
     const row = call.row;
     if (callee.mode === 'builtin') return this.deferBuiltin(statement, call, callee.builtin as string);
     if (callee.mode === 'type') {
+      for (const arg of call.args) this.expression(arg);
       this.error(statement, 'defer には関数の呼び出しを書いてください（型の変換は書けません）。');
       return () => {};
     }
     if (callee.mode === 'method') return this.deferMethod(call, callee, row);
     const value = this.asValue(callee);
-    if (this.isInvalid(value)) return () => {};
+    if (this.isInvalid(value)) {
+      for (const arg of call.args) this.expression(arg);
+      return () => {};
+    }
     const signature = coreType(value.type);
     if (signature?.kind !== 'func' || value.func?.generic) {
       if (value.func?.generic) {
-        const operand = this.expression(call);
-        const read = operand.eval;
+        const prepared = this.prepareGenericCall(call, value.func);
+        if (!prepared || !prepared.instance) return () => {};
+        const { instance, args } = prepared;
         return (frame) => {
-          frame.runtime.defer(frame, () => void read(frame), []);
+          const argValues = args(frame);
+          frame.runtime.defer(frame, () => void instance.call(argValues, row, frame), [instance, ...argValues]);
           return;
         };
       }
+      for (const arg of call.args) this.expression(arg);
       this.error(statement, `${describeType(value.type)} 型の値は関数ではないので、defer で呼び出せません。`);
       return () => {};
     }
@@ -1058,7 +1166,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const readFunction = value.eval;
     return (frame) => {
       const fn = readFunction(frame);
-      const argValues = args(frame);
+      const argValues = withTemporary(frame, fn, () => args(frame));
       if (!(fn instanceof GoFunc)) {
         frame.runtime.defer(frame, () => nilPointerPanic(), []);
         return;
@@ -1073,13 +1181,13 @@ export abstract class StatementCompiler extends CallCompiler {
     const args = this.callArguments(call, selection.method.type);
     if (!args) return () => {};
     if (selection.kind === 'interfaceMethod') {
-      const read = receiver.eval;
+      const read = this.embeddedReceiver(receiver, selection.path);
       const name = selection.method.name;
       return (frame) => {
         const iface = read(frame) as { type: Type; value: Value } | undefined;
-        const argValues = args(frame);
+        const argValues = withTemporary(frame, iface, () => args(frame));
+        if (!iface) nilPointerPanic();
         frame.runtime.defer(frame, () => {
-          if (!iface) nilPointerPanic();
           const target = dynamicMethod(iface.type, name);
           target?.(iface.value, argValues, row, frame);
         }, [iface, ...argValues]);
@@ -1087,40 +1195,46 @@ export abstract class StatementCompiler extends CallCompiler {
       };
     }
     const { method, path } = selection;
-    const pointer = method.pointerReceiver ? this.deferredPointerReceiver(receiver, path) : undefined;
+    const pointer = method.pointerReceiver ? this.pointerReceiver(call, receiver, path) : undefined;
+    if (method.pointerReceiver && !pointer) return () => {};
     const read = receiver.eval;
     const viaPointer = underlying(receiver.type).kind === 'pointer';
     return (frame) => {
       const value = pointer ? pointer(frame) : receiverFor(read(frame), path, method, viaPointer);
-      const argValues = args(frame);
+      const argValues = withTemporary(frame, value, () => args(frame));
       frame.runtime.defer(frame, () => void invokeMethod(method, value, argValues, row, frame), [value, ...argValues]);
       return;
     };
   }
 
-  private deferredPointerReceiver(receiver: Operand, path: readonly number[]): Eval {
-    if (path.length === 0 && underlying(receiver.type).kind !== 'pointer' && receiver.addressOf)
-      return receiver.addressOf();
-    const read = receiver.eval;
-    if (path.length > 0 && underlying(receiver.type).kind !== 'pointer' && receiver.addressOf) {
-      const address = receiver.addressOf();
-      return (frame) => receiverFor(address(frame), path, POINTER_METHOD);
-    }
-    return (frame) => receiverFor(read(frame), path, POINTER_METHOD);
-  }
-
   private deferBuiltin(statement: Span, call: Extract<Expression, { kind: 'call' }>, name: string): Exec {
-    if (name === 'panic' || name === 'print' || name === 'println') {
-      const values = call.args.map((arg) =>
-        name === 'panic' ? this.assign(this.expression(arg), ANY, '引数') : this.defaulted(this.value(arg)).eval
-      );
-      if (name === 'panic' && values.length !== 1) this.error(call, 'panic の引数の数が合いません。');
+    if (name === 'panic') {
+      const values = call.args.map((arg) => this.assign(this.expression(arg), ANY, '引数'));
+      if (values.length !== 1) this.error(call, 'panic の引数の数が合いません。');
       return (frame) => {
-        const evaluated = values.map((value) => value(frame));
+        const evaluated = evaluateAll(frame, values);
         frame.runtime.defer(
           frame,
           () => {
-            if (name === 'panic') throw new GoPanic(evaluated[0] ?? panicNilValue());
+            throw new GoPanic(evaluated[0] ?? panicNilValue());
+          },
+          evaluated
+        );
+        return;
+      };
+    }
+    if (name === 'print' || name === 'println') {
+      const operands = call.args.map((arg) => this.defaulted(this.value(arg)));
+      const values = operands.map((operand) => operand.eval);
+      const types = operands.map((operand) => operand.type);
+      const line = name === 'println';
+      return (frame) => {
+        const evaluated = evaluateAll(frame, values);
+        frame.runtime.defer(
+          frame,
+          () => {
+            const texts = evaluated.map((value, index) => runtimePrint(value, types[index]));
+            frame.runtime.writeStderr(line ? `${texts.join(' ')}\n` : texts.join(''));
           },
           evaluated
         );
@@ -1128,12 +1242,18 @@ export abstract class StatementCompiler extends CallCompiler {
       };
     }
     if (name === 'recover') {
+      if (call.args.length > 0) {
+        this.error(call, 'recover の引数の数が合いません。');
+        for (const arg of call.args) this.expression(arg);
+        return () => {};
+      }
       // A recover that the deferred mechanism calls directly is not called by a deferred function, so it stops nothing.
       return (frame) => {
         frame.runtime.defer(frame, () => {}, []);
         return;
       };
     }
+    for (const arg of call.args) this.expression(arg);
     this.unsupported(statement, `defer での ${name} の呼び出し`);
     return () => {};
   }
@@ -1334,6 +1454,15 @@ function commaOkResults(operand: Operand, convert: Convert): Eval[] {
     },
     second,
   ];
+}
+
+function transferEscapeLinks(from: VarEntity, to: VarEntity): void {
+  if (from.escapeSources) {
+    for (const source of from.escapeSources) linkEscapeSource(source, to);
+  }
+  if (from.escapeHooks) {
+    for (const hook of from.escapeHooks) linkEscapeHook(hook, to);
+  }
 }
 
 /** Counts an assignment to a variable, after which its declared value may no longer reach its uses. */

@@ -334,3 +334,350 @@ func main() {
     stdout: '1 2 20 9 7 1 5 1 2\n',
   });
 });
+
+test('assignments, conversions, generics, defer, map keys, and math match Go semantics', () => {
+  const program = String.raw`package main
+
+import (
+	"cmp"
+	"fmt"
+	"math"
+	"math/cmplx"
+	"strings"
+)
+
+const typedInt int = 1
+const constMin = min(typedInt, 2)
+const c64 complex64 = 1.00000001 + 0i
+const realDiff = real(c64) - 1
+
+type Node struct {
+	Val  int
+	Next *Node
+}
+
+type Atom struct {
+	str  string
+	next *Slist
+}
+type Slist struct {
+	atom Atom
+}
+
+type P [2]int
+type S struct{ X int }
+type Ordered struct{ X, Y, Z int }
+
+type I interface{ M() }
+type Embed struct{ I }
+type Impl int
+
+func (b Impl) M() { fmt.Print(b, " ") }
+
+func localA() any {
+	type T int
+	return T(1)
+}
+func localB() any {
+	type T int
+	return T(1)
+}
+func describe[T any](x T) string { return fmt.Sprintf("%v", x) }
+func showStructA() string {
+	type T int
+	return describe(struct{ X T }{1})
+}
+func showStructB() string {
+	type T string
+	return describe(struct{ X T }{"hi"})
+}
+func sumOrdered[T cmp.Ordered](xs []T) T {
+	var total T
+	for _, x := range xs {
+		total += x
+	}
+	return total
+}
+func maxOf[T cmp.Ordered](a, b T) T {
+	if a > b {
+		return a
+	}
+	return b
+}
+func fieldOf[T any](x struct{ X T }) T { return x.X }
+
+func shiftUint(i int) uint64 { return 1 << i }
+
+func main() {
+	defer println("deferred-err")
+	seq := 1
+	defer func(v int) { fmt.Print(v) }(seq)
+	seq = 2
+	defer Embed{Impl(9)}.M()
+
+	mAny := map[any]string{localA(): "a", localB(): "b"}
+	nanKey := complex(math.NaN(), 0)
+	nanIm := complex(0, math.NaN())
+	mCplx := map[complex128]int{nanKey: 1}
+	mCplx[nanKey] = 2
+	mCplx[nanIm] = 3
+
+	var escaped []int
+	for i := 0; i < 5; i++ {
+		escaped = append(escaped, i)
+	}
+	alias := escaped[1:]
+	_ = fmt.Sprint(alias)
+
+	a := []int{10, 20}
+	idx := 0
+	idx, a[idx] = 1, 99
+	head := &Node{1, &Node{2, &Node{3, nil}}}
+	var prev *Node
+	for cur := head; cur != nil; {
+		prev, cur, cur.Next = cur, cur.Next, prev
+	}
+
+	var nilSlice []int
+	zeroArr := [0]int(nilSlice)
+	bigSlice := make([]int, 200000)
+
+	var nilPtr *int
+	var boxedNil any = nilPtr
+	gotPtr, ptrOk := boxedNil.(*int)
+
+	holder := S{X: 1}
+	px := &holder.X
+	holder = S{X: 2}
+	seenViaPtr := *px
+	*px = 3
+
+	arrBacking := [2]int{1, 2}
+	view := arrBacking[:]
+	arrBacking = [2]int{8, 9}
+
+	sw := ""
+	switch 0.5 {
+	case 0.5:
+		sw += "f"
+	case 1.5:
+		sw += "g"
+	}
+	switch 1i {
+	case 1i:
+		sw += "c"
+	case 2i:
+		sw += "d"
+	}
+
+	var mask uint32
+	sh := 3
+	mask |= 1 << sh
+	var u8 uint8 = 1 << sh
+
+	neg := -5.0
+	two32 := float64(1 << 32)
+	bytes := []byte("hello")
+	bytesCap0 := cap(bytes)
+	bytes = append(bytes, '!')
+	runesConst := []rune("héllo")
+	runesDyn := []rune(strings.Repeat("a", 5))
+
+	var orderLog string
+	record := func(tag string, v int) int {
+		orderLog += tag
+		return v
+	}
+	ord := Ordered{Z: record("z", 3), X: record("x", 1), Y: record("y", 2)}
+
+	var iNil I
+	panickedAtDefer := false
+	func() {
+		defer func() { panickedAtDefer = recover() != nil }()
+		defer iNil.M()
+		orderLog += "unreachable"
+	}()
+
+	fmt.Println(
+		len(mAny), mAny[localA()], mAny[localB()],
+		len(mCplx), mCplx[nanKey],
+		cap(escaped),
+		a[0], prev.Val, len(zeroArr), len(bigSlice),
+		gotPtr == nil && ptrOk,
+		seenViaPtr, holder.X, view[0], view[1],
+		sw,
+		constMin, realDiff,
+		showStructA(), showStructB(),
+		sumOrdered([]int{1, 2, 3}), sumOrdered([]string{"a", "b"}),
+		maxOf(3, 2.5), maxOf(1, 'a'), fieldOf(struct{ X int }{7}),
+		mask, u8, shiftUint(sh),
+		Slist{Atom{str: "ok"}}.atom.str,
+		P{1, 2} == [2]int{1, 2}, S{0} == struct{ X int }{0},
+		uint32(neg), uint32(two32),
+		bytesCap0, cap(bytes), cap(runesConst), cap(runesDyn),
+		orderLog, ord.X, panickedAtDefer,
+		math.Remainder(1e20, 3), math.Remainder(0.3, 0.1),
+		math.Float64bits(math.FMA(math.SmallestNonzeroFloat64, 0.5, math.SmallestNonzeroFloat64)),
+		cmplx.Sqrt(complex(1, math.NaN())),
+	)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '2 a b 3 0 8 99 3 0 200000 true 2 3 8 9 fc 1 0 {1} {hi} 6 ab 3 97 7 8 8 8 ok true true 4294967291 0 5 16 5 32 zxy 1 true 1 -2.7755575615628914e-17 2 (NaN+NaNi)\n9 1',
+    stderr: 'deferred-err\n',
+  });
+});
+
+test('standard library zero values, nil receivers, streaming UTF-8, limits, and capacities match Go', () => {
+  const program = String.raw`package main
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"image/color"
+	"io"
+	"maps"
+	"os"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+var unwrapCalls int
+
+type customErr int
+
+func (customErr) Error() string { return "e" }
+func (customErr) Unwrap() error {
+	unwrapCalls++
+	return nil
+}
+
+type shortWriter int
+
+func (shortWriter) Write(p []byte) (int, error) { return 1, nil }
+
+func nilReceiverPanics() (rOk, wOk bool) {
+	func() {
+		defer func() { rOk = recover() != nil }()
+		var r *strings.Reader
+		_ = r.Len()
+	}()
+	func() {
+		defer func() { wOk = recover() != nil }()
+		var w *bufio.Writer
+		_ = w.Buffered()
+	}()
+	return rOk, wOk
+}
+
+func main() {
+	var b strings.Builder
+	b.Grow(100)
+	b.WriteString("abc")
+
+	var zeroReader strings.Reader
+	_, zeroEOF := zeroReader.ReadByte()
+	origReader := strings.NewReader("abc")
+	copiedReader := *origReader
+	_, _ = origReader.ReadByte()
+
+	scanner := bufio.NewScanner(strings.NewReader(strings.Repeat("a", 70000)))
+	scanOk := scanner.Scan()
+	scanErr := scanner.Err()
+	smallScanner := bufio.NewScanner(strings.NewReader("01234567890"))
+	smallScanner.Buffer(nil, 10)
+	smallOk := smallScanner.Scan()
+
+	rgba := color.RGBAModel.Convert(&color.Gray{Y: 100})
+	var zeroTime time.Time
+	_ = errors.Unwrap(customErr(1))
+	copiedBytes, copyErr := io.Copy(shortWriter(0), strings.NewReader("abc"))
+	rNil, wNil := nilReceiverPanics()
+
+	s := []int{5, 1, 4, 2, 3}
+	m := map[string]int{"a": 1, "b": 2, "c": 3}
+
+	fmt.Print("\xc3")
+	fmt.Print("\xa9 ")
+	_, _ = os.Stderr.Write([]byte{230})
+	_, _ = os.Stderr.Write([]byte{151, 165})
+
+	fmt.Println(
+		b.Len(), b.Cap(),
+		strings.EqualFold("ı", "i"), strings.EqualFold("ſ", "S"),
+		zeroEOF, origReader.Len(), copiedReader.Len(),
+		scanOk, scanErr, smallOk,
+		rgba,
+		zeroTime.Year(), zeroTime.IsZero(),
+		unwrapCalls,
+		copiedBytes, copyErr,
+		utf8.FullRuneInString("\xff"), utf8.FullRuneInString("\xc2A"), utf8.FullRuneInString("\xc2"),
+		cap(slices.Clone(s)), cap(slices.Collect(maps.Keys(m))), cap(slices.Sorted(maps.Keys(m))), cap(strings.SplitN("a,b,c", ",", 5)),
+		rNil, wNil,
+	)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 4 4 5 true true\n',
+    stderr: '日',
+  });
+});
+
+test.each([
+  ['untyped bool assigned to int', 'package main\nfunc main() { x := 1; var n int = x == 1; _ = n }', 2],
+  ['string index in const', 'package main\nfunc main() { const c = "abc"[0]; _ = c }', 2],
+  ['mismatched untyped families', 'package main\nfunc main() { _ = "a" + 1 }', 2],
+  [
+    'excess struct literal value without false unused error',
+    'package main\ntype T struct{ x int }\nfunc main() {\n\ta := 1\n\tb := 2\n\tt := T{a, b}\n\t_ = t\n}',
+    6,
+  ],
+  ['method without body', 'package main\ntype T struct{}\nfunc (t *T) M()\nfunc main() {}', 3],
+  ['typed const mismatch', 'package main\nconst x int = 1\nconst y float64 = x\nfunc main() {}', 3],
+  ['fractional typed float const to int', 'package main\nconst x float64 = 1.2\nfunc main() { _ = int(x) }', 3],
+  [
+    'constant returned as unconstrained type param',
+    'package main\nfunc f[T any](x T) T { return 1 }\nfunc main() { _ = f("a") }',
+    2,
+  ],
+  [
+    'duplicate type-switch case',
+    'package main\nfunc main() { var a any = 1; switch a.(type) { case int: ; case int: } }',
+    2,
+  ],
+  ['expanding generic instantiation cycle', 'package main\nfunc f[T any](x T) { f([]T{x}) }\nfunc main() { f(0) }', 2],
+  [
+    'ambiguous diamond selector',
+    'package main\ntype A struct{ X int }\ntype B struct{ A }\ntype C struct{ A }\ntype D struct{ B; C }\nfunc main() { var d D; _ = d.X }',
+    6,
+  ],
+])('%s is rejected at compile time', (_name, program, line) => {
+  const execution = executeProgram('go', program);
+  expect(execution).toMatchObject({ kind: 'compileError' });
+  if (execution.kind === 'compileError') expect(execution.diagnostics[0].row + 1).toBe(line);
+});
+
+test.each([
+  ['nested zero-value array exceeding maxSlots', 'package main\nfunc main() { var a [1001][1001]int; _ = a }'],
+  [
+    'strings.ReplaceAll exceeding maxStringLength',
+    'package main\nimport "strings"\nfunc main() { a := strings.Repeat("a", 2000); b := strings.Repeat("b", 2000); _ = strings.ReplaceAll(a, "a", b) }',
+  ],
+  [
+    'slices.Repeat exceeding maxSlots',
+    'package main\nimport "slices"\nfunc main() { _ = slices.Repeat([]int{1}, 1000000000) }',
+  ],
+])('%s stops within runtime memory limits', (_name, program) => {
+  const execution = executeProgram('go', program);
+  expect(execution).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('out of memory'),
+  });
+});

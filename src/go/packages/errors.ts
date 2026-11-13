@@ -13,12 +13,17 @@ import {
   missingMethod,
   pointerTo,
   sliceOf,
+  type Type,
   underlying,
 } from '../types';
 import { Cell, copyValue, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
-import { sliceValues } from './support';
+import { receiverStruct, sliceValues } from './support';
 
 const ERROR_SLICE = sliceOf(ERROR_TYPE);
+const UNWRAP_SINGLE_IFACE = { kind: 'interface' as const, methods: [{ name: 'Unwrap', type: fn([], [ERROR_TYPE]) }] };
+const UNWRAP_MULTI_IFACE = { kind: 'interface' as const, methods: [{ name: 'Unwrap', type: fn([], [ERROR_SLICE]) }] };
+const IS_IFACE = { kind: 'interface' as const, methods: [{ name: 'Is', type: fn([ERROR_TYPE], [BASIC.bool]) }] };
+const AS_IFACE = { kind: 'interface' as const, methods: [{ name: 'As', type: fn([ANY], [BASIC.bool]) }] };
 
 /** `*errors.joinError`, which `errors.Join` returns. */
 const JOIN_ERROR = namedType('errors', 'joinError', {
@@ -30,42 +35,34 @@ addMethod(
   'Error',
   fn([], [BASIC.string]),
   (receiver) =>
-    sliceValues(((receiver as Pointer).load() as GoStruct).fields[0])
+    sliceValues(receiverStruct(receiver).fields[0])
       .map((error) => errorMessage(error))
       .join('\n'),
   true
 );
-addMethod(
-  JOIN_ERROR,
-  'Unwrap',
-  fn([], [ERROR_SLICE]),
-  (receiver) => ((receiver as Pointer).load() as GoStruct).fields[0],
-  true
-);
+addMethod(JOIN_ERROR, 'Unwrap', fn([], [ERROR_SLICE]), (receiver) => receiverStruct(receiver).fields[0], true);
+
+const members: Record<string, Entity> = {
+  New: nativeFunction('New', fn([BASIC.string], [ERROR_TYPE]), ([text]) => newError(text as string)),
+  Is: nativeFunction('Is', fn([ERROR_TYPE, ERROR_TYPE], [BASIC.bool]), ([error, target]) => is(error, target)),
+  As: nativeFunction('As', fn([ERROR_TYPE, ANY], [BASIC.bool]), ([error, target]) => as(error, target)),
+  Unwrap: nativeFunction('Unwrap', fn([ERROR_TYPE], [ERROR_TYPE]), ([error]) => {
+    if (error === undefined || unwrapKind((error as Iface).type) !== 'single') return;
+    return dynamicMethod((error as Iface).type, 'Unwrap')?.((error as Iface).value, []) as Value;
+  }),
+  Join: nativeFunction('Join', fn([ERROR_SLICE], [ERROR_TYPE], true), ([errors]) => {
+    const present = sliceValues(errors).filter((error) => error !== undefined);
+    if (present.length === 0) return;
+    const list = new Slice(present, 0, present.length, present.length);
+    return new Iface(pointerTo(JOIN_ERROR), new Pointer(new Cell(new GoStruct([list])), 'v'));
+  }),
+};
+
+export const ERRORS_PACKAGE = definePackage('errors', members, ['ErrUnsupported']);
 
 function errorMessage(error: Value): string {
   const iface = error as Iface;
   return dynamicMethod(iface.type, 'Error')?.(iface.value, []) as string;
-}
-
-/** The errors an error wraps, through `Unwrap() error` or `Unwrap() []error`. */
-function unwrapAll(error: Iface): Value[] {
-  const call = dynamicMethod(error.type, 'Unwrap');
-  if (!call) return [];
-  const result = call(error.value, []);
-  if (result instanceof Slice || result === undefined) {
-    const type = (error.type.kind === 'pointer' ? error.type.element : error.type) as never;
-    void type;
-    if (result instanceof Slice) return result.values();
-  }
-  return result === undefined ? [] : [result as Value];
-}
-
-function unwrapType(error: Iface): 'single' | 'multiple' | undefined {
-  const call = dynamicMethod(error.type, 'Unwrap');
-  if (!call) return undefined;
-  const result = call(error.value, []);
-  return result instanceof Slice ? 'multiple' : 'single';
 }
 
 function is(error: Value, target: Value): boolean {
@@ -76,8 +73,8 @@ function is(error: Value, target: Value): boolean {
     const iface = current as Iface;
     if (targetComparable && identical(iface.type, (target as Iface).type) && equalityOf(ANY)(current, target))
       return true;
-    const isMethod = dynamicMethod(iface.type, 'Is');
-    if (isMethod && isMethod(iface.value, [target]) === true) return true;
+    if (!missingMethod(iface.type, IS_IFACE) && dynamicMethod(iface.type, 'Is')?.(iface.value, [target]) === true)
+      return true;
     return unwrapAll(iface).some(visit);
   };
   return visit(error);
@@ -102,27 +99,24 @@ function as(error: Value, target: Value): boolean {
       pointer.store(elementUnder.kind === 'interface' ? iface : copyValue(iface.value));
       return true;
     }
-    const asMethod = dynamicMethod(iface.type, 'As');
-    if (asMethod && asMethod(iface.value, [target]) === true) return true;
+    if (!missingMethod(iface.type, AS_IFACE) && dynamicMethod(iface.type, 'As')?.(iface.value, [target]) === true)
+      return true;
     return unwrapAll(iface).some(visit);
   };
   return visit(error);
 }
 
-const members: Record<string, Entity> = {
-  New: nativeFunction('New', fn([BASIC.string], [ERROR_TYPE]), ([text]) => newError(text as string)),
-  Is: nativeFunction('Is', fn([ERROR_TYPE, ERROR_TYPE], [BASIC.bool]), ([error, target]) => is(error, target)),
-  As: nativeFunction('As', fn([ERROR_TYPE, ANY], [BASIC.bool]), ([error, target]) => as(error, target)),
-  Unwrap: nativeFunction('Unwrap', fn([ERROR_TYPE], [ERROR_TYPE]), ([error]) => {
-    if (error === undefined || unwrapType(error as Iface) !== 'single') return;
-    return dynamicMethod((error as Iface).type, 'Unwrap')?.((error as Iface).value, []) as Value;
-  }),
-  Join: nativeFunction('Join', fn([ERROR_SLICE], [ERROR_TYPE], true), ([errors]) => {
-    const present = sliceValues(errors).filter((error) => error !== undefined);
-    if (present.length === 0) return;
-    const list = new Slice(present, 0, present.length, present.length);
-    return new Iface(pointerTo(JOIN_ERROR), new Pointer(new Cell(new GoStruct([list])), 'v'));
-  }),
-};
+/** The errors an error wraps, through `Unwrap() error` or `Unwrap() []error`. */
+function unwrapAll(error: Iface): Value[] {
+  const kind = unwrapKind(error.type);
+  if (!kind) return [];
+  const result = dynamicMethod(error.type, 'Unwrap')?.(error.value, []);
+  if (kind === 'multiple') return sliceValues(result as Value);
+  return result === undefined ? [] : [result as Value];
+}
 
-export const ERRORS_PACKAGE = definePackage('errors', members, ['ErrUnsupported']);
+function unwrapKind(type: Type): 'single' | 'multiple' | undefined {
+  if (!missingMethod(type, UNWRAP_SINGLE_IFACE)) return 'single';
+  if (!missingMethod(type, UNWRAP_MULTI_IFACE)) return 'multiple';
+  return undefined;
+}

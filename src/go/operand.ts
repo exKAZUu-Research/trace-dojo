@@ -27,8 +27,20 @@ export interface Operand {
   /** Evaluates the expression; a call with several results returns them as an array. */
   eval: Eval;
   store?: (frame: Frame, value: Value) => void;
+  /** Evaluates the left-hand side's container and index in phase 1, returning the phase-2 store writer. */
+  prepareStore?: (frame: Frame) => (value: Value) => void;
+  /** Reads and writes a map entry while evaluating the map and key expressions only once. */
+  mapUpdate?: (frame: Frame, change: (value: Value) => Value) => void;
+  /** Resolves a non-constant untyped shift expression once its target type is known. */
+  resolveUntyped?: (target: Type) => Operand;
   /** Takes the address, which makes a local variable live in a cell. */
   addressOf?: () => (frame: Frame) => Pointer;
+  /** Marks any underlying local storage as escaping when an element or field's address is taken. */
+  escapeAddress?: () => void;
+  /** Local variables whose backing storage this value may share (such as `s[1:]` or `a[:]`). */
+  backingVars?: VarEntity[];
+  /** Tracks whether a temporary allocation (such as `[]rune(s)`) escapes the current function. */
+  nonEscaping?: { escapes: boolean };
   /** Evaluates `v, ok` forms: a map index or a type assertion. */
   commaOk?: (frame: Frame) => [Value, boolean];
   builtin?: string;

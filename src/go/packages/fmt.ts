@@ -5,7 +5,7 @@ import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } f
 import { ERROR_TYPE, pointerTo, sliceOf, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { IO_WRITER } from './io';
-import { ANY_SLICE, byteSlice, callMethod, INT, sliceValues, STRING, writeStdout } from './support';
+import { ANY_SLICE, byteSlice, callMethod, INT, receiverStruct, sliceValues, STRING, writeStdout } from './support';
 
 const ERROR_RESULTS: Type[] = [INT, ERROR_TYPE];
 
@@ -37,7 +37,7 @@ addMethod(WRAP_ERRORS, 'Error', fn([], [STRING]), (receiver) => structOf(receive
 addMethod(WRAP_ERRORS, 'Unwrap', fn([], [sliceOf(ERROR_TYPE)]), (receiver) => structOf(receiver).fields[1], true);
 
 function structOf(receiver: Value): GoStruct {
-  return (receiver as Pointer).load() as GoStruct;
+  return receiverStruct(receiver);
 }
 
 /** `Errorf`: formats as Sprintf does, and wraps the errors that %w verbs refer to. */

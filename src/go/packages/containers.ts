@@ -270,7 +270,8 @@ listMethod('PushFrontList', [LIST_POINTER], [], (list, [other]) => {
 });
 
 /** The values of a list, read before inserting them, since a list may be inserted into itself. */
-function listValues(list: Pointer): Value[] {
+function listValues(list: Value): Value[] {
+  if (!(list instanceof Pointer)) nilPointerPanic();
   const values: Value[] = [];
   let item = lengthOf(list) === 0n ? undefined : element(rootOf(list)).fields[NEXT];
   for (let count = lengthOf(list); count > 0n; count--) {

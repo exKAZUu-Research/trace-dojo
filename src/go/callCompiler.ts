@@ -1,17 +1,18 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import { LIMITS } from '../interpreter/limits';
 import { assignFailure, constantValue, represent } from './assignability';
 import type { Expression, Span } from './ast';
 import { CompositeCompiler } from './compositeCompiler';
 import { binaryConstant, type Constant, exactInteger, type Rational } from './constants';
 import { toInterface } from './conversions';
 import type { FuncEntity, GenericFunc } from './entities';
+import { largerUntyped, sameUntypedFamily } from './expressionCompiler';
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
-import { utf8Decode } from './literals';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
 import { currentRuntime } from './native';
 import type { Operand } from './operand';
 import { ordering } from './operators';
-import { type Eval, evaluateAll, type Frame, GoPanic, type ListEval } from './runtime';
+import { type Eval, evaluateAll, type Frame, GoPanic, type ListEval, withTemporary } from './runtime';
 import { nilPointerPanic, panicNilValue, runtimeErrorPanic } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
 import { appendValues } from './sliceOps';
@@ -208,33 +209,45 @@ export abstract class CallCompiler extends CompositeCompiler {
     const read = callee.eval;
     return this.resultOperand(expression, signature.results, (frame) => {
       const fn = read(frame);
-      const argValues = args(frame);
+      const argValues = withTemporary(frame, fn, () => args(frame));
       if (!(fn instanceof GoFunc)) nilPointerPanic();
       return fn.call(argValues, row);
     });
   }
 
-  private genericCall(expression: Extract<Expression, { kind: 'call' }>, entity: FuncEntity): Operand {
+  protected prepareGenericCall(
+    expression: Extract<Expression, { kind: 'call' }>,
+    entity: FuncEntity
+  ): { instance: GoFunc | undefined; args: ListEval; results: Type[] } | undefined {
     const generic = entity.generic as GenericFunc;
     const operands = expression.args.map((arg) => this.expression(arg));
     const mapping = this.inferTypeArguments(expression, generic, operands);
-    if (!mapping) return this.invalid(expression);
+    if (!mapping) return undefined;
     const typeArgs = generic.typeParams.map((param) => mapping.get(param.id) as Type);
-    if (!this.checkTypeArguments(generic.typeParams, typeArgs, expression)) return this.invalid(expression);
+    if (!this.checkTypeArguments(generic.typeParams, typeArgs, expression)) return undefined;
+    if (!this.recordGenericInstantiation(generic.typeParams, typeArgs, expression)) return undefined;
     const signature = substitute(generic.type, mapping, (named, args) =>
       this.instantiateNamed(named, args)
     ) as FuncType;
     const args = this.listArguments(expression, operands, signature, entity.name);
-    if (!args) return this.invalid(expression);
+    if (!args) return undefined;
     if (typeArgs.some((arg) => containsTypeParam(arg))) {
-      return this.resultOperand(expression, signature.results, () => {});
+      return { instance: undefined, args, results: signature.results };
     }
-    const instance = generic.instantiate(typeArgs);
+    return { instance: generic.instantiate(typeArgs), args, results: signature.results };
+  }
+
+  private genericCall(expression: Extract<Expression, { kind: 'call' }>, entity: FuncEntity): Operand {
+    const prepared = this.prepareGenericCall(expression, entity);
+    if (!prepared) return this.invalid(expression);
+    const { instance, args, results } = prepared;
+    if (!instance) return this.resultOperand(expression, results, () => {});
     const row = expression.row;
-    return this.resultOperand(expression, signature.results, (frame) => instance.call(args(frame), row));
+    return this.resultOperand(expression, results, (frame) => instance.call(args(frame), row));
   }
 
   /** Infers the type arguments of a generic call from its arguments: typed ones first, then untyped defaults. */
+  // code-gauge-allow functionCognitiveComplexity 30 -- Unification plus untyped constant promotion across shared type parameters.
   private inferTypeArguments(span: Span, generic: GenericFunc, operands: Operand[]): Substitution | undefined {
     const { typeParams, type } = generic;
     const mapping: Substitution = new Map();
@@ -266,11 +279,28 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
     }
     inferFromConstraints(typeParams, mapping);
+    const untypedByParam = new Map<number, { param: TypeParamType; operands: Operand[] }>();
     for (const [param, operand] of untyped) {
       if (param.kind === 'typeParam' && !mapping.has(param.id) && typeParams.includes(param)) {
         if (isBasic(operand.type, 'untypedNil')) continue;
-        mapping.set(param.id, defaultType(operand.type));
+        const group = untypedByParam.get(param.id) ?? { param, operands: [] };
+        group.operands.push(operand);
+        untypedByParam.set(param.id, group);
       }
+    }
+    for (const { param, operands: group } of untypedByParam.values()) {
+      let chosen = group[0].type;
+      for (const operand of group.slice(1)) {
+        if (!sameUntypedFamily(chosen, operand.type)) {
+          this.error(
+            operand.span,
+            `${describeType(operand.type)} 型の値は、型引数 ${param.name} のほかの引数（${describeType(chosen)}）と型が合いません。`
+          );
+          return undefined;
+        }
+        chosen = largerUntyped(chosen, operand.type);
+      }
+      mapping.set(param.id, defaultType(chosen));
     }
     inferFromConstraints(typeParams, mapping);
     const missing = typeParams.find((param) => !mapping.has(param.id));
@@ -296,7 +326,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       const methodName = selection.method.name;
       return this.resultOperand(expression, methodType.results, (frame) => {
         const iface = readReceiver(frame) as { type: Type; value: Value } | undefined;
-        const argValues = args(frame);
+        const argValues = withTemporary(frame, iface, () => args(frame));
         if (!iface) nilPointerPanic();
         const call = dynamicMethod(iface.type, methodName);
         if (!call) throw new Error(`Missing method ${methodName}`);
@@ -316,12 +346,13 @@ export abstract class CallCompiler extends CompositeCompiler {
     }
     return this.resultOperand(expression, methodType.results, (frame) => {
       const value = readReceiver(frame);
-      return invokeMethod(method, value, args(frame), row);
+      const argValues = withTemporary(frame, value, () => args(frame));
+      return invokeMethod(method, value, argValues, row);
     });
   }
 
   /** Evaluates the embedded field that holds an interface, for a method promoted from it. */
-  private embeddedReceiver(receiver: Operand, path: readonly number[]): Eval {
+  protected embeddedReceiver(receiver: Operand, path: readonly number[]): Eval {
     const read = receiver.eval;
     if (path.length === 0) return read;
     return (frame) => {
@@ -336,7 +367,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** The pointer a method with a pointer receiver receives, taking the address of an addressable value. */
-  private pointerReceiver(span: Span, receiver: Operand, path: readonly number[]): Eval | undefined {
+  protected pointerReceiver(span: Span, receiver: Operand, path: readonly number[]): Eval | undefined {
     const read = receiver.eval;
     if (path.length > 0) {
       // Reaching the embedded field goes through the receiver's struct, which must be addressable unless a pointer
@@ -461,7 +492,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       span: expression,
       eval: (frame) => {
         const texts = evaluateAll(frame, values).map((value, index) => runtimePrint(value, types[index]));
-        frame.runtime.io.stderr.write(utf8Decode(line ? `${texts.join(' ')}\n` : texts.join('')));
+        frame.runtime.writeStderr(line ? `${texts.join(' ')}\n` : texts.join(''));
         return;
       },
     };
@@ -553,12 +584,16 @@ export abstract class CallCompiler extends CompositeCompiler {
     const read = slice.eval;
     const zero = this.zeroOf(element);
     // A local slice variable that never escapes gets its first array on the stack, as Go's compiler allocates it.
-    const local = slice.variable?.entity;
-    const onStack = (): boolean => local?.owner !== undefined && !local.escapes;
+    const backing = slice.backingVars;
+    const onStack = (): boolean =>
+      backing !== undefined &&
+      backing.length > 0 &&
+      backing.every((variable) => variable.owner !== undefined && !variable.escapes);
     return {
       mode: 'value',
       type: slice.type,
       span: expression,
+      backingVars: slice.backingVars,
       eval: (frame) => {
         const target = read(frame) as Slice | undefined;
         const added = evaluateAll(frame, values);
@@ -587,6 +622,7 @@ export abstract class CallCompiler extends CompositeCompiler {
         return this.invalid(expression);
       }
       const zero = this.zeroOf(under.element);
+      const elemSlots = this.zeroSlotCount(under.element);
       return {
         mode: 'value',
         type,
@@ -597,9 +633,13 @@ export abstract class CallCompiler extends CompositeCompiler {
           const room = capacity ? (capacity(frame) as bigint) : size;
           if (size < 0n || size > 1n << 48n) runtimeErrorPanic('makeslice: len out of range');
           if (room < size || room > 1n << 48n) runtimeErrorPanic('makeslice: cap out of range');
-          frame.runtime.allocate(Number(room));
-          const array = Array.from({ length: Number(room) }, zero);
-          return new Slice(array, 0, Number(size), Number(room));
+          const roomNum = Number(room);
+          if (roomNum > LIMITS.maxSlots || (elemSlots > 0 && roomNum * elemSlots > LIMITS.maxSlots)) {
+            frame.runtime.allocate(LIMITS.maxSlots + 1);
+          }
+          frame.runtime.allocate(roomNum);
+          const array = Array.from({ length: roomNum }, zero);
+          return new Slice(array, 0, Number(size), roomNum);
         },
       };
     }
@@ -632,8 +672,12 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   private sizeArgument(expression: Expression): Eval | undefined {
-    const operand = this.value(expression);
+    let operand = this.value(expression);
     if (this.isInvalid(operand)) return undefined;
+    if (operand.resolveUntyped) {
+      operand = operand.resolveUntyped(BASIC.int);
+      if (this.isInvalid(operand)) return undefined;
+    }
     if (operand.mode === 'constant' && operand.constant) {
       const value = exactInteger(operand.constant);
       if (value === undefined) {
@@ -707,16 +751,15 @@ export abstract class CallCompiler extends CompositeCompiler {
         const value = readSource(frame);
         const items = stringSource
           ? Array.from(value as string, (char) => BigInt(char.charCodeAt(0)) as Value)
-          : ((value as Slice | undefined)?.values() ?? []);
+          : ((value as Slice | undefined)?.values().map(copyValue) ?? []);
         const count = Math.min(to?.length ?? 0, items.length);
-        for (let index = 0; index < count; index++) (to as Slice).set(index, copyValue(items[index]));
+        for (let index = 0; index < count; index++) (to as Slice).set(index, items[index]);
         frame.runtime.spend(Math.floor(count / 16));
         return BigInt(count);
       },
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- min and max over constants and values of ordered types.
   private minMaxBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'min' | 'max'): Operand {
     let operands = expression.args.map((arg) => this.value(arg));
     if (operands.some((operand) => this.isInvalid(operand))) return this.invalid(expression);
@@ -725,6 +768,10 @@ export abstract class CallCompiler extends CompositeCompiler {
       operands = operands.map((operand) => {
         if (!isUntyped(operand.type)) return operand;
         const converted = this.assign(operand, typed.type, '引数');
+        if (operand.mode === 'constant' && operand.constant) {
+          const rep = represent(operand.constant, typed.type);
+          if ('constant' in rep) return this.constant(rep.constant, typed.type, operand.span);
+        }
         return { ...operand, type: typed.type, mode: 'value', eval: converted };
       });
       if (operands.some((operand) => !identical(operand.type, typed.type))) {
@@ -733,7 +780,23 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
     }
     let type = typed?.type ?? operands[0].type;
-    if (!typed) for (const operand of operands) if (rankOf(operand.type) > rankOf(type)) type = operand.type;
+    if (!typed) {
+      for (const operand of operands.slice(1)) {
+        if (!sameUntypedFamily(type, operand.type)) {
+          this.error(expression, `${name} の引数の型が揃っていません。`);
+          return this.invalid(expression);
+        }
+        if (rankOf(operand.type) > rankOf(type)) type = operand.type;
+      }
+      if (operands.some((operand) => operand.resolveUntyped)) {
+        const concrete = defaultType(type);
+        operands = operands.map((operand) =>
+          operand.resolveUntyped ? operand.resolveUntyped(concrete) : this.defaulted({ ...operand, type })
+        );
+        if (operands.some((operand) => this.isInvalid(operand))) return this.invalid(expression);
+        type = concrete;
+      }
+    }
     if (!isOrdered(type)) {
       this.error(expression, `${describeType(type)} 型の値は大小を比べられないので、${name} には使えません。`);
       return this.invalid(expression);
@@ -794,6 +857,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     return this.invalid(expression);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 30 -- complex over typed and untyped constants and values.
   private complexBuiltin(expression: Extract<Expression, { kind: 'call' }>): Operand {
     let re = this.value(expression.args[0]);
     let im = this.value(expression.args[1]);
@@ -818,17 +882,41 @@ export abstract class CallCompiler extends CompositeCompiler {
         expression
       );
     }
-    if (isUntyped(re.type) && !isUntyped(im.type))
-      re = { ...re, type: im.type, eval: this.assign(re, im.type, '引数') };
-    if (isUntyped(im.type) && !isUntyped(re.type))
-      im = { ...im, type: re.type, eval: this.assign(im, re.type, '引数') };
-    if (isUntyped(re.type)) re = this.defaulted({ ...re, type: BASIC.untypedFloat });
-    if (isUntyped(im.type)) im = this.defaulted({ ...im, type: BASIC.untypedFloat });
+    if (isUntyped(re.type) && !isUntyped(im.type)) {
+      const converted = this.assign(re, im.type, '引数');
+      const rep =
+        re.mode === 'constant' && re.constant && isFloat(im.type) ? represent(re.constant, im.type) : undefined;
+      re =
+        rep && 'constant' in rep
+          ? this.constant(rep.constant, im.type, re.span)
+          : { ...re, mode: 'value', type: im.type, eval: converted };
+    }
+    if (isUntyped(im.type) && !isUntyped(re.type)) {
+      const converted = this.assign(im, re.type, '引数');
+      const rep =
+        im.mode === 'constant' && im.constant && isFloat(re.type) ? represent(im.constant, re.type) : undefined;
+      im =
+        rep && 'constant' in rep
+          ? this.constant(rep.constant, re.type, im.span)
+          : { ...im, mode: 'value', type: re.type, eval: converted };
+    }
+    if (isUntyped(re.type))
+      re = re.resolveUntyped ? re.resolveUntyped(BASIC.float64) : this.defaulted({ ...re, type: BASIC.untypedFloat });
+    if (isUntyped(im.type))
+      im = im.resolveUntyped ? im.resolveUntyped(BASIC.float64) : this.defaulted({ ...im, type: BASIC.untypedFloat });
+    if (this.isInvalid(re) || this.isInvalid(im)) return this.invalid(expression);
     if (!isFloat(re.type) || !identical(re.type, im.type)) {
       this.error(expression, 'complex の2つの引数は、同じ浮動小数点数の型にしてください。');
       return this.invalid(expression);
     }
     const type = isBasic(re.type, 'float32') ? BASIC.complex64 : BASIC.complex128;
+    if (re.mode === 'constant' && im.mode === 'constant' && re.constant && im.constant) {
+      return this.constant(
+        { kind: 'complex', re: toRational(re.constant), im: toRational(im.constant) },
+        type,
+        expression
+      );
+    }
     const readRe = re.eval;
     const readIm = im.eval;
     return {
@@ -840,24 +928,19 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   private complexPartBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'real' | 'imag'): Operand {
-    const operand = this.value(expression.args[0]);
+    let operand = this.value(expression.args[0]);
     if (this.isInvalid(operand)) return operand;
+    if (operand.resolveUntyped) {
+      operand = operand.resolveUntyped(BASIC.complex128);
+      if (this.isInvalid(operand)) return operand;
+    }
     if (operand.mode === 'constant' && operand.constant && isUntyped(operand.type)) {
       const constant = operand.constant;
       if (constant.kind === 'string' || constant.kind === 'bool') {
         this.error(expression, `${name} には複素数を書いてください。`);
         return this.invalid(expression);
       }
-      const part =
-        constant.kind === 'complex'
-          ? name === 'real'
-            ? constant.re
-            : constant.im
-          : name === 'real'
-            ? constant.kind === 'float'
-              ? constant.value
-              : { num: constant.value, den: 1n }
-            : { num: 0n, den: 1n };
+      const part = extractComplexPart(constant, name);
       return this.constant({ kind: 'float', value: part }, BASIC.untypedFloat, expression);
     }
     if (!isComplex(operand.type)) {
@@ -868,6 +951,9 @@ export abstract class CallCompiler extends CompositeCompiler {
       return this.invalid(expression);
     }
     const type = isBasic(operand.type, 'complex64') ? BASIC.float32 : BASIC.float64;
+    if (operand.mode === 'constant' && operand.constant) {
+      return this.constant({ kind: 'float', value: extractComplexPart(operand.constant, name) }, type, expression);
+    }
     const read = operand.eval;
     return {
       mode: 'value',
@@ -959,6 +1045,12 @@ function floatExtreme(name: 'min' | 'max'): (best: Value, value: Value) => Value
 }
 
 function toRational(constant: Constant): Rational {
+  return constant.kind === 'float' ? constant.value : { num: (constant as { value: bigint }).value, den: 1n };
+}
+
+function extractComplexPart(constant: Constant, name: 'real' | 'imag'): Rational {
+  if (constant.kind === 'complex') return name === 'real' ? constant.re : constant.im;
+  if (name === 'imag') return { num: 0n, den: 1n };
   return constant.kind === 'float' ? constant.value : { num: (constant as { value: bigint }).value, den: 1n };
 }
 

@@ -44,7 +44,8 @@ export class Pointer {
   }
 
   store(value: Value): void {
-    (this.base as unknown as Record<string | number, Value>)[this.key] = value;
+    const record = this.base as unknown as Record<string | number, Value>;
+    record[this.key] = writeInPlace(record[this.key], value);
   }
 
   equals(other: Pointer): boolean {
@@ -63,6 +64,7 @@ export class GoStruct {
 /** Library state of a struct value: a turtle, or the fields a library type keeps outside Go's view. */
 export interface NativeState {
   turtle?: TurtleState;
+  clone?(): NativeState;
   [key: string]: unknown;
 }
 
@@ -84,7 +86,7 @@ export class Slice {
   }
 
   set(index: number, value: Value): void {
-    this.array[this.offset + index] = value;
+    this.array[this.offset + index] = writeInPlace(this.array[this.offset + index], value);
   }
 
   values(): Value[] {
@@ -122,7 +124,32 @@ export class Iface {
 
 /** Copies a value as assignment does: structs and arrays are values, everything else is shared. */
 export function copyValue(value: Value): Value {
-  if (value instanceof GoStruct) return new GoStruct(value.fields.map(copyValue), value.native);
+  if (value instanceof GoStruct) {
+    return new GoStruct(value.fields.map(copyValue), value.native?.clone ? value.native.clone() : value.native);
+  }
   if (value instanceof GoArray) return new GoArray(value.elements.map(copyValue));
   return value;
+}
+
+/**
+ * Writes `next` into existing storage `current`, updating struct fields and array elements in place so that existing
+ * pointers and slices into the destination continue to observe the variable's storage.
+ */
+export function writeInPlace(current: Value, next: Value): Value {
+  if (current instanceof GoStruct && next instanceof GoStruct && current.fields.length === next.fields.length) {
+    if (current === next) return current;
+    for (let index = 0; index < current.fields.length; index++) {
+      current.fields[index] = writeInPlace(current.fields[index], next.fields[index]);
+    }
+    current.native = next.native?.clone ? next.native.clone() : next.native;
+    return current;
+  }
+  if (current instanceof GoArray && next instanceof GoArray && current.elements.length === next.elements.length) {
+    if (current === next) return current;
+    for (let index = 0; index < current.elements.length; index++) {
+      current.elements[index] = writeInPlace(current.elements[index], next.elements[index]);
+    }
+    return current;
+  }
+  return copyValue(next);
 }

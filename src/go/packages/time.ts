@@ -1,8 +1,8 @@
 import type { Entity } from '../entities';
 import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { BASIC, type NamedType, type Type } from '../types';
-import { GoStruct, type Value } from '../values';
-import { INT, STRING } from './support';
+import { GoStruct, type NativeState, type Value } from '../values';
+import { BOOL, INT, STRING } from './support';
 
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTH_NAMES = [
@@ -40,28 +40,47 @@ interface Instant {
   monotonic: number;
 }
 
-const instantOf = (receiver: Value): Instant => (receiver as GoStruct).native?.instant as Instant;
-const dateOf = (receiver: Value): Date => new Date(instantOf(receiver).millis);
+interface TimeState extends NativeState {
+  instant: Instant;
+}
 
-const component = (name: string, read: (date: Date) => number, type: Type = INT): void => {
-  addMethod(TIME, name, fn([], [type]), (receiver) => BigInt(read(dateOf(receiver))));
+function createTimeState(millis: number, monotonic: number): TimeState {
+  const state: TimeState = {
+    instant: { millis, monotonic },
+    clone: () => createTimeState(millis, monotonic),
+  };
+  return state;
+}
+
+const instantOf = (receiver: Value): Instant | undefined =>
+  (receiver as GoStruct | undefined)?.native?.instant as Instant | undefined;
+
+const component = (name: string, zero: number, read: (date: Date) => number, type: Type = INT): void => {
+  addMethod(TIME, name, fn([], [type]), (receiver) => {
+    const instant = instantOf(receiver);
+    return BigInt(instant ? read(new Date(instant.millis)) : zero);
+  });
 };
-component('Year', (date) => date.getFullYear());
-component('Month', (date) => date.getMonth() + 1, MONTH);
-component('Day', (date) => date.getDate());
-component('Hour', (date) => date.getHours());
-component('Minute', (date) => date.getMinutes());
-component('Second', (date) => date.getSeconds());
-component('Nanosecond', (date) => date.getMilliseconds() * 1_000_000);
-component('Weekday', (date) => date.getDay(), WEEKDAY);
+component('Year', 1, (date) => date.getFullYear());
+component('Month', 1, (date) => date.getMonth() + 1, MONTH);
+component('Day', 1, (date) => date.getDate());
+component('Hour', 0, (date) => date.getHours());
+component('Minute', 0, (date) => date.getMinutes());
+component('Second', 0, (date) => date.getSeconds());
+component('Nanosecond', 0, (date) => date.getMilliseconds() * 1_000_000);
+component('Weekday', 1, (date) => date.getDay(), WEEKDAY);
 component(
   'YearDay',
+  1,
   (date) => Math.floor((date.getTime() - new Date(date.getFullYear(), 0, 1).getTime()) / 86_400_000) + 1
 );
+addMethod(TIME, 'IsZero', fn([], [BOOL]), (receiver) => instantOf(receiver) === undefined);
 
-/** Time.String: `2009-11-10 23:00:00.123 +0900 JST m=+0.000123456`. */
+/** Time.String: `2009-11-10 23:00:00.123 +0900 JST m=+0.000123456`, or `0001-01-01 00:00:00 +0000 UTC` for zero. */
 addMethod(TIME, 'String', fn([], [STRING]), (receiver) => {
-  const date = dateOf(receiver);
+  const instant = instantOf(receiver);
+  if (!instant) return '0001-01-01 00:00:00 +0000 UTC';
+  const date = new Date(instant.millis);
   const fraction = date.getMilliseconds() === 0 ? '' : `.${pad(date.getMilliseconds(), 3).replace(/0+$/, '')}`;
   const offset = -date.getTimezoneOffset();
   const sign = offset >= 0 ? '+' : '-';
@@ -74,8 +93,8 @@ addMethod(TIME, 'String', fn([], [STRING]), (receiver) => {
     : zone === 'GMT'
       ? 'UTC'
       : zone;
-  const monotonic = (instantOf(receiver).monotonic / 1e9).toFixed(9);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${fraction} ${sign}${pad(Math.floor(Math.abs(offset) / 60))}${pad(Math.abs(offset) % 60)} ${name} m=+${monotonic}`;
+  const monotonic = (instant.monotonic / 1e9).toFixed(9);
+  return `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${fraction} ${sign}${pad(Math.floor(Math.abs(offset) / 60))}${pad(Math.abs(offset) % 60)} ${name} m=+${monotonic}`;
 });
 
 function pad(value: number, width = 2): string {
@@ -111,7 +130,7 @@ const members: Record<string, Entity> = {
     const now = performance.now();
     if (!started.has(runtime)) started.set(runtime, now);
     const monotonic = Math.round((now - (started.get(runtime) as number)) * 1e6) + 1;
-    return new GoStruct([], { instant: { millis: Date.now(), monotonic } satisfies Instant });
+    return new GoStruct([], createTimeState(Date.now(), monotonic));
   }),
 };
 

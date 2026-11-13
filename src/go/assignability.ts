@@ -1,4 +1,4 @@
-import { type Constant, exactInteger, rationalToFloat, toRational } from './constants';
+import { type Constant, exactInteger, floatToRational, rationalToFloat, toRational } from './constants';
 import {
   type BasicKind,
   identical,
@@ -13,6 +13,7 @@ import {
   type MissingMethod,
   missingMethod,
   type Type,
+  typeIdentityKey,
   underlying,
 } from './types';
 import { Complex, type Value } from './values';
@@ -46,7 +47,7 @@ export function represent(constant: Constant, type: Type): Representation {
     if (kind === 'untypedFloat') return { constant: { kind: 'float', value } };
     const rounded = roundFloat(rationalToFloat(value), kind);
     if (!Number.isFinite(rounded)) return { error: 'overflows' };
-    return { constant: { kind: 'float', value } };
+    return { constant: { kind: 'float', value: floatToRational(rounded) } };
   }
   if (isComplex(type)) {
     if (kind === 'untypedComplex') {
@@ -57,13 +58,12 @@ export function represent(constant: Constant, type: Type): Representation {
     const re = toRational(constant);
     const im = constant.kind === 'complex' ? constant.im : { num: 0n, den: 1n };
     const part = kind === 'complex64' ? 'float32' : 'float64';
-    if (
-      !Number.isFinite(roundFloat(rationalToFloat(re), part)) ||
-      !Number.isFinite(roundFloat(rationalToFloat(im), part))
-    ) {
+    const roundedRe = roundFloat(rationalToFloat(re), part);
+    const roundedIm = roundFloat(rationalToFloat(im), part);
+    if (!Number.isFinite(roundedRe) || !Number.isFinite(roundedIm)) {
       return { error: 'overflows' };
     }
-    return { constant: { kind: 'complex', re, im } };
+    return { constant: { kind: 'complex', re: floatToRational(roundedRe), im: floatToRational(roundedIm) } };
   }
   return { error: 'mismatch' };
 }
@@ -108,6 +108,17 @@ function floatOf(value: number, type: Type): number {
 
 function complexPart(value: number, type: Type): number {
   return isBasic(type, 'complex64') ? Math.fround(value) : value;
+}
+
+/** A canonical key for a constant of a concrete type, for duplicate-case and duplicate-key checks. */
+export function constantIdentityKey(constant: Constant, type: Type): string {
+  const value = constantValue(constant, type);
+  const prefix = typeIdentityKey(type);
+  if (typeof value === 'bigint') return `${prefix}:i:${value}`;
+  if (typeof value === 'number') return `${prefix}:f:${value === 0 ? 0 : value}`;
+  if (value instanceof Complex) return `${prefix}:c:${value.re === 0 ? 0 : value.re},${value.im === 0 ? 0 : value.im}`;
+  if (typeof value === 'boolean') return `${prefix}:b:${value}`;
+  return `${prefix}:s:${value as string}`;
 }
 
 /** Why a value of type `from` is not assignable to `to`, or undefined when it is. */

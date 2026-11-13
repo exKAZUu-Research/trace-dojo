@@ -1,4 +1,5 @@
 import type { Entity } from '../entities';
+import { newError } from '../errorValues';
 import { addMethod, definePackage, fn, namedType, nativeFunction } from '../native';
 import { ProgramExit } from '../runtime';
 import { BASIC, ERROR_TYPE, pointerTo, sliceOf } from '../types';
@@ -7,11 +8,14 @@ import { bytesOf, writeStderr, writeStdout } from './support';
 
 /** `*os.File`, of which this environment has standard output and standard error. */
 const FILE = namedType('os', 'File', { kind: 'struct', fields: [] });
+const ERR_INVALID = newError('invalid argument');
 
 function write(receiver: Value, bytes: string): Value[] {
-  const descriptor = ((receiver as Pointer).load() as GoStruct).native?.descriptor;
+  if (!(receiver instanceof Pointer)) return [0n, ERR_INVALID];
+  const descriptor = (receiver.load() as GoStruct).native?.descriptor;
   if (descriptor === 1) writeStdout(bytes);
-  else writeStderr(bytes);
+  else if (descriptor === 2) writeStderr(bytes);
+  else return [0n, ERR_INVALID];
   return [BigInt(bytes.length), undefined];
 }
 

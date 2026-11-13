@@ -6,7 +6,9 @@ import { Cell, GoStruct, Iface, Pointer, type Value } from './values';
 function errorType(name: string, prefix: string, pointer = false): NamedType {
   const type = namedType('runtime', name, { kind: 'struct', fields: [] });
   const message = (receiver: Value): string => {
-    const struct = (receiver instanceof Pointer ? receiver.load() : receiver) as GoStruct;
+    if (pointer && !(receiver instanceof Pointer)) nilPointerPanic();
+    const struct = (receiver instanceof Pointer ? receiver.load() : receiver) as GoStruct | undefined;
+    if (!struct) nilPointerPanic();
     return prefix + String(struct.native?.message);
   };
   addMethod(type, 'Error', fn([], [BASIC.string]), (receiver) => message(receiver), pointer);

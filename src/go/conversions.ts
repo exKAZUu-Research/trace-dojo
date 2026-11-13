@@ -73,15 +73,22 @@ const stringToBytes: Convert = (value, runtime) => {
     Array.from(text, (char) => BigInt(char.charCodeAt(0))),
     0,
     text.length,
-    byteCapacity(text.length)
+    text.length
   );
 };
 
-const stringToRunes: Convert = (value, runtime) => {
-  const runes = runesOf(value as string).map(BigInt);
-  runtime.allocate(runes.length);
-  return new Slice(runes, 0, runes.length, runeCapacity(runes.length));
-};
+export function stringToRunesWithMode(mode: 'constant' | 'stack' | 'heap'): Convert {
+  return (value, runtime) => {
+    const runes: Value[] = runesOf(value as string).map(BigInt);
+    const length = runes.length;
+    const capacity = mode === 'constant' ? length : mode === 'stack' && length <= 32 ? 32 : runeCapacity(length);
+    runtime.allocate(capacity);
+    while (runes.length < capacity) runes.push(0n);
+    return new Slice(runes, 0, length, capacity);
+  };
+}
+
+const stringToRunes: Convert = stringToRunesWithMode('heap');
 
 function sliceToArray(arrayLength: number): Convert {
   return (value) => {
@@ -90,7 +97,7 @@ function sliceToArray(arrayLength: number): Convert {
     if (length < arrayLength) {
       boundsPanic(`cannot convert slice with length ${length} to array or pointer to array with length ${arrayLength}`);
     }
-    return new GoArray((slice as Slice).values().slice(0, arrayLength).map(copyValue));
+    return new GoArray(arrayLength === 0 ? [] : (slice as Slice).values().slice(0, arrayLength).map(copyValue));
   };
 }
 
@@ -116,8 +123,9 @@ function saturate(value: number, min: bigint, max: bigint): bigint {
 }
 
 /**
- * Converts a float to an integer as Go does on arm64, whose conversions saturate: a value beyond the range becomes the
- * nearest limit and NaN becomes 0. Types narrower than 32 bits convert through int32 and keep its low bits.
+ * Converts a float to an integer as Go does on arm64: 64-bit kinds saturate to their range, `uint32` saturates to
+ * `int64` and keeps the low 32 bits, `int32` saturates to `int32`, and narrower kinds saturate to `int32` and keep
+ * the low bits; NaN becomes 0.
  */
 function floatToInteger(kind: BasicKind): Convert {
   switch (kind) {
@@ -131,7 +139,7 @@ function floatToInteger(kind: BasicKind): Convert {
       return (value) => saturate(value as number, 0n, 2n ** 64n - 1n);
     }
     case 'uint32': {
-      return (value) => saturate(value as number, 0n, 2n ** 32n - 1n);
+      return (value) => BigInt.asUintN(32, saturate(value as number, INT64_MIN, INT64_MAX));
     }
     case 'int32': {
       return (value) => saturate(value as number, -(2n ** 31n), 2n ** 31n - 1n);
@@ -148,13 +156,8 @@ function runeOfInteger(value: bigint): number {
   return value < 0n || value > 0x10_ff_ffn ? 0xff_fd : Number(value);
 }
 
-/** The capacity Go gives the slice from `[]byte(s)`, rounded to its allocator's size classes. */
-function byteCapacity(length: number): number {
-  return roundUpToSizeClass(length);
-}
-
 function runeCapacity(length: number): number {
-  return Math.ceil(roundUpToSizeClass(length * 4) / 4);
+  return Math.floor(roundUpToSizeClass(length * 4) / 4);
 }
 
 /** Go's small allocation size classes, which decide the capacity of new slices. */

@@ -59,15 +59,35 @@ function mod(x: number, y: number): number {
   return x % y;
 }
 
-/** `math.Remainder` (IEEE 754): x - n*y with n the integer nearest x/y, halves to even. */
+/** `math.Remainder` (IEEE 754), transcribed from Go's `math/remainder.go`. */
 function remainder(x: number, y: number): number {
+  const tiny = 4.450147717014403e-308;
+  const halfMax = Number.MAX_VALUE / 2;
   if (Number.isNaN(x) || Number.isNaN(y) || !Number.isFinite(x) || y === 0) return Number.NaN;
   if (!Number.isFinite(y)) return x;
-  const quotient = x / y;
-  let n = Math.round(quotient);
-  if (Math.abs(quotient - Math.trunc(quotient)) === 0.5) n = 2 * Math.round(quotient / 2);
-  const result = x - n * y;
-  return result === 0 ? Math.sign(x) * 0 : result;
+  let sign = false;
+  let ax = x;
+  let ay = y;
+  if (ax < 0) {
+    ax = -ax;
+    sign = true;
+  }
+  if (ay < 0) ay = -ay;
+  if (ax === ay) return sign ? -0 : 0;
+  if (ay <= halfMax) ax %= ay + ay;
+  if (ay < tiny) {
+    if (ax + ax > ay) {
+      ax -= ay;
+      if (ax + ax >= ay) ax -= ay;
+    }
+  } else {
+    const yHalf = 0.5 * ay;
+    if (ax > yHalf) {
+      ax -= ay;
+      if (ax >= yHalf) ax -= ay;
+    }
+  }
+  return sign ? -ax : ax;
 }
 
 /** `math.Round`: halves away from zero. */

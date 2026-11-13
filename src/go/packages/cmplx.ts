@@ -17,7 +17,7 @@ function sqrt(value: Complex): Complex {
     if (re < 0) return new Complex(0, Math.sign(im) < 0 || Object.is(im, -0) ? -Math.sqrt(-re) : Math.sqrt(-re));
     return new Complex(Math.sqrt(re), im);
   }
-  if (!Number.isFinite(im)) return new Complex(Infinity, im);
+  if (im === Infinity || im === -Infinity) return new Complex(Infinity, im);
   if (re === 0) {
     if (im < 0) {
       const r = Math.sqrt(-0.5 * im);

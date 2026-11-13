@@ -1,3 +1,4 @@
+import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
 import {
   addMethod,
@@ -10,19 +11,15 @@ import {
   typeEntity,
   typeParam,
 } from '../native';
-import { GoPanic } from '../runtime';
+import { nilPointerPanic, runtimeErrorPanic } from '../runtimeErrors';
 import { BASIC, funcType, type NamedType, pointerTo, sliceOf } from '../types';
-import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { Cell, GoStruct, Iface, type NativeState, Pointer, Slice, type Value } from '../values';
 import { RNG_COOKED } from './rngCooked';
-import { callFunction, callMethod, FLOAT64, INT } from './support';
+import { callFunction, callMethod, FLOAT64, INT, receiverStruct, spendFor, stringPanic } from './support';
 
 const MASK64 = (1n << 64n) - 1n;
 const MASK63 = (1n << 63n) - 1n;
 const INT32_MAX = 2_147_483_647n;
-
-function stringPanic(message: string): never {
-  throw new GoPanic(new Iface(BASIC.string, message));
-}
 
 /** math/rand's additive lagged Fibonacci generator (rngSource), transcribed from Go's rng.go. */
 class LaggedFibonacci {
@@ -30,8 +27,16 @@ class LaggedFibonacci {
   private tap = 0;
   private feed = 607 - 273;
 
-  constructor(seed: bigint) {
-    this.seed(seed);
+  constructor(seed?: bigint) {
+    if (seed !== undefined) this.seed(seed);
+  }
+
+  clone(): LaggedFibonacci {
+    const copy = new LaggedFibonacci();
+    for (let index = 0; index < this.vec.length; index++) copy.vec[index] = this.vec[index];
+    copy.tap = this.tap;
+    copy.feed = this.feed;
+    return copy;
   }
 
   seed(seedValue: bigint): void {
@@ -164,11 +169,15 @@ class RandV1 {
   }
 
   perm(n: bigint): Slice {
+    if (n < 0n) stringPanic('invalid argument to Intn');
+    const runtime = currentRuntime();
+    if (n > BigInt(LIMITS.maxSlots)) runtime.allocate(LIMITS.maxSlots + 1);
     const count = Number(n);
-    if (count < 0) stringPanic('invalid argument to Intn');
-    currentRuntime().allocate(count);
+    runtime.allocate(count);
+    spendFor(count);
     const values: bigint[] = Array.from({ length: count }, () => 0n);
     for (let i = 0; i < count; i++) {
+      runtime.spend();
       const j = Number(this.intn(BigInt(i + 1)));
       values[i] = values[j];
       values[j] = BigInt(i);
@@ -178,7 +187,9 @@ class RandV1 {
 
   shuffle(n: bigint, swap: Value): void {
     if (n < 0n) stringPanic('invalid argument to Shuffle');
+    const runtime = currentRuntime();
     for (let i = n - 1n; i > 0n; i--) {
+      runtime.spend();
       const j = this.int31nLemire(i + 1n);
       callFunction(swap, [i, j]);
     }
@@ -194,8 +205,20 @@ const SOURCE = namedType('rand', 'Source', {
 });
 
 const RNG_SOURCE = namedType('rand', 'rngSource', { kind: 'struct', fields: [] });
-const sourceOf = (receiver: Value): LaggedFibonacci =>
-  ((receiver as Pointer).load() as GoStruct).native?.source as LaggedFibonacci;
+
+function createSourceState(source: LaggedFibonacci): NativeState {
+  const state: NativeState = {
+    source,
+    clone: () => createSourceState(source.clone()),
+  };
+  return state;
+}
+
+const sourceOf = (receiver: Value): LaggedFibonacci => {
+  const struct = receiverStruct(receiver);
+  struct.native ??= createSourceState(new LaggedFibonacci());
+  return struct.native.source as LaggedFibonacci;
+};
 addMethod(RNG_SOURCE, 'Int63', fn([], [BASIC.int64]), (receiver) => sourceOf(receiver).int63(), true);
 addMethod(RNG_SOURCE, 'Uint64', fn([], [BASIC.uint64]), (receiver) => sourceOf(receiver).uint64(), true);
 addMethod(
@@ -213,8 +236,9 @@ const RAND_V1 = namedType('rand', 'Rand', { kind: 'struct', fields: [] });
 RAND_V1.unsupported = new Set(['NormFloat64', 'ExpFloat64', 'Read']);
 
 function randV1Of(receiver: Value): RandV1 {
-  const struct = (receiver as Pointer).load() as GoStruct;
-  return struct.native?.rand as RandV1;
+  const struct = receiverStruct(receiver);
+  struct.native ??= { rand: new RandV1(() => nilPointerPanic(), undefined) };
+  return struct.native.rand as RandV1;
 }
 
 /** Defines the methods of a Rand type and the package functions that use the default generator. */
@@ -268,12 +292,12 @@ const v1Members: Record<string, Entity> = {
     ([seed]) =>
       new Iface(
         pointerTo(RNG_SOURCE),
-        new Pointer(new Cell(new GoStruct([], { source: new LaggedFibonacci(seed as bigint) })), 'v')
+        new Pointer(new Cell(new GoStruct([], createSourceState(new LaggedFibonacci(seed as bigint)))), 'v')
       )
   ),
   New: nativeFunction('New', fn([SOURCE], [pointerTo(RAND_V1)]), ([source]) => {
-    const iface = source as Iface;
-    const native = iface.value instanceof Pointer ? (iface.value.load() as GoStruct).native?.source : undefined;
+    const iface = source as Iface | undefined;
+    const native = iface?.value instanceof Pointer ? (iface.value.load() as GoStruct).native?.source : undefined;
     const rand =
       native instanceof LaggedFibonacci
         ? new RandV1(
@@ -357,7 +381,11 @@ class RandV2 {
 
   shuffle(n: bigint, swap: Value): void {
     if (n < 0n) stringPanic('invalid argument to Shuffle');
-    for (let i = n - 1n; i > 0n; i--) callFunction(swap, [i, this.uint64n(i + 1n)]);
+    const runtime = currentRuntime();
+    for (let i = n - 1n; i > 0n; i--) {
+      runtime.spend();
+      callFunction(swap, [i, this.uint64n(i + 1n)]);
+    }
   }
 }
 
@@ -366,7 +394,21 @@ const SOURCE_V2 = namedType('rand', 'Source', {
   methods: [{ name: 'Uint64', type: fn([], [BASIC.uint64]) }],
 });
 const PCG = namedType('rand', 'PCG', { kind: 'struct', fields: [] });
-const pcgOf = (receiver: Value): Pcg => ((receiver as Pointer).load() as GoStruct).native?.pcg as Pcg;
+
+function createPcgState(hi: bigint, lo: bigint): NativeState {
+  const pcg = new Pcg(hi, lo);
+  const state: NativeState = {
+    pcg,
+    clone: () => createPcgState(pcg.hi, pcg.lo),
+  };
+  return state;
+}
+
+const pcgOf = (receiver: Value): Pcg => {
+  const struct = receiverStruct(receiver);
+  struct.native ??= createPcgState(0n, 0n);
+  return struct.native.pcg as Pcg;
+};
 addMethod(PCG, 'Uint64', fn([], [BASIC.uint64]), (receiver) => pcgOf(receiver).uint64(), true);
 addMethod(
   PCG,
@@ -383,7 +425,11 @@ addMethod(
 
 const RAND_V2 = namedType('rand', 'Rand', { kind: 'struct', fields: [] });
 RAND_V2.unsupported = new Set(['NormFloat64', 'ExpFloat64', 'N']);
-const randV2Of = (receiver: Value): RandV2 => ((receiver as Pointer).load() as GoStruct).native?.rand as RandV2;
+const randV2Of = (receiver: Value): RandV2 => {
+  const struct = receiverStruct(receiver);
+  struct.native ??= { rand: new RandV2(() => nilPointerPanic()) };
+  return struct.native.rand as RandV2;
+};
 
 function positive(n: bigint, name: string): bigint {
   if (n <= 0n) stringPanic(`invalid argument to ${name}`);
@@ -408,11 +454,17 @@ const v2Methods: Record<string, [Parameters<typeof fn>, (rand: RandV2, args: Val
   Perm: [
     [[INT], [sliceOf(INT)]],
     (rand, [n]) => {
-      const count = Number(n as bigint);
+      const requested = n as bigint;
+      if (requested < 0n) runtimeErrorPanic('makeslice: len out of range');
+      const runtime = currentRuntime();
+      if (requested > BigInt(LIMITS.maxSlots)) runtime.allocate(LIMITS.maxSlots + 1);
+      const count = Number(requested);
+      runtime.allocate(count);
+      spendFor(count);
       const values: Value[] = Array.from({ length: count }, (_, index) => BigInt(index));
-      currentRuntime().allocate(count);
       const slice = new Slice(values, 0, count, count);
       for (let i = BigInt(count) - 1n; i > 0n; i--) {
+        runtime.spend();
         const j = Number(rand.uint64n(i + 1n));
         const value = values[Number(i)];
         values[Number(i)] = values[j];
@@ -431,11 +483,11 @@ const v2Members: Record<string, Entity> = {
   NewPCG: nativeFunction(
     'NewPCG',
     fn([BASIC.uint64, BASIC.uint64], [pointerTo(PCG)]),
-    ([hi, lo]) => new Pointer(new Cell(new GoStruct([], { pcg: new Pcg(hi as bigint, lo as bigint) })), 'v')
+    ([hi, lo]) => new Pointer(new Cell(new GoStruct([], createPcgState(hi as bigint, lo as bigint))), 'v')
   ),
   New: nativeFunction('New', fn([SOURCE_V2], [pointerTo(RAND_V2)]), ([source]) => {
-    const iface = source as Iface;
-    const native = iface.value instanceof Pointer ? (iface.value.load() as GoStruct).native?.pcg : undefined;
+    const iface = source as Iface | undefined;
+    const native = iface?.value instanceof Pointer ? (iface.value.load() as GoStruct).native?.pcg : undefined;
     const rand =
       native instanceof Pcg
         ? new RandV2(() => native.uint64())

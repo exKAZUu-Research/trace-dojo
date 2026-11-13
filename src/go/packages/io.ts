@@ -1,8 +1,8 @@
 import type { Entity } from '../entities';
 import { newError } from '../errorValues';
-import { definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { BASIC, ERROR_TYPE, sliceOf } from '../types';
-import type { Slice, Value } from '../values';
+import { Slice, type Value } from '../values';
 import { byteSlice, bytesOf, callMethod } from './support';
 
 const BYTE_SLICE = sliceOf(BASIC.uint8);
@@ -19,14 +19,20 @@ export const IO_READER = namedType('io', 'Reader', {
 
 /** `io.EOF`, which readers return at the end and programs compare with ==. */
 export const EOF = newError('EOF');
+export const ERR_SHORT_WRITE = newError('short write');
+const ERR_INVALID_WRITE = newError('invalid write result');
 
 /** Reads everything from a reader through its Read method, 512 bytes at a time as io.ReadAll starts. */
 function readAll(reader: Value): [string, Value] {
+  const runtime = currentRuntime();
   let data = '';
   for (;;) {
+    runtime.spend();
     const buffer = byteSlice('\0'.repeat(512));
     const [count, error] = callMethod(reader, 'Read', [buffer]) as [bigint, Value];
-    data += bytesOf(buffer).slice(0, Number(count));
+    const chunk = bytesOf(buffer).slice(0, Math.max(0, Number(count)));
+    runtime.checkStringLength(data.length + chunk.length);
+    data += chunk;
     if (error !== undefined) return [data, error === EOF ? undefined : error];
   }
 }
@@ -45,13 +51,42 @@ const members: Record<string, Entity> = {
     slot: -1,
     library: () => EOF,
   },
+  ErrShortWrite: {
+    kind: 'var',
+    name: 'ErrShortWrite',
+    type: ERROR_TYPE,
+    span: { row: 0, column: 0 },
+    used: true,
+    boxed: false,
+    owner: undefined,
+    slot: -1,
+    library: () => ERR_SHORT_WRITE,
+  },
   Copy: nativeFunction('Copy', fn([IO_WRITER, IO_READER], [BASIC.int64, ERROR_TYPE]), ([writer, reader]) => {
-    const [data, error] = readAll(reader);
-    if (data.length > 0) {
-      const [, writeError] = callMethod(writer, 'Write', [byteSlice(data)]) as [bigint, Value];
-      if (writeError !== undefined) return [0n, writeError];
+    const runtime = currentRuntime();
+    const size = 32 * 1024;
+    runtime.allocate(size);
+    const backing = Array.from({ length: size }, (): Value => 0n);
+    const buf = new Slice(backing, 0, size, size);
+    let written = 0n;
+    for (;;) {
+      runtime.spend();
+      const [nrBig, er] = callMethod(reader, 'Read', [buf]) as [bigint, Value];
+      const nr = Number(nrBig);
+      if (nr > 0) {
+        const chunk = new Slice(backing, 0, Math.min(nr, size), size);
+        let [nwBig, ew] = callMethod(writer, 'Write', [chunk]) as [bigint, Value];
+        let nw = Number(nwBig);
+        if (nw < 0 || nr < nw) {
+          nw = 0;
+          ew ??= ERR_INVALID_WRITE;
+        }
+        written += BigInt(nw);
+        if (ew !== undefined) return [written, ew];
+        if (nr !== nw) return [written, ERR_SHORT_WRITE];
+      }
+      if (er !== undefined) return [written, er === EOF ? undefined : er];
     }
-    return [BigInt(data.length), error];
   }),
   ReadAll: nativeFunction('ReadAll', fn([IO_READER], [BYTE_SLICE, ERROR_TYPE]), ([reader]) => {
     const [data, error] = readAll(reader);
@@ -88,6 +123,5 @@ export const IO_PACKAGE = definePackage('io', members, [
   'RuneReader',
   'StringWriter',
   'ErrUnexpectedEOF',
-  'ErrShortWrite',
   'ErrClosedPipe',
 ]);

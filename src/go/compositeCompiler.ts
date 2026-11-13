@@ -1,10 +1,10 @@
-import { constantValue, represent } from './assignability';
+import { constantIdentityKey, represent } from './assignability';
 import type { CompositeLiteral, Expression } from './ast';
 import { mapKeyOf } from './equality';
 import { describeConstant, ExpressionCompiler } from './expressionCompiler';
 import type { Operand } from './operand';
-import { type Eval, evaluateAll, type Frame } from './runtime';
-import { BASIC, coreType, defaultType, describeType, isInterface, type Type, typeString, underlying } from './types';
+import type { Eval, Frame } from './runtime';
+import { BASIC, coreType, defaultType, describeType, isInterface, isUntyped, type Type, underlying } from './types';
 import { Cell, GoArray, GoMap, GoStruct, Pointer, Slice, type Value } from './values';
 
 /** Compiles composite literals: structs, arrays, slices, and maps, whose nested literals may elide their types. */
@@ -76,9 +76,11 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     return this.assign(this.expression(expression), type, context);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keyed and unkeyed struct literals with Go's checks and evaluation order.
   private structLiteral(expression: CompositeLiteral, type: Type, struct: Extract<Type, { kind: 'struct' }>): Operand {
     const { fields } = struct;
-    const values = Array.from<Eval | undefined>({ length: fields.length });
+    const entries: { index: number; value: Eval }[] = [];
+    const seen = new Set<number>();
     const keyed = expression.elements.some((element) => element.key);
     if (keyed) {
       for (const element of expression.elements) {
@@ -87,23 +89,32 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
             element,
             '構造体のリテラルでは、すべての要素を フィールド名: 値 の形にするか、すべてを値だけにしてください。'
           );
+          if (element.key) this.expression(element.key);
+          this.expression(element.value);
           continue;
         }
         const index = fields.findIndex((field) => field.name === (element.key as { name: string }).name);
         if (index === -1) {
           this.error(element.key, `${describeType(type)} 型には ${element.key.name} というフィールドがありません。`);
+          this.expression(element.value);
           continue;
         }
-        if (values[index]) this.error(element, `フィールド ${element.key.name} に2回値を書いています。`);
-        values[index] = this.element(element.value, fields[index].type, 'フィールド');
+        if (seen.has(index)) this.error(element, `フィールド ${element.key.name} に2回値を書いています。`);
+        seen.add(index);
+        entries.push({ index, value: this.element(element.value, fields[index].type, 'フィールド') });
       }
     } else if (expression.elements.length > 0) {
+      let reportedExcess = false;
       for (const [index, element] of expression.elements.entries()) {
         if (index >= fields.length) {
-          this.error(element, `${describeType(type)} 型のフィールドより多くの値を書いています。`);
-          break;
+          if (!reportedExcess) {
+            this.error(element, `${describeType(type)} 型のフィールドより多くの値を書いています。`);
+            reportedExcess = true;
+          }
+          this.expression(element.value);
+          continue;
         }
-        values[index] = this.element(element.value, fields[index].type, 'フィールド');
+        entries.push({ index, value: this.element(element.value, fields[index].type, 'フィールド') });
       }
       if (expression.elements.length < fields.length) {
         this.error({ row: expression.endRow, column: 0 }, `${describeType(type)} 型のフィールドの値が足りません。`);
@@ -116,15 +127,26 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
       span: expression,
       eval: (frame) => {
         frame.runtime.allocate(fields.length);
-        const evaluated = evaluateAll(
-          frame,
-          values.map((value, index) => value ?? zeros[index])
-        );
+        const evaluated = Array.from<Value>({ length: fields.length });
+        const filled = new Set<number>();
+        frame.temporaries.push(evaluated);
+        try {
+          for (const { index, value } of entries) {
+            evaluated[index] = value(frame);
+            filled.add(index);
+          }
+        } finally {
+          frame.temporaries.pop();
+        }
+        for (let index = 0; index < fields.length; index++) {
+          if (!filled.has(index)) evaluated[index] = zeros[index]();
+        }
         return new GoStruct(evaluated);
       },
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 25 -- Keyed and unkeyed array/slice literals with constant bounds checks.
   private arrayLiteral(
     expression: CompositeLiteral,
     type: Type,
@@ -134,18 +156,25 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
     let next = 0;
     let length = 0;
     const seen = new Set<number>();
+    let reportedOutOfRange = false;
     for (const element of expression.elements) {
       if (element.key) {
         const key = this.constantExpression(element.key);
         if (key.value === undefined || key.value < 0n) {
           this.error(element.key, '配列やスライスのリテラルのキーには、0 以上の整数の定数を書いてください。');
+          this.expression(element.value);
           continue;
         }
         next = Number(key.value);
       }
       if (under.kind === 'array' && next >= under.length) {
-        this.error(element, `添字 ${next} は配列の範囲の外です（長さは ${under.length} です）。`);
-        break;
+        if (!reportedOutOfRange) {
+          this.error(element, `添字 ${next} は配列の範囲の外です（長さは ${under.length} です）。`);
+          reportedOutOfRange = true;
+        }
+        this.element(element.value, under.element, '要素');
+        next++;
+        continue;
       }
       if (seen.has(next)) this.error(element, `添字 ${next} に2回値を書いています。`);
       seen.add(next);
@@ -179,22 +208,25 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
 
   private mapLiteral(expression: CompositeLiteral, type: Type, under: Extract<Type, { kind: 'map' }>): Operand {
     const entries: { key: Eval; value: Eval }[] = [];
-    const constantKeys = new Set<unknown>();
+    const constantKeys = new Set<string>();
     const keyOf = mapKeyOf(under.key);
     for (const element of expression.elements) {
       if (!element.key) {
         this.error(element, 'map のリテラルでは、要素を キー: 値 の形で書いてください。');
+        this.element(element.value, under.value, 'map の値');
         continue;
       }
       const keyOperand =
         element.key.kind === 'composite' && !element.key.type ? undefined : this.expression(element.key);
       if (keyOperand?.mode === 'constant' && keyOperand.constant) {
-        const representation = represent(
-          keyOperand.constant,
-          isInterface(under.key) ? defaultType(keyOperand.type) : under.key
-        );
+        const concreteType = isInterface(under.key)
+          ? isUntyped(keyOperand.type)
+            ? defaultType(keyOperand.type)
+            : keyOperand.type
+          : under.key;
+        const representation = represent(keyOperand.constant, concreteType);
         if ('constant' in representation) {
-          const constantKey = `${typeString(defaultType(keyOperand.type))}:${String(constantValue(representation.constant, under.key))}`;
+          const constantKey = constantIdentityKey(representation.constant, concreteType);
           if (constantKeys.has(constantKey))
             this.error(element.key, `map のリテラルにキー ${describeConstant(keyOperand.constant)} が2回あります。`);
           constantKeys.add(constantKey);

@@ -1,10 +1,23 @@
+// oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt reads as raw bytes.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Type } from './types';
-import { Cell, GoArray, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
+import {
+  Cell,
+  copyValue,
+  GoArray,
+  GoFunc,
+  GoMap,
+  GoStruct,
+  Iface,
+  Pointer,
+  Slice,
+  type Value,
+  writeInPlace,
+} from './values';
 
 /** What a statement does next, when it does not simply complete. */
 export type Completion = { kind: 'break' } | { kind: 'continue' } | { kind: 'return' } | { kind: 'fallthrough' };
@@ -109,9 +122,30 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
+  private readonly stdoutDecoder = new TextDecoder('utf-8', { fatal: false });
+  private readonly stderrDecoder = new TextDecoder('utf-8', { fatal: false });
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
+  }
+
+  writeStdout(bytes: string): void {
+    if (bytes.length === 0) return;
+    const text = this.stdoutDecoder.decode(rawBytes(bytes), { stream: true });
+    if (text.length > 0) this.io.stdout.write(text);
+  }
+
+  writeStderr(bytes: string): void {
+    if (bytes.length === 0) return;
+    const text = this.stderrDecoder.decode(rawBytes(bytes), { stream: true });
+    if (text.length > 0) this.io.stderr.write(text);
+  }
+
+  flushOutput(): void {
+    const out = this.stdoutDecoder.decode();
+    if (out.length > 0) this.io.stdout.write(out);
+    const err = this.stderrDecoder.decode();
+    if (err.length > 0) this.io.stderr.write(err);
   }
 
   spend(cost = 1): void {
@@ -207,8 +241,12 @@ export class Runtime implements TracedRuntime<Frame> {
     const stack: unknown[] = [];
     for (const cell of this.globals) stack.push(cell);
     for (const frame of this.frames) {
-      stack.push(...frame.locals, ...frame.cells, ...frame.temporaries);
-      for (const deferred of frame.defers ?? []) stack.push(...deferred.values);
+      for (const local of frame.locals) stack.push(local);
+      for (const cell of frame.cells) stack.push(cell);
+      for (const temporary of frame.temporaries) stack.push(temporary);
+      for (const deferred of frame.defers ?? []) {
+        for (const value of deferred.values) stack.push(value);
+      }
       if (frame.panicking) stack.push(frame.panicking.value);
     }
     const turtles = new Set<unknown>();
@@ -222,20 +260,31 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 }
 
+function rawBytes(bytes: string): Uint8Array {
+  const array = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index++) array[index] = bytes.charCodeAt(index) & 0xff;
+  return array;
+}
+
 function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): void {
   if (item instanceof Cell) stack.push(item.v);
   else if (item instanceof Pointer) stack.push(item.base);
-  else if (Array.isArray(item)) stack.push(...(item as unknown[]));
-  else if (item instanceof GoStruct) {
+  else if (Array.isArray(item)) {
+    for (const entry of item as unknown[]) stack.push(entry);
+  } else if (item instanceof GoStruct) {
     stack.push(item.fields);
     const native = item.native;
     if (native?.turtle) turtles.add(native.turtle);
-    else if (native) stack.push(...Object.values(native));
+    else if (native) {
+      for (const value of Object.values(native)) stack.push(value);
+    }
   } else if (item instanceof GoArray) stack.push(item.elements);
   else if (item instanceof Slice) stack.push(item.array);
-  else if (item instanceof GoMap) for (const entry of item.entries.values()) stack.push(entry.key, entry.value);
-  else if (item instanceof GoFunc) stack.push(...item.captured);
-  else if (item instanceof Iface) stack.push(item.value);
+  else if (item instanceof GoMap) {
+    for (const entry of item.entries.values()) stack.push(entry.key, entry.value);
+  } else if (item instanceof GoFunc) {
+    for (const captured of item.captured) stack.push(captured);
+  } else if (item instanceof Iface) stack.push(item.value);
 }
 
 function resultsOf(frame: Frame): Value | Value[] {
@@ -265,6 +314,15 @@ export function evaluateAll(frame: Frame, evals: readonly Eval[]): Value[] {
   return values;
 }
 
+export function withTemporary<T>(frame: Frame, value: unknown, run: () => T): T {
+  frame.temporaries.push(value);
+  try {
+    return run();
+  } finally {
+    frame.temporaries.pop();
+  }
+}
+
 /** Reads a local, which is a cell when a closure or a pointer may share it. */
 export function readLocal(frame: Frame, slot: number): Value {
   const value = frame.locals[slot];
@@ -273,6 +331,7 @@ export function readLocal(frame: Frame, slot: number): Value {
 
 export function writeLocal(frame: Frame, slot: number, value: Value): void {
   const current = frame.locals[slot];
-  if (current instanceof Cell) current.v = value;
-  else frame.locals[slot] = value;
+  if (current instanceof Cell) current.v = writeInPlace(current.v, value);
+  else if (current === UNASSIGNED) frame.locals[slot] = copyValue(value);
+  else frame.locals[slot] = writeInPlace(current, value);
 }

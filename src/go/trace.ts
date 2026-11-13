@@ -2,7 +2,7 @@ import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
-import type { DisplayNode, TraceItemVariable } from '../problems/trace';
+import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { runProgram } from './execute';
 import { formatFloat } from './floatFormat';
@@ -123,8 +123,11 @@ function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
   }
 }
 
-function basicScalar(value: Value): Scalar {
-  if (typeof value === 'bigint') return Number(value);
+function basicScalar(value: Value): TraceScalar {
+  if (typeof value === 'bigint') {
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? number : value;
+  }
   if (typeof value === 'string') return utf8Decode(value);
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (value instanceof Complex) {
@@ -147,7 +150,7 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   const under = underlying(type);
   if (under.kind === 'func') return undefined;
   if (value === undefined) return NULL_NODE;
-  if (under.kind === 'basic') return { kind: 'value', value: basicScalar(value) as number | string | boolean | null };
+  if (under.kind === 'basic') return { kind: 'value', value: basicScalar(value) };
   if (value instanceof Iface) return displayNodeOf(value.value, value.type, seen);
   if (value instanceof Pointer) return pointerNodeOf(value, (under as { element: Type }).element, seen);
   if (seen.has(value)) return undefined;

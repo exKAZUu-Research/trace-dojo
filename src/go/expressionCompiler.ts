@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import { LIMITS } from '../interpreter/limits';
 import { assignFailure, constantValue, convertible, represent } from './assignability';
 import type { CompositeLiteral, Expression, Span } from './ast';
 import { CompilerBase } from './compilerBase';
@@ -9,14 +10,16 @@ import {
   ConstantOverflow,
   exactInteger,
   parseFloatLiteral,
+  rationalToFloat,
   shiftConstant,
   unaryConstant,
 } from './constants';
-import { conversion, toInterface } from './conversions';
-import type { Entity, VarEntity } from './entities';
+import { conversion, stringToRunesWithMode, toInterface } from './conversions';
+import { type Entity, linkEscapeHook, linkEscapeSource, markEscapes, type VarEntity } from './entities';
 import { equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
+import { currentRuntime } from './native';
 import type { Operand } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
 import { type Eval, type Frame, readLocal, writeLocal } from './runtime';
@@ -50,7 +53,19 @@ import {
   typeString,
   underlying,
 } from './types';
-import { Cell, Complex, copyValue, GoArray, type GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
+import {
+  Cell,
+  Complex,
+  copyValue,
+  GoArray,
+  type GoMap,
+  GoStruct,
+  Iface,
+  Pointer,
+  Slice,
+  type Value,
+  writeInPlace,
+} from './values';
 
 /** Compiles expressions, checking their types as Go's compiler does. */
 export abstract class ExpressionCompiler extends CompilerBase {
@@ -144,11 +159,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected constant(written: Constant, type: Type, span: Span): Operand {
-    // A typed floating-point constant holds a value of its type's precision, as Go's compiler rounds it.
-    const constant =
-      !isUntyped(type) && isFloat(type) && (written.kind === 'float' || written.kind === 'int')
-        ? roundedFloatConstant(written, isBasic(type, 'float32'))
-        : written;
+    // A typed floating-point or complex constant holds a value of its type's precision, as Go's compiler rounds it.
+    let constant = written;
+    if (!isUntyped(type) && (isFloat(type) || isComplex(type))) {
+      const represented = represent(written, type);
+      if ('constant' in represented) constant = represented.constant;
+    }
     const runtimeType = defaultType(type);
     const value = this.representsDefault(constant, runtimeType);
     return { mode: 'constant', type, span, constant, eval: () => value, ssaConstant: always };
@@ -267,15 +283,20 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const { library } = entity;
     if (library) return { mode: 'value', type: entity.type, span, eval: () => library() };
     if (!entity.owner) {
+      const prepareStore = (frame: Frame): ((value: Value) => void) => {
+        const cell = frame.runtime.globals[slot];
+        return (value) => {
+          cell.v = writeInPlace(cell.v, value);
+        };
+      };
       return {
         mode: 'variable',
         type: entity.type,
         span,
         variable: { markUsed },
         eval: (frame) => frame.runtime.globals[slot].v,
-        store: (frame, value) => {
-          frame.runtime.globals[slot].v = value;
-        },
+        prepareStore,
+        store: (frame, value) => prepareStore(frame)(value),
         addressOf: () => (frame) => new Pointer(frame.runtime.globals[slot], 'v'),
       };
     }
@@ -296,27 +317,55 @@ export abstract class ExpressionCompiler extends CompilerBase {
           entity.definedAsConstant &&
           (() => !entity.boxed && !entity.writes && (entity.definedAsConstant as () => boolean)()),
         variable: { markUsed, entity },
+        backingVars: [entity],
         eval: (frame) => readLocal(frame, slot),
+        prepareStore: (frame) => (value) => writeLocal(frame, slot, value),
         store: (frame, value) => writeLocal(frame, slot, value),
         addressOf: () => {
           entity.boxed = true;
-          entity.escapes = true;
+          markEscapes(entity);
           return (frame) => new Pointer(frame.locals[slot] as Cell, 'v');
         },
       };
     }
     const index = this.capture(entity, this.fn as NonNullable<typeof this.fn>);
+    const prepareStore = (frame: Frame): ((value: Value) => void) => {
+      const cell = frame.cells[index];
+      return (value) => {
+        cell.v = writeInPlace(cell.v, value);
+      };
+    };
     return {
       mode: 'variable',
       type: entity.type,
       span,
       variable: { markUsed },
       eval: (frame) => frame.cells[index].v,
-      store: (frame, value) => {
-        frame.cells[index].v = value;
-      },
+      prepareStore,
+      store: (frame, value) => prepareStore(frame)(value),
       addressOf: () => (frame) => new Pointer(frame.cells[index], 'v'),
     };
+  }
+
+  protected escapeOperand(operand: Operand): void {
+    const variable = operand.variable?.entity;
+    if (variable && operand.type === variable.type) markEscapes(variable);
+    if (operand.backingVars) {
+      for (const entity of operand.backingVars) markEscapes(entity);
+    }
+    if (operand.nonEscaping) operand.nonEscaping.escapes = true;
+  }
+
+  protected recordLocalEscapeAlias(operand: Operand, target: VarEntity): void {
+    if (operand.backingVars) {
+      for (const source of operand.backingVars) linkEscapeSource(source, target);
+    }
+    const nonEscaping = operand.nonEscaping;
+    if (nonEscaping) {
+      linkEscapeHook(() => {
+        nonEscaping.escapes = true;
+      }, target);
+    }
   }
 
   // Conversions -----------------------------------------------------------------------------------------------------
@@ -325,18 +374,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * Converts an operand for storing into a value of `target`: an untyped constant takes the type, a concrete value
    * enters an interface, and structs and arrays are copied. Reports the mismatch as `context` says.
    */
-  protected assign(operand: Operand, target: Type, context: string): Eval {
+  protected assign(operand: Operand, target: Type, context: string, targetLocal?: VarEntity): Eval {
     if (this.isInvalid(operand) || target === BASIC.invalid) return () => {};
     let value = this.asValue(operand);
     if (this.isInvalid(value)) return () => {};
-    // Storing the variable itself, not an element or field of it, lets its value escape.
-    const variable = value.variable?.entity;
-    if (variable && value.type === variable.type) variable.escapes = true;
+    if (targetLocal && targetLocal.owner !== undefined && !isInterface(target)) {
+      this.recordLocalEscapeAlias(value, targetLocal);
+    } else {
+      this.escapeOperand(value);
+    }
+    if (value.resolveUntyped) {
+      value = value.resolveUntyped(isInterface(target) ? defaultType(value.type) : target);
+      if (this.isInvalid(value)) return () => {};
+    }
     if (value.mode === 'constant' && value.constant && isUntyped(value.type)) {
       return this.assignConstant(value, target, context);
     }
-    // An untyped boolean from a comparison takes the target's boolean type, or bool in an interface.
-    if (value.type === BASIC.untypedBool) value = { ...value, type: isInterface(target) ? BASIC.bool : target };
+    // An untyped boolean from a comparison takes a boolean target's type, or bool otherwise.
+    if (value.type === BASIC.untypedBool) value = { ...value, type: isBoolean(target) ? target : BASIC.bool };
     if (value.type.kind === 'basic' && value.type.basic === 'untypedNil') {
       if (assignFailure(value.type, target)) {
         this.error(value.span, `nil は ${describeType(target)} 型の${context}には使えません。`);
@@ -377,9 +432,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const type = defaultType(operand.type);
       if (target.kind === 'typeParam') {
         // A type parameter's value must work for every type it allows, which the generic check verifies.
-        const fits = (target.constraint.typeSet?.terms ?? []).every(
-          (term) => 'constant' in represent(constant, term.type)
-        );
+        const terms = target.constraint.typeSet?.terms;
+        const fits =
+          terms !== undefined &&
+          terms.length > 0 &&
+          terms.every((term) => 'constant' in represent(constant, term.type));
         if (!fits) this.error(operand.span, `定数は ${target.name} 型の${context}には使えません。`);
         return () => {};
       }
@@ -428,6 +485,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(operand.span);
     }
     const type = defaultType(operand.type);
+    if (operand.resolveUntyped) return operand.resolveUntyped(type);
     if (operand.mode !== 'constant' || !operand.constant) return { ...operand, type };
     const representation = represent(operand.constant, type);
     if ('error' in representation) {
@@ -442,6 +500,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private convertUntyped(operand: Operand, target: Type): Operand {
     if (!isUntyped(operand.type) || isUntyped(target) || this.isInvalid(operand)) return operand;
     if (operand.type.kind === 'basic' && operand.type.basic === 'untypedNil') return { ...operand, type: target };
+    if (operand.resolveUntyped) {
+      return operand.resolveUntyped(isInterface(target) ? defaultType(operand.type) : target);
+    }
     if (operand.mode === 'constant' && operand.constant) {
       if (isInterface(target)) return this.defaulted(operand);
       if (target.kind === 'typeParam') return { ...operand, type: target, eval: () => {} };
@@ -453,7 +514,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return { ...operand, ...this.constant(representation.constant, target, operand.span) };
     }
     // An untyped boolean from a comparison.
-    return { ...operand, type: isInterface(target) ? BASIC.bool : target };
+    return { ...operand, type: isBoolean(target) ? target : BASIC.bool };
   }
 
   // Operators ------------------------------------------------------------------------------------------------------
@@ -477,11 +538,29 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const operand = this.value(expression.operand);
     if (this.isInvalid(operand)) return operand;
+    const unaryOp = operator as '+' | '-' | '!' | '^';
+    if (operand.resolveUntyped) {
+      const resolveOperand = operand.resolveUntyped;
+      return {
+        mode: 'value',
+        type: operand.type,
+        span: expression,
+        eval: () => {},
+        resolveUntyped: (target) => {
+          const resolved = resolveOperand(target);
+          return this.isInvalid(resolved) ? resolved : this.applyUnary(expression, unaryOp, resolved);
+        },
+      };
+    }
+    return this.applyUnary(expression, unaryOp, operand);
+  }
+
+  private applyUnary(span: Span, operator: '+' | '-' | '!' | '^', operand: Operand): Operand {
     const type = operand.type;
     const allowed = operator === '!' ? isBoolean(type) : operator === '^' ? isInteger(type) : isNumeric(type);
     if (!allowed) {
-      this.error(expression, `演算子 ${operator} は ${describeType(type)} 型の値には使えません。`);
-      return this.invalid(expression);
+      this.error(span, `演算子 ${operator} は ${describeType(type)} 型の値には使えません。`);
+      return this.invalid(span);
     }
     if (operand.mode === 'constant' && operand.constant) {
       const unsignedBits =
@@ -490,15 +569,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (!isUntyped(type)) {
         const representation = represent(constant, type);
         if ('error' in representation) {
-          this.error(expression, `定数 ${describeConstant(constant)} は ${describeType(type)} 型に収まりません。`);
-          return this.invalid(expression);
+          this.error(span, `定数 ${describeConstant(constant)} は ${describeType(type)} 型に収まりません。`);
+          return this.invalid(span);
         }
-        return this.constant(representation.constant, type, expression);
+        return this.constant(representation.constant, type, span);
       }
-      return this.constant(constant, type, expression);
+      return this.constant(constant, type, span);
     }
     const read = operand.eval;
-    if (operator === '+') return { mode: 'value', type, span: expression, eval: read, product: operand.product };
+    if (operator === '+') return { mode: 'value', type, span, eval: read, product: operand.product };
     // -(x*y) stays a product for fusing, as Go's compiler rewrites it to FNMUL.
     if (operator === '-' && operand.product) {
       const { left, right } = operand.product;
@@ -507,18 +586,18 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return {
         mode: 'value',
         type,
-        span: expression,
+        span,
         eval: (frame) => apply(read(frame)),
         product: { ...operand.product, left: negated, right },
       };
     }
-    if (this.hasTypeParam(type)) return { mode: 'value', type, span: expression, eval: () => {} };
-    if (operator === '!') return { mode: 'value', type, span: expression, eval: (frame) => !read(frame) };
+    if (this.hasTypeParam(type)) return { mode: 'value', type, span, eval: () => {} };
+    if (operator === '!') return { mode: 'value', type, span, eval: (frame) => !read(frame) };
     const apply = operator === '-' ? negate(type) : bitwiseNot(type);
     return {
       mode: 'value',
       type,
-      span: expression,
+      span,
       eval: (frame) => apply(read(frame)),
       ssaConstant: operand.ssaConstant,
     };
@@ -577,6 +656,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type: under.element,
       span,
       eval: (frame) => pointer(frame).load(),
+      prepareStore: (frame) => {
+        const target = pointer(frame);
+        return (value) => target.store(value);
+      },
       store: (frame, value) => pointer(frame).store(value),
       addressOf: () => pointer,
     };
@@ -613,7 +696,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (this.isInvalid(left) || this.isInvalid(right)) return this.invalid(expression);
     const isComparison = ['==', '!=', '<', '<=', '>', '>='].includes(operator);
     if (isComparison) return this.comparison(expression, left, right);
-    if (!identical(left.type, right.type) && !(isUntyped(left.type) && isUntyped(right.type))) {
+    if (
+      !identical(left.type, right.type) &&
+      !(isUntyped(left.type) && isUntyped(right.type) && sameUntypedFamily(left.type, right.type))
+    ) {
       this.error(
         expression,
         `${describeType(left.type)} 型と ${describeType(right.type)} 型の値には、演算子 ${operator} を使えません（型が違います）。`
@@ -621,13 +707,20 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     const type = isUntyped(left.type) && isUntyped(right.type) ? largerUntyped(left.type, right.type) : left.type;
-    const allowed =
-      operator === '+'
-        ? isNumeric(type) || isString(type)
-        : operator === '%' || operator === '&' || operator === '|' || operator === '^' || operator === '&^'
-          ? isInteger(type)
-          : isNumeric(type);
-    if (!allowed) {
+    if (isUntyped(type) && (left.resolveUntyped || right.resolveUntyped)) {
+      return {
+        mode: 'value',
+        type,
+        span: expression,
+        eval: () => {},
+        resolveUntyped: (target) => {
+          const resolvedLeft = this.convertUntyped(left, target);
+          const resolvedRight = this.convertUntyped(right, target);
+          return this.binaryOfOperands(span, operator, resolvedLeft, resolvedRight);
+        },
+      };
+    }
+    if (!allowsBinaryOperator(operator, type)) {
       this.error(expression, `演算子 ${operator} は ${describeType(type)} 型の値には使えません。`);
       return this.invalid(expression);
     }
@@ -807,9 +900,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- The comparison rules of the specification.
-  private comparison(expression: Extract<Expression, { kind: 'binary' }>, left: Operand, right: Operand): Operand {
+  private comparison(
+    expression: Extract<Expression, { kind: 'binary' }>,
+    leftOperand: Operand,
+    rightOperand: Operand
+  ): Operand {
     const { operator } = expression;
+    let left = leftOperand;
+    let right = rightOperand;
     let type = left.type;
     if (isNil(left)) type = right.type;
     const mismatch = (): Operand => {
@@ -826,12 +924,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.invalid(expression);
       }
       if (assignFailure(BASIC.untypedNil, other.type)) return mismatch();
-    } else if (!identical(left.type, right.type) && !(isUntyped(left.type) && isUntyped(right.type))) {
-      // A value is comparable with an interface value of an interface it implements.
-      const leftToRight = isInterface(right.type) && !assignFailure(left.type, right.type);
-      const rightToLeft = isInterface(left.type) && !assignFailure(right.type, left.type);
+    } else if (isUntyped(left.type) && isUntyped(right.type)) {
+      if (!sameUntypedFamily(left.type, right.type)) return mismatch();
+      if (left.resolveUntyped || right.resolveUntyped) {
+        const common = defaultType(largerUntyped(left.type, right.type));
+        left = this.convertUntyped(left, common);
+        right = this.convertUntyped(right, common);
+        if (this.isInvalid(left) || this.isInvalid(right)) return this.invalid(expression);
+        type = common;
+      } else {
+        type = largerUntyped(left.type, right.type);
+      }
+    } else if (!identical(left.type, right.type)) {
+      const leftToRight = !assignFailure(left.type, right.type);
+      const rightToLeft = !assignFailure(right.type, left.type);
       if (!leftToRight && !rightToLeft) return mismatch();
-      return this.mixedInterfaceComparison(expression, left, right, leftToRight);
+      if (isInterface(left.type) !== isInterface(right.type)) {
+        return this.mixedInterfaceComparison(expression, left, right, isInterface(right.type) && leftToRight);
+      }
+      type = leftToRight ? right.type : left.type;
     }
     const ordered = operator !== '==' && operator !== '!=';
     if (ordered && !isOrdered(type)) {
@@ -911,14 +1022,18 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- The shift rules of the specification.
   private shiftExpression(
     expression: Extract<Expression, { kind: 'binary' }>,
     leftOperand: Operand,
-    right: Operand
+    rightOperand: Operand
   ): Operand {
     const operator = expression.operator as '<<' | '>>';
     let left = leftOperand;
+    let right = rightOperand;
+    if (right.resolveUntyped) {
+      right = right.resolveUntyped(BASIC.uint);
+      if (this.isInvalid(right)) return right;
+    }
     if (
       !isInteger(right.type) &&
       !(right.mode === 'constant' && right.constant && exactInteger(right.constant) !== undefined)
@@ -956,6 +1071,31 @@ export abstract class ExpressionCompiler extends CompilerBase {
         }
       }
     }
+    if (isUntyped(right.type) && !(right.mode === 'constant' && right.constant)) {
+      right = this.defaulted(right);
+      if (this.isInvalid(right)) return right;
+    }
+    const readRight =
+      right.mode === 'constant' && right.constant
+        ? (() => {
+            const count = exactInteger(right.constant as Constant) as bigint;
+            return () => count;
+          })()
+        : right.eval;
+    if (isUntyped(left.type) && ((left.mode === 'constant' && left.constant) || left.resolveUntyped)) {
+      if (left.constant && (left.constant.kind === 'bool' || left.constant.kind === 'string')) {
+        this.error(expression.left, 'シフトできるのは整数だけです。');
+        return this.invalid(expression);
+      }
+      const untypedLeft = left;
+      return {
+        mode: 'value',
+        type: left.type,
+        span: expression,
+        eval: () => {},
+        resolveUntyped: (target) => this.resolveUntypedShift(expression, operator, untypedLeft, readRight, target),
+      };
+    }
     if (isUntyped(left.type)) left = this.defaulted(left);
     if (this.isInvalid(left)) return left;
     if (!isInteger(left.type)) {
@@ -966,13 +1106,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     const readLeft = left.eval;
-    const readRight =
-      right.mode === 'constant' && right.constant
-        ? (() => {
-            const count = exactInteger(right.constant as Constant) as bigint;
-            return () => count;
-          })()
-        : right.eval;
     if (this.hasTypeParam(left.type)) return { mode: 'value', type: left.type, span: expression, eval: () => {} };
     const apply = shift(operator, left.type);
     return {
@@ -980,6 +1113,67 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type: left.type,
       span: expression,
       eval: (frame) => apply(readLeft(frame) as bigint, readRight(frame) as bigint),
+    };
+  }
+
+  private resolveUntypedShift(
+    expression: Extract<Expression, { kind: 'binary' }>,
+    operator: '<<' | '>>',
+    untypedLeft: Operand,
+    readRight: Eval,
+    target: Type
+  ): Operand {
+    if (target === BASIC.invalid) return this.invalid(expression);
+    if (untypedLeft.resolveUntyped) {
+      const resolvedInner = untypedLeft.resolveUntyped(target);
+      if (this.isInvalid(resolvedInner)) return resolvedInner;
+      if (this.hasTypeParam(resolvedInner.type)) {
+        return { mode: 'value', type: resolvedInner.type, span: expression, eval: () => {} };
+      }
+      const apply = shift(operator, resolvedInner.type);
+      const readInner = resolvedInner.eval;
+      return {
+        mode: 'value',
+        type: resolvedInner.type,
+        span: expression,
+        eval: (frame) => apply(readInner(frame) as bigint, readRight(frame) as bigint),
+      };
+    }
+    const leftConstant = untypedLeft.constant as Constant;
+    if (target.kind === 'typeParam') {
+      if (!isInteger(target)) {
+        this.error(expression.left, `シフトできるのは整数だけです（${describeType(target)} 型の値が書かれています）。`);
+        return this.invalid(expression);
+      }
+      for (const term of target.constraint.typeSet?.terms ?? []) {
+        const rep = represent(leftConstant, term.type);
+        if ('error' in rep) {
+          this.reportRepresentation(untypedLeft, term.type, rep.error, 'オペランド');
+          return this.invalid(expression);
+        }
+      }
+      return { mode: 'value', type: target, span: expression, eval: () => {} };
+    }
+    const resolvedTarget = isInterface(target) ? defaultType(untypedLeft.type) : target;
+    if (!isInteger(resolvedTarget)) {
+      this.error(
+        expression.left,
+        `シフトできるのは整数だけです（${describeType(resolvedTarget)} 型の値が書かれています）。`
+      );
+      return this.invalid(expression);
+    }
+    const representation = represent(leftConstant, resolvedTarget);
+    if ('error' in representation) {
+      this.reportRepresentation(untypedLeft, resolvedTarget, representation.error, 'オペランド');
+      return this.invalid(expression);
+    }
+    const leftValue = constantValue(representation.constant, resolvedTarget) as bigint;
+    const apply = shift(operator, resolvedTarget);
+    return {
+      mode: 'value',
+      type: resolvedTarget,
+      span: expression,
+      eval: (frame) => apply(leftValue, readRight(frame) as bigint),
     };
   }
 
@@ -1062,17 +1256,38 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
     const throughPointer = underlying(operand.type).kind === 'pointer' || this.pathHasPointer(operand.type, steps);
     const addressable = operand.mode === 'variable' || throughPointer;
+    const escapeAddress = throughPointer
+      ? undefined
+      : () => {
+          operand.escapeAddress?.();
+          this.escapeOperand(operand);
+        };
     return {
       mode: addressable ? 'variable' : 'value',
       type,
       span,
       eval: (frame) => container(frame).fields[last],
-      store: addressable
-        ? (frame, value) => {
-            container(frame).fields[last] = value;
+      prepareStore: addressable
+        ? (frame) => {
+            const target = container(frame);
+            return (value) => {
+              target.fields[last] = writeInPlace(target.fields[last], value);
+            };
           }
         : undefined,
-      addressOf: addressable ? () => (frame) => new Pointer(container(frame).fields, last) : undefined,
+      store: addressable
+        ? (frame, value) => {
+            const target = container(frame);
+            target.fields[last] = writeInPlace(target.fields[last], value);
+          }
+        : undefined,
+      addressOf: addressable
+        ? () => {
+            escapeAddress?.();
+            return (frame) => new Pointer(container(frame).fields, last);
+          }
+        : undefined,
+      escapeAddress,
     };
   }
 
@@ -1092,8 +1307,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   /** Converts an index to a number, checking it as Go does: an integer, non-negative if constant. */
   protected indexValue(expression: Expression, length?: number): ((frame: Frame) => number) | undefined {
-    const operand = this.value(expression);
+    let operand = this.value(expression);
     if (this.isInvalid(operand)) return undefined;
+    if (operand.resolveUntyped) {
+      operand = operand.resolveUntyped(BASIC.int);
+      if (this.isInvalid(operand)) return undefined;
+    }
     if (operand.mode === 'constant' && operand.constant) {
       const value = exactInteger(operand.constant);
       if (value === undefined || !(isInteger(operand.type) || isUntyped(operand.type))) {
@@ -1144,11 +1363,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const index = this.indexValue(indexExpression, length);
       if (!index) return this.invalid(expression);
       const element = (frame: Frame): [Value[], number] => {
+        const array = read(frame) as GoArray;
         const at = index(frame);
         if (at < 0 || at >= length) indexPanic(at, length);
-        return [(read(frame) as GoArray).elements, at];
+        return [array.elements, at];
       };
-      return elementOperand(expression, type.element, operand, operand.mode === 'variable' || viaPointer, element);
+      const escapeAddress = viaPointer
+        ? undefined
+        : () => {
+            operand.escapeAddress?.();
+            this.escapeOperand(operand);
+          };
+      return elementOperand(
+        expression,
+        type.element,
+        operand,
+        operand.mode === 'variable' || viaPointer,
+        element,
+        escapeAddress
+      );
     }
     if (type.kind === 'slice') {
       const index = this.indexValue(indexExpression);
@@ -1160,13 +1393,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (at < 0 || at >= length) indexPanic(at, length);
         return [(slice as Slice).array, (slice as Slice).offset + at];
       };
-      return elementOperand(expression, type.element, operand, true, element);
+      const escapeAddress = (): void => {
+        operand.escapeAddress?.();
+        this.escapeOperand(operand);
+      };
+      return elementOperand(expression, type.element, operand, true, element, escapeAddress);
     }
     this.error(expression, `${describeType(operand.type)} 型の値には添字を付けられません。`);
     return this.invalid(expression);
   }
 
-  /** `s[i]`, a byte of a string, which is a constant when both are constants. */
+  /** `s[i]`, a byte of a string, which is never a constant even when both are constants. */
   private stringIndex(span: Span, operand: Operand, indexExpression: Expression): Operand {
     const text =
       operand.mode === 'constant' && operand.constant?.kind === 'string' ? operand.constant.value : undefined;
@@ -1174,7 +1411,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (!index) return this.invalid(span);
     const constantIndex = text === undefined ? undefined : this.constantExpression(indexExpression).value;
     if (text !== undefined && constantIndex !== undefined) {
-      return this.constant({ kind: 'int', value: BigInt(text.charCodeAt(Number(constantIndex))) }, BASIC.uint8, span);
+      const byteValue = BigInt(text.charCodeAt(Number(constantIndex)));
+      return { mode: 'value', type: BASIC.uint8, span, eval: () => byteValue, ssaConstant: always };
     }
     const read = operand.eval;
     return {
@@ -1201,6 +1439,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const entry = map?.entries.get(keyOf(key(frame)));
       return entry ? [entry.value, true] : [zero(), false];
     };
+    const prepareStore = (frame: Frame): ((value: Value) => void) => {
+      const map = read(frame) as GoMap | undefined;
+      const keyValue = key(frame);
+      return (value) => {
+        if (!map) plainPanic('assignment to entry in nil map');
+        const existing = map.entries.get(keyOf(keyValue));
+        if (existing) existing.value = writeInPlace(existing.value, value);
+        else {
+          frame.runtime.allocate(2);
+          map.entries.set(keyOf(keyValue), { key: keyValue, value });
+        }
+      };
+    };
     return {
       mode: 'mapIndex',
       type: valueType,
@@ -1208,15 +1459,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
       variable: operand.variable,
       eval: (frame) => lookup(frame)[0],
       commaOk: lookup,
-      store: (frame, value) => {
+      prepareStore,
+      store: (frame, value) => prepareStore(frame)(value),
+      mapUpdate: (frame, change) => {
         const map = read(frame) as GoMap | undefined;
         const keyValue = key(frame);
+        const hashed = keyOf(keyValue);
+        const existing = map?.entries.get(hashed);
+        const next = change(existing ? existing.value : zero());
         if (!map) plainPanic('assignment to entry in nil map');
-        const existing = map.entries.get(keyOf(keyValue));
-        if (existing) existing.value = value;
+        if (existing) existing.value = writeInPlace(existing.value, next);
         else {
           frame.runtime.allocate(2);
-          map.entries.set(keyOf(keyValue), { key: keyValue, value });
+          map.entries.set(hashed, { key: keyValue, value: next });
         }
       },
     };
@@ -1259,6 +1514,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         mode: 'value',
         type: { kind: 'slice', element: type.element },
         span: expression,
+        backingVars: viaPointer ? undefined : operand.backingVars,
         eval: (frame) => {
           const array = read(frame) as GoArray;
           const [from, to] = bounds(frame, length, length, 'length');
@@ -1271,6 +1527,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
         mode: 'value',
         type: operand.type,
         span: expression,
+        backingVars: operand.backingVars,
+        nonEscaping: operand.nonEscaping,
         eval: (frame) => {
           const slice = read(frame) as Slice | undefined;
           const capacity = slice?.capacity ?? 0;
@@ -1324,7 +1582,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const commaOk = (frame: Frame): [Value, boolean] => {
       const value = read(frame) as Iface | undefined;
       const result = value === undefined ? undefined : test(value);
-      return result === undefined ? [zero(), false] : [result, true];
+      return result === undefined ? [zero(), false] : [result.value, true];
     };
     return {
       mode: 'value',
@@ -1335,7 +1593,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const value = read(frame) as Iface | undefined;
         if (value === undefined) typeAssertionPanic(`interface is nil, not ${targetName}`);
         const result = test(value);
-        if (result !== undefined) return result;
+        if (result !== undefined) return result.value;
         if (isInterface(target)) {
           const missing = missingMethod(value.type, underlying(target) as never);
           typeAssertionPanic(`${typeString(value.type)} is not ${targetName}: missing method ${missing?.name}`);
@@ -1346,18 +1604,54 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** How a type assertion tests a non-nil interface value: the value it yields, or undefined when it fails. */
-  protected assertionTest(target: Type): (value: Iface) => Value | undefined {
+  protected assertionTest(target: Type): (value: Iface) => { value: Value } | undefined {
     if (isInterface(target)) {
       const iface = underlying(target);
-      return (value) => (iface.kind === 'interface' && !missingMethod(value.type, iface) ? value : undefined);
+      return (value) => (iface.kind === 'interface' && !missingMethod(value.type, iface) ? { value } : undefined);
     }
-    return (value) => (identical(value.type, target) ? copyValue(value.value) : undefined);
+    return (value) => (identical(value.type, target) ? { value: copyValue(value.value) } : undefined);
   }
 
   // Values ----------------------------------------------------------------------------------------------------------
 
+  protected zeroSlotCount(type: Type, seen = new Set<Type>()): number {
+    if (seen.has(type)) return 0;
+    const under = underlying(type);
+    if (under.kind === 'struct') {
+      seen.add(type);
+      let total = under.fields.length;
+      for (const field of under.fields) {
+        total += this.zeroSlotCount(field.type, seen);
+        if (total > LIMITS.maxSlots + 1) return LIMITS.maxSlots + 1;
+      }
+      seen.delete(type);
+      return total;
+    }
+    if (under.kind === 'array') {
+      if (under.length === 0) return 0;
+      seen.add(type);
+      const inner = this.zeroSlotCount(under.element, seen);
+      seen.delete(type);
+      const total = under.length + under.length * inner;
+      return total > LIMITS.maxSlots + 1 ? LIMITS.maxSlots + 1 : total;
+    }
+    return 0;
+  }
+
   /** Creates the zero value of a type each time it is called, since structs and arrays are mutable. */
   protected zeroOf(type: Type): () => Value {
+    const slots = this.zeroSlotCount(type);
+    const build = this.buildZeroOf(type);
+    if (slots === 0) return build;
+    return () => {
+      const runtime = currentRuntime();
+      runtime.allocate(slots);
+      runtime.spend(Math.floor(slots / 64));
+      return build();
+    };
+  }
+
+  private buildZeroOf(type: Type): () => Value {
     const under = underlying(type);
     switch (under.kind) {
       case 'basic': {
@@ -1369,11 +1663,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return () => {};
       }
       case 'struct': {
-        const zeros = under.fields.map((field) => this.zeroOf(field.type));
+        const zeros = under.fields.map((field) => this.buildZeroOf(field.type));
         return () => new GoStruct(zeros.map((zero) => zero()));
       }
       case 'array': {
-        const zero = this.zeroOf(under.element);
+        const zero = this.buildZeroOf(under.element);
         const { length } = under;
         return () => new GoArray(Array.from({ length }, zero));
       }
@@ -1393,8 +1687,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Converts an operand with `T(x)`, which the call compiler routes here. */
-  protected convert(span: Span, target: Type, operand: Operand): Operand {
+  // code-gauge-allow functionCognitiveComplexity 25 -- Type conversions including untyped shifts and []rune capacity modes.
+  protected convert(span: Span, target: Type, rawOperand: Operand): Operand {
+    let operand = rawOperand;
     if (this.isInvalid(operand)) return operand;
+    if (operand.resolveUntyped) {
+      operand = operand.resolveUntyped(isInterface(target) ? defaultType(operand.type) : target);
+      if (this.isInvalid(operand)) return operand;
+    }
     if (operand.mode === 'constant' && operand.constant && target.kind !== 'typeParam') {
       const result = this.convertConstant(span, target, operand);
       if (result) return result;
@@ -1418,6 +1718,32 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.unsupported(span, 'スライスから配列へのポインタへの変換');
       return this.invalid(span);
     }
+    const targetUnder = underlying(target);
+    if (isString(source.type) && targetUnder.kind === 'slice' && isBasic(targetUnder.element, 'int32')) {
+      if (operand.mode === 'constant' && operand.constant?.kind === 'string') {
+        const text = operand.constant.value;
+        const convertConstantRunes = stringToRunesWithMode('constant');
+        return {
+          mode: 'value',
+          type: target,
+          span,
+          eval: (frame) => convertConstantRunes(text, frame.runtime),
+          ssaConstant: always,
+        };
+      }
+      const nonEscaping = { escapes: false };
+      const heapRunes = stringToRunesWithMode('heap');
+      const stackRunes = stringToRunesWithMode('stack');
+      const read = source.eval;
+      return {
+        mode: 'value',
+        type: target,
+        span,
+        nonEscaping,
+        eval: (frame) => (nonEscaping.escapes ? heapRunes : stackRunes)(read(frame), frame.runtime),
+        ssaConstant: source.ssaConstant,
+      };
+    }
     const apply = conversion(source.type, target);
     const read = source.eval;
     return {
@@ -1439,7 +1765,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.constant({ kind: 'string', value: encodeRuneText(Number(rune)) }, target, span);
     }
     if (isNumeric(target) && (constant.kind === 'int' || constant.kind === 'float' || constant.kind === 'complex')) {
-      if (!isUntyped(operand.type) && isFloat(operand.type) && isInteger(target)) return undefined;
       const representation = represent(constant, target);
       if ('error' in representation) {
         const text = describeConstant(constant);
@@ -1450,12 +1775,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         else this.error(span, `定数 ${text} は ${describeType(target)} 型に変換できません。`);
         return this.invalid(span);
       }
-      let converted = representation.constant;
-      // A typed float constant holds a value of its type's precision.
-      if (isFloat(target) && converted.kind !== 'bool' && converted.kind !== 'string') {
-        converted = roundedFloatConstant(converted, isBasic(target, 'float32'));
-      }
-      return this.constant(converted, target, span);
+      return this.constant(representation.constant, target, span);
     }
     if ((isString(target) && constant.kind === 'string') || (isBoolean(target) && constant.kind === 'bool')) {
       return this.constant(constant, target, span);
@@ -1469,22 +1789,6 @@ function encodeRuneText(rune: number): string {
   let bytes = '';
   for (const byte of new TextEncoder().encode(text)) bytes += String.fromCharCode(byte);
   return bytes;
-}
-
-function roundedFloatConstant(constant: Constant, single: boolean): Constant {
-  const value = constantValue(constant, single ? BASIC.float32 : BASIC.float64) as number;
-  return { kind: 'float', value: floatRational(value) };
-}
-
-function floatRational(value: number): { num: bigint; den: bigint } {
-  if (value === 0) return { num: 0n, den: 1n };
-  let num = value;
-  let den = 1n;
-  while (!Number.isInteger(num)) {
-    num *= 2;
-    den *= 2n;
-  }
-  return { num: BigInt(num), den };
 }
 
 /** Reads through a pointer to an array, which indexing and slicing accept in place of the array. */
@@ -1510,7 +1814,8 @@ function elementOperand(
   type: Type,
   operand: Operand,
   addressable: boolean,
-  element: (frame: Frame) => [Value[], number]
+  element: (frame: Frame) => [Value[], number],
+  escapeAddress?: () => void
 ): Operand {
   return {
     mode: addressable ? 'variable' : 'value',
@@ -1521,13 +1826,27 @@ function elementOperand(
       const [elements, at] = element(frame);
       return elements[at];
     },
+    prepareStore: addressable
+      ? (frame) => {
+          const [elements, at] = element(frame);
+          return (value) => {
+            elements[at] = writeInPlace(elements[at], value);
+          };
+        }
+      : undefined,
     store: addressable
       ? (frame, value) => {
           const [elements, at] = element(frame);
-          elements[at] = value;
+          elements[at] = writeInPlace(elements[at], value);
         }
       : undefined,
-    addressOf: addressable ? () => (frame) => new Pointer(...element(frame)) : undefined,
+    addressOf: addressable
+      ? () => {
+          escapeAddress?.();
+          return (frame) => new Pointer(...element(frame));
+        }
+      : undefined,
+    escapeAddress,
   };
 }
 
@@ -1593,7 +1912,31 @@ function basicKind(type: Type): BasicKind {
   return under.kind === 'basic' ? under.basic : 'int';
 }
 
-function largerUntyped(a: Type, b: Type): Type {
+export function sameUntypedFamily(a: Type, b: Type): boolean {
+  const fa = untypedFamily(a);
+  return fa !== 'other' && fa === untypedFamily(b);
+}
+
+function untypedFamily(type: Type): string {
+  if (isNumeric(type)) return 'numeric';
+  if (isString(type)) return 'string';
+  if (isBoolean(type)) return 'bool';
+  return 'other';
+}
+
+function allowsBinaryOperator(operator: string, type: Type): boolean {
+  if (type.kind === 'typeParam') {
+    const terms = type.constraint.typeSet?.terms;
+    return terms !== undefined && terms.length > 0 && terms.every((term) => allowsBinaryOperator(operator, term.type));
+  }
+  if (operator === '+') return isNumeric(type) || isString(type);
+  if (operator === '%' || operator === '&' || operator === '|' || operator === '^' || operator === '&^') {
+    return isInteger(type);
+  }
+  return isNumeric(type);
+}
+
+export function largerUntyped(a: Type, b: Type): Type {
   return untypedRank(a) >= untypedRank(b) ? a : b;
 }
 
@@ -1618,12 +1961,12 @@ export function describeConstant(constant: Constant): string {
       return constant.value.toString();
     }
     case 'float': {
-      const { num, den } = constant.value;
-      if (den === 1n) return num.toString();
-      return String(Number(num) / Number(den));
+      const { num, den, exp } = constant.value;
+      if (exp === undefined && den === 1n) return num.toString();
+      return String(rationalToFloat(constant.value));
     }
     case 'complex': {
-      return `(${Number(constant.re.num) / Number(constant.re.den)} + ${Number(constant.im.num) / Number(constant.im.den)}i)`;
+      return `(${rationalToFloat(constant.re)} + ${rationalToFloat(constant.im)}i)`;
     }
   }
 }

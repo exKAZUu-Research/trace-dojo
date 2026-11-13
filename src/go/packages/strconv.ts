@@ -7,7 +7,18 @@ import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } f
 import { quote, quoteRune } from '../quote';
 import { BASIC, ERROR_TYPE, pointerTo, RUNE } from '../types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
-import { BOOL, BYTES, byteSlice, bytesOf, errorText, FLOAT64, INT, STRING } from './support';
+import {
+  BOOL,
+  BYTES,
+  byteSlice,
+  bytesOf,
+  errorText,
+  FLOAT64,
+  INT,
+  receiverStruct,
+  STRING,
+  stringPanic,
+} from './support';
 
 const ERR_SYNTAX = newError('invalid syntax');
 const ERR_RANGE = newError('value out of range');
@@ -26,18 +37,12 @@ addMethod(
   'Error',
   fn([], [STRING]),
   (receiver) => {
-    const [func, num, error] = ((receiver as Pointer).load() as GoStruct).fields as [string, string, Value];
+    const [func, num, error] = receiverStruct(receiver).fields as [string, string, Value];
     return `strconv.${func}: parsing ${quote(num)}: ${errorText(error)}`;
   },
   true
 );
-addMethod(
-  NUM_ERROR,
-  'Unwrap',
-  fn([], [ERROR_TYPE]),
-  (receiver) => ((receiver as Pointer).load() as GoStruct).fields[2],
-  true
-);
+addMethod(NUM_ERROR, 'Unwrap', fn([], [ERROR_TYPE]), (receiver) => receiverStruct(receiver).fields[2], true);
 
 function numError(func: string, num: string, error: Value): Value {
   return new Iface(pointerTo(NUM_ERROR), new Pointer(new Cell(new GoStruct([func, num, error])), 'v'));
@@ -180,7 +185,7 @@ function parseFloat(text: string, bitSize: number): [number, Value] {
 }
 
 function formatInteger(value: bigint, base: number): string {
-  if (base < 2 || base > 36) throw new Error('strconv: illegal AppendInt/FormatInt base');
+  if (base < 2 || base > 36) stringPanic('strconv: illegal AppendInt/FormatInt base');
   return value.toString(base);
 }
 

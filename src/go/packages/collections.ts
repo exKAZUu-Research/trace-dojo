@@ -1,6 +1,6 @@
+import { LIMITS } from '../../interpreter/limits';
 import type { Entity } from '../entities';
 import { equalityOf, mapKeyOf } from '../equality';
-import { newError } from '../errorValues';
 import {
   addMethod,
   currentRuntime,
@@ -12,9 +12,8 @@ import {
   typeEntity,
   typeParam,
 } from '../native';
-import { GoPanic } from '../runtime';
-import { boundsPanic } from '../runtimeErrors';
-import { appendValues } from '../sliceOps';
+import { boundsPanic, runtimeErrorPanic } from '../runtimeErrors';
+import { appendValues, grownCapacity } from '../sliceOps';
 import {
   ANY,
   BASIC,
@@ -45,7 +44,18 @@ import {
   type Value,
 } from '../values';
 import { pdqsort, type SortData, stableSort } from './sorting';
-import { BOOL, callFunction, callMethod, FLOAT64, INT, sliceValues, spendFor, STRING } from './support';
+import {
+  BOOL,
+  callFunction,
+  callMethod,
+  FLOAT64,
+  INT,
+  receiverStruct,
+  sliceValues,
+  spendFor,
+  STRING,
+  stringPanic,
+} from './support';
 
 // Ordering --------------------------------------------------------------------------------------------------------
 
@@ -94,18 +104,22 @@ function compare(a: Value, b: Value): number {
   return 0;
 }
 
+function swapSliceElements(slice: Slice, i: number, j: number): void {
+  if (i === j) return;
+  const left = copyValue(slice.get(i));
+  const right = copyValue(slice.get(j));
+  slice.set(i, right);
+  slice.set(j, left);
+}
+
 /** Sorts a slice's elements in place, as the slices and sort packages do. */
 function sortSlice(slice: Value, isLess: (a: Value, b: Value) => boolean, stable = false): undefined {
   if (!(slice instanceof Slice)) return undefined;
-  const { array, offset, length } = slice;
+  const { length } = slice;
   spendFor(length * Math.max(1, Math.ceil(Math.log2(length + 1))));
   const data: SortData = {
-    less: (i, j) => isLess(array[offset + i], array[offset + j]),
-    swap: (i, j) => {
-      const value = array[offset + i];
-      array[offset + i] = array[offset + j];
-      array[offset + j] = value;
-    },
+    less: (i, j) => isLess(slice.get(i), slice.get(j)),
+    swap: (i, j) => swapSliceElements(slice, i, j),
   };
   if (stable) stableSort(data, length);
   else pdqsort(data, length);
@@ -156,7 +170,7 @@ const REVERSE = namedType('sort', 'reverse', {
   kind: 'struct',
   fields: [{ name: 'Interface', type: SORT_INTERFACE, embedded: true }],
 });
-const reversed = (receiver: Value): Value => ((receiver as Pointer).load() as GoStruct).fields[0];
+const reversed = (receiver: Value): Value => receiverStruct(receiver).fields[0];
 addMethod(REVERSE, 'Len', fn([], [INT]), (receiver) => callMethod(reversed(receiver), 'Len'), true);
 addMethod(
   REVERSE,
@@ -181,10 +195,7 @@ function sliceType(name: string, element: Type, isLess: (a: Value, b: Value) => 
     isLess((receiver as Slice).get(Number(i)), (receiver as Slice).get(Number(j)))
   );
   addMethod(type, 'Swap', fn([INT, INT], []), (receiver, [i, j]) => {
-    const slice = receiver as Slice;
-    const value = slice.get(Number(i));
-    slice.set(Number(i), slice.get(Number(j)));
-    slice.set(Number(j), value);
+    swapSliceElements(receiver as Slice, Number(i), Number(j));
     return;
   });
   addMethod(type, 'Sort', fn([], []), (receiver) => {
@@ -218,9 +229,7 @@ function search(count: number, predicate: (index: number) => boolean): number {
 /** The slice inside the `any` that `sort.Slice` receives, which must hold a slice. */
 function anySlice(value: Value, name: string): Slice | undefined {
   if (!(value instanceof Iface) || underlying(value.type).kind !== 'slice') {
-    throw new GoPanic(
-      newError(`reflect: call of Swapper on ${value instanceof Iface ? underlying(value.type).kind : 'zero'} Value`)
-    );
+    stringPanic(`reflect: call of Swapper on ${value instanceof Iface ? underlying(value.type).kind : 'zero'} Value`);
   }
   void name;
   return value.value as Slice | undefined;
@@ -303,14 +312,10 @@ const sortMembers: Record<string, Entity> = {
 
 /** `sort.Slice`: sorts with a less function of indexes, swapping elements as reflect.Swapper does. */
 function sortByIndex(slice: Slice, isLessFn: Value, stable: boolean): void {
-  const { array, offset, length } = slice;
+  const { length } = slice;
   const data: SortData = {
     less: (i, j) => callFunction(isLessFn, [BigInt(i), BigInt(j)]) === true,
-    swap: (i, j) => {
-      const value = array[offset + i];
-      array[offset + i] = array[offset + j];
-      array[offset + j] = value;
-    },
+    swap: (i, j) => swapSliceElements(slice, i, j),
   };
   if (stable) stableSort(data, length);
   else pdqsort(data, length);
@@ -358,31 +363,52 @@ function elementTypeOf(types: Type[]): Type {
   return types[1];
 }
 
-function newSlice(values: Value[]): Slice {
-  currentRuntime().allocate(values.length);
-  return new Slice(values, 0, values.length, values.length);
+function zeroSlotCount(type: Type): number {
+  const under = underlying(type);
+  if (under.kind === 'array') return Math.max(1, under.length * zeroSlotCount(under.element));
+  if (under.kind === 'struct') {
+    let total = Math.max(1, under.fields.length);
+    for (const field of under.fields) total += zeroSlotCount(field.type) - 1;
+    return total;
+  }
+  return 1;
+}
+
+function allocateElements(count: number, element: Type): void {
+  const slots = BigInt(count) * BigInt(zeroSlotCount(element));
+  if (slots > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
+  allocate(Number(slots));
 }
 
 function cloneSlice(value: Value, element: Type): Value {
   if (value === undefined) return undefined;
-  const values = sliceValues(value).map(copyValue);
-  void element;
-  return newSlice(values);
+  const values = sliceValues(value);
+  if (values.length === 0) return new Slice([], 0, 0, 0);
+  const zero = zeroValueOf(element);
+  return appendValues(
+    new Slice([], 0, 0, 0),
+    values,
+    element,
+    zero,
+    (count) => allocateElements(count, element),
+    false
+  );
 }
 
 const SEQ_YIELD = (element: Type): FuncType => funcType([element], [BASIC.bool]);
 const SEQ = (element: Type): FuncType => funcType([SEQ_YIELD(element)], []);
 
-/** Collects the values an iterator yields, by calling it with a yield function that accepts every value. */
-function collect(seq: Value): Value[] {
-  const values: Value[] = [];
+/** Appends the values an iterator yields one by one, matching Go's `slices.AppendSeq`. */
+function appendSeq(initial: Slice | undefined, seq: Value, element: Type): Slice | undefined {
+  const zero = zeroValueOf(element);
+  let result = initial;
   callFunction(seq, [
     new GoFunc(([value]) => {
-      values.push(copyValue(value));
+      result = appendValues(result, [value], element, zero, (count) => allocateElements(count, element), false);
       return true;
     }),
   ]);
-  return values;
+  return result;
 }
 
 const slicesMembers: Record<string, Entity> = {
@@ -508,11 +534,7 @@ const slicesMembers: Record<string, Entity> = {
     () =>
       ([slice]) => {
         if (!(slice instanceof Slice)) return;
-        for (let i = 0, j = slice.length - 1; i < j; i++, j--) {
-          const value = slice.get(i);
-          slice.set(i, slice.get(j));
-          slice.set(j, value);
-        }
+        for (let i = 0, j = slice.length - 1; i < j; i++, j--) swapSliceElements(slice, i, j);
         return;
       }
   ),
@@ -608,41 +630,84 @@ const slicesMembers: Record<string, Entity> = {
     'Concat',
     EMPTY_INTERFACE,
     (s) => ({ params: [sliceOf(s)], results: [s], variadic: true }),
-    () =>
+    (types) =>
       ([lists]) => {
-        const values = sliceValues(lists).flatMap((list) => sliceValues(list).map(copyValue));
-        if (values.length === 0) return;
-        return newSlice(values);
+        const parts = sliceValues(lists);
+        let totalBig = 0n;
+        for (const part of parts) {
+          totalBig += BigInt((part as Slice | undefined)?.length ?? 0);
+          if (totalBig >= 1n << 63n) stringPanic('len out of range');
+        }
+        if (totalBig === 0n) return;
+        if (totalBig > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
+        const total = Number(totalBig);
+        const element = elementTypeOf(types);
+        const capacity = grownCapacity(0, total, element, false);
+        allocateElements(capacity, element);
+        spendFor(capacity);
+        const zero = zeroValueOf(element);
+        const array: Value[] = [];
+        for (const part of parts) {
+          currentRuntime().spend();
+          for (const item of sliceValues(part)) array.push(copyValue(item));
+        }
+        while (array.length < capacity) array.push(zero());
+        return new Slice(array, 0, total, capacity);
       }
   ),
   Repeat: sliceGeneric(
     'Repeat',
     EMPTY_INTERFACE,
     (s) => ({ params: [s, INT], results: [s] }),
-    () =>
+    (types) =>
       ([slice, count]) => {
-        const times = Number(count as bigint);
-        if (times < 0) throw new GoPanic(newError('cannot be negative'));
+        const times = count as bigint;
+        if (times < 0n) stringPanic('cannot be negative');
         const values = sliceValues(slice);
+        const totalBig = BigInt(values.length) * times;
+        if (totalBig >= 1n << 63n) stringPanic('the result of (len(x) * count) overflows');
+        if (totalBig > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
+        const total = Number(totalBig);
+        const element = elementTypeOf(types);
+        allocateElements(total, element);
+        spendFor(total);
+        const runtime = currentRuntime();
         const repeated: Value[] = [];
-        for (let index = 0; index < times; index++) repeated.push(...values.map(copyValue));
-        return newSlice(repeated);
+        if (values.length > 0) {
+          for (let index = 0; index < Number(times); index++) {
+            runtime.spend();
+            for (const value of values) repeated.push(copyValue(value));
+          }
+        }
+        return new Slice(repeated, 0, total, total);
       }
+  ),
+  AppendSeq: sliceGeneric(
+    'AppendSeq',
+    EMPTY_INTERFACE,
+    (s, e) => ({ params: [s, SEQ(e)], results: [s] }),
+    (types) =>
+      ([slice, seq]) =>
+        appendSeq(slice as Slice | undefined, seq, elementTypeOf(types))
   ),
   Sorted: (() => {
     const e = typeParam('E', ORDERED);
-    return genericFunction('Sorted', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
-      const slice = newSlice(collect(seq));
+    return genericFunction('Sorted', [e], funcType([SEQ(e)], [sliceOf(e)]), (types) => ([seq]) => {
+      const slice = appendSeq(undefined, seq, types[0]);
       sortSlice(slice, less);
-      return slice.length === 0 ? undefined : slice;
+      return slice;
     });
   })(),
   Collect: (() => {
     const e = typeParam('E', EMPTY_INTERFACE);
-    return genericFunction('Collect', [e], funcType([SEQ(e)], [sliceOf(e)]), () => ([seq]) => {
-      const values = collect(seq);
-      return values.length === 0 ? undefined : newSlice(values);
-    });
+    return genericFunction(
+      'Collect',
+      [e],
+      funcType([SEQ(e)], [sliceOf(e)]),
+      (types) =>
+        ([seq]) =>
+          appendSeq(undefined, seq, types[0])
+    );
   })(),
   Values: sliceGeneric(
     'Values',
@@ -659,7 +724,7 @@ const slicesMembers: Record<string, Entity> = {
 
 function extreme(slice: Value, message: string, better: (a: Value, b: Value) => boolean): Value {
   const values = sliceValues(slice);
-  if (values.length === 0) throw new GoPanic(newError(message));
+  if (values.length === 0) stringPanic(message);
   let best = values[0];
   for (const value of values.slice(1)) if (better(value, best)) best = value;
   return copyValue(best);
@@ -711,21 +776,20 @@ function insert(slice: Value, at: number, values: Value[], types: Type[]): Value
   if (values.length === 0) return slice;
   const element = elementTypeOf(types);
   const zero = zeroValueOf(element);
-  if (at === length) return appendValues(slice as Slice | undefined, values, element, zero, allocate);
+  const alloc = (count: number): void => allocateElements(count, element);
+  if (at === length) return appendValues(slice as Slice | undefined, values, element, zero, alloc);
   const current = slice as Slice;
   const tail = current.values().slice(at).map(copyValue);
   if (length + values.length > current.capacity) {
-    const head = new Slice(current.array, current.offset, at, current.capacity);
-    const grown = appendValues(
-      head,
-      Array.from({ length: length + values.length - at }, zero),
-      element,
-      zero,
-      allocate
-    ) as Slice;
-    for (const [index, value] of values.entries()) grown.set(at + index, copyValue(value));
-    for (const [index, value] of tail.entries()) grown.set(at + values.length + index, value);
-    return grown;
+    const newLength = length + values.length;
+    const newCapacity = grownCapacity(current.capacity, newLength, element, false);
+    alloc(newCapacity);
+    spendFor(newCapacity);
+    const array: Value[] = current.values().slice(0, at).map(copyValue);
+    for (const value of values) array.push(copyValue(value));
+    for (const value of tail) array.push(value);
+    while (array.length < newCapacity) array.push(zero());
+    return new Slice(array, 0, newLength, newCapacity);
   }
   const result = new Slice(current.array, current.offset, length + values.length, current.capacity);
   for (const [index, value] of tail.entries()) result.set(at + values.length + index, value);
@@ -793,7 +857,7 @@ Object.assign(slicesMembers, {
     () =>
       ([slice, size]) => {
         const n = Number(size as bigint);
-        if (n < 1) throw new GoPanic(newError('cannot be less than 1'));
+        if (n < 1) stringPanic('cannot be less than 1');
         return new GoFunc(([yieldFn]) => {
           const current = slice as Slice | undefined;
           for (let start = 0; start < (current?.length ?? 0); start += n) {
@@ -857,22 +921,24 @@ Object.assign(slicesMembers, {
     (s) => ({ params: [s, INT], results: [s] }),
     (types) =>
       ([slice, count]) => {
-        const n = Number(count as bigint);
-        if (n < 0) throw new GoPanic(newError('cannot be negative'));
+        const nBig = count as bigint;
+        if (nBig < 0n) stringPanic('cannot be negative');
         const current = slice as Slice | undefined;
         const length = current?.length ?? 0;
         const capacity = current?.capacity ?? 0;
-        if (capacity - length >= n) return slice;
-        const zero = zeroValueOf(elementTypeOf(types));
-        const full = current && new Slice(current.array, current.offset, capacity, capacity);
-        const grown = appendValues(
-          full,
-          Array.from({ length: n }, zero),
-          elementTypeOf(types),
-          zero,
-          allocate
-        ) as Slice;
-        return new Slice(grown.array, grown.offset, length, grown.capacity);
+        if (BigInt(capacity - length) >= nBig) return slice;
+        if (BigInt(length) + nBig > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
+        const n = Number(nBig);
+        const element = elementTypeOf(types);
+        const newCapacity = grownCapacity(capacity, length + n, element, false);
+        allocateElements(newCapacity, element);
+        spendFor(newCapacity);
+        const zero = zeroValueOf(element);
+        const array: Value[] = current
+          ? current.array.slice(current.offset, current.offset + capacity).map(copyValue)
+          : [];
+        while (array.length < newCapacity) array.push(zero());
+        return new Slice(array, 0, length, newCapacity);
       }
   ),
   Replace: sliceGeneric(
@@ -886,6 +952,7 @@ Object.assign(slicesMembers, {
         const i = Number(from as bigint);
         const j = Number(to as bigint);
         if (i < 0 || j < i || j > length) boundsPanic(`slice bounds out of range [${i}:${j}]`);
+        const element = elementTypeOf(types);
         const inserted = sliceValues(values).map(copyValue);
         const kept = [
           ...(current?.values() ?? []).slice(0, i).map(copyValue),
@@ -893,14 +960,14 @@ Object.assign(slicesMembers, {
           ...(current?.values() ?? []).slice(j).map(copyValue),
         ];
         if (current && kept.length <= current.capacity) {
-          const zero = zeroValueOf(elementTypeOf(types));
+          const zero = zeroValueOf(element);
           for (let index = 0; index < Math.max(kept.length, length); index++)
-            current.array[current.offset + index] = index < kept.length ? kept[index] : zero();
+            current.set(index, index < kept.length ? kept[index] : zero());
           return new Slice(current.array, current.offset, kept.length, current.capacity);
         }
         const head = current && new Slice(current.array, current.offset, i, current.capacity);
-        const zero = zeroValueOf(elementTypeOf(types));
-        return appendValues(head, kept.slice(i), elementTypeOf(types), zero, allocate);
+        const zero = zeroValueOf(element);
+        return appendValues(head, kept.slice(i), element, zero, (count) => allocateElements(count, element));
       }
   ),
   SortedFunc: (() => {
@@ -909,12 +976,12 @@ Object.assign(slicesMembers, {
       'SortedFunc',
       [e],
       funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
-      () =>
+      (types) =>
         ([seq, cmpFn]) => {
-          const slice = newSlice(collect(seq));
+          const slice = appendSeq(undefined, seq, types[0]);
           const order = cmpResult(cmpFn);
           sortSlice(slice, (a, b) => order(a, b) < 0);
-          return slice.length === 0 ? undefined : slice;
+          return slice;
         }
     );
   })(),
@@ -924,12 +991,12 @@ Object.assign(slicesMembers, {
       'SortedStableFunc',
       [e],
       funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
-      () =>
+      (types) =>
         ([seq, cmpFn]) => {
-          const slice = newSlice(collect(seq));
+          const slice = appendSeq(undefined, seq, types[0]);
           const order = cmpResult(cmpFn);
           sortSlice(slice, (a, b) => order(a, b) < 0, true);
-          return slice.length === 0 ? undefined : slice;
+          return slice;
         }
     );
   })(),
@@ -1015,7 +1082,7 @@ const mapsMembers: Record<string, Entity> = {
     const m2 = typeParam('M2', m.constraint);
     return genericFunction('Copy', [m, m2, k, v], funcType([m, m2], []), () => ([destination, source]) => {
       for (const [key, entry] of (source as GoMap | undefined)?.entries ?? []) {
-        if (!destination) throw new GoPanic(newError('assignment to entry in nil map'));
+        if (!destination) runtimeErrorPanic('assignment to entry in nil map');
         (destination as GoMap).entries.set(key, { key: copyValue(entry.key), value: copyValue(entry.value) });
       }
       return;
@@ -1090,7 +1157,7 @@ const mapsMembers: Record<string, Entity> = {
     const [m, k, v] = mapParams();
     return genericFunction('Insert', [m, k, v], funcType([m, SEQ2(k, v)], []), () => ([map, seq]) => {
       for (const [key, value] of collectPairs(seq)) {
-        if (!map) throw new GoPanic(newError('assignment to entry in nil map'));
+        if (!map) runtimeErrorPanic('assignment to entry in nil map');
         const target = map as GoMap;
         const existing = target.entries.get(target.keyOf(key));
         if (existing) existing.value = value;
