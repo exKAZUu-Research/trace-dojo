@@ -60,6 +60,11 @@ export function successorBytes(source: Uint8Array): Uint8Array {
   if (index < 0) {
     const last = parts.findLast((part) => part.point !== undefined);
     if (!last) return Uint8Array.from([1, ...source]);
+    if (last.point === 0x10_ff_ff) {
+      last.bytes = stringBytes(str(String.fromCodePoint(0x1_00_00)));
+      parts.unshift({ bytes: Uint8Array.of(1), point: undefined });
+      return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
+    }
     last.bytes = stringBytes(str(String.fromCodePoint((last.point as number) + 1)));
     return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
   }

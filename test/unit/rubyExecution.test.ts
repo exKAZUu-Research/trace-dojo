@@ -1780,3 +1780,9 @@ test('large Array samples retain the pre-callback snapshot', () => {
     stdout: '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]\n',
   });
 });
+
+test('String successor carries the maximum Unicode code point without host errors', () => {
+  expect(run(String.raw`p "\u{10ffff}".succ.bytes, "\u{10ffff}\xFF".next.bytes`)).toMatchObject({
+    stdout: '[1, 240, 144, 128, 128]\n[1, 240, 144, 128, 128, 255]\n',
+  });
+});
