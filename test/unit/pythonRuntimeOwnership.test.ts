@@ -133,3 +133,67 @@ p.SetParamEntityParsing(xml.parsers.expat.XML_PARAM_ENTITY_PARSING_ALWAYS)
 p.Parse('<!DOCTYPE r [' + ''.join(entities) + '%e8;]><r/>', True)`;
   expect(executeProgram('python', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test.each([
+  ['unsupported input', 'input()', '標準入力（input()）は、この採点環境では使えません。'],
+  [
+    'deadlock',
+    'lock=threading.Lock(); lock.acquire(); lock.acquire()',
+    'デッドロックが起きました。すべてのスレッドやタスクが待ったままで、どれも先に進めません。',
+  ],
+])('a grader stop for %s does not run shutdown code', (_name, stop, uncaughtException) => {
+  const program = `import atexit, threading
+atexit.register(lambda: print('atexit'))
+def generator():
+    try:
+        yield 1
+    except BaseException:
+        print('caught')
+    finally:
+        print('cleanup')
+g = generator()
+next(g)
+print('before')
+${stop}
+print('after')`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', stdout: 'before\n', uncaughtException });
+});
+
+test('a deadlocked coroutine does not resume during shutdown', () => {
+  const program = `import asyncio
+async def main():
+    try:
+        await asyncio.Event().wait()
+    except BaseException as error:
+        print('caught', type(error).__name__)
+    finally:
+        print('cleanup')
+asyncio.run(main())`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'デッドロックが起きました。すべてのスレッドやタスクが待ったままで、どれも先に進めません。',
+  });
+});
+
+test.each(['raise ValueError("failure")', 'raise SystemExit()'])(
+  'Python exceptions still run shutdown code: %s',
+  (stop) => {
+    const program = `import atexit
+atexit.register(lambda: print('atexit'))
+def generator():
+    try:
+        yield 1
+    finally:
+        print('cleanup')
+g = generator()
+next(g)
+print('before')
+${stop}`;
+    expect(executeProgram('python', program)).toMatchObject({
+      kind: 'executed',
+      stdout: 'before\natexit\ncleanup\n',
+      uncaughtException: stop.includes('ValueError') ? 'ValueError: failure' : undefined,
+    });
+  }
+);

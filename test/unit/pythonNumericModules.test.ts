@@ -61,3 +61,31 @@ test('traces show fractions and decimals as their reprs', () => {
     d: { kind: 'value', value: "Decimal('0.10')" },
   });
 });
+
+test('Decimal parses long coefficients independently of the int conversion limit', () => {
+  const program = `import sys
+from decimal import Decimal, getcontext
+from fractions import Fraction
+sys.set_int_max_str_digits(640)
+for text in ('1' * 5000, '3.' + '1' * 4999, 'NaN' + '1' * 5000,
+             '1e' + '0' * 5000 + '2', '-000.000', '١٢.٣٠', '+1e-0002'):
+    value = Decimal(text)
+    print(len(str(value)), str(value)[:25])
+getcontext().prec = 5100
+print(str(Decimal('1' * 5000) + 1) == '1' * 4999 + '2')
+try:
+    Decimal('1e' + '9' * 5000)
+except Exception as error:
+    print(type(error).__name__)
+try:
+    Fraction('1' * 1000)
+except ValueError:
+    print('fraction limit')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '5000 1111111111111111111111111\n5001 3.11111111111111111111111\n' +
+      '5003 NaN1111111111111111111111\n4 1E+2\n6 -0.000\n5 12.30\n4 0.01\nTrue\nInvalidOperation\nfraction limit\n',
+    uncaughtException: undefined,
+  });
+});

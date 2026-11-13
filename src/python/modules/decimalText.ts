@@ -1,4 +1,4 @@
-import { parseIntText } from '../numbers';
+import { toAsciiDigits } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
 import { repeatText } from '../stringBuilder';
 import { strLength } from '../strings';
@@ -11,6 +11,7 @@ const NUMBER =
 
 /** Parses the text of `Decimal(text)`, or returns undefined when it is not a numeric string. */
 export function parseDecimal(text: string): Dec | undefined {
+  currentRuntime().scan(text.length);
   const match = NUMBER.exec(text.trim().replaceAll('_', ''));
   if (!match) return undefined;
   const [, sign, intPart, fracPart, expPart, infinity, signal, diagnostic] = match;
@@ -18,15 +19,17 @@ export function parseDecimal(text: string): Dec | undefined {
   if (intPart !== undefined) {
     const fraction = fracPart ?? '';
     const exponent = Number(digits(expPart ?? '0'));
-    return dec(negative, digits(intPart + fraction).toString(), exponent - strLength(fraction));
+    if (!Number.isFinite(exponent)) return undefined;
+    return dec(negative, digits(intPart + fraction), exponent - strLength(fraction));
   }
   if (infinity) return dec(negative, '0', 'F');
-  const payload = diagnostic ? digits(diagnostic).toString() : '';
+  const payload = diagnostic ? digits(diagnostic) : '';
   return dec(negative, payload === '0' ? '' : payload, signal ? 'N' : 'n');
 }
 
-function digits(text: string): bigint {
-  return parseIntText(text || '0', 10) as bigint;
+function digits(text: string): string {
+  currentRuntime().buildString(text.length);
+  return toAsciiDigits(text).replace(/^0+/, '') || '0';
 }
 
 /** The scientific or engineering string of a decimal, as `Decimal.__str__` writes it. */

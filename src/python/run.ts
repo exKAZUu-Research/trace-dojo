@@ -41,6 +41,7 @@ export function executePythonProgram(source: string, input?: ProgramInput): Prog
  *
  * @param onEnd Called when the module ends, while its frame still holds its variables.
  */
+// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     const globals = mainGlobals(runtime, module);
@@ -52,23 +53,15 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
     try {
       let uncaughtException: string | undefined;
       try {
-        runtime.evaluator.runModule(module.body, frame);
+        uncaughtException = runPython(runtime, () => runtime.evaluator.runModule(module.body, frame));
+        uncaughtException = runPython(runtime, () => joinThreads(runtime)) ?? uncaughtException;
+        const exitError = runPython(runtime, () => runExitCallbacks(runtime));
+        uncaughtException ??= exitError;
+        const finalizerError = runPython(runtime, () => runtime.finalizer.closeAll(globals));
+        uncaughtException ??= finalizerError;
       } catch (error) {
-        uncaughtException = describeUncaught(error, runtime);
-        if (error instanceof DeadlockError) runtime.threads = undefined;
-      }
-      // CPython waits for the threads that are no daemons before it shuts down, and runs the atexit functions after them.
-      uncaughtException = joinThreads(runtime) ?? uncaughtException;
-      try {
-        runExitCallbacks(runtime);
-      } catch (error) {
-        uncaughtException ??= describeUncaught(error, runtime);
-      }
-      // CPython closes the generators still suspended when it shuts down, after reporting an uncaught exception.
-      try {
-        runtime.finalizer.closeAll(globals);
-      } catch (error) {
-        uncaughtException ??= describeUncaught(error, runtime);
+        if (!(error instanceof UnsupportedFeatureError || error instanceof DeadlockError)) throw error;
+        uncaughtException = error.message;
       }
       onEnd?.(frame);
       runtime.collectGarbage();
@@ -84,21 +77,26 @@ export function runModule(runtime: Runtime, module: Module, onEnd?: (frame: Fram
   });
 }
 
-/** Waits for the threads that are no daemons to end, returning how the program stopped if they could not. */
-function joinThreads(runtime: Runtime): string | undefined {
-  const scheduler = runtime.threads;
-  if (!scheduler) return undefined;
+function runPython(runtime: Runtime, run: () => void): string | undefined {
   try {
-    // The functions `threading._register_atexit` registers, which tell a pool's workers to end, run first.
-    const shutdown = runtime.modules.get('threading')?.dict.get('_shutdown');
-    if (shutdown) callValue(shutdown, []);
-    scheduler.waitFor(
-      new WaitRequest(() => scheduler.alive.every((thread) => thread.daemon || thread === scheduler.main))
-    );
-    return undefined;
+    run();
   } catch (error) {
-    return describeUncaught(error, runtime);
+    const raised = hostRefusal(error, runtime.deepNesting) ?? error;
+    if (!(raised instanceof PyError)) throw raised;
+    if (!isExceptionOf(raised, 'SystemExit')) return describeException(raised.exception);
   }
+  return undefined;
+}
+
+/** Waits for non-daemon threads before shutdown, including thread-pool exit callbacks. */
+function joinThreads(runtime: Runtime): void {
+  const scheduler = runtime.threads;
+  if (!scheduler) return;
+  const shutdown = runtime.modules.get('threading')?.dict.get('_shutdown');
+  if (shutdown) callValue(shutdown, []);
+  scheduler.waitFor(
+    new WaitRequest(() => scheduler.alive.every((thread) => thread.daemon || thread === scheduler.main))
+  );
 }
 
 /** The variables CPython gives the `__main__` module of a program run with `python -c`, in its order. */
@@ -111,18 +109,4 @@ function mainGlobals(runtime: Runtime, module: Module): Map<string, PyValue> {
     ['__spec__', None],
     ['__builtins__', runtime.importModule('builtins')],
   ]);
-}
-
-function describeUncaught(error: unknown, runtime: Runtime): string | undefined {
-  const raised = hostRefusal(error, runtime.deepNesting) ?? error;
-  if (raised instanceof UnsupportedFeatureError || raised instanceof DeadlockError) return raised.message;
-  if (!(raised instanceof PyError)) throw raised;
-  if (isExceptionOf(raised, 'SystemExit')) return undefined;
-  try {
-    return describeException(raised.exception);
-  } catch (describeError) {
-    // An exception whose message this grader cannot reproduce stops the program when shown.
-    if (describeError instanceof UnsupportedFeatureError) return describeError.message;
-    throw describeError;
-  }
 }
