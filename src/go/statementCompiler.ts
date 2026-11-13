@@ -13,10 +13,10 @@ import {
   type TypeDeclaration,
   type VarDeclaration,
 } from './ast';
-import { CallCompiler } from './callCompiler';
+import { CallCompiler, VALUE_BUILTINS } from './callCompiler';
 import { type FunctionContext, linkEscapeSource, linkTemporary, markReturned, type VarEntity } from './entities';
 import { equalityOf } from './equality';
-import { describeMissingMethod } from './expressionCompiler';
+import { describeMissingMethod, incomparableMessage } from './expressionCompiler';
 import { runesOf } from './literals';
 import { dynamicMethod, invokeMethod, receiverFor } from './methods';
 import type { Operand } from './operand';
@@ -49,6 +49,7 @@ import {
   type FuncType,
   identical,
   isBoolean,
+  isComparable,
   isFloat,
   isInteger,
   isInterface,
@@ -996,6 +997,7 @@ export abstract class StatementCompiler extends CallCompiler {
     seen: Map<string, Span>
   ): (frame: Frame, value: Value) => boolean {
     let operand = this.orderedValue(expression);
+    const rawType = operand.type;
     if (this.isInvalid(operand) || tagType === BASIC.invalid) return () => false;
     if (!tag) {
       if (operand.resolveUntyped) {
@@ -1049,6 +1051,11 @@ export abstract class StatementCompiler extends CallCompiler {
         expression,
         `case の値の型 ${describeType(operand.type)} が、switch の値の型 ${describeType(tagType)} と違います。`
       );
+      return () => false;
+    }
+    const incomparable = [operand.type, tagType].find((type) => !isComparable(type));
+    if (incomparable && rawType !== BASIC.untypedNil) {
+      this.error(expression, incomparableMessage(incomparable));
       return () => false;
     }
     if (operand.mode === 'constant' && operand.constant) {
@@ -1412,9 +1419,50 @@ export abstract class StatementCompiler extends CallCompiler {
         return;
       };
     }
-    for (const arg of call.args) this.expression(arg);
-    this.unsupported(statement, `defer での ${name} の呼び出し`);
-    return () => {};
+    if (name === 'close') {
+      for (const arg of call.args) this.expression(arg);
+      this.unsupported(statement, `defer での ${name} の呼び出し`);
+      return () => {};
+    }
+    return this.deferBuiltinStatement(call, name);
+  }
+
+  /** A deferred builtin such as delete, clear, or copy, whose arguments the defer statement evaluates. */
+  private deferBuiltinStatement(call: Extract<Expression, { kind: 'call' }>, name: string): Exec {
+    const evaluates: Eval[] = [];
+    let current: Value[] = [];
+    this.deferredArguments = {
+      args: new Set(call.args),
+      capture: (operand) => {
+        const index = evaluates.length;
+        evaluates.push(operand.eval);
+        return { ...operand, eval: () => current[index] };
+      },
+    };
+    let operand: Operand;
+    try {
+      operand = this.builtin(call, name);
+    } finally {
+      this.deferredArguments = undefined;
+    }
+    if (this.isInvalid(operand)) return () => {};
+    if (VALUE_BUILTINS.has(name)) {
+      this.error(call, `defer では ${name} の結果を使えません。`);
+      return () => {};
+    }
+    const run = operand.eval;
+    return (frame) => {
+      const values = evaluateAll(frame, evaluates);
+      frame.runtime.defer(
+        frame,
+        () => {
+          current = values;
+          run(frame);
+        },
+        values
+      );
+      return;
+    };
   }
 
   // Functions -------------------------------------------------------------------------------------------------------

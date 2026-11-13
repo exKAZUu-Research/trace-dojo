@@ -51,6 +51,7 @@ import {
   isComparable,
   isComplex,
   isFloat,
+  isForeignUnexported,
   isInteger,
   isInterface,
   isNumeric,
@@ -110,8 +111,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * temporaries, in order with each call after the calls among its operands, and the second the rest of the
    * operands, such as variable reads, the checks of assignment destinations, and the stores. Besides calls, the first
    * pass copies slice expressions, && and || expressions, type assertions to types that are not pointer-shaped, map
-   * literals, conversions of strings to byte or rune slices, and values that are not variables converted to
-   * interfaces through their addresses. The values wait in hidden slots, which garbage collection follows, until the
+   * literals, conversions of strings to byte or rune slices, keys of maps without fast access, and values that are
+   * not variables converted to interfaces through their addresses. The values wait in hidden slots, which garbage collection follows, until the
    * statement ends.
    */
   protected hoistingCalls<T>(compile: () => T): {
@@ -183,7 +184,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  /** The arguments of a deferred builtin call, which `capture` makes read the values the defer statement took. */
+  protected deferredArguments: { args: ReadonlySet<Expression>; capture: (operand: Operand) => Operand } | undefined;
+
   expression(expression: Expression): Operand {
+    const deferred = this.deferredArguments;
+    if (deferred?.args.has(expression)) {
+      this.deferredArguments = undefined;
+      try {
+        return deferred.capture(this.expression(expression));
+      } finally {
+        this.deferredArguments = deferred;
+      }
+    }
     const hoisted = this.hoisted;
     if (!hoisted || hoisted.fn !== this.fn) return this.compileExpression(expression);
     const tracked = this.withRuntimeCallTracking(() => this.compileExpression(expression));
@@ -1212,16 +1225,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     if (!ordered && !isNil(left) && !isNil(right) && !isComparable(type)) {
-      const under = underlying(type);
-      const what =
-        under.kind === 'slice'
-          ? 'スライス'
-          : under.kind === 'map'
-            ? 'map'
-            : under.kind === 'func'
-              ? '関数'
-              : `${describeType(type)} 型の値`;
-      this.error(expression, `${what}は nil としか比べられません。`);
+      this.error(expression, incomparableMessage(type));
       return this.invalid(expression);
     }
     if (left.mode === 'constant' && right.mode === 'constant' && left.constant && right.constant) {
@@ -1298,7 +1302,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     if (
       !isInteger(right.type) &&
-      !(right.mode === 'constant' && right.constant && exactInteger(right.constant) !== undefined)
+      !(
+        right.mode === 'constant' &&
+        right.constant &&
+        // Go's type checker shifts two constants before it checks the count's type.
+        (isUntyped(right.type) || left.mode === 'constant') &&
+        exactInteger(right.constant) !== undefined
+      )
     ) {
       this.error(expression.right, `シフトする量には整数を書いてください。`);
       return this.invalid(expression);
@@ -1484,6 +1494,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(span, `${field} は埋め込んだ複数の型にあるので、どれか決められません。`);
       return this.invalid(span);
     }
+    if (selection.kind === 'field' && isForeignUnexported(field, selection.pkg)) {
+      this.error(
+        span,
+        `${field} は ${selection.pkg} パッケージの外から使えないフィールドです（大文字で始まる名前だけを使えます）。`
+      );
+      return this.invalid(span);
+    }
     operand.variable?.markUsed();
     if (selection.kind !== 'field') {
       return { mode: 'method', type: NO_VALUE, span, eval: () => {}, method: { receiver: operand, selection } };
@@ -1610,7 +1627,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const read = operand.eval;
     return (frame) => {
       const value = read(frame) as bigint;
-      return value > 1n << 53n ? Number.MAX_SAFE_INTEGER : value < 0n ? -1 : Number(value);
+      // Beyond 2^53, any index is out of range, which only the panic message shows.
+      return value > 1n << 53n
+        ? Number.MAX_SAFE_INTEGER
+        : value < -(1n << 53n)
+          ? Number.MIN_SAFE_INTEGER
+          : Number(value);
     };
   }
 
@@ -1788,8 +1810,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const bounds = (frame: Frame, length: number, limit: number, limitName: string): [number, number] => {
       const from = low(frame);
       const to = high ? high(frame) : length;
-      if (to < 0 || to > limit) boundsPanic(`slice bounds out of range [:${to}] with ${limitName} ${limit}`);
-      if (from < 0 || from > to) boundsPanic(`slice bounds out of range [${from}:${to}]`);
+      // Go's runtime leaves out the other bound, and the length or capacity, for a negative bound.
+      if (to < 0) boundsPanic(`slice bounds out of range [:${to}]`);
+      if (to > limit) boundsPanic(`slice bounds out of range [:${to}] with ${limitName} ${limit}`);
+      if (from < 0) boundsPanic(`slice bounds out of range [${from}:]`);
+      if (from > to) boundsPanic(`slice bounds out of range [${from}:${to}]`);
       return [from, to];
     };
     if (isString(type) && type.kind === 'basic') {
@@ -1885,6 +1910,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const zero = this.zeroOf(target);
     const sourceName = typeString(operand.type);
     const targetName = typeString(target);
+    // Go's runtime names the asserted interface's type only when the target is concrete (assertE2I passes none).
+    const nilMessage = `${isInterface(target) ? 'interface' : sourceName} is nil, not ${targetName}`;
     const commaOk = (frame: Frame): [Value, boolean] => {
       const value = read(frame) as Iface | undefined;
       const result = value === undefined ? undefined : test(value);
@@ -1897,7 +1924,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       commaOk,
       eval: (frame) => {
         const value = read(frame) as Iface | undefined;
-        if (value === undefined) typeAssertionPanic(`interface is nil, not ${targetName}`);
+        if (value === undefined) typeAssertionPanic(nilMessage);
         const result = test(value);
         if (result !== undefined) return result.value;
         if (isInterface(target)) {
@@ -2099,6 +2126,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     return undefined;
   }
+}
+
+/** The error for comparing values of a type that is not comparable. */
+export function incomparableMessage(type: Type): string {
+  const under = underlying(type);
+  if (under.kind === 'slice') return 'スライスは nil としか比べられません。';
+  if (under.kind === 'map') return 'map は nil としか比べられません。';
+  if (under.kind === 'func') return '関数は nil としか比べられません。';
+  return `${describeType(type)} 型の値は、比べられないフィールドや要素を含むので比べられません。`;
 }
 
 function encodeRuneText(rune: number): string {

@@ -484,6 +484,7 @@ export class ProgramCompiler extends StatementCompiler {
           this.error(receiver, `${typeName} は型引数を持たない型です。`);
           continue;
         }
+        this.checkReceiverTypeParameterNames(declaration);
         if (shell.methods.some((method) => method.name === declaration.name)) {
           this.error(declaration.nameSpan, `メソッド ${typeName}.${declaration.name} が2回宣言されています。`);
           continue;
@@ -523,6 +524,19 @@ export class ProgramCompiler extends StatementCompiler {
         } else {
           this.pendingBodies.push(() => this.compileMethod(declaration, shell, method, undefined));
         }
+      }
+    }
+  }
+
+  /** The receiver's type parameters share the function's block with the receiver, parameters, and results. */
+  private checkReceiverTypeParameterNames(declaration: FunctionDeclaration): void {
+    const receiver = declaration.receiver as NonNullable<FunctionDeclaration['receiver']>;
+    const { parameters, results } = declaration.signature;
+    const later = new Set([receiver, ...parameters, ...results].map((part) => part.name));
+    for (const [index, name] of receiver.typeArguments.entries()) {
+      if (name === '_') continue;
+      if (receiver.typeArguments.indexOf(name) !== index || later.has(name)) {
+        this.error(receiver, `${name} はこのブロックですでに宣言されています。`);
       }
     }
   }

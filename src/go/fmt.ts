@@ -446,8 +446,9 @@ export class Printer {
 
   /** A nested value with an Error or String method prints with it, when reflection could call it. */
   private printNestedWithMethods(value: Value, type: Type, verb: string): boolean {
+    if (!this.canInterface) return false;
     if (value instanceof Iface) return this.handleMethods(value, verb);
-    if (!this.canInterface || isInterfaceType(type)) return false;
+    if (isInterfaceType(type)) return false;
     return this.handleMethods(new Iface(type, value), verb);
   }
 
