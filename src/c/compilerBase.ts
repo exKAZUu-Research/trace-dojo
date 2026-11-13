@@ -2,6 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
 import type { Declaration, Declarator, Expression, FieldDeclaration, Specifiers, TypeName, TypeSpecifier } from './ast';
+import type { Address } from './pointerBounds';
 import type { Frame, FunctionInfo, GlobalInfo, LocalInfo } from './runtime';
 import {
   builtinType,
@@ -21,8 +22,8 @@ import { unsupported } from './unsupported';
 export type Entity =
   | { kind: 'typedef'; type: CType }
   /** A variable; `constant` is the value of a const integer one with a constant initializer, which clang folds. */
-  | { kind: 'local'; local: LocalInfo; type: CType; constant?: Scalar }
-  | { kind: 'global'; global: GlobalInfo; type: CType; constant?: Scalar }
+  | { kind: 'local'; local: LocalInfo; type: CType; constant?: Scalar; constantBytes?: Uint8Array }
+  | { kind: 'global'; global: GlobalInfo; type: CType; constant?: Scalar; constantBytes?: Uint8Array }
   | { kind: 'function'; fn: FunctionInfo; type: CType }
   | { kind: 'enumConstant'; value: number; type: CType };
 
@@ -57,6 +58,8 @@ export interface Operand {
   value: (frame: Frame) => Value;
   lvalue?: LValue;
   bitWidth?: number;
+  constantBytes?: Uint8Array;
+  pointer?: (frame: Frame) => Address;
   /** The value of an arithmetic constant expression. */
   constant?: Scalar;
   /** Whether the value is an address known before the program runs, as static initializers require. */
@@ -73,6 +76,7 @@ export interface Location {
 }
 
 export interface LValue {
+  location?: (frame: Frame) => Address;
   resolve: (frame: Frame) => Location;
   /** The address of an object in memory; undefined for a variable that lives outside memory. */
   address?: (frame: Frame) => number;

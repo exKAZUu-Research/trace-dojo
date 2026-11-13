@@ -34,7 +34,7 @@ export function parseC(source: string): TranslationUnit {
   }
   try {
     return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => ({
-      items: new Converter([]).convertUnit(root, headers),
+      items: new Converter([], parser).convertUnit(root, headers),
     }));
   } catch (error) {
     throw atEndOfFile(error, text);
@@ -64,7 +64,7 @@ function parseHeader(
   const cached = headerCache.get(key);
   if (cached) return cached;
   const items = parseSource(parser, text, MISSING_TOKEN_NAMES, (root: Node) =>
-    new Converter(knownTypedefs, name).convertUnit(root)
+    new Converter(knownTypedefs, parser, name).convertUnit(root)
   ) as Declaration[];
   const typedefNames = items.flatMap((item) =>
     item.specifiers.storage === 'typedef'

@@ -295,13 +295,17 @@ function floatField(spec: Spec, value: number): string {
 function pad(spec: Spec, text: string): string {
   const width = spec.width ?? 0;
   if (text.length >= width) return text;
-  return spec.flags.includes('-') ? text.padEnd(width, ' ') : text.padStart(width, ' ');
+  return spec.flags.includes('-')
+    ? text.padEnd(width, ' ')
+    : text.padStart(width, spec.flags.includes('0') && ['s', 'c', '%'].includes(spec.conversion) ? '0' : ' ');
 }
 
 function padBytes(spec: Spec, bytes: Uint8Array): Uint8Array {
   const width = spec.width ?? 0;
   const padding = Math.max(width - bytes.length, 0);
-  const result = new Uint8Array(bytes.length + padding).fill(0x20);
+  const result = new Uint8Array(bytes.length + padding).fill(
+    spec.flags.includes('0') && !spec.flags.includes('-') ? 0x30 : 0x20
+  );
   result.set(bytes, spec.flags.includes('-') ? 0 : padding);
   return result;
 }

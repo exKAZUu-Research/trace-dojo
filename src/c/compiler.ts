@@ -36,6 +36,7 @@ import {
   INT,
   isCharArray,
   isComplete,
+  isConstQualified,
   isScalar,
   sizeOf,
   typeName,
@@ -254,6 +255,7 @@ export class Compiler extends StatementCompiler {
     this.fileScope.ordinary.set(name, entity);
     this.scope.ordinary.set(name, entity);
     if (init) {
+      entity.constantBytes = this.constantString(type, init);
       global.initialize = this.staticInitializer(type, init, row);
       const constant = this.foldedConstant(type, init);
       if (constant !== undefined) entity.constant = constant;
@@ -512,7 +514,16 @@ export class Compiler extends StatementCompiler {
   private foldInto(name: string, type: CType, init: Initializer | undefined): void {
     const constant = this.foldedConstant(type, init);
     const entity = this.scope.ordinary.get(name);
-    if (constant !== undefined && entity?.kind === 'local') entity.constant = constant;
+    if (entity?.kind === 'local') {
+      if (constant !== undefined) entity.constant = constant;
+      if (init) entity.constantBytes = this.constantString(type, init);
+    }
+  }
+
+  private constantString(type: CType, init: Initializer): Uint8Array | undefined {
+    if (!isCharArray(type) || !isConstQualified(type.of)) return undefined;
+    const literal = stringLiteralOf(init);
+    return literal ? decodeStringLiteral(literal.parts, literal.row).slice(0, type.length) : undefined;
   }
 
   // Initializers ------------------------------------------------------------------------------------------------------
@@ -575,7 +586,7 @@ export class Compiler extends StatementCompiler {
     this.aggregate(type, cursor, 0, writes, isStatic, true);
     if (cursor.index < cursor.items.length) {
       // clang warns about excess initializers and ignores them, but still checks their types.
-      for (const item of cursor.items.slice(cursor.index)) if (item.kind === 'expression') this.rvalue(item.expression);
+      for (const item of cursor.items.slice(cursor.index)) this.validateInitializer(item);
     }
     const size = sizeOf(type);
     return (frame, address) => {
@@ -687,6 +698,7 @@ export class Compiler extends StatementCompiler {
       cursor.index++;
       const inner = { items: item.items, index: 0 };
       this.aggregate(type, inner, offset, writes, isStatic, true);
+      for (const excess of inner.items.slice(inner.index)) this.validateInitializer(excess);
       return;
     }
     if (type.kind === 'record') {

@@ -1,6 +1,8 @@
 import { type Scalar, toInt32 } from '../arith';
 import { CRuntimeError } from '../errors';
+import type { SpecialCall } from '../expressionCompiler';
 import type { NativeFunction, Runtime } from '../runtime';
+import { INT } from '../types';
 import { exactParts, roundBinary } from './binaryFloat';
 import { asAddress, asNumber, writeBytes } from './support';
 
@@ -161,12 +163,27 @@ function toLong(value: number): bigint {
   return BigInt(value);
 }
 
-function fpClassify(x: number): number {
+function fpClassify(x: number, isFloat = false): number {
   if (Number.isNaN(x)) return 1;
   if (!Number.isFinite(x)) return 2;
   if (x === 0) return 3;
-  return Math.abs(x) < 2.2250738585072014e-308 ? 5 : 4;
+  return Math.abs(x) < (isFloat ? 2 ** -126 : 2 ** -1022) ? 5 : 4;
 }
+
+export const classificationCall: SpecialCall = (compiler, call, fn) => {
+  if (call.args.length !== 1) compiler.error(call.row, '浮動小数点数の分類には引数を1つ書いてください。');
+  const operand = compiler.rvalue(call.args[0]);
+  const isFloat = operand.type.kind === 'float' && operand.type.name === 'float';
+  return {
+    type: INT,
+    isCall: true,
+    value: (frame) => {
+      frame.runtime.spend();
+      const classification = fpClassify(Number(operand.value(frame)), isFloat);
+      return fn.name === '__builtin_isnormal' ? (classification === 4 ? 1 : 0) : classification;
+    },
+  };
+};
 
 export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
   fma: (_runtime, [x, y, z]) => fma(x as number, y as number, z as number),
@@ -262,6 +279,30 @@ for (const [name, fn] of Object.entries(BINARY)) {
   MATH_FUNCTIONS[`${name}l`] = MATH_FUNCTIONS[name];
   MATH_FUNCTIONS[`${name}f`] = (_runtime, [x, y]) => Math.fround(fn(x as number, y as number));
 }
+
+for (const name of [
+  'fma',
+  'modf',
+  'frexp',
+  'ldexp',
+  'scalbn',
+  'ilogb',
+  'nan',
+  'remquo',
+  'lround',
+  'llround',
+  'lrint',
+  'llrint',
+]) {
+  MATH_FUNCTIONS[`${name}l`] = MATH_FUNCTIONS[name];
+}
+for (const name of ['ilogb', 'lrint', 'llrint']) MATH_FUNCTIONS[`${name}f`] = MATH_FUNCTIONS[name];
+MATH_FUNCTIONS.scalbnf = MATH_FUNCTIONS.ldexpf;
+MATH_FUNCTIONS.scalbln = MATH_FUNCTIONS.ldexp;
+MATH_FUNCTIONS.scalblnf = MATH_FUNCTIONS.ldexpf;
+MATH_FUNCTIONS.scalblnl = MATH_FUNCTIONS.ldexp;
+MATH_FUNCTIONS.remquof = (runtime, args, types, row) =>
+  Math.fround(MATH_FUNCTIONS.remquo(runtime, args, types, row) as number);
 
 export const CTYPE_FUNCTIONS: Record<string, NativeFunction> = {};
 const CLASSES: Record<string, (c: number) => boolean> = {

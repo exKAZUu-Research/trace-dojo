@@ -1,5 +1,7 @@
 import { CRuntimeError } from '../errors';
+import type { SpecialCall } from '../expressionCompiler';
 import type { NativeFunction, Runtime } from '../runtime';
+import { INT } from '../types';
 import { asAddress, asNumber, asSize, cString, readBytes, readCString, readRaw, writeBytes } from './support';
 
 function checkOverlap(destination: number, source: number, size: number, sourceSize = size): void {
@@ -54,6 +56,30 @@ function span(bytes: Uint8Array, set: Uint8Array, inSet: boolean): number {
   while (index < bytes.length && members.has(bytes[index]) === inSet) index++;
   return index;
 }
+
+export const comparisonCall: SpecialCall = (compiler, call, fn) => {
+  const count = fn.name === 'strcmp' ? 2 : 3;
+  if (call.args.length !== count) return;
+  const operands = call.args.map((argument) => compiler.rvalue(argument));
+  const [a, b] = operands.map((operand) => operand.constantBytes);
+  if (!a || !b) return;
+  const n = count === 2 ? Math.max(a.length, b.length) : operands[2].constant;
+  if (n === undefined || Number(n) < 0) return;
+  const length = Number(n);
+  if (fn.name === 'memcmp' && (length > a.length || length > b.length)) return;
+  if (fn.name !== 'memcmp' && (!a.includes(0) || !b.includes(0))) return;
+  let result = 0;
+  for (let index = 0; index < length; index++) {
+    const x = a[index] ?? 0;
+    const y = b[index] ?? 0;
+    if (x !== y) {
+      result = Math.sign(x - y);
+      break;
+    }
+    if (fn.name !== 'memcmp' && x === 0) break;
+  }
+  return { type: INT, value: () => result, constant: result, isCall: true };
+};
 
 export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
   strlen: (runtime, [s]) => BigInt(readCString(runtime, asAddress(s)).length),

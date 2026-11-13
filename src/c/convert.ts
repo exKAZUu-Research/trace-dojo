@@ -1,6 +1,7 @@
-import type { Node } from '@willbooster/web-tree-sitter';
+import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import { parseSource } from '../interpreter/treeSitter';
 import {
   type BinaryOperator,
   type Compound,
@@ -104,6 +105,7 @@ export class Converter {
 
   constructor(
     builtinTypedefs: readonly string[],
+    private readonly parser: Parser,
     private readonly fromHeader?: string
   ) {
     this.scope = new NameScope();
@@ -159,6 +161,8 @@ export class Converter {
       }
       case 'expression_statement': {
         if (node.namedChildCount === 0) return [];
+        const declaration = this.reparseDeclaration(node);
+        if (declaration) return [declaration];
         break;
       }
     }
@@ -199,8 +203,9 @@ export class Converter {
 
   // Declarations ----------------------------------------------------------------------------------------------------
 
-  private declaration(node: Node): Declaration {
+  private declaration(node: Node, type?: TypeSpecifier): Declaration {
     const specifiers = this.specifiers(node);
+    if (type) specifiers.type = type;
     if (node.type === 'type_definition') specifiers.storage = 'typedef';
     const declarators = node.childrenForFieldName('declarator').map((child) => {
       if (child.type === 'init_declarator') {
@@ -540,6 +545,10 @@ export class Converter {
 
   /** A block item, where a `case` label's statements become the statements after the label. */
   private blockItem(node: Node): (Statement | Declaration)[] {
+    if (node.type === 'expression_statement') {
+      const declaration = this.reparseDeclaration(node);
+      if (declaration) return [declaration];
+    }
     if (node.type === 'declaration' || node.type === 'type_definition') return this.declarationOrExpression(node);
     if (node.type === 'struct_specifier' || node.type === 'union_specifier' || node.type === 'enum_specifier') {
       return this.externalDeclaration(node) as Declaration[];
@@ -564,6 +573,26 @@ export class Converter {
       return [labeled, ...rest];
     }
     return [this.statement(node)];
+  }
+
+  private reparseDeclaration(node: Node): Declaration | undefined {
+    const leading = this.leadingType(node.text, node.startPosition.row);
+    if (!leading) return undefined;
+    const source = '\n'.repeat(node.startPosition.row) + 'int' + node.text.slice(leading.length);
+    return parseSource(this.parser, source, {}, (root) => {
+      const declaration = root.firstNamedChild;
+      if (!declaration || declaration.type !== 'declaration')
+        throw new CompileError([{ row: node.startPosition.row, message: '宣言の書き方に誤りがあります。' }]);
+      return this.declaration(declaration, leading.type);
+    });
+  }
+
+  private leadingType(text: string, row: number): { length: number; type: TypeSpecifier } | undefined {
+    const name = /^[\p{XID_Start}_$][\p{XID_Continue}$]*/u.exec(text)?.[0];
+    if (!name) return undefined;
+    if (name === '_Bool') return { length: name.length, type: { kind: 'builtin', words: ['_Bool'], row } };
+    if (!this.scope.isType(name)) return undefined;
+    return { length: name.length, type: { kind: 'typedefName', name, row } };
   }
 
   /**
@@ -893,7 +922,21 @@ export class Converter {
     const row = node.startPosition.row;
     const type = node.childForFieldName('type');
     if (type) return { kind: 'sizeofType', typeName: this.typeName(type), row };
-    const operand = this.expression(field(node, 'value'));
+    const value = field(node, 'value');
+    const text = value.text;
+    const inner = text.startsWith('(') && text.endsWith(')') ? text.slice(1, -1).trim() : '';
+    const leading = this.leadingType(inner, row);
+    if (leading) {
+      const source = '\n'.repeat(row) + `int __trace_size = sizeof(int${inner.slice(leading.length)});`;
+      return parseSource(this.parser, source, {}, (root) => {
+        const typeNode = root.descendantsOfType('sizeof_expression')[0]?.childForFieldName('type');
+        if (!typeNode) throw new CompileError([{ row, message: '型の書き方に誤りがあります。' }]);
+        const typeName = this.typeName(typeNode);
+        typeName.specifiers.type = leading.type;
+        return { kind: 'sizeofType', typeName, row };
+      });
+    }
+    const operand = this.expression(value);
     const typeName = this.parenthesizedTypeName(operand);
     return typeName ? { kind: 'sizeofType', typeName, row } : { kind: 'sizeofExpression', operand, row };
   }

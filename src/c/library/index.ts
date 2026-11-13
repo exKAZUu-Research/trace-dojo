@@ -2,10 +2,10 @@ import type { LibraryEntry } from '../compiler';
 import { ProgramAbort } from '../errors';
 import { FILE_NAME } from '../preprocessor';
 import type { NativeFunction } from '../runtime';
-import { CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
+import { classificationCall, CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
 import { STDIO_FUNCTIONS } from './stdioFunctions';
 import { STDLIB_FUNCTIONS } from './stdlibFunctions';
-import { STRING_FUNCTIONS } from './stringFunctions';
+import { comparisonCall, STRING_FUNCTIONS } from './stringFunctions';
 import { asAddress, asNumber, bytesToText, readCString } from './support';
 import { newTurtleCall, removeCall, TURTLE_FUNCTIONS } from './turtleFunctions';
 
@@ -59,6 +59,29 @@ const UNSUPPORTED: Record<string, string> = {
   wcstombs: 'マルチバイト文字の変換（wcstombs）',
   at_quick_exit: 'at_quick_exit',
 };
+for (const name of [
+  'strcasecmp',
+  'strncasecmp',
+  'strlcpy',
+  'strlcat',
+  'isascii',
+  'toascii',
+  'random',
+  'srandom',
+  'initstate',
+  'setstate',
+  'drand48',
+  'erand48',
+  'lrand48',
+  'nrand48',
+  'mrand48',
+  'jrand48',
+  'srand48',
+  'seed48',
+  'lcong48',
+])
+  UNSUPPORTED[name] = `標準 C ライブラリ以外の関数（${name}）`;
+
 // These give the last bits of macOS's own algorithms, which no portable formula reproduces.
 for (const name of ['erf', 'erfc', 'tgamma', 'lgamma']) {
   for (const suffix of ['', 'f', 'l']) UNSUPPORTED[`${name}${suffix}`] = `${name}${suffix}`;
@@ -77,7 +100,15 @@ const NATIVES: Record<string, NativeFunction> = {
   atoll: STDLIB_FUNCTIONS.atol,
 };
 
-const SPECIAL_CALLS = { new_turtle: newTurtleCall, remove: removeCall };
+const SPECIAL_CALLS = {
+  strcmp: comparisonCall,
+  strncmp: comparisonCall,
+  memcmp: comparisonCall,
+  __builtin_fpclassify: classificationCall,
+  __builtin_isnormal: classificationCall,
+  new_turtle: newTurtleCall,
+  remove: removeCall,
+};
 
 /** The interpreter's implementation of a library function, or why it leaves the function out. */
 export function libraryEntry(name: string): LibraryEntry | undefined {

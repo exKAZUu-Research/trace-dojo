@@ -14,6 +14,7 @@ import type { BinaryOperator, Expression } from './ast';
 import { CompilerBase, type Entity, type Location, type LValue, type Operand } from './compilerBase';
 import { CRuntimeError } from './errors';
 import { decodeCharLiteral, decodeStringLiteral, parseNumber } from './literals';
+import { type Address, addressOf as pointerAddress, boundPointer, checkAddress } from './pointerBounds';
 import { type Frame, type FunctionInfo, loaderOf, loadRecord, storeRecord, storerOf } from './runtime';
 import {
   BOOL,
@@ -76,6 +77,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
   /** An expression as an rvalue: arrays and functions decay to pointers. */
   rvalue(expression: Expression): Operand {
     const operand = this.expression(expression);
+    if (operand.type.kind === 'array') {
+      const size = operand.type.length === undefined ? undefined : sizeOf(operand.type);
+      const pointer = (frame: Frame): Address => {
+        const address = operand.value(frame) as number;
+        return { address, start: address, end: address + (size ?? frame.runtime.memory.findBase(address)?.size ?? 0) };
+      };
+      return { ...operand, type: rvalueType(operand), pointer };
+    }
     return { ...operand, type: rvalueType(operand) };
   }
 
@@ -204,13 +213,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return {
           ...(entity.constant === undefined ? {} : { constant: entity.constant }),
           ...operand,
+          constantBytes: entity.constantBytes,
           isAddressConstant: entity.type.kind === 'array',
           lvalue: { ...(operand.lvalue as LValue), isStatic: true },
         };
       }
       case 'local': {
         const { local } = entity;
-        const folded = entity.constant === undefined ? {} : { constant: entity.constant };
+        const folded = { constant: entity.constant, constantBytes: entity.constantBytes };
         if (local.staticGlobal) {
           const index = local.staticGlobal.index;
           const operand = this.memoryOperand(entity.type, (frame) => frame.runtime.globals[index].base);
@@ -255,9 +265,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  protected memoryOperand(type: CType, address: (frame: Frame) => number): Operand {
+  protected memoryOperand(type: CType, address: (frame: Frame) => Address): Operand {
     const resolve = (frame: Frame): Location => {
-      const at = address(frame);
+      const at = checkAddress(address(frame), sizeOf(type));
       if (type.kind === 'array' || type.kind === 'function') return { load: () => at, store: () => {} };
       if (type.kind === 'record')
         return {
@@ -270,7 +280,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
         store: (value) => storerOf(type)(frame.runtime, at, value as Scalar),
       };
     };
-    return { type, value: (frame) => resolve(frame).load(), lvalue: { resolve, address } };
+    return {
+      type,
+      value: (frame) => resolve(frame).load(),
+      lvalue: { resolve, location: address, address: (frame) => checkAddress(address(frame), 0) },
+    };
   }
 
   private stringLiteral(parts: string[], row: number): Operand {
@@ -278,7 +292,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const index = this.stringIndex(bytes);
     const type: CType = { kind: 'array', of: { kind: 'int', name: 'char' }, length: bytes.length };
     const address = (frame: Frame): number => frame.runtime.literals[index].base;
-    return { ...this.memoryOperand(type, address), isAddressConstant: true };
+    return { ...this.memoryOperand(type, address), isAddressConstant: true, constantBytes: bytes };
   }
 
   // Operators -------------------------------------------------------------------------------------------------------
@@ -357,14 +371,32 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private pointerOffset(pointer: Operand, offset: Operand, sign: 1 | -1, row: number): Operand {
     const type = pointer.type as Extract<CType, { kind: 'pointer' }>;
     const size = this.pointerElementSize(type, row);
-    const base = pointer.value;
     const index = this.converted(offset, LONG);
-    const value = (frame: Frame): Value => {
-      const address = base(frame) as number;
+    const locate = (frame: Frame): Address => {
+      const original = pointer.pointer?.(frame) ?? boundPointer(frame, pointer.value(frame) as number, type.to);
+      const address = pointerAddress(original);
       const delta = Number(index(frame)) * size * sign;
-      return offsetAddress(frame, address, delta);
+      const result = offsetAddress(frame, address, delta);
+      const location = typeof original === 'number' ? result : { ...original, address: result };
+      checkAddress(location, 0);
+      return location;
     };
-    return { type, value, isAddressConstant: pointer.isAddressConstant && offset.constant !== undefined };
+    const value = (frame: Frame): Value => pointerAddress(locate(frame));
+    const constantOffset = offset.constant === undefined ? undefined : Number(offset.constant) * size * sign;
+    const constantBytes =
+      pointer.constantBytes &&
+      constantOffset !== undefined &&
+      constantOffset >= 0 &&
+      constantOffset <= pointer.constantBytes.length
+        ? pointer.constantBytes.slice(constantOffset)
+        : undefined;
+    return {
+      type,
+      value,
+      pointer: locate,
+      constantBytes,
+      isAddressConstant: pointer.isAddressConstant && offset.constant !== undefined,
+    };
   }
 
   private pointerElementSize(type: Extract<CType, { kind: 'pointer' }>, row: number): number {
@@ -457,12 +489,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const target = type.to;
     if (target.kind === 'void') this.error(row, 'void * の指す先は読めません（型を決めるキャストをしてください）。');
     if (target.kind === 'function') return { type: target, value: operand.value };
-    const address = operand.value as (frame: Frame) => number;
+    const address = operand.pointer ?? ((frame: Frame) => boundPointer(frame, operand.value(frame) as number, target));
     if (target.kind === 'record' && !target.info.isComplete) {
       return {
         type: target,
         value: () => this.error(row, '中身が定義されていない型の値は使えません。'),
-        lvalue: { resolve: () => ({ load: () => 0, store: () => {} }), address },
+        lvalue: {
+          resolve: () => ({ load: () => 0, store: () => {} }),
+          address: (frame) => pointerAddress(address(frame)),
+        },
       };
     }
     return this.memoryOperand(target, address);
@@ -478,7 +513,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const address = operand.lvalue.address;
     if (!address) throw new Error('A variable whose address is taken must live in memory');
     const isStatic = operand.isAddressConstant === true || operand.lvalue.isStatic === true;
-    return { type: pointerTo(type), value: address, isAddressConstant: isStatic };
+    const location = operand.lvalue.location;
+    const pointer = (frame: Frame): Address => {
+      const at = location?.(frame) ?? address(frame);
+      const bounded = typeof at === 'number' ? boundPointer(frame, at, type) : at;
+      checkAddress(bounded, 0);
+      return bounded;
+    };
+    return {
+      type: pointerTo(type),
+      value: (frame) => pointerAddress(pointer(frame)),
+      pointer,
+      isAddressConstant: isStatic,
+    };
   }
 
   private update(expression: Extract<Expression, { kind: 'update' }>): Operand {
@@ -594,6 +641,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const result: Operand = {
       type,
       value: convert,
+      pointer: type.kind === 'pointer' ? operand.pointer : undefined,
       ...(constant === undefined ? {} : { constant }),
       isAddressConstant: operand.isAddressConstant && type.kind === 'pointer',
     };
@@ -770,9 +818,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (target.kind === 'function') this.error(row, '関数ポインタには添字（[]）を使えません。');
     if (!isComplete(target)) this.error(row, `中身が定義されていない型（${typeName(target)}）の要素は読めません。`);
     const size = sizeOf(target);
-    const base = array.value;
     const offset = this.converted(index, LONG);
-    const address = (frame: Frame): number => (base(frame) as number) + Number(offset(frame)) * size;
+    const address = (frame: Frame): Address => {
+      const original = array.pointer?.(frame) ?? boundPointer(frame, array.value(frame) as number, target);
+      const at = pointerAddress(original) + Number(offset(frame)) * size;
+      return typeof original === 'number' ? at : { ...original, address: at };
+    };
     const operand = this.memoryOperand(target, address);
     const isStatic = array.isAddressConstant === true && index.constant !== undefined;
     return {

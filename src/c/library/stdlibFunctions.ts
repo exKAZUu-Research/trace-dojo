@@ -145,7 +145,7 @@ class QuickSort {
     let length = n;
     for (;;) {
       this.runtime.spend();
-      if (length < 7) {
+      if (length <= 7) {
         this.insertionSort(a, length);
         return;
       }

@@ -295,3 +295,107 @@ test.each([
 ])('misplaced atomic annotations are diagnosed: %s', (program) => {
   expect(() => traceProgram('c', program, program)).toThrow('// atomic は、メソッド・コンストラクタ・関数を宣言する行');
 });
+
+test('typedef declarators and abstract array/function types retain their meanings', () => {
+  const program = `#include <stdio.h>
+#include <stdbool.h>
+typedef int T;
+typedef struct { int x; } Point;
+T (*global)(T, T);
+T (*arrayPointer)[3];
+T (*get(void))[3];
+T add(T a, T b) { return a+b; }
+Point origin(void) { Point p={42}; return p; }
+int main(void) {
+ T (*op)(T,T)=add;
+ Point (*mk)(void)=origin;
+ bool (*pred)(int)=0;
+ int a[3]={1,2,3}; arrayPointer=&a;
+ printf("%d %d %d %zu %zu %d\\n", op(1,2), mk().x, pred==0, sizeof(T[4]), sizeof(T(*)(int)), (*arrayPointer)[2]);
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3 42 1 16 8 3\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('float classification macros retain the argument precision and math variants are callable', () => {
+  const program = `#include <stdio.h>
+#include <math.h>
+int main(void) {
+ float f=1e-40f; double d=1e-40;
+ printf("%d %d %d %d\\n",fpclassify(f)==FP_SUBNORMAL,isnormal(f),fpclassify(d)==FP_NORMAL,isnormal(d));
+ printf("%d %.0f %.0Lf %.0Lf\\n",ilogbf(8.0f),scalbnf(1.0f,2),scalblnl(1.0L,3L),fmal(2.0L,3.0L,1.0L));
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 0 1 1\n3 4 8 7\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('macOS hexadecimal rounding and zero-padded text fields retain their formatting', () => {
+  const program = `#include <stdio.h>
+int main(void) {
+ printf("%05s|%05c|%05.1s|%05%|%-05s|%05.3d|\\n","ab",'x',"xyz","ab",12);
+ printf("%.3a %.0a %.3a %.3a\\n",-336291.0255587237,1.5,1.0+31.0/65536.0+1e-12,1.0+25.0/65536.0);
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '000ab|0000x|0000x|0000%|ab   |  012|\n-0x1.486p+18 0x1p+0 0x1.002p+0 0x1.002p+0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('qsort preserves the target ordering and comparator count at its insertion-sort boundary', () => {
+  const program = `#include <stdio.h>
+#include <stdlib.h>
+typedef struct { int k; int id; } R;
+static int calls;
+int cmp(const void *a,const void *b){ calls++; const R *x=a,*y=b; return (x->k>y->k)-(x->k<y->k); }
+int main(void){ R a[7]; for(int i=0;i<7;i++){a[i].k=(i*7)%3;a[i].id=i;} qsort(a,7,sizeof a[0],cmp); for(int i=0;i<7;i++) printf("%d",a[i].id); printf(" %d\\n",calls); }`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '0361425 13\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'return a[0][2];',
+  'return a[1][-1];',
+  'int *p=a[0]; return p[2];',
+  'return *(a[0]+2);',
+  'return *(&a[0][2]);',
+])('array subobjects reject accesses into an adjacent row: %s', (body) => {
+  expect(executeProgram('c', `int main(void) { int a[2][2]={{1,2},{3,4}}; ${body} }`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: '配列や確保した領域の範囲の外を読み書きしました。',
+  });
+});
+
+test('one-past array addresses remain valid for pointer comparisons', () => {
+  const program = `#include <stdio.h>\nint main(void) { int a[2][2]={{1,2},{3,4}}; int *p=&a[0][2]; printf("%d %d %d\\n",p==a[1],a[1][0],a[0][1]); }`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 3 2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('constant string comparisons use clang folding while runtime comparisons use libc', () => {
+  const program = `#include <stdio.h>
+#include <string.h>
+const char a[]="apple";
+int main(void) {
+ const char local[]="cherry";
+ const char *p="apple", *q="cherry";
+ printf("%d %d %d %d %d\\n",strcmp("apple","cherry"),strcmp(p,q),memcmp("az","aa",2),strcmp("apple"+1,"cherry"),strcmp(a,local));
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '-1 -2 1 1 -1\n',
+    uncaughtException: undefined,
+  });
+});

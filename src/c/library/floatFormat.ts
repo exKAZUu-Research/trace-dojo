@@ -2,7 +2,7 @@ import { exactParts } from './binaryFloat';
 
 /**
  * Formats doubles as macOS's libc does for `%f`, `%e`, `%g`, and `%a`: from the exact binary value, rounded to the
- * requested digits with ties to even.
+ * requested digits using macOS rounding rules.
  */
 
 /** The exact decimal digits of a finite positive double, and the power of ten of the first digit. */
@@ -136,10 +136,12 @@ export function formatHex(value: number, precision: number | undefined, alternat
     const dropBits = BigInt((13 - precision) * 4);
     const full = (lead << 52n) | mantissa;
     const kept = full >> dropBits;
-    const remainder = full & ((1n << dropBits) - 1n);
-    const half = 1n << (dropBits - 1n);
-    let rounded = kept;
-    if (remainder > half) rounded++;
+    const dropped = full & ((1n << dropBits) - 1n);
+    const first = Number(dropped >> (dropBits - 4n));
+    const next = dropBits >= 8n ? Number((dropped >> (dropBits - 8n)) & 15n) : 0;
+    // Apple's __hdtoa uses the first discarded digit and the low bit of the next, ignoring later digits.
+    // https://github.com/apple-oss-distributions/Libc/blob/main/gdtoa/FreeBSD/_hdtoa.c
+    const rounded = kept + (first > 8 || (first === 8 && (next & 1) !== 0) ? 1n : 0n);
     const fractionBits = BigInt(precision * 4);
     lead = rounded >> fractionBits;
     hex = precision > 0 ? (rounded & ((1n << fractionBits) - 1n)).toString(16).padStart(precision, '0') : '';
