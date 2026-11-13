@@ -402,6 +402,15 @@ export class Runtime {
     return keys;
   }
 
+  /** Own string keys with the `length` an array or a String object holds, as `Object.getOwnPropertyNames` lists them. */
+  ownPropertyNames(object: JsObject): string[] {
+    const keys = this.ownKeys(object);
+    if (!(object instanceof JsArray) && typeof object.primitive !== 'string') return keys;
+    const indexCount = keys.findIndex((key) => !/^(?:0|[1-9]\d*)$/.test(key));
+    keys.splice(indexCount === -1 ? keys.length : indexCount, 0, 'length');
+    return keys;
+  }
+
   ownEnumerableKeys(object: JsObject): string[] {
     return this.ownKeys(object).filter((key) => this.getOwnProperty(object, key)?.enumerable);
   }

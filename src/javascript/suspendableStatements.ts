@@ -456,7 +456,8 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     const keys: string[] = [];
     const seen = new Set<string>();
     for (let current: JsObject | null = value; current; current = current.proto) {
-      for (const key of runtime.ownKeys(current)) {
+      // Every own name, enumerable or not, hides the same name further up the chain.
+      for (const key of runtime.ownPropertyNames(current)) {
         if (seen.has(key)) continue;
         seen.add(key);
         if (runtime.getOwnProperty(current, key)?.enumerable) keys.push(key);

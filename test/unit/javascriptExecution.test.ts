@@ -827,6 +827,11 @@ class C { #\\u0061 = 4; \\u0063onstructor() { console.log('made'); } m() { retur
 l\\u0061bel: for (;;) break label;`,
   ],
   [
+    'for...in over objects whose prototype has a length',
+    `const s = Object('ab'); Object.setPrototypeOf(s, { length: 4, extra: 1 }); for (const k in s) console.log(k);
+const a = [7]; Object.setPrototypeOf(a, { length: 9, more: 2 }); for (const k in a) console.log(k);`,
+  ],
+  [
     'Object.create with property descriptors',
     `const o = Object.create({ inh: 1 }, { x: { value: 1, enumerable: true }, y: { get() { return 2; }, enumerable: true }, z: { value: 3 } });
 console.log(o.x, o.y, o.inh, Object.keys(o), o, Object.getOwnPropertyDescriptor(o, 'z'));

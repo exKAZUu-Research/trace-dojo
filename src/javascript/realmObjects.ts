@@ -91,7 +91,7 @@ function fromEntries(runtime: Runtime, args: Value[]): Value {
 // code-gauge-allow functionNcss 32 -- Lists the builtin methods, each a small closure of its own.
 function defineReflection(method: ObjectMethod): void {
   method('getOwnPropertyNames', 1, (runtime, args) =>
-    runtime.newArray(ownPropertyNames(runtime, runtime.toObject(args[0])))
+    runtime.newArray(runtime.ownPropertyNames(runtime.toObject(args[0])))
   );
   method('getOwnPropertySymbols', 1, (runtime, args) =>
     runtime.newArray(runtime.ownSymbols(runtime.toObject(args[0])))
@@ -104,7 +104,7 @@ function defineReflection(method: ObjectMethod): void {
     const object = runtime.toObject(args[0]);
     const result = runtime.newObject();
     return runtime.hold(result, () => {
-      for (const key of [...ownPropertyNames(runtime, object), ...runtime.ownSymbols(object)]) {
+      for (const key of [...runtime.ownPropertyNames(object), ...runtime.ownSymbols(object)]) {
         runtime.createDataProperty(result, key, descriptorObject(runtime, runtime.getOwnProperty(object, key)));
       }
       return result;
@@ -207,15 +207,6 @@ function holdingTemporaries(runtime: Runtime, run: () => void): void {
 
 function primitiveText(value: Exclude<Value, JsObject>): string {
   return typeof value === 'symbol' ? value.toString() : String(value);
-}
-
-/** Own string keys, enumerable or not, with an array's or String object's `length` after its indices as V8 orders them. */
-function ownPropertyNames(runtime: Runtime, object: JsObject): string[] {
-  const keys = runtime.ownKeys(object);
-  if (!(object instanceof JsArray) && typeof object.primitive !== 'string') return keys;
-  const indexCount = keys.findIndex((key) => !/^(?:0|[1-9]\d*)$/.test(key));
-  keys.splice(indexCount === -1 ? keys.length : indexCount, 0, 'length');
-  return keys;
 }
 
 /** Whether an object is sealed, or frozen when `frozen` is set, as `Object.isSealed` and `Object.isFrozen` test. */
