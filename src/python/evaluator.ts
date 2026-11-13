@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 973 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 976 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
+  BinaryOperator,
   ClassDef,
   ExceptHandler,
   Expression,
@@ -36,7 +37,6 @@ import {
   iterateHeld,
   lengthOf,
   lookupSpecial,
-  setAttribute,
   setItem,
   toArray,
 } from './objects';
@@ -233,11 +233,16 @@ export class Evaluator extends AsyncEvaluator {
     const result = runtime.steps.runStatement(statement.stepRow, expression.kind === 'call', () =>
       this.evaluateValue(expression, frame)
     );
+    this.discard(statement, result);
+  }
+
+  /** Ends an expression statement, which drops its value after handing it to sys.displayhook in 'single' mode. */
+  private discard(statement: Extract<Statement, { kind: 'expression' }>, result: PyValue): void {
+    const { runtime } = this;
     if (statement.displays) {
       runtime.finalizer.locals.escape(result);
       callValue(getAttribute(runtime.importModule('sys'), 'displayhook'), [result]);
     }
-    // The statement drops its value, which closes a generator that only the value held.
     if (runtime.finalizer.pending.size > 0) this.release(result);
   }
 
@@ -357,33 +362,21 @@ export class Evaluator extends AsyncEvaluator {
     return [this.evaluateValue(expression, frame), false];
   }
 
-  /** Hands on the items an augmented assignment copied into a new container, as `items += (x,)` on a tuple does. */
-  private copiedBy(current: PyValue, result: PyValue): void {
-    const { locals } = this.runtime.finalizer;
-    if (locals.marking && result !== current) locals.escapeItems(result);
-  }
-
   // code-gauge-allow functionNcss 31 -- One case per kind of target, each storing where the target keeps it.
   private augmentedAssign(statement: Extract<Statement, { kind: 'augmentedAssign' }>, frame: Frame): void {
     const { target, operator } = statement;
     switch (target.kind) {
       case 'name': {
         const current = this.loadName(target, frame);
-        const value = this.evaluate(statement.value, frame);
-        // `items *= 0` frees the items a list drops.
-        const result = this.runtime.finalizer.mutating(current, () => inplaceOp(operator, current, value), [value]);
-        this.copiedBy(current, result);
-        this.storeName(target, result, frame);
+        this.storeName(target, this.inplace(operator, current, this.evaluate(statement.value, frame)), frame);
         return;
       }
       case 'attribute': {
         const object = this.evaluateValue(target.object, frame);
         this.hold(frame, object, () => {
           const current = getAttribute(object, target.name);
-          const result = inplaceOp(operator, current, this.evaluate(statement.value, frame));
-          this.copiedBy(current, result);
-          setAttribute(object, target.name, result);
-          this.stored(object, target.name, result, true);
+          const result = this.inplace(operator, current, this.evaluate(statement.value, frame));
+          this.storeInto(object, target.name, true, result);
         });
         return;
       }
@@ -393,11 +386,9 @@ export class Evaluator extends AsyncEvaluator {
           const index = this.evaluateValue(target.index, frame);
           const current = getItem(object, index);
           const result = this.hold(frame, index, () =>
-            inplaceOp(operator, current, this.evaluate(statement.value, frame))
+            this.inplace(operator, current, this.evaluate(statement.value, frame))
           );
-          this.copiedBy(current, result);
-          setItem(object, index, result);
-          this.stored(object, index, result, false);
+          this.storeInto(object, index, false, result);
         });
         return;
       }
@@ -405,6 +396,17 @@ export class Evaluator extends AsyncEvaluator {
         throw new Error('Unexpected target of an augmented assignment');
       }
     }
+  }
+
+  /**
+   * Applies an augmented assignment's operator to a target's value, freeing what `items *= 0` drops from a container
+   * changed in place, and handing on the items `items += (x,)` copied into a new one.
+   */
+  private inplace(operator: BinaryOperator, current: PyValue, value: PyValue): PyValue {
+    const { finalizer } = this.runtime;
+    const result = finalizer.mutating(current, () => inplaceOp(operator, current, value), [value]);
+    if (finalizer.locals.marking && result !== current) finalizer.locals.escapeItems(result);
+    return result;
   }
 
   private annotate(statement: Extract<Statement, { kind: 'annotatedAssign' }>, frame: Frame): void {
@@ -744,7 +746,7 @@ export class Evaluator extends AsyncEvaluator {
   private *suspendingStatementBody(statement: Statement, frame: Frame): Execution {
     switch (statement.kind) {
       case 'expression': {
-        yield* this.evaluateSuspending(statement.expression, frame);
+        this.discard(statement, yield* this.evaluateSuspending(statement.expression, frame));
         return undefined;
       }
       case 'assign': {
@@ -804,22 +806,23 @@ export class Evaluator extends AsyncEvaluator {
     const operand = (): Generator<PyValue, PyValue, PyValue> => this.evaluateSuspending(statement.value, frame);
     if (target.kind === 'name') {
       const current = this.loadName(target, frame);
-      this.storeName(target, inplaceOp(operator, current, yield* this.holding(frame, current, operand())), frame);
+      const value = yield* this.holding(frame, current, operand());
+      this.storeName(target, this.inplace(operator, current, value), frame);
       return;
     }
     if (target.kind === 'attribute') {
       const object = yield* this.evaluateSuspending(target.object, frame);
       const current = this.hold(frame, object, () => getAttribute(object, target.name));
-      const result = inplaceOp(operator, current, yield* this.holding(frame, object, operand()));
-      setAttribute(object, target.name, result);
+      const value = yield* this.holding(frame, object, operand());
+      this.hold(frame, object, () => this.storeInto(object, target.name, true, this.inplace(operator, current, value)));
       return;
     }
     const subscript = target as Extract<Target, { kind: 'subscript' }>;
     const object = yield* this.evaluateSuspending(subscript.object, frame);
     const index = yield* this.holding(frame, object, this.evaluateSuspending(subscript.index, frame));
     const current = getItem(object, index);
-    const result = inplaceOp(operator, current, yield* this.holding(frame, object, operand()));
-    setItem(object, index, result);
+    const value = yield* this.holding(frame, object, operand());
+    this.hold(frame, object, () => this.storeInto(object, index, false, this.inplace(operator, current, value)));
   }
 
   private *deleteSuspending(target: Target, frame: Frame): Generator<PyValue, void, PyValue> {
@@ -828,10 +831,12 @@ export class Evaluator extends AsyncEvaluator {
       return;
     }
     if (target.kind === 'attribute') {
-      deleteAttribute(yield* this.evaluateSuspending(target.object, frame), target.name);
+      const object = yield* this.evaluateSuspending(target.object, frame);
+      this.runtime.finalizer.replacing(object, target.name, true, () => deleteAttribute(object, target.name));
     } else if (target.kind === 'subscript') {
       const object = yield* this.evaluateSuspending(target.object, frame);
-      deleteItem(object, yield* this.holding(frame, object, this.evaluateSuspending(target.index, frame)));
+      const index = yield* this.holding(frame, object, this.evaluateSuspending(target.index, frame));
+      this.runtime.finalizer.replacing(object, index, false, () => deleteItem(object, index));
     } else if (target.kind === 'unpack') {
       for (const element of target.elements) yield* this.deleteSuspending(element, frame);
     }
@@ -972,8 +977,10 @@ export class Evaluator extends AsyncEvaluator {
       if (handler.name) {
         try {
           this.deleteName(handler.name, frame);
-        } catch {
-          // The handler may have deleted the name itself.
+        } catch (error) {
+          // The handler may have deleted the name itself; what freeing the exception ran may still stop the program.
+          // oxlint-disable-next-line no-unsafe-finally -- A refusal while freeing the exception stops the program, whatever the handler raised.
+          if (!(error instanceof PyError)) throw error;
         }
       }
       // The handled exception dies with the handler, and with it the frames its traceback kept.

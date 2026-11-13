@@ -10,7 +10,7 @@ import type { Frame } from './frame';
 import { parsePython } from './parse';
 import { runModule } from './run';
 import { Runtime } from './runtime';
-import { withoutCharge } from './runtimeContext';
+import { currentRuntime } from './runtimeContext';
 import { strRepr } from './strings';
 import { Ellipsis, None, NotImplemented, unbox } from './types';
 import {
@@ -282,7 +282,7 @@ function displayNodeOf(item: PyValue, seen: Set<PyObject>): DisplayNode | undefi
 
 function valueReprNode(value: PyObject): DisplayNode | undefined {
   try {
-    return { kind: 'value', value: withoutCharge(() => pyRepr(value)) };
+    return { kind: 'value', value: currentRuntime().forDisplay(() => pyRepr(value)) };
   } catch {
     return undefined;
   }

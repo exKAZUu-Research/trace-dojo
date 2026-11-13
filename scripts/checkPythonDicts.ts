@@ -1,8 +1,12 @@
-// Compares the class `__dict__`s and the module namespaces of this grader with CPython's (3.14.10), and prints the
-// lines that differ (`<` CPython, `>` this grader) and their count:
-//   bun scripts/checkPythonDicts.ts [module ...] [--write]
-// With --write, it writes the modules and classes that still differ to src/python/data/namespaceDifferences.ts, whose
-// namespaces this grader then refuses to list (see src/python/namespaceDifferences.ts).
+// Compares the class `__dict__`s and the module namespaces of this grader with CPython's (3.14.10):
+//   bun scripts/checkPythonDicts.ts [module ...]
+//   bun scripts/checkPythonDicts.ts --write
+// It prints each module and class whose names differ in set or order, as `missing ...; extra ...`, then the number of
+// differing lines and of differing modules and classes. The lines compared, each class's names sorted, go to
+// .tmp/pythonDicts/cpython.txt and .tmp/pythonDicts/ours.txt, which `diff` shows as `<` and `>` lines.
+// With --write, which compares every supported module, it writes the modules and classes that still differ to
+// src/python/data/namespaceDifferences.ts, whose namespaces this grader then refuses to list (see
+// src/python/namespaceDifferences.ts).
 // For each builtin type, internal type (iterators, views, descriptors, code, frame, ...) and public class of the
 // supported modules, the program it runs prints the type and the keys of `vars(T)` in order; for each module, the keys of
 // `vars(module)` in order, with the `__module__` of each function and class. Each module is imported in a process of its
@@ -115,12 +119,16 @@ if (import.meta.main) {
   applyClassOrders(!process.argv.includes('--natural'));
   await loadInterpreter();
   const requested = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+  if (requested.length > 0 && process.argv.includes('--write')) {
+    // The table covers every module, so one written from a subset would drop the others' entries.
+    throw new Error('--write compares every supported module and takes no module names');
+  }
   const modules =
     requested.length > 0 ? requested : [...interpreter.supportedModules].filter((name) => name !== '__main__');
   mkdirSync('.tmp/pythonDicts', { recursive: true });
   if (process.argv.includes('--natural')) {
     // The classes' names in the order this grader creates them, for the parent run.
-    process.stdout.write(runOurs(PROGRAM(modules, true)).output);
+    process.stdout.write(runOurTypes(PROGRAM(modules, true)));
   } else {
     compare(modules);
   }
@@ -327,7 +335,7 @@ function compareModules(python: string, modules: string[], lines: Lines): void {
 /** Compares the namespaces of the classes both CPython and this grader reach, importing every module. */
 function compareTypes(python: string, modules: string[], lines: Lines): void {
   const typeProgram = PROGRAM(modules, true);
-  const ourTypes = probeLines(runOurs(typeProgram).output).filter((line) => line.startsWith('T '));
+  const ourTypes = probeLines(runOurTypes(typeProgram)).filter((line) => line.startsWith('T '));
   const referenceTypes = probeLines(runCPython(python, typeProgram)).filter((line) => line.startsWith('T '));
   // A class only one side reaches is a name a module lacks, which the module's lines show.
   const [ourTypeNames, referenceTypeNames] = [typeNames(ourTypes), typeNames(referenceTypes)];
@@ -337,7 +345,12 @@ function compareTypes(python: string, modules: string[], lines: Lines): void {
     encoding: 'utf8',
     maxBuffer: 1 << 30,
   });
-  lines.natural.push(...probeLines(natural.stdout).filter((line) => line.startsWith('T ')));
+  const naturalTypes = probeLines(natural.stdout).filter((line) => line.startsWith('T '));
+  if (natural.status !== 0 || naturalTypes.length === 0) {
+    const detail = (natural.stderr || natural.error?.message || '').trim();
+    throw new Error(`The --natural run listed no types (exit status ${natural.status})${detail ? `:\n${detail}` : ''}`);
+  }
+  lines.natural.push(...naturalTypes);
   for (const name of ourTypeNames) {
     // The class attributes this grader leaves unsupported, which raise the unsupported error.
     for (const key of interpreter.registeredUnsupportedNames(name)) lines.allowed.add(`T ${name} ${key}`);
@@ -380,21 +393,29 @@ function runCPython(python: string, program: string): string {
   return result.stdout;
 }
 
+/** Runs the type program in this grader, failing unless it completes, as a partial listing passes for a full one. */
+function runOurTypes(program: string): string {
+  const run = runOurs(program);
+  if (run.failure) throw new Error(`The type program failed in this grader: ${run.failure}`);
+  return run.output;
+}
+
 /** Runs the program in this grader, returning its output and the attributes the module leaves unsupported. */
-function runOurs(program: string, module?: string): { output: string; unsupported: string[] } {
+function runOurs(program: string, module?: string): { output: string; unsupported: string[]; failure?: string } {
   const runtime = new interpreter.Runtime();
   const unsupported: string[] = [];
   try {
     const run = interpreter.runModule(runtime, interpreter.parsePython(program));
-    if (run.uncaughtException) console.error(`${module ?? 'types'}: ${run.uncaughtException.split('\n').at(-1)}`);
+    const failure = run.uncaughtException?.split('\n').at(-1);
+    if (failure) console.error(`${module ?? 'types'}: ${failure}`);
     const value = (
       runtime as unknown as { modules: Map<string, { unsupported: Map<string, string>; imports: Map<string, string> }> }
     ).modules.get(module ?? '');
     unsupported.push(...(value?.unsupported.keys() ?? []), ...(value?.imports.keys() ?? []));
-    return { output: run.stdout, unsupported };
+    return { output: run.stdout, unsupported, failure };
   } catch (error) {
     console.error(`${module ?? 'types'}: ${String(error)}`);
-    return { output: '', unsupported };
+    return { output: '', unsupported, failure: String(error) };
   }
 }
 

@@ -141,8 +141,11 @@ method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
 method(objectClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
   if (self instanceof PyClass) throw typeError(`can't apply this __setattr__ to ${typeName(self)} object`);
-  if (isInstanceWithAttributes(self)) setInstanceAttribute(self as PyObject, name, value);
-  else currentRuntime().setAttributeOf(self, name, value);
+  const runtime = currentRuntime();
+  runtime.finalizer.replacing(self, name, true, () => {
+    if (isInstanceWithAttributes(self)) setInstanceAttribute(self as PyObject, name, value);
+    else runtime.setAttributeOf(self, name, value);
+  });
   return None;
 });
 method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
@@ -152,8 +155,10 @@ method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
 method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
   if (typeof name !== 'string') throw typeError(`attribute name must be string, not '${typeName(name)}'`);
   if (self instanceof PyClass) throw typeError(`can't apply this __delattr__ to ${typeName(self)} object`);
-  if (isInstanceWithAttributes(self)) deleteInstanceAttribute(self as PyObject, name);
-  else deleteAttribute(self, name);
+  currentRuntime().finalizer.replacing(self, name, true, () => {
+    if (isInstanceWithAttributes(self)) deleteInstanceAttribute(self as PyObject, name);
+    else deleteAttribute(self, name);
+  });
   return None;
 });
 method(objectClass, '__sizeof__', 'none', 0, 0, (self) => sizeWithoutHeader(self));

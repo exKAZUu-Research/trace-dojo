@@ -53,12 +53,31 @@ fractionClass.isBaseType = true;
 // CPython writes Fraction in Python, as a class without annotations that programs could change.
 sharedPythonClasses.add(fractionClass);
 
-const NEW_SIGNATURE = { qualified: 'Fraction.__new__', params: ['numerator', 'denominator'], required: 0 };
-
-fractionClass.construct = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => {
-  const [numerator, denominator] = bindArguments(NEW_SIGNATURE, args, kwargs);
-  return newFraction(cls, numerator ?? 0n, denominator ?? None);
+const NEW_SIGNATURE = {
+  qualified: 'Fraction.__new__',
+  params: ['cls', 'numerator', 'denominator'],
+  required: 1,
+  isFunction: true,
 };
+
+fractionClass.construct = (cls: PyClass, args: PyValue[], kwargs: Kwargs) => fractionNew([cls, ...args], kwargs);
+// A program's subclass gets its instances from `__new__`, which CPython writes in Python.
+defineSlot(
+  fractionClass,
+  '__new__',
+  (cls, args, kwargs) => fractionNew(cls === undefined ? args : [cls, ...args], kwargs),
+  'static'
+);
+
+/** `Fraction.__new__(cls, numerator=0, denominator=None)`. */
+function fractionNew(args: PyValue[], kwargs: Kwargs): PyFraction {
+  const [cls, numerator, denominator] = bindArguments(NEW_SIGNATURE, args, kwargs);
+  if (!(cls instanceof PyClass) || !cls.isSubclassOf(fractionClass)) {
+    const described = cls instanceof PyClass ? `type ${cls.name}` : `instance of ${typeName(cls as PyValue)}`;
+    throw typeError(`super(type, obj): obj (${described}) is not an instance or subtype of type (Fraction).`);
+  }
+  return newFraction(cls, numerator ?? 0n, denominator ?? None);
+}
 
 /** Creates a fraction already in lowest terms, as `Fraction._from_coprime_ints` does. */
 export function fromCoprime([numerator, denominator]: Ratio, cls: PyClass = fractionClass): PyFraction {

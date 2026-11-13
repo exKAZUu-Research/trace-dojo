@@ -1,6 +1,6 @@
 // `datetime.timedelta`, as CPython's `_datetimemodule.c` implements it.
 import { method } from '../define';
-import { hashInt } from '../hashing';
+import { tupleHash } from '../hashing';
 import { exactBinary, floorDivInt, modInt, toIndex, trueDivideInt } from '../numbers';
 import { intClass, isInstanceOf, newTuple, NotImplemented, pyError, typeError, typeName } from '../types';
 import { type Kwargs, type PyClass, PyInstance, type PyValue } from '../values';
@@ -159,21 +159,20 @@ defineGetters(timedeltaClass, {
 method(timedeltaClass, 'total_seconds', 'none', 0, 0, (self) =>
   trueDivideInt(delta(self).totalMicroseconds, US_PER_SECOND)
 );
-valueHash(timedeltaClass, (self) => {
-  const { days, seconds, microseconds } = delta(self);
-  return hashOfInts([days, seconds, microseconds]);
-});
+valueHash(timedeltaClass, (self) => hashOfMicroseconds(delta(self).totalMicroseconds));
 defineConstants(timedeltaClass, () => ({
   min: newTimedelta(BigInt(-MAX_DAYS) * US_PER_DAY),
   max: newTimedelta(BigInt(MAX_DAYS + 1) * US_PER_DAY - 1n),
   resolution: newTimedelta(1n),
 }));
 
-/** The hash of a tuple of small ints, as CPython hashes the state tuples of datetime objects. */
-export function hashOfInts(values: number[]): bigint {
-  let hash = 0x34_56_78n;
-  for (const value of values) hash = BigInt.asIntN(64, hash * 1_000_003n + BigInt(value));
-  return hashInt(hash);
+/**
+ * The hash of a timedelta of `microseconds`, which CPython gives as the hash of its `(days, seconds, microseconds)`
+ * state; it hashes an aware datetime or time as the timedelta of its fields minus its offset.
+ */
+export function hashOfMicroseconds(microseconds: bigint): bigint {
+  const rest = modInt(microseconds, US_PER_DAY);
+  return tupleHash([floorDivInt(microseconds, US_PER_DAY), rest / US_PER_SECOND, rest % US_PER_SECOND]);
 }
 
 // Arithmetic --------------------------------------------------------------------------------------------------------

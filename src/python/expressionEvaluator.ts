@@ -15,7 +15,6 @@ import type {
 import { functionStr, KeywordArguments, mappingEntries } from './callArguments';
 import { constantValue, foldConstants } from './constantFolding';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
-import { peekOwnDict } from './descriptors';
 import { Frame } from './frame';
 import { referencesOf } from './garbageCollection';
 import { programAttribute } from './namespaceDifferences';
@@ -62,7 +61,6 @@ import {
   PyBoundMethod,
   PyBuiltinFunction,
   PyCell,
-  PyClass,
   PyDict,
   PyError,
   PyFunction,
@@ -70,7 +68,6 @@ import {
   PyInstance,
   PyList,
   PyModule,
-  PyObject,
   type PySet,
   PySlice,
   PyTuple,
@@ -450,22 +447,14 @@ export class ExpressionEvaluator {
       }
       case 'attribute': {
         this.hold(frame, value, () => {
-          const object = this.evaluateValue(target.object, frame);
-          if (this.runtime.finalizer.pending.size === 0) setAttribute(object, target.name, value);
-          else this.replacing(object, target.name, true, () => setAttribute(object, target.name, value));
-          this.stored(object, target.name, value, true);
+          this.storeInto(this.evaluateValue(target.object, frame), target.name, true, value);
         });
         return;
       }
       case 'subscript': {
         this.hold(frame, value, () => {
           const object = this.evaluateValue(target.object, frame);
-          this.hold(frame, object, () => {
-            const index = this.evaluateValue(target.index, frame);
-            if (this.runtime.finalizer.pending.size === 0) setItem(object, index, value);
-            else this.replacing(object, index, false, () => setItem(object, index, value));
-            this.stored(object, index, value, false);
-          });
+          this.hold(frame, object, () => this.storeInto(object, this.evaluateValue(target.index, frame), false, value));
         });
         return;
       }
@@ -478,11 +467,20 @@ export class ExpressionEvaluator {
     }
   }
 
+  /** Stores `value` as an attribute or an item of `object`, freeing what only the value it replaced kept. */
+  protected storeInto(object: PyValue, key: PyValue, isAttribute: boolean, value: PyValue): void {
+    this.runtime.finalizer.replacing(object, key, isAttribute, () => {
+      if (isAttribute) setAttribute(object, key as string, value);
+      else setItem(object, key, value);
+    });
+    this.stored(object, key, value, isAttribute);
+  }
+
   /**
    * Records that `object` now holds `value` under `key`: a local instance's attribute or a local container's item
    * stays local in it, and anything else keeps the value, and the key, outside the frames.
    */
-  protected stored(object: PyValue, key: PyValue, value: PyValue, isAttribute: boolean): void {
+  private stored(object: PyValue, key: PyValue, value: PyValue, isAttribute: boolean): void {
     const { locals } = this.runtime.finalizer;
     if (!locals.marking) return;
     if (isAttribute) {
@@ -542,51 +540,19 @@ export class ExpressionEvaluator {
       }
       case 'attribute': {
         const object = this.evaluateValue(target.object, frame);
-        this.replacing(object, target.name, true, () => deleteAttribute(object, target.name));
+        this.runtime.finalizer.replacing(object, target.name, true, () => deleteAttribute(object, target.name));
         return;
       }
       case 'subscript': {
         const object = this.evaluateValue(target.object, frame);
         const index = this.evaluate(target.index, frame);
-        this.replacing(object, index, false, () => deleteItem(object, index));
+        this.runtime.finalizer.replacing(object, index, false, () => deleteItem(object, index));
         return;
       }
       case 'unpack': {
         for (const element of target.elements) this.deleteTarget(element, frame);
       }
     }
-  }
-
-  /** Stores over or deletes an attribute or an item, closing a generator that only the value it held reached. */
-  private replacing(object: PyValue, key: PyValue, isAttribute: boolean, store: () => void): void {
-    // A slice may remove several items of a container, which its change frees.
-    if (!isAttribute && key instanceof PyObject) {
-      this.runtime.finalizer.mutating(object, store);
-      return;
-    }
-    const replaced = this.heldValue(object, key, isAttribute);
-    store();
-    this.release(replaced);
-  }
-
-  /**
-   * The value an attribute or an item of a builtin container holds, read without running the program's code, while a
-   * suspended generator waits to be closed: storing over it or deleting it may leave the generator unreachable.
-   */
-  private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): PyValue | undefined {
-    if (this.runtime.finalizer.pending.size === 0) return undefined;
-    if (isAttribute) {
-      if (object instanceof PyInstance || object instanceof PyClass) return object.dict.get(key as string);
-      return object instanceof PyObject
-        ? (peekOwnDict(object)?.get(key as string) ?? object.slotValues?.get(key as string))
-        : undefined;
-    }
-    if (object instanceof PyList && typeof key === 'bigint') {
-      const { items } = object;
-      return items[Number(key < 0n ? key + BigInt(items.length) : key)];
-    }
-    if (object instanceof PyDict && typeof key !== 'object') return object.store.get(key);
-    return undefined;
   }
 
   /** Closes the generators that dropping a reference to `value` left unreachable, as reference counting does. */
@@ -677,35 +643,45 @@ export class ExpressionEvaluator {
       const collected = this.arguments(expression.args, frame, callee);
       args = collected.args;
       kwargs = collected.kwargs;
-      const { finalizer } = this.runtime;
-      if (finalizer.locals.marking) finalizer.locals.beforeCall(callee);
-      const owner = finalizer.pending.size > 0 ? builtinMethodOwner(callee) : undefined;
-      if (owner !== undefined) {
-        // A method of a list, dict, set, or deque frees the items it removes, such as `clear` does.
-        const method = { name: callee instanceof PyBuiltinFunction ? callee.name : '', key: args[0] };
-        result = finalizer.mutating(
-          owner,
-          () => this.invoke(callee, args, collected.kwargs, expression.row),
-          args,
-          method
-        );
-      } else {
-        // CPython's caller hands its references to the arguments to a Python function's frame.
-        if (finalizer.pending.size > 0 && passesArguments(callee)) temporaries.length = length + 1;
-        result = this.invoke(callee, args, collected.kwargs, expression.row);
-      }
+      result = this.invokeFrom(this.beforeCall(callee, frame, length), callee, args, kwargs, expression.row);
     } finally {
       temporaries.length = length;
     }
-    const { locals } = this.runtime.finalizer;
-    if (locals.marking) locals.afterCall(callee, args, kwargs, result);
-    this.afterCall(args, result);
+    this.afterCall(callee, args, kwargs, result);
     return result;
   }
 
-  /** Closes a generator that only the arguments of a returned call held, as freeing them does in CPython. */
-  protected afterCall(args: PyValue[], result: PyValue): void {
+  /**
+   * Prepares the call of `callee` with its arguments evaluated, which `frame.temporaries` hold after the callee from
+   * `length` on, returning the list, dict, set, or deque whose method `callee` is when its removals need freeing.
+   */
+  protected beforeCall(callee: PyValue, frame: Frame, length: number): PyValue | undefined {
     const { finalizer } = this.runtime;
+    if (finalizer.locals.marking) finalizer.locals.beforeCall(callee);
+    if (finalizer.pending.size === 0) return undefined;
+    const owner = builtinMethodOwner(callee);
+    // CPython's caller hands its references to the arguments to a Python function's frame.
+    if (owner === undefined && passesArguments(callee)) frame.temporaries.length = length + 1;
+    return owner;
+  }
+
+  /** Calls `callee`, freeing what it removes from `owner`, the list, dict, set, or deque whose method it is, if any. */
+  protected invokeFrom(
+    owner: PyValue | undefined,
+    callee: PyValue,
+    args: PyValue[],
+    kwargs: Kwargs,
+    row: number
+  ): PyValue {
+    if (owner === undefined) return this.invoke(callee, args, kwargs, row);
+    const method = { name: callee instanceof PyBuiltinFunction ? callee.name : '', key: args[0] };
+    return this.runtime.finalizer.mutating(owner, () => this.invoke(callee, args, kwargs, row), args, method);
+  }
+
+  /** Records what a returned call stored, and frees what only its arguments held, as CPython's caller does. */
+  protected afterCall(callee: PyValue, args: PyValue[], kwargs: Kwargs, result: PyValue): void {
+    const { finalizer } = this.runtime;
+    if (finalizer.locals.marking) finalizer.locals.afterCall(callee, args, kwargs, result);
     if (finalizer.pending.size > 0) finalizer.release(args, [result]);
   }
 
@@ -858,7 +834,7 @@ export class ExpressionEvaluator {
         '<genexpr>',
         expression.qualifiedName ?? '<genexpr>',
         (input) => {
-          inner.callRow = runtime.currentRow;
+          inner.resumeRow = runtime.currentRow;
           runtime.pushFrame(inner);
           try {
             return input.error ? body.throw(input.error) : body.next();
@@ -935,7 +911,7 @@ export class ExpressionEvaluator {
       cells.set(name, cell);
     }
     for (const name of scope.cells) cells.set(name, new PyCell());
-    const callRow = kind === 'function' ? frame.callRow : this.runtime.currentRow;
+    const callRow = kind === 'function' ? frame.callRow : undefined;
     const inner = new Frame(kind, new Map(), cells, frame.globals, callRow, false, scope, frame.fn, frame.classCell);
     inner.builtins = frame.builtins;
     return inner;

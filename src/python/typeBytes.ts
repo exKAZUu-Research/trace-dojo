@@ -59,59 +59,70 @@ function constructBytes(name: 'bytes' | 'bytearray', args: PyValue[], kwargs: Kw
     args,
     kwargs
   );
-  const [source, encoding, errors] = (['source', 'encoding', 'errors'] as const).map((name, index) => {
-    const value = argument(args, kwargs, index, name);
-    return value === undefined ? undefined : unbox(value);
-  });
-  for (const [key, value] of [
-    ['encoding', encoding],
-    ['errors', errors],
-  ] as const) {
-    if (value !== undefined && typeof value !== 'string') {
+  const source = argument(args, kwargs, 0, 'source');
+  const [encoding, errors] = (['encoding', 'errors'] as const).map((key, index) => {
+    const value = argument(args, kwargs, index + 1, key);
+    if (value !== undefined && typeof unbox(value) !== 'string') {
       throw typeError(`${name}() argument '${key}' must be str, not ${typeName(value)}`);
     }
-  }
+    return value === undefined ? undefined : (unbox(value) as string);
+  });
   if (source === undefined) {
     if (encoding !== undefined || errors !== undefined) throw typeError('encoding or errors without sequence argument');
     return new Uint8Array(0);
   }
-  if (typeof source === 'string') {
-    if (encoding === undefined) throw typeError('string argument without an encoding');
-    return encodeString(source, encoding as string, (errors as string | undefined) ?? 'strict');
+  if (encoding === undefined && errors === undefined) return bytesFromObject(name, source);
+  const text = unbox(source);
+  if (typeof text === 'string') {
+    if (encoding === undefined) throw typeError(STRING_WITHOUT_ENCODING);
+    return encodeString(text, encoding, errors ?? 'strict');
   }
-  if (encoding !== undefined) throw typeError('encoding without a string argument');
-  if (errors !== undefined) throw typeError('errors without a string argument');
-  return bytesFromObject(name, source);
+  throw typeError(`${encoding === undefined ? 'errors' : 'encoding'} without a string argument`);
 }
 
-function bytesFromObject(name: 'bytes' | 'bytearray', source: PyValue): Uint8Array {
-  // bytes() asks `__bytes__` first, which a subclass of bytes may override.
-  const special = name === 'bytes' ? lookupSpecial(source, '__bytes__') : undefined;
+const STRING_WITHOUT_ENCODING = 'string argument without an encoding';
+
+/**
+ * The bytes `bytes(source)` or `bytearray(source)` creates, or with `from_bytes` the bytes that CPython's
+ * `PyObject_Bytes` converts an argument of `int.from_bytes` into, which has no `bytes(n)` count form.
+ */
+function bytesFromObject(name: 'bytes' | 'bytearray' | 'from_bytes', source: PyValue): Uint8Array {
   const data = bytesLikeData(source);
-  if (data !== undefined && (special === undefined || special === bytesClass.dict.get('__bytes__'))) {
-    return new Uint8Array(data);
-  }
-  if (special !== undefined) {
-    const result = callValue(bindValue(special, source), []);
-    if (!(result instanceof PyBytes) || result.isMutable) {
-      throw typeError(`__bytes__ returned non-bytes (type ${typeName(result)})`);
-    }
-    return new Uint8Array(result.data);
+  // `bytes()` asks `__bytes__` first, which even a subclass of str may define.
+  const special = name === 'bytearray' ? undefined : bytesFromSpecial(source, data);
+  if (special !== undefined) return special;
+  const notConvertible = `cannot convert '${typeName(source)}' object to ${name === 'bytearray' ? name : 'bytes'}`;
+  if (typeof unbox(source) === 'string') {
+    throw typeError(name === 'from_bytes' ? notConvertible : STRING_WITHOUT_ENCODING);
   }
   if (data !== undefined) return new Uint8Array(data);
-  if (typeof source === 'bigint' || typeof source === 'boolean' || lookupSpecial(source, '__index__') !== undefined) {
+  if (
+    name !== 'from_bytes' &&
+    (typeof source === 'bigint' || typeof source === 'boolean' || lookupSpecial(source, '__index__') !== undefined)
+  ) {
     const count = toIndex(source);
     if (count < 0n) throw valueError('negative count');
     currentRuntime().buildString(Number(count));
     return new Uint8Array(Number(count));
   }
-  const notConvertible = `cannot convert '${typeName(source)}' object to ${name}`;
   if (typeof source === 'number') throw typeError(notConvertible);
   return bytesFromIterable(
     source,
-    name === 'bytes' ? 'bytes must be in range(0, 256)' : 'byte must be in range(0, 256)',
+    name === 'bytearray' ? 'byte must be in range(0, 256)' : 'bytes must be in range(0, 256)',
     notConvertible
   );
+}
+
+/** The bytes an object's `__bytes__` gives, or undefined for an object without one. */
+function bytesFromSpecial(source: PyValue, data: Uint8Array | undefined): Uint8Array | undefined {
+  const special = lookupSpecial(source, '__bytes__');
+  if (special === undefined) return undefined;
+  if (data !== undefined && special === bytesClass.dict.get('__bytes__')) return new Uint8Array(data);
+  const result = callValue(bindValue(special, source), []);
+  if (!(result instanceof PyBytes) || result.isMutable) {
+    throw typeError(`__bytes__ returned non-bytes (type ${typeName(result)})`);
+  }
+  return new Uint8Array(result.data);
 }
 
 /** The bytes of an iterable of ints, as `bytes(iterable)` collects them. */
@@ -379,8 +390,7 @@ method(
   (owner, args, kwargs) => {
     checkPositional('from_bytes', args);
     const source = argument(args, kwargs, 0, 'bytes') as PyValue;
-    if (typeof unbox(source) === 'string') throw typeError("cannot convert 'str' object to bytes");
-    const data = bytesLikeData(source) ?? bytesFromObject('bytes', source);
+    const data = bytesFromObject('from_bytes', source);
     const little = byteOrderArgument(argument(args, kwargs, 1, 'byteorder'), 'from_bytes');
     currentRuntime().scan(data.length);
     currentRuntime().chargeBits(BigInt(data.length * 8));

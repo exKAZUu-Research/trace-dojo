@@ -6,7 +6,7 @@ import type { Kwargs, PyValue } from '../values';
 import { cInt, parseCArgs } from './datetimeArgs';
 import { defineComparisons, defineConstants, defineGetters, signOf, valueHash } from './datetimeClasses';
 import { formatArgument, localEpoch, parseStrptime, replaceArguments, strftimeArgument } from './datetimeDate';
-import { hashOfInts, newTimedelta, type PyTimedelta } from './datetimeDelta';
+import { hashOfMicroseconds, newTimedelta, type PyTimedelta } from './datetimeDelta';
 import { parseIsoTimeOnly } from './datetimeIso';
 import {
   isoTime,
@@ -91,7 +91,7 @@ defineConstants(timeClass, () => ({
 
 method(timeClass, '__repr__', 'none', 0, 0, (self) => {
   const value = time(self);
-  return `${reprName(value)}(${timeReprArguments(value, pyRepr, 2)})`;
+  return `${reprName(value)}(${timeReprArguments(value, pyRepr, 2, true)})`;
 });
 method(
   timeClass,
@@ -225,5 +225,5 @@ defineComparisons(timeClass, (self, other, name) => {
 valueHash(timeClass, (self) => {
   const value = time(self);
   const offset = callOffsetMethod(value.tzinfo, 'utcoffset', None);
-  return hashOfInts([Number(utcMicroseconds(value, offset) % 86_400_000_000n)]);
+  return hashOfMicroseconds(utcMicroseconds(value, offset));
 });

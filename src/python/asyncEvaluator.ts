@@ -147,7 +147,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       '<genexpr>',
       expression.qualifiedName ?? '<genexpr>',
       (input) => {
-        inner.callRow = runtime.currentRow;
+        inner.resumeRow = runtime.currentRow;
         runtime.pushFrame(inner);
         try {
           return input.error ? body.throw(input.error) : body.next(input.value);

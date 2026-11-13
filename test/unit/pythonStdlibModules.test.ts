@@ -25,7 +25,8 @@ jst = dt.timezone(dt.timedelta(hours=9), 'JST')`,
   repr(dt.timedelta(seconds=1) / 7), str(dt.timedelta(days=-2, microseconds=-100)),
   str(dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc).astimezone(jst)),
   repr(dt.datetime.fromisoformat('2024-W01-2T10:20:30.5+05:30')), repr(dt.datetime.strptime('02/01/24 3PM', '%d/%m/%y %I%p')),
-  str(dt.date(2024, 1, 2).isocalendar()), str(dt.datetime.fromtimestamp(0)), str(dt.datetime(1970, 1, 1, 9).timestamp())]`,
+  str(dt.date(2024, 1, 2).isocalendar()), str(dt.datetime.fromtimestamp(0)), str(dt.datetime(1970, 1, 1, 9).timestamp()),
+  str(hash(dt.timedelta(days=1))), str(hash(d.replace(tzinfo=jst))), str(hash(dt.time(1, tzinfo=jst)))]`,
     [
       'datetime.datetime(2024, 1, 2, 3, 4, 5, 6789)',
       '2 days, 3:04:05.006789',
@@ -39,6 +40,9 @@ jst = dt.timezone(dt.timedelta(hours=9), 'JST')`,
       'datetime.IsoCalendarDate(year=2024, week=1, weekday=2)',
       '1970-01-01 09:00:00',
       '0.0',
+      '7839147235533974352',
+      '-7021615908039106033',
+      '-2753564851575319543',
     ]
   );
 });

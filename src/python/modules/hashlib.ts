@@ -1,3 +1,4 @@
+import { LIMITS } from '../../interpreter/limits';
 import { bytesLikeData, newByteArray, newBytes, requireBytesLike } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
@@ -32,6 +33,7 @@ import {
   unbox,
   valueError,
 } from '../types';
+import { UnsupportedFeatureError } from '../unsupported';
 import { type Kwargs, type PyClass, PyDescriptor, PyError, PyOpaque, type PyValue } from '../values';
 import { type HmacHash, pbkdf2, scrypt } from './hashKdf';
 import { builtinClassWithBase } from './moduleClasses';
@@ -82,10 +84,14 @@ const GUARANTEED = [
   'shake_256',
 ];
 
-/** The state of a hash object: its algorithm, the message so far, and BLAKE2's parameters. */
+/**
+ * The state of a hash object: its algorithm, the message so far (the first `length` bytes of `data`, which grows by
+ * doubling, so that many small updates cost what their bytes do), and BLAKE2's parameters.
+ */
 interface HashState {
   name: string;
   data: Uint8Array;
+  length: number;
   blake2?: Blake2Parameters;
 }
 
@@ -111,17 +117,24 @@ function newHash(cls: PyClass, state: HashState, initial: PyValue | undefined): 
 }
 
 function append(state: HashState, data: Uint8Array): void {
-  currentRuntime().buildString(state.data.length + data.length);
-  const joined = new Uint8Array(state.data.length + data.length);
-  joined.set(state.data);
-  joined.set(data, state.data.length);
-  state.data = joined;
+  const length = state.length + data.length;
+  const runtime = currentRuntime();
+  runtime.ensureStringFits(length);
+  runtime.spend(Math.ceil(data.length / 16));
+  if (length > state.data.length) {
+    const grown = new Uint8Array(Math.min(Math.max(length, state.data.length * 2), LIMITS.maxStringLength));
+    grown.set(state.data.subarray(0, state.length));
+    state.data = grown;
+  }
+  state.data.set(data, state.length);
+  state.length = length;
 }
 
 function digestOf(state: HashState, length?: number): Uint8Array {
-  currentRuntime().scan(state.data.length * 4);
-  if (state.blake2) return (state.name === 'blake2b' ? blake2b : blake2s)(state.data, state.blake2);
-  return ALGORITHMS[state.name].digest(state.data, length ?? 0);
+  currentRuntime().scan(state.length * 4);
+  const message = state.data.subarray(0, state.length);
+  if (state.blake2) return (state.name === 'blake2b' ? blake2b : blake2s)(message, state.blake2);
+  return ALGORITHMS[state.name].digest(message, length ?? 0);
 }
 
 const hex = (data: Uint8Array): string => [...data].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -135,7 +148,7 @@ function defineHashMethods(cls: PyClass, info: (state: HashState) => { digestSiz
   });
   method(cls, 'copy', 'none', 0, 0, (self) => {
     const state = stateOf(self);
-    return new PyOpaque((self as PyOpaque).cls, state.name, { ...state });
+    return new PyOpaque((self as PyOpaque).cls, state.name, { ...state, data: state.data.slice(0, state.length) });
   });
   for (const [name, read] of [
     ['name', (state: HashState): PyValue => state.name],
@@ -241,7 +254,11 @@ function blake2Class(name: 'blake2b' | 'blake2s', wide: boolean): PyClass {
       innerSize: number('inner_size', 0),
       lastNode: isTruthy(option('last_node') ?? false),
     };
-    return newHash(constructed, { name, data: new Uint8Array(0), blake2: parameters }, args[0] ?? option('string'));
+    return newHash(
+      constructed,
+      { name, data: new Uint8Array(0), length: 0, blake2: parameters },
+      args[0] ?? option('string')
+    );
   };
   defineHashMethods(cls, (state) => ({ digestSize: state.blake2?.digestSize ?? 0, blockSize: wide ? 128 : 64 }));
   method(cls, 'digest', 'none', 0, 0, (self) => newBytes(digestOf(stateOf(self))));
@@ -271,7 +288,11 @@ function constructor(name: string): PyValue {
     1,
     (args, kwargs) => {
       const cls = name.startsWith('shake') ? hashXofClass : hashClass;
-      return newHash(cls, { name, data: new Uint8Array(0) }, args[0] ?? kwargs?.get('data') ?? kwargs?.get('string'));
+      return newHash(
+        cls,
+        { name, data: new Uint8Array(0), length: 0 },
+        args[0] ?? kwargs?.get('data') ?? kwargs?.get('string')
+      );
     },
     { keywords: ['data', 'usedforsecurity', 'string'] }
   );
@@ -296,7 +317,7 @@ function newByName(args: PyValue[], kwargs: Kwargs): PyValue {
   }
   if (!Object.hasOwn(ALGORITHMS, name)) throw valueError(`unsupported hash type ${nameValue}`);
   const cls = name.startsWith('shake') ? hashXofClass : hashClass;
-  return newHash(cls, { name, data: new Uint8Array(0) }, data ?? kwargs?.get('string'));
+  return newHash(cls, { name, data: new Uint8Array(0), length: 0 }, data ?? kwargs?.get('string'));
 }
 
 // Key derivation and file digests ----------------------------------------------------------------------------------
@@ -339,7 +360,7 @@ function pbkdf2Hmac(args: PyValue[], kwargs: Kwargs): PyValue {
   const dklen = dklenValue === undefined || dklenValue === None ? BigInt(hash.digestSize) : toIndex(dklenValue);
   if (dklen < 1n) throw valueError('key length must be greater than 0.');
   if (dklen > BigInt(INT_MAX)) throw pyError('OverflowError', 'key length is too great.');
-  currentRuntime().allocate(Number(dklen));
+  currentRuntime().ensureRoom(Math.ceil(Number(dklen) / 8));
   return newBytes(pbkdf2(hash, passwordData, saltData, Number(iterations), Number(dklen)));
 }
 
@@ -374,6 +395,9 @@ function scryptFunction(args: PyValue[], kwargs: Kwargs): PyValue {
   ) {
     throw valueError('Invalid parameter combination for n, r, p, maxmem.');
   }
+  if (memory > SCRYPT_MAX_MEMORY) {
+    throw new UnsupportedFeatureError('maxmem で 32 MiB より多くのメモリを使わせる hashlib.scrypt()');
+  }
   currentRuntime().spend(Math.ceil(memory / 1024));
   return newBytes(scrypt(hmacHash('sha256'), password, salt, { n, r, p, length: dklen }));
 }
@@ -395,7 +419,7 @@ function fileDigest(args: PyValue[], kwargs: Kwargs): PyValue {
     throw valueError(`'${pyRepr(file)}' is not a file-like object in binary reading mode.`);
   }
   const size = Number(toIndex(kwargs?.get('_bufsize') ?? 262_144n));
-  runtime.allocate(size);
+  runtime.ensureRoom(Math.ceil(size / 8));
   const buffer = newByteArray(new Uint8Array(size));
   for (;;) {
     const count = callValue(readinto, [buffer]);

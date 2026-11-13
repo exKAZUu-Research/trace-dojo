@@ -2,7 +2,14 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, Expression, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
 import type { Frame } from './frame';
-import { asPythonError, chargeScan, chargeSlots, chargeStep, refuseOversizedString } from './runtimeContext';
+import {
+  asPythonError,
+  chargeScan,
+  chargeSlots,
+  chargeStep,
+  refuseOversizedString,
+  trackFinalizable,
+} from './runtimeContext';
 import type { SetTable } from './setTable';
 import { recordSubclass } from './subclasses';
 
@@ -32,6 +39,7 @@ export class PyObject {
     // Every object a program makes costs a slot here, and what it holds is charged where the storage grows, so that
     // no kind of object can be retained outside the slot limit.
     chargeSlots(1);
+    if (cls?.flags.definesDel) trackFinalizable(this);
   }
 
   get identity(): number {

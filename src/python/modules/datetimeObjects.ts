@@ -163,13 +163,20 @@ export function isoDate(date: PyDate): string {
   return `${pad(date.year, 4)}-${pad(date.month)}-${pad(date.day)}`;
 }
 
-/** The arguments of a time's or datetime's repr after the date: `3, 4, 5` and then `fold` and `tzinfo`. */
-export function timeReprArguments(time: TimeOfDay, repr: (value: PyValue) => string, minimum: number): string {
+/**
+ * The arguments of a time's or datetime's repr after the date: `3, 4, 5` and then `fold` and `tzinfo`, which CPython
+ * writes in the opposite order for a time.
+ */
+export function timeReprArguments(
+  time: TimeOfDay,
+  repr: (value: PyValue) => string,
+  minimum: number,
+  tzinfoFirst = false
+): string {
   const values = [time.hour, time.minute, time.second, time.microsecond];
   let count = 4;
   while (count > minimum && values[count - 1] === 0) count--;
-  let text = values.slice(0, count).join(', ');
-  if (time.fold !== 0) text += `, fold=${time.fold}`;
-  if (time.tzinfo !== None) text += `, tzinfo=${repr(time.tzinfo)}`;
-  return text;
+  const fold = time.fold === 0 ? '' : `, fold=${time.fold}`;
+  const tzinfo = time.tzinfo === None ? '' : `, tzinfo=${repr(time.tzinfo)}`;
+  return values.slice(0, count).join(', ') + (tzinfoFirst ? tzinfo + fold : fold + tzinfo);
 }

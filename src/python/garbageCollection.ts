@@ -152,12 +152,9 @@ function popComponent(stack: object[], onStack: Set<object>, root: object, cycli
  */
 export function referencesOf(node: object, asCPythonVisits = false): object[] {
   const pending: unknown[] = [];
-  if (node instanceof PyObject) {
-    if (node.slotValues) pushAll(pending, node.slotValues.values());
-    if (node.instanceDict) pushAll(pending, node.instanceDict.values());
-  }
   const sequence = node instanceof PyList || node instanceof PyTuple || node instanceof PyDeque;
   if (asCPythonVisits && sequence) {
+    pushOwnedFields(pending, node);
     for (let index = node.items.length - 1; index >= 0; index--) pending.push(node.items[index]);
     if (!node.cls.isBuiltin) pending.push(node.cls);
   } else if (isNode(node)) {
@@ -186,12 +183,27 @@ function isNode(item: unknown): item is PyObject | PyCell {
   return item instanceof PyObject || item instanceof PyCell;
 }
 
-function pushChildren(pending: unknown[], item: PyObject | PyCell, turtles: Set<TurtleState>): void {
-  if (item instanceof PyCell) pending.push(item.value);
-  else pushReferences(pending, item, turtles);
+/** Pushes what a node refers to, returning the number of elements among them. */
+function pushChildren(pending: unknown[], item: PyObject | PyCell, turtles: Set<TurtleState>): number {
+  if (item instanceof PyCell) {
+    pending.push(item.value);
+    return 0;
+  }
+  pushOwnedFields(pending, item);
+  return pushReferences(pending, item, turtles);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Traverses object references while optionally short-circuiting on target hits.
+/**
+ * Pushes the fields any object may have besides what its kind holds, in the order CPython's deallocation of a subclass
+ * instance releases them: its slots, then its attributes, then the fields of a C type written in Python.
+ */
+function pushOwnedFields(pending: unknown[], object: PyObject): void {
+  if (object.slotValues) pushAll(pending, object.slotValues.values());
+  if (object.instanceDict) pushAll(pending, object.instanceDict.values());
+  const extraFields = peekFieldsOf(object);
+  if (extraFields) pushAll(pending, extraFields);
+}
+
 function walk(
   roots: unknown[],
   reached: Set<TurtleState>,
@@ -207,20 +219,11 @@ function walk(
     visited.add(item);
     scanned++;
     if (targets?.has(item) && --missing === 0) break;
-    if (!(item instanceof PyObject || item instanceof PyCell)) {
+    if (!isNode(item)) {
       pushNativeData(pending, item);
       continue;
     }
-    if (item instanceof PyCell) {
-      pending.push(item.value);
-      continue;
-    }
-    // The attributes and slots any object may have besides what its kind holds.
-    if (item.instanceDict) pushAll(pending, item.instanceDict.values());
-    if (item.slotValues) pushAll(pending, item.slotValues.values());
-    const extraFields = peekFieldsOf(item);
-    if (extraFields) pushAll(pending, extraFields);
-    scanned += pushReferences(pending, item, reached);
+    scanned += pushChildren(pending, item, reached);
   }
   return { visited, scanned };
 }

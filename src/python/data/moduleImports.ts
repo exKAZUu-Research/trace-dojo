@@ -1,4 +1,5 @@
-// Generated from CPython 3.14.10 by importing each module into a fresh interpreter.
+// A snapshot taken from CPython 3.14.10 by importing each module into a fresh interpreter and reading `sys.modules`
+// and the classes it defines; no script in this repository regenerates it, so edit it by hand against CPython.
 
 /** The modules CPython has imported when a program starts. */
 export const STARTUP_MODULES: ReadonlySet<string> = new Set(

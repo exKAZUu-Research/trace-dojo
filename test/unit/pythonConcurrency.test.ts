@@ -256,6 +256,34 @@ if log != expected:
     raise ValueError(log)`);
 });
 
+test("a thread busy-waiting on a flag lets the virtual clock reach another thread's timeout", () => {
+  expectSameAsCPython(`import threading, time
+running = True
+def spin():
+    while running:
+        pass
+spinner = threading.Thread(target=spin)
+spinner.start()
+time.sleep(0.1)
+running = False
+spinner.join()
+flag = []
+def wait_for_flag():
+    while not flag:
+        pass
+def set_flag():
+    time.sleep(0.05)
+    flag.append(1)
+threads = [threading.Thread(target=wait_for_flag), threading.Thread(target=set_flag)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+if flag != [1]:
+    raise AssertionError(flag)
+`);
+});
+
 test('types.coroutine makes generators awaitable, and inspect tells coroutines and async generators apart', () => {
   expectSameAsCPython(`import asyncio, inspect, types
 @types.coroutine

@@ -36,6 +36,7 @@ import { namespaceDict, namespaceOf } from './namespaces';
 import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { instancesHaveDict } from './slots';
+import { runSubclasses } from './subclasses';
 import { codeObject, frameObject, functionCode, setTraceback } from './tracebacks';
 import { typeFlags } from './typeFlags';
 import {
@@ -537,7 +538,7 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue, callsH
   if (setClassAttributeThroughMeta(target, name, value, callsHook)) return;
   if (name === '__getattribute__') noteGetattributeAssigned();
   // Instances created from now on are tracked; CPython also finalizes the existing ones, which this grader does not.
-  if (name === '__del__') target.flags.definesDel = true;
+  if (name === '__del__') markDefinesDel(target);
   if (membersByName(target).has(name)) {
     throw pyError('AttributeError', `cannot reassign member '${name}'`);
   }
@@ -551,6 +552,12 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue, callsH
   }
   if (name === '__module__' && typeof value === 'string') target.module = value;
   storeClassAttribute(target, name, value);
+}
+
+/** Records that a class and the subclasses the run created so far define `__del__`, which their instances inherit. */
+function markDefinesDel(cls: PyClass): void {
+  cls.flags.definesDel = true;
+  for (const [subclass] of runSubclasses(currentRuntime(), cls)) markDefinesDel(subclass);
 }
 
 /** Stores a class attribute: the ones type's getsets keep outside the class's dictionary, or in it. */
@@ -609,6 +616,8 @@ function setClassOf(target: PyObject, value: PyValue): void {
   ) {
     throw typeError(`__class__ assignment: '${value.name}' object layout differs from '${target.cls.name}'`);
   }
+  // CPython finalizes the object by its class when freed, so an object taking a class with `__del__` is watched.
+  if (value.flags.definesDel && !target.cls.flags.definesDel) currentRuntime().finalizer.watch(target);
   target.cls = value;
 }
 

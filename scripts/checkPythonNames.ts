@@ -1,11 +1,11 @@
 // Looks up in this grader every name CPython has in the modules it implements and in some builtin and library values,
 // and prints the names that raise AttributeError (or name another module than CPython's) instead of working or raising
-// the unsupported error, then the names left unsupported per module:
+// the unsupported error, or that fail otherwise, then the names left unsupported per module:
 //   bun scripts/checkPythonNames.ts .tmp/pythonNames.json [--unsupported]
 // The JSON comes from scripts/pythonData/generateModuleNames.py.
 import { readFileSync } from 'node:fs';
 
-import { getAttribute } from '../src/python/objects';
+import { getAttribute, isExceptionOf } from '../src/python/objects';
 import { parsePython } from '../src/python/parse';
 import { runModule } from '../src/python/run';
 import { Runtime } from '../src/python/runtime';
@@ -108,7 +108,10 @@ function lookUp(owner: string, value: PyValue, name: string, heldModule: string)
     return { owner, name, status: 'ok', detail: '' };
   } catch (error) {
     if (error instanceof UnsupportedFeatureError) return { owner, name, status: 'unsupported', detail: error.message };
-    if (error instanceof PyError) return { owner, name, status: 'missing', detail: error.exception.cls.name };
-    return { owner, name, status: 'missing', detail: String(error) };
+    if (error instanceof PyError) {
+      const status = isExceptionOf(error, 'AttributeError') ? 'missing' : 'unexpected';
+      return { owner, name, status, detail: error.exception.cls.name };
+    }
+    return { owner, name, status: 'unexpected', detail: String(error) };
   }
 }

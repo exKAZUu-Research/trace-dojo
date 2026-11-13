@@ -720,7 +720,8 @@ function builtinNamespace(): Map<string, PyValue> {
     [
       'delattr',
       builtin('delattr', 'expected', 2, 2, ([object, name]) => {
-        deleteAttribute(object, attributeName(name));
+        const key = attributeName(name);
+        currentRuntime().finalizer.replacing(object, key, true, () => deleteAttribute(object, key));
         return None;
       }),
     ],
@@ -765,7 +766,8 @@ function builtinNamespace(): Map<string, PyValue> {
     [
       'setattr',
       builtin('setattr', 'expected', 3, 3, ([object, name, value]) => {
-        setAttribute(object, attributeName(name), value);
+        const key = attributeName(name);
+        currentRuntime().finalizer.replacing(object, key, true, () => setAttribute(object, key, value));
         return None;
       }),
     ],

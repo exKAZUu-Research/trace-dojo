@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- The state of a run and the operations the interpreter reaches through it.
+// code-gauge-allow-file fileNcss 485 -- The state of a run and the operations the interpreter reaches through it.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -71,6 +71,14 @@ import {
 } from './values';
 import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
+/**
+ * How a call of a program's function starts: the frame its body runs in, with whether the evaluator called it itself,
+ * or the value the call gives at once, a generator or what a compiler's `__annotate__` computes.
+ */
+export type FunctionEntry =
+  | { frame: Frame; direct: boolean; value?: undefined }
+  | { frame?: undefined; value: PyValue };
+
 /** The magnitude below which multiplying two ints costs no more than one operation. */
 const SAFE_INTEGER_BOUND = 1n << 53n;
 
@@ -129,8 +137,23 @@ export class Runtime {
   operations = 0;
   /** How many builds that charge nothing are running; the run itself stays installed for them. */
   private freeBuilds = 0;
+  /** How many trace displays are being built, during which the program's own code must not run. */
+  private displaying = 0;
 
   /** Builds a value at no charge; see the function of the same name in runtimeContext. */
+  /**
+   * Builds the text a trace shows for a value, charging nothing and refusing to run the program's own code (a
+   * `__repr__` it defines), which would record steps and print where CPython runs nothing.
+   */
+  forDisplay<T>(build: () => T): T {
+    this.displaying++;
+    try {
+      return this.withoutCharge(build);
+    } finally {
+      this.displaying--;
+    }
+  }
+
   withoutCharge<T>(build: () => T): T {
     this.freeBuilds++;
     try {
@@ -222,6 +245,7 @@ export class Runtime {
     if (this.frames.length >= Math.min(this.recursionLimit, LIMITS.maxCallDepth)) {
       throw pyError('RecursionError', 'maximum recursion depth exceeded');
     }
+    if (this.displaying > 0 && !this.libraryNamespaces.has(frame.globals)) throw new ProgramCodeInDisplayError();
     if (this.hasLibraryNamespaces) this.noteLibraryFrame(frame);
     frame.nativeCalls = this.nativeCalls;
     this.frames.push(frame);
@@ -260,7 +284,7 @@ export class Runtime {
         continue;
       }
       result.push({ frame, row });
-      if (!frame.inlinedIn) row = frame.callRow;
+      if (!frame.inlinedIn) row = frame.callRow ?? frame.resumeRow;
     }
     return result;
   }
@@ -275,7 +299,7 @@ export class Runtime {
     for (const frame of this.frames.toReversed()) {
       result.push({ frame, row });
       if (!frame.inlinedIn) {
-        row = this.libraryEntryRows.has(frame) ? this.libraryEntryRows.get(frame) : frame.callRow;
+        row = this.libraryEntryRows.has(frame) ? this.libraryEntryRows.get(frame) : (frame.callRow ?? frame.resumeRow);
       }
     }
     return result;
@@ -310,42 +334,62 @@ export class Runtime {
     return new Frame('function', locals, cells, fn.globals, this.currentRow, def.isAtomic, def.scope, fn, fn.classCell);
   }
 
-  // code-gauge-allow functionNcss 31 -- Sets up each part of a call's frame.
+  // code-gauge-allow duplicateLines 15 -- The synchronous and suspending calls of a function share entry and exit, not the body's run.
   callFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): PyValue {
+    const entry = this.enterFunction(fn, args, kwargs);
+    if (!entry.frame) return entry.value;
+    let result: PyValue | undefined;
+    try {
+      result = this.evaluator.runFunction(fn, entry.frame);
+      this.finalizer.locals.returned(result, entry.direct);
+    } catch (error) {
+      throw this.unwindFunction(entry.frame, error);
+    } finally {
+      this.leaveFunction(entry.frame, result);
+    }
+    this.handToNative(result);
+    return result;
+  }
+
+  /**
+   * Starts a call of a program's function, which `callFunction` and a thread's suspending call share: the frame its
+   * body then runs in, pushed, or the value the call gives without running the body in a frame.
+   */
+  enterFunction(fn: PyFunction, args: readonly PyValue[], kwargs: Kwargs): FunctionEntry {
     const { locals } = this.finalizer;
     const direct = locals.takeDirectCall();
     const frame = this.newFunctionFrame(fn, args, kwargs);
     // The compiler's `__annotate__` binds its arguments as a Python function and runs its body natively.
-    if (fn instanceof PyAnnotateFunction) return fn.run(frame.locals.get('format') as PyValue);
+    if (fn instanceof PyAnnotateFunction) return { value: fn.run(frame.locals.get('format') as PyValue) };
     const { scope } = fn.def;
-    if (scope.isGenerator || scope.isAsync) return this.newGenerator(fn, frame);
+    if (scope.isGenerator || scope.isAsync) return { value: this.newGenerator(fn, frame) };
     locals.enterFunction(frame);
     this.pushFrame(frame);
-    let result: PyValue | undefined;
-    try {
-      result = this.evaluator.runFunction(fn, frame);
-      locals.returned(result, direct);
-    } catch (error) {
-      const raised = hostRefusal(error, this.deepNesting) ?? error;
-      noteUnwinding(raised);
-      // The exception's traceback keeps the frame, and with it the function's variables, while a generator may close.
-      const state = raised instanceof PyError ? raised.exception.exception : undefined;
-      if (state && this.finalizer.pending.size > 0) {
-        (state.tracebackFrames ??= []).push(frame);
-        locals.escapeFrame(frame);
-      }
-      throw raised;
-    } finally {
-      this.popFrame();
-      if (hasWeakCallbacks(this)) runWeakCallbacks([result]);
-      // The function's variables die with its frame, which closes a generator only they held.
-      const { finalizer } = this;
-      if (finalizer.pending.size > 0 && result !== undefined) {
-        finalizer.release(frameVariables(frame, scope.locals), [result]);
-      }
+    return { frame, direct };
+  }
+
+  /** The error to raise for `error`, which ends the call running in `frame`. */
+  unwindFunction(frame: Frame, error: unknown): unknown {
+    const raised = hostRefusal(error, this.deepNesting) ?? error;
+    noteUnwinding(raised);
+    // The exception's traceback keeps the frame, and with it the function's variables, while a generator may close.
+    const state = raised instanceof PyError ? raised.exception.exception : undefined;
+    if (state && this.finalizer.pending.size > 0) {
+      (state.tracebackFrames ??= []).push(frame);
+      this.finalizer.locals.escapeFrame(frame);
     }
-    this.handToNative(result);
-    return result;
+    return raised;
+  }
+
+  /** Ends the call running in `frame`, which returned `result`, or raised when it is undefined. */
+  leaveFunction(frame: Frame, result: PyValue | undefined): void {
+    this.popFrame();
+    if (hasWeakCallbacks(this)) runWeakCallbacks([result]);
+    // The function's variables die with its frame, which closes a generator only they held.
+    const { finalizer } = this;
+    if (finalizer.pending.size > 0 && result !== undefined) {
+      finalizer.release(frameVariables(frame, frame.scope.locals), [result]);
+    }
   }
 
   private newGenerator(fn: PyFunction, frame: Frame): PyGenerator {
@@ -685,6 +729,9 @@ export class Runtime {
     return roots;
   }
 }
+
+/** Stops a trace display that reached the program's own code, which then shows no value. */
+class ProgramCodeInDisplayError extends Error {}
 
 /**
  * The Python exception for an error of the host itself: RecursionError (or the deep-nesting unsupported error) when its

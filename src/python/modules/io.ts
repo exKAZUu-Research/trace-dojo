@@ -2,6 +2,7 @@
 import { bytesLikeData, newByteArray, newBytes, PyBytes } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { method } from '../define';
+import { builtinClassesWithDict } from '../descriptors';
 import { viewOf } from '../memoryview';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
@@ -403,6 +404,8 @@ registerSourceModule(
           defineStringIO(stringIO);
           const bytesIO = builtinClass('BytesIO', bufferedBase as PyClass);
           defineBytesIO(bytesIO);
+          builtinClassesWithDict.add(stringIO);
+          builtinClassesWithDict.add(bytesIO);
           return newTuple([stringIO, bytesIO]);
         }),
       ],

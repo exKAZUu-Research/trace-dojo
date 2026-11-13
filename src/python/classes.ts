@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 421 -- Class creation, its MRO, and its slots follow CPython's type creation together.
+// code-gauge-allow-file fileNcss 427 -- Class creation, its MRO, and its slots follow CPython's type creation together.
 import {
   annotationClosure,
   annotationReferences,
@@ -10,12 +10,14 @@ import type { ClassDef } from './ast';
 import { defineAttribute, PyAttribute } from './attributeDescriptors';
 import { INSTANCE_ATTRIBUTE_DOCS } from './builtinDocs';
 import { pyRepr } from './conversions';
+import { ownDict } from './descriptors';
 import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
 import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
 import { namespaceDict, ObjectNamespace } from './namespaces';
 import {
+  attributeError,
   bindValue,
   callValue,
   deleteItem,
@@ -646,12 +648,22 @@ export function typeNewFromArguments(meta: PyClass, args: PyValue[], kwargs: Kwa
 }
 
 /** The `__dict__` or `__weakref__` entry a class defines for its instances, which read them natively. */
+/**
+ * The `__dict__` the descriptor of a class reads, from the object itself: a lookup of the attribute would find the
+ * descriptor again where a C type keeps it.
+ */
+function dictOf(instance: PyValue): PyValue {
+  const dict = ownDict(instance);
+  if (dict === undefined) throw attributeError(instance, '__dict__');
+  return namespaceDict(dict);
+}
+
 function instanceAttributeDescriptor(cls: PyClass, name: string): PyAttribute {
   return new PyAttribute(
     'getset',
     name,
     cls,
-    (instance) => getAttribute(instance, name),
+    (instance) => (name === '__dict__' ? dictOf(instance) : getAttribute(instance, name)),
     undefined,
     INSTANCE_ATTRIBUTE_DOCS[name]
   );

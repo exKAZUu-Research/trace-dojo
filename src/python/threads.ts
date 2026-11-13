@@ -12,7 +12,6 @@ import { type ArgStyle, checkArgs } from './nativeArgs';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
-import { noteUnwinding } from './tracebacks';
 import { methodDescriptorClass, nativeFunction } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -214,19 +213,14 @@ export class Scheduler {
     this.queue.push(me);
     this.save(me);
     try {
-      if (
-        request === PREEMPTION &&
-        !this.queue.some((thread) => thread !== me && !thread.pinned && this.isReady(thread)) &&
-        this.queue.some((thread) => thread !== me && !thread.pinned && thread.wait?.deadline !== undefined)
-      ) {
-        this.advanceClock(me);
-      }
+      if (request === PREEMPTION) this.passSlice(me, me);
       for (;;) {
         this.runtime.spend();
         const next = this.pick(me);
         if (next === me) break;
         if (next) {
           this.runSlice(next);
+          if (next.wait === PREEMPTION) this.passSlice(next, me);
           continue;
         }
         this.advanceClock(me);
@@ -298,6 +292,16 @@ export class Scheduler {
       );
     }
     throw new DeadlockError();
+  }
+
+  /**
+   * Lets the virtual clock reach the earliest timeout after `preempted` used its slice, when no other thread is ready:
+   * CPython's busy thread takes real time, which brings that timeout, so a busy loop cannot starve a sleeping thread.
+   */
+  private passSlice(preempted: PyThreadState, me: PyThreadState): void {
+    const others = this.queue.filter((thread) => thread !== preempted && (!thread.pinned || thread === me));
+    if (others.some((thread) => this.isReady(thread))) return;
+    if (others.some((thread) => thread.wait?.deadline !== undefined)) this.advanceClock(me);
   }
 
   /** Runs a stopped thread until it waits or ends. */
@@ -488,16 +492,20 @@ export function suspendingCall(callee: PyValue, args: PyValue[], kwargs: Kwargs)
   return undefined;
 }
 
+// code-gauge-allow duplicateLines 15 -- The synchronous and suspending calls of a function share entry and exit, not the body's run.
 function* callFunctionSuspending(fn: PyFunction, args: PyValue[], kwargs: Kwargs): Suspension {
   const runtime = currentRuntime();
-  const frame = runtime.newFunctionFrame(fn, args, kwargs);
-  runtime.pushFrame(frame);
+  const entry = runtime.enterFunction(fn, args, kwargs);
+  if (!entry.frame) return entry.value;
+  let result: PyValue | undefined;
   try {
-    return yield* runtime.evaluator.runGenerator(fn, frame);
+    result = yield* runtime.evaluator.runGenerator(fn, entry.frame);
+    runtime.finalizer.locals.returned(result, entry.direct);
   } catch (error) {
-    noteUnwinding(error);
-    throw error;
+    throw runtime.unwindFunction(entry.frame, error);
   } finally {
-    runtime.popFrame();
+    runtime.leaveFunction(entry.frame, result);
   }
+  runtime.handToNative(result);
+  return result;
 }

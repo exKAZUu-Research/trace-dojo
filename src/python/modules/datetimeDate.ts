@@ -2,6 +2,7 @@
 import { LOCAL_ZONE, wallClockNanoseconds } from '../clock';
 import { pyRepr, pyStr } from '../conversions';
 import { method } from '../define';
+import { tupleHash } from '../hashing';
 import { floorDivInt } from '../numbers';
 import { currentRuntime } from '../runtimeContext';
 import { intClass, isInstanceOf, None, NotImplemented, pyError, typeError, typeName } from '../types';
@@ -18,7 +19,7 @@ import {
 import { makeNamedTupleClass } from './collections';
 import { cInt, parseCArgs } from './datetimeArgs';
 import { defineComparisons, defineConstants, defineGetters, valueHash } from './datetimeClasses';
-import { hashOfInts, isTimedelta, newTimedelta } from './datetimeDelta';
+import { isTimedelta, newTimedelta } from './datetimeDelta';
 import { parseIsoDate } from './datetimeIso';
 import {
   dateClass,
@@ -456,5 +457,5 @@ defineComparisons(dateClass, (self, other) => {
 });
 valueHash(dateClass, (self) => {
   const { year, month, day } = date(self);
-  return hashOfInts([year, month, day]);
+  return tupleHash([BigInt(year), BigInt(month), BigInt(day)]);
 });

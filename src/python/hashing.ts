@@ -75,11 +75,12 @@ export function frexp(value: number): { mantissa: number; exponent: number } {
 }
 
 function hashTuple(tuple: PyTuple): bigint {
-  tuple.hash ??= computeTupleHash(tuple.items);
+  tuple.hash ??= tupleHash(tuple.items);
   return tuple.hash;
 }
 
-function computeTupleHash(items: readonly PyValue[]): bigint {
+/** The hash of a tuple of `items`, as CPython's `tuplehash` computes it. */
+export function tupleHash(items: readonly PyValue[]): bigint {
   let acc = XXPRIME_5;
   for (const item of items) {
     chargeStep();

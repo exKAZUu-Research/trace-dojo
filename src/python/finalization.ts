@@ -1,4 +1,5 @@
 import { finalizeAsyncGenerator, hasAsyncGeneratorFinalizer, hasProgramFinalizer } from './coroutines';
+import { peekOwnDict } from './descriptors';
 import type { Frame } from './frame';
 import {
   findReachableAsCollector,
@@ -135,6 +136,11 @@ export class GeneratorFinalizer {
     this.locals.born(instance);
   }
 
+  /** Tracks an existing object that took a class that defines `__del__`, which anything may refer to. */
+  watch(object: PyObject): void {
+    this.pending.add(object);
+  }
+
   /**
    * Finalizes the tracked objects that dropping references to `dropped`, in that order, freed, keeping alive
    * `inFlight`, values held only by the host. Only what the dropped objects reach can be freed, so a walk from them
@@ -174,6 +180,34 @@ export class GeneratorFinalizer {
     const reachable = findReachableObjects(this.roots(held), candidates);
     if ([...candidates].every((object) => reachable.has(object))) return new Set();
     return new Set(order.filter((object) => !reachable.has(object)));
+  }
+
+  /** Stores over or deletes an attribute or an item, freeing what only the value it held kept. */
+  replacing(object: PyValue, key: PyValue, isAttribute: boolean, store: () => void): void {
+    // A slice may remove several items of a container, which its change frees.
+    if (!isAttribute && key instanceof PyObject) {
+      this.mutating(object, store);
+      return;
+    }
+    const replaced = this.heldValue(object, key, isAttribute);
+    store();
+    if (this.pending.size > 0) this.release([replaced]);
+  }
+
+  /** The value an attribute or an item of a builtin container holds, read without running the program's code. */
+  private heldValue(object: PyValue, key: PyValue, isAttribute: boolean): PyValue | undefined {
+    if (this.pending.size === 0) return undefined;
+    if (isAttribute) {
+      if (!(object instanceof PyObject)) return undefined;
+      const dict = object instanceof PyInstance || object instanceof PyClass ? object.dict : peekOwnDict(object);
+      return object.slotValues?.get(key as string) ?? dict?.get(key as string);
+    }
+    if (object instanceof PyList && typeof key === 'bigint') {
+      const { items } = object;
+      return items[Number(key < 0n ? key + BigInt(items.length) : key)];
+    }
+    if (object instanceof PyDict && typeof key !== 'object') return object.store.get(key);
+    return undefined;
   }
 
   /**

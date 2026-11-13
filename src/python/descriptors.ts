@@ -78,13 +78,24 @@ export function peekOwnDict(value: PyObject): Map<string, PyValue> | undefined {
 /** The dictionary of an object's own attributes, or undefined for an object without one. */
 export function ownDict(value: PyValue): Map<string, PyValue> | undefined {
   if (value instanceof PyObject && threadLocalAccess?.isThreadLocal(value)) return threadLocalAccess.peekDict(value);
-  if (value instanceof PyInstance) return value.cls.slotNames === undefined ? value.dict : undefined;
+  if (value instanceof PyInstance) return instanceHasDict(value) ? value.dict : undefined;
   if (typeof value !== 'object') return undefined;
   if (value instanceof PyFunction) return value.dict;
   if (!(value instanceof PyObject)) return undefined;
   if (value.cls.isBuiltin ? !builtinClassesWithDict.has(value.cls) : !instancesHaveDict(value.cls)) return undefined;
   value.instanceDict ??= new AttributeMap();
   return value.instanceDict;
+}
+
+/**
+ * Whether an instance has a `__dict__`: a builtin class's instances, which keep their state in native fields, have one
+ * only when CPython's type gives one (as exceptions do), as the assignment of a new attribute also decides.
+ */
+function instanceHasDict(instance: PyInstance): boolean {
+  const { cls } = instance;
+  if (builtinClassesWithDict.has(cls)) return true;
+  if (cls.slotNames !== undefined) return false;
+  return !cls.isBuiltin || instance.exception !== undefined || instance.turtle !== undefined;
 }
 
 /** Whether a program assigned `__getattribute__` to a class, which class bodies' flags do not record. */

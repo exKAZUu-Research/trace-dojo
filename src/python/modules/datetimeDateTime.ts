@@ -27,7 +27,7 @@ import {
   US_PER_DAY,
   yearRangeError,
 } from './datetimeDate';
-import { hashOfInts, isTimedelta, newTimedelta, type PyTimedelta } from './datetimeDelta';
+import { hashOfMicroseconds, isTimedelta, newTimedelta, type PyTimedelta } from './datetimeDelta';
 import { parseIsoDateTime } from './datetimeIso';
 import {
   checkTzinfo,
@@ -447,9 +447,10 @@ defineComparisons(datetimeTypeClass, (self, other, name) => {
 });
 valueHash(datetimeTypeClass, (self) => {
   const value = datetime(self);
-  const offset = utcoffsetOf(value);
-  const total = microsecondsOf(value) - (offset?.totalMicroseconds ?? 0n);
-  return hashOfInts([Number(total / 1_000_000n), Number(total % 1_000_000n)]);
+  // CPython asks for the offset of the fold-0 time, so that both folds of a time hash alike, and counts days from 1.
+  const local = microsecondsOf(value);
+  const offset = utcoffsetOf(value.fold === 0 ? value : fromMicroseconds(local, value.tzinfo));
+  return hashOfMicroseconds(local + US_PER_DAY - (offset?.totalMicroseconds ?? 0n));
 });
 
 defineTimezoneMethods(

@@ -79,8 +79,7 @@ function constructSubclass(
   kwargs: Kwargs
 ): PyValue {
   const instance = currentRuntime().runNative(() => construct(cls, args, kwargs));
-  if (instance instanceof PyObject && instance.cls !== cls && cls.isSubclassOf(instance.cls)) instance.cls = cls;
-  if (cls.flags.definesDel && instance instanceof PyObject) currentRuntime().finalizer.track(instance);
+  adoptAsInstance(instance, cls);
   const init = cls.lookup('__init__');
   if (init !== objectInit()) callInit(init, instance, args, kwargs);
   return instance;
@@ -147,10 +146,7 @@ function objectInit(): PyValue | undefined {
 function newObject(cls: PyClass): PyInstance {
   if (cls !== objectClass && refusesObjectNew(cls)) throw cannotCreate(cls);
   checkNotAbstract(cls);
-  const runtime = currentRuntime();
-  const instance = new PyInstance(cls);
-  if (cls.flags.definesDel) runtime.finalizer.track(instance);
-  return instance;
+  return new PyInstance(cls);
 }
 
 /**
@@ -232,11 +228,17 @@ export function defineConstructingNew(cls: PyClass): void {
   const create = (args: PyValue[], kwargs: Kwargs): PyValue => {
     const subclass = checkSubtype(cls, args);
     const made = construct(subclass, args.slice(1), kwargs);
-    // A construct that makes the type's own objects makes a subclass's by taking it as their class.
-    if (made instanceof PyObject && made.cls !== subclass && subclass.isSubclassOf(made.cls)) made.cls = subclass;
+    adoptAsInstance(made, subclass);
     return made;
   };
   cls.dict.set('__new__', new PyBuiltinFunction(builtinFunctionClass, '__new__', create, cls, 'static', cls.name));
+}
+
+/** Makes an object a builtin type's construct made of the type itself an instance of the subclass it was asked for. */
+function adoptAsInstance(made: PyValue, subclass: PyClass): void {
+  if (!(made instanceof PyObject) || made.cls === subclass || !subclass.isSubclassOf(made.cls)) return;
+  made.cls = subclass;
+  if (subclass.flags.definesDel) currentRuntime().finalizer.track(made);
 }
 
 /** The classes whose builtin `__new__` stands for one CPython writes in Python, which tp_new_wrapper's check skips. */

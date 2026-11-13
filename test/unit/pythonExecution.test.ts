@@ -82,6 +82,11 @@ test.each([
   ['an invalid color', "Turtle(0, 0, 'Z')", 'RuntimeError: Invalid color: Z'],
   ['unbounded recursion', 'def f(n):\n    return f(n + 1)\nf(0)', 'RecursionError: maximum recursion depth exceeded'],
   ['standard input', 'input()', '標準入力（input()）は、この採点環境では使えません。'],
+  [
+    'random bytes from the operating system',
+    'import random\ntry:\n    random.SystemRandom().randbytes(4)\nexcept BaseException:\n    pass',
+    'random.SystemRandom（OS の乱数）は、この採点環境では使えません。',
+  ],
   ['a subclass of bool', 'class B(bool):\n    pass', "TypeError: type 'bool' is not an acceptable base type"],
 ])('%s ends the program as CPython describes it', (_, source, description) => {
   expect(executeProgram('python', source)).toMatchObject({ kind: 'executed', uncaughtException: description });

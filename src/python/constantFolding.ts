@@ -3,6 +3,7 @@ import { newBytes, PyBytes } from './bytesValues';
 import { newComplex } from './complexNumbers';
 import { getItem, isTruthy } from './objects';
 import { binaryOp, unaryOp } from './operators';
+import { withoutCharge } from './runtimeContext';
 import { strLength } from './strings';
 import { Ellipsis, newTuple, None, sliceClass } from './types';
 import { PyError, PySlice, PyTuple, type PyValue } from './values';
@@ -89,7 +90,8 @@ export function constantValue(constant: Constant): PyValue {
       return newComplex(0, constant.value);
     }
     case 'bytes': {
-      return newBytes(constant.value);
+      // CPython creates a bytes literal once when it compiles the program, so evaluating one stores nothing new.
+      return withoutCharge(() => newBytes(constant.value));
     }
   }
 }

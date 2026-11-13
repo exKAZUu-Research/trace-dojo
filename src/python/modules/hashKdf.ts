@@ -42,12 +42,13 @@ export function pbkdf2(
   const message = new Uint8Array(salt.length + 4);
   message.set(salt);
   for (let block = 1, offset = 0; offset < length; block++, offset += hash.digestSize) {
+    runtime.spend(Math.ceil(message.length / 1024));
     new DataView(message.buffer).setUint32(salt.length, block);
     let u = hmac(hash, key, message);
     const t = Uint8Array.from(u);
     const next = hash.name === 'sha256' ? sha256HmacOfDigest(key) : (digest: Uint8Array) => hmac(hash, key, digest);
     for (let iteration = 1; iteration < iterations; iteration++) {
-      if (iteration % 256 === 0) runtime.spend(16);
+      if (iteration % 16 === 0) runtime.spend();
       u = next(u);
       for (let index = 0; index < t.length; index++) t[index] ^= u[index];
     }
@@ -150,7 +151,6 @@ export function scrypt(
   salt: Uint8Array,
   { n, r, p, length }: { n: number; r: number; p: number; length: number }
 ): Uint8Array {
-  const runtime = currentRuntime();
   const blockLength = 128 * r;
   const blocks = pbkdf2(sha256, password, salt, 1, p * blockLength);
   const words = new Uint32Array(blockLength / 4);
@@ -159,20 +159,29 @@ export function scrypt(
   for (let index = 0; index < p; index++) {
     const view = new DataView(blocks.buffer, index * blockLength, blockLength);
     for (let word = 0; word < words.length; word++) words[word] = view.getUint32(word * 4, true);
-    for (let step = 0; step < n; step++) {
-      memory.set(words, step * words.length);
-      blockMix(words, scratch, r);
-    }
-    runtime.spend(Math.ceil((n * r) / 4));
-    for (let step = 0; step < n; step++) {
-      const j = words[(2 * r - 1) * 16] % n;
-      for (let word = 0; word < words.length; word++) words[word] ^= memory[j * words.length + word];
-      blockMix(words, scratch, r);
-    }
-    runtime.spend(Math.ceil((n * r) / 4));
+    roMix(words, { memory, scratch, n, r });
     for (let word = 0; word < words.length; word++) view.setUint32(word * 4, words[word], true);
   }
   return pbkdf2(sha256, password, blocks, 1, length);
+}
+
+/** scryptROMix over one block, in place, charging its work as it goes so that the run's deadline can stop it. */
+function roMix(
+  words: Uint32Array,
+  { memory, scratch, n, r }: { memory: Uint32Array; scratch: Uint32Array; n: number; r: number }
+): void {
+  const runtime = currentRuntime();
+  for (let step = 0; step < n; step++) {
+    if (step % 64 === 0) runtime.spend(16 * r);
+    memory.set(words, step * words.length);
+    blockMix(words, scratch, r);
+  }
+  for (let step = 0; step < n; step++) {
+    if (step % 64 === 0) runtime.spend(16 * r);
+    const j = words[(2 * r - 1) * 16] % n;
+    for (let word = 0; word < words.length; word++) words[word] ^= memory[j * words.length + word];
+    blockMix(words, scratch, r);
+  }
 }
 
 /** scryptBlockMix: Salsa20/8 over the 2r 64-byte blocks of `words`, in place, with `scratch` of the same size. */

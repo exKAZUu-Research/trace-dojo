@@ -146,6 +146,7 @@ assert re.sub(r'\\N{EM DASH}', '-', 'a\\u2014b') == 'a-b'
 re.compile(r'\\N{NOPE}')`,
     "re.PatternError: undefined character name 'NOPE' at position 0",
   ],
+  ['an int given to int.from_bytes', 'int.from_bytes(3)', "TypeError: cannot convert 'int' object to bytes"],
   [
     'a str pattern on bytes',
     "import re\nre.search('a', b'a')",

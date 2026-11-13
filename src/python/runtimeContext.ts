@@ -1,4 +1,5 @@
 import type { Runtime } from './runtime';
+import type { PyObject } from './values';
 
 /**
  * The runtime of the program running now. Builtin classes are shared by every run, so their methods find the run's
@@ -36,6 +37,11 @@ export function chargeScan(length: number): void {
  */
 export function chargeSlots(count: number): void {
   current?.allocate(count);
+}
+
+/** Tracks a new object of a class that defines `__del__`, whose freeing the running program's finalizer watches. */
+export function trackFinalizable(object: PyObject): void {
+  current?.finalizer.track(object);
 }
 
 /**

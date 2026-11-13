@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- The native random generator and the methods random.py's module functions run.
+// code-gauge-allow-file fileNcss 472 -- The native random generator and the methods random.py's module functions run.
 import { setAttribute } from '../attributes';
 import { bytesClass, latin1Text, newBytes, PyBytes } from '../bytesValues';
 import { pyStr } from '../conversions';
@@ -42,6 +42,7 @@ import {
   typeName,
   valueError,
 } from '../types';
+import { UnsupportedFeatureError } from '../unsupported';
 import {
   type Kwargs,
   PyBoundMethod,
@@ -773,10 +774,15 @@ registerSourceModule(
         '_bind_natives',
         builtin('_bind_natives', 'expected', 2, 2, ([globals, instance]) => bindNatives(globals, instance)),
       ],
-      // os.urandom, which SystemRandom reads: random bytes from the host.
+      // os.urandom, which every SystemRandom method that draws numbers reads.
       [
         '_urandom',
-        builtin('_urandom', 'one', 1, 1, ([n]) => newBytes(crypto.getRandomValues(new Uint8Array(Number(toIndex(n)))))),
+        builtin('_urandom', 'one', 1, 1, ([n]) => {
+          const count = toIndex(n);
+          if (count < 0n) throw valueError('negative argument not allowed');
+          if (count === 0n) return newBytes(new Uint8Array(0));
+          throw new UnsupportedFeatureError('random.SystemRandom（OS の乱数）');
+        }),
       ],
     ])
 );

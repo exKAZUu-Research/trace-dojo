@@ -13,6 +13,11 @@ export class Frame implements TracedFrame {
   protectedDepth = 0;
   /** The frame an inlined (list, set, or dict) comprehension runs within, whose names CPython's frame shares. */
   inlinedIn?: Frame;
+  /**
+   * The row that last resumed a generator expression's frame, which tracebacks and warnings show for its caller. It is
+   * not a `callRow`, since a trace counts no call for a generator expression.
+   */
+  resumeRow?: number;
   /** What a generator expression's frame holds as its first argument: the iterator of its first iterable. */
   firstArgument?: PyValue;
   /** The `__builtins__` binding captured when the frame or its function was created, or `undefined` when absent. */

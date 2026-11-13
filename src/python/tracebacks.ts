@@ -77,7 +77,7 @@ export function noteUnwinding(error: unknown): void {
   finishedRows.set(frame, (state.traceback as PyTraceback).row);
   const caller = frames.at(-2);
   callers.set(frame, caller);
-  if (caller) prependTraceback(state, caller, frame.callRow ?? runtime.currentRow);
+  if (caller) prependTraceback(state, caller, frame.callRow ?? frame.resumeRow ?? runtime.currentRow);
 }
 
 /** Records the entry of the frame that catches an exception raised in it, as the traceback it handles shows. */

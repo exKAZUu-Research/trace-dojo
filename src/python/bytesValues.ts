@@ -1,5 +1,5 @@
 import { bytesLiteral } from './bytesLiteral';
-import { currentRuntime } from './runtimeContext';
+import { chargeSlots, currentRuntime } from './runtimeContext';
 import {
   bytearrayClass,
   bytesClass,
@@ -22,6 +22,7 @@ export class PyBytes extends PyObject {
 
   constructor(cls: PyClass, data: Uint8Array) {
     super(cls);
+    chargeSlots(bytesSlots(data.length));
     this.buffer = data;
     this.size = data.length;
   }
@@ -65,7 +66,7 @@ export class PyBytes extends PyObject {
     if (delta !== 0) this.checkNoExports();
     const size = this.size + delta;
     if (size > this.buffer.length) {
-      currentRuntime().allocate(Math.ceil(size / 8));
+      currentRuntime().allocate(bytesSlots(size));
       const grown = new Uint8Array(Math.max(size, this.buffer.length * 2, 16));
       grown.set(this.buffer.subarray(0, this.size));
       this.buffer = grown;
@@ -86,7 +87,7 @@ export class PyBytes extends PyObject {
       return;
     }
     if (size > this.buffer.length) {
-      currentRuntime().allocate(Math.ceil(size / 8));
+      currentRuntime().allocate(bytesSlots(size));
       const grown = new Uint8Array(Math.max(size, this.buffer.length * 2, 16));
       grown.set(this.buffer.subarray(0, this.size));
       this.buffer = grown;
@@ -95,6 +96,11 @@ export class PyBytes extends PyObject {
     }
     this.size = size;
   }
+}
+
+/** The slots of storage a buffer of `length` bytes is charged, eight bytes to a slot. */
+function bytesSlots(length: number): number {
+  return Math.ceil(length / 8);
 }
 
 /** A `memoryview`: a one-dimensional view of items of `format` over the bytes of a bytes or bytearray object. */

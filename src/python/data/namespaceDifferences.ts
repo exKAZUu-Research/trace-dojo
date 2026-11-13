@@ -1658,7 +1658,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ],
       [],
     ],
-    'fractions.Fraction': [['__doc__', '__new__'], []],
+    'fractions.Fraction': [['__doc__'], []],
     'functools.partial': [['__getattribute__', '__setattr__', '__delattr__'], []],
     'http.HTTPMethod': [
       [

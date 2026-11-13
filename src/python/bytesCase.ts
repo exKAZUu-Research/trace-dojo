@@ -82,19 +82,16 @@ shared('istitle', 'none', 0, 0, (self) =>
 // Hexadecimal -------------------------------------------------------------------------------------------------------
 
 /** `data.hex(sep, bytes_per_sep)`, which bytes, bytearray, and memoryview share. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows the separator rules of CPython's _Py_strhex.
 export function hexOf(data: Uint8Array, sepValue: PyValue | undefined, groupValue: PyValue | undefined): string {
+  const groupSize = Number(toIndex(groupValue ?? 1n));
   const sep = sepValue === undefined ? undefined : unbox(sepValue);
-  currentRuntime().buildString(data.length * 3);
-  const digits = [...data].map((byte) => byte.toString(16).padStart(2, '0'));
-  if (sep === undefined || sep === None) return digits.join('');
-  const separator = typeof sep === 'string' ? sep : sep instanceof PyBytes ? latin1Text(sep.data) : undefined;
-  if (separator === undefined) lengthOf(sep);
-  if (iterStr(separator ?? '').length !== 1) throw valueError('sep must be length 1.');
-  if (((separator as string).codePointAt(0) as number) >= 0x80) throw valueError('sep must be ASCII.');
-  const group = Number(toIndex(groupValue ?? 1n));
-  if (group === 0 || digits.length === 0) return digits.join('');
+  const separator = sep === undefined || sep === None ? undefined : hexSeparator(sep);
+  const group = separator === undefined ? 0 : groupSize;
   const size = Math.abs(group);
+  const groupCount = group === 0 ? 1 : Math.ceil(data.length / size);
+  currentRuntime().buildString(data.length * 2 + Math.max(0, groupCount - 1));
+  const digits = [...data].map((byte) => byte.toString(16).padStart(2, '0'));
+  if (separator === undefined || group === 0 || digits.length === 0) return digits.join('');
   const groups: string[] = [];
   if (group > 0) {
     for (let end = digits.length; end > 0; end -= size)
@@ -103,6 +100,14 @@ export function hexOf(data: Uint8Array, sepValue: PyValue | undefined, groupValu
     for (let start = 0; start < digits.length; start += size) groups.push(digits.slice(start, start + size).join(''));
   }
   return groups.join(separator);
+}
+
+function hexSeparator(sep: PyValue): string {
+  const separator = typeof sep === 'string' ? sep : sep instanceof PyBytes ? latin1Text(sep.data) : undefined;
+  if (separator === undefined) lengthOf(sep);
+  if (iterStr(separator ?? '').length !== 1) throw valueError('sep must be length 1.');
+  if (((separator as string).codePointAt(0) as number) >= 0x80) throw valueError('sep must be ASCII.');
+  return separator as string;
 }
 
 shared(

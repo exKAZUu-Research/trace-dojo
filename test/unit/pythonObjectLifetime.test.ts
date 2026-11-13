@@ -247,3 +247,77 @@ print('end')
     stdout: "del 6\nTrue b'7'\n8\ndel 8\nend\nclose 4\nclose 1\ndel 3\ndel 2\ndel 1\ndel 5\ndel 4\n",
   });
 });
+
+test('slot and builtin subclass fields, augmented targets, and threaded calls free objects as CPython does', () => {
+  const program = `import datetime
+class A:
+    def __init__(self, n): self.n = n
+    def __del__(self): print('del', self.n)
+    def __add__(self, other): return 0
+class Slotted:
+    __slots__ = ('x', 'y')
+class Listed(list): pass
+s = Slotted(); s.x = A('slot'); del s
+l = Listed(); l.x = A('list attr'); del l
+s = Slotted(); s.x = A('overwritten'); s.x = None
+s.y = A('deleted'); del s.y
+setattr(s, 'x', A('setattr')); setattr(s, 'x', 0)
+s.y = A('delattr'); delattr(s, 'y')
+class OwnDel(list):
+    def __del__(self): print('del OwnDel')
+class IntDel(int):
+    def __del__(self): print('del IntDel')
+class DateDel(datetime.date):
+    def __del__(self): print('del DateDel')
+o = OwnDel(); del o
+i = IntDel(3); del i
+d = DateDel(2020, 1, 1); del d
+class Box: pass
+b = Box(); b.items = [A('attr item')]
+b.items *= 0
+m = {'k': [A('key item')]}
+m['k'] *= 0
+b.a = A('augmented attr')
+b.a += 1
+def local():
+    v = A('local')
+local()
+def annotated(x: int): pass
+print(annotated.__annotate__(1))
+def drop(p):
+    del p
+    print('dropped param')
+drop(A('param'))
+q = [A('cleared')]
+q.clear()
+print('end')
+`;
+  // CPython 3.14.10 prints the same with or without threading, whose import makes every call suspendable here.
+  const expected = `${[
+    'del slot',
+    'del list attr',
+    'del overwritten',
+    'del deleted',
+    'del setattr',
+    'del delattr',
+    'del OwnDel',
+    'del IntDel',
+    'del DateDel',
+    'del attr item',
+    'del key item',
+    'del augmented attr',
+    'del local',
+    "{'x': <class 'int'>}",
+    'del param',
+    'dropped param',
+    'del cleared',
+    'end',
+  ].join('\n')}\n`;
+  for (const prefix of ['', 'import threading\n']) {
+    expect(executeProgram('python', `${prefix}${program}`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+      stdout: expected,
+    });
+  }
+});

@@ -10,14 +10,17 @@ import cmath, math, statistics, operator
 getcontext().prec = 16
 with localcontext(rounding=ROUND_FLOOR):
     floor_power = Decimal(100) ** Decimal('0.5')
+class F(Fraction):
+    pass
 actual = [repr(Fraction('3.1415926').limit_denominator(100) + 1), format(Fraction(2, 3), '.5f'), str(1 / Fraction(3) == Fraction(1, 3)),
           str(hash(Fraction(1, 2)) == hash(0.5)), str(Decimal(1) / 7), str(floor_power), format(Decimal('1234.5'), ',.2f'),
           repr(cmath.acos(complex(-1, -3.75))), repr(cmath.sqrt(complex(0.0, -0.0))), repr(math.hypot(1.3, 2.7)),
           repr(statistics.stdev([1.5, 2.5, 2.5, 2.75, 3.25, 4.75])), repr(statistics.NormalDist(100, 15).inv_cdf(0.9)),
-          repr(statistics.variance([Fraction(1, 3), Fraction(1, 2), 2])), repr(operator.itemgetter(1, 0)('ab'))]
+          repr(statistics.variance([Fraction(1, 3), Fraction(1, 2), 2])), repr(operator.itemgetter(1, 0)('ab')),
+          repr(F(1, 2)), repr(F()), repr(F(1, 2) + F(1, 3)), repr(F.from_float(0.5))]
 expected = ['Fraction(410, 99)', '0.66667', 'True', 'True', '0.1428571428571429', '9.999999999999999', '1,234.50',
             '(1.8234765819369754+2.0634370688955603j)', '-0j', '2.9966648127543394', '1.0810874155219827',
-            '119.22327348316901', 'Fraction(91, 108)', "('b', 'a')"]
+            '119.22327348316901', 'Fraction(91, 108)', "('b', 'a')", 'F(1, 2)', 'F(0, 1)', 'Fraction(5, 6)', 'F(1, 2)']
 for a, e in zip(actual, expected):
     if a != e:
         raise ValueError(a + ' != ' + e)`;

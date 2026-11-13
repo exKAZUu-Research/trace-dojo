@@ -10,7 +10,7 @@ import {
 } from './expressionEvaluator';
 import type { Frame } from './frame';
 import { delegateTo } from './generators';
-import { getItem, isTruthy, setAttribute, setItem } from './objects';
+import { getItem, isTruthy } from './objects';
 import { binaryOp, compareOp, unaryOp } from './operators';
 import { targetSuspends } from './suspension';
 import { templateLiteral } from './templateStrings';
@@ -284,12 +284,13 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     try {
       switch (target.kind) {
         case 'attribute': {
-          setAttribute(yield* this.evaluateSuspending(target.object, frame), target.name, value);
+          this.storeInto(yield* this.evaluateSuspending(target.object, frame), target.name, true, value);
           return;
         }
         case 'subscript': {
           const object = yield* this.evaluateSuspending(target.object, frame);
-          setItem(object, yield* this.holding(frame, object, this.evaluateSuspending(target.index, frame)), value);
+          const index = yield* this.holding(frame, object, this.evaluateSuspending(target.index, frame));
+          this.hold(frame, object, () => this.storeInto(object, index, false, value));
           return;
         }
         default: {
@@ -301,23 +302,6 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
       }
     } finally {
       frame.temporaries.length = length;
-    }
-  }
-
-  /**
-   * Calls a value from the call expression at `row` so that the blocking operations it makes suspend the running
-   * thread, as `invoke` calls it otherwise.
-   */
-  protected *invokeSuspending(callee: PyValue, args: PyValue[], kwargs: Kwargs, row: number): Suspension {
-    const call = suspendingCall(callee, args, kwargs);
-    if (!call) return this.invoke(callee, args, kwargs, row);
-    const { runtime } = this;
-    const outerRow = runtime.currentRow;
-    runtime.currentRow = row;
-    try {
-      return yield* call;
-    } finally {
-      runtime.currentRow = outerRow;
     }
   }
 
@@ -393,6 +377,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
   /** Evaluates the arguments of a call whose callee has been evaluated, then calls it. */
   protected *callValueSuspending(calleeValue: PyValue, args: Argument[], row: number, frame: Frame): Suspension {
     let passed: PyValue[] = [];
+    let kwargs: Kwargs;
     let result: PyValue = None;
     const length = frame.temporaries.length;
     frame.temporaries.push(calleeValue);
@@ -408,12 +393,39 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
         );
       }
       passed = collected.args;
-      result = yield* this.invokeSuspending(calleeValue, collected.args, collected.kwargs, row);
+      kwargs = collected.kwargs;
+      const owner = this.beforeCall(calleeValue, frame, length);
+      result = yield* this.invokeSuspending(owner, calleeValue, passed, kwargs, row);
     } finally {
       frame.temporaries.length = length;
     }
-    this.afterCall(passed, result);
+    this.afterCall(calleeValue, passed, kwargs, result);
     return result;
+  }
+
+  /**
+   * Calls a value from the call expression at `row` so that the blocking operations it makes suspend the running
+   * thread, as `invoke` calls it otherwise.
+   */
+  protected *invokeSuspending(
+    owner: PyValue | undefined,
+    callee: PyValue,
+    args: PyValue[],
+    kwargs: Kwargs,
+    row: number
+  ): Suspension {
+    const call = suspendingCall(callee, args, kwargs);
+    if (!call) return this.invokeFrom(owner, callee, args, kwargs, row);
+    const { runtime } = this;
+    const outerRow = runtime.currentRow;
+    runtime.currentRow = row;
+    const { locals } = runtime.finalizer;
+    if (locals.marking) locals.noteCall(callee);
+    try {
+      return yield* call;
+    } finally {
+      runtime.currentRow = outerRow;
+    }
   }
 
   private *compareSuspending(expression: Extract<Expression, { kind: 'compare' }>, frame: Frame): Suspension {
