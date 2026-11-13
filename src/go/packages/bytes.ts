@@ -395,7 +395,7 @@ const OP_READ = -1;
 const OP_INVALID = 0;
 
 /** `bytes.Buffer`, with Go's fields so that copies share the array and fmt prints them as Go does. */
-const BUFFER = namedType('bytes', 'Buffer', {
+export const BUFFER = namedType('bytes', 'Buffer', {
   kind: 'struct',
   fields: [
     { name: 'buf', type: BYTES, embedded: false },

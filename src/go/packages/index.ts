@@ -21,6 +21,7 @@ import { HEX_PACKAGE } from './hex';
 import { IMAGE_PACKAGE } from './image';
 import { COLOR_PACKAGE } from './imageColor';
 import { IO_PACKAGE } from './ioStreams';
+import { JSON_PACKAGE } from './json';
 import { LOG_PACKAGE } from './log';
 import { MATH_PACKAGE } from './math';
 import { RUNTIME_PACKAGE } from './misc';
@@ -36,6 +37,7 @@ import { TEXT_TEMPLATE_PACKAGE } from './template';
 import { TIME_PACKAGE } from './time';
 import { UNICODE_PACKAGE, UTF8_PACKAGE } from './unicode';
 import { URL_PACKAGE } from './url';
+import { XML_PACKAGE } from './xml';
 
 const PACKAGES = new Map<string, GoPackage>(
   [
@@ -57,6 +59,7 @@ const PACKAGES = new Map<string, GoPackage>(
     ERRORS_PACKAGE,
     FMT_PACKAGE,
     IO_PACKAGE,
+    JSON_PACKAGE,
     LOG_PACKAGE,
     SLOG_PACKAGE,
     MAPS_PACKAGE,
@@ -68,6 +71,7 @@ const PACKAGES = new Map<string, GoPackage>(
     STRINGS_PACKAGE,
     UNICODE_PACKAGE,
     UTF8_PACKAGE,
+    XML_PACKAGE,
     NET_PACKAGE,
     URL_PACKAGE,
     HASH_PACKAGE,
