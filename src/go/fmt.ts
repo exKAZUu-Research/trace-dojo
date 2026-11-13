@@ -86,13 +86,25 @@ export class Printer {
   static formatter: ((printer: Printer, iface: Iface, verb: string) => boolean) | undefined;
   /** The errors that %w verbs referred to, which only Errorf, constructed with `wrapErrors`, accepts. */
   readonly wrapped: Value[] = [];
-  private buffer = '';
+  private text = '';
   private flags = noFlags();
   /** The value being printed by its methods, to detect a String method that prints its own receiver forever. */
   private readonly depthLimit = 1000;
   private depth = 0;
 
   constructor(private readonly wrapErrors = false) {}
+
+  private get buffer(): string {
+    return this.text;
+  }
+
+  /** Every write of the output goes through here, which keeps it within the string limit and charges its work. */
+  private set buffer(value: string) {
+    const runtime = currentRuntime();
+    runtime.checkStringLength(value.length);
+    runtime.spend(1 + Math.floor((value.length - this.text.length) / 64));
+    this.text = value;
+  }
 
   // Entry points --------------------------------------------------------------------------------------------------
 
@@ -612,7 +624,6 @@ export class Printer {
       this.buffer += text;
       return;
     }
-    currentRuntime().checkStringLength(this.buffer.length + text.length + count);
     const padding = (zero && !minus ? '0' : ' ').repeat(count);
     this.buffer += minus ? text + padding : padding + text;
   }
