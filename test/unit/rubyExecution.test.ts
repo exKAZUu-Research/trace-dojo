@@ -2140,6 +2140,22 @@ test('implicit conversions use methods on reopened immediate classes', () => {
   });
 });
 
+test('shared comparisons honor numeric coercion', () => {
+  expect(run('class A;def coerce(x);[x,2];end;end;p [1,A.new].sort.map{|x|x.class}')).toMatchObject({
+    stdout: '[Integer, A]\n',
+  });
+});
+
+test('Hash inspection rejects insertion from child callbacks', () => {
+  expect(
+    run(
+      'class A;def inspect;$h[:b]=2;"x";end;end;$h={a:A.new};begin;p $h.inspect;rescue=>e;p e.class,e.message;end;p $h.size'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n"can\'t add a new key into hash during iteration"\n1\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

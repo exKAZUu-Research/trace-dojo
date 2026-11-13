@@ -231,6 +231,7 @@ export function* inspectHash(hash: RHash): Gen<string> {
   if (hash.map.size === 0) return '{}';
   if (inspecting.has(hash)) return '{...}';
   inspecting.add(hash);
+  hash.iterating++;
   try {
     const parts: string[] = [];
     let length = 2;
@@ -244,6 +245,7 @@ export function* inspectHash(hash: RHash): Gen<string> {
     }
     return `{${parts.join(', ')}}`;
   } finally {
+    hash.iterating--;
     inspecting.delete(hash);
   }
 }
@@ -568,10 +570,12 @@ export function comparisonFailed(a: Value, b: Value): unknown {
 /** `a <=> b` as a number, or `undefined` when it is nil. */
 // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of value Ruby converts or compares.
 export function* spaceship(a: Value, b: Value): Gen<number | undefined> {
-  if ((typeof a === 'bigint' || typeof a === 'number') && !isOverridden(a, '<=>')) {
-    if (typeof b === 'bigint' || typeof b === 'number') return numericCompare(a, b);
-    return undefined;
-  }
+  if (
+    (typeof a === 'bigint' || typeof a === 'number') &&
+    (typeof b === 'bigint' || typeof b === 'number') &&
+    !isOverridden(a, '<=>')
+  )
+    return numericCompare(a, b);
   if (a instanceof RString && b instanceof RString && !isOverridden(a, '<=>')) {
     return compareRubyStrings(a, b);
   }
