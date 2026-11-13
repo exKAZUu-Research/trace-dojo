@@ -61,7 +61,7 @@ export function* iterate(collection: Value, visit: Visit): Gen<void> {
     return NIL;
   });
   try {
-    yield* collection instanceof RObject && collection.cls === runtime.c.Enumerator
+    yield* collection instanceof RObject && collection.cls.isSubclassOf(runtime.c.Enumerator)
       ? iterateEnumerator(collection, function* (value) {
           runtime.spend();
           if ((yield* visit(value)) === STOP) throw signal;

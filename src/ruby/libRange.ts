@@ -197,7 +197,7 @@ def('Range', 'sum', [0, 1], function* (self: RRange, args, block) {
 });
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Range size handles Integer, Float, beginless, endless, and exclusive bounds.
-function rangeSize(range: RRange): Value {
+export function rangeSize(range: RRange): Value {
   const { begin, end, exclusive } = range;
   if (typeof begin === 'bigint') {
     if (end === NIL) return Number.POSITIVE_INFINITY;
@@ -277,15 +277,16 @@ def('Range', 'eql?', 1, function* (self: RRange, [other]) {
 def('Range', 'hash', 0, function* (self: RRange) {
   return yield* structuralHashValue(self);
 });
-def('Range', ['step', '%'], [0, 1], function* (self: RRange, args, block) {
-  const step = args.length > 0 ? args[0] : 1n;
-  if (typeof step !== 'bigint' && typeof step !== 'number')
-    throw typeError('no implicit conversion of String into Integer');
-  if (Number(step) < 0) throw argumentError("step can't be negative");
-  if (Number(step) === 0) throw argumentError("step can't be 0");
-  if (!block) return makeEnumerator(self, 'step', [step]);
-  return yield* stepRange(self, step, block);
-});
+for (const method of ['step', '%'])
+  def('Range', method, [0, 1], function* (self: RRange, args, block) {
+    const step = args.length > 0 ? args[0] : 1n;
+    if (typeof step !== 'bigint' && typeof step !== 'number')
+      throw typeError('no implicit conversion of String into Integer');
+    if (Number(step) < 0) throw argumentError("step can't be negative");
+    if (Number(step) === 0) throw argumentError("step can't be 0");
+    if (!block) return makeEnumerator(self, method, args);
+    return yield* stepRange(self, step, block);
+  });
 
 function* stepRange(self: RRange, step: bigint | number, block: RProc): Gen {
   const { begin, end } = self;

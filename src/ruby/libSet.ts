@@ -35,6 +35,10 @@ function membersOf(set: RObject): RHash {
   return (set.data as SetData).members;
 }
 
+export function setSize(set: RObject): bigint {
+  return BigInt(membersOf(set).map.size);
+}
+
 export function newSet(values: Iterable<Value>): Gen<RObject> {
   return (function* () {
     const set = new RObject(rt().c.Set);

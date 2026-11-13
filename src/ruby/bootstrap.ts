@@ -136,6 +136,7 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('Turtle', object);
   const enumerator = defineClass('Enumerator', object);
   enumerator.includes.push(c.Enumerable);
+  defineClass('ArithmeticSequence', enumerator, enumerator);
   defineClass('Yielder', object, enumerator);
   defineClass('IO', object);
   const set = defineClass('Set', object);

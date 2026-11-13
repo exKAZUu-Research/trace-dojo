@@ -34,6 +34,16 @@ test.each([
   ],
   ['Float remainder by Integer zero', 'begin; 1.0.remainder(0); rescue ZeroDivisionError; puts :zero; end', 'zero\n'],
   [
+    'Enumerator sizes and arithmetic sequence inspection',
+    'p [1,2].each_with_index.size, 5.upto(7).size, "abc".each_char.size, [1,2,3].each_slice(2).size, [1,2].select.size, (1..4).each_cons(2).size, 10.downto(1).size, 1.step(10,3).size, (1..10).step(2).size; p 1.step(10,3), (1..10).step(3), (1..10).step, (1..10) % 2, 1.step(to: 10, by: 2); p 1.step(10,3).class',
+    '2\n3\n3\n2\n2\n3\n10\n4\n5\n(1.step(10, 3))\n((1..10).step(3))\n((1..10).step)\n((1..10).%(2))\n(1.step(to: 10, by: 2))\nEnumerator::ArithmeticSequence\n',
+  ],
+  [
+    'Set and Array selection Enumerator sizes',
+    'p Set[1,2].each.size, [1,2,3].combination(2).size, [1,2,3].permutation(2).size, [1,2,3].repeated_combination(2).size, [1,2,3].repeated_permutation(2).size',
+    '2\n3\n6\n6\n9\n',
+  ],
+  [
     'String sum long bound',
     'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',
     "bignum too big to convert into 'long'\n38\n",
