@@ -102,8 +102,11 @@ function samples(self: PyNormalDist, n: PyValue, seed: PyValue | undefined): PyV
     next = () => generator.random();
   }
   const count = Number(n as bigint);
+  const runtime = currentRuntime();
+  runtime.ensureRoom(count);
   const result: PyValue[] = [];
   for (let index = 0; index < count; index++) {
+    runtime.spend();
     result.push(inverseCdf(next(), self.mu, self.sigma));
   }
   return newList(result);

@@ -239,7 +239,11 @@ function writeText(stream: TextStream, text: string): number {
   }
   const chars = iterStr(translated);
   if (chars.length === 0) return 0;
-  currentRuntime().buildString(Math.max(stream.chars.length, stream.position + chars.length));
+  const runtime = currentRuntime();
+  const length = Math.max(stream.chars.length, stream.position + chars.length);
+  runtime.buildString(length);
+  // The stream keeps one array element per character, which only its growth adds.
+  runtime.allocate(length - stream.chars.length);
   while (stream.chars.length < stream.position) stream.chars.push('\0');
   // Overwrites in place: splicing in a long text as arguments would exceed the host's argument limit.
   for (const [index, char] of chars.entries()) stream.chars[stream.position + index] = char;

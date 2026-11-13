@@ -1,3 +1,4 @@
+import { currentRuntime } from '../../runtimeContext';
 import {
   charRefNumber,
   type ContentModel,
@@ -320,7 +321,10 @@ export abstract class ExpatBase {
     inProlog: boolean
   ): void {
     const value: AttributeValue = { tz, isCdata, pool, internal, inProlog };
+    const runtime = currentRuntime();
     for (;;) {
+      // Each token is charged, as content's are, so that the deadline stops entities expanding in a value.
+      runtime.spend();
       const [tok, next] = tz.attributeValueTok(ptr, end);
       if (tok === TOK.NONE) return;
       this.attributeValueToken(value, tok, ptr, next);

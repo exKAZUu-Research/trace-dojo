@@ -92,8 +92,19 @@ class array:
         if _exported(self._data):
             raise BufferError('cannot resize an array that is exporting buffers')
 
+    def _count(self):
+        return len(self._data) // _ITEMSIZE[self._typecode]
+
+    def _item(self, offset):
+        value = _struct.unpack_from(_code(self._typecode), self._data, offset)[0]
+        return chr(value) if self._typecode in 'uw' else value
+
+    def _delete(self, offset):
+        self._check_resize()
+        del self._data[offset:offset + _ITEMSIZE[self._typecode]]
+
     def _position(self, index, message):
-        count = len(self)
+        count = self._count()
         if index < 0:
             index += count
         if not 0 <= index < count:
@@ -131,9 +142,7 @@ class array:
     def __getitem__(self, index):
         if isinstance(index, slice):
             return _new(self._typecode, self._items()[index])
-        offset = self._position(_subscript(index), 'array index out of range')
-        value = _struct.unpack_from(_code(self._typecode), self._data, offset)[0]
-        return chr(value) if self._typecode in 'uw' else value
+        return self._item(self._position(_subscript(index), 'array index out of range'))
 
     def __setitem__(self, index, value):
         if isinstance(index, slice):
@@ -157,9 +166,7 @@ class array:
             del items[index]
             self._store(items)
             return
-        offset = self._position(_subscript(index), 'array assignment index out of range')
-        self._check_resize()
-        del self._data[offset:offset + _ITEMSIZE[self._typecode]]
+        self._delete(self._position(_subscript(index), 'array assignment index out of range'))
 
     def _same_kind(self, other, message):
         if not isinstance(other, array):
@@ -239,7 +246,7 @@ class array:
     def insert(self, index, value, /):
         index = _index(index)
         converted = _convert(self._typecode, value)
-        count = len(self)
+        count = self._count()
         index = min(max(index + count, 0) if index < 0 else index, count)
         self._check_resize()
         offset = index * _ITEMSIZE[self._typecode]
@@ -247,12 +254,11 @@ class array:
 
     def pop(self, index=-1, /):
         index = _index(index)
-        if not len(self):
+        if not self._data:
             raise IndexError('pop from empty array')
         offset = self._position(index, 'pop index out of range')
-        value = self[offset // _ITEMSIZE[self._typecode]]
-        self._check_resize()
-        del self._data[offset:offset + _ITEMSIZE[self._typecode]]
+        value = self._item(offset)
+        self._delete(offset)
         return value
 
     def remove(self, value, /):
@@ -260,7 +266,7 @@ class array:
             index = self._items().index(value)
         except ValueError:
             raise ValueError('array.remove(x): x not in array') from None
-        del self[index]
+        self._delete(index * _ITEMSIZE[self._typecode])
 
     def index(self, value, start=0, stop=None, /):
         items = self._items()
