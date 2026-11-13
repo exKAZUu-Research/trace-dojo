@@ -286,7 +286,17 @@ function makeLazy(source: Value, steps: LazyStep[]): RObject {
 def('Enumerable', 'lazy', 0, (self) => makeLazy(self, []));
 def('Enumerator::Lazy', 'lazy', 0, (self) => self);
 
-for (const kind of ['map', 'collect', 'select', 'filter', 'reject', 'take_while', 'drop_while', 'filter_map', 'flat_map'] as const) {
+for (const kind of [
+  'map',
+  'collect',
+  'select',
+  'filter',
+  'reject',
+  'take_while',
+  'drop_while',
+  'filter_map',
+  'flat_map',
+] as const) {
   def('Enumerator::Lazy', kind, 0, (self: RObject, _args, block) => {
     const data = self.data as LazyData;
     const normalized = kind === 'collect' ? 'map' : kind === 'filter' ? 'select' : kind;
@@ -370,14 +380,14 @@ function* runLazy(self: RObject, visit: (value: Value) => Gen<unknown>): Gen<voi
           }
           case 'with_index': {
             const pair = arr([item, state.index++]);
-            next.push(step.block ? yield* callProc(step.block, [item, (state.index - 1n)]) : pair);
+            next.push(step.block ? yield* callProc(step.block, [item, state.index - 1n]) : pair);
             if (step.block) next[next.length - 1] = item;
             break;
           }
         }
       }
       values = next;
-      if (values.length === 0) return undefined;
+      if (values.length === 0) return;
     }
     for (const item of values) if ((yield* visit(item)) === STOP) return STOP;
     const finished = data.steps.some((step, index) => step.kind === 'take' && states[index].seen >= step.count);

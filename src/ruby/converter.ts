@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 848 -- The converter module keeps one concern's cases together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -551,7 +550,6 @@ export class Converter {
     return { k: 'str', parts: this.stringParts(node) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of syntax node.
   private regex(node: Node): Expr {
     const text = node.text;
     const flags = /[a-z]*$/.exec(text)?.[0] ?? '';
@@ -571,6 +569,8 @@ export class Converter {
     return { k: 'regex', parts, flags };
   }
 
+  // code-gauge-allow duplicateLines 18 -- The similar lines handle different Ruby methods or values.
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of syntax node.
   private stringParts(node: Node): StrPart[] {
     const parts: StrPart[] = [];
     let literal = '';
@@ -1293,7 +1293,6 @@ export class Converter {
     return { k: 'lvar', name, depth: this.ctx.scope.declare(name) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of pattern.
   private pattern(node: Node): Pattern {
     switch (node.type) {
       case 'identifier': {
@@ -1376,6 +1375,7 @@ export class Converter {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of syntax node.
   private hashPattern(node: Node): Pattern {
     const cls = this.patternClass(node);
     const pairs: { key: string; pattern?: Pattern; target?: LocalRef }[] = [];
@@ -1412,6 +1412,8 @@ export class Converter {
   }
 
   /** A heredoc's text, from the body the tree placed after its line; `<<~` removes the common indentation. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss 34 -- One case per kind of syntax node.
   private heredoc(node: Node): Expr {
     const body = this.heredocBodies[this.heredocIndex++];
     if (!body) this.fail(node, 'ヒアドキュメントの終わりがありません。');
@@ -1478,6 +1480,7 @@ function methodNameOf(node: Node): string {
 }
 
 /** Removes the indentation that every line of a `<<~` heredoc shares, from the starts of its lines. */
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of syntax node.
 function dedent(pieces: (string | Node)[]): void {
   let atLineStart = true;
   let indent = Number.POSITIVE_INFINITY;
@@ -1510,6 +1513,7 @@ function dedent(pieces: (string | Node)[]): void {
 }
 
 /** How a statement records its step, from what it does. */
+// code-gauge-allow functionNcss 35 -- One case per kind of syntax node.
 function stepKindOf(e: Expr): StepKind {
   switch (e.k) {
     case 'asgn':

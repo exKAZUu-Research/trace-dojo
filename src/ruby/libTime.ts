@@ -49,10 +49,12 @@ function nowNanoseconds(): bigint {
   return BigInt(Math.round((Date.now() + (runtime.slept ?? 0) * 1000) * 1e6));
 }
 
+// code-gauge-allow functionCognitiveComplexity 24 -- Ruby's method takes these argument forms, which the branches mirror.
 function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
   const fields: number[] = [];
   for (const [index, arg] of args.slice(0, 5).entries()) {
-    const value = arg === NIL ? (index < 3 ? 1 : 0) : Number(yield* toInt(arg instanceof RString ? BigInt(arg.s) : arg));
+    const value =
+      arg === NIL ? (index < 3 ? 1 : 0) : Number(yield* toInt(arg instanceof RString ? BigInt(arg.s) : arg));
     fields.push(value);
   }
   while (fields.length < 5) fields.push(fields.length < 3 ? 1 : 0);
@@ -85,7 +87,8 @@ function* buildTime(args: Value[], offset: number, zone: TimeData['zone']): Gen 
 sdef('Time', 'now', 0, () => makeTime(nowNanoseconds()));
 sdef('Time', ['new', 'local', 'mktime'], [0, 7], function* (self, args) {
   if (args.length === 0) return makeTime(nowNanoseconds());
-  if (args.length === 7 && args[6] !== NIL) return yield* buildTime(args.slice(0, 6), yield* parseOffset(args[6]), 'fixed');
+  if (args.length === 7 && args[6] !== NIL)
+    return yield* buildTime(args.slice(0, 6), yield* parseOffset(args[6]), 'fixed');
   void self;
   return yield* buildTime(args, LOCAL_OFFSET, 'local');
 });
@@ -97,7 +100,20 @@ sdef('Time', 'at', [1, 2], function* (_self, [seconds]) {
 });
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 function yearDay(date: Date): number {
   return Math.floor((date.getTime() - Date.UTC(date.getUTCFullYear(), 0, 1)) / 86_400_000) + 1;
@@ -117,13 +133,14 @@ function zoneName(data: TimeData): Value {
   return NIL;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per strftime directive.
+/** A number padded as `strftime` pads it: `-` leaves it unpadded and `_` pads it with spaces. */
+function pad(value: number, width: number, flag: string): string {
+  if (flag === '-') return String(value);
+  return String(value).padStart(width, flag === '_' ? ' ' : '0');
+}
+
 function strftime(data: TimeData, format: string): string {
   const date = data.fields();
-  const pad = (value: number, width: number, flag: string): string => {
-    if (flag === '-') return String(value);
-    return String(value).padStart(width, flag === '_' ? ' ' : '0');
-  };
   return format.replaceAll(/%([-_0^]?)(\d*)([a-zA-Z%+])/g, (whole, flag: string, _width: string, directive: string) => {
     const hour = date.getUTCHours();
     switch (directive) {
@@ -167,7 +184,7 @@ function strftime(data: TimeData, format: string): string {
         return pad(date.getUTCSeconds(), 2, flag);
       }
       case 'L': {
-        return String(Number(floorDivide(data.nanoseconds, 1_000_000n) % 1000n + 1000n) % 1000).padStart(3, '0');
+        return String(Number((floorDivide(data.nanoseconds, 1_000_000n) % 1000n) + 1000n) % 1000).padStart(3, '0');
       }
       case 'N': {
         return String(Number(((data.nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n)).padStart(9, '0');
@@ -263,8 +280,18 @@ for (const [name, read] of [
 for (const [index, day] of DAYS.entries()) {
   def('Time', `${day.toLowerCase()}?`, 0, (self: RObject) => dataOf(self).fields().getUTCDay() === index);
 }
-def('Time', 'usec', 0, (self: RObject) => (((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n) / 1000n);
-def('Time', 'nsec', 0, (self: RObject) => ((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n);
+def(
+  'Time',
+  'usec',
+  0,
+  (self: RObject) => (((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n) / 1000n
+);
+def(
+  'Time',
+  'nsec',
+  0,
+  (self: RObject) => ((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n
+);
 def('Time', 'zone', 0, (self: RObject) => zoneName(dataOf(self)));
 def('Time', ['utc_offset', 'gmt_offset', 'gmtoff'], 0, (self: RObject) => BigInt(dataOf(self).offset));
 def('Time', ['utc?', 'gmt?'], 0, (self: RObject) => dataOf(self).zone === 'utc');
@@ -318,15 +345,27 @@ def('Time', '<=>', 1, (self: RObject, [other]) => {
   const b = other.data.nanoseconds;
   return a < b ? -1n : a > b ? 1n : 0n;
 });
-def('Time', ['==', 'eql?'], 1, (self: RObject, [other]) => other instanceof RObject && other.data instanceof TimeData && other.data.nanoseconds === dataOf(self).nanoseconds);
+def(
+  'Time',
+  ['==', 'eql?'],
+  1,
+  (self: RObject, [other]) =>
+    other instanceof RObject && other.data instanceof TimeData && other.data.nanoseconds === dataOf(self).nanoseconds
+);
 def('Time', 'hash', 0, (self: RObject) => dataOf(self).nanoseconds % 1_000_000_007n);
 
-def('Kernel', 'sleep', [0, 1], (_self, args) => {
-  const runtime = rt() as unknown as { slept?: number };
-  const seconds = args.length > 0 ? toFloat(args[0]) : 0;
-  if (seconds < 0) throw argumentError('time interval must not be negative');
-  runtime.slept = (runtime.slept ?? 0) + seconds;
-  return BigInt(Math.round(seconds));
-}, { visibility: 'private' });
+def(
+  'Kernel',
+  'sleep',
+  [0, 1],
+  (_self, args) => {
+    const runtime = rt() as unknown as { slept?: number };
+    const seconds = args.length > 0 ? toFloat(args[0]) : 0;
+    if (seconds < 0) throw argumentError('time interval must not be negative');
+    runtime.slept = (runtime.slept ?? 0) + seconds;
+    return BigInt(Math.round(seconds));
+  },
+  { visibility: 'private' }
+);
 
 export { compareValues };

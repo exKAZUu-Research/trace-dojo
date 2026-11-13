@@ -649,7 +649,7 @@ for (const [name, generate] of [
     return self;
   });
 }
-// code-gauge-allow duplicateLines 16 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow duplicateLines 16 -- The similar lines handle different Ruby methods or values.
 def('Array', 'repeated_combination', 1, function* (self: RArray, [sizeValue], block) {
   const size = yield* toIndex(sizeValue);
   if (!block) return makeEnumerator(self, 'repeated_combination', [sizeValue]);
@@ -666,7 +666,7 @@ def('Array', 'repeated_combination', 1, function* (self: RArray, [sizeValue], bl
     for (let next = position + 1; next < size; next++) indices[next] = indices[position];
   }
 });
-// code-gauge-allow duplicateLines 16 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow duplicateLines 16 -- The similar lines handle different Ruby methods or values.
 def('Array', 'repeated_permutation', 1, function* (self: RArray, [sizeValue], block) {
   const size = yield* toIndex(sizeValue);
   if (!block) return makeEnumerator(self, 'repeated_permutation', [sizeValue]);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 679 -- The libNumeric module keeps one concern's cases together.
+// code-gauge-allow-file fileNcss 674 -- The libNumeric module keeps one concern's cases together.
 import {
   comparisonFailed,
   floatToInt,
@@ -104,8 +104,8 @@ function floatPow(base: number, exponent: number): Value {
   return exactFloatPower(base, exponent) ?? base ** exponent;
 }
 
-// code-gauge-allow duplicateLines 18 -- Each language wires its own parser and runtime into the shared modules alike.
 // code-gauge-allow functionNcss 31 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow duplicateLines 18 -- The similar lines handle different Ruby methods or values.
 function arithmetic(op: string, a: Num, b: Num): Value {
   if (typeof a === 'bigint' && typeof b === 'bigint') {
     switch (op) {

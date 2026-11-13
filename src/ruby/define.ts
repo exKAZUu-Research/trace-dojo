@@ -73,7 +73,17 @@ function register(
  * keeps its arity.
  */
 export function extend(owner: string, names: string[], wrap: (previous: NativeFn) => NativeFn): void {
-  specs.push({ owner, names, min: 0, max: 0, fn: () => undefined as never, singleton: false, visibility: 'public', takesKeywords: false, wrap });
+  specs.push({
+    owner,
+    names,
+    min: 0,
+    max: 0,
+    fn: () => undefined as never,
+    singleton: false,
+    visibility: 'public',
+    takesKeywords: false,
+    wrap,
+  });
 }
 
 let singletonOf: ((cls: RClass) => RClass) | undefined;

@@ -7,7 +7,7 @@ import { makeEnumerator } from './libEnumerator';
 import { nameOf } from './libMeta';
 import { NIL, RClass, type RHash, RObject, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, newHash, realClassOf, str, sym, truthy } from './values';
+import { arr, newHash, realClassOf, snapshot, str, sym, truthy } from './values';
 
 /** The members of a Struct or Data class, and whether its `new` takes keywords only. */
 interface Layout {
@@ -61,9 +61,7 @@ function* memberIndex(self: RObject, key: Value): Gen<number> {
   if (index < 0) index += members.length;
   if (index < 0 || index >= members.length) {
     const raw = yield* toIndex(key);
-    throw indexError(
-      `offset ${raw} too ${raw < 0 ? 'small' : 'large'} for struct(size:${members.length})`
-    );
+    throw indexError(`offset ${raw} too ${raw < 0 ? 'small' : 'large'} for struct(size:${members.length})`);
   }
   return index;
 }
@@ -93,7 +91,7 @@ function defineAccessors(cls: RClass, members: string[], writable: boolean): voi
       visibility: 'public',
       body: {
         kind: 'native',
-        fn: function* (self: RObject, [value]) {
+        *fn(self: RObject, [value]) {
           if (self.frozen) throw frozenError(self, yield* inspect(self));
           valuesOf(self)[index] = value;
           return value;
@@ -117,52 +115,66 @@ function* newStructClass(superclass: RClass, members: string[], layout: Omit<Lay
 
 // Struct ---------------------------------------------------------------------------------------------------------------
 
-sdef('Struct', 'new', [0, -1], function* (self: RClass, args, block, keywords) {
-  if (self !== rt().c.Struct) {
-    const object = new RObject(self);
-    object.data = new StructValues(layoutOf(self).members.map(() => NIL));
-    const initialize = self.findMethod('initialize');
-    if (initialize) {
-      yield* invoke(initialize, object, args, keywords, block, false);
+sdef(
+  'Struct',
+  'new',
+  [0, -1],
+  // code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
+  function* (self: RClass, args, block, keywords) {
+    if (self !== rt().c.Struct) {
+      const object = new RObject(self);
+      object.data = new StructValues(layoutOf(self).members.map(() => NIL));
+      const initialize = self.findMethod('initialize');
+      if (initialize) {
+        yield* invoke(initialize, object, args, keywords, block, false);
+      }
+      return object;
     }
-    return object;
-  }
-  let keywordInit: boolean | undefined;
-  if (keywords) {
-    for (const entry of keywords.map.values()) {
-      if (entry.key instanceof RSymbol && entry.key.name === 'keyword_init') keywordInit = entry.value === NIL ? undefined : truthy(entry.value);
-      else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+    let keywordInit: boolean | undefined;
+    if (keywords) {
+      for (const entry of keywords.map.values()) {
+        if (entry.key instanceof RSymbol && entry.key.name === 'keyword_init')
+          keywordInit = entry.value === NIL ? undefined : truthy(entry.value);
+        else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+      }
     }
-  }
-  let names = args;
-  if (args[0] instanceof RString) names = args.slice(1);
-  if (names.length === 0 && !keywordInit) throw argumentError('wrong number of arguments (given 0, expected 1+)');
-  const cls = yield* newStructClass(rt().c.Struct, yield* membersFrom(names), { keywordInit, kind: 'struct' });
-  if (block) yield* callProc(block, [cls], { self: cls, definee: cls });
-  return cls;
-}, { keywords: true });
+    let names = args;
+    if (args[0] instanceof RString) names = args.slice(1);
+    if (names.length === 0 && !keywordInit) throw argumentError('wrong number of arguments (given 0, expected 1+)');
+    const cls = yield* newStructClass(rt().c.Struct, yield* membersFrom(names), { keywordInit, kind: 'struct' });
+    if (block) yield* callProc(block, [cls], { self: cls, definee: cls });
+    return cls;
+  },
+  { keywords: true }
+);
 
-
-def('Struct', 'initialize', [0, -1], function* (self: RObject, args, _block, keywords) {
-  const { members, keywordInit } = layoutOf(self.cls);
-  const values = valuesOf(self);
-  if (keywordInit || (keywordInit === undefined && args.length === 0 && keywords)) {
-    if (args.length > 0) throw argumentError(`wrong number of arguments (given ${args.length}, expected 0)`);
-    const unknown: string[] = [];
-    for (const entry of keywords?.map.values() ?? []) {
-      const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
-      const index = members.indexOf(name);
-      if (index === -1) unknown.push(name);
-      else values[index] = entry.value;
+def(
+  'Struct',
+  'initialize',
+  [0, -1],
+  // code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
+  function* (self: RObject, args, _block, keywords) {
+    const { members, keywordInit } = layoutOf(self.cls);
+    const values = valuesOf(self);
+    if (keywordInit || (keywordInit === undefined && args.length === 0 && keywords)) {
+      if (args.length > 0) throw argumentError(`wrong number of arguments (given ${args.length}, expected 0)`);
+      const unknown: string[] = [];
+      for (const entry of keywords?.map.values() ?? []) {
+        const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
+        const index = members.indexOf(name);
+        if (index === -1) unknown.push(name);
+        else values[index] = entry.value;
+      }
+      if (unknown.length > 0) throw argumentError(`unknown keywords: ${unknown.join(', ')}`);
+      return NIL;
     }
-    if (unknown.length > 0) throw argumentError(`unknown keywords: ${unknown.join(', ')}`);
+    const all = keywords ? [...args, keywords] : args;
+    if (all.length > members.length) throw argumentError('struct size differs');
+    for (const [index, value] of all.entries()) values[index] = value;
     return NIL;
-  }
-  const all = keywords ? [...args, keywords] : args;
-  if (all.length > members.length) throw argumentError('struct size differs');
-  for (const [index, value] of all.entries()) values[index] = value;
-  return NIL;
-}, { visibility: 'private', keywords: true });
+  },
+  { visibility: 'private', keywords: true }
+);
 sdef('Struct', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((name) => sym(name))));
 sdef('Struct', 'keyword_init?', 0, (self: RClass) => layoutOf(self).keywordInit ?? NIL);
 def('Struct', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
@@ -183,7 +195,8 @@ def('Struct', 'to_h', 0, function* (self: RObject, _args, block) {
 });
 def('Struct', 'deconstruct_keys', 1, function* (self: RObject) {
   const hash = newHash();
-  for (const [index, name] of layoutOf(self.cls).members.entries()) yield* hashSet(hash, sym(name), valuesOf(self)[index]);
+  for (const [index, name] of layoutOf(self.cls).members.entries())
+    yield* hashSet(hash, sym(name), valuesOf(self)[index]);
   return hash;
 });
 def('Struct', '[]', 1, function* (self: RObject, [key]) {
@@ -196,7 +209,8 @@ def('Struct', '[]=', 2, function* (self: RObject, [key, value]) {
 });
 def('Struct', ['each'], 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'each', []);
-  for (const value of [...valuesOf(self)]) yield* callBlock(block, [value], false);
+  // The block may change the members, so it walks the values as they were.
+  for (const value of snapshot(valuesOf(self))) yield* callBlock(block, [value], false);
   return self;
 });
 def('Struct', 'each_pair', 0, function* (self: RObject, _args, block) {
@@ -260,55 +274,79 @@ sdef('Data', 'define', [0, -1], function* (_self, args, block) {
   if (block) yield* callProc(block, [cls], { self: cls, definee: cls });
   return cls;
 });
-sdef('Data', ['new', '[]'], [0, -1], function* (self: RClass, args, block, keywords) {
-  if (self === rt().c.Data) methodMissing(self, 'new', {});
-  const { members } = layoutOf(self);
-  if (args.length > members.length) {
-    throw argumentError(`wrong number of arguments (given ${args.length}, expected ${members.length === 0 ? 0 : `0..${members.length}`})`);
-  }
-  const hash: RHash = keywords ?? newHash();
-  for (const [index, value] of args.entries()) yield* hashSet(hash, sym(members[index]), value);
-  const object = new RObject(self);
-  object.data = new StructValues(members.map(() => NIL));
-  const initialize = self.findMethod('initialize');
-  if (initialize) yield* invoke(initialize, object, [], hash.map.size > 0 ? hash : undefined, block, false);
-  object.frozen = true;
-  return object;
-}, { keywords: true });
-
-def('Data', 'initialize', [0, 0], function* (self: RObject, _args, _block, keywords) {
-  const { members } = layoutOf(self.cls);
-  const values = valuesOf(self);
-  const given = new Set<string>();
-  const unknown: string[] = [];
-  for (const entry of keywords?.map.values() ?? []) {
-    const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
-    const index = members.indexOf(name);
-    if (index === -1) unknown.push(`:${name}`);
-    else {
-      values[index] = entry.value;
-      given.add(name);
+sdef(
+  'Data',
+  ['new', '[]'],
+  [0, -1],
+  function* (self: RClass, args, block, keywords) {
+    if (self === rt().c.Data) methodMissing(self, 'new', {});
+    const { members } = layoutOf(self);
+    if (args.length > members.length) {
+      throw argumentError(
+        `wrong number of arguments (given ${args.length}, expected ${members.length === 0 ? 0 : `0..${members.length}`})`
+      );
     }
-  }
-  const missing = members.filter((name) => !given.has(name)).map((name) => `:${name}`);
-  if (missing.length > 0) throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
-  if (unknown.length > 0) throw argumentError(`unknown keyword${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`);
-  return NIL;
-}, { visibility: 'private', keywords: true });
+    const hash: RHash = keywords ?? newHash();
+    for (const [index, value] of args.entries()) yield* hashSet(hash, sym(members[index]), value);
+    const object = new RObject(self);
+    object.data = new StructValues(members.map(() => NIL));
+    const initialize = self.findMethod('initialize');
+    if (initialize) yield* invoke(initialize, object, [], hash.map.size > 0 ? hash : undefined, block, false);
+    object.frozen = true;
+    return object;
+  },
+  { keywords: true }
+);
+
+def(
+  'Data',
+  'initialize',
+  [0, 0],
+  function* (self: RObject, _args, _block, keywords) {
+    const { members } = layoutOf(self.cls);
+    const values = valuesOf(self);
+    const given = new Set<string>();
+    const unknown: string[] = [];
+    for (const entry of keywords?.map.values() ?? []) {
+      const name = entry.key instanceof RSymbol ? entry.key.name : yield* inspect(entry.key);
+      const index = members.indexOf(name);
+      if (index === -1) unknown.push(`:${name}`);
+      else {
+        values[index] = entry.value;
+        given.add(name);
+      }
+    }
+    const missing = members.filter((name) => !given.has(name)).map((name) => `:${name}`);
+    if (missing.length > 0)
+      throw argumentError(`missing keyword${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`);
+    if (unknown.length > 0)
+      throw argumentError(`unknown keyword${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`);
+    return NIL;
+  },
+  { visibility: 'private', keywords: true }
+);
 sdef('Data', 'members', 0, (self: RClass) => arr(layoutOf(self).members.map((name) => sym(name))));
 def('Data', 'members', 0, (self: RObject) => arr(layoutOf(self.cls).members.map((name) => sym(name))));
 def('Data', 'to_h', 0, function* (self: RObject) {
   const hash = newHash();
-  for (const [index, name] of layoutOf(self.cls).members.entries()) yield* hashSet(hash, sym(name), valuesOf(self)[index]);
+  for (const [index, name] of layoutOf(self.cls).members.entries())
+    yield* hashSet(hash, sym(name), valuesOf(self)[index]);
   return hash;
 });
-def('Data', 'with', [0, 0], function* (self: RObject, _args, _block, keywords) {
-  if (!keywords) return self;
-  const hash = newHash();
-  for (const [index, name] of layoutOf(self.cls).members.entries()) yield* hashSet(hash, sym(name), valuesOf(self)[index]);
-  for (const entry of keywords.map.values()) yield* hashSet(hash, entry.key, entry.value);
-  return yield* callMethod(self.cls, 'new', [], hash);
-}, { keywords: true });
+def(
+  'Data',
+  'with',
+  [0, 0],
+  function* (self: RObject, _args, _block, keywords) {
+    if (!keywords) return self;
+    const hash = newHash();
+    for (const [index, name] of layoutOf(self.cls).members.entries())
+      yield* hashSet(hash, sym(name), valuesOf(self)[index]);
+    for (const entry of keywords.map.values()) yield* hashSet(hash, entry.key, entry.value);
+    return yield* callMethod(self.cls, 'new', [], hash);
+  },
+  { keywords: true }
+);
 def('Data', '==', 1, (self: RObject, [other]) => sameValues(self, other, rEquals));
 def('Data', 'eql?', 1, (self: RObject, [other]) => sameValues(self, other, rEql));
 def('Data', 'hash', 0, function* (self: RObject) {
@@ -319,7 +357,8 @@ def('Data', 'hash', 0, function* (self: RObject) {
 def('Data', ['inspect', 'to_s'], 0, (self: RObject) => inspectMembers(self, 'data'));
 def('Data', 'deconstruct_keys', 1, function* (self: RObject) {
   const hash = newHash();
-  for (const [index, name] of layoutOf(self.cls).members.entries()) yield* hashSet(hash, sym(name), valuesOf(self)[index]);
+  for (const [index, name] of layoutOf(self.cls).members.entries())
+    yield* hashSet(hash, sym(name), valuesOf(self)[index]);
   return hash;
 });
 def('Data', 'deconstruct', 0, (self: RObject) => arr([...valuesOf(self)]));

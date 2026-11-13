@@ -36,7 +36,6 @@ export function guardFailed(): void {
 }
 
 /** Whether a value matches a pattern, binding the pattern's variables in the frame as it goes, as Ruby does. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of pattern.
 export function* matchPattern(pattern: Pattern, value: Value, frame: Frame): Gen<boolean> {
   rt().spend();
   switch (pattern.k) {
@@ -134,6 +133,8 @@ function* matchFind(pattern: Extract<Pattern, { k: 'find' }>, value: Value, fram
   });
 }
 
+// code-gauge-allow functionNcss 38 -- One case per kind of pattern.
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of pattern.
 function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, frame: Frame): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
   let hash: RHash;

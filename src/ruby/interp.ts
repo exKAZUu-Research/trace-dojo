@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 931 -- The interp module keeps one concern's cases together.
 import type { BlockDef, Body, Call, Expr, MethodDef, MultiTarget, Params, ParamTarget, Stmt, Target } from './ast';
 import { caseEquals, inspect, toS } from './conversions';
 import {
@@ -742,7 +741,6 @@ function* evalRedoable(body: Body, frame: Frame): Gen {
 }
 
 /** What `defined?` says an expression is, without evaluating it except for a receiver. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of expression defined? tells.
 function text(value: string | undefined): Value {
   return value === undefined ? NIL : str(value);
 }
@@ -898,8 +896,8 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
 
 const RETRY = Symbol('retry');
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of expression or Ruby rule.
 // code-gauge-allow functionNcss 33 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of expression or Ruby rule.
 function* rescueClause(
   e: Extract<Expr, { k: 'begin' }>,
   error: RubyError,
@@ -945,6 +943,7 @@ function* rescueClause(
 
 // Definitions ---------------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionNcss 33 -- One case per kind of expression or Ruby rule.
 function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame): Gen {
   const runtime = rt();
   let owner: RClass;
@@ -1194,7 +1193,7 @@ export function methodMissing(recv: Value, name: string, options: CallOptions): 
 }
 
 /** Calls a method that lookup found. */
-// code-gauge-allow functionNcss 34 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionNcss 36 -- One case per kind of expression or Ruby rule.
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of expression or Ruby rule.
 export function* invoke(
   method: RMethod,
@@ -1340,7 +1339,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
 }
 
 /** The arguments `super` without parentheses passes: the method's parameters' current values. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of expression or Ruby rule.
 function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | undefined } {
   const def = frame.extra.def as MethodDef;
   const { params } = def;
@@ -1407,8 +1406,6 @@ export interface ProcCallOptions {
 }
 
 /** Calls a block or proc with arguments, binding them as a block (or a lambda) does. */
-// code-gauge-allow functionNcss 36 -- One case per kind of expression or Ruby rule.
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of expression or Ruby rule.
 export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions = {}): Gen {
   const runtime = rt();
   runtime.spend();

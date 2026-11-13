@@ -31,8 +31,8 @@ function pushFrame(frame: Frame, pending: Value[]): void {
 }
 
 /** Pushes the values an object refers to. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Each language wires its own parser and runtime into the shared modules alike.
-// code-gauge-allow functionNcss 31 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of object that holds references.
+// code-gauge-allow functionNcss 31 -- One case per kind of object that holds references.
 function pushReferences(value: RBasic, pending: Value[]): void {
   if (value.ivars) pending.push(...value.ivars.values());
   if (value.singleton) pending.push(value.singleton);

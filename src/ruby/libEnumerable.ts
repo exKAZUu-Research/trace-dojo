@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 677 -- The libEnumerable module keeps one concern's cases together.
+// code-gauge-allow-file fileNcss 675 -- The libEnumerable module keeps one concern's cases together.
 import { caseEquals, compareValues, inspect, rEquals, spaceship, toIndex, toInt } from './conversions';
 import { def } from './define';
 import { argumentError, typeError } from './errors';
@@ -6,7 +6,7 @@ import { eachEntry, hashGet, hashKeyOf, hashSet } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
 import { arr, newHash, realClassOf, truthy } from './values';
 

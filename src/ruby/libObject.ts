@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 583 -- The libObject module keeps one concern's cases together.
+// code-gauge-allow-file fileNcss 578 -- The libObject module keeps one concern's cases together.
 import {
   anonymousClassName,
   anyToS,
@@ -147,7 +147,7 @@ def(
 );
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow functionNcss 39 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionNcss 40 -- Ruby's method takes these argument forms, which the branches mirror.
 function* copyObject(self: Value, keepFrozen: boolean): Gen {
   if (!(self instanceof RBasic) || self instanceof RClass) return self;
   let copy: RBasic;

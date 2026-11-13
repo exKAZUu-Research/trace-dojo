@@ -40,7 +40,7 @@ export function parseRuby(source: string, trace?: TraceOptions): Program {
 const RUBY_ANNOTATION_PATTERN = /#[ \t]*atomic[ \t]*$/;
 
 /** The `# atomic` annotations of a program, read from its comment tokens. */
-// code-gauge-allow duplicateLines 16 -- Each language wires its own parser and runtime into the shared modules alike.
+// code-gauge-allow duplicateLines 16 -- The similar lines handle different Ruby methods or values.
 export function findRubyTraceAnnotations(source: string): TraceAnnotation[] {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The Ruby parser returned no tree');

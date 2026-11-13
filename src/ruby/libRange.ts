@@ -104,6 +104,7 @@ def('Range', ['to_a', 'to_ary', 'entries'], 0, function* (self: RRange) {
   if (self.end === NIL) throw rangeError('cannot convert endless range to an array');
   return arr(yield* toArray(self));
 });
+// code-gauge-allow duplicateLines 16 -- The similar lines handle different Ruby methods or values.
 def('Range', ['begin', 'first'], [0, 1], function* (self: RRange, args) {
   if (args.length === 0) {
     if (self.begin === NIL && args.length === 0) throw rangeError('cannot get the first element of beginless range');

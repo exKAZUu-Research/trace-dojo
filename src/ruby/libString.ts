@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 796 -- The libString module keeps one concern's cases together.
+// code-gauge-allow-file fileNcss 793 -- The libString module keeps one concern's cases together.
 import {
   compareStrings,
   inspect,
@@ -752,8 +752,8 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
 const isAlnum = (char: string): boolean => /^[A-Za-z0-9]$/.test(char);
 const isSpace = (char: string): boolean => ' \t\n\v\f\r\0'.includes(char);
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Ruby's method takes these argument forms, which the branches mirror.
 // code-gauge-allow functionNcss 40 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 23 -- Ruby's method takes these argument forms, which the branches mirror.
 export function succ(text: string): string {
   if (text.length === 0) return '';
   const chars = charsOf(text);

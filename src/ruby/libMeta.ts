@@ -159,6 +159,7 @@ def('Method', 'unbind', 0, () => {
 });
 
 /** What `parameters` lists for parameters a program wrote: each one's kind and, when it has one, its name. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Ruby's method takes these argument forms, which the branches mirror.
 function parameterList(params: Params, isLambda: boolean): Value {
   const entries: Value[] = [];
   const add = (kind: string, name?: string): void => {
