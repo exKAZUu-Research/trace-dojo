@@ -68,7 +68,7 @@ export class EventLoop {
 
   constructor(private readonly runtime: Runtime) {}
 
-  /** Reads the clock for `Date`, which moves it forward by a step: the whole milliseconds since the program started. */
+  /** Reads the clock for `Date`, which moves it forward as the constants above say: the whole milliseconds so far. */
   readClock(): number {
     const { spent } = this.runtime.budget;
     this.now += Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND);

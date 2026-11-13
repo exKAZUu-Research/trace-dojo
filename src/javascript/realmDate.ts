@@ -50,7 +50,6 @@ export function defineDateBuiltins(builder: RealmBuilder): void {
   defineConversions(builder, prototype);
 }
 
-/** The time value `new Date(...args)` gives. */
 /** The time value `new Date(...args)` gives for at least one argument. */
 function constructedTime({ runtime, args }: NativeCall): number {
   if (args.length === 1) {
