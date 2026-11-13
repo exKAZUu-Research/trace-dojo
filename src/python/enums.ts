@@ -6,7 +6,7 @@ import { hashInt, pyHash } from './hashing';
 import { getItem, keyError } from './items';
 import { bindValue, callValue, enumMemberGenerator, getAttribute, isTruthy, setItem } from './objects';
 import { binaryOp, intEnumValue, keysEqual } from './operators';
-import { currentRuntime } from './runtimeContext';
+import { currentRuntime, runningRuntime } from './runtimeContext';
 import { defineValueHash } from './slotWrappers';
 import {
   argumentTypeName,
@@ -291,13 +291,14 @@ export function createEnumMembers(cls: PyClass, namespace?: Map<string, PyValue>
     const rawValue = cls.dict.get(name) as PyValue;
     const created = create === undefined ? undefined : customMember(cls, rawValue);
     const converted = created ? (created.enumValue as PyValue) : mixinValue(cls, rawValue);
+    const member = created ? initializeMember(created, name, rawValue) : newMember(cls, name, converted, rawValue);
     const alias = lookups.find(([existingKey]) => keysEqual(existingKey, converted))?.[1];
     if (alias) {
       cls.dict.set(name, alias);
       named.set(name, alias);
+      runningRuntime()?.finalizer.release([member]);
       continue;
     }
-    const member = created ? initializeMember(created, name, rawValue) : newMember(cls, name, converted, rawValue);
     lookups.push([converted, member]);
     named.set(name, member);
     cls.dict.set(name, member);

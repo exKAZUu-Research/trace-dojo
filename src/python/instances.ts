@@ -161,7 +161,7 @@ function refusesObjectNew(cls: PyClass): boolean {
 }
 
 function cannotCreate(cls: PyClass): Error {
-  return typeError(`cannot create '${cls.qualifiedName}' instances`);
+  return typeError(`cannot create '${cls.typeName ?? cls.qualifiedName}' instances`);
 }
 
 /** Refuses a class whose `__abstractmethods__`, which `abc.ABCMeta` sets, names any method. */

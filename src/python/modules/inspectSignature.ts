@@ -16,6 +16,7 @@ import {
   typeClass,
   typeError,
   typeName,
+  unbox,
   valueError,
 } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
@@ -24,6 +25,7 @@ import {
   PyBuiltinFunction,
   PyClass,
   PyDescriptor,
+  type PyDict,
   PyFunction,
   PyInstance,
   PyOpaque,
@@ -253,24 +255,24 @@ export function formatAnnotation(annotation: PyValue, baseModule?: PyValue): str
 // Signatures of callables -------------------------------------------------------------------------------------------
 
 /** `inspect.signature(obj)` of a function, method, or class the program defines. */
-export function signature(value: PyValue): PyOpaque {
-  return newSignature(signatureData(value));
+export function signature(value: PyValue, format: PyValue = 1n): PyOpaque {
+  return newSignature(signatureData(value, format));
 }
 
-function signatureData(value: PyValue): Signature {
-  if (value instanceof PyBoundMethod) return withoutFirst(signatureData(value.fn));
+function signatureData(value: PyValue, format: PyValue): Signature {
+  if (value instanceof PyBoundMethod) return withoutFirst(signatureData(value.fn, format));
   // As _signature_from_callable does: the function a decorator wraps, and a `__signature__` set on the way.
   value = unwrapForSignature(value);
-  if (value instanceof PyBoundMethod) return withoutFirst(signatureData(value.fn));
+  if (value instanceof PyBoundMethod) return withoutFirst(signatureData(value.fn, format));
   const given = givenSignature(value);
   if (given) return given;
-  if (value instanceof PyFunction) return functionSignature(value);
-  if (value instanceof PyClass) return classSignature(value);
+  if (value instanceof PyFunction) return functionSignature(value, format);
+  if (value instanceof PyClass) return classSignature(value, format);
   if (value instanceof PyInstance && !value.cls.isBuiltin) {
     const call = value.cls.lookup('__call__');
-    if (call instanceof PyFunction) return withoutFirst(functionSignature(call));
+    if (call instanceof PyFunction) return withoutFirst(functionSignature(call, format));
   }
-  if (value instanceof PyOpaque && value.cls === partialClass) return partialSignature(value);
+  if (value instanceof PyOpaque && value.cls === partialClass) return partialSignature(value, format);
   if (value instanceof PyBuiltinFunction) return builtinSignature(value);
   if (!isCallable(value)) throw typeError(`${pyRepr(value)} is not a callable object`);
   throw new UnsupportedFeatureError('組み込みの関数やクラスの inspect.signature()');
@@ -315,10 +317,10 @@ function builtinSignature(fn: PyBuiltinFunction): Signature {
 /** The signature of a `functools.partial` object, as `_signature_get_partial` derives it from its function's. */
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
 // code-gauge-allow functionNcss 33 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
-function partialSignature(value: PyOpaque): Signature {
+function partialSignature(value: PyOpaque, format: PyValue): Signature {
   const { fn, args, keywords } = value.data as Partial;
   const kwargs = new Map(keywords.store.ordered().map((entry) => [entry.key as string, entry.value]));
-  const { parameters, returnAnnotation } = signatureData(fn);
+  const { parameters, returnAnnotation } = signatureData(fn, format);
   const params = parameters.map(parameterOf);
   const positional = params.filter((each) => each.kind <= Kind.PositionalOrKeyword);
   const hasVarArgs = params.some((each) => each.kind === Kind.VarPositional);
@@ -444,14 +446,14 @@ function evaluateDefault(text: string): PyValue | undefined {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows how _signature_from_callable of inspect.py tries a class.
-function classSignature(cls: PyClass): Signature {
+function classSignature(cls: PyClass, format: PyValue): Signature {
   for (const each of cls.mro) {
     if (each.isBuiltin) break;
     const init = each.dict.get('__init__');
-    if (init instanceof PyFunction) return withoutFirst(functionSignature(init));
+    if (init instanceof PyFunction) return withoutFirst(functionSignature(init, format));
     const create = each.dict.get('__new__');
     const fn = create instanceof PyDescriptor ? create.fn : create;
-    if (fn instanceof PyFunction) return withoutFirst(functionSignature(fn));
+    if (fn instanceof PyFunction) return withoutFirst(functionSignature(fn, format));
   }
   for (const base of cls.mro.slice(0, -1)) {
     const text = base.isBuiltin ? builtinTextSignature(base) : undefined;
@@ -484,8 +486,15 @@ const KINDS_OF_PARAMETERS: Record<string, Kind> = {
   varKeywords: Kind.VarKeyword,
 };
 
-function functionSignature(fn: PyFunction): Signature {
-  const annotations = functionAnnotations(fn);
+function functionSignature(fn: PyFunction, format: PyValue): Signature {
+  const annotations =
+    unbox(format) === 1n
+      ? functionAnnotations(fn)
+      : (callValue(
+          getAttribute(currentRuntime().importModule('annotationlib'), 'get_annotations'),
+          [fn],
+          new Map([['format', format]])
+        ) as PyDict);
   const annotationOf = (name: string): PyValue => annotations.store.get(name) ?? emptyClass;
   const positional = fn.def.params.filter((param) => param.kind === 'positionalOnly' || param.kind === 'positional');
   const firstDefault = positional.length - fn.defaults.length;

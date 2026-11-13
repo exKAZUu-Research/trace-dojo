@@ -2,7 +2,7 @@
 import { pyStr } from '../conversions';
 import { method } from '../define';
 import { enumClass } from '../enums';
-import { callValue, getAttribute, getIterator } from '../objects';
+import { callValue, getAttribute, getIterator, isCallable, setAttribute } from '../objects';
 import { objectState } from '../reduction';
 import { classOf, dictClass, ellipsisClass, newDict, newTuple, None, notImplementedClass, typeError } from '../types';
 import { type PyDeque, PyDict, type PyOpaque, PyTuple, type PyValue } from '../values';
@@ -52,10 +52,16 @@ method(partialClass, '__reduce__', 'none', 0, 0, (self) => {
 });
 method(partialClass, '__setstate__', 'one', 1, 1, (self, [state]) => {
   if (!(state instanceof PyTuple) || state.items.length !== 4) throw typeError('invalid partial state');
-  const [fn, args, kwargs] = state.items;
-  if (!(args instanceof PyTuple) || !(kwargs instanceof PyDict || kwargs === None)) {
+  const [fn, args, kwargs, attributes] = state.items;
+  if (
+    !isCallable(fn) ||
+    !(args instanceof PyTuple) ||
+    !(kwargs instanceof PyDict || kwargs === None) ||
+    !(attributes instanceof PyDict || attributes === None)
+  ) {
     throw typeError('invalid partial state');
   }
+  setAttribute(self, '__dict__', attributes === None ? newDict() : attributes);
   const partial = partialOf(self);
   partial.fn = fn;
   partial.args = newTuple(args.items);

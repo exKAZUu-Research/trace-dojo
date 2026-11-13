@@ -489,6 +489,9 @@ typeAliasClass.construct = (_cls, args, kwargs) => {
   return new PyTypeAlias(name, toArray(kwargs?.get('type_params') ?? newTuple([])), () => value, '__main__');
 };
 
+method(aliasClass, '__mro_entries__', 'one', 1, 1, (self, [bases]) =>
+  newTuple(typingMroEntries(self, toArray(bases), '') ?? [])
+);
 method(aliasClass, '__repr__', 'none', 0, 0, (self) => aliasText(self as PyTypingAlias));
 method(aliasClass, 'copy_with', 'one', 1, 1, (self, [params]) => {
   const alias = self as PyTypingAlias;

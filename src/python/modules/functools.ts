@@ -179,6 +179,13 @@ const KEYWORD_MARK = new PyOpaque(builtinClass('object'), 'kwd_mark');
 
 /** The key `_make_key` gives a call: its arguments, the keywords after a marker, and their types when typed. */
 function cacheKey(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {
+  if (
+    !cache.typed &&
+    !kwargs?.size &&
+    args.length === 1 &&
+    (typeof args[0] === 'bigint' || typeof args[0] === 'string')
+  )
+    return args[0];
   const items: PyValue[] = [...args];
   if (kwargs && kwargs.size > 0) {
     items.push(KEYWORD_MARK);
@@ -222,6 +229,8 @@ function callCached(cache: Cache, args: PyValue[], kwargs: Kwargs): PyValue {
   cache.store.set(key, value, hash);
   return value;
 }
+method(cacheClass, '__copy__', 'none', 0, 0, (self) => self);
+method(cacheClass, '__deepcopy__', 'one', 1, 1, (self) => self);
 method(cacheClass, 'cache_info', 'none', 0, 0, (self) => {
   const cache = (self as PyOpaque).data as Cache;
   return callValue(cache.cacheInfo, [

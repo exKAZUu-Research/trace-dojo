@@ -140,15 +140,18 @@ PathLike.__module__ = 'os'
 
 /** `os.fspath`: a path as a str or bytes, asking any other object for its `__fspath__`. */
 function fspath(value: PyValue): PyValue {
-  if (typeof value === 'string' || value instanceof PyBytes) return value;
-  if (value instanceof PyInstance && typeof value.primitive === 'string') return value;
+  if (isPath(value)) return value;
   const method = lookupSpecial(value, '__fspath__');
   if (method === undefined) {
     throw typeError(`expected str, bytes or os.PathLike object, not ${typeName(value)}`);
   }
   const result = callValue(bindValue(method, value), []);
-  if (typeof result === 'string' || result instanceof PyBytes) return result;
+  if (isPath(result)) return result;
   throw typeError(`expected ${typeName(value)}.__fspath__() to return str or bytes, not ${typeName(result)}`);
+}
+
+function isPath(value: PyValue): boolean {
+  return typeof unbox(value) === 'string' || value instanceof PyBytes;
 }
 
 /** `os.fsencode`: a path as bytes in the file system encoding of macOS, UTF-8 with surrogateescape. */

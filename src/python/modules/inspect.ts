@@ -70,9 +70,16 @@ registerSourceModule(
       ]),
       [
         'signature',
-        builtin('signature', 'takes', 1, 1, ([value]) => signature(value), {
-          keywords: ['follow_wrapped', 'globals', 'locals', 'eval_str', 'annotation_format'],
-        }),
+        builtin(
+          'signature',
+          'takes',
+          1,
+          1,
+          ([value], kwargs) => signature(value, kwargs?.get('annotation_format') ?? 1n),
+          {
+            keywords: ['follow_wrapped', 'globals', 'locals', 'eval_str', 'annotation_format'],
+          }
+        ),
       ],
       ['Signature', signatureClass],
       ['Parameter', parameterClass],

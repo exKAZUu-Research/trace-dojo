@@ -17,6 +17,7 @@ import inspect
 import keyword
 import itertools
 import abc
+import annotationlib
 from reprlib import recursive_repr
 
 
@@ -547,12 +548,13 @@ def _make_annotate_function(__class__, method_name, annotation_fields, return_ty
     # from a regular __init__ function
 
     def __annotate__(format, /):
+        Format = annotationlib.Format
         match format:
-            case 1 | 3 | 4:
+            case Format.VALUE | Format.FORWARDREF | Format.STRING:
                 cls_annotations = {}
                 for base in reversed(__class__.__mro__):
                     cls_annotations.update(
-                        _get_annotations(base)
+                        annotationlib.get_annotations(base, format=format)
                     )
 
                 new_annotations = {}
@@ -565,7 +567,10 @@ def _make_annotate_function(__class__, method_name, annotation_fields, return_ty
                         pass
 
                 if return_type is not MISSING:
-                    new_annotations["return"] = return_type
+                    if format == Format.STRING:
+                        new_annotations["return"] = annotationlib.type_repr(return_type)
+                    else:
+                        new_annotations["return"] = return_type
 
                 return new_annotations
 
@@ -1221,7 +1226,7 @@ def _process_class(cls, init, repr, eq, order, unsafe_hash, frozen,
         try:
             # In some cases fetching a signature is not possible.
             # But, we surely should not fail in this case.
-            text_sig = str(inspect.signature(cls)).replace(' -> None', '')
+            text_sig = str(inspect.signature(cls, annotation_format=annotationlib.Format.FORWARDREF)).replace(' -> None', '')
         except (TypeError, ValueError):
             text_sig = ''
         cls.__doc__ = (cls.__name__ + text_sig)
@@ -1673,7 +1678,7 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
     ns = {}
     ns.update(namespace)
     ns.update(defaults)
-    cls = type(cls_name, bases, ns)
+    cls = types.new_class(cls_name, bases, {}, lambda prepared: prepared.update(ns))
     _set_annotations(cls, {ann: get_any() if t is _ANY_MARKER else t for ann, t in annotations.items()})
 
     # For pickling to work, the __module__ variable needs to be set to the frame
