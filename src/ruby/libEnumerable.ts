@@ -622,7 +622,27 @@ function orderOf(block: RProc | undefined, a: Value, b: Value): Gen<number> {
 
 def('Enumerable', 'minmax_by', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'minmax_by', []);
-  return arr([yield* extremeBy(self, block, false), yield* extremeBy(self, block, true)]);
+  let min: Value | undefined;
+  let max: Value | undefined;
+  let minKey: Value | undefined;
+  let maxKey: Value | undefined;
+  yield* iterate(self, function* (value) {
+    const key = yield* call(block, value);
+    if (minKey === undefined || maxKey === undefined) {
+      min = max = value;
+      minKey = maxKey = key;
+      return;
+    }
+    if ((yield* compareValues(key, minKey)) < 0) {
+      min = value;
+      minKey = key;
+    }
+    if ((yield* compareValues(key, maxKey)) > 0) {
+      max = value;
+      maxKey = key;
+    }
+  });
+  return arr([min ?? NIL, max ?? NIL]);
 });
 
 // Grouping ------------------------------------------------------------------------------------------------------------

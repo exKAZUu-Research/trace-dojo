@@ -13,6 +13,34 @@ afterEach(() => {
 const run = (program: string): ProgramExecution => executeProgram('ruby', program);
 
 test.each([
+  ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
+  ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],
+  ['cyclic array equality', 'a = []; a << a; b = []; b << b; p a == b', 'true\n'],
+  ['minmax_by block calls', 'n=0; p [3,1,2].minmax_by { |x| n+=1; x }; p n', '[1, 3]\n3\n'],
+  ['receiver local in index', 'p (a = [10, 20])[a.size - 1]', '20\n'],
+  ['character indexes after emoji', 's = "😀a😀b"; p s.index("b"); p s.rindex("a")', '3\n1\n'],
+  ['named format substitution', 'p format("%{name}!", name: "Ruby")', '"Ruby!"\n'],
+  ['negative Float integer formatting', 'p format("%d", -1.2)', '"-1"\n'],
+  ['hexadecimal Float rounding', 'p format("%.1a", 1.99); p format("%.0a", 1.75)', '"0x1.0p+1"\n"0x1p+1"\n'],
+])('%s matches Ruby output', (_name, program, stdout) => {
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('cyclic module inclusion raises a Ruby error', () => {
+  expect(run('module A; end; module B; include A; end; module A; include B; end')).toMatchObject({
+    uncaughtException: 'cyclic include detected (ArgumentError)',
+  });
+});
+
+test('a positional splat after keyword arguments is rejected before execution', () => {
+  expect(run('puts "before"; def f(*a, **k); end; f(a: 1, *[])')).toMatchObject({ kind: 'compileError' });
+});
+
+test('puts limits exponentially nested output before flattening it', () => {
+  expect(run('a = ["x"]\n25.times { a = [a, a] }\nputs a')).toEqual({ kind: 'limitExceeded', limit: 'output' });
+});
+
+test.each([
   [
     'distinct array keys',
     'h = {}\nh[["a,sb"]] = 1\nh[["a", "b"]] = 2\np h.size\np h[["a,sb"]]\np h[["a", "b"]]',

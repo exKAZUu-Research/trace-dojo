@@ -10,31 +10,31 @@ import { arr, str } from './values';
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
-/** The text `puts` writes for its arguments: each on its own line, arrays flattened, nil as an empty line. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Ruby's method takes these argument forms, which the branches mirror.
-export function* putsText(args: Value[]): Gen<string> {
-  if (args.length === 0) return '\n';
-  let text = '';
+/** Writes each puts value as it is visited, bounding recursive output. */
+function* writePuts(target: Value, args: Value[]): Gen<void> {
+  if (args.length === 0) {
+    yield* write(target, '\n');
+    return;
+  }
   const visit = function* (value: Value, seen: Set<RArray>): Gen<void> {
+    rt().spend();
     if (value instanceof RArray) {
       if (seen.has(value)) {
-        text += '[...]\n';
-        return;
-      }
-      if (value.items.length === 0 && seen.size === 0) {
-        text += '\n';
+        yield* write(target, '[...]\n');
         return;
       }
       seen.add(value);
-      for (const item of value.items) yield* visit(item, seen);
-      seen.delete(value);
+      try {
+        for (const item of value.items) yield* visit(item, seen);
+      } finally {
+        seen.delete(value);
+      }
       return;
     }
     const line = value instanceof RString ? value.s : yield* toS(value);
-    text += line.endsWith('\n') ? line : `${line}\n`;
+    yield* write(target, line.endsWith('\n') ? line : `${line}\n`);
   };
   for (const arg of args) yield* visit(arg, new Set());
-  return text;
 }
 
 function* write(target: Value, text: string): Gen<void> {
@@ -58,7 +58,7 @@ def(
   'puts',
   [0, -1],
   function* (_self, args) {
-    yield* write(stdout(), yield* putsText(args));
+    yield* writePuts(stdout(), args);
     return NIL;
   },
   PRIVATE
@@ -137,7 +137,7 @@ def(
   [0, -1],
   function* (_self, args, _block, keywords) {
     void keywords;
-    if (args.length > 0) channel('stderr').write(yield* putsText(args));
+    if (args.length > 0) yield* writePuts(rt().globals.get('$stderr') ?? NIL, args);
     return NIL;
   },
   { ...PRIVATE, keywords: true }
@@ -152,7 +152,7 @@ function* charOf(value: Value): Gen<string> {
 // $stdout and $stderr ----------------------------------------------------------------------------------------------
 
 def('IO', 'puts', [0, -1], function* (self: RObject, args) {
-  yield* write(self, yield* putsText(args));
+  yield* writePuts(self, args);
   return NIL;
 });
 def('IO', 'print', [0, -1], function* (self: RObject, args) {

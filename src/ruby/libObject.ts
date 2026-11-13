@@ -524,6 +524,7 @@ def('Module', 'include', [1, -1], function* (self: RClass, modules) {
     }
   }
   for (const module of modules.toReversed() as RClass[]) {
+    if (module.ancestors().includes(self)) throw argumentError('cyclic include detected');
     if (self.ancestors().includes(module)) continue;
     self.includes.unshift(module);
     invalidateMethodCaches();

@@ -538,6 +538,8 @@ export class Converter {
           break;
         }
         default: {
+          if (pairs.length > 0 && child.type === 'splat_argument')
+            this.fail(child, 'キーワード引数の後に位置引数は書けません。');
           if (pairs.length > 0 && child.type !== 'splat_argument') {
             args.push({ k: 'hash', items: this.hashItems(pairs.splice(0)), braces: false });
           }
@@ -678,6 +680,7 @@ export class Converter {
     const argumentsNode = node.childForFieldName('arguments');
     const blockNode = node.childForFieldName('block');
     const operator = node.childForFieldName('operator')?.text;
+    const recv = receiverNode ? this.expr(receiverNode) : undefined;
     const { args, blockArg } = argumentsNode ? this.argumentList(argumentsNode) : { args: [], blockArg: undefined };
     if (methodNode?.type === 'super') {
       const block = blockNode ? this.block(blockNode, false) : undefined;
@@ -685,7 +688,6 @@ export class Converter {
       return { k: 'super', args, blockArg, block, used: use, row: node.startPosition.row };
     }
     const name = methodNode ? methodNode.text : 'call';
-    const recv = receiverNode ? this.expr(receiverNode) : undefined;
     const block = blockNode ? this.block(blockNode, false) : undefined;
     if (block && blockArg) this.fail(node, 'ブロックと & 引数を同時に渡すことはできません。');
     const call: Call = {
@@ -707,10 +709,11 @@ export class Converter {
   private elementReference(node: Node, use: Use): Expr {
     const object = required(node.childForFieldName('object'));
     const rest = namedChildren(node).filter((child) => child.id !== object.id && child.type !== 'comment');
+    const recv = this.expr(object);
     const { args, blockArg } = this.argumentListFrom(rest);
     return {
       k: 'call',
-      recv: this.expr(object),
+      recv,
       name: '[]',
       args,
       blockArg,
@@ -728,7 +731,11 @@ export class Converter {
     for (const child of nodes) {
       if (child.type === 'pair' || child.type === 'hash_splat_argument') pairs.push(child);
       else if (child.type === 'block_argument') this.unsupported(child, '[] への & 引数');
-      else args.push(this.argument(child));
+      else {
+        if (pairs.length > 0 && child.type === 'splat_argument')
+          this.fail(child, 'キーワード引数の後に位置引数は書けません。');
+        args.push(this.argument(child));
+      }
     }
     if (pairs.length > 0) args.push({ k: 'hash', items: this.hashItems(pairs), braces: false });
     return { args };
@@ -1148,8 +1155,7 @@ function stepKindOf(e: Expr): StepKind {
  */
 function classBodyStepKind(e: Expr, step: StepKind): StepKind {
   if (step === 'call' || step === 'expr' || step === 'value') return 'none';
-  if (step === 'assign' && (e.k === 'asgn' || e.k === 'opasgn') && e.k === 'asgn' && isLiteral(e.value))
-    return 'constant';
+  if (step === 'assign' && e.k === 'asgn' && isLiteral(e.value)) return 'constant';
   return step;
 }
 

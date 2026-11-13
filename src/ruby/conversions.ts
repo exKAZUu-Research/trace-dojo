@@ -4,7 +4,7 @@ import { hashGet } from './hashes';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
 import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
-import { classOf, isA, realClassOf, truthy } from './values';
+import { classOf, isA, realClassOf, str, truthy } from './values';
 
 // Numbers -------------------------------------------------------------------------------------------------------------
 
@@ -33,7 +33,7 @@ export const intToFloat: (value: bigint) => number = Number;
 
 /** Converts a Float to an Integer, truncating, or raises for NaN and infinities as `to_i` does. */
 export function floatToInt(value: number): bigint {
-  if (Number.isNaN(value)) throw rt().c.FloatDomainError && floatDomain('NaN');
+  if (Number.isNaN(value)) throw floatDomain('NaN');
   if (!Number.isFinite(value)) throw floatDomain(value > 0 ? 'Infinity' : '-Infinity');
   return BigInt(Math.trunc(value));
 }
@@ -184,8 +184,8 @@ export function* inspectHash(hash: RHash): Gen<string> {
     const parts: string[] = [];
     for (const { key, value } of hash.map.values()) {
       if (key instanceof RSymbol) {
-        const name = symInspect(key.name).slice(1);
-        parts.push(`${isSimpleSymbol(key.name) ? key.name : name}: ${yield* inspect(value)}`);
+        const name = isSimpleSymbol(key.name) ? key.name : yield* inspect(str(key.name));
+        parts.push(`${name}: ${yield* inspect(value)}`);
       } else {
         parts.push(`${yield* inspect(key)} => ${yield* inspect(value)}`);
       }
@@ -362,7 +362,7 @@ export function symInspect(name: string): string {
 // Comparisons ---------------------------------------------------------------------------------------------------------
 
 /** `a == b`, with the library's own types compared without calling methods unless the program redefined them. */
-export function* rEquals(a: Value, b: Value): Gen<boolean> {
+export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
   if (typeof a === 'bigint' || typeof a === 'number') {
     if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
@@ -377,18 +377,24 @@ export function* rEquals(a: Value, b: Value): Gen<boolean> {
   if (a instanceof RString) return b instanceof RString && a.s === b.s;
   if (a instanceof RArray) {
     if (!(b instanceof RArray) || a.items.length !== b.items.length) return false;
-    for (let index = 0; index < a.items.length; index++) {
-      if (index >= b.items.length || !(yield* rEquals(a.items[index], b.items[index]))) return false;
-    }
-    return true;
+    return yield* eqlContainer(a, b, pairs, function* () {
+      for (let index = 0; index < a.items.length; index++)
+        if (!(yield* rEquals(a.items[index], b.items[index], pairs))) return false;
+      return true;
+    });
   }
-  if (a instanceof RHash) return yield* hashEquals(a, b);
+  if (a instanceof RHash)
+    return b instanceof RHash && (yield* eqlContainer(a, b, pairs, () => hashEquals(a, b, pairs)));
   if (a instanceof RRange) {
     return (
       b instanceof RRange &&
-      a.exclusive === b.exclusive &&
-      (yield* rEquals(a.begin, b.begin)) &&
-      (yield* rEquals(a.end, b.end))
+      (yield* eqlContainer(a, b, pairs, function* () {
+        return (
+          a.exclusive === b.exclusive &&
+          (yield* rEquals(a.begin, b.begin, pairs)) &&
+          (yield* rEquals(a.end, b.end, pairs))
+        );
+      }))
     );
   }
   const method = classOf(a).findMethod('==');
@@ -398,11 +404,11 @@ export function* rEquals(a: Value, b: Value): Gen<boolean> {
   return false;
 }
 
-function* hashEquals(a: RHash, b: Value): Gen<boolean> {
+function* hashEquals(a: RHash, b: Value, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
   if (!(b instanceof RHash) || a.map.size !== b.map.size) return false;
   for (const entry of a.map.values()) {
     const other = yield* hashGet(b, entry.key);
-    if (!other || !(yield* rEquals(entry.value, other.value))) return false;
+    if (!other || !(yield* rEquals(entry.value, other.value, pairs))) return false;
   }
   return true;
 }
@@ -418,7 +424,7 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
 /** `a.eql?(b)`: equal values of the same type, as Hash keys compare. */
 export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   if (typeof a !== typeof b) return false;
-  if (typeof a === 'number') return a === b || (Number.isNaN(a) && Number.isNaN(b as number) && false);
+  if (typeof a === 'number') return a === b;
   if (a instanceof RString) return b instanceof RString && a.s === b.s;
   if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
   if (a instanceof RArray) return b instanceof RArray && (yield* eqlArray(a, b, pairs));

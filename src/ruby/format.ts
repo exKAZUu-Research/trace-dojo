@@ -1,4 +1,4 @@
-import { formatFloat, inspect, toS, toStr } from './conversions';
+import { floatToInt, formatFloat, inspect, toS, toStr } from './conversions';
 import { argumentError, floatDomainError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
@@ -51,6 +51,7 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     }
     const spec: Spec = { minus: false, plus: false, space: false, zero: false, sharp: false };
     let value: Value | undefined;
+    let braceSubstitution = false;
     for (;;) {
       const flag = template[index];
       if (flag === '-') spec.minus = true;
@@ -66,17 +67,14 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
         index = close;
         if (flag === '{') {
           result += pad(yield* toS(named), spec, false);
-          value = undefined;
+          braceSubstitution = true;
           break;
         }
         value = named;
       } else break;
       index++;
     }
-    if (template[index - 1] === '}' && value === undefined && template[index - 1 - 0] === '}') {
-      index--;
-      continue;
-    }
+    if (braceSubstitution) continue;
     let digits = /^\d+/.exec(template.slice(index))?.[0];
     if (digits && template[index + digits.length] === '$') {
       value = args[Number(digits) - 1];
@@ -178,7 +176,7 @@ function* intArg(value: Value): Gen<bigint> {
     if (!Number.isFinite(value)) {
       throw floatDomainError(formatFloat(value));
     }
-    return BigInt(Math.floor(value));
+    return floatToInt(value);
   }
   if (value instanceof RString) {
     return (yield* kernelInteger([value], undefined)) as bigint;
@@ -351,7 +349,19 @@ function hexFloat(value: number, precision: number | undefined): string {
     fraction += digit.toString(16);
     rest -= digit;
   }
-  if (precision !== undefined) fraction = fraction.slice(0, precision).padEnd(precision, '0');
+  if (precision !== undefined) {
+    const digits = Math.min(precision, 13);
+    const scale = 16 ** digits;
+    const scaled = mantissa * scale;
+    const whole = Math.floor(scaled);
+    const remainder = scaled - whole;
+    let rounded = whole + (remainder > 0.5 || (remainder === 0.5 && whole % 2 === 1) ? 1 : 0);
+    if (rounded === 2 * scale) {
+      rounded = scale;
+      exponent++;
+    }
+    fraction = precision === 0 ? '' : (rounded - scale).toString(16).padStart(digits, '0').padEnd(precision, '0');
+  }
   return `0x1${fraction ? `.${fraction}` : ''}p${exponent < 0 ? '-' : '+'}${Math.abs(exponent)}`;
 }
 

@@ -406,7 +406,7 @@ function unitOffset(text: string, position: number): number {
 
 function charPosition(text: string, offset: number): number {
   if (!SURROGATE.test(text)) return offset;
-  return text.slice(0, offset).length;
+  return charLength(text.slice(0, offset));
 }
 
 def('String', 'index', [1, 2], function* (self: RString, args) {
