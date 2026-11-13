@@ -2243,3 +2243,18 @@ public class Main { public static void main(String[] a) { TreeMap<String,Integer
     stdout: 'true false false false\ntrue true true true\n',
   });
 });
+
+test("Java's views of an unmodifiable map reject every change at once", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { Map<String,Integer> view = Collections.unmodifiableMap(new HashMap<>(Map.of("a",80,"b",90)));
+  t("vri", () -> view.values().removeIf(v -> v < 50)); t("ksr", () -> view.keySet().remove("z")); t("ksra", () -> view.keySet().removeAll(List.of("z"))); t("ksrt", () -> view.keySet().retainAll(List.of("a","b"))); t("esri", () -> view.entrySet().removeIf(e -> e.getValue() < 50));
+  t("clr", () -> { Collections.unmodifiableMap(new HashMap<>()).keySet().clear(); return "ok"; }); t("ok", () -> view.keySet().contains("a") + " " + view.values() + " " + view.entrySet().size());
+  Map<String,Integer> h = new HashMap<>(Map.of("a", 1)); t("hm", () -> h.keySet().remove("z") + " " + h.values().removeIf(v -> v > 5) + " " + h.keySet().retainAll(List.of("a")));
+  t("mof", () -> Map.of("a", 1).keySet().remove("z")); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'vri java.lang.UnsupportedOperationException\nksr java.lang.UnsupportedOperationException\nksra java.lang.UnsupportedOperationException\nksrt java.lang.UnsupportedOperationException\nesri java.lang.UnsupportedOperationException\nclr java.lang.UnsupportedOperationException\nok true [80, 90] 2\nhm false false false\nmof false\n',
+  });
+});

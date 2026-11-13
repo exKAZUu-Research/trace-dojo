@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
+// code-gauge-allow-file fileNcss 415 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
 import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
@@ -285,7 +285,12 @@ export function checkModifiable(frame: Frame, collection: Value, changesSize: bo
 
 /** Throws at the start of a mutator of a collection whose class rejects every call, before its arguments are read. */
 export function rejectEagerly(frame: Frame, collection: Value): void {
-  if (eagerlyRejectingClasses.has((collection as JavaObject).cls)) throwBuiltin(frame, 'UnsupportedOperationException');
+  const object = collection as JavaObject;
+  // A view of an unmodifiable map wrapper is the JDK's UnmodifiableSet or UnmodifiableCollection of the map's view.
+  const viewed = mapViewSources.get(object)?.map;
+  if (eagerlyRejectingClasses.has(object.cls) || (viewed && unmodifiableWrappers.has(viewed))) {
+    throwBuiltin(frame, 'UnsupportedOperationException');
+  }
 }
 
 /**
@@ -515,6 +520,7 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
     addMethod(cls, name, [parameter], BOOLEAN, false, (frame) => throwBuiltin(frame, 'UnsupportedOperationException'));
   }
   addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
+    rejectEagerly(frame, receiver);
     const view = mapViewSources.get(receiver as JavaObject);
     if (view && looksUpThroughMap(receiver)) {
       const { mapClass } = frame.runtime.builtins.collections;
@@ -533,6 +539,7 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
     return true;
   });
   addMethod(cls, 'clear', [], VOID, false, (frame, receiver) => {
+    rejectEagerly(frame, receiver);
     removeElements(frame, receiver, () => true);
   });
   linkOverrides(cls);
