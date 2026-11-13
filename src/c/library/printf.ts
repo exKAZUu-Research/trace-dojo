@@ -263,7 +263,7 @@ function floatField(spec: Spec, value: number): string {
   if (!Number.isFinite(magnitude)) {
     const text = Number.isNaN(magnitude) ? 'nan' : 'inf';
     // macOS prints no sign for a NaN.
-    const shownSign = Number.isNaN(magnitude) ? signOf(spec) : sign;
+    const shownSign = Number.isNaN(magnitude) ? '' : sign;
     return shownSign + (upper ? text.toUpperCase() : text);
   }
   let body: string;

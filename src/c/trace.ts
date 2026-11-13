@@ -117,7 +117,7 @@ class Snapshotter {
     return readScalar(block.view, offset, type);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
+  // code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of type.
   // code-gauge-allow functionNcss 35 -- One display case per C type; helpers isolate strings and pointed-to elements.
   private scalarOf(type: CType, where: Where): Scalarish | typeof NOT_SCALAR | undefined {
     switch (type.kind) {
@@ -131,7 +131,7 @@ class Snapshotter {
         if (value === undefined) return undefined;
         if (value === 0) return NOT_SCALAR;
         const block = this.runtime.memory.find(value as number);
-        if (!block) return `0x${Number(value).toString(16)}`;
+        if (!block || type.to.kind === 'function' || type.to.kind === 'void') return `0x${Number(value).toString(16)}`;
         if (isCharType(type.to)) return this.stringAt(value as number) ?? NOT_SCALAR;
         if (isArrayLike(this.runtime, type, where)) return this.elementsFrom(type.to, value as number);
         return NOT_SCALAR;
@@ -195,7 +195,12 @@ class Snapshotter {
         const value = this.read(type, where);
         if (value === undefined) return undefined;
         if (value === 0) return NULL_NODE;
-        return this.pointeeNode(type.to, value as number, seen);
+        return (
+          this.pointeeNode(type.to, value as number, seen) ?? {
+            kind: 'value',
+            value: `0x${Number(value).toString(16)}`,
+          }
+        );
       }
       case 'array': {
         if (!('address' in where)) return undefined;

@@ -475,3 +475,104 @@ test('float nextafter and nexttoward advance by a float representable step', () 
     uncaughtException: undefined,
   });
 });
+
+test('bit-field prefix and postfix update results use their distinct promotions', () => {
+  const source = `#include <stdio.h>
+int main(void){struct S{unsigned x:3;}s={1};printf("%d ",s.x++ < -1);printf("%d ",--s.x < -1);printf("%d ",s.x-- < -1);printf("%d ",++s.x < -1);printf("%d\\n",(s.x=1)<-1);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 0 1 0 0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['int a={1,f(),x};return a-1;', 'int a[1]={1,f(),x};return a[0]-1;'])(
+  'discarded initializers are checked without linker references: %s',
+  (body) => {
+    expect(executeProgram('c', `int f(void);extern int x;int main(void){${body}}`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('function and void pointers remain visible as pointer values', () => {
+  const source = `int dbl(int x){return 2*x;}
+int main(void){
+ int (*op)(int)=dbl;
+ int (*ops[1])(int)={dbl};
+ void *p=(void*)dbl;
+ int r=op(2);
+}`;
+  const trace = traceProgram('c', source, source);
+  const step = trace.traceItems.find((item) => item.line === 6);
+  expect(step?.vars.op).toMatch(/^0x[\da-f]+$/);
+  expect(step?.vars.p).toEqual(step?.vars.op);
+  expect(step?.referenceVars.ops).toEqual({ kind: 'array', entries: { 0: { kind: 'value', value: step?.vars.op } } });
+});
+
+test('math decomposition preserves exponents, exact remainders, NaN and signed zero', () => {
+  const source = `#include <stdio.h>
+#include <math.h>
+int main(void){double i;float f;int q;
+printf("%g %g %g\\n",logb(1.7976931348623157e308),logb(1023.9999999999999),logb(2.225073858507201e-308));
+printf("%.17g %g %g\\n",remainder(1e300,811.75),remainder(-0.0,3),remquo(7,2,&q));printf("%d\\n",q);
+printf("%g %g %g %g %g\\n",modf(-0.0,&i),modff(-0.0f,&f),modff(NAN,&f),modff(-INFINITY,&f),modff(INFINITY,&f));
+printf("[%+g][% e][%+010g][%-+10.3f][%+a]\\n",NAN,NAN,NAN,NAN,NAN);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1023 9 -1023\n-380.75 -0 -1\n4\n-0 -0 nan -0 0\n[nan][nan][       nan][nan       ][nan]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('floating conversion reports inexact underflow while allowing exact subnormals', () => {
+  const source = `#include <stdlib.h>
+#include <stdio.h>
+#include <errno.h>
+int main(void){char*inputs[]={"1e-40","0x1p-149","1e-310","0x1p-1074","0x1p-1022","0"};for(int i=0;i<6;i++){errno=0;float f=strtof(inputs[i],0);printf("%d ",errno);errno=0;double d=strtod(inputs[i],0);printf("%d\\n",errno);}}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '34 0\n0 0\n34 34\n34 0\n34 0\n0 0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'int *p=a[0]+2;printf("%d",*p);',
+  'int *p=&a[0][2];printf("%d",p[0]);',
+  'int *p=a[0];p+=2;printf("%d",*p);',
+  'int *p=a[0]+1;p++;printf("%d",*p);',
+  'int *p=a[0]+2;int **q=&p;printf("%d",**q);',
+  'int *p=a[0]+2;int *q=identity(p);printf("%d",*q);',
+  'int *p=a[0]+2;printf("%d",read(p));',
+  'struct S s={a[0]+2};struct S t=s;printf("%d",*t.p);',
+  'struct S s={a[0]+2};printf("%d",*copy(s).p);',
+  'int *p[1]={a[0]+2};printf("%d",*p[0]);',
+  'int *p=a[0]+2;int *q;memcpy(&q,&p,sizeof p);printf("%d",*q);',
+  'int *p=a[0]+2;int *q;memmove(&q,&p,sizeof p);printf("%d",*q);',
+  'int **p=malloc(sizeof *p);*p=a[0]+2;p=realloc(p,2*sizeof *p);printf("%d",**p);',
+  'int *p=a[0]+2;printf("%d",*(1?p:a[1]));',
+  'int *p=a[0]+2;printf("%d",*((void)0,p));',
+  'int *p=a[0]+2;void*q=p;printf("%d",*(int*)q);',
+  'int *p;printf("%d",*(p=a[0]+2));',
+])('stored pointer provenance stops row overrun: %s', (body) => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+struct S{int*p;};struct S copy(struct S s){return s;}int*identity(int*p){return p;}int read(int*p){return *p;}
+int main(void){int a[2][2]={{1,2},{3,4}};${body}}`;
+  const result = executeProgram('c', source);
+  expect(result).toMatchObject({ kind: 'executed', stdout: '' });
+  expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+});
+
+test('equal numeric row pointers retain different bounds and valid backward updates', () => {
+  const source = `#include <stdio.h>
+int a[2][2]={{1,2},{3,4}};int *p=a[0]+2;int*q=a[1];int main(void){printf("%d %d ",p==q,*q);p--;printf("%d ",*p);p=a[1];printf("%d\\n",*p);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1 3 2 3\n',
+    uncaughtException: undefined,
+  });
+});

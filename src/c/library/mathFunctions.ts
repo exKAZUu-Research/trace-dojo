@@ -1,4 +1,4 @@
-import { type Scalar, toInt32 } from '../arith';
+import type { Scalar } from '../arith';
 import { CRuntimeError } from '../errors';
 import type { SpecialCall } from '../expressionCompiler';
 import type { NativeFunction, Runtime } from '../runtime';
@@ -53,8 +53,7 @@ const UNARY: Record<string, (x: number) => number> = {
   log10: Math.log10,
   log2: Math.log2,
   log1p: Math.log1p,
-  logb: (x) =>
-    x === 0 ? Number.NEGATIVE_INFINITY : Number.isFinite(x) ? Math.floor(Math.log2(Math.abs(x))) : Math.abs(x),
+  logb: (x) => (x === 0 ? Number.NEGATIVE_INFINITY : Number.isFinite(x) ? frexp(x).exponent - 1 : Math.abs(x)),
   sqrt: Math.sqrt,
   cbrt: Math.cbrt,
   fabs: Math.abs,
@@ -80,11 +79,36 @@ function pow(x: number, y: number): number {
   return negative ? -magnitude : magnitude;
 }
 
-function remainder(x: number, y: number): number {
-  if (y === 0 || !Number.isFinite(x) || Number.isNaN(y)) return Number.NaN;
-  if (!Number.isFinite(y)) return x;
-  const quotient = roundHalfEven(x / y);
-  return x - quotient * y;
+function remainderParts(x: number, y: number): { value: number; quotient: number } {
+  if (y === 0 || !Number.isFinite(x) || Number.isNaN(y)) return { value: Number.NaN, quotient: 0 };
+  if (!Number.isFinite(y)) return { value: x, quotient: 0 };
+  const a = exactParts(Math.abs(x));
+  const b = exactParts(Math.abs(y));
+  const exponent = Math.min(a.exponent, b.exponent);
+  const numerator = a.mantissa << BigInt(a.exponent - exponent);
+  const denominator = b.mantissa << BigInt(b.exponent - exponent);
+  let quotient = numerator / denominator;
+  let residual = numerator % denominator;
+  const twice = residual * 2n;
+  if (twice > denominator || (twice === denominator && (quotient & 1n) === 1n)) {
+    quotient++;
+    residual -= denominator;
+  }
+  const sign = x < 0 || Object.is(x, -0) ? -1 : 1;
+  const magnitude = residual < 0n ? -residual : residual;
+  const value = sign * (residual < 0n ? -1 : 1) * roundBinary(magnitude, 1n, exponent);
+  return { value, quotient: sign * (y < 0 ? -1 : 1) * Number(quotient & 0x7fn) };
+}
+
+function modf(isFloat: boolean): NativeFunction {
+  return (runtime, [x, integer]) => {
+    const value = x as number;
+    const whole = Number.isFinite(value) ? Math.trunc(value) : value;
+    storeDouble(runtime, asAddress(integer), whole, isFloat);
+    if (Number.isNaN(value)) return value;
+    const fraction = Number.isFinite(value) ? value - whole : 0;
+    return fraction || (value < 0 || Object.is(value, -0) ? -0 : 0);
+  };
 }
 
 function nextAfter(x: number, y: number, isFloat = false): number {
@@ -109,7 +133,7 @@ const BINARY: Record<string, (x: number, y: number) => number> = {
   atan2: Math.atan2,
   pow,
   fmod: (x, y) => x % y,
-  remainder,
+  remainder: (x, y) => remainderParts(x, y).value,
   hypot: Math.hypot,
   fmin: (x, y) => (Number.isNaN(x) ? y : Number.isNaN(y) ? x : Math.min(x, y)),
   fmax: (x, y) => (Number.isNaN(x) ? y : Number.isNaN(y) ? x : Math.max(x, y)),
@@ -200,24 +224,8 @@ export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
   llroundf: (_runtime, [x]) => toLong(roundHalfAway(x as number)),
   lrint: (_runtime, [x]) => toLong(roundHalfEven(x as number)),
   llrint: (_runtime, [x]) => toLong(roundHalfEven(x as number)),
-  modf: (runtime, [x, integer]) => {
-    const value = x as number;
-    const whole = Number.isFinite(value) ? Math.trunc(value) : value;
-    storeDouble(runtime, asAddress(integer), whole, false);
-    return Number.isFinite(value)
-      ? value - whole || (value < 0 ? -0 : 0)
-      : Number.isNaN(value)
-        ? value
-        : value < 0
-          ? -0
-          : 0;
-  },
-  modff: (runtime, [x, integer]) => {
-    const value = x as number;
-    const whole = Number.isFinite(value) ? Math.trunc(value) : value;
-    storeDouble(runtime, asAddress(integer), whole, true);
-    return Math.fround(Number.isFinite(value) ? value - whole : 0);
-  },
+  modf: modf(false),
+  modff: modf(true),
   frexp: (runtime, [x, exponent]) => {
     const result = frexp(x as number);
     storeInt(runtime, asAddress(exponent), result.exponent);
@@ -241,9 +249,9 @@ export const MATH_FUNCTIONS: Record<string, NativeFunction> = {
   nan: () => Number.NaN,
   nanf: () => Number.NaN,
   remquo: (runtime, [x, y, quotient]) => {
-    const result = remainder(x as number, y as number);
-    storeInt(runtime, asAddress(quotient), toInt32(roundHalfEven((x as number) / (y as number))));
-    return result;
+    const result = remainderParts(x as number, y as number);
+    storeInt(runtime, asAddress(quotient), result.quotient);
+    return result.value;
   },
   __builtin_huge_val: () => Number.POSITIVE_INFINITY,
   __builtin_huge_valf: () => Number.POSITIVE_INFINITY,

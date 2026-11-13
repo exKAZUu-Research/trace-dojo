@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 546 -- Declaration and initializer compilation share symbol and type state; splitting the phase would only distribute that state across modules.
+// code-gauge-allow-file fileNcss 561 -- Declaration and initializer compilation share symbol and type state; splitting the phase would only distribute that state across modules.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -18,6 +18,7 @@ import { declaredName, findFunctionDeclarator } from './convert';
 import { isNullConstant, type SpecialCall, writeBits } from './expressionCompiler';
 import { decodeStringLiteral } from './literals';
 import { TURTLE_HEADER_NAME } from './parse';
+import { evaluate, type Evaluator, replacePointerRanges } from './pointerBounds';
 import {
   Completion,
   type Exec,
@@ -490,10 +491,12 @@ export class Compiler extends StatementCompiler {
               frame.live[index] = true;
               const block = frame.runtime.memory.find(frame.bases[index]);
               block?.initialized.fill(0);
+              block?.pointerRanges.clear();
             }
           : (frame) => {
               frame.live[index] = true;
               frame.slots[index] = undefined;
+              frame.pointerRanges.delete(index);
             },
         initializes: false,
       };
@@ -502,7 +505,10 @@ export class Compiler extends StatementCompiler {
       const value = this.scalarInitializer(type, init);
       return {
         run: (frame) => {
-          frame.slots[index] = value(frame) as number;
+          const result = evaluate(value, frame);
+          frame.slots[index] = result.value as number;
+          if (result.range) frame.pointerRanges.set(index, result.range);
+          else frame.pointerRanges.delete(index);
           frame.live[index] = true;
         },
         initializes: true,
@@ -535,7 +541,7 @@ export class Compiler extends StatementCompiler {
 
   // Initializers ------------------------------------------------------------------------------------------------------
 
-  private scalarInitializer(type: CType, init: Initializer): (frame: Frame) => Value {
+  private scalarInitializer(type: CType, init: Initializer): Evaluator {
     const expression = this.singleExpression(type, init);
     return this.convertForAssignment(this.rvalue(expression), type, 'initialization', expression.row);
   }
@@ -551,7 +557,7 @@ export class Compiler extends StatementCompiler {
   }
 
   private validateInitializer(init: Initializer): void {
-    if (init.kind === 'expression') this.rvalue(init.expression);
+    if (init.kind === 'expression') this.unevaluated(() => this.rvalue(init.expression));
     else for (const item of init.items) this.validateInitializer(item);
   }
 
@@ -586,7 +592,10 @@ export class Compiler extends StatementCompiler {
       const operand = this.rvalue(expression);
       this.checkStatic(operand, expression, isStatic);
       const value = this.convertForAssignment(operand, unqualified(type), 'initialization', expression.row);
-      return (frame, address) => storeValue(frame.runtime, address, unqualified(type), value(frame));
+      return (frame, address) => {
+        const result = evaluate(value, frame);
+        storeValue(frame.runtime, address, unqualified(type), result.value, result.range);
+      };
     }
     if (init.items.length === 0) unsupported(init.row, '空の { } による初期化');
     const cursor = { items: init.items, index: 0 };
@@ -599,6 +608,7 @@ export class Compiler extends StatementCompiler {
     return (frame, address) => {
       const block = frame.runtime.memory.locate(address, size);
       const offset = address - block.base;
+      replacePointerRanges(block.pointerRanges, offset, size);
       block.bytes.fill(0, offset, offset + size);
       block.initialized.fill(255, offset, offset + size);
       for (const { offset: at, write } of writes) write(frame, address + at);
@@ -615,6 +625,7 @@ export class Compiler extends StatementCompiler {
         return (frame, address) => {
           const block = frame.runtime.memory.locate(address, size);
           const offset = address - block.base;
+          replacePointerRanges(block.pointerRanges, offset, size);
           block.bytes.fill(0, offset, offset + size);
           block.initialized.fill(255, offset, offset + size);
           for (const { offset: at, write } of writes) write(frame, address + at);
@@ -699,7 +710,13 @@ export class Compiler extends StatementCompiler {
       this.checkStatic(operand, expression, isStatic);
       const value = this.convertForAssignment(operand, unqualified(type), 'initialization', expression.row);
       const target = unqualified(type);
-      writes.push({ offset, write: (frame, address) => storeValue(frame.runtime, address, target, value(frame)) });
+      writes.push({
+        offset,
+        write: (frame, address) => {
+          const result = evaluate(value, frame);
+          storeValue(frame.runtime, address, target, result.value, result.range);
+        },
+      });
       return;
     }
     if (item.kind === 'list') {
@@ -736,6 +753,7 @@ export class Compiler extends StatementCompiler {
       offset,
       write: (frame, address) => {
         const block = frame.runtime.memory.locate(address, copied.length);
+        replacePointerRanges(block.pointerRanges, address - block.base, copied.length);
         block.bytes.set(copied, address - block.base);
       },
     });

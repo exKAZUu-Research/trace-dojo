@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 782 -- Expression compilation shares lvalue and conversion invariants; splitting by operator would couple more compiler classes.
+// code-gauge-allow-file fileNcss 819 -- Expression compilation shares lvalue and conversion invariants; splitting by operator would couple more compiler classes.
 import {
   binaryOperation,
   complement,
@@ -15,8 +15,21 @@ import type { BinaryOperator, Expression } from './ast';
 import { CompilerBase, type Entity, type Location, type LValue, type Operand } from './compilerBase';
 import { CRuntimeError } from './errors';
 import { decodeCharLiteral, decodeStringLiteral, parseNumber } from './literals';
-import { type Address, addressOf as pointerAddress, boundPointer, checkAddress } from './pointerBounds';
-import { type Frame, type FunctionInfo, loaderOf, loadRecord, storeRecord, storerOf } from './runtime';
+import {
+  type Address,
+  addressOf as pointerAddress,
+  boundPointer,
+  checkAddress,
+  evaluate,
+  type Evaluated,
+  type Evaluator,
+  pointerAt,
+  pointerEvaluator,
+  replacePointerRanges,
+  resultOperand,
+  slicePointerRanges,
+} from './pointerBounds';
+import { type Frame, type FunctionInfo, loaderOf, loadRecord, storeRecord, storeValue } from './runtime';
 import {
   BOOL,
   commonType,
@@ -154,7 +167,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const right = this.rvalue(expression.right);
         const leftEffect = left.effect ?? left.value;
         const value = right.value;
-        return { type: right.type, value: (frame) => (leftEffect(frame), value(frame)) };
+        return {
+          type: right.type,
+          value: (frame) => (leftEffect(frame), value(frame)),
+          pointer:
+            right.type.kind === 'pointer'
+              ? (frame) => (leftEffect(frame), pointerEvaluator(right).pointer!(frame))
+              : undefined,
+        };
       }
       case 'call': {
         return this.call(expression);
@@ -194,7 +214,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.entityOperand(entity, name, row);
   }
 
-  // code-gauge-allow functionNcss 36 -- Each symbol storage class has its own load/address contract; keep that dispatch together.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Storage classes require distinct load, address, provenance, and tracing contracts.
+  // code-gauge-allow functionNcss 43 -- Each symbol storage class has its own load/address contract; keep that dispatch together.
   protected entityOperand(entity: Entity, name: string, row: number): Operand {
     switch (entity.kind) {
       case 'typedef': {
@@ -254,11 +275,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
           type: entity.type,
           value: load,
           ...folded,
+          pointer:
+            entity.type.kind === 'pointer'
+              ? (frame) => {
+                  const address = load(frame) as number;
+                  const range = frame.pointerRanges.get(index);
+                  return range
+                    ? { address, ...range }
+                    : boundPointer(frame, address, (entity.type as Extract<CType, { kind: 'pointer' }>).to);
+                }
+              : undefined,
           lvalue: {
             resolve: (frame) => ({
               load: () => load(frame),
-              store: (value) => {
+              range: () => frame.pointerRanges.get(index),
+              store: (value, range) => {
                 frame.slots[index] = value as Scalar;
+                if (range) frame.pointerRanges.set(index, range);
+                else frame.pointerRanges.delete(index);
               },
             }),
             local,
@@ -281,12 +315,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (type.kind === 'void') return { load: () => 0, store: () => {} };
       return {
         load: () => loaderOf(type)(frame.runtime, at),
-        store: (value) => storerOf(type)(frame.runtime, at, value as Scalar),
+        range: () => {
+          const block = frame.runtime.memory.locate(at, sizeOf(type));
+          return block.pointerRanges.get(at - block.base);
+        },
+        store: (value, range) => storeValue(frame.runtime, at, type, value, range),
       };
     };
     return {
       type,
       value: (frame) => resolve(frame).load(),
+      pointer:
+        type.kind === 'pointer'
+          ? (frame) => {
+              const location = resolve(frame);
+              const address = location.load() as number;
+              const range = location.range?.();
+              return pointerAt(frame, address, type.to, range);
+            }
+          : undefined,
       lvalue: { resolve, location: address, address: (frame) => checkAddress(address(frame), 0) },
     };
   }
@@ -539,14 +586,18 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const type = unqualified(operand.type);
     const lvalue = operand.lvalue as LValue;
     const step = this.updateOperation(type, expression.operator, row);
-    const value = (frame: Frame): Value => {
+    const execute = (frame: Frame): Evaluated => {
       const location = lvalue.resolve(frame);
       const previous = location.load() as Scalar;
+      const range = location.range?.();
       const next = step(previous, frame);
-      location.store(next);
-      return expression.prefix ? (lvalue.isBitField ? location.load() : next) : previous;
+      if (type.kind === 'pointer' && range) checkAddress({ address: next as number, ...range }, 0);
+      location.store(next, range);
+      if (lvalue.local) frame.live[lvalue.local.index] = true;
+      const value = expression.prefix ? (lvalue.isBitField ? location.load() : next) : previous;
+      return { value, range };
     };
-    return { type, value, bitWidth: operand.bitWidth };
+    return resultOperand(type, execute, expression.prefix ? operand.bitWidth : undefined);
   }
 
   // code-gauge-allow functionCognitiveComplexity 26 -- C pointer, boolean, and arithmetic updates have distinct conversion rules; splitting them only relocates the cases.
@@ -573,6 +624,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Assignment conversion, target resolution, and pointer provenance must share the cached right operand.
   private assignment(expression: Extract<Expression, { kind: 'assign' }>): Operand {
     const { row, operator } = expression;
     const target = this.expression(expression.left);
@@ -582,20 +634,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const source = this.rvalue(expression.right);
     const calculate = operator ? this.compoundOperation(operator, rvalueType(target), source, row) : undefined;
     const value = calculate ? undefined : this.convertForAssignment(source, type, 'assignment', row);
-    return {
-      type,
-      bitWidth: target.bitWidth,
-      value: (frame) => {
-        const right = calculate ? calculate.right(frame) : (value as (frame: Frame) => Value)(frame);
-        const location = lvalue.resolve(frame);
-        const result = calculate
-          ? convertScalar(calculate.apply(frame, location.load() as Scalar, right as Scalar), calculate.type, type)
-          : right;
-        location.store(result);
-        if (lvalue.local) frame.live[lvalue.local.index] = true;
-        return lvalue.isBitField ? location.load() : result;
-      },
+    const execute = (frame: Frame): Evaluated => {
+      const evaluated = calculate
+        ? { value: calculate.right(frame), range: undefined }
+        : evaluate(value as Evaluator, frame);
+      const location = lvalue.resolve(frame);
+      const result = calculate
+        ? convertScalar(
+            calculate.apply(frame, location.load() as Scalar, evaluated.value as Scalar),
+            calculate.type,
+            type
+          )
+        : evaluated.value;
+      const range = calculate && type.kind === 'pointer' ? location.range?.() : evaluated.range;
+      if (type.kind === 'pointer' && range) checkAddress({ address: result as number, ...range }, 0);
+      location.store(result, range);
+      if (lvalue.local) frame.live[lvalue.local.index] = true;
+      return { value: lvalue.isBitField ? location.load() : result, range };
     };
+    return resultOperand(type, execute, target.bitWidth);
   }
 
   private compoundOperation(
@@ -663,6 +720,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return constantOperand(SIZE_T, BigInt(sizeOf(type)));
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Conditional evaluation and constant folding share the selected branch and result type.
   private conditional(expression: Extract<Expression, { kind: 'conditional' }>): Operand {
     const { row } = expression;
     const condition = this.rvalue(expression.condition);
@@ -680,7 +738,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return { type, value, constant: convertedConstant(chosen.constant, chosen.type, type) };
       }
     }
-    return { type, value };
+    return {
+      type,
+      value,
+      pointer:
+        type.kind === 'pointer'
+          ? (frame) => {
+              const chosen = truth(frame) ? whenTrue : whenFalse;
+              return pointerEvaluator(chosen).pointer!(frame);
+            }
+          : undefined,
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- C conditional expressions have distinct arithmetic, pointer, record, and void rules; retain the single type-selection dispatch.
@@ -738,13 +806,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Converts a call's arguments to the parameters' types, or promotes them where the function declares none. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Prototype, variadic, and default-promotion rules form one ordered argument-validation pass.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Prototype, variadic, and default-promotion rules form one ordered argument-validation pass.
   arguments(
     fnType: FunctionType,
     argExpressions: Expression[],
     row: number,
     name?: string
-  ): { args: ((frame: Frame) => Value)[]; argTypes: CType[] } {
+  ): { args: Evaluator[]; argTypes: CType[] } {
     const params = fnType.params;
     const what = name ? `関数「${name}」` : '関数';
     if (params) {
@@ -754,7 +822,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.error(row, `${what}の引数が多すぎます（${params.length} 個です）。`);
       }
     }
-    const args: ((frame: Frame) => Value)[] = [];
+    const args: Evaluator[] = [];
     const argTypes: CType[] = [];
     for (const [index, argExpression] of argExpressions.entries()) {
       const operand = this.rvalue(argExpression);
@@ -768,33 +836,42 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const promoted = defaultPromotion(operand.type);
       if (promoted.kind === 'record' && !isComplete(promoted))
         this.error(argExpression.row, '中身が定義されていない型の値は渡せません。');
-      args.push(promoted === operand.type ? operand.value : this.converted(operand, promoted));
+      args.push(
+        promoted.kind === 'pointer'
+          ? pointerEvaluator(operand)
+          : promoted === operand.type
+            ? operand.value
+            : this.converted(operand, promoted)
+      );
       argTypes.push(promoted);
     }
     return { args, argTypes };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Call validation and pointer-return capture must bracket the same invocation.
   callOperand(
     fnType: FunctionType,
     callee: (frame: Frame) => number,
     direct: FunctionInfo | undefined,
-    args: ((frame: Frame) => Value)[],
+    args: Evaluator[],
     argTypes: CType[],
     row: number
   ): Operand {
     const ret = unqualified(fnType.ret);
-    const invoke = direct
-      ? (frame: Frame): Value | undefined => {
-          const values = args.map((arg) => arg(frame));
-          return frame.runtime.call(direct, values, argTypes, row);
-        }
-      : (frame: Frame): Value | undefined => {
-          const address = callee(frame);
-          const values = args.map((arg) => arg(frame));
-          const fn = frame.runtime.functions.get(address);
-          if (!fn) throw new CRuntimeError(address === 0 ? 'nullAccess' : 'badFunctionPointer');
-          return frame.runtime.call(fn, values, argTypes, row);
-        };
+    const invoke = (frame: Frame): Value | undefined => {
+      const address = direct ? undefined : callee(frame);
+      const values = args.map((arg) => evaluate(arg, frame));
+      const fn = direct ?? frame.runtime.functions.get(address!);
+      if (!fn) throw new CRuntimeError(address === 0 ? 'nullAccess' : 'badFunctionPointer');
+      return frame.runtime.call(
+        fn,
+        values.map((item) => item.value),
+        argTypes,
+        row,
+        undefined,
+        values.map((item) => item.range)
+      );
+    };
     const effect = (frame: Frame): void => {
       invoke(frame);
     };
@@ -808,6 +885,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (result === undefined) throw new CRuntimeError('missingReturn');
         return result;
       },
+      pointer:
+        ret.kind === 'pointer'
+          ? (frame) => {
+              const address = invoke(frame);
+              if (address === undefined) throw new CRuntimeError('missingReturn');
+              const range = frame.runtime.returnRange;
+              return pointerAt(frame, address as number, ret.to, range);
+            }
+          : undefined,
       effect,
       isCall: true,
     };
@@ -848,8 +934,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
-  // code-gauge-allow functionNcss 42 -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
+  // code-gauge-allow functionNcss 47 -- Record values, lvalues, arrows, and bit-fields share one field lookup; keep those access alternatives together.
   private member(expression: Extract<Expression, { kind: 'member' }>): Operand {
     const { row, field: name, arrow } = expression;
     let recordType: RecordType;
@@ -862,7 +948,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         this.error(row, `「->」は構造体・共用体へのポインタにしか使えません（${typeName(type)}）。`);
       }
       recordType = type.to;
-      address = object.value as (frame: Frame) => number;
+      address = (frame) => checkAddress(pointerEvaluator(object).pointer!(frame), sizeOf(recordType));
     } else {
       object = this.expression(expression.object);
       if (object.type.kind !== 'record')
@@ -887,17 +973,32 @@ export abstract class ExpressionCompiler extends CompilerBase {
           return readBits(record, offset, field.bitOffset ?? 0, field.bitWidth, field.type as IntType);
         return readFromBytes(record, offset, size, field.type);
       };
-      return { type: fieldType as CType, value: temporary, bitWidth: field.bitWidth };
+      return {
+        type: fieldType as CType,
+        value: temporary,
+        bitWidth: field.bitWidth,
+        pointer:
+          fieldType.kind === 'pointer'
+            ? (frame) => {
+                const record = value(frame) as RecordValue;
+                const address = readFromBytes(record, offset, size, field.type) as number;
+                const range = record.pointerRanges?.get(offset);
+                return pointerAt(frame, address, fieldType.to, range);
+              }
+            : undefined,
+      };
     }
     const base = address;
     const offset = field.offset;
-    if (field.bitWidth !== undefined)
-      return this.bitFieldOperand(
+    if (field.bitWidth !== undefined) {
+      const operand = this.bitFieldOperand(
         fieldType as IntType,
         (frame) => base(frame) + offset,
         field.bitOffset ?? 0,
         field.bitWidth
       );
+      return { ...operand, lvalue: { ...operand.lvalue!, local: !arrow ? object.lvalue?.local : undefined } };
+    }
     const operand = this.memoryOperand(fieldType as CType, (frame) => base(frame) + offset);
     const isStatic = !arrow && object.lvalue?.isStatic === true;
     return {
@@ -941,8 +1042,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Conversions -----------------------------------------------------------------------------------------------------
 
   /** Converts an rvalue to a type, which the caller has checked it may be converted to. */
-  converted(operand: Operand, type: CType): (frame: Frame) => Value {
+  converted(operand: Operand, type: CType): Evaluator {
     const from = operand.type;
+    if (type.kind === 'pointer' && from.kind === 'pointer') return pointerEvaluator(operand);
     const value = operand.value;
     if (from.kind === 'record' || type.kind === 'record' || type.kind === 'void') return value;
     if (operand.constant !== undefined && isScalar(type)) {
@@ -951,18 +1053,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const sameInteger = from.kind === 'int' && type.kind === 'int' && from.name === type.name;
     const sameFloat = from.kind === 'float' && type.kind === 'float' && from.name === type.name;
-    if (sameInteger || sameFloat || (from.kind === 'pointer' && type.kind === 'pointer')) return value;
+    if (sameInteger || sameFloat) return value;
     return (frame) => convertScalar(value(frame) as Scalar, from, type);
   }
 
   /** Converts a value as assignment does, rejecting the conversions clang rejects. */
   // code-gauge-allow functionCognitiveComplexity 30 -- C's rules for simple assignment, with clang's errors.
-  convertForAssignment(
-    operand: Operand,
-    target: CType,
-    context: ConversionContext,
-    row: number
-  ): (frame: Frame) => Value {
+  convertForAssignment(operand: Operand, target: CType, context: ConversionContext, row: number): Evaluator {
     const source = operand.type;
     const type = unqualified(target);
     const fail = (detail = ''): never =>
@@ -987,7 +1084,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const sourceIsFunction = source.to.kind === 'function';
         if (targetIsFunction && sourceIsFunction && !compatible(type.to, source.to))
           fail('（関数ポインタの型が合いません）');
-        return operand.value;
+        return pointerEvaluator(operand);
       }
       if (isInteger(source)) fail('（整数はポインタに変換できません）');
       fail();
@@ -1161,6 +1258,7 @@ export function writeBits(record: RecordValue, offset: number, bitOffset: number
   const mask = ((1n << BigInt(width)) - 1n) << BigInt(bitOffset);
   let size = 0;
   while (size < 8 && offset + size < bytes.length && mask >> BigInt(size * 8) > 0n) size++;
+  if (record.pointerRanges) replacePointerRanges(record.pointerRanges, offset, size);
   let raw = 0n;
   for (let index = size - 1; index >= 0; index--) raw = (raw << 8n) | BigInt(bytes[offset + index]);
   raw = (raw & ~mask) | ((BigInt(value) << BigInt(bitOffset)) & mask);
@@ -1173,6 +1271,7 @@ export function writeBits(record: RecordValue, offset: number, bitOffset: number
 function readFromBytes(record: RecordValue, offset: number, size: number, type: CType): Value {
   if (type.kind === 'record') {
     return {
+      pointerRanges: slicePointerRanges(record.pointerRanges, offset, size),
       bytes: record.bytes.slice(offset, offset + size),
       initialized: record.initialized.slice(offset, offset + size),
     };

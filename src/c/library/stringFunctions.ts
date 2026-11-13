@@ -193,13 +193,13 @@ export const STRING_FUNCTIONS: Record<string, NativeFunction> = {
   memcpy: (runtime, [destination, source, count]) => {
     const n = asSize(count);
     checkOverlap(asAddress(destination), asAddress(source), n);
-    const { bytes, initialized } = readRaw(runtime, asAddress(source), n);
-    writeBytes(runtime, asAddress(destination), bytes, initialized);
+    const { bytes, initialized, pointerRanges } = readRaw(runtime, asAddress(source), n);
+    writeBytes(runtime, asAddress(destination), bytes, initialized, pointerRanges);
     return destination;
   },
   memmove: (runtime, [destination, source, count]) => {
-    const { bytes, initialized } = readRaw(runtime, asAddress(source), asSize(count));
-    writeBytes(runtime, asAddress(destination), bytes, initialized);
+    const { bytes, initialized, pointerRanges } = readRaw(runtime, asAddress(source), asSize(count));
+    writeBytes(runtime, asAddress(destination), bytes, initialized, pointerRanges);
     return destination;
   },
   memset: (runtime, [s, c, count]) => {

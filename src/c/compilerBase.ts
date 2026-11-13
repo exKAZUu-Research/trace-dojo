@@ -2,7 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { convertScalar, type Scalar, type Value } from './arith';
 import type { Declaration, Declarator, Expression, FieldDeclaration, Specifiers, TypeName, TypeSpecifier } from './ast';
-import type { Address } from './pointerBounds';
+import type { Address, PointerRange } from './pointerBounds';
 import type { Frame, FunctionInfo, GlobalInfo, LocalInfo } from './runtime';
 import {
   builtinType,
@@ -73,7 +73,8 @@ export interface Operand {
 
 export interface Location {
   load: () => Value;
-  store: (value: Value) => void;
+  store: (value: Value, range?: PointerRange) => void;
+  range?: () => PointerRange | undefined;
 }
 
 export interface LValue {

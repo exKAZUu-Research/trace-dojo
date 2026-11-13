@@ -2,7 +2,7 @@ import type { Scalar, Value } from '../arith';
 import { CRuntimeError, ProgramAbort, ProgramExit } from '../errors';
 import type { NativeFunction, Runtime } from '../runtime';
 import { type CType, pointerTo, VOID } from '../types';
-import { parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
+import { isExactFloatPrefix, parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
 import { asAddress, asNumber, asSize, readCString, readRaw, writeBytes } from './support';
 
 export const ERANGE = 34;
@@ -97,7 +97,13 @@ function strtoFloat(isFloat: boolean): NativeFunction {
     if (parsed.length > 0 && Number.isFinite(value) === false && !parsed.isInfinityText && !Number.isNaN(value)) {
       setErrno(runtime, ERANGE);
     }
-    if (parsed.length > 0 && value === 0 && parsed.isNonzeroText) setErrno(runtime, ERANGE);
+    if (
+      parsed.length > 0 &&
+      parsed.isNonzeroText &&
+      Math.abs(value) < (isFloat ? 2 ** -126 : 2 ** -1022) &&
+      !isExactFloatPrefix(bytes, parsed.length, value)
+    )
+      setErrno(runtime, ERANGE);
     if (asAddress(end) !== 0) storePointer(runtime, asAddress(end), asAddress(text) + parsed.length);
     return value;
   };
@@ -242,8 +248,8 @@ class QuickSort {
     if (a === b) return;
     const first = readRaw(this.runtime, a, this.size);
     const second = readRaw(this.runtime, b, this.size);
-    writeBytes(this.runtime, a, second.bytes, second.initialized);
-    writeBytes(this.runtime, b, first.bytes, first.initialized);
+    writeBytes(this.runtime, a, second.bytes, second.initialized, second.pointerRanges);
+    writeBytes(this.runtime, b, first.bytes, first.initialized, first.pointerRanges);
   }
 }
 
@@ -300,8 +306,8 @@ export const STDLIB_FUNCTIONS: Record<string, NativeFunction> = {
     const copied = Math.min(block.size, newSize);
     const target = runtime.memory.findBase(result);
     if (target && copied > 0) {
-      target.bytes.set(block.bytes.subarray(0, copied));
-      target.initialized.set(block.initialized.subarray(0, copied));
+      const snapshot = readRaw(runtime, block.base, copied);
+      writeBytes(runtime, result, snapshot.bytes, snapshot.initialized, snapshot.pointerRanges);
     }
     free(runtime, address);
     return result;

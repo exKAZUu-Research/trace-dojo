@@ -7,6 +7,7 @@ import type { RecordValue, Scalar, Value } from './arith';
 import { CRuntimeError } from './errors';
 import { ByteStream } from './library/support';
 import { type Allocation, Memory } from './memory';
+import { type PointerRange, replacePointerRanges, slicePointerRanges } from './pointerBounds';
 import type { CType, FunctionType } from './types';
 
 /** A block-scope variable of a function, in the order the function declares it. */
@@ -82,6 +83,8 @@ export class Frame implements TracedFrame {
   /** Which variables are in scope, by local index, for the trace. */
   readonly live: boolean[] = [];
   visibleLocals?: readonly LocalInfo[];
+  readonly pointerRanges = new Map<number, PointerRange>();
+  returnRange?: PointerRange;
   returnValue: Value | undefined;
   /** The label a `goto` jumps to, while its completion travels to the statement holding the label. */
   gotoLabel = -1;
@@ -109,6 +112,7 @@ export class Frame implements TracedFrame {
       const index = local.index;
       this.live[index] = false;
       this.slots[index] = undefined;
+      this.pointerRanges.delete(index);
       const block = this.blocks.get(index);
       if (block) {
         this.runtime.memory.release(block);
@@ -136,6 +140,7 @@ export class Runtime implements TracedRuntime<Frame> {
   private readonly writers: Record<'stdout' | 'stderr', ByteStream>;
   /** The functions by address. */
   readonly functions = new Map<number, FunctionInfo>();
+  returnRange?: PointerRange;
   randomState = 1;
   /** Where `strtok` continues when called with NULL. */
   tokenizerPosition = 0;
@@ -214,16 +219,24 @@ export class Runtime implements TracedRuntime<Frame> {
     args: Value[],
     argTypes: CType[],
     callRow: number | undefined,
-    onReturn?: (frame: Frame) => void
+    onReturn?: (frame: Frame) => void,
+    argRanges: (PointerRange | undefined)[] = []
   ): Value | undefined {
     this.spend();
-    if (fn.native) return fn.native(this, args, argTypes, callRow ?? 0);
+    if (fn.native) {
+      const result = fn.native(this, args, argTypes, callRow ?? 0);
+      this.returnRange =
+        fn.type.ret.kind === 'pointer' && typeof result === 'number'
+          ? argRanges.find((range) => range && result >= range.start && result <= range.end)
+          : undefined;
+      return result;
+    }
     if (!fn.body) throw new CRuntimeError('custom', `関数「${fn.name}」が定義されていません。`);
     if (this.frames.length >= LIMITS.maxCallDepth) throw new CRuntimeError('stackOverflow');
     const frame = new Frame(this, fn, callRow);
     frame.enterScope(fn.params);
     for (const [index, param] of fn.params.entries()) {
-      bindParameter(frame, param, args[index]);
+      bindParameter(frame, param, args[index], argRanges[index]);
     }
     this.frames.push(frame);
     try {
@@ -234,6 +247,7 @@ export class Runtime implements TracedRuntime<Frame> {
       for (const block of frame.blocks.values()) this.memory.release(block);
     }
     if (fn.isAtomic) this.steps.completeAtomicCall();
+    this.returnRange = frame.returnRange;
     return frame.returnValue;
   }
 
@@ -267,29 +281,41 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 }
 
-function bindParameter(frame: Frame, param: LocalInfo, value: Value | undefined): void {
+function bindParameter(frame: Frame, param: LocalInfo, value: Value | undefined, range?: PointerRange): void {
   frame.live[param.index] = true;
   if (!param.inMemory) {
     frame.slots[param.index] = value as Scalar | undefined;
+    if (range) frame.pointerRanges.set(param.index, range);
     return;
   }
-  storeValue(frame.runtime, frame.bases[param.index], param.type, value);
+  storeValue(frame.runtime, frame.bases[param.index], param.type, value, range);
 }
 
 /** Stores a value of any complete type at an address, which the caller has already converted to the type. */
-export function storeValue(runtime: Runtime, address: number, type: CType, value: Value | undefined): void {
+export function storeValue(
+  runtime: Runtime,
+  address: number,
+  type: CType,
+  value: Value | undefined,
+  range?: PointerRange
+): void {
   if (value === undefined) return;
   if (typeof value === 'object') {
     storeRecord(runtime, address, value);
     return;
   }
   storerOf(type)(runtime, address, value);
+  if (type.kind === 'pointer' && range) {
+    const block = runtime.memory.locate(address, 8);
+    block.pointerRanges.set(address - block.base, range);
+  }
 }
 
 export function storeRecord(runtime: Runtime, address: number, value: RecordValue): void {
   const block = runtime.memory.locate(address, value.bytes.length);
   if (block.isReadOnly) throw new CRuntimeError('readOnly');
   const offset = address - block.base;
+  replacePointerRanges(block.pointerRanges, offset, value.bytes.length, value.pointerRanges);
   block.bytes.set(value.bytes, offset);
   block.initialized.set(value.initialized, offset);
 }
@@ -298,6 +324,7 @@ export function loadRecord(runtime: Runtime, address: number, size: number): Rec
   const block = runtime.memory.locate(address, size);
   const offset = address - block.base;
   return {
+    pointerRanges: slicePointerRanges(block.pointerRanges, offset, size),
     bytes: block.bytes.slice(offset, offset + size),
     initialized: block.initialized.slice(offset, offset + size),
   };
@@ -327,6 +354,7 @@ function write(size: number, set: (view: DataView, offset: number, value: Scalar
     const block = runtime.memory.locate(address, size);
     if (block.isReadOnly) throw new CRuntimeError('readOnly');
     const offset = address - block.base;
+    replacePointerRanges(block.pointerRanges, offset, size);
     set(block.view, offset, value);
     block.initialized.fill(255, offset, offset + size);
   };

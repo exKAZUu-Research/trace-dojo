@@ -3,6 +3,7 @@ import { convertScalar } from './arith';
 import type { Compound, Declaration, Expression, Statement } from './ast';
 import type { FunctionContext, SwitchContext } from './compilerBase';
 import { ExpressionCompiler } from './expressionCompiler';
+import { evaluate } from './pointerBounds';
 import { Completion, type Exec, type Frame, type LocalInfo } from './runtime';
 import { isInteger, promote, typeName, unqualified } from './types';
 
@@ -446,7 +447,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const value = this.convertForAssignment(operand, returnType, 'return', row);
     return {
       exec: (frame) => {
-        frame.returnValue = value(frame);
+        const result = evaluate(value, frame);
+        frame.returnValue = result.value;
+        frame.returnRange = result.range;
         return Completion.Return;
       },
       labels: NO_LABELS,

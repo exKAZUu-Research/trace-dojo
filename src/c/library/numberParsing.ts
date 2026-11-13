@@ -1,4 +1,4 @@
-/** Parses numbers at the start of byte strings, as `strtol`, `strtod`, and `scanf` do. */
+import { exactParts, roundBinary } from './binaryFloat';
 
 export function isSpaceByte(byte: number): boolean {
   return byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
@@ -94,7 +94,7 @@ export function parseFloatPrefix(
     const fraction = hex[2] ?? '';
     const mantissa = BigInt(`0x${integer + fraction || '0'}`);
     const exponent = Number(hex[3] ?? '0') - fraction.length * 4;
-    const value = sign * hexToDouble(mantissa, exponent);
+    const value = sign * roundBinary(mantissa, 1n, exponent);
     const matched = hex[3] === undefined ? `0x${integer}${hex[2] === undefined ? '' : `.${fraction}`}` : hex[0];
     return { value, length: index + matched.length, isInfinityText: false, isNonzeroText: mantissa !== 0n };
   }
@@ -114,15 +114,26 @@ export function parseFloatPrefix(
   };
 }
 
-/** mantissa × 2^exponent, rounded to the nearest double with ties to even. */
-function hexToDouble(mantissa: bigint, exponent: number): number {
-  if (mantissa === 0n) return 0;
-  const bits = mantissa.toString(2).length;
-  // Keep 54 significant bits plus a sticky bit, so that Number's conversion rounds once, correctly.
-  if (bits > 60) {
-    const shift = bits - 60;
-    const sticky = (mantissa & ((1n << BigInt(shift)) - 1n)) === 0n ? 0n : 1n;
-    return hexToDouble((mantissa >> BigInt(shift)) | sticky, exponent + shift);
+export function isExactFloatPrefix(bytes: Uint8Array, length: number, value: number): boolean {
+  const text = new TextDecoder().decode(bytes.subarray(0, length)).trim().replace(/^[+-]/, '').toLowerCase();
+  const hex = /^0x([\da-f]*)(?:\.([\da-f]*))?(?:p([+-]?\d+))?$/.exec(text);
+  const decimal = /^(\d*)(?:\.(\d*))?(?:e([+-]?\d+))?$/.exec(text);
+  const match = hex ?? decimal;
+  if (!match) return false;
+  const fraction = match[2] ?? '';
+  const digits = (match[1] ?? '') + fraction;
+  const coefficient = BigInt((hex ? '0x' : '') + (digits || '0'));
+  const exponent = Number(match[3] ?? 0) - fraction.length * (hex ? 4 : 1);
+  if (!Number.isFinite(exponent) || Math.abs(exponent) > 5000) return coefficient === 0n && value === 0;
+  const parts = exactParts(Math.abs(value));
+  const binaryShift = parts.exponent - (hex ? exponent : 0);
+  let left = parts.mantissa;
+  let right = coefficient;
+  if (binaryShift >= 0) left <<= BigInt(binaryShift);
+  else right <<= BigInt(-binaryShift);
+  if (!hex) {
+    if (exponent >= 0) right *= 10n ** BigInt(exponent);
+    else left *= 10n ** BigInt(-exponent);
   }
-  return Number(mantissa) * 2 ** exponent;
+  return left === right;
 }

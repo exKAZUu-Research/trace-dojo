@@ -1,5 +1,6 @@
-import type { Scalar, Value } from '../arith';
+import type { RecordValue, Scalar, Value } from '../arith';
 import { CRuntimeError } from '../errors';
+import { type PointerRanges, replacePointerRanges, slicePointerRanges } from '../pointerBounds';
 import type { Runtime } from '../runtime';
 import { type CType, INT_PROPERTIES } from '../types';
 
@@ -33,28 +34,32 @@ export function readBytes(runtime: Runtime, address: number, size: number): Uint
 }
 
 /** Reads bytes and which of them hold values, for functions that copy memory as it is. */
-export function readRaw(
-  runtime: Runtime,
-  address: number,
-  size: number
-): { bytes: Uint8Array; initialized: Uint8Array } {
+export function readRaw(runtime: Runtime, address: number, size: number): RecordValue {
   if (size === 0) return { bytes: new Uint8Array(), initialized: new Uint8Array() };
   if (address === 0) throw new CRuntimeError('nullArgument');
   const block = runtime.memory.locate(address, size);
   const offset = address - block.base;
   runtime.spend(Math.ceil(size / 64));
   return {
+    pointerRanges: slicePointerRanges(block.pointerRanges, offset, size),
     bytes: block.bytes.slice(offset, offset + size),
     initialized: block.initialized.slice(offset, offset + size),
   };
 }
 
-export function writeBytes(runtime: Runtime, address: number, bytes: Uint8Array, initialized?: Uint8Array): void {
+export function writeBytes(
+  runtime: Runtime,
+  address: number,
+  bytes: Uint8Array,
+  initialized?: Uint8Array,
+  pointerRanges?: PointerRanges
+): void {
   if (bytes.length === 0) return;
   if (address === 0) throw new CRuntimeError('nullArgument');
   const block = runtime.memory.locate(address, bytes.length);
   if (block.isReadOnly) throw new CRuntimeError('readOnly');
   const offset = address - block.base;
+  replacePointerRanges(block.pointerRanges, offset, bytes.length, pointerRanges);
   block.bytes.set(bytes, offset);
   if (initialized) block.initialized.set(initialized, offset);
   else block.initialized.fill(255, offset, offset + bytes.length);
