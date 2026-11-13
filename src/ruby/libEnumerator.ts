@@ -405,6 +405,8 @@ function arithmeticLastIndex(
     return index;
   }
   let index = Math.floor((Number(end) - Number(start)) / Number(step));
+  if (!Number.isFinite(index))
+    throw floatDomainError(Number.isNaN(index) ? 'NaN' : index > 0 ? 'Infinity' : '-Infinity');
   if (exclusive && Number(start) + Number(step) * index === Number(end)) index--;
   return BigInt(index);
 }

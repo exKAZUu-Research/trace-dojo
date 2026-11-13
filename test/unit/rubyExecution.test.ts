@@ -1530,3 +1530,20 @@ test('String bounds errors retain exact long indexes', () => {
     });
   }
 });
+
+test('String mutation converts out-of-range indexes once', () => {
+  for (const source of ['"a".insert(I.new, "x")', 's="a"; s[I.new]="x"', 's="a"; s[I.new,1]="x"']) {
+    expect(run(`class I; def to_int; puts :convert; 2; end; end; begin; ${source}; rescue; end`)).toMatchObject({
+      stdout: 'convert\n',
+    });
+  }
+});
+
+test('ArithmeticSequence last reports FloatDomainError for overflowing mixed bounds', () => {
+  for (const source of ['(10**400).step(1.0, 3).last', '(10**400).step(1.0, 3).last(2)']) {
+    expect(run(`p ${source}`)).toMatchObject({ uncaughtException: '-Infinity (FloatDomainError)' });
+  }
+  expect(run('p (-(10**400)).step(1.0, 3).last')).toMatchObject({
+    uncaughtException: 'Infinity (FloatDomainError)',
+  });
+});

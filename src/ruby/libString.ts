@@ -113,10 +113,14 @@ function regexpUnsupported(value: Value): void {
 }
 
 /** Resolves `str[index]`, `str[start, length]`, and `str[range]` to a start and a length, or undefined. */
-function* substringRange(length: number, args: Value[]): Gen<{ start: number; count: number } | undefined> {
+function* substringRange(
+  length: number,
+  args: Value[],
+  firstIndex?: { number: number; integer: bigint }
+): Gen<{ start: number; count: number } | undefined> {
   const [first, second] = args;
   if (second !== undefined) {
-    let start = yield* toIndex(first);
+    let start = firstIndex?.number ?? (yield* toIndex(first));
     const count = yield* toIndex(second);
     if (start < 0) start += length;
     if (start < 0 || start > length || count < 0) return undefined;
@@ -473,10 +477,11 @@ def('String', '[]=', [2, 3], function* (self: RString, args) {
     if (index < 0 || index >= chars.length) throw indexError(`index ${converted.integer} out of string`);
     range = { start: index, count: 1 };
   } else {
-    range = yield* substringRange(chars.length, selectors);
+    const firstIndex = first instanceof RRange ? undefined : yield* toIndexExact(first);
+    range = yield* substringRange(chars.length, selectors, firstIndex);
     if (!range) {
       if (first instanceof RRange) throw rangeError(`${yield* inspect(first)} out of range`);
-      throw indexError(`index ${(yield* toIndexExact(first)).integer} out of string`);
+      throw indexError(`index ${firstIndex?.integer} out of string`);
     }
   }
   const binary = combinedStringEncoding(
