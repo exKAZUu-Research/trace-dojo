@@ -7,117 +7,211 @@ type AnyLoop = Extract<Statement, { kind: Loop['kind'] | 'forOf' | 'forIn' }>;
 interface Frame {
   owner: object;
   declared: Set<string>;
+  /** The function's parameters, whose values its callers choose. */
+  parameters: Set<string>;
   isFunction: boolean;
 }
 
-/** Where an assignment or a loop sits: the function it runs in, and the frame that declares each name it may use. */
+/** Where a node sits: the function it runs in, and the frames that declare the names it may use. */
 interface Place {
   fn: object;
   frames: Frame[];
 }
 
-interface Assignment {
-  node: object;
-  name: string;
-  place: Place;
+/** What the walk over a program finds: its writes, its loops, and how its variables are used. */
+interface Collected {
+  writes: { node: object; name: string; place: Place }[];
+  loops: { loop: AnyLoop; place: Place }[];
+  /** Uses of variables other than writing them; `readsOnly` is a read of an element or of the `length`. */
+  uses: { name: string; place: Place; readsOnly: boolean }[];
+  /** Identifier nodes already noted, as members' objects or as written variables. */
+  handled: Set<object>;
+  /** Members a write's target is, through which their object is changed. */
+  writtenThrough: Set<object>;
 }
 
 /**
  * Marks the loops of a program whose end cannot depend on the clock, which then never poll it however many of their
- * iterations read it: a `for...in` loop that neither breaks nor returns, or a `for`, `while`, or
- * `do...while` loop that neither breaks nor returns and whose test and update only combine literals, the `length` of a
- * variable, and variables nothing can assign while it runs except its init, update, and plain statements directly in
- * its body. Assignments to another binding of the name, and those in the loop's own function outside the loop, run
- * before or after it. Any busy wait ends through something else, which a clock read can change.
+ * iterations read it: a `for...in` loop that neither breaks nor returns, or a `for`, `while`, or `do...while` loop that
+ * neither breaks nor returns and whose test and update only combine literals, variables, and the `length` of arrays and
+ * strings no code changes, where nothing can write those variables while it runs except its init, its update, and plain
+ * statements directly in its body that read only such variables. Writes to another binding of a name, and those the
+ * loop's own function makes outside the loop, run before or after it. A `for...of` loop may grow the array it walks or
+ * walk a generator until a deadline. Any busy wait ends through something else, which a clock read can change.
  */
 export function markCountedLoops(program: Program): void {
-  const assignments: Assignment[] = [];
-  const loops: { loop: AnyLoop; place: Place }[] = [];
-  const programFrame: Frame = { owner: program, declared: declaredIn(program.scope), isFunction: true };
-  visit(program, [programFrame], assignments, loops);
-  for (const { loop, place } of loops) {
-    // A for...of loop may grow the array it walks, or walk a generator, until a deadline, while for...in walks the keys
-    // the object had when the loop began.
+  const collected: Collected = { writes: [], loops: [], uses: [], handled: new Set(), writtenThrough: new Set() };
+  const programFrame: Frame = {
+    owner: program,
+    declared: declaredIn(program.scope),
+    parameters: new Set(),
+    isFunction: true,
+  };
+  visit(program, [programFrame], collected);
+  for (const { loop, place } of collected.loops) {
     if (loop.kind === 'forIn') {
       if (!leaves(loop.body)) loop.counted = true;
     } else if (
       (loop.kind === 'for' || loop.kind === 'while' || loop.kind === 'doWhile') &&
-      isCounted(loop, place, assignments)
+      new CountedProof(loop, place, collected).holds()
     ) {
       loop.counted = true;
     }
   }
 }
 
-function isCounted(loop: Loop, place: Place, assignments: Assignment[]): boolean {
-  const update = loop.kind === 'for' ? loop.update : undefined;
-  const init = loop.kind === 'for' ? loop.init : undefined;
-  if (!loop.test || !isPlain(loop.test) || (update !== undefined && !isPlain(update)) || leaves(loop.body))
-    return false;
-  // The assignments that run before the loop or once an iteration, which only advance it as a counter does.
-  const own = new Set<object>();
-  collectAssignmentNodes(init, own);
-  collectAssignmentNodes(update, own);
-  const bodyStatements = loop.body.kind === 'block' ? loop.body.body : [loop.body];
-  for (const statement of bodyStatements) {
-    // Such an assignment advances the loop only when no code computes its value, as `n++` and `n += 2` do.
-    if (statement.kind === 'expression' && isPlain(statement.expression)) {
-      collectAssignmentNodes(statement.expression, own, false);
+/** The proof that a `for`, `while`, or `do...while` loop's end cannot depend on the clock. */
+class CountedProof {
+  /** The writes that run before the loop or once an iteration from plain values, as a counter's do. */
+  private readonly own = new Set<object>();
+  private readonly inLoop = new Set<object>();
+  private readonly ownNames: Set<string>;
+  private readonly update: Expression | undefined;
+
+  constructor(
+    private readonly loop: Loop,
+    private readonly place: Place,
+    private readonly collected: Collected
+  ) {
+    this.update = loop.kind === 'for' ? loop.update : undefined;
+    const init = loop.kind === 'for' ? loop.init : undefined;
+    collectWriteNodes(init, this.own);
+    collectWriteNodes(this.update, this.own);
+    const bodyStatements = loop.body.kind === 'block' ? loop.body.body : [loop.body];
+    for (const statement of bodyStatements) {
+      if (statement.kind === 'expression' && isPlain(statement.expression)) {
+        collectWriteNodes(statement.expression, this.own, false);
+      }
     }
+    collectWriteNodes([loop.test, this.update, loop.body], this.inLoop);
+    this.ownNames = new Set(init?.kind === 'declaration' ? namesIn(init.declarators.map(({ target }) => target)) : []);
   }
-  const inLoop = new Set<object>();
-  collectAssignmentNodes([loop.test, update, loop.body], inLoop);
-  const ownNames = new Set(init?.kind === 'declaration' ? namesIn(init.declarators.map(({ target }) => target)) : []);
-  return namesIn(loop.test).every((name) => {
-    const binding = ownNames.has(name) ? loop : bindingOf(place, name);
-    return assignments.every(
-      (assignment) =>
-        assignment.name !== name ||
-        own.has(assignment.node) ||
-        bindingOf(assignment.place, name, loop) !== binding ||
-        (assignment.place.fn === place.fn && !inLoop.has(assignment.node))
+
+  holds(): boolean {
+    const { loop, update } = this;
+    if (!loop.test || !isPlain(loop.test) || (update !== undefined && !isPlain(update)) || leaves(loop.body))
+      return false;
+    const lengthObjects = new Set(lengthObjectsIn([loop.test, update]));
+    // The variables whose values decide the test, which the loop's own writes extend with the variables they read.
+    const pending = namesIn([loop.test, update]);
+    const checked = new Set<string>();
+    for (let name = pending.pop(); name !== undefined; name = pending.pop()) {
+      if (checked.has(name)) continue;
+      checked.add(name);
+      if (lengthObjects.has(name) && !this.isUnchangedSequence(name)) return false;
+      const read = this.valuesReadByWrites(name);
+      if (read === undefined) return false;
+      pending.push(...read);
+    }
+    return true;
+  }
+
+  /** The variables the loop's own writes of a name read, or undefined when other code may write it while it runs. */
+  private valuesReadByWrites(name: string): string[] | undefined {
+    const read: string[] = [];
+    for (const { node, place } of this.writesOf(name)) {
+      if (this.own.has(node)) read.push(...namesIn(valueOf(node)));
+      // A write outside the loop in its own function runs before or after it.
+      else if (place.fn !== this.place.fn || this.inLoop.has(node)) return undefined;
+    }
+    return read;
+  }
+
+  /**
+   * Whether a variable's `length` is a data property that stays as it is: the variable only ever holds arrays or
+   * strings, and no code anywhere does more with it than read its elements or length.
+   */
+  private isUnchangedSequence(name: string): boolean {
+    if (isParameter(this.place, name) || !this.writesOf(name).every(({ node }) => storesSequence(node))) return false;
+    const binding = this.bindingAt(this.place, name);
+    const { uses } = this.collected;
+    return uses.every((use) => use.name !== name || this.bindingAt(use.place, name) !== binding || use.readsOnly);
+  }
+
+  private writesOf(name: string): Collected['writes'] {
+    const binding = this.bindingAt(this.place, name);
+    return this.collected.writes.filter(
+      (write) => write.name === name && this.bindingAt(write.place, name) === binding
     );
-  });
-}
-
-/** The frame that declares a name used at a place, or undefined for a global; `loop` stands for a loop's own scope. */
-function bindingOf(place: Place, name: string, loop?: object): object | undefined {
-  for (let index = place.frames.length - 1; index >= 0; index--) {
-    const frame = place.frames[index];
-    if (frame.declared.has(name)) return frame.owner === loop ? loop : frame.owner;
   }
-  return undefined;
+
+  /** The frame that declares a name at a place, the loop itself for a variable its init declares. */
+  private bindingAt(at: Place, name: string): object | undefined {
+    if (at === this.place && this.ownNames.has(name)) return this.loop;
+    return bindingOf(at, name);
+  }
 }
 
-/** Walks the program, noting each assignment and loop with the place it sits in. */
-function visit(
-  node: unknown,
-  frames: Frame[],
-  assignments: Assignment[],
-  loops: { loop: AnyLoop; place: Place }[]
-): void {
+/** The frame that declares a name used at a place, or undefined for a global. */
+function bindingOf(place: Place, name: string): object | undefined {
+  return place.frames.findLast((frame) => frame.declared.has(name))?.owner;
+}
+
+function isParameter(place: Place, name: string): boolean {
+  const frame = place.frames.findLast((candidate) => candidate.declared.has(name));
+  return frame === undefined || frame.parameters.has(name);
+}
+
+/** Walks the program, noting each write, loop, and use of a variable with the place it sits in. */
+function visit(node: unknown, frames: Frame[], collected: Collected): void {
   if (typeof node !== 'object' || node === null) return;
   if (Array.isArray(node)) {
-    for (const item of node) visit(item, frames, assignments, loops);
+    for (const item of node) visit(item, frames, collected);
     return;
   }
   const record = node as { kind?: unknown; target?: unknown };
-  if (isLoopKind(record.kind)) loops.push({ loop: node as AnyLoop, place: placeOf(frames) });
+  if (isLoopKind(record.kind)) collected.loops.push({ loop: node as AnyLoop, place: placeOf(frames) });
   const inner = framesIn(node, frames);
-  for (const name of writtenNames(node)) assignments.push({ node, name, place: placeOf(inner) });
-  for (const value of Object.values(node)) visit(value, inner, assignments, loops);
+  const place = placeOf(inner);
+  const written = writtenNames(node);
+  for (const name of written) collected.writes.push({ node, name, place });
+  if (written.length > 0) markHandled(record.target, collected.handled);
+  if (record.target && (record.target as { kind?: unknown }).kind === 'member')
+    collected.writtenThrough.add(record.target);
+  noteUse(node, place, collected);
+  for (const value of Object.values(node)) visit(value, inner, collected);
+}
+
+/** Notes how a node uses a variable, which tells whether code may change the array or string a `length` belongs to. */
+function noteUse(node: object, place: Place, collected: Collected): void {
+  const record = node as { kind?: unknown; name?: unknown; object?: Expression; property?: Record<string, unknown> };
+  const { object, property } = record;
+  if (record.kind === 'member' && object?.kind === 'identifier' && !collected.handled.has(object)) {
+    const readsElementOrLength =
+      property?.kind === 'computed' || (property?.kind === 'key' && property.key === 'length');
+    const readsOnly = readsElementOrLength && !collected.writtenThrough.has(node);
+    collected.uses.push({ name: object.name, place, readsOnly });
+    collected.handled.add(object);
+  } else if (record.kind === 'identifier' && typeof record.name === 'string' && !collected.handled.has(node)) {
+    collected.uses.push({ name: record.name, place, readsOnly: false });
+  }
+}
+
+/** Marks the identifiers a write's target assigns, which are written rather than used; a member's object is used. */
+function markHandled(node: unknown, handled: Set<object>): void {
+  if (typeof node !== 'object' || node === null) return;
+  if (Array.isArray(node)) {
+    for (const item of node) markHandled(item, handled);
+    return;
+  }
+  const { kind } = node as { kind?: unknown };
+  if (kind === 'identifier') handled.add(node);
+  else if (kind !== 'member') for (const value of Object.values(node)) markHandled(value, handled);
 }
 
 /** The frames the children of a node sit in: a function's or a `for` loop's own, or its parent's with a block's names. */
 function framesIn(node: object, frames: Frame[]): Frame[] {
   if (isFunctionNode(node)) {
+    const parameters = new Set(namesIn([node.params, node.rest]));
     const declared = declaredIn(node.scope);
-    for (const name of namesIn([node.params, node.rest])) declared.add(name);
-    return [...frames, { owner: node, declared, isFunction: true }];
+    for (const name of parameters) declared.add(name);
+    return [...frames, { owner: node, declared, parameters, isFunction: true }];
   }
   const { kind, scope } = node as { kind?: unknown; scope?: ScopeDeclarations };
   if (!scope || !('lexical' in scope)) return frames;
-  if (isLoopKind(kind)) return [...frames, { owner: node, declared: declaredIn(scope), isFunction: false }];
+  if (isLoopKind(kind)) {
+    return [...frames, { owner: node, declared: declaredIn(scope), parameters: new Set(), isFunction: false }];
+  }
   // A block's names are taken as its frame's, which can only make a binding look shared with more code.
   const frame = frames.at(-1) as Frame;
   for (const name of declaredIn(scope)) frame.declared.add(name);
@@ -161,7 +255,6 @@ function isPlain(expression: Expression): boolean {
       return true;
     }
     case 'member': {
-      // An array's or a string's length, which no getter of the program computes.
       const { object, property } = expression;
       return object.kind === 'identifier' && property.kind === 'key' && property.key === 'length';
     }
@@ -190,16 +283,40 @@ function isPlain(expression: Expression): boolean {
   }
 }
 
+/** The value a write stores: an assignment's or a declarator's, or none for an increment. */
+function valueOf(node: object): unknown {
+  const record = node as { value?: unknown; init?: unknown };
+  return record.value ?? record.init;
+}
+
+/** Whether a write stores an array literal or a string, whose `length` no code of the program computes. */
+function storesSequence(node: object): boolean {
+  const value = valueOf(node) as Expression | undefined;
+  if (!value) return false;
+  return (
+    value.kind === 'array' || value.kind === 'template' || (value.kind === 'literal' && typeof value.value === 'string')
+  );
+}
+
+/** The variables whose `length` an expression reads. */
+function lengthObjectsIn(node: unknown): string[] {
+  if (typeof node !== 'object' || node === null) return [];
+  if (Array.isArray(node)) return node.flatMap(lengthObjectsIn);
+  const record = node as { kind?: unknown; object?: { kind?: unknown; name?: unknown } };
+  const own = record.kind === 'member' && record.object?.kind === 'identifier' ? [String(record.object.name)] : [];
+  return [...own, ...Object.values(node).flatMap(lengthObjectsIn)];
+}
+
 /** Adds the nodes in a node that write variables; `nested` false takes only the node itself when it is one. */
-function collectAssignmentNodes(node: unknown, nodes: Set<object>, nested = true): void {
+function collectWriteNodes(node: unknown, nodes: Set<object>, nested = true): void {
   if (typeof node !== 'object' || node === null) return;
   if (Array.isArray(node)) {
-    for (const item of node) collectAssignmentNodes(item, nodes, nested);
+    for (const item of node) collectWriteNodes(item, nodes, nested);
     return;
   }
   if (writtenNames(node).length > 0) nodes.add(node);
   if (!nested) return;
-  for (const value of Object.values(node)) collectAssignmentNodes(value, nodes);
+  for (const value of Object.values(node)) collectWriteNodes(value, nodes);
 }
 
 /** Whether a statement contains a `break` or `return`, outside any function it defines. */

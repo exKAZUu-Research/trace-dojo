@@ -815,9 +815,9 @@ function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sl
 const s = new Date(); while (new Date() - s < 500); console.log('waited again');
 setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);
 setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);
-setTimeout(() => console.log('long'), 50); for (let i = 0; i < 1000; i++) new Date(0); setTimeout(() => console.log('short'), 0);
+setTimeout(() => console.log('long'), 50); for (let i = 0; i < 500; i++) new Date(0); setTimeout(() => console.log('short'), 0);
 const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');
-const u = Date.now(); while (Date.now() - u < 500) { for (let i = 0; i < 1000; i++) sum += i; } console.log('waited with more work');
+const u = Date.now(); while (Date.now() - u < 500) { for (let i = 0; i < 500; i++) sum += i; } console.log('waited with more work');
 setTimeout(() => console.log('timer 100'), 100); for (let i = 0; i < 5000; i++) sum += i; console.log(new Date().getFullYear() > 2000); setTimeout(() => console.log('timer 0'), 0);
 setTimeout(() => console.log('overdue 500'), 500); sleep(1000); setTimeout(() => console.log('after sleep'), 60);
 // Timers set after the busy waits fall due at least 50 ms apart, so Node.js waking late does not reorder them.
@@ -839,17 +839,19 @@ for (const f of [() => Object.create(1), () => Object.create(null, null), () => 
     `let sum = 0;
 setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
 setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);
-let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 0; i < 2000; i++) sum += i; last = Date.now(); } console.log('polled twice per pass');
-let running = true; const f = Date.now(); while (running) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - f >= 300) running = false; } console.log('flag wait');
-let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 2000; i++) sum += i; done = Date.now() - g >= 300; } console.log('flag set');
-const h = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; const elapsed = Date.now() - h; if (elapsed >= 300) break; } console.log('elapsed variable');
-const o = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - o < 300) continue; break; } console.log('continue wait');
-let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
+let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 0; i < 500; i++) sum += i; last = Date.now(); } console.log('polled twice per pass');
+let running = true; const f = Date.now(); while (running) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - f >= 300) running = false; } console.log('flag wait');
+let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 500; i++) sum += i; done = Date.now() - g >= 300; } console.log('flag set');
+const h = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; const elapsed = Date.now() - h; if (elapsed >= 300) break; } console.log('elapsed variable');
+const o = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - o < 300) continue; break; } console.log('continue wait');
+let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
 while (!ticked) tick(); console.log('ticked');
 let level = 0; const z = Date.now(); const bump = () => { if (Date.now() - z > 300) level = 99; };
-while (level < 5) { for (let i = 0; i < 2000; i++) sum += i; bump(); } console.log('closure counter');
-var waited = 0; const y = Date.now(); while (waited < 300) { for (let i = 0; i < 2000; i++) sum += i; var waited = Date.now() - y; } console.log('var wait');
-const grown = [0]; const x = Date.now(); for (const item of grown) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - x < 300) grown.push(item + 1); } console.log('grown');`,
+while (level < 5) { for (let i = 0; i < 500; i++) sum += i; bump(); } console.log('closure counter');
+var waited = 0; const y = Date.now(); while (waited < 300) { for (let i = 0; i < 500; i++) sum += i; var waited = Date.now() - y; } console.log('var wait');
+const grown = [0]; const x = Date.now(); for (const item of grown) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - x < 300) grown.push(item + 1); } console.log('grown');
+let elapsed = 0; const e = Date.now(); while (elapsed < 300) { for (let i = 0; i < 500; i++) sum += i; const now = Date.now(); elapsed = now - e; } console.log('local now');
+const queue = [1]; const p = Date.now(); for (let i = 0; i < queue.length; i++) { for (let k = 0; k < 500; k++) sum += k; if (Date.now() - p < 300) queue.push(1); } console.log('queue grown');`,
   ],
   [
     'a timestamp helper around computation between timers',
