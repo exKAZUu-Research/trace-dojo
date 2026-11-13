@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 493 -- It transcribes one of expat's C files.
+// code-gauge-allow-file fileNcss 494 -- It transcribes one of expat's C files.
 import { ExpatBase } from './expatBase';
 import {
   badPublicIdChar,
@@ -50,6 +50,7 @@ export abstract class ExpatProlog extends ExpatBase {
         if (tok !== -TOK.PROLOG_S) next = end;
         tok = -tok;
       }
+      this.accountToken(inEntity, next - s);
       const role = this.prologState.role(tok, this.text(tz, s, next));
       if (role === 'INSTANCE_START') {
         if (this.foreignDTD) this.dtd.hasParamEntityRefs = true;

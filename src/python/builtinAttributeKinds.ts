@@ -2,6 +2,7 @@ import { PyAttribute } from './attributeDescriptors';
 import { assignExceptionAttribute, specialAttribute } from './attributes';
 import { builtinClassLayout, builtinDoc } from './builtinDocs';
 import { orderClassNamespace, orderModuleClasses } from './classOrders';
+import { CPYTHON_TYPE_NAMES } from './data/typeNames';
 import { method } from './define';
 import { ownDict } from './descriptors';
 import { defineConstructingNew } from './instances';
@@ -9,15 +10,7 @@ import { addModuleCreationHook } from './modules';
 import { attributeError, bindValue, callValue } from './objects';
 import { nativeCompare } from './operators';
 import { allBuiltinClasses } from './subclasses';
-import {
-  baseExceptionClass,
-  classmethodClass,
-  defineMethod,
-  iteratorClassSetup,
-  nativeFunction,
-  None,
-  propertyClass,
-} from './types';
+import { baseExceptionClass, classmethodClass, defineMethod, nativeFunction, None, propertyClass } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { PyBuiltinFunction, PyClass, PyDescriptor, PyObject, type PyValue } from './values';
 
@@ -28,6 +21,7 @@ import { PyBuiltinFunction, PyClass, PyDescriptor, PyObject, type PyValue } from
  */
 export function convertBuiltinAttributes(classes: Iterable<PyClass> = allBuiltinClasses()): void {
   for (const cls of classes) {
+    cls.typeName ??= CPYTHON_TYPE_NAMES[`${cls.module}.${cls.qualifiedName}`];
     if (!cls.isBuiltin || converted.has(cls)) continue;
     converted.add(cls);
     const layout = builtinClassLayout(cls);
@@ -142,9 +136,6 @@ addModuleCreationHook((runtime, name) => () => {
   convertBuiltinAttributes([...module.dict.values()].filter((value) => value instanceof PyClass));
   orderModuleClasses(module.dict.values());
 });
-
-// The classes of native iterators are created when first used, which may be while a program runs.
-iteratorClassSetup.push((cls) => convertBuiltinAttributes([cls]));
 
 /** Gives a builtin type the `__new__` CPython's tp_new is, which creates objects as calling the type does. */
 function defineTypeNew(cls: PyClass): void {

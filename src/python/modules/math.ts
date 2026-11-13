@@ -8,6 +8,7 @@ import { floatRepr, intToFloat, toIndex } from '../numbers';
 import { bindValue, callValue, isTruthy, lookupSpecial, toArray } from '../objects';
 import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { gcd } from '../typeNumbers';
 import { newTuple, pyError, typeError, typeName, valueError } from '../types';
 import { type Kwargs, PyInstance, type PyValue } from '../values';
 import { fma, fusedMultiplyAdd } from './mathFma';
@@ -145,31 +146,6 @@ function factorial(value: PyValue): bigint {
     result *= index;
   }
   return result;
-}
-
-const SMALL_INT = 1n << 64n;
-/** The bits of operand that one remainder step of Euclid's algorithm handles for one unit of the budget. */
-const BITS_PER_OPERATION = 1 << 13;
-
-function gcdOf(a: bigint, b: bigint): bigint {
-  let x = a < 0n ? -a : a;
-  let y = b < 0n ? -b : b;
-  if (x < SMALL_INT && y < SMALL_INT) {
-    while (y) [x, y] = [y, x % y];
-    return x;
-  }
-  // The steps of large operands are too many and too slow to leave uncharged.
-  const bits = Math.max(x.toString(16).length, y.toString(16).length) * 4;
-  let work = 0;
-  while (y) {
-    work += bits;
-    if (work >= BITS_PER_OPERATION) {
-      currentRuntime().spend(Math.floor(work / BITS_PER_OPERATION));
-      work %= BITS_PER_OPERATION;
-    }
-    [x, y] = [y, x % y];
-  }
-  return x;
 }
 
 /**
@@ -312,7 +288,7 @@ function lcm(values: bigint[]): bigint {
     if (result === 0n || value === 0n) return 0n;
     currentRuntime().chargeBigint(result, value);
     const product = result * value;
-    result = (product < 0n ? -product : product) / gcdOf(result, value);
+    result = (product < 0n ? -product : product) / gcd(result, value);
   }
   return result;
 }
@@ -378,7 +354,7 @@ registerModule('math', () => {
     ['gamma', gammaFunction('gamma', tgamma)],
     ['lgamma', gammaFunction('lgamma', lgamma)],
     ['factorial', builtin('factorial', 'one', 1, 1, ([value]) => factorial(value))],
-    ['gcd', builtin('gcd', 'expected', 0, Number.POSITIVE_INFINITY, (args) => gcd(args.map(integerArgument)))],
+    ['gcd', builtin('gcd', 'expected', 0, Number.POSITIVE_INFINITY, (args) => gcdOfAll(args.map(integerArgument)))],
     ['lcm', builtin('lcm', 'expected', 0, Number.POSITIVE_INFINITY, (args) => lcm(args.map(integerArgument)))],
     ['comb', builtin('comb', 'expected', 2, 2, ([n, k]) => comb(n, k))],
     ['perm', builtin('perm', 'expected', 1, 2, ([n, k]) => perm(n, k))],
@@ -422,9 +398,9 @@ export function log(value: PyValue, base: PyValue | undefined): number {
   return numerator / denominator;
 }
 
-function gcd(values: bigint[]): bigint {
+function gcdOfAll(values: bigint[]): bigint {
   let result = 0n;
-  for (const value of values) result = gcdOf(result, value);
+  for (const value of values) result = gcd(result, value);
   return result;
 }
 

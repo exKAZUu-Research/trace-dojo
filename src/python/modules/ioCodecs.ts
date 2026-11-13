@@ -4,6 +4,7 @@ import { codecModuleOf, decodeBytes, encodeString } from '../codecs';
 import { builtin } from '../define';
 import { currentRuntime } from '../runtimeContext';
 import { newTuple } from '../types';
+import { unicodeException } from '../unicodeErrors';
 import { PyError, type PyValue } from '../values';
 import { statefulCodecFunction } from './codecsNative';
 
@@ -94,8 +95,8 @@ function incompleteUtf8Tail(data: Uint8Array): number {
   return 0;
 }
 
-/** UTF-16 or UTF-32, whose state is 1 for little-endian and 2 for big-endian once a BOM or the first chunk chose. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Handles the BOM, the whole code units, and a split surrogate pair of one chunk.
+/** UTF-16 or UTF-32, whose state is 1 for little-endian and 2 for big-endian once a BOM chose. */
+// code-gauge-allow functionCognitiveComplexity 27 -- Handles BOM rejection and byte order, whole code units, and a split surrogate pair.
 function decodeUnits(
   module: string,
   errors: string,
@@ -109,6 +110,17 @@ function decodeUnits(
   if (order === 0) {
     if (data.length < unit && !final) return ['', 0, 0];
     const found = byteOrderMark(data, unit);
+    if (found === undefined && data.length >= unit) {
+      throw new PyError(
+        unicodeException('UnicodeDecodeError', [
+          unit === 2 ? 'utf-16' : 'utf-32',
+          newBytes(data),
+          0n,
+          BigInt(unit),
+          'Stream does not start with BOM',
+        ])
+      );
+    }
     order = found === 'big' ? 2 : 1;
     if (found !== undefined) start = unit;
   }

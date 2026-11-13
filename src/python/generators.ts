@@ -160,7 +160,10 @@ export function closeGenerator(generator: PyGenerator): PyValue {
     if (!step.done) throw pyError('RuntimeError', `${generatorKind(generator)} ignored GeneratorExit`);
     return step.value;
   } catch (error) {
-    if (error instanceof PyError && isGeneratorExit(error)) return None;
+    if (error instanceof PyError && isGeneratorExit(error)) {
+      runningRuntime()?.finalizer.release([error.exception]);
+      return None;
+    }
     throw error;
   }
 }

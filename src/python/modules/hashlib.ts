@@ -124,7 +124,9 @@ function append(state: HashState, data: Uint8Array): void {
   runtime.ensureStringFits(length);
   runtime.spend(Math.ceil(data.length / 16));
   if (length > state.data.length) {
-    const grown = new Uint8Array(Math.min(Math.max(length, state.data.length * 2), LIMITS.maxStringLength));
+    const capacity = Math.min(Math.max(length, state.data.length * 2), LIMITS.maxStringLength);
+    runtime.allocate(Math.ceil((capacity - state.data.length) / 8));
+    const grown = new Uint8Array(capacity);
     grown.set(state.data.subarray(0, state.length));
     state.data = grown;
   }
@@ -150,6 +152,7 @@ function defineHashMethods(cls: PyClass, info: (state: HashState) => { digestSiz
   });
   method(cls, 'copy', 'none', 0, 0, (self) => {
     const state = stateOf(self);
+    currentRuntime().allocate(Math.ceil(state.length / 8));
     return new PyOpaque((self as PyOpaque).cls, state.name, { ...state, data: state.data.slice(0, state.length) });
   });
   for (const [name, read] of [
@@ -234,7 +237,8 @@ function blake2Class(name: 'blake2b' | 'blake2s', wide: boolean): PyClass {
       const value = option(key);
       const data = value === undefined ? new Uint8Array(0) : messageData(value);
       if (data.length > limit) throw valueError(`maximum ${key === 'key' ? 'key' : key} length is ${limit} bytes`);
-      return data;
+      currentRuntime().allocate(Math.ceil(data.length / 8));
+      return new Uint8Array(data);
     };
     const number = (key: string, fallback: number): number => Number(toIndex(option(key) ?? BigInt(fallback)));
     const digestSize = number('digest_size', sizes.digest);

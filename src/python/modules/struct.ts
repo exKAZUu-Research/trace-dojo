@@ -66,6 +66,7 @@ const BYTE_ORDERS: Record<string, { little: boolean; native: boolean }> = {
 
 /** Parses a struct format as CPython's prepare_s does, laying its items out with their offsets. */
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows prepare_s, including native alignment.
+// code-gauge-allow functionNcss 31 -- Follows prepare_s with each item budgeted before allocation.
 function parseFormat(format: string): Layout {
   const order = BYTE_ORDERS[format[0]] ?? BYTE_ORDERS['@'];
   const codes = order.native ? NATIVE_CODES : STANDARD_CODES;
@@ -86,6 +87,7 @@ function parseFormat(format: string): Layout {
     if (!info) throw structError('bad char in struct format');
     const count = digits === '' ? 1 : Number(digits);
     if (order.native) size = Math.ceil(size / info.size) * info.size;
+    currentRuntime().allocate(5);
     items.push({ code, info, count, offset: size });
     size += info.kind === 'string' || info.kind === 'pascal' ? count : count * info.size;
     if (info.kind === 'string' || info.kind === 'pascal') arity++;
@@ -111,10 +113,7 @@ function layoutOf(formatValue: PyValue): Layout {
   const cached = layouts.get(text);
   if (cached) return cached;
   const layout = parseFormat(text);
-  if (text.length > MAX_CACHED_FORMAT_LENGTH) {
-    currentRuntime().allocate(layout.items.length);
-    return layout;
-  }
+  if (text.length > MAX_CACHED_FORMAT_LENGTH) return layout;
   if (layouts.size >= MAX_CACHED_LAYOUTS) layouts.delete(layouts.keys().next().value as string);
   layouts.set(text, layout);
   return layout;

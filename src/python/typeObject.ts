@@ -7,6 +7,7 @@ import {
   setInstanceAttribute,
   typeData,
 } from './attributes';
+import { convertBuiltinAttributes } from './builtinAttributeKinds';
 import { computeMro, typeNewFromArguments } from './classes';
 import { addressOf, defaultRepr, pyFormat, pyRepr, pyStr } from './conversions';
 import { method } from './define';
@@ -520,7 +521,10 @@ const HINTED_ITERATORS = new Set([
 ]);
 
 for (const cls of iteratorClasses.values()) defineIteratorClass(cls);
-iteratorClassSetup.push(defineIteratorClass);
+iteratorClassSetup.push((cls) => {
+  defineIteratorClass(cls);
+  convertBuiltinAttributes([cls]);
+});
 
 // Descriptors -------------------------------------------------------------------------------------------------------
 

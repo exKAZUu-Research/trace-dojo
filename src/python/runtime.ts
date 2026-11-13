@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 492 -- The state of a run and the operations the interpreter reaches through it.
+// code-gauge-allow-file fileNcss 495 -- The state of a run and the operations the interpreter reaches through it.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -416,6 +416,7 @@ export class Runtime {
   }
 
   /** A generator, coroutine, or async generator object that runs `body` in `frame` step by step. */
+  // code-gauge-allow functionNcss 33 -- Frame entry and exit must keep exception, trace, and ownership state in one try/finally.
   private frameGenerator(
     cls: PyClass,
     name: string,
@@ -426,8 +427,7 @@ export class Runtime {
     const { evaluator } = this;
     // The exceptions the generator handles where it suspended, which its caller does not handle.
     let handling: PyInstance[] = [];
-    // A generator that returned holds nothing of its frame any more, as CPython clears a finished frame.
-    let returned = false;
+    let completed = false;
     const holds = (): (PyValue | undefined)[] => [
       ...frame.locals.values(),
       ...[...frame.cells.values()].map((cell) => cell.value),
@@ -445,11 +445,13 @@ export class Runtime {
         const depth = evaluator.attachHandling(handling);
         let finished = true;
         let step: IteratorResult<PyValue, PyValue> | undefined;
+        let escaping: PyValue | undefined;
         try {
           step = this.guardRecursion(() => (input.error ? body.throw(input.error) : body.next(input.value)));
           finished = step.done === true;
           return step;
         } catch (error) {
+          if (error instanceof PyError) escaping = error.exception;
           noteUnwinding(error);
           throw error;
         } finally {
@@ -458,15 +460,14 @@ export class Runtime {
           // The caller goes on at the row that resumed the generator, as its later calls and errors report.
           this.currentRow = callerRow;
           this.finalizer.update(generator, frame, finished);
-          // A generator that raised keeps its frame for the traceback the exception carries.
-          if (step?.done) {
+          if (finished) {
             const dropped = holds();
-            returned = true;
-            this.finalizer.release(dropped, [step.value]);
+            completed = true;
+            this.finalizer.release(dropped, [step?.value, escaping]);
           }
         }
       },
-      () => (returned ? [] : holds())
+      () => (completed ? [] : holds())
     );
     generator.frame = frame;
     setFrameGenerator(frame, generator);

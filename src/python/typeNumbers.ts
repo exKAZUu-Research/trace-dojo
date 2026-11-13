@@ -212,10 +212,26 @@ function floatRatio(value: number): PyValue {
   return newTuple([numerator, denominator]);
 }
 
+const GCD_SMALL_INT = 1n << 64n;
+const GCD_BITS_PER_OPERATION = 1 << 13;
+
 export function gcd(a: bigint, b: bigint): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
-  while (y) [x, y] = [y, x % y];
+  if (x < GCD_SMALL_INT && y < GCD_SMALL_INT) {
+    while (y) [x, y] = [y, x % y];
+    return x;
+  }
+  const bits = Math.max(x.toString(16).length, y.toString(16).length) * 4;
+  let work = 0;
+  while (y) {
+    work += bits;
+    if (work >= GCD_BITS_PER_OPERATION) {
+      currentRuntime().spend(Math.floor(work / GCD_BITS_PER_OPERATION));
+      work %= GCD_BITS_PER_OPERATION;
+    }
+    [x, y] = [y, x % y];
+  }
   return x;
 }
 

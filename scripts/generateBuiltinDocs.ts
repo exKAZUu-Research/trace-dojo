@@ -1,18 +1,23 @@
 // Writes src/python/data/builtinDocs.ts from the docstrings and text signatures CPython has
 // (scripts/pythonData/generateBuiltinDocs.py), keeping those of what this grader implements natively:
-//   bun scripts/generateBuiltinDocs.ts .tmp/builtinDocs.json && bun fmt src/python/data/builtinDocs.ts
+//   bun scripts/generateBuiltinDocs.ts .tmp/builtinDocs.json
 import { readFileSync, writeFileSync } from 'node:fs';
 
-import { docKey, moduleDoc } from '../src/python/builtinDocs';
-import { SUPPORTED_MODULES } from '../src/python/moduleNames';
-import { builtinFunctionModule } from '../src/python/modules';
-import { parsePython } from '../src/python/parse';
-import { runModule } from '../src/python/run';
-import { Runtime } from '../src/python/runtime';
-import { withRuntime } from '../src/python/runtimeContext';
-import { classOf } from '../src/python/types';
-import { UnsupportedFeatureError } from '../src/python/unsupported';
-import { PyBuiltinFunction, PyClass, PyDescriptor, type PyValue } from '../src/python/values';
+import { z } from 'zod';
+
+import type { Runtime as RuntimeType } from '../src/python/runtime';
+import type { PyClass as PyClassType, PyValue } from '../src/python/values';
+
+const { parsePython } = await import('../src/python/parse');
+const { runModule } = await import('../src/python/run');
+const { docKey, moduleDoc } = await import('../src/python/builtinDocs');
+const { SUPPORTED_MODULES } = await import('../src/python/moduleNames');
+const { builtinFunctionModule } = await import('../src/python/modules');
+const { Runtime } = await import('../src/python/runtime');
+const { withRuntime } = await import('../src/python/runtimeContext');
+const { classOf } = await import('../src/python/types');
+const { UnsupportedFeatureError } = await import('../src/python/unsupported');
+const { PyBuiltinFunction, PyClass, PyDescriptor } = await import('../src/python/values');
 
 /** Values of builtin types that no module names, such as iterators, whose types the data needs. */
 const SAMPLES =
@@ -33,12 +38,11 @@ def cell():
 awaited = coroutine()
 generated = async_generator()`;
 
-const reference = JSON.parse(readFileSync(process.argv[2] as string, 'utf8')) as Record<
-  string,
-  [string | null, string | null]
->;
+const reference = z
+  .record(z.string(), z.tuple([z.string().nullable(), z.string().nullable()]))
+  .parse(JSON.parse(readFileSync(process.argv[2] as string, 'utf8')));
 const keys = new Set<string>();
-const seen = new Set<PyClass>();
+const seen = new Set<PyClassType>();
 
 for (const module of SUPPORTED_MODULES) {
   if (module === '__main__') continue;
@@ -81,7 +85,7 @@ const indexOf = (text: string | null): number => {
   return index;
 };
 const pairs = kept.map((key) => {
-  const [doc, signature] = reference[key] as [string | null, string | null];
+  const [doc, signature] = reference[key];
   return [indexOf(doc), indexOf(signature)];
 });
 const data = JSON.stringify([kept, strings, pairs]);
@@ -127,7 +131,7 @@ function addKey(value: PyValue): void {
   }
 }
 
-function run(source: string, inspect: (runtime: Runtime, globals: Map<string, PyValue>) => void): void {
+function run(source: string, inspect: (runtime: RuntimeType, globals: Map<string, PyValue>) => void): void {
   const runtime = new Runtime();
   let globals: Map<string, PyValue> | undefined;
   try {

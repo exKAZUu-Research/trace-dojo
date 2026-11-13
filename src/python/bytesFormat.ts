@@ -2,7 +2,7 @@ import { bytesLikeData, latin1Bytes, latin1Text, newBytes, PyBytes } from './byt
 import { pyAscii } from './conversions';
 import { toIndex } from './numbers';
 import { bindValue, callValue, lookupSpecial } from './objects';
-import { renderPercent, TemplateReader } from './percentFormat';
+import { percentFloat, renderPercent, TemplateReader } from './percentFormat';
 import { repeatText } from './stringBuilder';
 import { pyError, typeError, typeName, valueError } from './types';
 import { PyTuple, type PyValue } from './values';
@@ -33,6 +33,10 @@ class BytesTemplateReader extends TemplateReader {
     const shown = precision === undefined || type === 'c' ? body : body.slice(0, precision);
     const padding = repeatText(' ', Number(width || '0') - shown.length);
     return flags.includes('-') ? shown + padding : padding + shown;
+  }
+
+  protected override floatValue(value: PyValue): number {
+    return percentFloat(value, 'float argument required');
   }
 
   protected override mappingKey(key: string): PyValue {

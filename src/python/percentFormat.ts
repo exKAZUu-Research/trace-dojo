@@ -116,7 +116,12 @@ export class TemplateReader {
     precision: number | undefined,
     position: number
   ): string {
-    return convertOne(type, value, flags, width, precision, position);
+    const converted = 'eEfFgG'.includes(type) ? this.floatValue(value) : value;
+    return convertOne(type, converted, flags, width, precision, position);
+  }
+
+  protected floatValue(value: PyValue): number {
+    return percentFloat(value, 'must be real number');
   }
 
   /** The key of a `%(key)` specifier, which bytes formatting looks up as bytes. */
@@ -204,7 +209,7 @@ function convertOne(
   if ('eEfFgG'.includes(type)) {
     const { zero, align, sign, alternate } = conversion;
     const precisionText = `.${precision ?? 6}`;
-    return pyFormat(toFloat(value), `${zero ? '0=' : align}${sign}${alternate}${width}${precisionText}${type}`);
+    return pyFormat(value, `${zero ? '0=' : align}${sign}${alternate}${width}${precisionText}${type}`);
   }
   throw valueError(
     `unsupported format character '${type}' (0x${(type.codePointAt(0) as number).toString(16)}) at index ${position}`
@@ -275,10 +280,10 @@ function toInteger(type: string, value: PyValue): bigint {
 }
 
 /** The float a `%f`-like conversion formats, as PyFloat_AsDouble converts it. */
-function toFloat(value: PyValue): number {
+export function percentFloat(value: PyValue, message: string): number {
   const unboxed = unbox(value);
   if (typeof unboxed === 'string' || !isNumber(value) || unboxed instanceof PyComplex) {
-    throw typeError(`must be real number, not ${typeName(value)}`);
+    throw typeError(`${message}, not ${typeName(value)}`);
   }
   return unbox(callValue(floatClass, [value])) as number;
 }

@@ -175,12 +175,12 @@ export class ExpatParser extends ExpatProlog {
     const run: ContentRun = { tz, startTagLevel, end, haveMore, internal };
     let [tok, next] = tz.contentTok(s, end);
     for (;;) {
-      this.accountToken(internal, next - s);
       if (!internal) {
         this.eventPtr = s;
         this.eventEndPtr = next;
       }
       if (tok <= 0) return this.contentEnd(run, tok, s, next);
+      this.accountToken(internal, next - s);
       const after = this.contentToken(run, tok, s, next);
       if (typeof after !== 'number') return after.result;
       s = after;

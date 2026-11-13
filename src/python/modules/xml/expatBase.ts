@@ -93,7 +93,8 @@ export abstract class ExpatBase {
   protected column = 0;
   protected readonly tags: Tag[] = [];
   protected readonly buffer = { size: 0, start: 0, end: 0, lastRequest: 0, partialBefore: 0 };
-  /** The characters of entity text parsed so far, which expat's protection against amplification counts. */
+  /** The characters of the document and of entity text parsed so far, which expat's protection compares. */
+  private directChars = 0;
   private expandedChars = 0;
 
   // The declaration being parsed in the DTD.
@@ -315,17 +316,19 @@ export abstract class ExpatBase {
     return String.fromCodePoint(...pool);
   }
 
-  // code-gauge-allow functionParameterCount 7 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   /**
-   * Charges a token, and refuses one of entity text once expansion has made the parsed text more than 100 times the
-   * document past 8 MiB, as expat's default protection against amplification (billion laughs) does.
+   * Charges a complete token, and refuses one of entity text once expansion has made the parsed text more than 100
+   * times the document parsed so far past 8 MiB, as expat's default protection against amplification does.
    */
   protected accountToken(internal: boolean, length: number): void {
     currentRuntime().spend();
-    if (!internal) return;
+    if (!internal) {
+      this.directChars += length;
+      return;
+    }
     this.expandedChars += length;
-    const total = this.input.cs.length + this.expandedChars;
-    if (total >= AMPLIFICATION_THRESHOLD && total / this.input.cs.length > MAX_AMPLIFICATION) {
+    const total = this.directChars + this.expandedChars;
+    if (total >= AMPLIFICATION_THRESHOLD && total / Math.max(this.directChars, 1) > MAX_AMPLIFICATION) {
       throw new XmlError(XML_ERROR.AMPLIFICATION_LIMIT_BREACH);
     }
   }

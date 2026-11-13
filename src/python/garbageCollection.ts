@@ -4,7 +4,9 @@ import { pushAll } from './arrays';
 import { PyMemoryView } from './bytesValues';
 import { peekFieldsOf } from './cTypes';
 import { DictStore } from './dictStore';
+import { Frame } from './frame';
 import { ObjectNamespace } from './namespaces';
+import { frameReferences, PyTraceback } from './tracebacks';
 import {
   PyBoundMethod,
   PyBuiltinFunction,
@@ -230,7 +232,7 @@ function walk(
 
 /** Pushes what an object refers to, returning the number of elements among them. */
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of object that refers to others.
-// code-gauge-allow functionNcss 46 -- One case per kind of object that refers to others.
+// code-gauge-allow functionNcss 50 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
     pushAll(pending, object.items);
@@ -255,7 +257,10 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
   }
   if (object instanceof PyFunction) return pushFunctionReferences(pending, object);
   if (object instanceof PyClass || object instanceof PyModule) return pushNamespaceReferences(pending, object);
-  if (object instanceof PyBoundMethod) pending.push(object.self, object.fn);
+  if (object instanceof PyTraceback) {
+    pushNativeNodes(pending, object.frame);
+    pending.push(object.next);
+  } else if (object instanceof PyBoundMethod) pending.push(object.self, object.fn);
   else if (object instanceof PyBuiltinFunction) pending.push(object.self);
   else if (object instanceof PySuper) pending.push(object.self, object.thisClass);
   else if (object instanceof PyDescriptor) pending.push(object.fn, object.setter, object.deleter);
@@ -333,7 +338,8 @@ function pushNativeNodes(pending: unknown[], root: unknown): void {
 
 /** Pushes what the native state of a builtin object holds: the items of its arrays, maps, sets, and records. */
 function pushNativeData(pending: unknown[], data: object): void {
-  if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
+  if (data instanceof Frame) pushAll(pending, frameReferences(data));
+  else if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
   else if (data instanceof Map) for (const [key, value] of data) pending.push(key, value);
   else if (data instanceof DictStore) for (const entry of data.ordered()) pending.push(entry.key, entry.value);
   else if (Object.getPrototypeOf(data) === Object.prototype) pushAll(pending, Object.values(data));

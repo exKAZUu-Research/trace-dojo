@@ -123,6 +123,23 @@ export function setFrameGenerator(frame: Frame, generator: PyValue): void {
   frameGenerators.set(frame, generator);
 }
 
+/** The Python values and caller an exposed frame keeps alive independently of its generator or traceback. */
+export function frameReferences(frame: Frame): unknown[] {
+  return [
+    frame.locals,
+    frame.globals,
+    frame.cells,
+    frame.temporaries,
+    frame.annotations,
+    frame.fn,
+    frame.classCell,
+    frame.builtins,
+    frame.firstArgument,
+    frame.inlinedIn,
+    callers.get(frame),
+  ];
+}
+
 /** The frame object `depth` frames below the innermost one, as `sys._getframe(depth)` gives it. */
 export function stackFrame(depth: number): PyValue | undefined {
   const frames = cpythonFrames(currentRuntime().frames);
@@ -179,7 +196,10 @@ method(frameClass, 'clear', 'none', 0, 0, (self) => {
   }
   return None;
 });
-defineProperty(frameClass, 'f_generator', (self) => frameGenerators.get(frameOf(self)) ?? None);
+defineProperty(frameClass, 'f_generator', (self) => {
+  const generator = frameGenerators.get(frameOf(self));
+  return generator instanceof PyGenerator && !generator.finished ? generator : None;
+});
 defineProperty(frameClass, 'f_trace', () => None);
 defineProperty(frameClass, 'f_trace_lines', () => true);
 defineProperty(frameClass, 'f_trace_opcodes', () => false);
