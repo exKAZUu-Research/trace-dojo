@@ -426,6 +426,7 @@ for (const [name, feature] of [
   ['readline', '標準入力（readline）'],
   ['readlines', '標準入力（readlines）'],
   ['open', 'ファイルの読み書き（open）'],
+  ['__dir__', 'ファイルの場所（__dir__）'],
   ['system', '外部コマンドの実行（system）'],
   ['exec', '外部コマンドの実行（exec）'],
   ['spawn', '外部コマンドの実行（spawn）'],
