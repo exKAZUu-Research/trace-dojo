@@ -1374,6 +1374,11 @@ const programs: [name: string, runs: boolean, source: string][] = [
     '@FunctionalInterface interface Two { void a(); void b(); }\nclass Main {\n  public static void main(String[] args) {}\n}',
   ],
   [
+    'functional-interface-annotation-on-overloads',
+    false,
+    '@FunctionalInterface interface Overloaded { void apply(int x); void apply(String x); }\nclass Main {\n  public static void main(String[] args) {}\n}',
+  ],
+  [
     'safe-varargs-on-an-overridable-method',
     false,
     'class Main {\n  @SafeVarargs <T> void f(T... xs) {}\n  public static void main(String[] args) {}\n}',

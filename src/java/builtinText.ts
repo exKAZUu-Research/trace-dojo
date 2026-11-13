@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 402 -- The String, builder, and CharSequence methods, which share their text helpers.
 import type { Collections } from './builtinCollections';
 import { linkOverrides, subListChecks } from './builtinCollectionSupport';
 import { defineLocale } from './builtinLocale';
@@ -59,7 +60,7 @@ export function defineText(
   defineStringJoiner(registry, objectClass, stringClass.type);
   definePatternSyntaxAccessors(registry, stringType);
   defineStringExtras(stringClass, collections);
-  defineStringVariants(stringClass, objectClass);
+  defineStringVariants(stringClass);
   defineStringIdentity(
     stringClass,
     ['StringBuilder', 'StringBuffer'].map((name) => registry.classes.get(name) as ClassInfo)
@@ -146,6 +147,39 @@ function defineCharSequence(registry: Registry, implementations: ClassInfo[]): v
     linkOverrides(implementation);
   }
   defineAppendable(registry, cls, implementations.slice(1));
+  defineSequenceReaders(cls, implementations);
+}
+
+/**
+ * `String.contentEquals` and the builders' `insert(int, CharSequence)`, which read any `CharSequence`, a program's
+ * own included, through its `length` and `charAt`.
+ */
+function defineSequenceReaders(charSequence: ClassInfo, [stringClass, ...builders]: ClassInfo[]): void {
+  addMethod(stringClass, 'contentEquals', [charSequence.type], BOOLEAN, false, (frame, receiver, [other]) => {
+    if (other === undefined) return throwBuiltin(frame, 'NullPointerException');
+    const own = text(receiver);
+    if (sequenceLength(frame, charSequence, other) !== own.length) return false;
+    const builtin = textOfBuiltinSequence(other);
+    if (builtin !== undefined) return builtin === own;
+    // As the JDK's, it reads a program's sequence only up to the first char that differs.
+    for (let index = 0; index < own.length; index++) {
+      const code = frame.runtime.invokeVirtual(frame, charSequence, 'charAt', other, [index]) as number;
+      if (code !== charCodeOf(own, index)) return false;
+    }
+    return true;
+  });
+  for (const builder of builders) {
+    addMethod(builder, 'insert', [INT, charSequence.type], builder.type, false, (frame, receiver, [offset, value]) => {
+      checkOffset(frame, offset as number, builderOf(receiver).length);
+      const sequence = value ?? new JavaString('null');
+      const inserted =
+        sequence === receiver
+          ? selfInserted(builderOf(receiver), offset as number)
+          : charactersOf(frame, charSequence, sequence, 0, sequenceLength(frame, charSequence, sequence));
+      return spliceBuilder(frame, receiver, offset as number, offset as number, inserted);
+    });
+    linkOverrides(builder);
+  }
 }
 
 /**
@@ -188,6 +222,17 @@ function defineAppendable(registry: Registry, charSequence: ClassInfo, builders:
     addInterface(builder, { kind: 'class', cls });
     linkOverrides(builder);
   }
+}
+
+/**
+ * The text a builder inserts at `offset` when it inserts itself: as the JDK's, it moves its tail first and then copies
+ * its own chars one by one, so that a copied char may be one written moments before.
+ */
+function selfInserted(text: string, offset: number): string {
+  const chars = text.split('');
+  // A char read from the gap is one this copy has just written there.
+  for (let index = 0; index < text.length; index++) chars[offset + index] = chars[index] as string;
+  return chars.slice(offset, offset + text.length).join('');
 }
 
 /** The length of a non-null `CharSequence`, which a program's own implementation gives through `length()`. */
@@ -547,7 +592,7 @@ function defineStringExtras(stringClass: ClassInfo, collections: Collections): v
 }
 
 /** Variants of the common String methods: one-sided stripping, first-match replacement, and code points. */
-function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): void {
+function defineStringVariants(stringClass: ClassInfo): void {
   const stringType = stringClass.type;
   addMethod(stringClass, 'stripLeading', [], stringType, false, (frame, receiver) =>
     newString(frame, text(receiver).replace(LEADING_WHITESPACE, ''))
@@ -579,12 +624,6 @@ function defineStringVariants(stringClass: ClassInfo, objectClass: ClassInfo): v
       return replaceMatches(frame, receiver, pattern, requireString(frame, replacement));
     }
   );
-  // `contentEquals` takes a CharSequence, which these programs pass as a String or a StringBuilder.
-  addMethod(stringClass, 'contentEquals', [objectClass.type], BOOLEAN, false, (frame, receiver, [other]) => {
-    if (other instanceof JavaString) return other.value === text(receiver);
-    if (other instanceof JavaObject && other.builder !== undefined) return builderOf(other) === text(receiver);
-    return throwBuiltin(frame, 'NullPointerException');
-  });
   for (const searched of [stringType, INT]) {
     addMethod(stringClass, 'lastIndexOf', [searched, INT], INT, false, (frame, receiver, [target, from]) =>
       lastIndexFrom(frame, text(receiver), searched === INT ? target : requireString(frame, target), from as number)
