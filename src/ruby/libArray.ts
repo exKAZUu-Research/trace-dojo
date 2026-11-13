@@ -341,13 +341,17 @@ def('Array', 'slice!', [1, 2], function* (self: RArray, args) {
 function* filterInPlace(self: RArray, block: RProc, keep: (result: boolean) => boolean): Gen<boolean> {
   yield* modify(self);
   let changed = false;
-  for (let index = 0; index < self.items.length;) {
-    const item = self.items[index];
-    if (keep(truthy(yield* call(block, item)))) index++;
-    else {
-      self.items.splice(index, 1);
-      changed = true;
+  let read = 0;
+  let write = 0;
+  const items = self.items;
+  try {
+    for (; read < items.length; read++) {
+      const item = items[read];
+      if (keep(truthy(yield* call(block, item)))) items[write++] = item;
+      else changed = true;
     }
+  } finally {
+    if (write < read) self.items = [...items.slice(0, write), ...items.slice(read)];
   }
   return changed;
 }

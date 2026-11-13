@@ -86,6 +86,16 @@ test.each([
   ['Array fill beyond the end', 'a=[1,2]; p a.fill(0,5); p a.fill(0,5..7)', '[1, 2]\n[1, 2, nil, nil, nil, 0, 0, 0]\n'],
   ['Array values_at beyond the end', 'p [1,2].values_at(5..7)', '[nil, nil, nil]\n'],
   [
+    'array state during deletion',
+    'a=[1,2,3]; a.delete_if { |x| p a; x == 1 }; p a',
+    '[1, 2, 3]\n[1, 2, 3]\n[2, 2, 3]\n[2, 3]\n',
+  ],
+  [
+    'anonymous keyword rest through super',
+    'class A; def f(*x,**k); p [x,k]; end; end; class B<A; def f(*,**); super; end; end; B.new.f(1,2,a:3)',
+    '[[1, 2], {a: 3}]\n',
+  ],
+  [
     'array deletion before a rescued error',
     'a=[1,2,3]; begin; a.delete_if { |x| raise if x == 3; x == 1 }; rescue; end; p a',
     '[2, 3]\n',

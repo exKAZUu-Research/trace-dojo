@@ -1287,7 +1287,7 @@ function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | und
   for (const [index, param] of params.post.entries())
     args.push(value(param, original[original.length - params.post.length + index] ?? NIL));
   let keywords: RHash | undefined;
-  if (params.keywords.length > 0 || params.keywordRest) {
+  if (params.keywords.length > 0 || params.keywordRest !== undefined) {
     keywords = newHash();
     for (const keyword of params.keywords) {
       runToEnd(hashSet(keywords, RSymbol.of(keyword.name), scope.lookup(keyword.name, 0)));
