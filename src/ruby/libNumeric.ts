@@ -893,6 +893,7 @@ function erfc(x: number): number {
   const ax = Math.abs(x);
   if (ax < 1) return 1 - erf(x);
   if (!Number.isFinite(ax)) return Number.isNaN(ax) ? Number.NaN : x < 0 ? 2 : 0;
+  if (ax * ax > 745) return x < 0 ? 2 : 0;
   const tail =
     ax < 8
       ? polynomial(ax, ERFC_P) / polynomialWithLeadingOne(ax, ERFC_Q)

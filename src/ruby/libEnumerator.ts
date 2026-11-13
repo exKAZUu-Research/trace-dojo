@@ -1,5 +1,6 @@
 import { addressOf, inspect, toInt } from './conversions';
 import { def, sdef } from './define';
+import { argumentCountError } from './errors';
 import { callMethod, callProc, type Gen, nativeProc } from './interp';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
@@ -210,8 +211,14 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
 }
 
 def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
-  if (!block) return self;
   const source = sourceOf(self);
+  if (source.arithmetic && args.length > 0) throw argumentCountError(args.length, 0, 0);
+  if (!block) {
+    if (args.length === 0) return self;
+    const enumerator = makeEnumerator(source.recv, source.method, [...source.args, ...args], source.keywords);
+    sourceOf(enumerator).size = () => NIL;
+    return enumerator;
+  }
   return yield* runSource(source, block, args);
 });
 def('Enumerator', ['with_index', 'each_with_index'], [0, 1], function* (self: RObject, args, block) {

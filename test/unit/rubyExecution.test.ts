@@ -28,6 +28,17 @@ test.each([
     '0.5204998778130465\n0.9999999999984626\n2.1519736712498913e-17\n2.0\n1.0\n',
   ],
   [
+    'saturated error-function tails',
+    'p Math.erf(10.0**100), Math.erfc(10.0**100), Math.erf(-10.0**100), Math.erfc(-10.0**100)',
+    '1.0\n0.0\n-1.0\n2.0\n',
+  ],
+  [
+    'Enumerator each arguments',
+    'e=[1,2,3].each_slice(1); p e.each.equal?(e); a=e.each(2); p a.size; begin; a.to_a; rescue => x; p x.class; end',
+    'true\nnil\nArgumentError\n',
+  ],
+  ['blockless then Enumerator', 'p 1.then.size, 1.yield_self.each { |x| x+1 }', '1\n2\n'],
+  [
     'formatted binary String encoding',
     's=255.chr; p format("%s", s).bytes; p format("%sé", s).bytes; begin; format("é%s", s); rescue Encoding::CompatibilityError; puts :incompatible; end',
     '[255]\n[255, 195, 169]\nincompatible\n',

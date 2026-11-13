@@ -29,7 +29,7 @@ import {
   requireBlock,
   respondsTo,
 } from './interp';
-import { curry, makeEnumerator } from './libEnumerator';
+import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { kernelFloat, kernelInteger } from './libNumeric';
 import {
   invalidateMethodCaches,
@@ -141,6 +141,7 @@ def('Kernel', 'inspect', 0, function* (self) {
 });
 def('Kernel', 'itself', 0, (self) => self);
 def('Kernel', ['then', 'yield_self'], 0, function* (self, _args, block) {
+  if (!block) return sizedEnumerator(self, 'then', [], () => 1n);
   return yield* callProc(requireBlock(block), [self]);
 });
 def('Kernel', 'tap', 0, function* (self, _args, block) {
