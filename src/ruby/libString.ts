@@ -13,9 +13,9 @@ import {
   toIndex,
   toIndexExact,
   toRubyInt,
-  toS,
   toStr,
   toStrValue,
+  toSValue,
 } from './conversions';
 import { def, sdef } from './define';
 import {
@@ -901,28 +901,36 @@ for (const [name, squeezeRuns] of [
 
 // Substitution --------------------------------------------------------------------------------------------------------
 
-/** The text a replacement string stands for, where `\0`, `\&`, `\\`, `\'`, and `` \` `` refer to the match. */
-function expandReplacement(replacement: string, match: string, before: string, after: string): string {
-  return replacement.replaceAll(/\\([0&\\'`\d])/g, (_whole, code: string) => {
-    switch (code) {
-      case '0':
-      case '&': {
-        return match;
-      }
-      case '\\': {
-        return '\\';
-      }
-      case "'": {
-        return after;
-      }
-      case '`': {
-        return before;
-      }
-      default: {
-        return '';
-      }
-    }
-  });
+function expandReplacementValue(replacement: RString, match: RString, before: RString, after: RString): RString {
+  const bytes = stringBytes(replacement);
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  let binary = replacement.binary;
+  let start = 0;
+  const append = (part: Uint8Array): void => {
+    length += part.length;
+    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    chunks.push(part);
+  };
+  for (let index = 0; index + 1 < bytes.length; index++) {
+    if (bytes[index] !== 92) continue;
+    const code = bytes[index + 1];
+    const source = code === 48 || code === 38 ? match : code === 39 ? after : code === 96 ? before : undefined;
+    if (!source && code !== 92 && (code < 48 || code > 57)) continue;
+    append(bytes.slice(start, index));
+    if (source) {
+      binary = combinedStringEncoding(
+        binary,
+        bytes.every((byte) => byte < 0x80),
+        source
+      );
+      append(stringBytes(source));
+    } else if (code === 92) append(Uint8Array.of(92));
+    index++;
+    start = index + 1;
+  }
+  append(bytes.slice(start));
+  return stringFromBytes(joinChunks(chunks, length), binary);
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Substitution coordinates block and replacement-string forms across first/all matches.
@@ -945,6 +953,8 @@ function* substitute(
   const source = stringBytes(self);
   const sourceLength = source.length;
   const sourceBinary = self.binary;
+  const sourceAscii = source.every((byte) => byte < 0x80);
+  let resultBinary = sourceBinary;
   let active = source;
   const chunks: Uint8Array[] = [];
   let length = 0;
@@ -963,7 +973,7 @@ function* substitute(
     const raw = self.binary || self.rawBytes !== undefined;
     const foundByte = textByteLength(text.slice(0, found), raw);
     matched = true;
-    const piece = yield* substitutionPiece(target, replacement, block, text, found);
+    const piece = yield* substitutionPiece(self, target, replacement, block, text, found, foundByte);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
     const modified = (global || mutating) && self.s !== text;
     if (global || mutating) {
@@ -971,11 +981,12 @@ function* substitute(
       active = stringBytes(self);
     }
     append(active.slice(positionByte, foundByte));
-    append(stringBytes(str(piece)));
+    resultBinary = combinedStringEncoding(resultBinary, sourceAscii, piece);
+    append(stringBytes(piece));
     positionByte = foundByte + textByteLength(target, raw);
     position = modified ? textIndexAtByte(text, positionByte, raw) : found + target.length;
     if (target.length === 0) {
-      position = advanceEmptySubstitution(text, position, append);
+      position = advanceEmptySubstitution(text, position, positionByte, active, raw, append);
       positionByte = textByteLength(text.slice(0, position), raw);
       if (position > text.length) break;
     }
@@ -983,13 +994,20 @@ function* substitute(
     rt().spend();
   }
   if (positionByte <= sourceLength) append(active.slice(positionByte));
-  return { value: stringFromBytes(joinChunks(chunks, length), sourceBinary), matched };
+  return { value: stringFromBytes(joinChunks(chunks, length), resultBinary), matched };
 }
 
-function advanceEmptySubstitution(text: string, position: number, append: (bytes: Uint8Array) => void): number {
+function advanceEmptySubstitution(
+  text: string,
+  position: number,
+  positionByte: number,
+  active: Uint8Array,
+  raw: boolean,
+  append: (bytes: Uint8Array) => void
+): number {
   if (position >= text.length) return position + 1;
   const char = String.fromCodePoint(text.codePointAt(position) as number);
-  append(stringBytes(str(char)));
+  append(active.slice(positionByte, textByteLength(text.slice(0, position + char.length), raw)));
   return position + char.length;
 }
 
@@ -1004,27 +1022,32 @@ function joinChunks(chunks: Uint8Array[], length: number): Uint8Array {
 }
 
 function* substitutionPiece(
+  self: RString,
   target: string,
   replacement: Value | undefined,
   block: RProc | undefined,
   text: string,
-  found: number
-): Gen<string> {
+  found: number,
+  foundByte: number
+): Gen<RString> {
   if (replacement instanceof RHash) {
     const key = str(target);
     return yield* whileHeld(key, function* () {
       const entry = yield* hashGet(replacement, key);
-      return yield* toS(entry ? entry.value : yield* hashDefault(replacement, key));
+      return yield* toSValue(entry ? entry.value : yield* hashDefault(replacement, key));
     });
   }
-  if (replacement !== undefined)
-    return expandReplacement(
-      yield* stringArg(replacement),
-      target,
-      text.slice(0, found),
-      text.slice(found + target.length)
+  if (replacement !== undefined) {
+    const bytes = stringBytes(self);
+    const matchLength = textByteLength(target, self.binary || self.rawBytes !== undefined);
+    return expandReplacementValue(
+      yield* stringArgValue(replacement),
+      stringFromBytes(bytes.slice(foundByte, foundByte + matchLength), self.binary),
+      stringFromBytes(bytes.slice(0, foundByte), self.binary),
+      stringFromBytes(bytes.slice(foundByte + matchLength), self.binary)
     );
-  return yield* toS(yield* callBlock(block as RProc, [str(target)]));
+  }
+  return yield* toSValue(yield* callBlock(block as RProc, [str(target)]));
 }
 
 def('String', 'sub', [1, 2], function* (self: RString, args, block) {

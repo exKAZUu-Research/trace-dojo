@@ -243,19 +243,17 @@ function copyData(data: unknown): unknown {
   return data;
 }
 
-def('Kernel', 'extend', [1, -1], (self, modules) => {
+def('Kernel', 'extend', [1, -1], function* (self, modules) {
   if (!(self instanceof RBasic)) throw typeError("can't define singleton");
   for (const module of modules) {
     if (!(module instanceof RClass) || !module.isModule) {
       throw typeError(`wrong argument type ${realClassOf(module).name} (expected Module)`);
     }
   }
-  if (self.frozen) throw frozenError(self, self instanceof RClass ? (self.name ?? '') : (realClassOf(self).name ?? ''));
-  const singleton = singletonClassOf(self);
   for (const module of modules.toReversed() as RClass[]) {
-    if (!singleton.includes.includes(module)) singleton.includes.unshift(module);
+    yield* callMethod(module, 'extend_object', [self], undefined, undefined, { fcall: true });
+    yield* callMethod(module, 'extended', [self], undefined, undefined, { fcall: true });
   }
-  invalidateMethodCaches();
   return self;
 });
 def('Kernel', 'display', [0, 1], function* (self, args) {
@@ -621,20 +619,48 @@ def('Module', 'include?', 1, (self: RClass, [module]) => {
   return self !== module && self.ancestors().includes(module);
 });
 def('Module', 'included_modules', 0, (self: RClass) => arr(self.ancestors().filter((module) => module.isModule)));
+def(
+  'Module',
+  'append_features',
+  1,
+  (self: RClass, [target]) => {
+    if (!(target instanceof RClass)) throw typeError('wrong argument type');
+    if (self.ancestors().includes(target)) throw argumentError('cyclic include detected');
+    if (!target.ancestors().includes(self)) {
+      if (target.frozen) throw frozenError(target, target.name ?? '');
+      target.includes.unshift(self);
+      invalidateMethodCaches();
+    }
+    return self;
+  },
+  { visibility: 'private' }
+);
+def('Module', 'included', 1, () => NIL, { visibility: 'private' });
+def(
+  'Module',
+  'extend_object',
+  1,
+  (self: RClass, [target]) => {
+    if (!(target instanceof RBasic)) throw typeError("can't define singleton");
+    if (target.frozen)
+      throw frozenError(target, target instanceof RClass ? (target.name ?? '') : (realClassOf(target).name ?? ''));
+    const singleton = singletonClassOf(target);
+    if (!singleton.includes.includes(self)) singleton.includes.unshift(self);
+    invalidateMethodCaches();
+    return target;
+  },
+  { visibility: 'private' }
+);
+def('Module', 'extended', 1, () => NIL, { visibility: 'private' });
 def('Module', 'include', [1, -1], function* (self: RClass, modules) {
   for (const module of modules) {
     if (!(module instanceof RClass) || !module.isModule) {
       throw typeError(`wrong argument type ${realClassOf(module).name} (expected Module)`);
     }
   }
-  if (self.frozen) throw frozenError(self, self.name ?? '');
   for (const module of modules.toReversed() as RClass[]) {
-    if (module.ancestors().includes(self)) throw argumentError('cyclic include detected');
-    if (self.ancestors().includes(module)) continue;
-    self.includes.unshift(module);
-    invalidateMethodCaches();
-    const hook = classOf(module).findMethod('included');
-    if (hook && hook.body.kind === 'user') yield* invoke(hook, module, [self], undefined, undefined, false);
+    yield* callMethod(module, 'append_features', [self], undefined, undefined, { fcall: true });
+    yield* callMethod(module, 'included', [self], undefined, undefined, { fcall: true });
   }
   return self;
 });

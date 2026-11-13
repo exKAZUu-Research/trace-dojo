@@ -475,7 +475,8 @@ def('Integer', 'times', 0, function* (self: bigint, _args, block) {
 def('Integer', 'upto', 1, function* (self: bigint, [limit], block) {
   if (!block) return makeEnumerator(self, 'upto', [limit]);
   if (typeof limit === 'number') {
-    for (let index = self; (numericCompare(index, limit) ?? 1) <= 0; index++) yield* callBlock(block, [index], false);
+    for (let index = self; Number.isNaN(limit) || (numericCompare(index, limit) ?? 1) <= 0; index++)
+      yield* callBlock(block, [index], false);
     return self;
   }
   if (typeof limit !== 'bigint') throw comparisonFailed(self, limit);
@@ -485,7 +486,8 @@ def('Integer', 'upto', 1, function* (self: bigint, [limit], block) {
 def('Integer', 'downto', 1, function* (self: bigint, [limit], block) {
   if (!block) return makeEnumerator(self, 'downto', [limit]);
   if (typeof limit === 'number') {
-    for (let index = self; (numericCompare(index, limit) ?? -1) >= 0; index--) yield* callBlock(block, [index], false);
+    for (let index = self; Number.isNaN(limit) || (numericCompare(index, limit) ?? -1) >= 0; index--)
+      yield* callBlock(block, [index], false);
     return self;
   }
   if (typeof limit !== 'bigint') throw comparisonFailed(self, limit);

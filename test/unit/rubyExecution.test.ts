@@ -2062,6 +2062,44 @@ test('zero beginless bit slices and private numeric coercion follow Ruby', () =>
   });
 });
 
+test('Integer iteration yields against NaN until the block breaks', () => {
+  expect(run('1.upto(Float::NAN){|x|p x;break};1.downto(Float::NAN){|x|p x;break}')).toMatchObject({
+    stdout: '1\n1\n',
+  });
+});
+
+test('String substitutions retain binary source and replacement bytes', () => {
+  for (const method of ['sub', 'gsub', 'gsub!']) {
+    expect(run(`p 255.chr.${method}("", "-").bytes`)).toMatchObject({
+      stdout: method === 'sub' ? '[45, 255]\n' : '[45, 255, 45]\n',
+    });
+  }
+  expect(run('p "a".gsub("a") { 255.chr }.bytes, "a".gsub("a", 255.chr).bytes')).toMatchObject({
+    stdout: '[255]\n[255]\n',
+  });
+  expect(run('begin; "éa".gsub("a", 255.chr); rescue => e; p e.class; end')).toMatchObject({
+    stdout: 'Encoding::CompatibilityError\n',
+  });
+});
+
+test('non-mutating module hooks can run on frozen classes', () => {
+  expect(
+    run('module M; def self.append_features(x); puts :append; end; end; class C; end; C.freeze; C.include(M)')
+  ).toMatchObject({
+    stdout: 'append\n',
+  });
+  expect(
+    run('module M; def self.extend_object(x); puts :extend; end; end; class C; end; C.freeze; C.extend(M)')
+  ).toMatchObject({
+    stdout: 'extend\n',
+  });
+  expect(
+    run(
+      'module M; def self.append_features(x); puts :append; super; end; end; class C; include M; end; p C.ancestors.include?(M)'
+    )
+  ).toMatchObject({ stdout: 'append\ntrue\n' });
+});
+
 test('Hash pair collections identify non-array elements', () => {
   expect(
     run(
