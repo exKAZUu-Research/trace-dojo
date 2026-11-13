@@ -236,3 +236,13 @@ end`).map(({ line, vars, turtles }) => ({ line, vars, y: turtles[0]?.y }))
   );
   expect(traces[1]).toEqual(traces[0]);
 });
+
+test('shared Array keys have bounded trace labels', () => {
+  const program = `def mk # atomic
+  a = [1]
+  20.times { a = [a, a] }
+  a
+end
+h = { mk => 1 }`;
+  expect(JSON.stringify(rubyTrace(program)).length).toBeLessThan(100_000);
+});

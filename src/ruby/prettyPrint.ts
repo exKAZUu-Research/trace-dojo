@@ -16,11 +16,18 @@ const WIDTH = 79;
 
 /** The text `pp` writes for a value: its inspect, broken over lines as Ruby's PP does when it does not fit. */
 export function* prettyInspect(value: Value): Gen<string> {
-  const doc = yield* build(value, new Set(), { count: 0 });
+  const doc = yield* build(value, new Set(), { nodes: 0, textLength: 0 });
   return `${layout(doc)}\n`;
 }
 
-function text(value: string): Doc {
+interface BuildBudget {
+  nodes: number;
+  textLength: number;
+}
+
+function text(value: string, budget: BuildBudget): Doc {
+  budget.textLength += value.length;
+  if (budget.textLength > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
   return { kind: 'text', text: value };
 }
 
@@ -28,8 +35,8 @@ function breakable(separator = ' '): Doc {
   return { kind: 'break', text: separator };
 }
 
-function group(indent: number, open: string, parts: Doc[], close: string): Doc {
-  return { kind: 'group', indent, parts: [text(open), ...parts, text(close)] };
+function group(indent: number, open: string, parts: Doc[], close: string, budget: BuildBudget): Doc {
+  return { kind: 'group', indent, parts: [text(open, budget), ...parts, text(close, budget)] };
 }
 
 /** Whether the program redefined how a value is shown, which then decides its text as a whole. */
@@ -38,40 +45,40 @@ function showsItself(value: Value): boolean {
   return method !== undefined && method.body.kind !== 'native';
 }
 
-function* build(value: Value, seen: Set<object>, budget: { count: number }): Gen<Doc> {
+function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> {
   rt().spend();
-  if (++budget.count > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
+  if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
   if (value instanceof RArray && !showsItself(value)) {
-    if (seen.has(value)) return text('[...]');
+    if (seen.has(value)) return text('[...]', budget);
     seen.add(value);
     const parts: Doc[] = [];
     for (const [index, item] of value.items.entries()) {
-      if (index > 0) parts.push(text(','), breakable());
+      if (index > 0) parts.push(text(',', budget), breakable());
       parts.push(yield* build(item, seen, budget));
     }
     seen.delete(value);
-    return group(1, '[', parts, ']');
+    return group(1, '[', parts, ']', budget);
   }
   if (value instanceof RHash && !showsItself(value)) {
-    if (seen.has(value)) return text('{...}');
+    if (seen.has(value)) return text('{...}', budget);
     seen.add(value);
     const parts: Doc[] = [];
     let first = true;
     for (const { key, value: item } of value.map.values()) {
-      if (!first) parts.push(text(','), breakable());
+      if (!first) parts.push(text(',', budget), breakable());
       first = false;
       parts.push({ kind: 'group', indent: 0, parts: yield* pair(key, item, seen, budget) });
     }
     seen.delete(value);
-    return group(1, '{', parts, '}');
+    return group(1, '{', parts, '}', budget);
   }
   if (value instanceof RString && !showsItself(value)) {
     const lines = value.s.split(/(?<=\n)/);
-    if (lines.length <= 1) return text(strInspect(value.s));
+    if (lines.length <= 1) return text(strInspect(value.s), budget);
     const parts: Doc[] = [];
     for (const [index, line] of lines.entries()) {
-      if (index > 0) parts.push(text(' +'), breakable());
-      parts.push(text(strInspect(line)));
+      if (index > 0) parts.push(text(' +', budget), breakable());
+      parts.push(text(strInspect(line), budget));
     }
     return { kind: 'group', indent: 0, parts };
   }
@@ -84,35 +91,35 @@ function* build(value: Value, seen: Set<object>, budget: { count: number }): Gen
     value.ivars &&
     value.ivars.size > 0
   ) {
-    if (seen.has(value)) return text(yield* inspect(value));
+    if (seen.has(value)) return text(yield* inspect(value), budget);
     seen.add(value);
     const cls = realClassOf(value);
     const parts: Doc[] = [];
     let first = true;
     for (const [name, item] of value.ivars) {
       if (name.startsWith('@__')) continue;
-      if (!first) parts.push(text(','));
+      if (!first) parts.push(text(',', budget));
       first = false;
-      parts.push(breakable(), text(`${name}=`), {
+      parts.push(breakable(), text(`${name}=`, budget), {
         kind: 'group',
         indent: 1,
         parts: [breakable(''), yield* build(item, seen, budget)],
       });
     }
     seen.delete(value);
-    return group(1, `#<${cls.name ?? anonymousClassName(cls)}:${addressOf(value)}`, parts, '>');
+    return group(1, `#<${cls.name ?? anonymousClassName(cls)}:${addressOf(value)}`, parts, '>', budget);
   }
-  return text(yield* inspect(value));
+  return text(yield* inspect(value), budget);
 }
 
-function* pair(key: Value, value: Value, seen: Set<object>, budget: { count: number }): Gen<Doc[]> {
+function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc[]> {
   const parts: Doc[] = [];
   if (key instanceof RSymbol) {
     const shown = symInspect(key.name);
     const simple = !/^:["$@]|[%&*+\-/<=>@\]^`|~]$/.test(shown);
-    parts.push(text(`${simple ? key.name : strInspect(key.name)}:`));
+    parts.push(text(`${simple ? key.name : strInspect(key.name)}:`, budget));
   } else {
-    parts.push(yield* build(key, seen, budget), text(' '), text('=>'));
+    parts.push(yield* build(key, seen, budget), text(' ', budget), text('=>', budget));
   }
   parts.push({ kind: 'group', indent: 1, parts: [breakable(), yield* build(value, seen, budget)] });
   return parts;

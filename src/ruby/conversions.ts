@@ -62,6 +62,14 @@ export function* toIndex(value: Value): Gen<number> {
   return Number(integer);
 }
 
+export function* toRubyLong(value: Value): Gen<number> {
+  const integer = yield* toInt(value);
+  if (integer < -9_223_372_036_854_775_808n || integer > 9_223_372_036_854_775_807n) {
+    throw rangeError("bignum too big to convert into 'long'");
+  }
+  return Number(integer);
+}
+
 export function toIndexSync(value: Value): number {
   return runToEnd(toIndex(value));
 }

@@ -7,6 +7,7 @@ import {
   symInspect,
   toIndex,
   toInt,
+  toRubyLong,
   toS,
   toStr,
 } from './conversions';
@@ -165,7 +166,7 @@ function binaryInspect(text: string): string {
 }
 def('String', ['to_sym', 'intern'], 0, (self: RString) => sym(self.s));
 def('String', 'to_i', [0, 1], function* (self: RString, args) {
-  const base = args.length > 0 ? Number(yield* toInt(args[0])) : 10;
+  const base = args.length > 0 ? yield* toRubyLong(args[0]) : 10;
   if (base < 0 || base > 36 || base === 1) throw argumentError(`invalid radix ${base}`);
   return parseIntegerLenient(self.s, base);
 });

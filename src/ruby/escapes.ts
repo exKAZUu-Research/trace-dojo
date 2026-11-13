@@ -37,7 +37,11 @@ function modifiedByte(text: string, index: number): { byte: number; end: number 
     return { byte: Number.parseInt(octal, 8) & 0xff, end: index + octal.length };
   }
   const operand = kind === 'c' ? index + 2 : text[index + 2] === '-' ? index + 3 : -1;
-  if (operand < 0 || (kind !== 'c' && kind !== 'C' && kind !== 'M')) return undefined;
+  if (kind !== 'c' && kind !== 'C' && kind !== 'M') {
+    const byte = kind.codePointAt(0) as number;
+    return byte <= 0xff ? { byte, end: index + 1 } : undefined;
+  }
+  if (operand < 0) return undefined;
   const nested = modifiedByte(text, operand);
   if (!nested) return undefined;
   const byte =

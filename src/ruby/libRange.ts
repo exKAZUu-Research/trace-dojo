@@ -163,7 +163,8 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
     if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
     if (!self.exclusive) return self.end;
     if (typeof self.end === 'bigint') return self.end - 1n;
-    throw typeError('cannot exclude end value with non Integer begin value');
+    if (typeof self.end === 'number') throw typeError('cannot exclude non Integer end value');
+    throw rangeError('cannot get the maximum of beginless range with custom comparison method');
   }
   if (block || args.length > 0) return yield* callEnumerable(self, 'max', args, block);
   if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');

@@ -376,6 +376,7 @@ test('an endless loop exceeds the operation limit, and endless recursion raises 
 
 test('pretty printing a shared graph is bounded before expanding its output', () => {
   expect(run('a = ["x"]; 25.times { a = [a, a] }; pp a')).toEqual({ kind: 'limitExceeded', limit: 'output' });
+  expect(run('s = "x" * 100000; pp Array.new(1000, s)')).toEqual({ kind: 'limitExceeded', limit: 'output' });
 });
 
 test('standard error is accepted but not shown, and exit ends the program normally', () => {
@@ -420,6 +421,7 @@ test.each([
   ['rounding a small integer at large precision', 'p 1.round(-1000000000)', '0\n'],
   ['wide Integer sizes', 'p (2**64).size, (2**100).size', '9\n13\n'],
   ['Numeric subclass Math conversion', 'class A < Numeric; def to_f = 9.0; end; p Math.sqrt(A.new)', '3.0\n'],
+  ['escaped control and meta operands', String.raw`p "\C-\?".bytes, "\M-\z".bytes`, '[31]\n[250]\n'],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -436,6 +438,15 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   });
   expect(run('p (1.0..3.0).last(0)')).toMatchObject({
     uncaughtException: "can't iterate from Float (TypeError)",
+  });
+  for (const program of ['p Integer("1", 10**30)', 'p "1".to_i(10**30)', 'p format("%c", -(10**30))']) {
+    expect(run(program)).toMatchObject({ uncaughtException: "bignum too big to convert into 'long' (RangeError)" });
+  }
+  expect(run('p (...3.0).max')).toMatchObject({
+    uncaughtException: 'cannot exclude non Integer end value (TypeError)',
+  });
+  expect(run('p (..."z").max')).toMatchObject({
+    uncaughtException: 'cannot get the maximum of beginless range with custom comparison method (RangeError)',
   });
 });
 

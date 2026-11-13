@@ -8,6 +8,7 @@ import {
   numericEquals,
   toFloat,
   toInt,
+  toRubyLong,
   toStr,
 } from './conversions';
 import { def, sdef } from './define';
@@ -668,7 +669,7 @@ function* exceptionOption(keywords: RHash | undefined): Gen<boolean> {
 export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen {
   const raise = yield* exceptionOption(keywords);
   const [value, baseValue] = args;
-  const base = value instanceof RString && baseValue !== undefined ? Number(yield* toInt(baseValue)) : undefined;
+  const base = value instanceof RString && baseValue !== undefined ? yield* toRubyLong(baseValue) : undefined;
   if (base !== undefined && (base < 0 || (base !== 0 && (base < 2 || base > 36)))) {
     throw argumentError(`invalid radix ${base}`);
   }

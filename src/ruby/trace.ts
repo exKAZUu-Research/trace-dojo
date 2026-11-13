@@ -201,7 +201,7 @@ function keyLabels(keys: Value[]): string[] {
 /** A hash key as text, quoting strings and marking symbols when `quoted`, without running the program's methods. */
 function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = new WeakMap<RArray, string>()): string {
   rt().spend();
-  if (key instanceof RString) return quoted ? strInspect(key.s) : key.s;
+  if (key instanceof RString) return boundedKeyText(quoted ? strInspect(key.s) : key.s);
   if (key instanceof RSymbol) return quoted ? symInspect(key.name) : key.name;
   if (typeof key === 'boolean' || typeof key === 'bigint') return String(key);
   if (typeof key === 'number') return formatFloat(key);
@@ -212,7 +212,16 @@ function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = n
     if (cached) return cached;
     seen.add(key);
     try {
-      const text = `[${key.items.map((item) => keyText(item, true, seen, memo)).join(', ')}]`;
+      let text = '[';
+      for (const [index, item] of key.items.entries()) {
+        const part = keyText(item, true, seen, memo);
+        if (text.length + part.length + 2 > 4096) {
+          text += `… (${key.items.length} items)`;
+          break;
+        }
+        text += `${index > 0 ? ', ' : ''}${part}`;
+      }
+      text += ']';
       memo.set(key, text);
       return text;
     } finally {
@@ -220,4 +229,8 @@ function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = n
     }
   }
   return `#<${(key as RBasic).cls.name}>`;
+}
+
+function boundedKeyText(text: string): string {
+  return text.length <= 4096 ? text : `${text.slice(0, 2048)}…${text.slice(-2048)} (${text.length} chars)`;
 }
