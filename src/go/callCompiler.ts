@@ -589,6 +589,13 @@ export abstract class CallCompiler extends CompositeCompiler {
   /** `print` and `println`, which write to standard error in the runtime's own format, apart from fmt's. */
   private printBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'print' | 'println'): Operand {
     const operands = expression.args.map((arg) => this.defaulted(this.value(arg)));
+    for (const operand of operands) {
+      const kind = underlying(operand.type).kind;
+      if (!this.isInvalid(operand) && (kind === 'struct' || kind === 'array')) {
+        this.error(operand.span, `${describeType(operand.type)} 型の値は ${name} には渡せません。`);
+        return this.invalid(expression);
+      }
+    }
     const values = operands.map((operand) => operand.eval);
     const types = operands.map((operand) => operand.type);
     const line = name === 'println';
