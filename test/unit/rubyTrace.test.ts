@@ -290,3 +290,17 @@ test('Array to_h and chunk Enumerators retain accumulated Turtles through callba
       [3, 2],
     ]);
 });
+
+test('Hash insertion keeps pending values alive through custom hash callbacks', () => {
+  for (const [receiver, positions] of [
+    ['[1,3]', [1, 3]],
+    ['(1..2)', [1, 2]],
+  ] as const) {
+    const program = `class Key\n def hash\n  x=1\n  0\n end\nend\nh=${receiver}.to_h do |x|\n [Key.new,Turtle.new(x,0)]\nend\nh.values.each { |t| t.forward }`;
+    expect(
+      rubyTrace(program)
+        .at(-1)
+        ?.turtles.map(({ x, y }) => [x, y])
+    ).toEqual(positions.map((x) => [x, 1]));
+  }
+});

@@ -128,21 +128,27 @@ export function* hashDefault(hash: RHash, key: Value): Gen {
 }
 
 export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
-  if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
-  const { base, slot, entry } = yield* findEntry(hash, key);
-  if (entry) {
-    entry.value = value;
-    return;
+  const held = rt().held.length;
+  rt().held.push(hash, key, value);
+  try {
+    if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
+    const { base, slot, entry } = yield* findEntry(hash, key);
+    if (entry) {
+      entry.value = value;
+      return;
+    }
+    if (hash.iterating > 0) throw runtimeError(hash.iterationError ?? "can't add a new key into hash during iteration");
+    rt().chargeSlots(1);
+    rt().spend();
+    const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
+    hash.map.set(slot, { key: stored, value });
+    const bucket = hash.buckets.get(base) ?? [];
+    bucket.push(slot);
+    hash.buckets.set(base, bucket);
+    hash.bucketVersion = hash.map.version;
+  } finally {
+    rt().held.length = held;
   }
-  if (hash.iterating > 0) throw runtimeError(hash.iterationError ?? "can't add a new key into hash during iteration");
-  rt().chargeSlots(1);
-  rt().spend();
-  const stored = key instanceof RString && key.cls === rt().c.String && !key.frozen ? frozenCopy(key) : key;
-  hash.map.set(slot, { key: stored, value });
-  const bucket = hash.buckets.get(base) ?? [];
-  bucket.push(slot);
-  hash.buckets.set(base, bucket);
-  hash.bucketVersion = hash.map.version;
 }
 
 function frozenCopy(key: RString): RString {
