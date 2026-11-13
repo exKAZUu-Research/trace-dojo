@@ -248,7 +248,7 @@ function* streamPrettyPart(value: Value, separated: boolean, context: StreamCont
     const breakBefore = separated && state.column + 2 > WIDTH;
     if (breakBefore) yield* emit(`\n${' '.repeat(indent)}`);
     const shown = yield* inspect(value);
-    if (separated && !breakBefore) yield* emit(' '.repeat(indent));
+    if (separated && !breakBefore) yield* emit(' ');
     yield* emit(shown);
     return;
   }

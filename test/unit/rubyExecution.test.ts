@@ -2243,6 +2243,9 @@ test('pp emits container prefixes before user inspect callbacks', () => {
   expect(run('class A;def inspect;puts :side;"a";end;end;pp ["x"*76,A.new]')).toMatchObject({
     stdout: `["${'x'.repeat(76)}",\n side\na]\n`,
   });
+  expect(run('class A;def inspect;"x";end;end;pp [[1,A.new]], [{a:A.new}]')).toMatchObject({
+    stdout: '[[1, x]]\n[{a: x}]\n',
+  });
 });
 
 test('Integer step compares numeric-like limits through coerce', () => {
