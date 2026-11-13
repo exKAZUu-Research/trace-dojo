@@ -306,9 +306,10 @@ export function checkRemovable(frame: Frame, collection: Value): void {
 }
 
 /**
- * Whether clearing `list` while it is empty counts as a change, as `ArrayList`, `LinkedList`, and `Vector` count it
- * and so does a sublist whose list's `removeRange` does, unlike `AbstractList`'s, which `LinkedList` and the restricted
- * lists inherit.
+ * Whether clearing `list` while it is empty counts as a change: `ArrayList`'s, `LinkedList`'s, and `Vector`'s own
+ * `clear` count it, and so does a sublist whose list's `removeRange` counts it, as `ArrayList`'s and `Vector`'s do; a
+ * sublist of a `LinkedList` or of a restricted list clears through `AbstractList.removeRange`, which counts nothing
+ * when it removes nothing, and a restricted list's own `clear` changes nothing.
  */
 export function countsEmptyClear(list: Value): boolean {
   const root = rootListOf(list as JavaObject);
