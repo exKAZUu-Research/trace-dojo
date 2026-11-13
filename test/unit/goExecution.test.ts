@@ -421,6 +421,92 @@ func main() {
   });
 });
 
+// Go 1.27.3's compiler evaluates an assignment's calls first, then the right side and the destinations' operands, and
+// checks each destination at its own store; copies and in-place slice operations write into the existing elements.
+test('assignments order their calls, operands, faults, and stores as Go does', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type S struct {
+	X int
+	P *S
+}
+
+type K struct{ a, b int }
+
+func rhs() int {
+	fmt.Print("rhs ")
+	return 9
+}
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, recover() != nil) }()
+	f()
+}
+
+func main() {
+	x := 0
+	a := []int{0}
+	i := 2
+	var p *int
+	var s *S
+	try("index", func() { x, a[i] = 1, rhs() })
+	try("pointer", func() { x, *p = 2, rhs() })
+	try("field", func() { x, s.X = 3, rhs() })
+	try("container", func() { x, s.P.X = 4, rhs() })
+	try("compound", func() { a[i] += rhs() })
+	fmt.Println(x)
+
+	b := []int{0, 0}
+	j := 0
+	moveJ := func() int { j = 1; return 9 }
+	b[j] = moveJ()
+	c := []int{0}
+	old := c
+	replaceC := func() int { c = []int{0}; return 9 }
+	c[0] = replaceC()
+	y := 1
+	y += func() int { y = 10; return 1 }()
+	mk := map[K]int{}
+	key := K{1, 1}
+	mk[key] = func() int { key = K{2, 2}; return 9 }()
+	fmt.Println(b, old, c, y, mk)
+
+	m := map[int]int{0: 3}
+	m[0] += func() int { delete(m, 0); return 2 }()
+	n := map[int]int{0: 3}
+	n[0] += func() int { clear(n); return 2 }()
+	fmt.Println(m, n)
+
+	d := []S{{X: 1}}
+	px := &d[0].X
+	copy(d, d)
+	d[0].X = 5
+	e := [][1]int{{2}}
+	view := e[0][:]
+	copy(e, e)
+	e[0][0] = 6
+	f := []S{{X: 3}, {X: 4}}
+	pf := &f[0].X
+	f = slices.Compact(f)
+	f = slices.DeleteFunc(f, func(S) bool { return false })
+	f = slices.Replace(f, 0, 0)
+	f[0].X = 7
+	fmt.Println(*px, view[0], *pf)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'rhs index true\nrhs pointer true\nrhs field true\nrhs container true\nrhs compound true\n3\n' +
+      '[0 9] [0] [9] 11 map[{1 1}:9]\nmap[0:2] map[0:2]\n5 6 7\n',
+  });
+});
+
 test('assignments, conversions, generics, defer, map keys, and math match Go semantics', () => {
   const program = String.raw`package main
 
@@ -740,6 +826,26 @@ test.each([
   ],
   ['expanding generic instantiation cycle', 'package main\nfunc f[T any](x T) { f([]T{x}) }\nfunc main() { f(0) }', 2],
   [
+    'instantiation cycle through two functions',
+    'package main\nfunc f[T any](x T) { g(x) }\n\nfunc g[T any](x T) { f(&x) }\nfunc main() { f(0) }',
+    4,
+  ],
+  [
+    'impossible type-switch case',
+    'package main\ntype I interface{ M() }\nfunc main() { var i I; switch i.(type) { case int: } }',
+    3,
+  ],
+  [
+    'missing return after a local named panic',
+    'package main\nfunc f() int {\n\tpanic := func(int) {}\n\tpanic(1)\n}\nfunc main() { f() }',
+    5,
+  ],
+  [
+    'untyped constant operand of a type parameter',
+    'package main\nimport "cmp"\nfunc f[T cmp.Ordered](a T) bool { return a < 1 }\nfunc main() { f(1) }',
+    3,
+  ],
+  [
     'ambiguous diamond selector',
     'package main\ntype A struct{ X int }\ntype B struct{ A }\ntype C struct{ A }\ntype D struct{ B; C }\nfunc main() { var d D; _ = d.X }',
     6,
@@ -765,5 +871,156 @@ test.each([
   expect(execution).toMatchObject({
     kind: 'executed',
     uncaughtException: expect.stringContaining('out of memory'),
+  });
+});
+
+// Go 1.27.3 prints these lines: output keeps a leading byte order mark even when written a byte at a time; Scanner and
+// Writer keep their buffers in Go slices, so a buffer given to Scanner.Buffer receives the input and a copied Writer
+// shares its backing array; case mappings and folds follow Go's Unicode tables; reading from strings with fmt's and
+// bufio's readers works; and Builder and Reader print their fields.
+test('library state, folding, scanning, and output bytes match Go', () => {
+  const program = String.raw`package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+	"unicode"
+)
+
+func main() {
+	fmt.Print("\xef\xbb\xbf")
+	os.Stdout.Write([]byte{239})
+	os.Stdout.Write([]byte{187, 191})
+	fmt.Fprint(os.Stderr, "\xef\xbb\xbfe")
+
+	b := make([]byte, 10)
+	s := bufio.NewScanner(strings.NewReader("abc\nde"))
+	s.Buffer(b, 10)
+	s.Scan()
+	fmt.Println(string(b[:3]), &s.Bytes()[0] == &b[0])
+	s.Scan()
+	fmt.Println(&s.Bytes()[0] == &b[4])
+
+	var out strings.Builder
+	w := bufio.NewWriterSize(&out, 10)
+	w.WriteString("a")
+	c := *w
+	w.WriteString("b")
+	c.WriteString("c")
+	w.Flush()
+	c.Flush()
+	w.WriteString("xy")
+	d := *w
+	d.WriteString("Z")
+	d.Flush()
+	w.Flush()
+	fmt.Println(out.String())
+
+	fmt.Println(unicode.SimpleFold(223), unicode.SimpleFold(304), unicode.SimpleFold(305), unicode.SimpleFold(452),
+		unicode.SimpleFold(8064), unicode.ToUpper(8064), unicode.ToTitle(453), unicode.ToLower(7838),
+		strings.EqualFold("ᾀ", "ᾈ"), strings.EqualFold("ᾳ", "ᾼ"), strings.EqualFold("ß", "ẞ"), strings.EqualFold("İ", "i"),
+		strings.ToUpper("ᾀß"))
+
+	var x, y int
+	n, err := fmt.Sscanf("10 20", "%d %d", &x, &y)
+	fmt.Println(n, err, x, y)
+	var word string
+	n, err = fmt.Sscan("hello\n 5", &word, &x)
+	fmt.Println(n, err, word, x)
+	n, err = fmt.Sscanln("7\n8", &x, &y)
+	fmt.Println(n, err, x)
+	n, err = fmt.Sscanf("x", "%d", &x)
+	fmt.Println(n, err)
+	line, err := bufio.NewReader(strings.NewReader("first\nsecond")).ReadString('\n')
+	fmt.Printf("%q %v\n", line, err)
+
+	var zero strings.Builder
+	fmt.Println(strings.NewReader("abc"), zero)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: `\uFEFF\uFEFFabc true
+true
+acacxyZxy
+7838 304 305 453 8072 8072 453 223 true true true false ᾈß
+2 <nil> 10 20
+2 <nil> hello 5
+1 unexpected newline 7
+0 expected integer
+"first\\n" <nil>
+&{abc 0 -1} {<nil> []}
+`,
+    stderr: '\uFEFFe',
+  });
+});
+
+test.each([
+  [
+    'a Replacer whose patterns fail at every position',
+    `_ = strings.NewReplacer(${Array.from({ length: 500 }, (_, i) => `"z${i}", "x"`).join(', ')}).Replace(strings.Repeat("a", 1000000))`,
+  ],
+  [
+    'a Replacer whose long pattern fails late',
+    '_ = strings.NewReplacer(strings.Repeat("a", 5000)+"b", "x").Replace(strings.Repeat("a", 1000000))',
+  ],
+  [
+    'repeated searches of a long string',
+    's := strings.Repeat("a", 1000000)\n\tfor i := 0; i < 100000; i++ {\n\t\t_ = strings.Contains(s, "b")\n\t}',
+  ],
+])('%s stops at the operation limit', (_name, body) => {
+  const program = `package main\n\nimport "strings"\n\nfunc main() {\n\t${body}\n}`;
+  expect(executeProgram('go', program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+// Go 1.27.3 on arm64 prints these with TZ=UTC: time's calendar arithmetic, layouts, and parsing; math/rand's reseeded
+// generator, ziggurat draws, and Zipf; math/rand/v2's ChaCha8; and the bits of math's special functions. Sleep returns
+// at once but moves the clock that Since reads.
+test('time, math/rand, and math special functions compute what Go computes', () => {
+  const program = String.raw`package main
+
+import (
+	"fmt"
+	"math"
+	"math/rand"
+	v2 "math/rand/v2"
+	"time"
+)
+
+func main() {
+	t := time.Date(2024, time.February, 29, 23, 59, 58, 999999999, time.FixedZone("JST", 9*60*60))
+	u := t.Add(90*time.Minute + 2*time.Second).AddDate(0, 12, 0)
+	fmt.Println(t, u.UTC(), u.Sub(t), u.Weekday(), u.YearDay(), u.Unix())
+	fmt.Println(t.Format(time.RFC1123Z), t.Format("Mon Jan _2 3:04:05.000 PM 2006 MST"), t.Truncate(time.Hour), t.Round(time.Second))
+	p, err := time.Parse(time.RFC3339, "2006-01-02T15:04:05.5+07:00")
+	fmt.Println(p, err, p.Location())
+	_, err = time.Parse(time.DateOnly, "2023-02-29")
+	fmt.Println(err)
+	d, _ := time.ParseDuration("1h15m30.918273645s")
+	fmt.Println(d, d.Round(time.Millisecond), d.Truncate(time.Minute), d.Minutes(), time.Duration(1500)*time.Microsecond)
+	start := time.Now()
+	time.Sleep(time.Hour)
+	fmt.Println(time.Since(start) >= time.Hour)
+
+	r := rand.New(rand.NewSource(1))
+	r.Seed(7)
+	fmt.Println(r.Intn(100), r.Intn(100), math.Float64bits(r.NormFloat64()), math.Float64bits(r.ExpFloat64()))
+	z := rand.NewZipf(r, 1.5, 2, 1000)
+	fmt.Println(z.Uint64(), z.Uint64(), z.Uint64())
+	var seed [32]byte
+	c := v2.New(v2.NewChaCha8(seed))
+	fmt.Println(c.Uint64(), c.IntN(1000), math.Float64bits(c.NormFloat64()))
+
+	fmt.Println(math.Float64bits(math.Gamma(4.7)), math.Float64bits(math.Erf(0.3)), math.Float64bits(math.J0(2.5)), math.Float64bits(math.Yn(3, 7.1)))
+	lg, sign := math.Lgamma(-2.5)
+	fmt.Println(math.Float64bits(lg), sign, math.Float64bits(math.Erfinv(0.9)), math.Float64bits(math.Cbrt(10)))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
   });
 });

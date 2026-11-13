@@ -47,6 +47,7 @@ export abstract class CompilerBase {
   /** The compiled functions by their runtime information, for finding the function a frame runs. */
   protected readonly functionContexts = new Map<FunctionInfo, FunctionContext>();
   protected runtimeCallCount = 0;
+  protected readonly builtinPanicCalls = new WeakSet<Expression>();
 
   constructor(protected readonly trace: TraceSettings | undefined) {}
 
@@ -265,54 +266,82 @@ export abstract class CompilerBase {
 
   /** Types whose declarations are currently resolving, so generic instances wait until `underlying` is ready. */
   protected readonly resolvingTypes = new Set<NamedType>();
-  protected readonly genericEdges = new Map<number, { target: number; expanding: boolean }[]>();
+  /**
+   * The graph that Go's type checker builds to find instantiation cycles: a vertex per type parameter, and an edge from
+   * each type parameter mentioned in a type argument to the parameter it instantiates, weighing 1 when the argument
+   * wraps it in a bigger type. Vertices and edges keep the order in which Go's checker creates them, which decides where
+   * it reports a cycle.
+   */
+  private readonly instantiationVertices = new Map<number, number>();
+  private readonly instantiationVertexParams: TypeParamType[] = [];
+  private readonly instantiationEdges: { source: number; target: number; weight: number }[] = [];
+  protected readonly typeParamSpans = new Map<number, Span>();
   protected hasGenericCycle = false;
 
-  protected recordGenericInstantiation(params: TypeParamType[], args: Type[], span: Span): boolean {
-    let added = false;
+  protected recordGenericInstantiation(params: TypeParamType[], args: Type[]): boolean {
+    if (this.hasGenericCycle) return false;
     for (const [index, param] of params.entries()) {
       const arg = args[index];
-      if (!arg) continue;
-      const mentioned = new Set<TypeParamType>();
+      // Library type parameters belong to other packages, so their instantiations cannot form a cycle.
+      if (!arg || param.id < 0) continue;
+      const mentioned: TypeParamType[] = [];
       collectTypeParams(arg, mentioned);
       for (const source of mentioned) {
-        const expanding = arg !== source;
-        const list = this.genericEdges.get(source.id) ?? [];
-        if (!list.some((edge) => edge.target === param.id && edge.expanding === expanding)) {
-          list.push({ target: param.id, expanding });
-          this.genericEdges.set(source.id, list);
-          added = true;
+        const sourceVertex = this.instantiationVertex(source);
+        const target = this.instantiationVertex(param);
+        this.instantiationEdges.push({ source: sourceVertex, target, weight: arg === source ? 0 : 1 });
+      }
+    }
+    const cycleAt = this.findInstantiationCycle();
+    if (cycleAt === undefined) return true;
+    this.hasGenericCycle = true;
+    const param = this.instantiationVertexParams[cycleAt];
+    this.error(
+      this.typeParamSpans.get(param.id) ?? { row: 0, column: 0 },
+      `型パラメータ ${param.name} のインスタンス化が循環しています（インスタンス化のたびに型引数が大きくなり、終わりません）。`
+    );
+    return false;
+  }
+
+  private instantiationVertex(param: TypeParamType): number {
+    let vertex = this.instantiationVertices.get(param.id);
+    if (vertex === undefined) {
+      vertex = this.instantiationVertexParams.push(param) - 1;
+      this.instantiationVertices.set(param.id, vertex);
+    }
+    return vertex;
+  }
+
+  /**
+   * Finds a cycle through an edge of positive weight as Go's checker does (monomorph in go/types/mono.go): Bellman-Ford
+   * for the heaviest paths, where a path as long as the number of vertices contains a cycle, which is reported at the
+   * first vertex found twice walking that path backwards.
+   */
+  private findInstantiationCycle(): number | undefined {
+    const vertices = this.instantiationVertexParams.map(() => ({ weight: 0, previous: -1, length: 0 }));
+    for (let again = true; again;) {
+      again = false;
+      for (const [index, edge] of this.instantiationEdges.entries()) {
+        const source = vertices[edge.source];
+        const target = vertices[edge.target];
+        const weight = source.weight + edge.weight;
+        if (weight <= target.weight) continue;
+        target.previous = index;
+        target.length = source.length + 1;
+        if (target.length === vertices.length) {
+          const seen = new Set<number>();
+          let vertex = edge.target;
+          while (!seen.has(vertex) && vertices[vertex].previous >= 0) {
+            seen.add(vertex);
+            vertex = this.instantiationEdges[vertices[vertex].previous].source;
+          }
+          return vertex;
         }
+        target.weight = weight;
+        again = true;
       }
     }
-    if (added && this.findExpandingGenericCycle()) {
-      this.hasGenericCycle = true;
-      this.error(span, '型引数のインスタンス化が循環しています。');
-      return false;
-    }
-    return true;
-  }
-
-  private findExpandingGenericCycle(): boolean {
-    for (const [source, edges] of this.genericEdges) {
-      for (const edge of edges) {
-        if (edge.expanding && this.canReachTypeParam(edge.target, source)) return true;
-      }
-    }
-    return false;
-  }
-
-  private canReachTypeParam(from: number, goal: number): boolean {
-    const seen = new Set<number>();
-    const stack = [from];
-    while (stack.length > 0) {
-      const current = stack.pop() as number;
-      if (current === goal) return true;
-      if (seen.has(current)) continue;
-      seen.add(current);
-      for (const edge of this.genericEdges.get(current) ?? []) stack.push(edge.target);
-    }
-    return false;
+    return undefined;
   }
 
   private resolveNamedType(syntax: Extract<TypeExpression, { kind: 'name' }>, direct: boolean): Type {
@@ -338,7 +367,7 @@ export abstract class CompilerBase {
         return this.error(syntax, `型 ${syntax.name} の型引数の数が合いません。`);
       }
       if (!this.checkTypeArguments(entity.generic.typeParams, args, syntax)) return BASIC.invalid;
-      if (!this.recordGenericInstantiation(entity.generic.typeParams, args, syntax)) return BASIC.invalid;
+      if (!this.recordGenericInstantiation(entity.generic.typeParams, args)) return BASIC.invalid;
       return entity.generic.instantiate(args, syntax);
     }
     if (syntax.typeArguments.length > 0) return this.error(syntax, `${syntax.name} は型引数を持たない型です。`);
@@ -423,6 +452,7 @@ export abstract class CompilerBase {
     }));
     for (const [index, parameter] of parameters.entries()) {
       this.declare(parameter.name, { kind: 'type', name: parameter.name, type: declared[index] }, parameter);
+      this.typeParamSpans.set(declared[index].id, parameter);
     }
     for (const [index, parameter] of parameters.entries()) {
       const constraint = this.resolveType(parameter.constraint);
@@ -499,14 +529,14 @@ function describeConstraint(constraint: InterfaceType): string {
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Traverses all composite type constructors.
-function collectTypeParams(type: Type, out: Set<TypeParamType>, seen = new Set<Type>()): void {
+function collectTypeParams(type: Type, out: TypeParamType[], seen = new Set<Type>()): void {
+  if (type.kind === 'typeParam') {
+    out.push(type);
+    return;
+  }
   if (seen.has(type)) return;
   seen.add(type);
   switch (type.kind) {
-    case 'typeParam': {
-      out.add(type);
-      return;
-    }
     case 'named': {
       for (const arg of type.typeArgs ?? []) collectTypeParams(arg, out, seen);
       return;

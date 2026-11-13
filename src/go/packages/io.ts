@@ -1,8 +1,9 @@
+import { assignFailure } from '../assignability';
 import type { Entity } from '../entities';
 import { newError } from '../errorValues';
 import { currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
-import { BASIC, ERROR_TYPE, sliceOf } from '../types';
-import { Slice, type Value } from '../values';
+import { BASIC, ERROR_TYPE, sliceOf, type Type } from '../types';
+import { Iface, Pointer, Slice, type Value } from '../values';
 import { byteSlice, bytesOf, callMethod } from './support';
 
 const BYTE_SLICE = sliceOf(BASIC.uint8);
@@ -17,10 +18,96 @@ export const IO_READER = namedType('io', 'Reader', {
   methods: [{ name: 'Read', type: fn([BYTE_SLICE], [BASIC.int, ERROR_TYPE]) }],
 });
 
+const RUNE_READ = fn([], [BASIC.int32, BASIC.int, ERROR_TYPE]);
+const BYTE_READ = fn([], [BASIC.uint8, ERROR_TYPE]);
+const UNREAD = fn([], [ERROR_TYPE]);
+
+export const IO_RUNE_SCANNER = namedType('io', 'RuneScanner', {
+  kind: 'interface',
+  methods: [
+    { name: 'ReadRune', type: RUNE_READ },
+    { name: 'UnreadRune', type: UNREAD },
+  ],
+});
+
+export const IO_STRING_WRITER = namedType('io', 'StringWriter', {
+  kind: 'interface',
+  methods: [{ name: 'WriteString', type: fn([BASIC.string], [BASIC.int, ERROR_TYPE]) }],
+});
+
+export const IO_READER_FROM = namedType('io', 'ReaderFrom', {
+  kind: 'interface',
+  methods: [{ name: 'ReadFrom', type: fn([IO_READER], [BASIC.int64, ERROR_TYPE]) }],
+});
+
+const INTERFACES = [
+  IO_RUNE_SCANNER,
+  IO_STRING_WRITER,
+  IO_READER_FROM,
+  namedType('io', 'RuneReader', { kind: 'interface', methods: [{ name: 'ReadRune', type: RUNE_READ }] }),
+  namedType('io', 'ByteReader', { kind: 'interface', methods: [{ name: 'ReadByte', type: BYTE_READ }] }),
+  namedType('io', 'ByteScanner', {
+    kind: 'interface',
+    methods: [
+      { name: 'ReadByte', type: BYTE_READ },
+      { name: 'UnreadByte', type: UNREAD },
+    ],
+  }),
+];
+
 /** `io.EOF`, which readers return at the end and programs compare with ==. */
 export const EOF = newError('EOF');
 export const ERR_SHORT_WRITE = newError('short write');
+export const ERR_UNEXPECTED_EOF = newError('unexpected EOF');
+export const ERR_NO_PROGRESS = newError('multiple Read calls return no data or error');
 const ERR_INVALID_WRITE = newError('invalid write result');
+
+/** Whether two error values are the same error, as `==` compares the pointers that `errors.New` returns. */
+export function sameError(a: Value, b: Value): boolean {
+  if (a === b) return true;
+  return (
+    a instanceof Iface &&
+    b instanceof Iface &&
+    a.type === b.type &&
+    a.value instanceof Pointer &&
+    b.value instanceof Pointer &&
+    a.value.equals(b.value)
+  );
+}
+
+/** `io.WriteString`: the writer's own WriteString when it has one, and Write otherwise. */
+export function writeString(writer: Value, text: string): [bigint, Value] {
+  const viaString = writer instanceof Iface && assignFailure(writer.type, IO_STRING_WRITER) === undefined;
+  return callMethod(writer, viaString ? 'WriteString' : 'Write', [viaString ? text : byteSlice(text)]) as [
+    bigint,
+    Value,
+  ];
+}
+
+export function libraryVariable(name: string, type: Type, value: Value): Entity {
+  return {
+    kind: 'var',
+    name,
+    type,
+    span: { row: 0, column: 0 },
+    used: true,
+    boxed: false,
+    owner: undefined,
+    slot: -1,
+    library: () => value,
+  };
+}
+
+function intConstant(name: string, value: number): Entity {
+  return {
+    kind: 'const',
+    name,
+    type: BASIC.untypedInt,
+    value: { kind: 'int', value: BigInt(value) },
+    span: { row: 0, column: 0 },
+    used: true,
+  };
+}
 
 /** Reads everything from a reader through its Read method, 512 bytes at a time as io.ReadAll starts. */
 function readAll(reader: Value): [string, Value] {
@@ -40,28 +127,14 @@ function readAll(reader: Value): [string, Value] {
 const members: Record<string, Entity> = {
   Reader: typeEntity(IO_READER),
   Writer: typeEntity(IO_WRITER),
-  EOF: {
-    kind: 'var',
-    name: 'EOF',
-    type: ERROR_TYPE,
-    span: { row: 0, column: 0 },
-    used: true,
-    boxed: false,
-    owner: undefined,
-    slot: -1,
-    library: () => EOF,
-  },
-  ErrShortWrite: {
-    kind: 'var',
-    name: 'ErrShortWrite',
-    type: ERROR_TYPE,
-    span: { row: 0, column: 0 },
-    used: true,
-    boxed: false,
-    owner: undefined,
-    slot: -1,
-    library: () => ERR_SHORT_WRITE,
-  },
+  ...Object.fromEntries(INTERFACES.map((type) => [type.name, typeEntity(type)])),
+  EOF: libraryVariable('EOF', ERROR_TYPE, EOF),
+  ErrShortWrite: libraryVariable('ErrShortWrite', ERROR_TYPE, ERR_SHORT_WRITE),
+  ErrUnexpectedEOF: libraryVariable('ErrUnexpectedEOF', ERROR_TYPE, ERR_UNEXPECTED_EOF),
+  ErrNoProgress: libraryVariable('ErrNoProgress', ERROR_TYPE, ERR_NO_PROGRESS),
+  SeekStart: intConstant('SeekStart', 0),
+  SeekCurrent: intConstant('SeekCurrent', 1),
+  SeekEnd: intConstant('SeekEnd', 2),
   Copy: nativeFunction('Copy', fn([IO_WRITER, IO_READER], [BASIC.int64, ERROR_TYPE]), ([writer, reader]) => {
     const runtime = currentRuntime();
     const size = 32 * 1024;
@@ -92,36 +165,38 @@ const members: Record<string, Entity> = {
     const [data, error] = readAll(reader);
     return [byteSlice(data) as Slice, error];
   }),
-  WriteString: nativeFunction(
-    'WriteString',
-    fn([IO_WRITER, BASIC.string], [BASIC.int, ERROR_TYPE]),
-    ([writer, text]) => callMethod(writer, 'Write', [byteSlice(text as string)]) as Value[]
+  WriteString: nativeFunction('WriteString', fn([IO_WRITER, BASIC.string], [BASIC.int, ERROR_TYPE]), ([writer, text]) =>
+    writeString(writer, text as string)
   ),
 };
 
-export const IO_PACKAGE = definePackage('io', members, [
-  'Pipe',
-  'ReadFull',
-  'ReadAtLeast',
-  'MultiReader',
-  'MultiWriter',
-  'TeeReader',
-  'LimitReader',
-  'SectionReader',
-  'NopCloser',
-  'Discard',
-  'CopyN',
-  'CopyBuffer',
-  'ReadCloser',
-  'WriteCloser',
-  'ReadWriter',
-  'Closer',
-  'Seeker',
-  'ReaderAt',
-  'WriterAt',
-  'ByteReader',
-  'RuneReader',
-  'StringWriter',
-  'ErrUnexpectedEOF',
-  'ErrClosedPipe',
-]);
+export const IO_PACKAGE = definePackage(
+  'io',
+  members,
+  [
+    'Pipe',
+    'ReadFull',
+    'ReadAtLeast',
+    'MultiReader',
+    'MultiWriter',
+    'TeeReader',
+    'LimitReader',
+    'SectionReader',
+    'NopCloser',
+    'Discard',
+    'CopyN',
+    'CopyBuffer',
+    'ReadCloser',
+    'WriterTo',
+    'WriteCloser',
+    'ReadWriter',
+    'Closer',
+    'Seeker',
+    'ReaderAt',
+    'WriterAt',
+    'ByteReader',
+    'RuneReader',
+    'StringWriter',
+    'ErrClosedPipe',
+  ].filter((name) => !(name in members))
+);

@@ -3,22 +3,12 @@ import type { Entity } from '../entities';
 import { newError } from '../errorValues';
 import { formatFloat } from '../floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR } from '../literals';
-import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
-import { quote, quoteRune } from '../quote';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { canBackquote, isGraphic, isPrint, quote, quoteChunks, quoteRune, quoteRuneChunks } from '../quote';
+import { appendValues, moveToHeap } from '../sliceOps';
 import { BASIC, ERROR_TYPE, pointerTo, RUNE } from '../types';
-import { Cell, GoStruct, Iface, Pointer, type Value } from '../values';
-import {
-  BOOL,
-  BYTES,
-  byteSlice,
-  bytesOf,
-  errorText,
-  FLOAT64,
-  INT,
-  receiverStruct,
-  STRING,
-  stringPanic,
-} from './support';
+import { Cell, Complex, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { appendBytes, BOOL, BYTES, errorText, FLOAT64, INT, receiverStruct, STRING, stringPanic } from './support';
 
 const ERR_SYNTAX = newError('invalid syntax');
 const ERR_RANGE = newError('value out of range');
@@ -48,7 +38,7 @@ function numError(func: string, num: string, error: Value): Value {
   return new Iface(pointerTo(NUM_ERROR), new Pointer(new Cell(new GoStruct([func, num, error])), 'v'));
 }
 
-function renamed(error: Value, func: string, num: string): Value {
+export function renamed(error: Value, func: string, num: string): Value {
   const struct = ((error as Iface).value as Pointer).load() as GoStruct;
   struct.fields[0] = func;
   struct.fields[1] = num;
@@ -89,7 +79,7 @@ function underscoreOK(text: string): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- A transcription of Go's ParseUint.
-function parseUint(text: string, baseArg: number, bitSizeArg: number, func: string): [bigint, Value] {
+export function parseUint(text: string, baseArg: number, bitSizeArg: number, func: string): [bigint, Value] {
   if (text === '') return [0n, numError(func, text, ERR_SYNTAX)];
   const base0 = baseArg === 0;
   let base = baseArg;
@@ -130,7 +120,7 @@ function parseUint(text: string, baseArg: number, bitSizeArg: number, func: stri
   return [value, undefined];
 }
 
-function parseInt(text: string, base: number, bitSizeArg: number, func: string): [bigint, Value] {
+export function parseInt(text: string, base: number, bitSizeArg: number, func: string): [bigint, Value] {
   if (text === '') return [0n, numError(func, text, ERR_SYNTAX)];
   let s = text;
   let negative = false;
@@ -150,38 +140,198 @@ function parseInt(text: string, base: number, bitSizeArg: number, func: string):
   return [negative ? -unsigned : unsigned, undefined];
 }
 
-const SPECIAL_FLOATS: Record<string, number> = { inf: Infinity, infinity: Infinity, nan: Number.NaN };
+export function parseFloat(text: string, bitSize: number): [number, Value] {
+  const [value, size, error] = parseFloatPrefix(text, bitSize);
+  if (size !== text.length) return [0, numError('ParseFloat', text, ERR_SYNTAX)];
+  return [value, error && numError('ParseFloat', text, error)];
+}
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Go's float syntax: specials, decimal, and hexadecimal.
-function parseFloat(text: string, bitSize: number): [number, Value] {
-  const error = (kind: Value, value = 0): [number, Value] => [value, numError('ParseFloat', text, kind)];
+// code-gauge-allow functionCognitiveComplexity 20 -- A transcription of Go's ParseComplex.
+function parseComplex(text: string, bitSize: number): [Complex, Value] {
+  const size = bitSize === 64 ? 32 : 64;
+  const syntaxError: [Complex, Value] = [new Complex(0, 0), numError('ParseComplex', text, ERR_SYNTAX)];
+  let pending: Value;
+  const result = (value: Complex): [Complex, Value] => [value, pending && numError('ParseComplex', text, pending)];
   let s = text;
-  let sign = 1;
-  if (s[0] === '+' || s[0] === '-') {
-    if (s[0] === '-') sign = -1;
-    s = s.slice(1);
+  if (s.length >= 2 && s[0] === '(' && s.at(-1) === ')') s = s.slice(1, -1);
+  const [re, reSize, reError] = parseFloatPrefix(s, size);
+  if (reError === ERR_SYNTAX) return syntaxError;
+  pending = reError;
+  s = s.slice(reSize);
+  if (s === '') return result(new Complex(re, 0));
+  switch (s[0]) {
+    case '+': {
+      if (s.length > 1 && s[1] !== '+') s = s.slice(1);
+      break;
+    }
+    case '-': {
+      break;
+    }
+    case 'i': {
+      if (s.length === 1) return result(new Complex(0, re));
+      return syntaxError;
+    }
+    default: {
+      return syntaxError;
+    }
   }
-  const special = SPECIAL_FLOATS[s.toLowerCase()];
-  if (special !== undefined && !(Number.isNaN(special) && text.length !== s.length)) return [sign * special, undefined];
-  if (s.includes('_')) {
-    if (!underscoreOK(text)) return error(ERR_SYNTAX);
-    s = s.replaceAll('_', '');
+  const [im, imSize, imError] = parseFloatPrefix(s, size);
+  if (imError === ERR_SYNTAX) return syntaxError;
+  pending = imError ?? pending;
+  if (s.slice(imSize) !== 'i') return syntaxError;
+  return result(new Complex(re, im));
+}
+
+/** Go's `parseFloatPrefix`: the float at the start of `s`, the bytes it spans, and ErrSyntax or ErrRange. */
+function parseFloatPrefix(s: string, bitSize: number): [number, number, Value] {
+  const bits = bitSize === 32 ? 32 : 64;
+  const specialValue = special(s);
+  if (specialValue) return [specialValue[0], specialValue[1], undefined];
+  const syntax = readFloat(s);
+  if (!syntax) return [0, 0, ERR_SYNTAX];
+  const magnitude = floatOf(syntax.mantissa, syntax.exponent, syntax.hex, bits);
+  const value = syntax.negative ? -magnitude : magnitude;
+  return [value, syntax.size, Number.isFinite(value) ? undefined : ERR_RANGE];
+}
+
+function special(s: string): [number, number] | undefined {
+  const first = lower(s[0] ?? '');
+  if (first === 'n') return commonPrefixLengthIgnoreCase(s, 'nan') === 3 ? [Number.NaN, 3] : undefined;
+  const signSize = first === '+' || first === '-' ? 1 : 0;
+  if (signSize === 0 && first !== 'i') return undefined;
+  let size = commonPrefixLengthIgnoreCase(s.slice(signSize), 'infinity');
+  // Anything longer than "inf" is fine, but without the whole "infinity" only "inf" is consumed.
+  if (size > 3 && size < 8) size = 3;
+  if (size !== 3 && size !== 8) return undefined;
+  return [first === '-' ? -Infinity : Infinity, signSize + size];
+}
+
+function commonPrefixLengthIgnoreCase(s: string, prefix: string): number {
+  const length = Math.min(prefix.length, s.length);
+  for (let index = 0; index < length; index++) {
+    if (lower(s[index]) !== prefix[index]) return index;
   }
-  let value: number;
-  if (/^0[xX]/.test(s)) {
-    const match = /^0[xX]([\dA-Fa-f]*)(?:\.([\dA-Fa-f]*))?[pP]([+-]?\d+)$/.exec(s);
-    if (!match || (match[1] === '' && (match[2] ?? '') === '')) return error(ERR_SYNTAX);
-    const digits = (match[1] ?? '') + (match[2] ?? '');
-    const mantissa = BigInt(`0x${digits || '0'}`);
-    const exponent = Number(match[3]) - 4 * (match[2] ?? '').length;
-    value = Number(mantissa) * 2 ** exponent;
-  } else {
-    if (!/^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(s)) return error(ERR_SYNTAX);
-    value = Number(s);
+  return length;
+}
+
+/** A float's syntax: its value is `mantissa` × 10^`exponent`, or × 2^`exponent` when `hex`. */
+interface FloatSyntax {
+  mantissa: bigint;
+  exponent: number;
+  negative: boolean;
+  hex: boolean;
+  size: number;
+}
+
+// code-gauge-allow functionCognitiveComplexity 45 -- A transcription of Go's readFloat, keeping every mantissa digit.
+function readFloat(s: string): FloatSyntax | undefined {
+  let index = 0;
+  let underscores = false;
+  let negative = false;
+  if (s[index] === '+') index++;
+  else if (s[index] === '-') {
+    index++;
+    negative = true;
   }
-  if (bitSize === 32) value = Math.fround(value);
-  if (!Number.isFinite(value)) return error(ERR_RANGE, sign * Infinity);
-  return [sign * value, undefined];
+  let hex = false;
+  if (index + 2 < s.length && s[index] === '0' && lower(s[index + 1]) === 'x') {
+    index += 2;
+    hex = true;
+  }
+  let sawDot = false;
+  let sawDigits = false;
+  let digitCount = 0;
+  let point = 0;
+  let mantissa = 0n;
+  for (; index < s.length; index++) {
+    const char = s[index];
+    if (char === '_') {
+      underscores = true;
+      continue;
+    }
+    if (char === '.') {
+      if (sawDot) break;
+      sawDot = true;
+      point = digitCount;
+      continue;
+    }
+    const digit = digitValue(char, hex);
+    if (digit < 0) break;
+    sawDigits = true;
+    if (digit === 0 && digitCount === 0) {
+      point--;
+      continue;
+    }
+    digitCount++;
+    mantissa = mantissa * (hex ? 16n : 10n) + BigInt(digit);
+  }
+  if (!sawDigits) return undefined;
+  if (!sawDot) point = digitCount;
+  if (hex) {
+    point *= 4;
+    digitCount *= 4;
+  }
+  if (index < s.length && lower(s[index]) === (hex ? 'p' : 'e')) {
+    index++;
+    let sign = 1;
+    if (s[index] === '+') index++;
+    else if (s[index] === '-') {
+      index++;
+      sign = -1;
+    }
+    if (!(s[index] >= '0' && s[index] <= '9')) return undefined;
+    let exponent = 0;
+    for (; index < s.length && ((s[index] >= '0' && s[index] <= '9') || s[index] === '_'); index++) {
+      if (s[index] === '_') {
+        underscores = true;
+        continue;
+      }
+      // Go stops accumulating a huge exponent, which then only needs to be out of range.
+      if (exponent < 10_000) exponent = exponent * 10 + s.charCodeAt(index) - 48;
+    }
+    point += exponent * sign;
+  } else if (hex) {
+    return undefined;
+  }
+  if (underscores && !underscoreOK(s.slice(0, index))) return undefined;
+  return { mantissa, exponent: point - digitCount, negative, hex, size: index };
+}
+
+function digitValue(char: string, hex: boolean): number {
+  if (char >= '0' && char <= '9') return char.charCodeAt(0) - 48;
+  if (hex && lower(char) >= 'a' && lower(char) <= 'f') return lower(char).charCodeAt(0) - 87;
+  return -1;
+}
+
+const MAX_FLOAT32 = 3.4028234663852886e38;
+
+/** The float of the given size nearest to `mantissa` × (2 or 10)^`exponent`, or Infinity when it overflows. */
+function floatOf(mantissa: bigint, exponent: number, binary: boolean, bits: 32 | 64): number {
+  if (mantissa === 0n) return 0;
+  // Beyond these magnitudes every float overflows or underflows, so the exact powers need not be computed.
+  const magnitude = (binary ? mantissa.toString(2) : mantissa.toString()).length + exponent;
+  if (magnitude > (binary ? 2000 : 400)) return Infinity;
+  if (magnitude < (binary ? -2000 : -400)) return 0;
+  const power = (binary ? 2n : 10n) ** BigInt(Math.abs(exponent));
+  return exponent >= 0 ? roundRatio(mantissa * power, 1n, bits) : roundRatio(mantissa, power, bits);
+}
+
+/** The float nearest to `numerator` / `denominator` (both positive), rounding ties to even, or Infinity on overflow. */
+function roundRatio(numerator: bigint, denominator: bigint, bits: 32 | 64): number {
+  const [mantissaBits, minExponent, maxValue] = bits === 64 ? [52, -1022, Number.MAX_VALUE] : [23, -126, MAX_FLOAT32];
+  let exponent = numerator.toString(2).length - denominator.toString(2).length;
+  const below =
+    exponent >= 0 ? numerator < denominator << BigInt(exponent) : numerator << BigInt(-exponent) < denominator;
+  if (below) exponent--;
+  exponent = Math.max(exponent, minExponent);
+  const shift = mantissaBits - exponent;
+  const scaledNumerator = shift >= 0 ? numerator << BigInt(shift) : numerator;
+  const scaledDenominator = shift >= 0 ? denominator : denominator << BigInt(-shift);
+  let quotient = scaledNumerator / scaledDenominator;
+  const twiceRemainder = (scaledNumerator % scaledDenominator) * 2n;
+  if (twiceRemainder > scaledDenominator || (twiceRemainder === scaledDenominator && quotient % 2n === 1n)) quotient++;
+  const value = Number(quotient) * 2 ** (exponent - mantissaBits);
+  return value > maxValue ? Infinity : value;
 }
 
 function formatInteger(value: bigint, base: number): string {
@@ -189,51 +339,173 @@ function formatInteger(value: bigint, base: number): string {
   return value.toString(base);
 }
 
-/** `strconv.Unquote`: the value of a quoted Go string or rune literal, or ErrSyntax. */
-function unquote(text: string): [string, Value] {
-  if (text.length < 2) return ['', ERR_SYNTAX];
-  const quoteChar = text[0];
-  if (quoteChar !== text.at(-1)) return ['', ERR_SYNTAX];
-  const body = text.slice(1, -1);
-  if (quoteChar === '`') return body.includes('`') ? ['', ERR_SYNTAX] : [body.replaceAll('\r', ''), undefined];
-  if (quoteChar !== '"' && quoteChar !== "'") return ['', ERR_SYNTAX];
-  let result = '';
-  for (let at = 0; at < body.length;) {
-    const char = body[at];
-    if (char === quoteChar || char === '\n') return ['', ERR_SYNTAX];
-    if (char !== '\\') {
-      const { size } = decodeRune(body, at);
-      result += body.slice(at, at + size);
-      at += size;
-      continue;
-    }
-    const escape = /^\\(?:([abfnrtv\\'"])|([0-7]{3})|x([\dA-Fa-f]{2})|u([\dA-Fa-f]{4})|U([\dA-Fa-f]{8}))/.exec(
-      body.slice(at)
-    );
-    if (!escape) return ['', ERR_SYNTAX];
-    const [whole, simple, octal, hex, small, large] = escape;
-    if (simple) {
-      if ((simple === "'" && quoteChar === '"') || (simple === '"' && quoteChar === "'")) return ['', ERR_SYNTAX];
-      result += String.fromCharCode(
-        { a: 7, b: 8, f: 12, n: 10, r: 13, t: 9, v: 11 }[simple as 'a'] ?? simple.charCodeAt(0)
-      );
-    } else if (octal || hex) {
-      const byte = Number.parseInt(octal ?? hex, octal ? 8 : 16);
-      if (byte > 255) return ['', ERR_SYNTAX];
-      result += String.fromCharCode(byte);
-    } else {
-      const rune = Number.parseInt(small ?? large, 16);
-      if (rune > 0x10_ff_ff || (rune >= 0xd8_00 && rune <= 0xdf_ff)) return ['', ERR_SYNTAX];
-      result += encodeRune(rune);
-    }
-    at += whole.length;
-  }
-  if (quoteChar === "'") {
-    const { rune, size } = decodeRune(result, 0);
-    if (result.length === 0 || size !== result.length || (rune === RUNE_ERROR && size === 1)) return ['', ERR_SYNTAX];
-  }
-  return [result, undefined];
+function formatFloatBits(value: number, format: string, precision: number, bitSize: number): string {
+  if (bitSize !== 32 && bitSize !== 64) stringPanic('strconv: illegal AppendFloat bitSize');
+  if (!'beEfgGxX'.includes(format) && Number.isFinite(value)) return `%${format}`;
+  return formatFloat(bitSize === 32 ? Math.fround(value) : value, format, precision, bitSize);
 }
+
+function formatComplex(value: Complex, format: string, precision: number, bitSize: number): string {
+  if (bitSize !== 64 && bitSize !== 128) stringPanic('invalid bitSize');
+  const re = formatFloatBits(value.re, format, precision, bitSize / 2);
+  const im = formatFloatBits(value.im, format, precision, bitSize / 2);
+  return `(${re}${im[0] === '+' || im[0] === '-' ? '' : '+'}${im}i)`;
+}
+
+function appendChunks(destination: Value, chunks: string[]): Value {
+  let slice = destination;
+  for (const chunk of chunks) slice = appendBytes(slice, chunk);
+  return slice;
+}
+
+/**
+ * Splits FormatFloat's output into the pieces that Go's AppendFloat appends with one `append` call each,
+ * which decide how the destination grows.
+ */
+function floatChunks(text: string, format: string): string[] {
+  if (text === 'NaN' || text === '+Inf' || text === '-Inf' || !'bxXeEfgG'.includes(format)) return [text];
+  const sign = text.startsWith('-') ? ['-'] : [];
+  const body = text.slice(sign.length);
+  if (format === 'b') {
+    const [mantissa, exponent] = body.split('p');
+    return [...sign, mantissa, 'p', exponent[0], exponent.slice(1)];
+  }
+  if (format === 'x' || format === 'X') {
+    const at = body.search(/[pP]/);
+    return [...sign, body.slice(0, 3), ...body.slice(3, at).split(''), body[at], body[at + 1], body.slice(at + 2)];
+  }
+  const at = body.search(/[eE]/);
+  if (at < 0) return [...sign, ...body.split('')];
+  // The significant digits after the first are appended at once and the padding zeros one by one.
+  const fraction = body.slice(2, at);
+  const digits = fraction.replace(/0+$/, '');
+  const point = at > 1 ? ['.', digits, ...fraction.slice(digits.length).split('')] : [];
+  return [...sign, body[0], ...point, body[at], body[at + 1], body.slice(at + 2)];
+}
+
+/**
+ * Appends AppendFloat's pieces. Go's compiler gives fmtX, which formats 'x' and 'X', a 32-byte stack buffer for
+ * its first append (the minus sign) to an empty destination, and moves the result to a heap array of the
+ * length's size class on return.
+ */
+function appendFloatChunks(destination: Value, chunks: string[], format: string): Value {
+  const slice = destination as Slice | undefined;
+  if (!((format === 'x' || format === 'X') && chunks[0] === '-' && (slice?.capacity ?? 0) === 0)) {
+    return appendChunks(destination, chunks);
+  }
+  const runtime = currentRuntime();
+  const allocate = (count: number): void => runtime.allocate(count);
+  const buffer = appendValues(slice, [45n], BASIC.uint8, () => 0n, allocate, 'static');
+  return moveToHeap(appendChunks(buffer, chunks.slice(1)) as Slice, BASIC.uint8, () => 0n, allocate);
+}
+
+function appendQuoted(destination: Value, text: string, asciiOnly: boolean, graphicOnly: boolean): Value {
+  const slice = destination as Slice | undefined;
+  const length = slice?.length ?? 0;
+  let buffer: Value = slice;
+  // Go's appendQuotedWith preallocates room for the quotes and the unescaped text when the spare capacity lacks it.
+  if ((slice?.capacity ?? 0) - length < text.length) {
+    const capacity = length + text.length + 2;
+    currentRuntime().allocate(capacity);
+    const array = slice?.values() ?? [];
+    while (array.length < capacity) array.push(0n);
+    buffer = new Slice(array, 0, length, capacity);
+  }
+  return appendChunks(buffer, quoteChunks(text, '"', asciiOnly, graphicOnly));
+}
+
+/** `strconv.Unquote`: the value of a quoted Go string or rune literal, or ErrSyntax. */
+export function unquoteLiteral(text: string): [string, Value] {
+  const [value, rest, error] = unquote(text, true);
+  return rest === '' ? [value, error] : ['', ERR_SYNTAX];
+}
+
+/** Go's `unquote`: the quoted literal at the start of `input` (unescaped when `unescape`), the rest, and any error. */
+// code-gauge-allow functionCognitiveComplexity 30 -- A transcription of Go's unquote.
+function unquote(input: string, unescape: boolean): [string, string, Value] {
+  const failure: [string, string, Value] = ['', input, ERR_SYNTAX];
+  if (input.length < 2) return failure;
+  const quoteChar = input[0];
+  const end = input.indexOf(quoteChar, 1) + 1;
+  if (end === 0) return failure;
+  if (quoteChar === '`') {
+    return [unescape ? input.slice(1, end - 1).replaceAll('\r', '') : input.slice(0, end), input.slice(end), undefined];
+  }
+  if (quoteChar !== '"' && quoteChar !== "'") return failure;
+  const literal = input.slice(0, end);
+  if (!literal.includes('\\') && !literal.includes('\n')) {
+    const body = literal.slice(1, -1);
+    let valid: boolean;
+    if (quoteChar === '"') valid = validUtf8(body);
+    else {
+      const { rune, size } = body === '' ? { rune: RUNE_ERROR, size: 0 } : decodeRune(body, 0);
+      valid = size + 2 === end && (rune !== RUNE_ERROR || size !== 1);
+    }
+    if (valid) return [unescape ? body : literal, input.slice(end), undefined];
+  }
+  let rest = input.slice(1);
+  let buffer = '';
+  while (rest.length > 0 && rest[0] !== quoteChar) {
+    const [rune, multibyte, tail, error] = unquoteChar(rest, quoteChar.charCodeAt(0));
+    if (rest[0] === '\n' || error !== undefined) return failure;
+    rest = tail;
+    if (unescape) buffer += rune < 0x80 || !multibyte ? String.fromCharCode(rune) : encodeRune(rune);
+    if (quoteChar === "'") break;
+  }
+  if (rest[0] !== quoteChar) return failure;
+  rest = rest.slice(1);
+  return [unescape ? buffer : input.slice(0, input.length - rest.length), rest, undefined];
+}
+
+function validUtf8(bytes: string): boolean {
+  for (let index = 0; index < bytes.length;) {
+    const { rune, size } = decodeRune(bytes, index);
+    if (rune === RUNE_ERROR && size === 1) return false;
+    index += size;
+  }
+  return true;
+}
+
+const SIMPLE_ESCAPES: Partial<Record<string, number>> = { a: 7, b: 8, f: 12, n: 10, r: 13, t: 9, v: 11, '\\': 92 };
+const HEX_ESCAPE_DIGITS: Partial<Record<string, number>> = { x: 2, u: 4, U: 8 };
+
+/** `strconv.UnquoteChar`: the first character of an escaped literal body, whether it needs multiple bytes, and the rest. */
+// code-gauge-allow functionCognitiveComplexity 25 -- A transcription of Go's UnquoteChar.
+function unquoteChar(text: string, quoteByte: number): [number, boolean, string, Value] {
+  const failure: [number, boolean, string, Value] = [0, false, '', ERR_SYNTAX];
+  if (text === '') return failure;
+  const first = text.charCodeAt(0);
+  if (first === quoteByte && (quoteByte === 0x27 || quoteByte === 0x22)) return failure;
+  if (first >= 0x80) {
+    const { rune, size } = decodeRune(text, 0);
+    return [rune, true, text.slice(size), undefined];
+  }
+  if (first !== 0x5c) return [first, false, text.slice(1), undefined];
+  if (text.length <= 1) return failure;
+  const kind = text[1];
+  const rest = text.slice(2);
+  const simple = SIMPLE_ESCAPES[kind];
+  if (simple !== undefined) return [simple, false, rest, undefined];
+  const count = HEX_ESCAPE_DIGITS[kind];
+  if (count !== undefined) {
+    const digits = rest.slice(0, count);
+    if (digits.length < count || !/^[\dA-Fa-f]*$/.test(digits)) return failure;
+    const value = Number.parseInt(digits, 16);
+    if (kind === 'x') return [value, false, rest.slice(count), undefined];
+    if (value > 0x10_ff_ff || (value >= 0xd8_00 && value <= 0xdf_ff)) return failure;
+    return [value, true, rest.slice(count), undefined];
+  }
+  if (kind >= '0' && kind <= '7') {
+    const digits = text.slice(1, 4);
+    if (!/^[0-7]{3}$/.test(digits)) return failure;
+    const value = Number.parseInt(digits, 8);
+    return value > 255 ? failure : [value, false, text.slice(4), undefined];
+  }
+  if ((kind === "'" || kind === '"') && kind.charCodeAt(0) === quoteByte) return [quoteByte, false, rest, undefined];
+  return failure;
+}
+
+const runeOf = (value: Value): number => Number(value as bigint);
 
 const members: Record<string, Entity> = {
   NumError: typeEntity(NUM_ERROR),
@@ -281,6 +553,9 @@ const members: Record<string, Entity> = {
   ParseFloat: nativeFunction('ParseFloat', fn([STRING, INT], [FLOAT64, ERROR_TYPE]), ([text, bits]) =>
     parseFloat(text as string, Number(bits as bigint))
   ),
+  ParseComplex: nativeFunction('ParseComplex', fn([STRING, INT], [BASIC.complex128, ERROR_TYPE]), ([text, bits]) =>
+    parseComplex(text as string, Number(bits as bigint))
+  ),
   ParseBool: nativeFunction('ParseBool', fn([STRING], [BOOL, ERROR_TYPE]), ([text]) => {
     if (['1', 't', 'T', 'TRUE', 'true', 'True'].includes(text as string)) return [true, undefined];
     if (['0', 'f', 'F', 'FALSE', 'false', 'False'].includes(text as string)) return [false, undefined];
@@ -296,44 +571,78 @@ const members: Record<string, Entity> = {
     'FormatFloat',
     fn([FLOAT64, BASIC.uint8, INT, INT], [STRING]),
     ([value, format, precision, bits]) =>
-      formatFloat(
-        // A bit size of 32 formats the value rounded to a float32, as Go converts it first.
-        Number(bits as bigint) === 32 ? Math.fround(value as number) : (value as number),
-        String.fromCharCode(Number(format as bigint)),
-        Number(precision as bigint),
-        Number(bits as bigint) === 32 ? 32 : 64
-      )
+      formatFloatBits(value as number, String.fromCharCode(runeOf(format)), runeOf(precision), runeOf(bits))
   ),
-  FormatBool: nativeFunction('FormatBool', fn([BOOL], [STRING]), ([value]) => String(value)),
+  FormatComplex: nativeFunction(
+    'FormatComplex',
+    fn([BASIC.complex128, BASIC.uint8, INT, INT], [STRING]),
+    ([value, format, precision, bits]) =>
+      formatComplex(value as Complex, String.fromCharCode(runeOf(format)), runeOf(precision), runeOf(bits))
+  ),
+  FormatBool: nativeFunction('FormatBool', fn([BOOL], [STRING]), ([value]) => String(value as boolean)),
   Quote: nativeFunction('Quote', fn([STRING], [STRING]), ([text]) => quote(text as string)),
   QuoteToASCII: nativeFunction('QuoteToASCII', fn([STRING], [STRING]), ([text]) => quote(text as string, '"', true)),
-  QuoteRune: nativeFunction('QuoteRune', fn([RUNE], [STRING]), ([rune]) => quoteRune(Number(rune as bigint))),
-  QuoteRuneToASCII: nativeFunction('QuoteRuneToASCII', fn([RUNE], [STRING]), ([rune]) =>
-    quoteRune(Number(rune as bigint), true)
+  QuoteToGraphic: nativeFunction('QuoteToGraphic', fn([STRING], [STRING]), ([text]) =>
+    quote(text as string, '"', false, true)
   ),
-  Unquote: nativeFunction('Unquote', fn([STRING], [STRING, ERROR_TYPE]), ([text]) => unquote(text as string)),
-  AppendInt: nativeFunction('AppendInt', fn([BYTES, BASIC.int64, INT], [BYTES]), ([bytes, value, base]) =>
-    byteSlice(bytesOf(bytes) + formatInteger(value as bigint, Number(base as bigint)))
+  QuoteRune: nativeFunction('QuoteRune', fn([RUNE], [STRING]), ([rune]) => quoteRune(runeOf(rune))),
+  QuoteRuneToASCII: nativeFunction('QuoteRuneToASCII', fn([RUNE], [STRING]), ([rune]) => quoteRune(runeOf(rune), true)),
+  QuoteRuneToGraphic: nativeFunction('QuoteRuneToGraphic', fn([RUNE], [STRING]), ([rune]) =>
+    quoteRune(runeOf(rune), false, true)
+  ),
+  Unquote: nativeFunction('Unquote', fn([STRING], [STRING, ERROR_TYPE]), ([text]) => unquoteLiteral(text as string)),
+  UnquoteChar: nativeFunction(
+    'UnquoteChar',
+    fn([STRING, BASIC.uint8], [RUNE, BOOL, STRING, ERROR_TYPE]),
+    ([text, quoteByte]) => {
+      const [rune, multibyte, tail, error] = unquoteChar(text as string, runeOf(quoteByte));
+      return [BigInt(rune), multibyte, tail, error];
+    }
+  ),
+  QuotedPrefix: nativeFunction('QuotedPrefix', fn([STRING], [STRING, ERROR_TYPE]), ([text]) => {
+    const [prefix, , error] = unquote(text as string, false);
+    return [prefix, error];
+  }),
+  CanBackquote: nativeFunction('CanBackquote', fn([STRING], [BOOL]), ([text]) => canBackquote(text as string)),
+  IsPrint: nativeFunction('IsPrint', fn([RUNE], [BOOL]), ([rune]) => isPrint(runeOf(rune))),
+  IsGraphic: nativeFunction('IsGraphic', fn([RUNE], [BOOL]), ([rune]) => isGraphic(runeOf(rune))),
+  AppendInt: nativeFunction('AppendInt', fn([BYTES, BASIC.int64, INT], [BYTES]), ([bytes, value, base]) => {
+    const text = formatInteger(value as bigint, runeOf(base));
+    return appendChunks(bytes, text.startsWith('-') ? ['-', text.slice(1)] : [text]);
+  }),
+  AppendUint: nativeFunction('AppendUint', fn([BYTES, BASIC.uint64, INT], [BYTES]), ([bytes, value, base]) =>
+    appendBytes(bytes, formatInteger(value as bigint, runeOf(base)))
+  ),
+  AppendFloat: nativeFunction(
+    'AppendFloat',
+    fn([BYTES, FLOAT64, BASIC.uint8, INT, INT], [BYTES]),
+    ([bytes, value, format, precision, bits]) => {
+      const formatChar = String.fromCharCode(runeOf(format));
+      const text = formatFloatBits(value as number, formatChar, runeOf(precision), runeOf(bits));
+      return appendFloatChunks(bytes, floatChunks(text, formatChar), formatChar);
+    }
   ),
   AppendBool: nativeFunction('AppendBool', fn([BYTES, BOOL], [BYTES]), ([bytes, value]) =>
-    byteSlice(bytesOf(bytes) + String(value))
+    appendBytes(bytes, String(value as boolean))
   ),
   AppendQuote: nativeFunction('AppendQuote', fn([BYTES, STRING], [BYTES]), ([bytes, text]) =>
-    byteSlice(bytesOf(bytes) + quote(text as string))
+    appendQuoted(bytes, text as string, false, false)
+  ),
+  AppendQuoteToASCII: nativeFunction('AppendQuoteToASCII', fn([BYTES, STRING], [BYTES]), ([bytes, text]) =>
+    appendQuoted(bytes, text as string, true, false)
+  ),
+  AppendQuoteToGraphic: nativeFunction('AppendQuoteToGraphic', fn([BYTES, STRING], [BYTES]), ([bytes, text]) =>
+    appendQuoted(bytes, text as string, false, true)
+  ),
+  AppendQuoteRune: nativeFunction('AppendQuoteRune', fn([BYTES, RUNE], [BYTES]), ([bytes, rune]) =>
+    appendChunks(bytes, quoteRuneChunks(runeOf(rune)))
+  ),
+  AppendQuoteRuneToASCII: nativeFunction('AppendQuoteRuneToASCII', fn([BYTES, RUNE], [BYTES]), ([bytes, rune]) =>
+    appendChunks(bytes, quoteRuneChunks(runeOf(rune), true))
+  ),
+  AppendQuoteRuneToGraphic: nativeFunction('AppendQuoteRuneToGraphic', fn([BYTES, RUNE], [BYTES]), ([bytes, rune]) =>
+    appendChunks(bytes, quoteRuneChunks(runeOf(rune), false, true))
   ),
 };
 
-export const STRCONV_PACKAGE = definePackage('strconv', members, [
-  'ParseComplex',
-  'FormatComplex',
-  'AppendFloat',
-  'AppendUint',
-  'AppendQuoteRune',
-  'AppendQuoteToASCII',
-  'UnquoteChar',
-  'CanBackquote',
-  'IsPrint',
-  'IsGraphic',
-  'QuoteToGraphic',
-  'QuotedPrefix',
-]);
+export const STRCONV_PACKAGE = definePackage('strconv', members);

@@ -8,6 +8,7 @@ import { runProgram } from './execute';
 import { formatFloat } from './floatFormat';
 import { utf8Decode } from './literals';
 import { compareMapKeys } from './mapOrder';
+import { isOpaque } from './native';
 import { BUILDER } from './packages/strings';
 import { parseGo } from './parse';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
@@ -181,6 +182,7 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     const builder = (value.native?.builder as string | undefined) ?? '';
     return { kind: 'value', value: utf8Decode(builder) };
   }
+  if (isOpaque(type)) return { kind: 'object', entries: {} };
   if (seen.has(value)) return undefined;
   seen.add(value);
   try {

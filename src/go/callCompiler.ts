@@ -298,7 +298,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (!mapping) return undefined;
     const typeArgs = generic.typeParams.map((param) => mapping.get(param.id) as Type);
     if (!this.checkTypeArguments(generic.typeParams, typeArgs, expression)) return undefined;
-    if (!this.recordGenericInstantiation(generic.typeParams, typeArgs, expression)) return undefined;
+    if (!this.recordGenericInstantiation(generic.typeParams, typeArgs)) return undefined;
     const signature = substitute(generic.type, mapping, (named, args) =>
       this.instantiateNamed(named, args)
     ) as FuncType;
@@ -534,6 +534,7 @@ export abstract class CallCompiler extends CompositeCompiler {
         return count(2) ? this.deleteBuiltin(expression) : this.invalid(expression);
       }
       case 'panic': {
+        this.builtinPanicCalls.add(expression);
         if (!count(1)) return this.invalid(expression);
         const value = this.assign(this.expression(args[0]), ANY, '引数');
         return {

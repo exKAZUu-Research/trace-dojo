@@ -1,6 +1,7 @@
 import type { GoPackage } from '../entities';
 import { BITS_PACKAGE } from './bits';
 import { BUFIO_PACKAGE } from './bufio';
+import { BYTES_PACKAGE } from './bytes';
 import { CMPLX_PACKAGE } from './cmplx';
 import { CMP_PACKAGE, MAPS_PACKAGE, SLICES_PACKAGE, SORT_PACKAGE } from './collections';
 import { HEAP_PACKAGE, LIST_PACKAGE } from './containers';
@@ -20,6 +21,7 @@ const PACKAGES = new Map<string, GoPackage>(
   [
     BITS_PACKAGE,
     BUFIO_PACKAGE,
+    BYTES_PACKAGE,
     CMP_PACKAGE,
     CMPLX_PACKAGE,
     COLOR_PACKAGE,
