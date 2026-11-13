@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 415 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
+// code-gauge-allow-file fileNcss 418 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
 import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
@@ -541,6 +541,11 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
   });
   addMethod(cls, 'clear', [], VOID, false, (frame, receiver) => {
     rejectEagerly(frame, receiver);
+    // AbstractMap's key set and values clear through their map, which an ImmutableCollections map rejects at once.
+    const view = mapViewSources.get(receiver as JavaObject);
+    if (view?.lookup && eagerlyRejectingClasses.has(unwrapped(view.map).cls)) {
+      throwBuiltin(frame, 'UnsupportedOperationException');
+    }
     removeElements(frame, receiver, () => true);
   });
   linkOverrides(cls);
