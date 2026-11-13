@@ -58,16 +58,18 @@ export interface FunctionInfo {
 
 /**
  * The stack buffers of a function's call, and those of the calls inlined into it, by call site; `resultStaysLocal`
- * tells whether the result of an inlined call stays in the caller, which lets what the callee returns live on its stack.
+ * tells whether the result of an inlined call stays in the caller, which lets what the callee returns live on its stack,
+ * and `constantParams` which parameters of an inlined call Go's compiler knows as constants from the arguments.
  */
 export interface StackBuffers {
   used: WeakSet<object>;
   inlined: WeakMap<object, StackBuffers>;
   resultStaysLocal: boolean;
+  constantParams: readonly boolean[];
 }
 
-function newStackBuffers(resultStaysLocal = false): StackBuffers {
-  return { used: new WeakSet(), inlined: new WeakMap(), resultStaysLocal };
+function newStackBuffers(resultStaysLocal = false, constantParams: readonly boolean[] = []): StackBuffers {
+  return { used: new WeakSet(), inlined: new WeakMap(), resultStaysLocal, constantParams };
 }
 
 /** Marks a local whose scope has not begun or has ended. */
@@ -116,12 +118,21 @@ export class Frame implements TracedFrame {
     return this.stackBuffers?.resultStaysLocal ?? false;
   }
 
+  /** Whether Go's compiler knows the parameter at `index` as a constant, from the argument of the call it inlined. */
+  constantParam(index: number): boolean {
+    return this.stackBuffers?.constantParams[index] ?? false;
+  }
+
   /** The stack buffers of a call at `site` that Go's compiler inlines into this function. */
-  inlinedStackBuffers(site: object, resultStaysLocal: boolean): StackBuffers {
+  inlinedStackBuffers(
+    site: object,
+    resultStaysLocal: boolean,
+    constantParams: (frame: Frame) => readonly boolean[]
+  ): StackBuffers {
     const { inlined } = (this.stackBuffers ??= newStackBuffers());
     let buffers = inlined.get(site);
     if (!buffers) {
-      buffers = newStackBuffers(resultStaysLocal);
+      buffers = newStackBuffers(resultStaysLocal, constantParams(this));
       inlined.set(site, buffers);
     }
     return buffers;

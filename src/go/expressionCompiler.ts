@@ -30,8 +30,8 @@ import {
 import { checkKeyHashable, equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
-import { currentRuntime } from './native';
-import type { Operand, Storage } from './operand';
+import { currentRuntime, libraryCell } from './native';
+import type { Operand, SsaConstant, Storage } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
 import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
@@ -475,8 +475,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const markUsed = (): void => {
       entity.used = true;
     };
-    const { library } = entity;
-    if (library) return { mode: 'value', type: entity.type, span, eval: () => library() };
+    if (entity.library) {
+      const prepareLibraryStore = (): ((value: Value) => void) => {
+        const cell = libraryCell(entity);
+        return (value) => {
+          cell.v = writeInPlace(cell.v, value);
+        };
+      };
+      return {
+        mode: 'variable',
+        type: entity.type,
+        span,
+        variable: { markUsed },
+        eval: () => libraryCell(entity).v,
+        prepareStore: prepareLibraryStore,
+        store: (_frame, value) => prepareLibraryStore()(value),
+        addressOf: () => () => new Pointer(libraryCell(entity), 'v'),
+      };
+    }
     if (!entity.owner) {
       const prepareStore = (frame: Frame): ((value: Value) => void) => {
         const cell = frame.runtime.globals[slot];
@@ -510,10 +526,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
         },
         ssaConstant:
           entity.definedAsConstant &&
-          (() => !entity.boxed && !entity.writes && (entity.definedAsConstant as () => boolean)()),
+          ((frame) => !entity.boxed && !entity.writes && (entity.definedAsConstant as SsaConstant)(frame)),
         variable: { markUsed, entity },
         backingVars: [entity],
         addressStorage: { backingVars: [entity] },
+        ssaRoot: entity,
+        addressTaken: () => {
+          entity.addressTaken = true;
+        },
         eval: (frame) => readLocal(frame, slot),
         prepareStore: (frame) => (value) => writeLocal(frame, slot, value),
         store: (frame, value) => writeLocal(frame, slot, value),
@@ -537,6 +557,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
       variable: { markUsed, entity },
       backingVars: [entity],
       addressStorage: { backingVars: [entity] },
+      ssaRoot: entity,
+      addressTaken: () => {
+        entity.addressTaken = true;
+      },
       eval: (frame) => frame.cells[index].v,
       prepareStore,
       store: (frame, value) => prepareStore(frame)(value),
@@ -1036,7 +1060,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const fuseRight = rightProduct && fused(readLeft, rightProduct, false, operator === '-', false).eval;
     const fn = this.fn;
     if (operator === '+' && leftProduct && rightProduct && isBasic(type, 'float64') && fn) {
-      fn.sumsOfProducts.push(() => fuses(leftProduct) && fuses(rightProduct));
+      fn.sumsOfProducts.push(() => fuses(leftProduct, undefined) && fuses(rightProduct, undefined));
     }
     // Go's arm64 rules try `a - x*y` before `x*y - a`, and an addition's second operand before its first. Its generic
     // common subexpression elimination reorders the operands of an addition of two products only when another such
@@ -1055,8 +1079,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type,
       span,
       eval: (frame) => {
-        const leftFuses = leftProduct !== undefined && fuses(leftProduct);
-        const rightFuses = rightProduct !== undefined && fuses(rightProduct);
+        const leftFuses = leftProduct !== undefined && fuses(leftProduct, frame);
+        const rightFuses = rightProduct !== undefined && fuses(rightProduct, frame);
         if (leftFuses && (!rightFuses || prefersLeft(frame))) return (fuseLeft as Eval)(frame);
         if (rightFuses) return (fuseRight as Eval)(frame);
         return plain(frame);
@@ -1541,6 +1565,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
         : undefined,
       addressOf: addressable ? () => (frame) => new Pointer(container(frame).fields, last) : undefined,
       addressStorage,
+      backingVars: throughPointer ? undefined : operand.backingVars,
+      ssaRoot: throughPointer ? undefined : operand.ssaRoot,
       addressTaken: throughPointer ? undefined : operand.addressTaken,
       onWrite: throughPointer ? undefined : operand.onWrite,
     };
@@ -1627,6 +1653,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
         locateElement,
         {
           storage: viaPointer ? operand : operand.addressStorage,
+          backingVars: viaPointer ? undefined : operand.backingVars,
+          ssaRoot: viaPointer ? undefined : operand.ssaRoot,
           addressTaken: viaPointer ? undefined : operand.addressTaken,
           onWrite: viaPointer ? undefined : operand.onWrite,
         }
@@ -2107,7 +2135,13 @@ function elementOperand(
   operand: Operand,
   addressable: boolean,
   locateElement: (frame: Frame) => () => [Value[], number],
-  address: { storage?: Storage; addressTaken?: () => void; onWrite?: () => void }
+  address: {
+    storage?: Storage;
+    backingVars?: VarEntity[];
+    ssaRoot?: VarEntity;
+    addressTaken?: () => void;
+    onWrite?: () => void;
+  }
 ): Operand {
   const element = (frame: Frame): [Value[], number] => locateElement(frame)();
   return {
@@ -2145,6 +2179,8 @@ function elementOperand(
       : undefined,
     addressOf: addressable ? () => (frame) => new Pointer(...element(frame)) : undefined,
     addressStorage: address.storage,
+    backingVars: address.backingVars,
+    ssaRoot: address.ssaRoot,
     addressTaken: address.addressTaken,
     onWrite: address.onWrite,
   };
@@ -2298,16 +2334,16 @@ function inlinable(fn: FunctionContext): boolean {
  * Whether a product reaches the addition as a multiplication: through a variable only while it keeps its single
  * definition, and not when both factors are constants, which Go's compiler multiplies before the program runs.
  */
-function fuses(product: NonNullable<Operand['product']>): boolean {
+function fuses(product: NonNullable<Operand['product']>, frame: Frame | undefined): boolean {
   const { enabled = always, constant = never } = product;
-  return enabled() && !constant();
+  return enabled() && !constant(frame);
 }
 
 /** Whether both operands are constants to Go's compiler, which then computes the operation before the program runs. */
-function bothConstant(left: Operand, right: Operand): (() => boolean) | undefined {
+function bothConstant(left: Operand, right: Operand): SsaConstant | undefined {
   const { ssaConstant: a } = left;
   const { ssaConstant: b } = right;
-  return a && b && (() => a() && b());
+  return a && b && ((frame) => a(frame) && b(frame));
 }
 
 function isNil(operand: Operand): boolean {

@@ -38,6 +38,7 @@ import {
 } from './runtime';
 import { nilPointerPanic, panicNilValue } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
+import { sizeOf } from './sliceOps';
 import type { SliceTracking } from './slicePass';
 import {
   ANY,
@@ -314,11 +315,14 @@ export abstract class StatementCompiler extends CallCompiler {
       run,
     } = this.hoistingCalls(() => {
       const compiledTargets = left.map((target) => this.assignmentTarget(target));
+      if (left.length === 1 && right.length === 1) this.markInPlaceAppend(left[0], right[0], compiledTargets[0]);
       const typeOf = (index: number): Type | undefined => compiledTargets[index]?.type;
       const localAt = (index: number): VarEntity | 'discard' | undefined => {
         const inner = stripParens(left[index]);
         if (inner.kind === 'name' && inner.name === '_') return 'discard';
-        return inner.kind === 'name' ? compiledTargets[index]?.variable?.entity : undefined;
+        const target = compiledTargets[index];
+        // A field or array element of a local variable holds what the variable holds, as Go's escape analysis sees it.
+        return inner.kind === 'name' ? target?.variable?.entity : target?.ssaRoot;
       };
       return [
         compiledTargets,
@@ -383,6 +387,16 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
+  /** Records `x = append(x, ...)`, which Go's compiler compiles as an update of x in memory unless x can be in registers. */
+  private markInPlaceAppend(target: Expression, value: Expression, compiled: Operand | undefined): void {
+    const inner = stripParens(value);
+    if (inner.kind !== 'call' || !compiled || !sameSafeExpression(target, inner.args[0])) return;
+    const callee = stripParens(inner.callee);
+    if (callee.kind !== 'name' || this.lookup(callee.name)?.kind !== 'builtin' || callee.name !== 'append') return;
+    const root = compiled.ssaRoot;
+    this.inPlaceAppends.set(inner, () => !root || root.addressTaken === true || !fitsRegisters(root.type));
+  }
+
   /** Whether an expression only creates an object, which `Operand.createsObject` recorded when it compiled. */
   private readonly creations = new WeakSet<Expression>();
 
@@ -400,8 +414,8 @@ export abstract class StatementCompiler extends CallCompiler {
     count: number,
     typeOf: (index: number) => Type | undefined,
     defineTypes?: Type[],
-    /** The first value, when the caller has compiled it already. */
-    precompiled?: Operand,
+    /** Receives the operand of each value when there is one value per target. */
+    compiled?: Operand[],
     targetLocal?: (index: number) => VarEntity | 'discard' | undefined
   ): Eval[] | undefined {
     const convert = (operand: Operand, index: number): Eval => {
@@ -428,10 +442,12 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     if (right.length === count) {
       return right.map((expression, index) => {
-        const compiled = index === 0 && precompiled ? precompiled : this.expression(expression);
+        const expressionOperand = this.expression(expression);
+        if (compiled) compiled[index] = expressionOperand;
         // Assigning or returning a slice variable lets its array be shared, unless it converts to an interface.
         const target = typeOf(index);
-        const operand = target && isInterface(target) ? compiled : this.sliceTransition(expression, compiled);
+        const operand =
+          target && isInterface(target) ? expressionOperand : this.sliceTransition(expression, expressionOperand);
         if (operand.createsObject || (operand.isCall && this.isConstructorCall(expression)))
           this.creations.add(expression);
         if (operand.type.kind === 'tuple') {
@@ -445,7 +461,7 @@ export abstract class StatementCompiler extends CallCompiler {
       });
     }
     if (right.length === 1) {
-      const operand = precompiled ?? this.expression(right[0]);
+      const operand = this.expression(right[0]);
       if (this.isInvalid(operand)) return undefined;
       if (operand.type.kind === 'tuple' && operand.type.types.length === count) return spreadResults(operand, convert);
       if (count === 2 && operand.commaOk) return commaOkResults(operand, convert);
@@ -528,42 +544,28 @@ export abstract class StatementCompiler extends CallCompiler {
     if (existing.every((entity, index) => entity !== undefined || names[index].name === '_')) {
       this.error(statement, ':= の左辺に新しい変数がありません（すでにある変数への代入は = で書きます）。');
     }
-    const single = left.length === 1 && right.length === 1 && !existing[0] && names[0].name !== '_';
     const types: Type[] = [];
+    const compiled: Operand[] = [];
     const holders = names.map(({ name, span }, index): VarEntity | 'discard' => {
       if (name === '_') return 'discard';
       const current = existing[index];
       if (current?.kind === 'var') return current;
       return this.discardTarget(span);
     });
-    const {
-      result: [first, values],
-      run,
-    } = this.hoistingCalls(() => {
-      const compiledFirst = single ? this.expression(right[0]) : undefined;
-      if (compiledFirst?.product && isFloat(compiledFirst.type) && !isUntyped(compiledFirst.type)) {
-        return [compiledFirst, undefined] as const;
-      }
-      return [
-        compiledFirst,
-        this.rightSide(
-          statement,
-          right,
-          left.length,
-          (index) => {
-            const entity = existing[index];
-            return entity?.kind === 'var' ? entity.type : undefined;
-          },
-          types,
-          compiledFirst,
-          (index) => holders[index]
-        ),
-      ] as const;
-    });
-    if (first?.product && isFloat(first.type) && !isUntyped(first.type)) {
-      return this.productDeclaration(statement, names[0], first, run);
-    }
-    const definedAsConstant = first?.ssaConstant;
+    const { result: values, run } = this.hoistingCalls(() =>
+      this.rightSide(
+        statement,
+        right,
+        left.length,
+        (index) => {
+          const entity = existing[index];
+          return entity?.kind === 'var' ? entity.type : undefined;
+        },
+        types,
+        compiled,
+        (index) => holders[index]
+      )
+    );
     if (!values) {
       for (const [index, { name, span }] of names.entries())
         if (!existing[index] && name !== '_') this.declareLocal(name, BASIC.invalid, span).used = true;
@@ -588,7 +590,7 @@ export abstract class StatementCompiler extends CallCompiler {
       sliceDeclaration(variable, right.length === left.length ? right[index] : undefined);
       const holder = holders[index];
       if (holder !== 'discard') transferEscapeLinks(holder, variable);
-      if (single) variable.definedAsConstant = definedAsConstant;
+      this.defineFromValue(variable, compiled[index], values, index);
       return (frame) => (value) => declareValue(frame, variable, value);
     });
     const exec: Exec = (frame) => {
@@ -604,36 +606,26 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /**
-   * `x := a * b` with floats: keeps the factors in hidden slots so that an addition using x fuses the multiplication,
-   * as Go's compiler does on arm64 while x keeps this single definition.
+   * Lets uses of a variable that keeps its declared value see it as Go's SSA form does: as a constant when the value is
+   * one, and for a float product as the multiplication, keeping the factors in hidden slots so that an addition using
+   * the variable fuses it, as Go's compiler does on arm64.
    */
-  private productDeclaration(
-    statement: Span,
-    name: { name: string; span: Span },
-    operand: Operand,
-    run: (frame: Frame, rest: () => void) => void
-  ): Exec {
-    const product = operand.product as NonNullable<Operand['product']>;
+  private defineFromValue(variable: VarEntity, operand: Operand | undefined, values: Eval[], index: number): void {
+    if (!operand) return;
+    variable.definedAsConstant = operand.ssaConstant;
+    const { product, type } = operand;
+    if (!product || !isFloat(type) || isUntyped(type) || type !== variable.type) return;
     const left = this.hiddenSlot();
     const right = this.hiddenSlot();
-    const variable = this.declareLocal(name.name, operand.type, name.span);
     variable.productFactors = { left, right, source: product.source };
-    variable.definedAsConstant = operand.ssaConstant;
-    const multiply = arithmetic('*', operand.type);
-    return this.withStep(
-      statement,
-      (frame) => {
-        run(frame, () => {
-          const x = product.left(frame);
-          const y = product.right(frame);
-          frame.locals[left] = x;
-          frame.locals[right] = y;
-          declareValue(frame, variable, multiply(x, y));
-        });
-        return;
-      },
-      false
-    );
+    const multiply = arithmetic('*', type);
+    values[index] = (frame) => {
+      const x = product.left(frame);
+      const y = product.right(frame);
+      frame.locals[left] = x;
+      frame.locals[right] = y;
+      return multiply(x, y);
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- var declarations with and without types and values.
@@ -651,6 +643,7 @@ export abstract class StatementCompiler extends CallCompiler {
         continue;
       }
       const types: Type[] = [];
+      const compiled: Operand[] = [];
       const holders = spec.names.map((name): VarEntity | 'discard' =>
         name.name === '_' ? 'discard' : this.discardTarget(name)
       );
@@ -661,7 +654,7 @@ export abstract class StatementCompiler extends CallCompiler {
           spec.names.length,
           () => declaredType,
           types,
-          undefined,
+          compiled,
           (index) => holders[index]
         )
       );
@@ -672,6 +665,7 @@ export abstract class StatementCompiler extends CallCompiler {
         sliceDeclaration(variable, spec.values.length === spec.names.length ? spec.values[index] : undefined);
         const holder = holders[index];
         if (holder !== 'discard') transferEscapeLinks(holder, variable);
+        if (values) this.defineFromValue(variable, compiled[index], values, index);
         return variable;
       });
       if (!values) continue;
@@ -1101,7 +1095,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const cases = statement.cases.map((typeCase) =>
       this.typeSwitchCase(statement, typeCase, operand.type, bindings, seenTypes)
     );
-    if (statement.binding && bindings.length > 0 && bindings.every((binding) => !binding.used)) {
+    if (statement.binding && bindings.every((binding) => !binding.used)) {
       this.error(statement.binding, `宣言した変数 ${statement.binding.name} を使っていません。`);
     }
     for (const binding of bindings) binding.used = true;
@@ -1453,6 +1447,8 @@ export abstract class StatementCompiler extends CallCompiler {
         for (const [index, parameter] of signature.parameters.entries()) {
           fn.params.push(this.declareParameter(parameter, type.params[index]));
         }
+        for (const [index, param] of fn.params.entries())
+          param.definedAsConstant = (frame) => frame?.constantParam(index) ?? false;
         fn.info.params.push(...fn.params);
         fn.results = type.results;
         fn.hasNamedResults = signature.results.some((result) => result.name !== undefined);
@@ -1784,3 +1780,71 @@ function hasBreak(statements: Statement[]): boolean {
 }
 
 export type { Completion, Slice };
+
+/** Go's ir.SameSafeExpr: whether two expressions denote the same value without calls or other side effects. */
+function sameSafeExpression(a: Expression | undefined, b: Expression | undefined): boolean {
+  if (!a || !b) return false;
+  const x = stripParens(a);
+  const y = stripParens(b);
+  switch (x.kind) {
+    case 'name': {
+      return y.kind === 'name' && x.name === y.name;
+    }
+    case 'selector': {
+      return y.kind === 'selector' && x.field === y.field && sameSafeExpression(x.operand, y.operand);
+    }
+    case 'unary': {
+      return (
+        y.kind === 'unary' &&
+        x.operator === y.operator &&
+        x.operator !== '&' &&
+        x.operator !== '<-' &&
+        sameSafeExpression(x.operand, y.operand)
+      );
+    }
+    case 'index': {
+      return (
+        y.kind === 'index' &&
+        x.indices.length === 1 &&
+        y.indices.length === 1 &&
+        sameSafeExpression(x.operand, y.operand) &&
+        sameSafeExpression(x.indices[0], y.indices[0])
+      );
+    }
+    case 'binary': {
+      return (
+        y.kind === 'binary' &&
+        x.operator === y.operator &&
+        ARITHMETIC_OPERATORS.has(x.operator) &&
+        sameSafeExpression(x.left, y.left) &&
+        sameSafeExpression(x.right, y.right)
+      );
+    }
+    case 'int':
+    case 'float':
+    case 'imaginary': {
+      return y.kind === x.kind && x.text === (y as typeof x).text;
+    }
+    case 'rune':
+    case 'string': {
+      return y.kind === x.kind && x.value === (y as typeof x).value;
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+const ARITHMETIC_OPERATORS = new Set(['+', '-', '|', '^', '*', '<<', '>>', '&', '&^', '/', '%']);
+
+/** Go's ssa.CanSSA: whether its compiler can keep a value of the type in registers. */
+function fitsRegisters(type: Type): boolean {
+  const size = sizeOf(type);
+  if (size === 0) return true;
+  if (size > 32) return false;
+  const under = underlying(type);
+  if (under.kind === 'array') return under.length <= 1 && fitsRegisters(under.element);
+  if (under.kind === 'struct')
+    return under.fields.length <= 4 && under.fields.every((field) => fitsRegisters(field.type));
+  return true;
+}

@@ -12,7 +12,7 @@ import { isOpaque } from './native';
 import { BUILDER } from './packages/strings';
 import { parseGo } from './parse';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
-import { lookupFieldOrMethod, type Type, underlying } from './types';
+import { lookupFieldOrMethod, type Type, typeString, underlying } from './types';
 import { Cell, Complex, GoArray, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
@@ -232,14 +232,58 @@ function containerNodeOf(value: Value, under: Type, seen: Set<unknown>): Display
     return { kind: 'array', entries };
   }
   if (value instanceof GoMap && under.kind === 'map') {
-    const entries: Record<string, DisplayNode> = {};
+    // Keys such as `__proto__` must become entries, not reach Object.prototype's setter.
+    const entries = Object.create(null) as Record<string, DisplayNode>;
     const sorted = [...value.entries.values()].toSorted((a, b) => compareMapKeys(a.key, b.key, under.key));
-    for (const entry of sorted) {
-      const keyNode = displayNodeOf(entry.key, under.key, new Set());
-      const key = keyNode?.kind === 'value' ? String(keyNode.value) : '?';
-      entries[key] = displayNodeOf(entry.value, under.value, seen) ?? NULL_NODE;
+    const labels = keyLabels(
+      sorted.map((entry) => entry.key),
+      under.key
+    );
+    for (const [index, entry] of sorted.entries()) {
+      entries[labels[index]] = displayNodeOf(entry.value, under.value, seen) ?? NULL_NODE;
     }
     return { kind: 'object', entries };
   }
   return undefined;
+}
+
+/**
+ * Labels a map's keys, distinct for distinct keys: by their text as fmt's %v writes it when no two keys share one, and
+ * otherwise by Go literals with their types where they share one, where only keys that no literal tells apart (NaNs,
+ * pointers) can still share a label, so those get their position among the keys sharing it.
+ */
+function keyLabels(keys: Value[], type: Type): string[] {
+  const texts = keys.map((key) => keyText(key, type, false));
+  if (new Set(texts).size === texts.length) return texts;
+  const literals = keys.map((key) => keyText(key, type, true));
+  const counts = new Map<string, number>();
+  for (const literal of literals) counts.set(literal, (counts.get(literal) ?? 0) + 1);
+  const positions = new Map<string, number>();
+  return literals.map((literal) => {
+    if (counts.get(literal) === 1) return literal;
+    const position = (positions.get(literal) ?? 0) + 1;
+    positions.set(literal, position);
+    return `${literal} (${position})`;
+  });
+}
+
+/** A map key as text, typed and with strings quoted when `literal`, without running any of the program's methods. */
+function keyText(key: Value, type: Type, literal: boolean): string {
+  if (key instanceof Iface) {
+    const text = keyText(key.value, key.type, literal);
+    return literal ? `${typeString(key.type)}(${text})` : text;
+  }
+  if (key === undefined) return '<nil>';
+  const under = underlying(type);
+  if (under.kind === 'struct') {
+    const fields = under.fields.map((field, index) => keyText((key as GoStruct).fields[index], field.type, literal));
+    return `{${fields.join(' ')}}`;
+  }
+  if (under.kind === 'array') {
+    return `[${(key as GoArray).elements.map((element) => keyText(element, under.element, literal)).join(' ')}]`;
+  }
+  if (key instanceof Pointer) return '<pointer>';
+  if (typeof key === 'string') return literal ? JSON.stringify(utf8Decode(key)) : utf8Decode(key);
+  if (typeof key === 'number') return formatFloat(key, 'g', -1, 64);
+  return String(basicScalar(key));
 }

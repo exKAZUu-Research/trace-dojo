@@ -26,6 +26,7 @@ import {
   STRING,
   stringPanic,
 } from './support';
+import { SPECIAL_CASE, specialCaseMapper } from './unicodeRanges';
 import { isSpace, toLower, toTitle, toUpper } from './unicodeSupport';
 
 // Go's bytes.go, bytes/buffer.go, and bytes/reader.go, transcribed so that results share the input's array, and are
@@ -1023,6 +1024,14 @@ const members: Record<string, Entity> = {
     changeCase(bytesOf(s), /[a-z]/, (text) => text.toUpperCase(), toUpper)
   ),
   ToTitle: nativeFunction('ToTitle', fn([BYTES], [BYTES]), ([s]) => mapBytes(bytesOf(s), toTitle)),
+  ...Object.fromEntries(
+    ['ToUpperSpecial', 'ToLowerSpecial', 'ToTitleSpecial'].map((name, kind) => [
+      name,
+      nativeFunction(name, fn([SPECIAL_CASE, BYTES], [BYTES]), ([special, s]) =>
+        mapBytes(bytesOf(s), specialCaseMapper(special, kind))
+      ),
+    ])
+  ),
   ToValidUTF8: nativeFunction('ToValidUTF8', fn([BYTES, BYTES], [BYTES]), ([s, replacement]) =>
     toValidUTF8(bytesOf(s), bytesOf(replacement))
   ),
@@ -1064,13 +1073,11 @@ const members: Record<string, Entity> = {
   TrimSpace: nativeFunction('TrimSpace', fn([BYTES], [BYTES]), ([s]) => trimSpace(s)),
 };
 
+/** The bytes package, without the functions that return iterators. */
 export const BYTES_PACKAGE = definePackage('bytes', members, [
   'Lines',
   'SplitSeq',
   'SplitAfterSeq',
   'FieldsSeq',
   'FieldsFuncSeq',
-  'ToUpperSpecial',
-  'ToLowerSpecial',
-  'ToTitleSpecial',
 ]);

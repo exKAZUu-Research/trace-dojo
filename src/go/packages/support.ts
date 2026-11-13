@@ -82,6 +82,7 @@ export function callFunction(fn: Value, args: Value[]): Value | Value[] {
 
 /** Calls a method of an interface value, as `sort.Sort` calls `Less`. */
 export function callMethod(receiver: Value, name: string, args: Value[] = []): Value | Value[] {
+  if (receiver === undefined) nilPointerPanic();
   return callDynamic(receiver as Iface, name, args.map(copyValue));
 }
 

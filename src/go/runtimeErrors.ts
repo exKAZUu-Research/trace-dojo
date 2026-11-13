@@ -20,8 +20,8 @@ function errorType(name: string, prefix: string, pointer = false, pkg = 'runtime
 const BOUNDS_ERROR = errorType('boundsError', 'runtime error: ');
 const ERROR_STRING = errorType('errorString', 'runtime error: ');
 const PLAIN_ERROR = errorType('plainError', '');
-const TYPE_ASSERTION_ERROR = errorType('TypeAssertionError', '', true);
-const PANIC_NIL_ERROR = errorType('PanicNilError', 'runtime error: ', true);
+export const TYPE_ASSERTION_ERROR = errorType('TypeAssertionError', '', true);
+export const PANIC_NIL_ERROR = errorType('PanicNilError', 'runtime error: ', true);
 const UNHASHABLE_TYPE_ERROR = errorType('unhashableTypeError', 'hash of unhashable type: ', false, 'maps');
 
 function errorValue(type: NamedType, message: string, pointer = false): Iface {

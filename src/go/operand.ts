@@ -53,6 +53,11 @@ export interface Operand extends Storage {
   addressOf?: () => (frame: Frame) => Pointer;
   /** The storage the address of this variable, field, or element refers to. */
   addressStorage?: Storage;
+  /**
+   * The local variable this variable, field, or array element lies in with no pointer, slice, or map between, which
+   * Go's compiler may keep in registers as a whole.
+   */
+  ssaRoot?: VarEntity;
   /** What the program taking the address of this value, or of a part of it, does to escape analysis. */
   addressTaken?: () => void;
   /** Records a store into this field or element, which writes the array it lives in. */
@@ -78,16 +83,20 @@ export interface Operand extends Storage {
     /** Whether the product still fuses when the program runs, for a variable that may be assigned again. */
     enabled?: () => boolean;
     /** Whether both factors are constants to Go's compiler, which computes the product before the program runs. */
-    constant?: () => boolean;
+    constant?: SsaConstant;
     source: ProductSource;
   };
   /**
    * Whether Go's compiler knows the value as a constant: a constant, or a local variable defined once from one, which
-   * its optimizer propagates. Decided when the program runs, once every assignment is known.
+   * its optimizer propagates, or a parameter of a call inlined with a constant argument. Decided when the program runs,
+   * once every assignment is known, for the frame the value is computed in, which is undefined for the function itself
+   * rather than one of its calls.
    */
-  ssaConstant?: () => boolean;
+  ssaConstant?: SsaConstant;
   /** How many values the statement's first pass evaluates before this expression's place (`hoistingCalls`). */
   firstPass?: number;
   /** The variable a name refers to, for marking it used or assigned. */
   variable?: { markUsed(): void; entity?: VarEntity };
 }
+
+export type SsaConstant = (frame: Frame | undefined) => boolean;

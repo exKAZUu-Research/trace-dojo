@@ -1,4 +1,4 @@
-import { type Type, typeString, underlying } from './types';
+import { identical, type Type, typeIdentityKey, typeString, underlying } from './types';
 import type { Complex, GoArray, GoStruct, Iface, Value } from './values';
 
 /** Orders map keys as fmt prints them (internal/fmtsort): numbers and strings by value, NaN first, false first. */
@@ -33,6 +33,8 @@ export function compareMapKeys(a: Value, b: Value, type: Type): number {
       if (rank !== 0) return rank;
       const names = typeString(x.type).localeCompare(typeString(y.type));
       if (names !== 0) return names;
+      // Distinct types can share a name, such as types declared in different blocks.
+      if (!identical(x.type, y.type)) return typeIdentityKey(x.type) < typeIdentityKey(y.type) ? -1 : 1;
       return compareMapKeys(x.value, y.value, x.type);
     }
     default: {

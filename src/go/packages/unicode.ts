@@ -1,11 +1,11 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import type { Entity } from '../entities';
 import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from '../literals';
-import { definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
-import { indexPanic, nilPointerPanic } from '../runtimeErrors';
-import { BASIC, pointerTo, RUNE, sliceOf } from '../types';
-import { Cell, GoStruct, Pointer, type Value } from '../values';
-import { BOOL, BYTES, byteSlice, bytesOf, INT, sliceValues, STRING } from './support';
+import { definePackage, fn, nativeFunction } from '../native';
+import { indexPanic } from '../runtimeErrors';
+import { BASIC, RUNE } from '../types';
+import { appendBytes, BOOL, BYTES, bytesOf, INT, STRING } from './support';
+import { UNICODE_RANGE_MEMBERS } from './unicodeRanges';
 import * as unicode from './unicodeSupport';
 
 function predicate(name: string, test: (rune: number) => boolean): Entity {
@@ -27,70 +27,8 @@ function runeConstant(name: string, value: number): Entity {
   };
 }
 
-/** `*unicode.RangeTable`, which this environment represents by the Unicode property that it tests. */
-const RANGE_TABLE = namedType('unicode', 'RangeTable', { kind: 'struct', fields: [] });
-const RANGE_TABLE_POINTER = pointerTo(RANGE_TABLE);
-
-const TABLES: Record<string, RegExp> = {
-  Letter: /^\p{L}$/u,
-  L: /^\p{L}$/u,
-  Digit: /^\p{Nd}$/u,
-  Nd: /^\p{Nd}$/u,
-  Number: /^\p{N}$/u,
-  N: /^\p{N}$/u,
-  Upper: /^\p{Lu}$/u,
-  Lu: /^\p{Lu}$/u,
-  Lower: /^\p{Ll}$/u,
-  Ll: /^\p{Ll}$/u,
-  Punct: /^\p{P}$/u,
-  P: /^\p{P}$/u,
-  Symbol: /^\p{S}$/u,
-  S: /^\p{S}$/u,
-  Space: /^\p{Zs}$|^[\t\n\v\f\r\u0085\u2028\u2029]$/u,
-  Mark: /^\p{M}$/u,
-  Han: /^\p{Script=Han}$/u,
-  Hiragana: /^\p{Script=Hiragana}$/u,
-  Katakana: /^\p{Script=Katakana}$/u,
-  Latin: /^\p{Script=Latin}$/u,
-  Greek: /^\p{Script=Greek}$/u,
-  Cyrillic: /^\p{Script=Cyrillic}$/u,
-  Hangul: /^\p{Script=Hangul}$/u,
-};
-
-const tableValues = new Map(
-  Object.entries(TABLES).map(([name, pattern]) => [name, new Pointer(new Cell(new GoStruct([], { pattern })), 'v')])
-);
-
-function inTable(table: Value, rune: number): boolean {
-  if (!(table instanceof Pointer)) nilPointerPanic();
-  const pattern = (table.load() as GoStruct).native?.pattern as RegExp | undefined;
-  return pattern !== undefined && rune >= 0 && rune <= 0x10_ff_ff && pattern.test(String.fromCodePoint(rune));
-}
-
 const unicodeMembers: Record<string, Entity> = {
-  RangeTable: typeEntity(RANGE_TABLE),
-  ...Object.fromEntries(
-    [...tableValues].map(([name, value]): [string, Entity] => [
-      name,
-      {
-        kind: 'var',
-        name,
-        type: RANGE_TABLE_POINTER,
-        span: { row: 0, column: 0 },
-        used: true,
-        boxed: false,
-        owner: undefined,
-        slot: -1,
-        library: () => value,
-      },
-    ])
-  ),
-  Is: nativeFunction('Is', fn([RANGE_TABLE_POINTER, RUNE], [BOOL]), ([table, rune]) =>
-    inTable(table, Number(rune as bigint))
-  ),
-  In: nativeFunction('In', fn([RUNE, sliceOf(RANGE_TABLE_POINTER)], [BOOL], true), ([rune, tables]) =>
-    sliceValues(tables).some((table) => inTable(table, Number(rune as bigint)))
-  ),
+  ...UNICODE_RANGE_MEMBERS,
   SimpleFold: nativeFunction('SimpleFold', fn([RUNE], [RUNE]), ([rune]) =>
     BigInt(unicode.simpleFold(Number(rune as bigint)))
   ),
@@ -119,21 +57,7 @@ const unicodeMembers: Record<string, Entity> = {
   MaxLatin1: runeConstant('MaxLatin1', 0xff),
 };
 
-export const UNICODE_PACKAGE = definePackage('unicode', unicodeMembers, [
-  'IsOneOf',
-  'To',
-  'UpperCase',
-  'LowerCase',
-  'TitleCase',
-  'SpecialCase',
-  'TurkishCase',
-  'CaseRanges',
-  'Categories',
-  'Scripts',
-  'Properties',
-  'GraphicRanges',
-  'PrintRanges',
-]);
+export const UNICODE_PACKAGE = definePackage('unicode', unicodeMembers);
 
 function runeLength(rune: number): number {
   if (rune < 0) return -1;
@@ -252,14 +176,11 @@ const utf8Members: Record<string, Entity> = {
     return BigInt(encoded.length);
   }),
   AppendRune: nativeFunction('AppendRune', fn([BYTES, RUNE], [BYTES]), ([b, rune]) =>
-    byteSlice(bytesOf(b) + encodeRune(Number(rune as bigint)))
+    appendBytes(b, encodeRune(Number(rune as bigint)))
   ),
+  FullRune: nativeFunction('FullRune', fn([BYTES], [BOOL]), ([b]) => fullRune(bytesOf(b))),
   RuneStart: nativeFunction('RuneStart', fn([BASIC.uint8], [BOOL]), ([byte]) => ((byte as bigint) & 0xc0n) !== 0x80n),
   FullRuneInString: nativeFunction('FullRuneInString', fn([STRING], [BOOL]), ([s]) => fullRune(s as string)),
 };
 
-export const UTF8_PACKAGE = definePackage(
-  'unicode/utf8',
-  utf8Members,
-  ['FullRune', 'AppendRune'].filter((name) => !(name in utf8Members))
-);
+export const UTF8_PACKAGE = definePackage('unicode/utf8', utf8Members);
