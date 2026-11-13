@@ -40,11 +40,16 @@ export const IO_READER_FROM = namedType('io', 'ReaderFrom', {
   methods: [{ name: 'ReadFrom', type: fn([IO_READER], [BASIC.int64, ERROR_TYPE]) }],
 });
 
+export const IO_RUNE_READER = namedType('io', 'RuneReader', {
+  kind: 'interface',
+  methods: [{ name: 'ReadRune', type: RUNE_READ }],
+});
+
 const INTERFACES = [
   IO_RUNE_SCANNER,
   IO_STRING_WRITER,
   IO_READER_FROM,
-  namedType('io', 'RuneReader', { kind: 'interface', methods: [{ name: 'ReadRune', type: RUNE_READ }] }),
+  IO_RUNE_READER,
   namedType('io', 'ByteReader', { kind: 'interface', methods: [{ name: 'ReadByte', type: BYTE_READ }] }),
   namedType('io', 'ByteScanner', {
     kind: 'interface',
