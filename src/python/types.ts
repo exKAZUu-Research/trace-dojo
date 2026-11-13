@@ -267,6 +267,7 @@ export type ExceptionName =
   | 'ModuleNotFoundError'
   | 'SystemError'
   | 'LookupError'
+  | 'UnicodeError'
   | 'UnicodeEncodeError'
   | 'EOFError'
   | 'SystemExit';

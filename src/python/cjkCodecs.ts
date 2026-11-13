@@ -1,7 +1,15 @@
 // CPython's Chinese and Korean codecs: gb2312, gbk, gb18030, hz, big5, cp950, big5hkscs, euc_kr, cp949, and johab,
 // built from the tables of data/cjkCodecs.ts when a program first uses one.
-import { decodeWithSteps, type ErrorHandling, registerCodec, type TextCodec } from './codecs';
+import {
+  decodeBytes,
+  decodeWithSteps,
+  encodeString,
+  type ErrorHandling,
+  registerCodec,
+  type TextCodec,
+} from './codecs';
 import { CJK_ENCODINGS, CJK_SEQUENCES, CJK_TABLES, GB18030_RANGES } from './data/cjkCodecs';
+import { pyError } from './types';
 
 /** The codec modules of this file, whose `encodings` modules are those of CPython's multibyte codecs. */
 export const CJK_MODULES = ['gb2312', 'gbk', 'gb18030', 'hz', 'big5', 'cp950', 'big5hkscs', 'euc_kr', 'cp949', 'johab'];
@@ -177,7 +185,12 @@ function pairEncoder(encode: Map<number, number>): Encoder {
 /** The parts of a codec that keeps a state: its decoder's steps and its encoder, made afresh for each text. */
 export interface StatefulParts {
   decoder: () => Stepper;
-  encoder: () => { step: Encoder; reset: (out: number[]) => void };
+  encoder: () => {
+    step: Encoder;
+    reset: (out: number[]) => void;
+    getState?: () => bigint;
+    setState?: (state: bigint) => void;
+  };
   /** Whether a character at the end of a piece waits for the next, which may combine with it. */
   waitsAfter?: (point: number) => boolean;
 }
@@ -200,6 +213,8 @@ function decodeIncrementally(
   return { text, consumed };
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- The codec factories retain shift state and pending characters together with CPython checkpoint packing.
+// code-gauge-allow functionNcss 34 -- The codec factories retain shift state and pending characters together with CPython checkpoint packing.
 export function registerStatefulCodec(name: string, parts: StatefulParts): void {
   registerCodec(name, () => ({
     name,
@@ -220,16 +235,38 @@ export function registerStatefulCodec(name: string, parts: StatefulParts): void 
       );
     },
     incrementalEncoder: () => {
-      const { step, reset } = parts.encoder();
+      const { step, reset, getState, setState } = parts.encoder();
       let pending: number[] = [];
-      return (points, errors, final) => {
-        const all = [...pending, ...points];
-        const keep = !final && all.length > 0 && parts.waitsAfter?.(all.at(-1) as number) === true ? 1 : 0;
-        pending = all.slice(all.length - keep);
-        const out = encodeSteps(all.slice(0, all.length - keep), errors, step);
-        if (final) reset(out);
-        return Uint8Array.from(out);
-      };
+      return Object.assign(
+        (points: readonly number[], errors: ErrorHandling, final: boolean) => {
+          const all = [...pending, ...points];
+          const keep = !final && all.length > 0 && parts.waitsAfter?.(all.at(-1) as number) === true ? 1 : 0;
+          pending = all.slice(all.length - keep);
+          const out = encodeSteps(all.slice(0, all.length - keep), errors, step);
+          if (final) reset(out);
+          return Uint8Array.from(out);
+        },
+        {
+          getState: () => {
+            const bytes = encodeString(String.fromCodePoint(...pending), 'utf8', 'strict');
+            let value = BigInt(bytes.length);
+            for (const [index, byte] of bytes.entries()) value |= BigInt(byte) << BigInt(8 * (index + 1));
+            return value | ((getState?.() ?? 0n) << BigInt(8 * (bytes.length + 1)));
+          },
+          setState: (value: bigint) => {
+            if (value < 0n) throw pyError('OverflowError', "can't convert negative int to unsigned");
+            if (value >= 1n << 136n) throw pyError('OverflowError', 'int too big to convert');
+            const count = Number(value & 255n);
+            if (count > 8) throw pyError('UnicodeError', 'pending buffer too large');
+            const bytes = Uint8Array.from({ length: count }, (_, index) =>
+              Number((value >> BigInt(8 * (index + 1))) & 255n)
+            );
+            const text = decodeBytes(bytes, 'utf8', 'strict');
+            pending = Array.from(text, (char) => char.codePointAt(0) as number);
+            setState?.((value >> BigInt(8 * (count + 1))) & ((1n << 64n) - 1n));
+          },
+        }
+      );
     },
   }));
 }
@@ -424,6 +461,10 @@ function hzParts(): StatefulParts {
       const state = { inGb: false };
       return {
         step: hzEncoder(state, gb2312.encode),
+        getState: () => (state.inGb ? 1n : 0n),
+        setState: (value) => {
+          state.inGb = (value & 255n) !== 0n;
+        },
         reset: (out) => {
           if (state.inGb) out.push(0x7e, 0x7d);
           state.inGb = false;

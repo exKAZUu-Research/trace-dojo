@@ -98,11 +98,15 @@ registerModule('_codecs', () => {
     ],
     [
       '_incremental_decoder',
-      builtin('_incremental_decoder', 'one', 1, 1, ([module]) => incrementalDecoder(module as string)),
+      builtin('_incremental_decoder', 'expected', 1, 2, ([module, state]) =>
+        incrementalDecoder(module as string, state === true)
+      ),
     ],
     [
       '_incremental_encoder',
-      builtin('_incremental_encoder', 'one', 1, 1, ([module]) => incrementalEncoder(module as string)),
+      builtin('_incremental_encoder', 'expected', 1, 2, ([module, state]) =>
+        incrementalEncoder(module as string, state === true)
+      ),
     ],
     [
       '_decode_with',
@@ -374,10 +378,10 @@ function incrementalDecoder(module: string, withState = false): PyValue {
 }
 
 /** The encoder of an IncrementalEncoder or StreamWriter of a multibyte codec, which keeps the codec's state. */
-function incrementalEncoder(module: string): PyValue {
+function incrementalEncoder(module: string, withState = false): PyValue {
   const codec = lookupCodec(module, 'encode');
   const encode = codec.incrementalEncoder?.();
-  return builtin('encode', 'expected', 3, 3, ([input, errors, final]) => {
+  const callable = builtin('encode', 'expected', 3, 3, ([input, errors, final]) => {
     if (typeof input !== 'string') throw typeError(`encode() argument 1 must be str, not ${typeName(input)}`);
     if (!encode) return newBytes(encodeString(input, module, errorsName('encode', errors)));
     // oxlint-disable-next-line typescript/no-misused-spread -- Python encodes strings by code point.
@@ -391,6 +395,15 @@ function incrementalEncoder(module: string): PyValue {
     );
     return newBytes(encode(points, handling, isTruthy(final)));
   });
+  if (!withState) return callable;
+  return newTuple([
+    callable,
+    builtin('getstate', 'none', 0, 0, () => encode?.getState() ?? 0n),
+    builtin('setstate', 'one', 1, 1, ([state]) => {
+      encode?.setState(toIndex(state));
+      return None;
+    }),
+  ]);
 }
 
 /** `utf_16_ex_decode(data, errors, byteorder, final)`: decodes in the order a BOM gives, which it reports. */

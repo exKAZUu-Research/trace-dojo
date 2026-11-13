@@ -1,4 +1,4 @@
-// code-gauge-allow-file duplicateLines 394 -- The CPython sources it holds share code with others this grader holds.
+// code-gauge-allow-file duplicateLines 403 -- The CPython sources it holds share code with others this grader holds.
 import { CJK_MODULES } from '../cjkCodecs';
 import { ISO2022_MODULES } from '../iso2022Codecs';
 import { JIS_X_0213_MODULES } from '../jisX0213Codecs';
@@ -1098,8 +1098,7 @@ def getregentry():
 `;
 
 // The modules of CPython's Japanese codecs, which CPython writes over its C modules `_codecs_jp` and
-// `_multibytecodec`, over this grader's codecs instead. ISO-2022-JP keeps a shift state between calls, which
-// converting piece by piece would lose, so only its whole-text conversions are supported.
+// `_multibytecodec`, over this grader's codecs with their incremental shift and pending-input state.
 const MULTIBYTE = String.raw`
 import _codecs, codecs
 
@@ -1124,25 +1123,38 @@ class Codec(codecs.Codec):
 class IncrementalEncoder(codecs.IncrementalEncoder):
     def __init__(self, errors='strict'):
         codecs.IncrementalEncoder.__init__(self, errors)
-        self._encoder = _codecs._incremental_encoder(_NAME)
+        self._encoder, self._getstate, self._setstate = _codecs._incremental_encoder(_NAME, True)
 
     def encode(self, input, final=False):
         return self._encoder(input, self.errors, final)
 
     def reset(self):
-        self._encoder = _codecs._incremental_encoder(_NAME)
+        self._encoder, self._getstate, self._setstate = _codecs._incremental_encoder(_NAME, True)
+
+    def getstate(self):
+        return self._getstate()
+
+    def setstate(self, state):
+        self._setstate(state)
 
 class IncrementalDecoder(codecs.BufferedIncrementalDecoder):
     def __init__(self, errors='strict'):
         codecs.BufferedIncrementalDecoder.__init__(self, errors)
-        self._decoder = _codecs._incremental_decoder(_NAME)
+        self._decoder, self._getstate, self._setstate = _codecs._incremental_decoder(_NAME, True)
 
     def _buffer_decode(self, input, errors, final):
         return self._decoder(input, errors, final)
 
     def reset(self):
         codecs.BufferedIncrementalDecoder.reset(self)
-        self._decoder = _codecs._incremental_decoder(_NAME)
+        self._decoder, self._getstate, self._setstate = _codecs._incremental_decoder(_NAME, True)
+
+    def getstate(self):
+        return (self.buffer, self._getstate())
+
+    def setstate(self, state):
+        self._setstate(state[1])
+        self.buffer = state[0]
 
 # As _multibytecodec's MultibyteStreamReader: each read decodes what the stream gives, keeping the codec's state and
 # an incomplete sequence for the next, and reads a byte more while that gives no text.

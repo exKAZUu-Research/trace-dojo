@@ -926,6 +926,9 @@ class BufferedWriter(_BufferedIOMixin):
         if isinstance(b, str):
             raise TypeError("can't write str to binary stream")
         b = memoryview(b)
+        if not b.c_contiguous:
+            raise BufferError('memoryview: underlying buffer is not C-contiguous')
+        b = b.cast('B')
         with self._write_lock:
             if self.closed:
                 raise ValueError("write to closed file")
@@ -1683,14 +1686,14 @@ class TextIOWrapper(_TextIOBase):
         # into the decoder with need_eof as the EOF flag, then skip
         # chars_to_skip characters of the decoded result.  For most simple
         # decoders, tell() will often just give a byte offset in the file.
-        return (position | (dec_flags<<64) | (bytes_to_feed<<128) |
-               (chars_to_skip<<192) | bool(need_eof)<<256)
+        return (position | (dec_flags<<64) | (bytes_to_feed<<96) |
+               (chars_to_skip<<128) | bool(need_eof)<<160)
 
     def _unpack_cookie(self, bigint):
         rest, position = divmod(bigint, 1<<64)
-        rest, dec_flags = divmod(rest, 1<<64)
-        rest, bytes_to_feed = divmod(rest, 1<<64)
-        need_eof, chars_to_skip = divmod(rest, 1<<64)
+        rest, dec_flags = divmod(rest, 1<<32)
+        rest, bytes_to_feed = divmod(rest, 1<<32)
+        need_eof, chars_to_skip = divmod(rest, 1<<32)
         return position, dec_flags, bytes_to_feed, bool(need_eof), chars_to_skip
 
     def tell(self):

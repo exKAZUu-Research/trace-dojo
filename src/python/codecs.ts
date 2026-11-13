@@ -31,8 +31,13 @@ export interface TextCodec {
    */
   incrementalDecoder?: () => IncrementalDecoder;
   /** An encoder that keeps the codec's state, and characters that wait for the next, until `final`. */
-  incrementalEncoder?: () => (points: readonly number[], errors: ErrorHandling, final: boolean) => Uint8Array;
+  incrementalEncoder?: () => IncrementalEncoder;
 }
+
+export type IncrementalEncoder = ((points: readonly number[], errors: ErrorHandling, final: boolean) => Uint8Array) & {
+  getState: () => bigint;
+  setState: (state: bigint) => void;
+};
 
 export type IncrementalDecoder = ((
   data: Uint8Array,

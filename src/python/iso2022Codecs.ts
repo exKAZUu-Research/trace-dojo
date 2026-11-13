@@ -418,7 +418,16 @@ for (const [name, config] of Object.entries(CONFIGS)) {
     },
     encoder: () => {
       const state: EncoderState = { g0: ASCII, g1: ASCII, shifted: false };
-      return { step: encoderOf(config, state), reset: (out) => resetEncoder(state, out) };
+      return {
+        step: encoderOf(config, state),
+        reset: (out) => resetEncoder(state, out),
+        getState: () => BigInt(state.g0 + state.g1 * 256) + (BigInt(Number(state.shifted)) << 32n),
+        setState: (value) => {
+          state.g0 = Number(value & 255n);
+          state.g1 = Number((value >> 8n) & 255n);
+          state.shifted = (value & (1n << 32n)) !== 0n;
+        },
+      };
     },
     waitsAfter: pairCapable ? (point) => jisX0213().pairStarts.has(point) : undefined,
   });
