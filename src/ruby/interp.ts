@@ -420,8 +420,14 @@ function inspectForFrozen(self: RBasic): string {
 }
 
 function globalGet(name: string): Value {
-  if (UNSUPPORTED_GLOBALS[name]) throw new UnsupportedFeatureError(UNSUPPORTED_GLOBALS[name]);
+  const unsupported = unsupportedGlobal(name);
+  if (unsupported) throw new UnsupportedFeatureError(unsupported);
   return rt().globals.get(name) ?? NIL;
+}
+
+function unsupportedGlobal(name: string): string | undefined {
+  if (/^\$(?:[&`'+~]|[1-9]\d*)$/.test(name)) return `正規表現のマッチの結果（${name}）`;
+  return UNSUPPORTED_GLOBALS[name];
 }
 
 const UNSUPPORTED_GLOBALS: Record<string, string> = {
@@ -442,7 +448,8 @@ const UNSUPPORTED_GLOBALS: Record<string, string> = {
 };
 
 function globalSet(name: string, value: Value): void {
-  if (UNSUPPORTED_GLOBALS[name]) throw new UnsupportedFeatureError(UNSUPPORTED_GLOBALS[name]);
+  const unsupported = unsupportedGlobal(name);
+  if (unsupported) throw new UnsupportedFeatureError(unsupported);
   if ((name === '$stdout' || name === '$stderr') && !respondsTo(value, 'write')) {
     throw typeError(`${name} must have write method, ${realClassOf(value).name} given`);
   }

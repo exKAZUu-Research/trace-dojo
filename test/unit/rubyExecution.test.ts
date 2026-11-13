@@ -357,6 +357,10 @@ test.each([
   ['a thread', 'Thread.new { }', 'スレッド（Thread）は、この採点環境では使えません。'],
   ['eval', 'eval("1")', '文字列の評価（eval）は、この採点環境では使えません。'],
   ['send', '1.send(:+, 2)', 'send（名前によるメソッドの呼び出し）は、この採点環境では使えません。'],
+  ['Rational conversion', 'Rational(1, 2)', '有理数（Rational）は、この採点環境では使えません。'],
+  ['Complex conversion', 'Kernel.Complex(1, 2)', '複素数（Complex）は、この採点環境では使えません。'],
+  ['regexp match global', 'p $&', '正規表現のマッチの結果（$&）は、この採点環境では使えません。'],
+  ['numbered regexp match global', 'p $2', '正規表現のマッチの結果（$2）は、この採点環境では使えません。'],
 ])(
   '%s stops the program with the unsupported-feature message, which rescue cannot catch',
   (_name, program, message) => {
@@ -367,6 +371,25 @@ test.each([
 
 test('a class Ruby defines as a module cannot be defined as a class', () => {
   expect(run('class Signal\nend')).toMatchObject({ uncaughtException: 'Signal is not a class (TypeError)' });
+});
+
+test('Array extrema report comparison operands in Ruby order', () => {
+  expect(run('begin; [1, nil].max; rescue => e; puts e.message; end')).toMatchObject({
+    stdout: 'comparison of Integer with nil failed\n',
+  });
+  expect(run('begin; [nil, 1].min; rescue => e; puts e.message; end')).toMatchObject({
+    stdout: 'comparison of NilClass with 1 failed\n',
+  });
+});
+
+test('Comparable equality stops recursive comparisons for the same pair', () => {
+  expect(
+    run(
+      'class P; include Comparable; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); return 0 if self == o; n <=> o.n; end; end; p P.new(1) == P.new(1)'
+    )
+  ).toMatchObject({
+    stdout: 'false\n',
+  });
 });
 
 test('an endless loop exceeds the operation limit, and endless recursion raises SystemStackError', () => {

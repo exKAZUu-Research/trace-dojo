@@ -151,6 +151,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly heldArrays: Value[][] = [];
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];
+  readonly comparablePairs = new Map<Value, Set<Value>>();
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */

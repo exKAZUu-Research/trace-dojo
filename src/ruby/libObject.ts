@@ -408,6 +408,16 @@ def(
   },
   { ...PRIVATE, keywords: true }
 );
+for (const [name, feature] of [
+  ['Rational', '有理数（Rational）'],
+  ['Complex', '複素数（Complex）'],
+] as const) {
+  const reject = (): never => {
+    throw new UnsupportedFeatureError(feature);
+  };
+  def('Kernel', name, [0, -1], reject, PRIVATE);
+  sdef('Kernel', name, [0, -1], reject);
+}
 
 def(
   'Kernel',
@@ -850,15 +860,35 @@ def('SystemExit', 'success?', 0, (self: RObject) => (self.ivars?.get('@__status'
 
 // Comparable ----------------------------------------------------------------------------------------------------------
 
+class ComparableCycle {
+  constructor(
+    readonly receiver: Value,
+    readonly other: Value
+  ) {}
+}
+
 function* compareOrFail(self: Value, other: Value): Gen<number> {
   return yield* compareValues(self, other);
 }
 
 def('Comparable', '==', 1, function* (self, [other]) {
   if (self === other) return true;
-  const result = yield* callMethod(self, '<=>', [other]);
-  if (result === NIL) return false;
-  return result === 0n || result === 0;
+  const pairs = rt().comparablePairs;
+  const active = pairs.get(self) ?? new Set<Value>();
+  if (active.has(other)) throw new ComparableCycle(self, other);
+  active.add(other);
+  pairs.set(self, active);
+  try {
+    const result = yield* callMethod(self, '<=>', [other]);
+    if (result === NIL) return false;
+    return result === 0n || result === 0;
+  } catch (error) {
+    if (error instanceof ComparableCycle && error.receiver === self && error.other === other) return false;
+    throw error;
+  } finally {
+    active.delete(other);
+    if (active.size === 0) pairs.delete(self);
+  }
 });
 def('Comparable', '>', 1, function* (self, [other]) {
   return (yield* compareOrFail(self, other)) > 0;

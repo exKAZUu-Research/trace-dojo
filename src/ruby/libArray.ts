@@ -782,7 +782,7 @@ def('Array', 'max', [0, 1], function* (self: RArray, args, block) {
   let result: Value | undefined;
   for (const item of self.items) {
     if (result === undefined) result = item;
-    else if ((block ? yield* blockOrder(block, item, result) : yield* compareValues(item, result)) > 0) result = item;
+    else if ((block ? yield* blockOrder(block, result, item) : yield* compareValues(result, item)) < 0) result = item;
   }
   return result ?? NIL;
 });
@@ -791,7 +791,7 @@ def('Array', 'min', [0, 1], function* (self: RArray, args, block) {
   let result: Value | undefined;
   for (const item of self.items) {
     if (result === undefined) result = item;
-    else if ((block ? yield* blockOrder(block, item, result) : yield* compareValues(item, result)) < 0) result = item;
+    else if ((block ? yield* blockOrder(block, result, item) : yield* compareValues(result, item)) > 0) result = item;
   }
   return result ?? NIL;
 });
