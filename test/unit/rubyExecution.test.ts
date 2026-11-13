@@ -256,6 +256,11 @@ test.each([
     '0.0\n[0.0, 1.0]\n0.0\nArgumentError\n',
   ],
   [
+    'ArithmeticSequence first promotes Float values and checks infinite direction',
+    'p 0.0.step(-1.0,Float::INFINITY).first(2),Float::NAN.step(1.0,1.0).first(2),1.step(Float::NAN,2).first(3),1.step(5,Float::INFINITY).first(2)',
+    '[]\n[NaN, NaN]\n[1.0, 3.0, 5.0]\n[1.0]\n',
+  ],
+  [
     'Random subclass initializer receives its own arguments',
     'class R<Random;attr_reader :n;def initialize(x,y);super(x);@n=y;end;end;p R.new(1,7).n',
     '7\n',
@@ -276,6 +281,12 @@ test.each([
     '[nil]\n',
   ],
   [
+    'Hash to_proc dispatches default overrides',
+    'class H<Hash;def default(k);puts :default;7;end;end;h=H.new;p [:x].map(&h)',
+    'default\n[7]\n',
+  ],
+  ['Hash except discards defaults', 'h=Hash.new(7);h[:a]=1;p h.except(:a)[:x]', 'nil\n'],
+  [
     'rehash during iteration preserves Hash entries',
     'h={x:1};begin;h.each{|k,v|h.rehash};rescue=>e;p e.message,h;end',
     '"rehash during iteration"\n{x: 1}\n',
@@ -284,6 +295,11 @@ test.each([
     'rehash callback failure preserves Hash entries',
     'class K;def hash;raise "oops" if $fail;0;end;end;k=K.new;h={k=>1};$fail=true;begin;h.rehash;rescue=>e;p e.message,h.size;end',
     '"oops"\n1\n',
+  ],
+  [
+    'rehash guards recursive key callbacks',
+    'class K;attr_accessor :h;def hash;@h.rehash if @h;0;end;end;k=K.new;h={k=>1};k.h=h;begin;h.rehash;rescue=>e;p e.class,e.message,h.size;end',
+    'RuntimeError\n"rehash during iteration"\n1\n',
   ],
   [
     'Array to_h errors use the runtime class',
@@ -332,15 +348,31 @@ test.each([
     '15\n15\n1.4000000000000001\n',
   ],
   [
+    'exclusive ArithmeticSequence last subtracts from the computed endpoint',
+    'e=(0.0...0.30000000000000004).step(0.1);p e.last,e.last(2)',
+    '0.20000000000000004\n[0.10000000000000003, 0.20000000000000004]\n',
+  ],
+  [
     'Unicode and invalid-byte String upto share successor rules',
     String.raw`p "aé".upto("aê").to_a,"a日".upto("a旦").to_a,"ab".upto("a\xFF").to_a.size,"a\xFF".upto("b").to_a.map(&:bytes)`,
     '["aé", "aê"]\n["a日", "a旦"]\n675\n[[97, 255]]\n',
   ],
   ['String upto compares initial values regardless of length', 'p "b".upto("ab").to_a,"z".upto("aa").to_a', '[]\n[]\n'],
+  ['empty String upto terminates after yielding once', 'p "".upto("a").to_a,"".upto("a",true).to_a', '[""]\n[""]\n'],
+  [
+    'single-byte String upto crosses character classes',
+    'p "Z".upto("a").to_a,"B".upto("c").to_a.size',
+    '["Z", "[", "\\\\", "]", "^", "_", "`", "a"]\n34\n',
+  ],
   [
     'String successor carries through letters but skips symbols',
     'p "😀9".succ,"a😀".succ,"€9".succ,"日9".succ',
     '"😀10"\n"b😀"\n"€10"\n"旦0"\n',
+  ],
+  [
+    'String successor wraps Unicode digits and letters',
+    'p "a９".succ,"９".succ,"٩".succ,"aｚ".succ,"a😀9".succ',
+    '"b０"\n"１０"\n"١٠"\n"bａ"\n"a😀10"\n',
   ],
   [
     'empty String translations skip invalid patterns',
@@ -414,6 +446,7 @@ test.each([
     '2.5\n2.5\n1\n1.0\n',
   ],
   ['large Integer fdiv divides before Float rounding', 'p (10**400).fdiv(10**399)', '10.0\n'],
+  ['Integer fdiv preserves signed zero', 'p 0.fdiv(-3),0.fdiv(-(10**400))', '-0.0\n-0.0\n'],
   [
     'Integer bit slices accept lengths and Ranges',
     'p 15[1,2],15[1..2],5[1...3],(-1)[-1,3],5[0,-1],5[1..]',

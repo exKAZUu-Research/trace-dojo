@@ -1165,6 +1165,13 @@ def('String', 'upto', [1, 2], function* (self: RString, args, block) {
     }
     return self;
   }
+  const beginBytes = stringBytes(self);
+  const endBytes = stringBytes(end);
+  if (beginBytes.length === 1 && endBytes.length === 1 && beginBytes[0] < 128 && endBytes[0] < 128) {
+    for (let byte = beginBytes[0]; exclusive ? byte < endBytes[0] : byte <= endBytes[0]; byte++)
+      yield* callBlock(block, [stringFromBytes(Uint8Array.of(byte))], false);
+    return self;
+  }
   let current = stringFromBytes(stringBytes(self), self.binary);
   const limit = stringBytes(end);
   if (compareBytes(stringBytes(current), limit) > 0) return self;
@@ -1175,7 +1182,7 @@ def('String', 'upto', [1, 2], function* (self: RString, args, block) {
     yield* callBlock(block, [current], false);
     if (compareBytes(bytes, limit) === 0) break;
     const next = successorBytes(bytes);
-    if (next.length > limit.length) break;
+    if (next.length > limit.length || next.length === 0) break;
     current = stringFromBytes(next, self.binary);
     rt().spend();
   }

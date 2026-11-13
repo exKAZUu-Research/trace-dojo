@@ -31,6 +31,11 @@ test('a Hash captured by to_proc remains reachable in Turtle traces', () => {
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('curried Proc captures remain reachable in Turtle traces', () => {
+  const program = 'f=->(t,x){t.forward};c=f.curry.call(Turtle.new);f=nil;x=1;c.call(2)';
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([{ y: 1 }]);
+});
+
 test('byte-bearing class literals record the same steps as text literals', () => {
   const ordinary = rubyTrace('class C\n X="a"\nend').map(({ line }) => line);
   const escaped = rubyTrace(String.raw`class C

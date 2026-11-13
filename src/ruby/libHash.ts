@@ -296,14 +296,7 @@ def('Hash', 'flatten', [0, 1], function* (self: RHash, args) {
   return yield* callMethod(pairs, 'flatten', [depth]);
 });
 def('Hash', 'to_proc', 0, (self: RHash) => {
-  const proc = nativeProc(
-    1,
-    function* ([key]) {
-      const entry = yield* hashGet(self, key);
-      return entry ? entry.value : yield* hashDefault(self, key);
-    },
-    true
-  );
+  const proc = nativeProc(1, ([key]) => hashFetch(self, key), true);
   proc.captured = [self];
   return proc;
 });
@@ -389,6 +382,8 @@ def('Hash', 'slice', [0, -1], function* (self: RHash, keys) {
 });
 def('Hash', 'except', [0, -1], function* (self: RHash, keys) {
   const hash = yield* copy(self);
+  hash.defaultValue = NIL;
+  hash.defaultProc = undefined;
   for (const key of keys) yield* hashDelete(hash, key);
   return hash;
 });

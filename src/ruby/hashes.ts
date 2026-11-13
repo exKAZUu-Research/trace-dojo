@@ -200,9 +200,11 @@ export function rehash(hash: RHash): void {
   const replacement = new RHash(hash.cls);
   const held = rt().held.length;
   rt().held.push(replacement);
+  hash.iterating++;
   try {
     for (const entry of hash.map.values()) runToEnd(hashSet(replacement, entry.key, entry.value));
   } finally {
+    hash.iterating--;
     rt().held.length = held;
   }
   hash.map = replacement.map;

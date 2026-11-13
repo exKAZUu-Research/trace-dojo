@@ -47,7 +47,7 @@ export function ldexpDouble(value: number, exponent: number): number {
 
 export function bigintRatio(numerator: bigint, denominator: bigint): number {
   if (denominator === 0n) return Number(numerator) / 0;
-  if (numerator === 0n) return 0;
+  if (numerator === 0n) return denominator < 0n ? -0 : 0;
   const negative = numerator < 0n !== denominator < 0n;
   const left = numerator < 0n ? -numerator : numerator;
   const right = denominator < 0n ? -denominator : denominator;

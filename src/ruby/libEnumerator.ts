@@ -290,24 +290,28 @@ def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
 def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, end, step } = arithmeticSpec(source.recv, source.args, source.keywords);
+  const floatSequence = typeof start === 'number' || typeof end === 'number' || typeof step === 'number';
+  const first = floatSequence ? Number(start) : start;
+  const order = end === NIL ? undefined : numericCompare(start as bigint | number, end as bigint | number);
+  const empty = order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0));
   if (args.length === 0) {
     if (typeof step === 'number' && Number.isNaN(step)) throw comparisonFailed(step, 0n);
-    const order = end === NIL ? undefined : numericCompare(start as bigint | number, end as bigint | number);
-    return order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0)) ? NIL : start;
+    return empty ? NIL : first;
   }
   const count = yield* toIndex(args[0]);
   if (count < 0) throw argumentError('attempt to take negative size');
+  if (empty) return arr([]);
   if (typeof step === 'number' && Number.isNaN(step)) {
     rt().chargeSlots(count);
     rt().spend(count);
     return arr(Array.from({ length: count }, () => Number.NaN));
   }
-  if (typeof step === 'number' && !Number.isFinite(step)) return arr(count === 0 ? [] : [start]);
-  if (typeof end === 'number' && Number.isNaN(end)) {
+  if (typeof step === 'number' && !Number.isFinite(step)) return arr(count === 0 ? [] : [first]);
+  if ((typeof end === 'number' && Number.isNaN(end)) || (typeof start === 'number' && Number.isNaN(start))) {
     const values: Value[] = [];
     for (let index = 0; index < count; index++) {
       rt().spend();
-      values.push(arithmeticValue(start as bigint | number, step as bigint | number, BigInt(index)));
+      values.push(Number(first) + Number(step) * index);
     }
     return arr(values);
   }
@@ -343,13 +347,25 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
       )
     )
       return NIL;
-    return arithmeticValue(start as bigint | number, step as bigint | number, index);
+    return arithmeticLastValue(
+      start as bigint | number,
+      end as bigint | number,
+      step as bigint | number,
+      index,
+      exclusive
+    );
   }
   const requested = yield* toInt(args[0]);
   if (requested < 0n) throw argumentError('negative array size');
   const values: Value[] = [];
   const count = requested < index + 1n ? requested : index + 1n;
-  let value = arithmeticValue(start as bigint | number, step as bigint | number, index);
+  let value = arithmeticLastValue(
+    start as bigint | number,
+    end as bigint | number,
+    step as bigint | number,
+    index,
+    exclusive
+  );
   value =
     typeof value === 'bigint' && typeof step === 'bigint'
       ? value - step * count
@@ -397,6 +413,19 @@ function arithmeticValue(start: bigint | number, step: bigint | number, index: b
   return typeof start === 'bigint' && typeof step === 'bigint'
     ? start + step * index
     : Number(start) + Number(step) * Number(index);
+}
+
+function arithmeticLastValue(
+  start: bigint | number,
+  end: bigint | number,
+  step: bigint | number,
+  index: bigint,
+  exclusive: boolean
+): Value {
+  if (typeof start === 'bigint' && typeof end === 'bigint' && typeof step === 'bigint')
+    return arithmeticValue(start, step, index);
+  const value = Number(start) + Number(step) * Math.floor((Number(end) - Number(start)) / Number(step));
+  return exclusive && value === Number(end) ? value - Number(step) : value;
 }
 
 function canonicalNumber(value: Value): string {
@@ -464,7 +493,7 @@ sdef('Enumerator', 'new', [0, -1], () => {
 
 /** A curried lambda: it collects arguments until it has `arity`, then calls `proc` with them. */
 export function curry(proc: RProc, arity: number, collected: Value[]): Value {
-  return nativeProc(
+  const curried = nativeProc(
     -1,
     (args) => {
       const all = [...collected, ...args];
@@ -473,4 +502,6 @@ export function curry(proc: RProc, arity: number, collected: Value[]): Value {
     },
     true
   );
+  curried.captured = [proc, ...collected];
+  return curried;
 }

@@ -48,14 +48,14 @@ function chompInvalidBytes(bytes: Uint8Array, separator: RString | RNil | undefi
 
 export function successorBytes(source: Uint8Array): Uint8Array {
   if (source.length === 0) return source;
-  const parts = stringCharacters(stringFromBytes(source)).map((character) => ({
-    bytes: stringBytes(character),
-    point: character.rawBytes ? undefined : character.s.codePointAt(0),
-  }));
+  const parts: { bytes: Uint8Array; point: number | undefined }[] = stringCharacters(stringFromBytes(source)).map(
+    (character) => ({
+      bytes: stringBytes(character),
+      point: character.rawBytes ? undefined : character.s.codePointAt(0),
+    })
+  );
   const candidate = (part: (typeof parts)[number]): boolean =>
-    part.point !== undefined &&
-    (isAsciiAlnum(part.bytes[0]) ||
-      (part.bytes.length > 1 && /[\p{L}\p{Nd}\p{Nl}]/u.test(String.fromCodePoint(part.point))));
+    part.point !== undefined && characterClass(part.point) !== undefined;
   let index = parts.findLastIndex(candidate);
   if (index < 0) {
     const last = parts.findLast((part) => part.point !== undefined);
@@ -63,23 +63,39 @@ export function successorBytes(source: Uint8Array): Uint8Array {
     last.bytes = stringBytes(str(String.fromCodePoint((last.point as number) + 1)));
     return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
   }
-  let carry = 1;
+  let carry: Uint8Array = Uint8Array.of(1);
   for (;;) {
     const part = parts[index];
+    const kind = characterClass(part.point as number);
     if (part.bytes.length > 1) {
-      part.bytes = stringBytes(str(String.fromCodePoint((part.point as number) + 1)));
-      break;
+      const point = part.point as number;
+      if (characterClass(point + 1) === kind) {
+        part.bytes = stringBytes(str(String.fromCodePoint(point + 1)));
+        break;
+      }
+      let start = point;
+      while (start > 0 && characterClass(start - 1) === kind) {
+        rt().spend();
+        start--;
+      }
+      part.bytes = stringBytes(str(String.fromCodePoint(start)));
+      carry = stringBytes(str(String.fromCodePoint(kind === 'digit' ? start + 1 : start)));
+    } else {
+      const byte = part.bytes[0];
+      if (byte !== 57 && byte !== 90 && byte !== 122) {
+        part.bytes = Uint8Array.of(byte + 1);
+        break;
+      }
+      carry = Uint8Array.of(byte === 57 ? 49 : byte === 90 ? 65 : 97);
+      part.bytes = Uint8Array.of(byte === 57 ? 48 : byte === 90 ? 65 : 97);
     }
-    const byte = part.bytes[0];
-    if (byte !== 57 && byte !== 90 && byte !== 122) {
-      part.bytes = Uint8Array.of(byte + 1);
-      break;
-    }
-    carry = byte === 57 ? 49 : byte === 90 ? 65 : 97;
-    part.bytes = Uint8Array.of(byte === 57 ? 48 : byte === 90 ? 65 : 97);
     const previous = parts.slice(0, index).findLastIndex(candidate);
-    if (previous === -1) {
-      parts.splice(index, 0, { bytes: Uint8Array.of(carry), point: carry });
+    const separated = previous !== -1 && previous < index - 1;
+    if (
+      previous === -1 ||
+      (separated && part.bytes.length === 1 && characterClass(parts[previous].point as number) !== kind)
+    ) {
+      parts.splice(index, 0, { bytes: carry, point: undefined });
       break;
     }
     index = previous;
@@ -87,6 +103,10 @@ export function successorBytes(source: Uint8Array): Uint8Array {
   return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
 }
 
-function isAsciiAlnum(byte: number): boolean {
-  return (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
+function characterClass(point: number): 'digit' | 'letter' | undefined {
+  if (point > 0x10_ff_ff) return undefined;
+  const character = String.fromCodePoint(point);
+  if (/\p{Nd}/u.test(character)) return 'digit';
+  if (/[\p{L}\p{Nl}]/u.test(character)) return 'letter';
+  return undefined;
 }
