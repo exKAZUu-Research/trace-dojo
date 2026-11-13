@@ -1,3 +1,5 @@
+import { rt } from './runtime';
+
 const bits = new DataView(new ArrayBuffer(8));
 const FRACTION_MASK = (1n << 52n) - 1n;
 const SIGN_BIT = 1n << 63n;
@@ -43,6 +45,27 @@ export function ldexpDouble(value: number, exponent: number): number {
   return roundedDouble(dyad.mantissa, dyad.exponent + exponent);
 }
 
+export function bigintRatio(numerator: bigint, denominator: bigint): number {
+  if (denominator === 0n) return Number(numerator) / 0;
+  if (numerator === 0n) return 0;
+  const negative = numerator < 0n !== denominator < 0n;
+  const left = numerator < 0n ? -numerator : numerator;
+  const right = denominator < 0n ? -denominator : denominator;
+  let exponent = left.toString(2).length - right.toString(2).length;
+  if (exponent >= 0 ? left < right << BigInt(exponent) : left << BigInt(-exponent) < right) exponent--;
+  if (exponent > 1023) return negative ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+  if (exponent < -1075) return negative ? -0 : 0;
+  const unitExponent = Math.max(exponent - 52, -1074);
+  const shift = -unitExponent;
+  const scaledNumerator = shift >= 0 ? left << BigInt(shift) : left;
+  const scaledDenominator = shift >= 0 ? right : right << BigInt(-shift);
+  let significand = scaledNumerator / scaledDenominator;
+  const remainder = scaledNumerator % scaledDenominator;
+  const twice = remainder * 2n;
+  if (twice > scaledDenominator || (twice === scaledDenominator && significand % 2n !== 0n)) significand++;
+  return roundedDouble(negative ? -significand : significand, unitExponent);
+}
+
 export function floatStepCount(begin: number, end: number, step: number, exclusive = false): number {
   if (Number.isNaN(begin) || Number.isNaN(end) || Number.isNaN(step)) return Number.NaN;
   if (step === 0) return Number.POSITIVE_INFINITY;
@@ -55,10 +78,17 @@ export function floatStepCount(begin: number, end: number, step: number, exclusi
   if (exclusive) {
     if (count <= 0) return 0;
     count = Math.floor(count + error) + 1;
+    if (!Number.isSafeInteger(count)) return count;
     const inside = (index: number): boolean =>
       step > 0 ? fusedMultiplyAdd(index, step, begin) < end : fusedMultiplyAdd(index, step, begin) > end;
-    while (count > 0 && !inside(count - 1)) count--;
-    while (inside(count)) count++;
+    while (count > 0 && !inside(count - 1)) {
+      rt().spend();
+      count--;
+    }
+    while (Number.isSafeInteger(count) && inside(count)) {
+      rt().spend();
+      count++;
+    }
     return count;
   } else {
     if (count < 0) return 0;

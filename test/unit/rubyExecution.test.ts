@@ -42,6 +42,12 @@ test('an exception whose message fails still returns an execution result', () =>
   });
 });
 
+test('Random#bytes uses the dedicated unsupported error', () => {
+  expect(run('Random.new(1).bytes(4)')).toMatchObject({
+    uncaughtException: 'Random#bytes は、この採点環境では使えません。',
+  });
+});
+
 test('pretty-printing a flat large Array stays within the execution budget', () => {
   vi.restoreAllMocks();
   const result = run('pp [1] * 15000');
@@ -395,6 +401,23 @@ test.each([
     'print uses output field and record separators',
     String.raw`$,=":";$\="!";print 1,2;STDOUT.print 3,4;print`,
     '1:2!3:4!!',
+  ],
+  ['print without arguments uses the last input line', '$_="hi";print;STDOUT.print', 'hihi'],
+  [
+    'exclusive Float step size stays bounded for tiny steps',
+    'p (0.0...1.0).step(0.00000000000000000001).size',
+    '100000000000000000000\n',
+  ],
+  [
+    'fdiv and remainder honor private numeric coercion',
+    'class A;private;def coerce(x);[x,2];end;end;a=A.new;p 5.fdiv(a),5.0.fdiv(a),5.remainder(a),5.0.remainder(a)',
+    '2.5\n2.5\n1\n1.0\n',
+  ],
+  ['large Integer fdiv divides before Float rounding', 'p (10**400).fdiv(10**399)', '10.0\n'],
+  [
+    'Integer bit slices accept lengths and Ranges',
+    'p 15[1,2],15[1..2],5[1...3],(-1)[-1,3],5[0,-1],5[1..]',
+    '3\n3\n2\n6\n5\n2\n',
   ],
   ['record separator assignment copies a mutable String', 's="x";$/=s;s<<"y";p $/', '"x"\n'],
   [

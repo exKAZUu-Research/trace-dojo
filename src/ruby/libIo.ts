@@ -51,7 +51,8 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
 
 function* writePrint(target: Value, args: Value[]): Gen<void> {
   const field = rt().globals.get('$,') ?? NIL;
-  for (const [index, arg] of args.entries()) {
+  const values = args.length > 0 ? args : [rt().globals.get('$_') ?? NIL];
+  for (const [index, arg] of values.entries()) {
     if (index > 0 && field !== NIL) yield* write(target, yield* toSValue(field));
     yield* write(target, yield* toSValue(arg));
   }

@@ -14,12 +14,12 @@ import {
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
-import { floatFraction, floatStepCount, frexpDouble, fusedMultiplyAdd, ldexpDouble } from './floatMath';
+import { bigintRatio, floatFraction, floatStepCount, frexpDouble, fusedMultiplyAdd, ldexpDouble } from './floatMath';
 import { exactFloatPower } from './floatPower';
 import { gammaApprox, logGammaApprox } from './gammaMath';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { NIL, RArray, type RHash, type RProc, RString, RSymbol, type Value } from './objects';
+import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str, truthy } from './values';
 
@@ -37,8 +37,8 @@ function coerceError(value: Value, into: string): unknown {
 
 /** Applies an operator to a number and a value that is not one, through the value's `coerce`. */
 function* coerceBinary(self: Num, other: Value, op: string, target?: string): Gen {
-  if (respondsTo(other, 'coerce')) {
-    const pair = yield* callMethod(other, 'coerce', [self]);
+  if (respondsTo(other, 'coerce', true)) {
+    const pair = yield* callMethod(other, 'coerce', [self], undefined, undefined, { fcall: true });
     if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
     return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   }
@@ -46,8 +46,8 @@ function* coerceBinary(self: Num, other: Value, op: string, target?: string): Ge
 }
 
 function* coerceCompare(self: Num, other: Value, op: string): Gen {
-  if (respondsTo(other, 'coerce')) {
-    const pair = yield* callMethod(other, 'coerce', [self]);
+  if (respondsTo(other, 'coerce', true)) {
+    const pair = yield* callMethod(other, 'coerce', [self], undefined, undefined, { fcall: true });
     if (pair instanceof RArray && pair.items.length === 2) return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   }
   throw comparisonFailed(self, other);
@@ -243,9 +243,11 @@ for (const owner of ['Integer', 'Float']) {
     if (typeof self === 'bigint' && typeof other === 'bigint') return floorDiv(self, other);
     return floatToInt(floatDivmod(Number(self), Number(other))[0]);
   });
-  def(owner, 'fdiv', 1, (self: Num, [other]) => {
-    if (!isNum(other)) throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
-    return Number(self) / Number(other);
+  def(owner, 'fdiv', 1, function* (self: Num, [other]) {
+    if (!isNum(other)) return yield* coerceBinary(self, other, 'fdiv');
+    return typeof self === 'bigint' && typeof other === 'bigint'
+      ? bigintRatio(self, other)
+      : Number(self) / Number(other);
   });
   def(owner, 'quo', 1, (self: Num, [other]) => {
     if (!isNum(other)) return coerceBinary(self, other, 'quo', typeof self === 'bigint' ? 'Rational' : 'Float');
@@ -254,8 +256,8 @@ for (const owner of ['Integer', 'Float']) {
     }
     return Number(self) / Number(other);
   });
-  def(owner, 'remainder', 1, (self: Num, [other]) => {
-    if (!isNum(other)) throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
+  def(owner, 'remainder', 1, function* (self: Num, [other]) {
+    if (!isNum(other)) return yield* coerceBinary(self, other, 'remainder');
     if (typeof self === 'bigint' && typeof other === 'bigint') {
       if (other === 0n) throw zeroDivisionError();
       return self % other;
@@ -439,11 +441,30 @@ function shift(value: bigint, amount: bigint): bigint {
   return value >> -amount;
 }
 
-def('Integer', '[]', 1, function* (self: bigint, [index]) {
-  const bit = yield* toInt(index);
-  if (bit < 0n) return 0n;
-  return (self >> bit) & 1n;
+def('Integer', '[]', [1, 2], function* (self: bigint, args) {
+  if (args.length === 1 && args[0] instanceof RRange) {
+    const range = args[0];
+    if (range.begin === NIL) throw argumentError('The beginless range for Integer#[] results in infinity');
+    const start = yield* toInt(range.begin);
+    if (range.end === NIL) return shift(self, -start);
+    const end = yield* toInt(range.end);
+    const length = end - start + BigInt(!range.exclusive);
+    return length <= 0n && !(range.exclusive && length === 0n) ? shift(self, -start) : bitSlice(self, start, length);
+  }
+  const start = yield* toInt(args[0]);
+  if (args.length === 2) return bitSlice(self, start, yield* toInt(args[1]));
+  if (start < 0n) return 0n;
+  return (self >> start) & 1n;
 });
+
+function bitSlice(value: bigint, start: bigint, length: bigint): bigint {
+  const shifted = shift(value, -start);
+  if (length < 0n) return shifted;
+  if (length === 0n || shifted === 0n) return 0n;
+  if (length > 32_000_000n) throw rangeError('shift width too big');
+  chargeIntegerResult(Number(length), Number(length));
+  return shifted & ((1n << length) - 1n);
+}
 def('Integer', 'times', 0, function* (self: bigint, _args, block) {
   if (!block) return sizedEnumerator(self, 'times', [], () => (self > 0n ? self : 0n));
   for (let index = 0n; index < self; index++) yield* callBlock(block, [index], false);

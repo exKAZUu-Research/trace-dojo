@@ -3,7 +3,7 @@ import { def, sdef } from './define';
 import { argumentError, rangeError, rubyError } from './errors';
 import { callMethod, type Gen, invoke } from './interp';
 import { NIL, RObject, RRange, type Value } from './objects';
-import { rt } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
 import { classOf, realClassOf } from './values';
 
 /** Ruby's Mersenne Twister (MT19937), seeded and drawn from as `random.c` does. */
@@ -279,7 +279,7 @@ def('Random', ['rand', 'random_number'], [0, 1], (self: RObject, args) =>
 );
 def('Random', 'seed', 0, (self: RObject) => (self.data as MersenneTwister).seed);
 def('Random', 'bytes', 1, () => {
-  throw rubyError(rt().c.NotImplementedError, 'Random#bytes');
+  throw new UnsupportedFeatureError('Random#bytes');
 });
 
 export { toFloat };
