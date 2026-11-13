@@ -1453,3 +1453,19 @@ test.each([
     diagnostics: [expect.objectContaining({ row: 3 })],
   });
 });
+
+test.each([
+  's=sizeof(int)\nint a[2]={1,2};',
+  's=sizeof(int)\nint v={2};',
+  's=sizeof(int)\nPT w={2};',
+  's=sizeof(T)\nint m[2][2]={{1,2},{3,4}};',
+  's=(int)sizeof(int)\nstruct P q={1};',
+  's=sizeof(int*)\nenum{A,B}e;',
+  's=sizeof(struct P)\nint a[2]={1,2};',
+])('lexical type boundaries survive following brace initializers: %s', (body) => {
+  const source = `#include <stdio.h>\ntypedef int T;typedef struct P{int x;}PT;\nint main(void){int s=0;\n${body}\nreturn 0;\n}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 3 })],
+  });
+});

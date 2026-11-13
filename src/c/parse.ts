@@ -10,6 +10,7 @@ import { tokenize } from './lexer';
 import { lookupHeader, TURTLE_HEADER } from './library/headers';
 import { preprocess } from './preprocessor';
 import { cSyntaxDiagnostics, CSyntaxError } from './syntaxDiagnostics';
+import type { TypeScope } from './syntaxTokens';
 
 const parser = await loadParser('@willbooster/tree-sitter-c/tree-sitter-c.wasm');
 
@@ -59,21 +60,21 @@ function parseUnit(text: string, headers: HeaderDeclarations[], typedefNames: re
             return { items: new Converter([], parser).convertUnit(root, headers) };
           } catch (error) {
             if (!(error instanceof CompileError)) throw error;
-            const groups = resolveValueTypes(current, root, headers, budget);
+            const scopes = resolveValueTypes(current, root, headers, budget);
             if (!(error instanceof CSyntaxError)) throw error;
             throw new CompileError(
               cSyntaxDiagnostics(parser, current, root, error.diagnostics, {
                 headerTypes: typedefNames,
                 errorOffset: error.offset,
-                typeGroups: groups,
+                typeScopes: scopes,
               })
             );
           }
         },
         (root, errors) => {
           if (errors.length === 0) return errors;
-          const groups = resolveValueTypes(current, root, headers, budget);
-          return cSyntaxDiagnostics(parser, current, root, errors, { headerTypes: typedefNames, typeGroups: groups });
+          const scopes = resolveValueTypes(current, root, headers, budget);
+          return cSyntaxDiagnostics(parser, current, root, errors, { headerTypes: typedefNames, typeScopes: scopes });
         }
       );
     } catch (error) {
@@ -88,14 +89,14 @@ function resolveValueTypes(
   root: Node,
   headers: HeaderDeclarations[],
   budget: ExecutionBudget
-): ReadonlySet<number> {
-  const converter = new Converter([], parser, undefined, true);
+): TypeScope[] {
+  const converter = new Converter([], parser, undefined, budget);
   try {
     converter.convertUnit(root, headers);
   } catch (error) {
     if (!(error instanceof CompileError)) throw error;
   }
-  if (converter.valueTypeRanges.size === 0) return converter.typeGroups;
+  if (converter.valueTypeRanges.size === 0) return converter.typeScopes;
   budget.spend(text.length + converter.valueTypeRanges.size);
   const chunks: string[] = [];
   let at = 0;

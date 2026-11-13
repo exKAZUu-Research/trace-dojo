@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 704 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
+// code-gauge-allow-file fileNcss 720 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import type { ExecutionBudget } from '../interpreter/limits';
 import { parseSource } from '../interpreter/treeSitter';
 import {
   type BinaryOperator,
@@ -22,6 +23,7 @@ import {
   type TypeSpecifier,
 } from './ast';
 import { CSyntaxError } from './syntaxDiagnostics';
+import type { TypeScope } from './syntaxTokens';
 import { unsupported } from './unsupported';
 import { validateNames, validateSyntax } from './validateSyntax';
 
@@ -84,6 +86,17 @@ class NameScope {
 
   constructor(private readonly parent?: NameScope) {}
 
+  typeNames(budget: ExecutionBudget): ReadonlySet<string> {
+    const inherited = this.parent?.typeNames(budget);
+    budget.spend((inherited?.size ?? 0) + this.names.size);
+    const names = new Set(inherited);
+    for (const [name, kind] of this.names) {
+      if (kind === 'type') names.add(name);
+      else names.delete(name);
+    }
+    return names;
+  }
+
   kindOf(name: string): 'type' | 'value' | undefined {
     return this.names.get(name) ?? this.parent?.kindOf(name);
   }
@@ -107,7 +120,7 @@ export interface HeaderDeclarations {
 
 /** Converts tree-sitter's tree of a translation unit into the interpreter's syntax tree. */
 export class Converter {
-  readonly typeGroups = new Set<number>();
+  readonly typeScopes: TypeScope[] = [];
   readonly valueTypeRanges = new Map<number, number>();
   private readonly recoveredCasts = new WeakSet<Expression>();
   private scope: NameScope;
@@ -118,14 +131,14 @@ export class Converter {
     builtinTypedefs: readonly string[],
     private readonly parser: Parser,
     private readonly fromHeader?: string,
-    private readonly scopeOnly = false
+    private readonly recovery?: ExecutionBudget
   ) {
     this.scope = new NameScope();
     for (const name of builtinTypedefs) this.scope.declare(name, 'type');
   }
 
   convertUnit(root: Node, headers: readonly HeaderDeclarations[] = []): ExternalDeclaration[] {
-    if (!this.scopeOnly) validateSyntax(root);
+    if (!this.recovery) validateSyntax(root);
     const items: ExternalDeclaration[] = [];
     this.headers = headers;
     this.nextHeader = 0;
@@ -135,7 +148,7 @@ export class Converter {
       items.push(...this.externalDeclaration(child));
     }
     items.push(...this.headersBefore(Number.POSITIVE_INFINITY));
-    if (!this.scopeOnly) validateNames({ items });
+    if (!this.recovery) validateNames({ items });
     return items;
   }
 
@@ -159,6 +172,7 @@ export class Converter {
   }
 
   private externalDeclaration(node: Node): ExternalDeclaration[] {
+    if (this.recovery && node.isError) this.scanValueTypes(node);
     switch (node.type) {
       case 'function_definition': {
         return [this.functionDefinition(node)];
@@ -571,7 +585,7 @@ export class Converter {
   /** A block item, where a `case` label's statements become the statements after the label. */
   // code-gauge-allow functionCognitiveComplexity 17 -- Case-label flattening and declaration disambiguation share the current block scope; keep those alternatives together.
   private blockItem(node: Node): (Statement | Declaration)[] {
-    if (this.scopeOnly) this.scanValueTypes(node);
+    if (this.recovery) this.scanValueTypes(node);
     if (node.type === 'expression_statement') {
       const declaration = this.reparseDeclaration(node);
       if (declaration) return [declaration];
@@ -663,7 +677,7 @@ export class Converter {
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of statement.
   // code-gauge-allow functionNcss 45 -- One case per C statement shape; helpers handle the compound cases.
   private statement(node: Node): Statement {
-    if (this.scopeOnly && node.isError) this.scanValueTypes(node);
+    if (this.recovery && node.isError) this.scanValueTypes(node);
     const row = node.startPosition.row;
     this.checkUnsupported(node);
     switch (node.type) {
@@ -808,7 +822,7 @@ export class Converter {
 
   // code-gauge-allow functionNcss 58 -- One case per C expression kind; helpers already isolate the nontrivial forms.
   private expression(node: Node): Expression {
-    if (this.scopeOnly) this.scanValueTypes(node);
+    if (this.recovery) this.scanValueTypes(node);
     const row = node.startPosition.row;
     this.checkUnsupported(node);
     switch (node.type) {
@@ -940,18 +954,14 @@ export class Converter {
   }
 
   private scanValueTypes(node: Node): void {
+    if (!this.recovery) return;
+    this.typeScopes.push({ start: node.startIndex, end: node.endIndex, names: this.scope.typeNames(this.recovery) });
     if (['compound_statement', 'for_statement', 'function_definition'].includes(node.type)) return;
     const pending = [node];
     while (pending.length > 0) {
+      this.recovery.spend();
       const part = pending.pop()!;
       if (['compound_statement', 'for_statement', 'function_definition'].includes(part.type)) continue;
-      if (
-        part.type === 'parenthesized_expression' &&
-        part.namedChildCount === 1 &&
-        part.firstNamedChild?.type === 'identifier' &&
-        this.scope.isType(part.firstNamedChild.text)
-      )
-        this.typeGroups.add(part.startIndex);
       if (part.type === 'type_descriptor') {
         const type = part.childForFieldName('type');
         if (type?.type === 'type_identifier' && this.scope.kindOf(type.text) === 'value')

@@ -15,6 +15,8 @@ export interface PPToken {
   hasTrigraph?: boolean;
 }
 
+type TokenObserver = (token: PPToken, start: number, end: number) => void;
+
 /** A logical line: the tokens between two newlines that no backslash or comment hides. */
 export interface LogicalLine {
   tokens: PPToken[];
@@ -103,9 +105,10 @@ function isIdentifierPart(char: string): boolean {
  */
 export function tokenize(
   source: string,
-  budget = new ExecutionBudget()
+  budget = new ExecutionBudget(),
+  onToken?: TokenObserver
 ): { lines: LogicalLine[]; comments: SourceComment[]; rowCount: number } {
-  return new Lexer(source, budget).tokenize();
+  return new Lexer(source, budget, onToken).tokenize();
 }
 
 const TRIGRAPHS: Record<string, string> = {
@@ -135,7 +138,8 @@ class Lexer {
 
   constructor(
     source: string,
-    private readonly budget: ExecutionBudget
+    private readonly budget: ExecutionBudget,
+    private readonly onToken?: TokenObserver
   ) {
     budget.spend(source.length);
     const splice = /\?\?\/(?:\r?\n)/.exec(source);
@@ -153,7 +157,7 @@ class Lexer {
     this.source = translated;
   }
 
-  // code-gauge-allow functionNcss 35 -- Logical-line and comment handling share row and splice state; splitting the scanner loop would distribute that state.
+  // code-gauge-allow functionNcss 37 -- Logical-line and comment handling share row and splice state; splitting the scanner loop would distribute that state.
   tokenize(): { lines: LogicalLine[]; comments: SourceComment[]; rowCount: number } {
     const { source } = this;
     const length = source.length;
@@ -189,7 +193,9 @@ class Lexer {
         const { kind, text } = this.token(char);
         const original = this.original.slice(this.origins[start], this.origins[this.index]);
         const hasTrigraph = /\?\?[=()<>/'!-]/.test(original);
-        this.current.tokens.push({ kind, text, row: tokenRow, space: this.space, hasTrigraph });
+        const token = { kind, text, row: tokenRow, space: this.space, hasTrigraph };
+        this.current.tokens.push(token);
+        this.onToken?.(token, this.origins[start], this.origins[this.index]);
         this.space = false;
       }
     }
