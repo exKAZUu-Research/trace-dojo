@@ -177,7 +177,7 @@ def('Array', 'last', [0, 1], function* (self: RArray, args) {
   if (count < 0) throw argumentError('negative array size');
   return arr(count === 0 ? [] : self.items.slice(-count));
 });
-// code-gauge-allow functionCognitiveComplexity 20 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 20 -- values_at processes Integer and Range selectors, including out-of-bounds and beginless ranges.
 def('Array', 'values_at', [0, -1], function* (self: RArray, args) {
   const values: Value[] = [];
   for (const arg of args) {
@@ -459,8 +459,8 @@ def('Array', 'sort_by!', 0, function* (self: RArray, _args, block) {
   self.items = yield* sortBy(self.items, block);
   return self;
 });
-// code-gauge-allow functionCognitiveComplexity 28 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow functionNcss 32 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 28 -- fill combines value, start, length, Range, and block forms with shared growth validation.
+// code-gauge-allow functionNcss 32 -- fill combines value, start, length, Range, and block forms with shared growth validation.
 def('Array', 'fill', [0, 3], function* (self: RArray, args, block) {
   yield* modify(self);
   const values = block ? args : args.slice(1);
@@ -810,7 +810,7 @@ def('Array', 'cycle', [0, 1], function* (self: RArray, args, block) {
   }
   return NIL;
 });
-// code-gauge-allow functionCognitiveComplexity 16 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 16 -- bsearch handles Boolean search and numeric search modes with their distinct return rules.
 def('Array', 'bsearch', 0, function* (self: RArray, _args, block) {
   if (!block) return makeEnumerator(self, 'bsearch', []);
   let low = 0;

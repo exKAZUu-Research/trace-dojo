@@ -614,7 +614,7 @@ function* assignPreparedMulti(target: MultiTarget, prepared: PreparedAssignment[
   }
 }
 
-// code-gauge-allow functionNcss 39 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionNcss 39 -- Assignment handles each target kind and its receiver/index evaluation order.
 export function* assign(target: Target, value: Value, frame: Frame): Gen<void> {
   switch (target.k) {
     case 'lvar': {
@@ -828,7 +828,7 @@ export function storesAnswer(value: Value): boolean {
   return typeof value !== 'object' || value instanceof RString || value instanceof RSymbol;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionCognitiveComplexity 19 -- Case evaluates optional subjects, when predicates, guards, and the else body in Ruby order.
 function* evalCase(e: Extract<Expr, { k: 'case' }>, frame: Frame): Gen {
   const runtime = rt();
   const subject = e.subject ? yield* ev(e.subject, frame) : undefined;
@@ -901,8 +901,8 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
 
 const RETRY = Symbol('retry');
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of expression or Ruby rule.
-// code-gauge-allow functionNcss 33 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionCognitiveComplexity 24 -- Rescue selects classes, binds the exception, and restores handling state around the chosen body.
+// code-gauge-allow functionNcss 33 -- Rescue selects classes, binds the exception, and restores handling state around the chosen body.
 function* rescueClause(
   e: Extract<Expr, { k: 'begin' }>,
   error: RubyError,
@@ -999,7 +999,7 @@ function* moduleContainer(e: { scope?: Expr; top?: boolean }, frame: Frame): Gen
   return frame.cref[0];
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionCognitiveComplexity 20 -- Class definition resolves its namespace, superclass, reopened class, and body frame.
 function* defineClass(e: Extract<Expr, { k: 'class' }>, frame: Frame): Gen {
   const runtime = rt();
   const container = yield* moduleContainer(e, frame);
@@ -1082,7 +1082,7 @@ export interface CallOptions {
   used?: boolean;
 }
 
-// code-gauge-allow functionNcss 33 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionNcss 33 -- Calls retain receiver and argument roots while forwarding blocks, keywords, and break signals.
 function* evalCall(e: Call, frame: Frame): Gen {
   let recv: Value;
   if (e.recv) {
@@ -1184,8 +1184,8 @@ function methodMissing(recv: Value, name: string, options: CallOptions): never {
 }
 
 /** Calls a method that lookup found. */
-// code-gauge-allow functionNcss 34 -- One case per kind of expression or Ruby rule.
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionNcss 34 -- Invocation dispatches native, accessor, and user methods with their distinct arity and root rules.
+// code-gauge-allow functionCognitiveComplexity 22 -- Invocation dispatches native, accessor, and user methods with their distinct arity and root rules.
 export function* invoke(
   method: RMethod,
   recv: Value,
@@ -1235,7 +1235,7 @@ export function* invoke(
   }
 }
 
-// code-gauge-allow functionParameterCount 8 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionParameterCount 8 -- User calls need method metadata, receiver, arguments, keywords, block, call row, and result usage to build a frame.
 function* invokeUser(
   method: RMethod,
   def: MethodDef,
@@ -1288,7 +1288,7 @@ function hostStackOverflow(error: unknown, depth: number): unknown {
 export const STACK_OVERFLOW = { stackOverflow: true };
 let overflowDepth: number | undefined;
 
-// code-gauge-allow functionNcss 32 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionNcss 32 -- Super forwards explicit or implicit arguments and the active block to the next method owner.
 function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   const home = frame.home;
   const method = home.extra.method;
@@ -1328,7 +1328,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
 }
 
 /** The arguments `super` without parentheses passes: the method's parameters' current values. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionCognitiveComplexity 22 -- Implicit super reconstructs positional and keyword values from every declared parameter kind.
 function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | undefined } {
   const def = frame.extra.def as MethodDef;
   const { params } = def;
@@ -1402,8 +1402,8 @@ export interface ProcCallOptions {
 }
 
 /** Calls a block or proc with arguments, binding them as a block (or a lambda) does. */
-// code-gauge-allow functionNcss 36 -- One case per kind of expression or Ruby rule.
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of expression or Ruby rule.
+// code-gauge-allow functionNcss 36 -- Proc calls handle native and Ruby bodies, lambda arity, parameter binding, and control signals.
+// code-gauge-allow functionCognitiveComplexity 30 -- Proc calls handle native and Ruby bodies, lambda arity, parameter binding, and control signals.
 export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions = {}): Gen {
   const runtime = rt();
   runtime.spend();

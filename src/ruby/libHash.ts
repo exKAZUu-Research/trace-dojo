@@ -49,7 +49,7 @@ def(
   },
   { visibility: 'private', keywords: true }
 );
-// code-gauge-allow functionCognitiveComplexity 18 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 18 -- Hash.[] accepts alternating key/value arguments or one pair collection and validates both forms.
 sdef('Hash', '[]', [0, -1], function* (self, args) {
   const hash = new RHash(self);
   if (args.length === 1 && args[0] instanceof RHash) {

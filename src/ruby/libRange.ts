@@ -195,7 +195,7 @@ def('Range', 'sum', [0, 1], function* (self: RRange, args, block) {
   return yield* sum(self, args, block);
 });
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 21 -- Range size handles Integer, Float, beginless, endless, and exclusive bounds.
 function rangeSize(range: RRange): Value {
   const { begin, end, exclusive } = range;
   if (typeof begin === 'bigint') {

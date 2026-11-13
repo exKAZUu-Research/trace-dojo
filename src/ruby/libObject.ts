@@ -170,8 +170,8 @@ def(
   { keywords: true }
 );
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow functionNcss 39 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 18 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
+// code-gauge-allow functionNcss 39 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
 function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
   if (!(self instanceof RBasic) || self instanceof RClass) return self;
   let copy: RBasic;
@@ -308,8 +308,8 @@ def(
 );
 
 /** Builds the exception `raise` throws from its arguments. */
-// code-gauge-allow functionNcss 34 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow functionCognitiveComplexity 25 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionNcss 34 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
+// code-gauge-allow functionCognitiveComplexity 25 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
 export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
   const runtime = rt();
   let cause: Value | undefined;

@@ -400,7 +400,7 @@ def('String', 'slice!', [1, 2], function* (self: RString, args) {
   setText(self, chars.join(''));
   return result;
 });
-// code-gauge-allow functionCognitiveComplexity 17 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 17 -- String assignment supports substring, index, and Range selectors with different bounds errors.
 def('String', '[]=', [2, 3], function* (self: RString, args) {
   const value = yield* stringArg(args.at(-1) as Value);
   const selectors = args.slice(0, -1);
@@ -674,7 +674,7 @@ function characterSetMatcher(sets: string[]): (char: string) => boolean {
   return (char) => tests.every((test) => test(char));
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 19 -- Translation expands character sets and optionally squeezes adjacent replacements.
 function translate(
   text: string,
   fromSpec: string,
@@ -752,8 +752,8 @@ function expandReplacement(replacement: string, match: string, before: string, a
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow functionNcss 38 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 25 -- Substitution coordinates block and replacement-string forms across first/all matches.
+// code-gauge-allow functionNcss 38 -- Substitution coordinates block and replacement-string forms across first/all matches.
 function* substitute(
   self: RString,
   args: Value[],
@@ -957,8 +957,8 @@ def('String', 'reverse!', 0, (self: RString) => {
 const isAlnum = (char: string): boolean => /^[A-Za-z0-9]$/.test(char);
 const isSpace = (char: string): boolean => ' \t\n\v\f\r'.includes(char);
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Ruby's method takes these argument forms, which the branches mirror.
-// code-gauge-allow functionNcss 40 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 23 -- String successor carries across alphanumeric runs and handles non-alphanumeric tails.
+// code-gauge-allow functionNcss 40 -- String successor carries across alphanumeric runs and handles non-alphanumeric tails.
 export function succ(text: string): string {
   if (text.length === 0) return '';
   const chars = charsOf(text);
@@ -998,7 +998,7 @@ export function succ(text: string): string {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 20 -- upto uses numeric-string width rules or String successor iteration with exclusive bounds.
 def('String', 'upto', [1, 2], function* (self: RString, args, block) {
   if (!block) return makeEnumerator(self, 'upto', args);
   const last = yield* stringArg(args[0]);

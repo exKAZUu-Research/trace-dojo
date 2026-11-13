@@ -118,7 +118,7 @@ function floatPow(base: number, exponent: number): Value {
 }
 
 // code-gauge-allow duplicateLines 18 -- Ruby integer and float arithmetic use matching operator cases with different numeric representations.
-// code-gauge-allow functionNcss 31 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionNcss 31 -- Arithmetic dispatches Integer and Float operands across Ruby operators and zero-division rules.
 function arithmetic(op: string, a: Num, b: Num): Value {
   if (typeof a === 'bigint' && typeof b === 'bigint') {
     const bitsA = integerBits(a);
@@ -497,7 +497,7 @@ function* roundingMode(keywords: RHash | undefined): Gen<'up' | 'even' | 'down'>
   return 'up';
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 16 -- Integer rounding applies floor, ceil, truncate, and three half-tie policies to signed values.
 function roundInteger(
   value: bigint,
   digits: bigint,
@@ -702,7 +702,7 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
 }
 
 /** Parses an Integer as `Integer()` does: prefixes, underscores between digits, and surrounding blanks. */
-// code-gauge-allow functionNcss 33 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionNcss 33 -- Strict Integer parsing validates radix prefixes, signs, underscores, and surrounding whitespace.
 export function parseIntegerStrict(text: string, base?: number): bigint | undefined {
   if (base !== undefined && (base < 0 || (base !== 0 && (base < 2 || base > 36)))) {
     throw argumentError(`invalid radix ${base}`);
@@ -778,7 +778,7 @@ function parseFloatStrict(text: string): number | undefined {
 }
 
 /** The leading number of a string, as `String#to_i` reads it: invalid text ends it, giving 0 when nothing came. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Ruby's method takes these argument forms, which the branches mirror.
+// code-gauge-allow functionCognitiveComplexity 17 -- Lenient Integer parsing scans optional sign and radix prefix until the first invalid digit.
 export function parseIntegerLenient(text: string, base = 10): bigint {
   let index = 0;
   while (index < text.length && /[\t\n\v\f\r ]/.test(text[index])) index++;
