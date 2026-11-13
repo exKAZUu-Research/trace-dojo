@@ -243,7 +243,13 @@ export function* ev(e: Expr, frame: Frame): Gen {
         return yield* ev(e.body, frame);
       } catch (error) {
         if (error instanceof RubyError && isA(error.exception, rt().c.StandardError)) {
-          return yield* ev(e.handler, frame);
+          const saved = rt().globals.get('$!') ?? NIL;
+          rt().globals.set('$!', error.exception);
+          try {
+            return yield* ev(e.handler, frame);
+          } finally {
+            rt().globals.set('$!', saved);
+          }
         }
         throw error;
       }
@@ -1276,6 +1282,9 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
   runtime.pushFrame(frame);
   const savedRow = runtime.currentRow;
   try {
+    if (!def.params && proc.isLambda && (args.length > 0 || options.keywords)) {
+      throw argumentCountError(args.length + (options.keywords ? 1 : 0), 0, 0);
+    }
     if (def.params) {
       yield* bindParams(def.params, frame, args, options.keywords, proc.isLambda ? 'lambda' : 'proc');
       if (hasParams(def.params)) {
@@ -1329,3 +1338,7 @@ export function objectFrame(): Frame {
 }
 
 export { hashGet, RObject, RString };
+
+export function truthyValue(value: Value): boolean {
+  return truthy(value);
+}

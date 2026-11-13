@@ -135,6 +135,8 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly globals = new Map<string, Value>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
+  /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
+  readonly catchTags: Value[] = [];
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */

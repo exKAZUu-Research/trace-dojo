@@ -292,42 +292,26 @@ export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
   return new RubyError(object);
 }
 
-def(
-  'Kernel',
-  'catch',
-  [0, 1],
-  function* (_self, args, block) {
-    const tag = args.length > 0 ? args[0] : new RObject(rt().c.Object);
-    try {
-      return yield* callProc(requireBlock(block), [tag]);
-    } catch (error) {
-      if (error instanceof ThrowSignal && (error.tag === tag || (yield* rEquals(error.tag, tag))))
-        return error.value;
-      throw error;
-    }
-  },
-  PRIVATE
-);
-const activeCatchTags: Value[] = [];
-void activeCatchTags;
-def(
-  'Kernel',
-  'throw',
-  [1, 2],
-  function* (_self, [tag, value = NIL]) {
-    if (!catchIsActive()) {
-      const error = rubyError(rt().c.UncaughtThrowError, `uncaught throw ${yield* inspect(tag)}`);
-      throw error;
-    }
-    throw new ThrowSignal(tag, value);
-  },
-  PRIVATE
-);
-
-/** Whether a `catch` block is running, approximated by any native call frame of `catch` being held. */
-function catchIsActive(): boolean {
-  return true;
-}
+def('Kernel', 'catch', [0, 1], function* (_self, args, block) {
+  const runtime = rt();
+  const tag = args.length > 0 ? args[0] : new RObject(runtime.c.Object);
+  runtime.catchTags.push(tag);
+  try {
+    return yield* callProc(requireBlock(block), [tag]);
+  } catch (signal) {
+    if (signal instanceof ThrowSignal && signal.tag === tag) return signal.value;
+    throw signal;
+  } finally {
+    runtime.catchTags.pop();
+  }
+}, PRIVATE);
+def('Kernel', 'throw', [1, 2], function* (_self, [tag, value = NIL]) {
+  const runtime = rt();
+  for (const active of runtime.catchTags.toReversed()) {
+    if (active === tag || (yield* rEquals(active, tag))) throw new ThrowSignal(active, value);
+  }
+  throw rubyError(runtime.c.UncaughtThrowError, `uncaught throw ${yield* inspect(tag)}`);
+}, PRIVATE);
 
 def(
   'Kernel',

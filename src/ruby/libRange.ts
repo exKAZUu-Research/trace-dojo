@@ -1,5 +1,5 @@
 import { compareValues, inspectRange, rangeCovers, rEql, rEquals, spaceship, toIndex, toS } from './conversions';
-import { def } from './define';
+import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
 import { hashKeyOf } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
@@ -272,3 +272,6 @@ def('Range', ['step', '%'], [0, 1], function* (self: RRange, args, block) {
 });
 def('Range', 'dup', 0, (self) => self);
 def('Range', 'frozen?', 0, () => true);
+sdef('Range', 'new', [2, 3], function* (_self, [begin, end, exclusive = false]) {
+  return yield* interp.makeRange(begin, end, interp.truthyValue(exclusive));
+});

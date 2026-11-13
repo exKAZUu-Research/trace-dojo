@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 500 -- Hash's methods share its entry helpers.
-import { inspect, inspectHash, rEquals } from './conversions';
+import { inspect, inspectHash, rEql, rEquals } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, rubyError } from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash } from './hashes';
@@ -131,7 +131,14 @@ def('Hash', 'to_h', 0, function* (self: RHash, _args, block) {
 def('Hash', 'to_hash', 0, (self) => self);
 def('Hash', 'to_a', 0, (self: RHash) => arr([...self.map.values()].map((entry) => arr([entry.key, entry.value]))));
 def('Hash', '==', 1, (self: RHash, [other]) => rEquals(self, other));
-def('Hash', 'eql?', 1, (self: RHash, [other]) => rEquals(self, other));
+def('Hash', 'eql?', 1, function* (self: RHash, [other]) {
+  if (!(other instanceof RHash) || self.map.size !== other.map.size) return false;
+  for (const entry of self.map.values()) {
+    const match = yield* hashGet(other, entry.key);
+    if (!match || !(yield* rEql(entry.value, match.value))) return false;
+  }
+  return true;
+});
 def('Hash', 'default', [0, 1], function* (self: RHash, args) {
   if (args.length > 0 && self.defaultProc) return yield* hashDefault(self, args[0]);
   return self.defaultValue;

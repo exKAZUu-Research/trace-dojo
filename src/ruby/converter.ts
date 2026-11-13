@@ -44,9 +44,15 @@ class LocalScope {
   declare(name: string): number {
     const depth = this.depthOf(name);
     if (depth >= 0) return depth;
+    this.declareOwn(name);
+    return 0;
+  }
+
+  /** Declares a variable of this scope even when an outer scope has one, as block parameters shadow them. */
+  declareOwn(name: string): void {
+    if (this.set.has(name)) return;
     this.set.add(name);
     this.names.push(name);
-    return 0;
   }
 }
 
@@ -579,7 +585,6 @@ export class Converter {
         items.push(inner ? this.target(inner) : { k: 'mlhs', items: [] });
         continue;
       }
-      if (child.type === 'destructured_left_assignment') this.unsupported(child, '入れ子の多重代入（a, (b, c) = ...）');
       items.push(this.target(child));
     }
     return { k: 'mlhs', items, splat };
@@ -922,7 +927,7 @@ export class Converter {
         this.fail(child, `引数の名前「${name}」が重複しています。`);
       }
       seen.add(name);
-      this.ctx.scope.declare(name);
+      this.ctx.scope.declareOwn(name);
       return name;
     };
     for (const child of namedChildren(node)) {
@@ -963,7 +968,8 @@ export class Converter {
           break;
         }
         case 'destructured_parameter': {
-          this.unsupported(child, isBlock ? 'ブロック引数の分解（|(a, b)|）' : '引数の分解（def f((a, b))）');
+          const target = this.destructuredParameter(child, declare);
+          (params.rest === undefined && params.optional.length === 0 ? params.required : params.post).push(target);
           break;
         }
         case 'forward_parameter': {
@@ -984,6 +990,27 @@ export class Converter {
     return params;
   }
 
+  /** The targets of a parameter written as `(a, (b, *c))`, which destructures one argument. */
+  private destructuredParameter(node: Node, declare: (child: Node, name: string) => string): MultiTarget {
+    const items: Target[] = [];
+    let splat: number | undefined;
+    for (const child of namedChildren(node)) {
+      if (child.type === 'comment') continue;
+      if (child.type === 'identifier') {
+        items.push({ k: 'lvar', name: declare(child, child.text), depth: 0 });
+      } else if (child.type === 'splat_parameter') {
+        splat = items.length;
+        const nameNode = child.childForFieldName('name');
+        items.push(nameNode ? { k: 'lvar', name: declare(child, nameNode.text), depth: 0 } : { k: 'mlhs', items: [] });
+      } else if (child.type === 'destructured_parameter') {
+        items.push(this.destructuredParameter(child, declare));
+      } else {
+        this.unsupportedNode(child);
+      }
+    }
+    return { k: 'mlhs', items, splat };
+  }
+
   private block(node: Node, isLambdaLiteral: boolean): BlockDef {
     const outer = this.ctx;
     const scope = new LocalScope('block', outer.scope);
@@ -993,11 +1020,6 @@ export class Converter {
       let params: Params | undefined;
       if (parametersNode) {
         params = this.params(parametersNode, !isLambdaLiteral);
-        for (const local of parametersNode.children) {
-          if (local && parametersNode.fieldNameForChild(parametersNode.children.indexOf(local)) === 'locals') {
-            scope.declare(local.text);
-          }
-        }
         this.declareBlockLocals(parametersNode, scope);
       }
       let bodyNode = node.childForFieldName('body');
@@ -1015,7 +1037,7 @@ export class Converter {
     for (let index = 0; index < parametersNode.childCount; index++) {
       if (parametersNode.fieldNameForChild(index) !== 'locals') continue;
       const local = parametersNode.child(index);
-      if (local) scope.declare(local.text);
+      if (local) scope.declareOwn(local.text);
     }
   }
 

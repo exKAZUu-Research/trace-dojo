@@ -1,6 +1,6 @@
 import { formatFloat, inspect, toS, toStr } from './conversions';
 import { argumentError, typeError } from './errors';
-import { exponentParts, fixedDigits } from './floatFormat';
+import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
 import { callMethod, type Gen } from './interp';
 import { NIL, RHash, RString, RSymbol, type Value } from './objects';
@@ -295,24 +295,62 @@ function formatFloatDirective(type: string, value: number, spec: Spec): string {
   return pad(sign + body, spec, false);
 }
 
+/** `%.*f` digits of a non-negative value, as Ruby's vfprintf lays out what `dtoa` gives in mode 3. */
+function fixedDigits(value: number, precision: number): string {
+  if (value === 0) return precision > 0 ? `0.${'0'.repeat(precision)}` : '0';
+  const { digits, decpt } = rubyDtoa(value, 3, precision);
+  let integer: string;
+  let fraction: string;
+  if (decpt <= 0) {
+    integer = '0';
+    fraction = '0'.repeat(-decpt) + digits;
+  } else {
+    integer = digits.slice(0, decpt).padEnd(decpt, '0');
+    fraction = digits.slice(decpt);
+  }
+  fraction = fraction.slice(0, precision).padEnd(precision, '0');
+  return precision > 0 ? `${integer}.${fraction}` : integer;
+}
+
+function exponentDigits(value: number, significant: number): { digits: string; exponent: number } {
+  if (value === 0) return { digits: '0', exponent: 0 };
+  const { digits, decpt } = rubyDtoa(value, 2, significant);
+  return { digits: digits || '0', exponent: decpt - 1 };
+}
+
 function exponentText(value: number, precision: number, sharp: boolean): string {
-  const { mantissa, exponent } = exponentParts(value, precision);
-  const point = sharp && precision === 0 ? '.' : '';
-  return `${mantissa}${point}e${exponent < 0 ? '-' : '+'}${String(Math.abs(exponent)).padStart(2, '0')}`;
+  const { digits, exponent } = exponentDigits(value, precision + 1);
+  const padded = digits.padEnd(precision + 1, '0');
+  const mantissa = precision > 0 ? `${padded[0]}.${padded.slice(1)}` : `${padded[0]}${sharp ? '.' : ''}`;
+  return `${mantissa}e${exponent < 0 ? '-' : '+'}${String(Math.abs(exponent)).padStart(2, '0')}`;
 }
 
 function generalText(value: number, precision: number, sharp: boolean): string {
   const significant = precision === 0 ? 1 : precision;
-  const exponent = value === 0 ? 0 : exponentParts(value, significant - 1).exponent;
-  let text: string;
+  const { digits, exponent } = exponentDigits(value, significant);
   if (exponent < -4 || exponent >= significant) {
-    text = exponentText(value, significant - 1, sharp);
-    if (!sharp) text = text.replace(/\.?0+e/, 'e');
-  } else {
-    text = fixedDigits(value, significant - 1 - exponent);
-    if (!sharp && text.includes('.')) text = text.replace(/\.?0+$/, '');
+    let body = sharp ? digits.padEnd(significant, '0') : digits;
+    body = body.length > 1 ? `${body[0]}.${body.slice(1)}` : body + (sharp ? '.' : '');
+    return `${body}e${exponent < 0 ? '-' : '+'}${String(Math.abs(exponent)).padStart(2, '0')}`;
   }
+  const decimals = Math.max(0, significant - 1 - exponent);
+  let text = fixedFromDigits(digits, exponent + 1, sharp ? decimals : Math.max(0, digits.length - exponent - 1));
+  if (sharp && !text.includes('.')) text += '.';
   return text;
+}
+
+function fixedFromDigits(digits: string, decpt: number, decimals: number): string {
+  let integer: string;
+  let fraction: string;
+  if (decpt <= 0) {
+    integer = '0';
+    fraction = '0'.repeat(-decpt) + digits;
+  } else {
+    integer = digits.slice(0, decpt).padEnd(decpt, '0');
+    fraction = digits.slice(decpt);
+  }
+  fraction = fraction.padEnd(decimals, '0').slice(0, decimals);
+  return decimals > 0 ? `${integer}.${fraction}` : integer;
 }
 
 function hexFloat(value: number, precision: number | undefined): string {
