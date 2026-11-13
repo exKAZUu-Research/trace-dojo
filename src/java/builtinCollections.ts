@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 463 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
+// code-gauge-allow-file fileNcss 468 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
 import { checkCopiedElement } from './arrayCopy';
 import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
@@ -721,12 +721,15 @@ function defineListUpdates(cls: ClassInfo, element: JavaType, context: Context):
     touch(receiver);
     return true;
   });
-  addMethod(cls, 'clear', [], VOID, false, (frame, receiver) => {
-    if (elementsOf(receiver).length > 0) checkModifiable(frame, receiver, true);
-    else if (!countsEmptyClear(receiver)) return;
-    elementsOf(receiver).length = 0;
-    touch(receiver);
-  });
+  addMethod(cls, 'clear', [], VOID, false, clearList);
+}
+
+function clearList(frame: Frame, receiver: Value): Value {
+  if (elementsOf(receiver).length > 0) checkModifiable(frame, receiver, true);
+  else if (!countsEmptyClear(receiver)) return undefined;
+  elementsOf(receiver).length = 0;
+  touch(receiver);
+  return undefined;
 }
 
 /** The methods that search a list and compare it with another. */
