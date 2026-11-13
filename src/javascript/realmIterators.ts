@@ -3,7 +3,7 @@ import { DONE, type HostIterator, stepHostIterator } from './iteration';
 import type { RealmBuilder } from './realm';
 import { receiverText } from './realmCollections';
 import type { Runtime } from './runtime';
-import { JsArray, JsObject, type Value } from './values';
+import { JsArray, JsObject, unboxed, type Value } from './values';
 
 /** The well-known symbols the interpreter's builtins look up, which the program reads as `Symbol.iterator` and so on. */
 export const WELL_KNOWN_SYMBOLS = {
@@ -148,7 +148,8 @@ function defineSymbol(builder: RealmBuilder): void {
 }
 
 function thisSymbol(runtime: Runtime, value: Value): symbol {
-  if (typeof value === 'symbol') return value;
+  const primitive = unboxed(value);
+  if (typeof primitive === 'symbol') return primitive;
   return runtime.throwError('TypeError', `${runtime.describe(value)} is not a symbol`);
 }
 

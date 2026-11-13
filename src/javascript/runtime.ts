@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 401 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 513 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -587,7 +587,9 @@ export class Runtime {
       this.throwError('TypeError', 'Cannot convert undefined or null to object');
     // A string's properties are its UTF-16 code units.
     if (typeof value === 'string') return this.newArray(value.split(''));
-    return this.newObject();
+    const box = this.newObject(this.objectFor(value, ''));
+    box.primitive = value;
+    return box;
   }
 
   typeOf(value: Value): string {

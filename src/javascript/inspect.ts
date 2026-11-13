@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 406 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -173,6 +174,7 @@ interface Frame {
   braces: [string, string];
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
@@ -205,8 +207,8 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 31 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 22 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionNcss 34 -- Ports Node.js's util.inspect, so the two stay comparable.
 function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
   if (value instanceof JsArray) {
     const prefix = constructor === 'Array' ? '' : prefixOf(constructor, 'Array', `(${value.elements.length})`);
@@ -222,6 +224,7 @@ function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefi
   else if (value.regexp) base = String(value.regexp);
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
   else if (value.isError && constructor !== 'Object') base = errorText(value);
+  else if (value.primitive !== undefined) base = boxedBase(value.primitive, constructor, toStringTagOf(value));
   else {
     const tag = toStringTagOf(value);
     if (tag && tag !== constructor) open = `${prefixOf(constructor, 'Object')}[${tag}] {`;
@@ -230,6 +233,22 @@ function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefi
   if (!hasKeys) return base || `${open}}`;
   return { base, braces: [open, '}'] };
 }
+
+/** Node.js's getBoxedBase, such as `[Number: 3]`, `[BigInt (Big): 1n]`, or `[Symbol: Symbol(a)]`. */
+function boxedBase(
+  primitive: number | boolean | bigint | symbol,
+  constructor: string | undefined,
+  tag: string | undefined
+): string {
+  const type = BOXED_TYPES[typeof primitive as keyof typeof BOXED_TYPES];
+  let base = `[${type}`;
+  if (type !== constructor) base += constructor === undefined ? ' (null prototype)' : ` (${constructor})`;
+  base += `: ${typeof primitive === 'number' ? formatNumber(primitive) : typeof primitive === 'bigint' ? `${primitive}n` : String(primitive)}]`;
+  if (tag && tag !== constructor) base += ` [${tag}]`;
+  return base;
+}
+
+const BOXED_TYPES = { number: 'Number', boolean: 'Boolean', bigint: 'BigInt', symbol: 'Symbol' } as const;
 
 /**
  * The `Symbol.toStringTag` an object inherits as a data property, such as a generator's `Generator`, which Node.js
@@ -394,6 +413,7 @@ function promiseEntry(ctx: Context, state: PromiseState, recurseTimes: number): 
   return state.status === 'rejected' ? `<rejected> ${result}` : result;
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key): string {
   const property = object.properties.get(key);
   let text = 'undefined';
@@ -419,6 +439,7 @@ function formatIndented(ctx: Context, value: Value, recurseTimes: number, diff =
   return text;
 }
 
+// code-gauge-allow functionCognitiveComplexity 29 -- Ports Node.js's util.inspect, so the two stay comparable.
 function reduceToSingleString(
   ctx: Context,
   output: string[],
@@ -463,7 +484,7 @@ function isBelowBreakLength(ctx: Context, output: string[], start: number, base:
 }
 
 /** Lays out the entries of a long array in aligned columns. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
 // code-gauge-allow functionNcss 41 -- Ports Node.js's groupArrayElements as it is, so the two stay comparable.
 function groupArrayElements(ctx: Context, output: string[], array: JsArray): string[] {
   let totalLength = 0;

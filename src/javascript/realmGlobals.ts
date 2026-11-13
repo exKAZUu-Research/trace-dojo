@@ -14,6 +14,7 @@ import {
   JsObject,
   type NativeCall,
   toBoolean,
+  unboxed,
   type Value,
 } from './values';
 
@@ -62,15 +63,20 @@ function defineObject(builder: RealmBuilder): void {
 function tagOf(value: Value): string {
   if (value === undefined) return 'Undefined';
   if (value === null) return 'Null';
-  if (value instanceof JsArray) return 'Array';
-  if (value instanceof JsFunction) return 'Function';
-  if (value instanceof JsObject) {
-    if (value.regexp) return 'RegExp';
-    if (dateValueOf(value) !== undefined) return 'Date';
-    return value.isError ? 'Error' : 'Object';
-  }
-  if (typeof value === 'string') return 'String';
-  return typeof value === 'number' ? 'Number' : 'Boolean';
+  if (value instanceof JsObject) return objectTagOf(value);
+  // A BigInt or symbol has no builtin tag of its own, only its prototype's Symbol.toStringTag.
+  return PRIMITIVE_TAGS[typeof value] ?? 'Object';
+}
+
+const PRIMITIVE_TAGS: Partial<Record<string, string>> = { string: 'String', number: 'Number', boolean: 'Boolean' };
+
+function objectTagOf(object: JsObject): string {
+  if (object instanceof JsArray) return 'Array';
+  if (object instanceof JsFunction) return 'Function';
+  if (object.primitive !== undefined) return tagOf(object.primitive);
+  if (object.regexp) return 'RegExp';
+  if (dateValueOf(object) !== undefined) return 'Date';
+  return object.isError ? 'Error' : 'Object';
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Lists the builtin methods, each a small closure of its own.
@@ -350,13 +356,15 @@ function defineNumberFormats(builder: RealmBuilder): void {
 }
 
 function thisNumber(runtime: Runtime, value: Value): number {
-  if (typeof value !== 'number') return runtime.throwError('TypeError', 'This method requires a number');
-  return value;
+  const primitive = unboxed(value);
+  if (typeof primitive !== 'number') return runtime.throwError('TypeError', 'This method requires a number');
+  return primitive;
 }
 
 function thisBoolean(runtime: Runtime, value: Value): boolean {
-  if (typeof value !== 'boolean') return runtime.throwError('TypeError', 'This method requires a boolean');
-  return value;
+  const primitive = unboxed(value);
+  if (typeof primitive !== 'boolean') return runtime.throwError('TypeError', 'This method requires a boolean');
+  return primitive;
 }
 
 function defineBoolean(builder: RealmBuilder): void {

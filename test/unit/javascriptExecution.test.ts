@@ -630,6 +630,15 @@ let n = 5n; n++; n += 2n; console.log(n, n-- , --n, 3n * -1n, (123n).toLocaleStr
 console.log(1n + '1', '' + 2n, [1n].includes(1n), 1n.valueOf === BigInt.prototype.valueOf);`,
   ],
   [
+    'boxed primitives',
+    `const b = Object(1n);
+console.log(BigInt.prototype.toString.call(b), b.valueOf(), typeof b, b + 2n, b == 1n, Object(3).toFixed(1), Object(Symbol('q')).description);
+console.log(b, Object(-0), Object(true), Object(Symbol('a')), [Object(3)], Object.assign(Object(5), { extra: 1 }));
+console.log(Object.prototype.toString.call(Object(1)), Object.prototype.toString.call(Object(1n)), JSON.stringify([Object(1), Object(false)]));
+console.log(Object.getPrototypeOf(1) === Number.prototype, Object(1n) instanceof BigInt, structuredClone([Object(2n), Object(1)]));
+try { structuredClone(Object(Symbol('a'))); } catch (e) { console.log(e.name, e.message); }`,
+  ],
+  [
     'async generators and for await',
     `const sleep = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
 async function* countdown(n) { try { while (n > 0) { await sleep(10); yield n--; } return 'liftoff'; } finally { console.log('cleanup'); } }
