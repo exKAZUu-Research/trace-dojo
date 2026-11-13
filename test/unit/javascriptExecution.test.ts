@@ -843,7 +843,9 @@ let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 
 let running = true; const f = Date.now(); while (running) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - f >= 300) running = false; } console.log('flag wait');
 let done = false; const g = Date.now(); while (!done) { for (let i = 0; i < 2000; i++) sum += i; done = Date.now() - g >= 300; } console.log('flag set');
 const h = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; const elapsed = Date.now() - h; if (elapsed >= 300) break; } console.log('elapsed variable');
-const o = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - o < 300) continue; break; } console.log('continue wait');`,
+const o = Date.now(); while (true) { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - o < 300) continue; break; } console.log('continue wait');
+let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 2000; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
+while (!ticked) tick(); console.log('ticked');`,
   ],
   [
     'a timestamp helper around computation between timers',
@@ -861,7 +863,10 @@ console.log(times.length); setTimeout(() => console.log('L 0'), 0);
 function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
 setTimeout(() => console.log('M 50'), 50); const fibTimes = [];
 for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n); fibTimes.push(Date.now() - s); }
-console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);`,
+console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);
+setTimeout(() => console.log('O 50'), 50); const inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]; const inputTimes = [];
+for (let i = 0; i < inputs.length; i++) { const s = Date.now(); fib(inputs[i]); inputTimes.push(Date.now() - s); }
+console.log(inputTimes.length); setTimeout(() => console.log('P 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',
