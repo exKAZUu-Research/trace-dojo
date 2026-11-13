@@ -88,7 +88,10 @@ function tablesOf(codec: string): Tables {
 /** A step can also report an illegal sequence of more than one byte, as JIS X 0213:2000's emulation does. */
 export type Step = { text: string; length: number } | { illegal: number } | 'illegal' | 'incomplete';
 
-export type Stepper = (data: Uint8Array, index: number) => Step;
+export type Stepper = ((data: Uint8Array, index: number) => Step) & {
+  getState?: () => bigint;
+  setState?: (state: bigint) => void;
+};
 
 /** The step of a codec of ASCII and two-byte sequences, each byte above ASCII leading one. */
 function pairStep(decode: Map<number, string>, data: Uint8Array, index: number): Step {
@@ -211,7 +214,10 @@ export function registerStatefulCodec(name: string, parts: StatefulParts): void 
     incompleteTail: (data) => incompleteTail(data, parts.decoder()),
     incrementalDecoder: () => {
       const step = parts.decoder();
-      return (data, errors, final) => decodeIncrementally(data, errors, final, step);
+      return Object.assign(
+        (data: Uint8Array, errors: ErrorHandling, final: boolean) => decodeIncrementally(data, errors, final, step),
+        { getState: () => step.getState?.() ?? 0n, setState: (state: bigint) => step.setState?.(state) }
+      );
     },
     incrementalEncoder: () => {
       const { step, reset } = parts.encoder();
@@ -407,7 +413,12 @@ function hzParts(): StatefulParts {
   return {
     decoder: () => {
       const state = { inGb: false };
-      return (bytes, index) => hzStep(bytes, index, state, gb2312.decode);
+      return Object.assign((bytes: Uint8Array, index: number) => hzStep(bytes, index, state, gb2312.decode), {
+        getState: () => (state.inGb ? 1n : 0n),
+        setState: (value: bigint) => {
+          state.inGb = (value & 0xffn) !== 0n;
+        },
+      });
     },
     encoder: () => {
       const state = { inGb: false };

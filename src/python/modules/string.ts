@@ -1,10 +1,11 @@
 import { builtin } from '../define';
+import { registerModule } from '../modules';
 import { decimalValue } from '../numbers';
 import { registerSourceModule } from '../sourceModules';
 import { iteratorClass, newTuple, None, pyError, typeError, typeName } from '../types';
 import { DONE, PyIterator, type PyValue } from '../values';
 
-// CPython's `string` module, with natives standing in for the helpers of its `_string` module.
+// CPython's `string` module and its native formatting helpers.
 const SOURCE =
   String.raw`
 """A collection of string constants.
@@ -27,11 +28,7 @@ __all__ = ["ascii_letters", "ascii_lowercase", "ascii_uppercase", "capwords",
            "digits", "hexdigits", "octdigits", "printable", "punctuation",
            "whitespace", "Formatter", "Template"]
 
-class _string:
-    formatter_parser = _formatter_parser
-    formatter_field_name_split = _formatter_field_name_split
-
-del _formatter_parser, _formatter_field_name_split
+import _string
 
 
 # Some strings for ctype-style character classification
@@ -365,14 +362,14 @@ class Formatter:
         return obj, first
 `;
 
-registerSourceModule(
-  'string',
-  SOURCE,
+registerSourceModule('string', SOURCE);
+registerModule(
+  '_string',
   () =>
     new Map<string, PyValue>([
-      ['_formatter_parser', builtin('formatter_parser', 'one', 1, 1, ([text]) => formatterParser(text))],
+      ['formatter_parser', builtin('formatter_parser', 'one', 1, 1, ([text]) => formatterParser(text))],
       [
-        '_formatter_field_name_split',
+        'formatter_field_name_split',
         builtin('formatter_field_name_split', 'one', 1, 1, ([text]) => fieldNameSplit(text)),
       ],
     ])

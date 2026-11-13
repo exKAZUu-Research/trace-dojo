@@ -29,14 +29,19 @@ export interface TextCodec {
    * A decoder that keeps the codec's state from one piece of data to the next, which decodes as far as it can unless
    * `final` and says how many bytes it used; codecs without one decode each piece afresh.
    */
-  incrementalDecoder?: () => (
-    data: Uint8Array,
-    errors: ErrorHandling,
-    final: boolean
-  ) => { text: string; consumed: number };
+  incrementalDecoder?: () => IncrementalDecoder;
   /** An encoder that keeps the codec's state, and characters that wait for the next, until `final`. */
   incrementalEncoder?: () => (points: readonly number[], errors: ErrorHandling, final: boolean) => Uint8Array;
 }
+
+export type IncrementalDecoder = ((
+  data: Uint8Array,
+  errors: ErrorHandling,
+  final: boolean
+) => { text: string; consumed: number }) & {
+  getState: () => bigint;
+  setState: (state: bigint) => void;
+};
 
 /** Creates the codec a module name stands for, loading its tables only when a program uses it. */
 const codecFactories = new Map<string, () => TextCodec>();

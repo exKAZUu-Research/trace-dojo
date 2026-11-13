@@ -3,6 +3,9 @@
 #   mise exec -- python scripts/pythonData/generateBuiltinDocs.py > .tmp/builtinDocs.json
 # Run it from the repository root, since it reads the module list from src/python/moduleNames.ts; then
 # scripts/generateBuiltinDocs.ts keeps the entries of what this grader implements natively.
+import tokenize
+import struct
+import string
 import collections
 import contextlib
 import importlib

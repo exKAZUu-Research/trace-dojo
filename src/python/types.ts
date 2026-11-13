@@ -1,4 +1,7 @@
 import { DictStore } from './dictStore';
+import { assertIteratorName } from './iteratorTypes';
+import { toIndex } from './numbers';
+import { lookupSpecial } from './objects';
 import { SetTable } from './setTable';
 import { recordRootClass, recordSubclass } from './subclasses';
 import {
@@ -119,6 +122,7 @@ export const iteratorClassSetup: ((cls: PyClass) => void)[] = [];
 
 /** The class of a native iterator, such as `list_iterator` or `collections._deque_iterator`. */
 export function iteratorClass(name: string): PyClass {
+  assertIteratorName(name);
   let cls = iteratorClasses.get(name);
   if (!cls) {
     const dot = name.indexOf('.');
@@ -299,21 +303,42 @@ export function initExceptionFields(
     fields.set('name', name);
     if (is('AttributeError')) fields.set('obj', kwargs?.get('obj') ?? state.object ?? None);
   }
-  if (is('OSError')) initOSErrorFields(state, fields, args);
+  if (is('OSError')) initOSErrorFields(cls, state, fields, args);
   const errorName = fields.get('name');
   if (errorName !== undefined) state.name = typeof errorName === 'string' ? errorName : undefined;
   if (fields.has('obj')) state.object = fields.get('obj');
 }
 
 /** The fields of OSError, whose `args` keep only errno and strerror when a filename is given. */
-function initOSErrorFields(state: ExceptionState, fields: Map<string, PyValue>, args: readonly PyValue[]): void {
+function initOSErrorFields(
+  cls: PyClass,
+  state: ExceptionState,
+  fields: Map<string, PyValue>,
+  args: readonly PyValue[]
+): void {
   const tupleForm = args.length >= 2 && args.length <= 5;
   fields.set('errno', tupleForm ? args[0] : None);
   fields.set('strerror', tupleForm ? args[1] : None);
-  const hasFile = args.length >= 3 && args.length <= 5 && args[2] !== None;
+  let hasFile = args.length >= 3 && args.length <= 5 && args[2] !== None;
+  if (hasFile && cls === exceptionClassNamed('BlockingIOError') && isNumericArgument(args[2])) {
+    const written = toIndex(args[2]);
+    if (written < -(2n ** 63n) || written >= 2n ** 63n)
+      throw valueError("cannot fit 'int' into an index-sized integer");
+    if (written !== -1n) fields.set('characters_written', written);
+    hasFile = false;
+  }
   fields.set('filename', hasFile ? args[2] : None);
   fields.set('filename2', hasFile && args.length === 5 ? args[4] : None);
   if (hasFile) state.args = newTuple(args.slice(0, 2));
+}
+
+function isNumericArgument(value: PyValue): boolean {
+  return (
+    typeof value === 'bigint' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    ['__int__', '__float__', '__index__'].some((name) => lookupSpecial(value, name) !== undefined)
+  );
 }
 
 /** The JavaScript error that raises a builtin exception with a message. */

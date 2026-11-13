@@ -11,8 +11,7 @@ import { TokenizeError, Tokenizer } from './tokenizer';
 import { TOKENIZE_SOURCE } from './tokenizeSource';
 import { TOKEN_SOURCE } from './tokenSource';
 
-const tokenizerIterClass = iteratorClass('TokenizerIter');
-tokenizerIterClass.module = '_tokenize';
+const tokenizerIterClass = iteratorClass('_tokenize.TokenizerIter');
 
 const TOKENIZER_ITER: ClinicSpec = {
   name: 'TokenizerIter',

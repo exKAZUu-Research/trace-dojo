@@ -27,7 +27,7 @@ awaited, awaited.__await__(), generated, generated.asend(None), generated.athrow
 (1).__add__, int.__add__, int.__dict__["real"], dict.__dict__["fromkeys"], sys.float_info, sys.int_info, sys.hash_info,
 sys.thread_info, sys.version_info`;
 /** The functions and objects that SAMPLES names. */
-const SAMPLE_SETUP = `import sys, collections
+const SAMPLE_SETUP = `import sys, collections, struct, string, tokenize, re
 async def coroutine(): pass
 async def async_generator(): yield
 def cell():
@@ -62,10 +62,14 @@ for (const module of SUPPORTED_MODULES) {
     for (const name of value.unsupported.keys()) keys.add(`${module}.${name}`);
   });
 }
-run(`${SAMPLE_SETUP}\nsamples = [${SAMPLES}]\nawaited.close()`, (_runtime, globals) => {
-  const samples = globals.get('samples') as { items: PyValue[] } | undefined;
-  for (const sample of samples?.items ?? []) collect(classOf(sample));
-});
+run(
+  `${SAMPLE_SETUP}\nsamples = [${SAMPLES}]\nawaited.close()`,
+  (_runtime, globals) => {
+    const samples = globals.get('samples') as { items: PyValue[] } | undefined;
+    for (const sample of samples?.items ?? []) collect(classOf(sample));
+  },
+  true
+);
 
 const kept = Object.keys(reference)
   .filter((key) => keys.has(key))
@@ -129,15 +133,20 @@ function addKey(value: PyValue): void {
   }
 }
 
-function run(source: string, inspect: (runtime: RuntimeType, globals: Map<string, PyValue>) => void): void {
+function run(
+  source: string,
+  inspect: (runtime: RuntimeType, globals: Map<string, PyValue>) => void,
+  required = false
+): void {
   const runtime = new Runtime();
   let globals: Map<string, PyValue> | undefined;
   try {
-    runModule(runtime, parsePython(source), (frame) => {
+    const result = runModule(runtime, parsePython(source), (frame) => {
       globals = frame.globals;
     });
+    if (required && result.uncaughtException) throw new Error(result.uncaughtException);
   } catch (error) {
-    if (!(error instanceof UnsupportedFeatureError)) throw error;
+    if (required || !(error instanceof UnsupportedFeatureError)) throw error;
     return;
   }
   // Naming a builtin reads the run's state, as a function's module does.

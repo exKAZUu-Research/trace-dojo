@@ -107,7 +107,9 @@ test('an uncaught AttributeError on an object whose namespace differs suggests a
 });
 
 test('lazy iterator namespaces expose complete matching classes and stop on unmatched classes', () => {
-  const program = `values = [iter('é'), reversed({}), iter(lambda: 0, 0), iter(memoryview(b''))]
+  const program = `import string
+values = [iter('é'), reversed({}), iter(lambda: 0, 0), iter(memoryview(b'')),
+          string.Formatter().parse(''), string._string.formatter_field_name_split('a')[1]]
 for iterator in values:
     namespace = type(iterator).__dict__
     print(list(namespace), namespace['__doc__'])`;
@@ -117,13 +119,18 @@ for iterator in values:
       "['__iter__', '__next__', '__length_hint__', '__reduce__', '__setstate__', '__doc__'] None\n" +
       "['__iter__', '__next__', '__length_hint__', '__reduce__', '__doc__'] None\n" +
       "['__iter__', '__next__', '__reduce__', '__doc__'] None\n" +
-      "['__iter__', '__next__', '__doc__'] None\n",
+      "['__iter__', '__next__', '__doc__'] None\n".repeat(3),
     uncaughtException: undefined,
   });
-  for (const factory of ['iter', 'reversed']) {
-    const unmatched = `import collections
+  for (const factory of [
+    'iter(collections.deque())',
+    'reversed(collections.deque())',
+    'iter(collections.OrderedDict())',
+    'struct.iter_unpack("b", b"")',
+  ]) {
+    const unmatched = `import collections, struct
 try:
-    print(list(type(${factory}(collections.deque())).__dict__))
+    print(list(type(${factory}).__dict__))
 except BaseException:
     print('caught')
 print('after')`;

@@ -50,14 +50,16 @@ function markCalls(statements: Statement[], marksHere: boolean): void {
 /** Marks an expression and its parts that may suspend, returning whether it may. */
 export function markSuspendingExpression(expression: Expression): boolean {
   if (callsSuspend) markThreadParts(expression);
+  const partsSuspend = markAll(partsOf(expression));
+  const comprehensionSuspends = expression.kind === 'comprehension' && markAsyncComprehension(expression);
   const suspends =
-    markAll(partsOf(expression)) ||
+    partsSuspend ||
     (callsSuspend && expression.kind === 'comprehension') ||
     (callsSuspend && expression.kind === 'call') ||
     expression.kind === 'yield' ||
     expression.kind === 'yieldFrom' ||
     expression.kind === 'await' ||
-    (expression.kind === 'comprehension' && markAsyncComprehension(expression));
+    comprehensionSuspends;
   if (suspends) expression.suspends = true;
   return suspends;
 }

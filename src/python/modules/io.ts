@@ -6,7 +6,7 @@ import { builtinClassesWithDict } from '../descriptors';
 import { viewOf } from '../memoryview';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { callValue, getAttribute, lookupSpecial } from '../objects';
+import { callValue, getAttribute, iterate, lookupSpecial } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { iterStr } from '../strings';
@@ -26,7 +26,7 @@ import {
   unbox,
   valueError,
 } from '../types';
-import { PyClass, PyDescriptor, PyError, PyOpaque, type PyValue } from '../values';
+import { DONE, PyClass, PyDescriptor, PyError, PyOpaque, type PyValue } from '../values';
 import { ioCodecNatives } from './ioCodecs';
 import { IO_SOURCE } from './ioPython';
 
@@ -94,7 +94,7 @@ function readLinesFrom(stream: Stream, hint: number, length: (line: PyValue) => 
     currentRuntime().spend();
     lines.push(line);
     total += length(line);
-    if (hint > 0 && total > hint) break;
+    if (hint > 0 && total >= hint) break;
   }
   return lines;
 }
@@ -147,7 +147,8 @@ function defineBytesIOLineMethods(cls: PyClass): void {
   method(cls, 'writelines', 'one', 1, 1, (self, [lines]) => {
     checkOpen(streamOf(self));
     const write = getAttribute(self, 'write');
-    for (const line of currentRuntime().toArray(lines)) callValue(write, [line]);
+    const next = iterate(lines);
+    for (let line = next(); line !== DONE; line = next()) callValue(write, [line]);
     return None;
   });
   method(cls, '__iter__', 'none', 0, 0, (self) => {
@@ -171,7 +172,7 @@ function getter(cls: PyClass, name: string, read: (self: PyValue) => PyValue): v
 interface TextStream extends Stream {
   chars: string[];
   newline: string | undefined;
-  /** The kinds of line ending a universal-newline StringIO has translated: 1 for \r, 2 for \n, 4 for \r\n. */
+  /** The kinds of line ending a universal-newline StringIO has encountered: 1 for \r, 2 for \n, 4 for \r\n. */
   seen: number;
 }
 
@@ -229,11 +230,11 @@ function textLineEnd(stream: TextStream, from: number): number {
 /** Writes text at the position, translating line endings as the newline mode does, and returns its length. */
 function writeText(stream: TextStream, text: string): number {
   let translated = text;
-  if (stream.newline === undefined) {
+  if (stream.newline === undefined || stream.newline === '') {
     if (/\r\n/.test(text)) stream.seen |= 4;
     if (/\r(?!\n)/.test(text)) stream.seen |= 1;
     if (/(?<!\r)\n/.test(text)) stream.seen |= 2;
-    translated = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    if (stream.newline === undefined) translated = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
   } else if (stream.newline === '\r' || stream.newline === '\r\n') {
     translated = text.replaceAll('\n', stream.newline);
   }

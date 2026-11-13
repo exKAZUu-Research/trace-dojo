@@ -57,14 +57,14 @@ class _IncrementalDecoder(_IncrementalDecoderBase):
         _IncrementalDecoderBase.__init__(self, errors)
         self.encoding = encoding
         self.buffer = b""
-        self.flag = 0
+        self.flag = _initial_decoder_state(self.encoding)
         # The decoder of a codec that keeps a state, such as iso2022_jp, or None.
         self._stateful = _stateful_codec(encoding, 'decode')
 
     def decode(self, input, final=False):
         data = self.buffer + bytes(input)
         if self._stateful is not None:
-            text, consumed = self._stateful(data, self.errors, final)
+            text, consumed = self._stateful[0](data, self.errors, final)
         else:
             text, consumed, self.flag = _decode_chunk(self.encoding, self.errors, data, final, self.flag)
         self.buffer = data[consumed:]
@@ -72,15 +72,18 @@ class _IncrementalDecoder(_IncrementalDecoderBase):
 
     def reset(self):
         self.buffer = b""
-        self.flag = 0
+        self.flag = _initial_decoder_state(self.encoding)
         self._stateful = _stateful_codec(self.encoding, 'decode')
 
     def getstate(self):
-        return (self.buffer, self.flag)
+        flag = self._stateful[1]() if self._stateful is not None else self.flag
+        return (self.buffer, flag)
 
     def setstate(self, state):
         self.buffer = state[0]
         self.flag = state[1]
+        if self._stateful is not None:
+            self._stateful[2](self.flag)
 
 
 class _IncrementalEncoder:
@@ -922,29 +925,35 @@ class BufferedWriter(_BufferedIOMixin):
     def write(self, b):
         if isinstance(b, str):
             raise TypeError("can't write str to binary stream")
+        b = memoryview(b)
         with self._write_lock:
             if self.closed:
                 raise ValueError("write to closed file")
-            # XXX we can implement some more tricks to try and avoid
-            # partial writes
-            if len(self._write_buf) > self.buffer_size:
-                # We're full, so let's pre-flush the buffer.  (This may
-                # raise BlockingIOError with characters_written == 0.)
+            size = len(b)
+            if size < self.buffer_size and len(self._write_buf) + size <= self.buffer_size:
+                self._write_buf.extend(b)
+                return size
+            try:
                 self._flush_unlocked()
-            before = len(self._write_buf)
-            self._write_buf.extend(b)
-            written = len(self._write_buf) - before
-            if len(self._write_buf) > self.buffer_size:
-                try:
-                    self._flush_unlocked()
-                except BlockingIOError as e:
-                    if len(self._write_buf) > self.buffer_size:
-                        # We've hit the buffer_size. We have to accept a partial
-                        # write and cut back our buffer.
-                        overage = len(self._write_buf) - self.buffer_size
-                        written -= overage
-                        self._write_buf = self._write_buf[:self.buffer_size]
-                        raise BlockingIOError(e.errno, e.strerror, written)
+            except BlockingIOError:
+                accepted = min(size, self.buffer_size - len(self._write_buf))
+                self._write_buf.extend(b[:accepted])
+                if accepted < size:
+                    raise BlockingIOError(errno.EAGAIN, "write could not complete without blocking", accepted)
+                return accepted
+            written = 0
+            while size - written >= self.buffer_size:
+                n = self.raw.write(b[written:])
+                if n is None:
+                    break
+                if n < 0 or n > size - written:
+                    raise OSError("write() returned incorrect number of bytes")
+                written += n
+            accepted = min(size - written, self.buffer_size)
+            self._write_buf.extend(b[written:written + accepted])
+            written += accepted
+            if written < size:
+                raise BlockingIOError(errno.EAGAIN, "write could not complete without blocking", written)
             return written
 
     def truncate(self, pos=None):
@@ -1345,9 +1354,6 @@ class TextIOWrapper(_TextIOBase):
     # which calls close()
     _buffer = None
 
-    # The write_through argument has no effect here since this
-    # implementation always writes through.  The argument is present only
-    # so that the signature can match the signature of the C version.
     def __init__(self, buffer, encoding=None, errors=None, newline=None,
                  line_buffering=False, write_through=False):
         self._check_newline(newline)
@@ -2013,7 +2019,7 @@ class TextIOWrapper(_TextIOBase):
 
     @property
     def newlines(self):
-        return self._decoder.newlines if self._decoder else None
+        return self._decoder.newlines if self._decoder and self._readuniversal else None
 
     def _dealloc_warn(self, source):
         if dealloc_warn := getattr(self.buffer, "_dealloc_warn", None):

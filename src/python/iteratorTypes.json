@@ -1,4 +1,12 @@
 {
+  "_struct.unpack_iterator": {
+    "sample": "struct.iter_unpack('b', b'')",
+    "features": []
+  },
+  "_tokenize.TokenizerIter": {
+    "sample": "tokenize._tokenize.TokenizerIter(lambda: b'', extra_tokens=True)",
+    "features": []
+  },
   "bytearray_iterator": {
     "sample": "iter(bytearray())",
     "features": ["moved", "reduced", "hinted"]
@@ -47,9 +55,25 @@
     "sample": "enumerate(())",
     "features": ["reduced"]
   },
+  "fieldnameiterator": {
+    "sample": "string._string.formatter_field_name_split('a')[1]",
+    "features": []
+  },
   "filter": {
     "sample": "filter(None, ())",
     "features": ["reduced"]
+  },
+  "formatteriterator": {
+    "sample": "string.Formatter().parse('')",
+    "features": []
+  },
+  "generator": {
+    "sample": "iter(re.RegexFlag(0))",
+    "features": []
+  },
+  "iterator": {
+    "sample": "iter(type('Sequence', (), {'__getitem__': lambda self, index: 0})())",
+    "features": ["moved", "reduced", "hinted"]
   },
   "list_iterator": {
     "sample": "iter([])",
@@ -71,6 +95,10 @@
     "sample": "iter(memoryview(b''))",
     "features": []
   },
+  "odict_iterator": {
+    "sample": "iter(collections.OrderedDict())",
+    "features": []
+  },
   "range_iterator": {
     "sample": "iter(range(1))",
     "features": ["moved", "reduced", "hinted"]
@@ -88,7 +116,7 @@
     "features": ["moved", "reduced", "hinted"]
   },
   "str_iterator": {
-    "sample": "iter('é')",
+    "sample": "iter('\u00e9')",
     "features": ["moved", "reduced", "hinted"]
   },
   "tuple_iterator": {

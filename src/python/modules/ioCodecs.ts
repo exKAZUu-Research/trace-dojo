@@ -28,6 +28,13 @@ export function ioCodecNatives(): [string, PyValue][] {
       }),
     ],
     [
+      '_initial_decoder_state',
+      builtin('_initial_decoder_state', 'one', 1, 1, ([encoding]) => {
+        const module = codecModuleOf(encoding as string);
+        return module === 'utf_16' || module === 'utf_32' ? 2n : module === 'utf_8_sig' ? 1n : 0n;
+      }),
+    ],
+    [
       '_encode_chunk',
       builtin('_encode_chunk', 'expected', 4, 4, ([encoding, errors, text, started]) =>
         newBytes(encodeChunk(encoding as string, errors as string, text as string, started === true))
@@ -65,7 +72,7 @@ function decodeChunk(
   return [...decodeOthers(encoding, errors, data, final), state];
 }
 
-/** UTF-8, whose state is 1 once a UTF-8-SIG stream has passed the place of its BOM. */
+/** UTF-8-SIG retains state 1 until the possible BOM is consumed; plain UTF-8 stays at 0. */
 function decodeUtf8(
   signed: boolean,
   errors: string,
@@ -75,12 +82,12 @@ function decodeUtf8(
 ): [string, number, number] {
   const bom = [0xef, 0xbb, 0xbf];
   let start = 0;
-  if (signed && state === 0) {
-    if (!final && data.length < 3 && data.every((byte, index) => bom[index] === byte)) return ['', 0, 0];
+  if (signed && state === 1) {
+    if (!final && data.length < 3 && data.every((byte, index) => bom[index] === byte)) return ['', 0, 1];
     if (bom.every((byte, index) => data[index] === byte)) start = 3;
   }
   const end = final ? data.length : data.length - incompleteUtf8Tail(data);
-  return [decodeBytes(data.subarray(start, end), 'utf8', errors), end, 1];
+  return [decodeBytes(data.subarray(start, end), 'utf8', errors), end, 0];
 }
 
 /** How many bytes at the end of UTF-8 data start a character that the data does not finish. */
@@ -95,8 +102,8 @@ function incompleteUtf8Tail(data: Uint8Array): number {
   return 0;
 }
 
-/** UTF-16 or UTF-32, whose state is 1 for little-endian and 2 for big-endian once a BOM chose. */
-// code-gauge-allow functionCognitiveComplexity 27 -- Handles BOM rejection and byte order, whole code units, and a split surrogate pair.
+/** Generic UTF-16/32 uses state 2 before its BOM, then 0 for native little-endian or 1 for big-endian. */
+// code-gauge-allow functionCognitiveComplexity 28 -- Handles BOM rejection and byte order, whole code units, and a split surrogate pair.
 function decodeUnits(
   module: string,
   errors: string,
@@ -106,32 +113,38 @@ function decodeUnits(
   unit: number
 ): [string, number, number] {
   let start = 0;
-  let order = module.endsWith('_le') ? 1 : module.endsWith('_be') ? 2 : state;
-  if (order === 0) {
-    if (data.length < unit && !final) return ['', 0, 0];
-    const found = byteOrderMark(data, unit);
-    if (found === undefined && data.length >= unit) {
-      throw new PyError(
-        unicodeException('UnicodeDecodeError', [
-          unit === 2 ? 'utf-16' : 'utf-32',
-          newBytes(data),
-          0n,
-          BigInt(unit),
-          'Stream does not start with BOM',
-        ])
-      );
-    }
-    order = found === 'big' ? 2 : 1;
+  const explicit = module.endsWith('_le') || module.endsWith('_be');
+  let order = module.endsWith('_le') ? 0 : module.endsWith('_be') ? 1 : state;
+  if (order === 2) {
+    if (data.length < unit && !final) return ['', 0, 2];
+    const found = requiredByteOrderMark(data, unit);
+    if (found === undefined) return [decodeBytes(data, unit === 2 ? 'utf-16-le' : 'utf-32-le', errors), data.length, 2];
+    order = found === 'big' ? 1 : 0;
     if (found !== undefined) start = unit;
   }
   let end = final ? data.length : start + Math.floor((data.length - start) / unit) * unit;
   // A UTF-16 high surrogate waits for the low one that follows it.
   if (unit === 2 && !final && end - start >= 2) {
-    const high = order === 1 ? data[end - 1] : data[end - 2];
+    const high = order === 0 ? data[end - 1] : data[end - 2];
     if (high >= 0xd8 && high <= 0xdb) end -= 2;
   }
-  const name = `${unit === 2 ? 'utf-16' : 'utf-32'}-${order === 1 ? 'le' : 'be'}`;
-  return [decodeBytes(data.subarray(start, end), name, errors), end, order];
+  const name = `${unit === 2 ? 'utf-16' : 'utf-32'}-${order === 0 ? 'le' : 'be'}`;
+  return [decodeBytes(data.subarray(start, end), name, errors), end, explicit ? 0 : order];
+}
+
+/** A generic UTF-16/32 stream must start with a BOM once a complete code unit is available. */
+function requiredByteOrderMark(data: Uint8Array, unit: number): 'little' | 'big' | undefined {
+  const found = byteOrderMark(data, unit);
+  if (found !== undefined || data.length < unit) return found;
+  throw new PyError(
+    unicodeException('UnicodeDecodeError', [
+      unit === 2 ? 'utf-16' : 'utf-32',
+      newBytes(data),
+      0n,
+      BigInt(unit),
+      'Stream does not start with BOM',
+    ])
+  );
 }
 
 /** The byte order the BOM at the start of UTF-16 or UTF-32 data gives, or undefined without one. */

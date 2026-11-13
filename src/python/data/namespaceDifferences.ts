@@ -56,12 +56,14 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
   '_random.Random': '__new__ __init__ random seed getstate setstate getrandbits __doc__ __module__',
   '_struct.Struct':
     '__new__ __repr__ __getattribute__ __setattr__ __delattr__ __init__ iter_unpack pack pack_into unpack unpack_from __sizeof__ format size __doc__ __module__',
+  '_struct.unpack_iterator': '__getattribute__ __iter__ __next__ __length_hint__ __doc__ __module__',
   '_thread.RLock':
     '__new__ __repr__ acquire release locked _is_owned _acquire_restore _release_save _recursion_count __enter__ __exit__ _at_fork_reinit __doc__ __module__',
   '_thread._ExceptHookArgs':
     '__new__ __repr__ __reduce__ __replace__ exc_type exc_value exc_traceback thread __doc__ __module__ n_sequence_fields n_fields n_unnamed_fields __match_args__',
   '_thread.lock':
     '__new__ __repr__ acquire_lock acquire release_lock release locked_lock locked __enter__ __exit__ _at_fork_reinit __doc__ __module__',
+  '_tokenize.TokenizerIter': '__new__ __getattribute__ __iter__ __next__ __doc__ __module__',
   'annotationlib.Format':
     '_generate_next_value_ __module__ __firstlineno__ __static_attributes__ _new_member_ _use_args_ _member_names_ _member_map_ _value2member_map_ _hashable_values_ _unhashable_values_ _unhashable_values_map_ _member_type_ _value_repr_ __doc__ VALUE VALUE_WITH_FAKE_GLOBALS FORWARDREF STRING __format__ __new__',
   'annotationlib.ForwardRef':
@@ -676,6 +678,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ],
       [],
     ],
+    _string: [['__doc__', '__package__', '__loader__', '__spec__'], []],
     _symtable: [
       [],
       [
@@ -709,6 +712,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ],
     ],
     _thread: [[], ['_start_thread', '_monotonic']],
+    _tokenize: [['__doc__', '__package__', '__loader__', '__spec__'], []],
     annotationlib: [
       [],
       [
@@ -862,6 +866,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       [],
       [
         '_decode_chunk',
+        '_initial_decoder_state',
         '_encode_chunk',
         '_stateful_codec',
         '_codec_name',
@@ -1236,12 +1241,14 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     ],
     '_random.Random': [['__module__'], []],
     '_struct.Struct': [['__getattribute__', '__setattr__', '__delattr__', '__init__', '__sizeof__', '__module__'], []],
+    '_struct.unpack_iterator': [['__getattribute__', '__module__'], ['__repr__']],
     '_thread.RLock': [[], ['acquire_lock', 'release_lock']],
     '_thread._ExceptHookArgs': [
       ['__reduce__', '__replace__', '__match_args__'],
       ['__firstlineno__', '__static_attributes__'],
     ],
     '_thread._local': [['__module__'], []],
+    '_tokenize.TokenizerIter': [['__getattribute__', '__module__'], []],
     '_weakrefset.WeakSet': [['__class_getitem__'], ['_live', '__abstractmethods__', '_abc_impl']],
     'abc.abstractclassmethod': [[], []],
     'abc.abstractstaticmethod': [[], []],
@@ -1359,6 +1366,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     ],
     'binascii.Error': [['__module__'], []],
     'binascii.Incomplete': [['__module__'], []],
+    'builtins.odict_iterator': [['__reduce__'], []],
     'calendar.Day': [
       [
         '_generate_next_value_',

@@ -339,7 +339,7 @@ export function statefulCodecFunction(encoding: string, direction: 'encode' | 'd
   const module = codecModule(encoding);
   if (module === undefined || !hasTextCodec(module)) return None;
   const codec = lookupCodec(module, direction);
-  if (direction === 'decode') return codec.incrementalDecoder ? incrementalDecoder(module) : None;
+  if (direction === 'decode') return codec.incrementalDecoder ? incrementalDecoder(module, true) : None;
   return codec.incrementalEncoder ? incrementalEncoder(module) : None;
 }
 
@@ -347,10 +347,10 @@ export function statefulCodecFunction(encoding: string, direction: 'encode' | 'd
  * The decoder of an IncrementalDecoder or StreamReader of a multibyte codec, which keeps the codec's state from one
  * call to the next: `decode(data, errors, final)` gives the text and how many bytes it used.
  */
-function incrementalDecoder(module: string): PyValue {
+function incrementalDecoder(module: string, withState = false): PyValue {
   const codec = lookupCodec(module, 'decode');
   const decode = codec.incrementalDecoder?.();
-  return builtin('decode', 'expected', 3, 3, ([input, errors, final]) => {
+  const callable = builtin('decode', 'expected', 3, 3, ([input, errors, final]) => {
     if (!decode) return decodeWith(module, input, errors, isTruthy(final), `${module}_decode`);
     const data = requireBytes(input);
     const handling = new ErrorHandling(
@@ -362,6 +362,15 @@ function incrementalDecoder(module: string): PyValue {
     const { text, consumed } = decode(data, handling, isTruthy(final));
     return newTuple([text, BigInt(consumed)]);
   });
+  if (!withState) return callable;
+  return newTuple([
+    callable,
+    builtin('getstate', 'none', 0, 0, () => decode?.getState() ?? 0n),
+    builtin('setstate', 'one', 1, 1, ([state]) => {
+      decode?.setState(toIndex(state));
+      return None;
+    }),
+  ]);
 }
 
 /** The encoder of an IncrementalEncoder or StreamWriter of a multibyte codec, which keeps the codec's state. */

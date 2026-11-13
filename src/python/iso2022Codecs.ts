@@ -405,7 +405,16 @@ for (const [name, config] of Object.entries(CONFIGS)) {
   registerStatefulCodec(name, {
     decoder: () => {
       const state: DecoderState = { g: [ASCII, ASCII, ASCII], shifted: false, escapeThroughout: false };
-      return (data, index) => decodeStep(config, state, data, index);
+      return Object.assign((data: Uint8Array, index: number) => decodeStep(config, state, data, index), {
+        getState: () =>
+          BigInt(state.g[0] + state.g[1] * 256 + state.g[2] * 65_536) +
+          (BigInt(Number(state.shifted) + 2 * Number(state.escapeThroughout)) << 32n),
+        setState: (value: bigint) => {
+          state.g = [Number(value & 255n), Number((value >> 8n) & 255n), Number((value >> 16n) & 255n)];
+          state.shifted = (value & (1n << 32n)) !== 0n;
+          state.escapeThroughout = (value & (2n << 32n)) !== 0n;
+        },
+      });
     },
     encoder: () => {
       const state: EncoderState = { g0: ASCII, g1: ASCII, shifted: false };

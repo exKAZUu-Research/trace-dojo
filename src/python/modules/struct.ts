@@ -303,8 +303,7 @@ function packBytes(layout: Layout, values: PyValue[]): PyValue {
   return newBytes(out);
 }
 
-const unpackIteratorClass = iteratorClass('unpack_iterator');
-unpackIteratorClass.module = '_struct';
+const unpackIteratorClass = iteratorClass('_struct.unpack_iterator');
 method(
   unpackIteratorClass,
   '__repr__',

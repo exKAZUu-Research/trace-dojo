@@ -45,7 +45,10 @@ SAMPLES = [${iteratorSamples.join(', ')}, {}.keys(), {}.values(), {}.items(), _g
 _coro.close()
 `;
 
-const PROGRAM = (modules: readonly string[], types: boolean): string => `import sys, types, builtins, collections
+const PROGRAM = (
+  modules: readonly string[],
+  types: boolean
+): string => `import sys, types, builtins, collections, struct, string, tokenize, re
 MODULES = ${JSON.stringify(modules)}
 ${SAMPLES}
 
