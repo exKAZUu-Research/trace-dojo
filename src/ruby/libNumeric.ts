@@ -17,7 +17,7 @@ import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, type RHash, type RProc, RString, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str, truthy } from './values';
 
 type Num = bigint | number;
@@ -89,6 +89,8 @@ function intPow(base: bigint, exponent: bigint): Value {
     if (base === 0n) throw zeroDivisionError();
     throw new UnsupportedFeatureError('負の指数の累乗（結果が有理数になるもの）');
   }
+  if (base === 0n || base === 1n) return base;
+  if (base === -1n) return exponent % 2n === 0n ? 1n : -1n;
   const bits = integerBits(base);
   if (base !== 0n && base !== 1n && base !== -1n && BigInt(bits) * exponent > 32_000_000n) {
     throw argumentError('exponent is too large');
@@ -373,6 +375,7 @@ def('Integer', '>>', 1, function* (self: bigint, [other]) {
 });
 
 function shift(value: bigint, amount: bigint): bigint {
+  if (value === 0n) return 0n;
   if (amount >= 0n) {
     if (amount > 32_000_000n) throw rangeError('shift width too big');
     chargeIntegerResult(integerBits(value) + Number(amount), integerBits(value) + Number(amount));
@@ -423,7 +426,7 @@ def('Integer', 'chr', [0, 1], (self: bigint, args) => {
   return char;
 });
 def('Integer', 'ord', 0, (self) => self);
-def('Integer', 'size', 0, () => 8n);
+def('Integer', 'size', 0, (self: bigint) => BigInt(Math.max(8, Math.ceil(integerBits(self) / 8))));
 def('Integer', 'bit_length', 0, (self: bigint) => {
   const value = self < 0n ? -self - 1n : self;
   return value === 0n ? 0n : BigInt(value.toString(2).length);
@@ -498,6 +501,7 @@ function roundInteger(
   mode: 'up' | 'even' | 'down' | 'floor' | 'ceil' | 'truncate'
 ): bigint {
   if (digits >= 0n) return value;
+  if (digits < -9_223_372_036_854_775_807n) throw rangeError("bignum too big to convert into 'long'");
   const unit = 10n ** -digits;
   const remainder = floorMod(value, unit);
   const down = value - remainder;
@@ -651,9 +655,12 @@ function* exceptionOption(keywords: RHash | undefined): Gen<boolean> {
 export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen {
   const raise = yield* exceptionOption(keywords);
   const [value, baseValue] = args;
+  const base = value instanceof RString && baseValue !== undefined ? Number(yield* toInt(baseValue)) : undefined;
+  if (base !== undefined && (base < 0 || (base !== 0 && (base < 2 || base > 36)))) {
+    throw argumentError(`invalid radix ${base}`);
+  }
   try {
     if (value instanceof RString) {
-      const base = baseValue === undefined ? undefined : Number(yield* toInt(baseValue));
       const parsed = parseIntegerStrict(value.s, base);
       if (parsed === undefined) throw argumentError(`invalid value for Integer(): ${JSON.stringify(value.s)}`);
       return parsed;
@@ -666,7 +673,7 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
     if (respondsTo(value, 'to_i')) return yield* callMethod(value, 'to_i', []);
     throw typeError(`can't convert ${realClassOf(value).name} into Integer`);
   } catch (error) {
-    if (!raise) return NIL;
+    if (!raise && error instanceof RubyError) return NIL;
     throw error;
   }
 }
@@ -674,6 +681,9 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
 /** Parses an Integer as `Integer()` does: prefixes, underscores between digits, and surrounding blanks. */
 // code-gauge-allow functionNcss 33 -- Ruby's method takes these argument forms, which the branches mirror.
 export function parseIntegerStrict(text: string, base?: number): bigint | undefined {
+  if (base !== undefined && (base < 0 || (base !== 0 && (base < 2 || base > 36)))) {
+    throw argumentError(`invalid radix ${base}`);
+  }
   const match = /^[\t\n\v\f\r ]*([+-]?)(0[xXbBoOdD]?)?([\dA-Za-z]+(?:_[\dA-Za-z]+)*)[\t\n\v\f\r ]*$/.exec(text);
   if (!match) {
     if (/^[\t\n\v\f\r ]*[+-]?0[\t\n\v\f\r ]*$/.test(text)) return 0n;
@@ -695,7 +705,11 @@ export function parseIntegerStrict(text: string, base?: number): bigint | undefi
   const valid = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, radix);
   if (![...digits.toLowerCase()].every((char) => valid.includes(char))) return undefined;
   let result = 0n;
-  for (const char of digits.toLowerCase()) result = result * BigInt(radix) + BigInt(valid.indexOf(char));
+  let position = 0;
+  for (const char of digits.toLowerCase()) {
+    if (position++ % 64 === 0) rt().spend();
+    result = result * BigInt(radix) + BigInt(valid.indexOf(char));
+  }
   return sign === '-' ? -result : result;
 }
 
@@ -717,7 +731,7 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
     if (respondsTo(value, 'to_f')) return yield* callMethod(value, 'to_f', []);
     throw typeError(`can't convert ${realClassOf(value).name} into Float`);
   } catch (error) {
-    if (!raise) return NIL;
+    if (!raise && error instanceof RubyError) return NIL;
     throw error;
   }
 }
@@ -755,6 +769,7 @@ export function parseIntegerLenient(text: string, base = 10): bigint {
   let result = 0n;
   let lastWasDigit = false;
   for (; index < text.length; index++) {
+    if (index % 64 === 0) rt().spend();
     const char = text[index].toLowerCase();
     if (char === '_' && lastWasDigit && valid.includes(text[index + 1]?.toLowerCase() ?? '')) {
       lastWasDigit = false;

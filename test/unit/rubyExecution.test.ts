@@ -407,6 +407,23 @@ test.each([
     'a = [1]; s = Set[a]; s.delete_if { |x| x << 2; true }; p s.size, s.to_a',
     '0\n[]\n',
   ],
+  ['constant-size powers and shifts', 'p 0 << (10**30), 1 ** (10**30), (-1) ** (10**30)', '0\n1\n1\n'],
+  ['wide Integer sizes', 'p (2**64).size, (2**100).size', '9\n13\n'],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('invalid radices and extreme rounding return Ruby errors', () => {
+  expect(run('p Integer("0", 37, exception: false)')).toMatchObject({
+    uncaughtException: 'invalid radix 37 (ArgumentError)',
+  });
+  expect(run('p 1.round(-(10**30))')).toMatchObject({
+    uncaughtException: "bignum too big to convert into 'long' (RangeError)",
+  });
+});
+
+test('unsupported conversion cannot be hidden with exception false', () => {
+  expect(run('class A; def to_int; Thread; end; end; p Integer(A.new, exception: false)')).toMatchObject({
+    uncaughtException: 'スレッド（Thread）は、この採点環境では使えません。',
+  });
 });
