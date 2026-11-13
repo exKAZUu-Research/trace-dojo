@@ -100,6 +100,7 @@ def(
         grow(index + 1, self);
         while (self.items.length < index) self.items.push(NIL);
         self.items[index] = result;
+        self.items.length = index + 1;
       }
     } else {
       grow(size, self);

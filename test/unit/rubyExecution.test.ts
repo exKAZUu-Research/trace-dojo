@@ -2329,6 +2329,11 @@ test('Array initializer writes to current storage and checks frozen state', () =
   ).toMatchObject({
     stdout: 'FrozenError\n[0]\n',
   });
+  expect(
+    run('class A<Array;def initialize;super(2){|i|replace([7,8,9,10]) if i==0;p self;i};end;end;p A.new')
+  ).toMatchObject({
+    stdout: '[7, 8, 9, 10]\n[0]\n[0, 1]\n',
+  });
 });
 
 test('Array comparison converts array-like values and handles callback shrinkage', () => {
