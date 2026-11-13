@@ -384,7 +384,9 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
     throw argumentError("step can't be 0");
   }
   if (!block) return makeEnumerator(self, 'step', args, keywords);
-  if (limit !== NIL && !isNum(limit)) {
+  const useFloat = typeof self === 'number' || typeof limit === 'number' || typeof step === 'number';
+  if (useFloat && limit !== NIL && !isNum(limit)) limit = yield* floatStepLimit(limit);
+  if (!useFloat && limit !== NIL && !isNum(limit)) {
     let value: Num = self;
     const ascending = Number(step) > 0;
     for (;;) {
@@ -395,7 +397,6 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
     }
     return self;
   }
-  const useFloat = typeof self === 'number' || typeof limit === 'number' || typeof step === 'number';
   if (!useFloat) {
     const begin = self as bigint;
     const by = step as bigint;
@@ -421,6 +422,17 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
     yield* callBlock(block, [by > 0 ? Math.min(value, end) : Math.max(value, end)], false);
   }
   return self;
+}
+
+function* floatStepLimit(value: Value): Gen<number> {
+  if (value instanceof RString) throw typeError('no implicit conversion to float from string');
+  if (!respondsTo(value, 'to_f', true)) throw typeError(`can't convert ${realClassOf(value).name} into Float`);
+  const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
+  if (typeof converted !== 'number') {
+    const name = realClassOf(value).name;
+    throw typeError(`can't convert ${name} to Float (${name}#to_f gives ${realClassOf(converted).name})`);
+  }
+  return converted;
 }
 
 // Integer -------------------------------------------------------------------------------------------------------------

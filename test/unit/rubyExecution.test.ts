@@ -2251,6 +2251,17 @@ test('Integer step compares numeric-like limits through coerce', () => {
   });
 });
 
+test('Float step converts numeric-like limits through to_f', () => {
+  expect(run('class A;def to_f;1.6;end;end;p 1.step(A.new,0.5).to_a')).toMatchObject({
+    stdout: '[1.0, 1.5]\n',
+  });
+  expect(
+    run('class A;def coerce(x);[x,3];end;end;begin;1.step(A.new,0.5){|x|p x};rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({
+    stdout: 'TypeError\n"can\'t convert A into Float"\n',
+  });
+});
+
 test('Kernel numeric conversions invoke private conversion methods', () => {
   expect(run('class A;private;def to_int;12;end;end;p Integer(A.new)')).toMatchObject({ stdout: '12\n' });
   expect(run('class A;private;def to_str;"12";end;end;p Integer(A.new)')).toMatchObject({ stdout: '12\n' });
@@ -2286,6 +2297,16 @@ test('numeric equality honors reopened operand classes', () => {
     stdout: 'hit\ntrue\n',
   });
   expect(run('class TrueClass;def ==(x);true;end;end;p 1==true')).toMatchObject({ stdout: 'true\n' });
+});
+
+test('container equality skips callbacks for identical values', () => {
+  expect(
+    run(
+      'class X;def ==(x);puts :hit;false;end;end;x=X.new;p [x]==[x], [x].include?(x), [x].index(x), [x].count(x), {a:x}=={a:x}'
+    )
+  ).toMatchObject({
+    stdout: 'true\ntrue\n0\n1\ntrue\n',
+  });
 });
 
 test('Array bounds use current storage after selector conversions', () => {
