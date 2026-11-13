@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 541 -- The methods and attributes of the builtin types it defines belong together.
+// code-gauge-allow-file fileNcss 563 -- The methods and attributes of the builtin types it defines belong together.
 import { pyRepr, pyStr } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
@@ -24,6 +24,7 @@ import {
   typeError,
   typeName,
 } from './types';
+import { cachedTyping } from './typingCache';
 import {
   type Kwargs,
   PyBuiltinFunction,
@@ -213,6 +214,15 @@ export function isAlias(value: PyValue): value is PyOpaque {
   );
 }
 
+export function unpackedType(value: PyValue): PyValue | undefined {
+  if (value instanceof PyTypingAlias && value.isUnpack) return value.origin;
+  if (!isAlias(value)) return undefined;
+  const { origin, args } = aliasOf(value);
+  return origin instanceof PyOpaque && origin.cls.isSubclassOf(specialFormClass) && formOf(origin).name === 'Unpack'
+    ? args[0]
+    : undefined;
+}
+
 /** Whether `int | other` makes a union, as unionobject.c's is_unionable decides; typing's objects make their own. */
 function isUnionable(value: PyValue): boolean {
   return (
@@ -366,7 +376,13 @@ method(specialFormClass, '__repr__', 'none', 0, 0, (self) => `typing.${formOf(se
 method(specialFormClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
   const { getitem } = formOf(self);
   if (!getitem) throw typeError(`${pyRepr(self)} is not subscriptable`);
-  return getitem(self as PyOpaque, key);
+  return cachedTyping(
+    'specialForm',
+    self,
+    key,
+    () => getitem(self as PyOpaque, key),
+    classOf(self) === typedCacheSpecialFormClass
+  );
 });
 method(
   specialFormClass,
@@ -480,49 +496,59 @@ for (const cls of [specialAliasClass, tupleTypeClass, callableTypeClass]) {
 }
 
 method(specialAliasClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
-  const data = specialOf(self);
-  let params = tupleItems(key).map((param) => typeCheck(param, 'Parameters to generic types must be types.'));
-  const { nparams, defaults } = data;
-  if (defaults.length > 0 && params.length < nparams && params.length + defaults.length >= nparams) {
-    params = [...params, ...defaults.slice(params.length - nparams + defaults.length)];
-  }
-  if (params.length !== nparams) {
-    if (nparams === 0) throw typeError(`${pyRepr(self)} is not a generic class`);
-    const expected = defaults.length > 0 ? `at least ${nparams - defaults.length}` : String(nparams);
-    throw typeError(
-      `Too ${params.length > nparams ? 'many' : 'few'} arguments for ${pyRepr(self)}; actual ${params.length}, expected ${expected}`
-    );
-  }
-  return newTypingAlias(data.origin, params, data.name, data.inst);
+  return cachedTyping('specialAlias', self, key, () => {
+    const data = specialOf(self);
+    let params = tupleItems(key).map((param) => typeCheck(param, 'Parameters to generic types must be types.'));
+    const { nparams, defaults } = data;
+    if (defaults.length > 0 && params.length < nparams && params.length + defaults.length >= nparams) {
+      params = [...params, ...defaults.slice(params.length - nparams + defaults.length)];
+    }
+    if (params.length !== nparams) {
+      if (nparams === 0) throw typeError(`${pyRepr(self)} is not a generic class`);
+      const expected = defaults.length > 0 ? `at least ${nparams - defaults.length}` : String(nparams);
+      throw typeError(
+        `Too ${params.length > nparams ? 'many' : 'few'} arguments for ${pyRepr(self)}; actual ${params.length}, expected ${expected}`
+      );
+    }
+    return newTypingAlias(data.origin, params, data.name, data.inst);
+  });
 });
 
 method(tupleTypeClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
-  const data = specialOf(self);
-  const items = key instanceof PyTuple && classOf(key).isBuiltin ? [...key.items] : [key];
-  if (items.length === 2 && items[1] === Ellipsis) {
-    return newTypingAlias(
-      data.origin,
-      [typeCheck(items[0], 'Tuple[t, ...]: t must be a type.'), Ellipsis],
-      'Tuple',
-      false
-    );
-  }
-  const params = items.map((item) => typeCheck(item, 'Tuple[t0, t1, ...]: each t must be a type.'));
-  return newTypingAlias(data.origin, params, 'Tuple', false);
+  return cachedTyping('tupleType', self, key, () => {
+    const data = specialOf(self);
+    const items = key instanceof PyTuple && classOf(key).isBuiltin ? [...key.items] : [key];
+    if (items.length === 2 && items[1] === Ellipsis) {
+      return newTypingAlias(
+        data.origin,
+        [typeCheck(items[0], 'Tuple[t, ...]: t must be a type.'), Ellipsis],
+        'Tuple',
+        false
+      );
+    }
+    const params = items.map((item) => typeCheck(item, 'Tuple[t0, t1, ...]: each t must be a type.'));
+    return newTypingAlias(data.origin, params, 'Tuple', false);
+  });
 });
 
 method(callableTypeClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
-  const data = specialOf(self);
-  if (!(key instanceof PyTuple && classOf(key).isBuiltin) || key.items.length !== 2) {
-    throw typeError('Callable must be used as Callable[[arg, ...], result].');
-  }
-  const [parameters, result] = key.items;
-  const returns = typeCheck(result, 'Callable[args, result]: result must be a type.');
-  if (parameters === Ellipsis)
-    return newTypingAlias(data.origin, [Ellipsis, returns], 'Callable', true, callableAliasClass);
-  const items = parameters instanceof PyList ? parameters.items : tupleItems(parameters);
-  const args = items.map((item) => typeCheck(item, 'Callable[[arg, ...], result]: each arg must be a type.'));
-  return newTypingAlias(data.origin, [...args, returns], 'Callable', true, callableAliasClass);
+  const cacheKey =
+    key instanceof PyTuple && key.items[0] instanceof PyList
+      ? newTuple([newTuple(key.items[0].items), ...key.items.slice(1)])
+      : key;
+  return cachedTyping('callableType', self, cacheKey, () => {
+    const data = specialOf(self);
+    if (!(key instanceof PyTuple && classOf(key).isBuiltin) || key.items.length !== 2) {
+      throw typeError('Callable must be used as Callable[[arg, ...], result].');
+    }
+    const [parameters, result] = key.items;
+    const returns = typeCheck(result, 'Callable[args, result]: result must be a type.');
+    if (parameters === Ellipsis)
+      return newTypingAlias(data.origin, [Ellipsis, returns], 'Callable', true, callableAliasClass);
+    const items = parameters instanceof PyList ? parameters.items : tupleItems(parameters);
+    const args = items.map((item) => typeCheck(item, 'Callable[[arg, ...], result]: each arg must be a type.'));
+    return newTypingAlias(data.origin, [...args, returns], 'Callable', true, callableAliasClass);
+  });
 });
 
 /**
@@ -556,7 +582,9 @@ function isSubclassOfOrigin(cls: PyClass, origin: PyValue): boolean {
 
 for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, annotatedAliasClass]) {
   method(cls, '__repr__', 'none', 0, 0, (self) => typingAliasRepr(self as PyOpaque));
-  method(cls, '__getitem__', 'one', 1, 1, (self, [key]) => substituteAlias(self as PyOpaque, key));
+  method(cls, '__getitem__', 'one', 1, 1, (self, [key]) =>
+    unpackedType(self) instanceof PyTypeParam ? key : substituteAlias(self as PyOpaque, key)
+  );
   defineMethod(cls, '__call__', (self, args, kwargs) => {
     const result = callAlias({ ...aliasOf(self), origin: originOf(self as PyOpaque) }, args, kwargs);
     // `_BaseGenericAlias.__call__` records the alias on the instance where it can.
@@ -581,10 +609,20 @@ for (const cls of [typingAliasClass, callableAliasClass, literalAliasClass, anno
   method(cls, '__hash__', 'none', 0, 0, (self) =>
     pyHash(newTuple([aliasOf(self).origin, newTuple(aliasOf(self).args)]))
   );
+  // code-gauge-allow functionCognitiveComplexity 20 -- Alias attributes share origin, arguments and unpack state; splitting only moves the cases.
   opaqueAttributes(cls, (self, name) => {
     const alias = aliasOf(self);
     const isAnnotated = self.cls === annotatedAliasClass;
     if (name === '__origin__') return originOf(self);
+    const unpacked = unpackedType(self);
+    if (name === '__typing_is_unpacked_typevartuple__' && unpacked !== undefined)
+      return unpacked instanceof PyTypeParam && unpacked.kind === 'TypeVarTuple';
+    if (name === '__typing_unpacked_tuple_args__' && unpacked !== undefined) {
+      if (!isAlias(unpacked)) return None;
+      const inner = aliasOf(unpacked);
+      if (inner.origin !== tupleClass) throw typeError('Unpack[...] must be used with a tuple type');
+      return newTuple(inner.args);
+    }
     if (name === '__args__') return newTuple(isAnnotated ? alias.args.slice(0, 1) : alias.args);
     if (name === '__parameters__') return newTuple(collectParameters(alias.args));
     if (name === '__metadata__' && isAnnotated) return newTuple(alias.args.slice(1));

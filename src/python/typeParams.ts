@@ -12,9 +12,8 @@ import {
   toArray,
 } from './objects';
 import { equals } from './operators';
-import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
-import { newGenericAlias, typeConvert } from './typeHints';
+import { collectParameters, newGenericAlias, typeConvert, unpackedType } from './typeHints';
 import {
   builtinClass,
   defineMethod,
@@ -27,6 +26,7 @@ import {
   typeError,
   typeName,
 } from './types';
+import { cachedTyping } from './typingCache';
 import {
   type Kwargs,
   PyBuiltinFunction,
@@ -208,7 +208,12 @@ export function typeText(value: PyValue): string {
 /** `cls[key]` for a class that derives from Generic, as `Generic.__class_getitem__` checks it. */
 export function subscriptGeneric(cls: PyClass, key: PyValue): PyValue {
   const args = key instanceof PyTuple ? [...key.items] : [key];
-  return cachedAlias(cls, key instanceof PyTuple, args, () => specializeGenericArgs(cls, args.map(typeConvert)));
+  return cachedTyping(
+    'genericClass',
+    cls,
+    key,
+    () => new PyTypingAlias(cls, specializeGenericArgs(cls, args.map(typeConvert)))
+  );
 }
 
 function specializeGenericArgs(cls: PyClass, args: PyValue[]): PyValue[] {
@@ -239,42 +244,15 @@ function checkParameterDeclaration(cls: PyClass, args: PyValue[]): void {
   if (!args.every((arg) => isGenericParameter(arg))) {
     throw typeError(`Parameters to ${name}[...] must all be type variables or parameter specification variables.`);
   }
-  const params = args.map((arg) => (arg instanceof PyTypingAlias ? arg.origin : arg));
+  const params = args.map((arg) => unpackedType(arg) ?? arg);
   if (new Set(params).size !== params.length) throw typeError(`Parameters to ${name}[...] must all be unique`);
 }
 
-interface AliasEntry {
-  cls: PyClass;
-  tupleKey: boolean;
-  key: readonly PyValue[];
-  alias: PyTypingAlias;
-}
-
-const aliasCache = new WeakMap<Runtime, AliasEntry[]>();
-
-/** The per-run bounded LRU used by typing's generic subscription cache. */
-function cachedAlias(cls: PyClass, tupleKey: boolean, key: PyValue[], args: () => PyValue[]): PyTypingAlias {
-  const runtime = currentRuntime();
-  const entries = aliasCache.get(runtime) ?? [];
-  aliasCache.set(runtime, entries);
-  const index = entries.findIndex(
-    (entry) =>
-      entry.cls === cls &&
-      entry.tupleKey === tupleKey &&
-      entry.key.length === key.length &&
-      entry.key.every((arg, i) => arg === key[i])
-  );
-  const entry =
-    index === -1 ? { cls, tupleKey, key, alias: new PyTypingAlias(cls, args()) } : entries.splice(index, 1)[0];
-  entries.push(entry);
-  if (entries.length > 128) entries.shift();
-  return entry.alias;
-}
-
 function isGenericParameter(value: PyValue): boolean {
+  const unpacked = unpackedType(value);
   return (
     (value instanceof PyTypeParam && value.kind !== 'TypeVarTuple') ||
-    (value instanceof PyTypingAlias && value.isUnpack)
+    (unpacked instanceof PyTypeParam && unpacked.kind === 'TypeVarTuple')
   );
 }
 
@@ -307,16 +285,6 @@ function isKind(kind: TypeParamKind): (param: PyValue) => boolean {
 export function parametersOf(cls: PyClass): PyValue[] {
   const parameters = cls.lookup('__parameters__');
   return parameters instanceof PyTuple ? [...parameters.items] : [];
-}
-
-/** The type parameters that types mention, in order and without repeats, as `typing` collects them. */
-function collectParameters(args: readonly PyValue[]): PyValue[] {
-  const found: PyValue[] = [];
-  for (const arg of args) {
-    const params = arg instanceof PyTypeParam ? [arg] : arg instanceof PyTypingAlias ? arg.parameters : [];
-    for (const param of params) if (!found.includes(param)) found.push(param);
-  }
-  return found;
 }
 
 /**

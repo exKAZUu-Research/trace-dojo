@@ -1,11 +1,12 @@
 import { bytesLikeData, latin1Text, newBytes, PyBytes, PyMemoryView } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
-import { viewOf } from '../memoryview';
+import { withState } from '../iteratorStates';
+import { isCContiguous, viewOf } from '../memoryview';
 import { registerModule } from '../modules';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
-import { bindValue, callValue, isTruthy, lookupSpecial } from '../objects';
+import { bindValue, callValue, isTruthy, lookupSpecial, nativeIterator } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import {
   type CodeInfo,
@@ -28,7 +29,7 @@ import {
   typeName,
   unbox,
 } from '../types';
-import { DONE, PyDescriptor, PyError, PyIterator, PyOpaque, type PyValue } from '../values';
+import { DONE, PyDescriptor, PyError, type PyIterator, PyOpaque, type PyValue } from '../values';
 import { builtinClassWithBase } from './moduleClasses';
 
 const structErrorClass = builtinClassWithBase('error', exceptionClassNamed('Exception'), 'struct');
@@ -314,23 +315,48 @@ method(
 );
 
 function iterUnpack(layout: Layout, buffer: PyValue): PyValue {
-  const data = bufferData(buffer);
-  if (layout.size === 0) throw structError('cannot iteratively unpack with a struct of length 0');
-  if (data.length % layout.size !== 0) {
-    throw structError(`iterative unpacking requires a buffer of a multiple of ${layout.size} bytes`);
-  }
+  const view = unpackView(layout, buffer);
   let offset = 0;
-  const iterator = new PyIterator(
-    unpackIteratorClass,
+  let exhausted = false;
+  const next = withState(
     () => {
-      if (offset >= data.length) return DONE;
+      if (exhausted) return DONE;
+      if (offset >= view.nbytes) {
+        exhausted = true;
+        view.exports.delete(iterator);
+        if (view !== buffer) view.release();
+        return DONE;
+      }
+      const data = view.source.data.subarray(view.offset, view.offset + view.nbytes);
       offset += layout.size;
       return unpack(layout, data, offset - layout.size);
     },
-    () => [buffer]
+    { holds: () => (exhausted ? [] : [view]) }
   );
-  remaining.set(iterator, () => (data.length - offset) / layout.size);
+  const iterator = nativeIterator(unpackIteratorClass, next, () => [view]);
+  view.exports.add(iterator);
+  remaining.set(iterator, () => (view.nbytes - offset) / layout.size);
   return iterator;
+}
+
+function unpackView(layout: Layout, buffer: PyValue): PyMemoryView {
+  const view = buffer instanceof PyMemoryView ? buffer : viewOf(buffer, '');
+  view.checkReleased();
+  if (!isCContiguous(view)) {
+    if (view !== buffer) view.release();
+    throw new PyError(
+      newException(exceptionClassNamed('BufferError'), ['memoryview: underlying buffer is not C-contiguous'])
+    );
+  }
+  if (layout.size === 0 || view.nbytes % layout.size !== 0) {
+    if (view !== buffer) view.release();
+    throw structError(
+      layout.size === 0
+        ? 'cannot iteratively unpack with a struct of length 0'
+        : `iterative unpacking requires a buffer of a multiple of ${layout.size} bytes`
+    );
+  }
+  return view;
 }
 
 const remaining = new WeakMap<PyIterator, () => number>();

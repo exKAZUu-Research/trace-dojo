@@ -171,7 +171,9 @@ function typeHints(args: PyValue[], kwargs: Kwargs): PyDict {
     }
     return hints;
   }
-  const annotations = getAttribute(target, '__annotations__');
+  const annotations = callValue(currentRuntime().importModule('annotationlib').dict.get('get_annotations') as PyValue, [
+    target,
+  ]);
   const ownGlobals =
     target instanceof PyFunction
       ? target.globals

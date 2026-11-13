@@ -33,6 +33,7 @@ import {
   typeVarTupleClass,
 } from '../typeParams';
 import {
+  boolClass,
   dictClass,
   frozensetClass,
   listClass,
@@ -1125,6 +1126,21 @@ function aliases(abc: PyModule, collections: PyModule, re: PyModule): [string, P
     ['OrderedDict', newSpecialAlias(orderedDictClass, 2, { name: 'OrderedDict' })],
     ['Counter', newSpecialAlias(counterClass, 1, { name: 'Counter' })],
     ['ChainMap', newSpecialAlias(collections.dict.get('ChainMap') as PyValue, 2, { name: 'ChainMap' })],
+    [
+      'ContextManager',
+      newSpecialAlias(currentRuntime().importModule('contextlib').dict.get('AbstractContextManager') as PyValue, 2, {
+        name: 'ContextManager',
+        defaults: [currentRuntime().unionType(boolClass, noneClass)],
+      }),
+    ],
+    [
+      'AsyncContextManager',
+      newSpecialAlias(
+        currentRuntime().importModule('contextlib').dict.get('AbstractAsyncContextManager') as PyValue,
+        2,
+        { name: 'AsyncContextManager', defaults: [currentRuntime().unionType(boolClass, noneClass)] }
+      ),
+    ],
     ['Generator', newSpecialAlias(abcClass('Generator'), 3, { defaults: [noneClass, noneClass] })],
     ['Awaitable', newSpecialAlias(abcClass('Awaitable'), 1, { name: 'Awaitable' })],
     ['Coroutine', newSpecialAlias(abcClass('Coroutine'), 3, { name: 'Coroutine' })],

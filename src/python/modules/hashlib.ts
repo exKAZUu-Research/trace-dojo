@@ -114,7 +114,7 @@ function messageData(value: PyValue): Uint8Array {
 
 function newHash(cls: PyClass, state: HashState, initial: PyValue | undefined): PyOpaque {
   const hash = new PyOpaque(cls, state.name, state);
-  if (initial !== undefined && initial !== None) append(state, messageData(initial));
+  if (initial !== undefined) append(state, messageData(initial));
   return hash;
 }
 

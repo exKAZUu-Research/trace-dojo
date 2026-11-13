@@ -112,6 +112,7 @@ function bytesSlots(length: number): number {
 
 /** A `memoryview`: a one-dimensional view of items of `format` over the bytes of a bytes or bytearray object. */
 export class PyMemoryView extends PyObject {
+  readonly exports = new Set<PyObject>();
   released = false;
   /** The dimensions of a view that cast() gave more than one, or undefined for a one-dimensional view. */
   shape?: number[];
@@ -171,6 +172,16 @@ export class PyMemoryView extends PyObject {
 
   release(): void {
     if (this.released) return;
+    if (this.exports.size > 0) {
+      const reachable = currentRuntime().reachableObjects([], this.exports);
+      for (const owner of this.exports) if (!reachable.has(owner)) this.exports.delete(owner);
+      if (this.exports.size > 0)
+        throw new PyError(
+          newException(exceptionClassNamed('BufferError'), [
+            `memoryview has ${this.exports.size} exported buffer${this.exports.size === 1 ? '' : 's'}`,
+          ])
+        );
+    }
     this.released = true;
     this.source.views.delete(this);
   }

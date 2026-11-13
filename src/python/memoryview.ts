@@ -170,7 +170,8 @@ function naturalRowStride(view: PyMemoryView): number {
 }
 
 /** Whether a view's items follow one another in C order, as cast() and the contiguity attributes require. */
-function isCContiguous(view: PyMemoryView): boolean {
+export function isCContiguous(view: PyMemoryView): boolean {
+  if (view.count === 1) return true;
   if (view.stride !== view.itemsize) return false;
   return view.rowStride === undefined || (view.shape as number[])[0] <= 1;
 }
