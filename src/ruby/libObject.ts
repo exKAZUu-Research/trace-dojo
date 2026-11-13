@@ -51,7 +51,20 @@ import { arr, classOf, isA, newHash, realClassOf, singletonClassOf, str, sym, tr
 
 // Object --------------------------------------------------------------------------------------------------------------
 
-def('BasicObject', 'initialize', [0, -1], () => NIL, { visibility: 'private' });
+def('BasicObject', 'initialize', 0, () => NIL, { visibility: 'private' });
+def('BasicObject', 'initialize_copy', 1, () => NIL, { visibility: 'private' });
+for (const hook of ['initialize_dup', 'initialize_clone']) {
+  def(
+    'BasicObject',
+    hook,
+    1,
+    function* (self, [source]) {
+      yield* callMethod(self, 'initialize_copy', [source], undefined, undefined, { fcall: true });
+      return NIL;
+    },
+    { visibility: 'private' }
+  );
+}
 def('BasicObject', '==', 1, (self, [other]) => self === other || (typeof self === 'number' && self === other));
 def('BasicObject', 'equal?', 1, (self, [other]) => self === other);
 def('BasicObject', '!', 0, (self) => !truthy(self));
@@ -106,6 +119,7 @@ def('Kernel', 'hash', 0, function* (self) {
   return BigInt(hashString(yield* hashKeyOf(self)));
 });
 def('Kernel', '<=>', 1, function* (self, [other]) {
+  if (classOf(self).findMethod('==')?.owner === rt().c.Comparable) return self === other ? 0n : NIL;
   return self === other || (yield* rEquals(self, other)) ? 0n : NIL;
 });
 def('Kernel', 'to_s', 0, (self) => str(anyToS(self)));
@@ -128,7 +142,7 @@ def('Kernel', 'tap', 0, function* (self, _args, block) {
   return self;
 });
 def('Kernel', 'dup', 0, function* (self) {
-  return yield* copyObject(self, false);
+  return yield* copyObject(self, false, false);
 });
 def(
   'Kernel',
@@ -141,14 +155,14 @@ def(
         if (entry.key instanceof RSymbol && entry.key.name === 'freeze') keepFrozen = entry.value !== false;
       }
     }
-    return yield* copyObject(self, keepFrozen);
+    return yield* copyObject(self, true, keepFrozen);
   },
   { keywords: true }
 );
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Ruby's method takes these argument forms, which the branches mirror.
 // code-gauge-allow functionNcss 39 -- Ruby's method takes these argument forms, which the branches mirror.
-function* copyObject(self: Value, keepFrozen: boolean): Gen {
+function* copyObject(self: Value, clone: boolean, keepFrozen: boolean): Gen {
   if (!(self instanceof RBasic) || self instanceof RClass) return self;
   let copy: RBasic;
   if (self instanceof RString) copy = new RString(self.cls, self.s);
@@ -171,11 +185,18 @@ function* copyObject(self: Value, keepFrozen: boolean): Gen {
     return self;
   }
   if (self.ivars) copy.ivars = new Map(self.ivars);
-  if (keepFrozen) copy.frozen = self.frozen;
-  const initializeCopy = classOf(copy).findMethod('initialize_copy');
-  if (initializeCopy && initializeCopy.body.kind === 'user') {
-    yield* invoke(initializeCopy, copy, [self], undefined, undefined, false);
+  if (clone && self.singleton) {
+    const singleton = new RClass(rt().c.Class, undefined, self.singleton.superclass, false, true);
+    singleton.attached = copy;
+    singleton.includes.push(...self.singleton.includes);
+    singleton.prepends.push(...self.singleton.prepends);
+    for (const [name, method] of self.singleton.methods)
+      singleton.methods.set(name, { ...method, owner: method.owner === self.singleton ? singleton : method.owner });
+    copy.singleton = singleton;
+    invalidateMethodCaches();
   }
+  yield* callMethod(copy, clone ? 'initialize_clone' : 'initialize_dup', [self], undefined, undefined, { fcall: true });
+  if (keepFrozen) copy.frozen = self.frozen;
   return copy;
 }
 
@@ -318,7 +339,7 @@ def(
   function* (_self, [tag, value = NIL]) {
     const runtime = rt();
     for (const active of runtime.catchTags.toReversed()) {
-      if (active === tag || (yield* rEquals(active, tag))) throw new ThrowSignal(active, value);
+      if (active === tag) throw new ThrowSignal(active, value);
     }
     throw rubyError(runtime.c.UncaughtThrowError, `uncaught throw ${yield* inspect(tag)}`);
   },

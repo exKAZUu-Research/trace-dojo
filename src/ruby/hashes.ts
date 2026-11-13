@@ -26,18 +26,18 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
   cycle ??= { found: false };
   switch (typeof value) {
     case 'bigint': {
-      return `i${value}`;
+      return `i${digest(String(value))}`;
     }
     case 'number': {
-      return Object.is(value, -0) ? 'f0' : `f${value}`;
+      return Object.is(value, -0) ? 'f0' : `f${digest(String(value))}`;
     }
     case 'boolean': {
       return value ? 'T' : 'F';
     }
   }
   if (value === NIL) return 'N';
-  if (value instanceof RSymbol) return `y${value.name}`;
-  if (value instanceof RString) return `s${value.s}`;
+  if (value instanceof RSymbol) return `y${digest(value.name)}`;
+  if (value instanceof RString) return `s${digest(value.s)}`;
   if (value instanceof RArray || value instanceof RRange || value instanceof RHash) {
     const cycleIndex = ancestors.indexOf(value);
     if (cycleIndex !== -1) {
@@ -50,7 +50,7 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
       if (value instanceof RArray) {
         const parts: string[] = [];
         for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors, cycle));
-        return root && cycle.found ? 'recursive' : `a${JSON.stringify(parts)}`;
+        return root && cycle.found ? 'recursive' : `a${digest(JSON.stringify(parts))}`;
       }
       if (value instanceof RRange) {
         const encoded = `r${JSON.stringify([
@@ -58,7 +58,7 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
           value.exclusive,
           yield* hashKeyOf(value.end, ancestors, cycle),
         ])}`;
-        return root && cycle.found ? 'recursive' : encoded;
+        return root && cycle.found ? 'recursive' : `r${digest(encoded)}`;
       }
       const parts: string[] = [];
       for (const entry of value.map.values()) {
@@ -69,7 +69,7 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
           ])
         );
       }
-      return root && cycle.found ? 'recursive' : `h${JSON.stringify(parts.toSorted())}`;
+      return root && cycle.found ? 'recursive' : `h${digest(JSON.stringify(parts.toSorted()))}`;
     } finally {
       ancestors.pop();
     }
@@ -77,25 +77,44 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
   const method = classOf(value).findMethod('hash');
   if (method && method.body.kind === 'user') {
     const hash = yield* callMethod(value, 'hash', []);
-    return `u${typeof hash === 'bigint' ? hash : yield* hashKeyOf(hash, ancestors, cycle)}`;
+    return `u${digest(typeof hash === 'bigint' ? String(hash) : yield* hashKeyOf(hash, ancestors, cycle))}`;
   }
   const custom = value instanceof RObject ? (value.data as { hashKey?: () => string } | undefined) : undefined;
   if (custom?.hashKey) return custom.hashKey();
   return `o${(value as RBasic).id}`;
 }
 
+function digest(text: string): string {
+  let value = 2_166_136_261;
+  for (let index = 0; index < text.length; index++)
+    value = Math.imul(value ^ (text.codePointAt(index) as number), 16_777_619);
+  return (value >>> 0).toString(16);
+}
+
 /** Finds the entry for `key`, checking equality even when distinct keys have the same hash. */
-function* findEntry(hash: RHash, key: Value): Gen<{ slot: string; entry: HashEntry | undefined }> {
+function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; entry: HashEntry | undefined }> {
   const base = yield* hashKeyOf(key);
-  const prefix = `[${JSON.stringify(base)},`;
-  for (const [slot, entry] of hash.map) {
-    if (slot.startsWith(prefix) && (entry.key === key || truthy(yield* callMethod(key, 'eql?', [entry.key]))))
-      return { slot, entry };
+  if (hash.bucketVersion !== hash.map.version) rebuildBuckets(hash);
+  for (const slot of hash.buckets.get(base) ?? []) {
+    const entry = hash.map.get(slot);
+    if (entry && (entry.key === key || truthy(yield* callMethod(key, 'eql?', [entry.key]))))
+      return { base, slot, entry };
   }
   for (let index = 0; ; index++) {
     const slot = JSON.stringify([base, index]);
-    if (!hash.map.has(slot)) return { slot, entry: undefined };
+    if (!hash.map.has(slot)) return { base, slot, entry: undefined };
   }
+}
+
+function rebuildBuckets(hash: RHash): void {
+  hash.buckets.clear();
+  for (const slot of hash.map.keys()) {
+    const [base] = JSON.parse(slot) as [string, number];
+    const bucket = hash.buckets.get(base) ?? [];
+    bucket.push(slot);
+    hash.buckets.set(base, bucket);
+  }
+  hash.bucketVersion = hash.map.version;
 }
 
 export function* hashGet(hash: RHash, key: Value): Gen<HashEntry | undefined> {
@@ -116,7 +135,7 @@ export function* hashDefault(hash: RHash, key: Value): Gen {
 
 export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
   if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
-  const { slot, entry } = yield* findEntry(hash, key);
+  const { base, slot, entry } = yield* findEntry(hash, key);
   if (entry) {
     entry.value = value;
     return;
@@ -126,6 +145,10 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
   rt().spend();
   const stored = key instanceof RString && !key.frozen ? frozenCopy(key) : key;
   hash.map.set(slot, { key: stored, value });
+  const bucket = hash.buckets.get(base) ?? [];
+  bucket.push(slot);
+  hash.buckets.set(base, bucket);
+  hash.bucketVersion = hash.map.version;
 }
 
 function frozenCopy(key: RString): RString {
@@ -136,8 +159,15 @@ function frozenCopy(key: RString): RString {
 
 export function* hashDelete(hash: RHash, key: Value): Gen<HashEntry | undefined> {
   if (hash.frozen) throw frozenError(hash, yield* inspect(hash));
-  const { slot, entry } = yield* findEntry(hash, key);
-  if (entry) hash.map.delete(slot);
+  const { base, slot, entry } = yield* findEntry(hash, key);
+  if (entry) {
+    hash.map.delete(slot);
+    hash.buckets.set(
+      base,
+      (hash.buckets.get(base) ?? []).filter((item) => item !== slot)
+    );
+    hash.bucketVersion = hash.map.version;
+  }
   return entry;
 }
 

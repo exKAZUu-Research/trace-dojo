@@ -556,7 +556,11 @@ function isqrt(n: bigint): bigint {
 // Float ---------------------------------------------------------------------------------------------------------------
 
 def('Float', ['to_s', 'inspect'], 0, (self: number) => str(formatFloat(self)));
-def('Float', 'hash', 0, (self: number) => BigInt(Math.floor(self * 1000)));
+def('Float', 'hash', 0, (self: number) => {
+  const bits = new DataView(new ArrayBuffer(8));
+  bits.setFloat64(0, self === 0 ? 0 : self);
+  return bits.getBigUint64(0);
+});
 def('Float', ['to_i', 'to_int'], 0, (self: number) => floatToInt(self));
 def('Float', 'nan?', 0, (self: number) => Number.isNaN(self));
 def('Float', 'next_float', 0, (self: number) => nextFloat(self, 1));
@@ -564,6 +568,7 @@ def('Float', 'prev_float', 0, (self: number) => nextFloat(self, -1));
 
 function nextFloat(value: number, direction: number): number {
   if (Number.isNaN(value)) return value;
+  if (!Number.isFinite(value) && Math.sign(value) === Math.sign(direction)) return value;
   if (value === 0) return direction * Number.MIN_VALUE;
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value);
@@ -623,6 +628,7 @@ def('Float', 'truncate', [0, 1], function* (self: number, args) {
 function floorCeilDigits(value: number, digits: number, rounding: (x: number) => number): number {
   if (!Number.isFinite(value)) return value;
   const scale = 10 ** digits;
+  if (!Number.isFinite(scale) || !Number.isFinite(value * scale)) return value;
   const scaled = rounding(value * scale);
   const isFloor = rounding === Math.floor;
   const candidate = (isFloor ? scaled + 1 : scaled - 1) / scale;

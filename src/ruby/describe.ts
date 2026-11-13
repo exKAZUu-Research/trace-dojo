@@ -12,6 +12,5 @@ export function describeException(exception: RObject): string {
   const message = runToEnd(toS(runToEnd(callMethod(exception, 'message', []))));
   if (message === '') return name;
   const [first, ...rest] = message.split('\n');
-  if (first === name) return [`${first} (${name})`, ...rest].join('\n');
   return [`${first} (${name})`, ...rest].join('\n');
 }

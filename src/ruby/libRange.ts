@@ -50,9 +50,16 @@ function* iterateStrings(range: RRange, begin: RString, visit: Visit): Gen<void>
     }
   }
   if (!(end instanceof RString)) throw typeError(`can't iterate from ${realClassOf(begin).name}`);
-  const items: Value[] = [];
-  yield* callMethod(begin, 'upto', [end, exclusive], undefined, nativeCollector(items));
-  for (const item of items) if ((yield* visit(item)) === STOP) return;
+  const stop = {};
+  const block = nativeProc(1, function* ([value]) {
+    if ((yield* visit(value)) === STOP) throw stop;
+    return NIL;
+  });
+  try {
+    yield* callMethod(begin, 'upto', [end, exclusive], undefined, block);
+  } catch (error) {
+    if (error !== stop) throw error;
+  }
 }
 
 function* iterateSuccessors(range: RRange, visit: Visit): Gen<void> {
@@ -71,13 +78,6 @@ function* iterateSuccessors(range: RRange, visit: Visit): Gen<void> {
 
 function respondsToSucc(value: Value): boolean {
   return respondsTo(value, 'succ');
-}
-
-function nativeCollector(items: Value[]): RProc {
-  return nativeProc(1, ([value]) => {
-    items.push(value);
-    return NIL;
-  });
 }
 
 rangeHelpers.iterateRange = iterateRange;

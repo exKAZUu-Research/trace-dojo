@@ -86,4 +86,10 @@ export function installNatives(runtime: Runtime): void {
       });
     }
   }
+  const kernel = runtime.c.Kernel;
+  const singleton = (singletonOf as (cls: RClass) => RClass)(kernel);
+  for (const [name, method] of kernel.methods) {
+    if (method.visibility === 'private')
+      singleton.methods.set(name, { ...method, owner: singleton, visibility: 'public' });
+  }
 }

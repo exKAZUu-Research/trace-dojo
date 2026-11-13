@@ -6,7 +6,16 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { BlockDef, MethodDef } from './ast';
 import type { CoreClasses } from './bootstrap';
 import { collectGarbage } from './garbageCollection';
-import { NIL, type RClass, type RMethod, type RObject, type RProc, type Value, type Visibility } from './objects';
+import {
+  NIL,
+  type RClass,
+  type RMethod,
+  type RObject,
+  type RProc,
+  type RSymbol,
+  type Value,
+  type Visibility,
+} from './objects';
 
 /** The local variables of a method, class body, program, or block; a block's scope reaches its parent's. */
 export class Scope {
@@ -136,6 +145,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   readonly globals = new Map<string, Value>();
+  readonly symbols = new Map<string, RSymbol>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
   readonly heldArrays: Value[][] = [];
@@ -199,6 +209,18 @@ let current: Runtime | undefined;
 export function rt(): Runtime {
   if (!current) throw new Error('No Ruby runtime is running');
   return current;
+}
+
+export function* whileHeld<T>(
+  value: Value,
+  action: () => Generator<unknown, T, unknown>
+): Generator<unknown, T, unknown> {
+  rt().held.push(value);
+  try {
+    return yield* action();
+  } finally {
+    rt().held.pop();
+  }
 }
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {

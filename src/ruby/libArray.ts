@@ -13,7 +13,7 @@ import {
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
-import { hashKeyOf, hashSet } from './hashes';
+import { hashGet, hashKeyOf, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { inject, iterate, nmin, sortBy, sortValues, sum, toArray, uniqValues } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -255,7 +255,8 @@ def('Array', 'shift', [0, 1], function* (self: RArray, args) {
 });
 def('Array', ['unshift', 'prepend'], [0, -1], function* (self: RArray, args) {
   yield* modify(self);
-  self.items.unshift(...args);
+  grow(self.items.length + args.length, self);
+  self.items = [...args, ...self.items];
   return self;
 });
 def('Array', 'insert', [1, -1], function* (self: RArray, args) {
@@ -269,8 +270,9 @@ def('Array', 'insert', [1, -1], function* (self: RArray, args) {
         `index ${index - self.items.length - 1} too small for array; minimum: -${self.items.length + 1}`
       );
   }
+  grow(Math.max(index, self.items.length) + args.length - 1, self);
   while (self.items.length < index) self.items.push(NIL);
-  self.items.splice(index, 0, ...args.slice(1));
+  self.items = [...self.items.slice(0, index), ...args.slice(1), ...self.items.slice(index)];
   return self;
 });
 def('Array', 'concat', [0, -1], function* (self: RArray, args) {
@@ -283,7 +285,9 @@ def('Array', 'concat', [0, -1], function* (self: RArray, args) {
 });
 def('Array', 'replace', 1, function* (self: RArray, [other]) {
   yield* modify(self);
-  self.items = [...(yield* toAry(other)).items];
+  const items = (yield* toAry(other)).items;
+  grow(items.length, self);
+  self.items = [...items];
   return self;
 });
 def('Array', 'clear', 0, function* (self: RArray) {
@@ -403,6 +407,7 @@ def('Array', 'flatten!', [0, 1], function* (self: RArray, args) {
   const depth = args.length > 0 && args[0] !== NIL ? yield* toIndex(args[0]) : -1;
   const flattened = yield* flatten(self.items, depth, new Set([self]));
   const changed = self.items.some((item) => item instanceof RArray) && depth !== 0;
+  grow(flattened.length, self);
   self.items = flattened;
   return changed ? self : NIL;
 });
@@ -491,10 +496,10 @@ def('Array', '+', 1, function* (self: RArray, [other]) {
   return arr(items);
 });
 def('Array', ['-', 'difference'], [0, -1], function* (self: RArray, others) {
-  const excluded = new Set<string>();
-  for (const other of others) for (const item of (yield* toAry(other)).items) excluded.add(yield* hashKeyOf(item));
+  const excluded = newHash();
+  for (const other of others) for (const item of (yield* toAry(other)).items) yield* hashSet(excluded, item, true);
   const result: Value[] = [];
-  for (const item of self.items) if (!excluded.has(yield* hashKeyOf(item))) result.push(item);
+  for (const item of self.items) if (!(yield* hashGet(excluded, item))) result.push(item);
   return arr(result);
 });
 def('Array', '*', 1, function* (self: RArray, [count]) {
@@ -509,10 +514,10 @@ def('Array', '*', 1, function* (self: RArray, [count]) {
 def('Array', ['&', 'intersection'], [0, -1], function* (self: RArray, others) {
   let result = yield* uniqValues(self.items, undefined);
   for (const other of others) {
-    const keys = new Set<string>();
-    for (const item of (yield* toAry(other)).items) keys.add(yield* hashKeyOf(item));
+    const keys = newHash();
+    for (const item of (yield* toAry(other)).items) yield* hashSet(keys, item, true);
     const kept: Value[] = [];
-    for (const item of result) if (keys.has(yield* hashKeyOf(item))) kept.push(item);
+    for (const item of result) if (yield* hashGet(keys, item)) kept.push(item);
     result = kept;
   }
   return arr(result);
@@ -523,9 +528,9 @@ def('Array', ['|', 'union'], [0, -1], function* (self: RArray, others) {
   return arr(yield* uniqValues(all, undefined));
 });
 def('Array', 'intersect?', 1, function* (self: RArray, [other]) {
-  const keys = new Set<string>();
-  for (const item of (yield* toAry(other)).items) keys.add(yield* hashKeyOf(item));
-  for (const item of self.items) if (keys.has(yield* hashKeyOf(item))) return true;
+  const keys = newHash();
+  for (const item of (yield* toAry(other)).items) yield* hashSet(keys, item, true);
+  for (const item of self.items) if (yield* hashGet(keys, item)) return true;
   return false;
 });
 
@@ -607,8 +612,8 @@ def('Array', 'product', [0, -1], function* (self: RArray, others, block) {
 });
 
 function* combinations(items: Value[], size: number, visit: (combination: Value[]) => Gen<void>): Gen<void> {
+  if (size < 0 || size > items.length) return;
   const indices = Array.from({ length: size }, (_, index) => index);
-  if (size > items.length) return;
   for (;;) {
     rt().spend();
     yield* visit(indices.map((index) => items[index]));
@@ -793,8 +798,9 @@ function* blockOrder(block: RProc, a: Value, b: Value): Gen<number> {
 
 def('Array', 'cycle', [0, 1], function* (self: RArray, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);
-  const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : -1n;
-  for (let round = 0n; times < 0n || round < times; round++) {
+  const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : undefined;
+  if (times !== undefined && times <= 0n) return NIL;
+  for (let round = 0n; times === undefined || round < times; round++) {
     if (self.items.length === 0) return NIL;
     for (let index = 0; index < self.items.length; index++) yield* call(block, self.items[index], false);
   }

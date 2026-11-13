@@ -1,8 +1,8 @@
 // code-gauge-allow-file fileNcss 677 -- The libEnumerable module keeps one concern's cases together.
 import { caseEquals, compareValues, inspect, rEquals, spaceship, toIndex, toInt } from './conversions';
 import { def } from './define';
-import { argumentError, typeError } from './errors';
-import { eachEntry, hashGet, hashKeyOf, hashSet } from './hashes';
+import { argumentError, rubyError, typeError } from './errors';
+import { eachEntry, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
@@ -216,6 +216,7 @@ def('Enumerable', 'reverse_each', [0, -1], function* (self, _args, block) {
 
 /** `inject`/`reduce`: folds with a block or with the method a symbol names, from an initial value or the first. */
 export function* inject(self: Value, args: Value[], block: RProc | undefined): Gen {
+  if (args.length === 0 && !block) throw rubyError(rt().c.LocalJumpError, 'no block given');
   let accumulator: Value | undefined;
   let operator: string | undefined;
   if (args.length === 2) {
@@ -670,9 +671,11 @@ def('Enumerable', 'group_by', 0, function* (self, _args, block) {
   return groups;
 });
 def('Enumerable', 'chunk_while', 0, function* (self, _args, block) {
+  if (!block) throw argumentError('tried to create Proc object without a block');
   return arr(yield* chunks(self, block as RProc, false));
 });
 def('Enumerable', 'slice_when', 0, function* (self, _args, block) {
+  if (!block) throw argumentError('tried to create Proc object without a block');
   return arr(yield* chunks(self, block as RProc, true));
 });
 
@@ -759,12 +762,12 @@ def('Enumerable', 'uniq', 0, function* (self, _args, block) {
 });
 
 export function* uniqValues(items: Value[], block: RProc | undefined): Gen<Value[]> {
-  const seen = new Set<string>();
+  const seen = newHash();
   const result: Value[] = [];
   for (const value of items) {
-    const key = yield* hashKeyOf(block ? yield* call(block, value) : value);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const key = block ? yield* call(block, value) : value;
+    if (yield* hashGet(seen, key)) continue;
+    yield* hashSet(seen, key, true);
     result.push(value);
   }
   return result;
@@ -801,8 +804,9 @@ def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);
   const items = yield* toArray(self);
   if (items.length === 0) return NIL;
-  const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : -1n;
-  for (let round = 0n; times < 0n || round < times; round++) {
+  const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : undefined;
+  if (times !== undefined && times <= 0n) return NIL;
+  for (let round = 0n; times === undefined || round < times; round++) {
     for (const item of items) yield* callBlock(block, [item], false);
   }
   return NIL;

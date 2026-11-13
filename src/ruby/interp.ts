@@ -1,3 +1,4 @@
+import { ExecutionLimitError } from '../interpreter/limits';
 // code-gauge-allow-file fileNcss 931 -- The interp module keeps one concern's cases together.
 import type { BlockDef, Body, Call, Expr, MethodDef, MultiTarget, Params, ParamTarget, Stmt, Target } from './ast';
 import { caseEquals, inspect, toS } from './conversions';
@@ -798,6 +799,7 @@ function returnTarget(frame: Frame): Frame {
 function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
   const runtime = rt();
   let pendingException: RObject | undefined;
+  let fatalError: UnsupportedFeatureError | ExecutionLimitError | undefined;
   try {
     for (;;) {
       let value: Value;
@@ -814,6 +816,7 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
     }
   } catch (error) {
     if (error instanceof RubyError) pendingException = error.exception;
+    if (error instanceof UnsupportedFeatureError || error instanceof ExecutionLimitError) fatalError = error;
     throw error;
   } finally {
     if (e.ensure) {
@@ -825,6 +828,8 @@ function* evalBegin(e: Extract<Expr, { k: 'begin' }>, frame: Frame): Gen {
       }
       try {
         yield* evalBody(e.ensure, frame);
+      } catch (error) {
+        throw fatalError ?? error;
       } finally {
         if (pendingException) {
           frame.handling.pop();
@@ -1385,8 +1390,9 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       if (error instanceof ReturnSignal && error.target === frame) return error.value;
       if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
     }
-    throw error;
+    throw hostStackOverflow(error, runtime.frames.length);
   } finally {
+    frame.extra.finished = true;
     runtime.popFrame();
     runtime.currentRow = savedRow;
   }

@@ -363,6 +363,8 @@ export class Converter {
 
   private identifier(node: Node, use: Use): Expr {
     const name = node.text;
+    if (name === '__FILE__' || name === '__LINE__' || name === '__ENCODING__')
+      this.unsupported(node, `${name}（ソースファイルの情報）`);
     const depth = this.ctx.scope.depthOf(name);
     if (depth >= 0) return { k: 'lvar', name, depth };
     if (this.ctx.inBlock && (name === 'it' || /^_[1-9]$/.test(name))) {
@@ -547,11 +549,7 @@ export class Converter {
           break;
         }
         default: {
-          if (pairs.length > 0 && child.type === 'splat_argument')
-            this.fail(child, 'キーワード引数の後に位置引数は書けません。');
-          if (pairs.length > 0 && child.type !== 'splat_argument') {
-            args.push({ k: 'hash', items: this.hashItems(pairs.splice(0)), braces: false });
-          }
+          if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
           args.push(this.argument(child));
         }
       }
@@ -741,8 +739,7 @@ export class Converter {
       if (child.type === 'pair' || child.type === 'hash_splat_argument') pairs.push(child);
       else if (child.type === 'block_argument') this.unsupported(child, '[] への & 引数');
       else {
-        if (pairs.length > 0 && child.type === 'splat_argument')
-          this.fail(child, 'キーワード引数の後に位置引数は書けません。');
+        if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
         args.push(this.argument(child));
       }
     }
@@ -960,6 +957,11 @@ export class Converter {
       return name;
     };
     const blockLocals = new Set<number>();
+    let phase = 0;
+    const advance = (child: Node, next: number): void => {
+      if (next < phase) this.fail(child, '引数の並び順に誤りがあります。');
+      phase = next;
+    };
     for (let index = 0; index < node.childCount; index++)
       if (node.fieldNameForChild(index) === 'locals') blockLocals.add(required(node.child(index)).id);
     for (const child of namedChildren(node)) {
@@ -969,39 +971,48 @@ export class Converter {
           break;
         }
         case 'identifier': {
+          advance(child, params.rest !== undefined || params.optional.length > 0 ? 3 : 0);
           const target: ParamTarget = declare(child, child.text);
           (params.rest === undefined && params.optional.length === 0 ? params.required : params.post).push(target);
           break;
         }
         case 'optional_parameter': {
+          advance(child, 1);
           const name = declare(child, required(child.childForFieldName('name')).text);
           params.optional.push({ name, value: this.expr(required(child.childForFieldName('value'))) });
           break;
         }
         case 'splat_parameter': {
+          advance(child, 2);
           if (params.rest !== undefined) this.fail(child, '* の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
           params.rest = nameNode ? declare(child, nameNode.text) : '';
           break;
         }
         case 'hash_splat_parameter': {
+          advance(child, 5);
+          if (params.keywordRest !== undefined) this.fail(child, '** の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
           params.keywordRest = nameNode ? declare(child, nameNode.text) : '';
           break;
         }
         case 'keyword_parameter': {
+          advance(child, 4);
           const name = declare(child, required(child.childForFieldName('name')).text);
           const valueNode = child.childForFieldName('value');
           params.keywords.push({ name, value: valueNode ? this.expr(valueNode) : undefined });
           break;
         }
         case 'block_parameter': {
+          advance(child, 6);
+          if (params.block !== undefined) this.fail(child, '& の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
           if (!nameNode) this.unsupported(child, '名前のない & 引数');
           params.block = declare(child, nameNode.text);
           break;
         }
         case 'destructured_parameter': {
+          advance(child, params.rest !== undefined || params.optional.length > 0 ? 3 : 0);
           const target = this.destructuredParameter(child, declare);
           (params.rest === undefined && params.optional.length === 0 ? params.required : params.post).push(target);
           break;

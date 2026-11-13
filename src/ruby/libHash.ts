@@ -6,7 +6,7 @@ import { callBlock, callMethod, callProc, type Gen, respondsTo } from './interp'
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
+import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, newHash, realClassOf, snapshot, str, truthy } from './values';
 
 function* modify(self: RHash): Gen<void> {
@@ -250,7 +250,7 @@ def('Hash', 'replace', 1, function* (self: RHash, [other]) {
 def('Hash', 'shift', 0, function* (self: RHash) {
   yield* modify(self);
   const first = self.map.entries().next();
-  if (first.done) return yield* callMethod(self, 'default', [NIL]);
+  if (first.done) return NIL;
   self.map.delete(first.value[0]);
   return arr([first.value[1].key, first.value[1].value]);
 });
@@ -280,9 +280,11 @@ def('Hash', ['merge!', 'update'], [0, -1], function* (self: RHash, others, block
 def('Hash', 'transform_values', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'transform_values', []);
   const hash = newHash();
-  yield* eachEntry(self, function* (entry) {
-    yield* hashSet(hash, entry.key, yield* callBlock(block, [entry.value]));
-  });
+  yield* whileHeld(hash, () =>
+    eachEntry(self, function* (entry) {
+      yield* hashSet(hash, entry.key, yield* callBlock(block, [entry.value]));
+    })
+  );
   return hash;
 });
 def('Hash', 'transform_values!', 0, function* (self: RHash, _args, block) {

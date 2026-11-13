@@ -53,6 +53,13 @@ export function decodeDoubleQuoted(text: string): { text: string; binary: boolea
       index += octal.length - 1;
       continue;
     }
+    if (next === 'M' && text[index + 1] === '-') {
+      const meta = text[index + 2];
+      if (meta === undefined || meta === '\\') return undefined;
+      bytes.push(meta.codePointAt(0)! | 0x80);
+      index += 2;
+      continue;
+    }
     flushBytes();
     if (next === 'C' && text[index + 1] === '-') {
       const control = text[index + 2];

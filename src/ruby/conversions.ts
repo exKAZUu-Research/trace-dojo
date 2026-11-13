@@ -480,14 +480,13 @@ export function* compareValues(a: Value, b: Value): Gen<number> {
 }
 
 export function comparisonFailed(a: Value, b: Value): unknown {
-  const right = typeof b === 'object' && !(b instanceof RBasic) ? describeImmediate(b) : realClassOf(b).name;
+  const immediate =
+    typeof b === 'number' ||
+    typeof b === 'boolean' ||
+    (typeof b === 'bigint' && b >= -(1n << 62n) && b < 1n << 62n) ||
+    (typeof b === 'object' && !(b instanceof RBasic));
+  const right = immediate ? runToEnd(inspect(b)) : realClassOf(b).name;
   return argumentError(`comparison of ${realClassOf(a).name} with ${right} failed`);
-}
-
-function describeImmediate(value: Value): string {
-  if (value === NIL) return 'nil';
-  if (value instanceof RSymbol) return runToEnd(inspect(value));
-  return realClassOf(value).name ?? '';
 }
 
 /** `a <=> b` as a number, or `undefined` when it is nil. */

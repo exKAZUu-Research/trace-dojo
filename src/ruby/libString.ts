@@ -138,7 +138,9 @@ def('String', 'to_r', 0, () => {
 def('String', 'hex', 0, (self: RString) => parseIntegerLenient(self.s, 16));
 def('String', 'oct', 0, (self: RString) => parseIntegerLenient(self.s, 8));
 def('String', ['length', 'size'], 0, (self: RString) => BigInt(charLength(self.s)));
-def('String', 'bytesize', 0, (self: RString) => BigInt(new TextEncoder().encode(self.s).length));
+def('String', 'bytesize', 0, (self: RString) =>
+  BigInt(self.binary ? self.s.length : new TextEncoder().encode(self.s).length)
+);
 def('String', 'empty?', 0, (self: RString) => self.s.length === 0);
 def('String', 'hash', 0, (self: RString) => {
   let hash = 7n;
@@ -199,6 +201,10 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   for (const arg of args) {
     if (typeof arg === 'bigint') {
       if (arg < 0n) throw rangeError(`${arg} out of char range`);
+      if (arg > 0x7f_ff_ff_ff_ff_ff_ff_ffn) throw rangeError('bignum out of char range');
+      if (arg > 0x10_ff_ffn) throw rangeError(`${arg} out of char range`);
+      if (arg >= 0xd8_00n && arg <= 0xdf_ffn)
+        throw rangeError(`invalid codepoint 0x${arg.toString(16).toUpperCase()} in UTF-8`);
       text += String.fromCodePoint(Number(arg));
     } else {
       text += yield* stringArg(arg);
@@ -247,6 +253,7 @@ function* substring(self: RString, args: Value[]): Gen {
 
 def('String', ['[]', 'slice'], [1, 2], (self: RString, args) => substring(self, args));
 def('String', 'slice!', [1, 2], function* (self: RString, args) {
+  modify(self);
   const result = yield* substring(self, args);
   if (result === NIL) return NIL;
   const [first] = args;
@@ -294,16 +301,15 @@ def('String', 'chars', 0, (self: RString) => arr(charsOf(self.s).map((char) => s
 def('String', 'codepoints', 0, (self: RString) =>
   arr(charsOf(self.s).map((char) => BigInt(char.codePointAt(0) as number)))
 );
-def('String', 'bytes', 0, (self: RString) =>
-  arr(
-    (self.binary
-      ? [...self.s].map((char) => char.codePointAt(0) as number)
-      : [...new TextEncoder().encode(self.s)]
-    ).map(BigInt)
-  )
-);
+function bytesOf(self: RString): Uint8Array {
+  return self.binary
+    ? Uint8Array.from([...self.s].map((char) => char.codePointAt(0) as number))
+    : new TextEncoder().encode(self.s);
+}
+
+def('String', 'bytes', 0, (self: RString) => arr([...bytesOf(self)].map(BigInt)));
 def('String', 'getbyte', 1, function* (self: RString, [index]) {
-  const bytes = new TextEncoder().encode(self.s);
+  const bytes = bytesOf(self);
   let position = yield* toIndex(index);
   if (position < 0) position += bytes.length;
   return position >= 0 && position < bytes.length ? BigInt(bytes[position]) : NIL;
@@ -315,7 +321,7 @@ def('String', 'each_char', 0, function* (self: RString, _args, block) {
 });
 def('String', 'each_byte', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_byte', []);
-  for (const byte of new TextEncoder().encode(self.s)) yield* callBlock(block, [BigInt(byte)], false);
+  for (const byte of bytesOf(self)) yield* callBlock(block, [BigInt(byte)], false);
   return self;
 });
 def('String', 'ord', 0, (self: RString) => {
@@ -325,7 +331,7 @@ def('String', 'ord', 0, (self: RString) => {
 def('String', 'chr', 0, (self: RString) => str(charsOf(self.s)[0] ?? ''));
 def('String', 'sum', [0, 1], (self: RString) => {
   let total = 0n;
-  for (const byte of new TextEncoder().encode(self.s)) total += BigInt(byte);
+  for (const byte of bytesOf(self)) total += BigInt(byte);
   return total & 0xff_ffn;
 });
 
@@ -453,6 +459,7 @@ def('String', 'delete', [1, -1], function* (self: RString, args) {
   );
 });
 def('String', 'delete!', [1, -1], function* (self: RString, args) {
+  modify(self);
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* stringArg(arg));
   const matches = characterSetMatcher(sets);
@@ -482,6 +489,7 @@ def('String', 'squeeze', [0, -1], function* (self: RString, args) {
   return str(squeeze(self.s, sets));
 });
 def('String', 'squeeze!', [0, -1], function* (self: RString, args) {
+  modify(self);
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* stringArg(arg));
   const result = squeeze(self.s, sets);
@@ -528,11 +536,17 @@ function characterSetMatcher(sets: string[]): (char: string) => boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Ruby's method takes these argument forms, which the branches mirror.
-function translate(text: string, fromSpec: string, toSpec: string, squeezeRuns: boolean): string {
+function translate(
+  text: string,
+  fromSpec: string,
+  toSpec: string,
+  squeezeRuns: boolean
+): { text: string; matched: boolean } {
   const from = expandSet(fromSpec);
   const to = expandSet(toSpec).chars;
   let result = '';
   let previous: string | undefined;
+  let matched = false;
   for (const char of charsOf(text)) {
     let replacement: string | undefined;
     if (from.negated) {
@@ -546,11 +560,12 @@ function translate(text: string, fromSpec: string, toSpec: string, squeezeRuns: 
       previous = undefined;
       continue;
     }
+    matched = true;
     if (squeezeRuns && replacement === previous) continue;
     result += replacement;
     previous = replacement;
   }
-  return result;
+  return { text: result, matched };
 }
 
 for (const [name, squeezeRuns] of [
@@ -558,12 +573,13 @@ for (const [name, squeezeRuns] of [
   ['tr_s', true],
 ] as const) {
   def('String', name, 2, function* (self: RString, [from, to]) {
-    return str(translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns));
+    return str(translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns).text);
   });
   def('String', `${name}!`, 2, function* (self: RString, [from, to]) {
+    modify(self);
     const result = translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns);
-    if (result === self.s) return NIL;
-    setText(self, result);
+    if (!result.matched) return NIL;
+    setText(self, result.text);
     return self;
   });
 }
@@ -596,7 +612,12 @@ function expandReplacement(replacement: string, match: string, before: string, a
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Ruby's method takes these argument forms, which the branches mirror.
 // code-gauge-allow functionNcss 38 -- Ruby's method takes these argument forms, which the branches mirror.
-function* substitute(self: RString, args: Value[], block: RProc | undefined, global: boolean): Gen<string> {
+function* substitute(
+  self: RString,
+  args: Value[],
+  block: RProc | undefined,
+  global: boolean
+): Gen<{ text: string; matched: boolean }> {
   const [pattern, replacement] = args;
   regexpUnsupported(pattern);
   const target = yield* stringArg(pattern);
@@ -607,9 +628,11 @@ function* substitute(self: RString, args: Value[], block: RProc | undefined, glo
   const text = self.s;
   let result = '';
   let position = 0;
+  let matched = false;
   for (;;) {
     const found = text.indexOf(target, position);
     if (found === -1) break;
+    matched = true;
     let piece: string;
     if (replacement instanceof RHash) {
       const entry = yield* hashGet(replacement, str(target));
@@ -627,33 +650,38 @@ function* substitute(self: RString, args: Value[], block: RProc | undefined, glo
     result += text.slice(position, found) + piece;
     position = found + target.length;
     if (target.length === 0) {
-      if (found < text.length) result += text[found];
-      position = found + 1;
+      if (found < text.length) {
+        const char = String.fromCodePoint(text.codePointAt(found) as number);
+        result += char;
+        position = found + char.length;
+      } else position = found + 1;
       if (position > text.length) break;
     }
     if (!global) break;
     rt().spend();
   }
   if (position <= text.length) result += text.slice(position);
-  return result;
+  return { text: result, matched };
 }
 
 def('String', 'sub', [1, 2], function* (self: RString, args, block) {
-  return str(yield* substitute(self, args, block, false));
+  return str((yield* substitute(self, args, block, false)).text);
 });
 def('String', 'gsub', [1, 2], function* (self: RString, args, block) {
-  return str(yield* substitute(self, args, block, true));
+  return str((yield* substitute(self, args, block, true)).text);
 });
 def('String', 'sub!', [1, 2], function* (self: RString, args, block) {
+  modify(self);
   const result = yield* substitute(self, args, block, false);
-  if (result === self.s) return NIL;
-  setText(self, result);
+  if (!result.matched) return NIL;
+  setText(self, result.text);
   return self;
 });
 def('String', 'gsub!', [1, 2], function* (self: RString, args, block) {
+  modify(self);
   const result = yield* substitute(self, args, block, true);
-  if (result === self.s) return NIL;
-  setText(self, result);
+  if (!result.matched) return NIL;
+  setText(self, result.text);
   return self;
 });
 def('String', 'scan', 1, function* (self: RString, [pattern], block) {
@@ -665,7 +693,11 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     const index = self.s.indexOf(target, position);
     if (index === -1) break;
     found.push(str(target));
-    position = index + Math.max(target.length, 1);
+    position =
+      index +
+      (target.length === 0 && index < self.s.length
+        ? String.fromCodePoint(self.s.codePointAt(index) as number).length
+        : Math.max(target.length, 1));
     if (position > self.s.length) break;
   }
   if (!block) return arr(found);

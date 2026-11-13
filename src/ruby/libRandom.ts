@@ -21,6 +21,13 @@ export class MersenneTwister {
     else this.initByArray(words);
   }
 
+  copy(): MersenneTwister {
+    const copied = new MersenneTwister(this.seed);
+    copied.state.set(this.state);
+    copied.index = this.index;
+    return copied;
+  }
+
   private initGenrand(seed: number): void {
     const mt = this.state;
     mt[0] = seed >>> 0;

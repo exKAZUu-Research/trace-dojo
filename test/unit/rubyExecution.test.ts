@@ -22,7 +22,7 @@ test.each([
   ['named format substitution', 'p format("%{name}!", name: "Ruby")', '"Ruby!"\n'],
   ['negative Float integer formatting', 'p format("%d", -1.2)', '"-1"\n'],
   ['hexadecimal Float rounding', 'p format("%.1a", 1.99); p format("%.0a", 1.75)', '"0x1.0p+1"\n"0x1p+1"\n'],
-  ['a default for Hash shift', 'p Hash.new(5).shift; p Hash.new { |h,k| 7 }.shift', '5\n7\n'],
+  ['an empty Hash shift', 'p Hash.new(5).shift; p Hash.new { |h,k| 7 }.shift', 'nil\nnil\n'],
   ['an overridden Hash default', 'class H < Hash; def default(k = nil); 42; end; end; p H.new[:x]', '42\n'],
   ['leading-dot Float conversion', 'p ".5".to_f; p "-.5".to_f', '0.5\n-0.5\n'],
   [
@@ -44,6 +44,43 @@ test.each([
   ],
   ['UTF-8 escaped bytes', String.raw`p "\xC3\xA9"`, '"é"\n'],
   ['invalid UTF-8 escaped byte', String.raw`p "\xFF"; p "\xFF".bytes`, '"\\xFF"\n[255]\n'],
+  [
+    'invalid UTF-8 byte access',
+    String.raw`p "\xFF".bytesize, "\xFF".getbyte(0), "\xFF".each_byte.to_a`,
+    '1\n255\n[255]\n',
+  ],
+  ['meta escaped byte', String.raw`p "\M-a".bytesize; p "\M-a".bytes`, '1\n[225]\n'],
+  [
+    'Array set operations with colliding hashes',
+    'class Key; def hash; 1; end; end; a=Key.new; b=Key.new; p [a,b].uniq.size; p ([a]-[b]).size; p ([a]&[b]).size',
+    '2\n1\n0\n',
+  ],
+  ['negative Array and Enumerable cycle counts', 'p [1].cycle(-1) { |x| x }; p (1..2).cycle(-2).to_a', 'nil\n[]\n'],
+  ['negative combination size', '[1].combination(-1) { |x| p x }; puts "done"', 'done\n'],
+  ['Kernel module functions', 'Kernel.puts("x"); p Kernel.format("%d", 2)', 'x\n"2"\n'],
+  ['clone retains an extended module', 'module M; def m; 1; end; end; o=Object.new.extend(M); p o.clone.m', '1\n'],
+  [
+    'Random duplication copies generator state',
+    'r=Random.new(1); s=r.dup; p r.rand,s.rand',
+    '0.417022004702574\n0.417022004702574\n',
+  ],
+  [
+    'initialize_copy can call super',
+    'class P; attr_reader :x; def initialize_copy(o); super; @x=2; end; end; p P.new.dup.x',
+    '2\n',
+  ],
+  ['short String range traversal', 'p ("000000".."999999").first(3)', '["000000", "000001", "000002"]\n'],
+  [
+    'a bang substitution that matches without changing text',
+    's="abc"; p s.sub!("a", "a"); p s.tr!("a", "a")',
+    '"abc"\n"abc"\n',
+  ],
+  ['empty-pattern substitution around emoji', 'p "😀".gsub("", ".")', '".😀."\n'],
+  [
+    'Float neighbors at infinity',
+    'p Float::INFINITY.next_float; p (-Float::INFINITY).prev_float',
+    'Infinity\n-Infinity\n',
+  ],
   ['Ruby control escape', String.raw`p "\C-a"`, '"\\u0001"\n'],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
@@ -57,6 +94,19 @@ test('cyclic module inclusion raises a Ruby error', () => {
 
 test('a positional splat after keyword arguments is rejected before execution', () => {
   expect(run('puts "before"; def f(*a, **k); end; f(a: 1, *[])')).toMatchObject({ kind: 'compileError' });
+});
+
+test('a positional argument after a bare keyword hash is rejected before execution', () => {
+  expect(run('def f(*a, **kw); end; f(a: 1, 2)')).toMatchObject({ kind: 'compileError' });
+});
+
+test('misordered method parameters are rejected before execution', () => {
+  expect(run('def f(a: 1, b); end')).toMatchObject({ kind: 'compileError' });
+  expect(run('def f(*a, b = 1); end')).toMatchObject({ kind: 'compileError' });
+});
+
+test('unsupported source-location constants report their feature', () => {
+  expect(run('puts __FILE__')).toMatchObject({ kind: 'compileError' });
 });
 
 test('invalid Unicode scalar escapes are compile errors', () => {
@@ -79,6 +129,23 @@ test('Hash mutation during in-place filtering raises an error', () => {
 test('a private setter rejects an explicit receiver', () => {
   expect(run('class A; private; attr_writer :x; end; A.new.x = 1')).toMatchObject({
     uncaughtException: "private method 'x=' called for an instance of A (NoMethodError)",
+  });
+});
+
+test('out-of-range String append and missing inject block raise Ruby errors', () => {
+  expect(run('"a" << 1114112')).toMatchObject({ uncaughtException: '1114112 out of char range (RangeError)' });
+  expect(run('[3,1,2].inject')).toMatchObject({ uncaughtException: 'no block given (LocalJumpError)' });
+});
+
+test('a default initializer rejects unexpected arguments', () => {
+  expect(run('Object.new(1)')).toMatchObject({
+    uncaughtException: 'wrong number of arguments (given 1, expected 0) (ArgumentError)',
+  });
+});
+
+test('frozen bang String methods reject even unchanged results', () => {
+  expect(run('s="a".freeze; s.delete!("x")')).toMatchObject({
+    uncaughtException: expect.stringContaining('FrozenError'),
   });
 });
 
@@ -105,6 +172,7 @@ test('repeated big integer multiplication respects the operation limit', () => {
 
 test('Ruby array allocation respects the shared storage limit', () => {
   expect(run('a = Array.new(1000001); puts a.size')).toEqual({ kind: 'limitExceeded', limit: 'storage' });
+  expect(run('b=[0]*600000; a=[]; a.replace(b); p a.size+b.size')).toEqual({ kind: 'limitExceeded', limit: 'storage' });
 });
 
 test('large formatting and array products stop before building oversized results', () => {

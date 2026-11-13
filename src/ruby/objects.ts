@@ -15,15 +15,14 @@ export const NIL = new RNil();
 
 /** Symbols are interned, so that two symbols with the same name are the same object. */
 export class RSymbol {
-  private static readonly table = new Map<string, RSymbol>();
-
   private constructor(readonly name: string) {}
 
   static of(name: string): RSymbol {
-    let symbol = RSymbol.table.get(name);
+    const symbols = rt().symbols;
+    let symbol = symbols.get(name);
     if (!symbol) {
       symbol = new RSymbol(name);
-      RSymbol.table.set(name, symbol);
+      symbols.set(name, symbol);
     }
     return symbol;
   }
@@ -83,9 +82,32 @@ export interface HashEntry {
   value: Value;
 }
 
+class TrackedHashMap extends Map<string, HashEntry> {
+  version = 0;
+
+  override set(key: string, value: HashEntry): this {
+    super.set(key, value);
+    this.version++;
+    return this;
+  }
+
+  override delete(key: string): boolean {
+    const removed = super.delete(key);
+    if (removed) this.version++;
+    return removed;
+  }
+
+  override clear(): void {
+    super.clear();
+    this.version++;
+  }
+}
+
 export class RHash extends RBasic {
   /** The entries by key in insertion order, keyed by {@link hashKeyOf} of their keys. */
-  map = new Map<string, HashEntry>();
+  map = new TrackedHashMap();
+  buckets = new Map<string, string[]>();
+  bucketVersion = -1;
   defaultValue: Value = NIL;
   defaultProc?: RProc;
   /** How many iterations over the hash are in progress, during which adding a key is an error. */

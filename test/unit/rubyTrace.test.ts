@@ -29,6 +29,18 @@ ts.each { |t| t.forward }`;
   ]);
 });
 
+test('Turtles accumulated by transform_values stay visible through later block steps', () => {
+  const program = `h = {a:1, b:3}.transform_values do |x|
+  t = Turtle.new(x, 0)
+  t
+end
+h.each_value { |t| t.forward }`;
+  expect(traceProgram('ruby', program, program).finalTurtles).toMatchObject([
+    { x: 1, y: 1 },
+    { x: 3, y: 1 },
+  ]);
+});
+
 /** Programs that behave alike in both languages, so Ruby must reproduce the Java interpreter's trace. */
 test.each([
   {
