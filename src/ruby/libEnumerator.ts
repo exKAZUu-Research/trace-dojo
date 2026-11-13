@@ -296,7 +296,7 @@ def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject,
   const empty = order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0));
   if (args.length === 0) {
     if (typeof step === 'number' && Number.isNaN(step)) throw comparisonFailed(step, 0n);
-    return empty ? NIL : first;
+    return empty ? NIL : start;
   }
   const count = yield* toIndex(args[0]);
   if (count < 0) throw argumentError('attempt to take negative size');
@@ -422,8 +422,7 @@ function arithmeticLastValue(
   index: bigint,
   exclusive: boolean
 ): Value {
-  if (typeof start === 'bigint' && typeof end === 'bigint' && typeof step === 'bigint')
-    return arithmeticValue(start, step, index);
+  if (typeof start === 'bigint' && typeof step === 'bigint') return arithmeticValue(start, step, index);
   const value = Number(start) + Number(step) * Math.floor((Number(end) - Number(start)) / Number(step));
   return exclusive && value === Number(end) ? value - Number(step) : value;
 }

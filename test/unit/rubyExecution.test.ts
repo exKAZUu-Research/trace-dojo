@@ -1480,3 +1480,23 @@ test('input record separator stores a frozen copy', () => {
     stdout: 'FrozenError\n',
   });
 });
+
+test('ArithmeticSequence accessors retain stored Integer types across Float limits', () => {
+  expect(
+    run('p 1.step(2.5, 1).first, (1..5.0).step(2).first, 1.step(Float::NAN, 2).first, 1.step(5, Float::INFINITY).first')
+  ).toMatchObject({
+    stdout: '1\n1\n1\n1\n',
+  });
+  expect(
+    run('p 1.step(2.5, 1).first(2), (1..10.0).step(3).last, (1..10.0).step(3).last(2), (1...10.0).step(3).last')
+  ).toMatchObject({
+    stdout: '[1.0, 2.0]\n10\n[7, 10]\n7\n',
+  });
+  expect(run('p (10**400).step(Float::NAN, 1).first.class')).toMatchObject({ stdout: 'Integer\n' });
+});
+
+test('String successor carries across multibyte letters and skipped symbols', () => {
+  expect(run('p "é😀9".succ, "é.9".succ, "ｚ😀9".succ, "日😀9".succ, "a😀9".succ, "ß😀z".succ')).toMatchObject({
+    stdout: '"ê😀0"\n"ê.0"\n"ａａ😀0"\n"旦😀0"\n"a😀10"\n"à😀a"\n',
+  });
+});

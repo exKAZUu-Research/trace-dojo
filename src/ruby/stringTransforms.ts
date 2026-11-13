@@ -93,7 +93,10 @@ export function successorBytes(source: Uint8Array): Uint8Array {
     const separated = previous !== -1 && previous < index - 1;
     if (
       previous === -1 ||
-      (separated && part.bytes.length === 1 && characterClass(parts[previous].point as number) !== kind)
+      (separated &&
+        part.bytes.length === 1 &&
+        parts[previous].bytes.length === 1 &&
+        characterClass(parts[previous].point as number) !== kind)
     ) {
       parts.splice(index, 0, { bytes: carry, point: undefined });
       break;
