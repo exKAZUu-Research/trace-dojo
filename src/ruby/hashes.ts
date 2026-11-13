@@ -1,4 +1,4 @@
-import { inspect } from './conversions';
+import { inspect, toInt } from './conversions';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
 import { type HashEntry, NIL, RArray, RBasic, RHash, RObject, RRange, RString, RSymbol, type Value } from './objects';
@@ -26,13 +26,8 @@ export function* hashKeyOf(
   }
   const method = classOf(value).findMethod('hash');
   if (method && method.body.kind === 'user') {
-    if (value instanceof RBasic) ancestors.push(value);
-    try {
-      const hash = yield* callMethod(value, 'hash', []);
-      return `u${digest(typeof hash === 'bigint' ? String(hash) : yield* hashKeyOf(hash, ancestors, cycle, memo))}`;
-    } finally {
-      if (value instanceof RBasic) ancestors.pop();
-    }
+    const hash = yield* callMethod(value, 'hash', []);
+    return `u${digest(String(yield* toInt(hash)))}`;
   }
   switch (typeof value) {
     case 'bigint': {

@@ -407,7 +407,8 @@ test.each([
     'a = [1]; s = Set[a]; s.delete_if { |x| x << 2; true }; p s.size, s.to_a',
     '0\n[]\n',
   ],
-  ['constant-size powers and shifts', 'p 0 << (10**30), 1 ** (10**30), (-1) ** (10**30)', '0\n1\n1\n'],
+  ['constant-size powers and shifts', 'p 0 << (10**30), 1 ** (10**30), (-1) ** (10**30), 0 ** 0', '0\n1\n1\n1\n'],
+  ['rounding a small integer at large precision', 'p 1.round(-1000000000)', '0\n'],
   ['wide Integer sizes', 'p (2**64).size, (2**100).size', '9\n13\n'],
   ['Numeric subclass Math conversion', 'class A < Numeric; def to_f = 9.0; end; p Math.sqrt(A.new)', '3.0\n'],
 ])('%s matches Ruby output', (_name, program, stdout) => {
@@ -435,5 +436,19 @@ test('numeric conversions reject a wrong type returned by a conversion method', 
   });
   expect(run('class A; def to_f = "x"; end; p Float(A.new)')).toMatchObject({
     uncaughtException: "can't convert A to Float (A#to_f gives String) (TypeError)",
+  });
+});
+
+test('custom Hash key hashes require an Integer-convertible result', () => {
+  expect(run('class K; def hash = "x"; end; h = {}; h[K.new] = 1')).toMatchObject({
+    uncaughtException: 'no implicit conversion of String into Integer (TypeError)',
+  });
+  expect(run('class K; def hash = nil; end; h = {}; h[K.new] = 1')).toMatchObject({
+    uncaughtException: 'no implicit conversion of nil into Integer (TypeError)',
+  });
+  expect(
+    run('class H; def to_int = 7; end; class K; def hash = H.new; end; h = {}; k = K.new; h[k] = 1; p h[k]')
+  ).toMatchObject({
+    stdout: '1\n',
   });
 });

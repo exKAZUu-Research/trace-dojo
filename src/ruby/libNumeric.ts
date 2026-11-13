@@ -89,6 +89,7 @@ function intPow(base: bigint, exponent: bigint): Value {
     if (base === 0n) throw zeroDivisionError();
     throw new UnsupportedFeatureError('負の指数の累乗（結果が有理数になるもの）');
   }
+  if (exponent === 0n) return 1n;
   if (base === 0n || base === 1n) return base;
   if (base === -1n) return exponent % 2n === 0n ? 1n : -1n;
   const bits = integerBits(base);
@@ -502,6 +503,9 @@ function roundInteger(
 ): bigint {
   if (digits >= 0n) return value;
   if (digits < -9_223_372_036_854_775_807n) throw rangeError("bignum too big to convert into 'long'");
+  const smallResult = roundedWithoutUnit(value, digits, mode);
+  if (smallResult !== undefined) return smallResult;
+  if (-digits > 32_000_000n) rt().spend(1_000_001);
   const unit = 10n ** -digits;
   const remainder = floorMod(value, unit);
   const down = value - remainder;
@@ -522,6 +526,14 @@ function roundInteger(
   if (mode === 'even') return (down / unit) % 2n === 0n ? down : down + unit;
   if (mode === 'down') return value < 0n ? down + unit : down;
   return value < 0n ? down : down + unit;
+}
+
+function roundedWithoutUnit(value: bigint, digits: bigint, mode: string): bigint | undefined {
+  if (value === 0n) return 0n;
+  if (-digits <= BigInt((value < 0n ? -value : value).toString().length)) return undefined;
+  if (mode === 'floor') return value > 0n ? 0n : undefined;
+  if (mode === 'ceil') return value < 0n ? 0n : undefined;
+  return 0n;
 }
 
 def(
