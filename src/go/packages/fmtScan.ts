@@ -488,7 +488,7 @@ class ScanState {
       if (error !== undefined) throw new ScanStop(renamed(error, 'ParseFloat', text));
       const [exponent, exponentError] = parseInt(text.slice(p + 1), 10, 0, 'Atoi');
       if (exponentError !== undefined) throw new ScanStop(renamed(exponentError, 'Atoi', text));
-      return ldexp(mantissa, Number(exponent));
+      return ldexp(mantissa, exponent as bigint);
     }
     const [value, error] = parseFloat(text, bits);
     if (error !== undefined) throw new ScanStop(error);
@@ -702,9 +702,11 @@ function parsenum(text: string, start: number, end: number): [number, boolean, n
   return [value, present, index];
 }
 
-function ldexp(fraction: number, exponent: number): number {
+/** Go's `math.Ldexp` for a finite fraction. */
+function ldexp(fraction: number, exponent: bigint): number {
   let value = fraction;
-  let rest = exponent;
+  // A finite nonzero double times 2^±2200 always overflows or underflows, so a larger exponent changes nothing.
+  let rest = Number(exponent > 2200n ? 2200n : exponent < -2200n ? -2200n : exponent);
   while (rest > 1000) {
     value *= 2 ** 1000;
     rest -= 1000;

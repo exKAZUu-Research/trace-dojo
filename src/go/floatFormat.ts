@@ -1,3 +1,5 @@
+import { currentRuntime } from './native';
+
 /** A finite non-negative number as significant decimal digits and the position of the decimal point. */
 interface Decimal {
   /** Digits without leading or trailing zeros, or '' for zero. */
@@ -11,6 +13,12 @@ export function formatFloat(value: number, format: string, precision: number, bi
   if (Number.isNaN(value)) return 'NaN';
   if (value === Infinity) return '+Inf';
   if (value === -Infinity) return '-Inf';
+  // 'e', 'f', and 'x' write `precision` digits, whereas 'g' writes no more digits than the value has.
+  if (precision > 0 && format !== 'g' && format !== 'G' && format !== 'b') {
+    const runtime = currentRuntime();
+    runtime.checkStringLength(precision);
+    runtime.spend(1 + Math.floor(precision / 16));
+  }
   const negative = value < 0 || Object.is(value, -0);
   const magnitude = Math.abs(value);
   if (format === 'b') return (negative ? '-' : '') + binaryExponent(magnitude, bitSize);

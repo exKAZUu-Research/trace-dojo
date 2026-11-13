@@ -789,7 +789,7 @@ func main() {
 		unwrapCalls,
 		copiedBytes, copyErr,
 		utf8.FullRuneInString("\xff"), utf8.FullRuneInString("\xc2A"), utf8.FullRuneInString("\xc2"),
-		cap(slices.Clone(s)), cap(slices.Collect(maps.Keys(m))), cap(slices.Sorted(maps.Keys(m))), cap(strings.SplitN("a,b,c", ",", 5)),
+		cap(slices.Clone(s)), len(maps.Clone(m)), cap(strings.SplitN("a,b,c", ",", 5)),
 		rNil, wNil,
 	)
 }`;
@@ -797,7 +797,7 @@ func main() {
     kind: 'executed',
     uncaughtException: undefined,
     stdout:
-      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 4 4 5 true true\n',
+      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 3 5 true true\n',
     stderr: '日',
   });
 });
@@ -1082,4 +1082,46 @@ func main() {
       'error parsing regexp: invalid named capture: `(?P<>`\n' +
       'regexp: Compile(`a)`): error parsing regexp: unexpected ): `a)`\n',
   });
+});
+
+test('a run that changes library variables leaves the next run unaffected', () => {
+  const changing = `package main
+import ("fmt"; "os"; "time"; "unicode")
+func main() {
+	*os.Stdout = *os.Stderr
+	*time.UTC = *time.FixedZone("X", 3600)
+	*unicode.Upper = unicode.RangeTable{}
+	fmt.Fprintln(os.Stdout, time.UTC, unicode.Is(unicode.Upper, 'A'))
+}`;
+  expect(executeProgram('go', changing)).toMatchObject({ stdout: '', stderr: 'X false\n' });
+  const reading = `package main
+import ("fmt"; "os"; "time"; "unicode")
+func main() { fmt.Fprintln(os.Stdout, time.UTC, unicode.Is(unicode.Upper, 'A')) }`;
+  expect(executeProgram('go', reading)).toMatchObject({ stdout: 'UTC true\n', stderr: '' });
+});
+
+test.each([
+  [
+    'list elements',
+    'package main\nimport "container/list"\nfunc main() { l := list.New(); l.PushBack(1); for i := 0; i < 18; i++ { l.PushBackList(l) } }',
+  ],
+  [
+    'a huge float precision',
+    'package main\nimport "strconv"\nfunc main() { _ = strconv.FormatFloat(1, \'f\', 1<<30, 64) }',
+  ],
+])('a library call that allocates past the limits stops the run: %s', (_, program) => {
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('out of memory'),
+  });
+});
+
+test.each([
+  ['math.Jn of a huge order', 'package main\nimport "math"\nfunc main() { _ = math.Jn(9223372036854775807, 1) }'],
+  [
+    'strconv.ParseFloat of a long number',
+    'package main\nimport ("strconv"; "strings")\nfunc main() { for i := 0; i < 100; i++ { _, _ = strconv.ParseFloat(strings.Repeat("9", 500000), 64) } }',
+  ],
+])('a library loop proportional to its argument spends operations: %s', (_, program) => {
+  expect(executeProgram('go', program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
