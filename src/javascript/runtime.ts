@@ -406,7 +406,7 @@ export class Runtime {
   ownPropertyNames(object: JsObject): string[] {
     const keys = this.ownKeys(object);
     if (!(object instanceof JsArray) && typeof object.primitive !== 'string') return keys;
-    const indexCount = keys.findIndex((key) => !/^(?:0|[1-9]\d*)$/.test(key));
+    const indexCount = keys.findIndex((key) => arrayIndexOf(key) === undefined);
     keys.splice(indexCount === -1 ? keys.length : indexCount, 0, 'length');
     return keys;
   }

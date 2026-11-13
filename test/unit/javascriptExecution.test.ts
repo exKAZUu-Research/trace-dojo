@@ -829,7 +829,8 @@ l\\u0061bel: for (;;) break label;`,
   [
     'for...in over objects whose prototype has a length',
     `const s = Object('ab'); Object.setPrototypeOf(s, { length: 4, extra: 1 }); for (const k in s) console.log(k);
-const a = [7]; Object.setPrototypeOf(a, { length: 9, more: 2 }); for (const k in a) console.log(k);`,
+const a = [7]; Object.setPrototypeOf(a, { length: 9, more: 2 }); for (const k in a) console.log(k);
+const t = Object('a'); t[4294967295] = 2; t[3] = 1; console.log(Object.getOwnPropertyNames(t));`,
   ],
   [
     'Object.create with property descriptors',
