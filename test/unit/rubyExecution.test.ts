@@ -1611,3 +1611,12 @@ test('Kernel putc uses write for collectors inheriting Kernel putc', () => {
     stdout: '65\n["A"]\n',
   });
 });
+
+test('Array slice assignment accepts large replacements within storage limits', () => {
+  expect(run('a=[]; a[0,0]=Array.new(490000,1); p a.size, a[0], a[-1]')).toMatchObject({
+    stdout: '490000\n1\n1\n',
+  });
+  expect(run('a=[0]; a[0..0]=Array.new(490000,2); p a.size, a[0], a[-1]')).toMatchObject({
+    stdout: '490000\n2\n2\n',
+  });
+});

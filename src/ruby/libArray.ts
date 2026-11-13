@@ -186,7 +186,7 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
   const removed = Math.min(count, Math.max(0, filled - start));
   grow(filled - removed + replacement.length, self);
   while (self.items.length < start) self.items.push(NIL);
-  self.items.splice(start, count, ...replacement);
+  self.items = [...self.items.slice(0, start), ...replacement, ...self.items.slice(start + count)];
   return value;
 });
 def('Array', 'fetch', [1, 2], function* (self: RArray, args, block) {
