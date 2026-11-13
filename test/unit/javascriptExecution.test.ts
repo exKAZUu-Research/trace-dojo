@@ -252,6 +252,12 @@ console.log(observer.canMoveForward());`,
     'false\ntrue\n',
   ],
   [
+    'Object.create keeps the descriptors it has read',
+    `const props = { get a() { return { value: new Turtle(1, 1) }; }, get b() { console.log(observer.canMoveForward()); return { value: 2 }; } };
+const result = Object.create(null, props);`,
+    'false\n',
+  ],
+  [
     'flatMap releases an exhausted inner iterator',
     `Iterator.from([1, 2]).flatMap((x) => {
   if (x === 1) return { t: new Turtle(1, 1), [Symbol.iterator]() { return this; }, next() { return { done: true }; } };

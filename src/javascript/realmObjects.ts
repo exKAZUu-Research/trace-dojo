@@ -181,11 +181,20 @@ function changePrototype(runtime: Runtime, object: JsObject, proto: JsObject | n
 function defineProperties(runtime: Runtime, object: JsObject, properties: Value): JsObject {
   const source = runtime.toObject(properties);
   const descriptors: [Key, Descriptor][] = [];
-  for (const key of [...runtime.ownKeys(source), ...runtime.ownSymbols(source)]) {
-    if (!runtime.getOwnProperty(source, key)?.enumerable) continue;
-    descriptors.push([key, toPropertyDescriptor(runtime, runtime.get(source, key))]);
+  // The values read so far stay reachable while later descriptors' getters run the program's code.
+  const { temporaries } = runtime.frame;
+  const held = temporaries.length;
+  try {
+    for (const key of [...runtime.ownKeys(source), ...runtime.ownSymbols(source)]) {
+      if (!runtime.getOwnProperty(source, key)?.enumerable) continue;
+      const descriptor = toPropertyDescriptor(runtime, runtime.get(source, key));
+      temporaries.push(descriptor.value, descriptor.get, descriptor.set);
+      descriptors.push([key, descriptor]);
+    }
+    for (const [key, descriptor] of descriptors) definePropertyOrThrow(runtime, object, key, descriptor);
+  } finally {
+    temporaries.length = held;
   }
-  for (const [key, descriptor] of descriptors) definePropertyOrThrow(runtime, object, key, descriptor);
   return object;
 }
 
