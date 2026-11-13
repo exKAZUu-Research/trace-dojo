@@ -8,8 +8,6 @@ import {
   type ConstEntity,
   type FunctionContext,
   type GenericFunc,
-  INLINE_BUDGET,
-  INLINE_CALL_COST,
   newCalleeSummary,
   type TypeEntity,
   type VarEntity,
@@ -120,20 +118,9 @@ export class ProgramCompiler extends StatementCompiler {
     while (this.pendingBodies.length > 0) (this.pendingBodies.shift() as () => void)();
   }
 
-  /** Fills in what calls learn from a compiled body: its parameters, and whether Go's compiler inlines it. */
   private completeSummary(summary: CalleeSummary, key: unknown, fn: FunctionContext): void {
     fn.summary = summary;
-    summary.context = fn;
-    completeCalleeSummary(summary, fn.params);
-    let cost: number | undefined;
-    let inlinable: boolean | undefined;
-    summary.cost = () =>
-      (cost ??= fn.callees.reduce(
-        (total, callee) => total + (callee.inlinable() ? callee.cost() : INLINE_CALL_COST),
-        fn.inlineCost
-      ));
-    summary.inlinable = () =>
-      (inlinable ??= !fn.notInlinable && !this.isRecursiveFunction(key) && summary.cost() <= INLINE_BUDGET);
+    completeCalleeSummary(summary, fn, () => this.isRecursiveFunction(key));
   }
 
   private isRecursiveFunction(target: unknown): boolean {

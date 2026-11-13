@@ -6,7 +6,7 @@
  * through a pointer.
  */
 import type { FunctionContext, ProductSource, VarEntity } from './entities';
-import type { SsaConstant } from './operand';
+import type { SsaConstant, StaticValue } from './operand';
 
 export interface SsaValues {
   definitions: Map<VarEntity, Definition>;
@@ -57,14 +57,17 @@ export function newSsaValues(): SsaValues {
   return { definitions: new Map(), regions: [], stores: 0, versions: 0 };
 }
 
-/** Records a write of a variable, with what Go's compiler knows of the value written. */
+/**
+ * Records a write of a variable, with what Go's compiler knows of the value written: what its SSA form sees, and for
+ * the first definition, what it resolves the value to (`static`).
+ */
 export function define(
   fn: FunctionContext | undefined,
   variable: VarEntity,
-  value: { constant?: SsaConstant; factors?: ProductFactors } = {}
+  { static: resolved, ...value }: { constant?: SsaConstant; factors?: ProductFactors; static?: StaticValue } = {}
 ): void {
   if (variable.defined) variable.reassigned = true;
-  else variable.staticConstant = value.constant;
+  else variable.static = resolved;
   variable.defined = true;
   if (!fn) return;
   const ssa = fn.ssa;

@@ -157,6 +157,11 @@ test.each([
     '\tdefer func() {\n\t\tr := recover()\n\t\tpanic(fmt.Sprintf("again: %v", r))\n\t}()\n\tpanic("first")',
     'panic: first [recovered]\n\tpanic: again: first',
   ],
+  [
+    'panics again with values of inlined calls returning constants',
+    '\tcode := func() int { return 300 }\n\tn, s := code(), func() string { return "boom" }()\n\tproduct := n * 1\n\tdefer func() {\n\t\trecover()\n\t\tpanic(product)\n\t}()\n\tdefer func() {\n\t\trecover()\n\t\tpanic(n)\n\t}()\n\tdefer func() {\n\t\trecover()\n\t\tpanic(s)\n\t}()\n\tpanic("boom")',
+    'panic: boom [recovered, repanicked]\n\tpanic: 300 [recovered]\n\tpanic: 300',
+  ],
 ])("%s ends the program with Go's panic message", (_name, body, message) => {
   expect(executeProgram('go', goMain(body))).toMatchObject({ kind: 'executed', uncaughtException: message });
 });
@@ -1222,7 +1227,9 @@ func main() {
 
 // Go 1.27.3's SSA form knows a variable declared from a constant in any declaration form as that constant, and a
 // parameter of an inlined call as its constant argument, so it folds their products instead of fusing them; math.FMA
-// keeps an infinite addend when the exact finite product exceeds the float64 range.
+// keeps an infinite addend when the exact finite product exceeds the float64 range. Its inliner also inlines calls
+// through function literals and locals holding a function that the program never assigns again, a captured constant,
+// and a call returning a constant, but not a call through a local assigned again.
 test('constants reach products through every declaration form and inlined call', () => {
   const program = `package main
 
@@ -1237,6 +1244,8 @@ func price(p float64, qty int) float64 { return p*float64(qty) + 0.15 }
 
 func lerp(a, b, t float64) float64 { return a + (b-a)*t }
 
+func unit() float64 { return 0.1 }
+
 func main() {
 	var a, b = 0.1, 0.2
 	c, d := 0.3, 0.7
@@ -1248,17 +1257,27 @@ func main() {
 	w := 0.3
 	fmt.Println(price(0.1, 3), lerp(0.1, 0.9, w), lerp(v[0], v[1], v[2]))
 	fmt.Println(math.FMA(1e308, 2, math.Inf(-1)), math.FMA(-1e308, 2, math.Inf(1)), math.FMA(math.Inf(1), 0, 1))
+	k := 3.0
+	mad := func(a, b, c float64) float64 { return a*b + c }
+	tax := func(p float64) float64 { return p*k + 0.15 }
+	h, g := price, mad
+	g = mad
+	u := unit()
+	fmt.Println(mad(0.1, 3, 0.15), func(p float64) float64 { return p*3 + 0.15 }(0.1), h(0.1, 3), tax(0.1), u*3+0.15, g(0.1, 3, 0.15))
 }`;
   expect(executeProgram('go', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: '-0.19\n-0.09000000000000001 0.19\n0.45000000000000007 0.33999999999999997 0.34\n-Inf +Inf NaN\n',
+    stdout:
+      '-0.19\n-0.09000000000000001 0.19\n0.45000000000000007 0.33999999999999997 0.34\n-Inf +Inf NaN\n' +
+      '0.45000000000000007 0.45000000000000007 0.45000000000000007 0.45000000000000007 0.45000000000000007 0.45\n',
   });
 });
 
 // Go 1.27.3 gives an append the 32-byte stack buffer when the array it allocates stays in the function, also for a
 // slice no variable holds and for a field of a local struct it keeps in registers; it updates a variable whose address
-// the program takes, a large struct's field, or an array's element in memory, which never uses the buffer.
+// the program takes, a large struct's field, or an array's element in memory, which never uses the buffer. An element
+// of a composite literal stays where the literal goes, except in a map, or once the literal converts to an interface.
 test('append capacities follow where Go keeps the slice', () => {
   const program = `package main
 
@@ -1291,11 +1310,18 @@ func main() {
 	var a [2][]int
 	a[0] = append(a[0], 1)
 	fmt.Println(cap(x), cap(y), cap(k), cap(st), cap(b.items), cap(g.items), cap(a[0]))
+	lb := box{append([]int{}, 1)}
+	ls := [][]int{append([]int{}, 1)}
+	la := [1][]int{append([]int{}, 1)}
+	lp := &big{items: append([]int{}, 1)}
+	lm := map[int][]int{0: append([]int{}, 1)}
+	le := box{items: append([]int{}, 1)}
+	fmt.Println(cap(lb.items), cap(ls[0]), cap(la[0]), cap(lp.items), cap(lm[0]), cap(le.items), le)
 }`;
   expect(executeProgram('go', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
-    stdout: '4 32 2 1 4 1 1\n',
+    stdout: '4 32 2 1 4 1 1\n4 4 4 4 1 1 {[1]}\n',
   });
 });
 test('net/url parses, resolves, escapes, and encodes as Go does', () => {

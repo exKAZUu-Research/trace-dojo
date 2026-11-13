@@ -1,6 +1,6 @@
 import type { Span } from './ast';
 import type { Constant } from './constants';
-import type { FuncEntity, PackageEntity, ProductSource, Temporary, VarEntity } from './entities';
+import type { FuncEntity, PackageEntity, ProductSource, StaticCallee, Temporary, VarEntity } from './entities';
 import type { Eval, Frame } from './runtime';
 import type { Selection, Type } from './types';
 import type { Pointer, Value } from './values';
@@ -87,12 +87,14 @@ export interface Operand extends Storage {
     source: ProductSource;
   };
   /**
-   * Whether Go's compiler knows the value as a constant: a constant, or a variable whose reaching definition is one
-   * (see ssaValues.ts), or a parameter of a call inlined with a constant argument. Decided when the program runs, once
-   * every loop's writes are known, for the frame the value is computed in, which is undefined for the function itself
-   * rather than one of its calls.
+   * Whether Go's compiler knows the value as a constant: a constant, a variable whose reaching definition is one
+   * (see ssaValues.ts), a parameter or captured variable of an inlined call that the caller knows as one, or the result
+   * of an inlined call returning one. Decided when the program runs, once every loop's writes are known, for the frame
+   * the value is computed in, which is undefined for the function itself rather than one of its calls.
    */
   ssaConstant?: SsaConstant;
+  /** What Go's compiler resolves the value to through names it sees defined once (see `StaticValue`). */
+  static?: StaticValue;
   /** How many values the statement's first pass evaluates before this expression's place (`hoistingCalls`). */
   firstPass?: number;
   /** A value that exists only once the code producing it ran (a result of a multi-value call, a range value). */
@@ -105,4 +107,23 @@ export interface Operand extends Storage {
   variable?: { markUsed(): void; entity?: VarEntity };
 }
 
-export type SsaConstant = (frame: Frame | undefined) => boolean;
+/**
+ * Whether Go's compiler knows a value as a constant, given which parameters and captured variables of the call
+ * computing it are constants: undefined for the function itself, or the frame or arguments of a call it inlined.
+ */
+export type SsaConstant = (params: ConstantParams | undefined) => boolean;
+
+export interface ConstantParams {
+  constantParam(index: number): boolean;
+  constantCapture?(variable: object): boolean;
+}
+
+/**
+ * What Go's compiler resolves a value to as ir.StaticValue does, through a local variable it never assigns again or
+ * addresses after its one definition and through the single result of a call it inlines: a constant, which converts to
+ * an interface as constant data and folds in arithmetic, or a function of the program, whose calls it may inline.
+ */
+export interface StaticValue {
+  constant?: SsaConstant;
+  callee?: StaticCallee;
+}

@@ -1,5 +1,6 @@
 import { constantIdentityKey, represent } from './assignability';
 import type { CompositeLiteral, Expression } from './ast';
+import type { VarEntity } from './entities';
 import { mapKeyOf } from './equality';
 import { describeConstant, ExpressionCompiler } from './expressionCompiler';
 import type { Operand } from './operand';
@@ -36,21 +37,23 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
       pointerElided = true;
     }
     const under = coreType(literalType) ?? underlying(literalType);
+    // The elements share what happens to the literal, as Go's escape analysis lets them flow where the literal goes.
+    const holder = this.hiddenVariable();
     let operand: Operand;
     switch (under.kind) {
       case 'struct': {
-        operand = this.structLiteral(expression, literalType, under);
+        operand = this.structLiteral(expression, literalType, under, holder);
         break;
       }
       case 'array': {
-        operand = this.arrayLiteral(expression, literalType, under);
+        operand = this.arrayLiteral(expression, literalType, under, holder);
         break;
       }
       case 'slice': {
         const outer = this.inAllocatedSlice;
         this.inAllocatedSlice = true;
         try {
-          operand = this.arrayLiteral(expression, literalType, under);
+          operand = this.arrayLiteral(expression, literalType, under, holder);
         } finally {
           this.inAllocatedSlice = outer;
         }
@@ -65,21 +68,27 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         return this.invalid(expression);
       }
     }
-    if (!pointerElided) return { ...operand, createsObject: true };
+    const holds = holder.escapeSources !== undefined || holder.temporaries !== undefined;
+    const backingVars = holds ? [holder] : undefined;
+    if (!pointerElided) return { ...operand, backingVars, createsObject: true };
     const read = operand.eval;
     return {
       mode: 'value',
       type,
       span: expression,
+      backingVars,
       createsObject: true,
       eval: (frame) => new Pointer(new Cell(read(frame)), 'v'),
     };
   }
 
-  /** An element of a composite literal, whose own literal may elide its type. */
-  private element(expression: Expression, type: Type, context: string): Eval {
+  /**
+   * An element of a composite literal, whose own literal may elide its type; `holder` stands for the literal, or is
+   * absent for an element that escapes, as a map's does.
+   */
+  private element(expression: Expression, type: Type, context: string, holder?: VarEntity): Eval {
     if (expression.kind === 'composite' && !expression.type)
-      return this.assign(this.composite(expression, type), type, context);
+      return this.assign(this.composite(expression, type), type, context, holder);
     if (
       expression.kind === 'unary' &&
       expression.operator === '&' &&
@@ -89,15 +98,22 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
       const pointer = underlying(type);
       if (pointer.kind === 'pointer') {
         const literal = this.composite(expression.operand, pointer.element);
+        if (holder) this.recordLocalEscapeAlias(literal, holder);
+        else this.escapeOperand(literal);
         const read = literal.eval;
         return (frame) => new Pointer(new Cell(read(frame)), 'v');
       }
     }
-    return this.assign(this.expression(expression), type, context);
+    return this.assign(this.expression(expression), type, context, holder);
   }
 
   // code-gauge-allow functionCognitiveComplexity 35 -- Keyed and unkeyed struct literals with promoted fields and evaluation order.
-  private structLiteral(expression: CompositeLiteral, type: Type, struct: Extract<Type, { kind: 'struct' }>): Operand {
+  private structLiteral(
+    expression: CompositeLiteral,
+    type: Type,
+    struct: Extract<Type, { kind: 'struct' }>,
+    holder: VarEntity
+  ): Operand {
     const { fields } = struct;
     const entries: { path: number[]; value: Eval }[] = [];
     const seenPaths: number[][] = [];
@@ -152,7 +168,10 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         } else {
           seenPaths.push(selection.path);
         }
-        entries.push({ path: selection.path, value: this.element(element.value, selection.type, 'フィールド') });
+        entries.push({
+          path: selection.path,
+          value: this.element(element.value, selection.type, 'フィールド', holder),
+        });
       }
     } else if (expression.elements.length > 0) {
       let reportedExcess = false;
@@ -172,7 +191,7 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
             `${fieldName} は ${type.pkg} パッケージの外から使えないフィールドなので、値を書けません。`
           );
         }
-        const value = this.element(element.value, fields[index].type, 'フィールド');
+        const value = this.element(element.value, fields[index].type, 'フィールド', holder);
         // Go evaluates the value of a blank field for its effects but leaves the field zero.
         entries.push({ path: fields[index].name === '_' ? [] : [index], value });
       }
@@ -225,7 +244,8 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
   private arrayLiteral(
     expression: CompositeLiteral,
     type: Type,
-    under: Extract<Type, { kind: 'array' | 'slice' }>
+    under: Extract<Type, { kind: 'array' | 'slice' }>,
+    holder: VarEntity
   ): Operand {
     const entries: { index: number; value: Eval }[] = [];
     let next = 0;
@@ -252,13 +272,13 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
           this.error(element, `添字 ${next} は配列の範囲の外です（長さは ${under.length} です）。`);
           reportedOutOfRange = true;
         }
-        this.element(element.value, under.element, '要素');
+        this.element(element.value, under.element, '要素', holder);
         next++;
         continue;
       }
       if (seen.has(next)) this.error(element, `添字 ${next} に2回値を書いています。`);
       seen.add(next);
-      entries.push({ index: next, value: this.element(element.value, under.element, '要素') });
+      entries.push({ index: next, value: this.element(element.value, under.element, '要素', holder) });
       next++;
       length = Math.max(length, next);
     }

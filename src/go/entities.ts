@@ -1,6 +1,6 @@
 import type { FunctionDeclaration, Span } from './ast';
 import type { Constant } from './constants';
-import type { SsaConstant, Storage } from './operand';
+import type { StaticValue, Storage } from './operand';
 import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
 import type { SliceTracking } from './slicePass';
 import type { SsaValues } from './ssaValues';
@@ -59,8 +59,8 @@ export interface VarEntity {
   /** Whether the program has defined the variable, and whether it assigns it after the declaration. */
   defined?: boolean;
   reassigned?: boolean;
-  /** Whether the variable's one definition is a constant, as Go's ir.StaticValue sees through a local. */
-  staticConstant?: SsaConstant;
+  /** What the variable's first definition resolves to, which `staticValueOf` gives while it stays the only one. */
+  static?: StaticValue;
   /** Whether the program takes the address of the variable or of a part of it, which keeps it out of registers. */
   addressTaken?: boolean;
 }
@@ -149,7 +149,13 @@ export interface FunctionContext {
   /** The approximate cost Go's inliner assigns to the body, apart from the functions of the program it calls. */
   inlineCost: number;
   /** The functions of the program that the body calls, whose inlining decides the rest of its cost. */
-  callees: CalleeSummary[];
+  callees: StaticCallee[];
+  /** What each `return` statement's value resolves to, for a function with one unnamed result. */
+  returnedValues: (StaticValue | undefined)[];
+  /** Runs once the top-level function the body lies in has compiled, which settles every `StaticCallee` in it. */
+  onComplete: (() => void)[];
+  /** How many calls of each function literal the body has that Go's compiler resolves. */
+  closureCalls: Map<CalleeSummary, number>;
   /** Whether the body uses something Go's inliner refuses, such as `defer` or `recover`. */
   notInlinable: boolean;
   /** The package-level variables and functions that the body refers to, which decide initialization order. */
@@ -189,6 +195,10 @@ const EFFECTS: readonly Effect[] = ['escapes', 'returned', 'written'];
 export const INLINE_CALL_COST = 57;
 /** The largest cost of a function Go's inliner inlines (inlineMaxBudget). */
 export const INLINE_BUDGET = 80;
+/** The largest cost of a function literal Go's inliner inlines, at a call site that is its only one in the function. */
+const INLINE_CLOSURE_BUDGET = 10 * INLINE_BUDGET;
+/** The largest cost of a function literal Go's inliner inlines at other call sites (inlineCostOK). */
+const INLINE_CLOSURE_SITE_BUDGET = 2 * INLINE_BUDGET;
 
 /** What calls learn from the body of a function or method the program declares. */
 export interface CalleeSummary {
@@ -202,17 +212,86 @@ export interface CalleeSummary {
   cost: () => number;
   /** The compiled body. */
   context?: FunctionContext;
+  /** Whether the function is a function literal, whose calls Go's inliner gives a larger budget. */
+  closure?: boolean;
+}
+
+/**
+ * A function of the program that a call reaches as Go's compiler resolves its callee (ir.StaticValue): a declared
+ * function or method, a function literal, or a local variable holding one of them.
+ */
+export interface StaticCallee {
+  summary: CalleeSummary;
+  /**
+   * Whether the callee stays the call's: false once the program assigns again or addresses a variable it was read
+   * through, which is final when the top-level function the call lies in has compiled.
+   */
+  holds: () => boolean;
+  /** For a call of a function literal, how many calls of it the calling function has that Go's compiler resolves. */
+  sites?: Map<CalleeSummary, number>;
+}
+
+export const always = (): boolean => true;
+export const never = (): boolean => false;
+
+/** Whether Go's compiler inlines a call of `callee`. */
+export function inlinedCall(callee: StaticCallee): boolean {
+  const { summary, sites } = callee;
+  if (!callee.holds() || !summary.inlinable()) return false;
+  return !sites || sites.get(summary) === 1 || summary.cost() <= INLINE_CLOSURE_SITE_BUDGET;
+}
+
+/**
+ * What a read of a local variable resolves to: its first definition's value while the program neither assigns the
+ * variable again nor addresses it. `inOwner` tells whether the read runs in the frame defining the variable, whose
+ * inlined call decides the constants that depend on parameters.
+ */
+export function staticValueOf(variable: VarEntity, inOwner: boolean): StaticValue | undefined {
+  const { static: value } = variable;
+  if (!value || variable.owner === undefined) return undefined;
+  const holds = (): boolean => !variable.reassigned && !variable.addressTaken;
+  const { constant, callee } = value;
+  return {
+    constant: constant && ((params) => holds() && constant(inOwner ? params : undefined)),
+    callee: callee && { summary: callee.summary, holds: () => holds() && callee.holds() },
+  };
 }
 
 export function newCalleeSummary(): CalleeSummary {
   return { pending: [], inlinable: () => false, cost: () => INLINE_CALL_COST };
 }
 
-/** Records the receiver and parameters of a function whose body compiled, linking the arguments waiting for them. */
-export function completeCalleeSummary(summary: CalleeSummary, params: VarEntity[]): void {
-  summary.params = params;
-  for (const link of summary.pending) link(params);
+/**
+ * Fills in what calls learn from a compiled body: its parameters, linking the arguments waiting for them, and whether
+ * Go's compiler inlines it, which it refuses for a `recursive` function and allows a function literal more for.
+ */
+export function completeCalleeSummary(
+  summary: CalleeSummary,
+  fn: FunctionContext,
+  recursive: () => boolean,
+  closure = false
+): void {
+  summary.closure = closure;
+  const budget = closure ? INLINE_CLOSURE_BUDGET : INLINE_BUDGET;
+  summary.context = fn;
+  summary.params = fn.params;
+  for (const link of summary.pending) link(fn.params);
   summary.pending = [];
+  let cost: number | undefined;
+  let computing = false;
+  let inlinable: boolean | undefined;
+  summary.cost = () => {
+    if (cost !== undefined) return cost;
+    // A function reaching itself through function literals costs more than any budget.
+    if (computing) return Number.POSITIVE_INFINITY;
+    computing = true;
+    cost = fn.callees.reduce(
+      (total, callee) => total + (inlinedCall(callee) ? callee.summary.cost() : INLINE_CALL_COST),
+      fn.inlineCost
+    );
+    return cost;
+  };
+  summary.inlinable = () => (inlinable ??= !fn.notInlinable && !recursive() && summary.cost() <= budget);
 }
 
 export function markEscapes(entity: VarEntity): void {
