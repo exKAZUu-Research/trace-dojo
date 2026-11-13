@@ -49,9 +49,9 @@ export function decimalString(self: Dec, capitals: number, engineering = false):
   let fracPart: string;
   if (dotPlace <= 0) {
     intPart = '0';
-    fracPart = `.${'0'.repeat(-dotPlace)}${self.int}`;
+    fracPart = `.${repeatText('0', -dotPlace)}${self.int}`;
   } else if (dotPlace >= self.int.length) {
-    intPart = self.int + '0'.repeat(dotPlace - self.int.length);
+    intPart = self.int + repeatText('0', dotPlace - self.int.length);
     fracPart = '';
   } else {
     intPart = self.int.slice(0, dotPlace);
@@ -171,7 +171,7 @@ function insertThousands(digitsText: string, separator: string, minimumWidth: nu
   const groups: string[] = [];
   for (;;) {
     const length = Math.min(Math.max(rest.length, minWidth, 1), 3);
-    groups.push('0'.repeat(Math.max(length - rest.length, 0)) + rest.slice(-length));
+    groups.push(repeatText('0', Math.max(length - rest.length, 0)) + rest.slice(-length));
     rest = rest.slice(0, -length);
     minWidth -= length;
     if (!rest && minWidth <= 0) break;

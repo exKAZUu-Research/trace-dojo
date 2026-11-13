@@ -101,17 +101,15 @@ function joinThreads(runtime: Runtime): string | undefined {
   }
 }
 
-/** The variables CPython gives the `__main__` module of a script, in its order. */
+/** The variables CPython gives the `__main__` module of a program run with `python -c`, in its order. */
 function mainGlobals(runtime: Runtime, module: Module): Map<string, PyValue> {
   return new Map<string, PyValue>([
     ['__name__', '__main__'],
     ['__doc__', module.doc ?? None],
     ['__package__', None],
-    ['__loader__', unavailableValue('__loader__（スクリプトを読み込んだローダー）')],
+    ['__loader__', unavailableValue('__loader__（プログラムを読み込んだローダー）')],
     ['__spec__', None],
     ['__builtins__', runtime.importModule('builtins')],
-    ['__file__', unavailableValue('__file__（スクリプトのファイルのパス）')],
-    ['__cached__', None],
   ]);
 }
 

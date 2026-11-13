@@ -1,5 +1,6 @@
 // The decompression of bzip2 1.0.8 (`bzlib.c`, `decompress.c`), which CPython's `_bz2` links, transcribed so that it
 // stops for input and output where libbzip2 stops.
+import { currentRuntime } from '../runtimeContext';
 import { BZ_MAX_ALPHA_SIZE, createDecodeTable, type DecodeTable, updateCrc } from './bzip2Huffman';
 import { BZ2_RNUMS } from './bzip2Randomization';
 import type { ZStream } from './zlibDeflate';
@@ -54,7 +55,7 @@ export class Bzip2Decompressor {
   readonly strm: ZStream;
   private readonly reader: BitReader;
   private blockSize100k = 0;
-  private tt = new Uint32Array(0);
+  private tt: Uint32Array = new Uint32Array(0);
   private blockRandomised = false;
   private storedBlockCRC = 0;
   private storedCombinedCRC = 0;
@@ -133,7 +134,6 @@ export class Bzip2Decompressor {
     const level = yield* reader.bits(8);
     if (level < 0x31 || level > 0x39) throw new DataError();
     this.blockSize100k = level - 0x30;
-    this.tt = new Uint32Array(this.blockSize100k * 100_000);
     for (;;) {
       const uc = yield* reader.bits(8);
       if (uc === 0x17) break;
@@ -166,10 +166,10 @@ export class Bzip2Decompressor {
   }
 
   /** Decodes the block's move-to-front symbols into `tt`, returning its length. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the symbol loop of BZ2_decompress of bzip2's decompress.c.
-  // code-gauge-allow functionNcss 31 -- Transcribes the symbol loop of BZ2_decompress of bzip2's decompress.c.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the symbol loop of BZ2_decompress of bzip2's decompress.c.
+  // code-gauge-allow functionNcss 33 -- Transcribes the symbol loop of BZ2_decompress of bzip2's decompress.c.
   private *decodeSymbols(symbols: SymbolDecoder, seqToUnseq: number[]): Decoding<number> {
-    const { tt } = this;
+    let { tt } = this;
     const eob = seqToUnseq.length + 1;
     const nblockMAX = 100_000 * this.blockSize100k;
     const mtf = Array.from({ length: 256 }, (_, i) => i);
@@ -196,10 +196,21 @@ export class Bzip2Decompressor {
       }
       for (; es > 0; es--) {
         if (nblock >= nblockMAX) throw new DataError();
+        if (nblock >= tt.length) tt = this.growTable(nblockMAX);
         tt[nblock++] = uc;
       }
     }
     return nblock;
+  }
+
+  /** Grows the table of the decoded block up to `limit` entries as it fills, charging what it adds. */
+  private growTable(limit: number): Uint32Array {
+    const length = Math.min(Math.max(this.tt.length * 2, 4096), limit);
+    currentRuntime().allocate(Math.ceil((length - this.tt.length) / 2));
+    const grown = new Uint32Array(length);
+    grown.set(this.tt);
+    this.tt = grown;
+    return grown;
   }
 
   /** Builds the inverse transform of the decoded block in `tt` and reads its first byte. */

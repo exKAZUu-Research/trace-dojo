@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 407 -- It transcribes one of expat's C files.
+// code-gauge-allow-file fileNcss 410 -- It transcribes one of expat's C files.
+import { currentRuntime } from '../../runtimeContext';
 import type { Binding, Tag } from './expatBase';
 import { charRefNumber, PREDEFINED_ENTITIES, XML_ERROR, XmlError } from './expatDocument';
 import { ExpatProlog } from './expatProlog';
@@ -173,8 +174,11 @@ export class ExpatParser extends ExpatProlog {
     internal: boolean
   ): number {
     const run: ContentRun = { tz, startTagLevel, end, haveMore, internal };
+    const runtime = currentRuntime();
     let [tok, next] = tz.contentTok(s, end);
     for (;;) {
+      // Each token is charged, so that the deadline stops entities that expand far beyond the document.
+      runtime.spend();
       if (!internal) {
         this.eventPtr = s;
         this.eventEndPtr = next;

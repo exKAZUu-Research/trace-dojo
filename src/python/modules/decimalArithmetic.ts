@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 533 -- Transcribes the methods of _pydecimal that belong together.
+// code-gauge-allow-file fileNcss 534 -- Transcribes the methods of _pydecimal that belong together.
+import { repeatText } from '../stringBuilder';
 import { type DecimalContext, etiny, etop, type Rounding } from './decimalContext';
 import {
   adjusted,
@@ -540,7 +541,7 @@ export function scaleb(self: Dec, other: Dec, context: DecimalContext): Dec {
 
 function paddedDigits(self: Dec, prec: number): string {
   const pad = prec - self.int.length;
-  if (pad > 0) return '0'.repeat(pad) + self.int;
+  if (pad > 0) return repeatText('0', pad) + self.int;
   return pad < 0 ? self.int.slice(-pad) : self.int;
 }
 
@@ -557,7 +558,7 @@ export function rotateOrShift(self: Dec, other: Dec, context: DecimalContext, ro
       digits.slice(amount < 0 ? digits.length + amount : amount) +
       digits.slice(0, amount < 0 ? digits.length + amount : amount);
   else if (amount < 0) result = digits.slice(0, amount);
-  else result = (digits + '0'.repeat(amount)).slice(-context.prec);
+  else result = (digits + repeatText('0', amount)).slice(-context.prec);
   return dec(self.sign, result.replace(/^0+/, '') || '0', self.exp);
 }
 
@@ -580,7 +581,7 @@ export function logical(
 }
 
 export function logicalInvert(self: Dec, context: DecimalContext): Dec {
-  return logical(self, dec(0, '1'.repeat(context.prec), 0), context, (a, b) => a ^ b);
+  return logical(self, dec(0, repeatText('1', context.prec), 0), context, (a, b) => a ^ b);
 }
 
 export function nextValue(self: Dec, context: DecimalContext, up: boolean): Dec {
@@ -588,7 +589,7 @@ export function nextValue(self: Dec, context: DecimalContext, up: boolean): Dec 
   if (nan) return nan;
   const kind = infinityKind(self);
   if (kind === (up ? 1 : -1)) return self;
-  if (kind) return dec(up ? 1 : 0, '9'.repeat(context.prec), etop(context));
+  if (kind) return dec(up ? 1 : 0, repeatText('9', context.prec), etop(context));
   const quiet: DecimalContext = {
     ...context,
     rounding: up ? 'ROUND_CEILING' : 'ROUND_FLOOR',

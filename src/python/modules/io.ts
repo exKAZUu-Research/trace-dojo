@@ -238,7 +238,8 @@ function writeText(stream: TextStream, text: string): number {
     translated = text.replaceAll('\n', stream.newline);
   }
   const chars = iterStr(translated);
-  currentRuntime().buildString(stream.chars.length + chars.length);
+  if (chars.length === 0) return 0;
+  currentRuntime().buildString(Math.max(stream.chars.length, stream.position + chars.length));
   while (stream.chars.length < stream.position) stream.chars.push('\0');
   // Overwrites in place: splicing in a long text as arguments would exceed the host's argument limit.
   for (const [index, char] of chars.entries()) stream.chars[stream.position + index] = char;
@@ -338,11 +339,7 @@ function defineBytesIO(cls: PyClass): void {
     const data = bytesLikeData(value);
     if (data === undefined) throw typeError(`a bytes-like object is required, not '${typeName(value)}'`);
     stream.buffer.checkNoExports();
-    const { buffer, position } = stream;
-    if (buffer.length < position) buffer.splice(buffer.length, buffer.length, new Uint8Array(position - buffer.length));
-    buffer.splice(position, Math.min(buffer.length, position + data.length), new Uint8Array(data));
-    stream.position += data.length;
-    return BigInt(data.length);
+    return BigInt(writeBytes(stream, data));
   });
   method(cls, 'read1', 'expected', 0, 1, (self, [size]) => readFrom(binaryStream(self), sizeArgument(size)));
   method(cls, 'readinto', 'one', 1, 1, (self, [target]) => {
@@ -385,6 +382,19 @@ function defineBytesIO(cls: PyClass): void {
     if (size < stream.buffer.length) stream.buffer.splice(size, stream.buffer.length, new Uint8Array(0));
     return BigInt(size);
   });
+}
+
+/** Writes bytes at the position, filling a gap past the end with zeros, and returns their number. */
+function writeBytes(stream: BinaryStream, data: Uint8Array): number {
+  if (data.length === 0) return 0;
+  const { buffer, position } = stream;
+  if (buffer.length < position) {
+    currentRuntime().ensureRoom(Math.ceil((position - buffer.length) / 8));
+    buffer.splice(buffer.length, buffer.length, new Uint8Array(position - buffer.length));
+  }
+  buffer.splice(position, Math.min(buffer.length, position + data.length), new Uint8Array(data));
+  stream.position += data.length;
+  return data.length;
 }
 
 // The module --------------------------------------------------------------------------------------------------------

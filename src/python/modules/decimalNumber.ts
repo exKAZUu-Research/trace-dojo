@@ -1,4 +1,5 @@
 import { currentRuntime } from '../runtimeContext';
+import { repeatText } from '../stringBuilder';
 import { type Condition, type DecimalContext, etiny, etop, type Rounding } from './decimalContext';
 
 /**
@@ -91,7 +92,7 @@ function overflowResult(context: DecimalContext, sign: number): Dec {
   }
   if (sign === 0 && rounding === 'ROUND_CEILING') return signedInfinity(sign);
   if (sign === 1 && rounding === 'ROUND_FLOOR') return signedInfinity(sign);
-  return dec(sign, '9'.repeat(context.prec), context.Emax - context.prec + 1);
+  return dec(sign, repeatText('9', context.prec), context.Emax - context.prec + 1);
 }
 
 export function checkNans(self: Dec, other: Dec | undefined, context: DecimalContext): Dec | undefined {
@@ -149,7 +150,7 @@ export function fix(self: Dec, context: DecimalContext): Dec {
   if (subnormal) raiseCondition(context, 'Subnormal');
   if (context.clamp === 1 && self.exp > top) {
     raiseCondition(context, 'Clamped');
-    return dec(self.sign, self.int + '0'.repeat(self.exp - top), top);
+    return dec(self.sign, self.int + repeatText('0', self.exp - top), top);
   }
   return self;
 }
@@ -232,7 +233,7 @@ export function roundingChange(self: Dec, prec: number, rounding: Rounding): num
 export function rescale(self: Dec, exp: number, rounding: Rounding): Dec {
   if (!isFinite(self)) return self;
   if (self.int === '0') return dec(self.sign, '0', exp);
-  if (self.exp >= exp) return dec(self.sign, self.int + '0'.repeat(self.exp - exp), exp);
+  if (self.exp >= exp) return dec(self.sign, self.int + repeatText('0', self.exp - exp), exp);
   let value: Dec = self;
   let digits = self.int.length + self.exp - exp;
   if (digits < 0) {
@@ -273,8 +274,8 @@ export function compareValues(self: Dec, other: Dec): number {
   if (a !== b) return a > b ? selfSign : -selfSign;
   const selfExp = self.exp as number;
   const otherExp = other.exp as number;
-  const left = self.int + '0'.repeat(Math.max(selfExp - otherExp, 0));
-  const right = other.int + '0'.repeat(Math.max(otherExp - selfExp, 0));
+  const left = self.int + repeatText('0', Math.max(selfExp - otherExp, 0));
+  const right = other.int + repeatText('0', Math.max(otherExp - selfExp, 0));
   if (left === right) return 0;
   return left < right ? -selfSign : selfSign;
 }

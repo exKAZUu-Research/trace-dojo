@@ -191,6 +191,12 @@ test.each([
   ['the binary digits of a huge int', 'x = bin(1 << 1000000)'],
   ['a complex number padded to a huge width', 'x = format(complex(1, 2), ">1000000000")'],
   ['a bytes zero-filled to a huge width', "x = b'x'.zfill(1000001)"],
+  ['a StringIO written far past its end', "from io import StringIO\ns = StringIO()\ns.seek(2000000)\ns.write('x')"],
+  ['a BytesIO written far past its end', "from io import BytesIO\nb = BytesIO()\nb.seek(10 ** 12)\nb.write(b'x')"],
+  [
+    'a Decimal quantized to a huge exponent',
+    "from decimal import Decimal, Context\nx = Decimal(1).quantize(Decimal('1e-2000000'), context=Context(prec=2000001))",
+  ],
   ['a bytearray zero-filled to a huge width', "x = bytearray(b'-x').zfill(10 ** 12)"],
   ['a bytes percent field padded to a huge width', "x = b'%1000000000s' % b'x'"],
   ['a Decimal formatted with a huge exponent', "from decimal import Decimal\nx = format(Decimal('1e-1000001'), 'f')"],

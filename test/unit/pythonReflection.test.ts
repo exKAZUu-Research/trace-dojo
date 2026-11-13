@@ -44,7 +44,7 @@ expected = [
     (7, 8),
     (['K', '__builtins__', 'h', 'q'], 4, 'builtins', None),
     {'a': 1, 'b': 101},
-    ('yes', True, True, ['__name__', '__doc__', '__package__', '__loader__', '__spec__', '__builtins__', '__file__', '__cached__']),
+    ('yes', True, True, ['__name__', '__doc__', '__package__', '__loader__', '__spec__', '__builtins__', 'results', 'x']),
     (10, '<calc>', 1024),
     {'b': 2, 'a': 1},
 ]

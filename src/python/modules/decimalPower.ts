@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 507 -- Transcribes the methods of _pydecimal that belong together.
+// code-gauge-allow-file fileNcss 508 -- Transcribes the methods of _pydecimal that belong together.
 import { currentRuntime } from '../runtimeContext';
+import { repeatText } from '../stringBuilder';
 import { times } from './decimalArithmetic';
 import { type DecimalContext, etiny } from './decimalContext';
 import {
@@ -214,8 +215,8 @@ export function exponential(self: Dec, context: DecimalContext): Dec {
   let result: Dec;
   if (self.sign === 0 && adj > String((context.Emax + 1) * 3).length) result = dec(0, '1', context.Emax + 1);
   else if (self.sign === 1 && adj > String((-etiny(context) + 1) * 3).length) result = dec(0, '1', etiny(context) - 1);
-  else if (self.sign === 0 && adj < -p) result = dec(0, `1${'0'.repeat(p - 1)}1`, -p);
-  else if (self.sign === 1 && adj < -p - 1) result = dec(0, '9'.repeat(p + 1), -p - 1);
+  else if (self.sign === 0 && adj < -p) result = dec(0, `1${repeatText('0', p - 1)}1`, -p);
+  else if (self.sign === 1 && adj < -p - 1) result = dec(0, repeatText('9', p + 1), -p - 1);
   else {
     const c = self.sign ? -BigInt(self.int) : BigInt(self.int);
     const e = self.exp as number;
@@ -344,7 +345,7 @@ function powerOfOne(self: FiniteDec, other: Dec, resultSign: 0 | 1, context: Dec
     raiseCondition(context, 'Rounded');
     exp = 1 - context.prec;
   }
-  return dec(resultSign, `1${'0'.repeat(-exp)}`, exp);
+  return dec(resultSign, `1${repeatText('0', -exp)}`, exp);
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes _pydecimal's algorithm of the same name.
@@ -402,7 +403,7 @@ function powerReal(self: FiniteDec, other: FiniteDec, context: DecimalContext): 
   raiseCondition(context, 'Inexact');
   raiseCondition(context, 'Rounded');
   if (isFinite(result) && compareValues(result, ONE) === 0)
-    result = dec(0, `1${'0'.repeat(context.prec - 1)}`, 1 - context.prec);
+    result = dec(0, `1${repeatText('0', context.prec - 1)}`, 1 - context.prec);
   if (infinityKind(result)) result = INFINITY;
   return fix(result, context);
 }
@@ -414,7 +415,7 @@ function fixInexactPower(value: Dec, context: DecimalContext): Dec {
   let result = value;
   if (result.int.length <= context.prec) {
     const expDiff = context.prec + 1 - result.int.length;
-    result = dec(result.sign, result.int + '0'.repeat(expDiff), (result.exp as number) - expDiff);
+    result = dec(result.sign, result.int + repeatText('0', expDiff), (result.exp as number) - expDiff);
   }
   const quiet: DecimalContext = { ...context, status: new Set(), traps: new Set() };
   result = fix(result, quiet);
@@ -493,7 +494,7 @@ function powerExact(self: FiniteDec, other: FiniteDec, p: number): Dec | undefin
     const ideal = self.exp * Number(truncatedInt(other));
     zeros = Math.min(xe - ideal, p - text.length);
   }
-  return dec(0, text + '0'.repeat(Math.max(zeros, 0)), xe - zeros);
+  return dec(0, text + repeatText('0', Math.max(zeros, 0)), xe - zeros);
 }
 
 function integerRoot(xc: bigint, n: bigint): bigint | undefined {
@@ -533,7 +534,7 @@ function powerOfTenExact(
     const ideal = self.exp * Number(truncatedInt(other));
     zeros = Math.min(exponent - ideal, p - 1);
   }
-  return dec(0, `1${'0'.repeat(Math.max(zeros, 0))}`, exponent - zeros);
+  return dec(0, `1${repeatText('0', Math.max(zeros, 0))}`, exponent - zeros);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Transcribes _pydecimal's algorithm of the same name.

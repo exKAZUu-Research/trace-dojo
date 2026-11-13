@@ -1,4 +1,5 @@
 // CPython's zlib module over a transcription of zlib 1.2.12, the version the reference CPython links.
+import { LIMITS } from '../../interpreter/limits';
 import { bytesLikeData, newBytes } from '../bytesValues';
 import { builtin, method } from '../define';
 import { registerModule } from '../modules';
@@ -79,10 +80,14 @@ export class OutputBuffer {
   grow(): void {
     let size = BLOCK_SIZES[Math.min(this.blocks.length, BLOCK_SIZES.length - 1)];
     if (this.maxLength >= 0) size = Math.min(size, this.maxLength - this.allocated);
-    this.addBlock(size);
+    // The capacity stops one byte past the result's length limit, which is enough to tell a result beyond it.
+    const room = LIMITS.maxStringLength + 1 - this.allocated;
+    if (room <= 0) currentRuntime().ensureStringFits(this.allocated);
+    this.addBlock(Math.min(size, room));
   }
 
   finish(): Uint8Array {
+    currentRuntime().ensureStringFits(this.size);
     const result = new Uint8Array(this.size);
     let offset = 0;
     for (const block of this.blocks) {
@@ -94,7 +99,7 @@ export class OutputBuffer {
   }
 
   private addBlock(size: number): void {
-    currentRuntime().buildString(this.allocated + size > 1_000_000 ? this.allocated + size : 0);
+    if (size > LIMITS.maxStringLength + 1 - this.allocated) currentRuntime().ensureStringFits(this.allocated + size);
     const block = new Uint8Array(size);
     this.blocks.push(block);
     this.allocated += size;

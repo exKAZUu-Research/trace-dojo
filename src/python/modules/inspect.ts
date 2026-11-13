@@ -11,9 +11,27 @@ import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../o
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { IS_ABSTRACT, typeFlags } from '../typeFlags';
-import { builtinFunctionClass, classOf, generatorClass, None, typeError, typeName } from '../types';
+import {
+  builtinFunctionClass,
+  classOf,
+  exceptionClassNamed,
+  generatorClass,
+  newException,
+  None,
+  typeError,
+  typeName,
+} from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import { PyBoundMethod, PyBuiltinFunction, PyClass, PyFunction, PyGenerator, PyModule, type PyValue } from '../values';
+import {
+  PyBoundMethod,
+  PyBuiltinFunction,
+  PyClass,
+  PyError,
+  PyFunction,
+  PyGenerator,
+  PyModule,
+  type PyValue,
+} from '../values';
 import { INSPECT_SOURCE } from './inspectPython';
 import { emptyClass, formatAnnotation, parameterClass, signature, signatureClass } from './inspectSignature';
 import { inspectSourceNatives } from './inspectSource';
@@ -123,18 +141,25 @@ function getMembers(value: PyValue, predicate: PyValue | undefined): PyValue {
  * TypeError CPython raises, and else fail as the file's path is the environment's.
  */
 function getFile(name: string, value: PyValue): PyValue {
-  const runtime = currentRuntime();
   if (value instanceof PyModule || value instanceof PyClass) {
-    const module = value instanceof PyModule ? value : runtime.modules.get(value.module);
-    if (module && !module.dict.has('__file__') && !module.unsupported.has('__file__')) {
-      throw typeError(`${pyRepr(value)} is a built-in ${value instanceof PyModule ? 'module' : 'class'}`);
-    }
+    checkHasFile(value);
   } else if (value instanceof PyBuiltinFunction || !(value instanceof PyFunction || value instanceof PyBoundMethod)) {
     throw typeError(
       `module, class, method, function, traceback, frame, or code object was expected, got ${typeName(value)}`
     );
   }
   throw new UnsupportedFeatureError(`inspect.${name}()（ソースファイルのパス）`);
+}
+
+/** Raises what `inspect.getfile` raises for a module, or a class of a module, without a file. */
+function checkHasFile(value: PyModule | PyClass): void {
+  const module = value instanceof PyModule ? value : currentRuntime().modules.get(value.module);
+  if (!module || module.dict.has('__file__') || module.unsupported.has('__file__')) return;
+  // The program, run as `python -c` runs it, has no file.
+  if (value instanceof PyClass && value.module === '__main__') {
+    throw new PyError(newException(exceptionClassNamed('OSError'), ['source code not available']));
+  }
+  throw typeError(`${pyRepr(value)} is a built-in ${value instanceof PyModule ? 'module' : 'class'}`);
 }
 
 /** `inspect.getdoc`: the cleaned docstring of an object, or of the class or base class it inherits one from. */

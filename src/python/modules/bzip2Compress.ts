@@ -1,5 +1,6 @@
 // The compression of bzip2 1.0.8 (`bzlib.c`, `compress.c`), which CPython's `_bz2` links, transcribed so that it
 // writes the same bytes and hands them out at the same calls.
+import { currentRuntime } from '../runtimeContext';
 import { type BitWriter, writeBlock } from './bzip2Block';
 import { updateCrc } from './bzip2Huffman';
 import { blockSort, BZ_N_OVERSHOOT } from './bzip2Sort';
@@ -28,8 +29,8 @@ export class Bzip2Compressor implements BitWriter {
   private availInExpect = 0;
   private readonly blockSize100k: number;
   private readonly nblockMAX: number;
-  private readonly block: Uint8Array;
-  private readonly ptr: Int32Array;
+  /** The block being collected, grown as it fills up to the level's size, so that its memory is charged as used. */
+  private block = new Uint8Array(0);
   private zbits = new Uint8Array(1024);
   private stateInCh = 256;
   private stateInLen = 0;
@@ -48,8 +49,6 @@ export class Bzip2Compressor implements BitWriter {
     this.blockSize100k = blockSize100k;
     const n = 100_000 * blockSize100k;
     this.nblockMAX = n - 19;
-    this.block = new Uint8Array(n + BZ_N_OVERSHOOT);
-    this.ptr = new Int32Array(n);
     this.prepareNewBlock();
   }
 
@@ -148,6 +147,7 @@ export class Bzip2Compressor implements BitWriter {
     if (ch !== this.stateInCh && this.stateInLen === 1) {
       this.blockCRC = updateCrc(this.blockCRC, this.stateInCh);
       this.inUse[this.stateInCh] = true;
+      this.reserve(1);
       this.block[this.nblock++] = this.stateInCh;
       this.stateInCh = ch;
     } else if (ch !== this.stateInCh || this.stateInLen === 255) {
@@ -163,11 +163,26 @@ export class Bzip2Compressor implements BitWriter {
     const ch = this.stateInCh;
     for (let i = 0; i < this.stateInLen; i++) this.blockCRC = updateCrc(this.blockCRC, ch);
     this.inUse[ch] = true;
+    this.reserve(5);
     for (let i = Math.min(this.stateInLen, 4); i > 0; i--) this.block[this.nblock++] = ch;
     if (this.stateInLen >= 4) {
       this.inUse[this.stateInLen - 4] = true;
       this.block[this.nblock++] = this.stateInLen - 4;
     }
+  }
+
+  /** Makes room for `count` more bytes of the block, with the overshoot the sort writes past its end. */
+  private reserve(count: number): void {
+    const needed = this.nblock + count + BZ_N_OVERSHOOT;
+    if (needed <= this.block.length) return;
+    const length = Math.min(
+      Math.max(needed, this.block.length * 2, 4096),
+      100_000 * this.blockSize100k + BZ_N_OVERSHOOT
+    );
+    currentRuntime().allocate(Math.ceil((length - this.block.length) / 8));
+    const grown = new Uint8Array(length);
+    grown.set(this.block.subarray(0, this.nblock));
+    this.block = grown;
   }
 
   private flushRL(): void {
@@ -199,10 +214,13 @@ export class Bzip2Compressor implements BitWriter {
   private compressBlock(isLastBlock: boolean): void {
     const hasData = this.nblock > 0;
     let origPtr = 0;
+    let ptr = new Int32Array(0);
     if (hasData) {
       this.blockCRC = ~this.blockCRC >>> 0;
       this.combinedCRC = (((this.combinedCRC << 1) | (this.combinedCRC >>> 31)) ^ this.blockCRC) >>> 0;
-      origPtr = blockSort(this.block, this.ptr, this.nblock, WORK_FACTOR);
+      currentRuntime().allocate(Math.ceil(this.nblock / 2));
+      ptr = new Int32Array(this.nblock);
+      origPtr = blockSort(this.block, ptr, this.nblock, WORK_FACTOR);
     }
     if (this.blockNo === 1) {
       this.bsBuff = 0;
@@ -214,7 +232,7 @@ export class Bzip2Compressor implements BitWriter {
       this.bsPutUInt32(this.blockCRC);
       this.bsW(1, 0);
       this.bsW(24, origPtr);
-      writeBlock(this, this.block, this.ptr, this.nblock, this.inUse);
+      writeBlock(this, this.block, ptr, this.nblock, this.inUse);
     }
     if (isLastBlock) {
       this.bsPutBytes([0x17, 0x72, 0x45, 0x38, 0x50, 0x90]);

@@ -94,7 +94,9 @@ function parseFormat(format: string): Layout {
   return { format, items, size, little: order.little, arity };
 }
 
+/** The layouts of the formats used last, shared by every run, so that runs cannot grow it: CPython also caches 100. */
 const layouts = new Map<string, Layout>();
+const MAX_CACHED_LAYOUTS = 100;
 
 function layoutOf(formatValue: PyValue): Layout {
   const format = unbox(formatValue);
@@ -105,6 +107,7 @@ function layoutOf(formatValue: PyValue): Layout {
   let layout = layouts.get(text);
   if (!layout) {
     layout = parseFormat(text);
+    if (layouts.size >= MAX_CACHED_LAYOUTS) layouts.delete(layouts.keys().next().value as string);
     layouts.set(text, layout);
   }
   return layout;
