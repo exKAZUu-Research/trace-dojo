@@ -1082,7 +1082,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const cases = statement.cases.map((typeCase) =>
       this.typeSwitchCase(statement, typeCase, operand.type, bindings, seenTypes)
     );
-    if (statement.binding && bindings.length > 0 && bindings.every((binding) => !binding.used)) {
+    if (statement.binding && bindings.every((binding) => !binding.used)) {
       this.error(statement.binding, `宣言した変数 ${statement.binding.name} を使っていません。`);
     }
     for (const binding of bindings) binding.used = true;
