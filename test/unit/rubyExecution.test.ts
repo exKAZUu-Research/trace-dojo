@@ -1500,3 +1500,14 @@ test('String successor carries across multibyte letters and skipped symbols', ()
     stdout: '"ê😀0"\n"ê.0"\n"ａａ😀0"\n"旦😀0"\n"a😀10"\n"à😀a"\n',
   });
 });
+
+test('Range last zero traverses custom successor callbacks', () => {
+  expect(
+    run(
+      'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); @n<=>o.n; end; def succ; raise "bad"; end; end; begin; p (A.new(0)..A.new(3)).last(0); rescue => e; p e.class; end'
+    )
+  ).toMatchObject({
+    stdout: 'RuntimeError\n',
+  });
+  expect(run('p (1..3).last(0), (1..3).last(2)')).toMatchObject({ stdout: '[]\n[2, 3]\n' });
+});
