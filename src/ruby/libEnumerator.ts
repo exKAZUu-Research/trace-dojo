@@ -1,4 +1,13 @@
-import { addressOf, comparisonFailed, inspect, numericCompare, spaceship, toIndex, toInt } from './conversions';
+import {
+  addressOf,
+  comparisonFailed,
+  inspect,
+  numericCompare,
+  spaceship,
+  toIndex,
+  toInt,
+  toStepFloat,
+} from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError } from './errors';
 import { floatStepCount } from './floatMath';
@@ -293,10 +302,7 @@ def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject,
   const { start, end, step } = arithmeticSpec(source.recv, source.args, source.keywords);
   const floatSequence = typeof start === 'number' || typeof end === 'number' || typeof step === 'number';
   const first = floatSequence ? Number(start) : start;
-  const order =
-    end === NIL || (floatSequence && typeof end !== 'bigint' && typeof end !== 'number')
-      ? undefined
-      : yield* spaceship(start, end);
+  const order = yield* arithmeticFirstOrder(start, end, floatSequence, args.length === 0);
   const empty = order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0));
   if (args.length === 0) {
     if (typeof step === 'number' && Number.isNaN(step)) throw comparisonFailed(step, 0n);
@@ -321,6 +327,19 @@ def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject,
   }
   return yield* callMethod(self, 'take', [BigInt(count)]);
 });
+
+function* arithmeticFirstOrder(
+  start: Value,
+  end: Value,
+  floatSequence: boolean,
+  uncounted: boolean
+): Gen<number | undefined> {
+  if (end === NIL) return undefined;
+  const customFloatEnd = floatSequence && typeof end !== 'bigint' && typeof end !== 'number';
+  if (customFloatEnd && !uncounted) return undefined;
+  return yield* spaceship(start, customFloatEnd ? yield* toStepFloat(end) : end);
+}
+
 def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);

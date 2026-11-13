@@ -2227,6 +2227,13 @@ test('pp guards Hash entries during callback inspection', () => {
   ).toMatchObject({
     stdout: '{a:RuntimeError\n1\n',
   });
+  expect(
+    run(
+      'class A;def inspect;"x";end;end;class W;def write(s);raise "bad";end;end;h={a:A.new};$stdout=W.new;begin;pp h;rescue;end;$stdout=STDOUT;h[:b]=2;p h.size'
+    )
+  ).toMatchObject({
+    stdout: '2\n',
+  });
 });
 
 test('pp follows Array mutations during element inspection', () => {
@@ -2248,6 +2255,15 @@ test('pp emits container prefixes before user inspect callbacks', () => {
   });
 });
 
+test('pp breaks all separators in a streamed group that cannot fit', () => {
+  expect(run('class A;def inspect;"x";end;end;pp [A.new,"a"*80,1,2]')).toMatchObject({
+    stdout: `[x,\n "${'a'.repeat(80)}",\n 1,\n 2]\n`,
+  });
+  expect(run('class A;def inspect;"x";end;end;pp({one:"a"*60,two:A.new,three:2})')).toMatchObject({
+    stdout: `{one: "${'a'.repeat(60)}",\n two: x,\n three: 2}\n`,
+  });
+});
+
 test('Integer step compares numeric-like limits through coerce', () => {
   expect(run('class A;private;def coerce(x);[x,3];end;end;p 1.step(A.new).first(2)')).toMatchObject({
     stdout: '[1, 2]\n',
@@ -2262,6 +2278,14 @@ test('Float step converts numeric-like limits through to_f', () => {
     run('class A;def coerce(x);[x,3];end;end;begin;1.step(A.new,0.5){|x|p x};rescue=>e;p e.class,e.message;end')
   ).toMatchObject({
     stdout: 'TypeError\n"can\'t convert A into Float"\n',
+  });
+  expect(run('class A;def to_f;puts :converted;0.0;end;end;p 1.0.step(A.new).first')).toMatchObject({
+    stdout: 'converted\nnil\n',
+  });
+  expect(
+    run('class A;def coerce(x);[x,3];end;end;begin;p 1.0.step(A.new).first;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: 'TypeError\n',
   });
 });
 

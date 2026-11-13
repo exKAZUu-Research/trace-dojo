@@ -187,29 +187,31 @@ function* streamPretty(value: Value, context: StreamContext, indent: number): Ge
 function* streamArray(value: RArray, context: StreamContext, indent: number): Gen<void> {
   const { emit, seen } = context;
   if (seen.has(value)) return yield* emit('[...]');
+  const broken = context.state.column + (yield* minimumWidth(value, new Set())) > WIDTH;
   seen.add(value);
-  yield* emit('[');
   try {
+    yield* emit('[');
     for (let index = 0; index < value.items.length; index++) {
       if (index > 0) yield* emit(',');
-      yield* streamPrettyPart(value.items[index], index > 0, context, indent + 1);
+      yield* streamPrettyPart(value.items[index], index > 0, context, indent + 1, broken);
     }
+    yield* emit(']');
   } finally {
     seen.delete(value);
   }
-  yield* emit(']');
 }
 
 function* streamHash(value: RHash, context: StreamContext, indent: number): Gen<void> {
   const { emit, seen } = context;
   if (seen.has(value)) return yield* emit('{...}');
+  const broken = context.state.column + (yield* minimumWidth(value, new Set())) > WIDTH;
   seen.add(value);
   value.iterating++;
-  yield* emit('{');
   try {
+    yield* emit('{');
     let index = 0;
     for (const { key, value: item } of value.map.values()) {
-      if (index++ > 0) yield* emit(',');
+      if (index++ > 0) yield* emit(broken ? `,\n${' '.repeat(indent + 1)}` : ', ');
       if (key instanceof RSymbol) yield* emit(`${isSimplePrettySymbol(key) ? key.name : strInspect(key.name)}:`);
       else {
         yield* streamPrettyPart(key, false, context, indent + 1);
@@ -217,11 +219,11 @@ function* streamHash(value: RHash, context: StreamContext, indent: number): Gen<
       }
       yield* streamPrettyPart(item, true, context, indent + 1);
     }
+    yield* emit('}');
   } finally {
     value.iterating--;
     seen.delete(value);
   }
-  yield* emit('}');
 }
 
 function* streamObject(value: RObject, context: StreamContext, indent: number): Gen<void> {
@@ -229,31 +231,61 @@ function* streamObject(value: RObject, context: StreamContext, indent: number): 
   if (seen.has(value)) return yield* emit(yield* inspect(value));
   seen.add(value);
   const cls = realClassOf(value);
-  yield* emit(`#<${cls.name ?? anonymousClassName(cls)}:${addressOf(value)}`);
   try {
+    yield* emit(`#<${cls.name ?? anonymousClassName(cls)}:${addressOf(value)}`);
     for (const [name, item] of value.ivars ?? []) {
       if (name.startsWith('@__')) continue;
       yield* emit(` ${name}=`);
       yield* streamPretty(item, context, indent + 1);
     }
+    yield* emit('>');
   } finally {
     seen.delete(value);
   }
-  yield* emit('>');
 }
 
-function* streamPrettyPart(value: Value, separated: boolean, context: StreamContext, indent: number): Gen<void> {
+function* streamPrettyPart(
+  value: Value,
+  separated: boolean,
+  context: StreamContext,
+  indent: number,
+  broken = false
+): Gen<void> {
   const { emit, state } = context;
   if (showsItself(value)) {
-    const breakBefore = separated && state.column + 2 > WIDTH;
+    const breakBefore = separated && (broken || state.column + 2 > WIDTH);
     if (breakBefore) yield* emit(`\n${' '.repeat(indent)}`);
     const shown = yield* inspect(value);
     if (separated && !breakBefore) yield* emit(' ');
     yield* emit(shown);
     return;
   }
-  if (separated) yield* emit(state.column + 2 > WIDTH ? `\n${' '.repeat(indent)}` : ' ');
+  if (separated) yield* emit(broken || state.column + 2 > WIDTH ? `\n${' '.repeat(indent)}` : ' ');
   yield* streamPretty(value, context, indent);
+}
+
+function* minimumWidth(value: Value, seen: Set<object>): Gen<number> {
+  rt().spend();
+  if (showsItself(value)) return 1;
+  if (value instanceof RArray) {
+    if (seen.has(value)) return 5;
+    seen.add(value);
+    let width = 2;
+    for (const item of value.items) width += (yield* minimumWidth(item, seen)) + 2;
+    return value.items.length > 0 ? width - 2 : width;
+  }
+  if (value instanceof RHash) {
+    if (seen.has(value)) return 5;
+    seen.add(value);
+    let width = 2;
+    for (const entry of value.map.values()) {
+      width += entry.key instanceof RSymbol ? entry.key.name.length + 2 : (yield* minimumWidth(entry.key, seen)) + 4;
+      width += (yield* minimumWidth(entry.value, seen)) + 2;
+    }
+    return value.map.size > 0 ? width - 2 : width;
+  }
+  if (value instanceof RObject) return 1;
+  return (yield* inspect(value)).length;
 }
 
 function isSimplePrettySymbol(key: RSymbol): boolean {

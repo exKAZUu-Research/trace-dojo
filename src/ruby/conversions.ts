@@ -132,6 +132,17 @@ export function* toFloat(value: Value): Gen<number> {
   throw implicitConversionError(value, 'Float');
 }
 
+export function* toStepFloat(value: Value): Gen<number> {
+  if (value instanceof RString) throw typeError('no implicit conversion to float from string');
+  if (!respondsTo(value, 'to_f', true)) throw typeError(`can't convert ${realClassOf(value).name} into Float`);
+  const converted = yield* callMethod(value, 'to_f', [], undefined, undefined, { fcall: true });
+  if (typeof converted !== 'number') {
+    const name = realClassOf(value).name;
+    throw typeError(`can't convert ${name} to Float (${name}#to_f gives ${realClassOf(converted).name})`);
+  }
+  return converted;
+}
+
 // Strings -------------------------------------------------------------------------------------------------------------
 
 /** The text of a value as `to_s` makes it, which string interpolation and `puts` show. */
