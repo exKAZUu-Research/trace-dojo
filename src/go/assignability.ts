@@ -1,6 +1,5 @@
 import { type Constant, exactInteger, floatToRational, rationalToFloat, toRational } from './constants';
 import {
-  type BasicKind,
   identical,
   integerBits,
   isBasic,
@@ -45,7 +44,7 @@ export function represent(constant: Constant, type: Type): Representation {
     if (constant.kind === 'complex' && constant.im.num !== 0n) return { error: 'truncated' };
     const value = toRational(constant);
     if (kind === 'untypedFloat') return { constant: { kind: 'float', value } };
-    const rounded = roundFloat(rationalToFloat(value), kind);
+    const rounded = rationalToFloat(value, kind === 'float32');
     if (!Number.isFinite(rounded)) return { error: 'overflows' };
     return { constant: { kind: 'float', value: floatToRational(rounded) } };
   }
@@ -57,19 +56,15 @@ export function represent(constant: Constant, type: Type): Representation {
     }
     const re = toRational(constant);
     const im = constant.kind === 'complex' ? constant.im : { num: 0n, den: 1n };
-    const part = kind === 'complex64' ? 'float32' : 'float64';
-    const roundedRe = roundFloat(rationalToFloat(re), part);
-    const roundedIm = roundFloat(rationalToFloat(im), part);
+    const single = kind === 'complex64';
+    const roundedRe = rationalToFloat(re, single);
+    const roundedIm = rationalToFloat(im, single);
     if (!Number.isFinite(roundedRe) || !Number.isFinite(roundedIm)) {
       return { error: 'overflows' };
     }
     return { constant: { kind: 'complex', re: floatToRational(roundedRe), im: floatToRational(roundedIm) } };
   }
   return { error: 'mismatch' };
-}
-
-function roundFloat(value: number, kind: BasicKind): number {
-  return kind === 'float32' ? Math.fround(value) : value;
 }
 
 /** The runtime value of a constant of the given type. */

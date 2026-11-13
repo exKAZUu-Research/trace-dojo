@@ -1,3 +1,4 @@
+import { fma } from './fma';
 import { divideByZeroPanic, runtimeErrorPanic } from './runtimeErrors';
 import {
   type BasicKind,
@@ -114,16 +115,17 @@ function complexArithmetic(operator: string, single: boolean): Binary {
 function complexDivide(n: Complex, m: Complex, make: (re: number, im: number) => Complex): Complex {
   let e: number;
   let f: number;
+  // Go's runtime is compiled for arm64 with these multiply-adds fused.
   if (Math.abs(m.re) >= Math.abs(m.im)) {
     const ratio = m.im / m.re;
-    const denom = m.re + ratio * m.im;
-    e = (n.re + n.im * ratio) / denom;
-    f = (n.im - n.re * ratio) / denom;
+    const denom = fma(ratio, m.im, m.re);
+    e = fma(n.im, ratio, n.re) / denom;
+    f = fma(-n.re, ratio, n.im) / denom;
   } else {
     const ratio = m.re / m.im;
-    const denom = m.im + ratio * m.re;
-    e = (n.re * ratio + n.im) / denom;
-    f = (n.im * ratio - n.re) / denom;
+    const denom = fma(ratio, m.re, m.im);
+    e = fma(n.re, ratio, n.im) / denom;
+    f = fma(n.im, ratio, -n.re) / denom;
   }
   if (Number.isNaN(e) && Number.isNaN(f)) {
     // Correct final result to infinities and zeros if applicable. Matches C99: ISO/IEC 9899:1999 - G.5.1.
@@ -134,9 +136,28 @@ function complexDivide(n: Complex, m: Complex, make: (re: number, im: number) =>
     if (c === 0 && d === 0 && (!Number.isNaN(a) || !Number.isNaN(b))) {
       e = copySign(Infinity, c) * a;
       f = copySign(Infinity, c) * b;
+    } else if (isInfinite(a, b) && Number.isFinite(c) && Number.isFinite(d)) {
+      const [x, y] = [infToOne(a), infToOne(b)];
+      e = Infinity * (x * c + y * d);
+      f = Infinity * (y * c - x * d);
+    } else if (isInfinite(c, d) && Number.isFinite(a) && Number.isFinite(b)) {
+      const [x, y] = [infToOne(c), infToOne(d)];
+      // oxlint-disable-next-line erasing-op -- Multiplying by 0 keeps the sign of the product as Go's runtime does.
+      e = 0 * (a * x + b * y);
+      // oxlint-disable-next-line erasing-op -- As above.
+      f = 0 * (b * x - a * y);
     }
   }
   return make(e, f);
+}
+
+function isInfinite(x: number, y: number): boolean {
+  return Math.abs(x) === Infinity || Math.abs(y) === Infinity;
+}
+
+/** Go's inf2one: ±1 for an infinity and ±0 otherwise, keeping the sign. */
+function infToOne(value: number): number {
+  return copySign(Math.abs(value) === Infinity ? 1 : 0, value);
 }
 
 function copySign(magnitude: number, sign: number): number {

@@ -1,8 +1,7 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt reads as they are.
 import type { Entity, FuncEntity } from '../entities';
 import { newError } from '../errorValues';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
-import type { Runtime } from '../runtime';
+import { addMethod, definePackage, fn, namedType, nativeFunction, perRun, typeEntity } from '../native';
 import { indexPanic } from '../runtimeErrors';
 import { BASIC, type FuncType, type NamedType, pointerTo, sliceOf, type StructType, type Type } from '../types';
 import { Cell, copyValue, GoStruct, Iface, Pointer, type Slice, type Value } from '../values';
@@ -501,17 +500,12 @@ function newUniform(color: Value): Pointer {
   return new Pointer(new Cell(new GoStruct([color])), 'v');
 }
 
-/** The `image.Black`, `image.White`, `image.Transparent`, and `image.Opaque` of each run, which programs may change. */
-const uniformsByRuntime = new WeakMap<object, Record<string, Pointer>>();
-
 function uniformVariable(name: string, color: () => Iface): Entity {
-  return libraryVariable(name, UNIFORM_POINTER, () => {
-    const runtime = currentRuntime();
-    const uniforms = uniformsByRuntime.get(runtime) ?? {};
-    uniformsByRuntime.set(runtime, uniforms);
-    uniforms[name] ??= newUniform(color());
-    return uniforms[name];
-  });
+  return libraryVariable(
+    name,
+    UNIFORM_POINTER,
+    perRun(() => newUniform(color()))
+  );
 }
 
 // Formats -----------------------------------------------------------------------------------------------------------
@@ -543,17 +537,7 @@ interface Format {
 }
 
 /** The formats each run has registered, which none has until the program calls RegisterFormat. */
-const formatsByRuntime = new WeakMap<Runtime, Format[]>();
-
-function formatsOfRun(): Format[] {
-  const runtime = currentRuntime();
-  let formats = formatsByRuntime.get(runtime);
-  if (!formats) {
-    formats = [];
-    formatsByRuntime.set(runtime, formats);
-  }
-  return formats;
-}
+const formatsOfRun = perRun((): Format[] => []);
 
 /** `asReader`: the reader itself when it can Peek, and a new `*bufio.Reader` over it otherwise. */
 function asReader(reader: Value): Value {

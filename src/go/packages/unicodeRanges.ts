@@ -1,6 +1,5 @@
 import type { Entity } from '../entities';
-import { addMethod, currentRuntime, fn, namedType, nativeFunction, typeEntity } from '../native';
-import type { Runtime } from '../runtime';
+import { addMethod, currentRuntime, fn, namedType, nativeFunction, perRun, typeEntity } from '../native';
 import { divideByZeroPanic, nilPointerPanic } from '../runtimeErrors';
 import { BASIC, type NamedType, pointerTo, RUNE, sliceOf, type Type } from '../types';
 import { Cell, GoArray, GoMap, GoStruct, Pointer, type Slice, type Value } from '../values';
@@ -111,17 +110,7 @@ const ALIASES: Record<string, string> = {
 };
 
 /** The tables a run has built, keyed by group and name, so that each Go variable is one pointer. */
-const tablesOfRuns = new WeakMap<Runtime, Map<string, Value>>();
-
-function runCache(): Map<string, Value> {
-  const runtime = currentRuntime();
-  let cache = tablesOfRuns.get(runtime);
-  if (!cache) {
-    cache = new Map();
-    tablesOfRuns.set(runtime, cache);
-  }
-  return cache;
-}
+const runCache = perRun(() => new Map<string, Value>());
 
 function cached(key: string, build: () => Value): Value {
   const cache = runCache();

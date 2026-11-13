@@ -7,6 +7,7 @@ import { ERROR_TYPE, type InterfaceType, missingMethod, pointerTo, RUNE, sliceOf
 import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { fscan, fscanf, SCAN_STATE, SCANNER, sscan, sscanf } from './fmtScan';
 import { IO_READER, IO_WRITER } from './io';
+import { currentStdout, writeFile } from './os';
 import {
   ANY_SLICE,
   appendBytes,
@@ -19,7 +20,6 @@ import {
   receiverStruct,
   sliceValues,
   STRING,
-  writeStdout,
 } from './support';
 
 const ERROR_RESULTS: Type[] = [INT, ERROR_TYPE];
@@ -56,7 +56,7 @@ function structOf(receiver: Value): GoStruct {
 }
 
 /** `Errorf`: formats as Sprintf does, and wraps the errors that %w verbs refer to. */
-function errorf(format: string, args: Value[]): Value {
+export function errorf(format: string, args: Value[]): Value {
   const printer = new Printer(true);
   const message = printer.printf(format, args);
   const { wrapped } = printer;
@@ -75,8 +75,7 @@ export function writeTo(writer: Value, bytes: string): Value[] {
 }
 
 function printTo(bytes: string): Value[] {
-  writeStdout(bytes);
-  return [BigInt(bytes.length), undefined];
+  return writeFile(currentStdout(), bytes);
 }
 
 // Formatter ---------------------------------------------------------------------------------------------------------

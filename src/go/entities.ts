@@ -1,6 +1,6 @@
 import type { FunctionDeclaration, Span } from './ast';
 import type { Constant } from './constants';
-import type { Storage } from './operand';
+import type { SsaConstant, Storage } from './operand';
 import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
 import type { SliceTracking } from './slicePass';
 import type { FuncType, NamedType, Type, TypeParamType } from './types';
@@ -60,8 +60,10 @@ export interface VarEntity {
    * fuses with, as Go's compiler does through a variable whose value comes from that single definition.
    */
   productFactors?: { left: number; right: number; source: ProductSource };
+  /** Whether the program takes the address of the variable or of a part of it, which keeps it out of registers. */
+  addressTaken?: boolean;
   /** Whether the declaration's value is a constant to Go's compiler. */
-  definedAsConstant?: () => boolean;
+  definedAsConstant?: SsaConstant;
 }
 
 export interface ConstEntity {

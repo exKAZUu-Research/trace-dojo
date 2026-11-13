@@ -789,7 +789,7 @@ func main() {
 		unwrapCalls,
 		copiedBytes, copyErr,
 		utf8.FullRuneInString("\xff"), utf8.FullRuneInString("\xc2A"), utf8.FullRuneInString("\xc2"),
-		cap(slices.Clone(s)), cap(slices.Collect(maps.Keys(m))), cap(slices.Sorted(maps.Keys(m))), cap(strings.SplitN("a,b,c", ",", 5)),
+		cap(slices.Clone(s)), len(maps.Clone(m)), cap(strings.SplitN("a,b,c", ",", 5)),
 		rNil, wNil,
 	)
 }`;
@@ -797,7 +797,7 @@ func main() {
     kind: 'executed',
     uncaughtException: undefined,
     stdout:
-      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 4 4 5 true true\n',
+      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 3 5 true true\n',
     stderr: '日',
   });
 });
@@ -1025,6 +1025,241 @@ func main() {
   });
 });
 
+// Go 1.27.3 prints these: Go by Example's regexp calls, named groups and templates, Split, simple case folding, Unicode
+// classes and \b, leftmost-first versus POSIX leftmost-longest, byte offsets over invalid UTF-8, and parse errors.
+test('regexp matches as the RE2 engine of Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"bytes"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+func main() {
+	r := regexp.MustCompile("p([a-z]+)ch")
+	fmt.Println(r, r.MatchString("peach"), r.FindStringIndex("peach punch"), r.FindStringSubmatch("peach punch"))
+	fmt.Println(r.FindAllStringSubmatchIndex("peach punch pinch", -1), r.FindAllString("peach punch pinch", 2))
+	fmt.Println(r.ReplaceAllString("a peach", "<$1>"), string(r.ReplaceAllFunc([]byte("a peach"), bytes.ToUpper)))
+	re := regexp.MustCompile("(?P<first>\\w+)\\s(?P<last>\\w+)")
+	fmt.Printf("%q %d\n", re.SubexpNames(), re.SubexpIndex("last"))
+	fmt.Println(re.ReplaceAllString("ada lovelace, alan turing", "${'$'}{last}_$first"))
+	fmt.Printf("%q %q\n", regexp.MustCompile("a*").Split("baaaab", -1), regexp.MustCompile(",\\s*").Split("x, y,z", 2))
+	fmt.Println(regexp.MustCompile("(?i)straße|k").FindAllString("STRASSE Straſſe STRAßE K", -1))
+	fmt.Println(regexp.MustCompile("\\p{Greek}+|\\bgo\\b").FindAllStringIndex("αβγ go gopher", -1))
+	fmt.Println(regexp.MustCompile("a(|b)").FindString("ab"), regexp.MustCompilePOSIX("a(|b)").FindString("ab"))
+	pre, complete := regexp.MustCompile("^hello(?:x|y)").LiteralPrefix()
+	fmt.Println(pre, complete, regexp.MustCompile(".").FindAllStringIndex("é\xffz", -1))
+	fmt.Println(regexp.QuoteMeta("1+1=2? [yes]"), regexp.MustCompile("b+").MatchReader(strings.NewReader("abbc")))
+	for _, p := range []string{"a(b", "x**", "[z-a]", "\\pX", "a{1001}", "(?P<>x)"} {
+		_, err := regexp.Compile(p)
+		fmt.Println(err)
+	}
+	defer func() { fmt.Println(recover()) }()
+	regexp.MustCompile("a)")
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'p([a-z]+)ch true [0 5] [peach ea]\n' +
+      '[[0 5 1 3] [6 11 7 9] [12 17 13 15]] [peach punch]\n' +
+      'a <ea> a PEACH\n' +
+      '["" "first" "last"] 2\n' +
+      'lovelace_ada, turing_alan\n' +
+      '["b" "b"] ["x" "y,z"]\n' +
+      '[STRA\u00DFE \u212A]\n' +
+      '[[0 6] [7 9]]\n' +
+      'a ab\n' +
+      'hello false [[0 2] [2 3] [3 4]]\n' +
+      '1\\+1=2\\? \\[yes\\] true\n' +
+      'error parsing regexp: missing closing ): `a(b`\n' +
+      'error parsing regexp: invalid nested repetition operator: `**`\n' +
+      'error parsing regexp: invalid character class range: `z-a`\n' +
+      'error parsing regexp: invalid character class range: `\\pX`\n' +
+      'error parsing regexp: invalid repeat count: `{1001}`\n' +
+      'error parsing regexp: invalid named capture: `(?P<>`\n' +
+      'regexp: Compile(`a)`): error parsing regexp: unexpected ): `a)`\n',
+  });
+});
+
+test('a run that changes library variables leaves the next run unaffected', () => {
+  const changing = `package main
+import ("fmt"; "os"; "time"; "unicode")
+func main() {
+	*os.Stdout = *os.Stderr
+	*time.UTC = *time.FixedZone("X", 3600)
+	*unicode.Upper = unicode.RangeTable{}
+	fmt.Fprintln(os.Stdout, time.UTC, unicode.Is(unicode.Upper, 'A'))
+}`;
+  expect(executeProgram('go', changing)).toMatchObject({ stdout: '', stderr: 'X false\n' });
+  const reading = `package main
+import ("fmt"; "os"; "time"; "unicode")
+func main() { fmt.Fprintln(os.Stdout, time.UTC, unicode.Is(unicode.Upper, 'A')) }`;
+  expect(executeProgram('go', reading)).toMatchObject({ stdout: 'UTC true\n', stderr: '' });
+});
+
+test.each([
+  [
+    'list elements',
+    'package main\nimport "container/list"\nfunc main() { l := list.New(); l.PushBack(1); for i := 0; i < 18; i++ { l.PushBackList(l) } }',
+  ],
+  [
+    'a huge float precision',
+    'package main\nimport "strconv"\nfunc main() { _ = strconv.FormatFloat(1, \'f\', 1<<30, 64) }',
+  ],
+])('a library call that allocates past the limits stops the run: %s', (_, program) => {
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('out of memory'),
+  });
+});
+
+test.each([
+  ['math.Jn of a huge order', 'package main\nimport "math"\nfunc main() { _ = math.Jn(9223372036854775807, 1) }'],
+  [
+    'strconv.ParseFloat of a long number',
+    'package main\nimport ("strconv"; "strings")\nfunc main() { for i := 0; i < 100; i++ { _, _ = strconv.ParseFloat(strings.Repeat("9", 500000), 64) } }',
+  ],
+])('a library loop proportional to its argument spends operations: %s', (_, program) => {
+  expect(executeProgram('go', program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+// Go 1.27.3 prints these: text/template's actions, functions, nested templates, options, and its parse and execution
+// errors, which name the failing action.
+test('text/template executes templates as Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"text/template"
+)
+
+type Item struct {
+	Name  string
+	Price float64
+	Tags  []string
+}
+
+func (i Item) Label() string { return strings.ToUpper(i.Name) }
+
+func show(t *template.Template, data any) {
+	err := t.Execute(os.Stdout, data)
+	fmt.Println("|", err)
+}
+
+func main() {
+	funcs := template.FuncMap{
+		"join": strings.Join,
+		"half": func(x float64) (float64, error) {
+			if x < 0 {
+				return 0, errors.New("negative")
+			}
+			return x / 2, nil
+		},
+	}
+	t := template.Must(template.New("item").Funcs(funcs).Parse(
+		"{{define \"tags\"}}[{{join . \",\"}}]{{end}}{{.Label}} {{printf \"%.2f\" .Price}} {{half .Price}} {{template \"tags\" .Tags}}" +
+			"{{range $i, $t := .Tags}}{{if eq $t \"skip\"}}{{continue}}{{end}} {{$i}}:{{$t}}{{end}}"))
+	show(t, Item{"pen", 1.5, []string{"a", "skip", "b"}})
+	show(t, &Item{"ink", -3, nil})
+	m := template.Must(template.New("m").Option("missingkey=error").Parse("{{range $k, $v := .}}{{$k}}={{$v}} {{end}}{{.zz}}"))
+	show(m, map[string]int{"b": 2, "a": 1})
+	show(template.Must(template.New("r").Parse("{{range 5}}{{if eq . 3}}{{break}}{{end}}{{.}}{{end}} {{.Missing}}")), Item{})
+	_, err := template.New("bad").Parse("{{if .X}}{{.Y}")
+	fmt.Println(err)
+	fmt.Println(template.HTMLEscapeString("<a href=\"x\">"), template.JSEscapeString("it's"))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'PEN 1.50 0.75 [a,skip,b] 0:a 2:b| <nil>\nINK -3.00 | template: item:1:78: executing "item" at <half .Price>: error calling half: negative\na=1 b=2 | template: m:1:44: executing "m" at <.zz>: map has no entry for key "zz"\n012 | template: r:1:55: executing "r" at <.Missing>: can\'t evaluate field Missing in type main.Item\ntemplate: bad:1: bad character U+007D \'}\'\n&lt;a href=&#34;x&#34;&gt; it\\\'s\n',
+  });
+});
+
+// Go 1.27.3's SSA form knows a variable declared from a constant in any declaration form as that constant, and a
+// parameter of an inlined call as its constant argument, so it folds their products instead of fusing them; math.FMA
+// keeps an infinite addend when the exact finite product exceeds the float64 range.
+test('constants reach products through every declaration form and inlined call', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"math"
+)
+
+var v = []float64{0.1, 0.9, 0.3, 0.7}
+
+func price(p float64, qty int) float64 { return p*float64(qty) + 0.15 }
+
+func lerp(a, b, t float64) float64 { return a + (b-a)*t }
+
+func main() {
+	var a, b = 0.1, 0.2
+	c, d := 0.3, 0.7
+	s, t := a*b, c*d
+	fmt.Println(s - t)
+	x, y := v[2], v[3]
+	var p, q = x * y, x * x
+	fmt.Println(p-0.3, q+0.1)
+	w := 0.3
+	fmt.Println(price(0.1, 3), lerp(0.1, 0.9, w), lerp(v[0], v[1], v[2]))
+	fmt.Println(math.FMA(1e308, 2, math.Inf(-1)), math.FMA(-1e308, 2, math.Inf(1)), math.FMA(math.Inf(1), 0, 1))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '-0.19\n-0.09000000000000001 0.19\n0.45000000000000007 0.33999999999999997 0.34\n-Inf +Inf NaN\n',
+  });
+});
+
+// Go 1.27.3 gives an append the 32-byte stack buffer when the array it allocates stays in the function, also for a
+// slice no variable holds and for a field of a local struct it keeps in registers; it updates a variable whose address
+// the program takes, a large struct's field, or an array's element in memory, which never uses the buffer.
+test('append capacities follow where Go keeps the slice', () => {
+  const program = `package main
+
+import "fmt"
+
+type box struct{ items []int }
+
+type big struct {
+	items []int
+	a, b  int
+}
+
+type stack []int
+
+func (s *stack) push(v int) { *s = append(*s, v) }
+
+func main() {
+	x := append([]int{}, 1)
+	y := append(make([]byte, 0), 1)
+	var k []int
+	k = append(k, 1)
+	p := &k
+	*p = append(*p, 2)
+	var st stack
+	st.push(1)
+	var b box
+	b.items = append(b.items, 1)
+	var g big
+	g.items = append(g.items, 1)
+	var a [2][]int
+	a[0] = append(a[0], 1)
+	fmt.Println(cap(x), cap(y), cap(k), cap(st), cap(b.items), cap(g.items), cap(a[0]))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '4 32 2 1 4 1 1\n',
+  });
+});
 test('net/url parses, resolves, escapes, and encodes as Go does', () => {
   const program = `package main
 

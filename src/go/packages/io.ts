@@ -42,10 +42,13 @@ export const IO_CLOSER = ioInterface('Closer', { Close: CLOSE });
 export const IO_WRITE_CLOSER = ioInterface('WriteCloser', { Write: READ, Close: CLOSE });
 export const IO_READ_CLOSER = ioInterface('ReadCloser', { Read: READ, Close: CLOSE });
 
+export const IO_RUNE_READER = ioInterface('RuneReader', { ReadRune: RUNE_READ });
+
 const INTERFACES = [
   IO_WRITER,
   IO_READER,
   IO_RUNE_SCANNER,
+  IO_RUNE_READER,
   IO_STRING_WRITER,
   IO_READER_FROM,
   IO_WRITER_TO,
@@ -61,7 +64,6 @@ const INTERFACES = [
   ioInterface('ReadSeekCloser', { Read: READ, Seek: SEEK, Close: CLOSE }),
   ioInterface('WriteSeeker', { Write: READ, Seek: SEEK }),
   ioInterface('ReadWriteSeeker', { Read: READ, Write: READ, Seek: SEEK }),
-  ioInterface('RuneReader', { ReadRune: RUNE_READ }),
   ioInterface('ByteReader', { ReadByte: BYTE_READ }),
   ioInterface('ByteScanner', { ReadByte: BYTE_READ, UnreadByte: UNREAD }),
   ioInterface('ByteWriter', { WriteByte: fn([BASIC.uint8], [ERROR_TYPE]) }),

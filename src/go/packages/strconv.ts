@@ -8,7 +8,18 @@ import { canBackquote, isGraphic, isPrint, quote, quoteChunks, quoteRune, quoteR
 import { appendValues, moveToHeap } from '../sliceOps';
 import { BASIC, ERROR_TYPE, pointerTo, RUNE } from '../types';
 import { Cell, Complex, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
-import { appendBytes, BOOL, BYTES, errorText, FLOAT64, INT, receiverStruct, STRING, stringPanic } from './support';
+import {
+  appendBytes,
+  BOOL,
+  BYTES,
+  errorText,
+  FLOAT64,
+  INT,
+  receiverStruct,
+  spendFor,
+  STRING,
+  stringPanic,
+} from './support';
 
 const ERR_SYNTAX = newError('invalid syntax');
 const ERR_RANGE = newError('value out of range');
@@ -147,7 +158,7 @@ export function parseFloat(text: string, bitSize: number): [number, Value] {
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- A transcription of Go's ParseComplex.
-function parseComplex(text: string, bitSize: number): [Complex, Value] {
+export function parseComplex(text: string, bitSize: number): [Complex, Value] {
   const size = bitSize === 64 ? 32 : 64;
   const syntaxError: [Complex, Value] = [new Complex(0, 0), numError('ParseComplex', text, ERR_SYNTAX)];
   let pending: Value;
@@ -223,7 +234,13 @@ interface FloatSyntax {
   size: number;
 }
 
-// code-gauge-allow functionCognitiveComplexity 45 -- A transcription of Go's readFloat, keeping every mantissa digit.
+/**
+ * The significant digits that readFloat keeps, as Go's decimal type keeps 800: a value halfway between two floats
+ * needs fewer, so the kept digits and whether any dropped digit is nonzero round as all the digits do.
+ */
+const MAX_KEPT_DIGITS = 800;
+
+// code-gauge-allow functionCognitiveComplexity 45 -- A transcription of Go's readFloat.
 function readFloat(s: string): FloatSyntax | undefined {
   let index = 0;
   let underscores = false;
@@ -243,6 +260,8 @@ function readFloat(s: string): FloatSyntax | undefined {
   let digitCount = 0;
   let point = 0;
   let mantissa = 0n;
+  let keptDigits = 0;
+  let truncated = false;
   for (; index < s.length; index++) {
     const char = s[index];
     if (char === '_') {
@@ -263,13 +282,24 @@ function readFloat(s: string): FloatSyntax | undefined {
       continue;
     }
     digitCount++;
-    mantissa = mantissa * (hex ? 16n : 10n) + BigInt(digit);
+    if (keptDigits < MAX_KEPT_DIGITS) {
+      keptDigits++;
+      mantissa = mantissa * (hex ? 16n : 10n) + BigInt(digit);
+    } else if (digit !== 0) {
+      truncated = true;
+    }
   }
+  spendFor(index);
   if (!sawDigits) return undefined;
+  if (truncated) {
+    // A nonzero digit after the kept ones stands for all the dropped digits.
+    keptDigits++;
+    mantissa = mantissa * (hex ? 16n : 10n) + 1n;
+  }
   if (!sawDot) point = digitCount;
   if (hex) {
     point *= 4;
-    digitCount *= 4;
+    keptDigits *= 4;
   }
   if (index < s.length && lower(s[index]) === (hex ? 'p' : 'e')) {
     index++;
@@ -294,7 +324,7 @@ function readFloat(s: string): FloatSyntax | undefined {
     return undefined;
   }
   if (underscores && !underscoreOK(s.slice(0, index))) return undefined;
-  return { mantissa, exponent: point - digitCount, negative, hex, size: index };
+  return { mantissa, exponent: point - keptDigits, negative, hex, size: index };
 }
 
 function digitValue(char: string, hex: boolean): number {
@@ -471,7 +501,7 @@ const HEX_ESCAPE_DIGITS: Partial<Record<string, number>> = { x: 2, u: 4, U: 8 };
 
 /** `strconv.UnquoteChar`: the first character of an escaped literal body, whether it needs multiple bytes, and the rest. */
 // code-gauge-allow functionCognitiveComplexity 25 -- A transcription of Go's UnquoteChar.
-function unquoteChar(text: string, quoteByte: number): [number, boolean, string, Value] {
+export function unquoteChar(text: string, quoteByte: number): [number, boolean, string, Value] {
   const failure: [number, boolean, string, Value] = [0, false, '', ERR_SYNTAX];
   if (text === '') return failure;
   const first = text.charCodeAt(0);

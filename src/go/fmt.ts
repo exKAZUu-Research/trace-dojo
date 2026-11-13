@@ -3,6 +3,7 @@ import { formatFloat } from './floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from './literals';
 import { compareMapKeys } from './mapOrder';
 import { dynamicMethod } from './methods';
+import { perRun } from './native';
 import { canBackquote, isPrint, quote, quoteRune } from './quote';
 import { GoPanic } from './runtime';
 import { ERROR_TYPE, isExported, missingMethod, type Type, typeString, underlying } from './types';
@@ -29,15 +30,15 @@ const LOWER_DIGITS = '0123456789abcdefx';
 const UPPER_DIGITS = '0123456789ABCDEFX';
 
 /** The address `%p` and `%v` print for a pointer-like value, stable for each object while the program runs. */
-const addresses = new WeakMap<object, number>();
-let nextAddress = 0xc0_00_01_00_00;
+const addressState = perRun(() => ({ addresses: new WeakMap<object, number>(), next: 0xc0_00_01_00_00 }));
 
 export function addressOf(object: object): string {
-  let address = addresses.get(object);
+  const state = addressState();
+  let address = state.addresses.get(object);
   if (address === undefined) {
-    address = nextAddress;
-    nextAddress += 0x10;
-    addresses.set(object, address);
+    address = state.next;
+    state.next += 0x10;
+    state.addresses.set(object, address);
   }
   return `0x${address.toString(16)}`;
 }
@@ -957,8 +958,9 @@ function parseNumber(text: string, start: number): [number | undefined, number] 
 function intFromArg(args: Value[], argNum: number): [number | undefined, boolean, number] {
   if (argNum >= args.length) return [undefined, false, argNum];
   const arg = args[argNum];
-  if (arg instanceof Iface && arg.type.kind === 'basic' && /^u?int/.test(arg.type.basic)) {
-    const value = Number(arg.value as bigint);
+  const under = arg instanceof Iface ? underlying(arg.type) : undefined;
+  if (under?.kind === 'basic' && /^u?int/.test(under.basic) && ((arg as Iface).value as bigint) < 1n << 63n) {
+    const value = Number((arg as Iface).value as bigint);
     if (value > 1e6 || value < -1e6) return [undefined, false, argNum + 1];
     return [value, true, argNum + 1];
   }

@@ -7,9 +7,9 @@ import {
   namedType,
   nativeFunction,
   opaqueType,
+  perRun,
   typeEntity,
 } from '../native';
-import type { Runtime } from '../runtime';
 import { BASIC, pointerTo, RUNE, type Type } from '../types';
 import { Cell, GoArray, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import type { ByteView } from './byteView';
@@ -488,24 +488,16 @@ function streamValue(type: Type, state: EncoderState | DecoderState): Iface {
 const STANDARD_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
 /** The encodings a run shares as Go's package variables, which a program can modify through the pointers. */
-const encodingsOfRuns = new WeakMap<Runtime, Record<string, Pointer>>();
-
-function encodingsOfRun(): Record<string, Pointer> {
-  const runtime = currentRuntime();
-  let encodings = encodingsOfRuns.get(runtime);
-  if (!encodings) {
-    const std = newEncoding(`${STANDARD_ALPHABET}+/`);
-    const url = newEncoding(`${STANDARD_ALPHABET}-_`);
-    encodings = {
-      StdEncoding: encodingPointer(std),
-      URLEncoding: encodingPointer(url),
-      RawStdEncoding: encodingPointer(withPadding(std, NO_PADDING)),
-      RawURLEncoding: encodingPointer(withPadding(url, NO_PADDING)),
-    };
-    encodingsOfRuns.set(runtime, encodings);
-  }
-  return encodings;
-}
+const encodingsOfRun = perRun((): Record<string, Pointer> => {
+  const std = newEncoding(`${STANDARD_ALPHABET}+/`);
+  const url = newEncoding(`${STANDARD_ALPHABET}-_`);
+  return {
+    StdEncoding: encodingPointer(std),
+    URLEncoding: encodingPointer(url),
+    RawStdEncoding: encodingPointer(withPadding(std, NO_PADDING)),
+    RawURLEncoding: encodingPointer(withPadding(url, NO_PADDING)),
+  };
+});
 
 function runeConstant(name: string, value: number): Entity {
   return {

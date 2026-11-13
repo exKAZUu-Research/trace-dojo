@@ -8,9 +8,9 @@ import {
   namedType,
   nativeFunction,
   opaqueType,
+  perRun,
   typeEntity,
 } from '../native';
-import type { Runtime } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, type InterfaceMethod, type NamedType, pointerTo, type Type } from '../types';
 import { Cell, GoArray, GoStruct, Iface, Pointer, type Value } from '../values';
@@ -345,22 +345,12 @@ interface CrcTables {
   castagnoli?: Pointer;
 }
 
-const crcTables = new WeakMap<Runtime, CrcTables>();
-
 function tablePointer(table: readonly number[]): Pointer {
   currentRuntime().allocate(256);
   return new Pointer(new Cell(new GoArray(table.map(BigInt))), 'v');
 }
 
-function tablesOfRun(): CrcTables {
-  const runtime = currentRuntime();
-  let tables = crcTables.get(runtime);
-  if (!tables) {
-    tables = { ieee: tablePointer(IEEE_TABLE) };
-    crcTables.set(runtime, tables);
-  }
-  return tables;
-}
+const tablesOfRun = perRun((): CrcTables => ({ ieee: tablePointer(IEEE_TABLE) }));
 
 function makeTable(poly: number): Pointer {
   const tables = tablesOfRun();

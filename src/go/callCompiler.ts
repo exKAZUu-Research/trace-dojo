@@ -12,13 +12,15 @@ import {
   INLINE_CALL_COST,
   linkArgument,
   staysLocal,
+  type Temporary,
   type VarEntity,
 } from './entities';
+import { checkKeyHashable } from './equality';
 import { describeConstant, largerUntyped, sameUntypedFamily } from './expressionCompiler';
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
 import { currentRuntime } from './native';
-import type { Operand, Storage } from './operand';
+import type { Operand, SsaConstant, Storage } from './operand';
 import { ordering } from './operators';
 import {
   type Eval,
@@ -127,12 +129,13 @@ export abstract class CallCompiler extends CompositeCompiler {
     callee?: ProgramCall
   ): ListEval | undefined {
     const { params, variadic } = signature;
-    if (expression.args.length === 1 && (params.length !== 1 || variadic)) {
-      const only = this.expression(expression.args[0]);
-      if (only.type.kind === 'tuple') return this.spreadArguments(expression, only, signature, name);
-      return this.listArguments(expression, [only], signature, name);
-    }
     let operands = expression.args.map((arg) => this.expression(arg));
+    if (operands.length === 1 && operands[0].type.kind === 'tuple') {
+      return this.spreadArguments(expression, operands[0], signature, name);
+    }
+    if (operands.length === 1 && (params.length !== 1 || variadic)) {
+      return this.listArguments(expression, operands, signature, name);
+    }
     for (const operand of operands) {
       if (operand.type.kind === 'tuple') {
         this.error(operand.span, '複数の値を返す関数の呼び出しは、ほかの引数と並べて書けません。');
@@ -140,8 +143,10 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
     }
     if (variadic) return this.variadicArguments(expression, operands, signature, name);
-    if (!callee) return this.listArguments(expression, operands, signature, name);
+    if (!callee || operands.length !== params.length) return this.listArguments(expression, operands, signature, name);
     const { summary, receivers } = callee;
+    for (const [index, { ssaConstant }] of operands.entries())
+      if (ssaConstant) callee.constantArgs[receivers + index] = ssaConstant;
     operands = operands.map((operand, index) =>
       isInterface(params[index])
         ? operand
@@ -155,7 +160,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   /** A call of a function or method the program declares, with what stands for its result in the caller. */
   private programCall(summary: CalleeSummary | undefined, receivers: number): ProgramCall | undefined {
     if (!summary) return undefined;
-    return { summary, receivers, result: this.hiddenVariable() };
+    return { summary, receivers, result: this.hiddenVariable(), constantArgs: [] };
   }
 
   private listArguments(
@@ -587,6 +592,13 @@ export abstract class CallCompiler extends CompositeCompiler {
   /** `print` and `println`, which write to standard error in the runtime's own format, apart from fmt's. */
   private printBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'print' | 'println'): Operand {
     const operands = expression.args.map((arg) => this.defaulted(this.value(arg)));
+    for (const operand of operands) {
+      const kind = underlying(operand.type).kind;
+      if (!this.isInvalid(operand) && (kind === 'struct' || kind === 'array')) {
+        this.error(operand.span, `${describeType(operand.type)} 型の値は ${name} には渡せません。`);
+        return this.invalid(expression);
+      }
+    }
     const values = operands.map((operand) => operand.eval);
     const types = operands.map((operand) => operand.type);
     const line = name === 'println';
@@ -727,13 +739,16 @@ export abstract class CallCompiler extends CompositeCompiler {
     this.writeOperand(slice);
     const read = slice.eval;
     const zero = this.zeroOf(element);
-    const stackBuffer = this.appendStackBuffer(first, slice);
+    // The array that appending to a slice no variable holds allocates escapes where the append's result goes.
+    const nonEscaping: Temporary | undefined =
+      slice.nonEscaping ?? (slice.backingVars ? undefined : { escapes: false, written: false });
+    const stackBuffer = this.appendStackBuffer(first, { ...slice, nonEscaping }, this.inPlaceAppends.get(expression));
     return {
       mode: 'value',
       type: slice.type,
       span: expression,
       backingVars: slice.backingVars,
-      nonEscaping: slice.nonEscaping,
+      nonEscaping,
       eval: (frame) => {
         const target = read(frame) as Slice | undefined;
         const added = evaluateAll(frame, values);
@@ -748,20 +763,31 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /**
+   * `x = append(x, ...)` statements by their append, with whether Go's compiler updates x in memory, which it does when x
+   * is not a local variable, or a part of one, that it can keep in registers; such an append never uses the buffer.
+   */
+  protected readonly inPlaceAppends = new WeakMap<Expression, () => boolean>();
+
+  /**
    * How an append may use the stack buffer, as Go's compiler decides it: the slice optimization pass decides for a
    * variable it optimizes, and otherwise an empty slice whose array stays in the function gets the whole buffer once
-   * per call, at the variable's first append.
+   * per call, at the variable's first append or at an append to a slice no variable holds.
    */
-  private appendStackBuffer(syntax: Expression, slice: Operand): (frame: Frame) => StackBuffer | undefined {
+  private appendStackBuffer(
+    syntax: Expression,
+    slice: Operand,
+    inPlace: (() => boolean) | undefined
+  ): (frame: Frame) => StackBuffer | undefined {
     const tracking = this.sliceUseOf(syntax)?.tracking;
     const site = {};
     if (tracking) tracking.firstAppend ??= site;
-    const backing = slice.backingVars;
+    const { backingVars: backing, nonEscaping } = slice;
     const local = (frame: Frame): boolean =>
-      backing !== undefined &&
-      backing.length > 0 &&
-      backing.every((variable) => variable.owner !== undefined && staysLocal(variable, frame));
+      backing !== undefined && backing.length > 0
+        ? backing.every((variable) => variable.owner !== undefined && staysLocal(variable, frame))
+        : nonEscaping !== undefined && staysLocal(nonEscaping, frame);
     const plan = (frame: Frame): StackBuffer | undefined => {
+      if (inPlace?.()) return undefined;
       if (tracking) {
         const mode = sliceMode(tracking);
         if (mode === 'buffer') return 'buffer';
@@ -899,8 +925,8 @@ export abstract class CallCompiler extends CompositeCompiler {
       eval: (frame) => {
         const target = read(frame) as GoMap | undefined;
         const keyValue = key(frame);
-        target?.entries.delete(target.keyOf(keyValue));
-        return;
+        if (!target || target.entries.size === 0) checkKeyHashable(under.key, keyValue);
+        else target.entries.delete(target.keyOf(keyValue));
       },
     };
   }
@@ -1183,6 +1209,8 @@ interface ProgramCall {
   summary: CalleeSummary;
   receivers: number;
   result: VarEntity;
+  /** Whether each argument is a constant to Go's compiler, by parameter index. */
+  constantArgs: SsaConstant[];
 }
 
 /** Makes a value passed to a function of the program share what the body does with the parameter. */
@@ -1199,7 +1227,11 @@ function linkToParameter(call: ProgramCall, index: number, value: Storage): void
 function inlinedStackBuffers(call: ProgramCall | undefined): (frame: Frame) => StackBuffers | undefined {
   const site = {};
   return (frame) =>
-    call?.summary.inlinable() ? frame.inlinedStackBuffers(site, staysLocal(call.result, frame)) : undefined;
+    call?.summary.inlinable()
+      ? frame.inlinedStackBuffers(site, staysLocal(call.result, frame), (caller) =>
+          Array.from(call.constantArgs, (constant) => constant?.(caller) ?? false)
+        )
+      : undefined;
 }
 
 /** What Go's inliner charges for calling a library function: the fmt printers inline at a cost of 72 or 73. */

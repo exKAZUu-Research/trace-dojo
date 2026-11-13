@@ -147,7 +147,9 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
           this.expression(element.value);
           continue;
         }
-        entries.push({ path: [index], value: this.element(element.value, fields[index].type, 'フィールド') });
+        const value = this.element(element.value, fields[index].type, 'フィールド');
+        // Go evaluates the value of a blank field for its effects but leaves the field zero.
+        entries.push({ path: fields[index].name === '_' ? [] : [index], value });
       }
       if (expression.elements.length < fields.length) {
         this.error({ row: expression.endRow, column: 0 }, `${describeType(type)} 型のフィールドの値が足りません。`);
@@ -166,6 +168,7 @@ export abstract class CompositeCompiler extends ExpressionCompiler {
         try {
           for (const { path, value } of entries) {
             const fieldValue = value(frame);
+            if (path.length === 0) continue;
             const root = path[0];
             if (path.length === 1) {
               evaluated[root] = fieldValue;

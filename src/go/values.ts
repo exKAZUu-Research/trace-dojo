@@ -124,6 +124,9 @@ export class Iface {
   ) {}
 }
 
+/** Interface values of constants, whose data Go's compiler places in shared read-only memory. */
+export const CONSTANT_IFACES = new WeakSet<Iface>();
+
 /** Copies a value as assignment does: structs and arrays are values, everything else is shared. */
 export function copyValue(value: Value): Value {
   if (value instanceof GoStruct) {
