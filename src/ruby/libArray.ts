@@ -466,18 +466,19 @@ def('Array', 'reverse!', 0, function* (self: RArray) {
   return self;
 });
 
-function rotated(items: Value[], count: number): Value[] {
+function rotated(items: Value[], count: bigint): Value[] {
   if (items.length === 0) return [];
-  const shift = ((count % items.length) + items.length) % items.length;
+  const length = BigInt(items.length);
+  const shift = Number(((count % length) + length) % length);
   return [...items.slice(shift), ...items.slice(0, shift)];
 }
 
 def('Array', 'rotate', [0, 1], function* (self: RArray, args) {
-  return arr(rotated(self.items, args.length > 0 ? yield* toIndex(args[0]) : 1));
+  return arr(rotated(self.items, args.length > 0 ? (yield* toIndexExact(args[0])).integer : 1n));
 });
 def('Array', 'rotate!', [0, 1], function* (self: RArray, args) {
   yield* modify(self);
-  self.items = rotated(self.items, args.length > 0 ? yield* toIndex(args[0]) : 1);
+  self.items = rotated(self.items, args.length > 0 ? (yield* toIndexExact(args[0])).integer : 1n);
   return self;
 });
 def('Array', 'sort', 0, function* (self: RArray, _args, block) {

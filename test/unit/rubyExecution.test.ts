@@ -2035,3 +2035,13 @@ test('Hash pair collections identify non-array elements', () => {
     stdout: 'ArgumentError\n"wrong element type P at 0 (expected array)"\n',
   });
 });
+
+test('Array rotation keeps signed-long counts exact through modulus', () => {
+  expect(
+    run(
+      'p [1,2,3].rotate(9007199254740993), [1,2,3].rotate(9223372036854775807); a=[1,2,3]; a.rotate!(-9007199254740993); p a'
+    )
+  ).toMatchObject({
+    stdout: '[1, 2, 3]\n[2, 3, 1]\n[1, 2, 3]\n',
+  });
+});
