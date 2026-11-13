@@ -17,6 +17,16 @@ test.each([
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],
   ['cyclic array equality', 'a = []; a << a; b = []; b << b; p a == b', 'true\n'],
   ['minmax_by block calls', 'n=0; p [3,1,2].minmax_by { |x| n+=1; x }; p n', '[1, 3]\n3\n'],
+  [
+    'multiword Random seeds',
+    'p Random.new(2**32).rand, Random.new(2**64).rand, Random.new(-(2**32)).rand',
+    '0.8444218515250481\n0.1507172537105722\n0.8444218515250481\n',
+  ],
+  [
+    'error-function tails',
+    'p Math.erf(0.5), Math.erf(5), Math.erfc(6), Math.erfc(-6), Math.erf(Float::INFINITY)',
+    '0.5204998778130465\n0.9999999999984626\n2.1519736712498913e-17\n2.0\n1.0\n',
+  ],
   ['receiver local in index', 'p (a = [10, 20])[a.size - 1]', '20\n'],
   ['character indexes after emoji', 's = "😀a😀b"; p s.index("b"); p s.rindex("a")', '3\n1\n'],
   ['named format substitution', 'p format("%{name}!", name: "Ruby")', '"Ruby!"\n'],

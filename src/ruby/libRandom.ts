@@ -18,7 +18,10 @@ export class MersenneTwister {
     const words: number[] = [];
     for (let rest = magnitude; rest > 0n; rest >>= 32n) words.push(Number(rest & 0xff_ff_ff_ffn));
     if (words.length <= 1) this.initGenrand(words[0] ?? 0);
-    else this.initByArray(words);
+    else {
+      if (words.at(-1) === 1) words.pop();
+      this.initByArray(words);
+    }
   }
 
   copy(): MersenneTwister {

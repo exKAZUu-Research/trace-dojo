@@ -854,7 +854,7 @@ const MATH_FUNCTIONS: [string, number, (...args: number[]) => number, ((...args:
   ['log10', 1, Math.log10, (x) => x >= 0 || Number.isNaN(x)],
   ['hypot', 2, Math.hypot],
   ['erf', 1, erf],
-  ['erfc', 1, (x) => 1 - erf(x)],
+  ['erfc', 1, erfc],
 ];
 
 for (const [name, arity, fn, valid] of MATH_FUNCTIONS) {
@@ -884,20 +884,61 @@ function mathLog(value: Value, x: number): number {
 }
 
 function erf(x: number): number {
-  // Abramowitz and Stegun 7.1.26 is not exact; use a series that converges for the values learners use.
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
-  if (ax > 6) return sign;
-  let sum = ax;
-  let term = ax;
-  for (let n = 1; n < 200; n++) {
-    term *= (-ax * ax) / n;
-    const next = term / (2 * n + 1);
-    sum += next;
-    if (Math.abs(next) < 1e-17 * Math.abs(sum)) break;
-  }
-  return (sign * 2 * sum) / Math.sqrt(Math.PI);
+  if (Math.abs(x) > 1) return 1 - erfc(x);
+  const z = x * x;
+  return (x * polynomial(z, ERF_T)) / polynomialWithLeadingOne(z, ERF_U);
 }
+
+function erfc(x: number): number {
+  const ax = Math.abs(x);
+  if (ax < 1) return 1 - erf(x);
+  if (!Number.isFinite(ax)) return Number.isNaN(ax) ? Number.NaN : x < 0 ? 2 : 0;
+  const tail =
+    ax < 8
+      ? polynomial(ax, ERFC_P) / polynomialWithLeadingOne(ax, ERFC_Q)
+      : polynomial(ax, ERFC_R) / polynomialWithLeadingOne(ax, ERFC_S);
+  const result = Math.exp(-ax * ax) * tail;
+  return x < 0 ? 2 - result : result;
+}
+
+function polynomial(x: number, coefficients: readonly number[]): number {
+  let result = 0;
+  for (const coefficient of coefficients) result = result * x + coefficient;
+  return result;
+}
+
+function polynomialWithLeadingOne(x: number, coefficients: readonly number[]): number {
+  let result = x + coefficients[0];
+  for (let i = 1; i < coefficients.length; i++) result = result * x + coefficients[i];
+  return result;
+}
+
+// Cephes double-precision erf/erfc rational approximations (Stephen L. Moshier, netlib.org/cephes).
+const ERF_T = [
+  9.60497373987051638749, 9.00260197203842689217e1, 2.23200534594684319226e3, 7.00332514112805075473e3,
+  5.55923013010394962768e4,
+];
+const ERF_U = [
+  3.35617141647503099647e1, 5.21357949780152679795e2, 4.59432382970980127987e3, 2.26290000613890934246e4,
+  4.92673942608635921086e4,
+];
+const ERFC_P = [
+  2.46196981473530512524e-10, 5.64189564831068821977e-1, 7.46321056442269912687, 4.86371970985681366614e1,
+  1.96520832956077098242e2, 5.26445194995477358631e2, 9.3452852717195760754e2, 1.02755188689515710272e3,
+  5.57535335369399327526e2,
+];
+const ERFC_Q = [
+  1.32281951154744992508e1, 8.67072140885989742329e1, 3.54937778887819891062e2, 9.75708501743205489753e2,
+  1.82390916687909736289e3, 2.24633760818710981792e3, 1.65666309194161350182e3, 5.57535340817727675546e2,
+];
+const ERFC_R = [
+  5.64189583547755073984e-1, 1.27536670759978104416, 5.01905042251180477414, 6.16021097993053585195,
+  7.4097426995044893916, 2.9788666537210024067,
+];
+const ERFC_S = [
+  2.2605286322011727659, 9.39603524938001434673, 1.20489539808096656605e1, 1.70814450747565897222e1,
+  9.60896809063285878198, 3.3690764510008151605,
+];
 
 export function installMathConstants(): void {
   const { c } = rt();
