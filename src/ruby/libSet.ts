@@ -1,17 +1,19 @@
-import { inspect } from './conversions';
+import { inspect, rEquals } from './conversions';
 import { def, sdef } from './define';
 import { frozenError, typeError } from './errors';
-import { hashDelete, hashGet, hashKeyOf, hashSet } from './hashes';
+import { eachEntry, hashDelete, hashGet, hashSet } from './hashes';
 import { callBlock, type Gen } from './interp';
 import { iterate, toArray } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
 import { NIL, type RHash, RObject, type Value } from './objects';
 import { rt } from './runtime';
-import { arr, newHash, snapshot, str, truthy } from './values';
+import { arr, newHash, str, truthy } from './values';
 
 /** A Set keeps its members as the keys of a Hash, which gives it the Hash's insertion order and equality. */
 class SetData {
-  constructor(readonly members: RHash) {}
+  constructor(readonly members: RHash) {
+    members.iterationError = "can't add a new item into set during iteration";
+  }
 
   held(): Value[] {
     return [this.members];
@@ -77,7 +79,9 @@ def(
 sdef('Set', '[]', [0, -1], (_self, args) => newSet(args));
 def('Set', 'each', 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'each', []);
-  for (const entry of snapshot(membersOf(self).map.values())) yield* callBlock(block, [entry.key], false);
+  yield* eachEntry(membersOf(self), function* (entry) {
+    yield* callBlock(block, [entry.key], false);
+  });
   return self;
 });
 def('Set', ['add', '<<'], 1, function* (self: RObject, [value]) {
@@ -106,14 +110,9 @@ def('Set', ['include?', 'member?', '===', 'contain?'], 1, function* (self: RObje
 def('Set', ['size', 'length', 'count'], [0, 1], function* (self: RObject, args, block) {
   if (args.length === 0 && !block) return BigInt(membersOf(self).map.size);
   let count = 0n;
-  for (const entry of membersOf(self).map.values()) {
-    if (
-      args.length > 0
-        ? (yield* hashKeyOf(entry.key)) === (yield* hashKeyOf(args[0]))
-        : truthy(yield* callBlock(block!, [entry.key]))
-    )
-      count++;
-  }
+  yield* eachEntry(membersOf(self), function* (entry) {
+    if (args.length > 0 ? yield* rEquals(entry.key, args[0]) : truthy(yield* callBlock(block!, [entry.key]))) count++;
+  });
   return count;
 });
 def('Set', 'empty?', 0, (self: RObject) => membersOf(self).map.size === 0);
@@ -214,12 +213,12 @@ for (const [name, keep] of [
     if (!block) return makeEnumerator(self, name, []);
     yield* modify(self);
     let changed = false;
-    for (const [slot, entry] of snapshot(membersOf(self).map)) {
+    yield* eachEntry(membersOf(self), function* (entry) {
       if (truthy(yield* callBlock(block, [entry.key])) !== keep) {
-        membersOf(self).map.delete(slot);
+        yield* hashDelete(membersOf(self), entry.key);
         changed = true;
       }
-    }
+    });
     return changed || name === 'keep_if' || name === 'delete_if' ? self : NIL;
   });
 }

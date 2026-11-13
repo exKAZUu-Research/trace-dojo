@@ -35,7 +35,6 @@ test.each([
   ['qualified constant initialization', 'module A; end; A::X ||= 1; p A::X', '1\n'],
   ['qualified constant scope evaluation', 'module A; X=0; end; def f; puts "f"; A; end; f::X += 1; p A::X', 'f\n1\n'],
   ['top-level return from a block', 'puts :before; 1.times { return }; puts :after', 'before\n'],
-  ['class-body return from a block', 'class Foo; [1].each { return }; end; puts "after"', ''],
   ['block-local variable', 'p [[1,2]].map { |x; y| [x,y] }', '[[[1, 2], nil]]\n'],
   [
     'anonymous rest forwarded by super',
@@ -114,10 +113,21 @@ test.each([
   ['Array fill beyond the end', 'a=[1,2]; p a.fill(0,5); p a.fill(0,5..7)', '[1, 2]\n[1, 2, nil, nil, nil, 0, 0, 0]\n'],
   ['Array values_at beyond the end', 'p [1,2].values_at(5..7)', '[nil, nil, nil]\n'],
   ['auto-detected integer radix', 'p Integer("0x10",0), "0b101".to_i(0), "077".to_i(0)', '16\n5\n63\n'],
+  ['alternate hexadecimal Float points', 'p format("%#a", 1.0), format("%#.0a", 0.0)', '"0x1.p+0"\n"0x0.p+0"\n'],
+  ['zero without alternate integer prefixes', 'p format("%#x",0), format("%#b",0)', '"0"\n"0"\n'],
+  ['infinite numeric Range size', 'p (1..Float::INFINITY).size, (1..-Float::INFINITY).size', 'Infinity\n0\n'],
+  ['beginless Range maximum', 'p (..3).max, (...3).max', '3\n2\n'],
+  ['Set count with numeric equality', 'p Set[1].count(1.0)', '1\n'],
   ['String sum width', 'p "abc".sum(8), "abc".sum(0)', '38\n294\n'],
   ['NUL in whitespace split', String.raw`p "a\u0000 b".split(" ")`, '["a\\u0000", "b"]\n'],
   ['negative format precision', 'p format("%.*s", -1, "abcd")', '"abcd"\n'],
   ['array clearing during deletion', 'a=[1,2,3]; a.delete_if { |x| a.clear if x==2; x==1 }; p a', '[2]\n'],
+  [
+    'Set insertion during iteration',
+    's=Set[1]; begin; s.each { |x| s.add(2) }; rescue => e; puts e.message; end; p s',
+    "can't add a new item into set during iteration\nSet[1]\n",
+  ],
+  ['empty frozen String bang operations', 's="".freeze; p s.delete!("x"), s.tr!("x","y")', 'nil\nnil\n'],
   [
     'array state during deletion',
     'a=[1,2,3]; a.delete_if { |x| p a; x == 1 }; p a',
@@ -211,6 +221,15 @@ test('an out-of-range percent character raises a Ruby error', () => {
   expect(run('format("%c", 1114112)')).toMatchObject({ uncaughtException: 'invalid character (ArgumentError)' });
 });
 
+test('mixing numbered and unnumbered format arguments raises a Ruby error', () => {
+  expect(run('format("%d %1$d",1,2)')).toMatchObject({
+    uncaughtException: 'numbered(1) after unnumbered(1) (ArgumentError)',
+  });
+  expect(run('format("%1$d %d",1,2)')).toMatchObject({
+    uncaughtException: 'unnumbered(1) mixed with numbered (ArgumentError)',
+  });
+});
+
 test('a default initializer rejects unexpected arguments', () => {
   expect(run('Object.new(1)')).toMatchObject({
     uncaughtException: 'wrong number of arguments (given 1, expected 0) (ArgumentError)',
@@ -233,6 +252,13 @@ test('ensure exposes and preserves a pending exception', () => {
 test('a block return after its class body has ended raises a Ruby error', () => {
   expect(run('class Foo; PR = proc { return }; end; Foo::PR.call')).toMatchObject({
     uncaughtException: 'unexpected return (LocalJumpError)',
+  });
+});
+
+test('a block return from an active class body raises a Ruby error', () => {
+  expect(run('class Foo; [1].each { return }; end; puts "after"')).toMatchObject({
+    uncaughtException: 'unexpected return (LocalJumpError)',
+    stdout: '',
   });
 });
 

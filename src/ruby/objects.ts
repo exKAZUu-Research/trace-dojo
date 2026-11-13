@@ -113,6 +113,7 @@ export class RHash extends RBasic {
   defaultProc?: RProc;
   /** How many iterations over the hash are in progress, during which adding a key is an error. */
   iterating = 0;
+  iterationError?: string;
 }
 
 export class RRange extends RBasic {

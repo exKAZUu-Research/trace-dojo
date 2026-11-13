@@ -529,6 +529,7 @@ def('String', 'delete', [1, -1], function* (self: RString, args) {
   );
 });
 def('String', 'delete!', [1, -1], function* (self: RString, args) {
+  if (self.s.length === 0) return NIL;
   modify(self);
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* stringArg(arg));
@@ -646,6 +647,7 @@ for (const [name, squeezeRuns] of [
     return str(translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns).text);
   });
   def('String', `${name}!`, 2, function* (self: RString, [from, to]) {
+    if (self.s.length === 0) return NIL;
     modify(self);
     const result = translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns);
     if (!result.matched) return NIL;

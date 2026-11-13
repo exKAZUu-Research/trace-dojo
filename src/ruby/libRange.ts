@@ -105,8 +105,8 @@ def('Range', ['to_a', 'to_ary', 'entries'], 0, function* (self: RRange) {
   return arr(yield* toArray(self));
 });
 def('Range', ['begin', 'first'], [0, 1], function* (self: RRange, args) {
+  if (self.begin === NIL) throw rangeError('cannot get the first element of beginless range');
   if (args.length === 0) {
-    if (self.begin === NIL && args.length === 0) throw rangeError('cannot get the first element of beginless range');
     return self.begin;
   }
   const count = yield* toIndex(args[0]);
@@ -135,12 +135,19 @@ def('Range', 'last', [0, 1], function* (self: RRange, args) {
   return arr(count === 0 ? [] : items.slice(-count));
 });
 def('Range', 'min', [0, 1], function* (self: RRange, args, block) {
+  if (self.begin === NIL) throw rangeError('cannot get the minimum of beginless range');
   if (block || args.length > 0) return yield* callEnumerable(self, 'min', args, block);
   const order = self.end === NIL ? -1 : yield* spaceship(self.begin, self.end);
   if (order === undefined || order > 0 || (order === 0 && self.exclusive)) return NIL;
   return self.begin;
 });
 def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
+  if (self.begin === NIL && !block && args.length === 0) {
+    if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
+    if (!self.exclusive) return self.end;
+    if (typeof self.end === 'bigint') return self.end - 1n;
+    throw typeError('cannot exclude end value with non Integer begin value');
+  }
   if (block || args.length > 0) return yield* callEnumerable(self, 'max', args, block);
   if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
   const order = yield* spaceship(self.begin, self.end);
@@ -180,6 +187,8 @@ function rangeSize(range: RRange): Value {
       return size > 0n ? size : 0n;
     }
     if (typeof end === 'number') {
+      if (end === Number.POSITIVE_INFINITY) return end;
+      if (end === Number.NEGATIVE_INFINITY) return 0n;
       const last = Math.floor(end);
       let size = BigInt(last) - begin + 1n;
       if (exclusive && last === end) size -= 1n;

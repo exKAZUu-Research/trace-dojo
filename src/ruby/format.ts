@@ -23,10 +23,20 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
   const template = yield* toStr(formatValue);
   let result = '';
   let next = 0;
+  let argumentMode: 'none' | 'numbered' | 'unnumbered' = 'none';
   let hashArg: RHash | undefined;
   const takeArg = (): Value => {
+    if (argumentMode === 'numbered') throw argumentError(`unnumbered(${next + 1}) mixed with numbered`);
+    argumentMode = 'unnumbered';
     if (next >= args.length) throw argumentError('too few arguments');
     return args[next++];
+  };
+  const numberedArg = (digits: string): Value => {
+    if (argumentMode === 'unnumbered') throw argumentError(`numbered(${Number(digits)}) after unnumbered(${next})`);
+    argumentMode = 'numbered';
+    const value = args[Number(digits) - 1];
+    if (value === undefined) throw argumentError(`invalid index - ${digits}$`);
+    return value;
   };
   const namedArg = function* (name: string): Gen {
     hashArg ??= args.length === 1 && args[0] instanceof RHash ? args[0] : undefined;
@@ -77,8 +87,7 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     if (braceSubstitution) continue;
     let digits = /^\d+/.exec(template.slice(index))?.[0];
     if (digits && template[index + digits.length] === '$') {
-      value = args[Number(digits) - 1];
-      if (value === undefined) throw argumentError(`invalid index - ${digits}$`);
+      value = numberedArg(digits);
       index += digits.length + 1;
       digits = /^\d+/.exec(template.slice(index))?.[0];
     }
@@ -128,14 +137,16 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
     }
     case 'b':
     case 'B': {
-      return formatInteger(yield* intArg(arg()), 2, spec, spec.sharp ? `0${type}` : '');
+      const value = yield* intArg(arg());
+      return formatInteger(value, 2, spec, spec.sharp && value !== 0n ? `0${type}` : '');
     }
     case 'o': {
       return formatInteger(yield* intArg(arg()), 8, spec, spec.sharp ? '0' : '');
     }
     case 'x':
     case 'X': {
-      const text = formatInteger(yield* intArg(arg()), 16, spec, spec.sharp ? `0${type}` : '');
+      const value = yield* intArg(arg());
+      const text = formatInteger(value, 16, spec, spec.sharp && value !== 0n ? `0${type}` : '');
       return type === 'X' ? text.toUpperCase() : text;
     }
     case 'f':
@@ -275,6 +286,7 @@ function formatFloatDirective(type: string, value: number, spec: Spec): string {
     body = generalText(magnitude, spec.precision ?? 6, spec.sharp);
   } else {
     body = hexFloat(magnitude, spec.precision);
+    if (spec.sharp && !body.includes('.')) body = body.replace('p', '.p');
   }
   if (type === 'E' || type === 'G' || type === 'A') body = body.toUpperCase();
   const width = spec.width ?? 0;
