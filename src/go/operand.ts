@@ -27,8 +27,16 @@ export interface Operand {
   /** Evaluates the expression; a call with several results returns them as an array. */
   eval: Eval;
   store?: (frame: Frame, value: Value) => void;
-  /** Evaluates the left-hand side's container and index in phase 1, returning the phase-2 store writer. */
+  /**
+   * Evaluates an assignment destination's operands, returning the writer that later checks the destination (nil
+   * pointers, indices out of range, nil maps) and stores, so that a fault happens at its own store, as in Go.
+   */
   prepareStore?: (frame: Frame) => (value: Value) => void;
+  /**
+   * Evaluates the operands of an addressable struct or array as `prepareStore` does, returning what reads its storage
+   * after the same checks, for a destination inside it.
+   */
+  locate?: (frame: Frame) => () => Value;
   /** Reads and writes a map entry while evaluating the map and key expressions only once. */
   mapUpdate?: (frame: Frame, change: (value: Value) => Value) => void;
   /** Resolves a non-constant untyped shift expression once its target type is known. */

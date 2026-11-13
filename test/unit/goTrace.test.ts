@@ -194,6 +194,47 @@ func main() {
   expect(traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 1, 1, 1, 0]);
 });
 
+test('turtles in assignment destinations and map literal keys stay reachable while the right side runs', () => {
+  const program = `package main
+
+type S struct {
+	T *Turtle
+	X int
+}
+
+func maker() *S {
+	return &S{NewTurtle(), 0}
+}
+
+func makeSlice() []S {
+	return []S{{NewTurtle(), 0}}
+}
+
+func arg() int {
+	x := 1
+	return x
+}
+
+func main() {
+	maker().X = arg()
+	makeSlice()[0].X += arg()
+	map[*Turtle]int{}[NewTurtle()] = arg()
+	_ = map[*Turtle]int{NewTurtle(): arg()}
+}`;
+  const { traceItems } = traceProgram('go', program, program);
+  expect(traceItems.map(({ line, turtles }) => [line, turtles.length])).toEqual([
+    [0, 0],
+    [17, 1],
+    [22, 0],
+    [17, 1],
+    [23, 0],
+    [17, 1],
+    [24, 0],
+    [17, 1],
+    [25, 0],
+  ]);
+});
+
 test('integers beyond safe number precision remain exact bigints in trace snapshots', () => {
   const program = `package main
 

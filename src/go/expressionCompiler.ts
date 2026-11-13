@@ -15,15 +15,23 @@ import {
   unaryConstant,
 } from './constants';
 import { conversion, stringToRunesWithMode, toInterface } from './conversions';
-import { type Entity, linkEscapeHook, linkEscapeSource, markEscapes, type VarEntity } from './entities';
+import {
+  type Entity,
+  type FunctionContext,
+  linkEscapeHook,
+  linkEscapeSource,
+  markEscapes,
+  type VarEntity,
+} from './entities';
 import { equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
 import { currentRuntime } from './native';
 import type { Operand } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
-import { type Eval, type Frame, readLocal, writeLocal } from './runtime';
+import { type Eval, type Frame, readLocal, UNASSIGNED, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
+import { sizeOf } from './sliceOps';
 import {
   BASIC,
   type BasicKind,
@@ -46,10 +54,12 @@ import {
   isUnsigned,
   isUntyped,
   lookupFieldOrMethod,
+  type MissingMethod,
   missingMethod,
   NO_VALUE,
   RUNE,
   type Type,
+  type TypeParamType,
   typeString,
   underlying,
 } from './types';
@@ -81,8 +91,72 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return operand.type === BASIC.invalid;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per expression kind.
+  /** The values of the assignment being compiled that `hoistingCalls` evaluates first. */
+  private hoisted: { fn: FunctionContext | undefined; values: { slot: number; evaluate: Eval }[] } | undefined;
+
+  /**
+   * Compiles an assignment's operands so that their calls run first, in order, and the rest of the operands, the checks
+   * of the destinations, and the stores run after them, as Go's compiler orders an assignment. Besides calls, Go's
+   * compiler copies slice expressions, && and || expressions, and keys of maps without fast access to temporaries in
+   * that first pass (walk/order.go). The values wait in hidden slots, which garbage collection follows, until the
+   * statement ends.
+   */
+  protected hoistingCalls<T>(compile: () => T): { result: T; run: (frame: Frame, rest: () => void) => void } {
+    const outer = this.hoisted;
+    const hoisted: NonNullable<typeof this.hoisted> = { fn: this.fn, values: [] };
+    this.hoisted = hoisted;
+    let result: T;
+    try {
+      result = compile();
+    } finally {
+      this.hoisted = outer;
+    }
+    const { values } = hoisted;
+    if (values.length === 0) return { result, run: (_, rest) => rest() };
+    return {
+      result,
+      run: (frame, rest) => {
+        try {
+          for (const { slot, evaluate } of values) frame.locals[slot] = evaluate(frame) as Value;
+          rest();
+        } finally {
+          for (const { slot } of values) frame.locals[slot] = UNASSIGNED;
+        }
+      },
+    };
+  }
+
+  /** Evaluates a value in the first pass of the assignment being compiled, if any. */
+  private hoist(evaluate: Eval): Eval {
+    const hoisted = this.hoisted;
+    if (!hoisted || hoisted.fn !== this.fn) return evaluate;
+    const slot = this.hiddenSlot();
+    hoisted.values.push({ slot, evaluate });
+    return (frame) => frame.locals[slot] as Value;
+  }
+
   expression(expression: Expression): Operand {
+    const isLogical = expression.kind === 'binary' && (expression.operator === '&&' || expression.operator === '||');
+    if (!this.hoisted || (expression.kind !== 'call' && expression.kind !== 'slice' && !isLogical)) {
+      return this.compileExpression(expression);
+    }
+    // A call's own operands run with the call, and the right operand of && or || only when it is needed.
+    const hoisted = this.hoisted;
+    this.hoisted = undefined;
+    let tracked: { result: Operand; hasRuntimeCall: boolean };
+    try {
+      tracked = this.withRuntimeCallTracking(() => this.compileExpression(expression));
+    } finally {
+      this.hoisted = hoisted;
+    }
+    const operand = tracked.result;
+    if (operand.mode !== 'value' || this.isInvalid(operand)) return operand;
+    if (expression.kind === 'call' && !tracked.hasRuntimeCall) return operand;
+    return { ...operand, eval: this.hoist(operand.eval) };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 25 -- One case per expression kind.
+  private compileExpression(expression: Expression): Operand {
     if (this.fn) this.fn.nodeCount++;
     switch (expression.kind) {
       case 'name': {
@@ -413,14 +487,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const failure = assignFailure(value.type, target);
     if (failure) {
-      let detail = '';
-      if (failure.kind === 'missingMethod') {
-        const { missing } = failure;
-        if (missing.pointerOnly)
-          detail = `（メソッド ${missing.name} はポインタのレシーバを持つので、${describeType(value.type)} ではなく *${describeType(value.type)} が実装しています）`;
-        else if (missing.wrongType) detail = `（メソッド ${missing.name} の型が違います）`;
-        else detail = `（メソッド ${missing.name} がありません）`;
-      }
+      const detail = failure.kind === 'missingMethod' ? describeMissingMethod(value.type, failure.missing) : '';
       this.error(
         value.span,
         `${describeType(value.type)} 型の値は、${describeType(target)} 型の${context}には使えません${detail}。`
@@ -445,12 +512,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const type = defaultType(operand.type);
       if (target.kind === 'typeParam') {
         // A type parameter's value must work for every type it allows, which the generic check verifies.
-        const terms = target.constraint.typeSet?.terms;
-        const fits =
-          terms !== undefined &&
-          terms.length > 0 &&
-          terms.every((term) => 'constant' in represent(constant, term.type));
-        if (!fits) this.error(operand.span, `定数は ${target.name} 型の${context}には使えません。`);
+        if (!fitsTypeParam(constant, target))
+          this.error(operand.span, `定数は ${target.name} 型の${context}には使えません。`);
         return () => {};
       }
       const representation = represent(constant, type);
@@ -523,7 +586,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     if (operand.mode === 'constant' && operand.constant) {
       if (isInterface(target)) return this.defaulted(operand);
-      if (target.kind === 'typeParam') return { ...operand, type: target, eval: () => {} };
+      if (target.kind === 'typeParam') {
+        if (fitsTypeParam(operand.constant, target)) return { ...operand, type: target, eval: () => {} };
+        this.error(operand.span, `定数は ${target.name} 型のオペランドには使えません。`);
+        return this.invalid(operand.span);
+      }
       const representation = represent(operand.constant, target);
       if ('error' in representation) {
         this.reportRepresentation(operand, target, representation.error, 'オペランド');
@@ -669,14 +736,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (!(value instanceof Pointer)) nilPointerPanic();
       return value;
     };
+    const locatePointer = (frame: Frame): (() => Pointer) => {
+      const value = read(frame);
+      return () => {
+        if (!(value instanceof Pointer)) nilPointerPanic();
+        return value;
+      };
+    };
     return {
       mode: 'variable',
       type: under.element,
       span,
       eval: (frame) => pointer(frame).load(),
+      locate: (frame) => {
+        const target = locatePointer(frame);
+        return () => target().load();
+      },
       prepareStore: (frame) => {
-        const target = pointer(frame);
-        return (value) => target.store(value);
+        const target = locatePointer(frame);
+        return (value) => target().store(value);
       },
       store: (frame, value) => pointer(frame).store(value),
       addressOf: () => pointer,
@@ -1272,7 +1350,20 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (value === undefined) nilPointerPanic();
       return value as GoStruct;
     };
-    const throughPointer = underlying(operand.type).kind === 'pointer' || this.pathHasPointer(operand.type, steps);
+    const lastPointer = lastPointerAt(operand.type, steps);
+    // A destination's last pointer is dereferenced at its store, and everything before it when its operands are
+    // evaluated, as Go's compiler orders an assignment.
+    const locateContainer = (frame: Frame): (() => GoStruct) => {
+      if (lastPointer < 0) {
+        const base = operand.locate?.(frame) ?? constantly(read(frame));
+        return () => fieldPath(base(), steps);
+      }
+      let value = read(frame);
+      for (const index of steps.slice(0, lastPointer)) value = (dereferenced(value) as GoStruct).fields[index];
+      const pointer = value;
+      return () => fieldPath(dereferenced(pointer), steps.slice(lastPointer));
+    };
+    const throughPointer = lastPointer >= 0;
     const addressable = operand.mode === 'variable' || throughPointer;
     const escapeAddress = throughPointer
       ? undefined
@@ -1285,10 +1376,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type,
       span,
       eval: (frame) => container(frame).fields[last],
+      locate: addressable
+        ? (frame) => {
+            const target = locateContainer(frame);
+            return () => target().fields[last];
+          }
+        : undefined,
       prepareStore: addressable
         ? (frame) => {
-            const target = container(frame);
+            const locateTarget = locateContainer(frame);
             return (value) => {
+              const target = locateTarget();
               target.fields[last] = writeInPlace(target.fields[last], value);
             };
           }
@@ -1307,18 +1405,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
         : undefined,
       escapeAddress,
     };
-  }
-
-  private pathHasPointer(type: Type, path: number[]): boolean {
-    let current = underlying(type);
-    if (current.kind === 'pointer') return true;
-    for (const index of path) {
-      if (current.kind !== 'struct') return false;
-      const fieldType = current.fields[index].type;
-      if (underlying(fieldType).kind === 'pointer') return true;
-      current = underlying(fieldType);
-    }
-    return false;
   }
 
   // Index and slice -------------------------------------------------------------------------------------------------
@@ -1384,11 +1470,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const { length } = type;
       const index = this.indexValue(indexExpression, length);
       if (!index) return this.invalid(expression);
-      const element = (frame: Frame): [Value[], number] => {
-        const array = read(frame) as GoArray;
+      const pointer = operand.eval;
+      const locateElement = (frame: Frame): (() => [Value[], number]) => {
+        const array = viaPointer ? constantly(pointer(frame)) : (operand.locate?.(frame) ?? constantly(read(frame)));
         const at = index(frame);
-        if (at < 0 || at >= length) indexPanic(at, length);
-        return [array.elements, at];
+        return () => {
+          const { elements } = (viaPointer ? dereferenced(array()) : array()) as GoArray;
+          if (at < 0 || at >= length) indexPanic(at, length);
+          return [elements, at];
+        };
       };
       const escapeAddress = viaPointer
         ? undefined
@@ -1401,25 +1491,27 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type.element,
         operand,
         operand.mode === 'variable' || viaPointer,
-        element,
+        locateElement,
         escapeAddress
       );
     }
     if (type.kind === 'slice') {
       const index = this.indexValue(indexExpression);
       if (!index) return this.invalid(expression);
-      const element = (frame: Frame): [Value[], number] => {
+      const locateElement = (frame: Frame): (() => [Value[], number]) => {
         const slice = read(frame) as Slice | undefined;
         const at = index(frame);
-        const length = slice?.length ?? 0;
-        if (at < 0 || at >= length) indexPanic(at, length);
-        return [(slice as Slice).array, (slice as Slice).offset + at];
+        return () => {
+          const length = slice?.length ?? 0;
+          if (at < 0 || at >= length) indexPanic(at, length);
+          return [(slice as Slice).array, (slice as Slice).offset + at];
+        };
       };
       const escapeAddress = (): void => {
         operand.escapeAddress?.();
         this.escapeOperand(operand);
       };
-      return elementOperand(expression, type.element, operand, true, element, escapeAddress);
+      return elementOperand(expression, type.element, operand, true, locateElement, escapeAddress);
     }
     this.error(expression, `${describeType(operand.type)} 型の値には添字を付けられません。`);
     return this.invalid(expression);
@@ -1452,7 +1544,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   private mapIndex(span: Span, operand: Operand, keyType: Type, valueType: Type): Operand {
     const expression = span as Extract<Expression, { kind: 'index' }>;
-    const key = this.assign(this.expression(expression.indices[0]), keyType, 'map のキー');
+    const keyOperand = this.expression(expression.indices[0]);
+    const convertedKey = this.assign(keyOperand, keyType, 'map のキー');
+    const key =
+      keyOperand.mode === 'constant' || hasFastMapAccess(keyType, valueType) ? convertedKey : this.hoist(convertedKey);
     const read = operand.eval;
     const keyOf = mapKeyOf(keyType);
     const zero = this.zeroOf(valueType);
@@ -1830,15 +1925,19 @@ function throughArrayPointer(operand: Operand): { type: Type; read: Eval; viaPoi
   };
 }
 
-/** An element of an array or slice, which `element` locates as its container and index. */
+/**
+ * An element of an array or slice: `locateElement` evaluates the operands and returns what checks the index and gives
+ * the container and the index there.
+ */
 function elementOperand(
   span: Span,
   type: Type,
   operand: Operand,
   addressable: boolean,
-  element: (frame: Frame) => [Value[], number],
+  locateElement: (frame: Frame) => () => [Value[], number],
   escapeAddress?: () => void
 ): Operand {
+  const element = (frame: Frame): [Value[], number] => locateElement(frame)();
   return {
     mode: addressable ? 'variable' : 'value',
     type,
@@ -1848,10 +1947,20 @@ function elementOperand(
       const [elements, at] = element(frame);
       return elements[at];
     },
+    locate: addressable
+      ? (frame) => {
+          const target = locateElement(frame);
+          return () => {
+            const [elements, at] = target();
+            return elements[at];
+          };
+        }
+      : undefined,
     prepareStore: addressable
       ? (frame) => {
-          const [elements, at] = element(frame);
+          const target = locateElement(frame);
           return (value) => {
+            const [elements, at] = target();
             elements[at] = writeInPlace(elements[at], value);
           };
         }
@@ -1870,6 +1979,71 @@ function elementOperand(
       : undefined,
     escapeAddress,
   };
+}
+
+/**
+ * Whether Go's compiler passes the keys of such maps by value to its fast map routines (mapfast in
+ * cmd/compile/internal/walk): keys compared as 4 or 8 bytes of memory, or strings, with values of at most 128 bytes.
+ */
+function hasFastMapAccess(key: Type, value: Type): boolean {
+  if (sizeOf(value) > 128) return false;
+  if (isBasic(key, 'string')) return true;
+  const size = sizeOf(key);
+  return (size === 4 || size === 8) && comparesAsMemory(key);
+}
+
+function comparesAsMemory(type: Type): boolean {
+  const under = underlying(type);
+  switch (under.kind) {
+    case 'basic': {
+      return isInteger(under) || isBoolean(under);
+    }
+    case 'pointer': {
+      return true;
+    }
+    case 'array': {
+      return comparesAsMemory(under.element);
+    }
+    case 'struct': {
+      const fieldsSize = under.fields.reduce((total, field) => total + sizeOf(field.type), 0);
+      return fieldsSize === sizeOf(under) && under.fields.every((field) => comparesAsMemory(field.type));
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** The index in a field path after which the last pointer is dereferenced: 0 for the operand itself, or -1 for none. */
+function lastPointerAt(type: Type, steps: readonly number[]): number {
+  let last = -1;
+  let current = underlying(type);
+  for (let at = 0; ; at++) {
+    if (current.kind === 'pointer') {
+      last = at;
+      current = underlying(current.element);
+    }
+    if (at === steps.length || current.kind !== 'struct') return last;
+    current = underlying(current.fields[steps[at]].type);
+  }
+}
+
+/** The struct reached from a struct through fields of struct type. */
+function fieldPath(struct: Value, steps: readonly number[]): GoStruct {
+  let current = struct as GoStruct;
+  for (const index of steps) current = current.fields[index] as GoStruct;
+  return current;
+}
+
+/** The value a pointer points to, or the value itself when it is not a pointer, panicking for a nil pointer. */
+function dereferenced(value: Value): Value {
+  if (value instanceof Pointer) return value.load();
+  if (value === undefined) nilPointerPanic();
+  return value;
+}
+
+function constantly(value: Value): () => Value {
+  return () => value;
 }
 
 /** What tells apart the factors of products, for finding the same product again: a variable or a constant. */
@@ -1968,6 +2142,21 @@ function untypedRank(type: Type): number {
       (type as { basic: string }).basic
     ] ?? 0
   );
+}
+
+/** Whether every type a type parameter allows represents the constant, as converting the constant to it requires. */
+function fitsTypeParam(constant: Constant, target: TypeParamType): boolean {
+  const terms = target.constraint.typeSet?.terms;
+  return terms !== undefined && terms.length > 0 && terms.every((term) => 'constant' in represent(constant, term.type));
+}
+
+/** Why a type does not implement an interface, in parentheses for a message. */
+export function describeMissingMethod(type: Type, missing: MissingMethod): string {
+  if (missing.pointerOnly) {
+    return `（メソッド ${missing.name} はポインタのレシーバを持つので、${describeType(type)} ではなく *${describeType(type)} が実装しています）`;
+  }
+  if (missing.wrongType) return `（メソッド ${missing.name} の型が違います）`;
+  return `（メソッド ${missing.name} がありません）`;
 }
 
 /** How Go's compiler writes a constant in messages. */

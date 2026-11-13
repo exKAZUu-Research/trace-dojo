@@ -15,6 +15,7 @@ import type {
 import { CallCompiler } from './callCompiler';
 import { type FunctionContext, linkEscapeHook, linkEscapeSource, type VarEntity } from './entities';
 import { equalityOf } from './equality';
+import { describeMissingMethod } from './expressionCompiler';
 import { runesOf } from './literals';
 import { dynamicMethod, invokeMethod, receiverFor } from './methods';
 import type { Operand } from './operand';
@@ -50,6 +51,7 @@ import {
   isInterface,
   isString,
   isUntyped,
+  missingMethod,
   type Type,
   typeIdentityKey,
   underlying,
@@ -233,7 +235,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private incDec(statement: Extract<SimpleStatement, { kind: 'incDec' }>): Exec {
-    const target = this.expression(statement.operand);
+    const { result: target, run } = this.hoistingCalls(() => this.expression(statement.operand));
     if (this.isInvalid(target)) return () => {};
     if (!this.isAssignable(target, statement.operand)) return () => {};
     target.variable?.markUsed();
@@ -252,7 +254,7 @@ export abstract class StatementCompiler extends CallCompiler {
     return this.withStep(
       statement,
       (frame) => {
-        update(frame, (value) => apply(value, one(frame)));
+        run(frame, () => update(frame, (value) => apply(value, one(frame))));
         return;
       },
       false
@@ -303,7 +305,23 @@ export abstract class StatementCompiler extends CallCompiler {
   private assignment(statement: Extract<SimpleStatement, { kind: 'assign' }>): Exec {
     const { operator, left, right } = statement;
     if (operator !== '=') return this.compoundAssignment(statement);
-    const targets = left.map((target) => this.assignmentTarget(target));
+    const {
+      result: [targets, values],
+      run,
+    } = this.hoistingCalls(() => {
+      const compiledTargets = left.map((target) => this.assignmentTarget(target));
+      const typeOf = (index: number): Type | undefined => compiledTargets[index]?.type;
+      const localAt = (index: number): VarEntity | 'discard' | undefined => {
+        const inner = stripParens(left[index]);
+        if (inner.kind === 'name' && inner.name === '_') return 'discard';
+        return inner.kind === 'name' ? compiledTargets[index]?.variable?.entity : undefined;
+      };
+      return [
+        compiledTargets,
+        this.rightSide(statement, right, left.length, typeOf, undefined, undefined, localAt),
+      ] as const;
+    });
+    if (!values) return () => {};
     const prepareFor = (index: number): ((frame: Frame) => (value: Value) => void) => {
       const target = targets[index];
       if (!target || this.isInvalid(target)) return () => () => {};
@@ -311,23 +329,15 @@ export abstract class StatementCompiler extends CallCompiler {
       const store = target.store as NonNullable<Operand['store']>;
       return (frame) => (value) => store(frame, value);
     };
-    const typeOf = (index: number): Type | undefined => {
-      const target = targets[index];
-      if (!target) return undefined;
-      return target.type;
-    };
-    const localAt = (index: number): VarEntity | 'discard' | undefined => {
-      const inner = stripParens(left[index]);
-      if (inner.kind === 'name' && inner.name === '_') return 'discard';
-      return inner.kind === 'name' ? targets[index]?.variable?.entity : undefined;
-    };
-    const values = this.rightSide(statement, right, left.length, typeOf, undefined, undefined, localAt);
-    if (!values) return () => {};
     const prepares = values.map((_, index) => prepareFor(index));
+    // The right side's values, then every destination's operands, then the stores in order, each checking its own
+    // destination, as Go's compiler orders an assignment after the calls.
     const exec: Exec = (frame) => {
-      const writers = prepares.map((prepare) => prepare(frame));
-      const evaluated = evaluateAll(frame, values);
-      for (const [index, write] of writers.entries()) write(evaluated[index]);
+      run(frame, () => {
+        const evaluated = evaluateAll(frame, values);
+        const writers = prepares.map((prepare) => prepare(frame));
+        for (const [index, write] of writers.entries()) write(evaluated[index]);
+      });
       return;
     };
     const createsObjects = right.length === left.length && right.every((value) => this.createsObject(value));
@@ -425,29 +435,25 @@ export abstract class StatementCompiler extends CallCompiler {
       this.error(statement, `${statement.operator} の左辺と右辺には、値を1つずつ書いてください。`);
       return () => {};
     }
-    const target = this.expression(left[0]);
-    if (this.isInvalid(target) || !this.isAssignable(target, left[0])) {
-      this.expression(right[0]);
-      return () => {};
-    }
+    // Go reads the destination after the calls on both sides, so the right side's calls may change it.
+    const {
+      result: [target, value],
+      run,
+    } = this.hoistingCalls(() => [this.expression(left[0]), this.expression(right[0])] as const);
+    if (this.isInvalid(target) || !this.isAssignable(target, left[0])) return () => {};
     target.variable?.markUsed();
     countWrite(target);
     const current: Operand = { ...target, mode: 'value', eval: (frame) => frame.temporaries.at(-1) as Value };
-    const combined = this.binaryOfOperands(statement, operator, current, this.expression(right[0]));
+    const combined = this.binaryOfOperands(statement, operator, current, value);
     if (this.isInvalid(combined)) return () => {};
     const result = this.assign(combined, target.type, '変数');
     const update = this.updater(target, left[0]);
     return this.withStep(
       statement,
       (frame) => {
-        update(frame, (value) => {
-          frame.temporaries.push(value);
-          try {
-            return result(frame);
-          } finally {
-            frame.temporaries.pop();
-          }
-        });
+        run(frame, () =>
+          update(frame, (currentValue) => withTemporary(frame, currentValue, () => result(frame) as Value))
+        );
         return;
       },
       false
@@ -714,8 +720,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private rangeStatement(statement: Extract<Statement, { kind: 'range' }>): Exec {
-    const range = this.value(statement.range);
-    const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range);
+    const { result: range, hasRuntimeCall } = this.withRuntimeCallTracking(() => this.value(statement.range));
+    const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range, hasRuntimeCall);
     if (!source) {
       this.declareRangeTargets(statement, BASIC.invalid, BASIC.invalid);
       this.loopBody(statement.body);
@@ -747,12 +753,25 @@ export abstract class StatementCompiler extends CallCompiler {
   /** What a range loop walks: the collection, the types of its keys and values, and how to visit them. */
   private rangeSource(
     statement: Extract<Statement, { kind: 'range' }>,
-    range: Operand
+    range: Operand,
+    hasRuntimeCall: boolean
   ): { read: Eval; keyType: Type; valueType: Type; iterate: RangeIterator } | undefined {
     const type = coreType(range.type) ?? range.type;
     const read = range.eval;
-    if (type.kind === 'pointer' && underlying(type.element).kind === 'array') {
-      const arrayType = underlying(type.element) as Extract<Type, { kind: 'array' }>;
+    const arrayType = type.kind === 'pointer' ? underlying(type.element) : type;
+    const value = statement.value && stripParens(statement.value);
+    if (arrayType.kind === 'array' && (!value || (value.kind === 'name' && value.name === '_'))) {
+      // With at most one iteration variable, the length of an array type is constant, so Go evaluates the range
+      // expression only for its calls and never reads or dereferences the array.
+      const { length } = arrayType;
+      return {
+        read: hasRuntimeCall ? (frame) => void read(frame) : () => {},
+        keyType: BASIC.int,
+        valueType: arrayType.element,
+        iterate: (_, visit) => iterateIndices(length, visit),
+      };
+    }
+    if (type.kind === 'pointer' && arrayType.kind === 'array') {
       return {
         read: (frame) => dereferenceArray(read(frame)),
         keyType: BASIC.int,
@@ -1043,6 +1062,17 @@ export abstract class StatementCompiler extends CallCompiler {
         const key = typeIdentityKey(resolved);
         if (seenTypes.has(key)) this.error(syntax, `型の switch に ${describeType(resolved)} が2回書かれています。`);
         seenTypes.add(key);
+        const operandInterface = underlying(operandType);
+        const missing =
+          !isInterface(resolved) && operandInterface.kind === 'interface'
+            ? missingMethod(resolved, operandInterface)
+            : undefined;
+        if (missing) {
+          this.error(
+            syntax,
+            `${describeType(resolved)} 型は ${describeType(operandType)} を実装していないので、この case には決して当てはまりません${describeMissingMethod(resolved, missing)}。`
+          );
+        }
       }
       return resolved;
     });
@@ -1314,7 +1344,7 @@ export abstract class StatementCompiler extends CallCompiler {
           }
           return statements(frame);
         };
-        if (type.results.length > 0 && !isTerminatingList(body.statements)) {
+        if (type.results.length > 0 && !isTerminatingList(body.statements, this.builtinPanicCalls)) {
           this.error(
             { row: body.endRow, column: 0 },
             'return 文がありません（結果を返す関数は return 文か panic で終わらせてください）。'
@@ -1382,6 +1412,14 @@ function iterateString(collection: Value, visit: RangeVisit): Completion | undef
     const result = visit(BigInt(offset), BigInt(rune));
     if (result) return result;
     offset += runeSize(text, offset);
+  }
+  return undefined;
+}
+
+function iterateIndices(length: number, visit: RangeVisit): Completion | undefined {
+  for (let index = 0; index < length; index++) {
+    const result = visit(BigInt(index), undefined);
+    if (result) return result;
   }
   return undefined;
 }
@@ -1516,35 +1554,30 @@ function isAnswerType(type: Type): boolean {
 }
 
 /** Whether a statement list ends with a terminating statement, as a function with results must. */
-export function isTerminatingList(statements: Statement[]): boolean {
+export function isTerminatingList(statements: Statement[], panics: WeakSet<Expression>): boolean {
   const last = statements.toReversed().find((statement) => statement.kind !== 'empty');
-  return last !== undefined && isTerminating(last);
+  return last !== undefined && isTerminating(last, panics);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- The terminating statements of the specification.
-function isTerminating(statement: Statement): boolean {
+function isTerminating(statement: Statement, panics: WeakSet<Expression>): boolean {
   switch (statement.kind) {
     case 'return': {
       return true;
     }
     case 'expression': {
-      const call = stripParens(statement.expression);
-      return (
-        call.kind === 'call' &&
-        stripParens(call.callee).kind === 'name' &&
-        (stripParens(call.callee) as { name: string }).name === 'panic'
-      );
+      return panics.has(stripParens(statement.expression));
     }
     case 'block': {
-      return isTerminatingList(statement.block.statements);
+      return isTerminatingList(statement.block.statements, panics);
     }
     case 'if': {
       if (!statement.alternative) return false;
       const otherwise =
         'statements' in statement.alternative
-          ? isTerminatingList(statement.alternative.statements)
-          : isTerminating(statement.alternative);
-      return isTerminatingList(statement.consequence.statements) && otherwise;
+          ? isTerminatingList(statement.alternative.statements, panics)
+          : isTerminating(statement.alternative, panics);
+      return isTerminatingList(statement.consequence.statements, panics) && otherwise;
     }
     case 'for': {
       return statement.condition === undefined && !hasBreak(statement.body.statements);
@@ -1558,7 +1591,7 @@ function isTerminating(statement: Statement): boolean {
         cases.every((switchCase) => {
           const body = switchCase.body;
           const last = body.at(-1);
-          return !hasBreak(body) && (last?.kind === 'fallthrough' || isTerminatingList(body));
+          return !hasBreak(body) && (last?.kind === 'fallthrough' || isTerminatingList(body, panics));
         })
       );
     }
