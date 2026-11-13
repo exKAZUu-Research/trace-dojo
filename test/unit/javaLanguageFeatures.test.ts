@@ -2178,3 +2178,23 @@ public class Main { enum E { A } public static void main(String[] a) { EnumMap<E
       'java.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\njava.lang.NullPointerException: Cannot invoke "Object.getClass()" because "key" is null\nnull\n{A=2}\n',
   });
 });
+
+test("Java's TreeMap key sets decide membership by their map's comparator", () => {
+  const program = `import java.util.*;
+
+public class Main {
+  public static void main(String[] args) {
+    TreeMap<String, Integer> tm = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    tm.put("Apple", 1);
+    tm.put("banana", 2);
+    Set<String> keys = tm.keySet();
+    System.out.println(tm.containsKey("BANANA"));
+    System.out.println(keys.contains("BANANA"));
+    System.out.println(keys.containsAll(List.of("APPLE", "BANANA")));
+    System.out.println(Collections.disjoint(keys, List.of("APPLE")));
+    try { new TreeMap<Integer, Integer>(Map.of(1, 2)).keySet().contains(null); System.out.println("no exception"); }
+    catch (NullPointerException e) { System.out.println("NPE"); }
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'true\ntrue\ntrue\nfalse\nNPE\n' });
+});

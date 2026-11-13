@@ -391,6 +391,15 @@ function readSourceOf(collection: JavaObject, name: string): [JavaObject, string
   }
 }
 
+/**
+ * Whether `collection` is the key set of a `HashMap` or `TreeMap`, whose membership its map's `containsKey` decides,
+ * which a TreeMap does by its comparator; the restricted maps' key sets are AbstractMap's, which compare by equals.
+ */
+function looksUpThroughMap(collection: Value): boolean {
+  const view = mapViewSources.get(collection as JavaObject);
+  return view?.isKeySet === true && !unmodifiableClasses.has(view.map.cls);
+}
+
 /** The list a sublist views, through any nesting of sublists, or the collection itself when it is not a sublist. */
 function rootListOf(collection: JavaObject): JavaObject {
   let list = collection;
@@ -438,13 +447,16 @@ export function defineReadMethods(
 ): void {
   addMethod(cls, 'size', [], INT, false, (_, receiver) => elementsOf(receiver).length);
   addMethod(cls, 'isEmpty', [], BOOLEAN, false, (_, receiver) => elementsOf(receiver).length === 0);
-  addMethod(
-    cls,
-    'contains',
-    [context.objectType],
-    BOOLEAN,
-    false,
-    (frame, receiver, [value]) => indexOf(frame, elementsOf(receiver), value) !== -1
+  addMethod(cls, 'contains', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) =>
+    looksUpThroughMap(receiver)
+      ? frame.runtime.invokeVirtual(
+          frame,
+          frame.runtime.builtins.collections.mapClass,
+          'containsKey',
+          mapViewSources.get(receiver as JavaObject)?.map,
+          [value]
+        )
+      : indexOf(frame, elementsOf(receiver), value) !== -1
   );
   addMethod(cls, 'iterator', [], { kind: 'class', cls: itrClass, args: [element] }, false, (frame, receiver) => {
     const view = mapViewSources.get(receiver as JavaObject);
@@ -488,10 +500,8 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
     addMethod(cls, name, [parameter], BOOLEAN, false, (frame) => throwBuiltin(frame, 'UnsupportedOperationException'));
   }
   addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
-    // The key set of a HashMap or TreeMap looks the key up as its map does, which a TreeMap does by comparing it; the
-    // restricted maps' key sets are AbstractMap's, which compare the key with each one.
     const view = mapViewSources.get(receiver as JavaObject);
-    if (view?.isKeySet && !unmodifiableClasses.has(view.map.cls)) {
+    if (view && looksUpThroughMap(receiver)) {
       const { mapClass } = frame.runtime.builtins.collections;
       if (frame.runtime.invokeVirtual(frame, mapClass, 'containsKey', view.map, [value]) !== true) return false;
       // TreeMap.KeySet removes through its map, which finds the key by its comparator rather than by equals.
