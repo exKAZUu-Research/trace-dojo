@@ -809,7 +809,13 @@ const s = new Date(); while (new Date() - s < 500); console.log('waited again');
 setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first'), 0);
 setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);
 setTimeout(() => console.log('long'), 50); for (let i = 0; i < 1000; i++) new Date(0); setTimeout(() => console.log('short'), 0);
-const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');`,
+const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');
+setTimeout(() => console.log('timer 100'), 100); for (let i = 0; i < 5000; i++) sum += i; console.log(new Date().getFullYear() > 2000); setTimeout(() => console.log('timer 0'), 0);
+setTimeout(() => console.log('overdue 500'), 500); sleep(1000); setTimeout(() => console.log('after sleep'), 0);
+let n = 0; const iv = setInterval(() => { console.log('iv', ++n); if (n === 3) clearInterval(iv); }, 10);
+setTimeout(() => { console.log('t15'); Promise.resolve().then(() => console.log('micro in t15')); setTimeout(() => console.log('nested 0'), 0); }, 15);
+setTimeout(() => { sleep(100); console.log('slow'); }, 20); setTimeout(() => console.log('after slow'), 25);
+setTimeout(() => console.log('a'), 2); setTimeout(() => console.log('b'), 1);`,
   ],
   [
     'Object.create with property descriptors',
