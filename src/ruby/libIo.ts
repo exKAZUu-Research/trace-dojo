@@ -165,10 +165,13 @@ def('IO', 'print', [0, -1], function* (self: RObject, args) {
   return NIL;
 });
 def('IO', 'write', [0, -1], function* (self: RObject, args) {
-  let text = '';
-  for (const arg of args) text += yield* toS(arg);
-  channel(self.data as 'stdout' | 'stderr').write(text);
-  return BigInt(new TextEncoder().encode(text).length);
+  let bytes = 0n;
+  for (const arg of args) {
+    const text = yield* toS(arg);
+    channel(self.data as 'stdout' | 'stderr').write(text);
+    bytes += BigInt(new TextEncoder().encode(text).length);
+  }
+  return bytes;
 });
 def('IO', '<<', 1, function* (self: RObject, [value]) {
   yield* write(self, yield* toS(value));

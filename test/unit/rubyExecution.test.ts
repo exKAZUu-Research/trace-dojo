@@ -403,6 +403,11 @@ test.each([
     'beforeafter\n',
   ],
   [
+    'writing before a later conversion fails',
+    'class A; def to_s = raise "bad"; end; begin; $stdout.write("before", A.new); rescue; puts "after"; end',
+    'beforeafter\n',
+  ],
+  [
     'removing a mutated Set member',
     'a = [1]; s = Set[a]; s.delete_if { |x| x << 2; true }; p s.size, s.to_a',
     '0\n[]\n',
