@@ -147,6 +147,8 @@ export class EventLoop {
       if (!first) return;
       // The loop waits for the first list due, unless the program's polling already took the clock past it.
       if (first.expiry > this.now) {
+        // Time Date has already shown beyond the scheduling clock counts toward the wait, so Date never jumps twice.
+        this.observed = Math.max(0, this.observed - (first.expiry - this.now));
         this.now = first.expiry;
         this.spentAtNow = this.runtime.budget.spent;
       }
