@@ -243,7 +243,7 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (!mapping) return undefined;
     const typeArgs = generic.typeParams.map((param) => mapping.get(param.id) as Type);
     if (!this.checkTypeArguments(generic.typeParams, typeArgs, expression)) return undefined;
-    if (!this.recordGenericInstantiation(generic.typeParams, typeArgs, expression)) return undefined;
+    if (!this.recordGenericInstantiation(generic.typeParams, typeArgs)) return undefined;
     const signature = substitute(generic.type, mapping, (named, args) =>
       this.instantiateNamed(named, args)
     ) as FuncType;

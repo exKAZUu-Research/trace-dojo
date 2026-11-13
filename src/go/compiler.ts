@@ -426,7 +426,7 @@ export class ProgramCompiler extends StatementCompiler {
     const entity = [...this.typeStates.keys()].find((candidate) => candidate.type === named);
     if (!entity?.generic || this.hasGenericCycle) return named;
     const span = named.span ?? { row: 0, column: 0 };
-    if (!this.recordGenericInstantiation(entity.generic.typeParams, args, span)) return named;
+    if (!this.recordGenericInstantiation(entity.generic.typeParams, args)) return named;
     return entity.generic.instantiate(args, span);
   }
 

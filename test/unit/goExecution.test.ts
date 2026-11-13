@@ -335,6 +335,92 @@ func main() {
   });
 });
 
+// Go 1.27.3's compiler evaluates an assignment's calls first, then the right side and the destinations' operands, and
+// checks each destination at its own store; copies and in-place slice operations write into the existing elements.
+test('assignments order their calls, operands, faults, and stores as Go does', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type S struct {
+	X int
+	P *S
+}
+
+type K struct{ a, b int }
+
+func rhs() int {
+	fmt.Print("rhs ")
+	return 9
+}
+
+func try(name string, f func()) {
+	defer func() { fmt.Println(name, recover() != nil) }()
+	f()
+}
+
+func main() {
+	x := 0
+	a := []int{0}
+	i := 2
+	var p *int
+	var s *S
+	try("index", func() { x, a[i] = 1, rhs() })
+	try("pointer", func() { x, *p = 2, rhs() })
+	try("field", func() { x, s.X = 3, rhs() })
+	try("container", func() { x, s.P.X = 4, rhs() })
+	try("compound", func() { a[i] += rhs() })
+	fmt.Println(x)
+
+	b := []int{0, 0}
+	j := 0
+	moveJ := func() int { j = 1; return 9 }
+	b[j] = moveJ()
+	c := []int{0}
+	old := c
+	replaceC := func() int { c = []int{0}; return 9 }
+	c[0] = replaceC()
+	y := 1
+	y += func() int { y = 10; return 1 }()
+	mk := map[K]int{}
+	key := K{1, 1}
+	mk[key] = func() int { key = K{2, 2}; return 9 }()
+	fmt.Println(b, old, c, y, mk)
+
+	m := map[int]int{0: 3}
+	m[0] += func() int { delete(m, 0); return 2 }()
+	n := map[int]int{0: 3}
+	n[0] += func() int { clear(n); return 2 }()
+	fmt.Println(m, n)
+
+	d := []S{{X: 1}}
+	px := &d[0].X
+	copy(d, d)
+	d[0].X = 5
+	e := [][1]int{{2}}
+	view := e[0][:]
+	copy(e, e)
+	e[0][0] = 6
+	f := []S{{X: 3}, {X: 4}}
+	pf := &f[0].X
+	f = slices.Compact(f)
+	f = slices.DeleteFunc(f, func(S) bool { return false })
+	f = slices.Replace(f, 0, 0)
+	f[0].X = 7
+	fmt.Println(*px, view[0], *pf)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'rhs index true\nrhs pointer true\nrhs field true\nrhs container true\nrhs compound true\n3\n' +
+      '[0 9] [0] [9] 11 map[{1 1}:9]\nmap[0:2] map[0:2]\n5 6 7\n',
+  });
+});
+
 test('assignments, conversions, generics, defer, map keys, and math match Go semantics', () => {
   const program = String.raw`package main
 
@@ -653,6 +739,26 @@ test.each([
     2,
   ],
   ['expanding generic instantiation cycle', 'package main\nfunc f[T any](x T) { f([]T{x}) }\nfunc main() { f(0) }', 2],
+  [
+    'instantiation cycle through two functions',
+    'package main\nfunc f[T any](x T) { g(x) }\n\nfunc g[T any](x T) { f(&x) }\nfunc main() { f(0) }',
+    4,
+  ],
+  [
+    'impossible type-switch case',
+    'package main\ntype I interface{ M() }\nfunc main() { var i I; switch i.(type) { case int: } }',
+    3,
+  ],
+  [
+    'missing return after a local named panic',
+    'package main\nfunc f() int {\n\tpanic := func(int) {}\n\tpanic(1)\n}\nfunc main() { f() }',
+    5,
+  ],
+  [
+    'untyped constant operand of a type parameter',
+    'package main\nimport "cmp"\nfunc f[T cmp.Ordered](a T) bool { return a < 1 }\nfunc main() { f(1) }',
+    3,
+  ],
   [
     'ambiguous diamond selector',
     'package main\ntype A struct{ X int }\ntype B struct{ A }\ntype C struct{ A }\ntype D struct{ B; C }\nfunc main() { var d D; _ = d.X }',
