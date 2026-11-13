@@ -6,7 +6,7 @@ import { releaseCaughtException, runningRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
 import { TemporaryScope } from './temporaryScope';
 import { isWaitRequest, schedulerOf } from './threads';
-import { PyTraceback, setTraceback } from './tracebacks';
+import { frameReferences, PyTraceback, setTraceback } from './tracebacks';
 import {
   asyncGeneratorClass,
   baseExceptionClass,
@@ -151,7 +151,7 @@ function leaks(error: PyError, kind: string): boolean {
 export function closeGenerator(generator: PyGenerator): PyValue {
   if (generator.finished) return None;
   if (!generator.started) {
-    const dropped = generator.frame instanceof Frame ? generator.frame.localValues() : [];
+    const dropped = generator.frame instanceof Frame ? frameReferences(generator.frame) : [];
     generator.finished = true;
     const runtime = runningRuntime();
     if (runtime && generator.frame instanceof Frame) runtime.finalizer.update(generator, generator.frame, true);

@@ -6,13 +6,16 @@ import {
   findReachableAsCollector,
   findReachableInOrder,
   findReachableObjects,
+  nativeReferences,
   referencesOf,
 } from './garbageCollection';
 import { closeGenerator } from './generators';
 import { hostRoots } from './hostRoots';
 import { LocalReferences } from './localReferences';
+import { namespaceMapOf } from './namespaces';
 import { bindValue, callValue } from './objects';
 import type { Runtime } from './runtime';
+import { frameReferences } from './tracebacks';
 import { asyncGeneratorClass, None } from './types';
 import { reportUnraisable } from './unraisable';
 import { UnsupportedFeatureError } from './unsupported';
@@ -147,9 +150,11 @@ export class GeneratorFinalizer {
    * `inFlight`, values held only by the host. Only what the dropped objects reach can be freed, so a walk from them
    * comes first, since it is shorter than one over everything the program reaches.
    */
-  release(dropped: readonly (PyValue | undefined)[], inFlight: unknown[] = []): void {
+  release(dropped: readonly unknown[], inFlight: unknown[] = []): void {
     if (this.pending.size === 0) return;
-    const objects = dropped.filter((value): value is PyObject => value instanceof PyObject && value !== None);
+    const objects = dropped
+      .flatMap((root) => nativeReferences(root))
+      .filter((value): value is PyObject => value instanceof PyObject && value !== None);
     if (objects.length === 0) return;
     const held = [...inFlight, ...this.freeing.flatMap((set) => [...set])];
     // What the program refers to directly is kept, and with it all it reaches, so the walk stops there.
@@ -442,19 +447,20 @@ export class GeneratorFinalizer {
   private keptObjects(inFlight: unknown[]): (object: object) => boolean {
     const { runtime } = this;
     const direct = new Set<unknown>([...inFlight, ...runtime.evaluator.handledExceptions]);
-    for (const frame of runtime.frames) {
-      for (const value of frame.locals.values()) direct.add(value);
-      for (const cell of frame.cells.values()) direct.add(cell.value);
-      for (const value of frame.temporaries) direct.add(value);
-    }
+    for (const frame of runtime.frames) for (const value of nativeReferences(frameReferences(frame))) direct.add(value);
     const modules = new Set<unknown>(runtime.modules.values());
-    return (object) => {
-      if (direct.has(object) || modules.has(object)) return true;
-      if (!(object instanceof PyClass || object instanceof PyFunction) || typeof object.module !== 'string')
-        return false;
-      const module = runtime.modules.get(object.module);
-      return module !== undefined && module.dict.get(object.name) === object;
-    };
+    return (object) => direct.has(object) || modules.has(object) || this.moduleOwns(object);
+  }
+
+  private moduleOwns(object: object): boolean {
+    const { modules } = this.runtime;
+    if (object instanceof PyDict) {
+      const namespace = namespaceMapOf(object);
+      const name = namespace?.get('__name__');
+      return typeof name === 'string' && modules.get(name)?.dict === namespace;
+    }
+    if (!(object instanceof PyClass || object instanceof PyFunction) || typeof object.module !== 'string') return false;
+    return modules.get(object.module)?.dict.get(object.name) === object;
   }
 
   /** What the running program still refers to: its frames, the modules, the exceptions handled, and `inFlight`. */
@@ -466,12 +472,7 @@ export class GeneratorFinalizer {
       ...runtime.evaluator.handledExceptions,
       ...runtime.modules.values(),
     ];
-    for (const frame of runtime.frames) {
-      for (const value of frame.locals.values()) roots.push(value);
-      for (const cell of frame.cells.values()) roots.push(cell.value);
-      for (const value of frame.temporaries) roots.push(value);
-      if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
-    }
+    for (const frame of runtime.frames) pushAll(roots, frameReferences(frame));
     pushAll(roots, hostRoots(runtime));
     return roots;
   }

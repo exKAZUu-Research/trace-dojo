@@ -4,6 +4,7 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { PyAnnotateFunction } from './annotations';
+import { pushAll } from './arrays';
 import { createBuiltins } from './builtins';
 import type { PyMemoryView } from './bytesValues';
 import { bindArguments } from './calls';
@@ -31,7 +32,7 @@ import { withoutCharge } from './runtimeContext';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
 import { DEFAULT_SWITCH_INTERVAL, type Scheduler } from './threads';
-import { noteUnwinding, setFrameGenerator } from './tracebacks';
+import { frameReferences, noteUnwinding, setFrameGenerator } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
 import { genericClass, subscriptGeneric } from './typeParams';
@@ -384,10 +385,9 @@ export class Runtime {
   leaveFunction(frame: Frame, result: PyValue | undefined): void {
     this.popFrame();
     if (hasWeakCallbacks(this)) runWeakCallbacks([result]);
-    // The function's variables die with its frame, which closes a generator only they held.
     const { finalizer } = this;
     if (finalizer.pending.size > 0 && result !== undefined) {
-      finalizer.release(frame.localValues(), [result]);
+      finalizer.release(frameReferences(frame), [result]);
     }
   }
 
@@ -428,7 +428,7 @@ export class Runtime {
     // The exceptions the generator handles where it suspended, which its caller does not handle.
     let handling: PyInstance[] = [];
     let completed = false;
-    const holds = (): (PyValue | undefined)[] => [...frame.localValues(), ...handling];
+    const holds = (): unknown[] => [...frameReferences(frame), ...handling];
     const generator: PyGenerator = new PyGenerator(
       cls,
       name,
@@ -725,14 +725,9 @@ export class Runtime {
 
   private roots(): unknown[] {
     const roots: unknown[] = [this.nativeRoots];
-    for (const frame of this.frames) {
-      for (const value of frame.locals.values()) roots.push(value);
-      for (const cell of frame.cells.values()) roots.push(cell.value);
-      for (const value of frame.temporaries) roots.push(value);
-      if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
-    }
-    roots.push(...hostRoots(this));
-    roots.push(...this.finalizer.finalizing());
+    for (const frame of this.frames) pushAll(roots, frameReferences(frame));
+    pushAll(roots, hostRoots(this));
+    pushAll(roots, this.finalizer.finalizing());
     return roots;
   }
 }

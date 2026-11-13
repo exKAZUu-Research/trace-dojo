@@ -293,7 +293,7 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
   else if (object instanceof PyDictView) pending.push(object.dict);
   else if (object instanceof PyMemoryView) pending.push(object.source);
   else if (object instanceof PyIterator || (object instanceof PyGenerator && !object.finished))
-    pushAll(pending, object.holds());
+    pushNativeNodes(pending, [...object.holds()].toReversed());
   return 0;
 }
 
@@ -362,16 +362,14 @@ function pushNativeNodes(pending: unknown[], root: unknown): void {
     }
     if (seen.has(item)) continue;
     seen.add(item);
-    if (item instanceof Frame) {
-      pushAll(pending, item.localValues());
-      pushAll(stack, frameReferences(item));
-    } else pushNativeData(stack, item);
+    pushNativeData(stack, item);
   }
 }
 
 /** Pushes what the native state of a builtin object holds: the items of its arrays, maps, sets, and records. */
 function pushNativeData(pending: unknown[], data: object): void {
-  if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
+  if (data instanceof Frame) pushAll(pending, frameReferences(data).toReversed());
+  else if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
   else if (data instanceof Map) for (const [key, value] of data) pending.push(key, value);
   else if (data instanceof DictStore) for (const entry of data.ordered()) pending.push(entry.key, entry.value);
   else if (Object.getPrototypeOf(data) === Object.prototype) pushAll(pending, Object.values(data));

@@ -12,6 +12,7 @@ import { type ArgStyle, checkArgs } from './nativeArgs';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
+import { frameReferences } from './tracebacks';
 import { methodDescriptorClass, nativeFunction } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -259,11 +260,7 @@ export class Scheduler {
   *roots(): Iterable<unknown> {
     for (const thread of this.alive) {
       if (thread === this.current) continue;
-      for (const frame of thread.frames) {
-        yield* frame.locals.values();
-        for (const cell of frame.cells.values()) yield cell.value;
-        yield* frame.temporaries;
-      }
+      for (const frame of thread.frames) yield* frameReferences(frame);
       yield* thread.handling;
     }
   }

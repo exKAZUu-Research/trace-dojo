@@ -123,10 +123,11 @@ export function setFrameGenerator(frame: Frame, generator: PyValue): void {
   frameGenerators.set(frame, generator);
 }
 
-/** The namespace, function metadata and caller an exposed frame owns besides its execution locals. */
+/** The execution state, namespace, function metadata and exposed caller a live frame owns. */
 export function frameReferences(frame: Frame): unknown[] {
   return [
-    frame.globals,
+    ...frame.localValues(),
+    namespaceDict(frame.globals),
     frame.annotations,
     frame.fn,
     frame.classCell,

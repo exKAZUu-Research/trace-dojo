@@ -1,9 +1,10 @@
 import { PyAnnotateFunction } from './annotations';
 import type { Frame } from './frame';
-import { referencesOf } from './garbageCollection';
+import { nativeReferences, referencesOf } from './garbageCollection';
 import { hostRoots } from './hostRoots';
 import { plainInitOf } from './instances';
 import type { Runtime } from './runtime';
+import { frameReferences } from './tracebacks';
 import { dictClass, listClass, setClass, tupleClass } from './types';
 import {
   PyBoundMethod,
@@ -175,7 +176,7 @@ export class LocalReferences {
   }
 
   /** Hands a value on: it, the local objects it holds, and the object a method bound to it holds, are not local. */
-  escape(value: PyValue | undefined): void {
+  escape(value: unknown): void {
     if (!(value instanceof PyObject)) return;
     const pending: unknown[] = [value];
     while (pending.length > 0) {
@@ -197,9 +198,7 @@ export class LocalReferences {
   /** Hands on what a frame holds, which something besides the running frames keeps from now on. */
   escapeFrame(frame: Frame): void {
     if (!this.marking) return;
-    for (const value of frame.locals.values()) this.escape(value);
-    for (const cell of frame.cells.values()) this.escape(cell.value);
-    for (const value of frame.temporaries) this.escape(value);
+    for (const value of nativeReferences(frameReferences(frame))) this.escape(value);
   }
 
   /** Hands on the parameters a function's closures capture, whose cells the closures share. */
@@ -339,11 +338,7 @@ export class LocalReferences {
     };
     for (const value of held) note(value);
     for (const value of this.runtime.evaluator.handledExceptions) note(value);
-    for (const frame of this.runtime.frames) {
-      for (const value of frame.locals.values()) note(value);
-      for (const cell of frame.cells.values()) note(cell.value);
-      for (const value of frame.temporaries) note(value);
-    }
+    for (const frame of this.runtime.frames) for (const value of nativeReferences(frameReferences(frame))) note(value);
     for (const value of hostRoots(this.runtime)) note(value);
     return direct;
   }

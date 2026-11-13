@@ -1,6 +1,8 @@
 // The input of an expat parser: the characters decoded so far with the byte offset of each, and the bytes not yet
 // decoded. A character that does not decode is U+FFFF, which the tokenizer rejects as expat rejects a malformed byte.
 
+import { currentRuntime } from '../../runtimeContext';
+
 /** The encodings expat decodes itself, and those an unknown-encoding handler maps byte by byte. */
 export type InputEncoding = 'utf8' | 'utf-16le' | 'utf-16be' | 'iso-8859-1' | 'us-ascii' | { table: number[] };
 
@@ -15,13 +17,19 @@ export class ExpatInput {
   private raw: number[] = [];
   encoding: InputEncoding | undefined;
 
+  constructor() {
+    currentRuntime().allocate(5);
+  }
+
   /** Adds text, which pyexpat passes to expat as UTF-8. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
   addText(text: string): void {
+    let slots = 0;
+    for (const char of text) slots += 2 + utf8Length(char.codePointAt(0) as number);
+    currentRuntime().allocate(slots);
     for (const char of text) {
       const code = char.codePointAt(0) as number;
       this.cs.push(code);
-      const length = code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
+      const length = utf8Length(code);
       const last = this.offsets.at(-1) as number;
       this.offsets.push(last + length);
       if (length === 1) {
@@ -43,6 +51,7 @@ export class ExpatInput {
 
   /** Adds bytes, decoding all but an incomplete character at the end unless the input is final. */
   addBytes(bytes: ArrayLike<number>, isFinal: boolean): void {
+    currentRuntime().allocate(bytes.length);
     for (let index = 0; index < bytes.length; index++) this.raw.push(bytes[index] as number);
     if (this.encoding === undefined) {
       if (this.raw.length < 4 && !isFinal) return;
@@ -82,9 +91,14 @@ export class ExpatInput {
   }
 
   private push(code: number, end: number): void {
+    currentRuntime().allocate(2);
     this.cs.push(code);
     this.offsets.push(end);
   }
+}
+
+function utf8Length(code: number): number {
+  return code < 0x80 ? 1 : code < 0x8_00 ? 2 : code < 0x1_00_00 ? 3 : 4;
 }
 
 /** expat's initial scan: a byte order mark, or the bytes of `<?` in UTF-16, else UTF-8. */

@@ -147,3 +147,97 @@ print('after')`;
     uncaughtException: '標準入力（input()）は、この採点環境では使えません。',
   });
 });
+
+test.each(['resource=R()', '*, resource=R()'])(
+  'live generator frames own their function defaults after deleting %s',
+  (parameter) => {
+    const program = `class R:
+    def __del__(self): print('released')
+def make():
+    def gen(${parameter}):
+        del resource
+        print('running')
+        yield 1
+    return gen()
+g = make()
+print('created')
+next(g)
+print('advanced')
+g.close()
+print('end')`;
+    expect(executeProgram('python', program)).toMatchObject({
+      kind: 'executed',
+      stdout: 'created\nrunning\nadvanced\nreleased\nend\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([false, true])(
+  'an exposed frame retains function defaults after execution and clearing (started=%s)',
+  (started) => {
+    const program = `class R:
+    def __del__(self): print('released')
+def make():
+    def gen(resource=R()):
+        del resource
+        yield 1
+    return gen()
+g = make()
+frame = g.gi_frame
+${started ? 'next(g)' : ''}
+g.close()
+frame.clear()
+print('cleared')
+del frame
+print('end')`;
+    expect(executeProgram('python', program)).toMatchObject({
+      kind: 'executed',
+      stdout: 'cleared\nreleased\nend\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('active ordinary frames retain the function of a deleted callable', () => {
+  const program = `class R:
+    def __del__(self): print('released')
+def make():
+    def run(resource=R()):
+        global saved
+        del saved, resource
+        print('running')
+    return run
+saved = make()
+saved()
+print('end')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'running\nreleased\nend\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['coroutine', 'async generator'])('%s frames retain default resources while suspended', (kind) => {
+  const coroutine = kind === 'coroutine';
+  const program = `import asyncio
+class R:
+    def __del__(self): print('released')
+def make():
+    async def run(resource=R()):
+        del resource
+        print('running')
+        ${coroutine ? 'await asyncio.sleep(0)' : 'yield 1'}
+    return run()
+g = make()
+print('created')
+${coroutine ? 'g.send(None)' : 'try: g.asend(None).send(None)\nexcept StopIteration: pass'}
+print('advanced')
+${coroutine ? 'g.close()' : 'try: g.aclose().send(None)\nexcept StopIteration: pass'}
+print('end')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'created\nrunning\nadvanced\nreleased\nend\n',
+    uncaughtException: undefined,
+  });
+});

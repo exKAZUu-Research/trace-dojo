@@ -18,6 +18,10 @@ export function namespaceDict(namespace: Map<string, PyValue>): PyDict {
   return dict;
 }
 
+export function namespaceMapOf(dict: PyDict): Map<string, PyValue> | undefined {
+  return namespacesOfDicts.get(dict);
+}
+
 /** The variables of a frame that `exec` or `eval` runs in a dict, which the dict and the frame share. */
 export function namespaceOf(dict: PyDict): Map<string, PyValue> {
   return namespacesOfDicts.get(dict) ?? new DictNamespace(dict);
