@@ -349,6 +349,9 @@ export class Converter {
       case 'splat_argument': {
         return { k: 'splat', e: this.expr(onlyNamedChild(node)) };
       }
+      case 'regex': {
+        return this.regex(node);
+      }
       default: {
         return this.unsupportedNode(node);
       }
@@ -428,6 +431,25 @@ export class Converter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of syntax node.
+  private regex(node: Node): Expr {
+    const text = node.text;
+    const flags = /[a-z]*$/.exec(text)?.[0] ?? '';
+    if (/[^imxo]/.test(flags)) this.unsupported(node, `正規表現のオプション（${flags}）`);
+    const parts: StrPart[] = [];
+    let literal = '';
+    for (const child of namedChildren(node)) {
+      if (child.type === 'string_content' || child.type === 'escape_sequence') literal += child.text;
+      else if (child.type === 'interpolation') {
+        if (literal) parts.push(literal);
+        literal = '';
+        const statements = this.body(namedChildren(child), 1);
+        parts.push(statements.length === 1 ? statements[0].e : { k: 'seq', body: statements });
+      }
+    }
+    if (literal) parts.push(literal);
+    return { k: 'regex', parts, flags };
+  }
+
   private stringParts(node: Node): StrPart[] {
     const parts: StrPart[] = [];
     let literal = '';
@@ -749,9 +771,8 @@ export class Converter {
       case 'or': {
         return { k: 'or', l: left, r: right };
       }
-      case '=~':
       case '!~': {
-        this.unsupported(node, `正規表現のマッチ（${operator}）`);
+        return { k: 'not', e: this.operatorCall(node, left, '=~', [right]), row: node.startPosition.row };
       }
     }
     if (operator === '!=') {
@@ -1282,7 +1303,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   string_array: '% 記法の配列（%w[]）',
   symbol_array: '% 記法の配列（%i[]）',
   delimited_symbol: '文字列で書いたシンボル（:"a b"）',
-  regex: '正規表現',
   subshell: '外部コマンドの実行（`...`）',
   file: '__FILE__',
   line: '__LINE__',

@@ -665,11 +665,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   for (const item of found) yield* callBlock(block, [item], false);
   return self;
 });
-for (const name of ['match', 'match?', '=~']) {
-  def('String', name, [1, 2], () => {
-    throw new UnsupportedFeatureError('正規表現');
-  });
-}
+
 
 // Case and whitespace -------------------------------------------------------------------------------------------------
 

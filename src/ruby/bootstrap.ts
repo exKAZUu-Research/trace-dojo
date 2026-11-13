@@ -142,6 +142,8 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('UnboundMethod', object);
   defineClass('Struct', object).includes.push(c.Enumerable);
   defineClass('Data', object);
+  defineClass('Regexp', object);
+  defineClass('MatchData', object);
   const set = defineClass('Set', object);
   set.includes.push(c.Enumerable);
 

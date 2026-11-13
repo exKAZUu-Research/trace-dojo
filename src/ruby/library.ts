@@ -12,3 +12,4 @@ import './libTurtle';
 import './libSet';
 import './libMeta';
 import './libStruct';
+import './libRegexp';

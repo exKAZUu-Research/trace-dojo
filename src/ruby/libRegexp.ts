@@ -1,0 +1,741 @@
+// code-gauge-allow-file fileNcss 520 -- Regexp, MatchData, and String's regular-expression forms share the translation.
+import { inspect, rEquals, strInspect, toIndex, toS, toStr } from './conversions';
+import { def, extend, sdef } from './define';
+import { argumentError, indexError, rubyError, typeError } from './errors';
+import { hashGet, hashSet } from './hashes';
+import { callBlock, callMethod, type Gen } from './interp';
+import { makeEnumerator } from './libEnumerator';
+import { NIL, RArray, RHash, RObject, type NativeFn, type RProc, RString, RSymbol, type Value } from './objects';
+import { type Frame, rt, UnsupportedFeatureError } from './runtime';
+import { arr, newHash, str, sym, truthy } from './values';
+
+export interface RegexpData {
+  source: string;
+  ignoreCase: boolean;
+  multiline: boolean;
+  extended: boolean;
+  /** The translated expression; its `lastIndex` is set before each use. */
+  js: RegExp;
+}
+
+const POSIX_CLASSES: Record<string, string> = {
+  alpha: String.raw`\p{L}\p{M}`,
+  digit: '0-9',
+  alnum: String.raw`\p{L}\p{M}\p{Nd}`,
+  upper: String.raw`\p{Lu}`,
+  lower: String.raw`\p{Ll}`,
+  space: String.raw`\s`,
+  punct: String.raw`\p{P}`,
+  xdigit: '0-9A-Fa-f',
+  word: String.raw`\w`,
+  cntrl: String.raw`\p{Cc}`,
+  print: String.raw`\P{C}`,
+  graph: String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}`,
+  blank: String.raw` \t`,
+};
+
+const PROPERTY_NAMES: Record<string, string> = {
+  hiragana: 'Script=Hiragana',
+  katakana: 'Script=Katakana',
+  han: 'Script=Han',
+  latin: 'Script=Latin',
+  greek: 'Script=Greek',
+  cyrillic: 'Script=Cyrillic',
+  alpha: 'Alphabetic',
+  digit: 'Nd',
+  upper: 'Lu',
+  lower: 'Ll',
+  space: 'White_Space',
+  word: 'L',
+  punct: 'P',
+};
+
+const SYNTAX = '^$\\.*+?()[]{}|/-';
+
+/** Translates a Ruby (Onigmo) expression into JavaScript's syntax, rejecting what has no counterpart. */
+// code-gauge-allow functionCognitiveComplexity 30 -- One case per construct Ruby writes differently.
+export function translate(source: string, extended: boolean): string {
+  let out = '';
+  let inClass = 0;
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (extended && inClass === 0) {
+      if (/\s/.test(char)) continue;
+      if (char === '#') {
+        while (index < source.length && source[index] !== '\n') index++;
+        continue;
+      }
+    }
+    if (char === '\\') {
+      const next = source[++index] ?? '\\';
+      out += translateEscape(next, source, index, inClass > 0, (count) => {
+        index += count;
+      });
+      continue;
+    }
+    if (char === '[') {
+      const posix = /^\[:(\^?)(\w+):\]/.exec(source.slice(index));
+      if (inClass > 0 && posix) {
+        const body = POSIX_CLASSES[posix[2]];
+        if (!body) throw unsupportedSyntax(`[:${posix[2]}:]`);
+        if (posix[1]) throw unsupportedSyntax(`[:^${posix[2]}:]`);
+        out += body;
+        index += posix[0].length - 1;
+        continue;
+      }
+      if (inClass > 0) {
+        if (source[index + 1] === '[' || source[index + 1] === '^') throw unsupportedSyntax('入れ子の文字クラス');
+        out += '\\[';
+        continue;
+      }
+      inClass++;
+      out += char;
+      continue;
+    }
+    if (char === ']' && inClass > 0) {
+      inClass--;
+      out += char;
+      continue;
+    }
+    if (inClass > 0 && char === '&' && source[index + 1] === '&') throw unsupportedSyntax('文字クラスの積集合（&&）');
+    if (inClass === 0 && char === '(' && source[index + 1] === '?') {
+      const rest = source.slice(index + 2);
+      if (rest.startsWith('>')) {
+        out += '(?:';
+        index += 2;
+        continue;
+      }
+      if (/^[imx-]+[:)]/.test(rest)) throw unsupportedSyntax('正規表現の中のオプションの指定（(?i) など）');
+      if (rest.startsWith('#')) {
+        index = source.indexOf(')', index);
+        continue;
+      }
+    }
+    if (inClass === 0 && (char === '+' || char === '?') && /[*+?}]/.test(source[index - 1] ?? '') && source[index - 2] !== '\\') {
+      if (char === '+') throw unsupportedSyntax('強欲な量指定子（*+ など）');
+    }
+    out += char;
+  }
+  return out;
+}
+
+// code-gauge-allow functionCognitiveComplexity 25 -- One case per escape Ruby writes differently.
+function translateEscape(next: string, source: string, index: number, inClass: boolean, skip: (count: number) => void): string {
+  switch (next) {
+    case 'A': {
+      return String.raw`(?<![\s\S])`;
+    }
+    case 'z': {
+      return String.raw`(?![\s\S])`;
+    }
+    case 'Z': {
+      return String.raw`(?=\n?(?![\s\S]))`;
+    }
+    case 'h': {
+      return inClass ? '0-9a-fA-F' : '[0-9a-fA-F]';
+    }
+    case 'H': {
+      return '[^0-9a-fA-F]';
+    }
+    case 'G': {
+      throw unsupportedSyntax(String.raw`\G`);
+    }
+    case 'R': {
+      return String.raw`(?:\r\n|[\n\v\f\r\u0085  ])`;
+    }
+    case 'e': {
+      return String.raw`\x1B`;
+    }
+    case 'a': {
+      return String.raw`\x07`;
+    }
+    case 'p':
+    case 'P': {
+      const property = /^\{(\^?)(\w+)\}/.exec(source.slice(index + 1));
+      if (!property) return `\\${next}`;
+      const name = PROPERTY_NAMES[property[2].toLowerCase()] ?? property[2];
+      skip(property[0].length);
+      const negated = (next === 'P') !== (property[1] === '^');
+      return `\\${negated ? 'P' : 'p'}{${name}}`;
+    }
+    case 'k': {
+      return String.raw`\k`;
+    }
+    default: {
+      if (/[dDwWsSbBnrtfv0-9xuc]/.test(next)) return `\\${next}`;
+      return SYNTAX.includes(next) ? `\\${next}` : next;
+    }
+  }
+}
+
+function unsupportedSyntax(feature: string): unknown {
+  return new UnsupportedFeatureError(`正規表現の ${feature}`);
+}
+
+export function makeRegexp(source: string, options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean }): RObject {
+  const regexp = new RObject(rt().c.Regexp);
+  const translated = translate(source, options.extended ?? false);
+  let js: RegExp;
+  try {
+    js = new RegExp(translated, `dgmu${options.ignoreCase ? 'i' : ''}${options.multiline ? 's' : ''}`);
+  } catch {
+    throw rubyError(rt().c.RegexpError, `invalid pattern: /${source}/`);
+  }
+  const data: RegexpData = {
+    source,
+    ignoreCase: options.ignoreCase ?? false,
+    multiline: options.multiline ?? false,
+    extended: options.extended ?? false,
+    js,
+  };
+  regexp.data = data;
+  regexp.frozen = true;
+  return regexp;
+}
+
+export function isRegexp(value: Value): value is RObject {
+  return value instanceof RObject && value.cls === rt().c.Regexp;
+}
+
+function dataOf(regexp: RObject): RegexpData {
+  return regexp.data as RegexpData;
+}
+
+// Matching -------------------------------------------------------------------------------------------------------------
+
+export interface MatchState {
+  text: string;
+  groups: (readonly [number, number] | undefined)[];
+  names: string[];
+  namedGroups: Record<string, number>;
+  regexp: RObject;
+}
+
+/** Character positions from UTF-16 offsets, as Ruby counts positions in characters. */
+function charIndex(text: string, unit: number): number {
+  if (!/[\uD800-\uDFFF]/.test(text)) return unit;
+  return Array.from(text.slice(0, unit)).length;
+}
+
+function unitIndex(text: string, char: number): number {
+  if (!/[\uD800-\uDFFF]/.test(text)) return char;
+  return Array.from(text).slice(0, char).join('').length;
+}
+
+/** Runs a regexp from a character position, returning the match's state or undefined. */
+export function execAt(regexp: RObject, text: string, start: number): MatchState | undefined {
+  const { js } = dataOf(regexp);
+  rt().spend(Math.ceil(text.length / 64));
+  js.lastIndex = unitIndex(text, start);
+  const result = js.exec(text);
+  if (!result?.indices) return undefined;
+  const names: string[] = [];
+  const namedGroups: Record<string, number> = {};
+  const nameOrder = [...js.source.matchAll(/\(\?<([A-Za-z_]\w*)>/g)].map((match) => match[1]);
+  for (const [position, name] of nameOrder.entries()) {
+    names.push(name);
+    namedGroups[name] = position + 1;
+  }
+  return { text, groups: [...result.indices], names, namedGroups, regexp };
+}
+
+function matchData(state: MatchState): RObject {
+  const match = new RObject(rt().c.MatchData);
+  match.data = state;
+  match.frozen = true;
+  return match;
+}
+
+function stateOf(match: RObject): MatchState {
+  return match.data as MatchState;
+}
+
+function groupText(state: MatchState, group: number): Value {
+  const range = state.groups[group];
+  return range ? str(state.text.slice(range[0], range[1])) : NIL;
+}
+
+/** Sets `$~` for the method frame that called a matching method, as Ruby keeps it per frame. */
+function setLastMatch(state: MatchState | undefined): Value {
+  const frame = callerFrame();
+  const match = state ? matchData(state) : NIL;
+  frame.extra.lastMatch = match;
+  return match;
+}
+
+function callerFrame(): Frame {
+  return rt().frame.home;
+}
+
+export function lastMatch(): Value {
+  return callerFrame().extra.lastMatch ?? NIL;
+}
+
+/** The value of a match global: `$~`, `$&`, `` $` ``, `$'`, `$+`, or `$1`... */
+export function matchGlobal(name: string): Value {
+  const match = lastMatch();
+  if (name === '$~') return match;
+  if (match === NIL) return NIL;
+  const state = stateOf(match as RObject);
+  const whole = state.groups[0] as readonly [number, number];
+  switch (name) {
+    case '$&': {
+      return groupText(state, 0);
+    }
+    case '$`': {
+      return str(state.text.slice(0, whole[0]));
+    }
+    case "$'": {
+      return str(state.text.slice(whole[1]));
+    }
+    case '$+': {
+      for (let group = state.groups.length - 1; group > 0; group--) if (state.groups[group]) return groupText(state, group);
+      return NIL;
+    }
+    default: {
+      return groupText(state, Number(name.slice(1)));
+    }
+  }
+}
+
+/** All matches from the start of a text, advancing past empty matches as Ruby does. */
+function allMatches(regexp: RObject, text: string): MatchState[] {
+  const matches: MatchState[] = [];
+  let start = 0;
+  const length = charIndex(text, text.length);
+  while (start <= length) {
+    const state = execAt(regexp, text, start);
+    if (!state) break;
+    matches.push(state);
+    const [from, to] = state.groups[0] as readonly [number, number];
+    start = charIndex(text, to) + (from === to ? 1 : 0);
+  }
+  return matches;
+}
+
+// Regexp ---------------------------------------------------------------------------------------------------------------
+
+function* optionsOf(value: Value | undefined): Gen<{ ignoreCase: boolean; multiline: boolean; extended: boolean }> {
+  if (value === undefined || value === NIL || value === false) return { ignoreCase: false, multiline: false, extended: false };
+  if (typeof value === 'bigint') {
+    return { ignoreCase: (value & 1n) !== 0n, extended: (value & 2n) !== 0n, multiline: (value & 4n) !== 0n };
+  }
+  if (value instanceof RString) {
+    return { ignoreCase: value.s.includes('i'), multiline: value.s.includes('m'), extended: value.s.includes('x') };
+  }
+  yield* [];
+  return { ignoreCase: true, multiline: false, extended: false };
+}
+
+sdef('Regexp', ['new', 'compile'], [1, 2], function* (_self, [source, options]) {
+  if (isRegexp(source)) return source;
+  return makeRegexp(yield* toStr(source), yield* optionsOf(options));
+});
+sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
+  const text = value instanceof RSymbol ? value.name : yield* toStr(value);
+  return str(text.replaceAll(/[.*?+^$|()[\]{}\\/-]/g, String.raw`\$&`).replaceAll('\n', String.raw`\n`).replaceAll('\t', String.raw`\t`).replaceAll(' ', String.raw`\ `));
+});
+sdef('Regexp', 'union', [0, -1], function* (_self, args) {
+  const items = args.length === 1 && args[0] instanceof RArray ? args[0].items : args;
+  const parts: string[] = [];
+  for (const item of items) {
+    if (isRegexp(item)) parts.push(regexpToS(item));
+    else parts.push((yield* toStr(item)).replaceAll(/[.*?+^$|()[\]{}\\/-]/g, String.raw`\$&`));
+  }
+  return makeRegexp(parts.length === 0 ? '(?!)' : parts.join('|'), {});
+});
+sdef('Regexp', 'last_match', [0, 1], function* (_self, args) {
+  if (args.length === 0) return lastMatch();
+  const match = lastMatch();
+  if (match === NIL) return NIL;
+  return yield* matchIndex(match as RObject, args[0]);
+});
+
+function regexpToS(regexp: RObject): string {
+  const data = dataOf(regexp);
+  const on = `${data.multiline ? 'm' : ''}${data.ignoreCase ? 'i' : ''}${data.extended ? 'x' : ''}`;
+  const off = `${data.multiline ? '' : 'm'}${data.ignoreCase ? '' : 'i'}${data.extended ? '' : 'x'}`;
+  return `(?${on}${off ? `-${off}` : ''}:${data.source})`;
+}
+
+function regexpInspect(regexp: RObject): string {
+  const data = dataOf(regexp);
+  const source = data.source.replaceAll(/(?<!\\)\//g, String.raw`\/`);
+  return `/${source}/${data.multiline ? 'm' : ''}${data.ignoreCase ? 'i' : ''}${data.extended ? 'x' : ''}`;
+}
+
+def('Regexp', 'source', 0, (self: RObject) => str(dataOf(self).source));
+def('Regexp', 'inspect', 0, (self: RObject) => str(regexpInspect(self)));
+def('Regexp', 'to_s', 0, (self: RObject) => str(regexpToS(self)));
+def('Regexp', 'options', 0, (self: RObject) => {
+  const data = dataOf(self);
+  return BigInt((data.ignoreCase ? 1 : 0) | (data.extended ? 2 : 0) | (data.multiline ? 4 : 0));
+});
+def('Regexp', 'casefold?', 0, (self: RObject) => dataOf(self).ignoreCase);
+def('Regexp', ['==', 'eql?'], 1, (self: RObject, [other]) => {
+  if (!isRegexp(other)) return false;
+  const a = dataOf(self);
+  const b = dataOf(other);
+  return a.source === b.source && a.ignoreCase === b.ignoreCase && a.multiline === b.multiline && a.extended === b.extended;
+});
+def('Regexp', 'hash', 0, (self: RObject) => BigInt(dataOf(self).source.length));
+def('Regexp', 'names', 0, (self: RObject) => arr([...dataOf(self).js.source.matchAll(/\(\?<([A-Za-z_]\w*)>/g)].map((m) => str(m[1]))));
+
+function* subjectText(value: Value): Gen<string | undefined> {
+  if (value === NIL) return undefined;
+  if (value instanceof RSymbol) return value.name;
+  return yield* toStr(value);
+}
+
+def('Regexp', 'match', [1, 2], function* (self: RObject, args, block) {
+  const text = yield* subjectText(args[0]);
+  if (text === undefined) return setLastMatch(undefined);
+  const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
+  const match = setLastMatch(execAt(self, text, start < 0 ? start + charIndex(text, text.length) : start));
+  if (block && match !== NIL) return yield* callBlock(block, [match]);
+  return match;
+});
+def('Regexp', 'match?', [1, 2], function* (self: RObject, args) {
+  const text = yield* subjectText(args[0]);
+  if (text === undefined) return false;
+  return execAt(self, text, args.length > 1 ? yield* toIndex(args[1]) : 0) !== undefined;
+});
+def('Regexp', '=~', 1, function* (self: RObject, [value]) {
+  const text = yield* subjectText(value);
+  if (text === undefined) return setLastMatch(undefined);
+  const state = execAt(self, text, 0);
+  setLastMatch(state);
+  return state ? BigInt(charIndex(text, (state.groups[0] as readonly [number, number])[0])) : NIL;
+});
+def('Regexp', '===', 1, function* (self: RObject, [value]) {
+  if (!(value instanceof RString) && !(value instanceof RSymbol)) return false;
+  const state = execAt(self, value instanceof RString ? value.s : value.name, 0);
+  setLastMatch(state);
+  yield* [];
+  return state !== undefined;
+});
+
+// MatchData ------------------------------------------------------------------------------------------------------------
+
+function* matchIndex(match: RObject, key: Value): Gen {
+  const state = stateOf(match);
+  if (key instanceof RString || key instanceof RSymbol) {
+    const name = key instanceof RString ? key.s : key.name;
+    const group = state.namedGroups[name];
+    if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
+    return groupText(state, group);
+  }
+  let group = yield* toIndex(key);
+  if (group < 0) group += state.groups.length;
+  return group >= 0 && group < state.groups.length ? groupText(state, group) : NIL;
+}
+
+def('MatchData', '[]', [1, 2], function* (self: RObject, args) {
+  if (args.length === 2) {
+    const all = stateOf(self).groups.map((_range, group) => groupText(stateOf(self), group));
+    let start = yield* toIndex(args[0]);
+    if (start < 0) start += all.length;
+    return arr(all.slice(start, start + (yield* toIndex(args[1]))));
+  }
+  return yield* matchIndex(self, args[0]);
+});
+def('MatchData', 'captures', 0, (self: RObject) =>
+  arr(stateOf(self).groups.slice(1).map((_range, group) => groupText(stateOf(self), group + 1)))
+);
+def('MatchData', 'to_a', 0, (self: RObject) => arr(stateOf(self).groups.map((_range, group) => groupText(stateOf(self), group))));
+def('MatchData', 'named_captures', 0, function* (self: RObject) {
+  const hash = newHash();
+  const state = stateOf(self);
+  for (const name of state.names) yield* hashSet(hash, str(name), groupText(state, state.namedGroups[name]));
+  return hash;
+});
+
+
+def('MatchData', 'names', 0, (self: RObject) => arr(stateOf(self).names.map((name) => str(name))));
+def('MatchData', ['to_s'], 0, (self: RObject) => groupText(stateOf(self), 0));
+def('MatchData', 'pre_match', 0, (self: RObject) => {
+  const state = stateOf(self);
+  return str(state.text.slice(0, (state.groups[0] as readonly [number, number])[0]));
+});
+def('MatchData', 'post_match', 0, (self: RObject) => {
+  const state = stateOf(self);
+  return str(state.text.slice((state.groups[0] as readonly [number, number])[1]));
+});
+for (const [name, side] of [
+  ['begin', 0],
+  ['end', 1],
+] as const) {
+  def('MatchData', name, 1, function* (self: RObject, [key]) {
+    const state = stateOf(self);
+    const group = key instanceof RString || key instanceof RSymbol ? state.namedGroups[key instanceof RString ? key.s : key.name] : yield* toIndex(key);
+    const range = group === undefined ? undefined : state.groups[group];
+    return range ? BigInt(charIndex(state.text, range[side])) : NIL;
+  });
+}
+def('MatchData', 'offset', 1, function* (self: RObject, [key]) {
+  const state = stateOf(self);
+  const range = state.groups[yield* toIndex(key)];
+  return range ? arr([BigInt(charIndex(state.text, range[0])), BigInt(charIndex(state.text, range[1]))]) : arr([NIL, NIL]);
+});
+def('MatchData', ['size', 'length'], 0, (self: RObject) => BigInt(stateOf(self).groups.length));
+def('MatchData', 'values_at', [0, -1], function* (self: RObject, args) {
+  const values: Value[] = [];
+  for (const arg of args) values.push(yield* matchIndex(self, arg));
+  return arr(values);
+});
+def('MatchData', 'string', 0, (self: RObject) => str(stateOf(self).text));
+def('MatchData', 'regexp', 0, (self: RObject) => stateOf(self).regexp);
+def('MatchData', 'inspect', 0, (self: RObject) => {
+  const state = stateOf(self);
+  const parts = state.groups.map((range, group) => {
+    const shown = range ? strInspect(state.text.slice(range[0], range[1])) : 'nil';
+    if (group === 0) return shown;
+    const name = state.names.find((candidate) => state.namedGroups[candidate] === group);
+    return `${name ?? group}:${shown}`;
+  });
+  return str(`#<MatchData ${parts.join(' ')}>`);
+});
+def('MatchData', 'deconstruct', 0, (self: RObject) =>
+  arr(stateOf(self).groups.slice(1).map((_range, group) => groupText(stateOf(self), group + 1)))
+);
+
+// String's regular-expression forms ------------------------------------------------------------------------------------
+
+/** Expands `\1`, `\k<name>`, `\0`, `\&`, `\\`, `` \` ``, and `\'` in a replacement string. */
+function expand(replacement: string, state: MatchState): string {
+  const whole = state.groups[0] as readonly [number, number];
+  return replacement.replaceAll(/\\(k<(\w+)>|[0-9&\\`'])/g, (_text, code: string, name: string | undefined) => {
+    if (name !== undefined) {
+      const group = state.namedGroups[name];
+      if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
+      const value = groupText(state, group);
+      return value === NIL ? '' : (value as RString).s;
+    }
+    switch (code) {
+      case '&': {
+        return state.text.slice(whole[0], whole[1]);
+      }
+      case '\\': {
+        return '\\';
+      }
+      case '`': {
+        return state.text.slice(0, whole[0]);
+      }
+      case "'": {
+        return state.text.slice(whole[1]);
+      }
+      default: {
+        const value = groupText(state, Number(code));
+        return value === NIL ? '' : (value as RString).s;
+      }
+    }
+  });
+}
+
+function* substituteRegexp(self: RString, regexp: RObject, replacement: Value | undefined, block: RProc | undefined, global: boolean): Gen<string> {
+  const text = self.s;
+  const matches = global ? allMatches(regexp, text) : [execAt(regexp, text, 0)].filter((m): m is MatchState => !!m);
+  let result = '';
+  let position = 0;
+  for (const state of matches) {
+    const [from, to] = state.groups[0] as readonly [number, number];
+    let piece: string;
+    if (replacement instanceof RHash) {
+      const entry = yield* hashGet(replacement, str(text.slice(from, to)));
+      piece = yield* toS(entry ? entry.value : replacement.defaultValue);
+    } else if (replacement !== undefined) {
+      piece = expand(yield* toStr(replacement), state);
+    } else {
+      setLastMatch(state);
+      piece = yield* toS(yield* callBlock(block as RProc, [str(text.slice(from, to))]));
+    }
+    result += text.slice(position, from) + piece;
+    position = to;
+  }
+  setLastMatch(matches.at(-1));
+  return result + text.slice(position);
+}
+
+function wrapFirst(name: string, handle: (self: RString, args: Value[], block: RProc | undefined, previous: NativeFn) => Gen | Value): void {
+  extend('String', [name], (previous) => (self: RString, args, block, keywords) => {
+    if (args.length > 0 && isRegexp(args[0])) return handle(self, args, block, previous);
+    return previous(self, args, block, keywords);
+  });
+}
+
+for (const [name, global, bang] of [
+  ['sub', false, false],
+  ['gsub', true, false],
+  ['sub!', false, true],
+  ['gsub!', true, true],
+] as const) {
+  wrapFirst(name, function* (self, args, block) {
+    if (args.length === 1 && !block) {
+      if (global && !bang) return makeEnumerator(self, name, args);
+      throw argumentError('wrong number of arguments (given 1, expected 2)');
+    }
+    const result = yield* substituteRegexp(self, args[0] as RObject, args[1], block, global);
+    if (!bang) return str(result);
+    if (result === self.s) return NIL;
+    self.s = result;
+    return self;
+  });
+}
+wrapFirst('scan', function* (self, args, block) {
+  const matches = allMatches(args[0] as RObject, self.s);
+  const values = matches.map((state) =>
+    state.groups.length > 1 ? arr(state.groups.slice(1).map((_range, group) => groupText(state, group + 1))) : groupText(state, 0)
+  );
+  if (!block) {
+    setLastMatch(matches.at(-1));
+    return arr(values);
+  }
+  for (const [index, value] of values.entries()) {
+    setLastMatch(matches[index]);
+    yield* callBlock(block, [value], false);
+  }
+  return self;
+});
+wrapFirst('split', function* (self, args) {
+  const text = self.s;
+  const limit = args.length > 1 ? yield* toIndex(args[1]) : 0;
+  const parts: string[] = [];
+  let position = 0;
+  let searchFrom = 0;
+  const length = charIndex(text, text.length);
+  while (searchFrom <= length) {
+    if (limit > 0 && parts.length === limit - 1) break;
+    const state = execAt(args[0] as RObject, text, searchFrom);
+    if (!state) break;
+    const [from, to] = state.groups[0] as readonly [number, number];
+    if (from === to) {
+      if (from >= text.length) break;
+      if (from === position) {
+        searchFrom = charIndex(text, from) + 1;
+        if (position === 0 && from === 0) continue;
+      }
+    }
+    if (!(from === to && from === position)) {
+      parts.push(text.slice(position, from));
+      for (let group = 1; group < state.groups.length; group++) {
+        const value = groupText(state, group);
+        if (value !== NIL) parts.push((value as RString).s);
+      }
+      position = to;
+    }
+    searchFrom = charIndex(text, to) + (from === to ? 1 : 0);
+  }
+  parts.push(text.slice(position));
+  if (text.length === 0) return arr([]);
+  if (limit === 0) while (parts.length > 0 && parts.at(-1) === '') parts.pop();
+  return arr(parts.map((part) => str(part)));
+});
+for (const name of ['index', 'rindex'] as const) {
+  wrapFirst(name, function* (self, args) {
+    const regexp = args[0] as RObject;
+    const length = charIndex(self.s, self.s.length);
+    let start = args.length > 1 ? yield* toIndex(args[1]) : name === 'index' ? 0 : length;
+    if (start < 0) start += length;
+    if (start < 0 || start > length) return setLastMatch(undefined) && NIL;
+    if (name === 'index') {
+      const state = execAt(regexp, self.s, start);
+      setLastMatch(state);
+      return state ? BigInt(charIndex(self.s, (state.groups[0] as readonly [number, number])[0])) : NIL;
+    }
+    for (let position = start; position >= 0; position--) {
+      const state = execAt(regexp, self.s, position);
+      if (state && charIndex(self.s, (state.groups[0] as readonly [number, number])[0]) === position) {
+        setLastMatch(state);
+        return BigInt(position);
+      }
+    }
+    setLastMatch(undefined);
+    return NIL;
+  });
+}
+for (const name of ['[]', 'slice'] as const) {
+  wrapFirst(name, function* (self, args) {
+    const state = execAt(args[0] as RObject, self.s, 0);
+    setLastMatch(state);
+    if (!state) return NIL;
+    if (args.length > 1) return yield* matchIndex(setLastMatch(state) as RObject, args[1]);
+    return groupText(state, 0);
+  });
+}
+wrapFirst('slice!', function* (self, args) {
+  const state = execAt(args[0] as RObject, self.s, 0);
+  setLastMatch(state);
+  if (!state) return NIL;
+  const [from, to] = state.groups[0] as readonly [number, number];
+  const removed = self.s.slice(from, to);
+  self.s = self.s.slice(0, from) + self.s.slice(to);
+  yield* [];
+  return str(removed);
+});
+wrapFirst('start_with?', function* (self, args, block, previous) {
+  for (const arg of args) {
+    if (isRegexp(arg)) {
+      const state = execAt(arg, self.s, 0);
+      if (state && (state.groups[0] as readonly [number, number])[0] === 0) {
+        setLastMatch(state);
+        return true;
+      }
+    } else if (truthy((yield* asGen(previous(self, [arg], block, undefined))) as Value)) {
+      return true;
+    }
+  }
+  return false;
+});
+for (const [name, last] of [
+  ['partition', false],
+  ['rpartition', true],
+] as const) {
+  wrapFirst(name, function* (self, args) {
+    const matches = allMatches(args[0] as RObject, self.s);
+    const state = last ? matches.at(-1) : matches[0];
+    setLastMatch(state);
+    if (!state) return last ? arr([str(''), str(''), str(self.s)]) : arr([str(self.s), str(''), str('')]);
+    const [from, to] = state.groups[0] as readonly [number, number];
+    yield* [];
+    return arr([str(self.s.slice(0, from)), str(self.s.slice(from, to)), str(self.s.slice(to))]);
+  });
+}
+
+function* asGen(value: Gen | Value): Gen {
+  if (typeof value === 'object' && value !== null && Symbol.iterator in value && 'next' in value) return yield* value as Gen;
+  return value as Value;
+}
+
+def('String', '=~', 1, function* (self: RString, [pattern]) {
+  if (pattern instanceof RString) throw typeError("wrong argument type String (expected Regexp)");
+  if (!isRegexp(pattern)) {
+    return yield* callMethod(pattern, '=~', [self]);
+  }
+  const state = execAt(pattern, self.s, 0);
+  setLastMatch(state);
+  return state ? BigInt(charIndex(self.s, (state.groups[0] as readonly [number, number])[0])) : NIL;
+});
+
+
+function* asRegexp(pattern: Value): Gen<RObject> {
+  if (isRegexp(pattern)) return pattern;
+  const source = (yield* toStr(pattern)).replaceAll(/[.*?+^$|()[\]{}\\/-]/g, String.raw`\$&`);
+  return makeRegexp(source, {});
+}
+
+def('String', 'match', [1, 2], function* (self: RString, args, block) {
+  const regexp = yield* asRegexp(args[0]);
+  const start = args.length > 1 ? yield* toIndex(args[1]) : 0;
+  const match = setLastMatch(execAt(regexp, self.s, start));
+  if (block && match !== NIL) return yield* callBlock(block, [match]);
+  return match;
+});
+def('String', 'match?', [1, 2], function* (self: RString, args) {
+  const regexp = yield* asRegexp(args[0]);
+  return execAt(regexp, self.s, args.length > 1 ? yield* toIndex(args[1]) : 0) !== undefined;
+});
+for (const name of ['=~', 'match', 'match?']) {
+  def('Symbol', name, [1, 2], (self: RSymbol, args, block) => callMethod(str(self.name), name, args, undefined, block));
+}
+
+export { inspect, rEquals, sym };

@@ -28,6 +28,7 @@ import {
   type Value,
   type Visibility,
 } from './objects';
+import { isRegexp, makeRegexp, matchGlobal } from './libRegexp';
 import { bindParams } from './params';
 import {
   BreakSignal,
@@ -261,6 +262,17 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'blockpass': {
       throw new Error('A block argument outside a call');
     }
+    case 'regex': {
+      let source = '';
+      for (const part of e.parts) {
+        if (typeof part === 'string') source += part;
+        else {
+          const value = yield* ev(part, frame);
+          source += isRegexp(value) ? (value.data as { source: string }).source : yield* toS(value);
+        }
+      }
+      return makeRegexp(source, { ignoreCase: e.flags.includes('i'), multiline: e.flags.includes('m'), extended: e.flags.includes('x') });
+    }
   }
 }
 
@@ -361,6 +373,7 @@ function inspectForFrozen(self: RBasic): string {
 }
 
 function globalGet(name: string): Value {
+  if (/^\$(?:[~&`'+]|[1-9]\d*)$/.test(name)) return matchGlobal(name);
   if (UNSUPPORTED_GLOBALS[name]) throw new UnsupportedFeatureError(UNSUPPORTED_GLOBALS[name]);
   return rt().globals.get(name) ?? NIL;
 }
@@ -372,8 +385,6 @@ const UNSUPPORTED_GLOBALS: Record<string, string> = {
   $LOAD_PATH: '$LOAD_PATH',
   $LOADED_FEATURES: '$LOADED_FEATURES',
   '$:': '$:',
-  '$~': '正規表現のマッチの結果（$~）',
-  $1: '正規表現のマッチの結果（$1）',
   '$*': 'コマンドライン引数（$*）',
   $DEBUG: '$DEBUG',
   $VERBOSE: '$VERBOSE',

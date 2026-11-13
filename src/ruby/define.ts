@@ -10,6 +10,8 @@ interface NativeSpec {
   singleton: boolean;
   visibility: Visibility;
   takesKeywords: boolean;
+  /** Builds the method from the one defined before it, for a method that handles one more kind of argument. */
+  wrap?: (previous: NativeFn) => NativeFn;
 }
 
 const specs: NativeSpec[] = [];
@@ -66,6 +68,14 @@ function register(
   });
 }
 
+/**
+ * Extends native instance methods defined earlier: `wrap` receives each one's function and returns the new one, which
+ * keeps its arity.
+ */
+export function extend(owner: string, names: string[], wrap: (previous: NativeFn) => NativeFn): void {
+  specs.push({ owner, names, min: 0, max: 0, fn: () => undefined as never, singleton: false, visibility: 'public', takesKeywords: false, wrap });
+}
+
 let singletonOf: ((cls: RClass) => RClass) | undefined;
 
 export function setSingletonFactory(factory: (cls: RClass) => RClass): void {
@@ -73,11 +83,18 @@ export function setSingletonFactory(factory: (cls: RClass) => RClass): void {
 }
 
 export function installNatives(runtime: Runtime): void {
-  for (const spec of specs) {
+  // Extensions apply after every definition, whatever order the modules that register them load in.
+  for (const spec of [...specs.filter((each) => !each.wrap), ...specs.filter((each) => each.wrap)]) {
     const owner = runtime.c[spec.owner];
     if (!owner) throw new Error(`Unknown library class: ${spec.owner}`);
     const target = spec.singleton ? (singletonOf as (cls: RClass) => RClass)(owner) : owner;
     for (const name of spec.names) {
+      if (spec.wrap) {
+        const previous = target.methods.get(name);
+        if (previous?.body.kind !== 'native') throw new Error(`No native ${spec.owner}#${name} to extend`);
+        previous.body = { ...previous.body, fn: spec.wrap(previous.body.fn) };
+        continue;
+      }
       target.methods.set(name, {
         name,
         owner: target,

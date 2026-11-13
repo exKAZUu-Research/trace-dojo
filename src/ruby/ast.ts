@@ -130,7 +130,8 @@ export type Expr =
   | { k: 'class'; scope?: Expr; top?: boolean; name: string; superclass?: Expr; body: Body; row: number }
   | { k: 'module'; scope?: Expr; top?: boolean; name: string; body: Body; row: number }
   | { k: 'lambda'; block: BlockDef }
-  | { k: 'rescueMod'; body: Expr; handler: Expr };
+  | { k: 'rescueMod'; body: Expr; handler: Expr }
+  | { k: 'regex'; parts: StrPart[]; flags: string };
 
 export type HashItem = { key: Expr; value: Expr } | { splat: Expr };
 
