@@ -397,15 +397,15 @@ test('Enumerable grouping and extrema retain values through source steps', () =>
 
 test('trace expansion stays bounded for shared Array graphs', () => {
   const program = 'def mk # atomic\n a=[1]\n 23.times { a=[a,a] }\n a\nend\nx=mk';
-  const trace = traceProgram('ruby', program, program);
-  expect(JSON.stringify(trace.traceItems.at(-1)?.referenceVars.x).length).toBeLessThan(100_000);
+  expect(() => traceProgram('ruby', program, program)).toThrow('Execution limit exceeded: trace');
 });
 
 test('large flat Arrays remain visible in final trace variables', () => {
   const program = 'a=Array.new(2001,1)';
   const values = traceProgram('ruby', program, program).finalVars.a;
   expect(Array.isArray(values)).toBe(true);
-  expect((values as unknown[]).at(-1)).toBe('…');
+  expect((values as unknown[]).length).toBe(2001);
+  expect((values as unknown[]).at(-1)).toBe(1);
 });
 
 test('converted Hash sources keep later Turtle values alive during insertion', () => {
@@ -447,4 +447,13 @@ test('zip retains earlier converted inputs during later conversions', () => {
   const program =
     'class A; def to_ary; [Turtle.new]; end; end; class B; def to_ary; x=1; [2]; end; end; v=[1].zip(A.new,B.new)';
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('trace variables keep special local names as own properties', () => {
+  for (const value of ['42', '[1,2]']) {
+    const program = `__proto__=${value}`;
+    const trace = traceProgram('ruby', program, program);
+    expect(Object.hasOwn(trace.finalVars, '__proto__')).toBe(true);
+    expect(Object.hasOwn(trace.traceItems.at(-1)?.referenceVars ?? {}, '__proto__')).toBe(value.startsWith('['));
+  }
 });

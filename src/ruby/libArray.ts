@@ -1111,12 +1111,13 @@ def(
       const result: Value[] = [];
       const draws: number[] = [];
       for (let i = 0; i < n; i++) draws.push((yield* randomIndex(randomizer, length - i)) + i);
+      if (self.items.length < n) return arr([]);
       for (let i = 0; i < n; i++) {
         const j = draws[i];
         const i2 = memo.get(i) ?? i;
         const j2 = memo.get(j) ?? j;
         memo.set(j, i2);
-        const item = items[j2];
+        const item = self.items[j2];
         if (item !== undefined) result.push(item);
       }
       return arr(result);

@@ -1,3 +1,4 @@
+import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -74,16 +75,29 @@ function isVariableValue(value: Value): boolean {
   return !(value instanceof RProc || value instanceof RClass);
 }
 
-const MAX_TRACE_EXPANSION = 2000;
+const MAX_SCALAR_EXPANSION = 10_000;
+const MAX_DISPLAY_EXPANSION = 2000;
 
 function addVariable(variables: TraceVariables, name: string, value: Value): void {
   if (!isVariableValue(value)) return;
-  const scalar = scalarOf(value, new Set(), { remaining: MAX_TRACE_EXPANSION });
-  if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
+  const scalar = scalarOf(value, new Set(), { remaining: MAX_SCALAR_EXPANSION });
+  if (scalar !== NOT_SCALAR)
+    Object.defineProperty(variables.vars, name, {
+      value: scalar,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof RArray)) return;
-  const node = displayNodeOf(value, new Set(), { remaining: MAX_TRACE_EXPANSION });
-  if (node) variables.referenceVars[name] = node;
+  const node = displayNodeOf(value, new Set(), { remaining: MAX_DISPLAY_EXPANSION });
+  if (node)
+    Object.defineProperty(variables.referenceVars, name, {
+      value: node,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
 }
 
 const NOT_SCALAR = Symbol('notScalar');
@@ -91,7 +105,7 @@ type Scalar = TraceItemVariable[string];
 
 // code-gauge-allow duplicateLines 21 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
-  if (budget.remaining-- <= 0) return '…';
+  if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
   rt().spend();
   switch (typeof value) {
     case 'bigint': {
@@ -106,14 +120,11 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
   if (value === NIL) return null;
   if (value instanceof RString) return value.s;
   if (value instanceof RSymbol) return symInspect(value.name);
-  if (!(value instanceof RArray) || seen.has(value) || seen.size >= 256) return NOT_SCALAR;
+  if (!(value instanceof RArray) || seen.has(value)) return NOT_SCALAR;
+  if (seen.size >= 256) throw new ExecutionLimitError('trace');
   seen.add(value);
   const items: Scalar[] = [];
   for (const item of value.items) {
-    if (budget.remaining <= 0) {
-      items.push('…');
-      break;
-    }
     const scalar = scalarOf(item, seen, budget);
     if (scalar === NOT_SCALAR) return NOT_SCALAR;
     items.push(scalar);

@@ -75,7 +75,7 @@ export function* iterate(collection: Value, visit: Visit, args: Value[] = []): G
           if ((yield* visit(value)) === STOP) throw signal;
           return NIL;
         })
-      : callMethod(collection, 'each', args, undefined, block);
+      : callMethod(collection, 'each', args, undefined, block, { fcall: true });
   } catch (error) {
     if (error !== signal) throw error;
   }
@@ -1074,7 +1074,12 @@ export function* zipCollections(self: Value, others: Value[], block: RProc | und
   const arrayMark = arrays.length;
   arrays.push(inputs);
   try {
-    for (const other of others) inputs.push((yield* tryAry(other)) ?? other);
+    for (const other of others) {
+      const input = (yield* tryAry(other)) ?? other;
+      if (!(input instanceof RArray) && !respondsTo(input, 'each', true))
+        throw typeError(`wrong argument type ${realClassOf(input).name} (must respond to :each)`);
+      inputs.push(input);
+    }
     const iterators = inputs.map((other) =>
       other instanceof RArray
         ? undefined

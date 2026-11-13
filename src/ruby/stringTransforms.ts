@@ -61,8 +61,18 @@ export function successorBytes(source: Uint8Array): Uint8Array {
     for (let position = parts.length - 1; position >= 0; position--) {
       const part = parts[position];
       if (part.point === undefined) continue;
-      if (part.point === 0x10_ff_ff) {
-        part.bytes = stringBytes(str(String.fromCodePoint(0x1_00_00)));
+      const wrapped =
+        part.point === 0x7f
+          ? 0
+          : part.point === 0x7_ff
+            ? 0x80
+            : part.point === 0xff_ff
+              ? 0x8_00
+              : part.point === 0x10_ff_ff
+                ? 0x1_00_00
+                : undefined;
+      if (wrapped !== undefined) {
+        part.bytes = stringBytes(str(String.fromCodePoint(wrapped)));
         continue;
       }
       part.bytes = stringBytes(str(String.fromCodePoint(part.point + 1)));

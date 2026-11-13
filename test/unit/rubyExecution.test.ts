@@ -1934,3 +1934,38 @@ test('String successor propagates maximum Unicode carry leftward', () => {
     stdout: '[34, 240, 144, 128, 128]\n[1, 240, 144, 128, 128, 240, 144, 128, 128]\n',
   });
 });
+
+test('String successor wraps at every UTF-8 width boundary', () => {
+  expect(
+    run(String.raw`p "\u{7f}".succ.bytes, "\u{7ff}".succ.bytes, "\u{ffff}".succ.bytes, "!\u{7f}".succ.bytes`)
+  ).toMatchObject({
+    stdout: '[1, 0]\n[1, 194, 128]\n[1, 224, 160, 128]\n[34, 0]\n',
+  });
+});
+
+test('zip validates Enumerable fallbacks before an empty receiver iterates', () => {
+  expect(run('begin; (1...1).zip(5); rescue => e; p e.class,e.message; end')).toMatchObject({
+    stdout: 'TypeError\n"wrong argument type Integer (must respond to :each)"\n',
+  });
+  expect(run('class A; def to_ary; nil; end; end; begin; [1].zip(A.new); rescue => e; p e.class; end')).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+  expect(run('class A; private; def each; yield 2; end; end; p [1].zip(A.new)')).toMatchObject({
+    stdout: '[[1, 2]]\n',
+  });
+});
+
+test('memoized Array sampling reads current receiver contents', () => {
+  expect(
+    run(
+      'class R; def rand(n); $a.replace(Array.new(3000,9)); 0; end; end; $a=(1..3000).to_a; p $a.sample(11,random:R.new)'
+    )
+  ).toMatchObject({
+    stdout: '[9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]\n',
+  });
+  expect(
+    run('class R; def rand(n); $a.replace([8,9]); 0; end; end; $a=(1..3000).to_a; p $a.sample(11,random:R.new)')
+  ).toMatchObject({
+    stdout: '[]\n',
+  });
+});
