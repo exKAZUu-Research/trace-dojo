@@ -10,6 +10,7 @@ import {
   strInspect,
   symInspect,
   toIndex,
+  toIndexExact,
   toRubyInt,
   toS,
   toStr,
@@ -372,7 +373,8 @@ def('String', 'clear', 0, (self: RString) => {
 });
 def('String', 'insert', 2, function* (self: RString, [index, other]) {
   const chars = stringCharacters(self);
-  let position = yield* toIndex(index);
+  const converted = yield* toIndexExact(index);
+  let position = converted.number;
   const value = yield* stringArgValue(other);
   const binary = combinedStringEncoding(
     self.binary,
@@ -380,7 +382,7 @@ def('String', 'insert', 2, function* (self: RString, [index, other]) {
     value
   );
   if (position < 0) position += chars.length + 1;
-  if (position < 0 || position > chars.length) throw indexError(`index ${yield* toIndex(index)} out of string`);
+  if (position < 0 || position > chars.length) throw indexError(`index ${converted.integer} out of string`);
   chars.splice(position, 0, value);
   setBytes(self, stringBytes(joinStringCharacters(chars, binary)), binary);
   return self;
@@ -465,15 +467,16 @@ def('String', '[]=', [2, 3], function* (self: RString, args) {
   regexpUnsupported(first);
   let range: { start: number; count: number } | undefined;
   if (selectors.length === 1 && !(first instanceof RRange)) {
-    let index = yield* toIndex(first);
+    const converted = yield* toIndexExact(first);
+    let index = converted.number;
     if (index < 0) index += chars.length;
-    if (index < 0 || index >= chars.length) throw indexError(`index ${yield* toIndex(first)} out of string`);
+    if (index < 0 || index >= chars.length) throw indexError(`index ${converted.integer} out of string`);
     range = { start: index, count: 1 };
   } else {
     range = yield* substringRange(chars.length, selectors);
     if (!range) {
       if (first instanceof RRange) throw rangeError(`${yield* inspect(first)} out of range`);
-      throw indexError(`index ${yield* toIndex(first)} out of string`);
+      throw indexError(`index ${(yield* toIndexExact(first)).integer} out of string`);
     }
   }
   const binary = combinedStringEncoding(

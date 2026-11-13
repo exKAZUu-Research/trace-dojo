@@ -1518,3 +1518,15 @@ test('Range first zero validates its endpoints', () => {
   });
   expect(run('p (1..3).first(0), (1..3).first(2)')).toMatchObject({ stdout: '[]\n[1, 2]\n' });
 });
+
+test('String bounds errors retain exact long indexes', () => {
+  for (const source of [
+    '"a".insert(9007199254740993, "x")',
+    's="a"; s[9007199254740993]="x"',
+    's="a"; s[9007199254740993,1]="x"',
+  ]) {
+    expect(run(`begin; ${source}; rescue => e; p e.message; end`)).toMatchObject({
+      stdout: '"index 9007199254740993 out of string"\n',
+    });
+  }
+});
