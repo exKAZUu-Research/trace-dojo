@@ -1470,14 +1470,44 @@ test.each([
   });
 });
 
-test.each(['struct P{int x;}', 'union U{int x;float y;}', 'enum E{A,B}', 'struct P{int x;}v', 'int *gp'])(
-  'file-scope declarations retain their terminator location: %s',
-  (head) => {
-    for (const tail of ['int main(void){return 0;}', 'int g;', 'const int g=1;', 'T g=1;', 'T*p;']) {
-      expect(executeProgram('c', `typedef int T;\n${head}\n${tail}`)).toMatchObject({
-        kind: 'compileError',
-        diagnostics: [expect.objectContaining({ row: 1 })],
-      });
-    }
+test.each([
+  'struct P{int x;}',
+  'union U{int x;float y;}',
+  'enum E{A,B}',
+  'struct P{int x;}v',
+  'int *gp',
+  'unsigned long gu',
+  'int (*gfp)(int)',
+  'int g(int b)',
+])('file-scope declarations retain their terminator location: %s', (head) => {
+  for (const tail of ['int main(void){return 0;}', 'int g;', 'const int g=1;', 'T g=1;', 'T*p;', 'typedef int T2;']) {
+    expect(executeProgram('c', `typedef int T;\n${head}\n${tail}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ row: 1 })],
+    });
   }
-);
+});
+
+test('a tag definition can typedef its own type without a second base type', () => {
+  expect(executeProgram('c', 'struct P{int x;} typedef P;int main(void){P p={1};return p.x-1;}')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+});
+
+test('typedef specifiers retain every type word across storage-class specifiers', () => {
+  expect(
+    executeProgram(
+      'c',
+      '#include <stdio.h>\nint typedef long T;int main(void){T x=4294967296L;printf("%zu %ld",sizeof(T),x);}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '8 4294967296',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('c', 'int typedef\nfloat T;int main(void){return 0;}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 1 })],
+  });
+});

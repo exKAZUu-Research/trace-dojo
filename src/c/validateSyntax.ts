@@ -23,6 +23,7 @@ export function validateSyntax(root: Node): void {
   const pending = [root];
   while (pending.length > 0) {
     const node = pending.pop()!;
+    validateDeclarationType(node);
     if (node.type === 'macro_specifier')
       throw new CSyntaxError(node, `「${node.text}」は型や指定子として宣言されていません。`);
     for (const name of RESTRICTED_OPERANDS[node.type] ?? []) {
@@ -34,8 +35,35 @@ export function validateSyntax(root: Node): void {
       const children = node.children.filter((child) => child?.type !== 'comment');
       if (children.at(-2)?.type === ',') fail(node, '引数の最後のコンマの後には式が必要です。');
     }
-    for (const child of node.namedChildren) if (child) pending.push(child);
+    pending.push(...node.namedChildren.toReversed());
   }
+}
+
+function validateDeclarationType(node: Node): void {
+  const type = node.childForFieldName('type');
+  if (!type || !['struct_specifier', 'union_specifier', 'enum_specifier'].includes(type.type)) return;
+  const body = type.childForFieldName('body');
+  if (!body) return;
+  const extraType = declarationTypeNodes(node).find((child) => child.startIndex >= type.endIndex);
+  if (extraType) throw new CompileError([{ row: body.endPosition.row, message: '「;」が足りません。' }]);
+}
+
+export function declarationTypeNodes(node: Node): Node[] {
+  const first = node.childForFieldName('type');
+  const end = node.childForFieldName('declarator')?.startIndex ?? node.endIndex;
+  return node.namedChildren.filter(
+    (child) =>
+      child.startIndex < end &&
+      (child.id === first?.id ||
+        [
+          'primitive_type',
+          'sized_type_specifier',
+          'type_identifier',
+          'struct_specifier',
+          'union_specifier',
+          'enum_specifier',
+        ].includes(child.type))
+  );
 }
 
 function fail(node: Node, message: string): never {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 720 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
+// code-gauge-allow-file fileNcss 735 -- The syntax converter shares one typedef scope across declarations, statements, and expressions; keep that traversal together.
 import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -24,8 +24,9 @@ import {
 } from './ast';
 import { CSyntaxError } from './syntaxDiagnostics';
 import type { TypeScope } from './syntaxTokens';
+import { builtinType } from './types';
 import { unsupported } from './unsupported';
-import { validateNames, validateSyntax } from './validateSyntax';
+import { declarationTypeNodes, validateNames, validateSyntax } from './validateSyntax';
 
 /** What learners call the syntax that the converter leaves out, by tree-sitter's node type. */
 const UNSUPPORTED_NODES: Record<string, string> = {
@@ -306,9 +307,24 @@ export class Converter {
         this.qualifier(child, qualifiers);
       }
     }
-    const typeNode = field(node, 'type');
-    for (const child of typeNode.namedChildren) if (child?.type === 'type_qualifier') this.qualifier(child, qualifiers);
-    return { storage, qualifiers, type: this.typeSpecifier(typeNode), row: node.startPosition.row };
+    const typeNodes = declarationTypeNodes(node);
+    for (const child of typeNodes.flatMap((typeNode) => typeNode.namedChildren))
+      if (child.type === 'type_qualifier') this.qualifier(child, qualifiers);
+    return { storage, qualifiers, type: this.declarationType(typeNodes), row: node.startPosition.row };
+  }
+
+  private declarationType(nodes: Node[]): TypeSpecifier {
+    let type = this.typeSpecifier(nodes[0]);
+    for (const node of nodes.slice(1)) {
+      const next = this.typeSpecifier(node);
+      const words = type.kind === 'builtin' && next.kind === 'builtin' ? [...type.words, ...next.words] : undefined;
+      if (!words || !builtinType(words))
+        throw new CompileError([{ row: node.startPosition.row, message: '型の指定を組み合わせることはできません。' }]);
+      if (!this.fromHeader && words.filter((word) => word === 'long').length > 1)
+        unsupported(node.startPosition.row, 'long long');
+      type = { kind: 'builtin', words, row: type.row };
+    }
+    return type;
   }
 
   private qualifier(node: Node, qualifiers: { isConst: boolean; isVolatile: boolean }): void {

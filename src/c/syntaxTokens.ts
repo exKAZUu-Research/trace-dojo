@@ -108,30 +108,7 @@ export function sizeofTypeFollowers(
   return result;
 }
 
-export function aggregateDeclarationFollowers(
-  tokens: SourceToken[],
-  scopes: readonly TypeScope[],
-  fallback: ReadonlySet<string>,
-  budget: ExecutionBudget
-): SourceToken[] {
-  const closes = closingDelimiters(tokens, '{', '}', budget);
-  const cursor = new TypeScopeCursor(scopes, budget);
-  const result: SourceToken[] = [];
-  for (const [index, current] of tokens.entries()) {
-    budget.spend();
-    if (!['struct', 'union', 'enum'].includes(current.token.text)) continue;
-    let open = index + 1;
-    if (tokens[open]?.token.kind === 'identifier') open++;
-    if (tokens[open]?.token.text !== '{') continue;
-    const close = closes.get(open);
-    if (close === undefined) continue;
-    const following = declarationFollower(tokens, close + 1, cursor.at(current.start) ?? fallback, budget);
-    if (following) result.push(following);
-  }
-  return result;
-}
-
-export function declaratorFollowers(
+export function declarationFollowers(
   tokens: SourceToken[],
   starts: readonly number[],
   scopes: readonly TypeScope[],
@@ -140,21 +117,46 @@ export function declaratorFollowers(
 ): SourceToken[] {
   budget.spend(starts.length);
   const offsets = new Set(starts);
+  const closes = closingDelimiters(tokens, '{', '}', budget);
   const cursor = new TypeScopeCursor(scopes, budget);
   const result: SourceToken[] = [];
   for (const [index, current] of tokens.entries()) {
     budget.spend();
     if (!offsets.has(current.start)) continue;
-    let name = index;
-    while (tokens[name]?.token.text === '*' || QUALIFIERS.has(tokens[name]?.token.text)) {
-      budget.spend();
-      name++;
-    }
-    if (tokens[name]?.token.kind !== 'identifier' || DECLARATION_WORDS.has(tokens[name].token.text)) continue;
-    const following = declarationFollower(tokens, name + 1, cursor.at(current.start) ?? fallback, budget);
+    const names = cursor.at(current.start) ?? fallback;
+    const start = afterDeclarationSpecifiers(tokens, index, names, closes, budget);
+    if (start === index) continue;
+    const following = declarationFollower(tokens, start, names, budget);
     if (following) result.push(following);
   }
   return result;
+}
+
+function afterDeclarationSpecifiers(
+  tokens: SourceToken[],
+  start: number,
+  names: ReadonlySet<string>,
+  closes: ReadonlyMap<number, number>,
+  budget: ExecutionBudget
+): number {
+  let index = start;
+  let hasType = false;
+  while (index < tokens.length) {
+    budget.spend();
+    const text = tokens[index].token.text;
+    if (['struct', 'union', 'enum'].includes(text)) {
+      index++;
+      if (tokens[index]?.token.kind === 'identifier') index++;
+      const close = closes.get(index);
+      if (close !== undefined) index = close + 1;
+      return index;
+    }
+    if (TYPE_WORDS.has(text)) hasType = true;
+    else if (!hasType && names.has(text)) hasType = true;
+    else if (!DECLARATION_WORDS.has(text)) return index;
+    index++;
+  }
+  return index;
 }
 
 class TypeScopeCursor {
@@ -225,34 +227,54 @@ function declarationFollower(
 ): SourceToken | undefined {
   let depth = 0;
   let initialized = false;
+  let hasDeclarator = false;
   for (let index = start; index < tokens.length; index++) {
     budget.spend();
     const current = tokens[index];
     const text = current.token.text;
     if (depth === 0) {
       if (text === ';' || text === '}') return;
-      if (startsDeclaration(tokens, index, names)) return current;
+      if (startsDeclaration(tokens, index, names, hasDeclarator)) return current;
       if (text === '{' && !initialized) return;
       if (text === '=') initialized = true;
     }
-    if (current.token.kind !== 'punctuator') continue;
-    if (['(', '[', '{'].includes(text)) depth++;
-    else if ([')', ']', '}'].includes(text)) {
-      if (depth === 0) return;
-      depth--;
-    }
+    const nextDepth = declaratorDepth(depth, current.token);
+    if (nextDepth === undefined) return;
+    depth = nextDepth;
+    hasDeclarator ||= depth === 0 && completesDeclarator(current.token);
   }
   return undefined;
 }
 
-function startsDeclaration(tokens: SourceToken[], start: number, names: ReadonlySet<string>): boolean {
+function declaratorDepth(depth: number, token: PPToken): number | undefined {
+  if (token.kind !== 'punctuator') return depth;
+  if (['(', '[', '{'].includes(token.text)) return depth + 1;
+  if ([')', ']', '}'].includes(token.text)) return depth === 0 ? undefined : depth - 1;
+  return depth;
+}
+
+function completesDeclarator(token: PPToken): boolean {
+  return (
+    (token.kind === 'identifier' && !DECLARATION_WORDS.has(token.text)) || token.text === ')' || token.text === ']'
+  );
+}
+
+function startsDeclaration(
+  tokens: SourceToken[],
+  start: number,
+  names: ReadonlySet<string>,
+  hasDeclarator: boolean
+): boolean {
   let index = start;
   while (DECLARATION_WORDS.has(tokens[index]?.token.text) && !TYPE_WORDS.has(tokens[index]?.token.text)) index++;
   const text = tokens[index]?.token.text;
-  return text !== undefined && (TYPE_WORDS.has(text) || (names.has(text) && typedefDeclarationFollows(tokens, index)));
+  return (
+    text !== undefined &&
+    (TYPE_WORDS.has(text) || (names.has(text) && typedefDeclarationFollows(tokens, index, hasDeclarator)))
+  );
 }
 
-function typedefDeclarationFollows(tokens: SourceToken[], index: number): boolean {
+function typedefDeclarationFollows(tokens: SourceToken[], index: number, hasDeclarator: boolean): boolean {
   const next = tokens[index + 1]?.token;
-  return next?.kind === 'identifier' || next?.text === '*';
+  return next?.kind === 'identifier' || next?.text === '*' || (hasDeclarator && next?.text === '(');
 }

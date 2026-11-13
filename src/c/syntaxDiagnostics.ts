@@ -3,8 +3,7 @@ import type { Node, Parser } from '@willbooster/web-tree-sitter';
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import {
-  aggregateDeclarationFollowers,
-  declaratorFollowers,
+  declarationFollowers,
   sizeofTypeFollowers,
   type SourceToken,
   sourceTokens,
@@ -35,14 +34,7 @@ export function cSyntaxDiagnostics(
   }
   const candidates = [
     ...sizeofTypeFollowers(tokens, typeScopes, names, budget),
-    ...aggregateDeclarationFollowers(tokens, typeScopes, names, budget),
-    ...declaratorFollowers(
-      tokens,
-      root.descendantsOfType(['pointer_declarator', 'macro_specifier']).map((node) => node.startIndex),
-      typeScopes,
-      names,
-      budget
-    ),
+    ...declarationFollowers(tokens, declarationStarts(root, budget), typeScopes, names, budget),
   ]
     .filter((token) => token.start < next.offset)
     .toSorted((a, b) => a.start - b.start);
@@ -56,6 +48,23 @@ export function cSyntaxDiagnostics(
   if (illegal && illegal.startPosition.row <= row)
     return [{ row: illegal.startPosition.row, message: 'ここには関数の定義や文を書けません。' }];
   return [{ row, message: semicolon !== undefined ? '「;」が足りません。' : errors[0].message }];
+}
+
+function declarationStarts(root: Node, budget: ExecutionBudget): number[] {
+  const starts: number[] = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    budget.spend();
+    const node = pending.pop()!;
+    if (
+      node.isError ||
+      (['declaration', 'type_definition', 'function_definition', 'field_declaration'].includes(node.type) &&
+        node.childForFieldName('type'))
+    )
+      starts.push(node.startIndex);
+    pending.push(...node.namedChildren);
+  }
+  return starts;
 }
 
 export class CSyntaxError extends CompileError {
