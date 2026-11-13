@@ -8,6 +8,8 @@ class Box[T, U=str]: pass
 assert Box[int].__args__ == (int, str)
 assert Box[int, float].__args__ == (int, float)
 assert Box[int] is Box[int]
+assert Box[int] is not Box[(int,)]
+assert Box['int'] is Box['int']
 assert Box[int] is not Box[int, str]
 class Default[T=int, U=str]: pass
 assert Default[()].__args__ == (int, str)

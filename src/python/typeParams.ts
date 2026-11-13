@@ -207,8 +207,8 @@ export function typeText(value: PyValue): string {
 
 /** `cls[key]` for a class that derives from Generic, as `Generic.__class_getitem__` checks it. */
 export function subscriptGeneric(cls: PyClass, key: PyValue): PyValue {
-  const args = (key instanceof PyTuple ? [...key.items] : [key]).map(typeConvert);
-  return cachedAlias(cls, args, () => specializeGenericArgs(cls, args));
+  const args = key instanceof PyTuple ? [...key.items] : [key];
+  return cachedAlias(cls, key instanceof PyTuple, args, () => specializeGenericArgs(cls, args.map(typeConvert)));
 }
 
 function specializeGenericArgs(cls: PyClass, args: PyValue[]): PyValue[] {
@@ -245,6 +245,7 @@ function checkParameterDeclaration(cls: PyClass, args: PyValue[]): void {
 
 interface AliasEntry {
   cls: PyClass;
+  tupleKey: boolean;
   key: readonly PyValue[];
   alias: PyTypingAlias;
 }
@@ -252,14 +253,19 @@ interface AliasEntry {
 const aliasCache = new WeakMap<Runtime, AliasEntry[]>();
 
 /** The per-run bounded LRU used by typing's generic subscription cache. */
-function cachedAlias(cls: PyClass, key: PyValue[], args: () => PyValue[]): PyTypingAlias {
+function cachedAlias(cls: PyClass, tupleKey: boolean, key: PyValue[], args: () => PyValue[]): PyTypingAlias {
   const runtime = currentRuntime();
   const entries = aliasCache.get(runtime) ?? [];
   aliasCache.set(runtime, entries);
   const index = entries.findIndex(
-    (entry) => entry.cls === cls && entry.key.length === key.length && entry.key.every((arg, i) => arg === key[i])
+    (entry) =>
+      entry.cls === cls &&
+      entry.tupleKey === tupleKey &&
+      entry.key.length === key.length &&
+      entry.key.every((arg, i) => arg === key[i])
   );
-  const entry = index === -1 ? { cls, key, alias: new PyTypingAlias(cls, args()) } : entries.splice(index, 1)[0];
+  const entry =
+    index === -1 ? { cls, tupleKey, key, alias: new PyTypingAlias(cls, args()) } : entries.splice(index, 1)[0];
   entries.push(entry);
   if (entries.length > 128) entries.shift();
   return entry.alias;
