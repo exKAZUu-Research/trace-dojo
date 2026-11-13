@@ -857,7 +857,11 @@ let k = 0; while (true) { const s = Date.now(); for (let i = 0; i < 20000; i++) 
 setTimeout(() => console.log('J 0'), 0);
 setTimeout(() => console.log('K 50'), 50); const times = [];
 for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; times.push(Date.now() - s); }
-console.log(times.length); setTimeout(() => console.log('L 0'), 0);`,
+console.log(times.length); setTimeout(() => console.log('L 0'), 0);
+function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+setTimeout(() => console.log('M 50'), 50); const fibTimes = [];
+for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n); fibTimes.push(Date.now() - s); }
+console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',

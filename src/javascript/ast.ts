@@ -47,6 +47,7 @@ export type Statement = Span &
         /** Names the init declares with `let` or `const`, copied into a new scope for every iteration. */
         perIterationNames: string[];
         scope: ScopeDeclarations;
+        counted?: true;
       }
     | {
         kind: 'forOf' | 'forIn';
@@ -59,9 +60,11 @@ export type Statement = Span &
         /** Recorded after each binding of the target. */
         stepRow?: number;
         scope: ScopeDeclarations;
+        counted?: true;
       }
-    | { kind: 'while'; test: Expression; body: Statement }
-    | { kind: 'doWhile'; test: Expression; body: Statement }
+    /** `counted` marks a loop whose end cannot depend on the clock, as countedLoops.ts decides. */
+    | { kind: 'while'; test: Expression; body: Statement; counted?: true }
+    | { kind: 'doWhile'; test: Expression; body: Statement; counted?: true }
     | { kind: 'break' | 'continue'; label?: string }
     | { kind: 'labeled'; label: string; body: Statement }
     | { kind: 'switch'; discriminant: Expression; cases: SwitchCase[]; scope: ScopeDeclarations }

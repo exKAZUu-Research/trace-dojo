@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 589 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 590 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -73,6 +73,8 @@ export interface LoopState {
   iteration: number;
   lastClockRead?: number;
   clockReadIterations: number;
+  /** Whether the loop's end cannot depend on the clock, so it never polls it. */
+  counted: boolean;
 }
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
@@ -584,8 +586,8 @@ export class Runtime {
   }
 
   /** Starts a loop in the current frame, whose iterations the caller counts until it calls {@link exitLoop}. */
-  enterLoop(): LoopState {
-    const loop: LoopState = { iteration: 0, clockReadIterations: 0 };
+  enterLoop(counted: boolean): LoopState {
+    const loop: LoopState = { iteration: 0, clockReadIterations: 0, counted };
     this.frame.loops.push(loop);
     return loop;
   }
@@ -607,7 +609,7 @@ export class Runtime {
         loop.lastClockRead = loop.iteration;
         loop.clockReadIterations++;
       }
-      return loop.clockReadIterations > POLLING_ITERATIONS;
+      return !loop.counted && loop.clockReadIterations > POLLING_ITERATIONS;
     }
     return false;
   }
