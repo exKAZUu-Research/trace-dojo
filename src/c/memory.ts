@@ -59,6 +59,7 @@ export class Memory {
   /** The live blocks of each region, in address order. */
   private readonly live: Record<Region, Allocation[]> = { text: [], data: [], heap: [], stack: [] };
   private readonly freed: Allocation[] = [];
+  private readonly byBase = new Map<number, Allocation>();
   private next: Record<Region, number> = { ...REGION_STARTS };
   private stackBytes = 0;
   private lastFound?: Allocation;
@@ -71,20 +72,21 @@ export class Memory {
       // The stack grows downward, so that later frames have lower addresses, as on arm64.
       this.next.stack -= Math.ceil((size + GUARD) / 16) * 16;
       base = this.next.stack;
-      const allocation = new Allocation(base, size, region);
-      this.live.stack.unshift(allocation);
-      return allocation;
+    } else {
+      base = this.next[region];
+      this.next[region] = base + Math.ceil((Math.max(size, 1) + GUARD) / 16) * 16;
     }
-    base = this.next[region];
-    this.next[region] = base + Math.ceil((Math.max(size, 1) + GUARD) / 16) * 16;
     const allocation = new Allocation(base, size, region);
-    this.live[region].push(allocation);
+    this.byBase.set(base, allocation);
+    if (region === 'stack') this.live.stack.unshift(allocation);
+    else this.live[region].push(allocation);
     return allocation;
   }
 
   /** Ends the lifetime of a block: a returned function's variable, or a block that `free` releases. */
   release(allocation: Allocation): void {
     allocation.isAlive = false;
+    this.byBase.delete(allocation.base);
     const list = this.live[allocation.region];
     const index = list.indexOf(allocation);
     if (index !== -1) list.splice(index, 1);
@@ -115,8 +117,7 @@ export class Memory {
 
   /** The live block starting exactly at an address, as `free` requires. */
   findBase(address: number): Allocation | undefined {
-    const found = this.find(address);
-    return found?.base === address ? found : undefined;
+    return this.byBase.get(address);
   }
 
   wasFreed(address: number): boolean {
