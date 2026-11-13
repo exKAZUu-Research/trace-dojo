@@ -1975,3 +1975,11 @@ test('exclusive Float sequence sizes keep Ruby large-boundary tolerance', () => 
     stdout: '5000000000000001\n5000000000000001\n',
   });
 });
+
+test('Enumerator method names accept private implicit String conversion', () => {
+  expect(
+    run('class A; private; def to_str; "each"; end; end; p [1,2].to_enum(A.new).to_a, [1,2].enum_for(A.new).to_a')
+  ).toMatchObject({
+    stdout: '[1, 2]\n[1, 2]\n',
+  });
+});

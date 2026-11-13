@@ -266,7 +266,7 @@ def('Kernel', 'display', [0, 1], function* (self, args) {
 def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args) {
   const [method = sym('each'), ...rest] = args;
   if (method instanceof RSymbol) return makeEnumerator(self, method.name, rest);
-  if (method instanceof RString || respondsTo(method, 'to_str'))
+  if (method instanceof RString || respondsTo(method, 'to_str', true))
     return makeEnumerator(self, (yield* toStrValue(method)).s, rest);
   throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
 });
