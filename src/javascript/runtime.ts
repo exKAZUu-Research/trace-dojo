@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 567 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 585 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -42,6 +42,8 @@ export class Frame {
   readonly iterations = new Set<ValueIterator>();
   /** How many builtins run in the frame now, which keep what the program's code returns to them in its temporaries. */
   builtinsRunning = 0;
+  /** The loops running in the frame, innermost last, which tell a clock read polling in a loop from a lone one. */
+  readonly loops: LoopState[] = [];
 
   constructor(
     public scope: Scope,
@@ -57,6 +59,12 @@ export class Frame {
     for (const iteration of this.iterations) appendAll(values, iteration.roots);
     return values;
   }
+}
+
+/** A running loop: the iteration it is in, and the first iteration that read the clock. */
+export interface LoopState {
+  iteration: number;
+  firstClockRead?: number;
 }
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
@@ -565,6 +573,31 @@ export class Runtime {
     if (!newTarget) return fallback;
     const prototype = this.get(newTarget, 'prototype');
     return isObject(prototype) ? prototype : fallback;
+  }
+
+  /** Starts a loop in the current frame, whose iterations the caller counts until it calls {@link exitLoop}. */
+  enterLoop(): LoopState {
+    const loop: LoopState = { iteration: 0 };
+    this.frame.loops.push(loop);
+    return loop;
+  }
+
+  exitLoop(): void {
+    this.frame.loops.pop();
+  }
+
+  /**
+   * Notes a read of the clock, returning whether it polls: whether the innermost running loop, in this frame or a caller
+   * of it, read the clock in an earlier iteration, as a busy wait does.
+   */
+  readsClockInLoop(): boolean {
+    for (let index = this.frames.length - 1; index >= 0; index--) {
+      const loop = this.frames[index].loops.at(-1);
+      if (!loop) continue;
+      loop.firstClockRead ??= loop.iteration;
+      return loop.firstClockRead < loop.iteration;
+    }
+    return false;
   }
 
   pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {

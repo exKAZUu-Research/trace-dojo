@@ -112,13 +112,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       }
       case 'while':
       case 'doWhile': {
-        for (let first = true; ; first = false) {
-          if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
-            return undefined;
-          const result = yield* this.loopBodySteps(statement.body, labels);
-          if (result !== 'next') return result;
-          runtime.spend();
-        }
+        return yield* this.whileSteps(statement, labels);
       }
       case 'break':
       case 'continue': {
@@ -296,6 +290,25 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     this.bindPattern(target, value, 'initialize');
   }
 
+  private *whileSteps(
+    statement: Extract<Statement, { kind: 'while' | 'doWhile' }>,
+    labels: string[]
+  ): Steps<Completion> {
+    const { runtime } = this;
+    const loop = runtime.enterLoop();
+    try {
+      for (let first = true; ; first = false, loop.iteration++) {
+        if (!(first && statement.kind === 'doWhile') && !toBoolean(yield* this.valueSteps(statement.test)))
+          return undefined;
+        const result = yield* this.loopBodySteps(statement.body, labels);
+        if (result !== 'next') return result;
+        runtime.spend();
+      }
+    } finally {
+      runtime.exitLoop();
+    }
+  }
+
   /** Runs a loop body, returning `'next'` to continue the loop or the completion that ends it. */
   private *loopBodySteps(body: Statement, labels: string[]): Steps<'next' | Completion> {
     const completion = yield* this.statementSteps(body, []);
@@ -306,7 +319,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     return completion.kind === 'continue' ? 'next' : undefined;
   }
 
-  // code-gauge-allow duplicateLines 26 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
+  // code-gauge-allow duplicateLines 28 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
   private forStatementSteps(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Steps<Completion> {
     const { runtime } = this;
     return this.scopedSteps(
@@ -316,9 +329,10 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         yield* this.forInitSteps(statement);
         const frame = runtime.frame;
         const outer = frame.scope;
+        const loop = runtime.enterLoop();
         try {
           this.copyIterationScope(perIterationNames);
-          for (;;) {
+          for (; ; loop.iteration++) {
             if (statement.test && !toBoolean(yield* this.valueSteps(statement.test))) return;
             const result = yield* this.loopBodySteps(statement.body, labels);
             if (result !== 'next') return result;
@@ -330,6 +344,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
             runtime.spend();
           }
         } finally {
+          runtime.exitLoop();
           frame.scope = outer;
         }
       }.bind(this)
@@ -386,7 +401,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
 
   // code-gauge-allow duplicateLines 17 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
   // code-gauge-allow functionCognitiveComplexity 18 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
-  // code-gauge-allow functionNcss 38 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
+  // code-gauge-allow functionNcss 40 -- Mirrors the synchronous version in evaluator.ts, as a generator that suspends at yield and await.
   private *forEachIterationsSteps(
     statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
     labels: string[],
@@ -397,8 +412,9 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
+    const loop = runtime.enterLoop();
     try {
-      for (;;) {
+      for (; ; loop.iteration++) {
         const value = yield* iterator.next();
         if (value === DONE) {
           isExhausted = true;
@@ -434,6 +450,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
       }
       throw error;
     } finally {
+      runtime.exitLoop();
       // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks, while the value the loop
       // returns or throws stays reachable.
       if (!isExhausted) yield* this.holdingValue(pending, () => iterator.close(completion));

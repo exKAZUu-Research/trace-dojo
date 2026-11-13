@@ -49,11 +49,11 @@ interface TimerList {
 
 /**
  * How a read of the clock moves it forward: by the operations spent since the previous read at
- * OPERATIONS_PER_MILLISECOND, and by at least CLOCK_STEP. A read from the call site of the previous read polls the clock,
- * as a busy wait does, and takes the whole advance, so a busy wait as long as a run's time limit spends at most a fifth
- * of the operation budget whatever its body costs; any other read takes at most MAX_CLOCK_ADVANCE, Node.js's clock
- * resolution, since the interpreter's operations are far slower than Node.js's and a timestamp after computation must
- * not push timers scheduled after it past earlier ones.
+ * OPERATIONS_PER_MILLISECOND, and by at least CLOCK_STEP. A read in a loop that read the clock in an earlier iteration
+ * polls it, as a busy wait does, and takes the whole advance, so a busy wait as long as a run's time limit spends at most
+ * a fifth of the operation budget whatever its body costs; any other read takes at most MAX_CLOCK_ADVANCE, Node.js's
+ * clock resolution, since the interpreter's operations are far slower than Node.js's and a timestamp after computation
+ * must not push timers scheduled after it past earlier ones.
  */
 const OPERATIONS_PER_MILLISECOND = LIMITS.maxOperations / (LIMITS.maxMilliseconds * 5);
 const CLOCK_STEP = 10 / OPERATIONS_PER_MILLISECOND;
@@ -76,8 +76,6 @@ export class EventLoop {
   private readonly rejections = new Set<JsObject>();
   /** The milliseconds the simulated clock has advanced since the program started, in fractions of a millisecond. */
   private now = 0;
-  /** The row of the call that read the clock last, whose repetition marks a polling loop. */
-  private lastReadRow: number | undefined;
   /** The operations spent when the clock last moved, by a read or a jump to a timer. */
   private spentAtNow = 0;
   /** The timer whose callback is running, which clearing stops from running again. */
@@ -88,17 +86,13 @@ export class EventLoop {
 
   constructor(private readonly runtime: Runtime) {}
 
-  /**
-   * Reads the clock for `Date` at the call on `row`, which moves it forward as the constants above say: the whole
-   * milliseconds so far.
-   */
-  readClock(row: number | undefined): number {
-    const { spent } = this.runtime.budget;
+  /** Reads the clock for `Date`, which moves it forward as the constants above say: the whole milliseconds so far. */
+  readClock(): number {
+    const { runtime } = this;
+    const { spent } = runtime.budget;
     const advance = Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND);
-    const polls = row !== undefined && row === this.lastReadRow;
-    this.now += polls ? advance : Math.min(MAX_CLOCK_ADVANCE, advance);
+    this.now += runtime.readsClockInLoop() ? advance : Math.min(MAX_CLOCK_ADVANCE, advance);
     this.spentAtNow = spent;
-    this.lastReadRow = row;
     return Math.floor(this.now);
   }
 

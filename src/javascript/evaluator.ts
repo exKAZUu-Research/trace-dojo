@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 470 -- One executor of every statement kind and of functions and classes, which share its scopes.
+// code-gauge-allow-file fileNcss 477 -- One executor of every statement kind and of functions and classes, which share its scopes.
 import type {
   Block,
   ClassMember,
@@ -111,11 +111,16 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
       case 'while':
       case 'doWhile': {
-        for (let first = true; ; first = false) {
-          if (!(first && statement.kind === 'doWhile') && !toBoolean(this.evaluate(statement.test))) return undefined;
-          const result = this.loopBody(statement.body, labels);
-          if (result !== 'next') return result;
-          runtime.spend();
+        const loop = runtime.enterLoop();
+        try {
+          for (let first = true; ; first = false, loop.iteration++) {
+            if (!(first && statement.kind === 'doWhile') && !toBoolean(this.evaluate(statement.test))) return undefined;
+            const result = this.loopBody(statement.body, labels);
+            if (result !== 'next') return result;
+            runtime.spend();
+          }
+        } finally {
+          runtime.exitLoop();
         }
       }
       case 'break':
@@ -220,7 +225,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     return completion.kind === 'continue' ? 'next' : undefined;
   }
 
-  // code-gauge-allow duplicateLines 25 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
+  // code-gauge-allow duplicateLines 27 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Completion {
     const { runtime } = this;
     return this.scoped(statement.scope, () => {
@@ -228,9 +233,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
       this.forInit(statement);
       const frame = runtime.frame;
       const outer = frame.scope;
+      const loop = runtime.enterLoop();
       try {
         this.copyIterationScope(perIterationNames);
-        for (;;) {
+        for (; ; loop.iteration++) {
           if (statement.test && !toBoolean(this.evaluate(statement.test))) return;
           const result = this.loopBody(statement.body, labels);
           if (result !== 'next') return result;
@@ -242,6 +248,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
           runtime.spend();
         }
       } finally {
+        runtime.exitLoop();
         frame.scope = outer;
       }
     });
@@ -271,7 +278,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
   }
 
   /** Runs the iterations of a `for...of` or `for...in` loop, holding the iterable meanwhile. */
-  // code-gauge-allow functionNcss 40 -- Inlines what a nested call in the loop body would otherwise pay host frames for.
+  // code-gauge-allow functionNcss 42 -- Inlines what a nested call in the loop body would otherwise pay host frames for.
   // code-gauge-allow duplicateLines 17 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forEachIterations(
     statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
@@ -287,8 +294,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
+    const loop = runtime.enterLoop();
     try {
-      for (let value = iterator.next(); value !== DONE; value = iterator.next()) {
+      for (let value = iterator.next(); value !== DONE; value = iterator.next(), loop.iteration++) {
         runtime.spend();
         const outer = frame.scope;
         try {
@@ -324,6 +332,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       }
       throw error;
     } finally {
+      runtime.exitLoop();
       // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks, while the value the loop
       // returns or throws stays reachable.
       try {

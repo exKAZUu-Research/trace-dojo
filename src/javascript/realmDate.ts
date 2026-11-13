@@ -31,15 +31,15 @@ export function newDate(runtime: Runtime, time: number, prototype: JsObject): Js
 export function defineDateBuiltins(builder: RealmBuilder): void {
   const prototype = builder.realm.datePrototype;
   const startTime = Date.now();
-  const now = (runtime: Runtime, row: number | undefined): number => startTime + runtime.eventLoop.readClock(row);
+  const now = (runtime: Runtime): number => startTime + runtime.eventLoop.readClock();
   const dateConstructor = builder.defineClass('Date', 7, prototype, (call) => {
     const { runtime, newTarget } = call;
-    if (!newTarget) return new Date(now(runtime, call.callRow)).toString();
+    if (!newTarget) return new Date(now(runtime)).toString();
     // Only `new Date()` reads the clock, which moves it.
-    const time = call.args.length === 0 ? now(runtime, call.callRow) : constructedTime(call);
+    const time = call.args.length === 0 ? now(runtime) : constructedTime(call);
     return newDate(runtime, time, runtime.prototypeFor(newTarget, prototype));
   });
-  builder.method(dateConstructor, 'now', 0, ({ runtime, callRow }) => now(runtime, callRow));
+  builder.method(dateConstructor, 'now', 0, ({ runtime }) => now(runtime));
   builder.method(dateConstructor, 'parse', 1, ({ runtime, args }) => Date.parse(runtime.toString(args[0])));
   builder.method(dateConstructor, 'UTC', 7, ({ runtime, args }) => {
     const numbers = args.slice(0, 7).map((value) => runtime.toNumber(value));
