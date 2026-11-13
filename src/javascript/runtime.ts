@@ -498,7 +498,6 @@ export class Runtime {
     return isObject(result) ? result : thisValue;
   }
 
-  /** The prototype of an object that `new` creates for `newTarget`. */
   /** What String, Number, or Boolean returns: the primitive when called, and its box when constructed with `new`. */
   primitiveOrBox(value: string | number | boolean, newTarget: JsFunction | undefined): Value {
     if (!newTarget) return value;
@@ -507,6 +506,7 @@ export class Runtime {
     return box;
   }
 
+  /** The prototype of an object that `new` creates for `newTarget`. */
   prototypeFor(newTarget: JsFunction | undefined, fallback: JsObject): JsObject {
     if (!newTarget) return fallback;
     const prototype = this.get(newTarget, 'prototype');
