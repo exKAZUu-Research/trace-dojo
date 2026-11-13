@@ -270,7 +270,7 @@ function appendToBuilder(receiver: Value, text: string): Value[] {
   copyCheck(struct, state);
   const newLength = state.builder.length + text.length;
   currentRuntime().checkStringLength(newLength);
-  if (newLength > state.capacity) state.capacity = grownCapacity(state.capacity, newLength, BASIC.uint8, false);
+  if (newLength > state.capacity) state.capacity = grownCapacity(state.capacity, newLength, BASIC.uint8);
   state.builder += text;
   spendFor(text.length);
   return [BigInt(text.length), undefined];

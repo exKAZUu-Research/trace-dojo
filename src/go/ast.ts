@@ -223,3 +223,7 @@ export type Statement =
   | ({ kind: 'continue' } & Span)
   | ({ kind: 'fallthrough' } & Span)
   | ({ kind: 'defer'; call: Expression } & Span);
+
+export function stripParens(expression: Expression): Expression {
+  return expression.kind === 'paren' ? stripParens(expression.expression) : expression;
+}

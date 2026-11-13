@@ -1,4 +1,5 @@
 import type { Span } from './ast';
+import type { CalleeSummary } from './entities';
 
 export type BasicKind =
   | 'bool'
@@ -121,6 +122,8 @@ export interface Method {
 /** The runtime half of a method, filled in once the method's body compiles. */
 export interface MethodCode {
   call?: (receiver: unknown, args: unknown[], callRow?: number, deferredFor?: unknown) => unknown;
+  /** What calls learn from the body of a method the program declares. */
+  summary?: CalleeSummary;
 }
 
 export interface NamedType {

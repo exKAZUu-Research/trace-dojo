@@ -66,16 +66,25 @@ function toStringConversion(from: Type): Convert {
   return (value) => (value === undefined ? '' : (value as Slice).values().map(encode).join(''));
 }
 
-const stringToBytes: Convert = (value, runtime) => {
-  const text = value as string;
-  runtime.allocate(text.length);
-  return new Slice(
-    Array.from(text, (char) => BigInt(char.charCodeAt(0))),
-    0,
-    text.length,
-    text.length
-  );
-};
+/**
+ * `[]byte(s)` as Go's compiler allocates it: `exact` reuses the bytes of a constant, or of a string whose bytes the
+ * program only reads; `stack` uses the 32-byte stack buffer when the bytes fit; `heap` rounds to a size class.
+ */
+export function stringToBytesWithMode(mode: 'exact' | 'stack' | 'heap'): Convert {
+  return (value, runtime) => {
+    const text = value as string;
+    const length = text.length;
+    let capacity = length;
+    if (mode === 'stack' && length <= 32) capacity = 32;
+    else if (mode !== 'exact') capacity = roundUpToSizeClass(length);
+    runtime.allocate(capacity);
+    const bytes: Value[] = Array.from(text, (char) => BigInt(char.charCodeAt(0)));
+    while (bytes.length < capacity) bytes.push(0n);
+    return new Slice(bytes, 0, length, capacity);
+  };
+}
+
+const stringToBytes: Convert = stringToBytesWithMode('heap');
 
 export function stringToRunesWithMode(mode: 'constant' | 'stack' | 'heap'): Convert {
   return (value, runtime) => {

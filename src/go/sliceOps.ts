@@ -6,12 +6,16 @@ const PAGE_SIZE = 8192;
 const MAX_SMALL_SIZE = 32_768;
 const MALLOC_HEADER_SIZE = 8;
 const MIN_SIZE_FOR_MALLOC_HEADER = 512;
-/**
- * Go's compiler gives a slice variable that starts empty a 32-byte buffer on the stack for its first append when the
- * slice does not escape, which shows in the capacity after that append.
- */
-const STACK_BUFFER_SIZE = 32;
+/** The size of the buffer Go's compiler reserves on the stack for appends to a slice whose array stays local. */
+export const STACK_BUFFER_SIZE = 32;
+/** Arrays that stand for Go's stack buffers, which moving a slice to the heap copies. */
 const stackArrays = new WeakSet<Value[]>();
+
+/**
+ * How an append may use the stack buffer: `static` gives an empty slice the whole buffer at once, and `buffer` grows
+ * into it one size class at a time, as Go's growsliceBuf does.
+ */
+export type StackBuffer = 'static' | 'buffer';
 
 /** The size of a value of the type in bytes on a 64-bit platform, as `unsafe.Sizeof` reports it. */
 export function sizeOf(type: Type): number {
@@ -88,16 +92,10 @@ export function hasPointers(type: Type): boolean {
 }
 
 /** The capacity of the new array that `append` allocates, as Go's growslice computes it. */
-export function grownCapacity(oldCapacity: number, newLength: number, element: Type, onStack: boolean): number {
-  let capacity = nextCapacity(newLength, oldCapacity);
+export function grownCapacity(oldCapacity: number, newLength: number, element: Type): number {
   const size = sizeOf(element);
   if (size === 0) return newLength;
-  if (onStack && oldCapacity === 0 && newLength * size <= STACK_BUFFER_SIZE) {
-    return Math.max(capacity, Math.floor(STACK_BUFFER_SIZE / size));
-  }
-  const bytes = roundUpSize(capacity * size, !hasPointers(element));
-  capacity = Math.floor(bytes / size);
-  return capacity;
+  return Math.floor(roundUpSize(nextCapacity(newLength, oldCapacity) * size, !hasPointers(element)) / size);
 }
 
 function nextCapacity(newLength: number, oldCapacity: number): number {
@@ -125,7 +123,7 @@ export function appendValues(
   element: Type,
   zero: () => Value,
   allocate: (count: number) => void,
-  onStack = false
+  stack?: StackBuffer
 ): Slice | undefined {
   const length = slice?.length ?? 0;
   const capacity = slice?.capacity ?? 0;
@@ -135,29 +133,50 @@ export function appendValues(
     for (const [index, value] of values.entries()) slice.set(length + index, copyValue(value));
     return new Slice(slice.array, slice.offset, newLength, capacity);
   }
-  const size = sizeOf(element);
-  const usedStack = onStack && capacity === 0 && size > 0 && newLength * size <= STACK_BUFFER_SIZE;
-  const newCapacity = grownCapacity(capacity, newLength, element, onStack);
+  const stackCapacity = stack && stackBufferCapacity(stack, length, newLength, element);
+  const newCapacity = stackCapacity ?? grownCapacity(capacity, newLength, element);
   allocate(newCapacity);
   const array: Value[] = slice ? slice.values().map(copyValue) : [];
   for (const value of values) array.push(copyValue(value));
   while (array.length < newCapacity) array.push(zero());
-  if (usedStack) stackArrays.add(array);
+  if (stackCapacity !== undefined) stackArrays.add(array);
   return new Slice(array, 0, newLength, newCapacity);
 }
 
-/** Copies a stack-backed slice to a size-classed heap array when returning it cannot keep the stack buffer. */
-export function moveSliceToHeap(
+/** The capacity an append gets from the stack buffer, or undefined when it cannot use the buffer. */
+function stackBufferCapacity(
+  stack: StackBuffer,
+  oldLength: number,
+  newLength: number,
+  element: Type
+): number | undefined {
+  const size = sizeOf(element);
+  if (size === 0 || newLength * size > STACK_BUFFER_SIZE) return undefined;
+  if (stack === 'static') return oldLength === 0 ? Math.floor(STACK_BUFFER_SIZE / size) : undefined;
+  return Math.floor(roundUpSize(newLength * size, !hasPointers(element)) / size);
+}
+
+/** Whether the slice's array is a stack buffer, which tells whether an append used one. */
+export function inStackBuffer(slice: Slice | undefined): boolean {
+  return slice !== undefined && stackArrays.has(slice.array);
+}
+
+/**
+ * Go's move2heap for a slice whose capacity the function never reads: an array in a stack buffer moves to the heap with
+ * the capacity of the size class its length needs, as runtime.moveSliceNoCap allocates it.
+ */
+export function moveToHeap(
   slice: Slice | undefined,
   element: Type,
   zero: () => Value,
   allocate: (count: number) => void
 ): Slice | undefined {
-  if (!slice || !stackArrays.has(slice.array)) return slice;
-  const length = slice.length;
-  const capacity = grownCapacity(0, Math.max(length, 1), element, false);
+  if (!inStackBuffer(slice)) return slice;
+  const { length } = slice as Slice;
+  const size = sizeOf(element);
+  const capacity = length === 0 ? 0 : Math.floor(roundUpSize(length * size, !hasPointers(element)) / size);
   allocate(capacity);
-  const array: Value[] = slice.values().map(copyValue);
+  const array: Value[] = (slice as Slice).values().map(copyValue);
   while (array.length < capacity) array.push(zero());
   return new Slice(array, 0, length, capacity);
 }

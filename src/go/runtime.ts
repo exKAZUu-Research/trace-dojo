@@ -54,7 +54,20 @@ export interface FunctionInfo {
   resultSlots: number[];
   /** The receiver and parameters, which live in cells when closures or pointers share them. */
   params: { slot: number; boxed: boolean }[];
-  canInline?: boolean;
+}
+
+/**
+ * The stack buffers of a function's call, and those of the calls inlined into it, by call site; `resultStaysLocal`
+ * tells whether the result of an inlined call stays in the caller, which lets what the callee returns live on its stack.
+ */
+export interface StackBuffers {
+  used: WeakSet<object>;
+  inlined: WeakMap<object, StackBuffers>;
+  resultStaysLocal: boolean;
+}
+
+function newStackBuffers(resultStaysLocal = false): StackBuffers {
+  return { used: new WeakSet(), inlined: new WeakMap(), resultStaysLocal };
 }
 
 /** Marks a local whose scope has not begun or has ended. */
@@ -81,9 +94,37 @@ export class Frame implements TracedFrame {
     readonly callRow: number | undefined,
     /** The frame whose deferred call this frame runs, where `recover` may stop the panic. */
     readonly deferredFor: Frame | undefined,
-    readonly resultStaysOnStack = false
+    /**
+     * The stack buffers appends have taken, by the append that took each; a call that Go's compiler inlines shares the
+     * caller's, as its body becomes part of the caller.
+     */
+    private stackBuffers?: StackBuffers
   ) {
     this.locals = Array.from({ length: info.slotCount }, () => UNASSIGNED);
+  }
+
+  usedStackBuffer(append: object): boolean {
+    return this.stackBuffers?.used.has(append) ?? false;
+  }
+
+  useStackBuffer(append: object): void {
+    (this.stackBuffers ??= newStackBuffers()).used.add(append);
+  }
+
+  /** Whether the values this call returns stay in a caller that Go's compiler inlines it into. */
+  get resultStaysLocal(): boolean {
+    return this.stackBuffers?.resultStaysLocal ?? false;
+  }
+
+  /** The stack buffers of a call at `site` that Go's compiler inlines into this function. */
+  inlinedStackBuffers(site: object, resultStaysLocal: boolean): StackBuffers {
+    const { inlined } = (this.stackBuffers ??= newStackBuffers());
+    let buffers = inlined.get(site);
+    if (!buffers) {
+      buffers = newStackBuffers(resultStaysLocal);
+      inlined.set(site, buffers);
+    }
+    return buffers;
   }
 }
 
@@ -177,13 +218,13 @@ export class Runtime implements TracedRuntime<Frame> {
     deferredFor?: Frame,
     /** Receives the frame when the call ends, for reading the entry point's final variables. */
     onExit?: (frame: Frame) => void,
-    resultStaysOnStack = false
+    stackBuffers?: StackBuffers
   ): Value | Value[] {
     this.spend();
     if (this.frames.length >= LIMITS.maxCallDepth) {
       throw new GoFatal('runtime: goroutine stack exceeds 1000000000-byte limit\nfatal error: stack overflow');
     }
-    const frame = new Frame(this, info, cells, callRow, deferredFor, Boolean(info.canInline && resultStaysOnStack));
+    const frame = new Frame(this, info, cells, callRow, deferredFor, stackBuffers);
     for (const [index, { slot, boxed }] of info.params.entries())
       frame.locals[slot] = boxed ? new Cell(args[index]) : args[index];
     this.frames.push(frame);

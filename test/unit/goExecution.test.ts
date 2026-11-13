@@ -253,6 +253,24 @@ func main() {
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+// Go 1.27.3's arm64 rules fuse an addition's second product, unless another such addition in the same function (after
+// inlining) makes common subexpression elimination reorder the operands; a subtraction fuses its subtracted product.
+test.each([
+  ['a sum of two products', '\tfmt.Println(x*x + a*b)', '0.07\n'],
+  ['a sum of two products written the other way', '\tfmt.Println(a*b + x*x)', '0.06999999999999999\n'],
+  ['two sums of the same products', '\tfmt.Println(x*x + a*b, a*b + x*x)', '0.06999999999999999 0.06999999999999999\n'],
+  ['a sum of products in an inlined function', '\tfmt.Println(f(x, a, b))', '0.07\n'],
+  ['sums of products in two inlined calls', '\tfmt.Println(f(x, a, b), f(a, x, b))', '0.06999999999999999 0.07\n'],
+  [
+    'differences and a sum of products',
+    '\tfmt.Println(x*x - a*b, a*b - x*x, x*x + a*b, x*x - a*b)',
+    '-0.049999999999999996 0.049999999999999996 0.07 -0.049999999999999996\n',
+  ],
+])('%s fuses the product Go fuses', (_name, body, stdout) => {
+  const program = `package main\n\nimport "fmt"\n\nvar v = []float64{0.1, 0.2, 0.3}\n\nfunc f(p, q, r float64) float64 { return p*p + q*r }\n\nfunc main() {\n\tx, a, b := v[0], v[1], v[2]\n${body}\n}\n`;
+  expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
+});
+
 test('structs ending in a zero-size field include trailing padding in append capacities', () => {
   const program = `package main
 
@@ -280,6 +298,74 @@ func main() {
     uncaughtException: undefined,
     stdout: '1 1 2 2 16 1 1\n',
   });
+});
+
+// Go 1.27.3's escape analysis, slice optimization pass, and inliner decide whether an append or a []byte conversion
+// uses the 32-byte stack buffer, which shows in the capacities.
+test.each([
+  [
+    'a pointer to an element that stays in the function',
+    'type P struct{ age int }\n\nfunc (p *P) Older() { p.age++ }',
+    '\tvar ps []P\n\tfor i := 0; i < 5; i++ {\n\t\tps = append(ps, P{i})\n\t\tfmt.Print(cap(ps), " ")\n\t}\n\tp := &ps[1]\n\tp.age++\n\tps[2].Older()\n\tfmt.Println(ps[1].age, ps[2].age)',
+    '4 4 4 4 8 2 3\n',
+  ],
+  [
+    'a pointer to an element that escapes',
+    'var sink *int',
+    '\tvar t []int\n\tfor i := 0; i < 5; i++ {\n\t\tt = append(t, i)\n\t\tfmt.Print(cap(t), " ")\n\t}\n\tp := &t[1]\n\tsink = p\n\tfmt.Println(*sink)',
+    '1 2 4 4 8 1\n',
+  ],
+  [
+    'a slice returned after appends in a loop',
+    'func build(n int) []byte {\n\tvar s []byte\n\tfor i := 0; i < n; i++ {\n\t\ts = append(s, byte(i))\n\t}\n\treturn s\n}',
+    '\tx := build(3)\n\ty := build(20)\n\tfmt.Println(cap(x), cap(y))',
+    '8 24\n',
+  ],
+  [
+    'a returned slice whose capacity the function reads',
+    'func build(n int) []int {\n\tvar s []int\n\tfor i := 0; i < n; i++ {\n\t\ts = append(s, i)\n\t\tfmt.Print(cap(s), " ")\n\t}\n\treturn s\n}',
+    '\tfmt.Println(cap(build(5)))',
+    '1 2 3 4 8 8\n',
+  ],
+  [
+    'a range over the slice',
+    '',
+    '\tvar s []int\n\tfor i := 0; i < 3; i++ {\n\t\ts = append(s, i)\n\t\tfmt.Print(cap(s), " ")\n\t}\n\tfor range s {\n\t}\n\tfmt.Println(cap(s))',
+    '1 2 3 3\n',
+  ],
+  [
+    'a slice built by an inlined function',
+    'func ret3() []int { s := []int{}; s = append(s, 1, 2, 3); return s }\nfunc ret5() []int { s := []int{}; s = append(s, 1, 2, 3, 4, 5); return s }\nfunc bytes3() []byte { s := []byte{}; s = append(s, 1, 2, 3); return s }',
+    '\tfmt.Println(cap(ret3()), cap(ret5()), cap(bytes3()))\n\tx := ret3()\n\tfmt.Println(cap(x), x)',
+    '4 6 32\n3 [1 2 3]\n',
+  ],
+  [
+    'an inlined function called in a loop',
+    'func build(n int) []int {\n\tvar s []int\n\tfor i := 0; i < n; i++ {\n\t\ts = append(s, i)\n\t}\n\treturn s\n}',
+    '\tfor n := 1; n <= 3; n++ {\n\t\tfmt.Print(cap(build(n)), " ")\n\t}\n\tfmt.Println(cap(build(3)))',
+    '1 2 4 3\n',
+  ],
+  [
+    'a slice passed to functions, stored, and converted to an interface',
+    'type H struct{ items []int }\n\nfunc count(s []int) int { return len(s) }',
+    '\tvar a, b, c []int\n\tfor i := 0; i < 3; i++ {\n\t\ta = append(a, i)\n\t\tb = append(b, i)\n\t\tc = append(c, i)\n\t\tfmt.Print(cap(a), cap(b), cap(c), " ")\n\t}\n\tvar h H\n\th.items = b\n\tvar x any = c\n\tfmt.Println(count(a), len(h.items), x != nil)',
+    '1 1 4 2 2 4 3 3 4 3 3 true\n',
+  ],
+  [
+    'elements of 16, 24, and 40 bytes',
+    'type T16 struct{ a, b int }\ntype T24 struct{ a, b, c int }\ntype T40 struct{ a, b, c, d, e int }',
+    '\tvar a []T16\n\tvar b []T24\n\tvar c []T40\n\tfor i := 0; i < 3; i++ {\n\t\ta = append(a, T16{})\n\t\tb = append(b, T24{})\n\t\tc = append(c, T40{})\n\t\tfmt.Print(cap(a), cap(b), cap(c), " ")\n\t}\n\tfmt.Println()',
+    '2 1 1 2 2 2 4 4 4 \n',
+  ],
+  [
+    'bytes converted from a string',
+    'func text(n int) string {\n\ts := ""\n\tfor i := 0; i < n; i++ {\n\t\ts += "a"\n\t}\n\treturn s\n}',
+    '\tread := []byte(text(3))\n\twritten := []byte(text(3))\n\twritten[0] = 1\n\tlong := []byte(text(40))\n\tlong[0] = 1\n\tgrown := []byte(text(3))\n\tgrown = append(grown, 1)\n\tshown := []byte(text(3))\n\tfmt.Println(cap(read), cap(written), cap(long), cap(grown), cap(shown), cap([]byte("abc")))\n\tfmt.Println(shown)',
+    '3 32 48 32 8 3\n[97 97 97]\n',
+  ],
+])('the capacity with %s is the one Go reports', (_name, declarations, body, stdout) => {
+  const program = `package main\n\nimport "fmt"\n\n${declarations}\n\nfunc main() {\n${body}\n}\n`;
+  expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
 });
 
 test('copying and growing slices copy struct and array values without breaking shared pointers', () => {

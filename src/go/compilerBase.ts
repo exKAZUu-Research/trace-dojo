@@ -4,6 +4,8 @@ import { type Entity, type FunctionContext, type PackageEntity, type TypeEntity,
 import { substituteInterface } from './generics';
 import type { Exec, FunctionInfo, LocalInfo } from './runtime';
 import { Scope } from './scope';
+import { sizeOf, STACK_BUFFER_SIZE } from './sliceOps';
+import { newSliceTracking } from './slicePass';
 import {
   BASIC,
   COMPARABLE,
@@ -30,6 +32,8 @@ export interface TraceSettings {
 
 let nextTypeParamId = 0;
 
+const NO_SPAN: Span = { row: 0, column: 0 };
+
 /** The shared state of compiling one file: scopes, diagnostics, and the function being compiled. */
 export abstract class CompilerBase {
   protected readonly diagnostics: SourceDiagnostic[] = [];
@@ -40,8 +44,9 @@ export abstract class CompilerBase {
   protected fn: FunctionContext | undefined;
   /** Whether errors are being reported; instances of generic code were checked once already. */
   protected reporting = true;
+  /** The compiled functions by their runtime information, for finding the function a frame runs. */
+  protected readonly functionContexts = new Map<FunctionInfo, FunctionContext>();
   protected runtimeCallCount = 0;
-  protected readonly builtinPanicCalls = new WeakSet<Expression>();
 
   constructor(protected readonly trace: TraceSettings | undefined) {}
 
@@ -124,8 +129,17 @@ export abstract class CompilerBase {
     const local: LocalInfo = { name, slot, type, isReceiver };
     if (name !== '_') fn.info.locals.push(local);
     const entity: VarEntity = { kind: 'var', name, type, span, used: false, boxed: false, owner: fn, slot, local };
+    const under = underlying(type);
+    if (under.kind === 'slice' && sizeOf(under.element) <= STACK_BUFFER_SIZE) {
+      entity.slice = newSliceTracking(fn.loopDepth);
+    }
     this.declare(name, entity, span);
     return entity;
+  }
+
+  /** A variable of the function being compiled that holds no value, which only follows where values go. */
+  protected hiddenVariable(name = '', span: Span = NO_SPAN): VarEntity {
+    return { kind: 'var', name, type: BASIC.invalid, span, used: true, boxed: false, owner: this.fn, slot: -1 };
   }
 
   /** Allocates a slot that no name refers to, such as an unnamed result. */
@@ -146,6 +160,8 @@ export abstract class CompilerBase {
     entity.boxed = true;
     const existing = fn.captures.get(entity);
     if (existing !== undefined) return existing;
+    // Go's slice optimization pass gives up on a variable that a closure refers to.
+    entity.slice?.uses.push({});
     if (fn.parent && fn.parent !== entity.owner) this.capture(entity, fn.parent);
     const index = fn.captures.size;
     fn.captures.set(entity, index);
@@ -164,22 +180,26 @@ export abstract class CompilerBase {
       resultSlots: [],
       params: [],
     };
-    return {
+    const fn: FunctionContext = {
       info,
       parent,
       captures: new Map(),
+      params: [],
       results: [],
       resultVariables: [],
-      returnHolders: [],
       hasNamedResults: false,
-      hasDefer: false,
-      nodeCount: 0,
+      inlineCost: 0,
+      callees: [],
+      notInlinable: false,
       references: new Set(),
-      productOrders: new Map(),
+      products: new Map(),
+      sumsOfProducts: [],
       loopDepth: 0,
       breakDepth: 0,
       recordsSteps: this.trace !== undefined,
     };
+    this.functionContexts.set(info, fn);
+    return fn;
   }
 
   // Types ---------------------------------------------------------------------------------------------------------

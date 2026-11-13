@@ -2,12 +2,23 @@ import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { assignFailure, represent } from './assignability';
 import type { ConstDeclaration, File, FunctionDeclaration, Span, TypeDeclaration, TypeSpec, VarSpec } from './ast';
 import type { TraceSettings } from './compilerBase';
-import type { ConstEntity, FunctionContext, GenericFunc, TypeEntity, VarEntity } from './entities';
+import {
+  type CalleeSummary,
+  completeCalleeSummary,
+  type ConstEntity,
+  type FunctionContext,
+  type GenericFunc,
+  INLINE_BUDGET,
+  INLINE_CALL_COST,
+  newCalleeSummary,
+  type TypeEntity,
+  type VarEntity,
+} from './entities';
 import { mapKeyOf } from './equality';
 import { containsTypeParam, substitute } from './generics';
 import { currentRuntime } from './native';
 import { lookupPackage } from './packages/index';
-import type { FunctionInfo, LocalInfo } from './runtime';
+import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
 import { Scope } from './scope';
 import { STANDARD_PACKAGES } from './standardPackages';
 import { declareValue, StatementCompiler } from './statementCompiler';
@@ -64,7 +75,6 @@ export class ProgramCompiler extends StatementCompiler {
   private totalGenericInstances = 0;
   private readonly methodSpecs = new Map<string, FunctionDeclaration[]>();
   private readonly functionReferences = new Map<unknown, Set<unknown>>();
-  private readonly inlineCandidates: { key: unknown; info: FunctionInfo; eligible: boolean }[] = [];
   private readonly claimedAtomicRows = new Set<number>();
 
   constructor(
@@ -92,7 +102,6 @@ export class ProgramCompiler extends StatementCompiler {
     while (this.pendingGenericChecks.length > 0) (this.pendingGenericChecks.shift() as () => void)();
     for (const initializer of this.globals) initializer.pending?.();
     this.runPending();
-    this.finalizeInlineCandidates();
     this.checkImportsUsed();
     this.checkAtomicAnnotations();
     const main = this.mainFunction();
@@ -111,10 +120,20 @@ export class ProgramCompiler extends StatementCompiler {
     while (this.pendingBodies.length > 0) (this.pendingBodies.shift() as () => void)();
   }
 
-  private finalizeInlineCandidates(): void {
-    for (const { key, info, eligible } of this.inlineCandidates) {
-      info.canInline = eligible && !this.isRecursiveFunction(key);
-    }
+  /** Fills in what calls learn from a compiled body: its parameters, and whether Go's compiler inlines it. */
+  private completeSummary(summary: CalleeSummary, key: unknown, fn: FunctionContext): void {
+    fn.summary = summary;
+    summary.context = fn;
+    completeCalleeSummary(summary, fn.params);
+    let cost: number | undefined;
+    let inlinable: boolean | undefined;
+    summary.cost = () =>
+      (cost ??= fn.callees.reduce(
+        (total, callee) => total + (callee.inlinable() ? callee.cost() : INLINE_CALL_COST),
+        fn.inlineCost
+      ));
+    summary.inlinable = () =>
+      (inlinable ??= !fn.notInlinable && !this.isRecursiveFunction(key) && summary.cost() <= INLINE_BUDGET);
   }
 
   private isRecursiveFunction(target: unknown): boolean {
@@ -401,7 +420,7 @@ export class ProgramCompiler extends StatementCompiler {
         name: method.name,
         pointerReceiver: method.pointerReceiver,
         type,
-        code: {},
+        code: { summary: newCalleeSummary() },
         span: method.span,
       };
       instance.methods.push(instanceMethod);
@@ -489,7 +508,7 @@ export class ProgramCompiler extends StatementCompiler {
           name: declaration.name,
           pointerReceiver: receiver.pointer,
           type,
-          code: {},
+          code: { summary: newCalleeSummary() },
           span: declaration,
         };
         shell.methods.push(method);
@@ -558,13 +577,14 @@ export class ProgramCompiler extends StatementCompiler {
         this.functionReferences.set(method, fn.references);
         if (params.length > 0 && !isInstance) return;
         const { info } = fn;
-        this.inlineCandidates.push({ key: method, info, eligible: !fn.hasDefer && fn.nodeCount <= 80 });
+        const summary = method.code?.summary;
+        if (summary) this.completeSummary(summary, method, fn);
         (method.code as { call?: unknown }).call = (
           receiverValue: Value,
           argValues: Value[],
           callRow?: number,
           deferredFor?: unknown,
-          resultStaysOnStack?: boolean
+          stackBuffers?: StackBuffers
         ) =>
           currentRuntime().call(
             info,
@@ -573,7 +593,7 @@ export class ProgramCompiler extends StatementCompiler {
             callRow,
             deferredFor as never,
             undefined,
-            resultStaysOnStack
+            stackBuffers
           );
       });
     } finally {
@@ -604,7 +624,7 @@ export class ProgramCompiler extends StatementCompiler {
       args: Value[],
       callRow?: number,
       deferredFor?: unknown,
-      resultStaysOnStack?: boolean
+      stackBuffers?: StackBuffers
     ): Value | Value[] =>
       currentRuntime().call(
         state.info as FunctionInfo,
@@ -613,7 +633,7 @@ export class ProgramCompiler extends StatementCompiler {
         callRow,
         deferredFor as never,
         undefined,
-        resultStaysOnStack
+        stackBuffers
       );
     const entity = {
       kind: 'func' as const,
@@ -621,9 +641,10 @@ export class ProgramCompiler extends StatementCompiler {
       type,
       span: declaration,
       declaration,
+      summary: newCalleeSummary(),
       value: () => (value ??= new GoFunc(call)),
-      direct: (args: Value[], callRow: number | undefined, resultStaysOnStack?: boolean) =>
-        call(args, callRow, undefined, resultStaysOnStack),
+      direct: (args: Value[], callRow: number | undefined, stackBuffers?: StackBuffers) =>
+        call(args, callRow, undefined, stackBuffers),
     };
     this.declarePackageName(name, entity, declaration.nameSpan);
     this.pendingSignatures.push(() => {
@@ -644,7 +665,7 @@ export class ProgramCompiler extends StatementCompiler {
       );
       state.info = fn.info;
       this.functionReferences.set(entity, fn.references);
-      this.inlineCandidates.push({ key: entity, info: fn.info, eligible: !fn.hasDefer && fn.nodeCount <= 80 });
+      this.completeSummary(entity.summary, entity, fn);
     });
     if (name === 'main') this.mainEntity = { entity, state, declaration };
   }
@@ -677,16 +698,8 @@ export class ProgramCompiler extends StatementCompiler {
         if (this.hasGenericCycle) return new GoFunc(() => {});
         this.countGenericInstance(declaration);
         const state: { info?: FunctionInfo } = {};
-        const instance = new GoFunc((argValues, callRow, deferredFor, resultStaysOnStack) =>
-          currentRuntime().call(
-            state.info as FunctionInfo,
-            [],
-            argValues,
-            callRow,
-            deferredFor as never,
-            undefined,
-            resultStaysOnStack
-          )
+        const instance = new GoFunc((argValues, callRow, deferredFor) =>
+          currentRuntime().call(state.info as FunctionInfo, [], argValues, callRow, deferredFor as never)
         );
         cache.set(key, instance);
         this.pendingBodies.push(() => {
@@ -702,20 +715,14 @@ export class ProgramCompiler extends StatementCompiler {
               () => {
                 const type = this.resolveSignature(declaration.signature).type;
                 this.fn = undefined;
-                const fn = this.functionBody(
+                state.info = this.functionBody(
                   name,
                   declaration.signature,
                   type,
                   declaration.body as NonNullable<FunctionDeclaration['body']>,
                   undefined,
                   this.isAtomic(declaration)
-                );
-                state.info = fn.info;
-                this.inlineCandidates.push({
-                  key: entity,
-                  info: fn.info,
-                  eligible: !fn.hasDefer && fn.nodeCount <= 80,
-                });
+                ).info;
               }
             );
           } finally {

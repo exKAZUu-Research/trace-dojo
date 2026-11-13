@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { LIMITS } from '../interpreter/limits';
 import { assignFailure, constantValue, convertible, represent } from './assignability';
-import type { CompositeLiteral, Expression, Span } from './ast';
+import { type CompositeLiteral, type Expression, type Span, stripParens } from './ast';
 import { CompilerBase } from './compilerBase';
 import {
   binaryConstant,
@@ -14,16 +14,29 @@ import {
   shiftConstant,
   unaryConstant,
 } from './constants';
-import { conversion, stringToRunesWithMode, toInterface } from './conversions';
-import { type Entity, linkEscapeHook, linkEscapeSource, markEscapes, type VarEntity } from './entities';
+import { conversion, stringToBytesWithMode, stringToRunesWithMode, toInterface } from './conversions';
+import {
+  type Entity,
+  type FunctionContext,
+  linkEscapeSource,
+  linkTemporary,
+  markEscapes,
+  markWritten,
+  type ProductSource,
+  staysLocal,
+  type Temporary,
+  type VarEntity,
+} from './entities';
 import { equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
 import { currentRuntime } from './native';
-import type { Operand } from './operand';
+import type { Operand, Storage } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
-import { type Eval, type Frame, readLocal, writeLocal } from './runtime';
+import { type Eval, type Frame, type FunctionInfo, readLocal, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
+import { moveToHeap } from './sliceOps';
+import { sliceMode, type SliceTracking, type SliceUse } from './slicePass';
 import {
   BASIC,
   type BasicKind,
@@ -83,7 +96,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per expression kind.
   expression(expression: Expression): Operand {
-    if (this.fn) this.fn.nodeCount++;
+    if (this.fn) this.fn.inlineCost++;
     switch (expression.kind) {
       case 'name': {
         return this.name(expression, true);
@@ -232,7 +245,65 @@ export abstract class ExpressionCompiler extends CompilerBase {
       this.error(expression, `${name} は宣言されていません。`);
       return this.invalid(expression);
     }
+    if (entity.kind === 'var' && entity.slice && entity.owner === this.fn) {
+      const sliceUse: SliceUse = {};
+      entity.slice.uses.push(sliceUse);
+      this.sliceUses.set(expression, { tracking: entity.slice, use: sliceUse });
+    }
     return this.entityOperand(entity, expression, use);
+  }
+
+  /** Each mention of a local slice variable that Go's slice optimization pass tracks, by its name expression. */
+  private readonly sliceUses = new WeakMap<Expression, { tracking: SliceTracking; use: SliceUse }>();
+
+  /** The tracked slice variable an expression names, unless it is something else. */
+  protected sliceUseOf(syntax: Expression): { tracking: SliceTracking; use: SliceUse } | undefined {
+    return this.sliceUses.get(stripParens(syntax));
+  }
+
+  /** Records that the slice optimization pass understands a mention of a tracked slice variable. */
+  protected understandSlice(syntax: Expression, understood: () => boolean = always): SliceTracking | undefined {
+    const found = this.sliceUseOf(syntax);
+    if (found) found.use.understood = understood;
+    return found?.tracking;
+  }
+
+  /**
+   * A use of a tracked slice variable that lets its array be shared, before which Go's compiler moves the array out of
+   * the stack buffer; `applies` tells whether the use is a transition, which for a call depends on inlining.
+   */
+  protected sliceTransition(syntax: Expression, operand: Operand, applies: () => boolean = always): Operand {
+    const found = this.sliceUseOf(syntax);
+    const { store } = operand;
+    if (!found || !store) return operand;
+    found.use.understood = always;
+    const { tracking } = found;
+    tracking.transitions.push({ loopDepth: (this.fn as FunctionContext).loopDepth, applies });
+    const read = operand.eval;
+    const move = this.moveSliceToHeap(operand.type, tracking, applies);
+    return {
+      ...operand,
+      eval: (frame) => {
+        const value = read(frame);
+        const moved = move(frame, value);
+        if (moved !== value) store(frame, moved);
+        return moved;
+      },
+    };
+  }
+
+  /** Go's move2heap, which a transition of a variable in the `move` mode applies to the variable's slice. */
+  protected moveSliceToHeap(
+    type: Type,
+    tracking: SliceTracking,
+    applies: () => boolean
+  ): (frame: Frame, value: Value) => Value {
+    const { element } = underlying(type) as Extract<Type, { kind: 'slice' }>;
+    const zero = this.zeroOf(element);
+    return (frame, value) => {
+      if (sliceMode(tracking) !== 'move' || !applies()) return value;
+      return moveToHeap(value as Slice | undefined, element, zero, (count) => frame.runtime.allocate(count));
+    };
   }
 
   protected entityOperand(entity: Entity, span: Span, use: boolean): Operand {
@@ -312,19 +383,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
           right: (frame) => frame.locals[factors.right] as Value,
           enabled: () => !entity.boxed && !entity.writes,
           constant: entity.definedAsConstant,
-          order: factors.order,
+          source: factors.source,
         },
         ssaConstant:
           entity.definedAsConstant &&
           (() => !entity.boxed && !entity.writes && (entity.definedAsConstant as () => boolean)()),
         variable: { markUsed, entity },
         backingVars: [entity],
+        addressStorage: { backingVars: [entity] },
         eval: (frame) => readLocal(frame, slot),
         prepareStore: (frame) => (value) => writeLocal(frame, slot, value),
         store: (frame, value) => writeLocal(frame, slot, value),
         addressOf: () => {
           entity.boxed = true;
-          markEscapes(entity);
           return (frame) => new Pointer(frame.locals[slot] as Cell, 'v');
         },
       };
@@ -342,60 +413,56 @@ export abstract class ExpressionCompiler extends CompilerBase {
       span,
       variable: { markUsed, entity },
       backingVars: [entity],
+      addressStorage: { backingVars: [entity] },
       eval: (frame) => frame.cells[index].v,
       prepareStore,
       store: (frame, value) => prepareStore(frame)(value),
-      addressOf: () => {
-        markEscapes(entity);
-        return (frame) => new Pointer(frame.cells[index], 'v');
-      },
+      addressOf: () => (frame) => new Pointer(frame.cells[index], 'v'),
     };
   }
 
-  protected escapeOperand(operand: Operand): void {
-    const variable = operand.variable?.entity;
-    if (variable && operand.type === variable.type) markEscapes(variable);
+  protected escapeOperand(operand: Storage): void {
     if (operand.backingVars) {
       for (const entity of operand.backingVars) markEscapes(entity);
     }
-    if (operand.nonEscaping) {
-      operand.nonEscaping.escapes = true;
-      operand.nonEscaping.onEscape?.();
-    }
+    if (operand.nonEscaping) operand.nonEscaping.escapes = true;
   }
 
-  protected recordLocalEscapeAlias(operand: Operand, target: VarEntity): void {
+  /** Records that the program may write the elements of the array a slice value refers to. */
+  protected writeOperand(operand: Storage): void {
+    if (operand.backingVars) {
+      for (const entity of operand.backingVars) markWritten(entity);
+    }
+    if (operand.nonEscaping) operand.nonEscaping.written = true;
+  }
+
+  /** Makes the local storage a value refers to share what happens to the variable `target` that holds it. */
+  protected recordLocalEscapeAlias(operand: Storage, target: VarEntity): void {
     if (operand.backingVars) {
       for (const source of operand.backingVars) linkEscapeSource(source, target);
     }
-    const nonEscaping = operand.nonEscaping;
-    if (nonEscaping) {
-      linkEscapeHook((viaReturn) => {
-        if (viaReturn && !nonEscaping.onEscape) {
-          nonEscaping.viaReturn = true;
-          return;
-        }
-        nonEscaping.escapes = true;
-        nonEscaping.onEscape?.();
-      }, target);
-    }
+    if (operand.nonEscaping) linkTemporary(operand.nonEscaping, target);
   }
 
   // Conversions -----------------------------------------------------------------------------------------------------
 
   /**
    * Converts an operand for storing into a value of `target`: an untyped constant takes the type, a concrete value
-   * enters an interface, and structs and arrays are copied. Reports the mismatch as `context` says.
+   * enters an interface, and structs and arrays are copied. Reports the mismatch as `context` says. The value escapes
+   * unless `holder` is the local variable that receives it or links it to where it goes.
    */
-  protected assign(operand: Operand, target: Type, context: string, targetLocal?: VarEntity): Eval {
+  protected assign(
+    operand: Operand,
+    target: Type,
+    context: string,
+    holder?: VarEntity | ((value: Operand) => void)
+  ): Eval {
     if (this.isInvalid(operand) || target === BASIC.invalid) return () => {};
     let value = this.asValue(operand);
     if (this.isInvalid(value)) return () => {};
-    if (targetLocal && targetLocal.owner !== undefined && !isInterface(target)) {
-      this.recordLocalEscapeAlias(value, targetLocal);
-    } else {
-      this.escapeOperand(value);
-    }
+    if (typeof holder === 'function') holder(value);
+    else if (holder?.owner === undefined) this.escapeOperand(value);
+    else this.recordLocalEscapeAlias(value, holder);
     if (value.resolveUntyped) {
       value = value.resolveUntyped(isInterface(target) ? defaultType(value.type) : target);
       if (this.isInvalid(value)) return () => {};
@@ -649,10 +716,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(expression);
     }
     operand.variable?.markUsed();
+    operand.addressTaken?.();
     return {
       mode: 'value',
       type: { kind: 'pointer', element: operand.type },
       span: expression,
+      backingVars: operand.addressStorage?.backingVars,
+      nonEscaping: operand.addressStorage?.nonEscaping,
       eval: operand.addressOf(),
     };
   }
@@ -680,6 +750,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       },
       store: (frame, value) => pointer(frame).store(value),
       addressOf: () => pointer,
+      addressStorage: operand,
     };
   }
 
@@ -764,7 +835,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type,
         span: expression,
         eval: (frame) => apply(readLeft(frame), readRight(frame)),
-        product: { ...factors, constant: ssaConstant, order: this.productOrder(operator, left, right) },
+        product: { ...factors, constant: ssaConstant, source: this.productSource(operator, left, right) },
         ssaConstant,
       };
     }
@@ -821,47 +892,63 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return round(fma(negateProduct ? -x : x, y, negateAddend ? -addend : addend));
       },
     });
-    const plain = (): Operand => {
-      const apply = arithmetic(operator, type);
-      const readLeft = left.eval;
-      const readRight = right.eval;
-      return { mode: 'value', type, span, eval: (frame) => apply(readLeft(frame), readRight(frame)) };
-    };
-    // A product through a variable fuses only while the variable keeps its single definition, and a product of
-    // constants is computed before the program runs, so it never fuses.
-    const choose = (fusedOperand: Operand, product: NonNullable<Operand['product']>): Operand => {
-      const { enabled = always, constant = never } = product;
-      const unfused = plain().eval;
-      const fusedEval = fusedOperand.eval;
-      return {
-        ...fusedOperand,
-        eval: (frame) => (enabled() && !constant() ? fusedEval(frame) : unfused(frame)),
-        ssaConstant: bothConstant(left, right),
-      };
-    };
-    // Of two products, an addition fuses the one computed first, which Go's common subexpression elimination orders
-    // first; a subtraction fuses the subtracted one, as its rewrite rules try that form first.
-    const leftFirst = !right.product || (left.product !== undefined && left.product.order <= right.product.order);
-    if (left.product && (operator === '-' ? !right.product : leftFirst)) {
-      return choose(fused(right.eval, left.product, true, false, operator === '-'), left.product);
+    const leftProduct = left.product;
+    const rightProduct = right.product;
+    if (!leftProduct && !rightProduct) return undefined;
+    const apply = arithmetic(operator, type);
+    const readLeft = left.eval;
+    const readRight = right.eval;
+    const plain: Eval = (frame) => apply(readLeft(frame), readRight(frame));
+    const fuseLeft = leftProduct && fused(readRight, leftProduct, true, false, operator === '-').eval;
+    const fuseRight = rightProduct && fused(readLeft, rightProduct, false, operator === '-', false).eval;
+    const fn = this.fn;
+    if (operator === '+' && leftProduct && rightProduct && isBasic(type, 'float64') && fn) {
+      fn.sumsOfProducts.push(() => fuses(leftProduct) && fuses(rightProduct));
     }
-    if (right.product) return choose(fused(left.eval, right.product, false, operator === '-', false), right.product);
-    return undefined;
+    // Go's arm64 rules try `a - x*y` before `x*y - a`, and an addition's second operand before its first. Its generic
+    // common subexpression elimination reorders the operands of an addition of two products only when another such
+    // float64 addition ends up in the same function after inlining: it then puts second, and so fuses, a product
+    // computed more than once, or else the product computed first.
+    const contexts = this.functionContexts;
+    const prefersLeft = (frame: Frame): boolean => {
+      if (operator === '-' || !leftProduct || !rightProduct || !fn || !sumsGrouped(contexts, fn, frame)) return false;
+      const { source: a } = leftProduct;
+      const { source: b } = rightProduct;
+      if (a.count > 1 !== b.count > 1) return a.count > 1;
+      return a.order <= b.order;
+    };
+    return {
+      mode: 'value',
+      type,
+      span,
+      eval: (frame) => {
+        const leftFuses = leftProduct !== undefined && fuses(leftProduct);
+        const rightFuses = rightProduct !== undefined && fuses(rightProduct);
+        if (leftFuses && (!rightFuses || prefersLeft(frame))) return (fuseLeft as Eval)(frame);
+        if (rightFuses) return (fuseRight as Eval)(frame);
+        return plain(frame);
+      },
+      ssaConstant: bothConstant(left, right),
+    };
   }
 
   /**
-   * The position of a product among those the function computes, where the same variables or constants multiplied
-   * again keep their first position, as Go's common subexpression elimination keeps the first value.
+   * The value Go's common subexpression elimination gives a product, where the same variables or constants
+   * multiplied again are the same value.
    */
-  private productOrder(operator: string, left: Operand, right: Operand): number {
-    const orders = this.fn?.productOrders ?? new Map<string, number>();
+  private productSource(operator: string, left: Operand, right: Operand): ProductSource {
+    const products = this.fn?.products ?? new Map<string, ProductSource>();
     const a = productKeyOf(left);
     const b = productKeyOf(right);
-    const key = a !== undefined && b !== undefined ? [operator, ...[a, b].toSorted()].join(' ') : `#${orders.size}`;
-    const existing = orders.get(key);
-    if (existing !== undefined) return existing;
-    orders.set(key, orders.size);
-    return orders.size - 1;
+    const key = a !== undefined && b !== undefined ? [operator, ...[a, b].toSorted()].join(' ') : `#${products.size}`;
+    const existing = products.get(key);
+    if (existing) {
+      existing.count++;
+      return existing;
+    }
+    const source = { order: products.size, count: 1 };
+    products.set(key, source);
+    return source;
   }
 
   private foldBinary(span: Span, operator: string, a: Constant, b: Constant, type: Type): Operand {
@@ -1272,14 +1359,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (value === undefined) nilPointerPanic();
       return value as GoStruct;
     };
-    const throughPointer = underlying(operand.type).kind === 'pointer' || this.pathHasPointer(operand.type, steps);
+    const viaPointer = underlying(operand.type).kind === 'pointer';
+    const throughPointer = viaPointer || this.pathHasPointer(operand.type, steps);
     const addressable = operand.mode === 'variable' || throughPointer;
-    const escapeAddress = throughPointer
-      ? undefined
-      : () => {
-          operand.escapeAddress?.();
-          this.escapeOperand(operand);
-        };
+    let addressStorage: Storage | undefined;
+    if (!throughPointer) addressStorage = operand.addressStorage;
+    else if (viaPointer && steps.length === 0) {
+      addressStorage = operand;
+    }
     return {
       mode: addressable ? 'variable' : 'value',
       type,
@@ -1299,13 +1386,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
             target.fields[last] = writeInPlace(target.fields[last], value);
           }
         : undefined,
-      addressOf: addressable
-        ? () => {
-            escapeAddress?.();
-            return (frame) => new Pointer(container(frame).fields, last);
-          }
-        : undefined,
-      escapeAddress,
+      addressOf: addressable ? () => (frame) => new Pointer(container(frame).fields, last) : undefined,
+      addressStorage,
+      addressTaken: throughPointer ? undefined : operand.addressTaken,
+      onWrite: throughPointer ? undefined : operand.onWrite,
     };
   }
 
@@ -1390,20 +1474,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (at < 0 || at >= length) indexPanic(at, length);
         return [array.elements, at];
       };
-      const escapeAddress = viaPointer
-        ? undefined
-        : () => {
-            operand.escapeAddress?.();
-            this.escapeOperand(operand);
-          };
-      return elementOperand(
-        expression,
-        type.element,
-        operand,
-        operand.mode === 'variable' || viaPointer,
-        element,
-        escapeAddress
-      );
+      return elementOperand(expression, type.element, operand, operand.mode === 'variable' || viaPointer, element, {
+        storage: viaPointer ? operand : operand.addressStorage,
+        addressTaken: viaPointer ? undefined : operand.addressTaken,
+        onWrite: viaPointer ? undefined : operand.onWrite,
+      });
     }
     if (type.kind === 'slice') {
       const index = this.indexValue(indexExpression);
@@ -1415,11 +1490,17 @@ export abstract class ExpressionCompiler extends CompilerBase {
         if (at < 0 || at >= length) indexPanic(at, length);
         return [(slice as Slice).array, (slice as Slice).offset + at];
       };
-      const escapeAddress = (): void => {
-        operand.escapeAddress?.();
-        this.escapeOperand(operand);
-      };
-      return elementOperand(expression, type.element, operand, true, element, escapeAddress);
+      const tracked = this.understandSlice(expression.operand);
+      return elementOperand(expression, type.element, operand, true, element, {
+        storage: operand,
+        // The pointer may write the element, and Go's slice optimization pass gives up on a slice whose element's
+        // address the program takes.
+        addressTaken: () => {
+          this.writeOperand(operand);
+          if (tracked) this.understandSlice(expression.operand, never);
+        },
+        onWrite: () => this.writeOperand(operand),
+      });
     }
     this.error(expression, `${describeType(operand.type)} 型の値には添字を付けられません。`);
     return this.invalid(expression);
@@ -1741,28 +1822,36 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.invalid(span);
     }
     const targetUnder = underlying(target);
-    if (isString(source.type) && targetUnder.kind === 'slice' && isBasic(targetUnder.element, 'int32')) {
+    const toRunes = targetUnder.kind === 'slice' && isBasic(targetUnder.element, 'int32');
+    const toBytes = targetUnder.kind === 'slice' && isBasic(targetUnder.element, 'uint8');
+    if (isString(source.type) && (toRunes || toBytes)) {
       if (operand.mode === 'constant' && operand.constant?.kind === 'string') {
         const text = operand.constant.value;
-        const convertConstantRunes = stringToRunesWithMode('constant');
+        const convertConstant = toRunes ? stringToRunesWithMode('constant') : stringToBytesWithMode('exact');
         return {
           mode: 'value',
           type: target,
           span,
-          eval: (frame) => convertConstantRunes(text, frame.runtime),
+          eval: (frame) => convertConstant(text, frame.runtime),
           ssaConstant: always,
         };
       }
-      const nonEscaping = { escapes: false };
-      const heapRunes = stringToRunesWithMode('heap');
-      const stackRunes = stringToRunesWithMode('stack');
+      // Go's compiler allocates the elements on the stack while they stay in the function, and for bytes the program
+      // only reads, reuses the string's own bytes.
+      const nonEscaping: Temporary = { escapes: false, written: false };
+      const heap = toRunes ? stringToRunesWithMode('heap') : stringToBytesWithMode('heap');
+      const stack = toRunes ? stringToRunesWithMode('stack') : stringToBytesWithMode('stack');
+      const exact = toRunes ? stack : stringToBytesWithMode('exact');
       const read = source.eval;
       return {
         mode: 'value',
         type: target,
         span,
         nonEscaping,
-        eval: (frame) => (nonEscaping.escapes ? heapRunes : stackRunes)(read(frame), frame.runtime),
+        eval: (frame) => {
+          const convert = !staysLocal(nonEscaping, frame) ? heap : nonEscaping.written ? stack : exact;
+          return convert(read(frame), frame.runtime);
+        },
         ssaConstant: source.ssaConstant,
       };
     }
@@ -1837,7 +1926,7 @@ function elementOperand(
   operand: Operand,
   addressable: boolean,
   element: (frame: Frame) => [Value[], number],
-  escapeAddress?: () => void
+  address: { storage?: Storage; addressTaken?: () => void; onWrite?: () => void }
 ): Operand {
   return {
     mode: addressable ? 'variable' : 'value',
@@ -1862,13 +1951,10 @@ function elementOperand(
           elements[at] = writeInPlace(elements[at], value);
         }
       : undefined,
-    addressOf: addressable
-      ? () => {
-          escapeAddress?.();
-          return (frame) => new Pointer(...element(frame));
-        }
-      : undefined,
-    escapeAddress,
+    addressOf: addressable ? () => (frame) => new Pointer(...element(frame)) : undefined,
+    addressStorage: address.storage,
+    addressTaken: address.addressTaken,
+    onWrite: address.onWrite,
   };
 }
 
@@ -1912,6 +1998,53 @@ function isTrivialFactor(value: number | undefined): boolean {
 
 const always = (): boolean => true;
 const never = (): boolean => false;
+
+const groupedSums = new WeakMap<FunctionContext, number>();
+
+/**
+ * Whether the function running in the frame shares its float64 additions of two products with another, once Go's
+ * compiler inlines it into its callers and its callees into it, which makes common subexpression elimination order
+ * their operands.
+ */
+function sumsGrouped(contexts: ReadonlyMap<FunctionInfo, FunctionContext>, fn: FunctionContext, frame: Frame): boolean {
+  let root = fn;
+  const { frames } = frame.runtime;
+  for (let index = frames.lastIndexOf(frame) - 1; index >= 0 && inlinable(root); index--) {
+    const caller = contexts.get(frames[index].info);
+    if (!caller || !root.summary || !caller.callees.includes(root.summary)) break;
+    root = caller;
+  }
+  let count = groupedSums.get(root);
+  if (count === undefined) {
+    count = countSums(root, new Set());
+    groupedSums.set(root, count);
+  }
+  return count > 1;
+}
+
+/** The float64 additions of two products in a function, counting each call inlined into it once per call. */
+function countSums(fn: FunctionContext, inlining: ReadonlySet<FunctionContext>): number {
+  let count = fn.sumsOfProducts.filter((sum) => sum()).length;
+  for (const { context } of fn.callees) {
+    if (context && !inlining.has(context) && inlinable(context)) {
+      count += countSums(context, new Set([...inlining, fn]));
+    }
+  }
+  return count;
+}
+
+function inlinable(fn: FunctionContext): boolean {
+  return fn.summary?.inlinable() ?? false;
+}
+
+/**
+ * Whether a product reaches the addition as a multiplication: through a variable only while it keeps its single
+ * definition, and not when both factors are constants, which Go's compiler multiplies before the program runs.
+ */
+function fuses(product: NonNullable<Operand['product']>): boolean {
+  const { enabled = always, constant = never } = product;
+  return enabled() && !constant();
+}
 
 /** Whether both operands are constants to Go's compiler, which then computes the operation before the program runs. */
 function bothConstant(left: Operand, right: Operand): (() => boolean) | undefined {

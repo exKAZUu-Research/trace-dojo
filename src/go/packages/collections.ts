@@ -385,14 +385,7 @@ function cloneSlice(value: Value, element: Type): Value {
   const values = sliceValues(value);
   if (values.length === 0) return new Slice([], 0, 0, 0);
   const zero = zeroValueOf(element);
-  return appendValues(
-    new Slice([], 0, 0, 0),
-    values,
-    element,
-    zero,
-    (count) => allocateElements(count, element),
-    false
-  );
+  return appendValues(new Slice([], 0, 0, 0), values, element, zero, (count) => allocateElements(count, element));
 }
 
 const SEQ_YIELD = (element: Type): FuncType => funcType([element], [BASIC.bool]);
@@ -404,7 +397,7 @@ function appendSeq(initial: Slice | undefined, seq: Value, element: Type): Slice
   let result = initial;
   callFunction(seq, [
     new GoFunc(([value]) => {
-      result = appendValues(result, [value], element, zero, (count) => allocateElements(count, element), false);
+      result = appendValues(result, [value], element, zero, (count) => allocateElements(count, element));
       return true;
     }),
   ]);
@@ -642,7 +635,7 @@ const slicesMembers: Record<string, Entity> = {
         if (totalBig > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
         const total = Number(totalBig);
         const element = elementTypeOf(types);
-        const capacity = grownCapacity(0, total, element, false);
+        const capacity = grownCapacity(0, total, element);
         allocateElements(capacity, element);
         spendFor(capacity);
         const zero = zeroValueOf(element);
@@ -782,7 +775,7 @@ function insert(slice: Value, at: number, values: Value[], types: Type[]): Value
   const tail = current.values().slice(at).map(copyValue);
   if (length + values.length > current.capacity) {
     const newLength = length + values.length;
-    const newCapacity = grownCapacity(current.capacity, newLength, element, false);
+    const newCapacity = grownCapacity(current.capacity, newLength, element);
     alloc(newCapacity);
     spendFor(newCapacity);
     const array: Value[] = current.values().slice(0, at).map(copyValue);
@@ -930,7 +923,7 @@ Object.assign(slicesMembers, {
         if (BigInt(length) + nBig > BigInt(LIMITS.maxSlots)) allocate(LIMITS.maxSlots + 1);
         const n = Number(nBig);
         const element = elementTypeOf(types);
-        const newCapacity = grownCapacity(capacity, length + n, element, false);
+        const newCapacity = grownCapacity(capacity, length + n, element);
         allocateElements(newCapacity, element);
         spendFor(newCapacity);
         const zero = zeroValueOf(element);

@@ -1,19 +1,20 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { constantIdentityKey, represent } from './assignability';
-import type {
-  Block,
-  ConstDeclaration,
-  Expression,
-  Parameter,
-  SignatureSyntax,
-  SimpleStatement,
-  Span,
-  Statement,
-  TypeDeclaration,
-  VarDeclaration,
+import {
+  type Block,
+  type ConstDeclaration,
+  type Expression,
+  type Parameter,
+  type SignatureSyntax,
+  type SimpleStatement,
+  type Span,
+  type Statement,
+  stripParens,
+  type TypeDeclaration,
+  type VarDeclaration,
 } from './ast';
 import { CallCompiler } from './callCompiler';
-import { type FunctionContext, linkEscapeHook, linkEscapeSource, type VarEntity } from './entities';
+import { type FunctionContext, linkEscapeSource, linkTemporary, markReturned, type VarEntity } from './entities';
 import { equalityOf } from './equality';
 import { runesOf } from './literals';
 import { dynamicMethod, invokeMethod, receiverFor } from './methods';
@@ -36,6 +37,7 @@ import {
 } from './runtime';
 import { nilPointerPanic, panicNilValue } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
+import type { SliceTracking } from './slicePass';
 import {
   ANY,
   BASIC,
@@ -122,6 +124,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per statement kind.
   protected statement(statement: Statement): Exec {
+    (this.fn as FunctionContext).inlineCost++;
     const exec = this.statementBody(statement);
     return (frame) => {
       frame.runtime.spend();
@@ -237,6 +240,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (this.isInvalid(target)) return () => {};
     if (!this.isAssignable(target, statement.operand)) return () => {};
     target.variable?.markUsed();
+    countWrite(target);
     if (!isNumericType(target.type)) {
       this.error(
         statement,
@@ -322,6 +326,9 @@ export abstract class StatementCompiler extends CallCompiler {
       return inner.kind === 'name' ? targets[index]?.variable?.entity : undefined;
     };
     const values = this.rightSide(statement, right, left.length, typeOf, undefined, undefined, localAt);
+    for (const [index, target] of left.entries()) {
+      this.sliceAssignment(target, right.length === left.length ? right[index] : undefined);
+    }
     if (!values) return () => {};
     const prepares = values.map((_, index) => prepareFor(index));
     const exec: Exec = (frame) => {
@@ -332,6 +339,38 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     const createsObjects = right.length === left.length && right.every((value) => this.createsObject(value));
     return this.withStep(statement, exec, createsObjects);
+  }
+
+  /**
+   * `s = v` for a tracked slice variable s, which the slice optimization pass understands when v is nil, a slice
+   * literal, `s[i:j]`, or `append(s, ...)`.
+   */
+  private sliceAssignment(target: Expression, value: Expression | undefined): void {
+    const tracking = this.sliceUseOf(target)?.tracking;
+    if (!tracking || !value) return;
+    const inner = stripParens(value);
+    const isTarget = (syntax: Expression | undefined): boolean =>
+      syntax !== undefined && this.sliceUseOf(syntax)?.tracking === tracking;
+    const callee = inner.kind === 'call' ? stripParens(inner.callee) : undefined;
+    if (inner.kind === 'name' && inner.name === 'nil') {
+      this.understandSlice(target);
+    } else if (inner.kind === 'composite') {
+      this.understandSlice(target);
+      tracking.capReads.push(() => true);
+    } else if (inner.kind === 'slice' && isTarget(inner.operand)) {
+      this.understandSlice(target);
+      this.understandSlice(inner.operand);
+      tracking.capReads.push(() => true);
+    } else if (
+      inner.kind === 'call' &&
+      callee?.kind === 'name' &&
+      callee.name === 'append' &&
+      isTarget(inner.args[0])
+    ) {
+      this.understandSlice(target);
+      this.understandSlice(inner.args[0]);
+      tracking.appendWeight += 1 + (this.fn as FunctionContext).loopDepth - tracking.declDepth;
+    }
   }
 
   /** Whether an expression only creates an object, which `Operand.createsObject` recorded when it compiled. */
@@ -379,7 +418,10 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     if (right.length === count) {
       return right.map((expression, index) => {
-        const operand = index === 0 && precompiled ? precompiled : this.expression(expression);
+        const compiled = index === 0 && precompiled ? precompiled : this.expression(expression);
+        // Assigning or returning a slice variable lets its array be shared, unless it converts to an interface.
+        const target = typeOf(index);
+        const operand = target && isInterface(target) ? compiled : this.sliceTransition(expression, compiled);
         if (operand.createsObject || (operand.isCall && this.isConstructorCall(expression)))
           this.creations.add(expression);
         if (operand.type.kind === 'tuple') {
@@ -407,7 +449,13 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private discardTarget(span: Span): VarEntity {
-    return { kind: 'var', name: '_', type: BASIC.invalid, span, used: true, boxed: false, owner: this.fn, slot: -1 };
+    return this.hiddenVariable('_', span);
+  }
+
+  private resultHolder(): VarEntity {
+    const holder = this.hiddenVariable();
+    markReturned(holder);
+    return holder;
   }
 
   private isConstructorCall(expression: Expression): boolean {
@@ -514,11 +562,13 @@ export abstract class StatementCompiler extends CallCompiler {
         }
         const operand = this.variableOperand(entity, span);
         countWrite(operand);
+        if (entity.owner === this.fn) untrackSlice(entity);
         return operand.prepareStore ?? ((frame) => (value) => operand.store?.(frame, value));
       }
       const type = types[index] ?? BASIC.invalid;
       if (isUntyped(type)) this.error(span, `${name} の型を決められません（nil には型がありません）。`);
       const variable = this.declareLocal(name, type, span);
+      sliceDeclaration(variable, right.length === left.length ? right[index] : undefined);
       const holder = holders[index];
       if (holder !== 'discard') transferEscapeLinks(holder, variable);
       if (single) variable.definedAsConstant = definedAsConstant;
@@ -543,7 +593,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const left = this.hiddenSlot();
     const right = this.hiddenSlot();
     const variable = this.declareLocal(name.name, operand.type, name.span);
-    variable.productFactors = { left, right, order: product.order };
+    variable.productFactors = { left, right, source: product.source };
     variable.definedAsConstant = operand.ssaConstant;
     const multiply = arithmetic('*', operand.type);
     return this.withStep(
@@ -591,6 +641,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const type = declaredType ?? types[index] ?? BASIC.invalid;
         if (isUntyped(type)) this.error(name, `${name.name} の型を決められません（nil には型がありません）。`);
         const variable = this.declareLocal(name.name, type, name);
+        sliceDeclaration(variable, spec.values.length === spec.names.length ? spec.values[index] : undefined);
         const holder = holders[index];
         if (holder !== 'discard') transferEscapeLinks(holder, variable);
         return variable;
@@ -714,7 +765,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private rangeStatement(statement: Extract<Statement, { kind: 'range' }>): Exec {
-    const range = this.value(statement.range);
+    // The loop keeps the slice's array, which lets it be shared.
+    const range = this.sliceTransition(statement.range, this.value(statement.range));
     const source = this.isInvalid(range) ? undefined : this.rangeSource(statement, range);
     if (!source) {
       this.declareRangeTargets(statement, BASIC.invalid, BASIC.invalid);
@@ -812,6 +864,7 @@ export abstract class StatementCompiler extends CallCompiler {
           return undefined;
         }
         const variable = this.declareLocal(target.name, type, target);
+        untrackSlice(variable);
         const copy = isValueKind(type);
         return (frame) => (value) => declareValue(frame, variable, copy ? copyValue(value) : value);
       }
@@ -1065,6 +1118,7 @@ export abstract class StatementCompiler extends CallCompiler {
           const single = types.length === 1 && types[0] !== undefined ? types[0] : operandType;
           binding = this.declareLocal(statement.binding.name, single, statement.binding);
           binding.quiet = true;
+          untrackSlice(binding);
           bindings.push(binding);
         }
         return this.statements(typeCase.body);
@@ -1087,15 +1141,31 @@ export abstract class StatementCompiler extends CallCompiler {
       if (results.length > 0 && !fn.hasNamedResults) {
         this.error(statement, 'return 文に値が足りません。');
       }
-      if (fn.hasNamedResults) this.checkShadowedResults(statement);
-      return () => RETURN;
+      if (!fn.hasNamedResults) return () => RETURN;
+      this.checkShadowedResults(statement);
+      const moves = fn.resultVariables.flatMap((variable) =>
+        variable?.slice ? [this.namedResultTransition(variable, variable.slice)] : []
+      );
+      return (frame) => {
+        for (const move of moves) move(frame);
+        return RETURN;
+      };
     }
     if (results.length === 0) {
       for (const result of statement.results) this.expression(result);
       this.error(statement, '結果を返さない関数の return 文には、値を書けません。');
       return () => RETURN;
     }
-    const values = this.rightSide(statement, statement.results, results.length, (index) => results[index]);
+    const holder = (fn.resultHolder ??= this.resultHolder());
+    const values = this.rightSide(
+      statement,
+      statement.results,
+      results.length,
+      (index) => results[index],
+      undefined,
+      undefined,
+      () => holder
+    );
     if (!values) return () => RETURN;
     const slots = fn.info.resultSlots;
     return (frame) => {
@@ -1106,6 +1176,25 @@ export abstract class StatementCompiler extends CallCompiler {
         else frame.locals[slot] = writeInPlace(current as Value, evaluated[index]);
       }
       return RETURN;
+    };
+  }
+
+  /**
+   * A bare return of a tracked slice result, which lets its array be shared as `return s` does, unless Go's compiler
+   * inlines the function, where the result variable becomes the caller's.
+   */
+  private namedResultTransition(variable: VarEntity, tracking: SliceTracking): (frame: Frame) => void {
+    const fn = this.fn as FunctionContext;
+    const applies = (): boolean => !fn.summary?.inlinable();
+    tracking.transitions.push({ loopDepth: fn.loopDepth, applies });
+    const move = this.moveSliceToHeap(variable.type, tracking, applies);
+    const operand = this.variableOperand(variable, variable.span);
+    const read = operand.eval;
+    const store = operand.store as NonNullable<Operand['store']>;
+    return (frame) => {
+      const value = read(frame);
+      const moved = move(frame, value);
+      if (moved !== value) store(frame, moved);
     };
   }
 
@@ -1121,6 +1210,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Deferred calls of functions, generic functions, methods, and builtins.
   private deferStatement(statement: Extract<Statement, { kind: 'defer' }>): Exec {
+    (this.fn as FunctionContext).notInlinable = true;
     const call = stripParens(statement.call);
     if (call.kind !== 'call') {
       this.expression(statement.call);
@@ -1197,6 +1287,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const { method, path } = selection;
     const pointer = method.pointerReceiver ? this.pointerReceiver(call, receiver, path) : undefined;
     if (method.pointerReceiver && !pointer) return () => {};
+    const storage = this.receiverStorage(receiver, path, method.pointerReceiver);
+    if (storage) this.escapeOperand(storage);
     const read = receiver.eval;
     const viaPointer = underlying(receiver.type).kind === 'pointer';
     return (frame) => {
@@ -1283,12 +1375,12 @@ export abstract class StatementCompiler extends CallCompiler {
         if (receiver) {
           const variable = this.declareLocal(receiver.name ?? '_', receiver.type, receiver.span, true);
           variable.used = true;
-          fn.info.params.push(variable);
+          fn.params.push(variable);
         }
         for (const [index, parameter] of signature.parameters.entries()) {
-          const variable = this.declareParameter(parameter, type.params[index]);
-          fn.info.params.push(variable);
+          fn.params.push(this.declareParameter(parameter, type.params[index]));
         }
+        fn.info.params.push(...fn.params);
         fn.results = type.results;
         fn.hasNamedResults = signature.results.some((result) => result.name !== undefined);
         const zeros = type.results.map((result) => this.zeroOf(result));
@@ -1296,6 +1388,7 @@ export abstract class StatementCompiler extends CallCompiler {
           if (result.name !== undefined) {
             const variable = this.declareLocal(result.name, type.results[index], result);
             variable.used = true;
+            markReturned(variable);
             fn.resultVariables.push(variable);
             fn.info.resultSlots.push(variable.slot);
           } else {
@@ -1347,6 +1440,8 @@ export abstract class StatementCompiler extends CallCompiler {
       mode: 'value',
       type,
       span: expression,
+      // The closure refers to the variables it captures, which escape with it.
+      backingVars: [...fn.captures.keys()],
       eval: (frame) => {
         const cells = cellReaders.map((readCell) => readCell(frame));
         const runtime = frame.runtime;
@@ -1456,19 +1551,38 @@ function commaOkResults(operand: Operand, convert: Convert): Eval[] {
   ];
 }
 
+/**
+ * `s := v` or `var s = v` for a tracked slice variable s, which the slice optimization pass understands when v is nil or
+ * a slice literal.
+ */
+function sliceDeclaration(variable: VarEntity, value: Expression | undefined): void {
+  const inner = value && stripParens(value);
+  if (inner?.kind === 'composite') variable.slice?.capReads.push(() => true);
+  else if (inner?.kind !== 'name' || inner.name !== 'nil') untrackSlice(variable);
+}
+
+/** Makes Go's slice optimization pass give up on a variable, for a use it does not understand. */
+function untrackSlice(variable: VarEntity): void {
+  variable.slice?.uses.push({});
+}
+
 function transferEscapeLinks(from: VarEntity, to: VarEntity): void {
   if (from.escapeSources) {
     for (const source of from.escapeSources) linkEscapeSource(source, to);
   }
-  if (from.escapeHooks) {
-    for (const hook of from.escapeHooks) linkEscapeHook(hook, to);
+  if (from.temporaries) {
+    for (const temporary of from.temporaries) linkTemporary(temporary, to);
   }
 }
 
-/** Counts an assignment to a variable, after which its declared value may no longer reach its uses. */
+/**
+ * Counts an assignment to a variable, after which its declared value may no longer reach its uses, and records a store
+ * into an element as a write of its array.
+ */
 function countWrite(target: Operand): void {
   const entity = target.variable?.entity;
   if (entity && target.type === entity.type) entity.writes = (entity.writes ?? 0) + 1;
+  target.onWrite?.();
 }
 
 /** Stores the value of a newly declared variable, in a fresh cell when closures or pointers may share it. */
@@ -1485,10 +1599,6 @@ function runeSize(text: string, offset: number): number {
   if (rune < 0x8_00) return 2;
   if (rune < 0x1_00_00) return 3;
   return 4;
-}
-
-function stripParens(expression: Expression): Expression {
-  return expression.kind === 'paren' ? stripParens(expression.expression) : expression;
 }
 
 function nameOf(expression: Expression): string {

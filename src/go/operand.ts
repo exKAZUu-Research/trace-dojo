@@ -1,12 +1,20 @@
 import type { Span } from './ast';
 import type { Constant } from './constants';
-import type { FuncEntity, PackageEntity, VarEntity } from './entities';
+import type { FuncEntity, PackageEntity, ProductSource, Temporary, VarEntity } from './entities';
 import type { Eval, Frame } from './runtime';
 import type { Selection, Type } from './types';
 import type { Pointer, Value } from './values';
 
+/** The local storage a value or an address may refer to, which Go's escape analysis follows. */
+export interface Storage {
+  /** Local variables whose storage the value may share (such as `s[1:]`, `a[:]`, or `&x`). */
+  backingVars?: VarEntity[];
+  /** A temporary allocation the value may refer to (such as `[]byte(s)`). */
+  nonEscaping?: Temporary;
+}
+
 /** A compiled expression: what it is, its type, and how to evaluate it. */
-export interface Operand {
+export interface Operand extends Storage {
   mode:
     | 'value'
     /** An addressable variable, field, or element, which `store` writes. */
@@ -35,12 +43,12 @@ export interface Operand {
   resolveUntyped?: (target: Type) => Operand;
   /** Takes the address, which makes a local variable live in a cell. */
   addressOf?: () => (frame: Frame) => Pointer;
-  /** Marks any underlying local storage as escaping when an element or field's address is taken. */
-  escapeAddress?: () => void;
-  /** Local variables whose backing storage this value may share (such as `s[1:]` or `a[:]`). */
-  backingVars?: VarEntity[];
-  /** Tracks whether a temporary allocation, closure, or inlined call result escapes the current function. */
-  nonEscaping?: { escapes: boolean; viaReturn?: boolean; onEscape?: () => void };
+  /** The storage the address of this variable, field, or element refers to. */
+  addressStorage?: Storage;
+  /** What the program taking the address of this value, or of a part of it, does to escape analysis. */
+  addressTaken?: () => void;
+  /** Records a store into this field or element, which writes the array it lives in. */
+  onWrite?: () => void;
   /** Evaluates `v, ok` forms: a map index or a type assertion. */
   commaOk?: (frame: Frame) => [Value, boolean];
   builtin?: string;
@@ -63,8 +71,7 @@ export interface Operand {
     enabled?: () => boolean;
     /** Whether both factors are constants to Go's compiler, which computes the product before the program runs. */
     constant?: () => boolean;
-    /** When the function first computes this product, as Go's common subexpression elimination numbers it. */
-    order: number;
+    source: ProductSource;
   };
   /**
    * Whether Go's compiler knows the value as a constant: a constant, or a local variable defined once from one, which
