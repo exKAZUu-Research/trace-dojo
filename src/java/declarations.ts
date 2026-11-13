@@ -7,8 +7,8 @@ import type {
   Modifiers,
   TypeSyntax,
 } from './ast';
-import { functionalMethodOf } from './builtinFunctions';
 import { sameParameters, superclassesOf } from './compilerBase';
+import { functionalMethodOf } from './functionalInterfaces';
 import { LambdaCompiler } from './lambdaCompiler';
 import { findImplementation, throwBuiltin } from './runtime';
 import {

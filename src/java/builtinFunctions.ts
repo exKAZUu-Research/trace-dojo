@@ -25,6 +25,7 @@ import {
 } from './builtinSupport';
 import { compareIgnoringCase } from './builtinText';
 import { compareValues } from './builtinWrappers';
+import { functionalMethodOf } from './functionalInterfaces';
 import { type Frame, throwBuiltin } from './runtime';
 import {
   BOOLEAN,
@@ -36,8 +37,6 @@ import {
   type JavaType,
   LONG,
   type MethodInfo,
-  sameErasure,
-  superinterfacesOf,
   type TypeVariable,
   VOID,
   type WildcardType,
@@ -54,48 +53,6 @@ const extendsOf = (bound: JavaType): WildcardType => ({ kind: 'wildcard', bound,
 
 /** The classes of function objects, by interface and then by the class whose lambdas they are. */
 const functionClasses = new WeakMap<ClassInfo, Map<ClassInfo | undefined, ClassInfo>>();
-
-/**
- * The single abstract method of a functional interface, or `undefined` when `cls` is not one: the abstract methods it
- * declares and inherits, counted once per override-equivalent signature, less those that redeclare a public method of
- * `Object` and those a default method of a more specific interface implements (JLS 9.8).
- */
-export function functionalMethodOf(cls: ClassInfo, objectClass: ClassInfo): MethodInfo | undefined {
-  if (cls.kind !== 'interface') return;
-  const owners = [cls, ...superinterfacesOf(cls)];
-  const abstract: MethodInfo[] = [];
-  for (const owner of owners) {
-    for (const method of owner.methods) {
-      if (!method.isAbstract || method.isStatic) continue;
-      const isObjectMethod = objectClass.methods.some(
-        (other) => other.access === 'public' && !other.isStatic && sameSignature(other, method)
-      );
-      const isCounted = abstract.some((other) => sameSignature(other, method));
-      if (!isObjectMethod && !isImplementedByDefault(owners, owner, method) && !isCounted) abstract.push(method);
-    }
-  }
-  return abstract.length === 1 ? abstract[0] : undefined;
-}
-
-/** Whether a default method of an interface among `owners` that inherits `owner` implements its abstract `method`. */
-function isImplementedByDefault(owners: ClassInfo[], owner: ClassInfo, method: MethodInfo): boolean {
-  return owners.some(
-    (other) =>
-      other !== owner &&
-      superinterfacesOf(other).includes(owner) &&
-      other.methods.some((candidate) => !candidate.isAbstract && sameSignature(candidate, method))
-  );
-}
-
-/** Whether two methods have override-equivalent signatures, by an override the compiler linked or by erasure. */
-function sameSignature(a: MethodInfo, b: MethodInfo): boolean {
-  if (a.name !== b.name) return false;
-  if (a.overrides?.has(b) || b.overrides?.has(a)) return true;
-  return (
-    a.parameterTypes.length === b.parameterTypes.length &&
-    a.parameterTypes.every((type, index) => sameErasure(type, b.parameterTypes[index] as JavaType))
-  );
-}
 
 /** Creates an object of a functional interface that runs `call` for its abstract method. */
 export function functionObject(

@@ -1,5 +1,5 @@
 import { collectors } from './builtinCollectors';
-import { functionalMethodOf } from './builtinFunctions';
+import { functionalMethodOf } from './functionalInterfaces';
 import type { ClassInfo, NativeMethod } from './types';
 import { JavaArray, JavaObject } from './values';
 

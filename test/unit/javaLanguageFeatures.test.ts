@@ -2118,3 +2118,19 @@ public class Main { enum E { A, B, C } enum F { X } static void t(String n, Supp
       'd1 true\nd2 true\nc false false true [A, B, C]\nm null false 5 true\nts java.lang.NullPointerException\nul 1 false 0\n',
   });
 });
+
+test("Java's functional interfaces compare inherited methods as their parameterized superinterfaces give them", () => {
+  const program = `import java.util.function.*;
+interface A<T> { int size(T value); }
+interface B { int size(String value); }
+@FunctionalInterface interface C extends A<String>, B {}
+interface G<T> { T get(T x); }
+interface H extends G<Integer> { Integer get(Integer x); }
+interface S2 extends Function<String, Integer> { }
+interface Ap { Integer apply(String s); }
+@FunctionalInterface interface S3 extends Function<String, Integer>, Ap { }
+interface D<T> { void a(T x); }
+@FunctionalInterface interface D2 extends D<String> { default void a(String x) {} void b(); }
+public class Main { public static void main(String[] args) { C c = x -> x.length(); A<String> a = c; System.out.println(a.size("abc")); H h = x -> x + 1; System.out.println(h.get(1)); S2 s2 = String::length; System.out.println(s2.apply("ab")); S3 s3 = String::length; System.out.println(((Function<String, Integer>) s3).apply("abcd")); D2 d = () -> System.out.println("b"); d.a("q"); d.b(); } }`;
+  expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: '3\n2\n2\n4\nb\n' });
+});
