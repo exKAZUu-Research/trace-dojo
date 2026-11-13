@@ -26,6 +26,9 @@ export interface Tag {
   bindings: Binding[];
 }
 
+const AMPLIFICATION_THRESHOLD = 8 * 1024 * 1024;
+const MAX_AMPLIFICATION = 100;
+
 /** What the tokens of one attribute value share as `appendAttributeValue` adds them. */
 interface AttributeValue {
   tz: Tokenizer;
@@ -90,6 +93,8 @@ export abstract class ExpatBase {
   protected column = 0;
   protected readonly tags: Tag[] = [];
   protected readonly buffer = { size: 0, start: 0, end: 0, lastRequest: 0, partialBefore: 0 };
+  /** The characters of entity text parsed so far, which expat's protection against amplification counts. */
+  private expandedChars = 0;
 
   // The declaration being parsed in the DTD.
   protected doctypeName: string | undefined;
@@ -311,6 +316,21 @@ export abstract class ExpatBase {
   }
 
   // code-gauge-allow functionParameterCount 7 -- Transcribes expat's C code case by case, as its order of checks decides the errors and their positions.
+  /**
+   * Charges a token, and refuses one of entity text once expansion has made the parsed text more than 100 times the
+   * document past 8 MiB, as expat's default protection against amplification (billion laughs) does.
+   */
+  protected accountToken(internal: boolean, length: number): void {
+    currentRuntime().spend();
+    if (!internal) return;
+    this.expandedChars += length;
+    const total = this.input.cs.length + this.expandedChars;
+    if (total >= AMPLIFICATION_THRESHOLD && total / this.input.cs.length > MAX_AMPLIFICATION) {
+      throw new XmlError(XML_ERROR.AMPLIFICATION_LIMIT_BREACH);
+    }
+  }
+
+  // code-gauge-allow functionParameterCount 7 -- Transcribes expat's appendAttributeValue, whose parameters these are.
   protected appendAttributeValue(
     tz: Tokenizer,
     isCdata: boolean,
@@ -321,12 +341,11 @@ export abstract class ExpatBase {
     inProlog: boolean
   ): void {
     const value: AttributeValue = { tz, isCdata, pool, internal, inProlog };
-    const runtime = currentRuntime();
     for (;;) {
-      // Each token is charged, as content's are, so that the deadline stops entities expanding in a value.
-      runtime.spend();
       const [tok, next] = tz.attributeValueTok(ptr, end);
       if (tok === TOK.NONE) return;
+      this.accountToken(internal, next - ptr);
+      currentRuntime().ensureStringFits(pool.length + next - ptr);
       this.attributeValueToken(value, tok, ptr, next);
       ptr = tok === TOK.TRAILING_CR ? ptr + 1 : next;
     }

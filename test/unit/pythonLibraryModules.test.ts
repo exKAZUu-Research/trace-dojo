@@ -261,3 +261,18 @@ assert p.format_usage() == 'usage: -c [-h] [--x X]\n', p.format_usage()
 assert optparse.OptionParser().get_usage() == 'Usage: -c [options]\n'
 `);
 });
+
+test("entities that expand far beyond the document raise expat's amplification error", () => {
+  const program = `import xml.parsers.expat
+leaf = 'x' * 1000
+entities = [f'<!ENTITY e0 "{leaf}">'] + [f'<!ENTITY e{i} "' + f'&e{i - 1};' * 10 + '">' for i in range(1, 5)]
+parser = xml.parsers.expat.ParserCreate()
+try:
+    parser.Parse('<!DOCTYPE r [' + ''.join(entities) + ']><r>&e4;</r>', True)
+except xml.parsers.expat.ExpatError as error:
+    print(error)`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'limit on input amplification factor (from DTD and entities) breached: line 1, column 1253\n',
+  });
+});

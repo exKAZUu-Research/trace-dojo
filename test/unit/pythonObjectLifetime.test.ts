@@ -321,3 +321,52 @@ print('end')
     });
   }
 });
+
+test('a finished generator or coroutine frees its locals at once, as CPython clears a finished frame', () => {
+  const program = `import asyncio, weakref, gc
+class A:
+    def __init__(self, n): self.n = n
+    def __del__(self): print('del', self.n)
+def gen():
+    a = A('gen')
+    yield 1
+for _ in gen(): pass
+print('after gen')
+def gen2():
+    a = A('ret')
+    return a
+    yield
+g = gen2()
+try: next(g)
+except StopIteration as e: v = e.value
+print('got', v.n); del v
+print('after gen2')
+refs = []
+async def f():
+    a = A('coro'); refs.append(weakref.ref(a))
+    await asyncio.sleep(0)
+asyncio.run(f())
+print(refs[0]() is None)
+def gen3():
+    a = A('raise')
+    yield 1
+    raise ValueError
+try:
+    for _ in gen3(): pass
+except ValueError: pass
+print('after gen3')
+def outer():
+    x = A('cell')
+    def g():
+        yield x
+    return g
+gf = outer(); list(gf()); print('cell kept'); del gf
+print('end')
+`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'del gen\nafter gen\ngot ret\ndel ret\nafter gen2\ndel coro\nTrue\ndel raise\nafter gen3\ncell kept\ndel cell\nend\n',
+  });
+});
