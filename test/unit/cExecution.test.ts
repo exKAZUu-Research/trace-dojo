@@ -37,6 +37,57 @@ int main(void) {
   });
 });
 
+// clang prints this output: designations move the initializer's cursor, which later items continue from.
+test('designated initializers, variable-length arrays, and va_arg give the output of clang', () => {
+  const program = `#include <stdio.h>
+#include <stdarg.h>
+struct point { int x, y, z; };
+static int sum(int count, ...) {
+  va_list ap;
+  va_start(ap, count);
+  int total = 0;
+  for (int i = 0; i < count; i++) total += va_arg(ap, int);
+  va_end(ap);
+  return total;
+}
+static void fill(int rows, int cols, int m[rows][cols]) {
+  for (int i = 0; i < rows; i++)
+    for (int j = 0; j < cols; j++) m[i][j] = i * cols + j;
+}
+int main(void) {
+  struct point ps[] = { [1].y = 5, 1, 2, [0] = { .z = 9 }, 7 };
+  printf("%zu %d %d %d %d %d\\n", sizeof ps / sizeof ps[0], ps[0].z, ps[1].y, ps[1].z, ps[2].x, ps[0].x);
+  int rows = 2, cols = 3;
+  int m[rows][cols];
+  fill(rows, cols, m);
+  printf("%zu %d %d\\n", sizeof m, m[1][2], sum(4, m[0][1], m[1][0], 10, (int)'a'));
+  return 0;
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '3 9 5 1 2 0\n24 5 111\n',
+  });
+});
+
+test("va_arg of a type other than the argument's stops the program", () => {
+  const program = `#include <stdarg.h>
+double first(int n, ...) {
+  va_list ap;
+  va_start(ap, n);
+  double d = va_arg(ap, double);
+  va_end(ap);
+  return d;
+}
+int main(void) {
+  first(1, 2);
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'va_arg で読んだ型（double）が、渡された引数の型（int）と合いません。',
+  });
+});
+
 test('a program that draws reports its final board and the turtles its variables still reach', () => {
   const program = `#include <stdlib.h>
 void draw(void) {
