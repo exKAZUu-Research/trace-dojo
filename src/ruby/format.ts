@@ -249,7 +249,10 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string | RS
       const value = arg();
       let text: string;
       if (value instanceof RString)
-        return padStringValue(stringCharacters(value)[0] ?? stringFromBytes(new Uint8Array()), spec);
+        return padStringValue(stringCharacters(value)[0] ?? stringFromBytes(new Uint8Array()), {
+          ...spec,
+          precision: undefined,
+        });
       else {
         const point = yield* intArg(value);
         if (point < -0x80_00_00_00_00_00_00_00n || point > 0x7f_ff_ff_ff_ff_ff_ff_ffn)

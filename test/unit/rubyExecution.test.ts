@@ -33,6 +33,17 @@ test.each([
     '[255]\n[255, 195, 169]\nincompatible\n',
   ],
   ['Float remainder by Integer zero', 'begin; 1.0.remainder(0); rescue ZeroDivisionError; puts :zero; end', 'zero\n'],
+  [
+    'String sum long bound',
+    'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',
+    "bignum too big to convert into 'long'\n38\n",
+  ],
+  ['character format precision', String.raw`p format("%3.0c", "x"); p format("%.0c", "\xFF").bytes`, '"  x"\n[255]\n'],
+  [
+    'frozen String prepend checks before arguments',
+    'begin; "a".freeze.prepend(nil); rescue => e; p e.class; end',
+    'FrozenError\n',
+  ],
   ['receiver local in index', 'p (a = [10, 20])[a.size - 1]', '20\n'],
   ['character indexes after emoji', 's = "😀a😀b"; p s.index("b"); p s.rindex("a")', '3\n1\n'],
   ['named format substitution', 'p format("%{name}!", name: "Ruby")', '"Ruby!"\n'],
@@ -626,6 +637,11 @@ test.each([
     'custom Range arithmetic before each callback',
     'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); n <=> o.n; end; def succ; puts :succ; A.new(n+1); end; def +(v); puts :plus; A.new(n+v); end; end; (A.new(0)..A.new(3)).step(1.5) { |x| p x.n }',
     'plus\n0\nplus\n1.5\nplus\n3.0\n',
+  ],
+  [
+    'custom Range comparison order',
+    'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); puts :cmp; n <=> o.n; end; def +(v); puts :plus; A.new(n+v); end; end; (A.new(0)...A.new(2)).step(1) { |x| p x.n }',
+    'cmp\ncmp\nplus\ncmp\ncmp\n0\nplus\ncmp\n1\nplus\ncmp\n',
   ],
   [
     'custom Range at an inclusive starting endpoint',

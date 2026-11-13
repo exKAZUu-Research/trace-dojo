@@ -332,19 +332,26 @@ function* stepNumericRange(self: RRange, start: number, by: number, block: RProc
 function* stepCustomRange(self: RRange, step: bigint | number, block: RProc): Gen {
   const { end, exclusive } = self;
   let value = self.begin;
-  if (end !== NIL && !exclusive && (yield* spaceship(value, end)) === 0) {
-    yield* callBlock(block, [value], false);
-    return self;
+  if (end !== NIL) {
+    const initialOrder = yield* spaceship(value, end);
+    if (initialOrder === 0) {
+      if (!exclusive) yield* callBlock(block, [value], false);
+      return self;
+    }
+    const next = yield* callMethod(value, '+', [step]);
+    yield* spaceship(value, next);
   }
   for (;;) {
     rt().spend();
     if (end !== NIL) {
       const order = yield* spaceship(value, end);
       if (order === undefined || order > 0 || (exclusive && order === 0)) break;
+      yield* callBlock(block, [value], false);
+      if (order === 0) break;
+    } else {
+      yield* callBlock(block, [value], false);
     }
-    const next = yield* callMethod(value, '+', [step]);
-    yield* callBlock(block, [value], false);
-    value = next;
+    value = yield* callMethod(value, '+', [step]);
   }
   return self;
 }

@@ -8,7 +8,6 @@ import {
   strInspect,
   symInspect,
   toIndex,
-  toInt,
   toRubyInt,
   toS,
   toStr,
@@ -358,6 +357,7 @@ def('String', 'insert', 2, function* (self: RString, [index, other]) {
   return self;
 });
 def('String', 'prepend', [0, -1], function* (self: RString, args) {
+  modify(self);
   const values: RString[] = [];
   let binary = self.binary;
   let ascii = stringBytes(self).every((byte) => byte < 0x80);
@@ -505,7 +505,7 @@ def('String', 'chr', 0, (self: RString) => stringCharacters(self)[0] ?? str(''))
 def('String', 'sum', [0, 1], function* (self: RString, args) {
   let total = 0n;
   for (const byte of stringBytes(self)) total += BigInt(byte);
-  const bits = args.length > 0 ? yield* toInt(args[0]) : 16n;
+  const bits = args.length > 0 ? BigInt(yield* toRubyInt(args[0])) : 16n;
   return bits > 0n && bits < 32n ? total & ((1n << bits) - 1n) : total;
 });
 
