@@ -1,0 +1,289 @@
+import type { ProgramRecording } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
+import type { TraceOptions } from '../interpreter/traceAnnotations';
+import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
+import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
+import { type CompiledProgram, compileProgram } from './compiler';
+import { runProgram } from './execute';
+import { formatFloat } from './floatFormat';
+import { utf8Decode } from './literals';
+import { compareMapKeys } from './mapOrder';
+import { isOpaque } from './native';
+import { BUILDER } from './packages/strings';
+import { parseGo } from './parse';
+import { type Frame, Runtime, UNASSIGNED } from './runtime';
+import { lookupFieldOrMethod, type Type, typeString, underlying } from './types';
+import { Cell, Complex, GoArray, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
+
+// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+export function traceGoProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
+  const compiled = compileProgram(parseGo(program), { atomicRows: new Set(trace.atomicAnnotations.keys()) });
+  const runtime = new Runtime(input);
+  const snapshotter = new Snapshotter(runtime, compiled);
+  const recorder = new TraceRecorder(runtime, {
+    isAtomic: (frame) => frame.info.isAtomic,
+    variablesOf: (frame) => snapshotter.variablesOf(frame, true),
+  });
+  runtime.steps.recorder = recorder;
+  let finalVars: TraceItemVariable = {};
+  // A model program may end with a panic to show how one stops the program.
+  const run = runProgram(runtime, compiled, (frame) => {
+    finalVars = snapshotter.variablesOf(frame, false).vars;
+  });
+  return { traceItems: recorder.traceItems, finalVars, ...run };
+}
+
+class Snapshotter {
+  constructor(
+    private readonly runtime: Runtime,
+    private readonly program: CompiledProgram
+  ) {}
+
+  /**
+   * The variables a frame shows: its locals in scope and the variables its closure captured, then, when
+   * `withGlobals`, the package-level variables that no local hides. A receiver's fields also show as `t.x`, as
+   * Java's `this.x`.
+   */
+  variablesOf(frame: Frame, withGlobals: boolean): TraceVariables {
+    const variables: TraceVariables = { vars: {}, referenceVars: {} };
+    const shown = new Set<string>();
+    for (const local of frame.info.locals) {
+      const stored = frame.locals[local.slot];
+      if (stored === UNASSIGNED) continue;
+      const value = stored instanceof Cell ? stored.v : stored;
+      shown.add(local.name);
+      addVariable(variables, local.name, value, local.type);
+      if (local.isReceiver) addReceiverFields(variables, local.name, value, local.type);
+    }
+    for (const [index, capture] of frame.info.captures.entries()) {
+      if (shown.has(capture.name)) continue;
+      shown.add(capture.name);
+      addVariable(variables, capture.name, frame.cells[index].v, capture.type);
+    }
+    if (!withGlobals) return variables;
+    for (const global of this.program.globals) {
+      if (shown.has(global.name)) continue;
+      addVariable(variables, global.name, this.runtime.globals[global.slot].v, global.type);
+    }
+    return variables;
+  }
+}
+
+type Scalar = TraceItemVariable[string];
+const NOT_SCALAR = Symbol('notScalar');
+
+function addVariable(variables: TraceVariables, name: string, value: Value, type: Type): void {
+  if (underlying(type).kind === 'func') return;
+  const scalar = scalarOf(value, type);
+  if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
+  // Arrays and slices also appear as references so that learners can expand their elements.
+  const kind = underlying(type).kind;
+  if (scalar !== NOT_SCALAR && kind !== 'array' && kind !== 'slice') return;
+  const node = displayNodeOf(value, type, new Set());
+  if (node) variables.referenceVars[name] = node;
+}
+
+/** A receiver's fields, including promoted embedded fields, show as `t.x`, as Java shows `this.x`. */
+function addReceiverFields(variables: TraceVariables, name: string, value: Value, type: Type): void {
+  let struct: Value = value;
+  let structType = type;
+  if (value instanceof Pointer) {
+    struct = value.load();
+    structType = (underlying(type) as { element: Type }).element;
+  } else if (underlying(type).kind === 'pointer') {
+    return;
+  }
+  const seen = new Set<unknown>();
+  const walkStruct = (current: Value, currentType: Type, pathPrefix: readonly number[]): void => {
+    const under = underlying(currentType);
+    if (!(current instanceof GoStruct) || under.kind !== 'struct' || seen.has(current)) return;
+    seen.add(current);
+    for (const [index, field] of under.fields.entries()) {
+      const path = [...pathPrefix, index];
+      const selection = lookupFieldOrMethod(type, field.name);
+      if (
+        selection.kind === 'field' &&
+        selection.path.length === path.length &&
+        selection.path.every((step, at) => step === path[at])
+      ) {
+        const scalar = scalarOf(current.fields[index], field.type);
+        if (scalar !== NOT_SCALAR) variables.vars[`${name}.${field.name}`] = scalar;
+      }
+      if (!field.embedded) continue;
+      const fieldValue = current.fields[index];
+      const fieldUnder = underlying(field.type);
+      if (fieldUnder.kind === 'pointer') {
+        if (fieldValue instanceof Pointer) walkStruct(fieldValue.load(), fieldUnder.element, path);
+      } else {
+        walkStruct(fieldValue, field.type, path);
+      }
+    }
+  };
+  walkStruct(struct, structType, []);
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type.
+function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
+  const under = underlying(type);
+  switch (under.kind) {
+    case 'basic': {
+      return basicScalar(value);
+    }
+    case 'array':
+    case 'slice': {
+      if (!hasScalarElements(under.element)) return NOT_SCALAR;
+      const items = value instanceof GoArray ? value.elements : value instanceof Slice ? value.values() : [];
+      return items.map((item) => {
+        const scalar = scalarOf(item, under.element);
+        // oxlint-disable-next-line unicorn/no-null -- The trace format shows nil as null.
+        return scalar === NOT_SCALAR ? null : scalar;
+      }) as Scalar;
+    }
+    case 'interface': {
+      return value instanceof Iface ? scalarOf(value.value, value.type) : NOT_SCALAR;
+    }
+    default: {
+      return NOT_SCALAR;
+    }
+  }
+}
+
+function basicScalar(value: Value): TraceScalar {
+  if (typeof value === 'bigint') {
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? number : value;
+  }
+  if (typeof value === 'string') return utf8Decode(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (value instanceof Complex) {
+    return `(${formatFloat(value.re, 'g', -1, 64)}${value.im >= 0 || Number.isNaN(value.im) ? '+' : ''}${formatFloat(value.im, 'g', -1, 64)}i)`;
+  }
+  // oxlint-disable-next-line unicorn/no-null -- The trace format shows nil as null.
+  return null;
+}
+
+function hasScalarElements(type: Type): boolean {
+  const under = underlying(type);
+  if (under.kind === 'array' || under.kind === 'slice') return hasScalarElements(under.element);
+  return under.kind === 'basic';
+}
+
+// oxlint-disable-next-line unicorn/no-null -- The trace format shows nil as null.
+const NULL_NODE: DisplayNode = { kind: 'value', value: null };
+
+function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
+  const under = underlying(type);
+  if (under.kind === 'func') return undefined;
+  if (value === undefined) return NULL_NODE;
+  if (under.kind === 'basic') return { kind: 'value', value: basicScalar(value) };
+  if (value instanceof Iface) return displayNodeOf(value.value, value.type, seen);
+  if (value instanceof Pointer) return pointerNodeOf(value, (under as { element: Type }).element, seen);
+  if (type === BUILDER && value instanceof GoStruct) {
+    const builder = (value.native?.builder as string | undefined) ?? '';
+    return { kind: 'value', value: utf8Decode(builder) };
+  }
+  if (isOpaque(type)) return { kind: 'object', entries: {} };
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+  try {
+    return containerNodeOf(value, under, seen);
+  } finally {
+    seen.delete(value);
+  }
+}
+
+/** What a pointer refers to, shown in its place: a turtle shows its position, as Java shows a Turtle. */
+function pointerNodeOf(pointer: Pointer, element: Type, seen: Set<unknown>): DisplayNode | undefined {
+  const target = pointer.load();
+  const turtle = target instanceof GoStruct ? target.native?.turtle : undefined;
+  if (turtle) {
+    if (!turtle.isAlive) return undefined;
+    return {
+      kind: 'object',
+      entries: { x: { kind: 'value', value: turtle.x }, y: { kind: 'value', value: turtle.y } },
+    };
+  }
+  if (seen.has(pointer.base)) return undefined;
+  seen.add(pointer.base);
+  try {
+    return displayNodeOf(target, element, seen);
+  } finally {
+    seen.delete(pointer.base);
+  }
+}
+
+/** Structs show as objects of their fields, arrays and slices as arrays, and maps as objects keyed by their keys. */
+function containerNodeOf(value: Value, under: Type, seen: Set<unknown>): DisplayNode | undefined {
+  if (value instanceof GoStruct && under.kind === 'struct') {
+    // A strings.Builder shows the text it holds, as Java shows a StringBuilder.
+    const builder = value.native?.builder;
+    if (typeof builder === 'string') return { kind: 'value', value: utf8Decode(builder) };
+    const entries: Record<string, DisplayNode> = {};
+    for (const [index, field] of under.fields.entries()) {
+      const node = displayNodeOf(value.fields[index], field.type, seen);
+      if (node) entries[field.name] = node;
+    }
+    return { kind: 'object', entries };
+  }
+  if ((value instanceof GoArray || value instanceof Slice) && (under.kind === 'array' || under.kind === 'slice')) {
+    const items = value instanceof GoArray ? value.elements : value.values();
+    const entries: Record<string, DisplayNode> = {};
+    for (const [index, item] of items.entries()) entries[index] = displayNodeOf(item, under.element, seen) ?? NULL_NODE;
+    return { kind: 'array', entries };
+  }
+  if (value instanceof GoMap && under.kind === 'map') {
+    // Keys such as `__proto__` must become entries, not reach Object.prototype's setter.
+    const entries = Object.create(null) as Record<string, DisplayNode>;
+    const sorted = [...value.entries.values()].toSorted((a, b) => compareMapKeys(a.key, b.key, under.key));
+    const labels = keyLabels(
+      sorted.map((entry) => entry.key),
+      under.key
+    );
+    for (const [index, entry] of sorted.entries()) {
+      entries[labels[index]] = displayNodeOf(entry.value, under.value, seen) ?? NULL_NODE;
+    }
+    return { kind: 'object', entries };
+  }
+  return undefined;
+}
+
+/**
+ * Labels a map's keys, distinct for distinct keys: by their text as fmt's %v writes it when no two keys share one, and
+ * otherwise by Go literals with their types where they share one, where only keys that no literal tells apart (NaNs,
+ * pointers) can still share a label, so those get their position among the keys sharing it.
+ */
+function keyLabels(keys: Value[], type: Type): string[] {
+  const texts = keys.map((key) => keyText(key, type, false));
+  if (new Set(texts).size === texts.length) return texts;
+  const literals = keys.map((key) => keyText(key, type, true));
+  const counts = new Map<string, number>();
+  for (const literal of literals) counts.set(literal, (counts.get(literal) ?? 0) + 1);
+  const positions = new Map<string, number>();
+  return literals.map((literal) => {
+    if (counts.get(literal) === 1) return literal;
+    const position = (positions.get(literal) ?? 0) + 1;
+    positions.set(literal, position);
+    return `${literal} (${position})`;
+  });
+}
+
+/** A map key as text, typed and with strings quoted when `literal`, without running any of the program's methods. */
+function keyText(key: Value, type: Type, literal: boolean): string {
+  if (key instanceof Iface) {
+    const text = keyText(key.value, key.type, literal);
+    return literal ? `${typeString(key.type)}(${text})` : text;
+  }
+  if (key === undefined) return '<nil>';
+  const under = underlying(type);
+  if (under.kind === 'struct') {
+    const fields = under.fields.map((field, index) => keyText((key as GoStruct).fields[index], field.type, literal));
+    return `{${fields.join(' ')}}`;
+  }
+  if (under.kind === 'array') {
+    return `[${(key as GoArray).elements.map((element) => keyText(element, under.element, literal)).join(' ')}]`;
+  }
+  if (key instanceof Pointer) return '<pointer>';
+  if (typeof key === 'string') return literal ? JSON.stringify(utf8Decode(key)) : utf8Decode(key);
+  if (typeof key === 'number') return formatFloat(key, 'g', -1, 64);
+  return String(basicScalar(key));
+}
