@@ -23,7 +23,8 @@ export function validateSyntax(root: Node): void {
   const pending = [root];
   while (pending.length > 0) {
     const node = pending.pop()!;
-    if (node.type === 'macro_specifier') fail(node, `「${node.text}」は型や指定子として宣言されていません。`);
+    if (node.type === 'macro_specifier')
+      throw new CSyntaxError(node, `「${node.text}」は型や指定子として宣言されていません。`);
     for (const name of RESTRICTED_OPERANDS[node.type] ?? []) {
       const operand = node.childForFieldName(name);
       if (operand?.type === 'assignment_expression')

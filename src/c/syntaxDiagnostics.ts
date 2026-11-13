@@ -2,7 +2,14 @@ import type { Node, Parser } from '@willbooster/web-tree-sitter';
 
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
-import { sizeofTypeFollowers, type SourceToken, sourceTokens, type TypeScope } from './syntaxTokens';
+import {
+  aggregateDeclarationFollowers,
+  declaratorFollowers,
+  sizeofTypeFollowers,
+  type SourceToken,
+  sourceTokens,
+  type TypeScope,
+} from './syntaxTokens';
 
 export function cSyntaxDiagnostics(
   parser: Parser,
@@ -20,19 +27,31 @@ export function cSyntaxDiagnostics(
   const illegal = firstIllegalConstruct(root, headerTypes);
   const next = errorOffset === undefined ? nextToken(source, failure!) : { offset: errorOffset, row: errors[0].row };
   const tokens = sourceTokens(source, budget);
-  const sizeofError = sizeofTypeFollowers(tokens, typeScopes, knownTypes(root, headerTypes), budget).find(
-    (token) => token.start < next.offset
-  );
-  if (sizeofError) {
-    next.offset = sizeofError.start;
-    next.row = sizeofError.token.row;
-  }
+  const names = knownTypes(root, headerTypes);
   const earlyError = invalidCToken(root);
   if (earlyError && earlyError.startIndex < next.offset) {
     next.offset = earlyError.startIndex;
     next.row = earlyError.startPosition.row;
   }
-  const semicolon = missingSemicolonRow(parser, source, tokens, next.offset, budget);
+  const candidates = [
+    ...sizeofTypeFollowers(tokens, typeScopes, names, budget),
+    ...aggregateDeclarationFollowers(tokens, typeScopes, names, budget),
+    ...declaratorFollowers(
+      tokens,
+      root.descendantsOfType(['pointer_declarator', 'macro_specifier']).map((node) => node.startIndex),
+      typeScopes,
+      names,
+      budget
+    ),
+  ]
+    .filter((token) => token.start < next.offset)
+    .toSorted((a, b) => a.start - b.start);
+  let semicolon: number | undefined;
+  for (const candidate of candidates) {
+    semicolon = missingSemicolonRow(parser, source, tokens, candidate.start, budget);
+    if (semicolon !== undefined) break;
+  }
+  semicolon ??= missingSemicolonRow(parser, source, tokens, next.offset, budget);
   const row = semicolon ?? next.row;
   if (illegal && illegal.startPosition.row <= row)
     return [{ row: illegal.startPosition.row, message: 'ここには関数の定義や文を書けません。' }];

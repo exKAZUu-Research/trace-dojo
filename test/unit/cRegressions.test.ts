@@ -1469,3 +1469,15 @@ test.each([
     diagnostics: [expect.objectContaining({ row: 3 })],
   });
 });
+
+test.each(['struct P{int x;}', 'union U{int x;float y;}', 'enum E{A,B}', 'struct P{int x;}v', 'int *gp'])(
+  'file-scope declarations retain their terminator location: %s',
+  (head) => {
+    for (const tail of ['int main(void){return 0;}', 'int g;', 'const int g=1;', 'T g=1;', 'T*p;']) {
+      expect(executeProgram('c', `typedef int T;\n${head}\n${tail}`)).toMatchObject({
+        kind: 'compileError',
+        diagnostics: [expect.objectContaining({ row: 1 })],
+      });
+    }
+  }
+);
