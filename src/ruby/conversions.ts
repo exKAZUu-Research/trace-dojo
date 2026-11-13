@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 411 -- The conversions module keeps one concern's cases together.
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
 import { hashGet } from './hashes';
-import { callMethod, callProc, type Gen, runToEnd } from './interp';
+import { callMethod, callProc, type Gen, respondsTo, runToEnd } from './interp';
 import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, isA, realClassOf, str, truthy } from './values';
@@ -81,11 +81,18 @@ export function toStrSync(value: Value): string {
 }
 
 /** The Float a numeric argument stands for, as `Math` functions convert their arguments. */
-export function toFloat(value: Value): number {
+export function* toFloat(value: Value): Gen<number> {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return intToFloat(value);
   if (value === NIL) throw typeError("can't convert nil into Float");
   if (value instanceof RString) throw typeError("can't convert String into Float");
+  if (isA(value, rt().c.Numeric) && respondsTo(value, 'to_f')) {
+    const converted = yield* callMethod(value, 'to_f', []);
+    if (typeof converted === 'number') return converted;
+    throw typeError(
+      `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`
+    );
+  }
   throw implicitConversionError(value, 'Float');
 }
 

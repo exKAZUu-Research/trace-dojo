@@ -669,8 +669,17 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
     if (typeof value === 'bigint') return value;
     if (typeof value === 'number') return floatToInt(value);
     if (value === NIL) throw typeError("can't convert nil into Integer");
-    if (respondsTo(value, 'to_int')) return yield* callMethod(value, 'to_int', []);
-    if (respondsTo(value, 'to_i')) return yield* callMethod(value, 'to_i', []);
+    if (respondsTo(value, 'to_int')) {
+      const converted = yield* callMethod(value, 'to_int', []);
+      if (typeof converted === 'bigint') return converted;
+    }
+    if (respondsTo(value, 'to_i')) {
+      const converted = yield* callMethod(value, 'to_i', []);
+      if (typeof converted === 'bigint') return converted;
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_i gives ${realClassOf(converted).name})`
+      );
+    }
     throw typeError(`can't convert ${realClassOf(value).name} into Integer`);
   } catch (error) {
     if (!raise && error instanceof RubyError) return NIL;
@@ -728,7 +737,13 @@ export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
       return parsed;
     }
     if (value === NIL) throw typeError("can't convert nil into Float");
-    if (respondsTo(value, 'to_f')) return yield* callMethod(value, 'to_f', []);
+    if (respondsTo(value, 'to_f')) {
+      const converted = yield* callMethod(value, 'to_f', []);
+      if (typeof converted === 'number') return converted;
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Float (${realClassOf(value).name}#to_f gives ${realClassOf(converted).name})`
+      );
+    }
     throw typeError(`can't convert ${realClassOf(value).name} into Float`);
   } catch (error) {
     if (!raise && error instanceof RubyError) return NIL;
@@ -825,24 +840,21 @@ const MATH_FUNCTIONS: [string, number, (...args: number[]) => number, ((...args:
 ];
 
 for (const [name, arity, fn, valid] of MATH_FUNCTIONS) {
-  sdef('Math', name, arity, (_self, args) => {
-    const values = args.map((arg) => toFloat(arg));
+  sdef('Math', name, arity, function* (_self, args) {
+    const values: number[] = [];
+    for (const arg of args) values.push(yield* toFloat(arg));
     if (valid) domainCheck(name, valid(...values));
     return fn(...values);
   });
 }
-sdef('Math', 'log', [1, 2], (_self, args) => {
-  const x = mathArgument(args[0]);
+sdef('Math', 'log', [1, 2], function* (_self, args) {
+  const x = yield* toFloat(args[0]);
   domainCheck('log', x >= 0 || Number.isNaN(x));
   if (args.length === 1) return mathLog(args[0], x);
-  const base = toFloat(args[1]);
+  const base = yield* toFloat(args[1]);
   domainCheck('log', base >= 0 || Number.isNaN(base));
   return mathLog(args[0], x) / Math.log(base);
 });
-
-function mathArgument(value: Value): number {
-  return toFloat(value);
-}
 
 /** The natural logarithm, exact for big Integers whose Float conversion would overflow. */
 function mathLog(value: Value, x: number): number {

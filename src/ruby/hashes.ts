@@ -181,22 +181,19 @@ export function* hashDelete(hash: RHash, key: Value): Gen<HashEntry | undefined>
   return entry;
 }
 
-export function hashDeleteEntry(hash: RHash, target: HashEntry): void {
-  for (const [slot, entry] of hash.map) {
-    if (entry !== target) continue;
-    hash.map.delete(slot);
-    hash.bucketVersion = -1;
-    return;
-  }
+export function hashDeleteEntry(hash: RHash, slot: string, target: HashEntry): void {
+  if (hash.map.get(slot) !== target) return;
+  hash.map.delete(slot);
+  hash.bucketVersion = -1;
 }
 
 /** Iterates over a snapshot of the entries, marking the hash so that adding keys meanwhile is an error. */
-export function* eachEntry(hash: RHash, visit: (entry: HashEntry) => Gen<void>): Gen<void> {
+export function* eachEntry(hash: RHash, visit: (entry: HashEntry, slot: string) => Gen<void>): Gen<void> {
   hash.iterating++;
   try {
     for (const [slot, entry] of snapshot(hash.map)) {
       if (hash.map.get(slot) !== entry) continue;
-      yield* visit(entry);
+      yield* visit(entry, slot);
     }
   } finally {
     hash.iterating--;

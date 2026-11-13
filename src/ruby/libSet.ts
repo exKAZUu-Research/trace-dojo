@@ -213,9 +213,9 @@ for (const [name, keep] of [
     if (!block) return makeEnumerator(self, name, []);
     yield* modify(self);
     let changed = false;
-    yield* eachEntry(membersOf(self), function* (entry) {
+    yield* eachEntry(membersOf(self), function* (entry, slot) {
       if (truthy(yield* callBlock(block, [entry.key])) !== keep) {
-        hashDeleteEntry(membersOf(self), entry);
+        hashDeleteEntry(membersOf(self), slot, entry);
         changed = true;
       }
     });
