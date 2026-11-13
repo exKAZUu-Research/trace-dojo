@@ -1,4 +1,14 @@
-import { compareValues, inspectRange, rangeCovers, rEql, rEquals, spaceship, toIndex, toS } from './conversions';
+import {
+  compareValues,
+  inspectRange,
+  numericCompare,
+  rangeCovers,
+  rEql,
+  rEquals,
+  spaceship,
+  toIndex,
+  toS,
+} from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
 import { fusedMultiplyAdd } from './floatMath';
@@ -33,7 +43,10 @@ function* iterateIntegers(range: RRange, begin: bigint, visit: Visit): Gen<void>
   }
   const inRange = (value: bigint): boolean => {
     if (end === NIL) return true;
-    if (typeof end === 'number') return exclusive ? Number(value) < end : Number(value) <= end;
+    if (typeof end === 'number') {
+      const order = numericCompare(value, end);
+      return order !== undefined && (exclusive ? order < 0 : order <= 0);
+    }
     return exclusive ? value < (end as bigint) : value <= (end as bigint);
   };
   for (let value = begin; inRange(value); value++) {

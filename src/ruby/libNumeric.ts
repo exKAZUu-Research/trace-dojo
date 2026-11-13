@@ -35,13 +35,13 @@ function coerceError(value: Value, into: string): unknown {
 }
 
 /** Applies an operator to a number and a value that is not one, through the value's `coerce`. */
-function* coerceBinary(self: Num, other: Value, op: string): Gen {
+function* coerceBinary(self: Num, other: Value, op: string, target?: string): Gen {
   if (respondsTo(other, 'coerce')) {
     const pair = yield* callMethod(other, 'coerce', [self]);
     if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
     return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   }
-  throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
+  throw coerceError(other, target ?? (typeof self === 'bigint' ? 'Integer' : 'Float'));
 }
 
 function* coerceCompare(self: Num, other: Value, op: string): Gen {
@@ -241,10 +241,11 @@ for (const owner of ['Integer', 'Float']) {
     return Number(self) / Number(other);
   });
   def(owner, 'quo', 1, (self: Num, [other]) => {
+    if (!isNum(other)) return coerceBinary(self, other, 'quo', typeof self === 'bigint' ? 'Rational' : 'Float');
     if (typeof self === 'bigint' && typeof other === 'bigint') {
       throw new UnsupportedFeatureError('Integer#quo（有理数）');
     }
-    return Number(self) / Number(other as Num);
+    return Number(self) / Number(other);
   });
   def(owner, 'remainder', 1, (self: Num, [other]) => {
     if (!isNum(other)) throw coerceError(other, typeof self === 'bigint' ? 'Integer' : 'Float');
@@ -313,9 +314,13 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
   if (keywords) {
     for (const entry of keywords.map.values()) {
       const name = entry.key instanceof RSymbol ? entry.key.name : '';
-      if (name === 'to') limit = entry.value;
-      else if (name === 'by') step = entry.value;
-      else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
+      if (name === 'to') {
+        if (args.length > 0) throw argumentError('to is given twice');
+        limit = entry.value;
+      } else if (name === 'by') {
+        if (args.length > 1) throw argumentError('step is given twice');
+        step = entry.value;
+      } else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
   }
   if (!isNum(step)) throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
@@ -355,7 +360,7 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
 // Integer -------------------------------------------------------------------------------------------------------------
 
 def('Integer', ['to_s', 'inspect'], [0, 1], function* (self: bigint, args) {
-  const base = args.length > 0 ? Number(yield* toInt(args[0])) : 10;
+  const base = args.length > 0 ? yield* toRubyInt(args[0]) : 10;
   if (base < 2 || base > 36) throw argumentError(`invalid radix ${base}`);
   rt().checkStringLength(Math.ceil(integerBits(self) / Math.log2(base)) + 1);
   return str(self.toString(base));
@@ -547,14 +552,14 @@ def(
   'round',
   [0, 1],
   function* (self: bigint, args, _block, keywords) {
-    const digits = args.length > 0 ? yield* toInt(args[0]) : 0n;
+    const digits = args.length > 0 ? BigInt(yield* toRubyInt(args[0])) : 0n;
     return roundInteger(self, digits, yield* roundingMode(keywords));
   },
   { keywords: true }
 );
 for (const mode of ['floor', 'ceil', 'truncate'] as const) {
   def('Integer', mode, [0, 1], function* (self: bigint, args) {
-    const digits = args.length > 0 ? yield* toInt(args[0]) : 0n;
+    const digits = args.length > 0 ? BigInt(yield* toRubyInt(args[0])) : 0n;
     return roundInteger(self, digits, mode);
   });
 }
@@ -610,7 +615,7 @@ def(
   'round',
   [0, 1],
   function* (self: number, args, _block, keywords) {
-    const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+    const digits = args.length > 0 ? yield* toRubyInt(args[0]) : 0;
     const mode = yield* roundingMode(keywords);
     if (digits > 0) {
       if (!Number.isFinite(self)) return self;
@@ -630,19 +635,19 @@ def(
   { keywords: true }
 );
 def('Float', 'floor', [0, 1], function* (self: number, args) {
-  const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const digits = args.length > 0 ? yield* toRubyInt(args[0]) : 0;
   if (digits > 0) return floorCeilDigits(self, digits, Math.floor);
   checkFinite(self);
   return roundInteger(BigInt(Math.floor(self)), BigInt(digits), 'floor');
 });
 def('Float', 'ceil', [0, 1], function* (self: number, args) {
-  const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const digits = args.length > 0 ? yield* toRubyInt(args[0]) : 0;
   if (digits > 0) return floorCeilDigits(self, digits, Math.ceil);
   checkFinite(self);
   return roundInteger(BigInt(Math.ceil(self)), BigInt(digits), 'ceil');
 });
 def('Float', 'truncate', [0, 1], function* (self: number, args) {
-  const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const digits = args.length > 0 ? yield* toRubyInt(args[0]) : 0;
   if (digits > 0) return floorCeilDigits(self, digits, self > 0 ? Math.floor : Math.ceil);
   checkFinite(self);
   return roundInteger(BigInt(Math.trunc(self)), BigInt(digits), 'truncate');
@@ -673,23 +678,34 @@ function* exceptionOption(keywords: RHash | undefined): Gen<boolean> {
 export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen {
   const raise = yield* exceptionOption(keywords);
   const [value, baseValue] = args;
-  const base = value instanceof RString && baseValue !== undefined ? yield* toRubyInt(baseValue) : undefined;
-  if (base !== undefined && (base < 0 || (base !== 0 && (base < 2 || base > 36)))) {
-    throw argumentError(`invalid radix ${base}`);
-  }
+  const base = baseValue === undefined ? undefined : yield* toRubyInt(baseValue);
+  const invalidBase = base !== undefined && (base < 0 || (base !== 0 && (base < 2 || base > 36)));
+  let parsedString = false;
   try {
     if (value instanceof RString) {
-      const parsed = parseIntegerStrict(value.s, base);
-      if (parsed === undefined) throw argumentError(`invalid value for Integer(): ${JSON.stringify(value.s)}`);
-      return parsed;
+      parsedString = true;
+      if (invalidBase) throw argumentError(`invalid radix ${base}`);
+      return parseIntegerValue(value, base);
     }
-    if (baseValue !== undefined) throw argumentError('base specified for non string value');
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') return floatToInt(value);
-    if (value === NIL) throw typeError("can't convert nil into Integer");
-    if (respondsTo(value, 'to_int')) {
+    if (baseValue === undefined && typeof value === 'bigint') return value;
+    if (baseValue === undefined && typeof value === 'number') return floatToInt(value);
+    if (value === NIL && baseValue === undefined) throw typeError("can't convert nil into Integer");
+    if (baseValue === undefined && respondsTo(value, 'to_int')) {
       const converted = yield* callMethod(value, 'to_int', []);
       if (typeof converted === 'bigint') return converted;
+    }
+    let convertedString: Value = NIL;
+    if (respondsTo(value, 'to_str')) {
+      convertedString = yield* callMethod(value, 'to_str', []);
+      if (convertedString instanceof RString) {
+        parsedString = true;
+        if (invalidBase) throw argumentError(`invalid radix ${base}`);
+        return parseIntegerValue(convertedString, base);
+      }
+    }
+    if (baseValue !== undefined) {
+      if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
+      throw argumentError('base specified for non string value');
     }
     if (respondsTo(value, 'to_i')) {
       const converted = yield* callMethod(value, 'to_i', []);
@@ -698,11 +714,23 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
         `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_i gives ${realClassOf(converted).name})`
       );
     }
+    if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
     throw typeError(`can't convert ${realClassOf(value).name} into Integer`);
   } catch (error) {
-    if (!raise && error instanceof RubyError) return NIL;
+    if (!raise && !(parsedString && invalidBase) && error instanceof RubyError) return NIL;
     throw error;
   }
+}
+
+function parseIntegerValue(value: RString, base: number | undefined): bigint {
+  const parsed = parseIntegerStrict(value.s, base);
+  if (parsed === undefined) throw argumentError(`invalid value for Integer(): ${JSON.stringify(value.s)}`);
+  return parsed;
+}
+
+function integerStringConversionError(value: Value, converted: Value): RubyError {
+  const name = realClassOf(value).name;
+  return typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
 }
 
 /** Parses an Integer as `Integer()` does: prefixes, underscores between digits, and surrounding blanks. */

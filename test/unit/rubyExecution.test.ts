@@ -95,6 +95,21 @@ test.each([
     '[9007199254740992]\n[]\n[9007199254740993, 9007199254740992]\n',
   ],
   [
+    'Integer Range with a Float endpoint',
+    'p (9007199254740993..9007199254740994.0).to_a, (9007199254740993...9007199254740994.0).to_a',
+    '[9007199254740993, 9007199254740994]\n[9007199254740993]\n',
+  ],
+  [
+    'numeric conversion and argument boundaries',
+    'class X; def coerce(a); [2.0,4]; end; end; p 1.quo(X.new); begin; 1.quo(nil); rescue => e; p e.message; end; begin; 1.5.round(10**30); rescue => e; p e.class; end; begin; 1.to_s(10**30); rescue => e; p e.class; end; begin; 1.step(5,2,by:3); rescue => e; p e.message; end',
+    '0.5\n"nil can\'t be coerced into Rational"\nRangeError\nRangeError\n"step is given twice"\n',
+  ],
+  [
+    'Integer conversion from string-like values',
+    'class A; def to_str; "12"; end; def to_int; 5; end; end; class B; def to_str; "12"; end; def to_i; 7; end; end; p Integer(A.new), Integer(A.new,10), Integer(B.new)',
+    '5\n12\n12\n',
+  ],
+  [
     'String sum long bound',
     'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',
     "bignum too big to convert into 'long'\n38\n",
