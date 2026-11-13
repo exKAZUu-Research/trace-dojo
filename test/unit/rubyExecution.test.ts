@@ -1901,3 +1901,22 @@ test('multiple assignment snapshots values before setter callbacks', () => {
     stdout: '[2, 3]\n[1, 9, 3]\n',
   });
 });
+
+test('shared container equality stays within the execution budget', () => {
+  for (const comparison of ['a==b', 'a.eql?(b)']) {
+    expect(run(`a=[1]; b=[1]; 24.times { a=[a,a]; b=[b,b] }; p ${comparison}`)).toMatchObject({
+      kind: 'limitExceeded',
+    });
+  }
+});
+
+test('Hash equality permits mutation of the lookup operand', () => {
+  expect(run('class V; def ==(v); $b[:x]=3; false; end; end; $a={k:V.new}; $b={k:0}; p $a==$b,$b.size')).toMatchObject({
+    stdout: 'false\n2\n',
+  });
+  expect(
+    run('class V; def eql?(v); $b[:x]=3; false; end; end; $a={k:V.new}; $b={k:0}; p $a.eql?($b),$b.size')
+  ).toMatchObject({
+    stdout: 'false\n2\n',
+  });
+});

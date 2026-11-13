@@ -401,6 +401,13 @@ test('trace expansion stays bounded for shared Array graphs', () => {
   expect(JSON.stringify(trace.traceItems.at(-1)?.referenceVars.x).length).toBeLessThan(100_000);
 });
 
+test('large flat Arrays remain visible in final trace variables', () => {
+  const program = 'a=Array.new(2001,1)';
+  const values = traceProgram('ruby', program, program).finalVars.a;
+  expect(Array.isArray(values)).toBe(true);
+  expect((values as unknown[]).at(-1)).toBe('…');
+});
+
 test('converted Hash sources keep later Turtle values alive during insertion', () => {
   for (const operation of ['h={**A.new}', 'h={}.merge(A.new)']) {
     const program = `class K; def hash; x=1; 0; end; end; class A; def to_hash; {K.new=>1, 2=>Turtle.new}; end; end; ${operation}`;

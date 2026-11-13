@@ -91,7 +91,7 @@ type Scalar = TraceItemVariable[string];
 
 // code-gauge-allow duplicateLines 21 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
-  if (budget.remaining-- <= 0) return NOT_SCALAR;
+  if (budget.remaining-- <= 0) return '…';
   rt().spend();
   switch (typeof value) {
     case 'bigint': {
@@ -110,6 +110,10 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
   seen.add(value);
   const items: Scalar[] = [];
   for (const item of value.items) {
+    if (budget.remaining <= 0) {
+      items.push('…');
+      break;
+    }
     const scalar = scalarOf(item, seen, budget);
     if (scalar === NOT_SCALAR) return NOT_SCALAR;
     items.push(scalar);

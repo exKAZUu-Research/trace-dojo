@@ -166,7 +166,6 @@ def('Hash', '==', 1, (self: RHash, [other]) => rEquals(self, other));
 def('Hash', 'eql?', 1, function* (self: RHash, [other]) {
   if (!(other instanceof RHash) || self.map.size !== other.map.size) return false;
   self.iterating++;
-  other.iterating++;
   try {
     for (const entry of self.map.values()) {
       const match = yield* hashGet(other, entry.key);
@@ -175,7 +174,6 @@ def('Hash', 'eql?', 1, function* (self: RHash, [other]) {
     return true;
   } finally {
     self.iterating--;
-    other.iterating--;
   }
 });
 def('Hash', 'default', [0, 1], function* (self: RHash, args) {

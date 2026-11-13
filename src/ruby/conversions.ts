@@ -430,6 +430,7 @@ export function symInspect(name: string): string {
 
 /** `a == b`, with the library's own types compared without calling methods unless the program redefined them. */
 export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
+  rt().spend();
   if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
   if (typeof a === 'bigint' || typeof a === 'number') {
     if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
@@ -478,7 +479,6 @@ function* hashEquals(a: RHash, b: Value, pairs: Map<RBasic, Set<RBasic>>): Gen<b
 function* compareHashEntries(a: RHash, b: RHash, equals: (left: Value, right: Value) => Gen<boolean>): Gen<boolean> {
   if (a.map.size !== b.map.size) return false;
   a.iterating++;
-  b.iterating++;
   try {
     for (const entry of a.map.values()) {
       const other = yield* hashGet(b, entry.key);
@@ -487,7 +487,6 @@ function* compareHashEntries(a: RHash, b: RHash, equals: (left: Value, right: Va
     return true;
   } finally {
     a.iterating--;
-    b.iterating--;
   }
 }
 
@@ -501,6 +500,7 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
 
 /** `a.eql?(b)`: equal values of the same type, as Hash keys compare. */
 export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
+  rt().spend();
   if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
   if (typeof a !== typeof b) return false;
   if (typeof a === 'number') return a === b;
