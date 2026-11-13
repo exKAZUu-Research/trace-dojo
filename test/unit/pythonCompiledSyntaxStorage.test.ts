@@ -1,6 +1,13 @@
-import { expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
+
+beforeEach(() => {
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 test('dynamic compilation charges syntax before retaining a generated expression', () => {
   const program = `source = '[' + '1,' * 180000 + '0]'

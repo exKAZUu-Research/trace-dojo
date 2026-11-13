@@ -1,8 +1,14 @@
-import { expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
-/** Runs a program that raises when a value it computes differs from what CPython 3.14.10 computes for it. */
+beforeEach(() => {
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 function expectSameAsCPython(program: string): void {
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 }
