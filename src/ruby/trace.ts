@@ -1,0 +1,205 @@
+import type { ProgramRecording } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
+import type { TraceOptions } from '../interpreter/traceAnnotations';
+import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
+import type { DisplayNode, TraceItemVariable } from '../problems/trace';
+import { formatFloat, strInspect, symInspect } from './conversions';
+import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { parseRuby } from './parse';
+import { runProgram } from './run';
+import { type Frame, Runtime, type Scope } from './runtime';
+
+// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+export function traceRubyProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
+  const parsed = parseRuby(program, trace);
+  const runtime = new Runtime(input);
+  const recorder = new TraceRecorder(runtime, {
+    isAtomic: (frame) => frame.isAtomic,
+    variablesOf: (frame) => variablesOf(runtime, frame, true),
+  });
+  runtime.steps.recorder = recorder;
+  let finalVars: TraceItemVariable = {};
+  // A model program may end with an uncaught exception to show how one stops the program.
+  const run = runProgram(runtime, parsed, (frame) => {
+    finalVars = variablesOf(runtime, frame, false).vars;
+  });
+  return { traceItems: recorder.traceItems, finalVars, ...run };
+}
+
+/**
+ * The variables a frame shows: the local variables it sees (a block's include those of the method it was written in),
+ * then, when `withContext`, the instance variables of `self` (as Java's `this.x`), the class variables of the
+ * program's classes (as Java's static fields), and the global variables.
+ */
+function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): TraceVariables {
+  const variables: TraceVariables = { vars: {}, referenceVars: {} };
+  for (const [name, value] of visibleLocals(frame)) addVariable(variables, name, value);
+  if (!withContext) return variables;
+  const { self } = frame;
+  if (self instanceof RBasic && !(self instanceof RClass) && self.ivars) {
+    for (const [name, value] of self.ivars) if (!name.startsWith('@__')) addVariable(variables, name, value);
+  }
+  if (self instanceof RClass && self.isUserDefined && self.ivars) {
+    for (const [name, value] of self.ivars) addVariable(variables, `${self.name}.${name}`, value);
+  }
+  addClassVariables(variables, runtime.c.Object, new Set());
+  for (const [name, value] of runtime.globals) {
+    if (!SYSTEM_GLOBALS.has(name)) addVariable(variables, name, value);
+  }
+  return variables;
+}
+
+const SYSTEM_GLOBALS = new Set(['$stdout', '$stderr', '$!', '$,', '$/']);
+
+/** The local variables a frame sees, outermost scope first, each in the order the program first assigned it. */
+function visibleLocals(frame: Frame): [string, Value][] {
+  const scopes: Scope[] = [];
+  for (let scope: Scope | undefined = frame.scope; scope; scope = scope.parent) scopes.unshift(scope);
+  const values = new Map<string, Value>();
+  for (const scope of scopes) for (const [name, value] of scope.vars) values.set(name, value);
+  return [...values];
+}
+
+function addClassVariables(variables: TraceVariables, module: RClass, seen: Set<RClass>): void {
+  for (const value of module.constants.values()) {
+    if (!(value instanceof RClass) || !value.isUserDefined || seen.has(value)) continue;
+    seen.add(value);
+    for (const [name, field] of value.classVariables) addVariable(variables, `${value.name}.${name}`, field);
+    addClassVariables(variables, value, seen);
+  }
+}
+
+/** Procs and classes are definitions, not variables, to learners. */
+function isVariableValue(value: Value): boolean {
+  return !(value instanceof RProc || value instanceof RClass);
+}
+
+function addVariable(variables: TraceVariables, name: string, value: Value): void {
+  if (!isVariableValue(value)) return;
+  const scalar = scalarOf(value, new Set());
+  if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
+  // Arrays also appear as references so that learners can expand their elements.
+  if (scalar !== NOT_SCALAR && !(value instanceof RArray)) return;
+  const node = displayNodeOf(value, new Set());
+  if (node) variables.referenceVars[name] = node;
+}
+
+const NOT_SCALAR = Symbol('notScalar');
+type Scalar = TraceItemVariable[string];
+
+// code-gauge-allow duplicateLines 16 -- Each language converts its own values for the trace.
+function scalarOf(value: Value, seen: Set<object>): Scalar | typeof NOT_SCALAR {
+  switch (typeof value) {
+    case 'bigint': {
+      return traceIntOf(value);
+    }
+    case 'number':
+    case 'boolean': {
+      return value;
+    }
+  }
+  // oxlint-disable-next-line unicorn/no-null -- The trace format shows nil as null.
+  if (value === NIL) return null;
+  if (value instanceof RString) return value.s;
+  if (value instanceof RSymbol) return symInspect(value.name);
+  if (!(value instanceof RArray) || seen.has(value)) return NOT_SCALAR;
+  seen.add(value);
+  const items: Scalar[] = [];
+  for (const item of value.items) {
+    const scalar = scalarOf(item, seen);
+    if (scalar === NOT_SCALAR) return NOT_SCALAR;
+    items.push(scalar);
+  }
+  seen.delete(value);
+  return items as Scalar;
+}
+
+function traceIntOf(value: bigint): number | bigint {
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : value;
+}
+
+// oxlint-disable-next-line unicorn/no-null -- The trace format shows nil as null.
+const NULL_NODE: DisplayNode = { kind: 'value', value: null };
+
+/** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
+function displayNodeOf(value: Value, seen: Set<object>): DisplayNode | undefined {
+  if (typeof value === 'bigint') return { kind: 'value', value: traceIntOf(value) };
+  if (typeof value !== 'object') return { kind: 'value', value };
+  if (value === NIL) return NULL_NODE;
+  if (value instanceof RString) return { kind: 'value', value: value.s };
+  if (value instanceof RSymbol) return { kind: 'value', value: symInspect(value.name) };
+  if (!isVariableValue(value) || seen.has(value)) return undefined;
+  if (value instanceof RRange) return { kind: 'value', value: rangeText(value) };
+  if (value instanceof RObject && value.turtle) {
+    if (!value.turtle.isAlive) return undefined;
+    return {
+      kind: 'object',
+      entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
+    };
+  }
+  if (value instanceof RObject && value.data !== undefined) return undefined;
+  seen.add(value);
+  try {
+    return containerNodeOf(value as RBasic, seen);
+  } finally {
+    seen.delete(value);
+  }
+}
+
+function rangeText(value: RRange): string {
+  const end = (item: Value): string => (item === NIL ? '' : keyText(item, true));
+  return `${end(value.begin)}${value.exclusive ? '...' : '..'}${end(value.end)}`;
+}
+
+function containerNodeOf(value: RBasic, seen: Set<object>): DisplayNode {
+  const entries: Record<string, DisplayNode> = {};
+  if (value instanceof RArray) {
+    for (const [index, item] of value.items.entries()) entries[index] = displayNodeOf(item, seen) ?? NULL_NODE;
+    return { kind: 'array', entries };
+  }
+  if (value instanceof RHash) {
+    const ordered = [...value.map.values()];
+    const labels = keyLabels(ordered.map((entry) => entry.key));
+    for (const [index, entry] of ordered.entries()) {
+      entries[labels[index]] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
+    }
+  } else {
+    for (const [key, item] of value.ivars ?? []) {
+      if (key.startsWith('@__') || !isVariableValue(item)) continue;
+      const node = displayNodeOf(item, seen);
+      if (node) entries[key] = node;
+    }
+  }
+  return { kind: 'object', entries };
+}
+
+/**
+ * Labels a hash's keys, distinct for distinct keys: by their text when no two keys share one, and otherwise by their
+ * literals, with equal literals numbered.
+ */
+function keyLabels(keys: Value[]): string[] {
+  const texts = keys.map((key) => keyText(key, false));
+  if (new Set(texts).size === texts.length) return texts;
+  const literals = keys.map((key) => keyText(key, true));
+  const counts = new Map<string, number>();
+  for (const literal of literals) counts.set(literal, (counts.get(literal) ?? 0) + 1);
+  const positions = new Map<string, number>();
+  return literals.map((literal) => {
+    if (counts.get(literal) === 1) return literal;
+    const position = (positions.get(literal) ?? 0) + 1;
+    positions.set(literal, position);
+    return `${literal} (${position})`;
+  });
+}
+
+/** A hash key as text, quoting strings and marking symbols when `quoted`, without running the program's methods. */
+function keyText(key: Value, quoted: boolean): string {
+  if (key instanceof RString) return quoted ? strInspect(key.s) : key.s;
+  if (key instanceof RSymbol) return quoted ? symInspect(key.name) : key.name;
+  if (typeof key === 'boolean' || typeof key === 'bigint') return String(key);
+  if (typeof key === 'number') return formatFloat(key);
+  if (key === NIL) return 'nil';
+  if (key instanceof RArray) return `[${key.items.map((item) => keyText(item, true)).join(', ')}]`;
+  return `#<${(key as RBasic).cls.name}>`;
+}

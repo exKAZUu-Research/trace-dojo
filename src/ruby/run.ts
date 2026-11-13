@@ -1,0 +1,89 @@
+import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionLimitError } from '../interpreter/limits';
+import type { ProgramExecution, ProgramRun } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
+import type { Program } from './ast';
+import { bootstrap } from './bootstrap';
+import { describeException } from './describe';
+import { evalBody, runToEnd } from './interp';
+import { parseRuby } from './parse';
+import {
+  BreakSignal,
+  ExitSignal,
+  Frame,
+  NextSignal,
+  RetrySignal,
+  ReturnSignal,
+  RubyError,
+  Runtime,
+  Scope,
+  ThrowSignal,
+  UnsupportedFeatureError,
+  withRuntime,
+} from './runtime';
+import { isA } from './values';
+
+import './library';
+
+// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
+export function executeRubyProgram(source: string, input?: ProgramInput): ProgramExecution {
+  let program: Program;
+  try {
+    program = parseRuby(source);
+  } catch (error) {
+    if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
+    throw error;
+  }
+  try {
+    return { kind: 'executed', ...runProgram(new Runtime(input), program) };
+  } catch (error) {
+    if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
+    throw error;
+  }
+}
+
+/**
+ * Runs a program to its end or to an exception that escapes it.
+ *
+ * @param onEnd Called when the program ends, while its frame still holds its variables.
+ */
+export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
+  return withRuntime(runtime, () => {
+    bootstrap(runtime);
+    const frame = new Frame('main', runtime.mainObject, new Scope(), [runtime.c.Object], undefined, false, false, {});
+    runtime.pushFrame(frame);
+    try {
+      let uncaughtException: string | undefined;
+      try {
+        runToEnd(evalBody(program.body, frame));
+      } catch (error) {
+        uncaughtException = describeUncaught(runtime, error, frame);
+      }
+      onEnd?.(frame);
+      runtime.collectGarbage();
+      return {
+        finalBoard: runtime.world.boardText(),
+        finalTurtles: runtime.world.turtleTraces(),
+        uncaughtException,
+        ...runtime.io.output(),
+      };
+    } finally {
+      runtime.popFrame();
+    }
+  });
+}
+
+function describeUncaught(runtime: Runtime, error: unknown, frame: Frame): string | undefined {
+  if (error instanceof UnsupportedFeatureError) return error.message;
+  if (error instanceof ExitSignal) return undefined;
+  if (error instanceof ReturnSignal && error.target === frame) return undefined;
+  if (error instanceof RubyError) {
+    if (isA(error.exception, runtime.c.SystemExit)) return undefined;
+    return describeException(error.exception);
+  }
+  if (error instanceof ThrowSignal || error instanceof BreakSignal || error instanceof NextSignal) {
+    throw new TypeError('A control signal escaped the program');
+  }
+  if (error instanceof RetrySignal) throw new Error('A retry escaped its rescue clause');
+  throw error;
+}

@@ -39,15 +39,28 @@ export class StepTracker {
    * an argument whose evaluation recorded steps, a variable a `return` expression updates), needs this step.
    */
   runStatement<T>(row: number | undefined, onlyCalls: boolean | (() => boolean), run: () => T): T {
-    const { recordedSteps } = this;
+    const mark = this.statementMark();
     const result = run();
+    this.completeStatement(row, onlyCalls, mark);
+    return result;
+  }
+
+  /**
+   * Marks the start of a statement for {@link completeStatement}, for an evaluator that cannot pass the statement's run
+   * as a function, such as one whose statements are generators.
+   */
+  statementMark(): number {
+    return this.recordedSteps;
+  }
+
+  /** Records the step of a statement that started at `mark`, by the rule of {@link runStatement}. */
+  completeStatement(row: number | undefined, onlyCalls: boolean | (() => boolean), mark: number): void {
     const callsShowedIt =
       (typeof onlyCalls === 'function' ? onlyCalls() : onlyCalls) &&
-      this.recordedSteps !== recordedSteps &&
+      this.recordedSteps !== mark &&
       !this.atomicCallUnshown &&
       this.recorder?.showsState() === true;
     if (!callsShowedIt) this.step(row);
-    return result;
   }
 
   completeAtomicCall(): void {

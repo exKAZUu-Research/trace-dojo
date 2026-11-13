@@ -1,0 +1,534 @@
+import { argumentError, implicitConversionError, rangeError, typeError } from './errors';
+import { callMethod, callProc, type Gen, runToEnd } from './interp';
+import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
+import { rt } from './runtime';
+import { classOf, isA, realClassOf, truthy } from './values';
+
+// Numbers -------------------------------------------------------------------------------------------------------------
+
+/** Formats a Float as `Float#to_s` does: the shortest digits, in exponent form below 1e-4 or from 1e16. */
+export function formatFloat(value: number): string {
+  if (Number.isNaN(value)) return 'NaN';
+  if (value === Number.POSITIVE_INFINITY) return 'Infinity';
+  if (value === Number.NEGATIVE_INFINITY) return '-Infinity';
+  if (value === 0) return Object.is(value, -0) ? '-0.0' : '0.0';
+  const sign = value < 0 ? '-' : '';
+  const [mantissa, exponent] = Math.abs(value).toExponential().split('e');
+  const digits = mantissa.replace('.', '');
+  const point = Number(exponent) + 1;
+  if (point < -3 || (point > 15 && point >= digits.length)) {
+    const power = point - 1;
+    return `${sign}${digits[0]}.${digits.slice(1) || '0'}e${power < 0 ? '-' : '+'}${String(Math.abs(power)).padStart(2, '0')}`;
+  }
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}.0`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/** Converts an Integer to a Float as Ruby does, rounding to nearest even, with huge values becoming infinite. */
+export function intToFloat(value: bigint): number {
+  return Number(value);
+}
+
+/** Converts a Float to an Integer, truncating, or raises for NaN and infinities as `to_i` does. */
+export function floatToInt(value: number): bigint {
+  if (Number.isNaN(value)) throw rt().c.FloatDomainError && floatDomain('NaN');
+  if (!Number.isFinite(value)) throw floatDomain(value > 0 ? 'Infinity' : '-Infinity');
+  return BigInt(Math.trunc(value));
+}
+
+function floatDomain(message: string): unknown {
+  const { rubyError } = errorsModule;
+  return rubyError(rt().c.FloatDomainError, message);
+}
+
+import * as errorsModule from './errors';
+
+/** The Integer an argument stands for, as Ruby's implicit `to_int` conversion makes it (floats truncate). */
+export function* toInt(value: Value): Gen<bigint> {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') return floatToInt(value);
+  if (value instanceof RBasic && classOf(value).findMethod('to_int')) {
+    const converted = yield* callMethod(value, 'to_int', []);
+    if (typeof converted === 'bigint') return converted;
+  }
+  throw implicitConversionError(value, 'Integer');
+}
+
+/** {@link toInt} for an index or count that must fit a JavaScript number. */
+export function* toIndex(value: Value): Gen<number> {
+  const integer = yield* toInt(value);
+  if (integer > BigInt(Number.MAX_SAFE_INTEGER) || integer < -BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw rangeError(`bignum too big to convert into 'long'`);
+  }
+  return Number(integer);
+}
+
+export function toIndexSync(value: Value): number {
+  return runToEnd(toIndex(value));
+}
+
+/** The String an argument stands for, by Ruby's implicit `to_str` conversion. */
+export function* toStr(value: Value): Gen<string> {
+  if (value instanceof RString) return value.s;
+  if (value instanceof RBasic && classOf(value).findMethod('to_str')) {
+    const converted = yield* callMethod(value, 'to_str', []);
+    if (converted instanceof RString) return converted.s;
+  }
+  throw implicitConversionError(value, 'String');
+}
+
+export function toStrSync(value: Value): string {
+  return runToEnd(toStr(value));
+}
+
+/** The Float a numeric argument stands for, as `Math` functions convert their arguments. */
+export function toFloat(value: Value): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'bigint') return intToFloat(value);
+  if (value === NIL) throw typeError("can't convert nil into Float");
+  if (value instanceof RString) throw typeError("can't convert String into Float");
+  throw implicitConversionError(value, 'Float');
+}
+
+// Strings -------------------------------------------------------------------------------------------------------------
+
+/** The text of a value as `to_s` makes it, which string interpolation and `puts` show. */
+export function* toS(value: Value): Gen<string> {
+  if (value instanceof RString) return value.s;
+  const fast = fastToS(value);
+  if (fast !== undefined && !isOverridden(value, 'to_s')) return fast;
+  const converted = yield* callMethod(value, 'to_s', []);
+  if (converted instanceof RString) return converted.s;
+  return anyToS(value);
+}
+
+function fastToS(value: Value): string | undefined {
+  switch (typeof value) {
+    case 'bigint': {
+      return String(value);
+    }
+    case 'number': {
+      return formatFloat(value);
+    }
+    case 'boolean': {
+      return String(value);
+    }
+  }
+  if (value === NIL) return '';
+  if (value instanceof RSymbol) return value.name;
+  return undefined;
+}
+
+/** Whether the program redefined a library method for a value, which then must run instead of the fast path. */
+function isOverridden(value: Value, name: string): boolean {
+  const method = classOf(value).findMethod(name);
+  return method !== undefined && method.body.kind !== 'native';
+}
+
+/** The default text of an object: `#<Foo:0x...>`, with a fake address that stays the same for the object. */
+export function anyToS(value: Value): string {
+  return `#<${realClassOf(value).name ?? anonymousClassName(realClassOf(value))}:${addressOf(value)}>`;
+}
+
+export function addressOf(value: Value): string {
+  const runtime = rt();
+  const key = value as object;
+  let address = runtime.addresses.get(key);
+  if (address === undefined) {
+    address = runtime.addresses.size;
+    runtime.addresses.set(key, address);
+  }
+  return `0x${(0x7f_1a_2b_3c_00_00n + BigInt(address) * 0x28n).toString(16).padStart(16, '0')}`;
+}
+
+export function anonymousClassName(cls: RClass): string {
+  return `#<${cls.isModule ? 'Module' : 'Class'}:${addressOf(cls)}>`;
+}
+
+/** The text `inspect` makes, which `p` shows. */
+export function* inspect(value: Value): Gen<string> {
+  const fast = fastInspect(value);
+  if (fast !== undefined && !isOverridden(value, 'inspect')) return fast;
+  const converted = yield* callMethod(value, 'inspect', []);
+  if (converted instanceof RString) return converted.s;
+  return yield* toS(converted);
+}
+
+function fastInspect(value: Value): string | undefined {
+  if (value === NIL) return 'nil';
+  if (value instanceof RString) return strInspect(value.s);
+  if (value instanceof RSymbol) return symInspect(value.name);
+  if (typeof value === 'object') return undefined;
+  return fastToS(value);
+}
+
+/** Inspects the objects a container holds, showing `[...]` for one that contains itself. */
+const inspecting = new Set<object>();
+
+export function* inspectArray(array: RArray): Gen<string> {
+  if (inspecting.has(array)) return '[...]';
+  inspecting.add(array);
+  try {
+    const parts: string[] = [];
+    for (const item of array.items) parts.push(yield* inspect(item));
+    return `[${parts.join(', ')}]`;
+  } finally {
+    inspecting.delete(array);
+  }
+}
+
+export function* inspectHash(hash: RHash): Gen<string> {
+  if (hash.map.size === 0) return '{}';
+  if (inspecting.has(hash)) return '{...}';
+  inspecting.add(hash);
+  try {
+    const parts: string[] = [];
+    for (const { key, value } of hash.map.values()) {
+      if (key instanceof RSymbol) {
+        const name = symInspect(key.name).slice(1);
+        parts.push(`${isSimpleSymbol(key.name) ? key.name : name}: ${yield* inspect(value)}`);
+      } else {
+        parts.push(`${yield* inspect(key)} => ${yield* inspect(value)}`);
+      }
+    }
+    return `{${parts.join(', ')}}`;
+  } finally {
+    inspecting.delete(hash);
+  }
+}
+
+/** Whether a symbol key shows as `key: value` without quotes in a Hash's inspect. */
+function isSimpleSymbol(name: string): boolean {
+  return /^[A-Za-z_\u0080-￿][\w\u0080-￿]*[?!]?$/u.test(name);
+}
+
+export function* inspectRange(value: RRange): Gen<string> {
+  const begin = value.begin === NIL && value.end !== NIL ? '' : yield* inspect(value.begin);
+  const end = value.end === NIL && value.begin !== NIL ? '' : yield* inspect(value.end);
+  return `${begin}${value.exclusive ? '...' : '..'}${end}`;
+}
+
+export function* inspectObject(object: RBasic): Gen<string> {
+  const name = realClassOf(object).name ?? anonymousClassName(realClassOf(object));
+  const ivars = [...(object.ivars ?? [])].filter(([key]) => !key.startsWith('@__'));
+  if (ivars.length === 0) return `#<${name}:${addressOf(object)}>`;
+  if (inspecting.has(object)) return `#<${name}:${addressOf(object)} ...>`;
+  inspecting.add(object);
+  try {
+    const parts: string[] = [];
+    for (const [key, value] of ivars) parts.push(`${key}=${yield* inspect(value)}`);
+    return `#<${name}:${addressOf(object)} ${parts.join(', ')}>`;
+  } finally {
+    inspecting.delete(object);
+  }
+}
+
+export function* inspectException(exception: RObject): Gen<string> {
+  const name = realClassOf(exception).name ?? anonymousClassName(realClassOf(exception));
+  const message = yield* toS(yield* callMethod(exception, 'to_s', []));
+  if (message === '') return name;
+  if (message.includes('\n')) return `#<${name}: ${strInspect(message)}>`;
+  return `#<${name}: ${message}>`;
+}
+
+export function inspectProc(proc: RProc): string {
+  const body = proc.body;
+  const location = body.kind === 'block' ? ` main.rb:${body.def.row + 1}` : '';
+  return `#<Proc:${addressOf(proc)}${location}${proc.isLambda ? ' (lambda)' : ''}>`;
+}
+
+export function className(cls: RClass): string {
+  if (cls.isSingleton) {
+    const attached = cls.attached as Value;
+    const shown = attached instanceof RClass ? className(attached) : runToEnd(inspect(attached));
+    return `#<Class:${shown}>`;
+  }
+  return cls.name ?? anonymousClassName(cls);
+}
+
+/** A String's inspect: double-quoted, escaping quotes, backslashes, `#{`, and characters that do not print. */
+export function strInspect(text: string): string {
+  let result = '"';
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const code = text.codePointAt(index) as number;
+    if (code > 0xff_ff) {
+      result += isPrintable(code) ? String.fromCodePoint(code) : `\\u{${code.toString(16).toUpperCase()}}`;
+      index++;
+      continue;
+    }
+    switch (char) {
+      case '"': {
+        result += String.raw`\"`;
+        break;
+      }
+      case '\\': {
+        result += String.raw`\\`;
+        break;
+      }
+      case '\n': {
+        result += String.raw`\n`;
+        break;
+      }
+      case '\t': {
+        result += String.raw`\t`;
+        break;
+      }
+      case '\r': {
+        result += String.raw`\r`;
+        break;
+      }
+      case '\f': {
+        result += String.raw`\f`;
+        break;
+      }
+      case '\v': {
+        result += String.raw`\v`;
+        break;
+      }
+      case '\b': {
+        result += String.raw`\b`;
+        break;
+      }
+      case '\u0007': {
+        result += String.raw`\a`;
+        break;
+      }
+      case '\u001B': {
+        result += String.raw`\e`;
+        break;
+      }
+      case '#': {
+        const next = text[index + 1];
+        result += next === '{' || next === '$' || next === '@' ? String.raw`\#` : '#';
+        break;
+      }
+      default: {
+        if (isPrintable(code)) result += char;
+        else if (code < 0x80) result += `\\x${code.toString(16).toUpperCase().padStart(2, '0')}`;
+        else result += `\\u${code.toString(16).toUpperCase().padStart(4, '0')}`;
+      }
+    }
+  }
+  return `${result}"`;
+}
+
+function isPrintable(code: number): boolean {
+  if (code < 0x20 || code === 0x7f) return false;
+  if (code >= 0x80 && code < 0xa0) return false;
+  if (code >= 0xd8_00 && code <= 0xdf_ff) return false;
+  return !/[\p{Cc}\p{Cn}\p{Co}\p{Cs}\p{Zl}\p{Zp}]/u.test(String.fromCodePoint(code)) || code === 0x20;
+}
+
+const OPERATOR_SYMBOLS = new Set([
+  '+',
+  '-',
+  '*',
+  '/',
+  '%',
+  '**',
+  '==',
+  '===',
+  '!=',
+  '<',
+  '<=',
+  '>',
+  '>=',
+  '<=>',
+  '<<',
+  '>>',
+  '&',
+  '|',
+  '^',
+  '~',
+  '!',
+  '=~',
+  '!~',
+  '[]',
+  '[]=',
+  '+@',
+  '-@',
+  '`',
+]);
+
+export function symInspect(name: string): string {
+  if (OPERATOR_SYMBOLS.has(name)) return `:${name}`;
+  if (/^(?:\$|@@?)?[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) return `:${name}`;
+  if (/^[A-Za-z_\u0080-￿][\w\u0080-￿]*[?!=]$/u.test(name)) return `:${name}`;
+  return `:${strInspect(name)}`;
+}
+
+// Comparisons ---------------------------------------------------------------------------------------------------------
+
+/** `a == b`, with the library's own types compared without calling methods unless the program redefined them. */
+export function* rEquals(a: Value, b: Value): Gen<boolean> {
+  if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
+  if (typeof a === 'bigint' || typeof a === 'number') {
+    if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
+    if (typeof b === 'bigint' || typeof b === 'number') return numericEquals(a, b);
+    if (b instanceof RBasic && classOf(b).findMethod('==')?.body.kind === 'user') {
+      return truthy(yield* callMethod(b, '==', [a]));
+    }
+    return false;
+  }
+  if (typeof a !== 'object' || a === NIL || a instanceof RSymbol) return false;
+  if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
+  if (a instanceof RString) return b instanceof RString && a.s === b.s;
+  if (a instanceof RArray) {
+    if (!(b instanceof RArray) || a.items.length !== b.items.length) return false;
+    for (let index = 0; index < a.items.length; index++) {
+      if (index >= b.items.length || !(yield* rEquals(a.items[index], b.items[index]))) return false;
+    }
+    return true;
+  }
+  if (a instanceof RHash) return yield* hashEquals(a, b);
+  if (a instanceof RRange) {
+    return (
+      b instanceof RRange &&
+      a.exclusive === b.exclusive &&
+      (yield* rEquals(a.begin, b.begin)) &&
+      (yield* rEquals(a.end, b.end))
+    );
+  }
+  const method = classOf(a).findMethod('==');
+  if (method && method.owner !== rt().c.BasicObject && method.owner !== rt().c.Kernel) {
+    return truthy(yield* callMethod(a, '==', [b]));
+  }
+  return false;
+}
+
+function* hashEquals(a: RHash, b: Value): Gen<boolean> {
+  if (!(b instanceof RHash) || a.map.size !== b.map.size) return false;
+  const { hashGet } = yield* hashesModule();
+  for (const entry of a.map.values()) {
+    const other = yield* hashGet(b, entry.key);
+    if (!other || !(yield* rEquals(entry.value, other.value))) return false;
+  }
+  return true;
+}
+
+function* hashesModule(): Gen<typeof import('./hashes')> {
+  return hashes;
+}
+
+import * as hashes from './hashes';
+
+export function numericEquals(a: bigint | number, b: bigint | number): boolean {
+  if (typeof a === 'bigint' && typeof b === 'bigint') return a === b;
+  if (typeof a === 'number' && typeof b === 'number') return a === b;
+  const float = typeof a === 'number' ? a : (b as number);
+  const integer = typeof a === 'bigint' ? a : (b as bigint);
+  return Number.isInteger(float) && Number.isFinite(float) && BigInt(float) === integer;
+}
+
+/** `a.eql?(b)`: equal values of the same type, as Hash keys compare. */
+export function* rEql(a: Value, b: Value): Gen<boolean> {
+  if (typeof a !== typeof b) return false;
+  if (typeof a === 'number') return a === b || (Number.isNaN(a) && Number.isNaN(b as number) && false);
+  if (a instanceof RString) return b instanceof RString && a.s === b.s;
+  if (a instanceof RArray) {
+    if (!(b instanceof RArray) || a.items.length !== b.items.length) return false;
+    for (let index = 0; index < a.items.length; index++) {
+      if (!(yield* rEql(a.items[index], b.items[index]))) return false;
+    }
+    return true;
+  }
+  if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
+  if (a instanceof RHash || a instanceof RRange) return yield* rEquals(a, b);
+  return a === b;
+}
+
+/** The order of two values by `<=>`, raising "comparison of X with Y failed" when they do not compare. */
+export function* compareValues(a: Value, b: Value): Gen<number> {
+  const order = yield* spaceship(a, b);
+  if (order === undefined) throw comparisonFailed(a, b);
+  return order;
+}
+
+export function comparisonFailed(a: Value, b: Value): unknown {
+  const right = typeof b === 'object' && !(b instanceof RBasic) ? describeImmediate(b) : realClassOf(b).name;
+  return argumentError(`comparison of ${realClassOf(a).name} with ${right} failed`);
+}
+
+function describeImmediate(value: Value): string {
+  if (value === NIL) return 'nil';
+  if (value instanceof RSymbol) return runToEnd(inspect(value));
+  return realClassOf(value).name ?? '';
+}
+
+/** `a <=> b` as a number, or `undefined` when it is nil. */
+export function* spaceship(a: Value, b: Value): Gen<number | undefined> {
+  if ((typeof a === 'bigint' || typeof a === 'number') && !isOverridden(a, '<=>')) {
+    if (typeof b === 'bigint' || typeof b === 'number') return numericCompare(a, b);
+    return undefined;
+  }
+  if (a instanceof RString && b instanceof RString && !isOverridden(a, '<=>')) {
+    return compareStrings(a.s, b.s);
+  }
+  const result = yield* callMethod(a, '<=>', [b]);
+  if (result === NIL) return undefined;
+  if (typeof result === 'bigint') return Number(result > 0n ? 1n : result < 0n ? -1n : 0n);
+  if (typeof result === 'number') return Math.sign(result);
+  const positive = truthy(yield* callMethod(result, '>', [0n]));
+  if (positive) return 1;
+  return truthy(yield* callMethod(result, '<', [0n])) ? -1 : 0;
+}
+
+export function numericCompare(a: bigint | number, b: bigint | number): number | undefined {
+  if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
+  const x = typeof a === 'bigint' ? a : a;
+  const y = typeof b === 'bigint' ? b : b;
+  if (typeof x === 'number' && Number.isNaN(x)) return undefined;
+  if (typeof y === 'number' && Number.isNaN(y)) return undefined;
+  if (typeof x === 'number' && typeof y === 'number') return x < y ? -1 : x > y ? 1 : 0;
+  // Mixed: compare exactly, since converting a big Integer to a Float loses digits.
+  const float = (typeof x === 'number' ? x : y) as number;
+  const integer = (typeof x === 'bigint' ? x : y) as bigint;
+  let order: number;
+  if (!Number.isFinite(float)) order = float > 0 ? 1 : -1;
+  else {
+    const truncated = BigInt(Math.trunc(float));
+    if (truncated !== integer) order = truncated > integer ? 1 : -1;
+    else order = float > Math.trunc(float) ? 1 : float < Math.trunc(float) ? -1 : 0;
+  }
+  return typeof x === 'number' ? order : -order;
+}
+
+/** Compares strings by their UTF-8 bytes, which orders code points as their numbers do. */
+export function compareStrings(a: string, b: string): number {
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    const x = a.codePointAt(index) as number;
+    const y = b.codePointAt(index) as number;
+    if (x !== y) return x < y ? -1 : 1;
+    if (x > 0xff_ff) index++;
+  }
+  return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
+}
+
+/** `pattern === value`, as `case` and `when` compare. */
+export function* caseEquals(pattern: Value, value: Value): Gen<boolean> {
+  if (isOverridden(pattern, '===')) return truthy(yield* callMethod(pattern, '===', [value]));
+  if (pattern instanceof RClass) return isA(value, pattern);
+  if (pattern instanceof RRange) return yield* rangeCovers(pattern, value);
+  if (pattern instanceof RProc) return truthy(yield* callProc(pattern, [value]));
+  if (pattern instanceof RObject && classOf(pattern).findMethod('===')?.body.kind === 'native') {
+    return truthy(yield* callMethod(pattern, '===', [value]));
+  }
+  return yield* rEquals(pattern, value);
+}
+
+/** Whether a range covers a value: `begin <= value` and `value < end` (or `<=`), with nil ends open. */
+export function* rangeCovers(range: RRange, value: Value): Gen<boolean> {
+  if (range.begin !== NIL) {
+    const order = yield* spaceship(range.begin, value);
+    if (order === undefined || order > 0) return false;
+  }
+  if (range.end !== NIL) {
+    const order = yield* spaceship(value, range.end);
+    if (order === undefined) return false;
+    return range.exclusive ? order < 0 : order <= 0;
+  }
+  return true;
+}
