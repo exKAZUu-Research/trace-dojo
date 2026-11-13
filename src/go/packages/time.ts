@@ -1,7 +1,17 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import type { Entity } from '../entities';
+import type { Entity, VarEntity } from '../entities';
 import { newError } from '../errorValues';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, perRun, typeEntity } from '../native';
+import {
+  addMethod,
+  currentRuntime,
+  definePackage,
+  fn,
+  libraryCell,
+  namedType,
+  nativeFunction,
+  perRun,
+  typeEntity,
+} from '../native';
 import type { Runtime } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, pointerTo, type Type } from '../types';
@@ -124,7 +134,7 @@ timeMethod('AddDate', [INT, INT, INT], [TIME], (t, [years, months, days]) =>
 timeMethod('Truncate', [DURATION], [TIME], (t, [d]) => timeValue(goTime.truncate(t, d as bigint)));
 timeMethod('Round', [DURATION], [TIME], (t, [d]) => timeValue(goTime.round(t, d as bigint)));
 timeMethod('UTC', [], [TIME], (t) => timeValue(goTime.inLocation(t, goTime.UTC_LOCATION)));
-timeMethod('Local', [], [TIME], (t) => timeValue(goTime.inLocation(t, goTime.LOCAL_LOCATION)));
+timeMethod('Local', [], [TIME], (t) => timeValue(goTime.inLocation(t, goTime.currentLocal())));
 timeMethod('In', [LOCATION_POINTER], [TIME], (t, [loc]) => {
   if (loc === undefined) stringPanic('time: missing Location in call to Time.In');
   return timeValue(goTime.inLocation(t, locationOf(loc)));
@@ -223,7 +233,7 @@ function unmarshalBinary(data: string): goTime.Time | string {
   if (version === 2) offset += BigInt.asIntN(8, read(15, 1));
   const t: goTime.Time = { wall: BigInt.asUintN(64, ns), ext: sec, loc: undefined };
   if (offset === -60n) return t;
-  const location = offset === 0n ? goTime.LOCAL_LOCATION : goTime.fixedZone('', offset);
+  const location = offset === 0n ? goTime.currentLocal() : goTime.fixedZone('', offset);
   return goTime.inLocation(t, location);
 }
 
@@ -384,7 +394,7 @@ function constant(name: string, type: Type, value: bigint | string): Entity {
   };
 }
 
-function locationVariable(name: string, location: goTime.Location): Entity {
+function locationVariable(name: string, location: goTime.Location): VarEntity {
   return {
     kind: 'var',
     name,
@@ -397,6 +407,12 @@ function locationVariable(name: string, location: goTime.Location): Entity {
     library: () => pointerOf(location),
   };
 }
+
+const LOCAL = locationVariable('Local', goTime.LOCAL_LOCATION);
+goTime.setLocalReader(() => {
+  const pointer = libraryCell(LOCAL).v;
+  return pointer === undefined ? goTime.UTC_LOCATION : locationOf(pointer);
+});
 
 const DURATION_UNITS: [string, bigint][] = [
   ['Nanosecond', 1n],
@@ -415,7 +431,7 @@ const members: Record<string, Entity> = {
   Location: typeEntity(LOCATION),
   ParseError: typeEntity(PARSE_ERROR),
   UTC: locationVariable('UTC', goTime.UTC_LOCATION),
-  Local: locationVariable('Local', goTime.LOCAL_LOCATION),
+  Local: LOCAL,
   ...Object.fromEntries(DURATION_UNITS.map(([name, value]) => [name, constant(name, DURATION, value)])),
   ...Object.fromEntries(goTime.LONG_DAY_NAMES.map((name, index) => [name, constant(name, WEEKDAY, BigInt(index))])),
   ...Object.fromEntries(goTime.LONG_MONTH_NAMES.map((name, index) => [name, constant(name, MONTH, BigInt(index + 1))])),
@@ -466,7 +482,7 @@ const members: Record<string, Entity> = {
   ),
   Parse: nativeFunction('Parse', fn([STRING, STRING], [TIME, ERROR_TYPE]), ([layout, value]) => {
     spendFor((layout as string).length + (value as string).length);
-    return parseResult(timeFormat.parse(layout as string, value as string, goTime.UTC_LOCATION, goTime.LOCAL_LOCATION));
+    return parseResult(timeFormat.parse(layout as string, value as string, goTime.UTC_LOCATION, goTime.currentLocal()));
   }),
   ParseInLocation: nativeFunction(
     'ParseInLocation',

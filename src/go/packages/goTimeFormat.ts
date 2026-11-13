@@ -9,6 +9,7 @@ import {
   absSec,
   addSec,
   clockOf,
+  currentLocal,
   daysBefore,
   daysIn,
   daysOf,
@@ -18,7 +19,6 @@ import {
   i64,
   isLeap,
   locabs,
-  LOCAL_LOCATION,
   type Location,
   LONG_DAY_NAMES,
   LONG_MONTH_NAMES,
@@ -488,7 +488,7 @@ export function goString(t: Time): string {
   const locationText =
     location === UTC_LOCATION
       ? 'time.UTC'
-      : location === LOCAL_LOCATION
+      : location === currentLocal()
         ? 'time.Local'
         : `time.Location(${quote(location.name)})`;
   return `time.Date(${year}${monthText}, ${day}, ${hour}, ${min}, ${s}, ${nsec(t)}, ${locationText})`;
@@ -1063,9 +1063,9 @@ function parseRfc3339(s: string, local: Location): Time | undefined {
 
 /** `parseStrictRFC3339`, for UnmarshalJSON and UnmarshalText. */
 export function parseStrictRfc3339(text: string): ParseResult {
-  const t = parseRfc3339(text, LOCAL_LOCATION);
+  const t = parseRfc3339(text, currentLocal());
   if (t) return { time: t };
-  return parse(LAYOUTS.RFC3339, text, UTC_LOCATION, LOCAL_LOCATION);
+  return parse(LAYOUTS.RFC3339, text, UTC_LOCATION, currentLocal());
 }
 
 const UNIT_MAP = new Map<string, bigint>([

@@ -210,13 +210,22 @@ export abstract class CompilerBase {
 
   /**
    * Resolves type syntax. `direct` tells whether the type is stored directly in the type being declared, where a
-   * reference to that type makes it infinitely large.
+   * reference to that type makes it infinitely large. `constraint` tells whether the syntax stands where Go allows an
+   * interface with a type set: as a type parameter's constraint, or as the whole type of a type declaration.
    */
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type syntax.
-  resolveType(syntax: TypeExpression, direct = false): Type {
+  resolveType(syntax: TypeExpression, direct = false, constraint = false): Type {
     switch (syntax.kind) {
       case 'name': {
-        return this.resolveNamedType(syntax, direct);
+        const type = this.resolveNamedType(syntax, direct);
+        const under = underlying(type);
+        if (!constraint && under.kind === 'interface' && under.typeSet) {
+          return this.error(
+            syntax,
+            `${describeType(type)} 型は、型の制約にしか使えません（型の集合を持つインターフェースです）。`
+          );
+        }
+        return type;
       }
       case 'pointer': {
         return { kind: 'pointer', element: this.resolveType(syntax.element) };
@@ -456,7 +465,7 @@ export abstract class CompilerBase {
       this.typeParamSpans.set(declared[index].id, parameter);
     }
     for (const [index, parameter] of parameters.entries()) {
-      const constraint = this.resolveType(parameter.constraint);
+      const constraint = this.resolveType(parameter.constraint, false, true);
       const under = underlying(constraint);
       if (constraint === BASIC.invalid) continue;
       if (under.kind !== 'interface') {
@@ -466,7 +475,7 @@ export abstract class CompilerBase {
         );
         continue;
       }
-      if (constraint.kind === 'named') CONSTRAINT_NAMES.set(under, constraint);
+      if (constraint.kind === 'named') declared[index].constraintName = constraint;
       declared[index].constraint = under;
     }
     return declared;
@@ -484,7 +493,7 @@ export abstract class CompilerBase {
       if (failure) {
         this.error(
           span,
-          `${describeType(args[index])} は ${param.name} の制約 ${describeConstraint(param.constraint)} を満たしていません（${failure}）。`
+          `${describeType(args[index])} は ${param.name} の制約 ${describeConstraint(param)} を満たしていません（${failure}）。`
         );
         return false;
       }
@@ -523,11 +532,12 @@ export abstract class CompilerBase {
   protected abstract instantiateNamed(named: NamedType, args: Type[]): NamedType;
 }
 
-function describeConstraint(constraint: InterfaceType): string {
+function describeConstraint(param: TypeParamType): string {
+  const { constraint } = param;
   if (constraint === COMPARABLE || (constraint.typeSet?.comparable && constraint.methods.length === 0))
     return 'comparable';
   if (constraint === EMPTY_INTERFACE) return 'any';
-  const named = CONSTRAINT_NAMES.get(constraint);
+  const named = param.constraintName ?? CONSTRAINT_NAMES.get(constraint);
   if (named) return named.pkg && named.pkg !== 'main' ? `${named.pkg.split('/').at(-1)}.${named.name}` : named.name;
   const terms = constraint.typeSet?.terms;
   if (terms && constraint.methods.length === 0) {

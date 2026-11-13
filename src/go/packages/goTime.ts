@@ -21,6 +21,18 @@ export const UTC_LOCATION: Location = { name: 'UTC' };
 /** The interpreter fixes the local time zone to UTC, as Go has it when the TZ environment variable is "" or "UTC". */
 export const LOCAL_LOCATION: Location = { name: 'UTC' };
 
+let readLocal = (): Location => LOCAL_LOCATION;
+
+/** The location the `time.Local` variable holds now, which a program may assign. */
+export function currentLocal(): Location {
+  return readLocal();
+}
+
+/** Installs how `currentLocal` reads the `time.Local` variable of the running program. */
+export function setLocalReader(read: () => Location): void {
+  readLocal = read;
+}
+
 export const i64 = (x: bigint): bigint => BigInt.asIntN(64, x);
 export const u64 = (x: bigint): bigint => BigInt.asUintN(64, x);
 const u32 = (x: bigint): bigint => BigInt.asUintN(32, x);
@@ -345,8 +357,9 @@ export function now(unixNanos: bigint, mono: bigint): Time {
   const s = unixNanos / SECOND - (unixNanos % SECOND < 0n ? 1n : 0n);
   const ns = unixNanos - s * SECOND;
   const wallSec = s + UNIX_TO_INTERNAL - MIN_WALL;
-  if (u64(wallSec) >> 33n !== 0n) return { wall: ns, ext: wallSec + MIN_WALL, loc: LOCAL_LOCATION };
-  return { wall: HAS_MONOTONIC | (wallSec << NSEC_SHIFT) | ns, ext: mono, loc: LOCAL_LOCATION };
+  const loc = currentLocal();
+  if (u64(wallSec) >> 33n !== 0n) return { wall: ns, ext: wallSec + MIN_WALL, loc };
+  return { wall: HAS_MONOTONIC | (wallSec << NSEC_SHIFT) | ns, ext: mono, loc };
 }
 
 export function unix(secValue: bigint, nsecValue: bigint): Time {
@@ -365,7 +378,7 @@ export function unix(secValue: bigint, nsecValue: bigint): Time {
 }
 
 function unixTime(s: bigint, ns: bigint): Time {
-  return { wall: u64(i32(ns)), ext: i64(s + UNIX_TO_INTERNAL), loc: LOCAL_LOCATION };
+  return { wall: u64(i32(ns)), ext: i64(s + UNIX_TO_INTERNAL), loc: currentLocal() };
 }
 
 export function unixSeconds(t: Time): bigint {

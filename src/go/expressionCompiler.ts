@@ -581,6 +581,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (isInterface(target) && !isInterface(value.type)) {
       const box = toInterface(value.type);
       const read = value.eval;
+      if (value.mode === 'constant') {
+        // Go's compiler places a converted constant in read-only data, shared by every evaluation.
+        const constantIface = box(read({} as Frame)) as Iface;
+        CONSTANT_IFACES.add(constantIface);
+        return () => constantIface;
+      }
       return (frame) => box(read(frame));
     }
     if (isValueType(target)) {

@@ -67,12 +67,15 @@ function describeUncaught(error: unknown): string | undefined {
   throw error;
 }
 
-/** Describes a panic, ending as Go's runtime does when an Error or String method panics while it is printed. */
-function describePanicSafely(panic: GoPanic): string {
+/**
+ * Describes a panic, ending as Go's runtime does when an Error or String method panics while it is printed, and as
+ * the program otherwise ends when such a method exits or overflows the stack.
+ */
+function describePanicSafely(panic: GoPanic): string | undefined {
   try {
     return describePanic(panic);
   } catch (error) {
-    if (!(error instanceof GoPanic)) throw error;
+    if (!(error instanceof GoPanic)) return describeUncaught(error);
     const { value } = error;
     if (!(value instanceof Iface)) throw error;
     const reason = value.type === BASIC.string ? (value.value as string) : `type ${typeString(value.type)}`;

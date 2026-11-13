@@ -8,6 +8,24 @@ interface Decimal {
   point: number;
 }
 
+/**
+ * Checks, before building it, that a formatted float of `digits` digits stays within the string limit, allowing for
+ * its sign, point, and exponent or hexadecimal prefix, and charges the work of building it.
+ */
+export function chargeFormatting(digits: number): void {
+  const runtime = currentRuntime();
+  runtime.checkStringLength(digits + FORMAT_OVERHEAD);
+  runtime.spend(1 + Math.floor(digits / 16));
+}
+
+/** The most characters a float takes beyond its digits: sign, point, and `e+308` or `0x1.` and `p+1023`. */
+const FORMAT_OVERHEAD = 12;
+
+/** The digits of a finite value's integer part, plus one for a carry when it is rounded. */
+function integerDigits(magnitude: number): number {
+  return magnitude < 1 ? 1 : Math.floor(Math.log10(magnitude)) + 2;
+}
+
 /** `strconv.FormatFloat(value, format, precision, bitSize)`, which `fmt` also uses. */
 export function formatFloat(value: number, format: string, precision: number, bitSize: 32 | 64): string {
   if (Number.isNaN(value)) return 'NaN';
@@ -15,9 +33,7 @@ export function formatFloat(value: number, format: string, precision: number, bi
   if (value === -Infinity) return '-Inf';
   // 'e', 'f', and 'x' write `precision` digits, whereas 'g' writes no more digits than the value has.
   if (precision > 0 && format !== 'g' && format !== 'G' && format !== 'b') {
-    const runtime = currentRuntime();
-    runtime.checkStringLength(precision);
-    runtime.spend(1 + Math.floor(precision / 16));
+    chargeFormatting(precision + (format === 'f' ? integerDigits(Math.abs(value)) : 0));
   }
   const negative = value < 0 || Object.is(value, -0);
   const magnitude = Math.abs(value);

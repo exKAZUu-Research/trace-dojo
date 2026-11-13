@@ -1,9 +1,9 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { formatFloat } from './floatFormat';
+import { chargeFormatting, formatFloat } from './floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from './literals';
 import { compareMapKeys } from './mapOrder';
 import { dynamicMethod } from './methods';
-import { perRun } from './native';
+import { currentRuntime, perRun } from './native';
 import { canBackquote, isPrint, quote, quoteRune } from './quote';
 import { GoPanic } from './runtime';
 import { ERROR_TYPE, isExported, missingMethod, type Type, typeString, underlying } from './types';
@@ -611,6 +611,7 @@ export class Printer {
       this.buffer += text;
       return;
     }
+    currentRuntime().checkStringLength(this.buffer.length + text.length + count);
     const padding = (zero && !minus ? '0' : ' ').repeat(count);
     this.buffer += minus ? text + padding : padding + text;
   }
@@ -779,7 +780,11 @@ export class Printer {
       this.flags.zero = zero;
       return;
     }
-    if (this.flags.sharp && format !== 'b') num = sharpFloat(num, format, precision);
+    if (this.flags.sharp && format !== 'b') {
+      // The # flag pads %g with zeros up to the precision.
+      if (precision > 0) chargeFormatting(precision);
+      num = sharpFloat(num, format, precision);
+    }
     if (this.flags.plus || num[0] !== '+') {
       if (this.flags.zero && !this.flags.minus && this.flags.width !== undefined && this.flags.width > num.length) {
         this.buffer += num[0];
@@ -930,8 +935,7 @@ export class Printer {
       case 'x':
       case 'X': {
         const address = BigInt(object === undefined ? 0 : addressOf(object));
-        if (verb === 'x' || verb === 'X') this.fmtInteger(address, false, verb, false, address, type);
-        else this.fmtInteger(address, false, verb, false, address, type);
+        this.fmtInteger(address, false, verb, false, address, type);
         return;
       }
       default: {
@@ -969,7 +973,7 @@ function intFromArg(args: Value[], argNum: number): [number | undefined, boolean
 
 function pointerObject(value: Value): object | undefined {
   if (value === undefined) return undefined;
-  if (value instanceof Pointer) return value.key === 'v' ? value.base : value.base;
+  if (value instanceof Pointer) return value.base;
   if (value instanceof Slice) return value.array;
   if (value instanceof GoMap || value instanceof GoFunc) return value;
   return value as object;

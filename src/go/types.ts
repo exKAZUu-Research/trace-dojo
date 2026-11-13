@@ -97,7 +97,7 @@ export interface InterfaceType {
   typeSet?: TypeSet;
 }
 
-/** The named types that declare interfaces used as type constraints, which diagnostics name as Go does. */
+/** The library's named interfaces, such as `cmp.Ordered`, which diagnostics name as Go does. */
 export const CONSTRAINT_NAMES = new WeakMap<InterfaceType, NamedType>();
 
 export interface TupleType {
@@ -109,6 +109,8 @@ export interface TypeParamType {
   kind: 'typeParam';
   name: string;
   constraint: InterfaceType;
+  /** The named type the constraint was written as, which diagnostics name as Go does. */
+  constraintName?: NamedType;
   id: number;
 }
 

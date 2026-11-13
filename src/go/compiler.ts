@@ -264,15 +264,12 @@ export class ProgramCompiler extends StatementCompiler {
         shell.typeParams = entity.generic.typeParams;
       }
       this.resolvingTypes.add(shell);
-      const rawType = this.resolveType(state.spec.type, true);
+      const rawType = this.resolveType(state.spec.type, true, true);
       this.namedRhs.set(shell, rawType);
       const underlyingType = underlying(rawType);
       this.resolvingTypes.delete(shell);
       shell.underlying = underlyingType.kind === 'named' ? underlying(underlyingType) : underlyingType;
       if (entity.generic) this.completeInstances(entity);
-      if (underlyingType.kind === 'interface' && underlyingType.typeSet) {
-        this.error(state.spec, '型の集合を持つインターフェースは、型の制約にしか使えません。');
-      }
     } finally {
       this.scope = outerScope;
       this.fn = outerFn;
