@@ -1511,3 +1511,10 @@ test('Range last zero traverses custom successor callbacks', () => {
   });
   expect(run('p (1..3).last(0), (1..3).last(2)')).toMatchObject({ stdout: '[]\n[2, 3]\n' });
 });
+
+test('Range first zero validates its endpoints', () => {
+  expect(run('begin; p (1.0..3.0).first(0); rescue => e; p e.class; end')).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+  expect(run('p (1..3).first(0), (1..3).first(2)')).toMatchObject({ stdout: '[]\n[1, 2]\n' });
+});

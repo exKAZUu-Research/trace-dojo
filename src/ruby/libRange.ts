@@ -128,13 +128,12 @@ def('Range', ['begin', 'first'], [0, 1], function* (self: RRange, args) {
   const count = yield* toIndex(args[0]);
   if (count < 0) throw argumentError('negative array size (or size too big)');
   const items: Value[] = [];
-  if (count > 0) {
-    yield* iterateRange(self, function* (value) {
-      items.push(value);
-      yield* [];
-      return items.length >= count ? STOP : undefined;
-    });
-  }
+  yield* iterateRange(self, function* (value) {
+    if (count === 0) return STOP;
+    items.push(value);
+    yield* [];
+    return items.length >= count ? STOP : undefined;
+  });
   return arr(items);
 });
 def('Range', 'begin', 0, (self: RRange) => self.begin);
