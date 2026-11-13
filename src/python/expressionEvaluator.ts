@@ -38,7 +38,7 @@ import type { Runtime } from './runtime';
 import { currentRuntime, withoutCharge } from './runtimeContext';
 import { addToTable, updateTable } from './setOperations';
 import { templateLiteral } from './templateStrings';
-import { noteUnwinding, setFrameGenerator } from './tracebacks';
+import { TemporaryScope } from './temporaryScope';
 import {
   dictClass,
   functionClass,
@@ -64,7 +64,6 @@ import {
   PyDict,
   PyError,
   PyFunction,
-  PyGenerator,
   PyInstance,
   PyList,
   PyModule,
@@ -268,21 +267,25 @@ export class ExpressionEvaluator {
   /** Keeps a value reachable for garbage collection while `run` evaluates more of the expression holding it. */
   hold<T>(frame: Frame, value: PyValue, run: () => T): T {
     const { temporaries } = frame;
-    const length = temporaries.length;
+    const temporaryScope = new TemporaryScope(temporaries);
     temporaries.push(value);
     try {
-      return run();
+      return temporaryScope.keep(run());
+    } catch (error) {
+      throw temporaryScope.capture(error);
     } finally {
-      temporaries.length = length;
+      temporaryScope.release();
     }
   }
 
   private withTemporaries<T>(frame: Frame, run: () => T): T {
-    const length = frame.temporaries.length;
+    const temporaryScope2 = new TemporaryScope(frame.temporaries);
     try {
-      return run();
+      return temporaryScope2.keep(run());
+    } catch (error) {
+      throw temporaryScope2.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope2.release();
     }
   }
 
@@ -566,7 +569,7 @@ export class ExpressionEvaluator {
   private elements(elements: Element[], frame: Frame): PyValue[] {
     const items: PyValue[] = [];
     const { temporaries } = frame;
-    const length = temporaries.length;
+    const temporaryScope3 = new TemporaryScope(temporaries, () => [items]);
     try {
       for (const element of elements) {
         // The display keeps its elements, which stay local in it; a starred one is a container it copies.
@@ -574,8 +577,10 @@ export class ExpressionEvaluator {
           element.kind === 'starred' ? this.evaluate(element.value, frame) : this.evaluateValue(element, frame);
         addElement(items, frame, element.kind === 'starred', value);
       }
+    } catch (error) {
+      throw temporaryScope3.capture(error);
     } finally {
-      temporaries.length = length;
+      temporaryScope3.release();
     }
     return items;
   }
@@ -628,13 +633,14 @@ export class ExpressionEvaluator {
   // Calls -----------------------------------------------------------------------------------------------------------
 
   /** Evaluates a call, whose callee the caller may have evaluated already. */
+  // code-gauge-allow duplicateLines 15 -- Synchronous and suspending calls transfer the same arguments and result.
   protected call(
     expression: Extract<Expression, { kind: 'call' }>,
     frame: Frame,
     callee = this.evaluateValue(expression.callee, frame)
   ): PyValue {
     const { temporaries } = frame;
-    const length = temporaries.length;
+    const temporaryScope4 = new TemporaryScope(temporaries, () => [result]);
     temporaries.push(callee);
     let args: PyValue[];
     let kwargs: Kwargs;
@@ -643,9 +649,17 @@ export class ExpressionEvaluator {
       const collected = this.arguments(expression.args, frame, callee);
       args = collected.args;
       kwargs = collected.kwargs;
-      result = this.invokeFrom(this.beforeCall(callee, frame, length), callee, args, kwargs, expression.row);
+      result = this.invokeFrom(
+        this.beforeCall(callee, frame, temporaryScope4.length),
+        callee,
+        args,
+        kwargs,
+        expression.row
+      );
+    } catch (error) {
+      throw temporaryScope4.capture(error);
     } finally {
-      temporaries.length = length;
+      temporaryScope4.release();
     }
     this.afterCall(callee, args, kwargs, result);
     return result;
@@ -816,7 +830,6 @@ export class ExpressionEvaluator {
 
   /** Runs a comprehension, whose first iterable `firstIterable` the enclosing frame evaluated when passed. */
   // code-gauge-allow functionNcss 48 -- Follows how CPython runs each kind of comprehension in its own scope.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Follows how CPython runs each kind of comprehension in its own scope.
   protected comprehension(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
@@ -829,29 +842,7 @@ export class ExpressionEvaluator {
     if (expression.type === 'generator') {
       markGeneratorExpression(inner, first, first !== iterable ? first : undefined);
       const body = this.generatorItems(expression, inner, first, next);
-      const generator = new PyGenerator(
-        generatorClass,
-        '<genexpr>',
-        expression.qualifiedName ?? '<genexpr>',
-        (input) => {
-          inner.resumeRow = runtime.currentRow;
-          runtime.pushFrame(inner);
-          try {
-            return input.error ? body.throw(input.error) : body.next();
-          } catch (error) {
-            noteUnwinding(error);
-            throw error;
-          } finally {
-            runtime.popFrame();
-            // The generator keeps its frame off the stack.
-            if (runtime.finalizer.locals.marking) runtime.finalizer.locals.escapeFrame(inner);
-          }
-        },
-        () => [iterable, first, ...inner.locals.values(), ...inner.cells.values(), ...inner.temporaries]
-      );
-      generator.frame = inner;
-      setFrameGenerator(inner, generator);
-      return generator;
+      return runtime.frameGenerator(generatorClass, '<genexpr>', expression.qualifiedName ?? '<genexpr>', inner, body);
     }
     runtime.pushFrame(inner);
     try {
@@ -918,6 +909,7 @@ export class ExpressionEvaluator {
   }
 
   /** Runs the clauses of a comprehension, yielding each element, or storing each pair through `store`. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Nested clauses share their iterator lifetime and yield path.
   private *comprehensionItems(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
@@ -938,13 +930,15 @@ export class ExpressionEvaluator {
         if (!generator.conditions.every((condition) => isTruthy(this.evaluate(condition, frame)))) continue;
         if (index + 1 < generators.length) {
           const iterable = this.evaluateIterable(generators[index + 1].iterable, frame);
-          const length = frame.temporaries.length;
+          const temporaryScope5 = new TemporaryScope(frame.temporaries);
           const { next: innerNext, held } = iterateHeld(iterable);
           frame.temporaries.push(iterable, held);
           try {
             yield* level.call(this, index + 1, innerNext);
+          } catch (error) {
+            throw temporaryScope5.capture(error);
           } finally {
-            frame.temporaries.length = length;
+            temporaryScope5.release();
           }
           continue;
         }

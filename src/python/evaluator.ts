@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 976 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 985 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   BinaryOperator,
@@ -44,6 +44,7 @@ import { compareOp, equals, inplaceOp, isSame } from './operators';
 import type { Runtime } from './runtime';
 import type { Suspension } from './suspendingEvaluator';
 import { targetSuspends } from './suspension';
+import { TemporaryScope } from './temporaryScope';
 import { iterateSuspending, type SuspendingNext } from './threadIteration';
 import { isWaitRequest, PREEMPTION, schedulerOf, suspendingCall } from './threads';
 import { noteCaught, prependTraceback } from './tracebacks';
@@ -330,7 +331,7 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   /** Evaluates an assignment's value, telling whether it only creates objects, whose constructors' steps show it. */
-  // code-gauge-allow duplicateLines 21 -- The synchronous and suspending paths evaluate a creation the same way.
+  // code-gauge-allow duplicateLines 23 -- The synchronous and suspending paths evaluate a creation the same way.
   private evaluateCreation(expression: Expression, frame: Frame): [PyValue, boolean] {
     if (expression.kind === 'call') {
       const callee = this.evaluateValue(expression.callee, frame);
@@ -342,7 +343,7 @@ export class Evaluator extends AsyncEvaluator {
       expression.elements.every((element) => element.kind === 'call')
     ) {
       {
-        const length = frame.temporaries.length;
+        const temporaryScope = new TemporaryScope(frame.temporaries);
         try {
           let created = true;
           const items: PyValue[] = [];
@@ -353,16 +354,17 @@ export class Evaluator extends AsyncEvaluator {
             frame.temporaries.push(item);
           }
           for (const item of items) this.runtime.finalizer.locals.escape(item);
-          return [expression.kind === 'list' ? newList(items) : newTuple(items), created];
+          return temporaryScope.keep([expression.kind === 'list' ? newList(items) : newTuple(items), created]);
+        } catch (error) {
+          throw temporaryScope.capture(error);
         } finally {
-          frame.temporaries.length = length;
+          temporaryScope.release();
         }
       }
     }
     return [this.evaluateValue(expression, frame), false];
   }
 
-  // code-gauge-allow functionNcss 31 -- One case per kind of target, each storing where the target keeps it.
   private augmentedAssign(statement: Extract<Statement, { kind: 'augmentedAssign' }>, frame: Frame): void {
     const { target, operator } = statement;
     switch (target.kind) {
@@ -517,12 +519,10 @@ export class Evaluator extends AsyncEvaluator {
       ? yield* this.evaluateSuspending(statement.iterable, frame)
       : this.evaluateIterable(statement.iterable, frame);
     const suspendingTarget = targetSuspends(target);
-    const length = frame.temporaries.length;
+    const temporaryScope2 = new TemporaryScope(frame.temporaries);
     frame.temporaries.push(iterable);
-    // What leaves the loop along with control, which stays alive when the loop's generator closes.
-    let leaving: unknown;
-    let held: PyValue | undefined;
     try {
+      let held: PyValue | undefined;
       // A thread reads its loop's iterable where it can suspend, so that waiting in a generator it reads suspends it.
       const suspendingNext = runtime.threads ? iterateSuspending(iterable) : undefined;
       let next: (() => PyValue | typeof DONE) | undefined;
@@ -547,18 +547,15 @@ export class Evaluator extends AsyncEvaluator {
         else this.assign(target, item, frame);
         runtime.steps.stepBinding(statement.stepRow, !storesReference(target) || storesAnswer(item));
         const completion = yield* this.block(statement.body, frame);
-        if (completion === 'break') return undefined;
+        if (completion === 'break') return temporaryScope2.keep(undefined);
         if (completion && completion !== 'continue') {
-          leaving = typeof completion === 'object' ? completion.value : undefined;
-          return completion;
+          return temporaryScope2.keep(completion);
         }
       }
     } catch (error) {
-      leaving = error instanceof PyError ? error.exception : undefined;
-      throw error;
+      throw temporaryScope2.capture(error);
     } finally {
-      frame.temporaries.length = length;
-      runtime.finalizer.release([iterable, held], [leaving]);
+      temporaryScope2.release();
     }
     return yield* this.block(statement.orelse, frame);
   }
@@ -567,7 +564,7 @@ export class Evaluator extends AsyncEvaluator {
 
   /** Creates a function, inside the scope of its type parameters when it has them. */
   private defineFunction(fn: FunctionDef, frame: Frame, decorators?: PyValue[], defaults?: PyValue[]): PyValue {
-    const length = frame.temporaries.length;
+    const temporaryScope3 = new TemporaryScope(frame.temporaries);
     try {
       const resolvedDecorators =
         decorators ??
@@ -576,7 +573,7 @@ export class Evaluator extends AsyncEvaluator {
           frame.temporaries.push(value);
           return value;
         });
-      if (!fn.typeParams) return this.createFunction(fn, frame, resolvedDecorators, defaults);
+      if (!fn.typeParams) return temporaryScope3.keep(this.createFunction(fn, frame, resolvedDecorators, defaults));
       const defaultValues =
         defaults ??
         fn.params.flatMap((param) => {
@@ -587,9 +584,11 @@ export class Evaluator extends AsyncEvaluator {
         });
       const scopeFrame = this.typeParamFrame(fn.typeParams.scope, frame);
       const params = this.createTypeParams(fn.typeParams.params, scopeFrame);
-      return this.createFunction(fn, scopeFrame, resolvedDecorators, defaultValues, params);
+      return temporaryScope3.keep(this.createFunction(fn, scopeFrame, resolvedDecorators, defaultValues, params));
+    } catch (error) {
+      throw temporaryScope3.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope3.release();
     }
   }
 
@@ -616,7 +615,7 @@ export class Evaluator extends AsyncEvaluator {
       this.storeName(cls.typeParams.genericBase, genericBaseOf(params), scopeFrame);
     }
     const collected: CallArguments = { args: [], kwargs: undefined };
-    const length = scopeFrame.temporaries.length;
+    const temporaryScope4 = new TemporaryScope(scopeFrame.temporaries);
     try {
       for (const argument of cls.bases) {
         const value = yield* this.evaluateSuspending(argument.value, scopeFrame);
@@ -628,9 +627,11 @@ export class Evaluator extends AsyncEvaluator {
           scopeFrame
         );
       }
-      return createClass(this, cls, scopeFrame, decorators, collected);
+      return temporaryScope4.keep(createClass(this, cls, scopeFrame, decorators, collected));
+    } catch (error) {
+      throw temporaryScope4.capture(error);
     } finally {
-      scopeFrame.temporaries.length = length;
+      temporaryScope4.release();
     }
   }
 
@@ -706,7 +707,7 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   /** Suspending counterpart of `evaluateCreation`: evaluates an assignment's value and tells whether it only creates objects. */
-  // code-gauge-allow duplicateLines 21 -- The synchronous and suspending paths evaluate a creation the same way.
+  // code-gauge-allow duplicateLines 23 -- The synchronous and suspending paths evaluate a creation the same way.
   private *evaluateCreationSuspending(expression: Expression, frame: Frame): Suspension<[PyValue, boolean]> {
     if (expression.kind === 'call') {
       const callee = yield* this.evaluateSuspending(expression.callee, frame);
@@ -722,7 +723,7 @@ export class Evaluator extends AsyncEvaluator {
       expression.elements.length > 0 &&
       expression.elements.every((element) => element.kind === 'call')
     ) {
-      const length = frame.temporaries.length;
+      const temporaryScope5 = new TemporaryScope(frame.temporaries);
       try {
         let created = true;
         const items: PyValue[] = [];
@@ -733,9 +734,11 @@ export class Evaluator extends AsyncEvaluator {
           frame.temporaries.push(item);
         }
         for (const item of items) this.runtime.finalizer.locals.escape(item);
-        return [expression.kind === 'list' ? newList(items) : newTuple(items), created];
+        return temporaryScope5.keep([expression.kind === 'list' ? newList(items) : newTuple(items), created]);
+      } catch (error) {
+        throw temporaryScope5.capture(error);
       } finally {
-        frame.temporaries.length = length;
+        temporaryScope5.release();
       }
     }
     return [yield* this.evaluateSuspending(expression, frame), false];
@@ -933,20 +936,22 @@ export class Evaluator extends AsyncEvaluator {
     completion: Completion,
     frame: Frame
   ): Execution {
-    const length = frame.temporaries.length;
+    const temporaryScope6 = new TemporaryScope(frame.temporaries, (result) =>
+      result === undefined ? [pending?.exception, typeof completion === 'object' ? completion.value : undefined] : []
+    );
     if (typeof completion === 'object') frame.temporaries.push(completion.value);
     if (pending) {
       frame.temporaries.push(pending.exception);
       this.handling.push(pending.exception);
     }
     try {
-      return yield* this.block(finalbody, frame);
+      return temporaryScope6.keep(yield* this.block(finalbody, frame));
     } catch (error) {
       if (error instanceof PyError && pending) this.chainTo(error.exception, pending.exception);
-      throw error;
+      throw temporaryScope6.capture(error);
     } finally {
       if (pending) this.handling.pop();
-      frame.temporaries.length = length;
+      temporaryScope6.release();
     }
   }
 
@@ -1032,7 +1037,7 @@ export class Evaluator extends AsyncEvaluator {
 
   // With ----------------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 33 -- Enters, runs the body, and exits with or without an exception, as a with statement does.
+  // code-gauge-allow functionNcss 35 -- Enters, runs the body, and exits with or without an exception, as a with statement does.
   private *withStatement(statement: Extract<Statement, { kind: 'with' }>, frame: Frame, index: number): Execution {
     if (index >= statement.items.length) return yield* this.block(statement.body, frame);
     const { runtime } = this;
@@ -1049,7 +1054,7 @@ export class Evaluator extends AsyncEvaluator {
         `'${fullyQualifiedName(classOf(manager))}' object does not support the context manager protocol (missed ${missed} method)`
       );
     }
-    const length = frame.temporaries.length;
+    const temporaryScope7 = new TemporaryScope(frame.temporaries);
     frame.temporaries.push(manager);
     try {
       let entered = false;
@@ -1064,15 +1069,17 @@ export class Evaluator extends AsyncEvaluator {
         noteCaught(error, frame);
         runtime.currentRow = statement.row;
         if (!(yield* this.exitWithException(statement, bindValue(exit, manager), error.exception))) throw error;
-        return undefined;
+        return temporaryScope7.keep(undefined);
       }
       runtime.currentRow = statement.row;
       // The value the body returns stays reachable while __exit__ runs.
       if (typeof completion === 'object') frame.temporaries.push(completion.value);
       yield* this.callExit(statement, bindValue(exit, manager), [None, None, None]);
-      return completion;
+      return temporaryScope7.keep(completion);
+    } catch (error) {
+      throw temporaryScope7.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope7.release();
     }
   }
 
@@ -1147,7 +1154,7 @@ export class Evaluator extends AsyncEvaluator {
     const subject = statement.subject.suspends
       ? yield* this.evaluateSuspending(statement.subject, frame)
       : this.evaluate(statement.subject, frame);
-    const length = frame.temporaries.length;
+    const temporaryScope8 = new TemporaryScope(frame.temporaries);
     frame.temporaries.push(subject);
     try {
       for (const matchCase of statement.cases) {
@@ -1158,11 +1165,13 @@ export class Evaluator extends AsyncEvaluator {
           !isTruthy(guard.suspends ? yield* this.evaluateSuspending(guard, frame) : this.evaluate(guard, frame))
         )
           continue;
-        return yield* this.block(matchCase.body, frame);
+        return temporaryScope8.keep(yield* this.block(matchCase.body, frame));
       }
-      return undefined;
+      return temporaryScope8.keep(undefined);
+    } catch (error) {
+      throw temporaryScope8.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope8.release();
     }
   }
 

@@ -16,6 +16,7 @@ import { bindValue, callValue, getAttributeOrUndefined, isTruthy, lookupSpecial 
 import type { Runtime } from './runtime';
 import { currentRuntime, releaseCaughtException } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
+import { TemporaryScope } from './temporaryScope';
 import { peekThreadAsyncGenHooks, type ThreadAsyncGenHooks, threadAsyncGenHooks } from './threads';
 import {
   asyncGeneratorClass,
@@ -279,10 +280,11 @@ export function awaitIterator(value: PyValue): PyValue {
  * `await value` at `row`: passes what the running coroutine receives to the awaitable's iterator until it ends, giving
  * what it returns. An awaited coroutine's frame reports `row` as its call line.
  */
+// code-gauge-allow functionNcss 31 -- Delegate lifetime spans resumption, completion and exceptions.
 export function* awaitValue(value: PyValue, frame: Frame, row: number | undefined): Suspension {
   const iterator = awaitIterator(value);
   const runtime = currentRuntime();
-  const length = frame.temporaries.length;
+  const temporaryScope = new TemporaryScope(frame.temporaries);
   frame.temporaries.push(iterator);
   const isCoroutine = iterator instanceof PyGenerator && iterator.cls === coroutineClass;
   if (isCoroutine) awaited.add(iterator);
@@ -298,7 +300,7 @@ export function* awaitValue(value: PyValue, frame: Frame, row: number | undefine
       } finally {
         runtime.currentRow = outerRow;
       }
-      if (step.done) return step.value;
+      if (step.done) return temporaryScope.keep(step.value);
       try {
         input = { value: yield step.value };
       } catch (error) {
@@ -306,10 +308,12 @@ export function* awaitValue(value: PyValue, frame: Frame, row: number | undefine
         input = { error };
       }
     }
+  } catch (error) {
+    throw temporaryScope.capture(error);
   } finally {
     if (isCoroutine) awaited.delete(iterator);
     setDelegate(frame, undefined);
-    frame.temporaries.length = length;
+    temporaryScope.release();
   }
 }
 

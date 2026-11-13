@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 427 -- Class creation, its MRO, and its slots follow CPython's type creation together.
+// code-gauge-allow-file fileNcss 430 -- Class creation, its MRO, and its slots follow CPython's type creation together.
 import {
   annotationClosure,
   annotationReferences,
@@ -34,6 +34,7 @@ import { currentRuntime } from './runtimeContext';
 import { defineClassSlots, slotNamesOf } from './slots';
 import { isBaseType } from './subclassableTypes';
 import { recordedSubclasses, recordNewBase } from './subclasses';
+import { TemporaryScope } from './temporaryScope';
 import { noteUnwinding } from './tracebacks';
 import { initGenericSubclass, typingMroEntries } from './typeParams';
 import {
@@ -88,7 +89,7 @@ export const classDefinitions = new WeakMap<PyClass, ClassDef>();
 // The class statement -----------------------------------------------------------------------------------------------
 
 /** Runs a class statement: evaluates the bases, runs the body in a namespace, and calls the metaclass. */
-// code-gauge-allow functionNcss 44 -- Follows how a class statement prepares its namespace and calls its metaclass.
+// code-gauge-allow functionNcss 46 -- Follows how a class statement prepares its namespace and calls its metaclass.
 export function createClass(
   evaluator: Evaluator,
   def: ClassDef,
@@ -96,7 +97,7 @@ export function createClass(
   decorators?: PyValue[],
   evaluated?: CallArguments
 ): PyValue {
-  const length = frame.temporaries.length;
+  const temporaryScope = new TemporaryScope(frame.temporaries);
   try {
     const resolvedDecorators =
       decorators ??
@@ -143,7 +144,7 @@ export function createClass(
       classDict.value = namespaceDict(cls.dict);
       let decorated: PyValue = cls;
       for (const decorator of resolvedDecorators.toReversed()) decorated = callValue(decorator, [decorated]);
-      return decorated;
+      return temporaryScope.keep(decorated);
     }
     let result = callMeta(meta, def.name, bases, prepared ?? namespace, keywords, {
       classCell,
@@ -154,9 +155,11 @@ export function createClass(
       classDict.value = namespaceDict(result.dict);
     }
     for (const decorator of resolvedDecorators.toReversed()) result = callValue(decorator, [result]);
-    return result;
+    return temporaryScope.keep(result);
+  } catch (error) {
+    throw temporaryScope.capture(error);
   } finally {
-    frame.temporaries.length = length;
+    temporaryScope.release();
   }
 }
 

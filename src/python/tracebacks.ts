@@ -123,18 +123,14 @@ export function setFrameGenerator(frame: Frame, generator: PyValue): void {
   frameGenerators.set(frame, generator);
 }
 
-/** The Python values and caller an exposed frame keeps alive independently of its generator or traceback. */
+/** The namespace, function metadata and caller an exposed frame owns besides its execution locals. */
 export function frameReferences(frame: Frame): unknown[] {
   return [
-    frame.locals,
     frame.globals,
-    frame.cells,
-    frame.temporaries,
     frame.annotations,
     frame.fn,
     frame.classCell,
     frame.builtins,
-    frame.firstArgument,
     frame.inlinedIn,
     callers.get(frame),
   ];

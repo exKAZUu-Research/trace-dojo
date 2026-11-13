@@ -14,6 +14,7 @@ import { getItem, isTruthy } from './objects';
 import { binaryOp, compareOp, unaryOp } from './operators';
 import { targetSuspends } from './suspension';
 import { templateLiteral } from './templateStrings';
+import { TemporaryScope } from './temporaryScope';
 import { iterateSuspending, type SuspendingNext } from './threadIteration';
 import { isWaitRequest, suspendingCall } from './threads';
 import { newDict, newList, newSet, None, sliceClass } from './types';
@@ -195,8 +196,8 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
    * Runs the clauses of a comprehension, yielding each element (a key and value pair for a dict comprehension) and
    * passing on the waits of the thread reading its iterables or evaluating its parts.
    */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the clauses of a comprehension, as the synchronous one does.
-  // code-gauge-allow functionNcss 33 -- Follows the clauses of a comprehension, as the synchronous one does.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows the clauses of a comprehension, as the synchronous one does.
+  // code-gauge-allow functionNcss 35 -- Follows the clauses of a comprehension, as the synchronous one does.
   private *itemsSuspending(
     expression: Extract<Expression, { kind: 'comprehension' }>,
     frame: Frame,
@@ -219,12 +220,14 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
         if (!passes) continue;
         if (index + 1 < generators.length) {
           const iterable = yield* this.evaluateSuspending(generators[index + 1].iterable, frame);
-          const length = frame.temporaries.length;
+          const temporaryScope = new TemporaryScope(frame.temporaries);
           frame.temporaries.push(iterable);
           try {
             yield* level.call(this, index + 1, iterateSuspending(iterable));
+          } catch (error) {
+            throw temporaryScope.capture(error);
           } finally {
-            frame.temporaries.length = length;
+            temporaryScope.release();
           }
           continue;
         }
@@ -257,7 +260,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
   /** Evaluates the defaults of parameters in order, as defining a function does. */
   *defaultsSuspending(params: { default?: Expression }[], frame: Frame): Suspension<PyValue[]> {
     const values: PyValue[] = [];
-    const length = frame.temporaries.length;
+    const temporaryScope2 = new TemporaryScope(frame.temporaries, () => [values]);
     try {
       for (const param of params) {
         if (!param.default) continue;
@@ -265,8 +268,10 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
         values.push(value);
         frame.temporaries.push(value);
       }
+    } catch (error) {
+      throw temporaryScope2.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope2.release();
     }
     return values;
   }
@@ -279,19 +284,19 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     }
     // An attribute or an item keeps the value outside the frames.
     if (target.kind !== 'unpack') this.runtime.finalizer.locals.escape(value);
-    const length = frame.temporaries.length;
+    const temporaryScope3 = new TemporaryScope(frame.temporaries);
     frame.temporaries.push(value);
     try {
       switch (target.kind) {
         case 'attribute': {
           this.storeInto(yield* this.evaluateSuspending(target.object, frame), target.name, true, value);
-          return;
+          return temporaryScope3.keep(undefined);
         }
         case 'subscript': {
           const object = yield* this.evaluateSuspending(target.object, frame);
           const index = yield* this.holding(frame, object, this.evaluateSuspending(target.index, frame));
           this.hold(frame, object, () => this.storeInto(object, index, false, value));
-          return;
+          return temporaryScope3.keep(undefined);
         }
         default: {
           const items = this.unpackTarget(target as Extract<Target, { kind: 'unpack' }>, value);
@@ -300,19 +305,23 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
           }
         }
       }
+    } catch (error) {
+      throw temporaryScope3.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope3.release();
     }
   }
 
   /** Keeps a value reachable for garbage collection while `run` evaluates more of the expression holding it. */
   protected *holding<T>(frame: Frame, value: PyValue, run: Suspension<T>): Suspension<T> {
-    const length = frame.temporaries.length;
+    const temporaryScope4 = new TemporaryScope(frame.temporaries);
     frame.temporaries.push(value);
     try {
-      return yield* run;
+      return temporaryScope4.keep(yield* run);
+    } catch (error) {
+      throw temporaryScope4.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope4.release();
     }
   }
 
@@ -338,20 +347,22 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
 
   private *displaySuspending(kind: 'list' | 'tuple' | 'set', elements: Element[], frame: Frame): Suspension {
     const items: PyValue[] = [];
-    const length = frame.temporaries.length;
+    const temporaryScope5 = new TemporaryScope(frame.temporaries);
     try {
       for (const element of elements) {
         const isStarred = element.kind === 'starred';
         addElement(items, frame, isStarred, yield* this.evaluateSuspending(isStarred ? element.value : element, frame));
       }
-      return this.newDisplay(kind, items);
+      return temporaryScope5.keep(this.newDisplay(kind, items));
+    } catch (error) {
+      throw temporaryScope5.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope5.release();
     }
   }
 
   private *dictSuspending(expression: Extract<Expression, { kind: 'dict' }>, frame: Frame): Suspension {
-    const length = frame.temporaries.length;
+    const temporaryScope6 = new TemporaryScope(frame.temporaries);
     try {
       const dict = newDict();
       frame.temporaries.push(dict);
@@ -364,9 +375,11 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
         frame.temporaries.push(key);
         dict.store.set(key, yield* this.evaluateSuspending(item.value, frame));
       }
-      return dict;
+      return temporaryScope6.keep(dict);
+    } catch (error) {
+      throw temporaryScope6.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope6.release();
     }
   }
 
@@ -379,7 +392,7 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
     let passed: PyValue[] = [];
     let kwargs: Kwargs;
     let result: PyValue = None;
-    const length = frame.temporaries.length;
+    const temporaryScope7 = new TemporaryScope(frame.temporaries, () => [result]);
     frame.temporaries.push(calleeValue);
     try {
       const collected: CallArguments = { args: [], kwargs: undefined };
@@ -394,10 +407,12 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
       }
       passed = collected.args;
       kwargs = collected.kwargs;
-      const owner = this.beforeCall(calleeValue, frame, length);
+      const owner = this.beforeCall(calleeValue, frame, temporaryScope7.length);
       result = yield* this.invokeSuspending(owner, calleeValue, passed, kwargs, row);
+    } catch (error) {
+      throw temporaryScope7.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope7.release();
     }
     this.afterCall(calleeValue, passed, kwargs, result);
     return result;

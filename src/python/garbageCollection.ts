@@ -168,17 +168,43 @@ export function referencesOf(node: object, asCPythonVisits = false): object[] {
 /** The objects `roots` reach, in the order a breadth-first walk visiting as CPython's collector finds them. */
 export function findReachableAsCollector(roots: unknown[]): object[] {
   const visited = new Set<object>();
-  let level = roots.filter(isNode);
+  let level = roots.filter(isCollectorNode);
   while (level.length > 0) {
     const next: object[] = [];
     for (const item of level) {
       if (visited.has(item)) continue;
       visited.add(item);
-      pushAll(next, referencesOf(item, true));
+      pushAll(next, collectorReferences(item));
     }
     level = next;
   }
-  return [...visited];
+  return [...visited].filter(isNode);
+}
+
+function collectorReferences(node: object): object[] {
+  if (Array.isArray(node)) return node.filter(isCollectorNode);
+  if (node instanceof Map) return [...node].flat().filter(isCollectorNode);
+  if (node instanceof PyModule) return [node.dict];
+  if (node instanceof PyClass && !node.isBuiltin) return [node.dict, node.mro, node.bases, node.enumMembers ?? []];
+  if (node instanceof PyFunction) {
+    const annotations = functionAnnotationReferences(node);
+    if (node instanceof PyAnnotateFunction) pushAll(annotations, annotationReferences(node.annotations()));
+    const references: unknown[] = [
+      node.globals,
+      node.builtins,
+      node.defaults,
+      node.keywordDefaults,
+      node.dict,
+      node.closure,
+      annotations,
+    ];
+    return references.filter(isCollectorNode);
+  }
+  return referencesOf(node, true);
+}
+
+function isCollectorNode(item: unknown): item is object {
+  return isNode(item) || Array.isArray(item) || item instanceof Map;
 }
 
 function isNode(item: unknown): item is PyObject | PyCell {
@@ -231,7 +257,7 @@ function walk(
 }
 
 /** Pushes what an object refers to, returning the number of elements among them. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of object that refers to others.
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of object that refers to others.
 // code-gauge-allow functionNcss 50 -- One case per kind of object that refers to others.
 function pushReferences(pending: unknown[], object: PyObject, reached: Set<TurtleState>): number {
   if (object instanceof PyList || object instanceof PyTuple || object instanceof PyDeque) {
@@ -266,7 +292,8 @@ function pushReferences(pending: unknown[], object: PyObject, reached: Set<Turtl
   else if (object instanceof PyDescriptor) pending.push(object.fn, object.setter, object.deleter);
   else if (object instanceof PyDictView) pending.push(object.dict);
   else if (object instanceof PyMemoryView) pending.push(object.source);
-  else if (object instanceof PyIterator || object instanceof PyGenerator) pushAll(pending, object.holds());
+  else if (object instanceof PyIterator || (object instanceof PyGenerator && !object.finished))
+    pushAll(pending, object.holds());
   return 0;
 }
 
@@ -301,10 +328,6 @@ function pushInstanceReferences(pending: unknown[], instance: PyInstance, reache
   const state = instance.exception;
   if (state) {
     pending.push(state.args, state.cause, state.context, state.exceptions, state.traceback);
-    for (const frame of state.tracebackFrames ?? []) {
-      pushAll(pending, frame.locals.values());
-      for (const cell of frame.cells.values()) pending.push(cell);
-    }
   }
   return instance.dict.size;
 }
@@ -317,6 +340,13 @@ function pushNamespaceReferences(pending: unknown[], object: PyClass | PyModule)
     pushAll(pending, object.bases);
   }
   return object.dict.size;
+}
+
+/** The Python objects and cells directly held by native containers and records. */
+export function nativeReferences(root: unknown): unknown[] {
+  const references: unknown[] = [];
+  pushNativeNodes(references, root);
+  return references;
 }
 
 /** Pushes the Python objects and cells held inside native arrays, maps, sets, and plain records. */
@@ -332,14 +362,16 @@ function pushNativeNodes(pending: unknown[], root: unknown): void {
     }
     if (seen.has(item)) continue;
     seen.add(item);
-    pushNativeData(stack, item);
+    if (item instanceof Frame) {
+      pushAll(pending, item.localValues());
+      pushAll(stack, frameReferences(item));
+    } else pushNativeData(stack, item);
   }
 }
 
 /** Pushes what the native state of a builtin object holds: the items of its arrays, maps, sets, and records. */
 function pushNativeData(pending: unknown[], data: object): void {
-  if (data instanceof Frame) pushAll(pending, frameReferences(data));
-  else if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
+  if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
   else if (data instanceof Map) for (const [key, value] of data) pending.push(key, value);
   else if (data instanceof DictStore) for (const entry of data.ordered()) pending.push(entry.key, entry.value);
   else if (Object.getPrototypeOf(data) === Object.prototype) pushAll(pending, Object.values(data));

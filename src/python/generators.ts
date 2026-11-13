@@ -1,9 +1,10 @@
 import { addressOf } from './conversions';
 import { FINALIZER_FEATURE, method, unsupportedMethod, unsupportedSizeof } from './define';
-import type { Frame } from './frame';
+import { Frame } from './frame';
 import { bindValue, callValue, getAttribute, getAttributeOrUndefined, getIterator, lookupSpecial } from './objects';
 import { releaseCaughtException, runningRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
+import { TemporaryScope } from './temporaryScope';
 import { isWaitRequest, schedulerOf } from './threads';
 import { PyTraceback, setTraceback } from './tracebacks';
 import {
@@ -150,7 +151,11 @@ function leaks(error: PyError, kind: string): boolean {
 export function closeGenerator(generator: PyGenerator): PyValue {
   if (generator.finished) return None;
   if (!generator.started) {
+    const dropped = generator.frame instanceof Frame ? generator.frame.localValues() : [];
     generator.finished = true;
+    const runtime = runningRuntime();
+    if (runtime && generator.frame instanceof Frame) runtime.finalizer.update(generator, generator.frame, true);
+    runtime?.finalizer.release(dropped);
     return None;
   }
   try {
@@ -171,14 +176,14 @@ export function closeGenerator(generator: PyGenerator): PyValue {
 /** `yield from iterable`: passes what the generator receives to the iterator until it ends, giving what it returns. */
 export function* delegateTo(iterable: PyValue, frame: Frame): Suspension {
   const iterator = getIterator(iterable);
-  const length = frame.temporaries.length;
+  const temporaryScope = new TemporaryScope(frame.temporaries);
   frame.temporaries.push(iterator);
   setDelegate(frame, iterator);
   try {
     let input: GeneratorInput = { value: None };
     for (;;) {
       const step = delegateStep(iterator, input);
-      if (step.done) return step.value;
+      if (step.done) return temporaryScope.keep(step.value);
       try {
         input = { value: yield step.value };
       } catch (error) {
@@ -186,9 +191,11 @@ export function* delegateTo(iterable: PyValue, frame: Frame): Suspension {
         input = { error };
       }
     }
+  } catch (error) {
+    throw temporaryScope.capture(error);
   } finally {
     setDelegate(frame, undefined);
-    frame.temporaries.length = length;
+    temporaryScope.release();
   }
 }
 

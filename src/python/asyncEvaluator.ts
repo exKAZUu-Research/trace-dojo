@@ -4,9 +4,10 @@ import type { Frame } from './frame';
 import { bindValue, callValue, isTruthy, iterate, lookupSpecial, type NextFunction } from './objects';
 import { releaseCaughtException } from './runtimeContext';
 import { SuspendingEvaluator, type Suspension } from './suspendingEvaluator';
+import { TemporaryScope } from './temporaryScope';
 import { noteCaught } from './tracebacks';
 import { asyncGeneratorClass, classOf, fullyQualifiedName, newDict, newList, newSet, None, typeError } from './types';
-import { DONE, PyError, PyGenerator, type PyInstance, PyList, type PyValue } from './values';
+import { DONE, PyError, type PyInstance, PyList, type PyValue } from './values';
 
 type ComprehensionExpression = Extract<Expression, { kind: 'comprehension' }>;
 type Completion = undefined | 'break' | 'continue' | { value: PyValue };
@@ -23,8 +24,6 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
 
   // Statements --------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows the protocol of the async for loop, finalizing an async generator it leaves.
-  // code-gauge-allow functionNcss 33 -- Follows the protocol of the async for loop.
   /** `async for`: awaits the async iterator's `__anext__` for each item until it raises StopAsyncIteration. */
   protected *asyncForStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
@@ -32,10 +31,8 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
       ? yield* this.evaluateSuspending(statement.iterable, frame)
       : this.evaluate(statement.iterable, frame);
     const iterator = asyncIterator(iterable);
-    const length = frame.temporaries.length;
+    const temporaryScope = new TemporaryScope(frame.temporaries);
     frame.temporaries.push(iterator);
-    // What leaves the loop along with control, which stays alive when the loop's async generator is finalized.
-    let leaving: unknown;
     try {
       for (;;) {
         let item: PyValue;
@@ -54,24 +51,22 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
         yield* this.assignSuspending(statement.target, item, frame);
         runtime.steps.step(statement.stepRow);
         const completion = yield* this.block(statement.body, frame);
-        if (completion === 'break') return undefined;
+        if (completion === 'break') return temporaryScope.keep(undefined);
         if (completion && completion !== 'continue') {
-          leaving = typeof completion === 'object' ? completion.value : undefined;
-          return completion;
+          return temporaryScope.keep(completion);
         }
       }
     } catch (error) {
-      leaving = error instanceof PyError ? error.exception : undefined;
-      throw error;
+      throw temporaryScope.capture(error);
     } finally {
-      frame.temporaries.length = length;
-      runtime.finalizer.release([iterator], [leaving]);
+      temporaryScope.release();
     }
     return yield* this.block(statement.orelse, frame);
   }
 
   /** `async with`: awaits the manager's `__aenter__` before the body and its `__aexit__` after it. */
-  // code-gauge-allow functionNcss 43 -- Follows the protocol of the async with statement.
+  // code-gauge-allow functionNcss 45 -- Follows the protocol of the async with statement.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Enter, exit and exception suppression must share the manager lifetime.
   protected *asyncWithStatement(
     statement: Extract<Statement, { kind: 'with' }>,
     frame: Frame,
@@ -90,7 +85,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
         `'${fullyQualifiedName(classOf(manager))}' object does not support the asynchronous context manager protocol (missed ${missed} method)`
       );
     }
-    const length = frame.temporaries.length;
+    const temporaryScope2 = new TemporaryScope(frame.temporaries);
     frame.temporaries.push(manager);
     try {
       let entered = false;
@@ -119,14 +114,16 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
           this.detachHandling(depth);
         }
         if (!suppress) throw error;
-        return undefined;
+        return temporaryScope2.keep(undefined);
       }
       this.runtime.currentRow = statement.row;
       if (typeof completion === 'object') frame.temporaries.push(completion.value);
       yield* awaitValue(callValue(bindValue(exit, manager), [None, None, None]), frame, statement.row);
-      return completion;
+      return temporaryScope2.keep(completion);
+    } catch (error) {
+      throw temporaryScope2.capture(error);
     } finally {
-      frame.temporaries.length = length;
+      temporaryScope2.release();
     }
   }
 
@@ -145,21 +142,12 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
     const body = this.comprehensionLevel(expression, inner, 0, source, function* (value) {
       yield asyncYield(value);
     });
-    const { runtime } = this;
-    return new PyGenerator(
+    return this.runtime.frameGenerator(
       asyncGeneratorClass,
       '<genexpr>',
       expression.qualifiedName ?? '<genexpr>',
-      (input) => {
-        inner.resumeRow = runtime.currentRow;
-        runtime.pushFrame(inner);
-        try {
-          return input.error ? body.throw(input.error) : body.next(input.value);
-        } finally {
-          runtime.popFrame();
-        }
-      },
-      () => [first, ...inner.locals.values(), ...inner.temporaries]
+      inner,
+      body
     );
   }
 

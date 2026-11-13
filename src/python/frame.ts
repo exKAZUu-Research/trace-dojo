@@ -46,6 +46,7 @@ export class Frame implements TracedFrame {
     this.locals.clear();
     this.cells.clear();
     this.temporaries.length = 0;
+    this.firstArgument = undefined;
     return dropped;
   }
 
@@ -60,6 +61,7 @@ export class Frame implements TracedFrame {
       const value = this.locals.get(this.scope.locals[index] as string);
       if (value !== undefined) values.push(value);
     }
+    values.push(this.firstArgument);
     return values;
   }
 

@@ -4,6 +4,7 @@ import { enumLookup, isEnumClass } from './enums';
 import { bindValue, callValue, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { isSubclassableConstruct } from './subclassableTypes';
+import { TemporaryScope } from './temporaryScope';
 import {
   builtinFunctionClass,
   classOf,
@@ -89,7 +90,7 @@ function callInit(init: PyValue | undefined, instance: PyValue, args: PyValue[],
   const runtime = currentRuntime();
   // The caller holds the new instance while `__init__` runs, so its `self` going away there frees nothing.
   const { temporaries } = runtime.frame;
-  const length = temporaries.length;
+  const temporaryScope = new TemporaryScope(temporaries, () => [instance, result]);
   temporaries.push(instance);
   let result: PyValue;
   try {
@@ -97,8 +98,10 @@ function callInit(init: PyValue | undefined, instance: PyValue, args: PyValue[],
       init instanceof PyFunction
         ? runtime.callFunction(init, [instance, ...args], kwargs)
         : callValue(bindValue(init ?? None, instance), args, kwargs);
+  } catch (error) {
+    throw temporaryScope.capture(error);
   } finally {
-    temporaries.length = length;
+    temporaryScope.release();
   }
   if (result !== None) throw typeError(`__init__() should return None, not '${typeName(result)}'`);
 }

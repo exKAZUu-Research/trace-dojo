@@ -375,7 +375,6 @@ export class Runtime {
     // The exception's traceback keeps the frame, and with it the function's variables, while a generator may close.
     const state = raised instanceof PyError ? raised.exception.exception : undefined;
     if (state && this.finalizer.pending.size > 0) {
-      (state.tracebackFrames ??= []).push(frame);
       this.finalizer.locals.escapeFrame(frame);
     }
     return raised;
@@ -416,8 +415,9 @@ export class Runtime {
   }
 
   /** A generator, coroutine, or async generator object that runs `body` in `frame` step by step. */
-  // code-gauge-allow functionNcss 33 -- Frame entry and exit must keep exception, trace, and ownership state in one try/finally.
-  private frameGenerator(
+  // code-gauge-allow functionNcss 35 -- Frame entry and exit must keep exception, trace, and ownership state in one try/finally.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Frame entry and exit keep exception, trace and ownership state together.
+  frameGenerator(
     cls: PyClass,
     name: string,
     qualifiedName: string,
@@ -435,7 +435,8 @@ export class Runtime {
       qualifiedName,
       (input) => {
         const callerRow = this.currentRow;
-        frame.callRow = callerRow;
+        if (frame.kind === 'comprehension') frame.resumeRow = callerRow;
+        frame.callRow = frame.kind === 'comprehension' ? undefined : callerRow;
         this.pushFrame(frame);
         const depth = evaluator.attachHandling(handling);
         let finished = true;
