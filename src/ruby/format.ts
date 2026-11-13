@@ -1,5 +1,5 @@
 import { floatToInt, formatFloat, inspect, toS, toStr } from './conversions';
-import { argumentError, floatDomainError, rubyError, typeError } from './errors';
+import { argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
 import { callMethod, type Gen } from './interp';
@@ -94,7 +94,8 @@ export function* format(formatValue: Value, args: Value[]): Gen<string> {
     if (template[index] === '.') {
       index++;
       if (template[index] === '*') {
-        spec.precision = Number(yield* intArg(takeArg()));
+        const precision = Number(yield* intArg(takeArg()));
+        spec.precision = precision < 0 ? undefined : precision;
         index++;
       } else {
         const precision = /^\d*/.exec(template.slice(index))?.[0] ?? '';
@@ -159,7 +160,13 @@ function* directive(type: string, spec: Spec, arg: () => Value): Gen<string> {
     case 'c': {
       const value = arg();
       let text: string;
-      text = value instanceof RString ? ([...value.s][0] ?? '') : String.fromCodePoint(Number(yield* intArg(value)));
+      if (value instanceof RString) text = [...value.s][0] ?? '';
+      else {
+        const point = yield* intArg(value);
+        if (point > 0x7f_ff_ff_ff_ff_ff_ff_ffn) throw rangeError("bignum too big to convert into 'long'");
+        if (point < 0n || point > 0x10_ff_ffn) throw argumentError('invalid character');
+        text = String.fromCodePoint(Number(point));
+      }
       return pad(text, spec, false);
     }
     case '\n':

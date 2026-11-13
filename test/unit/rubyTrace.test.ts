@@ -17,6 +17,11 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test('a recursive Array Hash key remains traceable', () => {
+  const program = 'a=[]; a << a; h={}; h[a]=1; p h.size';
+  expect(traceProgram('ruby', program, program).stdout).toBe('1\n');
+});
+
 test('Turtles accumulated by map stay visible through later block steps', () => {
   const program = `ts = [1, 3].map do |x|
   t = Turtle.new(x, 0)

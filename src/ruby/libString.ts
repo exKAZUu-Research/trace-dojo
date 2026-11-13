@@ -166,7 +166,7 @@ function binaryInspect(text: string): string {
 def('String', ['to_sym', 'intern'], 0, (self: RString) => sym(self.s));
 def('String', 'to_i', [0, 1], function* (self: RString, args) {
   const base = args.length > 0 ? Number(yield* toInt(args[0])) : 10;
-  if (base < 2 || base > 36 || base === 1) throw argumentError(`invalid radix ${base}`);
+  if (base < 0 || base > 36 || base === 1) throw argumentError(`invalid radix ${base}`);
   return parseIntegerLenient(self.s, base);
 });
 def('String', 'to_f', 0, (self: RString) => parseFloatLenient(self.s));
@@ -394,10 +394,11 @@ def('String', 'ord', 0, (self: RString) => {
   return BigInt(self.s.codePointAt(0) as number);
 });
 def('String', 'chr', 0, (self: RString) => str(charsOf(self.s)[0] ?? ''));
-def('String', 'sum', [0, 1], (self: RString) => {
+def('String', 'sum', [0, 1], function* (self: RString, args) {
   let total = 0n;
   for (const byte of stringBytes(self)) total += BigInt(byte);
-  return total & 0xff_ffn;
+  const bits = args.length > 0 ? yield* toInt(args[0]) : 16n;
+  return bits > 0n && bits < 32n ? total & ((1n << bits) - 1n) : total;
 });
 
 function linesOf(text: string, separator: string | undefined, chomp: boolean): string[] {
@@ -868,7 +869,7 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
 
 /** The successor of a string: its rightmost alphanumeric character incremented, carrying leftward. */
 const isAlnum = (char: string): boolean => /^[A-Za-z0-9]$/.test(char);
-const isSpace = (char: string): boolean => ' \t\n\v\f\r\0'.includes(char);
+const isSpace = (char: string): boolean => ' \t\n\v\f\r'.includes(char);
 
 // code-gauge-allow functionCognitiveComplexity 23 -- Ruby's method takes these argument forms, which the branches mirror.
 // code-gauge-allow functionNcss 40 -- Ruby's method takes these argument forms, which the branches mirror.

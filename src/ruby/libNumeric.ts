@@ -679,15 +679,18 @@ export function parseIntegerStrict(text: string, base?: number): bigint | undefi
     return undefined;
   }
   const [, sign, prefix = '', body] = match;
-  let radix = base ?? 10;
+  let radix = base === undefined || base === 0 ? 10 : base;
   const lower = prefix.toLowerCase();
   if (lower === '0x') radix = check(16, base);
   else if (lower === '0b') radix = check(2, base);
   else if (lower === '0o') radix = check(8, base);
   else if (lower === '0d') radix = check(10, base);
-  else if (lower === '0') radix = base ?? 8;
+  else if (lower === '0') radix = base === undefined || base === 0 ? 8 : base;
   if (radix === -1) return undefined;
-  const digits = (lower === '0' && base !== undefined && base !== 8 ? `0${body}` : body).replaceAll('_', '');
+  const digits = (lower === '0' && base !== undefined && base !== 0 && base !== 8 ? `0${body}` : body).replaceAll(
+    '_',
+    ''
+  );
   const valid = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, radix);
   if (![...digits.toLowerCase()].every((char) => valid.includes(char))) return undefined;
   let result = 0n;
@@ -696,7 +699,7 @@ export function parseIntegerStrict(text: string, base?: number): bigint | undefi
 }
 
 function check(radix: number, base: number | undefined): number {
-  return base === undefined || base === radix ? radix : -1;
+  return base === undefined || base === 0 || base === radix ? radix : -1;
 }
 
 export function* kernelFloat(value: Value, keywords: RHash | undefined): Gen {
@@ -733,7 +736,6 @@ function parseFloatStrict(text: string): number | undefined {
 /** The leading number of a string, as `String#to_i` reads it: invalid text ends it, giving 0 when nothing came. */
 // code-gauge-allow functionCognitiveComplexity 17 -- Ruby's method takes these argument forms, which the branches mirror.
 export function parseIntegerLenient(text: string, base = 10): bigint {
-  const valid = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
   let index = 0;
   while (index < text.length && /[\t\n\v\f\r ]/.test(text[index])) index++;
   let negative = false;
@@ -742,6 +744,10 @@ export function parseIntegerLenient(text: string, base = 10): bigint {
     index++;
   }
   const prefix = text.slice(index, index + 2).toLowerCase();
+  if (base === 0) {
+    base = prefix === '0x' ? 16 : prefix === '0b' ? 2 : prefix === '0o' || text[index] === '0' ? 8 : 10;
+  }
+  const valid = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
   if ((base === 16 && prefix === '0x') || (base === 2 && prefix === '0b') || (base === 8 && prefix === '0o')) {
     index += 2;
   }

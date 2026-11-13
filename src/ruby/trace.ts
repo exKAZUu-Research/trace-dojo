@@ -7,7 +7,7 @@ import { formatFloat, strInspect, symInspect } from './conversions';
 import { NIL, RArray, RBasic, RClass, RHash, RObject, RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { parseRuby } from './parse';
 import { runProgram } from './run';
-import { type Frame, Runtime, type Scope } from './runtime';
+import { type Frame, rt, Runtime, type Scope } from './runtime';
 
 export function traceRubyProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const parsed = parseRuby(program, trace);
@@ -199,12 +199,25 @@ function keyLabels(keys: Value[]): string[] {
 }
 
 /** A hash key as text, quoting strings and marking symbols when `quoted`, without running the program's methods. */
-function keyText(key: Value, quoted: boolean): string {
+function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = new WeakMap<RArray, string>()): string {
+  rt().spend();
   if (key instanceof RString) return quoted ? strInspect(key.s) : key.s;
   if (key instanceof RSymbol) return quoted ? symInspect(key.name) : key.name;
   if (typeof key === 'boolean' || typeof key === 'bigint') return String(key);
   if (typeof key === 'number') return formatFloat(key);
   if (key === NIL) return 'nil';
-  if (key instanceof RArray) return `[${key.items.map((item) => keyText(item, true)).join(', ')}]`;
+  if (key instanceof RArray) {
+    if (seen.has(key)) return '[...]';
+    const cached = memo.get(key);
+    if (cached) return cached;
+    seen.add(key);
+    try {
+      const text = `[${key.items.map((item) => keyText(item, true, seen, memo)).join(', ')}]`;
+      memo.set(key, text);
+      return text;
+    } finally {
+      seen.delete(key);
+    }
+  }
   return `#<${(key as RBasic).cls.name}>`;
 }

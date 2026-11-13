@@ -113,6 +113,10 @@ test.each([
   ['nil String line and chomp separators', 'p "x".lines(nil); p "x".chomp(nil)', '["x"]\n"x"\n'],
   ['Array fill beyond the end', 'a=[1,2]; p a.fill(0,5); p a.fill(0,5..7)', '[1, 2]\n[1, 2, nil, nil, nil, 0, 0, 0]\n'],
   ['Array values_at beyond the end', 'p [1,2].values_at(5..7)', '[nil, nil, nil]\n'],
+  ['auto-detected integer radix', 'p Integer("0x10",0), "0b101".to_i(0), "077".to_i(0)', '16\n5\n63\n'],
+  ['String sum width', 'p "abc".sum(8), "abc".sum(0)', '38\n294\n'],
+  ['NUL in whitespace split', String.raw`p "a\u0000 b".split(" ")`, '["a\\u0000", "b"]\n'],
+  ['negative format precision', 'p format("%.*s", -1, "abcd")', '"abcd"\n'],
   ['array clearing during deletion', 'a=[1,2,3]; a.delete_if { |x| a.clear if x==2; x==1 }; p a', '[2]\n'],
   [
     'array state during deletion',
@@ -201,6 +205,10 @@ test('a private setter rejects an explicit receiver', () => {
 test('out-of-range String append and missing inject block raise Ruby errors', () => {
   expect(run('"a" << 1114112')).toMatchObject({ uncaughtException: '1114112 out of char range (RangeError)' });
   expect(run('[3,1,2].inject')).toMatchObject({ uncaughtException: 'no block given (LocalJumpError)' });
+});
+
+test('an out-of-range percent character raises a Ruby error', () => {
+  expect(run('format("%c", 1114112)')).toMatchObject({ uncaughtException: 'invalid character (ArgumentError)' });
 });
 
 test('a default initializer rejects unexpected arguments', () => {
