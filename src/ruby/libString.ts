@@ -345,8 +345,9 @@ def('String', 'sum', [0, 1], (self: RString) => {
   return total & 0xff_ffn;
 });
 
-function linesOf(text: string, separator: string, chomp: boolean): string[] {
+function linesOf(text: string, separator: string | undefined, chomp: boolean): string[] {
   if (text.length === 0) return [];
+  if (separator === undefined) return [text];
   const lines: string[] = [];
   let start = 0;
   if (separator === '') {
@@ -363,8 +364,11 @@ function linesOf(text: string, separator: string, chomp: boolean): string[] {
   return lines;
 }
 
-function* lineOptions(args: Value[], keywords: RHash | undefined): Gen<{ separator: string; chomp: boolean }> {
-  const separator = args.length > 0 ? yield* stringArg(args[0]) : '\n';
+function* lineOptions(
+  args: Value[],
+  keywords: RHash | undefined
+): Gen<{ separator: string | undefined; chomp: boolean }> {
+  const separator = args[0] === NIL ? undefined : args.length > 0 ? yield* stringArg(args[0]) : '\n';
   let chomp = false;
   if (keywords) {
     const entry = yield* hashGet(keywords, sym('chomp'));
@@ -781,11 +785,16 @@ const TRANSFORMS: [string, (text: string, args: string[]) => string, number][] =
 
 for (const [name, transform, maxArgs] of TRANSFORMS) {
   def('String', name, [0, maxArgs], function* (self: RString, args) {
+    if (name === 'chomp' && args[0] === NIL) return str(self.s);
     const strings: string[] = [];
     for (const arg of args) strings.push(yield* stringArg(arg));
     return str(transform(self.s, strings));
   });
   def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
+    if (name === 'chomp' && args[0] === NIL) {
+      modify(self);
+      return NIL;
+    }
     const strings: string[] = [];
     for (const arg of args) strings.push(yield* stringArg(arg));
     const result = transform(self.s, strings);

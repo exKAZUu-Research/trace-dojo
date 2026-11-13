@@ -82,6 +82,12 @@ test.each([
     '[3, 2, 1]\n',
   ],
   ['String dump escapes Unicode', 'p "あ".dump; p "😀".dump', '"\\"\\\\u3042\\""\n"\\"\\\\u{1F600}\\""\n'],
+  ['nil String line and chomp separators', 'p "x".lines(nil); p "x".chomp(nil)', '["x"]\n"x"\n'],
+  [
+    'array deletion before a rescued error',
+    'a=[1,2,3]; begin; a.delete_if { |x| raise if x == 3; x == 1 }; rescue; end; p a',
+    '[2, 3]\n',
+  ],
   [
     'Float neighbors at infinity',
     'p Float::INFINITY.next_float; p (-Float::INFINITY).prev_float',
