@@ -1,6 +1,6 @@
 import { fitsElement, runtimeClassNameOf } from './builtinClass';
 import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
-import { sortedValues } from './builtinCollectionSupport';
+import { nullTolerantLists, sortedValues } from './builtinCollectionSupport';
 import { type CollectorFunctions, collectors, defineCollectors } from './builtinCollectors';
 import { callFunction, type Functions } from './builtinFunctions';
 import { createOptional, defineOptionals, type Optionals, stateOf as optionalState } from './builtinOptionals';
@@ -469,6 +469,7 @@ function defineReferenceOperations(context: Context, types: StreamTypes, tType: 
     const list = frame.runtime.allocateObject(frame, collections.immutableList);
     list.elements = items;
     list.modCount = 0;
+    nullTolerantLists.add(list);
     return list;
   });
   const binary = fn('BinaryOperator');

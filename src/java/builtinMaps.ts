@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 426 -- The set and map classes, which share one hash and tree store and its views.
+// code-gauge-allow-file fileNcss 435 -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
@@ -15,6 +15,7 @@ import {
   javaHash,
   linkOverrides,
   mapViewSources,
+  rejectNullLookups,
   singletonClasses,
   touch,
   uncountedMapClasses,
@@ -458,6 +459,7 @@ export function restrictToImmutable(
   if (!changesOnlyOnUse) {
     defaultRemoveClasses.add(cls);
     eagerlyRejectingClasses.add(cls);
+    rejectNullLookups(cls, ['contains', 'get', 'containsKey', 'containsValue', 'getOrDefault'], nullLookupMessage);
   }
   cls.name = name;
   cls.constructors = [];
@@ -489,6 +491,20 @@ function copyMap(frame: Frame, receiver: Value, [source]: Value[]): Value {
   createStore(receiver, entries.length === 0 ? 16 : tableSizeFor(Math.ceil(entries.length / 0.75)));
   // As the JDK's constructor does, the copy asks no `removeEldestEntry` override to evict.
   for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value, false, false);
+  return undefined;
+}
+
+/**
+ * The message of a null lookup in a set or map of `Set.of` or `Map.of`: `Set12` and `Map1` compare the argument with
+ * `equals`, and a non-empty `MapN` hashes the key it gets; the other lookups require a non-null argument.
+ */
+function nullLookupMessage(receiver: JavaObject, name: string): string | undefined {
+  const size = storeOf(receiver).entries.length;
+  const isMap = name !== 'contains';
+  if (isMap ? size === 1 : size === 1 || size === 2) return 'Cannot invoke "Object.equals(Object)" because "o" is null';
+  if (isMap && size > 0 && (name === 'get' || name === 'getOrDefault')) {
+    return 'Cannot invoke "Object.hashCode()" because "pk" is null';
+  }
   return undefined;
 }
 

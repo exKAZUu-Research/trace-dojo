@@ -1980,3 +1980,21 @@ public class Main {
 }`;
   expect(executeProgram('java', program)).toMatchObject({ kind: 'executed', stdout: 'a\nb\nnamed\n2\n' });
 });
+
+test("Java's List.of, Set.of, and Map.of reject null lookups as the JDK's do, unlike Stream.toList's lists", () => {
+  const program = `import java.util.*; import java.util.function.*; import java.util.stream.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) {
+  t("l2", () -> List.of(1, 2).contains(null)); t("l3", () -> List.of(1,2,3).indexOf(null)); t("l3last", () -> List.of(1,2,3).lastIndexOf(null)); t("l0", () -> List.of().contains(null));
+  t("s", () -> Set.of(1,2).contains(null)); t("s1", () -> Set.of(1).contains(null)); t("mg", () -> Map.of(1,"a").get(null)); t("mk", () -> Map.of(1,"a").containsKey(null)); t("mv", () -> Map.of(1,"a").containsValue(null)); t("md", () -> Map.of(1,"a").getOrDefault(null, "d"));
+  t("copy", () -> List.copyOf(new ArrayList<>(List.of(1))).contains(null)); t("all", () -> List.of(1).containsAll(Arrays.asList(1, null)));
+  t("sub", () -> List.of(1,2,3).subList(0, 2).contains(null)); t("toList", () -> Stream.of(1, 2).toList().contains(null)); t("toListSub", () -> Stream.of(1, 2, 3).toList().subList(0, 2).indexOf(null));
+  t("unmod", () -> Collections.unmodifiableList(new ArrayList<>(List.of(1))).contains(null)); t("empty", () -> Collections.emptyList().contains(null)); t("asList", () -> Arrays.asList(1).contains(null));
+  t("get", () -> List.of(1).get(0)); t("contains", () -> List.of(1).contains(1));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'l2 java.lang.NullPointerException\nl3 java.lang.NullPointerException\nl3last java.lang.NullPointerException\nl0 java.lang.NullPointerException\ns java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\ns1 java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmg java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmk java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmv java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nmd java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\ncopy java.lang.NullPointerException\nall java.lang.NullPointerException\nsub java.lang.NullPointerException\ntoList false\ntoListSub -1\nunmod false\nempty false\nasList false\nget 1\ncontains true\n',
+  });
+});

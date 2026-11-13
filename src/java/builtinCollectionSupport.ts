@@ -305,6 +305,32 @@ export function countsEmptyClear(list: Value): boolean {
   return root === list || checkingClassOf(root).name !== 'LinkedList';
 }
 
+/** The lists of `Stream.toList`, which are of `List.of`'s class but may hold and look up null. */
+export const nullTolerantLists = new WeakSet<JavaObject>();
+
+/**
+ * Makes the lookups `names` of a class of `ImmutableCollections` throw `NullPointerException` for a null argument, as
+ * those collections reject null even where they could answer, but for the lists `Stream.toList` returns; `messageOf`
+ * gives the message the JDK's implementation class of a collection's size gives.
+ */
+export function rejectNullLookups(
+  cls: ClassInfo,
+  names: readonly string[],
+  messageOf: (receiver: JavaObject, name: string) => string | undefined = () => {}
+): void {
+  for (const method of cls.methods) {
+    const { native, name } = method;
+    if (!native || !names.includes(name) || method.parameterTypes[0]?.kind === 'int') continue;
+    method.native = (frame, receiver, args) => {
+      const object = receiver as JavaObject;
+      if (args[0] === undefined && !nullTolerantLists.has(rootListOf(object))) {
+        throwBuiltin(frame, 'NullPointerException', messageOf(object, name));
+      }
+      return native(frame, receiver, args);
+    };
+  }
+}
+
 /** The list a sublist views, through any nesting of sublists, or the collection itself when it is not a sublist. */
 function rootListOf(collection: JavaObject): JavaObject {
   let list = collection;
