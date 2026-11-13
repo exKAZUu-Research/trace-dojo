@@ -29,7 +29,7 @@ import {
   unsupported,
   unsupportedFeatures,
 } from './convertNodes';
-import { markCountedLoop } from './countedLoops';
+import { markCountedLoops } from './countedLoops';
 import { ExpressionConverter, patternSuspends } from './expressionConverter';
 import { isConstantExpression } from './stepRules';
 
@@ -119,7 +119,9 @@ export class ProgramConverter extends ExpressionConverter {
     const body = this.statementList(statements);
     this.popScope();
     this.assignAtomicAnnotations();
-    return { body, scope };
+    const program = { body, scope };
+    markCountedLoops(program);
+    return program;
   }
 
   // Statements ------------------------------------------------------------------------------------------------------
@@ -131,9 +133,7 @@ export class ProgramConverter extends ExpressionConverter {
   private statement(node: Node): Statement {
     const convert = this.statementConverters[node.type] as StatementConverter | undefined;
     if (!convert) return unsupported(node, unsupportedFeatures[node.type] ?? `構文「${node.type}」`);
-    const statement = convert(node);
-    markCountedLoop(statement);
-    return statement;
+    return convert(node);
   }
 
   /** Lets a statement record the step of its row. */

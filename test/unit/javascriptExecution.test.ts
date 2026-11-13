@@ -866,7 +866,11 @@ for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n); fibTimes.push(Date
 console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);
 setTimeout(() => console.log('O 50'), 50); const inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]; const inputTimes = [];
 for (let i = 0; i < inputs.length; i++) { const s = Date.now(); fib(inputs[i]); inputTimes.push(Date.now() - s); }
-console.log(inputTimes.length); setTimeout(() => console.log('P 0'), 0);`,
+console.log(inputTimes.length); setTimeout(() => console.log('P 0'), 0);
+setTimeout(() => console.log('Q 50'), 50); const ROUNDS = 15; const roundTimes = [];
+for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n); roundTimes.push(Date.now() - s); }
+let r = 1; while (r <= ROUNDS) { const s = Date.now(); fib(r); roundTimes.push(Date.now() - s); r++; }
+console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);`,
   ],
   [
     'microtasks that clear and schedule timers between timers',

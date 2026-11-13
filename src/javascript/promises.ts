@@ -48,25 +48,21 @@ interface TimerList {
 }
 
 /**
- * How a read of the clock moves it forward: by the operations spent since the previous read at
- * OPERATIONS_PER_MILLISECOND, and by at least CLOCK_STEP. A read polls the clock, as a busy wait does, when the
- * innermost running loop is one whose end a clock read decides and read the clock in an earlier iteration; it then
- * takes the whole advance, so a busy wait as long as a run's time limit spends at most
- * a fifth of the operation budget whatever its body costs. Any other read, such as a timestamp of a loop's rounds,
- * takes at most MAX_CLOCK_ADVANCE, Node.js's clock resolution, since the interpreter's operations are far slower than
- * Node.js's and a timestamp after computation must not push timers scheduled after it past earlier ones.
+ * How a read of the clock moves it forward. A read that polls it, as a busy wait does (see Runtime.pollsClock), moves it
+ * by the operations spent since the previous read at OPERATIONS_PER_MILLISECOND, so a busy wait as long as a run's time
+ * limit spends at most a fifth of the operation budget whatever its body costs. Any other read, such as a timestamp of
+ * a loop's rounds, moves it by CLOCK_STEP alone: the interpreter's operations are far slower than Node.js's, where such
+ * computation takes next to no time, and a timestamp after it must not push timers scheduled after it past earlier ones.
  */
 const OPERATIONS_PER_MILLISECOND = LIMITS.maxOperations / (LIMITS.maxMilliseconds * 5);
 const CLOCK_STEP = 10 / OPERATIONS_PER_MILLISECOND;
-const MAX_CLOCK_ADVANCE = 1;
 
 /**
  * The event loop of one run: the microtasks promises queue and the timers `setTimeout` schedules, which run after the
  * program's statements on a simulated clock, so a program never waits for real time. Timers run as Node.js's
  * lib/internal/timers.js runs them: one list per delay, the lists in the order they fall due, and each list's due timers
  * in the order they were scheduled. The clock jumps to the first list due when the loop would wait and otherwise
- * advances only when the program reads it, by the work done since the previous read, so a loop polling `Date.now()` sees
- * time pass and ends, while computation between reads moves timers scheduled after it by at most a millisecond.
+ * advances only when the program reads it, as the constants above say.
  */
 export class EventLoop {
   private readonly microtasks: Job[] = [];
@@ -91,8 +87,9 @@ export class EventLoop {
   readClock(): number {
     const { runtime } = this;
     const { spent } = runtime.budget;
-    const advance = Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND);
-    this.now += runtime.pollsClock() ? advance : Math.min(MAX_CLOCK_ADVANCE, advance);
+    this.now += runtime.pollsClock()
+      ? Math.max(CLOCK_STEP, (spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND)
+      : CLOCK_STEP;
     this.spentAtNow = spent;
     return Math.floor(this.now);
   }
