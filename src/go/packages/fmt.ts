@@ -4,7 +4,8 @@ import { Printer } from '../fmt';
 import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { ERROR_TYPE, pointerTo, sliceOf, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
-import { IO_WRITER } from './io';
+import { fscan, fscanf, sscan, sscanf } from './fmtScan';
+import { IO_READER, IO_WRITER } from './io';
 import { ANY_SLICE, byteSlice, callMethod, INT, receiverStruct, sliceValues, STRING, writeStdout } from './support';
 
 const ERROR_RESULTS: Type[] = [INT, ERROR_TYPE];
@@ -96,18 +97,32 @@ const members: Record<string, Entity> = {
     ([writer, format, args]) => writeTo(writer, new Printer().printf(format as string, sliceValues(args)))
   ),
   Stringer: typeEntity(STRINGER),
+  Sscan: nativeFunction('Sscan', fn([STRING, ANY_SLICE], ERROR_RESULTS, true), ([text, args]) =>
+    sscan(text as string, sliceValues(args), 'scan')
+  ),
+  Sscanln: nativeFunction('Sscanln', fn([STRING, ANY_SLICE], ERROR_RESULTS, true), ([text, args]) =>
+    sscan(text as string, sliceValues(args), 'scanln')
+  ),
+  Sscanf: nativeFunction('Sscanf', fn([STRING, STRING, ANY_SLICE], ERROR_RESULTS, true), ([text, format, args]) =>
+    sscanf(text as string, format as string, sliceValues(args))
+  ),
+  Fscan: nativeFunction('Fscan', fn([IO_READER, ANY_SLICE], ERROR_RESULTS, true), ([reader, args]) =>
+    fscan(reader, sliceValues(args), 'scan')
+  ),
+  Fscanln: nativeFunction('Fscanln', fn([IO_READER, ANY_SLICE], ERROR_RESULTS, true), ([reader, args]) =>
+    fscan(reader, sliceValues(args), 'scanln')
+  ),
+  Fscanf: nativeFunction('Fscanf', fn([IO_READER, STRING, ANY_SLICE], ERROR_RESULTS, true), ([reader, format, args]) =>
+    fscanf(reader, format as string, sliceValues(args))
+  ),
 };
 
 export const FMT_PACKAGE = definePackage('fmt', members, [
   'Scan',
   'Scanln',
   'Scanf',
-  'Fscan',
-  'Fscanln',
-  'Fscanf',
-  'Sscan',
-  'Sscanln',
-  'Sscanf',
+  'Scanner',
+  'ScanState',
   'Formatter',
   'State',
   'GoStringer',

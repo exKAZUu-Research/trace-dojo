@@ -65,6 +65,8 @@ export class GoStruct {
 export interface NativeState {
   turtle?: TurtleState;
   clone?(): NativeState;
+  /** The values of the type's declared fields, for a library type that keeps them in this state instead. */
+  fieldValues?(): Value[];
   [key: string]: unknown;
 }
 

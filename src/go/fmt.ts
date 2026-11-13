@@ -416,12 +416,11 @@ export class Printer {
   ): void {
     if (this.flags.sharpV) this.buffer += typeString(type);
     this.buffer += '{';
+    const values = struct.native?.fieldValues?.() ?? struct.fields;
     for (const [index, field] of under.fields.entries()) {
       if (index > 0) this.buffer += this.flags.sharpV ? ', ' : ' ';
       if (this.flags.plusV || this.flags.sharpV) this.buffer += `${field.name}:`;
-      this.withInterface(isExported(field.name), () =>
-        this.printValue(struct.fields[index], field.type, verb, depth + 1)
-      );
+      this.withInterface(isExported(field.name), () => this.printValue(values[index], field.type, verb, depth + 1));
     }
     this.buffer += '}';
   }

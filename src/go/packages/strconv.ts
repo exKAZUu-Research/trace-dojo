@@ -48,7 +48,7 @@ function numError(func: string, num: string, error: Value): Value {
   return new Iface(pointerTo(NUM_ERROR), new Pointer(new Cell(new GoStruct([func, num, error])), 'v'));
 }
 
-function renamed(error: Value, func: string, num: string): Value {
+export function renamed(error: Value, func: string, num: string): Value {
   const struct = ((error as Iface).value as Pointer).load() as GoStruct;
   struct.fields[0] = func;
   struct.fields[1] = num;
@@ -89,7 +89,7 @@ function underscoreOK(text: string): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- A transcription of Go's ParseUint.
-function parseUint(text: string, baseArg: number, bitSizeArg: number, func: string): [bigint, Value] {
+export function parseUint(text: string, baseArg: number, bitSizeArg: number, func: string): [bigint, Value] {
   if (text === '') return [0n, numError(func, text, ERR_SYNTAX)];
   const base0 = baseArg === 0;
   let base = baseArg;
@@ -130,7 +130,7 @@ function parseUint(text: string, baseArg: number, bitSizeArg: number, func: stri
   return [value, undefined];
 }
 
-function parseInt(text: string, base: number, bitSizeArg: number, func: string): [bigint, Value] {
+export function parseInt(text: string, base: number, bitSizeArg: number, func: string): [bigint, Value] {
   if (text === '') return [0n, numError(func, text, ERR_SYNTAX)];
   let s = text;
   let negative = false;
@@ -153,7 +153,7 @@ function parseInt(text: string, base: number, bitSizeArg: number, func: string):
 const SPECIAL_FLOATS: Record<string, number> = { inf: Infinity, infinity: Infinity, nan: Number.NaN };
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Go's float syntax: specials, decimal, and hexadecimal.
-function parseFloat(text: string, bitSize: number): [number, Value] {
+export function parseFloat(text: string, bitSize: number): [number, Value] {
   const error = (kind: Value, value = 0): [number, Value] => [value, numError('ParseFloat', text, kind)];
   let s = text;
   let sign = 1;
@@ -190,7 +190,7 @@ function formatInteger(value: bigint, base: number): string {
 }
 
 /** `strconv.Unquote`: the value of a quoted Go string or rune literal, or ErrSyntax. */
-function unquote(text: string): [string, Value] {
+export function unquote(text: string): [string, Value] {
   if (text.length < 2) return ['', ERR_SYNTAX];
   const quoteChar = text[0];
   if (quoteChar !== text.at(-1)) return ['', ERR_SYNTAX];

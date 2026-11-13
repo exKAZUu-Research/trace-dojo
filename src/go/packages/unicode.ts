@@ -166,7 +166,7 @@ function isValid(bytes: string): boolean {
   return true;
 }
 
-function fullRune(bytes: string): boolean {
+export function fullRune(bytes: string): boolean {
   const n = bytes.length;
   if (n === 0) return false;
   const b0 = bytes.charCodeAt(0);

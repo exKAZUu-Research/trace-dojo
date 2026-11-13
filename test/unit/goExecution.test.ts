@@ -681,3 +681,104 @@ test.each([
     uncaughtException: expect.stringContaining('out of memory'),
   });
 });
+
+// Go 1.27.3 prints these lines: output keeps a leading byte order mark even when written a byte at a time; Scanner and
+// Writer keep their buffers in Go slices, so a buffer given to Scanner.Buffer receives the input and a copied Writer
+// shares its backing array; case mappings and folds follow Go's Unicode tables; reading from strings with fmt's and
+// bufio's readers works; and Builder and Reader print their fields.
+test('library state, folding, scanning, and output bytes match Go', () => {
+  const program = String.raw`package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+	"unicode"
+)
+
+func main() {
+	fmt.Print("\xef\xbb\xbf")
+	os.Stdout.Write([]byte{239})
+	os.Stdout.Write([]byte{187, 191})
+	fmt.Fprint(os.Stderr, "\xef\xbb\xbfe")
+
+	b := make([]byte, 10)
+	s := bufio.NewScanner(strings.NewReader("abc\nde"))
+	s.Buffer(b, 10)
+	s.Scan()
+	fmt.Println(string(b[:3]), &s.Bytes()[0] == &b[0])
+	s.Scan()
+	fmt.Println(&s.Bytes()[0] == &b[4])
+
+	var out strings.Builder
+	w := bufio.NewWriterSize(&out, 10)
+	w.WriteString("a")
+	c := *w
+	w.WriteString("b")
+	c.WriteString("c")
+	w.Flush()
+	c.Flush()
+	w.WriteString("xy")
+	d := *w
+	d.WriteString("Z")
+	d.Flush()
+	w.Flush()
+	fmt.Println(out.String())
+
+	fmt.Println(unicode.SimpleFold(223), unicode.SimpleFold(304), unicode.SimpleFold(305), unicode.SimpleFold(452),
+		unicode.SimpleFold(8064), unicode.ToUpper(8064), unicode.ToTitle(453), unicode.ToLower(7838),
+		strings.EqualFold("ᾀ", "ᾈ"), strings.EqualFold("ᾳ", "ᾼ"), strings.EqualFold("ß", "ẞ"), strings.EqualFold("İ", "i"),
+		strings.ToUpper("ᾀß"))
+
+	var x, y int
+	n, err := fmt.Sscanf("10 20", "%d %d", &x, &y)
+	fmt.Println(n, err, x, y)
+	var word string
+	n, err = fmt.Sscan("hello\n 5", &word, &x)
+	fmt.Println(n, err, word, x)
+	n, err = fmt.Sscanln("7\n8", &x, &y)
+	fmt.Println(n, err, x)
+	n, err = fmt.Sscanf("x", "%d", &x)
+	fmt.Println(n, err)
+	line, err := bufio.NewReader(strings.NewReader("first\nsecond")).ReadString('\n')
+	fmt.Printf("%q %v\n", line, err)
+
+	var zero strings.Builder
+	fmt.Println(strings.NewReader("abc"), zero)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: `\uFEFF\uFEFFabc true
+true
+acacxyZxy
+7838 304 305 453 8072 8072 453 223 true true true false ᾈß
+2 <nil> 10 20
+2 <nil> hello 5
+1 unexpected newline 7
+0 expected integer
+"first\\n" <nil>
+&{abc 0 -1} {<nil> []}
+`,
+    stderr: '\uFEFFe',
+  });
+});
+
+test.each([
+  [
+    'a Replacer whose patterns fail at every position',
+    `_ = strings.NewReplacer(${Array.from({ length: 500 }, (_, i) => `"z${i}", "x"`).join(', ')}).Replace(strings.Repeat("a", 1000000))`,
+  ],
+  [
+    'a Replacer whose long pattern fails late',
+    '_ = strings.NewReplacer(strings.Repeat("a", 5000)+"b", "x").Replace(strings.Repeat("a", 1000000))',
+  ],
+  [
+    'repeated searches of a long string',
+    's := strings.Repeat("a", 1000000)\n\tfor i := 0; i < 100000; i++ {\n\t\t_ = strings.Contains(s, "b")\n\t}',
+  ],
+])('%s stops at the operation limit', (_name, body) => {
+  const program = `package main\n\nimport "strings"\n\nfunc main() {\n\t${body}\n}`;
+  expect(executeProgram('go', program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});

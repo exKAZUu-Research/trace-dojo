@@ -31,6 +31,18 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
 
 export type NativeImpl = (args: Value[]) => Value | Value[];
 
+const opaqueTypes = new WeakSet<Type>();
+
+/** Marks a library type whose fields are implementation details, which the trace does not show. */
+export function opaqueType(type: NamedType): NamedType {
+  opaqueTypes.add(type);
+  return type;
+}
+
+export function isOpaque(type: Type): boolean {
+  return opaqueTypes.has(type);
+}
+
 export function namedType(pkg: string, name: string, underlyingType: Type): NamedType {
   return { kind: 'named', name, pkg, underlying: underlyingType, methods: [] };
 }

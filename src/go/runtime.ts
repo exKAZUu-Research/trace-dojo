@@ -124,8 +124,8 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
-  private readonly stdoutDecoder = new TextDecoder('utf-8', { fatal: false });
-  private readonly stderrDecoder = new TextDecoder('utf-8', { fatal: false });
+  private readonly stdoutDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
+  private readonly stderrDecoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
