@@ -118,6 +118,12 @@ export function complexProduct(x: Complex, y: Complex, groupedSums: boolean, sin
   return new Complex(round(fma(-x.im, y.im, x.re * y.re)), round(im));
 }
 
+/** A complex product of constants, which Go's compiler folds with each operation rounded on its own. */
+export function foldedComplexProduct(x: Complex, y: Complex, single: boolean): Complex {
+  const round = single ? Math.fround : (value: number): number => value;
+  return new Complex(round(x.re * y.re - x.im * y.im), round(x.re * y.im + x.im * y.re));
+}
+
 /** Divides as Go's runtime does (complex128div), including its handling of infinities and NaNs. */
 function complexDivide(n: Complex, m: Complex, make: (re: number, im: number) => Complex): Complex {
   let e: number;

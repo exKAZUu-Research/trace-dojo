@@ -35,7 +35,7 @@ import { fma } from './fma';
 import { utf8Decode } from './literals';
 import { currentRuntime, libraryCell } from './native';
 import type { Operand, SsaConstant, Storage } from './operand';
-import { arithmetic, bitwiseNot, complexProduct, negate, ordering, shift } from './operators';
+import { arithmetic, bitwiseNot, complexProduct, foldedComplexProduct, negate, ordering, shift } from './operators';
 import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
 import { boxesByAddress, isPointerShaped, moveToHeap, sizeOf } from './sliceOps';
@@ -1088,6 +1088,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       eval: (frame) => {
         const x = readLeft(frame) as Complex;
         const y = readRight(frame) as Complex;
+        if (ssaConstant?.(frame)) return foldedComplexProduct(x, y, single);
         return complexProduct(x, y, fn !== undefined && sumsGrouped(contexts, fn, frame), single);
       },
       ssaConstant,
