@@ -27,8 +27,8 @@ export class PyBytes extends PyObject {
     super(cls);
     // Objects that wrap memory already charged, such as a decompressor's unused input read again, charge nothing.
     if (!chargedBuffers.has(data.buffer)) {
-      chargedBuffers.add(data.buffer);
       chargeSlots(bytesSlots(data.length));
+      chargedBuffers.add(data.buffer);
     }
     this.buffer = data;
     this.size = data.length;

@@ -208,6 +208,8 @@ function a85decode(args: PyValue[], kwargs: Kwargs): PyValue {
   let current: number[] = [];
   for (const char of `${text}uuuu`) {
     const code = char.codePointAt(0) as number;
+    // Each group or shortcut adds up to four bytes, so the result is checked before it grows.
+    currentRuntime().ensureStringFits(decoded.length + 4);
     if (code >= 33 && code <= 117) {
       current.push(code - 33);
       if (current.length === 5) {
@@ -218,8 +220,6 @@ function a85decode(args: PyValue[], kwargs: Kwargs): PyValue {
       }
     } else if (char === 'z' || (foldSpaces && char === 'y')) {
       if (current.length > 0) throw valueError(`${char} inside Ascii85 5-tuple`);
-      // A single character stands for four bytes, so the result is checked as it grows.
-      currentRuntime().ensureStringFits(decoded.length + 4);
       decoded.push(...Array.from({ length: 4 }, () => (char === 'z' ? 0 : 0x20)));
     } else if (!ignore.includes(char)) {
       throw valueError(`Non-Ascii85 digit found: ${char}`);
