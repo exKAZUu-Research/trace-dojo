@@ -325,6 +325,13 @@ console.log(observer.canMoveForward());`,
   });
 });
 
+test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
+  // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
+  const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);
+while (Date.now() - v < 50) { for (let i = 0; i < 500; i++) sum += i; }`;
+  expect(executeProgram('javascript', source)).toMatchObject({ kind: 'executed', stdout: '100\n' });
+});
+
 test.each([
   ['an infinite loop', 'while (true) {}', { kind: 'limitExceeded', limit: 'operations' }],
   ['an infinite loop of empty statements', 'for (;;);', { kind: 'limitExceeded', limit: 'operations' }],
@@ -833,11 +840,6 @@ for (const f of [() => Object.create(1), () => Object.create(null, null), () => 
 setTimeout(() => console.log('A 50'), 50); const t = Date.now(); while (Date.now() - t < 200) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('B 0'), 0);
 setTimeout(() => { const s = Date.now(); while (Date.now() - s < 400) { for (let i = 0; i < 300; i++) sum += i; } setTimeout(() => console.log('C 0'), 0); }, 300); setTimeout(() => console.log('D 400'), 400);
 let last = 0; const w = Date.now(); while (Date.now() - w < 300) { for (let i = 0; i < 2000; i++) sum += i; last = Date.now(); } console.log('polled twice per pass');`,
-  ],
-  [
-    'a timer pending through a busy wait',
-    `let sum = 0; const v = Date.now(); setTimeout(() => console.log('on time', Date.now() - v < 120), 100);
-while (Date.now() - v < 50) { for (let i = 0; i < 500; i++) sum += i; }`,
   ],
   [
     'a timestamp helper around computation between timers',
