@@ -248,7 +248,7 @@ export class RClass extends RBasic {
       for (const included of module.includes) addModule(included);
     };
     addModule(this);
-    list.push(...superAncestors);
+    for (const ancestor of superAncestors) list.push(ancestor);
     this.ancestorCache = { version: hierarchyVersion.value, list };
     return list;
   }

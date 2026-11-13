@@ -214,7 +214,9 @@ test('a private setter rejects an explicit receiver', () => {
 
 test('out-of-range String append and missing inject block raise Ruby errors', () => {
   expect(run('"a" << 1114112')).toMatchObject({ uncaughtException: '1114112 out of char range (RangeError)' });
-  expect(run('[3,1,2].inject')).toMatchObject({ uncaughtException: 'no block given (LocalJumpError)' });
+  expect(run('[3,1,2].inject')).toMatchObject({
+    uncaughtException: 'wrong number of arguments (given 0, expected 1..2) (ArgumentError)',
+  });
 });
 
 test('an out-of-range percent character raises a Ruby error', () => {
@@ -443,6 +445,14 @@ test.each([
     String.raw`p "\xFF".reverse.bytes, "\xFF".ljust(2).bytes`,
     '[255]\n[255, 32]\n',
   ],
+  ['empty whole-string line iteration', 'p "".lines(nil), "".each_line(nil).to_a', '[""]\n[""]\n'],
+  [
+    'nonpositive cycle without traversal',
+    'class C; include Enumerable; def each; puts :each; yield 1; end; end; C.new.cycle(-1) { puts :block }; C.new.cycle(0) { puts :block }; puts :after',
+    'after\n',
+  ],
+  ['endless Float Range steps', 'p (1..).step(1.5) { |x| break x if x > 2 }', '2.5\n'],
+  ['large splat into native Array method', 'a = Array.new(200000, 0); b = []; b.push(*a); p b.size', '200000\n'],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -468,6 +478,12 @@ test('invalid radices and extreme rounding return Ruby errors', () => {
   });
   expect(run('p (..."z").max')).toMatchObject({
     uncaughtException: 'cannot get the maximum of beginless range with custom comparison method (RangeError)',
+  });
+  expect(run('p [1, 2].inject')).toMatchObject({
+    uncaughtException: 'wrong number of arguments (given 0, expected 1..2) (ArgumentError)',
+  });
+  expect(run('p "".tr_s!("a", 2)')).toMatchObject({
+    uncaughtException: 'no implicit conversion of Integer into String (TypeError)',
   });
 });
 

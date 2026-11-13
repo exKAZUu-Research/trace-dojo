@@ -298,14 +298,15 @@ def('Range', ['step', '%'], [0, 1], function* (self: RRange, args, block) {
   }
   if (
     (typeof begin === 'bigint' || typeof begin === 'number') &&
-    (typeof end === 'bigint' || typeof end === 'number')
+    (typeof end === 'bigint' || typeof end === 'number' || end === NIL)
   ) {
     const start = Number(begin);
     const by = Number(step);
-    const n = Math.floor((Number(end) - start) / by + 1e-9);
+    const n = end === NIL ? Number.POSITIVE_INFINITY : Math.floor((Number(end) - start) / by + 1e-9);
     for (let index = 0; index <= n; index++) {
+      rt().spend();
       const value = start + index * by;
-      if (exclusive && value >= Number(end)) break;
+      if (end !== NIL && exclusive && value >= Number(end)) break;
       yield* callBlock(block, [value], false);
     }
     return self;

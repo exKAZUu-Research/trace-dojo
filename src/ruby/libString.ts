@@ -439,8 +439,8 @@ def('String', 'sum', [0, 1], function* (self: RString, args) {
 });
 
 function linesOf(text: string, separator: string | undefined, chomp: boolean): string[] {
-  if (text.length === 0) return [];
   if (separator === undefined) return [text];
+  if (text.length === 0) return [];
   const lines: string[] = [];
   let start = 0;
   if (separator === '') {
@@ -687,9 +687,11 @@ for (const [name, squeezeRuns] of [
     return str(translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns).text);
   });
   def('String', `${name}!`, 2, function* (self: RString, [from, to]) {
+    const source = yield* stringArg(from);
+    const replacement = yield* stringArg(to);
     if (self.s.length === 0) return NIL;
     modify(self);
-    const result = translate(self.s, yield* stringArg(from), yield* stringArg(to), squeezeRuns);
+    const result = translate(self.s, source, replacement, squeezeRuns);
     if (!result.matched) return NIL;
     setText(self, result.text);
     return self;

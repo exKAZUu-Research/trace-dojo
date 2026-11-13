@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 677 -- The libEnumerable module keeps one concern's cases together.
 import { caseEquals, compareValues, inspect, rEquals, spaceship, toIndex, toInt } from './conversions';
 import { def } from './define';
-import { argumentError, rubyError, typeError } from './errors';
+import { argumentCountError, argumentError, typeError } from './errors';
 import { eachEntry, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -89,7 +89,7 @@ export function* toArray(collection: Value): Gen<Value[]> {
 function* collectInto(collection: Value, arrays: Value[][], visit: Visit): Gen<void> {
   const held = rt().heldArrays;
   const mark = held.length;
-  held.push(...arrays);
+  for (const array of arrays) held.push(array);
   try {
     yield* iterate(collection, visit);
   } finally {
@@ -216,7 +216,7 @@ def('Enumerable', 'reverse_each', [0, -1], function* (self, _args, block) {
 
 /** `inject`/`reduce`: folds with a block or with the method a symbol names, from an initial value or the first. */
 export function* inject(self: Value, args: Value[], block: RProc | undefined): Gen {
-  if (args.length === 0 && !block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+  if (args.length === 0 && !block) throw argumentCountError(0, 1, 2);
   let accumulator: Value | undefined;
   let operator: string | undefined;
   if (args.length === 2) {
@@ -811,10 +811,10 @@ def('Enumerable', 'zip', [0, -1], function* (self, others, block) {
 });
 def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
   if (!block) return makeEnumerator(self, 'cycle', args);
-  const items = yield* toArray(self);
-  if (items.length === 0) return NIL;
   const times = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : undefined;
   if (times !== undefined && times <= 0n) return NIL;
+  const items = yield* toArray(self);
+  if (items.length === 0) return NIL;
   for (let round = 0n; times === undefined || round < times; round++) {
     for (const item of items) yield* callBlock(block, [item], false);
   }

@@ -192,8 +192,8 @@ function* copyObject(self: Value, clone: boolean, keepFrozen: boolean): Gen {
   if (clone && self.singleton) {
     const singleton = new RClass(rt().c.Class, undefined, self.singleton.superclass, false, true);
     singleton.attached = copy;
-    singleton.includes.push(...self.singleton.includes);
-    singleton.prepends.push(...self.singleton.prepends);
+    for (const included of self.singleton.includes) singleton.includes.push(included);
+    for (const prepended of self.singleton.prepends) singleton.prepends.push(prepended);
     for (const [name, method] of self.singleton.methods)
       singleton.methods.set(name, { ...method, owner: method.owner === self.singleton ? singleton : method.owner });
     copy.singleton = singleton;

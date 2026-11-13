@@ -1189,7 +1189,8 @@ export function* invoke(
         throw argumentCountError(actual.length, body.min, body.max);
       }
       const held = runtime.held.length;
-      runtime.held.push(recv, ...actual);
+      runtime.held.push(recv);
+      for (const arg of actual) runtime.held.push(arg);
       if (block) runtime.held.push(block);
       try {
         const result = body.fn(recv, actual, block, body.takesKeywords ? keywords : undefined);
