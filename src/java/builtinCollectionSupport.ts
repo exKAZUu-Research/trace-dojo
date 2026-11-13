@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 418 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
+// code-gauge-allow-file fileNcss 421 -- The shared collection machinery (iterators, views, policies, lookups) the builtin collections use.
 import { classCastMessage } from './builtinClass';
 import { stringify } from './builtins';
 import { addInterface, addMethod, addTypeParameters, newString, type Registry } from './builtinSupport';
@@ -520,36 +520,45 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
   ] as const) {
     addMethod(cls, name, [parameter], BOOLEAN, false, (frame) => throwBuiltin(frame, 'UnsupportedOperationException'));
   }
-  addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
-    rejectEagerly(frame, receiver);
-    const view = mapViewSources.get(receiver as JavaObject);
-    if (view && looksUpThroughMap(receiver)) {
-      const { mapClass } = frame.runtime.builtins.collections;
-      if (frame.runtime.invokeVirtual(frame, mapClass, 'containsKey', view.map, [value]) !== true) return false;
-      // TreeMap.KeySet removes through its map, which finds the key by its comparator rather than by equals.
-      if (view.store().compare) {
-        frame.runtime.invokeVirtual(frame, mapClass, 'remove', view.map, [value]);
-        return true;
-      }
-    }
-    const index = indexOf(frame, elementsOf(receiver), value);
-    if (index === -1) return false;
-    // As AbstractCollection.remove does, it removes through the view's iterator.
-    checkRemovable(frame, receiver);
-    removeElements(frame, receiver, (_, position) => position === index);
-    return true;
-  });
+  addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) =>
+    removeFromView(frame, receiver as JavaObject, value)
+  );
   addMethod(cls, 'clear', [], VOID, false, (frame, receiver) => {
-    rejectEagerly(frame, receiver);
-    // AbstractMap's key set and values clear through their map, which an ImmutableCollections map rejects at once.
-    const view = mapViewSources.get(receiver as JavaObject);
-    if (view?.lookup && eagerlyRejectingClasses.has(unwrapped(view.map).cls)) {
-      throwBuiltin(frame, 'UnsupportedOperationException');
-    }
-    removeElements(frame, receiver, () => true);
+    clearView(frame, receiver as JavaObject);
   });
   linkOverrides(cls);
   return cls;
+}
+
+/** A view's `remove`, which a HashMap's or TreeMap's key set makes through its map's lookup. */
+function removeFromView(frame: Frame, receiver: JavaObject, value: Value): boolean {
+  rejectEagerly(frame, receiver);
+  const view = mapViewSources.get(receiver);
+  if (view && looksUpThroughMap(receiver)) {
+    const { mapClass } = frame.runtime.builtins.collections;
+    if (frame.runtime.invokeVirtual(frame, mapClass, 'containsKey', view.map, [value]) !== true) return false;
+    // TreeMap.KeySet removes through its map, which finds the key by its comparator rather than by equals.
+    if (view.store().compare) {
+      frame.runtime.invokeVirtual(frame, mapClass, 'remove', view.map, [value]);
+      return true;
+    }
+  }
+  const index = indexOf(frame, elementsOf(receiver), value);
+  if (index === -1) return false;
+  // As AbstractCollection.remove does, it removes through the view's iterator.
+  checkRemovable(frame, receiver);
+  removeElements(frame, receiver, (_, position) => position === index);
+  return true;
+}
+
+/** A view's `clear`; AbstractMap's key set and values clear through their map, which Map.of rejects at once. */
+function clearView(frame: Frame, receiver: JavaObject): void {
+  rejectEagerly(frame, receiver);
+  const view = mapViewSources.get(receiver);
+  if (view?.lookup && eagerlyRejectingClasses.has(unwrapped(view.map).cls)) {
+    throwBuiltin(frame, 'UnsupportedOperationException');
+  }
+  removeElements(frame, receiver, () => true);
 }
 
 /**

@@ -40,6 +40,7 @@ export function accessedEntry(frame: Frame, map: Value, key: Value): HashEntry |
  * The constructors that choose a `LinkedHashMap`'s order, and `removeEldestEntry`, which it asks after each addition
  * whether to remove its eldest entry, as an LRU cache that overrides it does.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- The order constructors and the eviction hook, each a small native.
 export function defineLinkedHashMapOrder(cls: ClassInfo, entryClass: ClassInfo, nodeClass: ClassInfo): void {
   const [key, value] = cls.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
   for (const parameterTypes of [

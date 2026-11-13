@@ -182,6 +182,7 @@ function defineSetClass(
   return cls;
 }
 
+// code-gauge-allow functionNcss 31 -- One registration per map class and view, each a short call.
 export function defineHashMap(
   context: Context,
   views: { setClass: ClassInfo; collectionClass: ClassInfo; snapshotSet: ClassInfo; snapshotCollection: ClassInfo }
@@ -436,6 +437,7 @@ function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass:
 }
 
 /** `equals` and `hashCode` of a map, which compare and hash its entries as `AbstractMap` does. */
+// code-gauge-allow functionCognitiveComplexity 20 -- AbstractMap.equals and hashCode, with the wrapper and access-order cases they need.
 function defineMapEquality(cls: ClassInfo, context: Context, mapClass: ClassInfo): void {
   addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
     if (other === receiver) return true;
@@ -947,6 +949,7 @@ export function findEntry(frame: Frame, receiver: Value, key: Value): HashStore[
 }
 
 /** Adds or replaces an entry, returning the value it replaced or `NO_ENTRY`; a set keeps an existing entry. */
+// code-gauge-allow functionParameterCount 7 -- Each flag is a distinct JDK put path (sets, bucket heads, eviction), passed by its callers.
 export function putEntry(
   frame: Frame,
   receiver: Value,
