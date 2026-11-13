@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 540 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 562 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -40,6 +40,8 @@ export class Frame {
   readonly temporaries: Value[] = [];
   /** The unfinished iterations the frame runs, which stay reachable as long as the frame can still resume them. */
   readonly iterations = new Set<ValueIterator>();
+  /** How many builtins run in the frame now, which keep what the program's code returns to them in its temporaries. */
+  builtinsRunning = 0;
 
   constructor(
     public scope: Scope,
@@ -455,13 +457,17 @@ export class Runtime {
     const { behavior } = fn;
     if (behavior.kind === 'native') {
       // Held inline rather than through holdingAll, whose callback would cost every callback recursion depth.
-      const { temporaries } = this.frame;
+      // Inline rather than through runBuiltin, whose callback would cost every callback recursion depth.
+      const { frame } = this;
+      const { temporaries } = frame;
       const held = temporaries.length;
       temporaries.push(fn, thisValue);
       appendAll(temporaries, args);
+      frame.builtinsRunning++;
       try {
         return behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
       } finally {
+        frame.builtinsRunning--;
         temporaries.length = held;
       }
     }
@@ -470,14 +476,41 @@ export class Runtime {
     }
     // The receiver stays reachable through the call, which an arrow function or a getter's caller would not ensure, so
     // a builtin calling the program's code on a value it holds only in a host local never loses that value's turtles.
-    const { temporaries } = this.frame;
+    const { frame } = this;
+    const { temporaries } = frame;
     const held = temporaries.length;
     temporaries.push(thisValue);
+    let result: Value;
     try {
-      return this.evaluator.callFunction(fn, behavior, thisValue, args, callRow);
+      result = this.evaluator.callFunction(fn, behavior, thisValue, args, callRow);
     } finally {
       temporaries.length = held;
     }
+    return this.returnedToBuiltin(frame, result);
+  }
+
+  /**
+   * Runs a builtin with what it was called with held. Until it returns, every value the program's code returns to it
+   * stays reachable too, since a builtin may keep such a value only in a host local while it calls the program again.
+   */
+  private runBuiltin<T>(held: Value[], run: () => T): T {
+    const { frame } = this;
+    const { temporaries } = frame;
+    const length = temporaries.length;
+    appendAll(temporaries, held);
+    frame.builtinsRunning++;
+    try {
+      return run();
+    } finally {
+      frame.builtinsRunning--;
+      temporaries.length = length;
+    }
+  }
+
+  private returnedToBuiltin<T extends Value>(frame: Frame, value: T): T {
+    // Only an object can lead to a turtle, so a callback returning primitives, as forEach's do, adds nothing.
+    if (frame.builtinsRunning > 0 && isObject(value)) frame.temporaries.push(value);
+    return value;
   }
 
   construct(fn: Value, args: Value[], newTarget: Value = fn, callRow?: number): JsObject {
@@ -488,14 +521,17 @@ export class Runtime {
     const target = newTarget as JsFunction;
     const { behavior } = fn;
     if (behavior.kind === 'native') {
-      return this.holdingAll([fn, ...args], () =>
+      return this.runBuiltin([fn, ...args], () =>
         behavior.run({ runtime: this, thisValue: undefined, args, newTarget: target, callRow })
       ) as JsObject;
     }
-    if (behavior.kind === 'class') return this.evaluator.constructClass(fn, behavior, args, target, callRow);
+    const { frame } = this;
+    if (behavior.kind === 'class') {
+      return this.returnedToBuiltin(frame, this.evaluator.constructClass(fn, behavior, args, target, callRow));
+    }
     const thisValue = this.newObject(this.prototypeFor(target, this.realm.objectPrototype));
     const result = this.evaluator.callFunction(fn, behavior, thisValue, args, callRow, target);
-    return isObject(result) ? result : thisValue;
+    return this.returnedToBuiltin(frame, isObject(result) ? result : thisValue);
   }
 
   /** What String, Number, or Boolean returns: the primitive when called, and its box when constructed with `new`. */

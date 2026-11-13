@@ -269,6 +269,12 @@ const result = Object.create(null, props);`,
     'false\n',
   ],
   [
+    'a Set method keeps the methods it read from a set-like argument',
+    `const other = { size: 1, get has() { const t = new Turtle(1, 1); return () => { t; return true; }; }, get keys() { console.log(observer.canMoveForward()); return () => [][Symbol.iterator](); } };
+new Set([1]).isSubsetOf(other);`,
+    'false\n',
+  ],
+  [
     'a spread keeps its iterable while reading its iterator method',
     `const out = [...Object.defineProperty({ t: new Turtle(1, 1) }, Symbol.iterator, { get: () => { console.log(observer.canMoveForward()); return () => [][Symbol.iterator](); } })];`,
     'false\n',
@@ -279,12 +285,10 @@ const result = Object.create(null, props);`,
     'false\n',
   ],
   [
-    'flatMap releases an exhausted inner iterator',
-    `Iterator.from([1, 2]).flatMap((x) => {
-  if (x === 1) return { t: new Turtle(1, 1), [Symbol.iterator]() { return this; }, next() { return { done: true }; } };
-  console.log(observer.canMoveForward());
-  return [];
-}).next();`,
+    'flatMap releases an exhausted inner iterator once its step returns',
+    `const it = Iterator.from([1]).flatMap(() => ({ t: new Turtle(1, 1), [Symbol.iterator]() { return this; }, next() { return { done: true }; } }));
+it.next();
+console.log(observer.canMoveForward());`,
     'true\n',
   ],
 ])('%s, keeping the turtles it holds on the board', (_, source, stdout) => {
