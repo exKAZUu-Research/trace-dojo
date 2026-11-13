@@ -294,6 +294,17 @@ export function checkRemovable(frame: Frame, collection: Value): void {
   checkModifiable(frame, collection, true);
 }
 
+/**
+ * Whether clearing `list` while it is empty counts as a change, as `ArrayList`, `LinkedList`, and `Vector` count it
+ * and so does a sublist whose list's `removeRange` does, unlike `AbstractList`'s, which `LinkedList` and the restricted
+ * lists inherit.
+ */
+export function countsEmptyClear(list: Value): boolean {
+  const root = rootListOf(list as JavaObject);
+  if (unmodifiableClasses.has(root.cls) || fixedSizeClasses.has(root.cls)) return false;
+  return root === list || checkingClassOf(root).name !== 'LinkedList';
+}
+
 /** The list a sublist views, through any nesting of sublists, or the collection itself when it is not a sublist. */
 function rootListOf(collection: JavaObject): JavaObject {
   let list = collection;

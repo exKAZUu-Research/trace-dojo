@@ -9,6 +9,7 @@ import {
   checkPosition,
   checkRemovable,
   classType,
+  countsEmptyClear,
   countsNoOpChanges,
   createIterator,
   defaultRemoveClasses,
@@ -722,6 +723,7 @@ function defineListUpdates(cls: ClassInfo, element: JavaType, context: Context):
   });
   addMethod(cls, 'clear', [], VOID, false, (frame, receiver) => {
     if (elementsOf(receiver).length > 0) checkModifiable(frame, receiver, true);
+    else if (!countsEmptyClear(receiver)) return;
     elementsOf(receiver).length = 0;
     touch(receiver);
   });
