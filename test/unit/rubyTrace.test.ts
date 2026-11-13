@@ -226,3 +226,13 @@ c = Counter.new`);
     { '@count': 1, 'Counter.@@total': 1, $runs: 1 },
   ]);
 });
+
+test('Enumerator with_index preserves direct each_with_index steps', () => {
+  const traces = ['each_with_index', 'each.with_index'].map((method) =>
+    rubyTrace(`t = Turtle.new
+[1, 2].${method} do |x, i|
+  t.forward
+end`).map(({ line, vars, turtles }) => ({ line, vars, y: turtles[0]?.y }))
+  );
+  expect(traces[1]).toEqual(traces[0]);
+});

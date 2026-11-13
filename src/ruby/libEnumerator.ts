@@ -58,9 +58,9 @@ def('Enumerator', ['with_index', 'each_with_index'], [0, 1], function* (self: RO
   if (!block) return makeEnumerator(self, 'with_index', args);
   const userBlock = block;
   const source = sourceOf(self);
-  const proc = nativeProc(-1, (yielded) => {
+  const proc = nativeProc(-1, (yielded, _block, used) => {
     const value = yielded.length === 1 ? yielded[0] : arr(yielded);
-    return callProc(userBlock, [value, index++]);
+    return callProc(userBlock, [value, index++], { used });
   });
   return yield* callMethod(source.recv, source.method, source.args, source.keywords, proc);
 });
@@ -68,9 +68,9 @@ def('Enumerator', ['with_object', 'each_with_object'], 1, function* (self: RObje
   if (!block) return makeEnumerator(self, 'with_object', [memo]);
   const userBlock = block;
   const source = sourceOf(self);
-  const proc = nativeProc(-1, (yielded) => {
+  const proc = nativeProc(-1, (yielded, _block, used) => {
     const value = yielded.length === 1 ? yielded[0] : arr(yielded);
-    return callProc(userBlock, [value, memo]);
+    return callProc(userBlock, [value, memo], { used });
   });
   yield* callMethod(source.recv, source.method, source.args, source.keywords, proc);
   return memo;

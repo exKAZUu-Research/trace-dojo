@@ -1364,7 +1364,11 @@ export function makeBlock(def: BlockDef, frame: Frame): RProc {
   return proc;
 }
 
-export function nativeProc(arity: number, call: (args: Value[], block?: RProc) => Value | Gen, lambda = false): RProc {
+export function nativeProc(
+  arity: number,
+  call: (args: Value[], block: RProc | undefined, used: boolean) => Value | Gen,
+  lambda = false
+): RProc {
   const proc = new RProc(rt().c.Proc, { kind: 'native', arity, lambda, call }, NIL, undefined);
   proc.isLambda = lambda;
   proc.breakTag = {};
@@ -1392,7 +1396,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
     if (body.lambda && body.arity >= 0 && args.length !== body.arity) {
       throw argumentCountError(args.length, body.arity, body.arity);
     }
-    const result = body.call(args, options.block);
+    const result = body.call(args, options.block, options.used ?? true);
     return isGenerator(result) ? yield* result : result;
   }
   const { def } = body;

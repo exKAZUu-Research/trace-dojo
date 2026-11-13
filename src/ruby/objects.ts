@@ -154,7 +154,11 @@ export type ProcBody =
   | { kind: 'block'; def: BlockDef }
   | { kind: 'native'; arity: number; lambda: boolean; call: NativeProc };
 
-export type NativeProc = (args: Value[], block: RProc | undefined) => Value | Generator<unknown, Value, unknown>;
+export type NativeProc = (
+  args: Value[],
+  block: RProc | undefined,
+  used: boolean
+) => Value | Generator<unknown, Value, unknown>;
 
 export type Visibility = 'public' | 'private' | 'protected';
 
