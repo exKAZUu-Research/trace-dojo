@@ -30,6 +30,7 @@ import {
   STRING,
   stringPanic,
 } from './support';
+import { SPECIAL_CASE, specialCaseMapper } from './unicodeRanges';
 import { isSpace, mapRunes, simpleFold, toLower, toTitle, toUpper } from './unicodeSupport';
 
 const STRINGS = sliceOf(STRING);
@@ -634,6 +635,16 @@ addMethod(
   },
   true
 );
+addMethod(
+  REPLACER,
+  'WriteString',
+  fn([IO_WRITER, STRING], [INT, ERROR_TYPE]),
+  (receiver, [writer, text]) => {
+    const pairs = (receiverStruct(receiver).native?.pairs as string[] | undefined) ?? [];
+    return writeString(writer, replaceAllPairs(text as string, pairs));
+  },
+  true
+);
 
 // Package -----------------------------------------------------------------------------------------------------------
 
@@ -674,6 +685,14 @@ const members: Record<string, Entity> = {
     fn([STRING, STRING], [STRING, STRING, BOOL]),
     s2((s, sep) => {
       const found = s.indexOf(sep);
+      return found === -1 ? [s, '', false] : [s.slice(0, found), s.slice(found + sep.length), true];
+    })
+  ),
+  CutLast: nativeFunction(
+    'CutLast',
+    fn([STRING, STRING], [STRING, STRING, BOOL]),
+    s2((s, sep) => {
+      const found = s.lastIndexOf(sep);
       return found === -1 ? [s, '', false] : [s.slice(0, found), s.slice(found + sep.length), true];
     })
   ),
@@ -802,6 +821,14 @@ const members: Record<string, Entity> = {
     });
   }),
   ToTitle: nativeFunction('ToTitle', fn([STRING], [STRING]), ([s]) => mapRunes(s as string, toTitle)),
+  ...Object.fromEntries(
+    ['ToUpperSpecial', 'ToLowerSpecial', 'ToTitleSpecial'].map((name, kind) => [
+      name,
+      nativeFunction(name, fn([SPECIAL_CASE, STRING], [STRING]), ([special, s]) =>
+        mapRunes(s as string, specialCaseMapper(special, kind))
+      ),
+    ])
+  ),
   Trim: nativeFunction(
     'Trim',
     fn([STRING, STRING], [STRING]),

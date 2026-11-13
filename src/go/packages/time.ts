@@ -26,7 +26,7 @@ const INT64 = BASIC.int64;
 
 const LOCATION = namedType('time', 'Location', { kind: 'struct', fields: [] });
 const LOCATION_POINTER = pointerTo(LOCATION);
-const TIME = namedType('time', 'Time', {
+export const TIME = namedType('time', 'Time', {
   kind: 'struct',
   fields: [
     { name: 'wall', type: BASIC.uint64, embedded: false },
@@ -34,7 +34,7 @@ const TIME = namedType('time', 'Time', {
     { name: 'loc', type: LOCATION_POINTER, embedded: false },
   ],
 });
-const DURATION = namedType('time', 'Duration', INT64);
+export const DURATION = namedType('time', 'Duration', INT64);
 const MONTH = namedType('time', 'Month', INT);
 const WEEKDAY = namedType('time', 'Weekday', INT);
 
@@ -68,12 +68,12 @@ addMethod(LOCATION, 'String', fn([], [STRING]), (receiver) => locationOf(receive
 
 // Time values -----------------------------------------------------------------------------------------------------
 
-function timeOf(value: Value): goTime.Time {
+export function timeOf(value: Value): goTime.Time {
   const [wall, ext, loc] = (value as GoStruct).fields;
   return { wall: wall as bigint, ext: ext as bigint, loc: loc === undefined ? undefined : locationOf(loc) };
 }
 
-function timeValue(t: goTime.Time): GoStruct {
+export function timeValue(t: goTime.Time): GoStruct {
   return new GoStruct([t.wall, t.ext, t.loc ? pointerOf(t.loc) : undefined]);
 }
 
@@ -366,10 +366,12 @@ function monotonic(clock: Clock): bigint {
   return BigInt(Math.round((performance.now() - clock.startMilliseconds) * 1e6)) + clock.slept + 1n;
 }
 
-function now(): goTime.Time {
+export function now(): goTime.Time {
   const clock = clockOf(currentRuntime());
   const mono = monotonic(clock);
-  return goTime.now(clock.startUnixNanos + mono - 1n, mono);
+  // The wall clock of darwin, where Go reads it through the C library, counts microseconds.
+  const wall = clock.startUnixNanos + mono - 1n;
+  return goTime.now(wall - (wall % 1000n), mono);
 }
 
 // Package members -------------------------------------------------------------------------------------------------

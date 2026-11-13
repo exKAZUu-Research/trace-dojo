@@ -1,15 +1,36 @@
 import type { Entity } from '../entities';
-import { newError } from '../errorValues';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction } from '../native';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { ProgramExit } from '../runtime';
+import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, ERROR_TYPE, pointerTo, sliceOf } from '../types';
 import { Cell, GoStruct, Pointer, Slice, type Value } from '../values';
 import { EOF, IO_READER, sameError } from './io';
-import { bytesOf, callMethod, writeStderr, writeStdout } from './support';
+import { ERR_INVALID, OS_ERROR_MEMBERS } from './osErrors';
+import { bytesOf, callMethod, STRING, writeStderr, writeStdout } from './support';
 
 /** `*os.File`, of which this environment has standard output and standard error. */
 const FILE = namedType('os', 'File', { kind: 'struct', fields: [] });
-const ERR_INVALID = newError('invalid argument');
+FILE.unsupported = new Set([
+  'Chdir',
+  'Chmod',
+  'Chown',
+  'Close',
+  'Read',
+  'ReadAt',
+  'Readdir',
+  'ReadDir',
+  'Readdirnames',
+  'Seek',
+  'SetDeadline',
+  'SetReadDeadline',
+  'SetWriteDeadline',
+  'Stat',
+  'Sync',
+  'SyscallConn',
+  'Truncate',
+  'WriteAt',
+  'WriteTo',
+]);
 
 function write(receiver: Value, bytes: string): Value[] {
   if (!(receiver instanceof Pointer)) return [0n, ERR_INVALID];
@@ -64,6 +85,30 @@ addMethod(
   true
 );
 
+const descriptorOf = (receiver: Value): number | undefined =>
+  receiver instanceof Pointer ? ((receiver.load() as GoStruct).native?.descriptor as number) : undefined;
+addMethod(
+  FILE,
+  'Name',
+  fn([], [STRING]),
+  (receiver) => {
+    const descriptor = descriptorOf(receiver);
+    if (descriptor === undefined) nilPointerPanic();
+    return descriptor === 1 ? '/dev/stdout' : '/dev/stderr';
+  },
+  true
+);
+addMethod(
+  FILE,
+  'Fd',
+  fn([], [BASIC.uintptr]),
+  (receiver) => {
+    const descriptor = descriptorOf(receiver);
+    return descriptor === undefined ? (1n << 64n) - 1n : BigInt(descriptor);
+  },
+  true
+);
+
 const STDOUT = new Pointer(new Cell(new GoStruct([], { descriptor: 1 })), 'v');
 const STDERR = new Pointer(new Cell(new GoStruct([], { descriptor: 2 })), 'v');
 
@@ -82,6 +127,8 @@ function fileVariable(name: string, value: Value): Entity {
 }
 
 const members: Record<string, Entity> = {
+  ...OS_ERROR_MEMBERS,
+  File: typeEntity(FILE),
   Stdout: fileVariable('Stdout', STDOUT),
   Stderr: fileVariable('Stderr', STDERR),
   Exit: nativeFunction('Exit', fn([BASIC.int], []), ([code]) => {
@@ -116,9 +163,7 @@ export const OS_PACKAGE = definePackage('os', members, [
   'Rename',
   'TempDir',
   'UserHomeDir',
-  'File',
   'FileInfo',
-  'FileMode',
   'DirEntry',
   'Process',
   'StartProcess',
@@ -126,11 +171,6 @@ export const OS_PACKAGE = definePackage('os', members, [
   'Signal',
   'Interrupt',
   'Kill',
-  'ErrNotExist',
-  'ErrExist',
-  'ErrPermission',
-  'IsNotExist',
-  'IsExist',
   'Pipe',
   'Truncate',
   'Chmod',
@@ -145,5 +185,4 @@ export const OS_PACKAGE = definePackage('os', members, [
   'Getuid',
   'Getgid',
   'ExpandEnv',
-  'Expand',
 ]);

@@ -1024,3 +1024,295 @@ func main() {
       '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
   });
 });
+
+test('net/url parses, resolves, escapes, and encodes as Go does', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"net"
+	"net/url"
+)
+
+func main() {
+	u, err := url.Parse("postgres://user:pass@host.com:5432/a%2Fb c?k=v&k=w#f")
+	fmt.Println(u.Scheme, u.User, u.Host, u.Path, u.RawPath, u.RawQuery, u.Fragment, err)
+	host, port, _ := net.SplitHostPort(u.Host)
+	fmt.Println(host, port, u.Hostname(), u.Port(), u.Query(), u.Redacted(), u.EscapedPath())
+	fmt.Printf("%+v\\n", *u)
+	base, _ := url.Parse("http://a/b/c/d;p?q")
+	ref, _ := base.Parse("../../g?y#s")
+	fmt.Println(ref, base.JoinPath("x", "../y/"))
+	v := url.Values{"b": {"2 2"}, "a": {"&"}}
+	v.Add("b", "1")
+	fmt.Println(v.Encode(), v.Get("b"), v.Has("c"))
+	fmt.Println(url.QueryEscape("a b/c?"), url.PathEscape("a b/c?"))
+	_, err = url.QueryUnescape("%zz")
+	fmt.Println(err)
+	_, err = url.Parse("http://[::1")
+	fmt.Println(err)
+	_, err = url.ParseQuery("a=1;b=2")
+	fmt.Println(err)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'postgres user:pass host.com:5432 /a/b c /a%2Fb c k=v&k=w f <nil>\nhost.com 5432 host.com 5432 map[k:[v w]] postgres://user:xxxxx@host.com:5432/a/b%20c?k=v&k=w#f /a/b%20c\n{Scheme:postgres Opaque: User:user:pass Host:host.com:5432 Path:/a/b c Fragment:f RawQuery:k=v&k=w RawPath:/a%2Fb c RawFragment: ForceQuery:false OmitHost:false}\nhttp://a/g?y#s http://a/b/c/d;p/y/?q\na=%26&b=2+2&b=1 2 2 false\na+b%2Fc%3F a%20b%2Fc%3F\ninvalid URL escape "%zz"\nparse "http://[::1": missing \']\' in host\ninvalid semicolon separator in query\n',
+  });
+});
+
+test('log and log/slog format records as Go does', () => {
+  const program = `package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"log"
+	"log/slog"
+	"os"
+	"time"
+)
+
+func noTime(groups []string, a slog.Attr) slog.Attr {
+	if a.Key == slog.TimeKey && len(groups) == 0 {
+		return slog.Attr{}
+	}
+	return a
+}
+
+func main() {
+	log.SetOutput(os.Stdout)
+	log.SetFlags(log.Lshortfile | log.Lmsgprefix)
+	log.SetPrefix("app: ")
+	log.Println("hello", 42)
+	var buf bytes.Buffer
+	l := log.New(&buf, "[buf] ", 0)
+	l.Printf("%q", "x")
+	fmt.Print(buf.String())
+	func() {
+		defer func() { fmt.Println("recovered:", recover()) }()
+		l.Panicln("boom")
+	}()
+	opts := &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: noTime}
+	t := slog.New(slog.NewTextHandler(os.Stdout, opts))
+	t.Debug("text", "s", "a b", "d", 1500*time.Millisecond, "err", errors.New("bad"), slog.Group("g", "x", 1))
+	t.With("id", 7).WithGroup("req").Warn("grouped", "path", "/a", "ok", true)
+	j := slog.New(slog.NewJSONHandler(os.Stdout, opts))
+	j.Error("json", "n", 3, "f", 2.5, "list", []string{"a"}, "m", map[string]int{"b": 2, "a": 1}, "bad")
+	j.WithGroup("g").With("a", 1).Log(nil, slog.LevelInfo+2, "custom")
+	log.SetFlags(0)
+	log.SetPrefix("")
+	slog.Info("default", "k", "v q")
+	slog.SetDefault(t)
+	log.Print("through slog")
+	fmt.Println(slog.LevelWarn+1, slog.Int("a", 1), slog.Any("v", []int{1}).Value.Kind())
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'main.go:24: app: hello 42\n[buf] "x"\nrecovered: boom\n\nlevel=DEBUG msg=text s="a b" d=1.5s err=bad g.x=1\nlevel=WARN msg=grouped id=7 req.path=/a req.ok=true\n{"level":"ERROR","msg":"json","n":3,"f":2.5,"list":["a"],"m":{"a":1,"b":2},"!BADKEY":"bad"}\n{"level":"INFO+2","msg":"custom","g":{"a":1}}\nINFO default k="v q"\nlevel=INFO msg="through slog"\nWARN+1 a=1 Any\n',
+  });
+});
+
+test('math/cmplx elementary functions compute what Go computes bit for bit', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"math"
+	"math/cmplx"
+)
+
+func main() {
+	x := complex(1.5, -2)
+	fmt.Println(cmplx.Exp(1i*math.Pi), cmplx.Pow(2, 3i), cmplx.Log(x), cmplx.Log10(x))
+	fmt.Println(cmplx.Sin(x), cmplx.Cos(x), cmplx.Tan(x), cmplx.Cot(complex(math.Pi, 1e-3)))
+	fmt.Println(cmplx.Asin(x), cmplx.Acos(x), cmplx.Atan(x))
+	fmt.Println(cmplx.Sinh(x), cmplx.Cosh(x), cmplx.Tanh(x))
+	fmt.Println(cmplx.Asinh(x), cmplx.Acosh(x), cmplx.Atanh(x))
+	r, t := cmplx.Polar(x)
+	fmt.Println(r, t, cmplx.Rect(r, t), cmplx.IsInf(cmplx.Inf()), cmplx.IsNaN(cmplx.NaN()))
+	fmt.Println(cmplx.Atan(complex(math.Inf(1), math.NaN())), cmplx.Exp(complex(math.Inf(-1), math.Inf(1))))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '(-1+1.2246467991473515e-16i) (-0.4869944179657812+0.8734050817748715i) (0.9162907318741551-0.9272952180016122i) (0.3979400086720376-0.4027191962733731i)\n(3.7527713404792977-0.25655395609048176i) (0.26612719531354573+3.617775073940137i) (0.0053620609220030565-1.036920282100185i) (-1.2246463909318335e-10-1000.0003333333112i)\n(0.6065115181997547-1.6224941488715938i) (0.9642848085951419+1.6224941488715938i) (1.311223269671635-0.3104282830771958i)\n(-0.8860929093625314-2.1390400099806763i) (-0.9789478196465577-1.9361483295105069i) (1.0641443991765371+0.08039101531016817i)\n(1.6004100552346139-0.8877651461839051i) (1.6224941488715938-0.9642848085951419i) (0.22008968066202292-1.2452579660726566i)\n2.5 -0.9272952180016122 (1.5000000000000002-1.9999999999999998i) true true\n(1.5707963267948966+0i) (0+0i)\n',
+  });
+});
+
+test("image and image/color provide every pixel type, Y'CbCr conversion, and format sniffing as Go does", () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"image"
+	"image/color"
+	"strings"
+)
+
+func main() {
+	r := image.Rect(0, 0, 2, 2)
+	g := image.NewGray16(r)
+	g.Set(1, 0, color.NRGBA{200, 100, 50, 128})
+	n := image.NewNRGBA(r)
+	n.SetRGBA64(0, 1, color.RGBA64{1000, 50000, 3000, 40000})
+	p := image.NewPaletted(r, color.Palette{color.Black, color.White})
+	p.Set(1, 1, color.CMYK{10, 20, 30, 0})
+	y := image.NewYCbCr(image.Rect(0, 0, 4, 2), image.YCbCrSubsampleRatio420)
+	y.Y[5], y.Cb[1], y.Cr[1] = 120, 60, 200
+	fmt.Println(g.At(1, 0), g.Pix, n.At(0, 1), n.RGBA64At(0, 1), n.Opaque(), p.ColorIndexAt(1, 1), p.Opaque())
+	fmt.Println(y.At(1, 1), y.At(3, 1), y.COffset(3, 1), len(y.Cb), y.SubsampleRatio, y.SubImage(image.Rect(2, 0, 9, 9)).Bounds())
+	a := image.NewNYCbCrA(image.Rect(0, 0, 1, 1), image.YCbCrSubsampleRatio444)
+	a.A[0] = 128
+	fmt.Println(a.At(0, 0), a.Opaque(), image.NewCMYK(r).At(0, 0).(color.CMYK).K)
+	cy, cb, cr := color.RGBToYCbCr(255, 128, 0)
+	fmt.Println(cy, cb, cr, color.YCbCrModel.Convert(color.RGBA{255, 128, 0, 255}), color.NYCbCrAModel.Convert(color.Alpha{9}))
+	_, name, err := image.Decode(strings.NewReader("GIF89a"))
+	fmt.Printf("%q %v %v\\n", name, err, err == image.ErrFormat)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '{16022} [0 0 62 150 0 0 0 0] {6 63 19 156} {943 9905 2987 40092} false 1 true\n{120 0 0} {0 60 200} 1 2 YCbCrSubsampleRatio420 (2,0)-(4,2)\n{{0 0 0} 128} false 0\n151 43 202 {151 43 202} {{255 128 128} 9}\n"" image: unknown format true\n',
+  });
+});
+
+test('crypto hashes, base64, hex, path, filepath, and io helpers produce what Go produces', () => {
+  const program = `package main
+
+import (
+	"crypto/md5"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"hash/crc32"
+	"hash/fnv"
+	"io"
+	"path"
+	"path/filepath"
+	"strings"
+)
+
+func main() {
+	fmt.Printf("%x\\n%x\\n%x\\n", sha256.Sum256([]byte("abc")), md5.Sum([]byte("abc")), sha512.Sum512_256([]byte("abc")))
+	h := sha256.New224()
+	h.Write([]byte("a"))
+	h.Write([]byte("bc"))
+	f := fnv.New32a()
+	f.Write([]byte("abc"))
+	fmt.Printf("%x %d %d %d\\n", h.Sum(nil), f.Sum32(), crc32.ChecksumIEEE([]byte("abc")), crc32.Checksum([]byte("abc"), crc32.MakeTable(crc32.Castagnoli)))
+	enc := base64.StdEncoding.EncodeToString([]byte("hi?>"))
+	_, err := base64.StdEncoding.DecodeString("aGk/Pg=x")
+	dec, err2 := base64.RawURLEncoding.DecodeString("aGk_Pg")
+	fmt.Println(enc, base64.URLEncoding.EncodeToString([]byte("hi?>")), err, string(dec), err2)
+	_, err = hex.DecodeString("4g")
+	fmt.Print(hex.EncodeToString([]byte("Go!")), " ", err, "\\n", hex.Dump([]byte("hexadecimal dump!")))
+	fmt.Println(path.Join("a/b", "../c", "d.txt"), filepath.Ext("x/y.tar.gz"), filepath.Base("/a/b/"), filepath.Dir("a/b/c"))
+	rel, err := filepath.Rel("/a/b", "/a/c/d")
+	ok, err2 := filepath.Match("*.go", "main.go")
+	fmt.Println(rel, err, ok, err2, filepath.SplitList("/bin:/usr/bin"))
+	buf := make([]byte, 4)
+	n, err := io.ReadFull(strings.NewReader("ab"), buf)
+	all, _ := io.ReadAll(io.MultiReader(strings.NewReader("x"), io.LimitReader(strings.NewReader("yzw"), 2)))
+	fmt.Println(n, err, string(all))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n900150983cd24fb0d6963f7d28e17f72\n53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23\n23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7 440920331 891568578 910901175\naGk/Pg== aGk_Pg== illegal base64 data at input byte 6 hi?> <nil>\n476f21 encoding/hex: invalid byte: U+0067 'g'\n00000000  68 65 78 61 64 65 63 69  6d 61 6c 20 64 75 6d 70  |hexadecimal dump|\n00000010  21                                                |!|\na/c/d.txt .gz b a/b\n../c/d <nil> true <nil> [/bin /usr/bin]\n2 unexpected EOF xyz\n",
+  });
+});
+
+test('fmt Formatter, Scanner and Append, unicode tables and special cases, and os errors match Go', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"unicode"
+)
+
+type Celsius float64
+
+func (c Celsius) Format(f fmt.State, verb rune) {
+	p, ok := f.Precision()
+	if !ok {
+		p = 1
+	}
+	fmt.Fprintf(f, "%.*f°C (%s)", p, float64(c), fmt.FormatString(f, verb))
+}
+
+type Pair struct{ A, B string }
+
+func (p *Pair) Scan(state fmt.ScanState, verb rune) error {
+	tok, err := state.Token(true, func(r rune) bool { return r != ',' })
+	if err != nil {
+		return err
+	}
+	p.A = string(tok)
+	state.ReadRune()
+	tok, err = state.Token(false, nil)
+	p.B = string(tok)
+	return err
+}
+
+func main() {
+	fmt.Printf("%v|%8.2v|%+x\\n", Celsius(21.5), Celsius(-3), Celsius(0))
+	var p Pair
+	n, err := fmt.Sscan("left,right rest", &p)
+	fmt.Println(n, err, p)
+	b := fmt.Appendf([]byte("n="), "%03d", 7)
+	fmt.Println(string(fmt.Append(b, " ok", 1)))
+	fmt.Println(unicode.Is(unicode.Hiragana, 'あ'), unicode.In('Ж', unicode.Latin, unicode.Cyrillic), unicode.Is(unicode.Space, '\\t'), unicode.Is(unicode.White_Space, '\\t'))
+	fmt.Println(strings.ToUpperSpecial(unicode.TurkishCase, "iı"), unicode.To(unicode.TitleCase, 'ǆ'), unicode.SimpleFold('k'))
+	m := os.FileMode(493) | os.ModeDir
+	pe := &os.PathError{Op: "open", Path: "x.txt", Err: os.ErrNotExist}
+	fmt.Println(m, m.Perm(), pe, os.IsNotExist(pe), os.Expand("$A-\${B}", strings.ToLower))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '21.5°C (%v)|-3.00°C (%8.2v)|0.0°C (%+x)\n1 <nil> {left right}\nn=007 ok1\ntrue true false true\nİI 453 8490\ndrwxr-xr-x -rwxr-xr-x open x.txt: file does not exist true a-b\n',
+  });
+});
+
+test('net parses and formats IPs, CIDRs, MACs, flags, and address errors as Go does', () => {
+  const program = `package main
+
+import (
+	"errors"
+	"fmt"
+	"net"
+)
+
+func main() {
+	ip := net.ParseIP("2001:db8:0:0:1:0:0:1")
+	fmt.Println(ip, net.ParseIP("::ffff:10.1.2.3"), net.ParseIP("1.2.3.256"), ip.IsGlobalUnicast(), net.IPv4(192, 168, 1, 9).IsPrivate())
+	addr, network, err := net.ParseCIDR("192.168.100.14/22")
+	fmt.Println(addr, network, err, network.Contains(net.ParseIP("192.168.101.200")), network.Mask, net.CIDRMask(20, 32))
+	_, _, err = net.ParseCIDR("10.0.0.0/33")
+	fmt.Println(err, net.ParseIP("10.20.30.40").Mask(net.IPv4Mask(255, 255, 0, 0)))
+	mac, _ := net.ParseMAC("0000.5e00.5301")
+	_, err = net.ParseMAC("00:00:5e")
+	fmt.Println(mac, err, net.FlagUp|net.FlagMulticast)
+	op := &net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv6loopback, Port: 8080}, Err: errors.New("refused")}
+	fmt.Println(op, (&net.UDPAddr{IP: net.IPv4(1, 2, 3, 4), Port: 53}).Network())
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '2001:db8::1:0:0:1 10.1.2.3 <nil> true true\n192.168.100.14 192.168.100.0/22 <nil> true fffffc00 fffff000\ninvalid CIDR address: 10.0.0.0/33 10.20.0.0\n00:00:5e:00:53:01 address 00:00:5e: invalid MAC address up|multicast\ndial tcp [::1]:8080: refused udp\n',
+  });
+});

@@ -17,6 +17,7 @@ import {
   underlying,
 } from '../types';
 import { Cell, copyValue, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import { libraryVariable } from './io';
 import { receiverStruct, sliceValues } from './support';
 
 const ERROR_SLICE = sliceOf(ERROR_TYPE);
@@ -50,6 +51,7 @@ const members: Record<string, Entity> = {
     if (error === undefined || unwrapKind((error as Iface).type) !== 'single') return;
     return dynamicMethod((error as Iface).type, 'Unwrap')?.((error as Iface).value, []) as Value;
   }),
+  ErrUnsupported: libraryVariable('ErrUnsupported', ERROR_TYPE, newError('unsupported operation')),
   Join: nativeFunction('Join', fn([ERROR_SLICE], [ERROR_TYPE], true), ([errors]) => {
     const present = sliceValues(errors).filter((error) => error !== undefined);
     if (present.length === 0) return;
@@ -58,7 +60,8 @@ const members: Record<string, Entity> = {
   }),
 };
 
-export const ERRORS_PACKAGE = definePackage('errors', members, ['ErrUnsupported']);
+/** The errors package, without AsType, which a program can only call with explicit type arguments. */
+export const ERRORS_PACKAGE = definePackage('errors', members, ['AsType']);
 
 function errorMessage(error: Value): string {
   const iface = error as Iface;

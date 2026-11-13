@@ -2,16 +2,79 @@
 import { assignFailure } from '../assignability';
 import { newError } from '../errorValues';
 import { decodeRune, encodeRune } from '../literals';
-import { currentRuntime } from '../native';
+import { addMethod, currentRuntime, fn, namedType, opaqueType } from '../native';
 import { nilPointerPanic } from '../runtimeErrors';
-import { type BasicKind, integerBits, typeString, underlying } from '../types';
-import { Complex, Iface, Pointer, Slice, type Value } from '../values';
+import {
+  BASIC,
+  type BasicKind,
+  ERROR_TYPE,
+  funcType,
+  integerBits,
+  pointerTo,
+  RUNE,
+  sliceOf,
+  typeString,
+  underlying,
+} from '../types';
+import { Cell, Complex, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { EOF, ERR_UNEXPECTED_EOF, IO_RUNE_SCANNER, sameError } from './io';
 import { parseFloat, parseInt, parseUint, renamed, unquoteLiteral } from './strconv';
-import { callMethod } from './support';
+import { byteSlice, callFunction, callMethod, receiverStruct } from './support';
 import { fullRune } from './unicode';
 
 const EOF_RUNE = -1;
+const RUNE_PREDICATE = funcType([RUNE], [BASIC.bool]);
+
+export const SCAN_STATE = namedType('fmt', 'ScanState', {
+  kind: 'interface',
+  methods: [
+    { name: 'Read', type: fn([sliceOf(BASIC.uint8)], [BASIC.int, ERROR_TYPE]) },
+    { name: 'ReadRune', type: fn([], [RUNE, BASIC.int, ERROR_TYPE]) },
+    { name: 'SkipSpace', type: fn([], []) },
+    { name: 'Token', type: fn([BASIC.bool, RUNE_PREDICATE], [sliceOf(BASIC.uint8), ERROR_TYPE]) },
+    { name: 'UnreadRune', type: fn([], [ERROR_TYPE]) },
+    { name: 'Width', type: fn([], [BASIC.int, BASIC.bool]) },
+  ],
+});
+export const SCANNER = namedType('fmt', 'Scanner', {
+  kind: 'interface',
+  methods: [{ name: 'Scan', type: fn([SCAN_STATE, RUNE], [ERROR_TYPE]) }],
+});
+
+/** `*fmt.ss`, the scanner that a Scan method receives as its fmt.ScanState. */
+const SS = opaqueType(namedType('fmt', 'ss', { kind: 'struct', fields: [] }));
+const stateOf = (receiver: Value): ScanState => receiverStruct(receiver).native?.state as ScanState;
+const ERR_READ = newError("ScanState's Read should not be called. Use ReadRune");
+addMethod(SS, 'Read', fn([sliceOf(BASIC.uint8)], [BASIC.int, ERROR_TYPE]), () => [0n, ERR_READ], true);
+addMethod(SS, 'ReadRune', fn([], [RUNE, BASIC.int, ERROR_TYPE]), (receiver) => stateOf(receiver).userReadRune(), true);
+addMethod(
+  SS,
+  'UnreadRune',
+  fn([], [ERROR_TYPE]),
+  (receiver) => {
+    stateOf(receiver).userUnreadRune();
+    return;
+  },
+  true
+);
+addMethod(
+  SS,
+  'SkipSpace',
+  fn([], []),
+  (receiver) => {
+    stateOf(receiver).userSkipSpace();
+    return [];
+  },
+  true
+);
+addMethod(SS, 'Width', fn([], [BASIC.int, BASIC.bool]), (receiver) => stateOf(receiver).userWidth(), true);
+addMethod(
+  SS,
+  'Token',
+  fn([BASIC.bool, RUNE_PREDICATE], [sliceOf(BASIC.uint8), ERROR_TYPE]),
+  (receiver, [skip, accept]) => stateOf(receiver).userToken(skip as boolean, accept),
+  true
+);
 const HUGE_WID = 1 << 30;
 const FLOAT_VERBS = 'beEfFgGv';
 const DECIMAL_DIGITS = '0123456789';
@@ -47,12 +110,16 @@ class ScanStop {
 interface RuneScanner {
   readRune(): [number, Value];
   unreadRune(): void;
+  /** The size in bytes of the rune that readRune returned last. */
+  lastSize: number;
 }
 
 /** Go's `readRune`, which reads a rune a byte at a time from a source that cannot unread. */
 class ByteRuneScanner implements RuneScanner {
+  lastSize = 0;
   private readonly pending: number[] = [];
   private peekRune = -1;
+  private peekSize = 0;
 
   constructor(private readonly readByte: () => [number, Value]) {}
 
@@ -60,12 +127,14 @@ class ByteRuneScanner implements RuneScanner {
     if (this.peekRune >= 0) {
       const rune = this.peekRune;
       this.peekRune = ~rune;
+      this.lastSize = this.peekSize;
       return [rune, undefined];
     }
     const [first, error] = this.nextByte();
     if (error !== undefined) return [0, error];
     if (first < 0x80) {
       this.peekRune = ~first;
+      this.lastSize = this.peekSize = 1;
       return [first, undefined];
     }
     let bytes = String.fromCharCode(first);
@@ -80,6 +149,7 @@ class ByteRuneScanner implements RuneScanner {
     const { rune, size } = decodeRune(bytes, 0);
     for (let at = size; at < bytes.length; at++) this.pending.push(bytes.charCodeAt(at));
     this.peekRune = ~rune;
+    this.lastSize = this.peekSize = size;
     return [rune, undefined];
   }
 
@@ -101,15 +171,18 @@ function stringScanner(text: string): RuneScanner {
 /** The scanner of an io.Reader: its own ReadRune and UnreadRune when it has them, as io.RuneScanner does. */
 function readerScanner(reader: Value): RuneScanner {
   if (reader instanceof Iface && assignFailure(reader.type, IO_RUNE_SCANNER) === undefined) {
-    return {
+    const scanner: RuneScanner = {
+      lastSize: 0,
       readRune: () => {
-        const [rune, , error] = callMethod(reader, 'ReadRune') as [bigint, bigint, Value];
+        const [rune, size, error] = callMethod(reader, 'ReadRune') as [bigint, bigint, Value];
+        scanner.lastSize = Number(size);
         return [Number(rune), error];
       },
       unreadRune: () => {
         callMethod(reader, 'UnreadRune');
       },
     };
+    return scanner;
   }
   const buffer = new Slice([0n], 0, 1, 1);
   return new ByteRuneScanner(() => {
@@ -229,6 +302,41 @@ class ScanState {
         if (processed < args.length) this.errorString('too many operands');
       }
     );
+  }
+
+  // fmt.ScanState, for the Scan methods of fmt.Scanner values ----------------------------------------------------
+
+  userReadRune(): Value[] {
+    const [rune, error] = this.readRune();
+    return error === undefined ? [BigInt(rune), BigInt(this.rs.lastSize), undefined] : [0n, 0n, error];
+  }
+
+  userUnreadRune(): void {
+    this.unreadRune();
+  }
+
+  userSkipSpace(): void {
+    this.skipSpace();
+  }
+
+  userWidth(): Value[] {
+    return this.maxWid === HUGE_WID ? [0n, false] : [BigInt(this.maxWid), true];
+  }
+
+  /** `ss.Token`, which returns a scanning error instead of stopping the scan. */
+  userToken(skipSpace: boolean, accept: Value): Value[] {
+    try {
+      this.buf = '';
+      const test =
+        accept === undefined
+          ? (rune: number) => !isSpace(rune)
+          : (rune: number) => callFunction(accept, [BigInt(rune)]) === true;
+      const token = this.token(skipSpace, test);
+      return [token === '' ? undefined : byteSlice(token), undefined];
+    } catch (error) {
+      if (error instanceof ScanStop) return [undefined, error.error];
+      throw error;
+    }
   }
 
   private recovering(processed: () => number, run: () => void): [number, Value] {
@@ -579,6 +687,12 @@ class ScanState {
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of destination, as Go's scanOne.
   private scanOne(verb: number, arg: Value): void {
     this.buf = '';
+    if (arg instanceof Iface && assignFailure(arg.type, SCANNER) === undefined) {
+      const state = new Iface(pointerTo(SS), new Pointer(new Cell(new GoStruct([], { state: this })), 'v'));
+      const error = callMethod(arg, 'Scan', [state, BigInt(verb)]) as Value;
+      if (error !== undefined) throw new ScanStop(sameError(error, EOF) ? ERR_UNEXPECTED_EOF : error);
+      return;
+    }
     const type = arg instanceof Iface ? arg.type : undefined;
     const pointerType = type && underlying(type);
     if (!type || pointerType?.kind !== 'pointer') {
