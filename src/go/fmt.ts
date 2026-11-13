@@ -920,8 +920,9 @@ function parseNumber(text: string, start: number): [number | undefined, number] 
 function intFromArg(args: Value[], argNum: number): [number | undefined, boolean, number] {
   if (argNum >= args.length) return [undefined, false, argNum];
   const arg = args[argNum];
-  if (arg instanceof Iface && arg.type.kind === 'basic' && /^u?int/.test(arg.type.basic)) {
-    const value = Number(arg.value as bigint);
+  const under = arg instanceof Iface ? underlying(arg.type) : undefined;
+  if (under?.kind === 'basic' && /^u?int/.test(under.basic) && ((arg as Iface).value as bigint) < 1n << 63n) {
+    const value = Number((arg as Iface).value as bigint);
     if (value > 1e6 || value < -1e6) return [undefined, false, argNum + 1];
     return [value, true, argNum + 1];
   }
@@ -963,8 +964,7 @@ function sharpFloat(num: string, format: string, precision: number): string {
   for (const char of body.slice(1)) {
     if (char === '.') continue;
     if (char !== '0') sawNonzero = true;
-    if (sawNonzero || char !== '0') digits--;
-    else if (char === '0' && sawNonzero) digits--;
+    if (sawNonzero) digits--;
   }
   if (!sawDot) {
     body += '.';

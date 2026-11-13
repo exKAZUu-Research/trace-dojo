@@ -127,12 +127,13 @@ export abstract class CallCompiler extends CompositeCompiler {
     callee?: ProgramCall
   ): ListEval | undefined {
     const { params, variadic } = signature;
-    if (expression.args.length === 1 && (params.length !== 1 || variadic)) {
-      const only = this.expression(expression.args[0]);
-      if (only.type.kind === 'tuple') return this.spreadArguments(expression, only, signature, name);
-      return this.listArguments(expression, [only], signature, name);
-    }
     let operands = expression.args.map((arg) => this.expression(arg));
+    if (operands.length === 1 && operands[0].type.kind === 'tuple') {
+      return this.spreadArguments(expression, operands[0], signature, name);
+    }
+    if (operands.length === 1 && (params.length !== 1 || variadic)) {
+      return this.listArguments(expression, operands, signature, name);
+    }
     for (const operand of operands) {
       if (operand.type.kind === 'tuple') {
         this.error(operand.span, '複数の値を返す関数の呼び出しは、ほかの引数と並べて書けません。');
@@ -140,7 +141,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
     }
     if (variadic) return this.variadicArguments(expression, operands, signature, name);
-    if (!callee) return this.listArguments(expression, operands, signature, name);
+    if (!callee || operands.length !== params.length) return this.listArguments(expression, operands, signature, name);
     const { summary, receivers } = callee;
     operands = operands.map((operand, index) =>
       isInterface(params[index])

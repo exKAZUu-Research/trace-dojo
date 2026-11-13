@@ -71,6 +71,7 @@ import {
 import {
   Cell,
   Complex,
+  CONSTANT_IFACES,
   copyValue,
   GoArray,
   type GoMap,
@@ -589,6 +590,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return () => {};
       }
       const value = new Iface(type, constantValue(representation.constant, type));
+      CONSTANT_IFACES.add(value);
       return () => value;
     }
     const representation = represent(constant, target);
@@ -1685,7 +1687,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const low = expression.low ? this.indexValue(expression.low) : () => 0;
     const high = expression.high ? this.indexValue(expression.high) : undefined;
     if (!low || (expression.high && !high)) return this.invalid(expression);
-    this.checkConstantBounds(expression);
+    let limit: number | undefined;
+    if (type.kind === 'array') limit = type.length;
+    else if (operand.constant?.kind === 'string') limit = operand.constant.value.length;
+    this.checkConstantBounds(expression, limit);
     const bounds = (frame: Frame, length: number, limit: number, limitName: string): [number, number] => {
       const from = low(frame);
       const to = high ? high(frame) : length;
@@ -1738,9 +1743,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return this.invalid(expression);
   }
 
-  private checkConstantBounds(expression: Extract<Expression, { kind: 'slice' }>): void {
+  /** Reports constant bounds that are reversed or, for arrays and constant strings, beyond the length `limit`. */
+  private checkConstantBounds(expression: Extract<Expression, { kind: 'slice' }>, limit: number | undefined): void {
     const low = expression.low ? this.constantExpression(expression.low).value : undefined;
     const high = expression.high ? this.constantExpression(expression.high).value : undefined;
+    for (const [bound, syntax] of [
+      [low, expression.low],
+      [high, expression.high],
+    ] as const) {
+      if (limit !== undefined && bound !== undefined && syntax && bound > BigInt(limit)) {
+        this.error(syntax, `添字 ${bound} は範囲の外です（長さは ${limit} です）。`);
+        return;
+      }
+    }
     if (low !== undefined && high !== undefined && low > high) {
       this.error(expression, `スライスの範囲が逆になっています（${low} > ${high}）。`);
     }

@@ -416,10 +416,10 @@ function rationalInteger(value: Rational): bigint | undefined {
   return (value.num & mask) === 0n ? value.num >> shift : undefined;
 }
 
-/** Rounds an exact fraction to the nearest double, halves to even. */
-export function rationalToFloat({ num, den, exp }: Rational): number {
+/** Rounds an exact fraction to the nearest double, or float32 when `single`, halves to even. */
+export function rationalToFloat({ num, den, exp }: Rational, single = false): number {
   if (num === 0n) return 0;
-  if (exp !== undefined) return num < 0n ? -scaleToFloat(-num, exp) : scaleToFloat(num, exp);
+  if (exp !== undefined) return num < 0n ? -scaleToFloat(-num, exp, single) : scaleToFloat(num, exp, single);
   const negative = num < 0n;
   const magnitude = negative ? -num : num;
   // Scales the quotient to at least 66 significant bits, then rounds once with a sticky bit.
@@ -428,16 +428,25 @@ export function rationalToFloat({ num, den, exp }: Rational): number {
   const denominator = shift < 0 ? den << BigInt(-shift) : den;
   let quotient = numerator / denominator;
   if (numerator % denominator !== 0n) quotient |= 1n;
-  const result = scaleToFloat(quotient, -shift);
+  const result = scaleToFloat(quotient, -shift, single);
   return negative ? -result : result;
 }
 
-/** Computes `mantissa * 2 ** exponent` rounded once to the nearest double, halves to even, handling subnormals. */
-export function scaleToFloat(mantissa: bigint, exponent: number): number {
+const MAX_FLOAT32 = 3.4028234663852886e38;
+
+/**
+ * Computes `mantissa * 2 ** exponent` rounded once to the nearest double, or float32 when `single`, halves to even,
+ * handling subnormals.
+ */
+export function scaleToFloat(mantissa: bigint, exponent: number, single = false): number {
   if (mantissa === 0n) return 0;
   const bits = mantissa.toString(2).length;
   if (bits + exponent > 1025) return Infinity;
   if (bits + exponent < -1075) return 0;
+  if (single) {
+    const result = scaleToFloat(roundToBits(mantissa, exponent, 24, -149), Math.max(bits + exponent - 24, -149));
+    return result > MAX_FLOAT32 ? Infinity : result;
+  }
   const lowestBit = Math.max(bits + exponent - 53, -1074);
   const drop = lowestBit - exponent;
   let value = mantissa;
@@ -451,6 +460,18 @@ export function scaleToFloat(mantissa: bigint, exponent: number): number {
     return Number(value) * 2 ** lowestBit;
   }
   return Number(value) * 2 ** exponent;
+}
+
+/** The integer `mantissa * 2 ** exponent` scaled to keep `precision` bits above `minimumBit`, rounded half to even. */
+function roundToBits(mantissa: bigint, exponent: number, precision: number, minimumBit: number): bigint {
+  const lowestBit = Math.max(mantissa.toString(2).length + exponent - precision, minimumBit);
+  const drop = lowestBit - exponent;
+  if (drop <= 0) return mantissa << BigInt(-drop);
+  const bigDrop = BigInt(drop);
+  const half = 1n << (bigDrop - 1n);
+  const remainder = mantissa & ((1n << bigDrop) - 1n);
+  const value = mantissa >> bigDrop;
+  return remainder > half || (remainder === half && (value & 1n) === 1n) ? value + 1n : value;
 }
 
 /** The exact fraction a finite double holds. */
