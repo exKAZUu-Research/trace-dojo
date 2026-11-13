@@ -2156,3 +2156,14 @@ public class Main {
     stdout: 'lambda 3\nreference 4\nreversed 5\n',
   });
 });
+
+test("Java's TreeMap key sets remove a key their map's comparator finds", () => {
+  const program = `import java.util.*;
+public class Main { public static void main(String[] a) { TreeMap<String,Integer> t = new TreeMap<>(String.CASE_INSENSITIVE_ORDER); t.put("a",1); t.put("b",2); System.out.println(t.keySet().remove("A") + " " + t); t.put("c",3); t.put("d",4); System.out.println(t.keySet().removeAll(List.of("C")) + " " + t);
+ TreeMap<String,Integer> l = new TreeMap<>(Comparator.comparing(String::length)); l.put("ab", 1); System.out.println(l.keySet().remove("zz") + " " + l); TreeMap<Integer, Integer> n = new TreeMap<>(Map.of(1, 1)); System.out.println(n.keySet().remove(2) + " " + n.keySet().remove(1) + " " + n);
+ TreeSet<String> ts = new TreeSet<>(String.CASE_INSENSITIVE_ORDER); ts.add("a"); System.out.println(ts.remove("A") + " " + ts); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true {b=2}\ntrue {b=2, d=4}\ntrue {}\nfalse true {}\ntrue []\n',
+  });
+});

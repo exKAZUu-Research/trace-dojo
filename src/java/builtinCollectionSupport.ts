@@ -494,6 +494,11 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
     if (view?.isKeySet && !unmodifiableClasses.has(view.map.cls)) {
       const { mapClass } = frame.runtime.builtins.collections;
       if (frame.runtime.invokeVirtual(frame, mapClass, 'containsKey', view.map, [value]) !== true) return false;
+      // TreeMap.KeySet removes through its map, which finds the key by its comparator rather than by equals.
+      if (view.store().compare) {
+        frame.runtime.invokeVirtual(frame, mapClass, 'remove', view.map, [value]);
+        return true;
+      }
     }
     const index = indexOf(frame, elementsOf(receiver), value);
     if (index === -1) return false;
