@@ -2073,3 +2073,19 @@ public class Main { static void t(String n, Supplier<Object> s) { try { System.o
       'lhs true [null, keep]\nhs true [null]\nhsBig java.lang.NullPointerException\nretain java.lang.NullPointerException\nal java.lang.NullPointerException\nts true [1, 3]\nks true {b=2, c=3}\ndupe false [1, 2, 3]\nsingle false\n',
   });
 });
+
+test("Java's EnumSet and map key sets remove null as their JDK classes do", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ enum E { A, B, C }
+ public static void main(String[] a) { List<Integer> n = Collections.singletonList(null); EnumSet<E> es = EnumSet.of(E.A, E.B, E.C); t("enum", () -> es.removeAll(Arrays.asList(null, E.B)) + " " + es);
+  t("tmks", () -> new TreeMap<>(Map.of(1, 1, 2, 2)).keySet().removeAll(n)); t("hmks", () -> new HashMap<>(Map.of(1, 1, 2, 2)).keySet().removeAll(n)); t("mofks", () -> Map.of(1, 1, 2, 2).keySet().removeAll(n));
+  t("lhmks", () -> new LinkedHashMap<>(Map.of(1, 1, 2, 2)).keySet().removeAll(n)); t("es", () -> Map.of(1, 1, 2, 2).entrySet().removeAll(n)); t("hes", () -> new HashMap<>(Map.of(1, 1, 2, 2)).entrySet().removeAll(n));
+  t("single", () -> Collections.singleton(1).removeAll(n)); t("empty", () -> Collections.emptySet().removeAll(List.of())); t("useto", () -> Collections.unmodifiableSet(new HashSet<>(List.of(1, 2))).removeAll(n));
+ } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'enum true [A, C]\ntmks java.lang.NullPointerException\nhmks false\nmofks false\nlhmks false\nes false\nhes false\nsingle false\nempty false\nuseto java.lang.UnsupportedOperationException\n',
+  });
+});

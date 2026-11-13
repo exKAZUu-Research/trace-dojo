@@ -291,6 +291,12 @@ function defineEnumMap(cls: ClassInfo, classClass: ClassInfo): void {
 /** `EnumSet`, a set of an enum's constants in their order, which only its static methods create. */
 function defineEnumSet(context: Context, cls: ClassInfo, collectionClass: ClassInfo): void {
   cls.constructors = [];
+  // An EnumSet holds no null, so it neither finds nor removes one, without comparing it with its constants.
+  for (const method of cls.methods) {
+    const { native } = method;
+    if (!native || (method.name !== 'contains' && method.name !== 'remove')) continue;
+    method.native = (frame, receiver, args) => (args[0] === undefined ? false : native(frame, receiver, args));
+  }
   const classClass = context.registry.classes.get('Class') as ClassInfo;
   const create = (frame: Frame, values: Iterable<Value>): JavaObject => createEnumSet(frame, cls, values);
   const generic = (

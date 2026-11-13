@@ -480,6 +480,13 @@ export function defineSnapshot(context: Context, kind: string, parent: ClassInfo
     addMethod(cls, name, [parameter], BOOLEAN, false, (frame) => throwBuiltin(frame, 'UnsupportedOperationException'));
   }
   addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
+    // The key set of a HashMap or TreeMap looks the key up as its map does, which a TreeMap does by comparing it; the
+    // restricted maps' key sets are AbstractMap's, which compare the key with each one.
+    const view = mapViewSources.get(receiver as JavaObject);
+    if (view?.isKeySet && !unmodifiableClasses.has(view.map.cls)) {
+      const { mapClass } = frame.runtime.builtins.collections;
+      if (frame.runtime.invokeVirtual(frame, mapClass, 'containsKey', view.map, [value]) !== true) return false;
+    }
     const index = indexOf(frame, elementsOf(receiver), value);
     if (index === -1) return false;
     // As AbstractCollection.remove does, it removes through the view's iterator.
