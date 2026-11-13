@@ -810,6 +810,7 @@ setTimeout(() => console.log('second'), 30); setTimeout(() => console.log('first
 setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i < 20000; i++) sum += i; setTimeout(() => console.log('timeout 0'), 0);
 setTimeout(() => console.log('long'), 50); for (let i = 0; i < 1000; i++) new Date(0); setTimeout(() => console.log('short'), 0);
 const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');
+const u = Date.now(); while (Date.now() - u < 500) { for (let i = 0; i < 1000; i++) sum += i; } console.log('waited with more work');
 setTimeout(() => console.log('timer 100'), 100); for (let i = 0; i < 5000; i++) sum += i; console.log(new Date().getFullYear() > 2000); setTimeout(() => console.log('timer 0'), 0);
 setTimeout(() => console.log('overdue 500'), 500); sleep(1000); setTimeout(() => console.log('after sleep'), 60);
 // Timers set after the busy waits fall due at least 50 ms apart, so Node.js waking late does not reorder them.
