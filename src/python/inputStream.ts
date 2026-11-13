@@ -4,7 +4,7 @@ import { pyRepr, strObject } from './conversions';
 import { method } from './define';
 import { builtinClassesWithDict, ownDict } from './descriptors';
 import { defineNew } from './instances';
-import { isCContiguous, viewOf } from './memoryview';
+import { clinicMethod } from './modules/clinicArgs';
 import { toIndex } from './numbers';
 import { callValue, getAttribute, getAttributeOrUndefined, setAttribute } from './objects';
 import type { Runtime } from './runtime';
@@ -17,12 +17,12 @@ import {
   pyError,
   stringValue,
   typeError,
-  typeName,
   unbox,
   valueError,
 } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { type PyClass, PyError, PyOpaque, type PyValue } from './values';
+import { withWritableBuffer } from './writableBuffer';
 
 interface InputState {
   runtime: Runtime;
@@ -62,14 +62,19 @@ export function createFileIOClass(runtime: Runtime, rawBase: PyClass): PyClass {
   defineNew(rawClass, unsupportedFileAccess);
   method(rawClass, '__init__', 'takes', 0, Number.POSITIVE_INFINITY, unsupportedFileAccess);
   builtinClassesWithDict.add(rawClass);
-  method(rawClass, 'readinto', 'one', 1, 1, readInto);
+  clinicMethod(rawClass, { name: 'readinto', params: ['buffer'], positionalOnly: 1, required: 1 }, (self, [target]) =>
+    readInto(self, target as PyValue)
+  );
   method(rawClass, 'read', 'expected', 0, 1, (self, [size]) => {
     const count = size === undefined || size === None ? -1n : toIndex(size);
     return callValue(getAttribute(rawBase, 'read'), [self, count]);
   });
   method(rawClass, 'close', 'none', 0, 0, (self) => {
-    stateOf(self).runtime.io.stdin.isClosed = true;
-    return None;
+    try {
+      return callValue(getAttribute(rawBase, 'close'), [self]);
+    } finally {
+      stateOf(self).runtime.io.stdin.isClosed = true;
+    }
   });
   for (const [name, result] of [
     ['readable', true],
@@ -118,12 +123,9 @@ function fileRepr(self: PyValue): string {
   return `<_io.FileIO ${shown} mode='rb' closefd=False>`;
 }
 
-function readInto(self: PyValue, [target]: PyValue[]): PyValue {
-  checkOpen(self);
-  const view = viewOf(target);
-  try {
-    if (view.readonly || !isCContiguous(view))
-      throw typeError(`readinto() argument must be read-write bytes-like object, not ${typeName(target)}`);
+function readInto(self: PyValue, target: PyValue): PyValue {
+  return withWritableBuffer(target, { name: 'readinto', position: 1 }, (view) => {
+    checkOpen(self);
     const destination = view.source.data.subarray(view.offset, view.offset + view.nbytes);
     const state = stateOf(self);
     let written = Math.min(destination.length, state.pending.length);
@@ -146,9 +148,7 @@ function readInto(self: PyValue, [target]: PyValue[]): PyValue {
     }
     state.runtime.spendNative(Math.ceil(written / 64));
     return BigInt(written);
-  } finally {
-    view.release();
-  }
+  });
 }
 
 function checkOpen(self: PyValue): void {

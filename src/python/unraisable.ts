@@ -13,11 +13,7 @@ export function setUnraisableHookArgsClass(cls: PyClass): void {
   hookArgsClass = cls;
 }
 
-/**
- * Reports an exception that nothing can catch, raised while finalizing an object, as CPython's
- * `PyErr_FormatUnraisable` does: `sys.unraisablehook` receives it with `message` followed by the object's repr.
- */
-export function reportUnraisable(error: PyError, message: string, object: PyValue): void {
+export function reportUnraisable(error: PyError, message: string, object?: PyValue): void {
   const hook = currentRuntime().importModule('sys').dict.get('unraisablehook') ?? defaultUnraisableHook;
   const exception = error.exception;
   try {
@@ -25,7 +21,7 @@ export function reportUnraisable(error: PyError, message: string, object: PyValu
       exception.cls,
       exception,
       exception.exception?.traceback ?? None,
-      `${message} ${pyRepr(object)}`,
+      object === undefined ? message : `${message} ${pyRepr(object)}`,
       None,
     ]);
     callValue(hook, [args]);

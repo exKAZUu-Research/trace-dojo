@@ -244,21 +244,19 @@ class _IOBase:
 
         This is not implemented for read-only and non-blocking streams.
         """
-        self._checkClosed()
-        # XXX Should this return the number of bytes written???
-
-    __closed = False
+        if hasattr(self, '__IOBase_closed'):
+            raise ValueError('I/O operation on closed file.')
 
     def close(self):
         """Flush and close the IO object.
 
         This method has no effect if the file is already closed.
         """
-        if not self.__closed:
+        if not hasattr(self, '__IOBase_closed'):
             try:
                 self.flush()
             finally:
-                self.__closed = True
+                setattr(self, '__IOBase_closed', True)
 
     def __del__(self):
         """Called when the instance is about to be destroyed."""
@@ -320,7 +318,7 @@ class _IOBase:
 
     @property
     def closed(self):
-        return self.__closed
+        return hasattr(self, '__IOBase_closed')
 
     def _checkClosed(self, msg=None):
         if self.closed:
@@ -2105,7 +2103,7 @@ for _cls in (BufferedRWPair, BufferedRandom, BufferedReader, BufferedWriter, Inc
              _IOBase, _RawIOBase, _BufferedIOBase, _TextIOBase):
     _cls.__module__ = '_io'
     _c_type_name(_cls, '_io.' + _cls.__name__)
-    if _cls in (TextIOWrapper, BufferedReader, BufferedWriter, BufferedRandom):
+    if _cls in (TextIOWrapper, BufferedReader, BufferedWriter, BufferedRandom, _BufferedIOBase):
         _clinic_init(_cls)
     _c_type(_cls)
 del _cls

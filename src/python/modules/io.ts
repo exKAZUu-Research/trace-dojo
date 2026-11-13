@@ -5,7 +5,7 @@ import { addressOf, pyRepr } from '../conversions';
 import { method } from '../define';
 import { builtinClassesWithDict } from '../descriptors';
 import { createFileIOClass } from '../inputStream';
-import { isCContiguous, viewOf } from '../memoryview';
+import { viewOf } from '../memoryview';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
 import { callValue, getAttribute, isTruthy, iterate, lookupSpecial } from '../objects';
@@ -31,6 +31,7 @@ import {
   valueError,
 } from '../types';
 import { DONE, PyClass, PyDescriptor, PyError, PyFunction, type PyInstance, PyOpaque, type PyValue } from '../values';
+import { withWritableBuffer } from '../writableBuffer';
 import { unpackKeywords } from './clinicArgs';
 import { ioCodecNatives } from './ioCodecs';
 import { IO_SOURCE } from './ioPython';
@@ -157,10 +158,7 @@ function defineBytesIOLineMethods(cls: PyClass): void {
     for (let line = next(); line !== DONE; line = next()) callValue(write, [line]);
     return None;
   });
-  method(cls, '__iter__', 'none', 0, 0, (self) => {
-    checkOpen(streamOf(self));
-    return self;
-  });
+  method(cls, '__iter__', 'none', 0, 0, (self) => self);
 }
 
 function getter(cls: PyClass, name: string, read: (self: PyValue) => PyValue): void {
@@ -355,16 +353,11 @@ function defineBytesIO(cls: PyClass): void {
   method(cls, 'read1', 'expected', 0, 1, (self, [size]) => readFrom(binaryStream(self), sizeArgument(size)));
   method(cls, 'readinto', 'one', 1, 1, (self, [target]) => {
     const stream = binaryStream(self);
-    const view = viewOf(target);
-    try {
-      if (view.readonly || !isCContiguous(view))
-        throw typeError(`readinto() argument must be read-write bytes-like object, not ${typeName(target)}`);
+    return withWritableBuffer(target, { name: 'readinto' }, (view) => {
       const data = readFrom(stream, view.nbytes) as PyBytes;
       view.source.data.set(data.data, view.offset);
       return BigInt(data.length);
-    } finally {
-      view.release();
-    }
+    });
   });
   method(cls, 'getvalue', 'none', 0, 0, (self) => {
     const stream = binaryStream(self);
@@ -415,6 +408,7 @@ function writeBytes(stream: BinaryStream, data: Uint8Array): number {
 // The module --------------------------------------------------------------------------------------------------------
 
 function clinicInitializer(cls: PyClass): void {
+  defineReadintoBoundaries(cls);
   const initialize = cls.dict.get('__init__');
   if (!(initialize instanceof PyFunction)) return;
   const params = initialize.def.params.slice(1).map(({ name }) => name);
@@ -429,6 +423,22 @@ function clinicInitializer(cls: PyClass): void {
     unpackKeywords(cls.name, params, required, args, kwargs);
     return callValue(initialize, [self, ...args], kwargs);
   });
+}
+
+function defineReadintoBoundaries(cls: PyClass): void {
+  if (!['_BufferedIOBase', 'BufferedReader', 'BufferedRandom'].includes(cls.name)) return;
+  const implementation = cls.dict.get('_readinto');
+  for (const name of ['readinto', 'readinto1']) {
+    const original = cls.lookup(name);
+    if (!(original instanceof PyFunction)) continue;
+    method(cls, name, 'one', 1, 1, (self, [target]) =>
+      withWritableBuffer(target, { name }, (view) =>
+        implementation instanceof PyFunction
+          ? callValue(implementation, [self, view, name === 'readinto1'])
+          : callValue(original, [self, view])
+      )
+    );
+  }
 }
 
 function checkCClosed(self: PyInstance, text: boolean, operation: PyValue | undefined): PyValue {

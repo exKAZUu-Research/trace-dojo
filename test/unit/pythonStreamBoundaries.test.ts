@@ -240,3 +240,39 @@ print('buffered')`;
     uncaughtException: undefined,
   });
 });
+
+test('closed in-memory streams distinguish iterator identity and base flush state from data operations', () => {
+  const program = `import io
+text = io.StringIO('abc')
+text.close()
+assert text.closed and text.flush() is None
+try: text.read()
+except ValueError: pass
+else: raise AssertionError('closed text remained readable')
+binary = io.BytesIO(b'abc')
+binary.close()
+assert binary.closed and iter(binary) is binary
+for operation in (lambda: next(binary), binary.flush):
+    try: operation()
+    except ValueError: pass
+    else: raise AssertionError('closed data operation accepted')
+class Closed(io.IOBase):
+    @property
+    def closed(self): return True
+assert Closed().flush() is None
+class Open(io.IOBase):
+    @property
+    def closed(self): return False
+stream = Open()
+stream.close()
+assert not stream.closed
+try: stream.flush()
+except ValueError: pass
+else: raise AssertionError('base close state lost')
+print('states')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'states\n',
+    uncaughtException: undefined,
+  });
+});

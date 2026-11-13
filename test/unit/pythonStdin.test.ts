@@ -236,3 +236,27 @@ print('released')`;
     uncaughtException: undefined,
   });
 });
+
+test('raw close flushes once and closes both states even when a flush callback raises', () => {
+  const program = `import io, sys
+raw = sys.stdin.buffer.raw
+calls = []
+def flush():
+    calls.append(raw.closed)
+    raise ValueError('flush failed')
+raw.flush = flush
+try: raw.close()
+except ValueError as error: assert str(error) == 'flush failed'
+else: raise AssertionError('flush error lost')
+assert raw.closed and calls == [False]
+assert raw.close() is None and calls == [False]
+try: io.IOBase.flush(raw)
+except ValueError as error: assert str(error) == 'I/O operation on closed file.'
+else: raise AssertionError('base close state lost')
+print('closed')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'closed\n',
+    uncaughtException: undefined,
+  });
+});

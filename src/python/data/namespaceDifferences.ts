@@ -1104,7 +1104,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     '_io.FileIO': [['readall', '_isatty_open_only', '_dealloc_warn', '__getstate__', '__module__'], []],
     '_io.StringIO': [['__init__', '__getstate__'], []],
     '_io._BufferedIOBase': [[], ['_readinto']],
-    '_io._IOBase': [[], ['_unsupported', '_IOBase__closed', '__weakref__']],
+    '_io._IOBase': [[], ['_unsupported', '__weakref__']],
     '_io._RawIOBase': [[], []],
     '_io._TextIOBase': [[], []],
     '_lzma.LZMACompressor': [['__module__'], []],
