@@ -191,8 +191,7 @@ method(frameClass, 'clear', 'none', 0, 0, (self) => {
   }
   // A module's or a class body's frame shares its namespace, which clearing the frame leaves.
   if (frame.kind === 'function' || frame.kind === 'comprehension') {
-    frame.locals.clear();
-    frame.cells.clear();
+    currentRuntime().finalizer.release(frame.clearLocals());
   }
   return None;
 });

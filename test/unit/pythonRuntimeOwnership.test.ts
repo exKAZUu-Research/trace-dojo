@@ -197,3 +197,115 @@ ${stop}`;
     });
   }
 );
+
+test.each([false, true])('async generator close releases its terminal exception (suspending=%s)', (suspending) => {
+  const program = `import asyncio
+class A:
+    def __del__(self): print('del')
+async def gen():
+    a = A()
+    try:
+        yield 1
+    finally:
+        ${suspending ? 'await asyncio.sleep(0)' : 'pass'}
+async def main():
+    g = gen()
+    await anext(g)
+    await g.aclose()
+    print('end')
+asyncio.run(main())`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'del\nend\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['exposed frame', 'g.close()\nframe.clear()'],
+  ['traceback', 'try: next(g)\nexcept ValueError as error: saved = error.__traceback__\ntraceback.clear_frames(saved)'],
+])('clearing a retained %s releases its locals immediately', (_name, clear) => {
+  const program = `import sys, traceback
+class A:
+    def __del__(self): print('del')
+def gen():
+    a = A()
+    yield sys._getframe()
+    raise ValueError()
+g = gen()
+frame = next(g)
+${clear}
+print('end')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'del\nend\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('clearing a frame preserves cells independently owned by escaped closures', () => {
+  const program = `import sys
+class A:
+    def __del__(self): print('del')
+def gen():
+    a = A()
+    def keep(): return a
+    yield sys._getframe(), keep
+g = gen()
+frame, keep = next(g)
+g.close()
+frame.clear()
+print(type(keep()).__name__)
+del keep
+print('end')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'A\ndel\nend\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('native iteration releases discarded terminal exceptions without releasing yielded return values', () => {
+  const program = `import asyncio
+class A:
+    def __del__(self): print('del')
+class AsyncIt:
+    def __aiter__(self): return self
+    async def __anext__(self):
+        a = A()
+        raise StopAsyncIteration
+async def main():
+    async for _ in AsyncIt(): pass
+    print('for end')
+    [x async for x in AsyncIt()]
+    print('comprehension end')
+    print(await anext(AsyncIt(), 'fallback'))
+asyncio.run(main())
+class It:
+    def __iter__(self): return self
+    def __next__(self):
+        a = A()
+        raise StopIteration
+list(It())
+print('list end')
+class Seq:
+    def __getitem__(self, index):
+        a = A()
+        raise IndexError
+list(Seq())
+print('sequence end')
+class ReturnIt:
+    def __iter__(self): return self
+    def __next__(self): raise StopIteration(A())
+def gen():
+    result = yield from ReturnIt()
+    print(type(result).__name__)
+list(gen())
+print('generator end')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'del\nfor end\ndel\ncomprehension end\ndel\nfallback\ndel\nlist end\ndel\nsequence end\nA\ndel\ngenerator end\n',
+    uncaughtException: undefined,
+  });
+});

@@ -428,12 +428,7 @@ export class Runtime {
     // The exceptions the generator handles where it suspended, which its caller does not handle.
     let handling: PyInstance[] = [];
     let completed = false;
-    const holds = (): (PyValue | undefined)[] => [
-      ...frame.locals.values(),
-      ...[...frame.cells.values()].map((cell) => cell.value),
-      ...frame.temporaries,
-      ...handling,
-    ];
+    const holds = (): (PyValue | undefined)[] => [...frame.localValues(), ...handling];
     const generator: PyGenerator = new PyGenerator(
       cls,
       name,

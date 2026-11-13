@@ -88,7 +88,7 @@ export function freedByReferenceCounting(garbage: Set<object>): Set<object> {
     const node = pending.pop() as object;
     if (kept.has(node)) continue;
     kept.add(node);
-    pending.push(...(children.get(node) ?? []));
+    pushAll(pending, children.get(node) ?? []);
   }
   return new Set([...garbage].filter((node) => !kept.has(node)));
 }
@@ -174,7 +174,7 @@ export function findReachableAsCollector(roots: unknown[]): object[] {
     for (const item of level) {
       if (visited.has(item)) continue;
       visited.add(item);
-      next.push(...referencesOf(item, true));
+      pushAll(next, referencesOf(item, true));
     }
     level = next;
   }

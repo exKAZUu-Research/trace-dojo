@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 531 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 533 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -19,7 +19,7 @@ import { completeNamespace } from './modules/moduleLayout';
 import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict } from './namespaces';
 import { describeIntegerIndex, toIndex } from './numbers';
-import { currentRuntime } from './runtimeContext';
+import { currentRuntime, releaseCaughtException } from './runtimeContext';
 import { iterStr, strLength } from './strings';
 import { superAttribute } from './typeObject';
 import {
@@ -627,8 +627,10 @@ export function nextOf(iterator: PyValue): NextFunction {
     try {
       return callValue(bound, []);
     } catch (error) {
-      if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('StopIteration')))
+      if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('StopIteration'))) {
+        releaseCaughtException(error);
         return DONE;
+      }
       throw error;
     }
   };
@@ -642,8 +644,9 @@ function iterateSequence(value: PyValue): NextFunction {
     try {
       return getItemOf(value, index++);
     } catch (error) {
-      if (isExceptionOf(error, 'IndexError') || isExceptionOf(error, 'StopIteration')) {
+      if (error instanceof PyError && (isExceptionOf(error, 'IndexError') || isExceptionOf(error, 'StopIteration'))) {
         finished = true;
+        releaseCaughtException(error);
         return DONE;
       }
       throw error;

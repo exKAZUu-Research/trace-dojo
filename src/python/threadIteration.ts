@@ -2,6 +2,7 @@
 // read, suspends the thread, as the scheduler expects, instead of waiting on the host's stack.
 import { resumeGeneratorSuspending } from './generators';
 import { bindValue, callValue, getIterator, lookupSpecial, type NextFunction } from './objects';
+import { releaseCaughtException } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
 import { suspendingCall } from './threads';
 import { exceptionClassNamed, isIteratorGenerator, None, typeError, typeName } from './types';
@@ -56,6 +57,7 @@ export function suspendingNextOf(iterator: PyValue): SuspendingNext {
       return yield* callSuspending(bound, []);
     } catch (error) {
       if (error instanceof PyError && error.exception.cls.isSubclassOf(exceptionClassNamed('StopIteration'))) {
+        releaseCaughtException(error);
         return DONE;
       }
       throw error;

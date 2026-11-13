@@ -7,6 +7,7 @@ import { argument } from '../nativeArgs';
 import { callValue, getAttribute, isTruthy, lengthOf } from '../objects';
 import { binaryOp } from '../operators';
 import { currentRuntime } from '../runtimeContext';
+import { StringBuilder } from '../stringBuilder';
 import { exceptionClassNamed, newException, None, pyError, typeError, typeName, unbox, valueError } from '../types';
 import { type Kwargs, PyError, type PyValue } from '../values';
 import { binasciiError, decodeBase64, encodeBase64, unhexlify } from './binascii';
@@ -193,7 +194,7 @@ function a85encode(args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 // code-gauge-allow functionCognitiveComplexity 29 -- Transcribes base64.a85decode.
-// code-gauge-allow functionNcss 31 -- Transcribes base64.a85decode.
+// code-gauge-allow functionNcss 34 -- Follows base64.a85decode while bounding string growth and packed output allocation.
 function a85decode(args: PyValue[], kwargs: Kwargs): PyValue {
   let text = latin1Text(decodeData(args[0]));
   const ignore = kwargs?.has('ignorechars')
@@ -204,29 +205,31 @@ function a85decode(args: PyValue[], kwargs: Kwargs): PyValue {
     text = text.startsWith('<~') ? text.slice(2, -2) : text.slice(0, -2);
   }
   const foldSpaces = isTruthy(kwargs?.get('foldspaces') ?? false);
-  const decoded: number[] = [];
-  let current: number[] = [];
+  const decoded = new StringBuilder();
+  let count = 0;
+  let word = 0;
   for (const char of `${text}uuuu`) {
     const code = char.codePointAt(0) as number;
-    // Each group or shortcut adds up to four bytes, so the result is checked before it grows.
-    currentRuntime().ensureStringFits(decoded.length + 4);
     if (code >= 33 && code <= 117) {
-      current.push(code - 33);
-      if (current.length === 5) {
-        const word = current.reduce((acc, digit) => acc * 85 + digit, 0);
+      word = word * 85 + code - 33;
+      if (++count === 5) {
         if (word > 0xff_ff_ff_ff) throw valueError('Ascii85 overflow');
-        decoded.push(word >>> 24, (word >>> 16) & 0xff, (word >>> 8) & 0xff, word & 0xff);
-        current = [];
+        decoded.append(String.fromCodePoint(word >>> 24, (word >>> 16) & 0xff, (word >>> 8) & 0xff, word & 0xff));
+        count = 0;
+        word = 0;
       }
     } else if (char === 'z' || (foldSpaces && char === 'y')) {
-      if (current.length > 0) throw valueError(`${char} inside Ascii85 5-tuple`);
-      decoded.push(...Array.from({ length: 4 }, () => (char === 'z' ? 0 : 0x20)));
+      if (count > 0) throw valueError(`${char} inside Ascii85 5-tuple`);
+      decoded.append(char === 'z' ? '\0\0\0\0' : '    ');
     } else if (!ignore.includes(char)) {
       throw valueError(`Non-Ascii85 digit found: ${char}`);
     }
   }
-  const padding = 4 - current.length;
-  return newBytes(Uint8Array.from(padding ? decoded.slice(0, -padding) : decoded));
+  const padding = 4 - count;
+  const all = decoded.build();
+  const result = padding ? all.slice(0, -padding) : all;
+  currentRuntime().ensureRoom(Math.ceil(result.length / 8));
+  return newBytes(latin1Bytes(result));
 }
 
 function decode85(data: Uint8Array, alphabet: string, name: string): Uint8Array {

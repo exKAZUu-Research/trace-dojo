@@ -1,5 +1,5 @@
 import type { Runtime } from './runtime';
-import type { PyObject } from './values';
+import type { PyError, PyObject } from './values';
 
 /**
  * The runtime of the program running now. Builtin classes are shared by every run, so their methods find the run's
@@ -42,6 +42,10 @@ export function chargeSlots(count: number): void {
 /** Tracks a new object of a class that defines `__del__`, whose freeing the running program's finalizer watches. */
 export function trackFinalizable(object: PyObject): void {
   current?.finalizer.track(object);
+}
+
+export function releaseCaughtException(error: PyError, inFlight: unknown[] = []): void {
+  current?.finalizer.release([error.exception], inFlight);
 }
 
 /**

@@ -14,7 +14,7 @@ import {
 } from './generators';
 import { bindValue, callValue, getAttributeOrUndefined, isTruthy, lookupSpecial } from './objects';
 import type { Runtime } from './runtime';
-import { currentRuntime } from './runtimeContext';
+import { currentRuntime, releaseCaughtException } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
 import { peekThreadAsyncGenHooks, type ThreadAsyncGenHooks, threadAsyncGenHooks } from './threads';
 import {
@@ -176,7 +176,10 @@ function defineIteratorMethods(cls: PyClass): void {
     try {
       return closeGenerator(self as PyGenerator);
     } catch (error) {
-      if (isStopAsyncIteration(error)) return None;
+      if (isStopAsyncIteration(error)) {
+        releaseCaughtException(error);
+        return None;
+      }
       throw error;
     }
   });
@@ -368,7 +371,10 @@ export function anext(iterator: PyValue, fallback: PyValue | undefined): PyValue
       try {
         return delegateStep(inner, input);
       } catch (error) {
-        if (isStopAsyncIteration(error)) return { done: true, value: fallback };
+        if (isStopAsyncIteration(error)) {
+          releaseCaughtException(error, [fallback]);
+          return { done: true, value: fallback };
+        }
         throw error;
       }
     },
@@ -480,6 +486,7 @@ function athrow(generator: PyGenerator, args: PyValue[] | undefined): PyValue {
       } catch (error) {
         state.runningAsync = false;
         if (args === undefined && error instanceof PyError && (isStopAsyncIteration(error) || isGeneratorExit(error))) {
+          releaseCaughtException(error);
           return { done: true, value: None };
         }
         throw error;

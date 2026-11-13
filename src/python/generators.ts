@@ -2,7 +2,7 @@ import { addressOf } from './conversions';
 import { FINALIZER_FEATURE, method, unsupportedMethod, unsupportedSizeof } from './define';
 import type { Frame } from './frame';
 import { bindValue, callValue, getAttribute, getAttributeOrUndefined, getIterator, lookupSpecial } from './objects';
-import { runningRuntime } from './runtimeContext';
+import { releaseCaughtException, runningRuntime } from './runtimeContext';
 import type { Suspension } from './suspendingEvaluator';
 import { isWaitRequest, schedulerOf } from './threads';
 import { PyTraceback, setTraceback } from './tracebacks';
@@ -161,7 +161,7 @@ export function closeGenerator(generator: PyGenerator): PyValue {
     return step.value;
   } catch (error) {
     if (error instanceof PyError && isGeneratorExit(error)) {
-      runningRuntime()?.finalizer.release([error.exception]);
+      releaseCaughtException(error);
       return None;
     }
     throw error;
@@ -243,7 +243,9 @@ function untilStopIteration(run: () => PyValue): Step {
     return { done: false, value: run() };
   } catch (error) {
     if (!(error instanceof PyError) || !isStopIteration(error)) throw error;
-    return { done: true, value: getAttribute(error.exception, 'value') };
+    const value = getAttribute(error.exception, 'value');
+    releaseCaughtException(error, [value]);
+    return { done: true, value };
   }
 }
 

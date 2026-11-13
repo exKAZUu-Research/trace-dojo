@@ -1,3 +1,4 @@
+import { pushAll } from './arrays';
 import { finalizeAsyncGenerator, hasAsyncGeneratorFinalizer, hasProgramFinalizer } from './coroutines';
 import { peekOwnDict } from './descriptors';
 import type { Frame } from './frame';
@@ -464,7 +465,7 @@ export class GeneratorFinalizer {
       for (const value of frame.temporaries) roots.push(value);
       if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
     }
-    roots.push(...hostRoots(runtime));
+    pushAll(roots, hostRoots(runtime));
     return roots;
   }
 }

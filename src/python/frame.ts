@@ -41,6 +41,18 @@ export class Frame implements TracedFrame {
     this.builtins = fn ? fn.builtins : globals.has('__builtins__') ? globals.get('__builtins__') : undefined;
   }
 
+  clearLocals(): (PyValue | undefined)[] {
+    const dropped = this.localValues();
+    this.locals.clear();
+    this.cells.clear();
+    this.temporaries.length = 0;
+    return dropped;
+  }
+
+  localValues(): (PyValue | undefined)[] {
+    return [...this.locals.values(), ...[...this.cells.values()].map((cell) => cell.value), ...this.temporaries];
+  }
+
   /** The name of the module whose code runs here: `__main__` for the program. */
   get moduleName(): string {
     const name = this.globals.get('__name__');

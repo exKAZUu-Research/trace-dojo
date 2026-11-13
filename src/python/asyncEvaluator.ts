@@ -2,6 +2,7 @@ import type { Comprehension, Expression, Statement } from './ast';
 import { asyncIterator, asyncYield, awaitValue, isStopAsyncIteration, nextAwaitable } from './coroutines';
 import type { Frame } from './frame';
 import { bindValue, callValue, isTruthy, iterate, lookupSpecial, type NextFunction } from './objects';
+import { releaseCaughtException } from './runtimeContext';
 import { SuspendingEvaluator, type Suspension } from './suspendingEvaluator';
 import { noteCaught } from './tracebacks';
 import { asyncGeneratorClass, classOf, fullyQualifiedName, newDict, newList, newSet, None, typeError } from './types';
@@ -23,7 +24,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
   // Statements --------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Follows the protocol of the async for loop, finalizing an async generator it leaves.
-  // code-gauge-allow functionNcss 32 -- Follows the protocol of the async for loop.
+  // code-gauge-allow functionNcss 33 -- Follows the protocol of the async for loop.
   /** `async for`: awaits the async iterator's `__anext__` for each item until it raises StopAsyncIteration. */
   protected *asyncForStatement(statement: Extract<Statement, { kind: 'for' }>, frame: Frame): Execution {
     const { runtime } = this;
@@ -42,7 +43,10 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
           runtime.currentRow = statement.row;
           item = yield* awaitValue(nextAwaitable(iterator), frame, statement.row);
         } catch (error) {
-          if (isStopAsyncIteration(error)) break;
+          if (isStopAsyncIteration(error)) {
+            releaseCaughtException(error);
+            break;
+          }
           throw error;
         }
         runtime.spend();
@@ -204,7 +208,7 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
 
   /** Runs the clauses of a comprehension from the one at `index`, passing each element to `emit`. */
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows how a comprehension runs its clauses, each sync or async.
-  // code-gauge-allow functionNcss 32 -- Follows how a comprehension runs its clauses, each sync or async.
+  // code-gauge-allow functionNcss 33 -- Follows how a comprehension runs its clauses, each sync or async.
   private *comprehensionLevel(
     expression: ComprehensionExpression,
     frame: Frame,
@@ -222,7 +226,10 @@ export abstract class AsyncEvaluator extends SuspendingEvaluator {
         try {
           item = yield* awaitValue(nextAwaitable(source.asyncIterator), frame, expression.row);
         } catch (error) {
-          if (isStopAsyncIteration(error)) break;
+          if (isStopAsyncIteration(error)) {
+            releaseCaughtException(error);
+            break;
+          }
           throw error;
         }
       }
