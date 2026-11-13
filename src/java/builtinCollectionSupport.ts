@@ -330,11 +330,13 @@ export const subListChecks = new WeakMap<JavaObject, () => void>();
 export function touch(receiver: Value): void {
   const object = receiver as JavaObject;
   object.modCount = (object.modCount ?? 0) + 1;
-  const capacity = vectorCapacities.get(object);
+  // A sublist grows the array of the Stack it views.
+  const stack = rootListOf(object);
+  const capacity = vectorCapacities.get(stack);
   if (capacity === undefined) return;
   // Vector grows its array to twice its length, or to the size needed if that is more, and never shrinks it.
-  const size = (object.elements as Value[]).length;
-  if (size > capacity) vectorCapacities.set(object, Math.max(capacity * 2, size));
+  const size = (stack.elements as Value[]).length;
+  if (size > capacity) vectorCapacities.set(stack, Math.max(capacity * 2, size));
 }
 
 /** The length of each `Stack`'s array, which its index messages report. */

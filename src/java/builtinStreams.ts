@@ -730,10 +730,18 @@ function defineStringStreams(context: Context, streams: StreamTypes): void {
   });
   addMethod(stringClass, 'codePoints', [], streams.intStream.type, false, (frame, receiver) => {
     const text = (receiver as JavaString).value;
-    return createStream(frame, streams.intStreamImpl, function* () {
-      // Iterating a string yields its code points, and an unpaired surrogate as itself, as Java's does.
-      for (const character of text) yield character.codePointAt(0) as number;
-    });
+    // The JDK knows the size of a string it stores in Latin-1, as it does every string of chars up to U+00FF.
+    const isLatin1 = /^[\0-\u00FF]*$/.test(text);
+    return createStream(
+      frame,
+      streams.intStreamImpl,
+      function* () {
+        // Iterating a string yields its code points, and an unpaired surrogate as itself, as Java's does.
+        for (const character of text) yield character.codePointAt(0) as number;
+      },
+      [],
+      isLatin1 ? () => BigInt(text.length) : undefined
+    );
   });
   addMethod(stringClass, 'lines', [], classType(streams.stream, stringClass.type), false, (frame, receiver) => {
     const text = (receiver as JavaString).value;
