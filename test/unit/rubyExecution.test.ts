@@ -1559,3 +1559,13 @@ test('ArithmeticSequence last errors name the nonfinite ratio', () => {
     uncaughtException: 'NaN (FloatDomainError)',
   });
 });
+
+test('equal Sets hash independently of deleted collision slots', () => {
+  expect(
+    run(
+      'class K; attr_reader :n; def initialize(n); @n=n; end; def hash; 0; end; def eql?(o); n==o.n; end; end; a=(0..10).map { |n| K.new(n) }; x=Set.new(a); 10.times { |i| x.delete(a[i]) }; y=Set[a[10]]; p x.eql?(y), x.hash==y.hash, {x=>42}[y]'
+    )
+  ).toMatchObject({
+    stdout: 'true\ntrue\n42\n',
+  });
+});
