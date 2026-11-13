@@ -444,8 +444,10 @@ function shift(value: bigint, amount: bigint): bigint {
 def('Integer', '[]', [1, 2], function* (self: bigint, args) {
   if (args.length === 1 && args[0] instanceof RRange) {
     const range = args[0];
-    if (self === 0n) return 0n;
-    if (range.begin === NIL) throw argumentError('The beginless range for Integer#[] results in infinity');
+    if (range.begin === NIL) {
+      if (self === 0n) return 0n;
+      throw argumentError('The beginless range for Integer#[] results in infinity');
+    }
     const start = yield* toInt(range.begin);
     if (range.end === NIL) return shift(self, -start);
     const end = yield* toInt(range.end);

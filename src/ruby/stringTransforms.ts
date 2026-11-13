@@ -46,14 +46,14 @@ function chompInvalidBytes(bytes: Uint8Array, separator: RString | RNil | undefi
   return stringFromBytes(bytes.slice(0, matches ? bytes.length - suffix.length : bytes.length));
 }
 
-export function successorBytes(source: Uint8Array): Uint8Array {
+export function successorBytes(source: Uint8Array, binary = false): Uint8Array {
   if (source.length === 0) return source;
-  const parts: { bytes: Uint8Array; point: number | undefined }[] = stringCharacters(stringFromBytes(source)).map(
-    (character) => ({
-      bytes: stringBytes(character),
-      point: character.rawBytes ? undefined : character.s.codePointAt(0),
-    })
-  );
+  const parts: { bytes: Uint8Array; point: number | undefined }[] = stringCharacters(
+    stringFromBytes(source, binary)
+  ).map((character) => ({
+    bytes: stringBytes(character),
+    point: character.rawBytes && !binary ? undefined : character.s.codePointAt(0),
+  }));
   const candidate = (part: (typeof parts)[number]): boolean =>
     part.point !== undefined && characterClass(part.point) !== undefined;
   let index = parts.findLastIndex(candidate);
@@ -99,6 +99,17 @@ export function successorBytes(source: Uint8Array): Uint8Array {
       carry = stringBytes(str(String.fromCodePoint(kind === 'digit' ? start + 1 : start)));
     } else {
       const byte = part.bytes[0];
+      if (byte === 255) {
+        part.bytes = Uint8Array.of(0);
+        carry = Uint8Array.of(1);
+        const previous = parts.slice(0, index).findLastIndex(candidate);
+        if (previous === -1) {
+          parts.unshift({ bytes: carry, point: undefined });
+          break;
+        }
+        index = previous;
+        continue;
+      }
       if (byte !== 57 && byte !== 90 && byte !== 122) {
         part.bytes = Uint8Array.of(byte + 1);
         break;

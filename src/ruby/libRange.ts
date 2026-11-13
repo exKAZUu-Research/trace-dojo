@@ -18,9 +18,9 @@ import { structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
-import { succ } from './libString';
 import { NIL, type RProc, RRange, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
+import { successorBytes } from './stringTransforms';
 import { arr, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 type Visit = (value: Value) => Gen<unknown>;
@@ -60,9 +60,13 @@ function* iterateIntegers(range: RRange, begin: bigint, visit: Visit): Gen<void>
 function* iterateStrings(range: RRange, begin: RString, visit: Visit): Gen<void> {
   const { end, exclusive } = range;
   if (end === NIL) {
-    for (let text = begin.s; ; text = succ(text)) {
+    for (
+      let current = stringFromBytes(stringBytes(begin), begin.binary);
+      ;
+      current = stringFromBytes(successorBytes(stringBytes(current), begin.binary), begin.binary)
+    ) {
       rt().spend();
-      if ((yield* visit(str(text))) === STOP) return;
+      if ((yield* visit(current)) === STOP) return;
     }
   }
   if (!(end instanceof RString)) throw typeError(`can't iterate from ${realClassOf(begin).name}`);

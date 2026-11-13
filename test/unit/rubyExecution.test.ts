@@ -2060,6 +2060,10 @@ test('zero beginless bit slices and private numeric coercion follow Ruby', () =>
   expect(run('class A; private; def coerce(x); [x,2]; end; end; p 5<=>A.new, 5.0<=>A.new')).toMatchObject({
     stdout: '1\n1\n',
   });
+  expect(run('class I; def to_int; puts :called; 2; end; end; p 0[(I.new..)]')).toMatchObject({
+    stdout: 'called\n0\n',
+  });
+  expect(run('begin; p 0[("a"..)]; rescue => e; p e.class; end')).toMatchObject({ stdout: 'TypeError\n' });
 });
 
 test('Integer iteration yields against NaN until the block breaks', () => {
@@ -2080,6 +2084,17 @@ test('String substitutions retain binary source and replacement bytes', () => {
   expect(run('begin; "éa".gsub("a", 255.chr); rescue => e; p e.class; end')).toMatchObject({
     stdout: 'Encoding::CompatibilityError\n',
   });
+});
+
+test('empty String scan retains original match count across equal-byte edits', () => {
+  expect(run('s="bbaa";i=0;s.scan(""){i+=1;s[0,2]="é" if i==1};p i')).toMatchObject({ stdout: '5\n' });
+  expect(run('s="éaaa";i=0;s.scan(""){i+=1;s[0]="bb" if i==1};p i')).toMatchObject({ stdout: '5\n' });
+});
+
+test('endless String ranges retain binary bytes', () => {
+  expect(run('p (233.chr..).first(2).map{|x|x.bytes}')).toMatchObject({ stdout: '[[233], [234]]\n' });
+  expect(run('p (255.chr..).first(2).map{|x|x.bytes}')).toMatchObject({ stdout: '[[255], [1, 0]]\n' });
+  expect(run('p 233.chr.succ.bytes, 255.chr.succ.bytes')).toMatchObject({ stdout: '[234]\n[1, 0]\n' });
 });
 
 test('non-mutating module hooks can run on frozen classes', () => {

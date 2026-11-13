@@ -1074,19 +1074,16 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   regexpUnsupported(pattern);
   const target = yield* patternText(pattern, 'regexp');
+  if (target.length === 0) return yield* scanEmpty(self, block);
   const found: Value[] = [];
   let text = self.s;
   const sourceLength = stringBytes(self).length;
-  const emptyMatchLimit = charLength(text) + 1;
-  let matches = 0;
   let position = 0;
   for (;;) {
-    if (target.length === 0 && matches >= emptyMatchLimit) break;
     const index = text.indexOf(target, position);
     if (index === -1) break;
     const raw = self.binary || self.rawBytes !== undefined;
     const foundByte = textByteLength(text.slice(0, index), raw);
-    matches++;
     const match = str(target);
     let modified = false;
     if (block) {
@@ -1096,20 +1093,27 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
       text = self.s;
     } else found.push(match);
     const nextByte = foundByte + textByteLength(target, raw);
-    if (modified && target.length > 0) position = textIndexAtByte(text, nextByte, raw);
-    else {
-      const start = modified ? textIndexAtByte(text, foundByte, raw) : index;
-      position =
-        start +
-        (target.length === 0 && start < text.length
-          ? String.fromCodePoint(text.codePointAt(start) as number).length
-          : Math.max(target.length, 1));
-    }
+    position = modified ? textIndexAtByte(text, nextByte, raw) : index + target.length;
     if (position > text.length) break;
   }
   if (!block) return arr(found);
   return self;
 });
+
+function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
+  const count = charLength(self.s) + 1;
+  const sourceLength = stringBytes(self).length;
+  const found: Value[] = [];
+  for (let index = 0; index < count; index++) {
+    const match = str('');
+    if (block) {
+      yield* callBlock(block, [match], false);
+      if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
+    } else found.push(match);
+    rt().spend();
+  }
+  return block ? self : arr(found);
+}
 
 function textByteLength(text: string, raw: boolean): number {
   return raw ? text.length : new TextEncoder().encode(text).length;
@@ -1196,6 +1200,8 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
   def('String', name, [0, maxArgs], function* (self: RString, args) {
     const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
     if (self.rawBytes && !self.binary) return transformInvalid(self, name, yield* invalidSeparator(name, selected));
+    if (self.binary && (name === 'succ' || name === 'next'))
+      return stringFromBytes(successorBytes(stringBytes(self), true), true);
     if (name === 'chomp' && selected[0] === NIL) return str(self.s);
     const strings: string[] = [];
     for (const arg of selected) strings.push(yield* stringArg(arg));
@@ -1203,6 +1209,10 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
   });
   def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
     const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
+    if (self.binary && (name === 'succ' || name === 'next')) {
+      setBytes(self, successorBytes(stringBytes(self), true), true);
+      return self;
+    }
     if (self.rawBytes && !self.binary) {
       const result = transformInvalid(self, name, yield* invalidSeparator(name, selected));
       const before = stringBytes(self);
@@ -1281,13 +1291,13 @@ def('String', 'upto', [1, 2], function* (self: RString, args, block) {
   let current = stringFromBytes(stringBytes(self), self.binary);
   const limit = stringBytes(end);
   if (compareBytes(stringBytes(current), limit) > 0) return self;
-  const afterEnd = successorBytes(limit);
+  const afterEnd = successorBytes(limit, self.binary);
   for (;;) {
     const bytes = stringBytes(current);
     if (compareBytes(bytes, afterEnd) === 0 || (exclusive && compareBytes(bytes, limit) === 0)) break;
     yield* callBlock(block, [current], false);
     if (compareBytes(bytes, limit) === 0) break;
-    const next = successorBytes(bytes);
+    const next = successorBytes(bytes, self.binary);
     if (next.length > limit.length || next.length === 0) break;
     current = stringFromBytes(next, self.binary);
     rt().spend();
