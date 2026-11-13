@@ -19,7 +19,6 @@ import {
   BASIC,
   COMPARABLE,
   EMPTY_INTERFACE,
-  type FuncType,
   funcType,
   type InterfaceType,
   isFloat,
@@ -30,19 +29,7 @@ import {
   type TypeParamType,
   underlying,
 } from '../types';
-import {
-  Cell,
-  Complex,
-  copyValue,
-  GoArray,
-  GoFunc,
-  GoMap,
-  GoStruct,
-  Iface,
-  Pointer,
-  Slice,
-  type Value,
-} from '../values';
+import { Cell, Complex, copyValue, GoArray, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { pdqsort, type SortData, stableSort } from './sorting';
 import {
   BOOL,
@@ -116,9 +103,13 @@ function swapSliceElements(slice: Slice, i: number, j: number): void {
 function sortSlice(slice: Value, isLess: (a: Value, b: Value) => boolean, stable = false): undefined {
   if (!(slice instanceof Slice)) return undefined;
   const { length } = slice;
-  spendFor(length * Math.max(1, Math.ceil(Math.log2(length + 1))));
+  const runtime = currentRuntime();
+  let comparisons = 0;
   const data: SortData = {
-    less: (i, j) => isLess(slice.get(i), slice.get(j)),
+    less: (i, j) => {
+      if (++comparisons % 16 === 0) runtime.spend();
+      return isLess(slice.get(i), slice.get(j));
+    },
     swap: (i, j) => swapSliceElements(slice, i, j),
   };
   if (stable) stableSort(data, length);
@@ -215,6 +206,7 @@ const FLOAT64_SLICE = sliceType('Float64Slice', FLOAT64, less);
 
 function isSorted(slice: Value, isLess: (a: Value, b: Value) => boolean): boolean {
   const values = sliceValues(slice);
+  spendFor(values.length);
   for (let index = values.length - 1; index > 0; index--) if (isLess(values[index], values[index - 1])) return false;
   return true;
 }
@@ -388,24 +380,9 @@ function cloneSlice(value: Value, element: Type): Value {
   if (value === undefined) return undefined;
   const values = sliceValues(value);
   if (values.length === 0) return new Slice([], 0, 0, 0);
+  spendFor(values.length);
   const zero = zeroValueOf(element);
   return appendValues(new Slice([], 0, 0, 0), values, element, zero, (count) => allocateElements(count, element));
-}
-
-const SEQ_YIELD = (element: Type): FuncType => funcType([element], [BASIC.bool]);
-const SEQ = (element: Type): FuncType => funcType([SEQ_YIELD(element)], []);
-
-/** Appends the values an iterator yields one by one, matching Go's `slices.AppendSeq`. */
-function appendSeq(initial: Slice | undefined, seq: Value, element: Type): Slice | undefined {
-  const zero = zeroValueOf(element);
-  let result = initial;
-  callFunction(seq, [
-    new GoFunc(([value]) => {
-      result = appendValues(result, [value], element, zero, (count) => allocateElements(count, element));
-      return true;
-    }),
-  ]);
-  return result;
 }
 
 const slicesMembers: Record<string, Entity> = {
@@ -483,7 +460,10 @@ const slicesMembers: Record<string, Entity> = {
     (s, e) => ({ params: [s, e], results: [BOOL] }),
     (types) => {
       const equal = equalityOf(elementTypeOf(types));
-      return ([slice, value]) => sliceValues(slice).some((element) => equal(element, value));
+      return ([slice, value]) => {
+        spendFor(sliceValues(slice).length);
+        return sliceValues(slice).some((element) => equal(element, value));
+      };
     }
   ),
   ContainsFunc: sliceGeneric(
@@ -500,7 +480,10 @@ const slicesMembers: Record<string, Entity> = {
     (s, e) => ({ params: [s, e], results: [INT] }),
     (types) => {
       const equal = equalityOf(elementTypeOf(types));
-      return ([slice, value]) => BigInt(sliceValues(slice).findIndex((element) => equal(element, value)));
+      return ([slice, value]) => {
+        spendFor(sliceValues(slice).length);
+        return BigInt(sliceValues(slice).findIndex((element) => equal(element, value)));
+      };
     }
   ),
   IndexFunc: sliceGeneric(
@@ -520,6 +503,7 @@ const slicesMembers: Record<string, Entity> = {
       return ([a, b]) => {
         const x = sliceValues(a);
         const y = sliceValues(b);
+        spendFor(Math.min(x.length, y.length));
         return x.length === y.length && x.every((element, index) => equal(element, y[index]));
       };
     }
@@ -531,6 +515,7 @@ const slicesMembers: Record<string, Entity> = {
     () =>
       ([slice]) => {
         if (!(slice instanceof Slice)) return;
+        spendFor(slice.length);
         for (let i = 0, j = slice.length - 1; i < j; i++, j--) swapSliceElements(slice, i, j);
         return;
       }
@@ -679,49 +664,12 @@ const slicesMembers: Record<string, Entity> = {
         return new Slice(repeated, 0, total, total);
       }
   ),
-  AppendSeq: sliceGeneric(
-    'AppendSeq',
-    EMPTY_INTERFACE,
-    (s, e) => ({ params: [s, SEQ(e)], results: [s] }),
-    (types) =>
-      ([slice, seq]) =>
-        appendSeq(slice as Slice | undefined, seq, elementTypeOf(types))
-  ),
-  Sorted: (() => {
-    const e = typeParam('E', ORDERED);
-    return genericFunction('Sorted', [e], funcType([SEQ(e)], [sliceOf(e)]), (types) => ([seq]) => {
-      const slice = appendSeq(undefined, seq, types[0]);
-      sortSlice(slice, less);
-      return slice;
-    });
-  })(),
-  Collect: (() => {
-    const e = typeParam('E', EMPTY_INTERFACE);
-    return genericFunction(
-      'Collect',
-      [e],
-      funcType([SEQ(e)], [sliceOf(e)]),
-      (types) =>
-        ([seq]) =>
-          appendSeq(undefined, seq, types[0])
-    );
-  })(),
-  Values: sliceGeneric(
-    'Values',
-    EMPTY_INTERFACE,
-    (s, e) => ({ params: [s], results: [SEQ(e)] }),
-    () =>
-      ([slice]) =>
-        new GoFunc(([yieldFn]) => {
-          for (const value of sliceValues(slice)) if (callFunction(yieldFn, [value]) !== true) break;
-          return;
-        })
-  ),
 };
 
 function extreme(slice: Value, message: string, better: (a: Value, b: Value) => boolean): Value {
   const values = sliceValues(slice);
   if (values.length === 0) stringPanic(message);
+  spendFor(values.length);
   let best = values[0];
   for (const value of values.slice(1)) if (better(value, best)) best = value;
   return copyValue(best);
@@ -737,6 +685,7 @@ function compact(slice: Value, equal: (a: Value, b: Value) => boolean, types: Ty
 
 /** Writes values over the front of a slice's array, clears the rest of its old length, and shortens it. */
 function overwrite(slice: Slice, kept: Value[], types: Type[]): Slice {
+  spendFor(slice.length);
   const zero = zeroValueOf(elementTypeOf(types));
   for (let index = 0; index < slice.length; index++)
     slice.set(index, index < kept.length ? copyValue(kept[index]) : zero());
@@ -771,6 +720,7 @@ function insert(slice: Value, at: number, values: Value[], types: Type[]): Value
   const length = (slice as Slice | undefined)?.length ?? 0;
   if (at < 0 || at > length) boundsPanic(`slice bounds out of range [${at}:${length}]`);
   if (values.length === 0) return slice;
+  spendFor(length + values.length);
   const element = elementTypeOf(types);
   const zero = zeroValueOf(element);
   const alloc = (count: number): void => allocateElements(count, element);
@@ -803,75 +753,7 @@ function deleteRange(slice: Value, from: number, to: number, types: Type[]): Val
   return overwrite(current, kept, types);
 }
 
-const SEQ2_YIELD = (key: Type, value: Type): FuncType => funcType([key, value], [BASIC.bool]);
-const SEQ2 = (key: Type, value: Type): FuncType => funcType([SEQ2_YIELD(key, value)], []);
-
-/** Collects the pairs an iterator of pairs yields. */
-function collectPairs(seq: Value): [Value, Value][] {
-  const pairs: [Value, Value][] = [];
-  callFunction(seq, [
-    new GoFunc(([key, value]) => {
-      pairs.push([copyValue(key), copyValue(value)]);
-      return true;
-    }),
-  ]);
-  return pairs;
-}
-
-/** An iterator over pairs, which stops when the yield function returns false, as range-over-func requires. */
-function pairIterator(pairs: () => [Value, Value][]): GoFunc {
-  return new GoFunc(([yieldFn]) => {
-    for (const [key, value] of pairs()) if (callFunction(yieldFn, [key, value]) !== true) break;
-    return;
-  });
-}
-
 Object.assign(slicesMembers, {
-  All: sliceGeneric(
-    'All',
-    EMPTY_INTERFACE,
-    (s, e) => ({ params: [s], results: [SEQ2(INT, e)] }),
-    () =>
-      ([slice]) =>
-        pairIterator(() => sliceValues(slice).map((value, index): [Value, Value] => [BigInt(index), value]))
-  ),
-  Backward: sliceGeneric(
-    'Backward',
-    EMPTY_INTERFACE,
-    (s, e) => ({ params: [s], results: [SEQ2(INT, e)] }),
-    () =>
-      ([slice]) =>
-        pairIterator(() =>
-          sliceValues(slice)
-            .map((value, index): [Value, Value] => [BigInt(index), value])
-            .toReversed()
-        )
-  ),
-  Chunk: sliceGeneric(
-    'Chunk',
-    EMPTY_INTERFACE,
-    (s) => ({ params: [s, INT], results: [SEQ(s)] }),
-    () =>
-      ([slice, size]) => {
-        const n = Number(size as bigint);
-        if (n < 1) stringPanic('cannot be less than 1');
-        return new GoFunc(([yieldFn]) => {
-          const current = slice as Slice | undefined;
-          for (let start = 0; start < (current?.length ?? 0); start += n) {
-            const end = Math.min(start + n, (current as Slice).length);
-            // Each chunk is a slice of the original array whose capacity ends with the chunk.
-            const chunk = new Slice(
-              (current as Slice).array,
-              (current as Slice).offset + start,
-              end - start,
-              end - start
-            );
-            if (callFunction(yieldFn, [chunk]) !== true) break;
-          }
-          return;
-        });
-      }
-  ),
   Compare: sliceGeneric(
     'Compare',
     ORDERED,
@@ -880,6 +762,7 @@ Object.assign(slicesMembers, {
       ([a, b]) => {
         const x = sliceValues(a);
         const y = sliceValues(b);
+        spendFor(Math.min(x.length, y.length));
         for (let index = 0; index < Math.min(x.length, y.length); index++) {
           const order = compare(x[index], y[index]);
           if (order !== 0) return BigInt(order);
@@ -972,6 +855,7 @@ Object.assign(slicesMembers, {
         const j = Number(to as bigint);
         if (i < 0 || j < i || j > length) boundsPanic(`slice bounds out of range [${i}:${j}]`);
         const element = elementTypeOf(types);
+        spendFor(length + sliceValues(values).length);
         const inserted = sliceValues(values).map(copyValue);
         const kept = [
           ...(current?.values() ?? []).slice(0, i).map(copyValue),
@@ -989,55 +873,13 @@ Object.assign(slicesMembers, {
         return appendValues(head, kept.slice(i), element, zero, (count) => allocateElements(count, element));
       }
   ),
-  SortedFunc: (() => {
-    const e = typeParam('E', EMPTY_INTERFACE);
-    return genericFunction(
-      'SortedFunc',
-      [e],
-      funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
-      (types) =>
-        ([seq, cmpFn]) => {
-          const slice = appendSeq(undefined, seq, types[0]);
-          const order = cmpResult(cmpFn);
-          sortSlice(slice, (a, b) => order(a, b) < 0);
-          return slice;
-        }
-    );
-  })(),
-  SortedStableFunc: (() => {
-    const e = typeParam('E', EMPTY_INTERFACE);
-    return genericFunction(
-      'SortedStableFunc',
-      [e],
-      funcType([SEQ(e), funcType([e, e], [INT])], [sliceOf(e)]),
-      (types) =>
-        ([seq, cmpFn]) => {
-          const slice = appendSeq(undefined, seq, types[0]);
-          const order = cmpResult(cmpFn);
-          sortSlice(slice, (a, b) => order(a, b) < 0, true);
-          return slice;
-        }
-    );
-  })(),
 });
 
 export const SLICES_PACKAGE = definePackage(
   'slices',
   slicesMembers,
-  [
-    'All',
-    'Backward',
-    'AppendSeq',
-    'Chunk',
-    'Clip',
-    'Grow',
-    'EqualFunc',
-    'IndexFunc',
-    'Replace',
-    'SortedFunc',
-    'SortedStableFunc',
-    'ContainsFunc',
-  ].filter((name) => !(name in slicesMembers))
+  // The iterator functions need iter and range-over-func, which this stage rejects.
+  ['All', 'AppendSeq', 'Backward', 'Chunk', 'Collect', 'Sorted', 'SortedFunc', 'SortedStableFunc', 'Values']
 );
 
 // maps ------------------------------------------------------------------------------------------------------------
@@ -1053,43 +895,13 @@ function mapParams(keyConstraint: InterfaceType = COMPARABLE): [TypeParamType, T
   return [m, k, v];
 }
 
-function mapEntries(value: Value): { key: Value; value: Value }[] {
-  return [...((value as GoMap | undefined)?.entries.values() ?? [])];
-}
-
 const mapsMembers: Record<string, Entity> = {
-  Keys: (() => {
-    const [m, k, v] = mapParams();
-    return genericFunction(
-      'Keys',
-      [m, k, v],
-      funcType([m], [SEQ(k)]),
-      () =>
-        ([map]) =>
-          new GoFunc(([yieldFn]) => {
-            for (const entry of mapEntries(map)) if (callFunction(yieldFn, [entry.key]) !== true) break;
-            return;
-          })
-    );
-  })(),
-  Values: (() => {
-    const [m, k, v] = mapParams();
-    return genericFunction(
-      'Values',
-      [m, k, v],
-      funcType([m], [SEQ(v)]),
-      () =>
-        ([map]) =>
-          new GoFunc(([yieldFn]) => {
-            for (const entry of mapEntries(map)) if (callFunction(yieldFn, [entry.value]) !== true) break;
-            return;
-          })
-    );
-  })(),
   Clone: (() => {
     const [m, k, v] = mapParams();
     return genericFunction('Clone', [m, k, v], funcType([m], [m]), (types) => ([map]) => {
       if (map === undefined) return;
+      spendFor((map as GoMap).entries.size);
+      allocate(2 * (map as GoMap).entries.size);
       const copy = new GoMap(mapKeyOf(types[1]));
       for (const [key, entry] of (map as GoMap).entries)
         copy.entries.set(key, { key: copyValue(entry.key), value: copyValue(entry.value) });
@@ -1100,8 +912,10 @@ const mapsMembers: Record<string, Entity> = {
     const [m, k, v] = mapParams();
     const m2 = typeParam('M2', m.constraint);
     return genericFunction('Copy', [m, m2, k, v], funcType([m, m2], []), () => ([destination, source]) => {
+      spendFor((source as GoMap | undefined)?.entries.size ?? 0);
       for (const [key, entry] of (source as GoMap | undefined)?.entries ?? []) {
         if (!destination) runtimeErrorPanic('assignment to entry in nil map');
+        if (!(destination as GoMap).entries.has(key)) allocate(2);
         (destination as GoMap).entries.set(key, { key: copyValue(entry.key), value: copyValue(entry.value) });
       }
       return;
@@ -1122,6 +936,7 @@ const mapsMembers: Record<string, Entity> = {
         const x = (a as GoMap | undefined)?.entries ?? new Map();
         const y = (b as GoMap | undefined)?.entries ?? new Map();
         if (x.size !== y.size) return false;
+        spendFor(x.size);
         for (const [key, entry] of x) {
           const other = y.get(key);
           if (!other || !equal(entry.value, other.value)) return false;
@@ -1144,46 +959,6 @@ const mapsMembers: Record<string, Entity> = {
           return;
         }
     );
-  })(),
-  All: (() => {
-    const [m, k, v] = mapParams();
-    return genericFunction(
-      'All',
-      [m, k, v],
-      funcType([m], [SEQ2(k, v)]),
-      () =>
-        ([map]) =>
-          pairIterator(() => mapEntries(map).map((entry): [Value, Value] => [entry.key, entry.value]))
-    );
-  })(),
-  Collect: (() => {
-    const k = typeParam('K', COMPARABLE);
-    const v = typeParam('V', EMPTY_INTERFACE);
-    return genericFunction(
-      'Collect',
-      [k, v],
-      funcType([SEQ2(k, v)], [{ kind: 'map', key: k, value: v }]),
-      (types) =>
-        ([seq]) => {
-          const keyOf = mapKeyOf(types[0]);
-          const map = new GoMap(keyOf);
-          for (const [key, value] of collectPairs(seq)) map.entries.set(keyOf(key), { key, value });
-          return map;
-        }
-    );
-  })(),
-  Insert: (() => {
-    const [m, k, v] = mapParams();
-    return genericFunction('Insert', [m, k, v], funcType([m, SEQ2(k, v)], []), () => ([map, seq]) => {
-      for (const [key, value] of collectPairs(seq)) {
-        if (!map) runtimeErrorPanic('assignment to entry in nil map');
-        const target = map as GoMap;
-        const existing = target.entries.get(target.keyOf(key));
-        if (existing) existing.value = value;
-        else target.entries.set(target.keyOf(key), { key, value });
-      }
-      return;
-    });
   })(),
   EqualFunc: (() => {
     const k = typeParam('K', COMPARABLE);
@@ -1218,7 +993,7 @@ const mapsMembers: Record<string, Entity> = {
   })(),
 };
 
-export const MAPS_PACKAGE = definePackage('maps', mapsMembers);
+export const MAPS_PACKAGE = definePackage('maps', mapsMembers, ['All', 'Collect', 'Insert', 'Keys', 'Values']);
 
 // cmp -------------------------------------------------------------------------------------------------------------
 

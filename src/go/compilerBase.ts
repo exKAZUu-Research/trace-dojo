@@ -9,6 +9,7 @@ import { newSliceTracking } from './slicePass';
 import {
   BASIC,
   COMPARABLE,
+  CONSTRAINT_NAMES,
   describeType,
   EMPTY_INTERFACE,
   type Field,
@@ -465,6 +466,7 @@ export abstract class CompilerBase {
         );
         continue;
       }
+      if (constraint.kind === 'named') CONSTRAINT_NAMES.set(under, constraint);
       declared[index].constraint = under;
     }
     return declared;
@@ -525,6 +527,12 @@ function describeConstraint(constraint: InterfaceType): string {
   if (constraint === COMPARABLE || (constraint.typeSet?.comparable && constraint.methods.length === 0))
     return 'comparable';
   if (constraint === EMPTY_INTERFACE) return 'any';
+  const named = CONSTRAINT_NAMES.get(constraint);
+  if (named) return named.pkg && named.pkg !== 'main' ? `${named.pkg.split('/').at(-1)}.${named.name}` : named.name;
+  const terms = constraint.typeSet?.terms;
+  if (terms && constraint.methods.length === 0) {
+    return terms.map((term) => `${term.tilde ? '~' : ''}${describeType(term.type)}`).join(' | ');
+  }
   return describeType(constraint);
 }
 

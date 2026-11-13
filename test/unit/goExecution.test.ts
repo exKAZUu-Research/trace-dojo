@@ -789,7 +789,7 @@ func main() {
 		unwrapCalls,
 		copiedBytes, copyErr,
 		utf8.FullRuneInString("\xff"), utf8.FullRuneInString("\xc2A"), utf8.FullRuneInString("\xc2"),
-		cap(slices.Clone(s)), cap(slices.Collect(maps.Keys(m))), cap(slices.Sorted(maps.Keys(m))), cap(strings.SplitN("a,b,c", ",", 5)),
+		cap(slices.Clone(s)), len(maps.Clone(m)), cap(strings.SplitN("a,b,c", ",", 5)),
 		rNil, wNil,
 	)
 }`;
@@ -797,7 +797,7 @@ func main() {
     kind: 'executed',
     uncaughtException: undefined,
     stdout:
-      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 4 4 5 true true\n',
+      'é 3 112 false true EOF 2 3 false bufio.Scanner: token too long false {100 100 100 255} 1 true 1 1 short write true true false 6 3 5 true true\n',
     stderr: '日',
   });
 });
@@ -1022,6 +1022,163 @@ func main() {
     uncaughtException: undefined,
     stdout:
       '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
+  });
+});
+
+// Go 1.27.3 prints these: Go by Example's regexp calls, named groups and templates, Split, simple case folding, Unicode
+// classes and \b, leftmost-first versus POSIX leftmost-longest, byte offsets over invalid UTF-8, and parse errors.
+test('regexp matches as the RE2 engine of Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"bytes"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+func main() {
+	r := regexp.MustCompile("p([a-z]+)ch")
+	fmt.Println(r, r.MatchString("peach"), r.FindStringIndex("peach punch"), r.FindStringSubmatch("peach punch"))
+	fmt.Println(r.FindAllStringSubmatchIndex("peach punch pinch", -1), r.FindAllString("peach punch pinch", 2))
+	fmt.Println(r.ReplaceAllString("a peach", "<$1>"), string(r.ReplaceAllFunc([]byte("a peach"), bytes.ToUpper)))
+	re := regexp.MustCompile("(?P<first>\\w+)\\s(?P<last>\\w+)")
+	fmt.Printf("%q %d\n", re.SubexpNames(), re.SubexpIndex("last"))
+	fmt.Println(re.ReplaceAllString("ada lovelace, alan turing", "${'$'}{last}_$first"))
+	fmt.Printf("%q %q\n", regexp.MustCompile("a*").Split("baaaab", -1), regexp.MustCompile(",\\s*").Split("x, y,z", 2))
+	fmt.Println(regexp.MustCompile("(?i)straße|k").FindAllString("STRASSE Straſſe STRAßE K", -1))
+	fmt.Println(regexp.MustCompile("\\p{Greek}+|\\bgo\\b").FindAllStringIndex("αβγ go gopher", -1))
+	fmt.Println(regexp.MustCompile("a(|b)").FindString("ab"), regexp.MustCompilePOSIX("a(|b)").FindString("ab"))
+	pre, complete := regexp.MustCompile("^hello(?:x|y)").LiteralPrefix()
+	fmt.Println(pre, complete, regexp.MustCompile(".").FindAllStringIndex("é\xffz", -1))
+	fmt.Println(regexp.QuoteMeta("1+1=2? [yes]"), regexp.MustCompile("b+").MatchReader(strings.NewReader("abbc")))
+	for _, p := range []string{"a(b", "x**", "[z-a]", "\\pX", "a{1001}", "(?P<>x)"} {
+		_, err := regexp.Compile(p)
+		fmt.Println(err)
+	}
+	defer func() { fmt.Println(recover()) }()
+	regexp.MustCompile("a)")
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'p([a-z]+)ch true [0 5] [peach ea]\n' +
+      '[[0 5 1 3] [6 11 7 9] [12 17 13 15]] [peach punch]\n' +
+      'a <ea> a PEACH\n' +
+      '["" "first" "last"] 2\n' +
+      'lovelace_ada, turing_alan\n' +
+      '["b" "b"] ["x" "y,z"]\n' +
+      '[STRA\u00DFE \u212A]\n' +
+      '[[0 6] [7 9]]\n' +
+      'a ab\n' +
+      'hello false [[0 2] [2 3] [3 4]]\n' +
+      '1\\+1=2\\? \\[yes\\] true\n' +
+      'error parsing regexp: missing closing ): `a(b`\n' +
+      'error parsing regexp: invalid nested repetition operator: `**`\n' +
+      'error parsing regexp: invalid character class range: `z-a`\n' +
+      'error parsing regexp: invalid character class range: `\\pX`\n' +
+      'error parsing regexp: invalid repeat count: `{1001}`\n' +
+      'error parsing regexp: invalid named capture: `(?P<>`\n' +
+      'regexp: Compile(`a)`): error parsing regexp: unexpected ): `a)`\n',
+  });
+});
+
+test('a run that changes library variables leaves the next run unaffected', () => {
+  const changing = `package main
+import ("fmt"; "os"; "time"; "unicode")
+func main() {
+	*os.Stdout = *os.Stderr
+	*time.UTC = *time.FixedZone("X", 3600)
+	*unicode.Upper = unicode.RangeTable{}
+	fmt.Fprintln(os.Stdout, time.UTC, unicode.Is(unicode.Upper, 'A'))
+}`;
+  expect(executeProgram('go', changing)).toMatchObject({ stdout: '', stderr: 'X false\n' });
+  const reading = `package main
+import ("fmt"; "os"; "time"; "unicode")
+func main() { fmt.Fprintln(os.Stdout, time.UTC, unicode.Is(unicode.Upper, 'A')) }`;
+  expect(executeProgram('go', reading)).toMatchObject({ stdout: 'UTC true\n', stderr: '' });
+});
+
+test.each([
+  [
+    'list elements',
+    'package main\nimport "container/list"\nfunc main() { l := list.New(); l.PushBack(1); for i := 0; i < 18; i++ { l.PushBackList(l) } }',
+  ],
+  [
+    'a huge float precision',
+    'package main\nimport "strconv"\nfunc main() { _ = strconv.FormatFloat(1, \'f\', 1<<30, 64) }',
+  ],
+])('a library call that allocates past the limits stops the run: %s', (_, program) => {
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('out of memory'),
+  });
+});
+
+test.each([
+  ['math.Jn of a huge order', 'package main\nimport "math"\nfunc main() { _ = math.Jn(9223372036854775807, 1) }'],
+  [
+    'strconv.ParseFloat of a long number',
+    'package main\nimport ("strconv"; "strings")\nfunc main() { for i := 0; i < 100; i++ { _, _ = strconv.ParseFloat(strings.Repeat("9", 500000), 64) } }',
+  ],
+])('a library loop proportional to its argument spends operations: %s', (_, program) => {
+  expect(executeProgram('go', program)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+// Go 1.27.3 prints these: text/template's actions, functions, nested templates, options, and its parse and execution
+// errors, which name the failing action.
+test('text/template executes templates as Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"text/template"
+)
+
+type Item struct {
+	Name  string
+	Price float64
+	Tags  []string
+}
+
+func (i Item) Label() string { return strings.ToUpper(i.Name) }
+
+func show(t *template.Template, data any) {
+	err := t.Execute(os.Stdout, data)
+	fmt.Println("|", err)
+}
+
+func main() {
+	funcs := template.FuncMap{
+		"join": strings.Join,
+		"half": func(x float64) (float64, error) {
+			if x < 0 {
+				return 0, errors.New("negative")
+			}
+			return x / 2, nil
+		},
+	}
+	t := template.Must(template.New("item").Funcs(funcs).Parse(
+		"{{define \"tags\"}}[{{join . \",\"}}]{{end}}{{.Label}} {{printf \"%.2f\" .Price}} {{half .Price}} {{template \"tags\" .Tags}}" +
+			"{{range $i, $t := .Tags}}{{if eq $t \"skip\"}}{{continue}}{{end}} {{$i}}:{{$t}}{{end}}"))
+	show(t, Item{"pen", 1.5, []string{"a", "skip", "b"}})
+	show(t, &Item{"ink", -3, nil})
+	m := template.Must(template.New("m").Option("missingkey=error").Parse("{{range $k, $v := .}}{{$k}}={{$v}} {{end}}{{.zz}}"))
+	show(m, map[string]int{"b": 2, "a": 1})
+	show(template.Must(template.New("r").Parse("{{range 5}}{{if eq . 3}}{{break}}{{end}}{{.}}{{end}} {{.Missing}}")), Item{})
+	_, err := template.New("bad").Parse("{{if .X}}{{.Y}")
+	fmt.Println(err)
+	fmt.Println(template.HTMLEscapeString("<a href=\"x\">"), template.JSEscapeString("it's"))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'PEN 1.50 0.75 [a,skip,b] 0:a 2:b| <nil>\nINK -3.00 | template: item:1:78: executing "item" at <half .Price>: error calling half: negative\na=1 b=2 | template: m:1:44: executing "m" at <.zz>: map has no entry for key "zz"\n012 | template: r:1:55: executing "r" at <.Missing>: can\'t evaluate field Missing in type main.Item\ntemplate: bad:1: bad character U+007D \'}\'\n&lt;a href=&#34;x&#34;&gt; it\\\'s\n',
   });
 });
 

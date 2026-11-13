@@ -6,13 +6,15 @@ import { CASE_ORBIT, CASE_RANGES, UPPER_LOWER } from './unicodeCaseTables';
 /** `unicode.IsSpace`. */
 export function isSpace(rune: number): boolean {
   if (rune <= 0xff) return rune === 0x20 || (rune >= 0x09 && rune <= 0x0d) || rune === 0x85 || rune === 0xa0;
-  return /^\p{White_Space}$/u.test(String.fromCodePoint(rune));
+  return isWhiteSpace(rune);
 }
 
 const test =
   (pattern: RegExp) =>
   (rune: number): boolean =>
     rune >= 0 && rune <= 0x10_ff_ff && pattern.test(String.fromCodePoint(rune));
+
+const isWhiteSpace = test(/^\p{White_Space}$/u);
 
 export const isLetter = test(/^\p{L}$/u);
 export const isDigit = test(/^\p{Nd}$/u);
@@ -24,8 +26,7 @@ export const isPunct = test(/^\p{P}$/u);
 export const isSymbol = test(/^\p{S}$/u);
 export const isMark = test(/^\p{M}$/u);
 export const isControl = test(/^\p{Cc}$/u);
-export const isGraphic = (rune: number): boolean =>
-  rune === 0x20 || /^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]$/u.test(String.fromCodePoint(rune));
+export const isGraphic = test(/^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]$/u);
 
 const UPPER_CASE = 0;
 const LOWER_CASE = 1;

@@ -585,28 +585,23 @@ addMethod(READER, 'Size', fn([], [BASIC.int64]), (receiver) => BigInt(new Reader
 const REPLACER = namedType('strings', 'Replacer', { kind: 'struct', fields: [] });
 
 /**
- * Replaces at each position the first old string, in argument order, that matches there, without overlaps. Every
- * comparison is charged, matching or not, since the work grows with the input length times the number of pairs.
+ * Go's genericReplacer: at each byte position, the first old string in argument order that matches there; after an
+ * empty match, the same position is tried again without the empty string. Every comparison is charged, matching or
+ * not, since the work grows with the input length times the number of pairs.
  */
 function replaceAllPairs(s: string, pairs: string[]): string {
   const runtime = currentRuntime();
   let result = '';
-  let at = 0;
+  let last = 0;
   let work = 0;
-  const hasEmpty = pairs.some((value, index) => index % 2 === 0 && value === '');
-  while (at <= s.length) {
-    let matched = false;
+  let previousMatchEmpty = false;
+  for (let at = 0; at <= s.length;) {
+    let match: number | undefined;
     for (let pair = 0; pair < pairs.length; pair += 2) {
       const old = pairs[pair];
       work += 1 + (old.length >>> 4);
-      if (old !== '' && s.startsWith(old, at)) {
-        result = appendBounded(result, pairs[pair + 1]);
-        at += old.length;
-        matched = true;
-        break;
-      }
-      if (old === '') {
-        result = appendBounded(result, pairs[pair + 1]);
+      if (old === '' ? !previousMatchEmpty : s.startsWith(old, at)) {
+        match = pair;
         break;
       }
     }
@@ -614,14 +609,17 @@ function replaceAllPairs(s: string, pairs: string[]): string {
       runtime.spend(work);
       work = 0;
     }
-    if (matched) continue;
-    if (at >= s.length) break;
-    const size = hasEmpty ? decodeRune(s, at).size : 1;
-    result = appendBounded(result, s.slice(at, at + size));
-    at += size;
+    previousMatchEmpty = match !== undefined && pairs[match] === '';
+    if (match === undefined) {
+      at++;
+      continue;
+    }
+    result = appendBounded(appendBounded(result, s.slice(last, at)), pairs[match + 1]);
+    at += pairs[match].length;
+    last = at;
   }
   runtime.spend(work + 1);
-  return result;
+  return appendBounded(result, s.slice(last));
 }
 
 addMethod(

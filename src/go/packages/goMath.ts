@@ -11,6 +11,7 @@
  * and so never fuses. Exp and Exp2 are written in assembly on arm64 (exp_arm64.s) and are transcribed from it.
  */
 import { fma } from '../fma';
+import { currentRuntime } from '../native';
 
 const PI = 3.141592653589793;
 const PI_2 = 1.5707963267948966; // Pi/2
@@ -1625,6 +1626,15 @@ function negateInt(n: bigint): bigint {
   return n === MIN_INT64 ? n : -n;
 }
 
+/** Charges the run for the iterations of a loop that runs as many times as an argument asks. */
+function iterationCharger(): () => void {
+  const runtime = currentRuntime();
+  let iterations = 0;
+  return () => {
+    if (++iterations % 16 === 0) runtime.spend();
+  };
+}
+
 /** `math.Jn` returns the order-n Bessel function of the first kind. */
 export function jn(n: bigint, x: number): number {
   const TwoM29 = 2 ** -29;
@@ -1643,6 +1653,7 @@ export function jn(n: bigint, x: number): number {
     if ((n & 1n) === 1n) sign = true;
   }
   const order = Number(n);
+  const iterate = iterationCharger();
   let b: number;
   if (order <= x) {
     if (x >= TWO_302) {
@@ -1652,7 +1663,10 @@ export function jn(n: bigint, x: number): number {
     } else {
       b = j1(x);
       let a = j0(x);
-      for (let i = 1; i < order; i++) [a, b] = [b, fma(b, (i + i) / x, -a)];
+      for (let i = 1; i < order; i++) {
+        iterate();
+        [a, b] = [b, fma(b, (i + i) / x, -a)];
+      }
     }
   } else if (x < TwoM29) {
     if (order > 33) {
@@ -1675,19 +1689,24 @@ export function jn(n: bigint, x: number): number {
     let q1 = fma(w, z, -1);
     let k = 1;
     while (q1 < 1e9) {
+      iterate();
       k++;
       z += h;
       [q0, q1] = [q1, fma(z, q1, -q0)];
     }
     const m = order + order;
     let t = 0;
-    for (let i = 2 * (order + k); i >= m; i -= 2) t = 1 / (i / x - t);
+    for (let i = 2 * (order + k); i >= m; i -= 2) {
+      iterate();
+      t = 1 / (i / x - t);
+    }
     let a = t;
     b = 1;
     const v = 2 / x;
     const tmp = order * log(Math.abs(v * order));
     const rescale = tmp >= 709.782712893384;
     for (let i = order - 1; i > 0; i--) {
+      iterate();
       const di = i + i;
       [a, b] = [b, (b * di) / x - a];
       if (rescale && b > 1e100) {
@@ -1721,7 +1740,11 @@ export function yn(n: bigint, x: number): number {
   } else {
     let a = y0(x);
     b = y1(x);
-    for (let i = 1; i < n && b !== -Infinity; i++) [a, b] = [b, fma((i + i) / x, b, -a)];
+    const iterate = iterationCharger();
+    for (let i = 1; i < n && b !== -Infinity; i++) {
+      iterate();
+      [a, b] = [b, fma((i + i) / x, b, -a)];
+    }
   }
   return sign ? -b : b;
 }
