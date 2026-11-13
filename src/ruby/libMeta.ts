@@ -1,3 +1,4 @@
+import type { Params } from './ast';
 import { className, inspect, toStr } from './conversions';
 import { def } from './define';
 import { argumentError, nameError, typeError } from './errors';
@@ -156,6 +157,56 @@ def('Method', ['inspect', 'to_s'], 0, (self: RObject) => {
 def('Method', 'unbind', 0, () => {
   throw typeError('UnboundMethod is not supported');
 });
+
+/** What `parameters` lists for parameters a program wrote: each one's kind and, when it has one, its name. */
+function parameterList(params: Params, isLambda: boolean): Value {
+  const entries: Value[] = [];
+  const add = (kind: string, name?: string): void => {
+    entries.push(arr(name === undefined ? [sym(kind)] : [sym(kind), sym(name)]));
+  };
+  const positional = isLambda ? 'req' : 'opt';
+  const nameOf = (target: Params['required'][number]): string | undefined =>
+    typeof target === 'string' && !(params.implicit && target === 'it') ? target : undefined;
+  for (const target of params.required) add(positional, nameOf(target));
+  for (const optional of params.optional) add('opt', optional.name);
+  if (params.rest !== undefined) add('rest', params.rest);
+  for (const target of params.post) add(positional, nameOf(target));
+  for (const keyword of params.keywords) add(keyword.value ? 'key' : 'keyreq', keyword.name);
+  if (params.noKeywords) add('nokey');
+  if (params.keywordRest !== undefined) add('keyrest', params.keywordRest);
+  if (params.block !== undefined) add('block', params.block);
+  return arr(entries);
+}
+
+/** What `parameters` lists for a method or proc implemented natively, which Ruby knows only by its arity. */
+function nativeParameterList(arity: number): Value {
+  if (arity < 0) return arr([arr([sym('rest')])]);
+  return arr(Array.from({ length: arity }, () => arr([sym('req')])));
+}
+
+def(
+  'Proc',
+  'parameters',
+  0,
+  (self: RProc, _args, _block, keywords) => {
+    const asLambda = keywords?.map.get('ylambda')?.value;
+    const isLambda = asLambda === undefined || asLambda === NIL ? self.isLambda : truthy(asLambda);
+    if (self.body.kind === 'native') return nativeParameterList(self.body.arity);
+    return self.body.def.params ? parameterList(self.body.def.params, isLambda) : arr([]);
+  },
+  { keywords: true }
+);
+def('Method', 'parameters', 0, (self: RObject) => {
+  const { method } = self.data as MethodData;
+  if (method.body.kind === 'user') return parameterList(method.body.def.params, true);
+  if (method.body.kind === 'proc') return callParameters(method.body.proc);
+  return nativeParameterList(methodArity(method));
+});
+
+function callParameters(proc: RProc): Value {
+  if (proc.body.kind === 'native') return nativeParameterList(proc.body.arity);
+  return proc.body.def.params ? parameterList(proc.body.def.params, true) : arr([]);
+}
 
 function methodArity(method: RMethod): number {
   const { body } = method;

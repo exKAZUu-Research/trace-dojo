@@ -75,3 +75,20 @@ p Reflected.instance_method(:hi).owner, f.method(:hi).arity
 p defined?(@iv = 1)
 p defined?(x = 1)
 p defined?(@a += 1)
+p proc { |a, b = 1, *c, d, e:, f: 2, **g, &h| }.parameters
+p lambda { |a, b = 1, *c, d, e:, f: 2, **g, &h| }.parameters
+p proc { |(x, y), z| }.parameters, proc { }.parameters, lambda { }.parameters, proc { |*| }.parameters, proc { |a,| }.parameters
+p proc { _1 + _2 }.parameters, proc { it }.parameters, lambda { it }.parameters
+def m(a, b = 1, *rest, c, k:, j: 1, **opts, &blk) = nil
+def n(*, **, &) = nil
+def o(...) = nil
+p method(:m).parameters, method(:n).parameters, method(:o).parameters, method(:puts).parameters
+p proc { |a| }.parameters(lambda: true)
+def f(*) = g(*)
+def g(*a) = p(a)
+f(1,2)
+def h(**) = i(**)
+def i(**k) = p(k)
+h(a: 1)
+def j(&) = [1].map(&)
+p j { _1 + 1 }

@@ -624,11 +624,11 @@ export class Converter {
     for (const node of nodes) {
       if (node.type === 'comment') continue;
       if (node.type === 'hash_splat_argument') {
-        items.push({ splat: this.expr(onlyNamedChild(node)) });
+        items.push({ splat: this.anonymousOr(node, FORWARD_KEYWORDS) });
         continue;
       }
       if (node.type === 'forward_argument') {
-        items.push({ splat: { k: 'lvar', name: FORWARD_KEYWORDS, depth: this.ctx.scope.depthOf(FORWARD_KEYWORDS) } });
+        items.push({ splat: this.anonymousOr(node, FORWARD_KEYWORDS) });
         continue;
       }
       if (node.type !== 'pair') this.unsupportedNode(node);
@@ -659,8 +659,17 @@ export class Converter {
 
   /** An argument, which may be a splat (`*a`) where a list of values is expected. */
   private argument(node: Node): Expr {
-    if (node.type === 'splat_argument') return { k: 'splat', e: this.expr(onlyNamedChild(node)) };
+    if (node.type === 'splat_argument') return { k: 'splat', e: this.anonymousOr(node, FORWARD_REST) };
     return this.expr(node);
+  }
+
+  /** The value an argument such as `*a` passes, or for a bare `*`, `**`, or `&`, what the method received there. */
+  private anonymousOr(node: Node, name: string): Expr {
+    const value = namedChildren(node).find((child) => child.type !== 'comment');
+    if (value) return this.expr(value);
+    const depth = this.ctx.scope.depthOf(name);
+    if (depth < 0) this.fail(node, `名前のない ${name} 引数を受け取っていないので、${name} だけでは渡せません。`);
+    return { k: 'lvar', name, depth };
   }
 
   private argumentList(node: Node): { args: Expr[]; blockArg?: Expr } {
@@ -678,13 +687,11 @@ export class Converter {
           break;
         }
         case 'block_argument': {
-          const value = namedChildren(child)[0];
-          if (!value) this.unsupported(child, '名前のない & 引数の受け渡し');
-          blockArg = this.expr(value);
+          blockArg = this.anonymousOr(child, FORWARD_BLOCK);
           break;
         }
         case 'forward_argument': {
-          if (this.ctx.scope.depthOf(FORWARD_REST) < 0)
+          if (this.ctx.scope.depthOf(FORWARD_ALL) < 0)
             this.fail(child, '引数を転送する ... は、... を受け取るメソッドの中でしか使えません。');
           const reference = (name: string): Expr => ({ k: 'lvar', name, depth: this.ctx.scope.depthOf(name) });
           args.push({ k: 'splat', e: reference(FORWARD_REST) });
@@ -1109,12 +1116,12 @@ export class Converter {
         case 'splat_parameter': {
           if (params.rest !== undefined) this.fail(child, '* の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
-          params.rest = nameNode ? declare(child, nameNode.text) : '';
+          params.rest = declare(child, nameNode ? nameNode.text : FORWARD_REST);
           break;
         }
         case 'hash_splat_parameter': {
           const nameNode = child.childForFieldName('name');
-          params.keywordRest = nameNode ? declare(child, nameNode.text) : '';
+          params.keywordRest = declare(child, nameNode ? nameNode.text : FORWARD_KEYWORDS);
           break;
         }
         case 'keyword_parameter': {
@@ -1125,8 +1132,7 @@ export class Converter {
         }
         case 'block_parameter': {
           const nameNode = child.childForFieldName('name');
-          if (!nameNode) this.unsupported(child, '名前のない & 引数');
-          params.block = declare(child, nameNode.text);
+          params.block = declare(child, nameNode ? nameNode.text : FORWARD_BLOCK);
           break;
         }
         case 'destructured_parameter': {
@@ -1138,6 +1144,7 @@ export class Converter {
           params.rest = declare(child, FORWARD_REST);
           params.keywordRest = declare(child, FORWARD_KEYWORDS);
           params.block = declare(child, FORWARD_BLOCK);
+          declare(child, FORWARD_ALL);
           break;
         }
         case 'hash_splat_nil': {
@@ -1448,13 +1455,15 @@ export class Converter {
   }
 }
 
-const FORWARD_REST = '__forwarded_rest';
-const FORWARD_KEYWORDS = '__forwarded_keywords';
-const FORWARD_BLOCK = '__forwarded_block';
+// Anonymous parameters (`*`, `**`, `&`, `...`) live under names no variable can take, so the trace leaves them out.
+const FORWARD_REST = '*';
+const FORWARD_KEYWORDS = '**';
+const FORWARD_BLOCK = '&';
+const FORWARD_ALL = '...';
 
 /** The parameters of a block that uses numbered parameters or `it`: `_1` alone binds as `|x|` does. */
 function implicitParams(names: Set<string>): Params {
-  const params: Params = { required: [], optional: [], post: [], keywords: [], trailingComma: false };
+  const params: Params = { required: [], optional: [], post: [], keywords: [], trailingComma: false, implicit: true };
   if (names.has('it')) {
     params.required.push('it');
     return params;

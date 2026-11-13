@@ -56,7 +56,10 @@ function visibleLocals(frame: Frame): [string, Value][] {
   const scopes: Scope[] = [];
   for (let scope: Scope | undefined = frame.scope; scope; scope = scope.parent) scopes.unshift(scope);
   const values = new Map<string, Value>();
-  for (const scope of scopes) for (const [name, value] of scope.vars) values.set(name, value);
+  for (const scope of scopes) {
+    // Anonymous parameters (`*`, `**`, `&`, `...`) are kept under names that are not identifiers.
+    for (const [name, value] of scope.vars) if (/^[^*&.]/.test(name)) values.set(name, value);
+  }
   return [...values];
 }
 

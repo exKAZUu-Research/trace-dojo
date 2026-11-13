@@ -50,17 +50,19 @@ export interface MultiTarget {
 export interface Params {
   required: ParamTarget[];
   optional: { name: string; value: Expr }[];
-  /** The name of `*rest`, or '' for an anonymous `*`. */
+  /** The name of `*rest`, or `*` for an anonymous `*`. */
   rest?: string;
   post: ParamTarget[];
   keywords: { name: string; value?: Expr }[];
-  /** The name of `**opts`, or '' for an anonymous `**`. */
+  /** The name of `**opts`, or `**` for an anonymous `**`. */
   keywordRest?: string;
   block?: string;
   /** Whether the parameters end with `**nil`, which accepts no keywords. */
   noKeywords?: boolean;
   /** Whether a block's parameter list ends with a comma (`|a,|`), which splats one array argument. */
   trailingComma: boolean;
+  /** Whether the block names no parameters and uses `it` or numbered parameters (`_1`) instead. */
+  implicit?: boolean;
 }
 
 export type ParamTarget = string | MultiTarget;

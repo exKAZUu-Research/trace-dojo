@@ -1348,7 +1348,7 @@ function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | und
   const value = (name: ParamTarget): Value => (typeof name === 'string' ? scope.lookup(name, 0) : NIL);
   const args: Value[] = [...params.required.map(value), ...params.optional.map((param) => value(param.name))];
   if (params.rest !== undefined) {
-    const rest = params.rest === '' ? NIL : scope.lookup(params.rest, 0);
+    const rest = scope.lookup(params.rest, 0);
     if (rest instanceof RArray) args.push(...rest.items);
   }
   args.push(...params.post.map(value));

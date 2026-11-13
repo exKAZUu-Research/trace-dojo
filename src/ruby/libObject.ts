@@ -829,9 +829,6 @@ def(
 def('Proc', 'to_proc', 0, (self) => self);
 def('Proc', 'lambda?', 0, (self: RProc) => self.isLambda);
 def('Proc', 'arity', 0, (self: RProc) => BigInt(procArity(self)));
-def('Proc', 'parameters', 0, () => {
-  throw new UnsupportedFeatureError('Proc#parameters');
-});
 def('Proc', ['inspect', 'to_s'], 0, (self: RProc) => str(inspectProc(self)));
 def('Proc', 'curry', [0, 1], function* (self: RProc, args) {
   const arity = args.length > 0 ? Number(yield* toInt(args[0])) : procArity(self);

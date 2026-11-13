@@ -52,3 +52,21 @@ Reflected
 "assignment"
 "assignment"
 "assignment"
+[[:opt, :a], [:opt, :b], [:rest, :c], [:opt, :d], [:keyreq, :e], [:key, :f], [:keyrest, :g], [:block, :h]]
+[[:req, :a], [:opt, :b], [:rest, :c], [:req, :d], [:keyreq, :e], [:key, :f], [:keyrest, :g], [:block, :h]]
+[[:opt], [:opt, :z]]
+[]
+[]
+[[:rest, :*]]
+[[:opt, :a]]
+[[:opt, :_1], [:opt, :_2]]
+[[:opt]]
+[[:req]]
+[[:req, :a], [:opt, :b], [:rest, :rest], [:req, :c], [:keyreq, :k], [:key, :j], [:keyrest, :opts], [:block, :blk]]
+[[:rest, :*], [:keyrest, :**], [:block, :&]]
+[[:rest, :*], [:keyrest, :**], [:block, :&]]
+[[:rest]]
+[[:req, :a]]
+[1, 2]
+{a: 1}
+[2]

@@ -50,7 +50,7 @@ export function* bindParams(
   if (params.rest !== undefined) {
     const restCount = Math.max(0, args.length - index - params.post.length);
     const rest = arr(args.slice(index, index + restCount));
-    if (params.rest !== '') scope.vars.set(params.rest, rest);
+    scope.vars.set(params.rest, rest);
     index += restCount;
   }
   for (const param of params.post) yield* bindParam(param, args[index++] ?? NIL, frame);
