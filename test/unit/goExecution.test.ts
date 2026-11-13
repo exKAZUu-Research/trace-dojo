@@ -1024,3 +1024,110 @@ func main() {
       '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
   });
 });
+
+// Go 1.27.3 prints these: encoding/json (implemented on json/v2 since Go 1.25) with embedded fields, sorted map keys,
+// TextMarshaler keys, floats, HTML escaping, case-insensitive field matching, error messages, and the token stream.
+test('encoding/json marshals, unmarshals, and streams as Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+)
+
+type Base struct{ ID int }
+
+type Level int
+
+func (l Level) MarshalText() ([]byte, error) { return []byte([]string{"low", "high"}[l]), nil }
+
+type Item struct {
+	Base
+	Name   string
+	Tags   []string
+	Price  float64
+	Raw    []byte
+	Levels map[Level]int
+	next   *Item
+}
+
+func main() {
+	b, err := json.Marshal(Item{Base{1}, "a<b>", nil, 1e21, []byte("hi"), map[Level]int{1: 2, 0: 3}, nil})
+	fmt.Println(string(b), err)
+	b, _ = json.MarshalIndent(map[string]any{"z": []int{}, "a": 0.000001}, ">", "  ")
+	fmt.Println(string(b))
+	var it Item
+	err = json.Unmarshal([]byte("{\"id\":7,\"NAME\":\"x\",\"Tags\":[\"t\",1]}"), &it)
+	fmt.Println(it.ID, it.Name, it.Tags, err)
+	var v any
+	fmt.Println(json.Unmarshal([]byte("{\"a\":[1,\"s\",null,true]}"), &v), v)
+	fmt.Println(json.Unmarshal([]byte("[1,2"), &v))
+	dec := json.NewDecoder(strings.NewReader("{\"k\": [1.5, \"x\"]} 3"))
+	for {
+		t, err := dec.Token()
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+		fmt.Printf("%T:%v ", t, t)
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "\t")
+	enc.Encode([]any{json.Number("12"), json.RawMessage("{ \"r\" : 1 }")})
+	_, err = json.Marshal(func() {})
+	fmt.Println(err)
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '{"ID":1,"Name":"a\\u003cb\\u003e","Tags":null,"Price":1e+21,"Raw":"aGk=","Levels":{"high":2,"low":3}} <nil>\n{\n>  "a": 0.000001,\n>  "z": []\n>}\n7 x [t ] json: cannot unmarshal number into Item.Tags.1 of type string\n<nil> map[a:[1 s <nil> true]]\nunexpected end of JSON input\njson.Delim:{ string:k json.Delim:[ float64:1.5 string:x json.Delim:] json.Delim:} float64:3 EOF\n[\n\t12,\n\t{\n\t\t"r": 1\n\t}\n]\njson: unsupported type: func()\n',
+  });
+});
+
+// Go 1.27.3 prints these: encoding/xml with an XMLName field, indentation, escaping, tokens, and errors.
+test('encoding/xml marshals, unmarshals, and tokenizes as Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"encoding/xml"
+	"fmt"
+	"strings"
+)
+
+type Plant struct {
+	XMLName xml.Name
+	Id      int
+	Name    string
+	Origin  []string
+}
+
+func main() {
+	coffee := &Plant{XMLName: xml.Name{Local: "plant"}, Id: 27, Name: "Coffee & Tea", Origin: []string{"Ethiopia", "Brazil"}}
+	out, _ := xml.MarshalIndent(coffee, " ", "  ")
+	fmt.Println(xml.Header + string(out))
+	var p Plant
+	fmt.Println(xml.Unmarshal(out, &p), p.XMLName.Local, p.Id, p.Name, p.Origin)
+	fmt.Println(xml.Unmarshal([]byte("<plant><Id>x</Id></plant>"), &p))
+	d := xml.NewDecoder(strings.NewReader("<a x='1'><!--c-->t&lt;<b/></a>"))
+	for {
+		t, err := d.Token()
+		if err != nil {
+			fmt.Println(err)
+			break
+		}
+		fmt.Printf("%T %v\n", t, t)
+	}
+	_, err := xml.Marshal(map[string]int{})
+	fmt.Println(err)
+	fmt.Println(xml.Unmarshal([]byte("<a><b></a>"), &p))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      '<?xml version="1.0" encoding="UTF-8"?>\n <plant>\n   <Id>27</Id>\n   <Name>Coffee &amp; Tea</Name>\n   <Origin>Ethiopia</Origin>\n   <Origin>Brazil</Origin>\n </plant>\n<nil> plant 27 Coffee & Tea [Ethiopia Brazil]\nstrconv.ParseInt: parsing "x": invalid syntax\nxml.StartElement {{ a} [{{ x} 1}]}\nxml.Comment [99]\nxml.CharData [116 60]\nxml.StartElement {{ b} []}\nxml.EndElement {{ b}}\nxml.EndElement {{ a}}\nEOF\nxml: unsupported type: map[string]int\nXML syntax error on line 1: element <b> closed by </a>\n',
+  });
+});

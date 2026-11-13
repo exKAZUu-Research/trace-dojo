@@ -8,6 +8,7 @@ import { HEAP_PACKAGE, LIST_PACKAGE } from './containers';
 import { ERRORS_PACKAGE } from './errors';
 import { FMT_PACKAGE } from './fmt';
 import { IO_PACKAGE } from './io';
+import { JSON_PACKAGE } from './json';
 import { MATH_PACKAGE } from './math';
 import { COLOR_PACKAGE, IMAGE_PACKAGE, RUNTIME_PACKAGE } from './misc';
 import { OS_PACKAGE } from './os';
@@ -16,6 +17,7 @@ import { STRCONV_PACKAGE } from './strconv';
 import { STRINGS_PACKAGE } from './strings';
 import { TIME_PACKAGE } from './time';
 import { UNICODE_PACKAGE, UTF8_PACKAGE } from './unicode';
+import { XML_PACKAGE } from './xml';
 
 const PACKAGES = new Map<string, GoPackage>(
   [
@@ -35,6 +37,7 @@ const PACKAGES = new Map<string, GoPackage>(
     ERRORS_PACKAGE,
     FMT_PACKAGE,
     IO_PACKAGE,
+    JSON_PACKAGE,
     MAPS_PACKAGE,
     MATH_PACKAGE,
     OS_PACKAGE,
@@ -44,6 +47,7 @@ const PACKAGES = new Map<string, GoPackage>(
     STRINGS_PACKAGE,
     UNICODE_PACKAGE,
     UTF8_PACKAGE,
+    XML_PACKAGE,
   ].map((pkg) => [pkg.path, pkg])
 );
 
