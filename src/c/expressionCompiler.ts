@@ -319,7 +319,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
         load: () => loaderOf(type)(frame.runtime, at),
         range: () => {
           const block = frame.runtime.memory.locate(at, sizeOf(type));
-          return sizeOf(type) === 8 ? rangeOfBytes(block.pointerBytes, at - block.base, block.bytes) : undefined;
+          return sizeOf(type) === 8
+            ? rangeOfBytes(block.pointerBytes, at - block.base, block.bytes, frame.runtime.budget)
+            : undefined;
         },
         bytes: () => {
           const block = frame.runtime.memory.locate(at, sizeOf(type));
@@ -331,10 +333,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return {
       type,
       value: (frame) => resolve(frame).load(),
-      read: (frame) => {
-        const location = resolve(frame);
-        return { value: location.load(), range: location.range?.(), bytes: location.bytes?.() };
-      },
+      read: Object.assign(
+        (frame: Frame) => {
+          const location = resolve(frame);
+          return { value: location.load(), range: location.range?.(), bytes: location.bytes?.() };
+        },
+        { always: true }
+      ),
       pointer:
         type.kind === 'pointer'
           ? (frame) => {
@@ -404,7 +409,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const av = evaluate(a, frame),
         bv = evaluate(b, frame);
       const value = operation.run(av.value as Scalar, bv.value as Scalar);
-      return preserveOrigin ? arithmeticResult(value, [av, bv], operator) : { value };
+      return preserveOrigin ? arithmeticResult(value, [av, bv], frame.runtime.budget, operator) : { value };
     };
     return foldBinary(
       operation.type,
@@ -564,7 +569,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         () => operation(convertScalar(operand.constant!, type, promoted)),
         (frame) => {
           const previous = evaluate(value, frame);
-          return arithmeticResult(operation(previous.value as Scalar), [previous]);
+          return arithmeticResult(operation(previous.value as Scalar), [previous], frame.runtime.budget);
         }
       );
     }
@@ -588,7 +593,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
       (frame) => {
         const previous = evaluate(value, frame);
         const result = operation(previous.value as Scalar);
-        return promoted.kind === 'int' ? arithmeticResult(result, [previous]) : { value: result };
+        return promoted.kind === 'int'
+          ? arithmeticResult(result, [{ value: 0 }, previous], frame.runtime.budget, '-')
+          : { value: result };
       }
     );
   }
@@ -638,6 +645,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Updating one resolved location must preserve bit-field, pointer, and prefix/postfix result semantics.
   private update(expression: Extract<Expression, { kind: 'update' }>): Operand {
     const { row } = expression;
     const operand = this.expression(expression.operand);
@@ -645,6 +653,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const type = unqualified(operand.type);
     const lvalue = operand.lvalue as LValue;
     const step = this.updateOperation(type, expression.operator, row);
+    const operator = expression.operator === '++' ? '+' : '-';
     const execute = (frame: Frame): Evaluated => {
       const location = lvalue.resolve(frame);
       const previous = location.load() as Scalar;
@@ -655,11 +664,20 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const metadata =
         type.kind === 'pointer'
           ? { value: next, range, bytes: undefined }
-          : arithmeticResult(next, [{ value: previous, range, bytes: previousBytes }]);
+          : arithmeticResult(
+              next,
+              [{ value: previous, range, bytes: previousBytes }, { value: 1 }],
+              frame.runtime.budget,
+              operator
+            );
       location.store(next, metadata.range, metadata.bytes);
       if (lvalue.local) frame.live[lvalue.local.index] = true;
       const value = expression.prefix ? (lvalue.isBitField ? location.load() : next) : previous;
-      return { value, range, bytes: expression.prefix ? metadata.bytes : previousBytes };
+      return {
+        value,
+        range: expression.prefix ? metadata.range : range,
+        bytes: expression.prefix ? metadata.bytes : previousBytes,
+      };
     };
     return resultOperand(type, execute, expression.prefix ? operand.bitWidth : undefined);
   }
@@ -714,7 +732,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const metadata = calculate
         ? type.kind === 'pointer'
           ? { value: result, range: previous!.range }
-          : arithmeticResult(result as Scalar, [previous!, evaluated], operator)
+          : arithmeticResult(result as Scalar, [previous!, evaluated], frame.runtime.budget, operator)
         : evaluated;
       const range = metadata.range;
       if (type.kind === 'pointer' && range) checkAddress({ address: result as number, ...range }, 0);

@@ -1,7 +1,9 @@
+import type { ExecutionBudget } from '../interpreter/limits';
 import type { Scalar, Value } from './arith';
 import type { BinaryOperator } from './ast';
 import type { Operand } from './compilerBase';
 import { CRuntimeError } from './errors';
+import { MIN_ADDRESS } from './memory';
 import type { Frame } from './runtime';
 import { compatible, type CType, sizeOf } from './types';
 
@@ -16,13 +18,16 @@ export type Address = number | BoundedAddress;
 export type PointerRange = Pick<BoundedAddress, 'start' | 'end'>;
 interface PointerOrigin {
   representation: bigint;
-  range: PointerRange;
+  key: string;
+  range?: PointerRange;
+  expression?: AddressTerms;
 }
+type AddressTerms = ReadonlyMap<string, { range: PointerRange; weight: bigint }>;
 interface PointerByte {
   origin: PointerOrigin;
   index: number;
 }
-export type PointerBytes = Map<number, PointerByte>;
+export type PointerBytes = Map<number, ReadonlyMap<string, PointerByte>>;
 
 export type MetadataReader = ((frame: Frame) => Evaluated) & { always?: boolean };
 
@@ -54,7 +59,7 @@ export function resultOperand(type: CType, execute: (frame: Frame) => Evaluated,
 }
 
 export function evaluate(value: Evaluator, frame: Frame): Evaluated {
-  if (value.read && (value.read.always || frame.runtime.hasProvenance)) return value.read(frame);
+  if (value.read && (value.read.always || frame.runtime.hasIntegerProvenance)) return value.read(frame);
   if (!value.pointer) return { value: value(frame) };
   const at = value.pointer(frame);
   return { value: addressOf(at), range: typeof at === 'number' ? undefined : { start: at.start, end: at.end } };
@@ -153,44 +158,206 @@ export function replacePointerBytes(bytes: PointerBytes, offset: number, size: n
 }
 
 export function pointerBytesOf(range: PointerRange, value: Scalar): PointerBytes {
-  const origin = { range, representation: BigInt.asUintN(64, BigInt(value)) };
-  return new Map(Array.from({ length: 8 }, (_, index) => [index, { origin, index }]));
+  const representation = BigInt.asUintN(64, BigInt(value));
+  const origin = { range, representation, key: `${representation}/${range.start}/${range.end}` };
+  return new Map(
+    Array.from({ length: 8 }, (_, index) => [index, new Map([[`${origin.key}/${index}`, { origin, index }]])])
+  );
 }
 
 export function rangeOfBytes(
   bytes: PointerBytes | undefined,
   offset: number,
-  representation: Uint8Array
+  representation: Uint8Array,
+  budget: ExecutionBudget
 ): PointerRange | undefined {
-  const first = bytes?.get(offset);
-  if (!first || first.index !== 0) return;
-  for (let i = 0; i < 8; i++) {
-    const byte = bytes!.get(offset + i);
-    if (
-      !byte ||
-      byte.index !== i ||
-      byte.origin.representation !== first.origin.representation ||
-      byte.origin.range.start !== first.origin.range.start ||
-      byte.origin.range.end !== first.origin.range.end ||
-      representation[offset + i] !== Number((first.origin.representation >> BigInt(i * 8)) & 255n)
-    )
-      return;
+  const origins = matchingOrigins(bytes, offset, representation, budget);
+  const expression = origins.find((origin) => origin.expression)?.expression;
+  if (expression) return rangeOfTerms(expression);
+  let range: PointerRange | undefined;
+  for (const origin of origins) {
+    if (!origin.range) continue;
+    range = range
+      ? { start: Math.max(range.start, origin.range.start), end: Math.min(range.end, origin.range.end) }
+      : origin.range;
   }
-  return first.origin.range;
+  return range;
 }
 
-export function arithmeticResult(value: Scalar, operands: Evaluated[], operator?: BinaryOperator): Evaluated {
-  const [left, right] = operands;
-  if (operator === '-' && left?.range && right?.range) return { value };
-  let range: PointerRange | undefined;
-  let bytes: PointerBytes | undefined;
-  let ambiguous = false;
-  for (const operand of operands) {
-    if (operand.range) {
-      if (range && (range.start !== operand.range.start || range.end !== operand.range.end)) ambiguous = true;
-      range ??= operand.range;
-    }
-    bytes ??= operand.bytes;
+function matchingOrigins(
+  bytes: PointerBytes | undefined,
+  offset: number,
+  representation: Uint8Array,
+  budget: ExecutionBudget
+): PointerOrigin[] {
+  const origins: PointerOrigin[] = [];
+  for (const { origin, index } of bytes?.get(offset)?.values() ?? []) {
+    budget.spend(8);
+    if (index === 0 && coherentOrigin(bytes!, offset, representation, origin)) origins.push(origin);
   }
-  return { value, range: ambiguous ? undefined : range, bytes };
+  return origins;
+}
+
+function coherentOrigin(
+  bytes: PointerBytes,
+  offset: number,
+  representation: Uint8Array,
+  origin: PointerOrigin
+): boolean {
+  for (let i = 0; i < 8; i++) {
+    if (
+      !bytes.get(offset + i)?.has(`${origin.key}/${i}`) ||
+      representation[offset + i] !== Number((origin.representation >> BigInt(i * 8)) & 255n)
+    )
+      return false;
+  }
+  return true;
+}
+
+export function arithmeticResult(
+  value: Scalar,
+  operands: Evaluated[],
+  budget: ExecutionBudget,
+  operator?: BinaryOperator
+): Evaluated {
+  if (!operands.some((operand) => !!operand.range || !!operand.bytes?.size)) return { value };
+  const sources = operands.map(
+    (operand) => operand.bytes ?? (operand.range ? pointerBytesOf(operand.range, operand.value as Scalar) : undefined)
+  );
+  const bytes = mergePointerBytes(sources, budget);
+  const terms = operands.map((operand) => termsOf(operand, budget));
+  if (!terms.some((item) => item !== undefined)) return { value, bytes };
+  const numeric = BigInt(value);
+  const isAddress = numeric >= BigInt(MIN_ADDRESS) && numeric <= BigInt(Number.MAX_SAFE_INTEGER);
+  let expression: AddressTerms;
+  if (operator === '+' || operator === '-') expression = combineTerms(terms, operator, budget);
+  else if (!isAddress) expression = new Map();
+  else {
+    const recovered = rangeOfBytes(bytes, 0, representationOf(value), budget);
+    const range = recovered ?? uniqueRange(operands);
+    expression = range ? termsForRange(range) : new Map();
+  }
+  return {
+    value,
+    range: isAddress ? rangeOfTerms(expression) : undefined,
+    bytes: expressionBytes(bytes, value, expression, budget),
+  };
+}
+
+function termsOf(operand: Evaluated, budget: ExecutionBudget): AddressTerms | undefined {
+  const expression = matchingOrigins(operand.bytes, 0, representationOf(operand.value as Scalar), budget).find(
+    (origin) => origin.expression
+  )?.expression;
+  return expression ?? (operand.range ? termsForRange(operand.range) : undefined);
+}
+
+function representationOf(value: Scalar): Uint8Array {
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigUint64(0, BigInt.asUintN(64, BigInt(value)), true);
+  return bytes;
+}
+
+function termsForRange(range: PointerRange): AddressTerms {
+  return new Map([[`${range.start}/${range.end}`, { range, weight: 1n }]]);
+}
+
+function rangeOfTerms(terms: AddressTerms): PointerRange | undefined {
+  if (terms.size !== 1) return;
+  const [term] = terms.values();
+  return term.weight === 1n ? term.range : undefined;
+}
+
+function combineTerms(
+  operands: (AddressTerms | undefined)[],
+  operator: '+' | '-',
+  budget: ExecutionBudget
+): AddressTerms {
+  const terms = new Map<string, { range: PointerRange; weight: bigint }>();
+  for (const [index, operand] of operands.entries()) {
+    for (const [key, term] of operand ?? []) {
+      budget.spend();
+      const weight = (terms.get(key)?.weight ?? 0n) + term.weight * (operator === '-' && index > 0 ? -1n : 1n);
+      if (weight === 0n) terms.delete(key);
+      else terms.set(key, { range: term.range, weight });
+    }
+  }
+  return terms;
+}
+
+function uniqueRange(operands: Evaluated[]): PointerRange | undefined {
+  let range: PointerRange | undefined;
+  for (const operand of operands) {
+    if (!operand.range) continue;
+    if (range && (range.start !== operand.range.start || range.end !== operand.range.end)) return;
+    range = operand.range;
+  }
+  return range;
+}
+
+function expressionBytes(
+  bytes: PointerBytes | undefined,
+  value: Scalar,
+  expression: AddressTerms,
+  budget: ExecutionBudget
+): PointerBytes {
+  const representation = BigInt.asUintN(64, BigInt(value));
+  budget.spend(expression.size);
+  const key =
+    `e:${representation}/` +
+    [...expression]
+      .map(([at, term]) => `${at}=${term.weight}`)
+      .toSorted()
+      .join(',');
+  const origin: PointerOrigin = { representation, key, expression };
+  const result: PointerBytes = new Map();
+  for (const [offset, candidates] of bytes ?? []) {
+    budget.spend(candidates.size);
+    result.set(offset, new Map([...candidates].filter(([, byte]) => !byte.origin.expression)));
+  }
+  for (let index = 0; index < 8; index++) {
+    result.set(
+      index,
+      new Map<string, PointerByte>([...(result.get(index) ?? []), [`${key}/${index}`, { origin, index }]])
+    );
+  }
+  return result;
+}
+
+export function mergePointerBytes(
+  sources: (PointerBytes | undefined)[],
+  budget: ExecutionBudget
+): PointerBytes | undefined {
+  const present = sources.filter((source): source is PointerBytes => !!source?.size);
+  if (present.length < 2) return present[0];
+  const result: PointerBytes = new Map();
+  for (const source of present) {
+    for (const [offset, candidates] of source) {
+      budget.spend(candidates.size + (result.get(offset)?.size ?? 0));
+      const combined = new Map(result.get(offset));
+      for (const [key, byte] of candidates) combined.set(key, byte);
+      result.set(offset, combined);
+    }
+  }
+  return result;
+}
+
+export function storedPointerBytes(
+  range: PointerRange,
+  value: Scalar,
+  bytes: PointerBytes | undefined,
+  budget: ExecutionBudget
+): PointerBytes {
+  const retained: PointerBytes = new Map();
+  for (const [offset, candidates] of bytes ?? []) {
+    budget.spend(candidates.size);
+    const other = new Map(
+      [...candidates].filter(
+        ([, byte]) =>
+          byte.origin.range !== undefined &&
+          (byte.origin.range.start !== range.start || byte.origin.range.end !== range.end)
+      )
+    );
+    if (other.size > 0) retained.set(offset, other);
+  }
+  return mergePointerBytes([pointerBytesOf(range, value), retained], budget)!;
 }

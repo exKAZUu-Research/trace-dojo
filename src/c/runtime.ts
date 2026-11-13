@@ -14,6 +14,7 @@ import {
   type PointerRange,
   replacePointerBytes,
   slicePointerBytes,
+  storedPointerBytes,
 } from './pointerBounds';
 import { type CType, type FunctionType, sizeOf } from './types';
 
@@ -107,11 +108,18 @@ export class Frame implements TracedFrame {
     this.slots = Array.from({ length: fn.slotCount });
   }
   assign(index: number, result: Evaluated | undefined): void {
-    if (result?.range || result?.bytes?.size) this.runtime.hasProvenance = true;
+    const type = this.fn.locals[index]?.type;
+    if (type?.kind === 'int' && (result?.range || result?.bytes?.size)) this.runtime.hasIntegerProvenance = true;
     this.slots[index] = result?.value as Scalar | undefined;
     if (result?.range) this.scalarRanges.set(index, result.range);
     else this.scalarRanges.delete(index);
-    if (result?.bytes) this.scalarBytes.set(index, result.bytes);
+    const bytes =
+      result?.range && type && sizeOf(type) === 8
+        ? type.kind === 'pointer'
+          ? pointerBytesOf(result.range, result.value as Scalar)
+          : storedPointerBytes(result.range, result.value as Scalar, result.bytes, this.runtime.budget)
+        : result?.bytes;
+    if (bytes) this.scalarBytes.set(index, bytes);
     else this.scalarBytes.delete(index);
   }
 
@@ -141,7 +149,7 @@ export class Frame implements TracedFrame {
 }
 
 export class Runtime implements TracedRuntime<Frame> {
-  hasProvenance = false;
+  hasIntegerProvenance = false;
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
   readonly steps = new StepTracker();
@@ -355,9 +363,14 @@ export function storeValue(
     return;
   }
   storerOf(type)(runtime, address, value);
-  const metadata = range && sizeOf(type) === 8 ? pointerBytesOf(range, value) : bytes;
+  const metadata =
+    range && sizeOf(type) === 8
+      ? type.kind === 'pointer'
+        ? pointerBytesOf(range, value)
+        : storedPointerBytes(range, value, bytes, runtime.budget)
+      : bytes;
   if (metadata) {
-    runtime.hasProvenance = true;
+    if (type.kind === 'int') runtime.hasIntegerProvenance = true;
     const size = sizeOf(type);
     const block = runtime.memory.locate(address, size);
     replacePointerBytes(block.pointerBytes, address - block.base, size, metadata);
@@ -368,7 +381,6 @@ export function storeRecord(runtime: Runtime, address: number, value: RecordValu
   const block = runtime.memory.locate(address, value.bytes.length);
   if (block.isReadOnly) throw new CRuntimeError('readOnly');
   const offset = address - block.base;
-  if (value.pointerBytes?.size) runtime.hasProvenance = true;
   replacePointerBytes(block.pointerBytes, offset, value.bytes.length, value.pointerBytes);
   block.bytes.set(value.bytes, offset);
   block.initialized.set(value.initialized, offset);

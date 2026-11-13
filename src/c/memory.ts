@@ -47,6 +47,8 @@ const REGION_STARTS: Record<Region, number> = {
   stack: 0x1_6f_df_f0_00,
 };
 
+export const MIN_ADDRESS = Math.min(...Object.values(REGION_STARTS));
+
 /** The gap left after every block, so that a pointer just past one block never points into the next. */
 const GUARD = 16;
 const MAX_STACK_BYTES = 8 * 1024 * 1024;

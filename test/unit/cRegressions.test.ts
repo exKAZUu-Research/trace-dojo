@@ -1242,3 +1242,74 @@ test.each([
     diagnostics: [expect.objectContaining({ row: row + 1 })],
   });
 });
+
+test.each(['k^(k^b)', 'k+(b-k)', '(b+k)-k', '(b^k)^k'])(
+  'mixed byte origins retain reversible pointer representations: %s',
+  (expression) => {
+    const result = executeProgram(
+      'c',
+      `#include <stdio.h>
+int main(void){int a[2][2]={{1,2},{3,4}};int*p=a[0]+2,*m=a[0],*q;
+for(int i=0;i<8;i++){unsigned char b=((unsigned char*)&p)[i],k=((unsigned char*)&m)[i];((unsigned char*)&q)[i]=${expression};}printf("%d",*q);}`
+    );
+    expect(result).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: expect.any(String) });
+  }
+);
+
+test.each(['m^m', 'm&0', 'm%1', 'm-m', '(m^m)+4', '(m^m)-4'])(
+  'transformed pointer integers act as offsets: %s',
+  (offset) => {
+    const shifted = offset.endsWith('+4')
+      ? 'a[0]+1'
+      : offset.endsWith('-4')
+        ? '(int*)((uintptr_t)(a[0]+2)+4)'
+        : 'a[0]+2';
+    const result = executeProgram(
+      'c',
+      `#include <stdio.h>
+#include <stdint.h>
+int main(void){int a[2][2]={{1,2},{3,4}};uintptr_t p=(uintptr_t)(${shifted}),m=(uintptr_t)a[1];int*q=(int*)(p+(${offset}));printf("%d",*q);}`
+    );
+    expect(result).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: expect.any(String) });
+  }
+);
+
+test('mixed integer transformations can restore either pointer representation', () => {
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>
+#include <stdint.h>
+int main(void){int a[2][2]={{1,2},{3,4}};uintptr_t p=(uintptr_t)&a[0][0],m=(uintptr_t)&a[1][0];uintptr_t n=m^(m^p);printf("%d",*(int*)n);}`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '1', uncaughtException: undefined });
+});
+
+test('ordinary arithmetic retains its operation budget after pointer declarations', () => {
+  const expression = '(i*j+i/j-j%i)*(i^j)+((i<<1)|(j>>1))-(total%7)';
+  expect(
+    executeProgram(
+      'c',
+      `#include <stdio.h>
+int main(void){int arr[4];int*p=arr;char*s="abc";long total=0;for(int i=1;i<=700;i++)for(int j=1;j<=700;j++){total+=${expression}+${expression}+${expression}+${expression};}printf("%ld",total);}`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '121453674519304', uncaughtException: undefined });
+});
+
+test.each(['m+(p-m)', '(p+m)-m'])('additive pointer origins cancel across calls and byte copies: %s', (expression) => {
+  for (const end of [false, true]) {
+    const result = executeProgram(
+      'c',
+      `#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+uintptr_t save(uintptr_t n){uintptr_t copy;memcpy(&copy,&n,sizeof copy);return copy;}
+int main(void){int a[2][2]={{1,2},{3,4}};uintptr_t p=(uintptr_t)(a[0]+${end ? 2 : 0}),m=(uintptr_t)a[1];uintptr_t n=save(${expression});printf("%d",*(int*)n);}`
+    );
+    expect(result).toMatchObject({
+      kind: 'executed',
+      stdout: end ? '' : '1',
+      uncaughtException: end ? expect.any(String) : undefined,
+    });
+  }
+});
