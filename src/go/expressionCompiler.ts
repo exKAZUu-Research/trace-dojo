@@ -31,7 +31,7 @@ import { equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
 import { currentRuntime } from './native';
-import type { Operand, Storage } from './operand';
+import type { Operand, SsaConstant, Storage } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
 import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
 import { boundsPanic, indexPanic, nilPointerPanic, plainPanic, typeAssertionPanic } from './runtimeErrors';
@@ -454,7 +454,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         },
         ssaConstant:
           entity.definedAsConstant &&
-          (() => !entity.boxed && !entity.writes && (entity.definedAsConstant as () => boolean)()),
+          ((frame) => !entity.boxed && !entity.writes && (entity.definedAsConstant as SsaConstant)(frame)),
         variable: { markUsed, entity },
         backingVars: [entity],
         addressStorage: { backingVars: [entity] },
@@ -975,7 +975,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const fuseRight = rightProduct && fused(readLeft, rightProduct, false, operator === '-', false).eval;
     const fn = this.fn;
     if (operator === '+' && leftProduct && rightProduct && isBasic(type, 'float64') && fn) {
-      fn.sumsOfProducts.push(() => fuses(leftProduct) && fuses(rightProduct));
+      fn.sumsOfProducts.push(() => fuses(leftProduct, undefined) && fuses(rightProduct, undefined));
     }
     // Go's arm64 rules try `a - x*y` before `x*y - a`, and an addition's second operand before its first. Its generic
     // common subexpression elimination reorders the operands of an addition of two products only when another such
@@ -994,8 +994,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       type,
       span,
       eval: (frame) => {
-        const leftFuses = leftProduct !== undefined && fuses(leftProduct);
-        const rightFuses = rightProduct !== undefined && fuses(rightProduct);
+        const leftFuses = leftProduct !== undefined && fuses(leftProduct, frame);
+        const rightFuses = rightProduct !== undefined && fuses(rightProduct, frame);
         if (leftFuses && (!rightFuses || prefersLeft(frame))) return (fuseLeft as Eval)(frame);
         if (rightFuses) return (fuseRight as Eval)(frame);
         return plain(frame);
@@ -2229,16 +2229,16 @@ function inlinable(fn: FunctionContext): boolean {
  * Whether a product reaches the addition as a multiplication: through a variable only while it keeps its single
  * definition, and not when both factors are constants, which Go's compiler multiplies before the program runs.
  */
-function fuses(product: NonNullable<Operand['product']>): boolean {
+function fuses(product: NonNullable<Operand['product']>, frame: Frame | undefined): boolean {
   const { enabled = always, constant = never } = product;
-  return enabled() && !constant();
+  return enabled() && !constant(frame);
 }
 
 /** Whether both operands are constants to Go's compiler, which then computes the operation before the program runs. */
-function bothConstant(left: Operand, right: Operand): (() => boolean) | undefined {
+function bothConstant(left: Operand, right: Operand): SsaConstant | undefined {
   const { ssaConstant: a } = left;
   const { ssaConstant: b } = right;
-  return a && b && (() => a() && b());
+  return a && b && ((frame) => a(frame) && b(frame));
 }
 
 function isNil(operand: Operand): boolean {

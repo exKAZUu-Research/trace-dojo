@@ -18,7 +18,7 @@ import { describeConstant, largerUntyped, sameUntypedFamily } from './expression
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
 import { currentRuntime } from './native';
-import type { Operand, Storage } from './operand';
+import type { Operand, SsaConstant, Storage } from './operand';
 import { ordering } from './operators';
 import {
   type Eval,
@@ -143,6 +143,8 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (variadic) return this.variadicArguments(expression, operands, signature, name);
     if (!callee || operands.length !== params.length) return this.listArguments(expression, operands, signature, name);
     const { summary, receivers } = callee;
+    for (const [index, { ssaConstant }] of operands.entries())
+      if (ssaConstant) callee.constantArgs[receivers + index] = ssaConstant;
     operands = operands.map((operand, index) =>
       isInterface(params[index])
         ? operand
@@ -156,7 +158,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   /** A call of a function or method the program declares, with what stands for its result in the caller. */
   private programCall(summary: CalleeSummary | undefined, receivers: number): ProgramCall | undefined {
     if (!summary) return undefined;
-    return { summary, receivers, result: this.hiddenVariable() };
+    return { summary, receivers, result: this.hiddenVariable(), constantArgs: [] };
   }
 
   private listArguments(
@@ -1184,6 +1186,8 @@ interface ProgramCall {
   summary: CalleeSummary;
   receivers: number;
   result: VarEntity;
+  /** Whether each argument is a constant to Go's compiler, by parameter index. */
+  constantArgs: SsaConstant[];
 }
 
 /** Makes a value passed to a function of the program share what the body does with the parameter. */
@@ -1200,7 +1204,11 @@ function linkToParameter(call: ProgramCall, index: number, value: Storage): void
 function inlinedStackBuffers(call: ProgramCall | undefined): (frame: Frame) => StackBuffers | undefined {
   const site = {};
   return (frame) =>
-    call?.summary.inlinable() ? frame.inlinedStackBuffers(site, staysLocal(call.result, frame)) : undefined;
+    call?.summary.inlinable()
+      ? frame.inlinedStackBuffers(site, staysLocal(call.result, frame), (caller) =>
+          Array.from(call.constantArgs, (constant) => constant?.(caller) ?? false)
+        )
+      : undefined;
 }
 
 /** What Go's inliner charges for calling a library function: the fmt printers inline at a cost of 72 or 73. */

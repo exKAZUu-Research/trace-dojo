@@ -400,8 +400,8 @@ export abstract class StatementCompiler extends CallCompiler {
     count: number,
     typeOf: (index: number) => Type | undefined,
     defineTypes?: Type[],
-    /** The first value, when the caller has compiled it already. */
-    precompiled?: Operand,
+    /** Receives the operand of each value when there is one value per target. */
+    compiled?: Operand[],
     targetLocal?: (index: number) => VarEntity | 'discard' | undefined
   ): Eval[] | undefined {
     const convert = (operand: Operand, index: number): Eval => {
@@ -428,10 +428,12 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     if (right.length === count) {
       return right.map((expression, index) => {
-        const compiled = index === 0 && precompiled ? precompiled : this.expression(expression);
+        const expressionOperand = this.expression(expression);
+        if (compiled) compiled[index] = expressionOperand;
         // Assigning or returning a slice variable lets its array be shared, unless it converts to an interface.
         const target = typeOf(index);
-        const operand = target && isInterface(target) ? compiled : this.sliceTransition(expression, compiled);
+        const operand =
+          target && isInterface(target) ? expressionOperand : this.sliceTransition(expression, expressionOperand);
         if (operand.createsObject || (operand.isCall && this.isConstructorCall(expression)))
           this.creations.add(expression);
         if (operand.type.kind === 'tuple') {
@@ -445,7 +447,7 @@ export abstract class StatementCompiler extends CallCompiler {
       });
     }
     if (right.length === 1) {
-      const operand = precompiled ?? this.expression(right[0]);
+      const operand = this.expression(right[0]);
       if (this.isInvalid(operand)) return undefined;
       if (operand.type.kind === 'tuple' && operand.type.types.length === count) return spreadResults(operand, convert);
       if (count === 2 && operand.commaOk) return commaOkResults(operand, convert);
@@ -528,13 +530,8 @@ export abstract class StatementCompiler extends CallCompiler {
     if (existing.every((entity, index) => entity !== undefined || names[index].name === '_')) {
       this.error(statement, ':= の左辺に新しい変数がありません（すでにある変数への代入は = で書きます）。');
     }
-    const single = left.length === 1 && right.length === 1 && !existing[0] && names[0].name !== '_';
-    const first = single ? this.expression(right[0]) : undefined;
-    if (first?.product && isFloat(first.type) && !isUntyped(first.type)) {
-      return this.productDeclaration(statement, names[0], first);
-    }
     const types: Type[] = [];
-    const definedAsConstant = first?.ssaConstant;
+    const compiled: Operand[] = [];
     const holders = names.map(({ name, span }, index): VarEntity | 'discard' => {
       if (name === '_') return 'discard';
       const current = existing[index];
@@ -550,7 +547,7 @@ export abstract class StatementCompiler extends CallCompiler {
         return entity?.kind === 'var' ? entity.type : undefined;
       },
       types,
-      first,
+      compiled,
       (index) => holders[index]
     );
     if (!values) {
@@ -577,7 +574,7 @@ export abstract class StatementCompiler extends CallCompiler {
       sliceDeclaration(variable, right.length === left.length ? right[index] : undefined);
       const holder = holders[index];
       if (holder !== 'discard') transferEscapeLinks(holder, variable);
-      if (single) variable.definedAsConstant = definedAsConstant;
+      this.defineFromValue(variable, compiled[index], values, index);
       return (frame) => (value) => declareValue(frame, variable, value);
     });
     const exec: Exec = (frame) => {
@@ -591,29 +588,26 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /**
-   * `x := a * b` with floats: keeps the factors in hidden slots so that an addition using x fuses the multiplication,
-   * as Go's compiler does on arm64 while x keeps this single definition.
+   * Lets uses of a variable that keeps its declared value see it as Go's SSA form does: as a constant when the value is
+   * one, and for a float product as the multiplication, keeping the factors in hidden slots so that an addition using
+   * the variable fuses it, as Go's compiler does on arm64.
    */
-  private productDeclaration(statement: Span, name: { name: string; span: Span }, operand: Operand): Exec {
-    const product = operand.product as NonNullable<Operand['product']>;
+  private defineFromValue(variable: VarEntity, operand: Operand | undefined, values: Eval[], index: number): void {
+    if (!operand) return;
+    variable.definedAsConstant = operand.ssaConstant;
+    const { product, type } = operand;
+    if (!product || !isFloat(type) || isUntyped(type) || type !== variable.type) return;
     const left = this.hiddenSlot();
     const right = this.hiddenSlot();
-    const variable = this.declareLocal(name.name, operand.type, name.span);
     variable.productFactors = { left, right, source: product.source };
-    variable.definedAsConstant = operand.ssaConstant;
-    const multiply = arithmetic('*', operand.type);
-    return this.withStep(
-      statement,
-      (frame) => {
-        const x = product.left(frame);
-        const y = product.right(frame);
-        frame.locals[left] = x;
-        frame.locals[right] = y;
-        declareValue(frame, variable, multiply(x, y));
-        return;
-      },
-      false
-    );
+    const multiply = arithmetic('*', type);
+    values[index] = (frame) => {
+      const x = product.left(frame);
+      const y = product.right(frame);
+      frame.locals[left] = x;
+      frame.locals[right] = y;
+      return multiply(x, y);
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- var declarations with and without types and values.
@@ -631,6 +625,7 @@ export abstract class StatementCompiler extends CallCompiler {
         continue;
       }
       const types: Type[] = [];
+      const compiled: Operand[] = [];
       const holders = spec.names.map((name): VarEntity | 'discard' =>
         name.name === '_' ? 'discard' : this.discardTarget(name)
       );
@@ -640,7 +635,7 @@ export abstract class StatementCompiler extends CallCompiler {
         spec.names.length,
         () => declaredType,
         types,
-        undefined,
+        compiled,
         (index) => holders[index]
       );
       const variables = spec.names.map((name, index) => {
@@ -650,6 +645,7 @@ export abstract class StatementCompiler extends CallCompiler {
         sliceDeclaration(variable, spec.values.length === spec.names.length ? spec.values[index] : undefined);
         const holder = holders[index];
         if (holder !== 'discard') transferEscapeLinks(holder, variable);
+        if (values) this.defineFromValue(variable, compiled[index], values, index);
         return variable;
       });
       if (!values) continue;
@@ -1411,6 +1407,8 @@ export abstract class StatementCompiler extends CallCompiler {
         for (const [index, parameter] of signature.parameters.entries()) {
           fn.params.push(this.declareParameter(parameter, type.params[index]));
         }
+        for (const [index, param] of fn.params.entries())
+          param.definedAsConstant = (frame) => frame?.constantParam(index) ?? false;
         fn.info.params.push(...fn.params);
         fn.results = type.results;
         fn.hasNamedResults = signature.results.some((result) => result.name !== undefined);

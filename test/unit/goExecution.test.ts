@@ -1024,3 +1024,39 @@ func main() {
       '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
   });
 });
+
+// Go 1.27.3's SSA form knows a variable declared from a constant in any declaration form as that constant, and a
+// parameter of an inlined call as its constant argument, so it folds their products instead of fusing them; math.FMA
+// keeps an infinite addend when the exact finite product exceeds the float64 range.
+test('constants reach products through every declaration form and inlined call', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"math"
+)
+
+var v = []float64{0.1, 0.9, 0.3, 0.7}
+
+func price(p float64, qty int) float64 { return p*float64(qty) + 0.15 }
+
+func lerp(a, b, t float64) float64 { return a + (b-a)*t }
+
+func main() {
+	var a, b = 0.1, 0.2
+	c, d := 0.3, 0.7
+	s, t := a*b, c*d
+	fmt.Println(s - t)
+	x, y := v[2], v[3]
+	var p, q = x * y, x * x
+	fmt.Println(p-0.3, q+0.1)
+	w := 0.3
+	fmt.Println(price(0.1, 3), lerp(0.1, 0.9, w), lerp(v[0], v[1], v[2]))
+	fmt.Println(math.FMA(1e308, 2, math.Inf(-1)), math.FMA(-1e308, 2, math.Inf(1)), math.FMA(math.Inf(1), 0, 1))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '-0.19\n-0.09000000000000001 0.19\n0.45000000000000007 0.33999999999999997 0.34\n-Inf +Inf NaN\n',
+  });
+});

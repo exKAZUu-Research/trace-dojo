@@ -1,6 +1,6 @@
 import type { FunctionDeclaration, Span } from './ast';
 import type { Constant } from './constants';
-import type { Storage } from './operand';
+import type { SsaConstant, Storage } from './operand';
 import type { FunctionInfo, LocalInfo, StackBuffers } from './runtime';
 import type { SliceTracking } from './slicePass';
 import type { FuncType, NamedType, Type, TypeParamType } from './types';
@@ -61,7 +61,7 @@ export interface VarEntity {
    */
   productFactors?: { left: number; right: number; source: ProductSource };
   /** Whether the declaration's value is a constant to Go's compiler. */
-  definedAsConstant?: () => boolean;
+  definedAsConstant?: SsaConstant;
 }
 
 export interface ConstEntity {
