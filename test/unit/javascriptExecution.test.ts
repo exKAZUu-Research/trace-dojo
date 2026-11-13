@@ -851,6 +851,8 @@ try { const d = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += 
     `let sum = 0;
 let ticked = false; const q = Date.now(); function tick() { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - q >= 300) ticked = true; }
 while (!ticked) tick(); console.log('ticked');
+function sleep(ms) { const start = Date.now(); while (Date.now() - start < ms) { for (let i = 0; i < 500; i++) sum += i; } }
+sleep(300); sleep(300); sleep(300); sleep(300); console.log('slept four times');
 let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');`,
   ],
   [
