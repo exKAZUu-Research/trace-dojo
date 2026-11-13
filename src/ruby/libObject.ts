@@ -911,6 +911,27 @@ export function procArity(proc: RProc): number {
 /** Defines `to_s` and `inspect` on the main object, which Ruby shows as `main`. */
 export function defineMainObject(main: RObject): void {
   const singleton = singletonClassOf(main);
+  const object = rt().c.Object;
+  const delegate = (name: string, visibility: Visibility): void => {
+    singleton.methods.set(name, {
+      name,
+      owner: singleton,
+      visibility: 'private',
+      body: {
+        kind: 'native',
+        fn: (_self, args) => {
+          if (name === 'include') return callMethod(object, 'include', args);
+          return setVisibility(object, args, visibility);
+        },
+        min: 0,
+        max: -1,
+        takesKeywords: false,
+      },
+    });
+  };
+  delegate('include', 'public');
+  delegate('public', 'public');
+  delegate('private', 'private');
   for (const name of ['to_s', 'inspect']) {
     singleton.methods.set(name, {
       name,

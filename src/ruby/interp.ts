@@ -88,7 +88,13 @@ function* evalStmt(statement: Stmt, frame: Frame): Gen {
 
 /** Whether an assignment stores a newly created object (`x = Foo.new`), which only calls the constructor. */
 function isCreation(e: Expr): boolean {
-  return e.k === 'asgn' && e.target.k !== 'mlhs' && e.value.k === 'call' && e.value.name === 'new' && !!e.value.recv;
+  return e.k === 'asgn' && e.target.k !== 'mlhs' && createsObjects(e.value);
+}
+
+/** Whether a value expression only creates objects: `Foo.new(...)`, or an array literal of such creations. */
+function createsObjects(e: Expr): boolean {
+  if (e.k === 'call') return e.name === 'new' && !!e.recv;
+  return e.k === 'array' && e.items.length > 0 && e.items.every((item) => createsObjects(item));
 }
 
 // Expressions ---------------------------------------------------------------------------------------------------------
@@ -273,9 +279,16 @@ function* interpolate(parts: (string | Expr)[], frame: Frame): Gen<string> {
 /** The values of a list of expressions, with splats (`*a`) expanded. */
 function* evalList(items: Expr[], frame: Frame): Gen<Value[]> {
   const values: Value[] = [];
-  for (const item of items) {
-    if (item.k === 'splat') values.push(...(yield* splatItems(yield* ev(item.e, frame))));
-    else values.push(yield* ev(item, frame));
+  // The values evaluated so far stay reachable while later ones run, as turtles they hold must not vanish.
+  const mark = frame.temporaries.length;
+  try {
+    for (const item of items) {
+      if (item.k === 'splat') values.push(...(yield* splatItems(yield* ev(item.e, frame))));
+      else values.push(yield* ev(item, frame));
+      frame.temporaries.push(values.at(-1) ?? NIL);
+    }
+  } finally {
+    frame.temporaries.length = mark;
   }
   return values;
 }
@@ -295,6 +308,17 @@ export function* splatItems(value: Value): Gen<Value[]> {
 
 function* evalHash(e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<RHash> {
   const hash = newHash();
+  const mark = frame.temporaries.length;
+  frame.temporaries.push(hash);
+  try {
+    yield* fillHash(hash, e, frame);
+  } finally {
+    frame.temporaries.length = mark;
+  }
+  return hash;
+}
+
+function* fillHash(hash: RHash, e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<void> {
   for (const item of e.items) {
     if ('splat' in item) {
       const value = yield* ev(item.splat, frame);
@@ -306,7 +330,6 @@ function* evalHash(e: Extract<Expr, { k: 'hash' }>, frame: Frame): Gen<RHash> {
     const key = yield* ev(item.key, frame);
     yield* hashSet(hash, key, yield* ev(item.value, frame));
   }
-  return hash;
 }
 
 export function* makeRange(from: Value, to: Value, exclusive: boolean): Gen {
@@ -655,9 +678,12 @@ function* evalFor(e: Extract<Expr, { k: 'for' }>, frame: Frame): Gen {
   return iterable;
 }
 
-/** Whether a value is one learners answer in a trace: a number, a string, a symbol, a boolean, or nil. */
+/**
+ * Whether a value is one learners answer in a trace: a number, a string, a symbol, or a boolean. nil counts as a
+ * reference, as Java's null in a variable of a class type does.
+ */
 export function storesAnswer(value: Value): boolean {
-  return typeof value !== 'object' || value === NIL || value instanceof RString || value instanceof RSymbol;
+  return typeof value !== 'object' || value instanceof RString || value instanceof RSymbol;
 }
 
 function* evalCase(e: Extract<Expr, { k: 'case' }>, frame: Frame): Gen {
@@ -889,7 +915,15 @@ function* evalCall(e: Call, frame: Frame): Gen {
   } else {
     recv = frame.self;
   }
-  const { args, keywords } = yield* evalArgs(e.args, frame);
+  const mark = frame.temporaries.length;
+  frame.temporaries.push(recv);
+  let evaluated: { args: Value[]; keywords: RHash | undefined };
+  try {
+    evaluated = yield* evalArgs(e.args, frame);
+  } finally {
+    frame.temporaries.length = mark;
+  }
+  const { args, keywords } = evaluated;
   let block: RProc | undefined;
   if (e.block) {
     block = makeBlock(e.block, frame);

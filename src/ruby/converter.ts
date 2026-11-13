@@ -114,7 +114,10 @@ export class Converter {
 
   private statement(node: Node, use: Use): Stmt {
     const e = this.expr(node, use);
-    return { e, row: node.startPosition.row, use, step: stepKindOf(e) };
+    let step = stepKindOf(e);
+    if (e.k === 'call' && e.fcall && DECLARATION_METHODS.has(e.name)) step = 'none';
+    if (this.ctx.inClassBody && !this.ctx.inDef && !this.ctx.inBlock) step = classBodyStepKind(e, step);
+    return { e, row: node.startPosition.row, use, step };
   }
 
   /** Converts a node holding statements, such as `then`, `else`, `do`, or `body_statement`, into a body. */
@@ -1128,6 +1131,16 @@ function stepKindOf(e: Expr): StepKind {
   }
 }
 
+/**
+ * How a statement of a class body records its step: declarations such as `attr_accessor` and `include` record none,
+ * and neither does storing a literal, as Java's static fields with constant initializers do.
+ */
+function classBodyStepKind(e: Expr, step: StepKind): StepKind {
+  if (step === 'call' || step === 'expr' || step === 'value') return 'none';
+  if (step === 'assign' && (e.k === 'asgn' || e.k === 'opasgn') && e.k === 'asgn' && isLiteral(e.value)) return 'constant';
+  return step;
+}
+
 /** Whether an expression is made of literals and operators over them, which nothing a program does can change. */
 function isLiteral(e: Expr): boolean {
   switch (e.k) {
@@ -1159,6 +1172,26 @@ function isLiteral(e: Expr): boolean {
     }
   }
 }
+
+/** Methods that declare rather than compute, which record no step, as Java's declarations and imports do not. */
+const DECLARATION_METHODS = new Set([
+  'include',
+  'extend',
+  'prepend',
+  'private',
+  'public',
+  'protected',
+  'module_function',
+  'attr_accessor',
+  'attr_reader',
+  'attr_writer',
+  'attr',
+  'private_constant',
+  'private_class_method',
+  'public_class_method',
+  'require',
+  'require_relative',
+]);
 
 const OPERATORS = new Set(['+', '-', '*', '/', '%', '**', '-@', '+@', '<<', '>>', '&', '|', '^', '~']);
 
