@@ -2268,6 +2268,9 @@ test('pp breaks all separators in a streamed group that cannot fit', () => {
   expect(run('class A;def inspect;"x"*80;end;end;pp({a:1,b:A.new,c:2})')).toMatchObject({
     stdout: `{a: 1,\n b:\n  ${'x'.repeat(80)},\n c: 2}\n`,
   });
+  expect(run('class A;def inspect;"x";end;end;a=["z"*40];pp [a,a,A.new]')).toMatchObject({
+    stdout: `[["${'z'.repeat(40)}"],\n ["${'z'.repeat(40)}"],\n x]\n`,
+  });
 });
 
 test('Integer step compares numeric-like limits through coerce', () => {
@@ -2382,6 +2385,9 @@ test('Array join follows receiver mutation during element conversion', () => {
   });
   expect(run('class A;def to_ary;$a.clear;[1];end;end;$a=[A.new,2];p $a.join(",")')).toMatchObject({
     stdout: '"1"\n',
+  });
+  expect(run('class A;def to_str;puts :str;1;end;end;begin;p [A.new].join;rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'str\nTypeError\n',
   });
 });
 

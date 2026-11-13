@@ -309,19 +309,31 @@ function* minimumWidth(value: Value, seen: Set<object>): Gen<number> {
   if (value instanceof RArray) {
     if (seen.has(value)) return 5;
     seen.add(value);
-    let width = 2;
-    for (const item of value.items) width += (yield* minimumWidth(item, seen)) + 2;
-    return value.items.length > 0 ? width - 2 : width;
+    try {
+      let width = 2;
+      for (const item of value.items) {
+        width += (yield* minimumWidth(item, seen)) + 2;
+        if (width > WIDTH + 2) break;
+      }
+      return value.items.length > 0 ? width - 2 : width;
+    } finally {
+      seen.delete(value);
+    }
   }
   if (value instanceof RHash) {
     if (seen.has(value)) return 5;
     seen.add(value);
-    let width = 2;
-    for (const entry of value.map.values()) {
-      width += entry.key instanceof RSymbol ? entry.key.name.length + 2 : (yield* minimumWidth(entry.key, seen)) + 4;
-      width += (yield* minimumWidth(entry.value, seen)) + 2;
+    try {
+      let width = 2;
+      for (const entry of value.map.values()) {
+        width += entry.key instanceof RSymbol ? entry.key.name.length + 2 : (yield* minimumWidth(entry.key, seen)) + 4;
+        width += (yield* minimumWidth(entry.value, seen)) + 2;
+        if (width > WIDTH + 2) break;
+      }
+      return value.map.size > 0 ? width - 2 : width;
+    } finally {
+      seen.delete(value);
     }
-    return value.map.size > 0 ? width - 2 : width;
   }
   if (value instanceof RObject) return 1;
   return (yield* inspect(value)).length;

@@ -640,8 +640,10 @@ function* preflightJoinFirst(self: RArray): Gen<void> {
     !(first instanceof RString) &&
     !(first instanceof RArray) &&
     respondsTo(first, 'to_str', true)
-  )
-    yield* callMethod(first, 'to_str', [], undefined, undefined, { fcall: true });
+  ) {
+    const converted = yield* callMethod(first, 'to_str', [], undefined, undefined, { fcall: true });
+    if (!(converted instanceof RString) && converted !== NIL) throw joinStringConversionError(first, converted);
+  }
 }
 
 def('Array', 'join', [0, 1], function* (self: RArray, args) {
@@ -655,13 +657,15 @@ function* joinValue(value: Value, separator: RString, seen: Set<RArray>): Gen<RS
   if (respondsTo(value, 'to_str', true)) {
     const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
     if (converted instanceof RString) return converted;
-    if (converted !== NIL)
-      throw typeError(
-        `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`
-      );
+    if (converted !== NIL) throw joinStringConversionError(value, converted);
   }
   const converted = yield* tryAry(value);
   return converted ? yield* join(converted, separator, seen) : yield* toSValue(value);
+}
+
+function joinStringConversionError(value: Value, converted: Value): unknown {
+  const name = realClassOf(value).name;
+  return typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
 }
 def('Array', 'assoc', 1, function* (self: RArray, [key]) {
   for (const item of self.items) {
