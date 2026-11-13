@@ -1,4 +1,5 @@
 import type { ProgramRecording } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
@@ -13,9 +14,9 @@ import { type Type, underlying } from './types';
 import { Cell, Complex, GoArray, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
-export function traceGoProgram(program: string, trace: TraceOptions): ProgramRecording {
+export function traceGoProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseGo(program), { atomicRows: new Set(trace.atomicAnnotations.keys()) });
-  const runtime = new Runtime();
+  const runtime = new Runtime(input);
   const snapshotter = new Snapshotter(runtime, compiled);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.info.isAtomic,

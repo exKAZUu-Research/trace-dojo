@@ -1,18 +1,17 @@
 import type { Entity } from '../entities';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction } from '../native';
+import { addMethod, definePackage, fn, namedType, nativeFunction } from '../native';
 import { ProgramExit } from '../runtime';
 import { BASIC, ERROR_TYPE, pointerTo, sliceOf } from '../types';
 import { Cell, GoStruct, Pointer, type Value } from '../values';
-import { bytesOf, writeStdout } from './support';
+import { bytesOf, writeStderr, writeStdout } from './support';
 
 /** `*os.File`, of which this environment has standard output and standard error. */
 const FILE = namedType('os', 'File', { kind: 'struct', fields: [] });
 
 function write(receiver: Value, bytes: string): Value[] {
   const descriptor = ((receiver as Pointer).load() as GoStruct).native?.descriptor;
-  // Standard error is accepted but not shown, as Java's System.err is.
   if (descriptor === 1) writeStdout(bytes);
-  else currentRuntime().spend(1 + Math.floor(bytes.length / 64));
+  else writeStderr(bytes);
   return [BigInt(bytes.length), undefined];
 }
 

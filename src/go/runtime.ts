@@ -1,4 +1,5 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
@@ -101,11 +102,17 @@ export class ProgramExit extends Error {
 export class Runtime implements TracedRuntime<Frame> {
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
+  /** The standard streams and the files of the run. */
+  readonly io: ProgramIO;
   readonly steps = new StepTracker();
   readonly frames: Frame[] = [];
   /** The package-level variables, which pointers may refer to. */
   globals: Cell[] = [];
   private allocated = 0;
+
+  constructor(input?: ProgramInput) {
+    this.io = new ProgramIO(this.budget, input);
+  }
 
   spend(cost = 1): void {
     this.budget.spend(cost);

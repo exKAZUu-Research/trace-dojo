@@ -16,7 +16,12 @@ export { ANY, ERROR_TYPE };
 
 /** Writes UTF-8 bytes to standard output. */
 export function writeStdout(bytes: string): void {
-  currentRuntime().budget.print(utf8Decode(bytes));
+  currentRuntime().io.stdout.write(utf8Decode(bytes));
+}
+
+/** Writes UTF-8 bytes to standard error. */
+export function writeStderr(bytes: string): void {
+  currentRuntime().io.stderr.write(utf8Decode(bytes));
 }
 
 /** Spends operations in proportion to the work a library call does on `size` items. */

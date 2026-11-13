@@ -24,6 +24,31 @@ func main() {
     finalBoard: ['.......', '.GG....', '.......', '.......', '....Y..', '....Y..', '.......'].join('\n'),
     finalTurtles: [{ x: 2, y: 1, color: 'G', dir: 'E' }],
     uncaughtException: undefined,
+    stdout: '',
+    stderr: '',
+    finalFiles: {},
+  });
+});
+
+// Go 1.27.3 prints the builtins' floats as fmt's %v does, and writes them and os.Stderr to standard error.
+test('println and os.Stderr write to standard error', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	println("n", 42, 3.5, 1e100, true)
+	print("a", 1.0, "\\n")
+	fmt.Fprintln(os.Stderr, "err")
+	fmt.Println("out")
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'out\n',
+    stderr: 'n 42 3.5 1e+100 true\na1\nerr\n',
   });
 });
 

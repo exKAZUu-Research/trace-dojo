@@ -6,12 +6,14 @@ import { binaryConstant, type Constant, exactInteger, type Rational } from './co
 import { toInterface } from './conversions';
 import type { FuncEntity, GenericFunc } from './entities';
 import { containsTypeParam, inferFromConstraints, substitute, type Substitution, unify } from './generics';
+import { utf8Decode } from './literals';
 import { dynamicMethod, invokeMethod, POINTER_METHOD, receiverFor } from './methods';
 import { currentRuntime } from './native';
 import type { Operand } from './operand';
 import { ordering } from './operators';
 import { type Eval, evaluateAll, type Frame, GoPanic, type ListEval } from './runtime';
 import { nilPointerPanic, panicNilValue, runtimeErrorPanic } from './runtimeErrors';
+import { runtimePrint } from './runtimePrint';
 import { appendValues } from './sliceOps';
 import { newTurtle, TURTLE_POINTER } from './turtle';
 import {
@@ -434,17 +436,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
       case 'print':
       case 'println': {
-        // The builtin prints to standard error, which this environment accepts without showing.
-        const values = args.map((arg) => this.defaulted(this.value(arg)).eval);
-        return {
-          mode: 'novalue',
-          type: NO_VALUE,
-          span: expression,
-          eval: (frame) => {
-            for (const value of values) value(frame);
-            return;
-          },
-        };
+        return this.printBuiltin(expression, name);
       }
       case 'close': {
         this.unsupported(expression, 'チャネル（close）');
@@ -455,6 +447,24 @@ export abstract class CallCompiler extends CompositeCompiler {
       }
     }
     throw new Error(`Unknown builtin ${name}`);
+  }
+
+  /** `print` and `println`, which write to standard error in the runtime's own format, apart from fmt's. */
+  private printBuiltin(expression: Extract<Expression, { kind: 'call' }>, name: 'print' | 'println'): Operand {
+    const operands = expression.args.map((arg) => this.defaulted(this.value(arg)));
+    const values = operands.map((operand) => operand.eval);
+    const types = operands.map((operand) => operand.type);
+    const line = name === 'println';
+    return {
+      mode: 'novalue',
+      type: NO_VALUE,
+      span: expression,
+      eval: (frame) => {
+        const texts = evaluateAll(frame, values).map((value, index) => runtimePrint(value, types[index]));
+        frame.runtime.io.stderr.write(utf8Decode(line ? `${texts.join(' ')}\n` : texts.join('')));
+        return;
+      },
+    };
   }
 
   private typeArgument(expression: Expression): Type | undefined {

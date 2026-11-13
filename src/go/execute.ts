@@ -1,6 +1,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
+import type { ProgramInput } from '../interpreter/programIo';
 import { type CompiledProgram, compileProgram } from './compiler';
 import { withRuntime } from './native';
 import { describePanic } from './panicText';
@@ -8,7 +9,7 @@ import { parseGo } from './parse';
 import { type Frame, GoFatal, GoPanic, ProgramExit, Runtime } from './runtime';
 import { Cell } from './values';
 
-export function executeGoProgram(source: string): ProgramExecution {
+export function executeGoProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
   try {
     compiled = compileProgram(parseGo(source));
@@ -17,7 +18,7 @@ export function executeGoProgram(source: string): ProgramExecution {
     throw error;
   }
   try {
-    return { kind: 'executed', ...runProgram(new Runtime(), compiled) };
+    return { kind: 'executed', ...runProgram(new Runtime(input), compiled) };
   } catch (error) {
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
@@ -43,7 +44,12 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     } catch (error) {
       uncaughtException = describeUncaught(error);
     }
-    return { finalBoard: runtime.world.boardText(), finalTurtles: runtime.world.turtleTraces(), uncaughtException };
+    return {
+      finalBoard: runtime.world.boardText(),
+      finalTurtles: runtime.world.turtleTraces(),
+      uncaughtException,
+      ...runtime.io.output(),
+    };
   });
 }
 
