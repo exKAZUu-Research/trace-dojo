@@ -383,10 +383,7 @@ function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass:
   return mapView(frame, map, viewClass, (entry) => {
     let node = nodes.get(entry);
     if (!node) {
-      node = frame.runtime.allocateObject(frame, nodeClass);
-      nodeEntries.set(node, entry);
-      nodeMaps.set(node, map as JavaObject);
-      Object.defineProperty(node, 'elements', { get: () => [entry.key, entry.value] });
+      node = createEntryNode(frame, nodeClass, entry, map as JavaObject);
       nodes.set(entry, node);
     }
     return node;
@@ -437,9 +434,7 @@ function defineMapEntry(mapClass: ClassInfo, entryClass: ClassInfo, nodeClass: C
     true,
     (frame, _, [key, value]) => {
       if (key === undefined || value === undefined) throwBuiltin(frame, 'NullPointerException');
-      const node = frame.runtime.allocateObject(frame, nodeClass);
-      nodeEntries.set(node, { key, value });
-      return node;
+      return createEntryNode(frame, nodeClass, { key, value });
     }
   );
   method.typeParameters = [k, v];
@@ -599,6 +594,23 @@ export function defineEntryNode(context: Context, entryClass: ClassInfo): ClassI
 }
 
 export const nodeEntries = new WeakMap<JavaObject, { key: Value; value: Value }>();
+
+/**
+ * A `Map.Entry` object of `entry`, a map's live entry when `map` is given; it shows its key and value to the
+ * reachability walk, which cannot see into `nodeEntries`.
+ */
+export function createEntryNode(
+  frame: Frame,
+  nodeClass: ClassInfo,
+  entry: { key: Value; value: Value },
+  map?: JavaObject
+): JavaObject {
+  const node = frame.runtime.allocateObject(frame, nodeClass);
+  nodeEntries.set(node, entry);
+  if (map) nodeMaps.set(node, map);
+  Object.defineProperty(node, 'elements', { get: () => [entry.key, entry.value] });
+  return node;
+}
 
 // code-gauge-allow functionCognitiveComplexity 21 -- One registration per builtin method, each a small native.
 // code-gauge-allow functionNcss 52 -- One registration per builtin method, each a small native.
@@ -793,9 +805,7 @@ export function defineNavigation(cls: ClassInfo, key: JavaType, isMap: boolean):
 function defineEntryNavigation(cls: ClassInfo, key: JavaType, entryType: JavaType, nodeClass: ClassInfo): void {
   const snapshot = (frame: Frame, entry: { key: Value; value: Value } | undefined): Value => {
     if (!entry) return undefined;
-    const node = frame.runtime.allocateObject(frame, nodeClass);
-    nodeEntries.set(node, { key: entry.key, value: entry.value });
-    return node;
+    return createEntryNode(frame, nodeClass, { key: entry.key, value: entry.value });
   };
   for (const [name, isFirst, removes] of [
     ['firstEntry', true, false],

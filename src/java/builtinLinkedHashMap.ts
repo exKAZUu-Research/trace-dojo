@@ -1,5 +1,5 @@
 import { classType, touch, unmodifiableWrappers } from './builtinCollectionSupport';
-import { createStore, findEntry, nodeEntries, nodeMaps, removeEntry, storeOf, tableSizeFor } from './builtinMaps';
+import { createEntryNode, createStore, findEntry, removeEntry, storeOf, tableSizeFor } from './builtinMaps';
 import { addConstructor, addMethod } from './builtinSupport';
 import { findImplementation, type Frame, throwBuiltin } from './runtime';
 import { BOOLEAN, type ClassInfo, FLOAT, INT, type JavaType } from './types';
@@ -73,9 +73,7 @@ export function defineLinkedHashMapOrder(cls: ClassInfo, entryClass: ClassInfo, 
     // An insertion-ordered store keeps its entries in iteration order, the eldest first.
     const eldest = storeOf(map).entries[0];
     if (!eldest) return;
-    const node = frame.runtime.allocateObject(frame, nodeClass);
-    nodeEntries.set(node, eldest);
-    nodeMaps.set(node, map);
+    const node = createEntryNode(frame, nodeClass, eldest, map);
     if (frame.runtime.invokeVirtual(frame, cls, 'removeEldestEntry', map, [node]) === true) {
       removeEntry(frame, map, eldest.key);
     }

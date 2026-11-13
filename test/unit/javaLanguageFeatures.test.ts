@@ -1709,6 +1709,12 @@ test.each([
     '',
   ],
   [
+    'an entry that removeEldestEntry saved',
+    'Cache c = new Cache(); c.put(1, new Turtle()); c.put(2, null); int done = 1;',
+    'static class Cache extends LinkedHashMap<Integer, Turtle> { Map.Entry<Integer, Turtle> evicted; protected boolean removeEldestEntry(Map.Entry<Integer, Turtle> eldest) { if (size() <= 1) return false; evicted = eldest; return true; } }',
+  ],
+  ['an entry of Map.entry', 'Map.Entry<Integer, Turtle> e = Map.entry(1, new Turtle()); int done = 1;', ''],
+  [
     'an entry comparator',
     'Comparator<Map.Entry<Integer, Integer>> c = make(); int done = 1;',
     'static Comparator<Map.Entry<Integer, Integer>> make() { Turtle t = new Turtle(); return Map.Entry.comparingByKey((a, b) -> { t.前に進む(); return 0; }); }',
