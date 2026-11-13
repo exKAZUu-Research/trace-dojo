@@ -469,8 +469,13 @@ function definePredicateDefaults(cls: ClassInfo, t?: JavaType): void {
 function definePredicateFactories(cls: ClassInfo, objectType: JavaType): void {
   const element: TypeVariable = { name: 'T', bounds: [objectType] };
   const predicateOf = classType(cls, typeOf(element));
+  // As the JDK's, a non-null target's equals decides every test, even of the target itself or of null.
   addMethod(cls, 'isEqual', [objectType], predicateOf, true, (frame, _, [target]) =>
-    functionObject(frame, cls, (callFrame, [value]) => javaEquals(callFrame, target, value))
+    functionObject(frame, cls, (callFrame, [value]) =>
+      target instanceof JavaObject && target.boxed === undefined
+        ? callFrame.runtime.invokeVirtual(callFrame, callFrame.runtime.builtins.objectClass, 'equals', target, [value])
+        : javaEquals(callFrame, target, value)
+    )
   ).typeParameters = [element];
   const negated: TypeVariable = { name: 'T', bounds: [objectType] };
   addMethod(

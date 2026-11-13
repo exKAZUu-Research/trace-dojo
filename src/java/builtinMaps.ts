@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 423 -- The set and map classes, which share one hash and tree store and its views.
+// code-gauge-allow-file fileNcss 426 -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
@@ -480,6 +480,18 @@ export function restrictToImmutable(
   return cls;
 }
 
+/** A map's copy constructor, which fills a table for the entries in the source's order, as `putMapEntries` does. */
+function copyMap(frame: Frame, receiver: Value, [source]: Value[]): Value {
+  if (!(source instanceof JavaObject)) return throwBuiltin(frame, 'NullPointerException');
+  // Like the other builtins, it reads only the builtin maps, which keep a store.
+  if (!source.store) return throwBuiltin(frame, 'UnsupportedOperationException');
+  const entries = source.store.ordered();
+  createStore(receiver, entries.length === 0 ? 16 : tableSizeFor(Math.ceil(entries.length / 0.75)));
+  // As the JDK's constructor does, the copy asks no `removeEldestEntry` override to evict.
+  for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value, false, false);
+  return undefined;
+}
+
 /**
  * Whether `clear`, `remove`, or `addAll` would change a set or map of `Collections`, which, as
  * `AbstractCollection` and `AbstractMap` do, reject only a call that would change them.
@@ -605,15 +617,7 @@ export function defineMapMethods(
         { kind: 'wildcard', bound: value, isSuper: false }
       ),
     ],
-    (frame, receiver, [source]) => {
-      if (!(source instanceof JavaObject) || !source.store) return throwBuiltin(frame, 'NullPointerException');
-      // As HashMap.putMapEntries does: a table for the entries, filled in the source's iteration order.
-      const entries = source.store.ordered();
-      createStore(receiver, entries.length === 0 ? 16 : tableSizeFor(Math.ceil(entries.length / 0.75)));
-      // As the JDK's constructor does, the copy asks no `removeEldestEntry` override to evict.
-      for (const entry of entries) putEntry(frame, receiver, entry.key, true, entry.value, false, false);
-      return;
-    }
+    copyMap
   );
   addMethod(cls, 'put', [key, value], value, false, (frame, receiver, [keyValue, newValue]) => {
     const previous = putEntry(frame, receiver, keyValue, false, newValue);
