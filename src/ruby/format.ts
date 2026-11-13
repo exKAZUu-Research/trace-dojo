@@ -1,4 +1,4 @@
-import { floatToInt, formatFloat, inspect, toStr, toSValue } from './conversions';
+import { floatToInt, formatFloat, inspect, toStrValue, toSValue } from './conversions';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError } from './errors';
 import { rubyDtoa } from './floatFormat';
 import { hashGet } from './hashes';
@@ -38,13 +38,20 @@ export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
 }
 
 function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; parts: (string | RString)[] }> {
-  const template = yield* toStr(formatValue);
+  const source = yield* toStrValue(formatValue);
+  const templateBytes = stringBytes(source);
+  const template = new TextDecoder('latin1').decode(templateBytes);
   let result = '';
-  let literal = '';
+  let literal: number[] = [];
   const parts: (string | RString)[] = [];
   const flush = (): void => {
-    if (literal) parts.push(literal);
-    literal = '';
+    if (literal.length > 0) {
+      const value = stringFromBytes(Uint8Array.from(literal), source.binary);
+      parts.push(value);
+      result += value.s;
+      rt().checkStringLength(result.length);
+    }
+    literal = [];
   };
   const append = (part: string | RString): void => {
     flush();
@@ -82,18 +89,17 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; pa
     }
     return entry.value;
   };
+  const nameAt = (start: number, end: number): string => new TextDecoder().decode(templateBytes.subarray(start, end));
   for (let index = 0; index < template.length; index++) {
     const char = template[index];
     if (char !== '%') {
-      result += char;
-      literal += char;
+      literal.push(templateBytes[index]);
       continue;
     }
     index++;
     if (index >= template.length) throw argumentError('incomplete format specifier; use %% (double %) instead');
     if (template[index] === '%') {
-      result += '%';
-      literal += '%';
+      literal.push(0x25);
       continue;
     }
     const spec: Spec = { minus: false, plus: false, space: false, zero: false, sharp: false };
@@ -109,7 +115,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; pa
       else if (flag === '<' || flag === '{') {
         const close = template.indexOf(flag === '<' ? '>' : '}', index);
         if (close === -1) throw argumentError('malformed name - unmatched parenthesis');
-        const name = template.slice(index + 1, close);
+        const name = nameAt(index + 1, close);
         const named = yield* namedArg(name);
         index = close;
         if (flag === '{') {
@@ -155,7 +161,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; pa
     }
     if (template[index] === '<') {
       const close = template.indexOf('>', index);
-      value = yield* namedArg(template.slice(index + 1, close));
+      value = yield* namedArg(nameAt(index + 1, close));
       index = close + 1;
     }
     const type = template[index];

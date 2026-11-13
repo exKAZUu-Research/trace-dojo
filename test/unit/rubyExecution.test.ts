@@ -506,6 +506,11 @@ test.each([
     '[255]\n[255]\n[255]\n',
   ],
   [
+    'raw bytes in format templates',
+    String.raw`p format("a\xFF%s", "b").bytes, ("a\xFF%s" % "b").bytes`,
+    '[97, 255, 98]\n[97, 255, 98]\n',
+  ],
+  [
     'raw bytes in insertion and prepend',
     String.raw`s="\xFF"; s.prepend("a"); s.insert(1,"b"); p s.bytes`,
     '[97, 98, 255]\n',
@@ -561,6 +566,11 @@ test.each([
     'custom Range arithmetic before each callback',
     'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); n <=> o.n; end; def succ; puts :succ; A.new(n+1); end; def +(v); puts :plus; A.new(n+v); end; end; (A.new(0)..A.new(3)).step(1.5) { |x| p x.n }',
     'plus\n0\nplus\n1.5\nplus\n3.0\n',
+  ],
+  [
+    'custom Range at an inclusive starting endpoint',
+    'class A; def <=>(o); 0; end; def +(x); raise "bad"; end; end; a=A.new; (a..a).step(1.5) { puts :yielded }',
+    'yielded\n',
   ],
   [
     'Unicode case folding',

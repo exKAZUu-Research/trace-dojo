@@ -328,6 +328,10 @@ function* stepNumericRange(self: RRange, start: number, by: number, block: RProc
 function* stepCustomRange(self: RRange, step: bigint | number, block: RProc): Gen {
   const { end, exclusive } = self;
   let value = self.begin;
+  if (end !== NIL && !exclusive && (yield* spaceship(value, end)) === 0) {
+    yield* callBlock(block, [value], false);
+    return self;
+  }
   for (;;) {
     rt().spend();
     if (end !== NIL) {
