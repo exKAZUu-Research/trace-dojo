@@ -1492,7 +1492,9 @@ export abstract class StatementCompiler extends CallCompiler {
       args: new Set(call.args),
       capture: (operand) => {
         const index = evaluates.length;
-        evaluates.push(operand.eval);
+        const read = operand.eval;
+        // The defer statement saves the arguments' values, so an array or a struct is copied there.
+        evaluates.push(isValueKind(operand.type) ? (frame) => copyValue(read(frame)) : read);
         return { ...operand, eval: () => current[index] };
       },
     };

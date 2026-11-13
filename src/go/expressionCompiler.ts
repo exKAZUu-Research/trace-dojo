@@ -1654,12 +1654,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const read = operand.eval;
     return (frame) => {
       const value = read(frame) as bigint;
-      // Beyond 2^53, any index is out of range, which only the panic message shows.
-      return value > 1n << 53n
-        ? Number.MAX_SAFE_INTEGER
-        : value < -(1n << 53n)
-          ? Number.MIN_SAFE_INTEGER
-          : Number(value);
+      // An index beyond 2^53 is out of range; it stays a bigint, which compares as such and prints exactly in the panic.
+      return value > 1n << 53n || value < -(1n << 53n) ? (value as unknown as number) : Number(value);
     };
   }
 

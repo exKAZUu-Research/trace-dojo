@@ -233,8 +233,9 @@ function unmarshalBinary(data: string): goTime.Time | string {
   if (version === 2) offset += BigInt.asIntN(8, read(15, 1));
   const t: goTime.Time = { wall: BigInt.asUintN(64, ns), ext: sec, loc: undefined };
   if (offset === -60n) return t;
-  const location = offset === 0n ? goTime.currentLocal() : goTime.fixedZone('', offset);
-  return goTime.inLocation(t, location);
+  // As Go's UnmarshalBinary does, the time takes Local only when Local has the encoded offset at that instant.
+  const local = goTime.inLocation(t, goTime.currentLocal());
+  return goTime.zone(local).offset === offset ? local : goTime.inLocation(t, goTime.fixedZone('', offset));
 }
 
 /** Defines a pointer method that decodes bytes into the Time and returns the error value. */
