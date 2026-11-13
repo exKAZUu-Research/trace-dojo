@@ -433,7 +433,6 @@ for (const [name, feature] of [
   ['`', '外部コマンドの実行（`...`）'],
   ['fork', 'プロセスの生成（fork）'],
   ['trap', 'シグナル（trap）'],
-  ['sleep', 'sleep'],
   ['eval', '文字列の評価（eval）'],
   ['binding', 'binding'],
   ['caller', '呼び出し履歴（caller）'],

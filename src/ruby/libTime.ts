@@ -1,0 +1,332 @@
+import { compareValues, toFloat, toInt, toStr } from './conversions';
+import { def, sdef } from './define';
+import { argumentError, typeError } from './errors';
+import type { Gen } from './interp';
+import { NIL, RObject, RString, type Value } from './objects';
+import { rt } from './runtime';
+import { arr, str } from './values';
+
+/** The local time zone, which the grader fixes to Japan's (no daylight saving time). */
+const LOCAL_OFFSET = 9 * 3600;
+const LOCAL_ZONE = 'JST';
+
+/** A Time: nanoseconds since the epoch, the offset it shows its fields in, and how it names its zone. */
+class TimeData {
+  constructor(
+    readonly nanoseconds: bigint,
+    readonly offset: number,
+    readonly zone: 'local' | 'utc' | 'fixed'
+  ) {}
+
+  hashKey(): string {
+    return `t${this.nanoseconds}`;
+  }
+
+  /** The fields as UTC fields of the shifted instant, which shows the local fields. */
+  fields(): Date {
+    return new Date(Number(floorDivide(this.nanoseconds, 1_000_000n)) + this.offset * 1000);
+  }
+}
+
+function floorDivide(a: bigint, b: bigint): bigint {
+  const quotient = a / b;
+  return a % b !== 0n && a < 0n !== b < 0n ? quotient - 1n : quotient;
+}
+
+function makeTime(nanoseconds: bigint, offset = LOCAL_OFFSET, zone: TimeData['zone'] = 'local'): RObject {
+  const time = new RObject(rt().c.Time);
+  time.data = new TimeData(nanoseconds, offset, zone);
+  return time;
+}
+
+function dataOf(time: RObject): TimeData {
+  return time.data as TimeData;
+}
+
+/** The virtual clock: the host's time plus what `sleep` has slept, since sleeping does not wait here. */
+function nowNanoseconds(): bigint {
+  const runtime = rt() as unknown as { slept?: number };
+  return BigInt(Math.round((Date.now() + (runtime.slept ?? 0) * 1000) * 1e6));
+}
+
+function* fieldArgs(args: Value[]): Gen<{ fields: number[]; seconds: number }> {
+  const fields: number[] = [];
+  for (const [index, arg] of args.slice(0, 5).entries()) {
+    const value = arg === NIL ? (index < 3 ? 1 : 0) : Number(yield* toInt(arg instanceof RString ? BigInt(arg.s) : arg));
+    fields.push(value);
+  }
+  while (fields.length < 5) fields.push(fields.length < 3 ? 1 : 0);
+  const seconds = args.length > 5 && args[5] !== NIL ? toFloat(args[5]) : 0;
+  if (fields[1] < 1 || fields[1] > 12) throw argumentError('mon out of range');
+  if (fields[2] < 1 || fields[2] > 31) throw argumentError('mday out of range');
+  if (fields[3] < 0 || fields[3] > 24) throw argumentError('hour out of range');
+  if (fields[4] < 0 || fields[4] > 59) throw argumentError('min out of range');
+  if (seconds < 0 || seconds >= 61) throw argumentError('sec out of range');
+  return { fields, seconds };
+}
+
+function* parseOffset(value: Value): Gen<number> {
+  const text = yield* toStr(value);
+  if (text === 'UTC' || text === 'Z') return 0;
+  const match = /^([+-])(\d{2}):?(\d{2})$/.exec(text);
+  if (!match) throw argumentError(`"+HH:MM", "-HH:MM", "UTC" or "A".."I","K".."Z" expected for utc_offset: ${text}`);
+  return (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 3600 + Number(match[3]) * 60);
+}
+
+function* buildTime(args: Value[], offset: number, zone: TimeData['zone']): Gen {
+  const { fields, seconds } = yield* fieldArgs(args);
+  const [year, month, day, hour, minute] = fields;
+  const whole = Math.floor(seconds);
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute, whole) - offset * 1000;
+  const fraction = BigInt(Math.round((seconds - whole) * 1e9));
+  return makeTime(BigInt(utcMs) * 1_000_000n + fraction, offset, zone);
+}
+
+sdef('Time', 'now', 0, () => makeTime(nowNanoseconds()));
+sdef('Time', ['new', 'local', 'mktime'], [0, 7], function* (self, args) {
+  if (args.length === 0) return makeTime(nowNanoseconds());
+  if (args.length === 7 && args[6] !== NIL) return yield* buildTime(args.slice(0, 6), yield* parseOffset(args[6]), 'fixed');
+  void self;
+  return yield* buildTime(args, LOCAL_OFFSET, 'local');
+});
+sdef('Time', ['utc', 'gm'], [1, 7], (_self, args) => buildTime(args, 0, 'utc'));
+sdef('Time', 'at', [1, 2], function* (_self, [seconds]) {
+  if (typeof seconds === 'bigint') return makeTime(seconds * 1_000_000_000n);
+  if (seconds instanceof RObject && seconds.data instanceof TimeData) return makeTime(seconds.data.nanoseconds);
+  return makeTime(BigInt(Math.round(toFloat(seconds) * 1e9)));
+});
+
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function yearDay(date: Date): number {
+  return Math.floor((date.getTime() - Date.UTC(date.getUTCFullYear(), 0, 1)) / 86_400_000) + 1;
+}
+
+function offsetText(offset: number, colon: boolean): string {
+  const sign = offset < 0 ? '-' : '+';
+  const magnitude = Math.abs(offset);
+  const hours = String(Math.floor(magnitude / 3600)).padStart(2, '0');
+  const minutes = String(Math.floor((magnitude % 3600) / 60)).padStart(2, '0');
+  return `${sign}${hours}${colon ? ':' : ''}${minutes}`;
+}
+
+function zoneName(data: TimeData): Value {
+  if (data.zone === 'utc') return str('UTC');
+  if (data.zone === 'local') return str(LOCAL_ZONE);
+  return NIL;
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per strftime directive.
+function strftime(data: TimeData, format: string): string {
+  const date = data.fields();
+  const pad = (value: number, width: number, flag: string): string => {
+    if (flag === '-') return String(value);
+    return String(value).padStart(width, flag === '_' ? ' ' : '0');
+  };
+  return format.replaceAll(/%([-_0^]?)(\d*)([a-zA-Z%+])/g, (whole, flag: string, _width: string, directive: string) => {
+    const hour = date.getUTCHours();
+    switch (directive) {
+      case 'Y': {
+        return String(date.getUTCFullYear());
+      }
+      case 'C': {
+        return pad(Math.floor(date.getUTCFullYear() / 100), 2, flag);
+      }
+      case 'y': {
+        return pad(date.getUTCFullYear() % 100, 2, flag);
+      }
+      case 'm': {
+        return pad(date.getUTCMonth() + 1, 2, flag);
+      }
+      case 'd': {
+        return pad(date.getUTCDate(), 2, flag);
+      }
+      case 'e': {
+        return pad(date.getUTCDate(), 2, flag || '_');
+      }
+      case 'j': {
+        return pad(yearDay(date), 3, flag);
+      }
+      case 'H': {
+        return pad(hour, 2, flag);
+      }
+      case 'k': {
+        return pad(hour, 2, flag || '_');
+      }
+      case 'I': {
+        return pad(hour % 12 || 12, 2, flag);
+      }
+      case 'l': {
+        return pad(hour % 12 || 12, 2, flag || '_');
+      }
+      case 'M': {
+        return pad(date.getUTCMinutes(), 2, flag);
+      }
+      case 'S': {
+        return pad(date.getUTCSeconds(), 2, flag);
+      }
+      case 'L': {
+        return String(Number(floorDivide(data.nanoseconds, 1_000_000n) % 1000n + 1000n) % 1000).padStart(3, '0');
+      }
+      case 'N': {
+        return String(Number(((data.nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n)).padStart(9, '0');
+      }
+      case 'p': {
+        return hour < 12 ? 'AM' : 'PM';
+      }
+      case 'P': {
+        return hour < 12 ? 'am' : 'pm';
+      }
+      case 'A': {
+        return flag === '^' ? DAYS[date.getUTCDay()].toUpperCase() : DAYS[date.getUTCDay()];
+      }
+      case 'a': {
+        return DAYS[date.getUTCDay()].slice(0, 3);
+      }
+      case 'B': {
+        return flag === '^' ? MONTHS[date.getUTCMonth()].toUpperCase() : MONTHS[date.getUTCMonth()];
+      }
+      case 'b':
+      case 'h': {
+        return MONTHS[date.getUTCMonth()].slice(0, 3);
+      }
+      case 'u': {
+        return String(date.getUTCDay() || 7);
+      }
+      case 'w': {
+        return String(date.getUTCDay());
+      }
+      case 'z': {
+        return offsetText(data.offset, false);
+      }
+      case 'Z': {
+        const zone = zoneName(data);
+        return zone === NIL ? '' : (zone as RString).s;
+      }
+      case 's': {
+        return String(floorDivide(data.nanoseconds, 1_000_000_000n));
+      }
+      case 'F': {
+        return strftime(data, '%Y-%m-%d');
+      }
+      case 'T':
+      case 'X': {
+        return strftime(data, '%H:%M:%S');
+      }
+      case 'D':
+      case 'x': {
+        return strftime(data, '%m/%d/%y');
+      }
+      case 'R': {
+        return strftime(data, '%H:%M');
+      }
+      case 'c': {
+        return strftime(data, '%a %b %e %H:%M:%S %Y');
+      }
+      case '%': {
+        return '%';
+      }
+      default: {
+        return whole;
+      }
+    }
+  });
+}
+
+function timeText(data: TimeData, withFraction: boolean): string {
+  let text = strftime(data, '%Y-%m-%d %H:%M:%S');
+  const fraction = ((data.nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n;
+  if (withFraction && fraction !== 0n) text += `.${String(fraction).padStart(9, '0').replace(/0+$/, '')}`;
+  return `${text} ${data.zone === 'utc' ? 'UTC' : offsetText(data.offset, false)}`;
+}
+
+def('Time', 'to_s', 0, (self: RObject) => str(timeText(dataOf(self), false)));
+def('Time', 'inspect', 0, (self: RObject) => str(timeText(dataOf(self), true)));
+def('Time', 'strftime', 1, function* (self: RObject, [format]) {
+  return str(strftime(dataOf(self), yield* toStr(format)));
+});
+for (const [name, read] of [
+  ['year', (date: Date) => date.getUTCFullYear()],
+  ['month', (date: Date) => date.getUTCMonth() + 1],
+  ['mon', (date: Date) => date.getUTCMonth() + 1],
+  ['day', (date: Date) => date.getUTCDate()],
+  ['mday', (date: Date) => date.getUTCDate()],
+  ['hour', (date: Date) => date.getUTCHours()],
+  ['min', (date: Date) => date.getUTCMinutes()],
+  ['sec', (date: Date) => date.getUTCSeconds()],
+  ['wday', (date: Date) => date.getUTCDay()],
+  ['yday', yearDay],
+] as const) {
+  def('Time', name, 0, (self: RObject) => BigInt(read(dataOf(self).fields())));
+}
+for (const [index, day] of DAYS.entries()) {
+  def('Time', `${day.toLowerCase()}?`, 0, (self: RObject) => dataOf(self).fields().getUTCDay() === index);
+}
+def('Time', 'usec', 0, (self: RObject) => (((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n) / 1000n);
+def('Time', 'nsec', 0, (self: RObject) => ((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n);
+def('Time', 'zone', 0, (self: RObject) => zoneName(dataOf(self)));
+def('Time', ['utc_offset', 'gmt_offset', 'gmtoff'], 0, (self: RObject) => BigInt(dataOf(self).offset));
+def('Time', ['utc?', 'gmt?'], 0, (self: RObject) => dataOf(self).zone === 'utc');
+def('Time', 'to_i', 0, (self: RObject) => floorDivide(dataOf(self).nanoseconds, 1_000_000_000n));
+def('Time', 'to_f', 0, (self: RObject) => Number(dataOf(self).nanoseconds) / 1e9);
+def('Time', ['utc', 'getutc', 'gmtime', 'getgm'], 0, (self: RObject) => makeTime(dataOf(self).nanoseconds, 0, 'utc'));
+def('Time', ['localtime', 'getlocal'], [0, 1], function* (self: RObject, args) {
+  if (args.length > 0) return makeTime(dataOf(self).nanoseconds, yield* parseOffset(args[0]), 'fixed');
+  return makeTime(dataOf(self).nanoseconds);
+});
+def('Time', 'to_a', 0, (self: RObject) => {
+  const data = dataOf(self);
+  const date = data.fields();
+  return arr([
+    BigInt(date.getUTCSeconds()),
+    BigInt(date.getUTCMinutes()),
+    BigInt(date.getUTCHours()),
+    BigInt(date.getUTCDate()),
+    BigInt(date.getUTCMonth() + 1),
+    BigInt(date.getUTCFullYear()),
+    BigInt(date.getUTCDay()),
+    BigInt(yearDay(date)),
+    false,
+    zoneName(data),
+  ]);
+});
+def('Time', 'round', [0, 1], function* (self: RObject, args) {
+  const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const unit = 10n ** BigInt(9 - digits);
+  const data = dataOf(self);
+  const rounded = floorDivide(data.nanoseconds + unit / 2n, unit) * unit;
+  return makeTime(rounded, data.offset, data.zone);
+});
+def('Time', '+', 1, (self: RObject, [seconds]) => {
+  if (seconds instanceof RObject && seconds.data instanceof TimeData) throw typeError('time + time?');
+  const data = dataOf(self);
+  const delta = typeof seconds === 'bigint' ? seconds * 1_000_000_000n : BigInt(Math.round(toFloat(seconds) * 1e9));
+  return makeTime(data.nanoseconds + delta, data.offset, data.zone);
+});
+def('Time', '-', 1, (self: RObject, [other]) => {
+  const data = dataOf(self);
+  if (other instanceof RObject && other.data instanceof TimeData) {
+    return Number(data.nanoseconds - other.data.nanoseconds) / 1e9;
+  }
+  const delta = typeof other === 'bigint' ? other * 1_000_000_000n : BigInt(Math.round(toFloat(other) * 1e9));
+  return makeTime(data.nanoseconds - delta, data.offset, data.zone);
+});
+def('Time', '<=>', 1, (self: RObject, [other]) => {
+  if (!(other instanceof RObject && other.data instanceof TimeData)) return NIL;
+  const a = dataOf(self).nanoseconds;
+  const b = other.data.nanoseconds;
+  return a < b ? -1n : a > b ? 1n : 0n;
+});
+def('Time', ['==', 'eql?'], 1, (self: RObject, [other]) => other instanceof RObject && other.data instanceof TimeData && other.data.nanoseconds === dataOf(self).nanoseconds);
+def('Time', 'hash', 0, (self: RObject) => dataOf(self).nanoseconds % 1_000_000_007n);
+
+def('Kernel', 'sleep', [0, 1], (_self, args) => {
+  const runtime = rt() as unknown as { slept?: number };
+  const seconds = args.length > 0 ? toFloat(args[0]) : 0;
+  if (seconds < 0) throw argumentError('time interval must not be negative');
+  runtime.slept = (runtime.slept ?? 0) + seconds;
+  return BigInt(Math.round(seconds));
+}, { visibility: 'private' });
+
+export { compareValues };

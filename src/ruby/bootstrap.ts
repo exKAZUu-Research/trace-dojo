@@ -144,6 +144,7 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('Data', object);
   defineClass('Regexp', object);
   defineClass('MatchData', object);
+  defineClass('Time', object).includes.push(c.Comparable);
   const set = defineClass('Set', object);
   set.includes.push(c.Enumerable);
 
