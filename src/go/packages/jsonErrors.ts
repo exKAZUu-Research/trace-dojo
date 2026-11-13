@@ -269,6 +269,7 @@ export function marshalErrorToGo(err: LibError): Value {
 }
 
 /** `transformUnmarshalError`, for the value passed to Unmarshal. */
+// code-gauge-allow functionCognitiveComplexity 18 -- A transcription of Go's unmarshalErrorToGo, step by step.
 export function unmarshalErrorToGo(root: Value, err: LibError): Value {
   if (!(err instanceof SemanticError)) return syntacticToGo(err);
   if (err.err === ERR_NON_NIL_REFERENCE) return newPointerError(INVALID_UNMARSHAL_ERROR, [reflectType(err.goType)]);

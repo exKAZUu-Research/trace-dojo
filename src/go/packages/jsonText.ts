@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 837 -- One port of Go's encoding package source, whose parts share its state and helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { decodeRune, encodeRune, RUNE_ERROR } from '../literals';
 import { currentRuntime } from '../native';
@@ -244,6 +245,7 @@ abstract class CoderState {
   abstract offsetAt(pos: number): number;
 
   /** `appendStackPointer`: the JSON pointer to the current position, `where` being before, at, or after a value. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's stackPointer, step by step.
   stackPointer(where: number): string {
     let pointer = '';
     let objectDepth = 0;
@@ -707,6 +709,7 @@ export class DecoderState extends CoderState {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- A transcription of Go's decoderState.consumeObject.
+  // code-gauge-allow functionNcss 49 -- A transcription of Go's consumeObject, step by step.
   private consumeObject(flags: StringFlags, start: number, depth: number): [number, LibError | undefined] {
     let pos = start;
     let err: LibError | undefined;
@@ -827,6 +830,7 @@ export class EncoderState extends CoderState {
   }
 
   /** Writes a literal, delimiter, or (quoted) string or number token. */
+  // code-gauge-allow functionNcss 44 -- A transcription of Go's writeToken, step by step.
   writeToken(kind: Kind, text = ''): LibError | undefined {
     currentRuntime().spend();
     let b = this.buf + this.prefixFor(kind);
@@ -921,6 +925,7 @@ export class EncoderState extends CoderState {
   }
 
   /** `reformatValue` of `src[at:]`: the reformatted text, the length consumed, and any error. */
+  // code-gauge-allow functionNcss 31 -- A transcription of Go's reformatValue, step by step.
   private reformatValue(src: string, at: number, depth: number): [string, number, LibError | undefined] {
     currentRuntime().spend();
     if (at >= src.length) return ['', 0, UNEXPECTED_EOF];
@@ -967,6 +972,8 @@ export class EncoderState extends CoderState {
   }
 
   /** `reformatObject` and `reformatArray`. */
+  // code-gauge-allow functionNcss 33 -- A transcription of Go's reformatComposite, step by step.
+  // code-gauge-allow functionCognitiveComplexity 21 -- A transcription of Go's reformatComposite, step by step.
   private reformatComposite(
     src: string,
     at: number,

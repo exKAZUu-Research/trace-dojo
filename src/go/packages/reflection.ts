@@ -13,48 +13,11 @@ import {
   underlying,
 } from '../types';
 import { Cell, Complex, GoArray, GoStruct, Iface, Pointer, type Value } from '../values';
+import { type Kind, typeKind } from './templateReflect';
 
-/** reflect's kinds of the types that values of a program have. */
-export type Kind =
-  | 'bool'
-  | 'int'
-  | 'uint'
-  | 'float'
-  | 'complex'
-  | 'string'
-  | 'map'
-  | 'struct'
-  | 'slice'
-  | 'array'
-  | 'pointer'
-  | 'interface'
-  | 'func';
-
+/** reflect's kind of a type, as `reflect.Type.Kind` names it. */
 export function kindOf(type: Type): Kind {
-  const under = underlying(type);
-  switch (under.kind) {
-    case 'basic': {
-      const name = under.basic;
-      if (name === 'bool') return 'bool';
-      if (name === 'string') return 'string';
-      if (name.startsWith('float')) return 'float';
-      if (name.startsWith('complex')) return 'complex';
-      if (name.startsWith('uint')) return 'uint';
-      return 'int';
-    }
-    case 'map':
-    case 'struct':
-    case 'slice':
-    case 'array':
-    case 'pointer':
-    case 'interface':
-    case 'func': {
-      return under.kind;
-    }
-    default: {
-      return 'func';
-    }
-  }
+  return typeKind(type);
 }
 
 /** The bit size of an integer or float type, as `reflect.Type.Bits`. */

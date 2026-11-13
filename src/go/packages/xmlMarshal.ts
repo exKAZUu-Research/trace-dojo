@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 512 -- One port of Go's encoding package source, whose parts share its state and helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { formatFloat } from '../floatFormat';
 import { decodeRune, RUNE_ERROR } from '../literals';
@@ -346,6 +347,8 @@ export class Printer {
   }
 
   /** `EncodeToken`. */
+  // code-gauge-allow functionNcss 36 -- A transcription of Go's encodeToken, step by step.
+  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's encodeToken, step by step.
   encodeToken(token: XToken | undefined): Value {
     if (token === undefined) return plainError('xml: EncodeToken of invalid token type');
     let err: Value;
@@ -393,6 +396,8 @@ export class Printer {
   // Marshaling ---------------------------------------------------------------------------------------------------------
 
   /** `marshalValue`. */
+  // code-gauge-allow functionNcss 32 -- A transcription of Go's marshalValue, step by step.
+  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's marshalValue, step by step.
   marshalValue(initial: XVal | undefined, finfo: FieldInfo | undefined, startTemplate: XToken | undefined): Value {
     currentRuntime().spend();
     if (startTemplate?.kind === 'start' && startTemplate.name.local === '') {
@@ -470,6 +475,7 @@ export class Printer {
     }
     return start;
   }
+  // code-gauge-allow duplicateLines 15 -- Marshaling and unmarshaling each try the methods of a value and of its address, as Go does.
   /** The MarshalXML and MarshalText methods of a value or its address, as marshalValue tries them. */
   private marshalWithMethods(
     val: XVal,
@@ -636,6 +642,7 @@ export function escapeString(s: string): string {
   return escapeText(s, true);
 }
 
+// code-gauge-allow functionCognitiveComplexity 28 -- A transcription of Go's isValidDirective, step by step.
 function isValidDirective(dir: string): boolean {
   let depth = 0;
   let inquote = '';

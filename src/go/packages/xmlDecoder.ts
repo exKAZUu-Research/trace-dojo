@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 696 -- One port of Go's encoding package source, whose parts share its state and helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { mapKeyOf } from '../equality';
 import { decodeRune, encodeRune, RUNE_ERROR } from '../literals';
@@ -192,6 +193,7 @@ export class XmlDecoder {
 
   /** `Token`: the next token with namespaces translated, or an error. */
   // code-gauge-allow functionCognitiveComplexity 30 -- A transcription of Go's Decoder.Token.
+  // code-gauge-allow functionNcss 39 -- A transcription of Go's token, step by step.
   token(): [XToken | undefined, Value] {
     currentRuntime().spend();
     let t: XToken | undefined;
@@ -383,6 +385,7 @@ export class XmlDecoder {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's startElement, step by step.
   private startElement(): XToken | undefined {
     const name = this.nsname();
     if (!name) return this.failUnlessErr('expected element name after <');
@@ -628,10 +631,11 @@ export class XmlDecoder {
   }
 
   /** `text`: character data up to `<`, the closing quote, or the end of a CDATA section, with entities replaced. */
+  // code-gauge-allow functionNcss 36 -- A transcription of Go's text, step by step.
+  // code-gauge-allow functionCognitiveComplexity 27 -- A transcription of Go's text, step by step.
   private text(quoteChar: number, cdata: boolean): string | undefined {
     let b0 = 0;
     let b1 = 0;
-    let trunc = 0;
     let buf = '';
     for (;;) {
       currentRuntime().spend();
@@ -641,17 +645,10 @@ export class XmlDecoder {
         if (sameError(this.err, EOF)) this.err = this.syntaxError('unexpected EOF in CDATA section');
         return undefined;
       }
-      if (quoteChar < 0 && b0 === 0x5d && b1 === 0x5d && b === 0x3e) {
-        if (!cdata) return this.fail('unescaped ]]> not in CDATA section');
-        trunc = 2;
-        break;
-      }
-      if (b === 0x3c && !cdata) {
-        if (quoteChar >= 0) return this.fail('unescaped < inside quoted string');
-        this.ungetc(0x3c);
-        break;
-      }
-      if (quoteChar >= 0 && b === quoteChar) break;
+      const end = this.textEnd(b, quoteChar, cdata, b0 === 0x5d && b1 === 0x5d);
+      if (end === 'error') return undefined;
+      if (end === 'cdata') buf = buf.slice(0, -2);
+      if (end !== 'more') break;
       if (b === 0x26 && !cdata) {
         const entity = this.entityReference();
         if (entity === undefined) return undefined;
@@ -665,10 +662,26 @@ export class XmlDecoder {
       b0 = b1;
       b1 = b;
     }
-    const data = buf.slice(0, buf.length - trunc);
-    return this.checkCharacters(data) ? data : undefined;
+    return this.checkCharacters(buf) ? buf : undefined;
   }
 
+  /** Whether the byte ends the text: at `<`, the closing quote, or `]]>` ending a CDATA section; or is an error. */
+  private textEnd(
+    b: number,
+    quoteChar: number,
+    cdata: boolean,
+    afterBrackets: boolean
+  ): 'more' | 'end' | 'cdata' | 'error' {
+    if (quoteChar < 0 && afterBrackets && b === 0x3e) {
+      return cdata ? 'cdata' : (this.fail('unescaped ]]> not in CDATA section') ?? 'error');
+    }
+    if (b === 0x3c && !cdata) {
+      if (quoteChar >= 0) return this.fail('unescaped < inside quoted string') ?? 'error';
+      this.ungetc(0x3c);
+      return 'end';
+    }
+    return quoteChar >= 0 && b === quoteChar ? 'end' : 'more';
+  }
   /** Records a syntax error and returns undefined, for the parsers that report failure so. */
   private fail(msg: string): undefined {
     this.err = this.syntaxError(msg);
@@ -679,6 +692,7 @@ export class XmlDecoder {
    * The text of the entity or character reference after `&`, its raw text when it is unknown and the decoder is not
    * strict, or undefined with the error stored.
    */
+  // code-gauge-allow functionCognitiveComplexity 19 -- A transcription of Go's entityReference, step by step.
   private entityReference(): string | undefined {
     let raw = '&';
     let b = this.mustgetc();
@@ -708,6 +722,7 @@ export class XmlDecoder {
   }
 
   /** The raw text after `&` of a `#` reference, and the character it stands for when it is valid. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- A transcription of Go's characterReference, step by step.
   private characterReference(): { raw: string; text?: string } | undefined {
     let raw = '#';
     let b = this.mustgetc();

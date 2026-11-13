@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 452 -- One port of Go's encoding package source, whose parts share its state and helpers.
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { formatFloat } from '../floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR } from '../literals';
@@ -195,6 +196,7 @@ function decodeSurrogates(r1: number, r2: number): number {
   return RUNE_ERROR;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's hasEscapedUTF16Prefix, step by step.
 function hasEscapedUTF16Prefix(b: string, at: number, lowerSurrogateHalf: boolean): boolean {
   for (let i = 0; at + i < b.length; i++) {
     const c = b[at + i];
@@ -211,6 +213,7 @@ function hasEscapedUTF16Prefix(b: string, at: number, lowerSurrogateHalf: boolea
  * `jsonwire.ConsumeStringResumable` over `b[at:]` with invalid UTF-8 allowed, as v1 allows it: the length consumed and
  * any error. `resumeOffset` continues a string whose start an earlier call consumed.
  */
+// code-gauge-allow functionCognitiveComplexity 21 -- A transcription of Go's consumeString, step by step.
 export function consumeString(
   flags: StringFlags,
   b: string,
@@ -262,6 +265,8 @@ function consumeEscape(b: string, pos: number): number | LibError {
 const REPLACEMENT = encodeRune(RUNE_ERROR);
 
 /** `jsonwire.AppendUnquote` of the whole of `src`: the unquoted bytes and any error. */
+// code-gauge-allow functionNcss 40 -- A transcription of Go's unquote, step by step.
+// code-gauge-allow functionCognitiveComplexity 25 -- A transcription of Go's unquote, step by step.
 export function unquote(src: string): [string, LibError | undefined] {
   if (src.length === 0) return ['', UNEXPECTED_EOF];
   if (src[0] !== '"') return ['', newInvalidCharacterError(src, 0, `at start of string (expecting '"')`)];
@@ -537,6 +542,7 @@ function escapedASCII(c: number): string {
  * `jsonwire.AppendQuote` with invalid UTF-8 allowed (it becomes U+FFFD), as v1 options make it; the result is the
  * quoted string.
  */
+// code-gauge-allow functionCognitiveComplexity 23 -- A transcription of Go's quoteJSON, step by step.
 export function quoteJSON(src: string, flags: EscapeFlags): string {
   let dst = '"';
   let i = 0;

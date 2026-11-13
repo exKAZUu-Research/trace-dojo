@@ -46,6 +46,7 @@ export function base64Decode(src: string): [string, LibError | undefined] {
 }
 
 /** Go's `decodeQuantum`: up to four characters into up to three bytes. */
+// code-gauge-allow functionCognitiveComplexity 17 -- A transcription of Go's decodeQuantum, step by step.
 function decodeQuantum(src: string, start: number): [number, string, LibError | undefined] {
   const dbuf = [0, 0, 0, 0];
   let dlen = 4;

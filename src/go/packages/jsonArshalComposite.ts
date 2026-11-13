@@ -80,6 +80,8 @@ class MemberErrors {
 
 // Maps ----------------------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionNcss 38 -- A transcription of Go's makeMapArshaler, step by step.
+// code-gauge-allow functionCognitiveComplexity 26 -- A transcription of Go's makeMapArshaler, step by step.
 export function makeMapArshaler(type: Type, lookup: Lookup): Arshaler {
   const mapType = underlying(type) as MapType;
   const keyFncs = lookup(mapType.key);
@@ -288,6 +290,7 @@ export function makeStructArshaler(type: Type, lookup: Lookup): Arshaler {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- A transcription of Go's unmarshalStruct, step by step.
 function unmarshalStruct(
   dec: DecoderState,
   ref: Ref,

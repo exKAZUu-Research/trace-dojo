@@ -55,6 +55,7 @@ export const ERR_NON_STRING_VALUE = new TextError('JSON value must be string typ
 
 /** `json.SemanticError` of v2, which v1 turns into its own error types. */
 export class SemanticError extends LibError {
+  // code-gauge-allow functionParameterCount 7 -- The fields of Go's SemanticError.
   constructor(
     readonly action: string,
     public offset: number,
