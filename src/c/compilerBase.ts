@@ -10,6 +10,7 @@ import type {
   TypeName,
   TypeSpecifier,
 } from './ast';
+import { CRuntimeError } from './errors';
 import { decodeStringLiteral } from './literals';
 import type { Frame, FunctionInfo, GlobalInfo, LocalInfo } from './runtime';
 import {
@@ -20,6 +21,7 @@ import {
   INT,
   isComplete,
   layoutRecord,
+  LONG,
   RecordInfo,
   sizeOf,
   typeName,
@@ -93,6 +95,8 @@ export interface LValue {
 
 /** The state of the function being compiled. */
 export interface FunctionContext {
+  /** The number of the function's variable-length arrays, each of which has a slot for its length. */
+  vlaCount: number;
   info: FunctionInfo;
   returnType: CType;
   labels: Map<string, { id: number; row: number; defined: boolean }>;
@@ -120,6 +124,10 @@ export interface CompileOptions {
 export abstract class CompilerBase {
   protected scope = new Scope();
   protected fn?: FunctionContext;
+  /** The lengths of variable-length arrays in the declarator being compiled, which its declaration computes. */
+  protected pendingVla: ((frame: Frame) => void)[] = [];
+  /** How deep in a prototype's parameter list the compiler is, where a variable length is only `[*]`. */
+  private prototypeDepth = 0;
 
   /** The function being compiled, for the checks of calls that depend on it, such as `va_start`. */
   get currentFunction(): FunctionInfo | undefined {
@@ -377,9 +385,8 @@ export abstract class CompilerBase {
             this.error(current.row, '関数の配列は作れません（関数ポインタの配列にしてください）。');
           if (!isComplete(type))
             this.error(current.row, `要素の型（${typeName(type)}）が決まっていない配列は作れません。`);
-          let length: number | undefined;
-          if (current.size !== undefined) length = this.arrayLength(current.size);
-          type = { kind: 'array', of: type, ...(length === undefined ? {} : { length }) };
+          const length = current.size === undefined ? {} : this.arrayLength(current.size);
+          type = { kind: 'array', of: type, ...length };
           break;
         }
         case 'function': {
@@ -393,16 +400,42 @@ export abstract class CompilerBase {
     }
   }
 
-  private arrayLength(size: Expression): number {
-    const operand = this.constantOperand(size);
-    if (operand?.constant === undefined || operand.type.kind !== 'int') {
-      if (this.fn) unsupported(size.row, '大きさが定数でない配列（可変長配列）');
-      this.error(size.row, '配列の大きさには、整数の定数を書いてください。');
+  /** An array's length, or the slot of a variable-length array, whose length the declaration computes. */
+  private arrayLength(size: Expression): { length?: number; vla?: number } {
+    const operand = this.rvalueOf(size);
+    if (operand.type.kind !== 'int')
+      this.error(size.row, `配列の大きさには整数を書いてください（${typeName(operand.type)}）。`);
+    if (operand.constant !== undefined) {
+      const length = Number(operand.constant);
+      if (length < 0) this.error(size.row, '配列の大きさに負の数は使えません。');
+      return { length };
     }
-    const length = Number(operand.constant);
-    if (length < 0) this.error(size.row, '配列の大きさに負の数は使えません。');
-    return length;
+    if (this.prototypeDepth > 0) return { vla: -1 };
+    if (!this.fn) this.error(size.row, '関数の外の配列の大きさには、整数の定数を書いてください。');
+    const slot = this.fn.vlaCount++;
+    const value = operand.value;
+    const sourceType = operand.type;
+    this.pendingVla.push((frame) => {
+      const length = Number(convertScalar(value(frame) as Scalar, sourceType, LONG));
+      // A variable-length array of no or negative length is undefined behavior.
+      if (length <= 0)
+        throw new CRuntimeError('custom', `可変長配列の大きさが ${length} です（1 以上にしてください）。`);
+      frame.vla[slot] = length;
+    });
+    return { vla: slot };
   }
+
+  /** Runs the length computations of the variable-length arrays declared since the last call. */
+  protected takePendingVla(): ((frame: Frame) => void) | undefined {
+    const pending = this.pendingVla;
+    if (pending.length === 0) return undefined;
+    this.pendingVla = [];
+    return (frame) => {
+      for (const compute of pending) compute(frame);
+    };
+  }
+
+  protected abstract rvalueOf(expression: Expression): Operand;
 
   private functionType(ret: CType, declarator: Extract<Declarator, { kind: 'function' }>): CType {
     if (!declarator.params) {
@@ -419,8 +452,31 @@ export abstract class CompilerBase {
     ) {
       return { kind: 'function', ret, params: [], variadic: declarator.variadic };
     }
-    const types = params.map((param) => this.parameterType(param).type);
-    return { kind: 'function', ret, params: types, variadic: declarator.variadic };
+    // In a prototype, earlier parameters are in scope for later ones' array lengths, which are only `[*]` there.
+    this.prototypeDepth++;
+    try {
+      const types = this.withScope(() =>
+        params.map((param) => {
+          const { type, name } = this.parameterType(param);
+          if (name !== undefined) {
+            const local: LocalInfo = {
+              name,
+              type,
+              index: -1,
+              row: param.row,
+              inMemory: false,
+              size: 0,
+              isParameter: true,
+            };
+            this.scope.ordinary.set(name, { kind: 'local', local, type });
+          }
+          return type;
+        })
+      );
+      return { kind: 'function', ret, params: types, variadic: declarator.variadic };
+    } finally {
+      this.prototypeDepth--;
+    }
   }
 
   /** A parameter's type, adjusted as C adjusts it: arrays become pointers and functions pointers to functions. */

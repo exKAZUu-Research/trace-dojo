@@ -9,7 +9,7 @@ import { compileC, runProgram } from './execute';
 import { readScalar } from './expressionCompiler';
 import type { Allocation } from './memory';
 import { type Frame, Runtime } from './runtime';
-import { type CType, INT_PROPERTIES, isCharType, sizeOf } from './types';
+import { type CType, INT_PROPERTIES, isCharType, sizeIn, sizeOf } from './types';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -41,8 +41,16 @@ class Snapshotter {
     private readonly program: CompiledProgram
   ) {}
 
+  /** The lengths of the variable-length arrays of the frame whose variables are being read. */
+  private vla: readonly number[] = [];
+
+  private lengthOf(type: Extract<CType, { kind: 'array' }>): number {
+    return type.vla === undefined ? (type.length ?? 0) : (this.vla[type.vla] ?? 0);
+  }
+
   /** The variables a frame shows: its own in scope, then the file-scope variables when `withContext`. */
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
+    this.vla = frame.vla;
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const hidesArgs = frame.fn === this.program.main && frame.fn.params.length === 2;
     for (const local of frame.fn.locals) {
@@ -133,11 +141,11 @@ class Snapshotter {
       }
       case 'array': {
         if (!('address' in where)) return NOT_SCALAR;
-        if (isCharType(type.of)) return this.stringAt(where.address, sizeOf(type)) ?? NOT_SCALAR;
+        if (isCharType(type.of)) return this.stringAt(where.address, sizeIn(type, this.vla)) ?? NOT_SCALAR;
         if (!hasScalarElements(type)) return NOT_SCALAR;
-        const elementSize = sizeOf(type.of);
+        const elementSize = sizeIn(type.of, this.vla);
         const items: Scalarish[] = [];
-        for (let index = 0; index < (type.length ?? 0); index++) {
+        for (let index = 0; index < this.lengthOf(type); index++) {
           const item = this.scalarOf(type.of, { address: where.address + index * elementSize });
           // oxlint-disable-next-line unicorn/no-null -- The trace format shows values never written as null.
           items.push(item === NOT_SCALAR || item === undefined ? null : item);
@@ -193,10 +201,11 @@ class Snapshotter {
       }
       case 'array': {
         if (!('address' in where)) return undefined;
-        if (isCharType(type.of)) return { kind: 'value', value: this.stringAt(where.address, sizeOf(type)) ?? '' };
-        const size = sizeOf(type.of);
+        if (isCharType(type.of))
+          return { kind: 'value', value: this.stringAt(where.address, sizeIn(type, this.vla)) ?? '' };
+        const size = sizeIn(type.of, this.vla);
         const entries: Record<string, DisplayNode> = {};
-        for (let index = 0; index < (type.length ?? 0); index++) {
+        for (let index = 0; index < this.lengthOf(type); index++) {
           entries[index] = this.nodeOf(type.of, { address: where.address + index * size }, seen) ?? NULL_NODE;
         }
         return { kind: 'array', entries };

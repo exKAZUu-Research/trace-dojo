@@ -34,10 +34,12 @@ import {
   type CType,
   type Field,
   type FunctionType,
+  hasVla,
   INT,
   isCharArray,
   isComplete,
   isScalar,
+  sizeIn,
   sizeOf,
   typeName,
   unqualified,
@@ -365,6 +367,7 @@ export class Compiler extends StatementCompiler {
       switches: [],
       addressTaken: addressTakenNames(definition.body),
       registerLocals: new Set(),
+      vlaCount: 0,
     };
     const outer = this.fn;
     this.fn = context;
@@ -383,11 +386,13 @@ export class Compiler extends StatementCompiler {
           if (param.specifiers.storage === 'register') context.registerLocals.add(local);
           info.params.push(local);
         }
+        // Parameters of variably modified types, such as `int a[rows][cols]`, get their lengths on entry.
+        const parameterLengths = this.takePendingVla();
         const body = this.compound(definition.body, true);
         for (const [labelName, label] of context.labels) {
           if (!label.defined) this.error(label.row, `ラベル「${labelName}」がありません。`);
         }
-        info.body = functionBody(body.exec, name === 'main');
+        info.body = functionBody(body.exec, name === 'main', parameterLengths);
       });
     } finally {
       this.fn = outer;
@@ -464,13 +469,17 @@ export class Compiler extends StatementCompiler {
     declarator: InitDeclarator
   ): LocalPart | undefined {
     const declared = this.declaredType(base, declarator.declarator);
+    const lengths = this.takePendingVla();
     const { name } = declared;
     let { type } = declared;
     if (name === undefined) this.error(declared.row, '宣言する名前を書いてください。');
     if (storage === 'typedef') {
       if (this.scope.ordinary.has(name)) this.error(declared.row, `「${name}」が2回宣言されています。`);
       this.scope.ordinary.set(name, { kind: 'typedef', type });
-      return undefined;
+      return lengths ? { run: lengths, initializes: false } : undefined;
+    }
+    if (lengths && (storage === 'static' || storage === 'extern')) {
+      this.error(declared.row, `${storage} の変数「${name}」の型には、可変長配列は使えません。`);
     }
     if (type.kind === 'function') {
       if (storage === 'static') this.error(declared.row, '関数の中では、static の関数は宣言できません。');
@@ -490,7 +499,20 @@ export class Compiler extends StatementCompiler {
     if (!isComplete(type))
       this.error(declared.row, `変数「${name}」の型（${typeName(type)}）の中身が決まっていません。`);
     if (storage === 'static') return { run: this.staticLocal(name, type, declared.row, init), initializes: false };
-    return this.automaticLocal(name, type, declared.row, init, storage === 'register');
+    if (hasVla(type)) {
+      if (init) this.error(declared.row, `可変長配列「${name}」には初期値を書けません。`);
+      return this.variableLengthLocal(name, type, declared.row, lengths);
+    }
+    const part = this.automaticLocal(name, type, declared.row, init, storage === 'register');
+    if (!lengths) return part;
+    // A pointer to a variable-length array (`int (*p)[n]`) computes its lengths before its initializer.
+    return {
+      run: (frame) => {
+        lengths(frame);
+        part.run(frame);
+      },
+      initializes: part.initializes,
+    };
   }
 
   private externLocal(name: string, type: CType, row: number): void {
@@ -521,6 +543,31 @@ export class Compiler extends StatementCompiler {
     const index = local.index;
     return (frame) => {
       frame.live[index] = true;
+    };
+  }
+
+  /** A variable-length array, whose block its declaration creates once its lengths are known. */
+  private variableLengthLocal(
+    name: string,
+    type: CType,
+    row: number,
+    lengths: ((frame: Frame) => void) | undefined
+  ): LocalPart {
+    const local = this.addLocal(name, type, row, false);
+    local.inMemory = true;
+    local.isVla = true;
+    const index = local.index;
+    return {
+      run: (frame) => {
+        lengths?.(frame);
+        const block = frame.runtime.allocate(sizeIn(type, frame.vla), 'stack');
+        block.type = type;
+        block.name = name;
+        frame.bases[index] = block.base;
+        frame.blocks.push(block);
+        frame.live[index] = true;
+      },
+      initializes: false,
     };
   }
 
@@ -924,8 +971,9 @@ function stringLiteralOf(init: Initializer): Extract<Expression, { kind: 'string
   return undefined;
 }
 
-function functionBody(exec: Exec, isMain: boolean): Exec {
+function functionBody(exec: Exec, isMain: boolean, prepare: ((frame: Frame) => void) | undefined): Exec {
   return (frame) => {
+    prepare?.(frame);
     exec(frame);
     // Reaching the end of main returns 0.
     if (isMain && frame.returnValue === undefined) frame.returnValue = 0;

@@ -19,6 +19,8 @@ export interface LocalInfo {
   inMemory: boolean;
   /** The size of the variable's block, for one that lives in memory. */
   size: number;
+  /** Whether the variable is a variable-length array, whose block its declaration creates. */
+  isVla?: boolean;
   /** The global that holds a `static` local. */
   staticGlobal?: GlobalInfo;
   isParameter: boolean;
@@ -88,6 +90,8 @@ export class Frame implements TracedFrame {
   gotoLabel = -1;
   /** The address of the block holding a variadic function's extra arguments, which `va_start` points to. */
   varargs = 0;
+  /** The lengths of the function's variable-length arrays, by slot, computed when their declarations run. */
+  readonly vla: number[] = [];
 
   constructor(
     readonly runtime: Runtime,
@@ -193,7 +197,8 @@ export class Runtime implements TracedRuntime<Frame> {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new CRuntimeError('stackOverflow');
     const frame = new Frame(this, fn, callRow);
     for (const local of fn.locals) {
-      if (!local.inMemory || local.staticGlobal) continue;
+      // A variable-length array gets its block when its declaration runs and its length is known.
+      if (!local.inMemory || local.staticGlobal || local.isVla) continue;
       const block = this.allocate(local.size, 'stack');
       block.type = local.type;
       block.name = local.name;

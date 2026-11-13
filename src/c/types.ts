@@ -25,7 +25,11 @@ export type CType =
   | ({ kind: 'float'; name: FloatName } & Qualified)
   | ({ kind: 'pointer'; to: CType } & Qualified)
   /** An array, whose length is undefined while it is incomplete (`int a[]` before its initializer). */
-  | ({ kind: 'array'; of: CType; length?: number } & Qualified)
+  /**
+   * An array, whose length is undefined while it is incomplete (`int a[]` before its initializer); a variable-length
+   * array has instead the index of the frame's slot holding its length (`vla`), or -1 in a prototype (`int a[*]`).
+   */
+  | ({ kind: 'array'; of: CType; length?: number; vla?: number } & Qualified)
   /** A function type, whose parameters are undefined when declared with `()`. */
   | { kind: 'function'; ret: CType; params?: CType[]; variadic: boolean }
   | ({ kind: 'record'; info: RecordInfo } & Qualified);
@@ -182,7 +186,7 @@ export function isComplete(type: CType): boolean {
       return false;
     }
     case 'array': {
-      return type.length !== undefined && isComplete(type.of);
+      return (type.length !== undefined || type.vla !== undefined) && isComplete(type.of);
     }
     case 'record': {
       return type.info.isComplete;
@@ -536,6 +540,19 @@ export function layoutRecord(
   info.fields = fields;
   info.align = align;
   info.size = Math.ceil(size / align) * align;
+}
+
+/** Whether a type has a variable-length array in it, whose size the program computes when it runs. */
+export function hasVla(type: CType): boolean {
+  if (type.kind === 'array') return type.vla !== undefined || hasVla(type.of);
+  return false;
+}
+
+/** The size of a type, reading the lengths of its variable-length arrays from the frame that declared them. */
+export function sizeIn(type: CType, vla: readonly number[]): number {
+  if (type.kind !== 'array') return sizeOf(type);
+  const length = type.vla === undefined ? (type.length ?? 0) : (vla[type.vla] ?? 0);
+  return length * sizeIn(type.of, vla);
 }
 
 /** Whether a type is an array of a character type, which a string literal may initialize. */

@@ -27,6 +27,7 @@ import {
   type FloatType,
   type FunctionType,
   hasConstMember,
+  hasVla,
   INT,
   INT_PROPERTIES,
   type IntType,
@@ -42,6 +43,7 @@ import {
   promote,
   type RecordType,
   SIZE_T,
+  sizeIn,
   sizeOf,
   typeName,
   unqualified,
@@ -78,6 +80,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected constantOperand(expression: Expression): Operand | undefined {
     const operand = this.expression(expression);
     return operand.constant === undefined ? undefined : operand;
+  }
+
+  protected rvalueOf(expression: Expression): Operand {
+    return this.rvalue(expression);
   }
 
   /** An expression as an rvalue: arrays and functions decay to pointers. */
@@ -131,10 +137,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.update(expression);
       }
       case 'cast': {
-        return this.cast(this.typeOfName(expression.typeName), this.rvalue(expression.operand), row);
+        const type = this.typeOfName(expression.typeName);
+        return withLengths(this.takePendingVla(), this.cast(type, this.rvalue(expression.operand), row));
       }
       case 'sizeofType': {
-        return this.sizeofType(this.typeOfName(expression.typeName), row);
+        const type = this.typeOfName(expression.typeName);
+        return withLengths(this.takePendingVla(), this.sizeofType(type, row));
       }
       case 'sizeofExpression': {
         const operand = this.expression(expression.operand);
@@ -427,12 +435,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
         `中身が定義されていない型（${typeName(type.to)}）へのポインタには、整数を足したり引いたりできません。`
       );
     }
-    const size = sizeOf(type.to);
+    const size = elementSize(type.to);
     const base = pointer.value;
     const index = this.converted(offset, LONG);
     const value = (frame: Frame): Value => {
       const address = base(frame) as number;
-      const delta = Number(index(frame)) * size * sign;
+      const delta = Number(index(frame)) * size(frame) * sign;
       return offsetAddress(frame, address, delta);
     };
     return { type, value, isAddressConstant: pointer.isAddressConstant && offset.constant !== undefined };
@@ -444,7 +452,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (!compatible(unqualified(lt.to), unqualified(rt.to), true)) {
       this.error(row, `型の違うポインタどうし（${typeName(lt)} と ${typeName(rt)}）の差は求められません。`);
     }
-    const size = sizeOf(lt.to);
+    const size = elementSize(lt.to);
     const a = left.value;
     const b = right.value;
     return {
@@ -455,7 +463,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const memory = frame.runtime.memory;
         const block = memory.find(x) ?? memory.find(x - 1);
         if (block && !(y >= block.base && y <= block.end)) throw new CRuntimeError('pointerDifference');
-        return BigInt(Math.trunc((x - y) / size));
+        return BigInt(Math.trunc((x - y) / size(frame)));
       },
     };
   }
@@ -556,8 +564,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
           `中身が定義されていない型（${typeName(type.to)}）へのポインタには、${expression.operator} を使えません。`
         );
       }
-      const size = sizeOf(type.to) * sign;
-      step = (value, frame) => offsetAddress(frame, value as number, size);
+      const size = elementSize(type.to);
+      step = (value, frame) => offsetAddress(frame, value as number, size(frame) * sign);
     } else if (isArithmetic(type)) {
       if (type.kind === 'int' && type.name === 'bool') {
         step = (value) => (sign === 1 ? 1 : value === 0 ? 1 : 0);
@@ -673,6 +681,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (type.kind === 'function') return constantOperand(SIZE_T, 1n);
     if (type.kind === 'void') return constantOperand(SIZE_T, 1n);
     if (!isComplete(type)) this.error(row, `中身が決まっていない型（${typeName(type)}）に sizeof は使えません。`);
+    // The size of a variable-length array is known only when the program runs.
+    if (hasVla(type)) return { type: SIZE_T, value: (frame) => BigInt(sizeIn(type, frame.vla)) };
     return constantOperand(SIZE_T, BigInt(sizeOf(type)));
   }
 
@@ -857,10 +867,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (target.kind === 'void') this.error(row, 'void * には添字（[]）を使えません。');
     if (target.kind === 'function') this.error(row, '関数ポインタには添字（[]）を使えません。');
     if (!isComplete(target)) this.error(row, `中身が定義されていない型（${typeName(target)}）の要素は読めません。`);
-    const size = sizeOf(target);
+    const size = elementSize(target);
     const base = array.value;
     const offset = this.converted(index, LONG);
-    const address = (frame: Frame): number => (base(frame) as number) + Number(offset(frame)) * size;
+    const address = (frame: Frame): number => (base(frame) as number) + Number(offset(frame)) * size(frame);
     const operand = this.memoryOperand(target, address);
     const isStatic = array.isAddressConstant === true && index.constant !== undefined;
     return {
@@ -1076,6 +1086,28 @@ function checkVararg(frame: Frame, address: number, type: CType): void {
       `va_arg で読んだ型（${typeName(type)}）が、渡された引数の型（${typeName(stored)}）と合いません。`
     );
   }
+}
+
+/** The size of the elements a pointer steps over, which a variable-length array decides when the program runs. */
+function elementSize(type: CType): (frame: Frame) => number {
+  if (!hasVla(type)) {
+    const size = sizeOf(type);
+    return () => size;
+  }
+  return (frame) => sizeIn(type, frame.vla);
+}
+
+/** Computes the lengths of the variable-length arrays a type name declares before the operand that uses it. */
+function withLengths(lengths: ((frame: Frame) => void) | undefined, operand: Operand): Operand {
+  if (!lengths) return operand;
+  const value = operand.value;
+  return {
+    type: operand.type,
+    value: (frame) => {
+      lengths(frame);
+      return value(frame);
+    },
+  };
 }
 
 const RELATIONAL = new Set<string>(['<', '>', '<=', '>=']);
