@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 564 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 567 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -464,12 +464,15 @@ export class Runtime {
       temporaries.push(fn, thisValue);
       appendAll(temporaries, args);
       frame.builtinsRunning++;
+      let result: Value;
       try {
-        return behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
+        result = behavior.run({ runtime: this, thisValue, args, newTarget: undefined, callRow });
       } finally {
         frame.builtinsRunning--;
         temporaries.length = held;
       }
+      // A builtin called by another, as a bound function is, hands its result on to the one that called it.
+      return this.returnedToBuiltin(frame, result);
     }
     if (behavior.kind === 'class') {
       return this.throwError('TypeError', `Class constructor ${this.functionName(fn)} cannot be invoked without 'new'`);
@@ -521,9 +524,10 @@ export class Runtime {
     const target = newTarget as JsFunction;
     const { behavior } = fn;
     if (behavior.kind === 'native') {
-      return this.runBuiltin([fn, ...args], () =>
+      const constructed = this.runBuiltin([fn, ...args], () =>
         behavior.run({ runtime: this, thisValue: undefined, args, newTarget: target, callRow })
       ) as JsObject;
+      return this.returnedToBuiltin(this.frame, constructed);
     }
     const { frame } = this;
     if (behavior.kind === 'class') {
