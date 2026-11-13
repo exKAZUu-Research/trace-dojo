@@ -119,14 +119,17 @@ function defineReflection(method: ObjectMethod): void {
   method('defineProperties', 2, (runtime, args) => {
     const [object, properties] = args;
     if (!isObject(object)) return runtime.throwError('TypeError', 'Object.defineProperties called on non-object');
-    const source = runtime.toObject(properties);
-    const descriptors: [Key, Descriptor][] = [];
-    for (const key of [...runtime.ownKeys(source), ...runtime.ownSymbols(source)]) {
-      if (!runtime.getOwnProperty(source, key)?.enumerable) continue;
-      descriptors.push([key, toPropertyDescriptor(runtime, runtime.get(source, key))]);
+    return defineProperties(runtime, object, properties);
+  });
+  method('create', 2, (runtime, args) => {
+    const [proto, properties] = args;
+    if (proto !== null && !isObject(proto)) {
+      return runtime.throwError('TypeError', `Object prototype may only be an Object or null: ${primitiveText(proto)}`);
     }
-    for (const [key, descriptor] of descriptors) definePropertyOrThrow(runtime, object, key, descriptor);
-    return object;
+    const object = runtime.newObject(proto);
+    return properties === undefined
+      ? object
+      : runtime.hold(object, () => defineProperties(runtime, object, properties));
   });
 }
 
@@ -155,10 +158,7 @@ function setPrototypeOf(runtime: Runtime, args: Value[]): Value {
     return runtime.throwError('TypeError', 'Object.setPrototypeOf called on null or undefined');
   }
   if (proto !== null && !isObject(proto)) {
-    return runtime.throwError(
-      'TypeError',
-      `Object prototype may only be an Object or null: ${runtime.describe(proto)}`
-    );
+    return runtime.throwError('TypeError', `Object prototype may only be an Object or null: ${primitiveText(proto)}`);
   }
   if (isObject(object)) changePrototype(runtime, object, proto);
   return object;
@@ -175,6 +175,18 @@ function changePrototype(runtime: Runtime, object: JsObject, proto: JsObject | n
     if (current === object) runtime.throwError('TypeError', 'Cyclic __proto__ value');
   }
   object.proto = proto;
+}
+
+/** The spec's ObjectDefineProperties, which reads every descriptor before defining any. */
+function defineProperties(runtime: Runtime, object: JsObject, properties: Value): JsObject {
+  const source = runtime.toObject(properties);
+  const descriptors: [Key, Descriptor][] = [];
+  for (const key of [...runtime.ownKeys(source), ...runtime.ownSymbols(source)]) {
+    if (!runtime.getOwnProperty(source, key)?.enumerable) continue;
+    descriptors.push([key, toPropertyDescriptor(runtime, runtime.get(source, key))]);
+  }
+  for (const [key, descriptor] of descriptors) definePropertyOrThrow(runtime, object, key, descriptor);
+  return object;
 }
 
 function primitiveText(value: Exclude<Value, JsObject>): string {

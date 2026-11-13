@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 
 import { traceProgram } from '../../src/interpreter/program';
-import type { TraceItem } from '../../src/problems/trace';
+import type { DisplayNode, TraceItem } from '../../src/problems/trace';
 
 const javaMain = (body: string, members = ''): string => `public class Main {
   public static void main(String[] args) {
@@ -799,5 +799,23 @@ test('a BigInt too large for a number and a symbol show their text unquoted insi
         s: { kind: 'value', value: 'Symbol(k)', verbatim: true },
       },
     },
+  });
+});
+
+const value = (v: string | number): DisplayNode => ({ kind: 'value', value: v });
+
+test('a trace shows the contents of Maps and Sets and the text of Dates and regular expressions', () => {
+  const program = `const m = new Map([['a', 1]]);
+const n = new Map([[2, 'b']]);
+const s = new Set([1, 'b']);
+const d = new Date(0);
+const r = /a+/g;`;
+  const trace = traceProgram('javascript', program, program);
+  expect(trace.traceItems.at(-1)?.referenceVars).toEqual({
+    m: { kind: 'object', entries: { a: value(1) } },
+    n: { kind: 'array', entries: { 0: { kind: 'array', entries: { 0: value(2), 1: value('b') } } } },
+    s: { kind: 'array', entries: { 0: value(1), 1: value('b') } },
+    d: { kind: 'value', value: '1970-01-01T00:00:00.000Z', verbatim: true },
+    r: { kind: 'value', value: '/a+/g', verbatim: true },
   });
 });

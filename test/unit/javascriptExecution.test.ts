@@ -729,6 +729,19 @@ function* g() { const o = { a: 1 }; o[yield 'key']++; console.log(o.a); }
 h().then(() => { const it = g(); it.next(); it.next('a'); });`,
   ],
   [
+    'busy-waiting on the clock',
+    `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
+const t = Date.now(); setTimeout(() => console.log(Date.now() - t >= 30), 30); setTimeout(() => console.log('first'), 0);`,
+  ],
+  [
+    'Object.create with property descriptors',
+    `const o = Object.create({ inh: 1 }, { x: { value: 1, enumerable: true }, y: { get() { return 2; }, enumerable: true }, z: { value: 3 } });
+console.log(o.x, o.y, o.inh, Object.keys(o), o, Object.getOwnPropertyDescriptor(o, 'z'));
+for (const f of [() => Object.create(1), () => Object.create(null, null), () => Object.setPrototypeOf({}, 'a')]) {
+  try { f(); } catch (e) { console.log(e.name, e.message); }
+}`,
+  ],
+  [
     'async generators and for await',
     `const sleep = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
 async function* countdown(n) { try { while (n > 0) { await sleep(10); yield n--; } return 'liftoff'; } finally { console.log('cleanup'); } }

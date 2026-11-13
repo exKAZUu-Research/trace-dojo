@@ -101,13 +101,6 @@ function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunctio
     return target;
   });
   builder.method(objectConstructor, 'getPrototypeOf', 1, ({ runtime, args }) => runtime.toObject(args[0]).proto);
-  builder.method(objectConstructor, 'create', 1, ({ runtime, args }) => {
-    const proto = args[0];
-    if (proto !== null && !isObject(proto)) {
-      return runtime.throwError('TypeError', 'Object prototype may only be an Object or null');
-    }
-    return runtime.newObject(proto);
-  });
   builder.method(objectConstructor, 'freeze', 1, ({ args }) => {
     const object = args[0];
     if (isObject(object)) freeze(object);

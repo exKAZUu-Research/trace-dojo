@@ -35,9 +35,14 @@ interface Timer extends Job {
   interval?: number;
 }
 
+/** How many operations make a millisecond pass on the simulated clock, about the interpreter's speed. */
+const OPERATIONS_PER_MILLISECOND = 1000;
+
 /**
  * The event loop of one run: the microtasks promises queue and the timers `setTimeout` schedules, which run after the
- * program's statements in Node.js's order on a simulated clock, so a program never waits for real time.
+ * program's statements in Node.js's order on a simulated clock, so a program never waits for real time. The clock jumps
+ * to each timer it runs and otherwise advances with the operations the program spends, so a loop polling `Date.now()`
+ * sees time pass and ends, the same way on every run.
  */
 export class EventLoop {
   private readonly microtasks: Job[] = [];
@@ -45,7 +50,9 @@ export class EventLoop {
   /** The jobs running now, innermost last. */
   private readonly running: Job[] = [];
   private readonly rejections = new Set<JsObject>();
+  /** The clock's time when it last jumped to a timer, and the operations spent by then. */
   private now = 0;
+  private spentAtNow = 0;
   /** The timer whose callback is running, which clearing stops from running again. */
   private runningTimer: Timer | undefined;
   private nextTimerId = 1;
@@ -54,7 +61,7 @@ export class EventLoop {
 
   /** The milliseconds the simulated clock has advanced since the program started. */
   get time(): number {
-    return this.now;
+    return this.now + Math.floor((this.runtime.budget.spent - this.spentAtNow) / OPERATIONS_PER_MILLISECOND);
   }
 
   enqueue(job: Job): void {
@@ -64,7 +71,7 @@ export class EventLoop {
   addTimer(delay: number, job: Job, repeats: boolean): number {
     const id = this.nextTimerId++;
     const interval = Math.max(1, delay);
-    this.timers.push({ ...job, id, time: this.now + interval, interval: repeats ? interval : undefined });
+    this.timers.push({ ...job, id, time: this.time + interval, interval: repeats ? interval : undefined });
     return id;
   }
 
@@ -88,7 +95,9 @@ export class EventLoop {
       this.drainMicrotasks();
       const timer = this.nextTimer();
       if (!timer) return;
-      this.now = timer.time;
+      // A timer due while the program was busy runs late, as in Node.js, and the clock never goes back.
+      this.now = Math.max(timer.time, this.time);
+      this.spentAtNow = this.runtime.budget.spent;
       this.runningTimer = timer;
       this.runJob(timer);
       if (this.runningTimer && timer.interval !== undefined)
