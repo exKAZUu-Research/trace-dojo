@@ -252,3 +252,85 @@ func main() {
 }`;
   expect(executeProgram('go', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
+
+test('structs ending in a zero-size field include trailing padding in append capacities', () => {
+  const program = `package main
+
+import "fmt"
+
+type empty struct{}
+type allZero struct{ a struct{}; b [0]int }
+type trailStruct struct{ x int; z struct{} }
+type trailArray struct{ x int; z [0]int }
+type trailByte struct{ x byte; z struct{} }
+type nested struct{ inner trailStruct; b byte }
+
+func main() {
+	var a0 []empty; a0 = append(a0, empty{})
+	var a1 []allZero; a1 = append(a1, allZero{})
+	var a2 []trailStruct; a2 = append(a2, trailStruct{})
+	var a3 []trailArray; a3 = append(a3, trailArray{})
+	var a4 []trailByte; a4 = append(a4, trailByte{})
+	var a5 []nested; a5 = append(a5, nested{})
+	var a6 [][2]trailStruct; a6 = append(a6, [2]trailStruct{})
+	fmt.Println(cap(a0), cap(a1), cap(a2), cap(a3), cap(a4), cap(a5), cap(a6))
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '1 1 2 2 16 1 1\n',
+  });
+});
+
+test('copying and growing slices copy struct and array values without breaking shared pointers', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"slices"
+)
+
+type box struct {
+	x int
+	a [1]int
+	p *int
+}
+
+func main() {
+	shared := 10
+	a := []box{{x: 1, a: [1]int{2}, p: &shared}}
+	b := make([]box, 1)
+	copy(b, a)
+	b[0].x = 9
+	b[0].a[0] = 8
+	*b[0].p = 20
+
+	c := append(a, box{x: 3})
+	c[0].x = 7
+	c[0].a[0] = 6
+
+	d := []box{{x: 1}, {x: 2}}
+	copy(d[1:], d[:1])
+	d[1].x = 5
+
+	ins := slices.Insert(a, 0, box{x: 4})
+	ins[1].x = 99
+	top := slices.MaxFunc(a, func(u, v box) int { u.x = 77; return u.x - v.x })
+	top.x = 88
+
+	arr := [2]box{{x: 1}, {x: 2}}
+	var seen []int
+	for i, v := range arr {
+		if i == 0 {
+			arr[1].x = 50
+		}
+		seen = append(seen, v.x)
+	}
+	fmt.Println(a[0].x, a[0].a[0], *a[0].p, b[0].x, c[0].x, d[0].x, d[1].x, seen[0], seen[1])
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '1 2 20 9 7 1 5 1 2\n',
+  });
+});

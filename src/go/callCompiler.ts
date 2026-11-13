@@ -38,7 +38,7 @@ import {
   type TypeParamType,
   underlying,
 } from './types';
-import { Complex, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
+import { Complex, copyValue, GoArray, GoFunc, GoMap, Pointer, Slice, type Value } from './values';
 
 /** Builtins whose call has a value that a statement must use, as Go reports `len(s) (value) is not used`. */
 const VALUE_BUILTINS = new Set([
@@ -709,7 +709,7 @@ export abstract class CallCompiler extends CompositeCompiler {
           ? Array.from(value as string, (char) => BigInt(char.charCodeAt(0)) as Value)
           : ((value as Slice | undefined)?.values() ?? []);
         const count = Math.min(to?.length ?? 0, items.length);
-        for (let index = 0; index < count; index++) (to as Slice).set(index, items[index]);
+        for (let index = 0; index < count; index++) (to as Slice).set(index, copyValue(items[index]));
         frame.runtime.spend(Math.floor(count / 16));
         return BigInt(count);
       },

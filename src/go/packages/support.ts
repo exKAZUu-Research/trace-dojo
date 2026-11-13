@@ -4,7 +4,7 @@ import { callDynamic } from '../methods';
 import { currentRuntime } from '../native';
 import { nilPointerPanic } from '../runtimeErrors';
 import { ANY, BASIC, ERROR_TYPE, sliceOf, type Type } from '../types';
-import { GoFunc, Iface, Slice, type Value } from '../values';
+import { copyValue, GoFunc, Iface, Slice, type Value } from '../values';
 
 export const INT = BASIC.int;
 export const STRING = BASIC.string;
@@ -51,12 +51,12 @@ export function byteSlice(bytes: string): Slice {
 /** Calls a function value from the library, as `sort.Slice` calls its less function. */
 export function callFunction(fn: Value, args: Value[]): Value | Value[] {
   if (!(fn instanceof GoFunc)) nilPointerPanic();
-  return fn.call(args);
+  return fn.call(args.map(copyValue));
 }
 
 /** Calls a method of an interface value, as `sort.Sort` calls `Less`. */
 export function callMethod(receiver: Value, name: string, args: Value[] = []): Value | Value[] {
-  return callDynamic(receiver as Iface, name, args);
+  return callDynamic(receiver as Iface, name, args.map(copyValue));
 }
 
 /** The text of an error value, for messages that quote it. */
@@ -69,5 +69,5 @@ export function goString(text: string): string {
 }
 
 export function boxed(type: Type, value: Value): Iface {
-  return new Iface(type, value);
+  return new Iface(type, copyValue(value));
 }

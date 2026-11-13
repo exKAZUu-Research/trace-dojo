@@ -31,7 +31,19 @@ import {
   type TypeParamType,
   underlying,
 } from '../types';
-import { Cell, copyValue, GoFunc, GoMap, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
+import {
+  Cell,
+  Complex,
+  copyValue,
+  GoArray,
+  GoFunc,
+  GoMap,
+  GoStruct,
+  Iface,
+  Pointer,
+  Slice,
+  type Value,
+} from '../values';
 import { pdqsort, type SortData, stableSort } from './sorting';
 import { BOOL, callFunction, callMethod, FLOAT64, INT, sliceValues, spendFor, STRING } from './support';
 
@@ -366,7 +378,7 @@ function collect(seq: Value): Value[] {
   const values: Value[] = [];
   callFunction(seq, [
     new GoFunc(([value]) => {
-      values.push(value);
+      values.push(copyValue(value));
       return true;
     }),
   ]);
@@ -650,7 +662,7 @@ function extreme(slice: Value, message: string, better: (a: Value, b: Value) => 
   if (values.length === 0) throw new GoPanic(newError(message));
   let best = values[0];
   for (const value of values.slice(1)) if (better(value, best)) best = value;
-  return best;
+  return copyValue(best);
 }
 
 function compact(slice: Value, equal: (a: Value, b: Value) => boolean, types: Type[]): Value {
@@ -664,7 +676,8 @@ function compact(slice: Value, equal: (a: Value, b: Value) => boolean, types: Ty
 /** Writes values over the front of a slice's array, clears the rest of its old length, and shortens it. */
 function overwrite(slice: Slice, kept: Value[], types: Type[]): Slice {
   const zero = zeroValueOf(elementTypeOf(types));
-  for (let index = 0; index < slice.length; index++) slice.set(index, index < kept.length ? kept[index] : zero());
+  for (let index = 0; index < slice.length; index++)
+    slice.set(index, index < kept.length ? copyValue(kept[index]) : zero());
   return new Slice(slice.array, slice.offset, kept.length, slice.capacity);
 }
 
@@ -674,11 +687,16 @@ function zeroValueOf(type: Type): () => Value {
     if (under.basic === 'string') return () => '';
     if (under.basic === 'bool') return () => false;
     if (under.basic.startsWith('float')) return () => 0;
+    if (under.basic.startsWith('complex')) return () => new Complex(0, 0);
     if (under.basic.startsWith('int') || under.basic.startsWith('uint')) return () => 0n;
   }
   if (under.kind === 'struct') {
     const zeros = under.fields.map((field) => zeroValueOf(field.type));
     return () => new GoStruct(zeros.map((zero) => zero()));
+  }
+  if (under.kind === 'array') {
+    const zero = zeroValueOf(under.element);
+    return () => new GoArray(Array.from({ length: under.length }, zero));
   }
   return () => {};
 }
@@ -695,7 +713,7 @@ function insert(slice: Value, at: number, values: Value[], types: Type[]): Value
   const zero = zeroValueOf(element);
   if (at === length) return appendValues(slice as Slice | undefined, values, element, zero, allocate);
   const current = slice as Slice;
-  const tail = current.values().slice(at);
+  const tail = current.values().slice(at).map(copyValue);
   if (length + values.length > current.capacity) {
     const head = new Slice(current.array, current.offset, at, current.capacity);
     const grown = appendValues(
@@ -732,7 +750,7 @@ function collectPairs(seq: Value): [Value, Value][] {
   const pairs: [Value, Value][] = [];
   callFunction(seq, [
     new GoFunc(([key, value]) => {
-      pairs.push([key, value]);
+      pairs.push([copyValue(key), copyValue(value)]);
       return true;
     }),
   ]);
@@ -869,7 +887,11 @@ Object.assign(slicesMembers, {
         const j = Number(to as bigint);
         if (i < 0 || j < i || j > length) boundsPanic(`slice bounds out of range [${i}:${j}]`);
         const inserted = sliceValues(values).map(copyValue);
-        const kept = [...(current?.values() ?? []).slice(0, i), ...inserted, ...(current?.values() ?? []).slice(j)];
+        const kept = [
+          ...(current?.values() ?? []).slice(0, i).map(copyValue),
+          ...inserted,
+          ...(current?.values() ?? []).slice(j).map(copyValue),
+        ];
         if (current && kept.length <= current.capacity) {
           const zero = zeroValueOf(elementTypeOf(types));
           for (let index = 0; index < Math.max(kept.length, length); index++)
@@ -984,7 +1006,7 @@ const mapsMembers: Record<string, Entity> = {
       if (map === undefined) return;
       const copy = new GoMap(mapKeyOf(types[1]));
       for (const [key, entry] of (map as GoMap).entries)
-        copy.entries.set(key, { key: entry.key, value: copyValue(entry.value) });
+        copy.entries.set(key, { key: copyValue(entry.key), value: copyValue(entry.value) });
       return copy;
     });
   })(),
@@ -994,7 +1016,7 @@ const mapsMembers: Record<string, Entity> = {
     return genericFunction('Copy', [m, m2, k, v], funcType([m, m2], []), () => ([destination, source]) => {
       for (const [key, entry] of (source as GoMap | undefined)?.entries ?? []) {
         if (!destination) throw new GoPanic(newError('assignment to entry in nil map'));
-        (destination as GoMap).entries.set(key, { key: entry.key, value: copyValue(entry.value) });
+        (destination as GoMap).entries.set(key, { key: copyValue(entry.key), value: copyValue(entry.value) });
       }
       return;
     });
@@ -1143,7 +1165,7 @@ const cmpMembers: Record<string, Entity> = {
     return genericFunction('Or', [t], funcType([sliceOf(t)], [t], true), (types) => {
       const zero = zeroValueOf(types[0]);
       const equal = equalityOf(types[0]);
-      return ([values]) => sliceValues(values).find((value) => !equal(value, zero())) ?? zero();
+      return ([values]) => copyValue(sliceValues(values).find((value) => !equal(value, zero())) ?? zero());
     });
   })(),
 };

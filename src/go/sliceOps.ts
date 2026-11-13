@@ -50,12 +50,15 @@ function layoutOf(type: Type): { size: number; align: number } {
     case 'struct': {
       let offset = 0;
       let align = 1;
+      let lastSize = 0;
       for (const field of under.fields) {
         const layout = layoutOf(field.type);
         offset = Math.ceil(offset / layout.align) * layout.align + layout.size;
         align = Math.max(align, layout.align);
+        lastSize = layout.size;
       }
-      // A struct ending in a zero-size field gets padding so that a pointer to that field stays inside the struct.
+      // A non-zero-size struct ending in a zero-size field gets padding so that a pointer to that field stays inside the struct.
+      if (offset > 0 && lastSize === 0) offset++;
       return { size: Math.ceil(offset / align) * align, align };
     }
     default: {
@@ -133,7 +136,7 @@ export function appendValues(
   }
   const newCapacity = grownCapacity(capacity, newLength, element, onStack);
   allocate(newCapacity);
-  const array: Value[] = slice ? slice.values() : [];
+  const array: Value[] = slice ? slice.values().map(copyValue) : [];
   for (const value of values) array.push(copyValue(value));
   while (array.length < newCapacity) array.push(zero());
   return new Slice(array, 0, newLength, newCapacity);

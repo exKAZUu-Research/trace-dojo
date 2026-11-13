@@ -620,14 +620,11 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity 20 -- The three-clause loop with Go 1.22's per-iteration variables.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>): Exec {
     const row = this.stepRow(statement);
-    const fn = this.fn as FunctionContext;
-    const firstLocal = fn.info.locals.length;
     const initExec =
       statement.init && statement.init.kind !== 'empty' ? this.simpleStatementWithoutStep(statement.init) : undefined;
     const loopVariables = [...this.scope.entities.values()].filter(
       (entity): entity is VarEntity => entity.kind === 'var'
     );
-    void firstLocal;
     const condition = statement.condition ? this.condition(statement.condition, 'for 文') : () => true;
     const body = this.loopBody(statement.body);
     const post =
@@ -655,10 +652,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const completion = body(frame);
         if (completion === BREAK) return;
         if (completion && completion !== CONTINUE) return completion;
-        // Each iteration has its own copy of the loop's variables, which closures may have captured.
-        for (const variable of loopVariables) {
-          if (variable.boxed) frame.locals[variable.slot] = new Cell(readLocal(frame, variable.slot));
-        }
+        reboxLoopVariables(frame, loopVariables);
         update?.(frame);
       }
       return;
@@ -713,19 +707,26 @@ export abstract class StatementCompiler extends CallCompiler {
     statement: Extract<Statement, { kind: 'range' }>,
     range: Operand
   ): { read: Eval; keyType: Type; valueType: Type; iterate: RangeIterator } | undefined {
-    let type = coreType(range.type) ?? range.type;
-    let read = range.eval;
+    const type = coreType(range.type) ?? range.type;
+    const read = range.eval;
     if (type.kind === 'pointer' && underlying(type.element).kind === 'array') {
-      const pointerRead = read;
-      read = (frame) => {
-        const pointer = pointerRead(frame);
-        if (!(pointer instanceof Pointer)) nilPointerPanic();
-        return pointer.load();
+      const arrayType = underlying(type.element) as Extract<Type, { kind: 'array' }>;
+      return {
+        read: (frame) => dereferenceArray(read(frame)),
+        keyType: BASIC.int,
+        valueType: arrayType.element,
+        iterate: iterateArray,
       };
-      type = underlying(type.element);
     }
     if (isString(type)) return { read, keyType: BASIC.int, valueType: BASIC.int32, iterate: iterateString };
-    if (type.kind === 'array') return { read, keyType: BASIC.int, valueType: type.element, iterate: iterateArray };
+    if (type.kind === 'array') {
+      return {
+        read: (frame) => copyValue(read(frame)),
+        keyType: BASIC.int,
+        valueType: type.element,
+        iterate: iterateArray,
+      };
+    }
     if (type.kind === 'slice') return { read, keyType: BASIC.int, valueType: type.element, iterate: iterateSlice };
     if (type.kind === 'map') return { read, keyType: type.key, valueType: type.value, iterate: iterateMap };
     if (isInteger(type) || (range.mode === 'constant' && isUntyped(range.type))) {
@@ -1241,6 +1242,18 @@ export abstract class StatementCompiler extends CallCompiler {
 type RangeVisit = (key: Value, value: Value) => Completion | undefined;
 type RangeIterator = (collection: Value, visit: RangeVisit) => Completion | undefined;
 
+/** Gives each iteration its own cell for loop variables that closures or pointers share. */
+function reboxLoopVariables(frame: Frame, loopVariables: VarEntity[]): void {
+  for (const variable of loopVariables) {
+    if (variable.boxed) frame.locals[variable.slot] = new Cell(copyValue(readLocal(frame, variable.slot)));
+  }
+}
+
+function dereferenceArray(pointer: Value): Value {
+  if (!(pointer instanceof Pointer)) nilPointerPanic();
+  return pointer.load();
+}
+
 /** Visits the runes of a string with their byte offsets. */
 function iterateString(collection: Value, visit: RangeVisit): Completion | undefined {
   const text = collection as string;
@@ -1253,9 +1266,9 @@ function iterateString(collection: Value, visit: RangeVisit): Completion | undef
   return undefined;
 }
 
-/** Visits a copy of an array's elements, since the range expression is evaluated, and copied, once. */
+/** Visits an array's elements (`range a` passes a copy of the array; `range &a` passes the live array). */
 function iterateArray(collection: Value, visit: RangeVisit): Completion | undefined {
-  for (const [index, value] of [...(collection as GoArray).elements].entries()) {
+  for (const [index, value] of (collection as GoArray).elements.entries()) {
     const result = visit(BigInt(index), value);
     if (result) return result;
   }
