@@ -107,6 +107,7 @@ class Preprocessor {
     const flush = (): void => {
       if (pending.length === 0) return;
       try {
+        rejectTrigraphs(pending);
         emit(this.expand(pending));
       } catch (error) {
         if (!(error instanceof CompileError)) throw error;
@@ -143,6 +144,7 @@ class Preprocessor {
     const name = nameToken?.text ?? '';
     const rest = line.tokens.slice(2);
     const active = isActive();
+    if (active) rejectTrigraphs(line.tokens);
     if (CONDITIONAL_DIRECTIVES.has(name)) this.conditionalDirective(name, rest, row, conditionals, active);
     else if (active) this.otherDirective(name, nameToken, rest, row);
   }
@@ -313,6 +315,7 @@ class Preprocessor {
 
   // code-gauge-allow functionCognitiveComplexity 16 -- defined replacement and identifier normalization precede one shared integer-expression evaluator.
   private evaluateCondition(tokens: PPToken[], row: number): boolean {
+    rejectTrigraphs(tokens);
     const replaced: PPToken[] = [];
     for (let index = 0; index < tokens.length; index++) {
       const token = tokens[index];
@@ -526,4 +529,9 @@ function paste(left: PPToken, right: PPToken, row: number): PPToken {
     throw new CompileError([{ row, message: `## でつないだ「${text}」は、1つの字句になりません。` }]);
   }
   return { ...tokens[0], row, space: left.space };
+}
+
+function rejectTrigraphs(tokens: PPToken[]): void {
+  const token = tokens.find((item) => item.hasTrigraph);
+  if (token) unsupported(token.row, 'トライグラフ');
 }

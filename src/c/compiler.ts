@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 561 -- Declaration and initializer compilation share symbol and type state; splitting the phase would only distribute that state across modules.
+// code-gauge-allow-file fileNcss 579 -- Declaration and initializer compilation share symbol and type state; splitting the phase would only distribute that state across modules.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type { Value } from './arith';
 import type {
@@ -47,9 +47,10 @@ import {
 import { unsupported } from './unsupported';
 
 /** A library function: its implementation, or the reason the interpreter leaves it out. */
-export type LibraryEntry =
+export type LibraryEntry = (
   | { kind: 'native'; run: NonNullable<FunctionInfo['native']>; special?: SpecialCall }
-  | { kind: 'unsupported'; feature: string };
+  | { kind: 'unsupported'; feature: string }
+) & { canDefine?: boolean; isPlaceholder?: boolean };
 
 export interface CompiledProgram {
   globals: GlobalInfo[];
@@ -81,11 +82,7 @@ export class Compiler extends StatementCompiler {
     const main = this.scope.ordinary.get('main');
     if (main?.kind !== 'function' || !main.fn.isDefined)
       this.error(0, 'main 関数がありません（int main(void) { ... } を書いてください）。');
-    for (const fn of this.functions) {
-      if (fn.referencedAt !== undefined && !fn.isDefined && !fn.native && fn.header === undefined) {
-        this.error(fn.referencedAt, `関数「${fn.name}」は宣言されていますが、定義されていません。`);
-      }
-    }
+    for (const fn of this.functions) this.checkFunctionDefinition(fn);
     for (const global of this.globals) {
       if (!global.isDefined && global.header === undefined && global.referencedAt !== undefined)
         this.error(global.referencedAt, `変数「${global.name}」は宣言されていますが、定義されていません。`);
@@ -98,6 +95,13 @@ export class Compiler extends StatementCompiler {
     return { globals: this.globals, functions: this.functions, strings: this.strings, main: main.fn };
   }
 
+  private checkFunctionDefinition(fn: FunctionInfo): void {
+    if (fn.referencedAt === undefined || fn.isDefined || fn.native) return;
+    const entry = fn.header === undefined ? undefined : this.library(fn.name);
+    if (entry?.kind === 'unsupported') unsupported(fn.referencedAt, entry.feature);
+    this.error(fn.referencedAt, `関数「${fn.name}」は宣言されていますが、定義されていません。`);
+  }
+
   protected specialCall(name: string): SpecialCall | undefined {
     const entry = this.library(name);
     return entry?.kind === 'native' ? entry.special : undefined;
@@ -107,7 +111,7 @@ export class Compiler extends StatementCompiler {
     if (!this.isUnevaluated) fn.referencedAt ??= row;
     if (fn.header === undefined) return;
     const entry = this.library(fn.name);
-    if (entry?.kind === 'unsupported') unsupported(row, entry.feature);
+    if (entry?.kind === 'unsupported' && (!entry.canDefine || fn.hasPlaceholderType)) unsupported(row, entry.feature);
   }
 
   private externalDeclaration(item: ExternalDeclaration): void {
@@ -151,7 +155,8 @@ export class Compiler extends StatementCompiler {
     this.scope.ordinary.set(name, { kind: 'typedef', type });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keep the compatible-declaration and builtin-replacement rules together; extracting branches would obscure their shared symbol state.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keep the compatible-declaration and builtin-replacement rules together; extracting branches would obscure their shared symbol state.
+  // code-gauge-allow functionNcss 37 -- All declarations must reuse one function identity and its composite type.
   protected declareFunction(
     name: string,
     type: FunctionType,
@@ -164,7 +169,14 @@ export class Compiler extends StatementCompiler {
     const isTurtleBuiltin =
       looked?.kind === 'function' && looked.fn.header === TURTLE_HEADER_NAME && header !== TURTLE_HEADER_NAME;
     const existing = isTurtleBuiltin ? undefined : looked;
+    const entry = header === undefined ? undefined : this.library(name);
     if (existing && existing.kind === 'function') {
+      if (entry?.isPlaceholder) return existing.fn;
+      if (existing.fn.hasPlaceholderType) {
+        existing.fn.type = type;
+        existing.type = type;
+        existing.fn.hasPlaceholderType = false;
+      }
       if (!compatible(existing.type, type)) {
         this.error(row, `関数「${name}」の型が、前の宣言（${typeName(existing.type)}）と合いません。`);
       }
@@ -194,7 +206,7 @@ export class Compiler extends StatementCompiler {
       ...(header === undefined ? {} : { header }),
     };
     if (header !== undefined) {
-      const entry = this.library(name);
+      info.hasPlaceholderType = entry?.isPlaceholder;
       if (entry?.kind === 'native') info.native = entry.run;
     }
     this.functions.push(info);
@@ -280,7 +292,7 @@ export class Compiler extends StatementCompiler {
   // Functions ---------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Declaring a function's parameters, checking main's form.
-  // code-gauge-allow functionNcss 51 -- Parameter scope, labels, and body compilation form one function lifecycle; splitting it would distribute the context restoration.
+  // code-gauge-allow functionNcss 42 -- Parameter scope, labels, and body compilation form one function lifecycle; splitting it would distribute the context restoration.
   private functionDefinition(definition: FunctionDefinition): void {
     const { specifiers, row } = definition;
     if (specifiers.storage === 'typedef' || specifiers.storage === 'auto' || specifiers.storage === 'register') {
@@ -296,8 +308,10 @@ export class Compiler extends StatementCompiler {
     if (name === 'main') this.checkMain(type, row);
     const info = this.declareFunction(name, type, row, specifiers.storage === 'static', undefined);
     if (info.isDefined) this.error(row, `関数「${name}」が2回定義されています。`);
-    if (info.header !== undefined)
+    if (info.header !== undefined && !this.library(name)?.canDefine)
       this.error(row, `関数「${name}」は標準ライブラリにあるので、同じ名前の関数は定義できません。`);
+    info.header = undefined;
+    info.native = undefined;
     info.isDefined = true;
     info.row = row;
     const annotations = this.options.trace?.atomicAnnotations;
@@ -321,19 +335,7 @@ export class Compiler extends StatementCompiler {
     this.fn = context;
     try {
       this.withScope(() => {
-        // `(void)` declares no parameters.
-        const params = (type.params ?? []).length === 0 ? [] : (declarator.params ?? []);
-        for (const param of params) {
-          const { type: paramType, name: declaredParam } = this.parameterType(param);
-          // clang accepts an unnamed parameter in a definition, as C23 does; the function cannot read it.
-          const paramName = declaredParam ?? `\0${param.row}:${info.params.length}`;
-          if (!isComplete(paramType))
-            this.error(param.row, `引数「${paramName}」の型（${typeName(paramType)}）の中身が定義されていません。`);
-          if (this.scope.ordinary.has(paramName)) this.error(param.row, `引数「${paramName}」が2つあります。`);
-          const local = this.addLocal(paramName, paramType, param.row, true);
-          if (param.specifiers.storage === 'register') context.registerLocals.add(local);
-          info.params.push(local);
-        }
+        this.defineParameters(declarator, context);
         const body = this.compound(definition.body, true);
         for (const [labelName, label] of context.labels) {
           if (!label.defined) this.error(label.row, `ラベル「${labelName}」がありません。`);
@@ -342,6 +344,22 @@ export class Compiler extends StatementCompiler {
       });
     } finally {
       this.fn = outer;
+    }
+  }
+
+  private defineParameters(declarator: Extract<Declarator, { kind: 'function' }>, context: FunctionContext): void {
+    const info = context.info;
+    const params = (info.type.params ?? []).length === 0 ? [] : (declarator.params ?? []);
+    for (const param of params) {
+      const { type: paramType, name: declaredParam } = this.parameterType(param);
+      // clang accepts an unnamed parameter in a definition, as C23 does; the function cannot read it.
+      const paramName = declaredParam ?? `\0${param.row}:${info.params.length}`;
+      if (!isComplete(paramType))
+        this.error(param.row, `引数「${paramName}」の型（${typeName(paramType)}）の中身が定義されていません。`);
+      if (this.scope.ordinary.has(paramName)) this.error(param.row, `引数「${paramName}」が2つあります。`);
+      const local = this.addLocal(paramName, paramType, param.row, true);
+      if (param.specifiers.storage === 'register') context.registerLocals.add(local);
+      info.params.push(local);
     }
   }
 

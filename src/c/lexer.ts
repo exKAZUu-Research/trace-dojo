@@ -10,6 +10,7 @@ export interface PPToken {
   space: boolean;
   /** The macros whose expansion produced this token, which it must not expand again. */
   hide?: ReadonlySet<string>;
+  hasTrigraph?: boolean;
 }
 
 /** A logical line: the tokens between two newlines that no backslash or comment hides. */
@@ -102,10 +103,24 @@ export function tokenize(source: string): { lines: LogicalLine[]; comments: Sour
   return new Lexer(source).tokenize();
 }
 
+const TRIGRAPHS: Record<string, string> = {
+  '=': '#',
+  '(': '[',
+  ')': ']',
+  '<': '{',
+  '>': '}',
+  "'": '^',
+  '!': '|',
+  '-': '~',
+  '/': '\\',
+};
+
 type TokenBody = Pick<PPToken, 'kind' | 'text'>;
 
 class Lexer {
   private readonly source: string;
+  private readonly original: string;
+  private readonly origins: number[] = [];
   private readonly lines: LogicalLine[] = [];
   private readonly comments: SourceComment[] = [];
   private row = 0;
@@ -114,12 +129,21 @@ class Lexer {
   private space = false;
 
   constructor(source: string) {
-    const trigraph = /\?\?[=()<>/'!-]/.exec(source);
-    if (trigraph) unsupported(source.slice(0, trigraph.index).split('\n').length - 1, 'トライグラフ');
-    this.source = source;
+    const splice = /\?\?\/(?:\r?\n)/.exec(source);
+    if (splice) unsupported(source.slice(0, splice.index).split('\n').length - 1, 'トライグラフ');
+    this.original = source;
+    let translated = '';
+    for (let index = 0; index < source.length; index++) {
+      this.origins.push(index);
+      const replacement = source.startsWith('??', index) ? TRIGRAPHS[source[index + 2]] : undefined;
+      translated += replacement ?? source[index];
+      if (replacement) index += 2;
+    }
+    this.origins.push(source.length);
+    this.source = translated;
   }
 
-  // code-gauge-allow functionNcss 31 -- Logical-line and comment handling share row and splice state; splitting the scanner loop would distribute that state.
+  // code-gauge-allow functionNcss 34 -- Logical-line and comment handling share row and splice state; splitting the scanner loop would distribute that state.
   tokenize(): { lines: LogicalLine[]; comments: SourceComment[]; rowCount: number } {
     const { source } = this;
     const length = source.length;
@@ -142,8 +166,11 @@ class Lexer {
         this.blockComment();
       } else {
         const tokenRow = this.row;
+        const start = this.index;
         const { kind, text } = this.token(char);
-        this.current.tokens.push({ kind, text, row: tokenRow, space: this.space });
+        const original = this.original.slice(this.origins[start], this.origins[this.index]);
+        const hasTrigraph = /\?\?[=()<>/'!-]/.test(original);
+        this.current.tokens.push({ kind, text, row: tokenRow, space: this.space, hasTrigraph });
         this.space = false;
       }
     }
@@ -199,7 +226,11 @@ class Lexer {
         this.index++;
       }
     }
-    this.comments.push({ index: start, text: source.slice(start, this.index), isLine: true });
+    this.comments.push({
+      index: this.origins[start],
+      text: this.original.slice(this.origins[start], this.origins[this.index]),
+      isLine: true,
+    });
     this.space = true;
   }
 
@@ -217,7 +248,11 @@ class Lexer {
     }
     this.take();
     this.take();
-    this.comments.push({ index: start, text: source.slice(start, this.index), isLine: false });
+    this.comments.push({
+      index: this.origins[start],
+      text: this.original.slice(this.origins[start], this.origins[this.index]),
+      isLine: false,
+    });
     this.space = true;
   }
 

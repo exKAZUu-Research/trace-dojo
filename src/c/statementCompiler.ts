@@ -110,6 +110,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         try {
           return compiled.exec(frame, entry);
         } finally {
+          if (previous === undefined) frame.finalVisibleLocals = locals;
           frame.visibleLocals = previous;
         }
       },

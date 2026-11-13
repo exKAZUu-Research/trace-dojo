@@ -47,7 +47,8 @@ class Snapshotter {
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const hidesArgs = frame.fn === this.program.main && frame.fn.params.length === 2;
-    const locals = frame.visibleLocals ?? frame.fn.locals.filter((local) => frame.live[local.index]);
+    const locals =
+      frame.visibleLocals ?? frame.finalVisibleLocals ?? frame.fn.locals.filter((local) => frame.live[local.index]);
     for (const local of locals) {
       // main's parameters only receive the launcher's arguments, which these programs never use.
       if (hidesArgs && local.isParameter) continue;

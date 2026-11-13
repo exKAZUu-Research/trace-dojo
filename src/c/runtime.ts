@@ -61,6 +61,7 @@ export interface FunctionInfo {
   row: number;
   isDefined: boolean;
   isStatic: boolean;
+  hasPlaceholderType?: boolean;
   body?: Exec;
   native?: NativeFunction;
   locals: LocalInfo[];
@@ -83,6 +84,7 @@ export class Frame implements TracedFrame {
   /** Which variables are in scope, by local index, for the trace. */
   readonly live: boolean[] = [];
   visibleLocals?: readonly LocalInfo[];
+  finalVisibleLocals?: readonly LocalInfo[];
   readonly pointerRanges = new Map<number, PointerRange>();
   returnRange?: PointerRange;
   returnValue: Value | undefined;

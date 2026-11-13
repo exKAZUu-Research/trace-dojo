@@ -60,7 +60,7 @@ const UNSUPPORTED: Record<string, string> = {
   wcstombs: 'マルチバイト文字の変換（wcstombs）',
   at_quick_exit: 'at_quick_exit',
 };
-for (const name of [
+const EXTENSION_NAMES = [
   'strcasecmp',
   'strncasecmp',
   'strlcpy',
@@ -80,8 +80,8 @@ for (const name of [
   'srand48',
   'seed48',
   'lcong48',
-])
-  UNSUPPORTED[name] = `標準 C ライブラリ以外の関数（${name}）`;
+];
+for (const name of EXTENSION_NAMES) UNSUPPORTED[name] = `標準 C ライブラリ以外の関数（${name}）`;
 
 // These give the last bits of macOS's own algorithms, which no portable formula reproduces.
 for (const name of ['erf', 'erfc', 'tgamma', 'lgamma']) {
@@ -102,6 +102,7 @@ const NATIVES: Record<string, NativeFunction> = {
 };
 
 const PLATFORM_FUNCTIONS = new Set(Object.values(PLATFORM_HEADER_FUNCTIONS).flat());
+const EXTENSIONS = new Set([...PLATFORM_FUNCTIONS, 'strdup', 'strndup', ...EXTENSION_NAMES]);
 
 const SPECIAL_CALLS = {
   strcmp: comparisonCall,
@@ -116,15 +117,16 @@ const SPECIAL_CALLS = {
 /** The interpreter's implementation of a library function, or why it leaves the function out. */
 export function libraryEntry(name: string): LibraryEntry | undefined {
   const feature = UNSUPPORTED[name];
-  if (feature) return { kind: 'unsupported', feature };
+  if (feature) return { kind: 'unsupported', feature, canDefine: EXTENSIONS.has(name) };
   const run = NATIVES[name];
   if (!run)
     return PLATFORM_FUNCTIONS.has(name)
-      ? { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name}）` }
+      ? { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name}）`, canDefine: true, isPlaceholder: true }
       : undefined;
   return {
     kind: 'native',
     run,
+    canDefine: EXTENSIONS.has(name),
     ...(name in SPECIAL_CALLS ? { special: SPECIAL_CALLS[name as keyof typeof SPECIAL_CALLS] } : {}),
   };
 }

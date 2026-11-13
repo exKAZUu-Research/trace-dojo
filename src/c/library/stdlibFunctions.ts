@@ -3,6 +3,7 @@ import { CRuntimeError, ProgramAbort, ProgramExit } from '../errors';
 import type { NativeFunction, Runtime } from '../runtime';
 import { type CType, pointerTo, VOID } from '../types';
 import { isExactFloatPrefix, parseFloatPrefix, parseIntegerPrefix } from './numberParsing';
+import { qsort } from './sorting';
 import { asAddress, asNumber, asSize, readCString, readRaw, writeBytes } from './support';
 
 export const ERANGE = 34;
@@ -60,11 +61,12 @@ function absolute(bits: 32 | 64): NativeFunction {
 }
 
 /** `strtol` and its relatives: the integer at the start of a string, clamped to the type with `errno` set. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Base errors, destination bounds, errno, and end pointers form one conversion result.
+// code-gauge-allow functionCognitiveComplexity 18 -- Base errors, destination bounds, errno, and end pointers form one conversion result.
 function strtoInteger(bits: 32 | 64, signed: boolean, wide: boolean): NativeFunction {
   return (runtime, [text, end, base]) => {
     const bytes = readCString(runtime, asAddress(text));
     const parsed = parseIntegerPrefix(bytes, asNumber(base));
+    if (parsed.length === 0) setErrno(runtime, 22);
     let value = parsed.value;
     const min = signed ? -(1n << BigInt(bits - 1)) : 0n;
     const max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
@@ -126,131 +128,6 @@ function comparator(runtime: Runtime, address: number, row: number): (a: number,
   const fn = runtime.functions.get(address);
   if (!fn) throw new CRuntimeError(address === 0 ? 'nullAccess' : 'badFunctionPointer');
   return (a, b) => Number(runtime.call(fn, [a, b], [VOID_POINTER, VOID_POINTER], row) as Scalar);
-}
-
-/** macOS's qsort: Bentley and McIlroy's, as FreeBSD's libc implements it, so that equal elements end up alike. */
-function qsort(
-  runtime: Runtime,
-  base: number,
-  count: number,
-  size: number,
-  compare: (a: number, b: number) => number
-): void {
-  new QuickSort(runtime, size, compare).sort(base, count);
-}
-
-class QuickSort {
-  constructor(
-    private readonly runtime: Runtime,
-    private readonly size: number,
-    private readonly compare: (a: number, b: number) => number
-  ) {}
-
-  sort(start: number, n: number): void {
-    const { size } = this;
-    let a = start;
-    let length = n;
-    for (;;) {
-      this.runtime.spend();
-      if (length <= 7) {
-        this.insertionSort(a, length);
-        return;
-      }
-      this.swap(a, this.pivot(a, length));
-      const { pa, pb, pc, pd, swapped } = this.partition(a, length);
-      if (!swapped) {
-        this.insertionSort(a, length);
-        return;
-      }
-      const pn = a + length * size;
-      let r = Math.min(pa - a, pb - pa);
-      this.vectorSwap(a, pb - r, r);
-      r = Math.min(pd - pc, pn - pd - size);
-      this.vectorSwap(pb, pn - r, r);
-      if ((r = pb - pa) > size) this.sort(a, r / size);
-      if ((r = pd - pc) <= size) return;
-      a = pn - r;
-      length = r / size;
-    }
-  }
-
-  private pivot(a: number, length: number): number {
-    const { size } = this;
-    let pm = a + Math.floor(length / 2) * size;
-    if (length > 7) {
-      let pl = a;
-      let pn = a + (length - 1) * size;
-      if (length > 40) {
-        const d = Math.floor(length / 8) * size;
-        pl = this.med3(pl, pl + d, pl + 2 * d);
-        pm = this.med3(pm - d, pm, pm + d);
-        pn = this.med3(pn - 2 * d, pn - d, pn);
-      }
-      pm = this.med3(pl, pm, pn);
-    }
-    return pm;
-  }
-
-  private partition(a: number, length: number): { pa: number; pb: number; pc: number; pd: number; swapped: boolean } {
-    const { size } = this;
-    let swapped = false;
-    let pa = a + size;
-    let pb = pa;
-    let pc = a + (length - 1) * size;
-    let pd = pc;
-    for (;;) {
-      let result: number;
-      while (pb <= pc && (result = this.compare(pb, a)) <= 0) {
-        if (result === 0) {
-          swapped = true;
-          this.swap(pa, pb);
-          pa += size;
-        }
-        pb += size;
-      }
-      while (pb <= pc && (result = this.compare(pc, a)) >= 0) {
-        if (result === 0) {
-          swapped = true;
-          this.swap(pc, pd);
-          pd -= size;
-        }
-        pc -= size;
-      }
-      if (pb > pc) return { pa, pb, pc, pd, swapped };
-      this.swap(pb, pc);
-      swapped = true;
-      pb += size;
-      pc -= size;
-    }
-  }
-
-  private med3(a: number, b: number, c: number): number {
-    if (this.compare(a, b) < 0) {
-      if (this.compare(b, c) < 0) return b;
-      return this.compare(a, c) < 0 ? c : a;
-    }
-    if (this.compare(b, c) > 0) return b;
-    return this.compare(a, c) < 0 ? a : c;
-  }
-
-  private insertionSort(start: number, n: number): void {
-    const { size } = this;
-    for (let pm = start + size; pm < start + n * size; pm += size) {
-      for (let pl = pm; pl > start && this.compare(pl - size, pl) > 0; pl -= size) this.swap(pl, pl - size);
-    }
-  }
-
-  private vectorSwap(a: number, b: number, length: number): void {
-    for (let offset = 0; offset < length; offset += this.size) this.swap(a + offset, b + offset);
-  }
-
-  private swap(a: number, b: number): void {
-    if (a === b) return;
-    const first = readRaw(this.runtime, a, this.size);
-    const second = readRaw(this.runtime, b, this.size);
-    writeBytes(this.runtime, a, second.bytes, second.initialized, second.pointerRanges);
-    writeBytes(this.runtime, b, first.bytes, first.initialized, first.pointerRanges);
-  }
 }
 
 function bsearch(

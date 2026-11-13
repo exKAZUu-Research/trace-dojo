@@ -576,3 +576,113 @@ int a[2][2]={{1,2},{3,4}};int *p=a[0]+2;int*q=a[1];int main(void){printf("%d %d 
     uncaughtException: undefined,
   });
 });
+
+test.each(['*p=3;', 'int value=3;memcpy(p,&value,sizeof value);'])(
+  'final snapshots retain bypassed lexical locals after indirect writes: %s',
+  (write) => {
+    const source = `#include <string.h>
+int x=9;
+int main(void){
+ goto L;
+ int x;
+ L:;
+ int *p=&x;
+ ${write}
+}`;
+    const trace = traceProgram('c', source, source);
+    expect(trace.traceItems.at(-1)?.vars.x).toBe(3);
+    expect(trace.finalVars.x).toBe(3);
+  }
+);
+
+test('final snapshots restore outer visibility when nested blocks end', () => {
+  const source = `int main(void){int x=1;{int x=2;}return 0;}`;
+  expect(traceProgram('c', source, source).finalVars).toEqual({ x: 1 });
+});
+
+test.each(['// 本当に動く??!\n/* (??) */', '/* ??/??/ */', ' #if 0\n"what??!"\n#endif'])(
+  'trigraphs discarded as comments or inactive tokens do not reject programs: %s',
+  (prefix) => {
+    expect(executeProgram('c', `#include <stdio.h>\n${prefix}\nint main(void){puts("ok");}`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'ok\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['??=define X 1', 'int x=??-1;', 'char*s="??!";', '// ??/\n int hidden;'])(
+  'active trigraph syntax remains unsupported: %s',
+  (code) => {
+    expect(executeProgram('c', `${code}\nint main(void){}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({ message: 'トライグラフは、この採点環境では使えません。' }),
+      ]),
+    });
+  }
+);
+
+test('integer conversion failures report platform errno across signed and unsigned families', () => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+#include <inttypes.h>
+#include <errno.h>
+int main(void){char*inputs[]={"abc","","   ","-","10","10"};int bases[]={10,10,0,10,1,37};char*end;
+for(int i=0;i<6;i++){errno=0;long n=strtol(inputs[i],&end,bases[i]);printf("%ld %d %ld\\n",n,errno,end-inputs[i]);}
+errno=0;strtoul("abc",0,10);printf("%d ",errno);errno=0;strtoimax("-",0,10);printf("%d ",errno);errno=0;strtoumax("",0,10);printf("%d\\n",errno);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 22 0\n0 22 0\n0 22 0\n0 22 0\n0 22 0\n0 22 0\n22 22 22\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('learner definitions supersede platform extensions while typed conflicts remain errors', () => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+int strcasecmp(const char*a,const char*b){return 0;}long random(void){return 7;}size_t strnlen(const char*s,size_t n){return 2;}
+int main(void){printf("%d %ld %zu\\n",strcasecmp("a","b"),random(),strnlen("abc",3));}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0 7 2\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('c', '#include <stdlib.h>\nint random(void){return 7;}int main(void){}').kind).toBe(
+    'compileError'
+  );
+});
+
+test('larger tie-heavy qsort partitions preserve Apple order and comparator count', () => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+int calls;int cmp(const void*a,const void*b){calls++;return *(const int*)a/10-*(const int*)b/10;}
+int main(void){int z[32]={40,43,19,43,69,7,88,39,50,41,22,38,2,85,89,67,91,14,105,31,37,63,37,5,49,70,86,77,35,36,12,8};qsort(z,32,sizeof z[0],cmp);for(int i=0;i<32;i++)printf("%d,",z[i]);printf(" %d\\n",calls);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '8,7,2,5,14,19,12,22,39,37,31,37,36,38,35,40,43,43,41,49,50,67,69,63,70,77,89,86,85,88,91,105, 108\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('qsort comparison order and tie ordering match Apple across partition sizes', () => {
+  const source = `#include <stdio.h>
+#include <stdlib.h>
+unsigned digest;
+int cmp(const void*a,const void*b){int x=*(const int*)a,y=*(const int*)b;digest=digest*33u+(unsigned)(x*131+y);return x/10-y/10;}
+int main(void){for(int n=1;n<=64;n++){int a[64];unsigned seed=7;for(int i=0;i<n;i++){seed=seed*1664525u+1013904223u;a[i]=(int)(seed%110u);}qsort(a,n,sizeof *a,cmp);for(int i=0;i<n;i++)digest=digest*33u+(unsigned)a[i];}printf("%u\\n",digest);}`;
+  expect(executeProgram('c', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '3139257128\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('a typed learner prototype permits calls before an extension function definition', () => {
+  const source = `#include <string.h>
+#include <stdio.h>
+size_t strnlen(const char*s,size_t n);size_t length(const char*s){return strnlen(s,3);}size_t strnlen(const char*s,size_t n){return 2;}
+int main(void){printf("%zu\\n",length("abc"));}`;
+  expect(executeProgram('c', source)).toMatchObject({ kind: 'executed', stdout: '2\n', uncaughtException: undefined });
+});
