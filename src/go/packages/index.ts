@@ -12,6 +12,7 @@ import { MATH_PACKAGE } from './math';
 import { COLOR_PACKAGE, IMAGE_PACKAGE, RUNTIME_PACKAGE } from './misc';
 import { OS_PACKAGE } from './os';
 import { RAND_PACKAGE, RAND_V2_PACKAGE } from './rand';
+import { REGEXP_PACKAGE } from './regexp';
 import { STRCONV_PACKAGE } from './strconv';
 import { STRINGS_PACKAGE } from './strings';
 import { TIME_PACKAGE } from './time';
@@ -30,6 +31,7 @@ const PACKAGES = new Map<string, GoPackage>(
     LIST_PACKAGE,
     RAND_PACKAGE,
     RAND_V2_PACKAGE,
+    REGEXP_PACKAGE,
     RUNTIME_PACKAGE,
     TIME_PACKAGE,
     ERRORS_PACKAGE,

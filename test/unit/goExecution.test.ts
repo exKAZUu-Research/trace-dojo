@@ -1024,3 +1024,62 @@ func main() {
       '2024-02-29 23:59:58.999999999 +0900 JST 2025-02-28 16:30:00.999999999 +0000 UTC 8761h30m2s Saturday 60 1740760200\nThu, 29 Feb 2024 23:59:58 +0900 Thu Feb 29 11:59:58.999 PM 2024 JST 2024-02-29 23:00:00 +0900 JST 2024-02-29 23:59:59 +0900 JST\n2006-01-02 15:04:05.5 +0700 +0700 <nil> \nparsing time "2023-02-29": day out of range\n1h15m30.918273645s 1h15m30.918s 1h15m0s 75.51530456075 1.5ms\ntrue\n86 70 4606516669249208593 4609484862093197509\n1 45 9\n12432809566553409497 421 13835421274913171332\n4624876730496230199 4599591633323682319 13810505694936104767 4598160665187177521\n13811638431671717664 -1 4607916898044544591 4612033774433628239\n',
   });
 });
+
+// Go 1.27.3 prints these: Go by Example's regexp calls, named groups and templates, Split, simple case folding, Unicode
+// classes and \b, leftmost-first versus POSIX leftmost-longest, byte offsets over invalid UTF-8, and parse errors.
+test('regexp matches as the RE2 engine of Go does', () => {
+  const program = String.raw`package main
+
+import (
+	"bytes"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+func main() {
+	r := regexp.MustCompile("p([a-z]+)ch")
+	fmt.Println(r, r.MatchString("peach"), r.FindStringIndex("peach punch"), r.FindStringSubmatch("peach punch"))
+	fmt.Println(r.FindAllStringSubmatchIndex("peach punch pinch", -1), r.FindAllString("peach punch pinch", 2))
+	fmt.Println(r.ReplaceAllString("a peach", "<$1>"), string(r.ReplaceAllFunc([]byte("a peach"), bytes.ToUpper)))
+	re := regexp.MustCompile("(?P<first>\\w+)\\s(?P<last>\\w+)")
+	fmt.Printf("%q %d\n", re.SubexpNames(), re.SubexpIndex("last"))
+	fmt.Println(re.ReplaceAllString("ada lovelace, alan turing", "${'$'}{last}_$first"))
+	fmt.Printf("%q %q\n", regexp.MustCompile("a*").Split("baaaab", -1), regexp.MustCompile(",\\s*").Split("x, y,z", 2))
+	fmt.Println(regexp.MustCompile("(?i)straße|k").FindAllString("STRASSE Straſſe STRAßE K", -1))
+	fmt.Println(regexp.MustCompile("\\p{Greek}+|\\bgo\\b").FindAllStringIndex("αβγ go gopher", -1))
+	fmt.Println(regexp.MustCompile("a(|b)").FindString("ab"), regexp.MustCompilePOSIX("a(|b)").FindString("ab"))
+	pre, complete := regexp.MustCompile("^hello(?:x|y)").LiteralPrefix()
+	fmt.Println(pre, complete, regexp.MustCompile(".").FindAllStringIndex("é\xffz", -1))
+	fmt.Println(regexp.QuoteMeta("1+1=2? [yes]"), regexp.MustCompile("b+").MatchReader(strings.NewReader("abbc")))
+	for _, p := range []string{"a(b", "x**", "[z-a]", "\\pX", "a{1001}", "(?P<>x)"} {
+		_, err := regexp.Compile(p)
+		fmt.Println(err)
+	}
+	defer func() { fmt.Println(recover()) }()
+	regexp.MustCompile("a)")
+}`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      'p([a-z]+)ch true [0 5] [peach ea]\n' +
+      '[[0 5 1 3] [6 11 7 9] [12 17 13 15]] [peach punch]\n' +
+      'a <ea> a PEACH\n' +
+      '["" "first" "last"] 2\n' +
+      'lovelace_ada, turing_alan\n' +
+      '["b" "b"] ["x" "y,z"]\n' +
+      '[STRA\u00DFE \u212A]\n' +
+      '[[0 6] [7 9]]\n' +
+      'a ab\n' +
+      'hello false [[0 2] [2 3] [3 4]]\n' +
+      '1\\+1=2\\? \\[yes\\] true\n' +
+      'error parsing regexp: missing closing ): `a(b`\n' +
+      'error parsing regexp: invalid nested repetition operator: `**`\n' +
+      'error parsing regexp: invalid character class range: `z-a`\n' +
+      'error parsing regexp: invalid character class range: `\\pX`\n' +
+      'error parsing regexp: invalid repeat count: `{1001}`\n' +
+      'error parsing regexp: invalid named capture: `(?P<>`\n' +
+      'regexp: Compile(`a)`): error parsing regexp: unexpected ): `a)`\n',
+  });
+});
