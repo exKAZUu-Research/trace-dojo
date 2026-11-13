@@ -735,7 +735,7 @@ export class XmlDecoder {
 
   /** Whether character data is valid UTF-8 of XML characters, storing the syntax error when it is not. */
   private checkCharacters(data: string): boolean {
-    for (let i = 0; i < data.length; ) {
+    for (let i = 0; i < data.length;) {
       const { rune, size } = decodeRune(data, i);
       if (rune === RUNE_ERROR && size === 1) return this.fail('invalid UTF-8') ?? false;
       i += size;

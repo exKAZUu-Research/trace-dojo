@@ -45,7 +45,7 @@ export class XmlUnmarshaler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 60 -- A transcription of Go's Decoder.unmarshal.
+  /** `unmarshal`: decodes the element that `start` begins, or the next one, into the value. */
   private unmarshal(initial: XVal, startArg: StartToken | undefined): Value {
     currentRuntime().spend();
     if (this.d.stackDepth > 10_000) return plainError('exceeded max depth');
@@ -55,99 +55,90 @@ export class XmlUnmarshaler {
       if (err !== undefined) return err;
       if (token?.kind === 'start') start = token;
     }
-    let val = initial;
-    if (kindOf(val.type) === 'interface' && val.value !== undefined) {
-      const inner = val.value as Iface;
-      if (kindOf(inner.type) === 'pointer' && inner.value !== undefined) {
-        val = { type: inner.type, value: inner.value, readOnly: val.readOnly };
-      }
-    }
-    if (kindOf(val.type) === 'pointer') {
-      let target = val.value as Pointer | undefined;
-      if (target === undefined) {
-        target = newVariable(elementType(val.type));
-        val.pointer?.store(target);
-      }
-      val = { type: elementType(val.type), value: target.load(), pointer: target, readOnly: val.readOnly };
-    }
+    const val = this.target(initial);
     const methodResult = this.unmarshalWithMethods(val, start);
     if (methodResult !== NO_METHOD) return methodResult;
-    let saveData: XVal | undefined;
-    let structVal: XVal | undefined;
-    let tinfo: TypeInfo | undefined;
     switch (kindOf(val.type)) {
       case 'interface': {
         return this.skip();
       }
+      case 'struct': {
+        return this.unmarshalStruct(val, start);
+      }
       case 'slice': {
-        if (isByteKind(elementType(val.type))) {
-          saveData = val;
-          break;
-        }
-        return this.unmarshalSliceElement(val, start);
+        if (!isByteKind(elementType(val.type))) return this.unmarshalSliceElement(val, start);
+        return this.unmarshalData(val);
       }
       case 'bool':
       case 'float':
       case 'int':
       case 'uint':
       case 'string': {
-        saveData = val;
-        break;
-      }
-      case 'struct': {
-        if (val.type === NAME) {
-          val.pointer?.store(nameToGo(start.name));
-          break;
-        }
-        structVal = val;
-        const info = getTypeInfo(val.type);
-        if ('err' in info) return info.err;
-        tinfo = info;
-        if (info.xmlname) {
-          const fv = fieldValue(val, info.xmlname, true);
-          if (fv?.type === NAME) fv.pointer?.store(nameToGo(start.name));
-        }
-        break;
+        return this.unmarshalData(val);
       }
       default: {
         return plainError(`unknown type ${typeString(val.type)}`);
       }
     }
+  }
+
+  /** The value to decode into: the pointer a non-nil interface holds, and what a pointer points to, allocated if nil. */
+  private target(initial: XVal): XVal {
+    let val = initial;
+    const inner = kindOf(val.type) === 'interface' ? (val.value as Iface | undefined) : undefined;
+    if (inner !== undefined && kindOf(inner.type) === 'pointer' && inner.value !== undefined) {
+      val = { type: inner.type, value: inner.value, readOnly: val.readOnly };
+    }
+    if (kindOf(val.type) !== 'pointer') return val;
+    let target = val.value as Pointer | undefined;
+    if (target === undefined) {
+      target = newVariable(elementType(val.type));
+      val.pointer?.store(target);
+    }
+    return { type: elementType(val.type), value: target.load(), pointer: target, readOnly: val.readOnly };
+  }
+
+  private unmarshalStruct(val: XVal, start: StartToken): Value {
+    if (val.type === NAME) {
+      val.pointer?.store(nameToGo(start.name));
+      return this.readElement(undefined, undefined)[1];
+    }
+    const info = getTypeInfo(val.type);
+    if ('err' in info) return info.err;
+    if (info.xmlname) {
+      const fv = fieldValue(val, info.xmlname, true);
+      if (fv?.type === NAME) fv.pointer?.store(nameToGo(start.name));
+    }
+    return this.readElement(info, val)[1];
+  }
+
+  /** Decodes the character data of the element into a basic value or byte slice. */
+  private unmarshalData(val: XVal): Value {
+    const [data, err] = this.readElement(undefined, undefined);
+    return err ?? copyValue(val, data);
+  }
+
+  /**
+   * Reads the rest of the element: its child elements into the struct's fields, skipping the others, and its character
+   * data, which it returns.
+   */
+  private readElement(tinfo: TypeInfo | undefined, structVal: XVal | undefined): [string, Value] {
     let data = '';
     for (;;) {
       const [token, err] = this.d.token();
-      if (err !== undefined) return err;
-      if (token?.kind === 'start') {
-        let consumed = false;
-        if (structVal && tinfo) {
-          const [pathConsumed, pathErr] = this.unmarshalPath(tinfo, structVal, token);
-          if (pathErr !== undefined) return pathErr;
-          consumed = pathConsumed;
-        }
-        if (!consumed) {
-          const skipErr = this.skip();
-          if (skipErr !== undefined) return skipErr;
-        }
-      } else if (token?.kind === 'end') {
-        break;
-      } else if (token?.kind === 'chardata' && saveData) {
-        data += token.data;
+      if (err !== undefined) return [data, err];
+      if (token?.kind === 'end') return [data, undefined];
+      if (token?.kind === 'chardata') data += token.data;
+      if (token?.kind !== 'start') continue;
+      let consumed = false;
+      if (structVal && tinfo) {
+        const [pathConsumed, pathErr] = this.unmarshalPath(tinfo, structVal, token);
+        if (pathErr !== undefined) return [data, pathErr];
+        consumed = pathConsumed;
       }
+      const skipErr = consumed ? undefined : this.skip();
+      if (skipErr !== undefined) return [data, skipErr];
     }
-    if (saveData && !saveData.readOnly) {
-      if (implementsInterface(saveData.type, TEXT_UNMARSHALER)) {
-        const err = callValueMethod(saveData.type, saveData.value, 'UnmarshalText', [byteSlice(data)]) as Value;
-        if (err !== undefined) return err;
-        saveData = undefined;
-      } else if (saveData.pointer && implementsInterface(pointerTo(saveData.type), TEXT_UNMARSHALER)) {
-        const err = callValueMethod(pointerTo(saveData.type), saveData.pointer, 'UnmarshalText', [
-          byteSlice(data),
-        ]) as Value;
-        if (err !== undefined) return err;
-        saveData = undefined;
-      }
-    }
-    return saveData ? copyValue(saveData, data) : undefined;
   }
 
   private unmarshalSliceElement(val: XVal, start: StartToken): Value {

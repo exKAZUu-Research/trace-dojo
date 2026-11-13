@@ -2,8 +2,8 @@
 import { formatFloat } from '../floatFormat';
 import { decodeRune, RUNE_ERROR } from '../literals';
 import { currentRuntime } from '../native';
-import { pointerTo, type Type, typeIdentityKey, typeString, underlying } from '../types';
-import { type GoArray, GoStruct, type Iface, Pointer, type Slice, type Value } from '../values';
+import { type Field, pointerTo, type Type, typeIdentityKey, typeString, underlying } from '../types';
+import { type GoArray, GoStruct, type Iface, Pointer, Slice, type Value } from '../values';
 import { ERR_SHORT_WRITE } from './io';
 import { TEXT_MARSHALER } from './jsonArshalCore';
 import {
@@ -56,31 +56,32 @@ export function getTypeInfo(type: Type): TypeInfo | { err: Value } {
   const struct = structOf(type);
   if (struct && type !== NAME) {
     for (const [i, field] of struct.fields.entries()) {
-      if (!exported(field.name) && !field.embedded) continue;
-      if (field.embedded) {
-        const inner = kindOf(field.type) === 'pointer' ? elementType(field.type) : field.type;
-        if (kindOf(inner) === 'struct') {
-          const innerInfo = getTypeInfo(inner);
-          if ('err' in innerInfo) return innerInfo;
-          info.xmlname ??= innerInfo.xmlname;
-          for (const finfo of innerInfo.fields) {
-            const err = addFieldInfo(type, info, { idx: [i, ...finfo.idx], name: finfo.name });
-            if (err !== undefined) return { err };
-          }
-          continue;
-        }
-      }
-      const name = fieldName(field.name);
-      if (name === 'XMLName') {
-        info.xmlname = { idx: [i], name: '' };
-        continue;
-      }
-      const err = addFieldInfo(type, info, { idx: [i], name });
+      const err = addField(type, info, i, field);
       if (err !== undefined) return { err };
     }
   }
   typeInfoCache.set(key, info);
   return info;
+}
+
+/** Adds a struct field, or the fields an embedded struct promotes, returning a TagPathError for a conflict. */
+function addField(type: Type, info: TypeInfo, i: number, field: Field): Value {
+  if (!exported(field.name) && !field.embedded) return undefined;
+  const inner = kindOf(field.type) === 'pointer' ? elementType(field.type) : field.type;
+  if (field.embedded && kindOf(inner) === 'struct') {
+    const innerInfo = getTypeInfo(inner);
+    if ('err' in innerInfo) return innerInfo.err;
+    info.xmlname ??= innerInfo.xmlname;
+    for (const finfo of innerInfo.fields) {
+      const err = addFieldInfo(type, info, { idx: [i, ...finfo.idx], name: finfo.name });
+      if (err !== undefined) return err;
+    }
+    return undefined;
+  }
+  const name = fieldName(field.name);
+  if (name !== 'XMLName') return addFieldInfo(type, info, { idx: [i], name });
+  info.xmlname = { idx: [i], name: '' };
+  return undefined;
 }
 
 function addFieldInfo(type: Type, info: TypeInfo, field: FieldInfo): Value {
@@ -392,70 +393,24 @@ export class Printer {
   // Marshaling ---------------------------------------------------------------------------------------------------------
 
   /** `marshalValue`. */
-  // code-gauge-allow functionCognitiveComplexity 40 -- A transcription of Go's printer.marshalValue.
   marshalValue(initial: XVal | undefined, finfo: FieldInfo | undefined, startTemplate: XToken | undefined): Value {
     currentRuntime().spend();
     if (startTemplate?.kind === 'start' && startTemplate.name.local === '') {
       return plainError('xml: EncodeElement of StartElement with missing name');
     }
-    if (initial === undefined) return undefined;
-    let val = initial;
-    for (;;) {
-      const kind = kindOf(val.type);
-      if (kind === 'interface') {
-        const iface = val.value as Iface | undefined;
-        if (iface === undefined) return undefined;
-        val = { type: iface.type, value: iface.value, readOnly: val.readOnly };
-      } else if (kind === 'pointer') {
-        const pointer = val.value as Pointer | undefined;
-        if (pointer === undefined) return undefined;
-        val = { type: elementType(val.type), value: pointer.load(), pointer, readOnly: val.readOnly };
-      } else break;
-    }
+    const val = initial && indirect(initial);
+    if (val === undefined) return undefined;
     const { type } = val;
     const kind = kindOf(type);
     const methodResult = this.marshalWithMethods(val, finfo, startTemplate);
     if (methodResult !== NO_METHOD) return methodResult;
     if ((kind === 'slice' || kind === 'array') && !isByteKind(elementType(type))) {
-      const list = val.value as Slice | GoArray | undefined;
-      const values = list === undefined ? [] : 'elements' in list ? list.elements : list.values();
-      for (const [i, element] of values.entries()) {
-        let pointer: Pointer | undefined;
-        if (list && 'array' in list) pointer = new Pointer(list.array, list.offset + i);
-        else if (list && val.pointer) pointer = new Pointer((list as GoArray).elements, i);
-        const err = this.marshalValue(
-          { type: elementType(type), value: element, pointer, readOnly: val.readOnly },
-          finfo,
-          startTemplate
-        );
-        if (err !== undefined) return err;
-      }
-      return undefined;
+      return this.marshalElements(val, finfo, startTemplate);
     }
     const tinfo = getTypeInfo(type);
     if ('err' in tinfo) return tinfo.err;
-    const start: { name: XName; attr: XAttr[] } = { name: { space: '', local: '' }, attr: [] };
-    if (startTemplate?.kind === 'start') {
-      start.name = { ...startTemplate.name };
-      start.attr = [...startTemplate.attr];
-    } else if (tinfo.xmlname) {
-      const fv = fieldValue(val, tinfo.xmlname, false);
-      if (fv && fv.type === NAME) {
-        const [space, local] = (fv.value as GoStruct).fields as [string, string];
-        if (local !== '') start.name = { space, local };
-      }
-    }
-    if (start.name.local === '' && finfo) start.name = { space: '', local: finfo.name };
-    if (start.name.local === '') {
-      let name = typeName(type);
-      const bracket = name.indexOf('[');
-      if (bracket !== -1) name = name.slice(0, bracket);
-      if (name === '') return unsupportedTypeError(type);
-      start.name.local = name;
-    }
-    if (tinfo.xmlname && start.name.space === '' && this.tags.length > 0 && (this.tags.at(-1) as XName).space !== '') {
-      start.attr.push({ name: { space: '', local: 'xmlns' }, value: '' });
-    }
+    const start = this.startElementOf(val, tinfo, finfo, startTemplate);
+    if (!('name' in start)) return start.err;
     let err = this.writeStart(start);
     if (err !== undefined) return err;
     if (kind === 'struct') {
@@ -465,12 +420,56 @@ export class Printer {
       if (simpleErr !== undefined) err = simpleErr;
       else this.writeString(escapeText(text, true));
     }
-    if (err !== undefined) return err;
-    err = this.writeEnd(start.name);
-    if (err !== undefined) return err;
-    return this.cachedWriteError();
+    return err ?? this.writeEnd(start.name) ?? this.cachedWriteError();
   }
 
+  /** Marshals each element of a slice or array with the same field and start element. */
+  private marshalElements(val: XVal, finfo: FieldInfo | undefined, startTemplate: XToken | undefined): Value {
+    const list = val.value as Slice | GoArray | undefined;
+    if (list === undefined) return undefined;
+    const isSlice = list instanceof Slice;
+    const values = isSlice ? list.values() : list.elements;
+    for (const [i, element] of values.entries()) {
+      let pointer: Pointer | undefined;
+      if (isSlice) pointer = new Pointer(list.array, list.offset + i);
+      else if (val.pointer) pointer = new Pointer(list.elements, i);
+      const err = this.marshalValue(
+        { type: elementType(val.type), value: element, pointer, readOnly: val.readOnly },
+        finfo,
+        startTemplate
+      );
+      if (err !== undefined) return err;
+    }
+    return undefined;
+  }
+
+  /** The start element of a value: the template, the XMLName field's value, the field's name, or the type's name. */
+  private startElementOf(
+    val: XVal,
+    tinfo: TypeInfo,
+    finfo: FieldInfo | undefined,
+    startTemplate: XToken | undefined
+  ): { name: XName; attr: XAttr[] } | { err: Value } {
+    const start: { name: XName; attr: XAttr[] } = { name: { space: '', local: '' }, attr: [] };
+    if (startTemplate?.kind === 'start') {
+      start.name = { ...startTemplate.name };
+      start.attr = [...startTemplate.attr];
+    } else if (tinfo.xmlname) {
+      const fv = fieldValue(val, tinfo.xmlname, false);
+      const [space, local] = fv?.type === NAME ? ((fv.value as GoStruct).fields as [string, string]) : ['', ''];
+      if (local !== '') start.name = { space, local };
+    }
+    if (start.name.local === '' && finfo) start.name = { space: '', local: finfo.name };
+    if (start.name.local === '') {
+      const name = typeName(val.type).replace(/\[.*$/, '');
+      if (name === '') return { err: unsupportedTypeError(val.type) };
+      start.name.local = name;
+    }
+    if (tinfo.xmlname && start.name.space === '' && this.tags.length > 0 && (this.tags.at(-1) as XName).space !== '') {
+      start.attr.push({ name: { space: '', local: 'xmlns' }, value: '' });
+    }
+    return start;
+  }
   /** The MarshalXML and MarshalText methods of a value or its address, as marshalValue tries them. */
   private marshalWithMethods(
     val: XVal,
@@ -531,6 +530,23 @@ export class Printer {
 }
 
 const NO_METHOD = Symbol('no method');
+
+/** Follows interfaces and pointers to the value they hold, or undefined for a nil one. */
+function indirect(initial: XVal): XVal | undefined {
+  let val = initial;
+  for (;;) {
+    const kind = kindOf(val.type);
+    if (kind !== 'interface' && kind !== 'pointer') return val;
+    if (val.value === undefined) return undefined;
+    if (kind === 'interface') {
+      const iface = val.value as Iface;
+      val = { type: iface.type, value: iface.value, readOnly: val.readOnly };
+    } else {
+      const pointer = val.value as Pointer;
+      val = { type: elementType(val.type), value: pointer.load(), pointer, readOnly: val.readOnly };
+    }
+  }
+}
 
 function isByteKind(type: Type): boolean {
   return kindOf(type) === 'uint' && bitsOf(type) === 8;
