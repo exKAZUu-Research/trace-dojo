@@ -2262,6 +2262,12 @@ test('pp breaks all separators in a streamed group that cannot fit', () => {
   expect(run('class A;def inspect;"x";end;end;pp({one:"a"*60,two:A.new,three:2})')).toMatchObject({
     stdout: `{one: "${'a'.repeat(60)}",\n two: x,\n three: 2}\n`,
   });
+  expect(run('class A;def inspect;"x"*80;end;end;pp [1,A.new,2]')).toMatchObject({
+    stdout: `[1,\n ${'x'.repeat(80)},\n 2]\n`,
+  });
+  expect(run('class A;def inspect;"x"*80;end;end;pp({a:1,b:A.new,c:2})')).toMatchObject({
+    stdout: `{a: 1,\n b:\n  ${'x'.repeat(80)},\n c: 2}\n`,
+  });
 });
 
 test('Integer step compares numeric-like limits through coerce', () => {

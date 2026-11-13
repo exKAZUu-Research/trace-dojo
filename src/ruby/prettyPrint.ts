@@ -7,7 +7,7 @@ import { classOf, realClassOf, stringBytes, stringFromBytes } from './values';
 
 /** A document for Ruby's PrettyPrint: text, a breakable space, or a group whose breakables break together. */
 type Doc =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; deferred?: boolean }
   | { kind: 'break'; text: string }
   | { kind: 'group'; indent: number; parts: Doc[] };
 
@@ -21,8 +21,16 @@ export function* prettyInspect(value: Value): Gen<string> {
 }
 
 export function* writePretty(value: Value, write: (part: string) => Gen<void>): Gen<void> {
-  if (!hasInspectionCallbacks(value, new Set(), { nodes: 0, textLength: 0 })) {
+  const callbacks = inspectionCallbackCount(value, new Set(), { nodes: 0, textLength: 0 });
+  if (callbacks === 0) {
     yield* write(yield* prettyInspect(value));
+    return;
+  }
+  if (callbacks === 1) {
+    const prefix = staticPrefix(yield* build(value, new Set(), { nodes: 0, textLength: 0 }, true));
+    if (prefix) yield* write(prefix);
+    const rendered = yield* prettyInspect(value);
+    yield* write(rendered.slice(prefix.length));
     return;
   }
   const budget: BuildBudget = { nodes: 0, textLength: 0 };
@@ -35,6 +43,27 @@ export function* writePretty(value: Value, write: (part: string) => Gen<void>): 
   };
   yield* streamPretty(value, { emit, seen: new Set(), budget, state }, 0);
   yield* emit('\n');
+}
+
+function staticPrefix(doc: Doc): string {
+  let prefix = '';
+  let column = 0;
+  const read = (node: Doc, indent: number): boolean => {
+    if (node.kind === 'break') {
+      if (column + 2 > WIDTH) prefix += `\n${' '.repeat(indent)}`;
+      return false;
+    }
+    if (node.kind === 'text') {
+      if (node.deferred) return false;
+      prefix += node.text;
+      column += node.text.length;
+      return true;
+    }
+    for (const part of node.parts) if (!read(part, indent + node.indent)) return false;
+    return true;
+  };
+  read(doc, 0);
+  return prefix;
 }
 
 interface BuildBudget {
@@ -69,9 +98,10 @@ function showsItself(value: Value): boolean {
   return method !== undefined && method.body.kind !== 'native';
 }
 
-function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> {
+function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc> {
   rt().spend();
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
+  if (defer && showsItself(value)) return { kind: 'text', text: '', deferred: true };
   if (value instanceof RArray && !showsItself(value)) {
     if (seen.has(value)) return text('[...]', budget);
     seen.add(value);
@@ -79,7 +109,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> 
       const parts: Doc[] = [];
       for (let index = 0; index < value.items.length; index++) {
         if (index > 0) parts.push(text(',', budget), breakable());
-        parts.push(yield* build(value.items[index], seen, budget));
+        parts.push(yield* build(value.items[index], seen, budget, defer));
       }
       return group(1, '[', parts, ']', budget);
     } finally {
@@ -96,7 +126,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> 
       for (const { key, value: item } of value.map.values()) {
         if (!first) parts.push(text(',', budget), breakable());
         first = false;
-        parts.push({ kind: 'group', indent: 0, parts: yield* pair(key, item, seen, budget) });
+        parts.push({ kind: 'group', indent: 0, parts: yield* pair(key, item, seen, budget, defer) });
       }
       return group(1, '{', parts, '}', budget);
     } finally {
@@ -135,7 +165,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> 
       parts.push(breakable(), text(`${name}=`, budget), {
         kind: 'group',
         indent: 1,
-        parts: [breakable(''), yield* build(item, seen, budget)],
+        parts: [breakable(''), yield* build(item, seen, budget, defer)],
       });
     }
     seen.delete(value);
@@ -144,22 +174,31 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc> 
   return text(yield* inspect(value), budget);
 }
 
-function hasInspectionCallbacks(value: Value, seen: Set<object>, budget: BuildBudget): boolean {
+function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildBudget): number {
   rt().spend();
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-  if (showsItself(value)) return true;
-  if (!(value instanceof RBasic) || seen.has(value)) return false;
+  if (showsItself(value)) return 1;
+  if (!(value instanceof RBasic) || seen.has(value)) return 0;
   seen.add(value);
+  let count = 0;
   if (value instanceof RArray) {
-    for (const item of value.items) if (hasInspectionCallbacks(item, seen, budget)) return true;
+    for (const item of value.items) {
+      count += inspectionCallbackCount(item, seen, budget);
+      if (count >= 2) return 2;
+    }
   } else if (value instanceof RHash) {
-    for (const entry of value.map.values())
-      if (hasInspectionCallbacks(entry.key, seen, budget) || hasInspectionCallbacks(entry.value, seen, budget))
-        return true;
+    for (const entry of value.map.values()) {
+      count += inspectionCallbackCount(entry.key, seen, budget);
+      count += inspectionCallbackCount(entry.value, seen, budget);
+      if (count >= 2) return 2;
+    }
   } else {
-    for (const item of value.ivars?.values() ?? []) if (hasInspectionCallbacks(item, seen, budget)) return true;
+    for (const item of value.ivars?.values() ?? []) {
+      count += inspectionCallbackCount(item, seen, budget);
+      if (count >= 2) return 2;
+    }
   }
-  return false;
+  return count;
 }
 
 function* streamPretty(value: Value, context: StreamContext, indent: number): Gen<void> {
@@ -305,14 +344,14 @@ function stringLines(value: RString): RString[] {
   return lines;
 }
 
-function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget): Gen<Doc[]> {
+function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc[]> {
   const parts: Doc[] = [];
   if (key instanceof RSymbol) {
     parts.push(text(`${isSimplePrettySymbol(key) ? key.name : strInspect(key.name)}:`, budget));
   } else {
-    parts.push(yield* build(key, seen, budget), text(' ', budget), text('=>', budget));
+    parts.push(yield* build(key, seen, budget, defer), text(' ', budget), text('=>', budget));
   }
-  parts.push({ kind: 'group', indent: 1, parts: [breakable(), yield* build(value, seen, budget)] });
+  parts.push({ kind: 'group', indent: 1, parts: [breakable(), yield* build(value, seen, budget, defer)] });
   return parts;
 }
 
