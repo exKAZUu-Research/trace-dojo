@@ -1,3 +1,4 @@
+import { keywordEntries } from './callArguments';
 import { method } from './define';
 // Gives the builtin types the `__new__` and `__init__` that create and fill instances of a program's subclasses.
 import { DictStore } from './dictStore';
@@ -23,6 +24,7 @@ import {
   setClass,
   strClass,
   tupleClass,
+  unbox,
 } from './types';
 import { type Kwargs, type PyClass, PyComplex, PyDict, PyInstance, PyList, PySet, type PyValue } from './values';
 
@@ -32,7 +34,7 @@ for (const cls of [intClass, floatClass, strClass]) {
   const construct = cls.construct as NonNullable<PyClass['construct']>;
   defineNew(cls, (subtype, args, kwargs) => {
     const value = construct(cls, args, kwargs);
-    return subtype === cls ? value : box(subtype, value as bigint | number | string);
+    return subtype === cls ? value : box(subtype, unbox(value) as bigint | number | string);
   });
 }
 
@@ -82,7 +84,7 @@ defineMethod(dictClass, '__init__', (self, args, kwargs) => {
 export function updateDictFromArguments(dict: PyDict, qualified: string, args: PyValue[], kwargs: Kwargs): void {
   checkArgs({ qualified, min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] }, args, kwargs);
   if (args.length > 0) updateDict(dict, args[0]);
-  for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
+  for (const [key, value] of keywordEntries(kwargs)) dict.store.set(key, value);
 }
 
 defineNew(setClass, (subtype) => new PySet(subtype, new SetTable()));

@@ -180,6 +180,7 @@ export function strftimeArgument(args: PyValue[], kwargs: Kwargs): string {
 }
 
 export function formatArgument(spec: PyValue): string {
+  spec = stringValue(spec) ?? spec;
   if (typeof spec !== 'string') throw typeError(`__format__() argument 1 must be str, not ${typeName(spec)}`);
   return spec;
 }

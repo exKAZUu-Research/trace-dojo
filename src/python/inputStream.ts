@@ -1,6 +1,6 @@
 import { defineAttribute } from './attributeDescriptors';
 import { newBytes, PyBytes, requireBytesLike } from './bytesValues';
-import { pyRepr, pyStr } from './conversions';
+import { pyRepr, strObject } from './conversions';
 import { method } from './define';
 import { builtinClassesWithDict, ownDict } from './descriptors';
 import { defineNew } from './instances';
@@ -165,7 +165,7 @@ export function input(prompt: PyValue | undefined): PyValue {
   const stderr = getAttributeOrUndefined(sys, 'stderr');
   if (stderr === undefined || stderr === None) throw pyError('RuntimeError', 'lost sys.stderr');
   flushQuietly(stderr);
-  if (prompt !== undefined) callValue(getAttribute(stdout, 'write'), [pyStr(prompt)]);
+  if (prompt !== undefined) callValue(getAttribute(stdout, 'write'), [strObject(prompt)]);
   flushQuietly(stdout);
   return inputResult(callValue(getAttribute(stdin, 'readline'), []));
 }

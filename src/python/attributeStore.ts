@@ -1,6 +1,8 @@
 import { type DictEntry, DictStore } from './dictStore';
 import { keyHash, pyHash } from './hashing';
-import type { PyValue } from './values';
+import { releaseNamespaceKey, withoutCharge } from './runtimeContext';
+import { stringValue } from './types';
+import { NamespaceMap, type PyValue } from './values';
 
 /** The entries of each object's attributes whose keys are not strings, with the attribute each was stored after. */
 interface Extras {
@@ -25,25 +27,54 @@ export class AttributeStore extends DictStore {
   }
 
   override get size(): number {
+    if (this.dictionary) return this.dictionary.size;
     return this.attributes.size + (this.extras?.store.size ?? 0);
   }
 
-  override lookup(key: PyValue): DictEntry | undefined {
+  private get dictionary(): DictStore | undefined {
+    return this.attributes instanceof NamespaceMap ? this.attributes.dictionary : undefined;
+  }
+
+  override lookup(key: PyValue, knownHash?: bigint): DictEntry | undefined {
+    if (typeof key !== 'string' && this.attributes instanceof NamespaceMap) this.promote(this.attributes);
+    if (this.dictionary) return this.dictionary.lookup(key, knownHash);
     if (typeof key !== 'string') {
-      const hash = keyHash(key, 'dict key');
+      const hash = knownHash ?? keyHash(key, 'dict key');
       return this.extras?.store.lookup(key, hash);
     }
     const value = this.attributes.get(key);
     return value === undefined ? undefined : entryOf(key, value);
   }
 
-  override set(key: PyValue, value: PyValue): void {
+  override set(key: PyValue, value: PyValue, knownHash?: bigint): void {
+    if (this.attributes instanceof NamespaceMap && typeof key !== 'string') this.promote(this.attributes);
+    if (this.dictionary) {
+      const version = this.dictionary.version;
+      this.dictionary.set(key, value, knownHash);
+      if (this.dictionary.version !== version) this.version++;
+      return;
+    }
     if (typeof key !== 'string') {
       this.setExtra(key, value);
       return;
     }
     if (!this.attributes.has(key)) this.version++;
     this.attributes.set(key, value);
+  }
+
+  private promote(attributes: NamespaceMap): void {
+    if (attributes.dictionary) return;
+    const dictionary = new DictStore();
+    withoutCharge(() => {
+      for (const entry of this.liveEntries()) dictionary.set(entry.key, entry.value, entry.hash);
+    });
+    Map.prototype.clear.call(attributes);
+    attributes.dictionary = dictionary;
+    attributes.keyText = stringValue;
+    attributes.changed = () => {
+      this.version++;
+    };
+    extrasOf.delete(attributes);
   }
 
   private setExtra(key: PyValue, value: PyValue): void {
@@ -69,6 +100,12 @@ export class AttributeStore extends DictStore {
   }
 
   override remove(entry: DictEntry): void {
+    if (this.dictionary) {
+      this.dictionary.remove(entry);
+      this.version++;
+      releaseNamespaceKey(entry.key, entry.value);
+      return;
+    }
     if (typeof entry.key === 'string') this.attributes.delete(entry.key);
     else this.extras?.store.remove(entry);
     this.version++;
@@ -81,6 +118,10 @@ export class AttributeStore extends DictStore {
   }
 
   override *liveEntries(): Generator<DictEntry> {
+    if (this.dictionary) {
+      yield* this.dictionary.liveEntries();
+      return;
+    }
     const extras = this.extras;
     if (!extras) {
       for (const [key, value] of this.attributes) yield entryOf(key, value);

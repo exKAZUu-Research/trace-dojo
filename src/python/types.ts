@@ -7,6 +7,7 @@ import { recordRootClass, recordSubclass } from './subclasses';
 import {
   type ExceptionState,
   type Kwargs,
+  NamespaceMap,
   type NativeBinding,
   type NativeFunction,
   PyBuiltinFunction,
@@ -306,7 +307,7 @@ export function initExceptionFields(
   }
   if (is('OSError')) initOSErrorFields(cls, state, fields, args);
   const errorName = fields.get('name');
-  if (errorName !== undefined) state.name = typeof errorName === 'string' ? errorName : undefined;
+  if (errorName !== undefined) state.name = stringValue(errorName);
   if (fields.has('obj')) state.object = fields.get('obj');
 }
 
@@ -358,7 +359,7 @@ export function valueError(message: string): PyError {
 // Containers --------------------------------------------------------------------------------------------------------
 
 /** BaseException.add_note on an exception, which the interpreter also calls as CPython's _PyErr_FormatNote does. */
-export function addNote(exception: PyInstance, note: string): void {
+export function addNote(exception: PyInstance, note: PyValue): void {
   if (!exception.exception) return;
   let notes = exception.dict.get('__notes__');
   if (notes === undefined) {
@@ -381,7 +382,8 @@ export function newTuple(items: readonly PyValue[]): PyTuple {
 
 export function newDict(entries: Iterable<[PyValue, PyValue]> = []): PyDict {
   const dict = new PyDict(dictClass, new DictStore());
-  for (const [key, value] of entries) dict.store.set(key, value);
+  for (const [key, value] of entries instanceof NamespaceMap ? entries.rawEntries() : entries)
+    dict.store.set(key, value);
   return dict;
 }
 
@@ -494,7 +496,8 @@ export function descriptorClassOf(cls: PyClass, name: string, binding: NativeBin
 const PRIMITIVE_CLASSES = new Set([intClass, boolClass, floatClass, strClass]);
 const RENDERING_METHODS = new Set(['__mod__', '__rmod__', 'format', 'format_map']);
 
-export function stringValue(value: PyValue): string | undefined {
+export function stringValue(value: PyValue | undefined): string | undefined {
+  if (value === undefined) return undefined;
   const text = unbox(value);
   return typeof text === 'string' ? text : undefined;
 }

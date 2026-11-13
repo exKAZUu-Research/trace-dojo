@@ -16,12 +16,13 @@ import {
   None,
   noneClass,
   objectClass,
+  stringValue,
   typeClass,
   typeError,
+  typeName,
 } from '../types';
 import { type ClassAnnotations, type Kwargs, PyClass, PyOpaque, type PyValue } from '../values';
 import { namedTupleClass } from './collections';
-import { PyNewType } from './typingTypeVars';
 
 // NamedTuple ------------------------------------------------------------------------------------------------------------
 
@@ -152,7 +153,7 @@ function unpackPair(field: PyValue): [PyValue, PyValue] {
 /** `typing._type_check` of a field's type, which accepts None, strings, and callables. */
 function checkFieldType(name: PyValue, type: PyValue): PyValue {
   if (type === None) return noneClass;
-  if (typeof type === 'string' || isCallable(type) || type instanceof PyOpaque) return type;
+  if (stringValue(type) !== undefined || isCallable(type) || type instanceof PyOpaque) return type;
   throw typeError(`field ${pyStr(name)} annotation must be a type Got ${pyRepr(type).slice(0, 100)}.`);
 }
 
@@ -255,22 +256,20 @@ const typedDict = nativeFunction('TypedDict', (args, kwargs) => {
     frame,
     value: checkFieldType(key, getItem(callValue(dictClass, [fields as PyValue]), key)),
   }));
-  const name = typename as string;
+  const name = stringValue(typename);
+  if (name === undefined) throw typeError(`type.__new__() argument 1 must be str, not ${typeName(typename)}`);
   const def = { name, qualifiedName: name } as ClassDef;
   const cls = createTypedDict(def, new Map(), annotations, kwargs, []);
   cls.module = callerModule();
+  cls.nameValue = typeof typename === 'string' ? undefined : typename;
+  cls.qualifiedNameValue = cls.nameValue;
   cls.dict.set('__orig_bases__', newTuple([typedDict]));
   return cls;
 });
 
-mroEntryHooks.push((base, className) => {
+mroEntryHooks.push((base) => {
   if (base === namedTuple) return [namedTupleBase];
   if (base === typedDict) return [typedDictBase];
-  if (base instanceof PyNewType) {
-    throw typeError(
-      `Cannot subclass an instance of NewType. Perhaps you were looking for: \`${className} = NewType('${className}', ${base.name})\``
-    );
-  }
   return;
 });
 

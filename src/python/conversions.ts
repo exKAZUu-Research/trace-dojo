@@ -4,7 +4,7 @@ import { decimalValue, floatRepr, intToString } from './numbers';
 import { bindValue, callValue, getAttribute, getItem, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { asciiEscape, iterStr, strRepr } from './strings';
-import { classOf, isNativeMethod, None, typeError, typeName, valueError } from './types';
+import { classOf, isNativeMethod, None, stringValue, typeError, typeName, valueError } from './types';
 import { PyBuiltinFunction, PyComplex, PyInstance, type PyObject, type PyValue } from './values';
 
 /** `repr()` of a value. */
@@ -41,6 +41,24 @@ export function pyAscii(value: PyValue): string {
 }
 
 function callStringMethod(value: PyObject, name: '__repr__' | '__str__'): string {
+  return stringValue(callStringObject(value, name)) as string;
+}
+
+export function strObject(value: PyValue): PyValue {
+  return typeof value === 'object' && value !== None ? callStringObject(value, '__str__') : pyStr(value);
+}
+
+export function reprObject(value: PyValue): PyValue {
+  return typeof value === 'object' && value !== None ? callStringObject(value, '__repr__') : pyRepr(value);
+}
+
+export function asciiObject(value: PyValue): PyValue {
+  const rendered = reprObject(value);
+  const text = stringValue(rendered) as string;
+  return isAscii(text) ? rendered : asciiEscape(text);
+}
+
+function callStringObject(value: PyObject, name: '__repr__' | '__str__'): PyValue {
   const runtime = currentRuntime();
   const method = lookupSpecial(value, name);
   if (method === undefined) return defaultRepr(value);
@@ -49,7 +67,8 @@ function callStringMethod(value: PyObject, name: '__repr__' | '__str__'): string
     method instanceof PyBuiltinFunction && method.self === undefined
       ? runtime.guardRecursion(() => method.run([value], undefined))
       : runtime.guardRecursion(() => callValue(bindValue(method, value), []));
-  if (typeof result !== 'string') throw typeError(`${name} returned non-string (type ${typeName(result)})`);
+  const text = stringValue(result);
+  if (text === undefined) throw typeError(`${name} returned non-string (type ${typeName(result)})`);
   return result;
 }
 
@@ -70,8 +89,9 @@ export function pyFormat(value: PyValue, spec: string): string {
   // The builtin types' own __format__ methods are method descriptors, which formatValue implements natively.
   if (method !== undefined && !isNativeMethod(method)) {
     const result = callValue(bindValue(method, value), [spec]);
-    if (typeof result !== 'string') throw typeError(`__format__ must return a str, not ${typeName(result)}`);
-    return result;
+    const text = stringValue(result);
+    if (text === undefined) throw typeError(`__format__ must return a str, not ${typeName(result)}`);
+    return text;
   }
   // An int, float, or str subclass formats its value, or shows its str() for an empty spec, as their __format__ do.
   if (value instanceof PyInstance && value.primitive !== undefined) {
@@ -307,3 +327,8 @@ export function isStringLike(value: PyValue): value is string {
 }
 
 export { iterStr };
+
+function isAscii(text: string): boolean {
+  for (let index = 0; index < text.length; index++) if ((text.codePointAt(index) as number) > 127) return false;
+  return true;
+}

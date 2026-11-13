@@ -7,7 +7,17 @@ import { callValue } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { strLength } from '../strings';
-import { classOf, iteratorClass, newTuple, None, objectClass, pyError, typeError, typeName } from '../types';
+import {
+  classOf,
+  iteratorClass,
+  newTuple,
+  None,
+  objectClass,
+  pyError,
+  stringValue,
+  typeError,
+  typeName,
+} from '../types';
 import { DONE, type PyClass, PyIterator, type PyValue } from '../values';
 import { realArgument } from './math';
 
@@ -63,6 +73,7 @@ class array:
         if len(args) > 2:
             raise TypeError(f'array() takes at most 2 arguments ({len(args)} given)')
         typecode = args[0]
+        if isinstance(typecode, str): typecode = str.__str__(typecode)
         if not isinstance(typecode, str) or len(typecode) != 1:
             _character_error('array() argument 1', typecode)
         if typecode not in typecodes:
@@ -404,6 +415,7 @@ function convertItem(typecode: string, value: PyValue): PyValue {
 }
 
 function convertCharacter(value: PyValue): PyValue {
+  value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(`array item must be a unicode character, not ${typeName(value)}`);
   const length = strLength(value);
   if (length !== 1) throw typeError(`array item must be a unicode character, not a string of length ${length}`);

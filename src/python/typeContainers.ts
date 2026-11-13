@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 436 -- The list, tuple, and dict types keep their methods together.
-import { mappingEntries } from './callArguments';
+import { keywordEntries, mappingEntries } from './callArguments';
 import { pyRepr } from './conversions';
 import { method } from './define';
 import { reversedDictIterator } from './dictReversal';
@@ -422,7 +422,7 @@ const dictOf = (self: PyValue): PyDict => self as PyDict;
 function updateFromArguments(qualified: string, dict: PyDict, args: PyValue[], kwargs: Kwargs): void {
   checkArgs({ qualified, min: 0, max: 1, style: 'expected', keywords: [...(kwargs?.keys() ?? [])] }, args, kwargs);
   if (args.length > 0) updateDict(dict, args[0]);
-  for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
+  for (const [key, value] of keywordEntries(kwargs)) dict.store.set(key, value);
 }
 
 export function updateDict(dict: PyDict, source: PyValue): void {

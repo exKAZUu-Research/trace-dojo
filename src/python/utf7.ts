@@ -5,7 +5,7 @@ import { ErrorHandling, registerCodec } from './codecs';
 import { builtin } from './define';
 import { isTruthy } from './objects';
 import { currentRuntime } from './runtimeContext';
-import { newTuple, None, typeError, typeName } from './types';
+import { newTuple, None, stringValue, typeError, typeName } from './types';
 import type { PyValue } from './values';
 
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -197,6 +197,7 @@ registerCodec('utf_7', () => ({
 
 function errorsName(name: string, errors: PyValue | undefined): string {
   if (errors === undefined || errors === None) return 'strict';
+  errors = stringValue(errors) ?? errors;
   if (typeof errors !== 'string') throw typeError(`${name}() argument 2 must be str or None, not ${typeName(errors)}`);
   return errors;
 }
@@ -207,6 +208,7 @@ export function utf7Natives(): [string, PyValue][] {
     [
       'utf_7_encode',
       builtin('utf_7_encode', 'expected', 1, 2, ([input, errors]) => {
+        input = stringValue(input) ?? input;
         if (typeof input !== 'string') throw typeError(`utf_7_encode() argument 1 must be str, not ${typeName(input)}`);
         errorsName('utf_7_encode', errors);
         // oxlint-disable-next-line typescript/no-misused-spread -- Python encodes strings by code point.

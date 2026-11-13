@@ -5,6 +5,7 @@ import { PyMemoryView } from './bytesValues';
 import { peekFieldsOf } from './cTypes';
 import { DictStore } from './dictStore';
 import { Frame } from './frame';
+import { NamespaceMap, namespaceReferences } from './namespaceMap';
 import { ObjectNamespace } from './namespaces';
 import { frameReferences, PyTraceback } from './tracebacks';
 import {
@@ -65,87 +66,6 @@ export function findReachableInOrder(roots: unknown[], skip?: (object: object) =
     level = next;
   }
   return listed;
-}
-
-/**
- * The objects among `garbage`, which nothing else refers to, that reference counting frees: those that no cycle among
- * them reaches, which only the cycle collector frees.
- */
-export function freedByReferenceCounting(garbage: Set<object>): Set<object> {
-  const turtles = new Set<TurtleState>();
-  const children = new Map<object, object[]>();
-  for (const node of garbage) {
-    const pending: unknown[] = [];
-    pushChildren(pending, node as PyObject | PyCell, turtles);
-    children.set(
-      node,
-      pending.filter((child): child is object => isNode(child) && garbage.has(child))
-    );
-  }
-  const kept = new Set<object>();
-  const pending = [...nodesOnCycles(children)];
-  while (pending.length > 0) {
-    const node = pending.pop() as object;
-    if (kept.has(node)) continue;
-    kept.add(node);
-    pushAll(pending, children.get(node) ?? []);
-  }
-  return new Set([...garbage].filter((node) => !kept.has(node)));
-}
-
-interface TarjanEntry {
-  node: object;
-  next: number;
-}
-
-/** The nodes that lie on a cycle of the graph, found as Tarjan's strongly connected components. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Tarjan's algorithm, iterative so that long chains cannot exhaust the stack.
-// code-gauge-allow functionNcss 36 -- Tarjan's algorithm, iterative so that long chains cannot exhaust the stack.
-function nodesOnCycles(children: Map<object, object[]>): Set<object> {
-  const index = new Map<object, number>();
-  const low = new Map<object, number>();
-  const stack: object[] = [];
-  const onStack = new Set<object>();
-  const cyclic = new Set<object>();
-  const work: TarjanEntry[] = [];
-  const enter = (node: object): void => {
-    index.set(node, index.size);
-    low.set(node, index.size - 1);
-    stack.push(node);
-    onStack.add(node);
-    work.push({ node, next: 0 });
-  };
-  for (const start of children.keys()) {
-    if (!index.has(start)) enter(start);
-    while (work.length > 0) {
-      const top = work.at(-1) as TarjanEntry;
-      const edges = children.get(top.node) ?? [];
-      if (top.next < edges.length) {
-        const child = edges[top.next++];
-        if (child === top.node) cyclic.add(child);
-        if (!index.has(child)) enter(child);
-        else if (onStack.has(child)) low.set(top.node, Math.min(low.get(top.node) ?? 0, index.get(child) ?? 0));
-        continue;
-      }
-      work.pop();
-      const parent = work.at(-1);
-      if (parent) low.set(parent.node, Math.min(low.get(parent.node) ?? 0, low.get(top.node) ?? 0));
-      if (low.get(top.node) === index.get(top.node)) popComponent(stack, onStack, top.node, cyclic);
-    }
-  }
-  return cyclic;
-}
-
-/** Pops a strongly connected component off Tarjan's stack, adding its nodes to `cyclic` when they form a cycle. */
-function popComponent(stack: object[], onStack: Set<object>, root: object, cyclic: Set<object>): void {
-  const component: object[] = [];
-  let member: object | undefined;
-  do {
-    member = stack.pop() as object;
-    onStack.delete(member);
-    component.push(member);
-  } while (member !== root);
-  if (component.length > 1) for (const each of component) cyclic.add(each);
 }
 
 /**
@@ -237,7 +157,7 @@ function pushChildren(pending: unknown[], item: PyObject | PyCell, turtles: Set<
  */
 function pushOwnedFields(pending: unknown[], object: PyObject): void {
   if (object.slotValues) pushAll(pending, object.slotValues.values());
-  if (object.instanceDict) pushAll(pending, object.instanceDict.values());
+  if (object.instanceDict) pushAll(pending, namespaceReferences(object.instanceDict));
   const extraFields = peekFieldsOf(object);
   if (extraFields) pushAll(pending, extraFields);
 }
@@ -319,11 +239,11 @@ function pushOpaqueReferences(pending: unknown[], object: PyOpaque): void {
 function pushFunctionReferences(pending: unknown[], fn: PyFunction): number {
   // A module's globals are reachable from the module itself.
   if (fn.globals instanceof ObjectNamespace) pending.push(fn.globals.holder);
-  pending.push(fn.builtins);
+  pending.push(fn.builtins, fn.nameValue, fn.qualifiedNameValue);
   pushAll(pending, fn.closure.values());
   pushAll(pending, fn.defaults);
   pushAll(pending, fn.keywordDefaults.values());
-  pushAll(pending, fn.dict.values());
+  pushAll(pending, namespaceReferences(fn.dict));
   if (fn instanceof PyAnnotateFunction) pushAll(pending, annotationReferences(fn.annotations()));
   pushAll(pending, functionAnnotationReferences(fn));
   return fn.defaults.length;
@@ -331,7 +251,7 @@ function pushFunctionReferences(pending: unknown[], fn: PyFunction): number {
 
 function pushInstanceReferences(pending: unknown[], instance: PyInstance, reached: Set<TurtleState>): number {
   if (instance.turtle?.isAlive) reached.add(instance.turtle);
-  pushAll(pending, instance.dict.values());
+  pushAll(pending, namespaceReferences(instance.dict));
   pending.push(instance.enumValue);
   const state = instance.exception;
   if (state) {
@@ -342,7 +262,7 @@ function pushInstanceReferences(pending: unknown[], instance: PyInstance, reache
 
 function pushNamespaceReferences(pending: unknown[], object: PyClass | PyModule): number {
   if (object instanceof PyClass && object.isBuiltin) return 0;
-  pushAll(pending, object.dict.values());
+  pushAll(pending, namespaceReferences(object.dict));
   if (object instanceof PyClass) {
     pending.push(object.nameValue, object.qualifiedNameValue);
     pushAll(pending, object.enumMembers ?? []);
@@ -379,6 +299,7 @@ function pushNativeNodes(pending: unknown[], root: unknown): void {
 function pushNativeData(pending: unknown[], data: object): void {
   if (data instanceof Frame) pushAll(pending, frameReferences(data).toReversed());
   else if (Array.isArray(data) || data instanceof Set) pushAll(pending, data);
+  else if (data instanceof NamespaceMap && data.dictionary) pushAll(pending, namespaceReferences(data));
   else if (data instanceof Map) for (const [key, value] of data) pending.push(key, value);
   else if (data instanceof DictStore) for (const entry of data.ordered()) pending.push(entry.key, entry.value);
   else if (Object.getPrototypeOf(data) === Object.prototype) pushAll(pending, Object.values(data));

@@ -17,6 +17,7 @@ import {
   None,
   NotImplemented,
   pyError,
+  stringValue,
   typeError,
   typeName,
 } from '../types';
@@ -41,7 +42,7 @@ interface Context {
 }
 
 interface ContextVar {
-  name: string;
+  name: PyValue;
   default?: PyValue;
 }
 
@@ -65,7 +66,7 @@ function currentContext(): ContextObject {
 }
 
 export function newInternalContextVar(name: string): PyOpaque {
-  return new PyOpaque(contextVarClass, name, { name } satisfies ContextVar);
+  return new PyOpaque(contextVarClass, stringValue(name) as string, { name } satisfies ContextVar);
 }
 
 export function getInternalContextVar(variable: PyOpaque): PyValue | undefined {
@@ -193,8 +194,8 @@ contextVarClass.construct = (_cls, args, kwargs) => {
     throw typeError(`ContextVar() takes exactly 1 positional argument (${args.length} given)`);
   }
   const [name] = args;
-  if (typeof name !== 'string') throw typeError('context variable name must be a str');
-  return new PyOpaque(contextVarClass, name, {
+  if (stringValue(name) === undefined) throw typeError('context variable name must be a str');
+  return new PyOpaque(contextVarClass, stringValue(name) as string, {
     name,
     default: kwargs?.get('default'),
   } satisfies ContextVar);

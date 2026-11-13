@@ -13,7 +13,7 @@ import type { Runtime } from '../runtime';
 import { blockingBuiltin, getRunningLoop, schedulerOf, setRunningLoop, WaitRequest } from '../threads';
 import { toFloat } from '../typeNumbers';
 import { generatorClass, moduleClass, newList, None } from '../types';
-import { PyGenerator, PyModule, type PyValue } from '../values';
+import { NamespaceMap, PyGenerator, PyModule, type PyValue } from '../values';
 import { threadLocalClass } from './thread';
 
 const wokenLoops = new WeakMap<Runtime, WeakSet<object>>();
@@ -22,7 +22,7 @@ const wokenLoops = new WeakMap<Runtime, WeakSet<object>>();
 // code-gauge-allow functionNcss 43 -- One small builtin per native part of the event loop.
 export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
   const woken = wokenOf(runtime);
-  const core = new PyModule(moduleClass, '_asyncio_core', new Map());
+  const core = new PyModule(moduleClass, '_asyncio_core', new NamespaceMap());
   const define = (name: string, value: PyValue): void => {
     core.dict.set(name, value);
   };

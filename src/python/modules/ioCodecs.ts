@@ -3,7 +3,7 @@ import { newBytes } from '../bytesValues';
 import { codecModuleOf, decodeBytes, encodeString } from '../codecs';
 import { builtin } from '../define';
 import { currentRuntime } from '../runtimeContext';
-import { newTuple } from '../types';
+import { newTuple, stringValue } from '../types';
 import { unicodeException } from '../unicodeErrors';
 import { PyError, type PyValue } from '../values';
 import { statefulCodecFunction } from './codecsNative';
@@ -18,8 +18,8 @@ export function ioCodecNatives(): [string, PyValue][] {
       '_decode_chunk',
       builtin('_decode_chunk', 'expected', 5, 5, ([encoding, errors, data, final, flag]) => {
         const [text, consumed, state] = decodeChunk(
-          encoding as string,
-          errors as string,
+          stringValue(encoding) as string,
+          stringValue(errors) as string,
           (data as PyBytes).data,
           final === true,
           Number(flag)
@@ -30,26 +30,33 @@ export function ioCodecNatives(): [string, PyValue][] {
     [
       '_initial_decoder_state',
       builtin('_initial_decoder_state', 'one', 1, 1, ([encoding]) => {
-        const module = codecModuleOf(encoding as string);
+        const module = codecModuleOf(stringValue(encoding) as string);
         return module === 'utf_16' || module === 'utf_32' ? 2n : module === 'utf_8_sig' ? 1n : 0n;
       }),
     ],
     [
       '_encode_chunk',
       builtin('_encode_chunk', 'expected', 4, 4, ([encoding, errors, text, started]) =>
-        newBytes(encodeChunk(encoding as string, errors as string, text as string, started === true))
+        newBytes(
+          encodeChunk(
+            stringValue(encoding) as string,
+            stringValue(errors) as string,
+            stringValue(text) as string,
+            started === true
+          )
+        )
       ),
     ],
     [
       '_stateful_codec',
       builtin('_stateful_codec', 'expected', 2, 2, ([encoding, direction]) =>
-        statefulCodecFunction(encoding as string, direction as 'encode' | 'decode')
+        statefulCodecFunction(stringValue(encoding) as string, direction as 'encode' | 'decode')
       ),
     ],
     [
       '_codec_name',
       builtin('_codec_name', 'one', 1, 1, ([encoding]) => {
-        decodeBytes(new Uint8Array(0), encoding as string, 'strict');
+        decodeBytes(new Uint8Array(0), stringValue(encoding) as string, 'strict');
         return encoding;
       }),
     ],

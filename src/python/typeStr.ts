@@ -1,5 +1,5 @@
 import { decodeObject } from './codecs';
-import { formatString, pyFormat, pyStr } from './conversions';
+import { formatString, pyFormat, strObject } from './conversions';
 import { method } from './define';
 import { pyHash } from './hashing';
 import { sliceIndices } from './items';
@@ -22,6 +22,7 @@ import {
   pyError,
   sliceClass,
   strClass,
+  stringValue,
   typeError,
   typeName,
   unbox,
@@ -68,7 +69,7 @@ strClass.construct = (_cls, args, kwargs) => {
   const encoding = argument(args, kwargs, 1, 'encoding');
   const errors = argument(args, kwargs, 2, 'errors');
   if (encoding !== undefined || errors !== undefined) return decodeObject(value ?? '', encoding, errors);
-  return value === undefined ? '' : pyStr(value);
+  return value === undefined ? '' : strObject(value);
 };
 
 const LINE_BREAKS = '\n\r\v\f\u001C\u001D\u001E\u0085  ';
@@ -81,12 +82,14 @@ const asStr = (self: PyValue): string => self as string;
 
 /** Checks that an argument is a str, raising the TypeError whose text `message` makes from the argument's type. */
 function expectStr(value: PyValue, message: (type: string) => string): string {
+  value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(message(typeName(value)));
   return value;
 }
 
 /** Checks a str argument that Argument Clinic converts, raising its TypeError naming the argument as `what`. */
 function expectStrArgument(value: PyValue, what: string): string {
+  value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(`${what} must be str, not ${argumentTypeName(value)}`);
   return value;
 }
@@ -573,6 +576,7 @@ method(strClass, 'translate', 'one', 1, 1, (self, [table]) => {
 
 /** The text a translation table maps a character to: an integer as its character, None as nothing, or a string. */
 function translation(mapped: PyValue): string {
+  mapped = stringValue(mapped) ?? mapped;
   if (mapped === None) return '';
   if (typeof mapped === 'string') return mapped;
   if (typeof mapped !== 'bigint' && typeof mapped !== 'boolean') {
@@ -606,6 +610,7 @@ function makeTranslation(args: PyValue[]): PyDict {
 
 /** A key of the dict str.maketrans takes, whose characters it turns into code points, with CPython's errors. */
 function translationKey(key: PyValue): PyValue {
+  key = stringValue(key) ?? key;
   if (typeof key === 'bigint' || typeof key === 'boolean') return key;
   if (typeof key !== 'string') throw typeError('keys in translate table mustbe strings or integers');
   if (strLength(key) !== 1) throw valueError('string keys in translatetable must be of length 1');

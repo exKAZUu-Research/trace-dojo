@@ -1,3 +1,4 @@
+import { copyKeywords, keywordMap } from '../callArguments';
 import { monotonicNanoseconds, nanosecondsToSeconds } from '../clock';
 import { addressOf } from '../conversions';
 import { builtin, method, redeclareMethods } from '../define';
@@ -20,7 +21,17 @@ import {
   WaitRequest,
 } from '../threads';
 import { toFloat } from '../typeNumbers';
-import { exceptionClassNamed, newTuple, None, objectClass, pyError, typeError, typeName, valueError } from '../types';
+import {
+  exceptionClassNamed,
+  newTuple,
+  None,
+  objectClass,
+  pyError,
+  stringValue,
+  typeError,
+  typeName,
+  valueError,
+} from '../types';
 import {
   AttributeMap,
   type Kwargs,
@@ -220,7 +231,7 @@ function startNewThread(name: string): PyValue {
   return blockingBuiltin(name, 'expected', [2, 3], function* ([fn, args, kwargs]) {
     if (!(args instanceof PyTuple)) throw typeError('2nd arg must be a tuple');
     if (kwargs !== undefined && !(kwargs instanceof PyDict)) throw typeError('optional 3rd arg must be a dictionary');
-    const named = kwargs && new Map([...kwargs.store.ordered()].map((entry) => [entry.key as string, entry.value]));
+    const named = kwargs && keywordMap(kwargs.store.ordered().map((entry) => [entry.key, entry.value]));
     // The threads `start_new_thread` starts are not waited for at the end, like daemon threads.
     const thread = yield* startThread(fn, [...args.items], named, true);
     return thread.ident;
@@ -253,7 +264,7 @@ defineNew(threadLocalClass, (cls, args, kwargs) => {
   registerThreadLocalMap(dicts, runtime);
   const instance = new PyOpaque(cls, '_local', {
     args: [...args],
-    kwargs: kwargs && new Map(kwargs),
+    kwargs: kwargs && copyKeywords(kwargs),
     dicts,
   } satisfies LocalState);
   if (cls.flags.definesDel) runtime.finalizer.track(instance);
@@ -330,7 +341,7 @@ registerModule('_thread', () => {
         (args, kwargs) => {
           const name = argument(args, kwargs, 0, 'name');
           if (name === undefined) throw typeError("set_name() missing required argument 'name' (pos 1)");
-          if (typeof name !== 'string') {
+          if (stringValue(name) === undefined) {
             throw typeError(`set_name() argument 'name' must be str, not ${typeName(name)}`);
           }
           return None;

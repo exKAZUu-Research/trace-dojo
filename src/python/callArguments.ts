@@ -1,9 +1,11 @@
 import { pyStr } from './conversions';
 import type { Frame } from './frame';
+import { namespaceDict } from './namespaces';
 import { callValue, getAttributeOrUndefined, getItem, toArray } from './objects';
 import { equals } from './operators';
-import { dictClass, None, typeError, typeName } from './types';
-import { type Kwargs, PyDict, type PyError, type PyValue } from './values';
+import { currentRuntime } from './runtimeContext';
+import { dictClass, None, stringValue, typeError, typeName } from './types';
+import { type Kwargs, NamespaceMap, PyDict, type PyError, type PyValue } from './values';
 
 /**
  * The keyword arguments of a call, merged as CPython's DICT_MERGE merges them: a repeated name raises at once, while a
@@ -15,10 +17,9 @@ export class KeywordArguments {
 
   constructor(private readonly callee: PyValue) {}
 
-  add(name: string, value: PyValue): void {
-    this.kwargs ??= new Map();
-    if (this.kwargs.has(name)) throw this.repeated(name);
-    this.kwargs.set(name, value);
+  add(name: string, value: PyValue, key: PyValue = name): void {
+    this.kwargs ??= new NamespaceMap();
+    if (!addKeyword(this.kwargs, key, value)) throw this.repeated(name);
   }
 
   merge(mapping: PyValue, frame: Frame): void {
@@ -26,8 +27,9 @@ export class KeywordArguments {
       throw typeError(`${functionStr(this.callee)} argument after ** must be a mapping, not ${typeName(mapping)}`);
     }
     for (const [key, value] of mappingEntries(mapping)) {
-      frame.temporaries.push(value);
-      if (typeof key === 'string') this.add(key, value);
+      frame.temporaries.push(key, value);
+      const name = stringValue(key);
+      if (name !== undefined) this.add(name, value, key);
       else if (this.nonStringKeys.some((other) => equals(other, key))) throw this.repeated(pyStr(key));
       else this.nonStringKeys.push(key);
     }
@@ -41,6 +43,24 @@ export class KeywordArguments {
   private repeated(name: string): PyError {
     return typeError(`${functionStr(this.callee)} got multiple values for keyword argument '${name}'`);
   }
+}
+
+export function addKeyword(kwargs: Map<string, PyValue>, key: PyValue, value: PyValue): boolean {
+  if (typeof key !== 'string' || (kwargs instanceof NamespaceMap && kwargs.dictionary)) {
+    const dict = namespaceDict(kwargs);
+    if (dict.store.has(key)) return false;
+    dict.store.set(key, value);
+  } else {
+    if (kwargs.has(key)) return false;
+    kwargs.set(key, value);
+  }
+  return true;
+}
+
+export function keywordEntries(kwargs: Kwargs): [PyValue, PyValue][] {
+  if (kwargs instanceof NamespaceMap && kwargs.dictionary)
+    return kwargs.dictionary.ordered().map(({ key, value }) => [key, value]);
+  return [...(kwargs ?? [])];
 }
 
 /** How CPython's _PyObject_FunctionStr names a callable in the errors of a call's argument unpacking. */
@@ -59,4 +79,31 @@ export function mappingEntries(mapping: PyValue): [PyValue, PyValue][] {
   const keys = getAttributeOrUndefined(mapping, 'keys');
   if (keys === undefined) throw typeError(`'${typeName(mapping)}' object is not a mapping`);
   return toArray(callValue(keys, [])).map((key) => [key, getItem(mapping, key)]);
+}
+
+export function keywordMap(entries: Iterable<[PyValue, PyValue]>): NamespaceMap {
+  const result = new NamespaceMap();
+  for (const [key, value] of entries) setKeyword(result, key, value);
+  return result;
+}
+
+export function copyKeywords(kwargs: Kwargs): NamespaceMap {
+  return keywordMap(keywordEntries(kwargs));
+}
+
+export function setKeyword(kwargs: Map<string, PyValue>, key: PyValue, value: PyValue): void {
+  if (typeof key === 'string') kwargs.set(key, value);
+  else namespaceDict(kwargs).store.set(key, value);
+}
+
+export function unicodeKeywords(kwargs: Kwargs, name: string): Kwargs {
+  if (!(kwargs instanceof NamespaceMap) || !kwargs.dictionary) return kwargs;
+  const parsed = new Map<string, PyValue>();
+  for (const [key, value] of keywordEntries(kwargs)) {
+    const text = stringValue(key) as string;
+    if (parsed.has(text)) throw typeError(`${name}() got an unexpected keyword argument '${text}'`);
+    parsed.set(text, value);
+    currentRuntime().handToNative(key);
+  }
+  return parsed;
 }

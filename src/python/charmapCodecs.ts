@@ -6,7 +6,7 @@ import { CHARMAP_TABLES } from './data/charmapCodecs';
 import { builtin, method } from './define';
 import { getItem } from './objects';
 import { currentRuntime } from './runtimeContext';
-import { builtinClass, newDict, newTuple, None, typeError, typeName } from './types';
+import { builtinClass, newDict, newTuple, None, stringValue, typeError, typeName } from './types';
 import { PyOpaque, type PyValue } from './values';
 
 const REASON = 'character maps to <undefined>';
@@ -119,6 +119,7 @@ method(encodingMapClass, 'size', 'none', 0, 0, (self) => {
 
 /** `charmap_build(decoding_table)`: an EncodingMap, or a dict when the table does not fit one. */
 function charmapBuild(table: PyValue): PyValue {
+  table = stringValue(table) ?? table;
   if (typeof table !== 'string' || table === '') throw typeError('bad argument type for built-in operation');
   // oxlint-disable-next-line typescript/no-misused-spread -- A decoding table holds one character per byte.
   const points = [...table].map((char) => char.codePointAt(0) as number);
@@ -158,13 +159,15 @@ function encodingLookup(mapping: PyValue): (point: number) => readonly number[] 
 /** The text a mapping gives a byte: the character of a table string, or what `mapping[byte]` gives. */
 // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of value a mapping may give, as charmap_decode_mapping checks them.
 function decodingLookup(mapping: PyValue): (byte: number) => string | undefined {
+  mapping = stringValue(mapping) ?? mapping;
   if (typeof mapping === 'string') {
     // oxlint-disable-next-line typescript/no-misused-spread -- A decoding table holds one character per byte.
     const chars = [...mapping];
     return (byte) => (byte < chars.length && chars[byte] !== UNDEFINED_CHAR ? chars[byte] : undefined);
   }
   return (byte) => {
-    const value = mappedValue(mapping, byte);
+    const rawValue = mappedValue(mapping, byte);
+    const value = stringValue(rawValue) ?? rawValue;
     if (value === undefined || value === None) return;
     if (typeof value === 'bigint') {
       if (value < 0n || value > 0x10_ff_ffn) throw typeError('character mapping must be in range(0x110000)');
@@ -187,12 +190,14 @@ function mappedValue(mapping: PyValue, key: number): PyValue | undefined {
 
 function errorsName(name: string, errors: PyValue | undefined): string {
   if (errors === undefined || errors === None) return 'strict';
+  errors = stringValue(errors) ?? errors;
   if (typeof errors !== 'string') throw typeError(`${name}() argument 2 must be str or None, not ${typeName(errors)}`);
   return errors;
 }
 
 /** `charmap_encode(str, errors=None, mapping=None)`, which encodes Latin-1 without a mapping. */
 function charmapEncode([input, errors, mapping]: PyValue[]): PyValue {
+  input = stringValue(input) ?? input;
   if (typeof input !== 'string') throw typeError(`charmap_encode() argument 1 must be str, not ${typeName(input)}`);
   const handler = errorsName('charmap_encode', errors);
   // oxlint-disable-next-line typescript/no-misused-spread -- Python encodes strings by code point.

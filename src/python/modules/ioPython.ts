@@ -1361,6 +1361,7 @@ class TextIOWrapper(_TextIOBase):
                  line_buffering=False, write_through=False):
         self._check_newline(newline)
         encoding = text_encoding(encoding)
+        if isinstance(encoding, str): encoding = str.__str__(encoding)
 
         if encoding == "locale":
             encoding = self._get_locale_encoding()
@@ -1400,7 +1401,7 @@ class TextIOWrapper(_TextIOBase):
 
     def _configure(self, encoding=None, errors=None, newline=None,
                    line_buffering=False, write_through=False):
-        self._encoding = encoding
+        self._encoding = str.__str__(encoding)
         self._errors = errors
         self._encoder = None
         self._decoder = None

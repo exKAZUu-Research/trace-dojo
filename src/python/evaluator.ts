@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 985 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
+// code-gauge-allow-file fileNcss 987 -- The statement evaluator keeps one method per kind of statement together, with the suspending variants of the simple ones.
 import { newAnnotate, recordAnnotation } from './annotations';
 import type {
   BinaryOperator,
@@ -62,12 +62,23 @@ import {
   newTuple,
   None,
   pyError,
+  stringValue,
   typeError,
   typeName,
 } from './types';
 import { unavailableValue } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
-import { DONE, PyClass, PyError, type PyFunction, PyInstance, PyModule, PyTuple, type PyValue } from './values';
+import {
+  DONE,
+  PyClass,
+  type PyDict,
+  PyError,
+  type PyFunction,
+  PyInstance,
+  PyModule,
+  PyTuple,
+  type PyValue,
+} from './values';
 import { hasWeakCallbacks, runWeakCallbacks } from './weakReferences';
 
 const NO_EXCEPTIONS: PyInstance[] = [];
@@ -315,7 +326,8 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   /** The value `from module import name` binds from a module, or undefined when it has no such name. */
-  private moduleName(module: PyModule, moduleName: string, name: string, deferred = false): PyValue | undefined {
+  private moduleName(module: PyModule, moduleName: string, nameValue: PyValue, deferred = false): PyValue | undefined {
+    const name = stringValue(nameValue) as string;
     const feature = module.unsupported.get(name);
     if (feature !== undefined) {
       if (deferred) return unavailableValue(feature);
@@ -325,9 +337,9 @@ export class Evaluator extends AsyncEvaluator {
     // As in CPython, a name a package lacks may be a submodule, which importing it adds to the package.
     const submodule = `${moduleName}.${name}`;
     const value =
-      module.dict.get(name) ??
+      module.dict.get(nameValue as string) ??
       importedModule(module, name) ??
-      (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, name) : undefined) ??
+      (module.dict.has('__getattr__') ? getAttributeOrUndefined(module, nameValue) : undefined) ??
       (isRegisteredModule(submodule) ? this.runtime.resolveImport(submodule) : undefined);
     if (value === undefined && !this.runtime.inLibraryCode()) {
       const missing = missingNamespaceName(module, name);
@@ -1309,7 +1321,7 @@ export class Evaluator extends AsyncEvaluator {
     const names = this.matchClassPositional(pattern, cls, subject, bindings, frame);
     if (!names) return false;
     for (const [index, keyword] of pattern.keywords.entries()) {
-      if (names.includes(keyword))
+      if (names.store.has(keyword))
         throw typeError(`${cls.name}() got multiple sub-patterns for attribute '${keyword}'`);
       const value = getAttributeOrUndefined(subject, keyword);
       if (value === undefined || !this.matchPattern(pattern.keywordPatterns[index], value, bindings, frame))
@@ -1325,20 +1337,23 @@ export class Evaluator extends AsyncEvaluator {
     subject: PyValue,
     bindings: Map<Target, PyValue>,
     frame: Frame
-  ): string[] | undefined {
+  ): PyDict | undefined {
     const { patterns } = pattern;
-    if (patterns.length === 0) return [];
+    if (patterns.length === 0) return newDict();
     if (SELF_MATCHING.has(cls.name) && cls.isBuiltin) {
       if (patterns.length > 1)
         throw typeError(`${cls.name}() accepts 1 positional sub-pattern (${patterns.length} given)`);
-      return this.matchPattern(patterns[0], subject, bindings, frame) ? [] : undefined;
+      return this.matchPattern(patterns[0], subject, bindings, frame) ? newDict() : undefined;
     }
     const allowed = matchArgsOf(cls, patterns.length);
-    const names: string[] = [];
+    const names = newDict();
     for (const [index, sub] of patterns.entries()) {
       const name = allowed[index];
-      if (typeof name !== 'string') throw typeError(`__match_args__ elements must be strings (got ${typeName(name)})`);
-      names.push(name);
+      if (stringValue(name) === undefined)
+        throw typeError(`__match_args__ elements must be strings (got ${typeName(name)})`);
+      if (names.store.has(name))
+        throw typeError(`${cls.name}() got multiple sub-patterns for attribute '${stringValue(name)}'`);
+      names.store.set(name, None);
       const value = getAttributeOrUndefined(subject, name);
       if (value === undefined || !this.matchPattern(sub, value, bindings, frame)) return undefined;
     }
@@ -1379,12 +1394,12 @@ function starNames(module: PyValue, resolve: (name: string) => PyValue | undefin
     return [...module.dict].filter(([name]) => !name.startsWith('_'));
   }
   return toArray(all).map((name) => {
-    if (typeof name !== 'string') {
+    if (stringValue(name) === undefined) {
       const owner = module instanceof PyModule ? module.name : pyStr(getAttribute(module, '__name__'));
       throw typeError(`Item in ${owner}.__all__ must be str, not ${typeName(name)}`);
     }
-    const value = resolve(name);
-    return [name, value ?? getAttribute(module, name)];
+    const value = resolve(name as string);
+    return [name as string, value ?? getAttribute(module, name)];
   });
 }
 

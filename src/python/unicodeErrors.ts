@@ -1,9 +1,8 @@
 import { bytesLikeData, newBytes, PyBytes } from './bytesValues';
-import { pyStr } from './conversions';
 import { method } from './define';
 import { toIndex } from './numbers';
 import { iterStr, strLength } from './strings';
-import { exceptionClassNamed, newTuple, None, typeError, typeName, unbox } from './types';
+import { exceptionClassNamed, newTuple, stringValue, typeError, typeName } from './types';
 import { PyInstance, type PyValue } from './values';
 
 type UnicodeErrorName = 'UnicodeEncodeError' | 'UnicodeDecodeError' | 'UnicodeTranslateError';
@@ -37,7 +36,7 @@ for (const name of Object.keys(FIELDS) as UnicodeErrorName[]) {
 
 type Check = [(value: PyValue) => PyValue | undefined, string];
 
-const STR: Check = [(value) => (typeof unbox(value) === 'string' ? unbox(value) : undefined), 'str'];
+const STR: Check = [(value) => (stringValue(value) !== undefined ? value : undefined), 'str'];
 const INDEX: Check = [(value) => toIndex(value), 'int'];
 const BYTES: Check = [
   (value) => {
@@ -63,12 +62,13 @@ function checkedArguments(name: UnicodeErrorName, args: PyValue[]): PyValue[] {
 
 function unicodeErrorStr(name: UnicodeErrorName, exception: PyInstance): string {
   const field = (key: string): PyValue | undefined => exception.dict.get(key);
-  const object = field('object');
+  const rawObject = field('object');
+  const object = stringValue(rawObject) ?? rawObject;
   const start = field('start');
   const end = field('end');
-  const reason = field('reason');
+  const reason = stringValue(field('reason'));
   if (typeof start !== 'bigint' || typeof end !== 'bigint' || typeof reason !== 'string') return '';
-  const encoding = name === 'UnicodeTranslateError' ? '' : `'${pyStr(field('encoding') ?? None)}' codec `;
+  const encoding = name === 'UnicodeTranslateError' ? '' : `'${stringValue(field('encoding')) ?? ''}' codec `;
   const verb = { UnicodeEncodeError: 'encode', UnicodeDecodeError: 'decode', UnicodeTranslateError: 'translate' }[name];
   const length = object instanceof PyBytes ? object.length : typeof object === 'string' ? strLength(object) : 0;
   if (start < BigInt(length) && end === start + 1n) {

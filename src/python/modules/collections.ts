@@ -1,4 +1,5 @@
 import { defineAttribute } from '../attributeDescriptors';
+import { keywordEntries } from '../callArguments';
 import { pyRepr } from '../conversions';
 import { builtin, method, redeclareMethods } from '../define';
 import { DictStore } from '../dictStore';
@@ -353,7 +354,7 @@ function initDefaultdict(dict: PyDict, args: PyValue[], kwargs: Kwargs): void {
   dict.defaultFactory = factory === None ? undefined : factory;
   if (args.length > 1) updateDict(dict, args[1]);
   if (args.length > 2) throw typeError(`defaultdict expected at most 2 arguments, got ${args.length}`);
-  for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
+  for (const [key, value] of keywordEntries(kwargs)) dict.store.set(key, value);
 }
 
 defaultdictClass.construct = (cls, args, kwargs) => {

@@ -6,7 +6,7 @@ import type { Runtime } from './runtime';
 import { exceptionClassNamed, moduleClass, newException, None } from './types';
 import { isUnavailable } from './unavailableValues';
 import { UnsupportedFeatureError } from './unsupported';
-import { PyBuiltinFunction, PyError, PyModule, type PyValue } from './values';
+import { NamespaceMap, PyBuiltinFunction, PyError, PyModule, type PyValue } from './values';
 
 /** Creates a module's attributes; a module written in Python instead runs its code in `namespace` and returns none. */
 type ModuleFactory = (runtime: Runtime, namespace: Map<string, PyValue>) => Map<string, PyValue>;
@@ -162,7 +162,7 @@ export function importModule(runtime: Runtime, name: string): PyModule {
 
 function createModule(runtime: Runtime, name: string, factory: ModuleFactory): PyModule {
   // The builtins module's namespace is the one names fall back to, so that changing either changes the other.
-  const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new Map());
+  const module = new PyModule(moduleClass, name, name === 'builtins' ? runtime.builtins : new NamespaceMap());
   // As in CPython, the module is in sys.modules while its code runs, which a cyclic import finds it in.
   runtime.modules.set(name, module);
   moduleTables.get(runtime)?.set(name, module);

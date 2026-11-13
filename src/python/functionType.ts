@@ -2,7 +2,7 @@ import { namespaceOf } from './namespaces';
 import { argument } from './nativeArgs';
 import { toArray } from './objects';
 import { codeClass, infoOf } from './tracebacks';
-import { functionClass, None, typeError, typeName } from './types';
+import { functionClass, None, stringValue, typeError, typeName } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { type PyCell, PyDict, PyFunction, PyOpaque, PyTuple, type PyValue } from './values';
 
@@ -33,8 +33,11 @@ functionClass.construct = (_cls, args, kwargs) => {
     kwdefaults instanceof PyDict ? new Map(namespaceOf(kwdefaults)) : new Map(),
     original.classCell
   );
-  if (typeof name === 'string') fn.name = name;
-  else if (name !== undefined && name !== None)
+  const text = stringValue(name);
+  if (text !== undefined) {
+    fn.name = text;
+    fn.nameValue = typeof name === 'string' ? undefined : name;
+  } else if (name !== undefined && name !== None)
     throw typeError(`arg 3 (name) must be None or string, not ${typeName(name)}`);
   return fn;
 };

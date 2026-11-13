@@ -38,6 +38,7 @@ import {
   objectClass,
   pyError,
   strClass,
+  stringValue,
   typeError,
   typeName,
   valueError,
@@ -183,12 +184,7 @@ export function seedOf(value: PyValue | undefined, version: PyValue = 2n): bigin
   if (isInstanceOf(value, intClass)) return toIndex(value);
   if (isInstanceOf(value, strClass) || value instanceof PyBytes) {
     if (equals(version, 1n) && (isInstanceOf(value, strClass) || isInstanceOf(value, bytesClass))) {
-      const text =
-        value instanceof PyBytes
-          ? latin1Text(value.data)
-          : typeof value === 'string'
-            ? value
-            : ((value as PyInstance).primitive as string);
+      const text = value instanceof PyBytes ? latin1Text(value.data) : (stringValue(value) as string);
       return versionOneSeed(text);
     }
     if (equals(version, 2n)) return bigintOfBytes(versionTwoBytes(value));
@@ -211,10 +207,7 @@ function seedKey(value: PyValue | undefined, version: PyValue = 2n): number[] {
 
 /** The bytes of a str or bytes seed of version 2 followed by their SHA-512, whose int CPython seeds with. */
 function versionTwoBytes(value: PyValue): Uint8Array {
-  const bytes =
-    value instanceof PyBytes
-      ? value.data
-      : new TextEncoder().encode(typeof value === 'string' ? value : ((value as PyInstance).primitive as string));
+  const bytes = value instanceof PyBytes ? value.data : new TextEncoder().encode(stringValue(value) as string);
   currentRuntime().scan(bytes.length);
   const combined = new Uint8Array(bytes.length + 64);
   combined.set(bytes);
@@ -290,7 +283,7 @@ function sample(generator: MersenneTwister, args: PyValue[], kwargs: Kwargs): Py
   const population = argument(args, kwargs, 0, 'population') as PyValue;
   const kValue = argument(args, kwargs, 1, 'k') as PyValue;
   const counts = kwargs?.get('counts') ?? None;
-  if (!isSequence(population) && typeof population !== 'string') {
+  if (!isSequence(population) && stringValue(population) === undefined) {
     throw typeError('Population must be a sequence.  For dicts or sets, use sorted(d).');
   }
   const n = exactLength(population);

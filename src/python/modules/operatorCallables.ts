@@ -1,3 +1,4 @@
+import { copyKeywords } from '../callArguments';
 import { pyRepr } from '../conversions';
 import { method } from '../define';
 import { attributeName, callValue, getAttribute, getItem } from '../objects';
@@ -65,7 +66,7 @@ export const methodcallerClass = callableClass(
 methodcallerClass.construct = (cls, [name, ...args], kwargs) => {
   if (name === undefined) throw typeError('methodcaller needs at least one argument, the method name');
   if (stringValue(name) === undefined) throw typeError('method name must be a string');
-  return new PyOpaque(cls, '', { name, args, kwargs: kwargs && new Map(kwargs) } satisfies MethodCall);
+  return new PyOpaque(cls, '', { name, args, kwargs: kwargs && copyKeywords(kwargs) } satisfies MethodCall);
 };
 
 function callableClass(

@@ -22,7 +22,16 @@ import { callValue, getAttribute, isTruthy } from '../objects';
 import type { Runtime } from '../runtime';
 import { currentRuntime } from '../runtimeContext';
 import { fromCodePoints } from '../strings';
-import { exceptionClassNamed, isInstanceOf, newException, newTuple, None, typeError, typeName } from '../types';
+import {
+  exceptionClassNamed,
+  isInstanceOf,
+  newException,
+  newTuple,
+  None,
+  stringValue,
+  typeError,
+  typeName,
+} from '../types';
 import { characterName } from '../unicodeDatabase';
 import { escapePoint } from '../unicodeErrors';
 import { utf7Natives } from '../utf7';
@@ -170,12 +179,13 @@ function hexDigits(byte: number): number[] {
 /** `readbuffer_encode(data, errors=None)`: the bytes of a buffer, or of a string's UTF-8, and their length. */
 function readbufferEncode(data: PyValue, errors: PyValue | undefined): PyValue {
   checkErrorsArgument('readbuffer_encode', errors);
-  const bytes = typeof data === 'string' ? encodeString(data, 'utf8', 'strict') : requireBytesLike(data);
+  const text = stringValue(data);
+  const bytes = text !== undefined ? encodeString(text, 'utf8', 'strict') : requireBytesLike(data);
   return newTuple([newBytes(Uint8Array.from(bytes)), BigInt(bytes.length)]);
 }
 
 function checkErrorsArgument(name: string, errors: PyValue | undefined): void {
-  if (errors !== undefined && errors !== None && typeof errors !== 'string') {
+  if (errors !== undefined && errors !== None && stringValue(errors) === undefined) {
     throw typeError(`${name}() argument 2 must be str or None, not ${typeName(errors)}`);
   }
 }
@@ -219,6 +229,7 @@ function unregisterSearch(search: PyValue): PyValue {
 
 /** `codecs.lookup`: the CodecInfo of an encoding, from this grader's `encodings` modules or a registered search. */
 function lookup(encoding: PyValue): PyValue {
+  encoding = stringValue(encoding) ?? encoding;
   if (typeof encoding !== 'string') throw typeError(`lookup() argument must be str, not ${typeName(encoding)}`);
   const state = registry();
   const key = cacheKey(encoding);
@@ -291,6 +302,7 @@ function codecFunction(direction: 'encode' | 'decode'): PyValue {
 }
 
 function stringArgument(direction: string, name: string, value: PyValue): string {
+  value = stringValue(value) ?? value;
   if (typeof value !== 'string')
     throw typeError(`${direction}() argument '${name}' must be str, not ${typeName(value)}`);
   return value;
@@ -307,12 +319,14 @@ function codecInfoFunction(info: PyValue, direction: 'encode' | 'decode'): PyVal
 function unicodeEncoder(module: string): PyValue {
   const name = `${module}_encode`;
   return builtin(name, 'expected', 1, 2, ([input, errors]) => {
+    input = stringValue(input) ?? input;
     if (typeof input !== 'string') throw typeError(`${name}() argument 1 must be str, not ${typeName(input)}`);
     return encodeWith(module, input, errors ?? None, name);
   });
 }
 
 function encodeWith(module: PyValue, input: PyValue, errors: PyValue, name = `${module as string}_encode`): PyValue {
+  input = stringValue(input) ?? input;
   if (typeof input !== 'string') throw typeError(`${name}() argument 1 must be str, not ${typeName(input)}`);
   const encoded = encodeString(input, module as string, errorsName(name, errors));
   // oxlint-disable-next-line typescript/no-misused-spread -- Python counts a string's length in code points.
@@ -382,6 +396,7 @@ function incrementalEncoder(module: string, withState = false): PyValue {
   const codec = lookupCodec(module, 'encode');
   const encode = codec.incrementalEncoder?.();
   const callable = builtin('encode', 'expected', 3, 3, ([input, errors, final]) => {
+    input = stringValue(input) ?? input;
     if (typeof input !== 'string') throw typeError(`encode() argument 1 must be str, not ${typeName(input)}`);
     if (!encode) return newBytes(encodeString(input, module, errorsName('encode', errors)));
     // oxlint-disable-next-line typescript/no-misused-spread -- Python encodes strings by code point.
@@ -437,6 +452,7 @@ function requireBytes(input: PyValue): Uint8Array {
 
 function errorsName(name: string, errors: PyValue): string {
   if (errors === None) return 'strict';
+  errors = stringValue(errors) ?? errors;
   if (typeof errors !== 'string') throw typeError(`${name}() argument 2 must be str or None, not ${typeName(errors)}`);
   return errors;
 }
@@ -617,12 +633,13 @@ function errorEnd(error: PyValue): number {
 }
 
 function errorPoints(error: PyValue): number[] {
-  const text = getAttribute(error, 'object');
+  const text = stringValue(getAttribute(error, 'object'));
   const points = Array.from(typeof text === 'string' ? text : '', (char) => char.codePointAt(0) as number);
   return points.slice(errorStart(error), errorEnd(error));
 }
 
 function lookupErrorHandler(name: PyValue): PyValue {
+  name = stringValue(name) ?? name;
   if (typeof name !== 'string') throw typeError(`lookup_error() argument must be str, not ${typeName(name)}`);
   const handler = customErrorHandler(currentRuntime(), name) ?? ERROR_HANDLERS.get(name);
   if (handler === undefined) throw lookupError(`unknown error handler name '${name}'`);
@@ -630,6 +647,7 @@ function lookupErrorHandler(name: PyValue): PyValue {
 }
 
 function registerError(name: PyValue, handler: PyValue): PyValue {
+  name = stringValue(name) ?? name;
   if (typeof name !== 'string') throw typeError(`register_error() argument 1 must be str, not ${typeName(name)}`);
   if (!isCallable(handler)) throw typeError('handler must be callable');
   registerErrorHandler(currentRuntime(), name, handler);

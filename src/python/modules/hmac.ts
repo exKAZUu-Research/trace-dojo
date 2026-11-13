@@ -1,7 +1,7 @@
 import { bytesLikeData } from '../bytesValues';
 import { builtin } from '../define';
 import { registerSourceModule } from '../sourceModules';
-import { typeError, typeName } from '../types';
+import { stringValue, typeError, typeName } from '../types';
 import type { PyValue } from '../values';
 
 // CPython's `hmac.py`, which computes HMAC through `hashlib` as CPython does without OpenSSL; `_compare_digest` is `_operator._compare_digest`.
@@ -289,6 +289,8 @@ registerSourceModule(
 
 /** `_operator._compare_digest`: whether two ASCII strings or two bytes-like objects are equal. */
 function compareDigest(a: PyValue, b: PyValue): boolean {
+  a = stringValue(a) ?? a;
+  b = stringValue(b) ?? b;
   if (typeof a === 'string' && typeof b === 'string') {
     if (!isAscii(a + b)) throw typeError('comparing strings with non-ASCII characters is not supported');
     return a === b;

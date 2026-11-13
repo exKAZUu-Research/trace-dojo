@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 650 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
+// code-gauge-allow-file fileNcss 661 -- The attribute lookup keeps the special attributes of every builtin kind of object together.
 import {
   classAnnotate,
   classAnnotations,
@@ -33,7 +33,7 @@ import { builtinFunctionModule } from './modules';
 import { completeNamespace } from './modules/moduleLayout';
 import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict, namespaceOf } from './namespaces';
-import { attributeError, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
+import { attributeError, attributeName, bindValue, callValue, getAttribute, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { instancesHaveDict } from './slots';
 import { runSubclasses } from './subclasses';
@@ -83,9 +83,9 @@ import { weakReferenceOf } from './weakReferences';
 export const BUILTIN_DOC = '組み込みの関数・型・モジュールの説明文（__doc__）';
 
 /** Reads an attribute of a class: its own data, then the attributes of its MRO, bound as a class reads them. */
-export function classAttribute(cls: PyClass, name: string): PyValue | undefined {
+export function classAttribute(cls: PyClass, name: string, key = name): PyValue | undefined {
   const meta = cls.cls;
-  const metaAttribute = meta === typeClass ? undefined : meta.lookup(name);
+  const metaAttribute = meta === typeClass ? undefined : meta.lookup(key);
   if (
     metaAttribute !== undefined &&
     metaAttribute !== typeClass.dict.get(name) &&
@@ -96,7 +96,7 @@ export function classAttribute(cls: PyClass, name: string): PyValue | undefined 
   const own = typeData(cls, name) ?? (cls.flags.isEnum ? enumClassData(cls, name) : undefined);
   if (own !== undefined) return own;
   if (metaAttribute !== undefined && isMetaDataDescriptor(metaAttribute)) return bindToClass(metaAttribute, cls);
-  const attribute = cls.lookup(name);
+  const attribute = cls.lookup(key);
   if (attribute === undefined) {
     // Methods of the metaclass, such as `mro()`, bind to the class.
     if (metaAttribute !== undefined) return bindToClass(metaAttribute, cls);
@@ -343,10 +343,10 @@ function generatorAttribute(generator: PyGenerator, attribute: string): PyValue 
 function functionAttribute(fn: PyFunction, name: string): PyValue | undefined {
   switch (name) {
     case '__name__': {
-      return fn.name;
+      return fn.nameValue ?? fn.name;
     }
     case '__qualname__': {
-      return fn.qualifiedName;
+      return fn.qualifiedNameValue ?? fn.qualifiedName;
     }
     case '__doc__': {
       return fn.doc ?? fn.dict.get('__doc__') ?? fn.def.doc ?? None;
@@ -436,18 +436,13 @@ function exceptionFieldOf(instance: PyInstance, name: string): PyValue | undefin
 
 // code-gauge-allow functionCognitiveComplexity 28 -- One case per writable attribute a function keeps outside its dictionary.
 // code-gauge-allow functionNcss 38 -- One case per writable attribute a function keeps outside its dictionary.
-function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue): void {
+function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue, nameValue: PyValue = name): void {
   if (name === '__globals__' || name === '__closure__' || name === '__builtins__') {
     throw pyError('AttributeError', 'readonly attribute');
   }
   if (name === '__annotations__' || name === '__annotate__') setFunctionAnnotationAttribute(fn, name, value);
-  else if (name === '__name__') {
-    if (typeof value !== 'string') throw typeError('__name__ must be set to a string object');
-    fn.name = value;
-  } else if (name === '__qualname__') {
-    if (typeof value !== 'string') throw typeError('__qualname__ must be set to a string object');
-    fn.qualifiedName = value;
-  } else if (name === '__module__') fn.module = value;
+  else if (name === '__name__' || name === '__qualname__') setFunctionName(fn, name, value);
+  else if (name === '__module__') fn.module = value;
   else if (name === '__doc__') fn.doc = value;
   else if (name === '__defaults__') {
     if (value !== None && !(value instanceof PyTuple)) throw typeError('__defaults__ must be set to a tuple object');
@@ -460,27 +455,28 @@ function setFunctionAttribute(fn: PyFunction, name: string, value: PyValue): voi
   } else if (name === '__type_params__') {
     if (!(value instanceof PyTuple)) throw typeError('__type_params__ must be set to a tuple');
     fn.typeParams = [...value.items];
-  } else fn.dict.set(name, value);
+  } else storeNamedAttribute(fn.dict, nameValue, value);
 }
 
-export function setAttribute(target: PyValue, name: string, value: PyValue): void {
+export function setAttribute(target: PyValue, nameValue: PyValue, value: PyValue): void {
+  const name = attributeName(nameValue);
   currentRuntime().spend();
   if (takesInstanceAttributes(target)) {
     const custom = userHook(target as PyObject, '__setattr__');
-    if (custom === undefined) setInstanceAttribute(target as PyObject, name, value);
-    else callValue(bindValue(custom, target), [name, value]);
+    if (custom === undefined) setInstanceAttribute(target as PyObject, name, value, nameValue);
+    else callValue(bindValue(custom, target), [nameValue, value]);
     return;
   }
   if (target instanceof PyClass) {
-    setClassAttribute(target, name, value);
+    setClassAttribute(target, name, value, true, nameValue);
     return;
   }
   if (target instanceof PyFunction) {
-    setFunctionAttribute(target, name, value);
+    setFunctionAttribute(target, name, value, nameValue);
     return;
   }
   if (target instanceof PyModule) {
-    target.dict.set(name, value);
+    storeNamedAttribute(target.dict, nameValue, value);
     target.unsupported.delete(name);
     target.imports.delete(name);
     return;
@@ -534,10 +530,16 @@ function userHook(target: PyObject, name: string): PyValue | undefined {
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Class metadata keeps string data and original objects together; splitting these cases only moves their complexity.
-function setClassAttribute(target: PyClass, name: string, value: PyValue, callsHook = true): void {
+function setClassAttribute(
+  target: PyClass,
+  name: string,
+  value: PyValue,
+  callsHook = true,
+  nameValue: PyValue = name
+): void {
   refuseSharedClass(target);
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
-  if (setClassAttributeThroughMeta(target, name, value, callsHook)) return;
+  if (setClassAttributeThroughMeta(target, name, value, callsHook, nameValue)) return;
   if (name === '__getattribute__') noteGetattributeAssigned();
   // Instances created from now on are tracked; CPython also finalizes the existing ones, which this grader does not.
   if (name === '__del__') markDefinesDel(target);
@@ -561,7 +563,7 @@ function setClassAttribute(target: PyClass, name: string, value: PyValue, callsH
     return;
   }
   if (name === '__module__') target.module = stringValue(value) ?? target.module;
-  storeClassAttribute(target, name, value);
+  storeClassAttribute(target, name, value, nameValue);
 }
 
 /** Records that a class and the subclasses the run created so far define `__del__`, which their instances inherit. */
@@ -571,11 +573,11 @@ function markDefinesDel(cls: PyClass): void {
 }
 
 /** Stores a class attribute: the ones type's getsets keep outside the class's dictionary, or in it. */
-function storeClassAttribute(target: PyClass, name: string, value: PyValue): void {
+function storeClassAttribute(target: PyClass, name: string, value: PyValue, nameValue: PyValue): void {
   if (name === '__bases__') setClassBases(target, value);
   else if (name === '__annotations__') setClassAnnotations(target, value);
   else if (name === '__annotate__') setClassAnnotate(target, value);
-  else target.dict.set(name, value);
+  else storeNamedAttribute(target.dict, nameValue, value);
 }
 
 /** Whether a value is an instance of a program's subclass of a builtin type other than object, such as list. */
@@ -589,17 +591,28 @@ export function isInstanceWithAttributes(value: PyValue): boolean {
 }
 
 /** `type.__setattr__`: sets a class attribute as a metaclass's `__setattr__` does when it defers to `type`'s. */
-export function setClassAttributeWithoutHook(target: PyClass, name: string, value: PyValue): void {
-  setClassAttribute(target, name, value, false);
+export function setClassAttributeWithoutHook(
+  target: PyClass,
+  name: string,
+  value: PyValue,
+  nameValue: PyValue = name
+): void {
+  setClassAttribute(target, name, value, false, nameValue);
 }
 
 /** Sets a class attribute through its metaclass's `__setattr__` or data descriptor, returning whether one did. */
-function setClassAttributeThroughMeta(target: PyClass, name: string, value: PyValue, callsHook: boolean): boolean {
+function setClassAttributeThroughMeta(
+  target: PyClass,
+  name: string,
+  value: PyValue,
+  callsHook: boolean,
+  nameValue: PyValue
+): boolean {
   const meta = target.cls;
   if (meta.isBuiltin) return false;
   const custom = callsHook ? meta.lookup('__setattr__') : undefined;
   if (custom !== undefined && !(custom instanceof PyBuiltinFunction)) {
-    callValue(bindValue(custom, target), [name, value]);
+    callValue(bindValue(custom, target), [nameValue, value]);
     return true;
   }
   const attribute = meta.lookup(name);
@@ -647,7 +660,7 @@ function setProperty(property: PyDescriptor, target: PyObject, name: string, val
 }
 
 /** Stores an instance attribute, honoring descriptors, slots, and the special attributes of exceptions. */
-export function setInstanceAttribute(target: PyObject, name: string, value: PyValue): void {
+export function setInstanceAttribute(target: PyObject, name: string, value: PyValue, nameValue: PyValue = name): void {
   if (isThreadLocal(target)) {
     ensureThreadLocalDict(target);
     if (name === '__dict__') throw readOnlyError(target, name);
@@ -671,12 +684,12 @@ export function setInstanceAttribute(target: PyObject, name: string, value: PyVa
   }
   if (attribute !== undefined && callSetter(attribute, target, value)) return;
   if (target instanceof PyInstance) {
-    setInstanceDictEntry(target, name, value, attribute);
+    setInstanceDictEntry(target, name, value, attribute, nameValue);
     return;
   }
   const dict = ownDict(target);
   if (dict === undefined) throw noDictError(target, name, attribute);
-  dict.set(name, value);
+  storeNamedAttribute(dict, nameValue, value);
 }
 
 /** Assigns `__dict__`, which makes the dict itself hold the object's attributes from then on. */
@@ -690,7 +703,13 @@ function replaceDict(target: PyObject, value: PyValue): void {
 }
 
 /** Stores an attribute of a PyInstance once no descriptor took it, checking what its builtin class allows. */
-function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, attribute: PyValue | undefined): void {
+function setInstanceDictEntry(
+  target: PyInstance,
+  name: string,
+  value: PyValue,
+  attribute: PyValue | undefined,
+  nameValue: PyValue
+): void {
   const cls = target.cls;
   if (cls.slotNames !== undefined) throw noDictError(target, name, attribute);
   if (target.enumValue !== undefined) {
@@ -705,11 +724,11 @@ function setInstanceDictEntry(target: PyInstance, name: string, value: PyValue, 
   const state = target.exception;
   if (state && setExceptionField(state, name, value)) return;
   if (target.turtle && !cls.isBuiltin && attribute === undefined) {
-    target.dict.set(name, value);
+    storeNamedAttribute(target.dict, nameValue, value);
     return;
   }
   if (cls.isBuiltin && !state && !target.turtle && !builtinClassesWithDict.has(cls)) throw noDictError(target, name);
-  target.dict.set(name, value);
+  storeNamedAttribute(target.dict, nameValue, value);
 }
 
 const UNDELETABLE_EXCEPTION_ATTRIBUTES = new Set([
@@ -768,7 +787,7 @@ function setKeywordField(state: ExceptionState, name: string, value: PyValue): b
   if (!known && !(name === 'name' && state.name !== undefined) && !(name === 'obj' && state.object !== undefined))
     return false;
   (state.fields ??= new Map()).set(name, value);
-  if (name === 'name') state.name = typeof value === 'string' ? value : undefined;
+  if (name === 'name') state.name = stringValue(value);
   if (name === 'obj') state.object = value;
   return true;
 }
@@ -783,7 +802,7 @@ function refuseSharedClass(target: PyClass): void {
 }
 
 /** `type.__delattr__`: deletes a class attribute without its metaclass's `__delattr__`. */
-export function deleteClassAttribute(target: PyClass, name: string): void {
+export function deleteClassAttribute(target: PyClass, name: string, nameValue: PyValue = name): void {
   refuseSharedClass(target);
   // CPython words deleting as it does assigning.
   if (target.isBuiltin) throw typeError(`cannot set '${name}' attribute of immutable type '${target.name}'`);
@@ -791,7 +810,7 @@ export function deleteClassAttribute(target: PyClass, name: string): void {
     throw pyError('AttributeError', `${pyRepr(target.name)} cannot delete member ${pyRepr(name)}.`);
   }
   if (name === '__annotations__') setClassAnnotations(target, undefined);
-  else if (!target.dict.delete(name)) throw attributeError(target, name);
+  else if (!target.dict.delete(nameValue as string)) throw attributeError(target, name);
 }
 
 function propertyName(property: PyDescriptor, fallback: string): string {
@@ -810,18 +829,19 @@ function noDictError(target: PyValue, name: string, attribute?: PyValue): Error 
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows the order object.__delattr__ tries data descriptors, special stores, and the instance dict in.
-export function deleteAttribute(target: PyValue, name: string): void {
+export function deleteAttribute(target: PyValue, nameValue: PyValue): void {
+  const name = attributeName(nameValue);
   currentRuntime().spend();
   if (takesInstanceAttributes(target)) {
     const custom = userHook(target as PyObject, '__delattr__');
-    if (custom === undefined) deleteInstanceAttribute(target as PyObject, name);
-    else callValue(bindValue(custom, target), [name]);
+    if (custom === undefined) deleteInstanceAttribute(target as PyObject, name, nameValue);
+    else callValue(bindValue(custom, target), [nameValue]);
     return;
   }
   if (target instanceof PyClass) {
     const custom = target.cls.isBuiltin ? undefined : target.cls.lookup('__delattr__');
-    if (custom === undefined || custom instanceof PyBuiltinFunction) deleteClassAttribute(target, name);
-    else callValue(bindValue(custom, target), [name]);
+    if (custom === undefined || custom instanceof PyBuiltinFunction) deleteClassAttribute(target, name, nameValue);
+    else callValue(bindValue(custom, target), [nameValue]);
     return;
   }
   if (target instanceof PyFunction && (name === '__annotations__' || name === '__annotate__')) {
@@ -833,7 +853,7 @@ export function deleteAttribute(target: PyValue, name: string): void {
     return;
   }
   if (target instanceof PyFunction || target instanceof PyModule) {
-    if (!deleteNamespaceEntry(target, name)) throw attributeError(target, name);
+    if (!deleteNamespaceEntry(target, name, nameValue)) throw attributeError(target, name);
     return;
   }
   // Deleting an attribute of a builtin type's object fails as assigning it does.
@@ -841,14 +861,14 @@ export function deleteAttribute(target: PyValue, name: string): void {
 }
 
 /** Deletes a function's or module's attribute, including a module's not yet imported or unsupported names. */
-function deleteNamespaceEntry(target: PyFunction | PyModule, name: string): boolean {
-  if (target.dict.delete(name)) return true;
+function deleteNamespaceEntry(target: PyFunction | PyModule, name: string, nameValue: PyValue): boolean {
+  if (target.dict.delete(nameValue as string)) return true;
   return target instanceof PyModule && (target.imports.delete(name) || target.unsupported.delete(name));
 }
 
 /** Deletes an instance attribute, honoring descriptors and slots, as `object.__delattr__` does. */
 // code-gauge-allow functionCognitiveComplexity 19 -- Honors native descriptors, properties, user descriptors, enum members, and own dict.
-export function deleteInstanceAttribute(target: PyObject, name: string): void {
+export function deleteInstanceAttribute(target: PyObject, name: string, nameValue: PyValue = name): void {
   if (isThreadLocal(target)) {
     ensureThreadLocalDict(target);
     if (name === '__dict__') throw readOnlyError(target, name);
@@ -875,5 +895,23 @@ export function deleteInstanceAttribute(target: PyObject, name: string): void {
   }
   const dict = ownDict(target);
   if (dict === undefined) throw noDictError(target, name, attribute);
-  if (!dict.delete(name)) throw attributeError(target, name);
+  if (!dict.delete(nameValue as string)) throw attributeError(target, name);
+}
+
+function storeNamedAttribute(namespace: Map<string, PyValue>, name: PyValue, value: PyValue): void {
+  if (typeof name === 'string') namespace.set(name, value);
+  else namespaceDict(namespace).store.set(name, value);
+}
+
+function setFunctionName(fn: PyFunction, field: '__name__' | '__qualname__', value: PyValue): void {
+  const text = stringValue(value);
+  if (text === undefined) throw typeError(`${field} must be set to a string object`);
+  const original = typeof value === 'string' ? undefined : value;
+  if (field === '__name__') {
+    fn.name = text;
+    fn.nameValue = original;
+  } else {
+    fn.qualifiedName = text;
+    fn.qualifiedNameValue = original;
+  }
 }

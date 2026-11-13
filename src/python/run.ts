@@ -15,7 +15,7 @@ import { withRuntime } from './runtimeContext';
 import { DeadlockError, WaitRequest } from './threads';
 import { None } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { PyError, type PyValue } from './values';
+import { NamespaceMap, PyError, type PyValue } from './values';
 
 import './library';
 
@@ -101,7 +101,7 @@ function joinThreads(runtime: Runtime): void {
 
 /** The variables CPython gives the `__main__` module of a program run with `python -c`, in its order. */
 function mainGlobals(runtime: Runtime, module: Module): Map<string, PyValue> {
-  return new Map<string, PyValue>([
+  return new NamespaceMap([
     ['__name__', '__main__'],
     ['__doc__', module.doc ?? None],
     ['__package__', None],

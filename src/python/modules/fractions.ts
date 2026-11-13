@@ -415,6 +415,7 @@ pythonMethod(
   { params: ['format_spec'], required: 1, positionalOnly: true },
   '__format__',
   (self, [spec]) => {
+    spec = stringValue(spec) ?? spec;
     if (typeof spec !== 'string')
       throw typeError(`__format__() argument must be str, not ${typeName(spec as PyValue)}`);
     return formatFractionValue(ratioOf(self), spec, classOf(self).name);

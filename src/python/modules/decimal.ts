@@ -154,10 +154,11 @@ export function fromFloat(value: number): Dec {
 // code-gauge-allow functionCognitiveComplexity 21 -- Follows the argument handling of the C module _decimal.
 function fromTuple(items: readonly PyValue[]): Dec {
   if (items.length !== 3) throw valueError('argument must be a sequence of length 3');
-  const [sign, digits, exponent] = items;
+  const [sign, digits, rawExponent] = items;
   if ((typeof sign !== 'bigint' && typeof sign !== 'boolean') || (BigInt(sign) !== 0n && BigInt(sign) !== 1n)) {
     throw valueError('sign must be an integer with the value 0 or 1');
   }
+  const exponent = stringValue(rawExponent) ?? rawExponent;
   let exp: Dec['exp'];
   if (typeof exponent === 'string') {
     if (!['F', 'n', 'N'].includes(exponent)) {
@@ -387,7 +388,7 @@ defineSlot(
 defineSlot(decimalClass, '__str__', (self) => decimalString(valueOf(self), getContext().state.capitals));
 defineSlot(decimalClass, '__format__', (self, args) => {
   if (args.length === 0 || args.length > 2) throw typeError(`__format__ expected 1 or 2 arguments, got ${args.length}`);
-  const [spec] = args;
+  const spec = stringValue(args[0]) ?? args[0];
   if (typeof spec !== 'string') throw typeError(`format spec must be a string`);
   return formatDecimal(valueOf(self), spec, getContext().state);
 });
@@ -495,6 +496,7 @@ function defineShared(name: string, operation: Operation): void {
 }
 
 function roundingArgument(value: PyValue | undefined): Rounding | undefined {
+  value = stringValue(value) ?? value;
   if (value === undefined || value === None) return undefined;
   if (typeof value !== 'string' || !(ROUNDINGS as readonly string[]).includes(value)) {
     throw typeError(
@@ -536,7 +538,7 @@ for (const [name, operation] of Object.entries(DECIMAL_OPERATIONS)) defineShared
 
 defineSlot(contextClass, 'create_decimal', (self, args) => {
   if (args.length > 1) throw typeError(`function takes at most 1 argument (${args.length} given)`);
-  const value = args[0] ?? '0';
+  const value = stringValue(args[0]) ?? args[0] ?? '0';
   const context = self as PyContext;
   return newDecimal(
     inContext(context, (state) => {

@@ -1,7 +1,7 @@
 // The attributes and the str of SyntaxError, which `SyntaxError(msg, (filename, lineno, offset, text))` sets.
 import { pyStr } from './conversions';
 import { method } from './define';
-import { exceptionClasses, exceptionClassNamed, newTuple, None, typeError } from './types';
+import { exceptionClasses, exceptionClassNamed, newTuple, None, stringValue, typeError } from './types';
 import { type PyInstance, PyTuple, type PyValue } from './values';
 
 const syntaxErrorClass = exceptionClassNamed('SyntaxError');
@@ -38,7 +38,7 @@ method(syntaxErrorClass, '__init__', 'expected', 0, Number.POSITIVE_INFINITY, (s
 method(syntaxErrorClass, '__str__', 'none', 0, 0, (self) => {
   const { dict } = self as PyInstance;
   const message = pyStr(dict.get('msg') ?? None);
-  const filename = dict.get('filename');
+  const filename = stringValue(dict.get('filename'));
   const lineno = dict.get('lineno');
   const name = typeof filename === 'string' ? filename.split('/').at(-1) : undefined;
   const hasLine = typeof lineno === 'bigint';

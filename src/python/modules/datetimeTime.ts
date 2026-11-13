@@ -130,6 +130,7 @@ method(timeClass, '__replace__', 'takes', 0, 6, (self, args, kwargs) => replaceT
 method(timeClass, '__bool__', 'none', 0, 0, () => true);
 
 function timeIsoformat(value: PyTime, timespec: PyValue): string {
+  timespec = stringValue(timespec) ?? timespec;
   if (typeof timespec !== 'string') throw typeError('isoformat() argument 1 must be str');
   if (!TIMESPECS.includes(timespec)) throw pyError('ValueError', 'Unknown timespec value');
   return isoTime(value, timespec) + offsetText(callOffsetMethod(value.tzinfo, 'utcoffset', None));

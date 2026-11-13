@@ -1,3 +1,4 @@
+import { keywordEntries } from './callArguments';
 // The variants of the builtins that call back into Python or read iterators, which a program that runs threads calls
 // where the thread can suspend: a wait in a function they call or a generator they read then suspends the thread, as
 // the scheduler expects, while the other programs keep calling the synchronous builtins.
@@ -21,6 +22,7 @@ import {
   None,
   setClass,
   strClass,
+  stringValue,
   tupleClass,
   typeError,
   valueError,
@@ -70,7 +72,7 @@ function* dictSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
   const next = iterateSuspending(source, currentRuntime().frame.temporaries);
   let index = 0;
   for (let item = yield* next(); item !== DONE; item = yield* next()) addUpdatePair(dict, item, index++);
-  for (const [key, value] of kwargs ?? []) dict.store.set(key, value);
+  for (const [key, value] of keywordEntries(kwargs)) dict.store.set(key, value);
   return dict;
 }
 
@@ -189,7 +191,7 @@ function* sumSuspending(args: PyValue[], kwargs: Kwargs): Suspension {
   if (args.length === 0) throw typeError('sum() takes at least 1 positional argument (0 given)');
   checkArgs({ qualified: 'sum', min: 1, max: 2, style: 'takes', keywords: ['start'] }, args, kwargs);
   let result = argument(args, kwargs, 1, 'start') ?? 0n;
-  if (typeof result === 'string') throw typeError("sum() can't sum strings [use ''.join(seq) instead]");
+  if (stringValue(result) !== undefined) throw typeError("sum() can't sum strings [use ''.join(seq) instead]");
   const runtime = currentRuntime();
   const next = iterateSuspending(args[0], currentRuntime().frame.temporaries);
   let item = yield* next();

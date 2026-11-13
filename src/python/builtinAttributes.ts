@@ -51,6 +51,7 @@ import {
   sliceClass,
   staticmethodClass,
   strClass,
+  stringValue,
   superClass,
   tupleClass,
   typeError,
@@ -129,6 +130,7 @@ method(
   1,
   1,
   (_cls, [kind]) => {
+    kind = stringValue(kind) ?? kind;
     if (typeof kind !== 'string')
       throw typeError(`__getformat__() argument must be str, not ${argumentTypeName(kind)}`);
     if (kind !== 'double' && kind !== 'float')
@@ -192,6 +194,7 @@ method(
   1,
   1,
   (cls, [text]) => {
+    text = stringValue(text) ?? text;
     if (typeof text !== 'string') throw typeError('bad argument type for built-in operation');
     const value = floatFromHex(text);
     return cls === floatClass ? value : callValue(cls, [value]);

@@ -509,8 +509,3 @@ function athrowStep(generator: PyGenerator, state: AsyncGeneratorState, closing:
   }
   return step;
 }
-
-/** The async generators started and not finished, which an event loop closes when it shuts down. */
-export function isUnfinishedAsyncGenerator(value: PyValue): boolean {
-  return value instanceof PyGenerator && value.cls === asyncGeneratorClass && value.started && !value.finished;
-}

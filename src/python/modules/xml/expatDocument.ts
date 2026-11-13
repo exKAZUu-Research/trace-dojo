@@ -1,4 +1,4 @@
-import { type Scan, TOK, Tokenizer } from './expatTokenizer';
+import { type Scan, TOK } from './expatTokenizer';
 
 // The declarations of a document's DTD, the content models of element declarations, and the error codes of expat.
 
@@ -208,11 +208,6 @@ export function normalizePublicId(text: string): string {
 /** Text with its line breaks normalized to newlines, as `normalizeLines` does for comments and PIs. */
 export function normalizeLines(text: string): string {
   return text.replaceAll(/\r\n?/g, '\n');
-}
-
-/** The tokens of an internal entity's text, scanned as code points that no namespace processing applies to. */
-export function entityTokenizer(text: number[], ns: boolean): Tokenizer {
-  return new Tokenizer(text, ns);
 }
 
 export type { Scan };

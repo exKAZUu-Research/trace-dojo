@@ -14,6 +14,7 @@ import {
   newException,
   None,
   pyError,
+  stringValue,
   typeError,
   valueError,
 } from '../types';
@@ -200,10 +201,11 @@ function specEntries(spec: PyValue, names: readonly string[], filterName: string
   if (!(spec instanceof PyDict)) throw fail();
   const values = new Map<string, number>();
   for (const { key, value } of spec.store.ordered()) {
-    if (typeof key !== 'string' || !names.includes(key)) throw fail();
-    if (key === 'id' || key === 'preset') continue;
+    const name = stringValue(key);
+    if (name === undefined || !names.includes(name)) throw fail();
+    if (name === 'id' || name === 'preset') continue;
     try {
-      values.set(key, uint32Arg(value));
+      values.set(name, uint32Arg(value));
     } catch (error) {
       if (error instanceof PyError) throw fail();
       throw error;

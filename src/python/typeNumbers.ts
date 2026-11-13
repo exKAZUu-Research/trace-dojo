@@ -347,6 +347,7 @@ function imagPart(text: string): number {
 
 method(complexClass, '__repr__', 'none', 0, 0, (self) => complexRepr(self as PyComplex));
 method(complexClass, '__format__', 'one', 1, 1, (self, [spec]) => {
+  spec = stringValue(spec) ?? spec;
   if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
   return formatComplex(self as PyComplex, spec);
 });

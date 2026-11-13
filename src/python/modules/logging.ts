@@ -2,7 +2,7 @@ import { builtin } from '../define';
 import { registerUnsupportedAttributes } from '../modules';
 import { toIndex } from '../numbers';
 import { registerSourceModule } from '../sourceModules';
-import { newTuple, None } from '../types';
+import { newTuple, None, stringValue } from '../types';
 import type { PyValue } from '../values';
 
 // The core of CPython's `logging` package: loggers, handlers writing to streams, formatters, filters, and the
@@ -1109,7 +1109,7 @@ registerSourceModule(
       [
         '_percent_fields',
         builtin('_percent_fields', 'one', 1, 1, ([format]) =>
-          /%\(\w+\)[#0+ -]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[diouxXeEfFgGcrsa%]/.test(format as string)
+          /%\(\w+\)[#0+ -]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[diouxXeEfFgGcrsa%]/.test(stringValue(format) as string)
         ),
       ],
     ])

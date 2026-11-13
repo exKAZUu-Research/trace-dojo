@@ -52,6 +52,10 @@ export function releaseCaughtException(error: PyError, inFlight: unknown[] = [])
   current?.finalizer.release([error.exception], inFlight);
 }
 
+export function releaseNamespaceKey(key: unknown, value: unknown): void {
+  current?.finalizer.release([key], [value]);
+}
+
 /**
  * Refuses a string beyond the length limit that a native function returns, so that none can hand one to the program
  * even when it built the string without consulting the limit.

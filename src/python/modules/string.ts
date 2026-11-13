@@ -2,7 +2,7 @@ import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { decimalValue } from '../numbers';
 import { registerSourceModule } from '../sourceModules';
-import { iteratorClass, newTuple, None, pyError, typeError, typeName } from '../types';
+import { iteratorClass, newTuple, None, pyError, stringValue, typeError, typeName } from '../types';
 import { DONE, PyIterator, type PyValue } from '../values';
 
 // CPython's `string` module and its native formatting helpers.
@@ -379,8 +379,9 @@ registerModule(
 
 /** `_string.formatter_parser`: the (literal, field name, format spec, conversion) tuples of a format string. */
 // code-gauge-allow functionCognitiveComplexity 25 -- Follows MarkupIterator_next of CPython's unicode_format.h.
-// code-gauge-allow functionNcss 34 -- Follows MarkupIterator_next of CPython's unicode_format.h.
+// code-gauge-allow functionNcss 35 -- Follows MarkupIterator_next of CPython's unicode_format.h.
 function formatterParser(value: PyValue): PyValue {
+  value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(`expected str, got ${typeName(value)}`);
   // oxlint-disable-next-line typescript/no-misused-spread -- CPython parses a format string by code points.
   const chars = [...value];
@@ -471,8 +472,9 @@ function parseSpec(chars: string[], start: number, name: string, hasConversion: 
 
 /** `_string.formatter_field_name_split`: the first part of a field name and the attributes and keys after it. */
 // code-gauge-allow functionCognitiveComplexity 22 -- Follows FieldNameIterator of CPython's unicode_format.h.
-// code-gauge-allow functionNcss 31 -- Follows FieldNameIterator of CPython's unicode_format.h.
+// code-gauge-allow functionNcss 32 -- Follows FieldNameIterator of CPython's unicode_format.h.
 function fieldNameSplit(value: PyValue): PyValue {
+  value = stringValue(value) ?? value;
   if (typeof value !== 'string') throw typeError(`expected str, got ${typeName(value)}`);
   let position = 0;
   while (position < value.length && value[position] !== '.' && value[position] !== '[') position++;

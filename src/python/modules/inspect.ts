@@ -18,6 +18,7 @@ import {
   generatorClass,
   newException,
   None,
+  stringValue,
   typeError,
   typeName,
 } from '../types';
@@ -173,7 +174,7 @@ function checkHasFile(value: PyModule | PyClass): void {
 export function getDoc(value: PyValue): PyValue {
   const doc = getAttributeOrUndefined(value, '__doc__') ?? None;
   const found = doc === None ? inheritedDoc(value) : doc;
-  return typeof found === 'string' ? cleanDoc(found) : None;
+  return stringValue(found) !== undefined ? cleanDoc(found) : None;
 }
 
 /** `inspect._finddoc`: the docstring of a base class, or of the method a method overrides. */
@@ -221,8 +222,8 @@ function functionOwner(fn: PyFunction): PyClass | undefined {
 
 /** `inspect.cleandoc`: a docstring without the indentation of its lines after the first and its blank edges. */
 export function cleanDoc(doc: PyValue): PyValue {
-  if (typeof doc !== 'string') throw typeError(`'${classOf(doc).name}' object has no attribute 'expandtabs'`);
-  const expanded = callValue(getAttribute(doc, 'expandtabs'), []) as string;
+  if (stringValue(doc) === undefined) throw typeError(`'${classOf(doc).name}' object has no attribute 'expandtabs'`);
+  const expanded = stringValue(callValue(getAttribute(doc, 'expandtabs'), [])) as string;
   const lines = expanded.split('\n');
   let margin = Number.POSITIVE_INFINITY;
   for (const line of lines.slice(1)) {

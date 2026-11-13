@@ -6,9 +6,17 @@ import { isRegisteredModule, setBuiltinFunctionModule } from '../modules';
 import { checkNamespaceView } from '../namespaceDifferences';
 import { argument, checkArgs } from '../nativeArgs';
 import { callValue, importedModule } from '../objects';
-import { nativeFunction, newList, None, typeError, typeName } from '../types';
+import { nativeFunction, newList, None, stringValue, typeError, typeName } from '../types';
 import { UnsupportedFeatureError } from '../unsupported';
-import { type Kwargs, PyBuiltinFunction, type PyClass, PyFunction, PyModule, type PyValue } from '../values';
+import {
+  type Kwargs,
+  NamespaceMap,
+  PyBuiltinFunction,
+  type PyClass,
+  PyFunction,
+  PyModule,
+  type PyValue,
+} from '../values';
 import { MODULE_LAYOUTS } from './moduleLayouts';
 
 /** How CPython provides a module: where its code comes from, its doc and package, and the modules its code imported. */
@@ -148,7 +156,7 @@ const createdModules = new WeakSet<PyModule>();
 
 /** `types.ModuleType(name, doc=None)`, a module with CPython's initial namespace. */
 export function createModule(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyModule {
-  const module = new PyModule(cls, '', new Map<string, PyValue>());
+  const module = new PyModule(cls, '', new NamespaceMap());
   initializeModule(module, args, kwargs);
   createdModules.add(module);
   return module;
@@ -163,7 +171,7 @@ export function initializeModule(module: PyModule, args: PyValue[], kwargs: Kwar
   );
   const name = argument(args, kwargs, 0, 'name');
   if (name === undefined) throw typeError("module() missing required argument 'name' (pos 1)");
-  if (typeof name !== 'string') throw typeError(`module() argument 'name' must be str, not ${typeName(name)}`);
+  if (stringValue(name) === undefined) throw typeError(`module() argument 'name' must be str, not ${typeName(name)}`);
   for (const [key, value] of [
     ['__name__', name],
     ['__doc__', argument(args, kwargs, 1, 'doc') ?? None],
@@ -192,8 +200,8 @@ export function moduleRepr(module: PyModule): string {
   if (createdModules.has(module)) {
     const name = module.dict.get('__name__');
     const file = module.dict.get('__file__');
-    const shown = typeof name === 'string' ? pyRepr(name) : "'?'";
-    return typeof file === 'string' ? `<module ${shown} from ${pyRepr(file)}>` : `<module ${shown}>`;
+    const shown = stringValue(name) !== undefined ? pyRepr(name as PyValue) : "'?'";
+    return stringValue(file) !== undefined ? `<module ${shown} from ${pyRepr(file as PyValue)}>` : `<module ${shown}>`;
   }
   const kind = MODULE_LAYOUTS[module.name]?.kind ?? 'builtin';
   if (kind === 'builtin' || kind === 'frozen')

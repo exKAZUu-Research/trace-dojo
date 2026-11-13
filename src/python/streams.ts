@@ -6,7 +6,17 @@ import { toIndex } from './numbers';
 import { callValue, getAttribute, iterate } from './objects';
 import type { Runtime } from './runtime';
 import { strLength } from './strings';
-import { argumentTypeName, builtinClass, defineMethod, None, pyError, typeError, typeName, valueError } from './types';
+import {
+  argumentTypeName,
+  builtinClass,
+  defineMethod,
+  None,
+  pyError,
+  stringValue,
+  typeError,
+  typeName,
+  valueError,
+} from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { registerUnsupportedClassAttributes } from './unsupportedAttributes';
 import { DONE, type Kwargs, PyOpaque, type PyValue } from './values';
@@ -42,6 +52,7 @@ export function createStream(runtime: Runtime, name: 'stdout' | 'stderr'): PyVal
 }
 
 method(textIOClass, 'write', 'one', 1, 1, (self, [text]) => {
+  text = stringValue(text) ?? text;
   if (typeof text !== 'string') throw typeError(`write() argument must be str, not ${argumentTypeName(text)}`);
   stateOf(self).write(text);
   return BigInt(strLength(text));
@@ -139,8 +150,9 @@ function reconfigure(self: PyValue, _args: PyValue[], kwargs: Kwargs): PyValue {
 }
 
 function textOption(kwargs: Kwargs, name: string): string | undefined {
-  const value = kwargs?.get(name) ?? None;
-  if (value === None) return undefined;
+  const rawValue = kwargs?.get(name) ?? None;
+  if (rawValue === None) return undefined;
+  const value = stringValue(rawValue) ?? rawValue;
   if (typeof value !== 'string') {
     throw typeError(`reconfigure() argument '${name}' must be str or None, not ${typeName(value)}`);
   }

@@ -28,6 +28,7 @@ import {
   noneClass,
   NotImplemented,
   objectClass,
+  stringValue,
   tupleClass,
   typeClass,
   typeError,
@@ -265,7 +266,7 @@ function convertNone(value: PyValue): PyValue {
 /** `typing._type_convert`: None is NoneType and a string is a forward reference. */
 export function typeConvert(value: PyValue): PyValue {
   if (value === None) return noneClass;
-  if (typeof value === 'string') {
+  if (stringValue(value) !== undefined) {
     const forwardRef = currentRuntime().importModule('annotationlib').dict.get('ForwardRef') as PyValue;
     const created = callValue(forwardRef, [value]);
     // As CPython's typing, which compiles the reference at once so that a syntax error shows here.

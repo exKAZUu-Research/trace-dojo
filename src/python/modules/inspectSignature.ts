@@ -1,5 +1,6 @@
 import { functionAnnotations } from '../annotations';
 import { builtinTextSignature } from '../builtinDocs';
+import { keywordEntries, keywordMap } from '../callArguments';
 import { pyRepr } from '../conversions';
 import { method } from '../define';
 import { callValue, getAttribute, getAttributeOrUndefined, isCallable } from '../objects';
@@ -13,6 +14,7 @@ import {
   newDict,
   newTuple,
   None,
+  stringValue,
   typeClass,
   typeError,
   typeName,
@@ -76,6 +78,7 @@ type Kind = (typeof Kind)[keyof typeof Kind];
 
 interface Parameter {
   name: string;
+  nameValue?: PyValue;
   kind: Kind;
   default: PyValue;
   annotation: PyValue;
@@ -102,7 +105,7 @@ function signatureOf(value: PyValue): Signature {
 for (const [index, name] of KIND_NAMES.entries()) parameterClass.dict.set(name, KINDS[index]);
 parameterClass.dict.set('empty', emptyClass);
 signatureClass.dict.set('empty', emptyClass);
-defineProperty(parameterClass, 'name', (self) => parameterOf(self).name);
+defineProperty(parameterClass, 'name', (self) => parameterOf(self).nameValue ?? parameterOf(self).name);
 defineProperty(parameterClass, 'kind', (self) => KINDS[parameterOf(self).kind]);
 defineProperty(parameterClass, 'default', (self) => parameterOf(self).default);
 defineProperty(parameterClass, 'annotation', (self) => parameterOf(self).annotation);
@@ -114,11 +117,13 @@ parameterClass.construct = (_cls, args, kwargs) => {
     args,
     kwargs
   );
-  if (typeof name !== 'string') throw typeError(`name must be a str, not a ${typeName(name as PyValue)}`);
+  const text = stringValue(name);
+  if (text === undefined) throw typeError(`name must be a str, not a ${typeName(name as PyValue)}`);
   if (kindIndex(kind as PyValue) === -1)
     throw valueError(`value ${pyRepr(kind as PyValue)} is not a valid Parameter.kind`);
   return newParameter({
-    name,
+    name: text,
+    nameValue: name,
     kind: kindIndex(kind as PyValue) as Kind,
     default: defaultValue ?? emptyClass,
     annotation: annotation ?? emptyClass,
@@ -128,7 +133,7 @@ parameterClass.construct = (_cls, args, kwargs) => {
 defineProperty(signatureClass, 'parameters', (self) => {
   const ordered = currentRuntime().importModule('collections').dict.get('OrderedDict') as PyValue;
   const pairs = signatureOf(self).parameters.map((parameter) =>
-    currentRuntime().tuple([parameterOf(parameter).name, parameter])
+    currentRuntime().tuple([parameterOf(parameter).nameValue ?? parameterOf(parameter).name, parameter])
   );
   return callValue(ordered, [currentRuntime().listOf(pairs)]);
 });
@@ -170,7 +175,7 @@ for (const [name, partial] of [
 ] as const) {
   defineMethod(signatureClass, name, (self, args, kwargs) => {
     const bind = getAttribute(currentRuntime().importModule('inspect'), '_signature_bind');
-    const named = newDict(kwargs?.entries() ?? []);
+    const named = newDict(keywordEntries(kwargs));
     return callValue(bind, [self, newTuple(args), named], new Map([['partial', partial]]));
   });
 }
@@ -319,7 +324,7 @@ function builtinSignature(fn: PyBuiltinFunction): Signature {
 // code-gauge-allow functionNcss 33 -- Follows the cases of _signature_get_partial in CPython's inspect.py.
 function partialSignature(value: PyOpaque, format: PyValue): Signature {
   const { fn, args, keywords } = value.data as Partial;
-  const kwargs = new Map(keywords.store.ordered().map((entry) => [entry.key as string, entry.value]));
+  const kwargs = keywordMap(keywords.store.ordered().map((entry) => [entry.key, entry.value]));
   const { parameters, returnAnnotation } = signatureData(fn, format);
   const params = parameters.map(parameterOf);
   const positional = params.filter((each) => each.kind <= Kind.PositionalOrKeyword);

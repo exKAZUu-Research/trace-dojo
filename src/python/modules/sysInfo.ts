@@ -24,6 +24,7 @@ import {
   newTuple,
   None,
   pyError,
+  stringValue,
   tupleClass,
   typeError,
   typeName,
@@ -73,7 +74,7 @@ export function sysInformation(runtime: Runtime): [string, PyValue][] {
     [
       'audit',
       builtin('audit', 'expected', 1, Number.POSITIVE_INFINITY, ([event]) => {
-        if (typeof event !== 'string') throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
+        if (stringValue(event) === undefined) throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
         return None;
       }),
     ],
@@ -412,6 +413,7 @@ function setRecursionLimit(runtime: Runtime, value: PyValue): PyValue {
 }
 
 function intern(value: PyValue): PyValue {
+  if (typeof value !== 'string' && stringValue(value) !== undefined) throw typeError(`can't intern ${typeName(value)}`);
   if (typeof value !== 'string') throw typeError(`intern() argument must be str, not ${typeName(value)}`);
   return value;
 }
@@ -424,7 +426,7 @@ function excInfo(runtime: Runtime): PyValue {
 
 /** `sys.audit(event, *args)`, which calls no hooks, as no program can add one here. */
 function audit([event]: PyValue[]): PyValue {
-  if (typeof event !== 'string') throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
+  if (stringValue(event) === undefined) throw typeError(`audit() argument 1 must be str, not ${typeName(event)}`);
   return None;
 }
 

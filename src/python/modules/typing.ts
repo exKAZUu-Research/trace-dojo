@@ -1,4 +1,4 @@
-import { builtin, pythonFunction } from '../define';
+import { builtin, moduleBuiltin, pythonFunction } from '../define';
 import { importModule, registerModule, registerSharedAttributes, registerUnsupportedAttributes } from '../modules';
 import { getAttribute } from '../objects';
 import { currentRuntime } from '../runtimeContext';
@@ -41,6 +41,7 @@ import {
   noneClass,
   setClass,
   strClass,
+  stringValue,
   tupleClass,
   typeClass,
   typeError,
@@ -48,8 +49,9 @@ import {
 import { type PyClass, PyFunction, type PyModule, type PyValue } from '../values';
 import { nativeCheckCaller } from './abc';
 import { defaultdictClass, dequeClass, orderedDictClass } from './collections';
+import { NEW_TYPE_SOURCE } from './newTypeSource';
 import { isTypedDict, TYPING_CLASSES } from './typingClasses';
-import { getTypeHints, newTypeClass } from './typingTypeVars';
+import { getTypeHints } from './typingTypeVars';
 
 /** The names of typing that need features this grader does not support. */
 registerUnsupportedAttributes('typing', {
@@ -1067,6 +1069,7 @@ registerModule('typing', (runtime, namespace) => {
     namespace.set(key, value);
   }
   runModuleSource(runtime, namespace, SOURCE);
+  runModuleSource(runtime, namespace, NEW_TYPE_SOURCE);
   return new Map();
 });
 
@@ -1175,7 +1178,7 @@ function frameModuleName(depth: PyValue): PyValue {
   const index = frames.length - 1 - Number(depth);
   if (nativeCheckCaller(index)) return 'abc';
   const name = index < 0 ? undefined : frames[index]?.globals.get('__name__');
-  return typeof name === 'string' ? name : None;
+  return stringValue(name) !== undefined ? (name as PyValue) : None;
 }
 
 function natives(): [string, PyValue][] {
@@ -1187,7 +1190,7 @@ function natives(): [string, PyValue][] {
     ['TypeAliasType', typeAliasClass],
     ['Generic', genericClass],
     ['NoDefault', NoDefault],
-    ['NewType', newTypeClass],
+    ['_idfunc', moduleBuiltin('_typing')('_idfunc', 'one', 1, 1, ([value]) => value)],
     ...TYPING_CLASSES,
     ['get_origin', pythonFunction('get_origin', 'tp', ([tp]) => typingOrigin(tp))],
     ['get_args', pythonFunction('get_args', 'tp', ([tp]) => typingArgs(tp))],

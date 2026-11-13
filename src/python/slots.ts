@@ -1,6 +1,6 @@
 import { PyAttribute } from './attributeDescriptors';
 import { toArray } from './objects';
-import { intClass, pyError, tupleClass, typeError, typeName, valueError } from './types';
+import { intClass, pyError, stringValue, tupleClass, typeError, typeName, valueError } from './types';
 import { type PyClass, type PyObject, type PyValue } from './values';
 
 /** Whether a class attribute is a slot's descriptor. */
@@ -37,9 +37,10 @@ function slotMember(name: string, cls: PyClass): PyAttribute {
 export function defineClassSlots(cls: PyClass, entries: Map<string, PyValue>): string[] | undefined {
   const declared = entries.get('__slots__');
   if (declared === undefined) return undefined;
-  const names = typeof declared === 'string' ? [declared] : toArray(declared);
+  const names = stringValue(declared) !== undefined ? [declared] : toArray(declared);
   const result: string[] = [];
-  for (const name of names) {
+  for (const rawName of names) {
+    const name = stringValue(rawName) ?? rawName;
     if (typeof name !== 'string') throw typeError(`__slots__ items must be strings, not '${typeName(name)}'`);
     if (!/^[\p{XID_Start}_][\p{XID_Continue}]*$/u.test(name)) throw typeError('__slots__ must be identifiers');
     if (name === '__dict__' && (result.includes(name) || basesHaveDict(cls))) {

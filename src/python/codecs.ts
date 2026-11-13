@@ -7,7 +7,7 @@ import { callValue, getAttribute, getAttributeOrUndefined } from './objects';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
 import { fromCodePoints } from './strings';
-import { exceptionClassNamed, newException, typeError, typeName, unbox } from './types';
+import { exceptionClassNamed, newException, stringValue, typeError, typeName, unbox } from './types';
 import { characterName } from './unicodeDatabase';
 import { escapePoint, unicodeException } from './unicodeErrors';
 import { PyError, PyTuple, type PyValue } from './values';
@@ -170,12 +170,12 @@ function registeredTextCodec(info: PyValue, encoding: string, direction: 'encode
     },
     decode: (data, errors) => {
       const result = call('decode', newBytes(new Uint8Array(data)), errors);
-      if (typeof result !== 'string') {
+      if (stringValue(result) === undefined) {
         throw typeError(
           `'${encoding}' decoder returned '${typeName(result)}' instead of 'str'; use codecs.decode() to decode to arbitrary types`
         );
       }
-      return result;
+      return stringValue(result) as string;
     },
   };
 }
@@ -371,12 +371,13 @@ export class ErrorHandling {
     const [replacement, position] = this.callCustomHandler(
       this.encodeException(start, end, reason),
       'encoding error handler must return (str/bytes, int) tuple',
-      (value) => typeof value === 'string' || value instanceof PyBytes
+      (value) => stringValue(value) !== undefined || value instanceof PyBytes
     );
     if (position !== end) {
       throw currentRuntime().unsupported('エラーの終わり以外から再開する独自のエラーハンドラ（codecs.register_error）');
     }
-    return typeof replacement === 'string' ? { text: replacement } : { bytes: [...(replacement as PyBytes).data] };
+    const text = stringValue(replacement);
+    return text !== undefined ? { text } : { bytes: [...(replacement as PyBytes).data] };
   }
 
   private callCustomHandler(
@@ -460,9 +461,9 @@ export class ErrorHandling {
     const [text, resume] = this.callCustomHandler(
       this.decodeException(start, end, reason),
       'decoding error handler must return (str, int) tuple',
-      (value) => typeof value === 'string'
+      (value) => stringValue(value) !== undefined
     );
-    return { text: text as string, resume };
+    return { text: stringValue(text) as string, resume };
   }
 
   /** The UnicodeEncodeError for the characters from `start` up to `end`. */

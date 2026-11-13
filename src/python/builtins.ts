@@ -1,9 +1,10 @@
 // code-gauge-allow-file fileNcss 531 -- The builtins module keeps every builtin function together.
 import { bytearrayClass, bytesClass, memoryviewClass, PyBytes } from './bytesValues';
+import { unicodeKeywords } from './callArguments';
 import { checkShortcuts } from './checkShortcuts';
 import { buildClass } from './classes';
 import { complexAbs } from './complexNumbers';
-import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
+import { asciiObject, pyFormat, reprObject, strObject } from './conversions';
 import { aiter, anext } from './coroutines';
 import { builtin } from './define';
 import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
@@ -75,6 +76,7 @@ import {
   sliceClass,
   staticmethodClass,
   strClass,
+  stringValue,
   superClass,
   tupleClass,
   typeClass,
@@ -88,6 +90,8 @@ import { unsupportedClassAttribute } from './unsupportedAttributes';
 import {
   DONE,
   type Kwargs,
+  NamespaceMap,
+  PyBuiltinFunction,
   PyClass,
   PyComplex,
   PyDict,
@@ -298,21 +302,24 @@ for (const cls of [enumerateClass, zipClass, mapClass, filterClass, reversedClas
 // Functions ---------------------------------------------------------------------------------------------------------
 
 function print(args: PyValue[], kwargs: Kwargs): PyValue {
+  const flush = isTruthy(kwargs?.get('flush') ?? false);
   const { separator, end } = printTexts(kwargs);
   const runtime = currentRuntime();
   const file = printFile(kwargs?.get('file') ?? None);
   if (file === None) return None;
   const isStdout = file === runtime.standardStream('stdout');
   // Each piece is written on its own, as CPython writes them, so that the output limit ends a huge print early.
-  const write = (text: string): void => {
-    if (isStdout) runtime.io.stdout.write(text);
+  const write = (value: PyValue): void => {
+    const text = strObject(value);
+    if (isStdout) runtime.io.stdout.write(stringValue(text) as string);
     else callValue(getAttribute(file, 'write'), [text]);
   };
   for (const [index, value] of args.entries()) {
     if (index > 0) write(separator);
-    write(pyStr(value));
+    write(value);
   }
   write(end);
+  if (flush) callValue(getAttribute(file, 'flush'), []);
   return None;
 }
 
@@ -325,17 +332,18 @@ function printFile(file: PyValue): PyValue {
 }
 
 /** The separator and the end of a print call, after the checks CPython makes on its keywords. */
-function printTexts(kwargs: Kwargs): { separator: string; end: string } {
+function printTexts(kwargs: Kwargs): { separator: PyValue; end: PyValue } {
   for (const key of kwargs?.keys() ?? []) {
     if (!['sep', 'end', 'file', 'flush'].includes(key))
       throw typeError(`print() got an unexpected keyword argument '${key}'`);
   }
   const separator = kwargs?.get('sep') ?? None;
   const end = kwargs?.get('end') ?? None;
-  if (separator !== None && typeof separator !== 'string')
+  if (separator !== None && stringValue(separator) === undefined)
     throw typeError(`sep must be None or a string, not ${typeName(separator)}`);
-  if (end !== None && typeof end !== 'string') throw typeError(`end must be None or a string, not ${typeName(end)}`);
-  return { separator: typeof separator === 'string' ? separator : ' ', end: typeof end === 'string' ? end : '\n' };
+  if (end !== None && stringValue(end) === undefined)
+    throw typeError(`end must be None or a string, not ${typeName(end)}`);
+  return { separator: separator === None ? ' ' : separator, end: end === None ? '\n' : end };
 }
 
 function minMax(name: 'min' | 'max'): (args: PyValue[], kwargs: Kwargs) => PyValue {
@@ -616,9 +624,9 @@ function getattr(args: PyValue[], kwargs: Kwargs): PyValue {
   checkArgs({ qualified: 'getattr', min: 2, max: 3, style: 'expected' }, args, kwargs);
   const [object, nameValue, fallback] = args;
   const name = attributeName(nameValue);
-  if (fallback === undefined) return readProgramAttribute(object, name, () => getAttribute(object, name));
+  if (fallback === undefined) return readProgramAttribute(object, name, () => getAttribute(object, nameValue));
   return readProgramAttribute(object, name, () => {
-    const value = getAttributeOrUndefined(object, name);
+    const value = getAttributeOrUndefined(object, nameValue);
     if (value !== undefined) return value;
     // A name CPython's namespace has is not one getattr() falls back for.
     const feature = currentRuntime().inLibraryCode() ? undefined : missingNamespaceName(object, name);
@@ -643,7 +651,7 @@ function hasAttribute(object: PyValue, nameValue: PyValue): boolean {
   if (unsupportedClassAttribute(object, name) !== undefined) return true;
   if (missingNamespaceName(object, name) !== undefined) return true;
   checkExtraName(object, name);
-  return getAttributeOrUndefined(object, name) !== undefined;
+  return getAttributeOrUndefined(object, nameValue) !== undefined;
 }
 
 function unsupportedFunction(name: string, feature: string): PyValue {
@@ -693,19 +701,36 @@ function one(name: string, run: (args: PyValue[]) => PyValue): PyValue {
 
 export function createBuiltins(): Map<string, PyValue> {
   const builtins = builtinNamespace();
+  for (const name of [
+    '__import__',
+    'compile',
+    'eval',
+    'exec',
+    'print',
+    'min',
+    'max',
+    'pow',
+    'round',
+    'sorted',
+    'sum',
+  ]) {
+    const value = builtins.get(name);
+    if (value instanceof PyBuiltinFunction)
+      value.prepareKeywords = (kwargs) => unicodeKeywords(kwargs, name === 'sorted' ? 'sort' : name);
+  }
   registerBuiltinVariants(builtins);
   return builtins;
 }
 
 function builtinNamespace(): Map<string, PyValue> {
   const exceptions = [...exceptionClasses.entries()];
-  return new Map<string, PyValue>([
+  return new NamespaceMap([
     ['__build_class__', buildClass],
     ['__import__', nativeFunction('__import__', dunderImport)],
     ['abs', one('abs', abs)],
     ['all', one('all', ([iterable]) => !someItem(iterable, (item) => !isTruthy(item)))],
     ['any', one('any', ([iterable]) => someItem(iterable, isTruthy))],
-    ['ascii', one('ascii', ([value]) => pyAscii(value))],
+    ['ascii', one('ascii', ([value]) => asciiObject(value))],
     ['bin', one('bin', radix('0b', 2))],
     [
       'breakpoint',
@@ -722,7 +747,7 @@ function builtinNamespace(): Map<string, PyValue> {
       'delattr',
       builtin('delattr', 'expected', 2, 2, ([object, name]) => {
         const key = attributeName(name);
-        currentRuntime().finalizer.replacing(object, key, true, () => deleteAttribute(object, key));
+        currentRuntime().finalizer.replacing(object, key, true, () => deleteAttribute(object, name));
         return None;
       }),
     ],
@@ -733,9 +758,13 @@ function builtinNamespace(): Map<string, PyValue> {
     [
       'format',
       builtin('format', 'expected', 1, 2, ([value, spec]) => {
-        if (spec !== undefined && typeof spec !== 'string')
+        if (spec !== undefined && stringValue(spec) === undefined)
           throw typeError(`format() argument 2 must be str, not ${argumentTypeName(spec)}`);
-        return pyFormat(value, spec ?? '');
+        const method = lookupSpecial(value, '__format__');
+        if (method === undefined) return pyFormat(value, stringValue(spec) ?? '');
+        const result = callValue(bindValue(method, value), [spec ?? '']);
+        if (stringValue(result) === undefined) throw typeError(`__format__ must return a str, not ${typeName(result)}`);
+        return result;
       }),
     ],
     ['getattr', builtin('getattr', 'expected', 2, 3, getattr)],
@@ -762,13 +791,13 @@ function builtinNamespace(): Map<string, PyValue> {
       'print',
       builtin('print', 'expected', 0, Number.POSITIVE_INFINITY, print, { keywords: ['sep', 'end', 'file', 'flush'] }),
     ],
-    ['repr', one('repr', ([value]) => pyRepr(value))],
+    ['repr', one('repr', ([value]) => reprObject(value))],
     ['round', builtin('round', 'takes', 1, 2, round, { keywords: ['number', 'ndigits'], named: 2 })],
     [
       'setattr',
       builtin('setattr', 'expected', 3, 3, ([object, name, value]) => {
         const key = attributeName(name);
-        currentRuntime().finalizer.replacing(object, key, true, () => setAttribute(object, key, value));
+        currentRuntime().finalizer.replacing(object, key, true, () => setAttribute(object, name, value));
         return None;
       }),
     ],

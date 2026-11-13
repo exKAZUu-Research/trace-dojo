@@ -117,7 +117,7 @@ export function customGetattribute(value: PyValue): PyValue | undefined {
 }
 
 /** Reads an attribute with a program's `__getattribute__`, falling back to its `__getattr__` on AttributeError. */
-export function getWithCustomGetattribute(value: PyValue, name: string, method: PyValue): PyValue {
+export function getWithCustomGetattribute(value: PyValue, name: PyValue, method: PyValue): PyValue {
   try {
     return callValue(bindValue(method, value), [name]);
   } catch (error) {

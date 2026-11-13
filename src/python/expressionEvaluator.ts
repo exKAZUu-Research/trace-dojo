@@ -12,7 +12,7 @@ import type {
   ScopeInfo,
   Target,
 } from './ast';
-import { functionStr, KeywordArguments, mappingEntries } from './callArguments';
+import { addKeyword, functionStr, KeywordArguments, mappingEntries } from './callArguments';
 import { constantValue, foldConstants } from './constantFolding';
 import { pyAscii, pyFormat, pyRepr, pyStr } from './conversions';
 import { Frame } from './frame';
@@ -51,6 +51,7 @@ import {
   None,
   pyError,
   sliceClass,
+  stringValue,
   tupleClass,
   typeError,
   typeName,
@@ -58,6 +59,7 @@ import {
 import {
   DONE,
   type Kwargs,
+  NamespaceMap,
   PyBoundMethod,
   PyBuiltinFunction,
   PyCell,
@@ -1040,7 +1042,7 @@ export function addArgument(
       return;
     }
     case 'keyword': {
-      const kwargs = (collected.kwargs ??= new Map());
+      const kwargs = (collected.kwargs ??= new NamespaceMap());
       if (kwargs.has(argument.name)) {
         throw typeError(`${functionStr(callee)} got multiple values for keyword argument '${argument.name}'`);
       }
@@ -1052,13 +1054,12 @@ export function addArgument(
       if (lookupSpecial(value, 'keys') === undefined) {
         throw typeError(`${functionStr(callee)} argument after ** must be a mapping, not ${typeName(value)}`);
       }
-      const kwargs = (collected.kwargs ??= new Map());
+      const kwargs = (collected.kwargs ??= new NamespaceMap());
       for (const [key, item] of mappingEntries(value)) {
-        if (typeof key !== 'string') throw typeError('keywords must be strings');
-        if (kwargs.has(key))
-          throw typeError(`${functionStr(callee)} got multiple values for keyword argument '${key}'`);
-        kwargs.set(key, item);
-        frame.temporaries.push(item);
+        if (stringValue(key) === undefined) throw typeError('keywords must be strings');
+        if (!addKeyword(kwargs, key, item))
+          throw typeError(`${functionStr(callee)} got multiple values for keyword argument '${stringValue(key)}'`);
+        frame.temporaries.push(key, item);
       }
     }
   }

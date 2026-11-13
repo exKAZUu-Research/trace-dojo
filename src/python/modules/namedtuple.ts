@@ -1,3 +1,4 @@
+import { copyKeywords } from '../callArguments';
 import { bindArguments, type Signature } from '../calls';
 import { pyRepr, pyStr } from '../conversions';
 import { method, pythonFunction, pythonMethod } from '../define';
@@ -95,7 +96,8 @@ function namedtuple(args: PyValue[], kwargs: Kwargs): PyClass {
   const moduleArg = kwargs?.get('module');
   const resolvedModule =
     moduleArg === undefined || moduleArg === None ? runningRuntime()?.frame?.globals.get('__name__') : moduleArg;
-  cls.module = typeof resolvedModule === 'string' ? resolvedModule : '__main__';
+  cls.module = stringValue(resolvedModule) ?? '__main__';
+  cls.dict.set('__module__', resolvedModule ?? '__main__');
   cls.dict.set('__doc__', `${typename}(${fields.join(', ')}${fields.length === 1 ? ',' : ''})`);
   cls.dict.set('__slots__', newTuple([]));
   cls.dict.set('_fields', newTuple(fields));
@@ -243,7 +245,7 @@ function fieldsOf(tuple: PyTuple): readonly PyValue[] {
 /** Transcribes `self._make(map(kwds.pop, field_names, self))` of `_replace` and its check of the keywords left over. */
 function replaceFields(self: PyValue, kwargs: Kwargs): PyValue {
   const tuple = libraryReceiver(self, isNamedTuple, '_make', 'NamedTuple._replace');
-  const remaining = new Map(kwargs);
+  const remaining = copyKeywords(kwargs);
   // map() stops at the shorter of the fields and the tuple's iteration, which a subclass may override.
   const fields = fieldsOf(tuple);
   const items = leadingItems(tuple, fields.length).map((current, index) => {

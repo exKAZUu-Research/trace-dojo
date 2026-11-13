@@ -72,6 +72,7 @@ import {
   sliceClass,
   staticmethodClass,
   strClass,
+  stringValue,
   superClass,
   typeClass,
   typeError,
@@ -137,29 +138,29 @@ for (const name of ['__lt__', '__le__', '__gt__', '__ge__']) {
 }
 method(objectClass, '__hash__', 'none', 0, 0, (self) => identityHash(self as PyObject));
 method(objectClass, '__format__', 'one', 1, 1, (self, [spec]) => {
+  spec = stringValue(spec) ?? spec;
   if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
   if (spec !== '') throw typeError(`unsupported format string passed to ${typeName(self)}.__format__`);
   return pyStr(self);
 });
-method(objectClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
-  name = attributeName(name);
+method(objectClass, '__setattr__', 'expected', 2, 2, (self, [nameValue, value]) => {
+  const name = attributeName(nameValue);
   if (self instanceof PyClass) throw typeError(`can't apply this __setattr__ to ${typeName(self)} object`);
   const runtime = currentRuntime();
   runtime.finalizer.replacing(self, name, true, () => {
-    if (isInstanceWithAttributes(self)) setInstanceAttribute(self as PyObject, name, value);
+    if (isInstanceWithAttributes(self)) setInstanceAttribute(self as PyObject, name, value, nameValue);
     else runtime.setAttributeOf(self, name, value);
   });
   return None;
 });
 method(objectClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
-  name = attributeName(name);
   return genericGetAttribute(self, name);
 });
-method(objectClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
-  name = attributeName(name);
+method(objectClass, '__delattr__', 'one', 1, 1, (self, [nameValue]) => {
+  const name = attributeName(nameValue);
   if (self instanceof PyClass) throw typeError(`can't apply this __delattr__ to ${typeName(self)} object`);
   currentRuntime().finalizer.replacing(self, name, true, () => {
-    if (isInstanceWithAttributes(self)) deleteInstanceAttribute(self as PyObject, name);
+    if (isInstanceWithAttributes(self)) deleteInstanceAttribute(self as PyObject, name, nameValue);
     else deleteAttribute(self, name);
   });
   return None;
@@ -168,6 +169,7 @@ method(objectClass, '__sizeof__', 'none', 0, 0, (self) => sizeWithoutHeader(self
 for (const cls of [intClass, strClass]) method(cls, '__sizeof__', 'none', 0, 0, (self) => sizeWithoutHeader(self));
 for (const cls of [intClass, floatClass, complexClass]) {
   method(cls, '__format__', 'one', 1, 1, (self, [spec]) => {
+    spec = stringValue(spec) ?? spec;
     if (typeof spec !== 'string') throw typeError(`__format__() argument must be str, not ${argumentTypeName(spec)}`);
     return spec === '' ? pyStr(self) : pyFormat(self, spec);
   });
@@ -274,17 +276,14 @@ function typeAttributeValue(instance: PyValue, name: string): PyValue {
 }
 
 method(typeClass, '__getattribute__', 'one', 1, 1, (self, [name]) => {
-  name = attributeName(name);
   return genericGetAttribute(self, name);
 });
 method(typeClass, '__setattr__', 'expected', 2, 2, (self, [name, value]) => {
-  name = attributeName(name);
-  setClassAttributeWithoutHook(self as PyClass, name, value);
+  setClassAttributeWithoutHook(self as PyClass, attributeName(name), value, name);
   return None;
 });
 method(typeClass, '__delattr__', 'one', 1, 1, (self, [name]) => {
-  name = attributeName(name);
-  deleteClassAttribute(self as PyClass, name);
+  deleteClassAttribute(self as PyClass, attributeName(name), name);
   return None;
 });
 method(typeClass, '__dir__', 'none', 0, 0, (self) => currentRuntime().dir(self));

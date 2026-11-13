@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 436 -- Class creation, its MRO, and its slots follow CPython's type creation together.
+// code-gauge-allow-file fileNcss 439 -- Class creation, its MRO, and its slots follow CPython's type creation together.
 import {
   annotationClosure,
   annotationReferences,
@@ -9,13 +9,14 @@ import {
 import type { ClassDef } from './ast';
 import { defineAttribute, PyAttribute } from './attributeDescriptors';
 import { INSTANCE_ATTRIBUTE_DOCS } from './builtinDocs';
+import { copyKeywords } from './callArguments';
 import { pyRepr } from './conversions';
 import { ownDict } from './descriptors';
 import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
 import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
-import { namespaceDict, ObjectNamespace } from './namespaces';
+import { copyNamespace, namespaceDict, ObjectNamespace } from './namespaces';
 import {
   attributeError,
   bindValue,
@@ -62,6 +63,7 @@ import { UnsupportedFeatureError } from './unsupported';
 import {
   type ClassAnnotations,
   type Kwargs,
+  NamespaceMap,
   PyBuiltinFunction,
   PyCell,
   PyClass,
@@ -110,7 +112,7 @@ export function createClass(
     const { args: originalBases, kwargs } = evaluated ?? evaluator.arguments(def.bases, frame, buildClass, 2);
     frame.temporaries.push(...originalBases);
     const bases = resolveBases(originalBases, def.name);
-    const keywords = new Map(kwargs);
+    const keywords = copyKeywords(kwargs);
     const explicit = keywords.get('metaclass');
     keywords.delete('metaclass');
     const meta =
@@ -118,7 +120,7 @@ export function createClass(
         ? winningMeta(explicit ?? metaOfBases(bases), bases)
         : explicit;
     const prepared = meta === typeClass ? undefined : prepare(meta, def.name, bases, keywords);
-    const namespace = prepared === undefined ? new Map<string, PyValue>() : new MappingNamespace(prepared);
+    const namespace = prepared === undefined ? new NamespaceMap() : new MappingNamespace(prepared);
     namespace.set(
       '__module__',
       namespace.get('__name__') ??
@@ -195,7 +197,7 @@ function addClassAnnotate(
 /** Creates the class of a class statement by calling its metaclass, which `type` does without a dict. */
 function callMeta(
   meta: PyValue,
-  name: string,
+  name: PyValue,
   bases: PyValue[],
   namespace: PyValue | Map<string, PyValue>,
   keywords: Map<string, PyValue>,
@@ -243,9 +245,10 @@ export const buildClass = new PyBuiltinFunction(builtinFunctionClass, '__build_c
   if (args.length < 2) throw typeError('__build_class__: not enough arguments');
   const [func, name, ...originalBases] = args;
   if (!(func instanceof PyFunction)) throw typeError('__build_class__: func must be a function');
-  if (typeof name !== 'string') throw typeError('__build_class__: name is not a string');
-  const bases = resolveBases(originalBases, name);
-  const keywords = new Map(kwargs);
+  const text = stringValue(name);
+  if (text === undefined) throw typeError('__build_class__: name is not a string');
+  const bases = resolveBases(originalBases, text);
+  const keywords = copyKeywords(kwargs);
   const explicit = keywords.get('metaclass');
   keywords.delete('metaclass');
   const meta =
@@ -253,7 +256,7 @@ export const buildClass = new PyBuiltinFunction(builtinFunctionClass, '__build_c
       ? winningMeta(explicit ?? metaOfBases(bases), bases)
       : explicit;
   const prepared = meta === typeClass ? undefined : prepare(meta, name, bases, keywords);
-  const namespace = prepared === undefined ? new Map<string, PyValue>() : new MappingNamespace(prepared);
+  const namespace = prepared === undefined ? new NamespaceMap() : new MappingNamespace(prepared);
   if (bases !== originalBases) namespace.set('__orig_bases__', newTuple(originalBases));
   callValue(func, []);
   return callMeta(meta, name, bases, prepared ?? namespace, keywords, { classCell: new PyCell(), annotations: [] });
@@ -281,7 +284,7 @@ function winningMeta(meta: PyClass, bases: readonly PyValue[]): PyClass {
 }
 
 /** Calls the metaclass's `__prepare__`, unless it is `type`'s, returning the mapping the class body fills. */
-function prepare(meta: PyValue, name: string, bases: PyValue[], keywords: Map<string, PyValue>): PyValue | undefined {
+function prepare(meta: PyValue, name: PyValue, bases: PyValue[], keywords: Map<string, PyValue>): PyValue | undefined {
   if (meta instanceof PyClass && meta.lookup('__prepare__') === typeClass.dict.get('__prepare__')) return undefined;
   const prepareMethod = getAttributeOrUndefined(meta, '__prepare__');
   if (prepareMethod === undefined) return undefined;
@@ -359,14 +362,16 @@ export class MappingNamespace extends ObjectNamespace {
   override *[Symbol.iterator](): MapIterator<[string, PyValue]> {
     if (this.mapping instanceof PyDict) {
       for (const entry of this.mapping.store.ordered()) {
-        if (typeof entry.key === 'string') yield [entry.key, entry.value];
+        const name = stringValue(entry.key);
+        if (name !== undefined) yield [name, entry.value];
       }
       return;
     }
     for (const key of toArray(this.mapping)) {
-      if (typeof key !== 'string') continue;
-      const value = this.get(key);
-      if (value !== undefined) yield [key, value];
+      const name = stringValue(key);
+      if (name === undefined) continue;
+      const value = this.get(key as string);
+      if (value !== undefined) yield [name, value];
     }
   }
 }
@@ -392,7 +397,7 @@ export function typeNew(
   const classBases = checkBases(nameText, bases);
   const effectiveBases = classBases.length > 0 ? classBases : [objectClass];
   checkLayout(effectiveBases);
-  const entries = namespaceEntries(namespace);
+  const entries = copyNamespace(namespace);
   // As CPython does, a namespace without `__module__` takes the `__name__` of the globals calling `type()`.
   if (!entries.has('__module__'))
     entries.set('__module__', currentRuntime().frame.globals.get('__name__') ?? '__main__');
@@ -454,13 +459,6 @@ function checkBases(name: string, bases: readonly PyValue[]): PyClass[] {
   return classes;
 }
 
-function namespaceEntries(namespace: Map<string, PyValue> | PyDict): Map<string, PyValue> {
-  if (!(namespace instanceof PyDict)) return new Map(namespace);
-  const entries = new Map<string, PyValue>();
-  for (const entry of namespace.store.ordered()) if (typeof entry.key === 'string') entries.set(entry.key, entry.value);
-  return entries;
-}
-
 function qualifiedNameOf(entries: Map<string, PyValue>, name: PyValue): string {
   const qualified = entries.get('__qualname__') ?? name;
   const text = stringValue(qualified);
@@ -497,7 +495,7 @@ function fillClassDict(cls: PyClass, entries: Map<string, PyValue>): void {
   }
   // A class without a docstring gets `__doc__` after `__dict__` and `__weakref__`, as in CPython.
   if (!entries.has('__doc__')) entries.set('__doc__', None);
-  for (const [name, value] of entries) cls.dict.set(name, value);
+  copyNamespace(entries, cls.dict);
   if (cls.dict.has('__eq__') && !cls.dict.has('__hash__')) cls.dict.set('__hash__', None);
 }
 
@@ -513,7 +511,7 @@ function wrapImplicitMethod(entries: Map<string, PyValue>, name: string, kind: P
 /** Calls `__set_name__` on the attributes of a new class that define it. */
 function setNames(cls: PyClass): void {
   // The hooks may change the class's dictionary, so they run on the attributes it had when it was created.
-  for (const [name, value] of new Map(cls.dict)) {
+  for (const { key: name, value } of namespaceDict(cls.dict).store.ordered()) {
     if (typeof value !== 'object' || classOf(value).isBuiltin) continue;
     const setName = lookupSpecial(value, '__set_name__');
     if (setName !== undefined) callValue(bindValue(setName, value), [cls, name]);
@@ -657,7 +655,7 @@ export function typeNewFromArguments(meta: PyClass, args: PyValue[], kwargs: Kwa
     // A `__new__` written in Python, as ABCMeta's is, which CPython's slot calls through the attribute.
     return callValue(getAttribute(winner, '__new__'), [winner, ...args], kwargs) as PyClass;
   }
-  return typeNew(meta, nameValue, bases.items, namespace, new Map(kwargs));
+  return typeNew(meta, nameValue, bases.items, namespace, copyKeywords(kwargs));
 }
 
 /** The `__dict__` or `__weakref__` entry a class defines for its instances, which read them natively. */

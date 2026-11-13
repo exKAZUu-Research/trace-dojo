@@ -1,6 +1,5 @@
-// The ASCII case methods and predicates, hex conversions, and translation that bytes and bytearray share.
-
 import { shared } from './bytesMethods';
+// The ASCII case methods and predicates, hex conversions, and translation that bytes and bytearray share.
 import {
   bytearrayClass,
   bytesClass,
@@ -17,7 +16,7 @@ import { toIndex } from './numbers';
 import { callValue, lengthOf } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { iterStr } from './strings';
-import { None, typeError, typeName, unbox, valueError } from './types';
+import { None, stringValue, typeError, typeName, unbox, valueError } from './types';
 import { isTitleSequence } from './unicodeCase';
 import type { PyValue } from './values';
 
@@ -104,7 +103,7 @@ export function hexOf(data: Uint8Array, sepValue: PyValue | undefined, groupValu
 }
 
 function hexSeparator(sep: PyValue): string {
-  const separator = typeof sep === 'string' ? sep : sep instanceof PyBytes ? latin1Text(sep.data) : undefined;
+  const separator = stringValue(sep) ?? (sep instanceof PyBytes ? latin1Text(sep.data) : undefined);
   if (separator === undefined) lengthOf(sep);
   if (iterStr(separator ?? '').length !== 1) throw valueError('sep must be length 1.');
   if (((separator as string).codePointAt(0) as number) >= 0x80) throw valueError('sep must be ASCII.');

@@ -1,5 +1,6 @@
 import { LIMITS } from '../../interpreter/limits';
 import { bytesLikeData, newByteArray, newBytes, requireBytesLike } from '../bytesValues';
+import { copyKeywords } from '../callArguments';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import {
@@ -312,7 +313,7 @@ function newByName(args: PyValue[], kwargs: Kwargs): PyValue {
   const name = nameValue.toLowerCase();
   const data = argument(args, kwargs, 1, 'data');
   if (name === 'blake2b' || name === 'blake2s') {
-    const rest = new Map(kwargs);
+    const rest = copyKeywords(kwargs);
     rest.delete('name');
     rest.delete('data');
     return currentRuntime().instantiate(

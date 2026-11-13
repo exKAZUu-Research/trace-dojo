@@ -478,7 +478,7 @@ export function suspendingCall(callee: PyValue, args: PyValue[], kwargs: Kwargs)
     if (!blocking) return undefined;
     return blocking(
       callee.self === undefined || callee.binding === 'static' ? args : [callee.self, ...args],
-      kwargs
+      callee.prepareKeywords ? callee.prepareKeywords(kwargs) : kwargs
     ) as unknown as Suspension;
   }
   if (callee instanceof PyFunction && !callee.def.scope.isGenerator && !callee.def.scope.isAsync) {

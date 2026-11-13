@@ -23,6 +23,7 @@ import {
   NotImplemented,
   objectClass,
   propertyClass,
+  stringValue,
   typeError,
   typeName,
 } from './types';
@@ -113,9 +114,11 @@ export class PyTypeParam extends PyInstance {
   constructor(
     readonly kind: TypeParamKind,
     readonly name: string,
-    readonly parts: TypeParamParts
+    readonly parts: TypeParamParts,
+    nameValue: PyValue = name
   ) {
     super(kind === 'TypeVar' ? typeVarClass : kind === 'TypeVarTuple' ? typeVarTupleClass : paramSpecClass);
+    (this.slotValues ??= new Map()).set('__name__', nameValue);
   }
 
   /** The bound, the constraints, or the default, computing it on first read. */
@@ -153,9 +156,11 @@ export class PyTypeAlias extends PyInstance {
     readonly name: string,
     readonly typeParams: PyValue[],
     private readonly compute: Lazy,
-    readonly module: string
+    readonly module: string,
+    nameValue: PyValue = name
   ) {
     super(typeAliasClass);
+    (this.slotValues ??= new Map()).set('__name__', nameValue);
   }
 
   get aliased(): PyValue {
@@ -356,7 +361,7 @@ for (const cls of [typeVarClass, typeVarTupleClass, paramSpecClass]) {
   method(cls, '__or__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(self, other));
   method(cls, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(other, self));
   method(cls, 'has_default', 'none', 0, 0, (self) => (self as PyTypeParam).parts.default !== undefined);
-  property(cls, '__name__', (self) => (self as PyTypeParam).name);
+  property(cls, '__name__', (self) => (self as PyObject).slotValues?.get('__name__') ?? '');
   property(cls, '__module__', () => '__main__');
   property(cls, '__default__', (self) => (self as PyTypeParam).part('default', NoDefault));
 }
@@ -431,7 +436,7 @@ method(typeVarTupleClass, '__iter__', 'none', 0, 0, (self) =>
 method(noDefaultClass, '__repr__', 'none', 0, 0, () => 'typing.NoDefault');
 
 method(typeAliasClass, '__repr__', 'none', 0, 0, (self) => (self as PyTypeAlias).name);
-property(typeAliasClass, '__name__', (self) => (self as PyTypeAlias).name);
+property(typeAliasClass, '__name__', (self) => (self as PyObject).slotValues?.get('__name__') ?? '');
 property(typeAliasClass, '__value__', (self) => (self as PyTypeAlias).aliased);
 property(typeAliasClass, '__type_params__', (self) => newTuple((self as PyTypeAlias).typeParams));
 property(typeAliasClass, '__parameters__', (self) => newTuple((self as PyTypeAlias).typeParams.map(unpackedIfTuple)));
@@ -449,12 +454,13 @@ typeAliasClass.construct = (_cls, args, kwargs) => {
     args,
     kwargs
   );
-  const name = argument(args, kwargs, 0, 'name');
+  const nameValue = argument(args, kwargs, 0, 'name');
+  const name = stringValue(nameValue) ?? nameValue;
   const value = argument(args, kwargs, 1, 'value') ?? None;
   if (typeof name !== 'string') {
     throw typeError(`TypeAliasType.__new__() argument 'name' must be str, not ${typeName(name ?? None)}`);
   }
-  return new PyTypeAlias(name, toArray(kwargs?.get('type_params') ?? newTuple([])), () => value, '__main__');
+  return new PyTypeAlias(name, toArray(kwargs?.get('type_params') ?? newTuple([])), () => value, '__main__', nameValue);
 };
 
 method(aliasClass, '__mro_entries__', 'one', 1, 1, (self, [bases]) =>

@@ -48,6 +48,7 @@ import {
   newTuple,
   None,
   pyError,
+  stringValue,
   superClass,
   typeError,
   valueError,
@@ -607,11 +608,12 @@ export class Runtime {
   classItem(cls: PyClass, key: PyValue): PyValue {
     if (cls.isSubclassOf(genericClass)) return subscriptGeneric(cls, key);
     if (cls.flags.isEnum) {
-      if (typeof key !== 'string') {
+      const name = stringValue(key);
+      if (name === undefined) {
         pyHash(key);
         throw keyError(key);
       }
-      const member = membersByName(cls).get(key) ?? cls.dict.get(key);
+      const member = membersByName(cls).get(name) ?? cls.dict.get(name);
       if (member === undefined || !(member instanceof PyInstance) || member.enumValue === undefined)
         throw keyError(key);
       return member;

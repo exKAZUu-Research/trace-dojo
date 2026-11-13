@@ -6,7 +6,18 @@ import { pyHash } from '../../hashing';
 import { checkArgs } from '../../nativeArgs';
 import { toIndex } from '../../numbers';
 import { lookupSpecial } from '../../objects';
-import { builtinClass, defineMethod, newDict, newTuple, None, pyError, typeError, typeName, unbox } from '../../types';
+import {
+  builtinClass,
+  defineMethod,
+  newDict,
+  newTuple,
+  None,
+  pyError,
+  stringValue,
+  typeError,
+  typeName,
+  unbox,
+} from '../../types';
 import { type Kwargs, PyObject, type PyValue } from '../../values';
 import { clinicArgs } from './arguments';
 import { readOnlyAttribute } from './attributes';
@@ -62,7 +73,8 @@ function groupIndex(match: MatchObject, index: PyValue): number {
     if (value >= 0n && value <= BigInt(match.pattern.groups)) found = Number(value);
   } else {
     hashKey(index);
-    if (typeof index === 'string') found = match.pattern.groupindex.get(index) ?? -1;
+    const name = stringValue(index);
+    if (name !== undefined) found = match.pattern.groupindex.get(name) ?? -1;
   }
   if (found < 0) throw pyError('IndexError', 'no such group');
   return found;

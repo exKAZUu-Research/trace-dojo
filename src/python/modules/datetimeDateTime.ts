@@ -140,12 +140,12 @@ function isoformat(value: PyDateTime, args: PyValue[], kwargs: Kwargs): string {
     kwargs,
     (each) => each
   );
-  const sep = separator ?? 'T';
+  const sep = stringValue(separator) ?? separator ?? 'T';
   if (typeof sep !== 'string' || strLength(sep) !== 1) {
     const shown = typeof sep === 'string' ? `a string of length ${strLength(sep)}` : typeName(sep);
     throw typeError(`isoformat() argument 1 must be a unicode character, not ${shown}`);
   }
-  const spec = timespec ?? 'auto';
+  const spec = stringValue(timespec) ?? timespec ?? 'auto';
   if (typeof spec !== 'string') throw typeError(`isoformat() argument 2 must be str, not ${typeName(spec)}`);
   if (!TIMESPECS.includes(spec)) throw pyError('ValueError', 'Unknown timespec value');
   return `${isoDate(value)}${sep}${isoTime(value, spec)}${offsetText(utcoffsetOf(value))}`;

@@ -3,7 +3,16 @@ import { builtin } from '../define';
 import { toIndex } from '../numbers';
 import { callValue } from '../objects';
 import type { Runtime } from '../runtime';
-import { exceptionClassNamed, intClass, isInstanceOf, None, typeError, typeName, valueError } from '../types';
+import {
+  exceptionClassNamed,
+  intClass,
+  isInstanceOf,
+  None,
+  stringValue,
+  typeError,
+  typeName,
+  valueError,
+} from '../types';
 import { PyError, type PyInstance, type PyValue } from '../values';
 
 /** The `clk_id` constants of the reference CPython on macOS. */
@@ -87,6 +96,7 @@ function osError(errno: bigint, message: string): PyError {
 }
 
 function clockInfo(runtime: Runtime, name: PyValue): PyValue {
+  name = stringValue(name) ?? name;
   if (typeof name !== 'string') throw typeError(`get_clock_info() argument 1 must be str, not ${typeName(name)}`);
   const info = CLOCK_INFO[name];
   if (info === undefined) throw valueError('unknown clock');

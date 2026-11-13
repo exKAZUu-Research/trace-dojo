@@ -1,5 +1,6 @@
 import type { TracedFrame } from '../interpreter/traceRecorder';
 import type { ScopeInfo } from './ast';
+import { NamespaceMap } from './namespaceMap';
 import type { Annotation, PyCell, PyFunction, PyValue } from './values';
 
 /** The variables of a running module, class body, or function call. */
@@ -60,6 +61,9 @@ export class Frame implements TracedFrame {
       const value = this.locals.get(this.scope.locals[index] as string);
       if (value !== undefined) values.push(value);
     }
+    if (this.locals instanceof NamespaceMap && this.locals.dictionary)
+      for (const entry of this.locals.dictionary.liveEntries())
+        if (typeof entry.key === 'object') values.push(entry.key);
     values.push(this.firstArgument, ...this.innerFrames);
     return values;
   }

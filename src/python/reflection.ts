@@ -2,7 +2,7 @@ import { MappingNamespace } from './classes';
 import type { Frame } from './frame';
 import { checkNamespaceListing } from './namespaceDifferences';
 import { namespaceDict } from './namespaces';
-import { getAttributeOrUndefined, getIterator, toArray } from './objects';
+import { callValue, getAttribute, getAttributeOrUndefined, getIterator, toArray } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { newDict, newList, typeError } from './types';
 import { PyDict, type PyList, type PyValue } from './values';
@@ -49,8 +49,9 @@ export function vars(value: PyValue): PyValue {
 export function callerNames(): PyList {
   const locals = callerLocals();
   const keys = locals instanceof PyDict ? locals.store.ordered().map((entry) => entry.key) : toArray(locals);
-  const names = keys.filter((key): key is string => typeof key === 'string').toSorted();
-  return newList(names);
+  const names = newList(keys);
+  callValue(getAttribute(names, 'sort'), []);
+  return names;
 }
 
 /**

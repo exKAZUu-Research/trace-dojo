@@ -13,6 +13,7 @@ import {
   objectClass,
   propertyClass,
   pyError,
+  stringValue,
   typeClass,
   typeError,
   valueError,
@@ -167,7 +168,7 @@ function integerField(value: PyValue): bigint {
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- One case per context field and signal container, with the messages of the C module.
-// code-gauge-allow functionNcss 35 -- One case per context field and signal container, with the messages of the C module.
+// code-gauge-allow functionNcss 36 -- One case per context field and signal container, with the messages of the C module.
 function setContextField(context: PyContext, field: string, value: PyValue): void {
   const { state } = context;
   switch (field) {
@@ -178,6 +179,7 @@ function setContextField(context: PyContext, field: string, value: PyValue): voi
       return;
     }
     case 'rounding': {
+      value = stringValue(value) ?? value;
       if (typeof value !== 'string' || !(ROUNDINGS as readonly string[]).includes(value)) {
         throw typeError(
           'valid values for rounding are:\n  [ROUND_CEILING, ROUND_FLOOR, ROUND_UP, ROUND_DOWN,\n   ROUND_HALF_UP, ROUND_HALF_DOWN, ROUND_HALF_EVEN,\n   ROUND_05UP]'
@@ -282,6 +284,7 @@ method(contextClass, 'clear_traps', 'none', 0, 0, (self) => {
 method(contextClass, 'Etiny', 'none', 0, 0, (self) => BigInt(contextState(self).Emin - contextState(self).prec + 1));
 method(contextClass, 'Etop', 'none', 0, 0, (self) => BigInt(contextState(self).Emax - contextState(self).prec + 1));
 defineSlot(contextClass, '__setattr__', (self, [name, value]) => {
+  name = stringValue(name) ?? name;
   if (typeof name !== 'string' || !(CONTEXT_FIELDS as readonly string[]).includes(name)) {
     throw pyError(
       'AttributeError',

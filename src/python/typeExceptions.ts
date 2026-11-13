@@ -15,6 +15,7 @@ import {
   newList,
   newTuple,
   None,
+  stringValue,
   typeError,
 } from './types';
 import { type Kwargs, PyClass, PyInstance, PyList, PyTuple, type PyValue } from './values';
@@ -118,7 +119,8 @@ method(baseExceptionClass, '__repr__', 'none', 0, 0, (self) => {
   return args.length === 1 ? `${name}(${pyRepr(args[0])})` : `${name}${pyRepr(newTuple(args))}`;
 });
 method(baseExceptionClass, 'add_note', 'one', 1, 1, (self, [note]) => {
-  if (typeof note !== 'string') throw typeError(`add_note() argument must be str, not ${argumentTypeName(note)}`);
+  if (stringValue(note) === undefined)
+    throw typeError(`add_note() argument must be str, not ${argumentTypeName(note)}`);
   addNote(instanceOf(self), note);
   return None;
 });
@@ -135,7 +137,7 @@ export function exceptionStr(exception: PyInstance): string {
   if (!state) return '';
   if (state.exceptions) {
     const count = state.exceptions.items.length;
-    return `${state.message ?? ''} (${count} sub-exception${count === 1 ? '' : 's'})`;
+    return `${pyStr(state.message ?? '')} (${count} sub-exception${count === 1 ? '' : 's'})`;
   }
   const args = state.args.items;
   const is = (name: string): boolean => exception.cls.mro.some((cls) => cls.isBuiltin && cls.name === name);
@@ -164,7 +166,7 @@ function constructGroup(cls: PyClass, args: PyValue[], kwargs: Kwargs): PyInstan
   if (args.length !== 2)
     throw typeError(`BaseExceptionGroup.__new__() takes exactly 2 arguments (${args.length} given)`);
   const [message, sequence] = args;
-  if (typeof message !== 'string') {
+  if (stringValue(message) === undefined) {
     throw typeError(`BaseExceptionGroup.__new__() argument 1 must be str, not ${argumentTypeName(message)}`);
   }
   if (!(sequence instanceof PyList || sequence instanceof PyTuple)) {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 558 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 561 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -84,7 +84,11 @@ export function callValue(fn: PyValue, args: PyValue[], kwargs?: Kwargs): PyValu
     const runtime = currentRuntime();
     runtime.spend();
     return runtime.runNative(() =>
-      fn.run(fn.self === undefined || fn.binding === 'static' ? args : [fn.self, ...args], kwargs, fn.self)
+      fn.run(
+        fn.self === undefined || fn.binding === 'static' ? args : [fn.self, ...args],
+        fn.prepareKeywords ? fn.prepareKeywords(kwargs) : kwargs,
+        fn.self
+      )
     );
   }
   if (fn instanceof PyBoundMethod) {
@@ -187,20 +191,21 @@ export function attributeError(value: PyValue, name: string): PyError {
 }
 
 /** Reads `value.name`, raising AttributeError when it is missing. */
-export function getAttribute(value: PyValue, name: string): PyValue {
+export function getAttribute(value: PyValue, nameValue: PyValue): PyValue {
+  const name = attributeName(nameValue);
   const custom = customGetattribute(value);
-  if (custom !== undefined) return getWithCustomGetattribute(value, name, custom);
+  if (custom !== undefined) return getWithCustomGetattribute(value, nameValue, custom);
   const getattr = value instanceof PyModule ? value.dict.get('__getattr__') : lookupSpecial(value, '__getattr__');
   let found: PyValue | undefined;
   try {
-    found = findAttribute(value, name) ?? missingAttribute(value, name);
+    found = findAttribute(value, name, nameValue) ?? missingAttribute(value, name);
   } catch (error) {
     // A descriptor that raises AttributeError reports the attribute as missing, so `__getattr__` still applies.
     if (getattr === undefined || !isAttributeError(error)) throw error;
   }
   if (found !== undefined) return found;
-  if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [name]);
-  if (getattr !== undefined) return callValue(bindValue(getattr, value), [name]);
+  if (getattr !== undefined && value instanceof PyModule) return callValue(getattr, [nameValue]);
+  if (getattr !== undefined) return callValue(bindValue(getattr, value), [nameValue]);
   const feature = unsupportedClassAttribute(value, name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
   throw attributeError(value, name);
@@ -220,7 +225,7 @@ function isAttributeError(error: unknown): boolean {
 }
 
 /** Reads `value.name`, or returns undefined when it is missing. */
-export function getAttributeOrUndefined(value: PyValue, name: string): PyValue | undefined {
+export function getAttributeOrUndefined(value: PyValue, name: PyValue): PyValue | undefined {
   try {
     return getAttribute(value, name);
   } catch (error) {
@@ -230,32 +235,34 @@ export function getAttributeOrUndefined(value: PyValue, name: string): PyValue |
 }
 
 /** `object.__getattribute__`: reads an attribute without the program's `__getattribute__` and `__getattr__`. */
-export function genericGetAttribute(value: PyValue, name: string): PyValue {
-  const found = findAttribute(value, name);
+export function genericGetAttribute(value: PyValue, nameValue: PyValue): PyValue {
+  const name = attributeName(nameValue);
+  const found = findAttribute(value, name, nameValue);
   if (found === undefined) throw attributeError(value, name);
   return found;
 }
 
-// code-gauge-allow functionNcss 31 -- One step per place an attribute lookup may find a name.
-function findAttribute(value: PyValue, name: string): PyValue | undefined {
-  if (value instanceof PyClass) return classAttribute(value, name);
-  if (value instanceof PyModule) return moduleAttribute(value, name);
+// code-gauge-allow functionNcss 32 -- One step per place an attribute lookup may find a name.
+function findAttribute(value: PyValue, name: string, nameValue: PyValue = name): PyValue | undefined {
+  const key = nameValue as string;
+  if (value instanceof PyClass) return classAttribute(value, name, key);
+  if (value instanceof PyModule) return moduleAttribute(value, name, key);
   if (value instanceof PySuper) return superAttribute(value, name);
   if (isThreadLocal(value)) ensureThreadLocalDict(value);
   const cls = classOf(value);
   const special = specialAttribute(value, name);
   if (special !== undefined) return special;
-  const attribute = cls.lookup(name);
-  if (attribute === undefined) return ownDict(value)?.get(name) ?? typeDocOf(cls, name);
+  const attribute = cls.lookup(key);
+  if (attribute === undefined) return ownDict(value)?.get(key) ?? typeDocOf(cls, name);
   if (attribute instanceof PyAttribute) {
     // A descriptor standing for what this grader's objects keep natively finds nothing where they keep nothing.
     if (!attribute.stands) return attribute.get(value);
-    return ownDict(value)?.get(name) ?? attribute.fallback ?? typeDocOf(cls, name);
+    return ownDict(value)?.get(key) ?? attribute.fallback ?? typeDocOf(cls, name);
   }
   if (attribute instanceof PyDescriptor && isPropertyKind(attribute.cls)) return bindValue(attribute, value, cls);
   const getter = descriptorGetter(attribute);
   if (getter !== undefined && isDataDescriptor(attribute)) return callGetter(getter, attribute, value, cls);
-  const own = ownDict(value)?.get(name);
+  const own = ownDict(value)?.get(key);
   if (own !== undefined) return own;
   if (getter !== undefined) return callGetter(getter, attribute, value, cls);
   return bindValue(attribute, value, cls);
@@ -266,7 +273,7 @@ function typeDocOf(cls: PyClass, name: string): PyValue | undefined {
   return name === '__doc__' && cls.isBuiltin ? classAttribute(cls, name) : undefined;
 }
 
-function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
+function moduleAttribute(module: PyModule, name: string, key = name): PyValue | undefined {
   if (name === '__class__') return module.cls;
   const feature = module.unsupported.get(name);
   if (feature !== undefined) throw new UnsupportedFeatureError(feature);
@@ -278,7 +285,7 @@ function moduleAttribute(module: PyModule, name: string): PyValue | undefined {
   // A module's `__annotate__` is None until its code defines one, which reading it records, as CPython does.
   if (name === '__annotate__' && !module.dict.has(name)) module.dict.set(name, None);
   const value =
-    name === '__annotations__' ? moduleAnnotations(module) : (module.dict.get(name) ?? importedModule(module, name));
+    name === '__annotations__' ? moduleAnnotations(module) : (module.dict.get(key) ?? importedModule(module, name));
   // A special name the module lacks is one its module object lacks, which programs and pydoc look for.
   if (value === undefined && module.partialFeature !== undefined && !/^__\w+__$/.test(name))
     throw new UnsupportedFeatureError(module.partialFeature);

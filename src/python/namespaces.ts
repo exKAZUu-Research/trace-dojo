@@ -1,6 +1,8 @@
 import { AttributeStore } from './attributeStore';
-import { dictClass } from './types';
-import { PyDict, type PyValue } from './values';
+import { keyHash } from './hashing';
+import { registerNamedKeyAccess } from './namespaceMap';
+import { dictClass, stringValue } from './types';
+import { NamespaceMap, PyDict, type PyValue } from './values';
 
 /** The dicts that `globals()` and a class body's `locals()` return, one per namespace, so that each stays the same. */
 const dictsOfNamespaces = new WeakMap<Map<string, PyValue>, PyDict>();
@@ -16,6 +18,16 @@ export function namespaceDict(namespace: Map<string, PyValue>): PyDict {
     namespacesOfDicts.set(dict, namespace);
   }
   return dict;
+}
+
+export function copyNamespace(
+  source: Map<string, PyValue> | PyDict,
+  target: Map<string, PyValue> = new NamespaceMap()
+): Map<string, PyValue> {
+  const store = namespaceDict(target).store;
+  const original = source instanceof PyDict ? source.store : namespaceDict(source).store;
+  for (const entry of original.liveEntries()) store.set(entry.key, entry.value, entry.hash);
+  return target;
 }
 
 export function namespaceMapOf(dict: PyDict): Map<string, PyValue> | undefined {
@@ -67,7 +79,8 @@ class DictNamespace extends ObjectNamespace {
 
   override *entries(): MapIterator<[string, PyValue]> {
     for (const entry of this.dict.store.liveEntries()) {
-      if (typeof entry.key === 'string') yield [entry.key, entry.value];
+      const name = stringValue(entry.key);
+      if (name !== undefined) yield [name, entry.value];
     }
   }
 
@@ -87,3 +100,18 @@ class DictNamespace extends ObjectNamespace {
     for (const [key, value] of this.entries()) callback(value, key, this);
   }
 }
+
+registerNamedKeyAccess({
+  lookup: (maps, key) => {
+    const hash = keyHash(key, 'dict key');
+    for (const map of maps) {
+      const entry = namespaceDict(map).store.lookup(key, hash);
+      if (entry !== undefined) return entry.value;
+    }
+    return;
+  },
+  set: (map, key, value) => {
+    namespaceDict(map).store.set(key, value);
+  },
+  delete: (map, key) => namespaceDict(map).store.delete(key) !== undefined,
+});

@@ -1,3 +1,5 @@
+import { lookupNamedKey, NamespaceMap } from './namespaceMap';
+export { NamespaceMap } from './namespaceMap';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDef, Expression, FunctionDef } from './ast';
 import type { DictStore } from './dictStore';
@@ -60,6 +62,7 @@ const checkedRuns = new WeakSet<NativeFunction>();
 
 export class PyBuiltinFunction extends PyObject {
   readonly run: NativeFunction;
+  prepareKeywords?: (kwargs: Kwargs) => Kwargs;
   /** The `__module__` of a module's function: the name its module has in C, such as `_functools`. */
   module?: string;
 
@@ -108,7 +111,7 @@ export interface ClassLayout {
 
 export class PyClass extends PyObject {
   mro: PyClass[] = [];
-  readonly dict = new Map<string, PyValue>();
+  readonly dict: Map<string, PyValue> = new NamespaceMap();
   module = 'builtins';
   qualifiedName: string;
   /** The name that messages of builtin code show for a type of a C extension module, such as `decimal.Decimal`. */
@@ -178,6 +181,11 @@ export class PyClass extends PyObject {
 
   /** Looks up an attribute along the method resolution order. */
   lookup(name: string): PyValue | undefined {
+    if (typeof name !== 'string')
+      return lookupNamedKey(
+        this.mro.map((cls) => cls.dict),
+        name
+      );
     for (const cls of this.mro) {
       const value = cls.dict.get(name);
       if (value !== undefined) return value;
@@ -226,7 +234,7 @@ export interface ExceptionState {
   /** The file names an OSError was created with, which its `args` then leave out. */
   filename?: PyValue;
   filename2?: PyValue;
-  message?: string;
+  message?: PyValue;
   /** The fields an exception sets from its keyword arguments, such as ImportError's `path`. */
   fields?: Map<string, PyValue>;
 }
@@ -248,8 +256,7 @@ export abstract class PyNumberInstance extends PyInstance {
   abstract reprText(): string;
 }
 
-/** The attributes of an instance or opaque object, which charge the slot each new name takes. */
-export class AttributeMap extends Map<string, PyValue> {
+export class AttributeMap extends NamespaceMap {
   override set(name: string, value: PyValue): this {
     if (!this.has(name)) chargeSlots(1);
     return super.set(name, value);
@@ -410,7 +417,9 @@ export class PyCell {
 export class PyFunction extends PyObject {
   readonly dict: Map<string, PyValue> = new AttributeMap();
   name: string;
+  nameValue?: PyValue;
   qualifiedName: string;
+  qualifiedNameValue?: PyValue;
   doc: PyValue | undefined;
   module: PyValue = '__main__';
   /** The type parameters written in brackets after the name, as `__type_params__` gives them. */

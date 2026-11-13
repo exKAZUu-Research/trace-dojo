@@ -4,7 +4,7 @@ import { exceptionClassNamed, newException, newTuple, typeError } from './types'
 import { type PyClass, PyInstance, PyList, type PyValue } from './values';
 
 /** Creates an exception group of `cls` holding `exceptions`, with its message and sub-exceptions set. */
-export function makeExceptionGroup(cls: PyClass, message: string, exceptions: readonly PyValue[]): PyInstance {
+export function makeExceptionGroup(cls: PyClass, message: PyValue, exceptions: readonly PyValue[]): PyInstance {
   const group = newException(cls, [message, newTuple(exceptions)]);
   const state = group.exception;
   if (state) {

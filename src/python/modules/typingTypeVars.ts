@@ -1,8 +1,7 @@
 import { CompileError } from '../../interpreter/diagnostics';
 import type { Expression, ScopeInfo } from '../ast';
 import { MappingNamespace } from '../classes';
-import { pyRepr, pyStr } from '../conversions';
-import { builtin, method } from '../define';
+import { pyRepr } from '../conversions';
 import { Frame } from '../frame';
 import { namespaceDict, namespaceOf } from '../namespaces';
 import { callValue, getAttribute, getAttributeOrUndefined, isTruthy } from '../objects';
@@ -19,7 +18,6 @@ import {
   typeVarTupleClass,
 } from '../typeParams';
 import {
-  builtinClass,
   dictClass,
   exceptionClassNamed,
   newDict,
@@ -27,21 +25,12 @@ import {
   newTuple,
   None,
   noneClass,
+  stringValue,
   typeError,
   typeName,
   valueError,
 } from '../types';
-import {
-  type Kwargs,
-  PyClass,
-  PyDict,
-  PyError,
-  PyFunction,
-  PyInstance,
-  PyModule,
-  PyOpaque,
-  type PyValue,
-} from '../values';
+import { type Kwargs, PyClass, PyDict, PyError, PyFunction, PyModule, PyOpaque, type PyValue } from '../values';
 
 /** The keyword arguments each kind of type parameter takes, beside its name. */
 const KEYWORDS: Record<TypeParamKind, string[]> = {
@@ -52,6 +41,7 @@ const KEYWORDS: Record<TypeParamKind, string[]> = {
 
 /** `TypeVar(name, *constraints, ...)`, `ParamSpec(name, ...)`, or `TypeVarTuple(name, ...)`. */
 // code-gauge-allow functionCognitiveComplexity 20 -- Checks the arguments as each constructor of typevarobject.c does.
+// code-gauge-allow functionNcss 31 -- Validates one native constructor while retaining its original name object.
 function newTypeParamFromCall(kind: TypeParamKind, args: PyValue[], kwargs: Kwargs): PyValue {
   const label = kind.toLowerCase();
   for (const key of kwargs?.keys() ?? []) {
@@ -62,7 +52,8 @@ function newTypeParamFromCall(kind: TypeParamKind, args: PyValue[], kwargs: Kwar
   if (kind !== 'TypeVar' && args.length > 1) {
     throw typeError(`${label}() takes exactly 1 positional argument (${args.length} given)`);
   }
-  const name = args[0] ?? kwargs?.get('name');
+  const nameValue = args[0] ?? kwargs?.get('name');
+  const name = stringValue(nameValue) ?? nameValue;
   if (name === undefined) throw typeError(`${label}() missing required argument 'name' (pos 1)`);
   if (typeof name !== 'string') throw typeError(`${label}() argument 'name' must be str, not ${typeName(name)}`);
   const option = (key: string): PyValue | undefined => kwargs?.get(key);
@@ -79,7 +70,7 @@ function newTypeParamFromCall(kind: TypeParamKind, args: PyValue[], kwargs: Kwar
   if (bound !== None) parts.bound = () => bound;
   if (constraints.length > 0) parts.constraints = () => newTuple(constraints);
   if (defaultValue !== NoDefault) parts.default = () => defaultValue;
-  return new PyTypeParam(kind, name, parts);
+  return new PyTypeParam(kind, name, parts, nameValue);
 }
 
 /** A TypeVar's constraints and bound, with strings as forward references, as typing's `_type_convert` makes them. */
@@ -94,36 +85,6 @@ function constraintsAndBound(given: PyValue[], givenBound: PyValue): [PyValue[],
 typeVarClass.construct = (_cls, args, kwargs) => newTypeParamFromCall('TypeVar', args, kwargs);
 paramSpecClass.construct = (_cls, args, kwargs) => newTypeParamFromCall('ParamSpec', args, kwargs);
 typeVarTupleClass.construct = (_cls, args, kwargs) => newTypeParamFromCall('TypeVarTuple', args, kwargs);
-
-// NewType ---------------------------------------------------------------------------------------------------------------
-
-export const newTypeClass = builtinClass('NewType');
-newTypeClass.module = 'typing';
-
-/** A type made by `NewType(name, supertype)`, whose calls return their argument. */
-export class PyNewType extends PyInstance {
-  constructor(
-    readonly name: string,
-    readonly supertype: PyValue
-  ) {
-    super(newTypeClass);
-    this.dict.set('__name__', name);
-    this.dict.set('__qualname__', name);
-    this.dict.set('__module__', '__main__');
-    this.dict.set('__supertype__', supertype);
-  }
-}
-
-newTypeClass.construct = (_cls, args, kwargs) => {
-  const call = builtin('NewType', 'takes', 2, 2, ([name, supertype]) => new PyNewType(pyStr(name), supertype), {
-    keywords: ['name', 'tp'],
-  });
-  return call.run(args, kwargs);
-};
-method(newTypeClass, '__call__', 'one', 1, 1, (_self, [value]) => value);
-method(newTypeClass, '__repr__', 'none', 0, 0, (self) => `__main__.${(self as PyNewType).name}`);
-method(newTypeClass, '__or__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(self, other));
-method(newTypeClass, '__ror__', 'one', 1, 1, (self, [other]) => currentRuntime().unionType(other, self));
 
 // get_type_hints --------------------------------------------------------------------------------------------------------
 
@@ -208,8 +169,9 @@ function resolveHint(
 ): PyValue {
   if (hint === None) return noneClass;
   let value = hint;
-  if (typeof hint === 'string') {
-    const expression = forwardReference(hint);
+  const text = stringValue(hint);
+  if (text !== undefined) {
+    const expression = forwardReference(text);
     const frame = new Frame('module', locals, new Map(), globals, undefined, true, expression.scope);
     value = currentRuntime().evaluator.evaluate(expression.expression, frame);
   }

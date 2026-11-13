@@ -1,3 +1,4 @@
+import { copyKeywords, keywordEntries, keywordMap, setKeyword } from '../callArguments';
 import { addressOf, pyRepr } from '../conversions';
 import { builtin, method } from '../define';
 import { builtinClassesWithDict, builtinDescriptorClasses, ownDict } from '../descriptors';
@@ -61,11 +62,11 @@ partialClass.construct = (_cls, args, kwargs) => {
   if (fn instanceof PyOpaque && fn.cls === partialClass) {
     // A partial of a partial flattens into one, as CPython's partial_new does.
     const inner = fn.data as Partial;
-    const merged = new Map(keywordsOf(inner));
-    for (const [key, value] of kwargs ?? []) merged.set(key, value);
+    const merged = copyKeywords(keywordsOf(inner));
+    for (const [key, value] of keywordEntries(kwargs)) setKeyword(merged, key, value);
     return newPartial(inner.fn, fillPlaceholders(inner.args.items, rest, true), merged);
   }
-  return newPartial(fn, rest, new Map(kwargs));
+  return newPartial(fn, rest, copyKeywords(kwargs));
 };
 
 function newPartial(fn: PyValue, args: PyValue[], kwargs: Map<string, PyValue>): PyOpaque {
@@ -77,7 +78,7 @@ function newPartial(fn: PyValue, args: PyValue[], kwargs: Map<string, PyValue>):
 }
 
 function keywordsOf(partial: Partial): Map<string, PyValue> {
-  return new Map(partial.keywords.store.ordered().map((entry) => [entry.key as string, entry.value]));
+  return keywordMap(partial.keywords.store.ordered().map((entry) => [entry.key, entry.value]));
 }
 
 /** Fills a partial's placeholders with call arguments in order, as CPython's partial does. */
@@ -108,7 +109,7 @@ defineMethod(
   (self, args, kwargs) => {
     const partial = partialOf(self);
     const merged = keywordsOf(partial);
-    for (const [key, value] of kwargs ?? []) merged.set(key, value);
+    for (const [key, value] of keywordEntries(kwargs)) setKeyword(merged, key, value);
     return callValue(partial.fn, fillPlaceholders(partial.args.items, args), merged.size > 0 ? merged : undefined);
   },
   { receiver: 'wrapper' }

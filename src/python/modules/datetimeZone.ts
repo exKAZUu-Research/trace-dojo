@@ -2,7 +2,7 @@
 import { pyRepr } from '../conversions';
 import { method } from '../define';
 import { callValue, getAttribute } from '../objects';
-import { isInstanceOf, None, NotImplemented, pyError, strClass, typeError, typeName } from '../types';
+import { isInstanceOf, None, NotImplemented, pyError, strClass, stringValue, typeError, typeName } from '../types';
 import { type Kwargs, PyInstance, type PyValue } from '../values';
 import { datetimeClass, defineConstants, valueHash } from './datetimeClasses';
 import { hashOfMicroseconds, isTimedelta, newTimedelta, type PyTimedelta, timedeltaRepr } from './datetimeDelta';
@@ -15,9 +15,13 @@ tzinfoClass.construct = (cls) => new PyInstance(cls);
 export class PyTimezone extends PyInstance {
   constructor(
     readonly offset: PyTimedelta,
-    readonly name: string | undefined
+    readonly name: PyValue | undefined
   ) {
     super(timezoneClass);
+    this.slotValues = new Map([
+      ['offset', offset],
+      ['name', name ?? None],
+    ]);
   }
 }
 
@@ -29,7 +33,7 @@ export function isTzinfo(value: PyValue): boolean {
 }
 
 /** `timezone(offset)`, the UTC singleton for a zero offset without a name. */
-export function newTimezone(offset: PyTimedelta, name?: string): PyTimezone {
+export function newTimezone(offset: PyTimedelta, name?: PyValue): PyTimezone {
   checkOffsetRange(offset);
   if (name === undefined && offset.totalMicroseconds === 0n) return UTC;
   return new PyTimezone(offset, name);
@@ -42,7 +46,7 @@ timezoneClass.construct = (_cls, args, kwargs) => {
   if (!isTimedelta(offset)) {
     throw typeError(`timezone() argument 1 must be datetime.timedelta, not ${typeName(offset)}`);
   }
-  if (name !== undefined && typeof name !== 'string') {
+  if (name !== undefined && stringValue(name) === undefined) {
     throw typeError(`timezone() argument 2 must be str, not ${typeName(name)}`);
   }
   checkOffsetRange(offset);
@@ -99,7 +103,7 @@ function zone(self: PyValue): PyTimezone {
   return self as PyTimezone;
 }
 
-function timezoneName(self: PyTimezone): string {
+function timezoneName(self: PyTimezone): PyValue {
   if (self.name !== undefined) return self.name;
   if (self === UTC || self.offset.totalMicroseconds === 0n) return 'UTC';
   return offsetName(self.offset);
