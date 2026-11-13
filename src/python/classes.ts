@@ -14,7 +14,7 @@ import { createEnumMembers } from './enums';
 import type { Evaluator } from './evaluator';
 import type { CallArguments } from './expressionEvaluator';
 import { Frame } from './frame';
-import { namespaceDict } from './namespaces';
+import { namespaceDict, ObjectNamespace } from './namespaces';
 import {
   bindValue,
   callValue,
@@ -310,9 +310,9 @@ function runClassBody(
 }
 
 /** A class body's namespace that a metaclass's `__prepare__` returned, read and written through its item methods. */
-export class MappingNamespace extends Map<string, PyValue> {
+export class MappingNamespace extends ObjectNamespace {
   constructor(readonly mapping: PyValue) {
-    super();
+    super(mapping);
   }
 
   override get size(): number {

@@ -14,6 +14,7 @@ import {
   setRegisteredCodecLookup,
 } from '../codecs';
 import { builtin } from '../define';
+import { registerRootSource } from '../hostRoots';
 import { importModule, registerModule, setNoModule } from '../modules';
 import { argument } from '../nativeArgs';
 import { toIndex } from '../numbers';
@@ -76,6 +77,11 @@ interface Registry {
 }
 
 const registries = new WeakMap<Runtime, Registry>();
+
+registerRootSource((runtime) => {
+  const registry = registries.get(runtime);
+  return registry ? [...registry.searches, ...registry.cache.values()] : [];
+});
 
 registerModule('_codecs', () => {
   const entries = new Map<string, PyValue>([

@@ -16,6 +16,7 @@ import { Frame } from './frame';
 import { findReachableObjects, findReachableTurtles } from './garbageCollection';
 import { resumeGenerator } from './generators';
 import { pyHash } from './hashing';
+import { hostRoots } from './hostRoots';
 import { deepNestingError, isHostStackOverflow } from './hostStack';
 import { instantiate } from './instances';
 import { keyError } from './items';
@@ -29,7 +30,7 @@ import type { ProgramSource } from './programSource';
 import { withoutCharge } from './runtimeContext';
 import { setDifference, setIntersection, setSymmetricDifference, setUnion } from './setOperations';
 import { createStream } from './streams';
-import { DEFAULT_SWITCH_INTERVAL, type Scheduler, threadRoots } from './threads';
+import { DEFAULT_SWITCH_INTERVAL, type Scheduler } from './threads';
 import { noteUnwinding, setFrameGenerator } from './tracebacks';
 import { newGenericAlias, unionOf } from './typeHints';
 import { boundSuper } from './typeObject';
@@ -679,7 +680,7 @@ export class Runtime {
       for (const value of frame.temporaries) roots.push(value);
       if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
     }
-    roots.push(...threadRoots(this));
+    roots.push(...hostRoots(this));
     roots.push(...this.finalizer.finalizing());
     return roots;
   }

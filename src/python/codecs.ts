@@ -1,6 +1,7 @@
 import { bytesLikeData, newBytes, PyBytes } from './bytesValues';
 import { pyRepr } from './conversions';
 import { CODEC_ALIASES, NON_TEXT_CODECS } from './data/codecNames';
+import { registerRootSource } from './hostRoots';
 import { toIndex } from './numbers';
 import { callValue, getAttribute, getAttributeOrUndefined } from './objects';
 import type { Runtime } from './runtime';
@@ -188,6 +189,8 @@ export function callCodec(fn: PyValue, args: PyValue[], direction: 'encode' | 'd
 
 /** The error handlers each run registered with `codecs.register_error`, by name. */
 const customErrorHandlers = new WeakMap<Runtime, Map<string, PyValue>>();
+
+registerRootSource((runtime) => customErrorHandlers.get(runtime)?.values() ?? []);
 
 export function registerErrorHandler(runtime: Runtime, name: string, handler: PyValue): void {
   let handlers = customErrorHandlers.get(runtime);

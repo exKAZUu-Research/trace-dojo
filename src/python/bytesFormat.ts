@@ -1,5 +1,6 @@
 import { bytesLikeData, latin1Bytes, latin1Text, newBytes, PyBytes } from './bytesValues';
 import { pyAscii } from './conversions';
+import { toIndex } from './numbers';
 import { bindValue, callValue, lookupSpecial } from './objects';
 import { renderPercent, TemplateReader } from './percentFormat';
 import { repeatText } from './stringBuilder';
@@ -64,13 +65,13 @@ function bytesOf(value: PyValue): Uint8Array {
 }
 
 function byteOf(value: PyValue): string {
-  if (typeof value === 'bigint' || typeof value === 'boolean') {
-    const code = BigInt(value);
-    if (code < 0n || code > 255n) throw pyError('OverflowError', '%c arg not in range(256)');
-    return String.fromCodePoint(Number(code));
+  if (value instanceof PyBytes) {
+    if (value.length === 1) return String.fromCodePoint(value.data[0]);
+    throw typeError(
+      `%c requires an integer in range(256) or a single byte, not a ${value.isMutable ? 'bytearray' : 'bytes'} object of length ${value.length}`
+    );
   }
-  const data = bytesLikeData(value);
-  if (data?.length === 1) return String.fromCodePoint(data[0]);
-  const described = data === undefined ? typeName(value) : `a bytes object of length ${data.length}`;
-  throw typeError(`%c requires an integer in range(256) or a single byte, not ${described}`);
+  const code = toIndex(value, () => `%c requires an integer in range(256) or a single byte, not ${typeName(value)}`);
+  if (code < 0n || code > 255n) throw pyError('OverflowError', '%c arg not in range(256)');
+  return String.fromCodePoint(Number(code));
 }

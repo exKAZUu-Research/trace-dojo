@@ -7,6 +7,7 @@
 // earliest timeout; when none is pending either, it is a deadlock.
 import { sleepFor, virtualNanoseconds } from './clock';
 import type { Frame } from './frame';
+import { registerRootSource } from './hostRoots';
 import { type ArgStyle, checkArgs } from './nativeArgs';
 import type { Runtime } from './runtime';
 import { currentRuntime } from './runtimeContext';
@@ -94,8 +95,10 @@ export function registerThreadLocalMap(
   if (key !== runtime) extrasOf(key).localMaps.push(new WeakRef(dicts));
 }
 
+registerRootSource(threadRoots);
+
 /** The values the active and suspended threads keep reachable outside the active frame stack. */
-export function* threadRoots(runtime: Runtime): Iterable<unknown> {
+function* threadRoots(runtime: Runtime): Iterable<unknown> {
   yield* extrasRoots(runtime);
   if (runtime.threads) {
     for (const thread of runtime.threads.alive) {

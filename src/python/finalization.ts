@@ -7,10 +7,10 @@ import {
   referencesOf,
 } from './garbageCollection';
 import { closeGenerator } from './generators';
+import { hostRoots } from './hostRoots';
 import { LocalReferences } from './localReferences';
 import { bindValue, callValue } from './objects';
 import type { Runtime } from './runtime';
-import { threadRoots } from './threads';
 import { asyncGeneratorClass, None } from './types';
 import { reportUnraisable } from './unraisable';
 import { UnsupportedFeatureError } from './unsupported';
@@ -223,10 +223,13 @@ export class GeneratorFinalizer {
   /**
    * Finalizes every tracked object, as the end of the program does. CPython's shutdown first collects the garbage that
    * cycles kept, then the module's namespace, finalizing its objects in the order its collector lists them: a
-   * breadth-first walk from the module's variables in order.
+   * breadth-first walk from the module's variables in order. What native state still holds (a registered codec or
+   * error handler, a daemon thread) CPython frees only after `sys.stdout` is gone, where nothing shows.
    */
   closeAll(globals: Map<string, PyValue>): void {
     this.runtime.cyclicGarbageDeadline = undefined;
+    const heldByHost = findReachableObjects([...hostRoots(this.runtime)]);
+    for (const object of heldByHost) this.pending.delete(object as PyObject);
     for (const object of this.pending) {
       if (object instanceof PyGenerator && hasProgramFinalizer(object)) {
         throw new UnsupportedFeatureError(
@@ -261,13 +264,14 @@ export class GeneratorFinalizer {
   }
 
   /**
-   * Whether another module holds a function of the program, which keeps its namespace alive in CPython past the point
-   * where the shutdown clears it, until after `sys.stdout` is gone, so its objects' `__del__` run where nothing shows.
+   * Whether another module or native state holds a function of the program, which keeps its namespace alive in CPython
+   * past the point where the shutdown clears it, until after `sys.stdout` is gone, so its objects' `__del__` run where
+   * nothing shows.
    */
   private mainHeldElsewhere(globals: Map<string, PyValue>): boolean {
-    const roots = [...this.runtime.modules.values()].filter((module) => module.dict !== globals);
+    const modules = [...this.runtime.modules.values()].filter((module) => module.dict !== globals);
     const reached = findReachableInOrder(
-      roots.flatMap((module) => [...module.dict.values()]),
+      [...modules.flatMap((module) => [...module.dict.values()]), ...hostRoots(this.runtime)],
       (object) => object instanceof PyModule
     );
     return reached.some((object) => object instanceof PyFunction && object.globals === globals);
@@ -426,7 +430,7 @@ export class GeneratorFinalizer {
       for (const value of frame.temporaries) roots.push(value);
       if (frame.globals !== frame.locals) for (const value of frame.globals.values()) roots.push(value);
     }
-    roots.push(...threadRoots(runtime));
+    roots.push(...hostRoots(runtime));
     return roots;
   }
 }

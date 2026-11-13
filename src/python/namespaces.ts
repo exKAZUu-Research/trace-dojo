@@ -23,10 +23,17 @@ export function namespaceOf(dict: PyDict): Map<string, PyValue> {
   return namespacesOfDicts.get(dict) ?? new DictNamespace(dict);
 }
 
-/** The variables of a frame kept in a dict the program passed to `exec` or `eval`. */
-class DictNamespace extends Map<string, PyValue> {
-  constructor(readonly dict: PyDict) {
+/** Variables kept in a Python object instead of in the map itself, which a function with them as globals keeps. */
+export class ObjectNamespace extends Map<string, PyValue> {
+  constructor(readonly holder: PyValue) {
     super();
+  }
+}
+
+/** The variables of a frame kept in a dict the program passed to `exec` or `eval`. */
+class DictNamespace extends ObjectNamespace {
+  constructor(readonly dict: PyDict) {
+    super(dict);
   }
 
   override get size(): number {

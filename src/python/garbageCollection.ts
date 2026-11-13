@@ -4,6 +4,7 @@ import { pushAll } from './arrays';
 import { PyMemoryView } from './bytesValues';
 import { peekFieldsOf } from './cTypes';
 import { DictStore } from './dictStore';
+import { ObjectNamespace } from './namespaces';
 import {
   PyBoundMethod,
   PyBuiltinFunction,
@@ -273,6 +274,8 @@ function pushOpaqueReferences(pending: unknown[], object: PyOpaque): void {
 }
 
 function pushFunctionReferences(pending: unknown[], fn: PyFunction): number {
+  // A module's globals are reachable from the module itself.
+  if (fn.globals instanceof ObjectNamespace) pending.push(fn.globals.holder);
   pending.push(fn.builtins);
   pushAll(pending, fn.closure.values());
   pushAll(pending, fn.defaults);

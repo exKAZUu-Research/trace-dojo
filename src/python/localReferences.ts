@@ -1,9 +1,9 @@
 import { PyAnnotateFunction } from './annotations';
 import type { Frame } from './frame';
 import { referencesOf } from './garbageCollection';
+import { hostRoots } from './hostRoots';
 import { plainInitOf } from './instances';
 import type { Runtime } from './runtime';
-import { threadRoots } from './threads';
 import { dictClass, listClass, setClass, tupleClass } from './types';
 import {
   PyBoundMethod,
@@ -344,7 +344,7 @@ export class LocalReferences {
       for (const cell of frame.cells.values()) note(cell.value);
       for (const value of frame.temporaries) note(value);
     }
-    for (const value of threadRoots(this.runtime)) note(value);
+    for (const value of hostRoots(this.runtime)) note(value);
     return direct;
   }
 }

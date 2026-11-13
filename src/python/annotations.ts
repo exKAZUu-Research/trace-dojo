@@ -1,5 +1,6 @@
 import type { FunctionDef, NameRef, Statement } from './ast';
 import { Frame } from './frame';
+import { ObjectNamespace } from './namespaces';
 import { callValue, getItem, isCallable, isTruthy, setItem } from './objects';
 import { compareOp } from './operators';
 import { parseDynamicCode } from './parse';
@@ -194,9 +195,9 @@ function fakeFrame(frame: Frame, fake: FakeNames): Frame {
 }
 
 /** Globals read through a mapping, whose `__missing__` gives annotationlib's stand-ins for undefined names. */
-class FakeGlobals extends Map<string, PyValue> {
+class FakeGlobals extends ObjectNamespace {
   constructor(private readonly mapping: PyValue) {
-    super();
+    super(mapping);
   }
 
   override get(name: string): PyValue | undefined {

@@ -215,3 +215,35 @@ if R.count != 1899:
     raise AssertionError(R.count)
 `);
 });
+
+test('atexit and codec registrations and the globals of exec functions keep objects alive as CPython does', () => {
+  const program = `import atexit, codecs, gc, weakref
+class A:
+    def __init__(self, n): self.n = n
+    def __del__(self): print('del', self.n)
+    def close(self, *args, **kwargs): print('close', self.n)
+atexit.register(A(1).close, A(2), key=A(3))
+atexit.register(A(4).close, A(5))
+a = A(6); atexit.register(a.close); atexit.unregister(a.close); del a
+def make_handler():
+    held = A(7)
+    return lambda error: (str(held.n), error.end), weakref.ref(held)
+handler, held = make_handler()
+codecs.register_error('lifetime', handler); del handler
+gc.collect()
+print(held() is not None, 'é'.encode('ascii', 'lifetime'))
+namespace = {'A': A}
+exec('kept = A(8)\\ndef get(): return kept', namespace)
+get = namespace['get']; del namespace
+gc.collect()
+print(get().n)
+del get
+gc.collect()
+print('end')
+`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: "del 6\nTrue b'7'\n8\ndel 8\nend\nclose 4\nclose 1\ndel 3\ndel 2\ndel 1\ndel 5\ndel 4\n",
+  });
+});
