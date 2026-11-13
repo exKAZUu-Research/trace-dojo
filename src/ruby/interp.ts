@@ -1524,29 +1524,36 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   } else {
     ({ args, keywords } = implicitSuperArgs(home));
   }
-  let block: RProc | undefined = home.extra.block;
-  if (e.block) block = makeBlock(e.block, frame);
-  else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
-  const superMethod = classOf(home.self).findSuperMethod(method.name, method.owner);
-  if (!superMethod) {
-    throw noMethodError(
-      `super: no superclass method '${method.name}' for ${receiverDescription(home.self)}`,
-      home.self,
-      method.name
-    );
-  }
-  const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
-  rt().currentRow = e.row;
-  if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used);
-  const proc = block as RProc;
-  proc.callSiteActive = true;
+  const mark = frame.temporaries.length;
+  frame.temporaries.push(...args);
+  if (keywords) frame.temporaries.push(keywords);
   try {
-    return yield* invoke(superMethod, home.self, args, keywords, proc, used);
-  } catch (error) {
-    if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
-    throw error;
+    let block: RProc | undefined = home.extra.block;
+    if (e.block) block = makeBlock(e.block, frame);
+    else if (e.blockArg) block = yield* toBlock(yield* ev(e.blockArg, frame));
+    const superMethod = classOf(home.self).findSuperMethod(method.name, method.owner);
+    if (!superMethod) {
+      throw noMethodError(
+        `super: no superclass method '${method.name}' for ${receiverDescription(home.self)}`,
+        home.self,
+        method.name
+      );
+    }
+    const used = e.used === 1 || (e.used === 2 && frame.resultUsed);
+    rt().currentRow = e.row;
+    if (!e.block) return yield* invoke(superMethod, home.self, args, keywords, block, used);
+    const proc = block as RProc;
+    proc.callSiteActive = true;
+    try {
+      return yield* invoke(superMethod, home.self, args, keywords, proc, used);
+    } catch (error) {
+      if (error instanceof BreakSignal && error.tag === proc.breakTag) return error.value;
+      throw error;
+    } finally {
+      proc.callSiteActive = false;
+    }
   } finally {
-    proc.callSiteActive = false;
+    frame.temporaries.length = mark;
   }
 }
 
@@ -1580,12 +1587,22 @@ function implicitSuperArgs(frame: Frame): { args: Value[]; keywords: RHash | und
     }
     if (params.keywordRest !== undefined) {
       const rest = params.keywordRest === '' ? frame.extra.keywords : scope.lookup(params.keywordRest, 0);
-      if (rest instanceof RHash)
-        for (const entry of rest.map.values()) runToEnd(hashSet(keywords, entry.key, entry.value));
+      if (rest instanceof RHash) {
+        const named = params.keywordRest === '' ? new Set(params.keywords.map((keyword) => keyword.name)) : undefined;
+        addSuperKeywordRest(keywords, rest, named);
+      }
     }
     if (keywords.map.size === 0) keywords = undefined;
   }
   return { args, keywords };
+}
+
+function addSuperKeywordRest(target: RHash, rest: RHash, named: Set<string> | undefined): void {
+  for (const entry of rest.map.values()) {
+    const key = entry.key;
+    if (key instanceof RSymbol && named?.has(key.name)) continue;
+    runToEnd(hashSet(target, key, entry.value));
+  }
 }
 
 // Blocks --------------------------------------------------------------------------------------------------------------
@@ -1652,6 +1669,8 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       home: outer.home,
       outer,
       proc,
+      args,
+      keywords: options.keywords,
       blockDef: def,
       isLambda: proc.isLambda,
       block: options.block ?? outer.home.extra.block,

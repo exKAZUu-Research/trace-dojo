@@ -416,6 +416,20 @@ test('rescue selection keeps the active exception and its Turtle reachable', () 
   expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
 });
 
+test('super arguments stay reachable while evaluating a later block argument', () => {
+  const program =
+    'class A;def f(x);$v=x;end;end;class B<A;def b;q=1;proc{};end;def f;super(Turtle.new,&b);end;end;B.new.f';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
+test('block arguments stay reachable while evaluating parameter defaults', () => {
+  for (const program of [
+    'def f;yield Turtle.new;end;f{|a=(q=1),b|$v=b}',
+    'def f;yield k:Turtle.new;end;f{|a=(q=1),k:|$v=k}',
+  ])
+    expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('converted Hash sources keep later Turtle values alive during insertion', () => {
   for (const operation of ['h={**A.new}', 'h={}.merge(A.new)']) {
     const program = `class K; def hash; x=1; 0; end; end; class A; def to_hash; {K.new=>1, 2=>Turtle.new}; end; end; ${operation}`;

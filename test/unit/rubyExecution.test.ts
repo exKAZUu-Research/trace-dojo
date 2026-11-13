@@ -2149,6 +2149,19 @@ test('implicit block conversion invokes private to_proc', () => {
   });
 });
 
+test('implicit super forwards changed named keywords with anonymous rest', () => {
+  expect(
+    run('class A; def f(a:); p a; end; end; class B<A; def f(a:,**); a=9; super; end; end; B.new.f(a:1)')
+  ).toMatchObject({
+    stdout: '9\n',
+  });
+  expect(
+    run('class A; def f(a:,b:); p a,b; end; end; class B<A; def f(a:,**); a=9; super; end; end; B.new.f(a:1,b:2)')
+  ).toMatchObject({
+    stdout: '9\n2\n',
+  });
+});
+
 test('non-mutating module hooks can run on frozen classes', () => {
   expect(
     run('module M; def self.append_features(x); puts :append; end; end; class C; end; C.freeze; C.include(M)')

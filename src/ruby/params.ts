@@ -50,23 +50,30 @@ export function* bindParams(
     }
     throw argumentError(`${message})`);
   }
-  let index = 0;
-  for (const param of params.required) yield* bindParam(param, args[index++] ?? NIL, frame);
-  const available = Math.max(0, args.length - required);
-  const optionalCount = Math.min(optional, available);
-  for (const [position, param] of params.optional.entries()) {
-    if (position < optionalCount) scope.vars.set(param.name, args[index++]);
-    else scope.vars.set(param.name, yield* ev(param.value, frame));
+  const mark = frame.temporaries.length;
+  frame.temporaries.push(...args);
+  if (keywords) frame.temporaries.push(keywords);
+  try {
+    let index = 0;
+    for (const param of params.required) yield* bindParam(param, args[index++] ?? NIL, frame);
+    const available = Math.max(0, args.length - required);
+    const optionalCount = Math.min(optional, available);
+    for (const [position, param] of params.optional.entries()) {
+      if (position < optionalCount) scope.vars.set(param.name, args[index++]);
+      else scope.vars.set(param.name, yield* ev(param.value, frame));
+    }
+    if (params.rest !== undefined) {
+      const restCount = Math.max(0, args.length - index - params.post.length);
+      const rest = arr(args.slice(index, index + restCount));
+      if (params.rest !== '') scope.vars.set(params.rest, rest);
+      index += restCount;
+    }
+    for (const param of params.post) yield* bindParam(param, args[index++] ?? NIL, frame);
+    if (takesKeywords) yield* bindKeywords(params, frame, keywords);
+    if (params.block !== undefined) scope.vars.set(params.block, frame.extra.block ?? NIL);
+  } finally {
+    frame.temporaries.length = mark;
   }
-  if (params.rest !== undefined) {
-    const restCount = Math.max(0, args.length - index - params.post.length);
-    const rest = arr(args.slice(index, index + restCount));
-    if (params.rest !== '') scope.vars.set(params.rest, rest);
-    index += restCount;
-  }
-  for (const param of params.post) yield* bindParam(param, args[index++] ?? NIL, frame);
-  if (takesKeywords) yield* bindKeywords(params, frame, keywords);
-  if (params.block !== undefined) scope.vars.set(params.block, frame.extra.block ?? NIL);
 }
 
 function* bindParam(param: ParamTarget, value: Value, frame: Frame): Gen<void> {
