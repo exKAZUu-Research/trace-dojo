@@ -135,6 +135,8 @@ export function bootstrap(runtime: Runtime): void {
   const enumerator = defineClass('Enumerator', object);
   enumerator.includes.push(c.Enumerable);
   defineClass('Yielder', object, enumerator);
+  defineClass('Generator', object, enumerator);
+  defineClass('Lazy', enumerator, enumerator);
   defineClass('IO', object);
   defineClass('Method', object);
   defineClass('UnboundMethod', object);

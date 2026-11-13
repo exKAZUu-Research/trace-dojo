@@ -779,9 +779,6 @@ def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
 def('Enumerable', 'compact', 0, function* (self) {
   return arr((yield* toArray(self)).filter((value) => value !== NIL));
 });
-def('Enumerable', 'lazy', 0, () => {
-  throw new UnsupportedFeatureError('遅延評価（lazy）');
-});
 
 def('Enumerable', 'to_set', 0, function* (self) {
   return yield* callMethod(rt().c.Set, 'new', [self]);
