@@ -1,9 +1,13 @@
 # Prints src/python/data/unicodeData.ts: the Unicode character database of CPython's unicodedata module, read back from
-# the module itself and compressed. Run with CPython 3.14: python generateUnicodeData.py > src/python/data/unicodeData.ts
+# the module itself and compressed:
+#   mise exec -- python scripts/pythonData/generateUnicodeData.py > src/python/data/unicodeData.ts
 import re
 import sys
 import unicodedata as ucd
 from collections import Counter
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 LAST = 0x10FFFF
 LINE = 116

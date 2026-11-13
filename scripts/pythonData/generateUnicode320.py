@@ -1,7 +1,11 @@
 # Prints src/python/data/unicode320.ts: how CPython's unicodedata.ucd_3_2_0, the Unicode 3.2.0 database that IDNA uses,
-# differs from the current one, read back from the module. Run with CPython 3.14:
-# python generateUnicode320.py > src/python/data/unicode320.ts
+# differs from the current one, read back from the module:
+#   mise exec -- python scripts/pythonData/generateUnicode320.py > src/python/data/unicode320.ts
+import sys
 import unicodedata as current
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 old = current.ucd_3_2_0
 LAST = 0x10FFFF

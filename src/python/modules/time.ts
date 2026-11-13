@@ -1,4 +1,10 @@
-import { LOCAL_ZONE, monotonicNanoseconds, processNanoseconds, wallClockNanoseconds } from '../clock';
+import {
+  LOCAL_ZONE,
+  monotonicNanoseconds,
+  nanosecondsToSeconds,
+  processNanoseconds,
+  wallClockNanoseconds,
+} from '../clock';
 import { builtin } from '../define';
 import { registerModule } from '../modules';
 import { toIndex } from '../numbers';
@@ -13,13 +19,9 @@ import { PyStructTime, structTimeClass } from './structTime';
 import { timeClocks } from './timeClocks';
 import { strftime, type TimeFields } from './timeFormat';
 
-const seconds = (nanoseconds: bigint): number =>
-  nanoseconds % 1_000_000_000n === 0n ? Number(nanoseconds / 1_000_000_000n) : Number(nanoseconds) / 1e9;
-
-/** A clock function in seconds and its `_ns` variant in nanoseconds. */
 function clock(name: string, read: () => bigint): [string, PyValue][] {
   return [
-    [name, builtin(name, 'none', 0, 0, () => seconds(read()))],
+    [name, builtin(name, 'none', 0, 0, () => nanosecondsToSeconds(read()))],
     [`${name}_ns`, builtin(`${name}_ns`, 'none', 0, 0, () => read())],
   ];
 }
@@ -29,8 +31,8 @@ registerModule('time', (runtime) => {
     ...clock('time', () => wallClockNanoseconds(runtime)),
     ...clock('perf_counter', () => monotonicNanoseconds(runtime)),
     ...clock('monotonic', () => monotonicNanoseconds(runtime)),
-    ...clock('process_time', processNanoseconds),
-    ...clock('thread_time', processNanoseconds),
+    ...clock('process_time', () => processNanoseconds(runtime)),
+    ...clock('thread_time', () => processNanoseconds(runtime)),
     [
       'sleep',
       blockingBuiltin('sleep', 'one', [1, 1], function* ([value]) {

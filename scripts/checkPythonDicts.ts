@@ -10,12 +10,12 @@
 // such as a module's `__file__`, are left out of both sides.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
+import type { parsePython as ParsePython } from '../src/python/parse';
+import type { runModule as RunModule } from '../src/python/run';
 import type { Runtime as RuntimeType } from '../src/python/runtime';
 
-const REF = path.join(os.homedir(), 'Documents/tokyo-online-university/step-interpreter/scripts/ref');
+const EXPECTED_PYTHON = '3.14.10';
 
 /** Values of the types that no module names, whose classes the program compares too. */
 const SAMPLES = `
@@ -103,8 +103,8 @@ const GRADER_EXTENSIONS = ['M builtins Turtle'];
 
 /** The parts of the interpreter the script uses, loaded once the class orders are set. */
 const interpreter = {} as {
-  parsePython: (source: string) => unknown;
-  runModule: (runtime: RuntimeType, module: never) => { output: string; uncaughtException?: string };
+  parsePython: typeof ParsePython;
+  runModule: typeof RunModule;
   Runtime: new () => RuntimeType;
   registeredUnsupportedNames: (name: string) => string[];
   supportedModules: ReadonlySet<string>;
@@ -328,8 +328,17 @@ function shared(line: string, names: Set<string>): boolean {
 }
 
 function pythonExecutable(): string {
-  writeFileSync('.tmp/pythonDicts/executable.py', 'import sys\nprint(sys.executable)\n');
-  return spawnSync(REF, ['python', '.tmp/pythonDicts/executable.py'], { encoding: 'utf8' }).stdout.trim();
+  const probe = `import sys; v = '.'.join(map(str, sys.version_info[:3])); assert v == '${EXPECTED_PYTHON}', v; print(sys.executable)`;
+  const viaMise = spawnSync('mise', ['exec', `python@${EXPECTED_PYTHON}`, '--', 'python', '-I', '-c', probe], {
+    encoding: 'utf8',
+  });
+  if (viaMise.status === 0) return viaMise.stdout.trim();
+  const direct = spawnSync('python3.14', ['-I', '-c', probe], { encoding: 'utf8' });
+  if (direct.status === 0) return direct.stdout.trim();
+  const detail = (viaMise.stderr || direct.stderr || viaMise.error?.message || direct.error?.message || '').trim();
+  throw new Error(
+    `CPython ${EXPECTED_PYTHON} is required (run \`mise install\` to install the version pinned in mise.toml)${detail ? `: ${detail}` : ''}`
+  );
 }
 
 function runCPython(python: string, program: string): string {
@@ -343,13 +352,13 @@ function runOurs(program: string, module?: string): { output: string; unsupporte
   const runtime = new interpreter.Runtime();
   const unsupported: string[] = [];
   try {
-    const run = interpreter.runModule(runtime, interpreter.parsePython(program) as never);
+    const run = interpreter.runModule(runtime, interpreter.parsePython(program));
     if (run.uncaughtException) console.error(`${module ?? 'types'}: ${run.uncaughtException.split('\n').at(-1)}`);
     const value = (
       runtime as unknown as { modules: Map<string, { unsupported: Map<string, string>; imports: Map<string, string> }> }
     ).modules.get(module ?? '');
     unsupported.push(...(value?.unsupported.keys() ?? []), ...(value?.imports.keys() ?? []));
-    return { output: run.output, unsupported };
+    return { output: run.stdout, unsupported };
   } catch (error) {
     console.error(`${module ?? 'types'}: ${String(error)}`);
     return { output: '', unsupported };

@@ -54,6 +54,68 @@ for a, e in zip(actual, expected):
   expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
 });
 
+test('bytearray slice assignment and extend follow CPython sequence and error rules', () => {
+  const program = `class Seq:
+    def __getitem__(self, i):
+        if i >= 2:
+            raise IndexError
+        return 65 + i
+class Blocked:
+    __iter__ = None
+    def __getitem__(self, i):
+        return 65
+class MyInt(int):
+    pass
+class MyStr(str):
+    pass
+class Idx:
+    def __index__(self):
+        return 3
+a = bytearray()
+a[:] = Seq()
+b = bytearray(b'xxxx')
+b[::2] = Seq()
+c = bytearray(b'x')
+c.extend(Seq())
+errors = []
+for fn in [
+    lambda: bytearray().__setitem__(slice(None), Blocked()),
+    lambda: bytearray().__setitem__(slice(None), None),
+    lambda: bytearray().__setitem__(slice(None), MyInt(2)),
+    lambda: bytearray().__setitem__(slice(None), Idx()),
+    lambda: bytearray().__setitem__(slice(None), MyStr('ab')),
+    lambda: bytearray().__setitem__(slice(None), 1.5),
+    lambda: bytearray().__setitem__(slice(None, None, 0), 1),
+    lambda: bytearray().extend(Blocked()),
+    lambda: bytes(Blocked()),
+]:
+    try:
+        fn()
+    except Exception as e:
+        errors.append(f'{type(e).__name__}: {e}')
+expected = (
+    bytearray(b'AB'),
+    bytearray(b'AxBx'),
+    bytearray(b'xAB'),
+    bytes(Seq()),
+    bytearray(Seq()),
+    [
+        "TypeError: cannot convert 'Blocked' object to bytearray",
+        "TypeError: cannot convert 'NoneType' object to bytearray",
+        'TypeError: can assign only bytes, buffers, or iterables of ints in range(0, 256)',
+        'TypeError: can assign only bytes, buffers, or iterables of ints in range(0, 256)',
+        'TypeError: can assign only bytes, buffers, or iterables of ints in range(0, 256)',
+        'TypeError: can assign only bytes, buffers, or iterables of ints in range(0, 256)',
+        'ValueError: slice step cannot be zero',
+        "TypeError: can't extend bytearray with Blocked",
+        "TypeError: cannot convert 'Blocked' object to bytes",
+    ],
+)
+if (a, b, c, bytes(Seq()), bytearray(Seq()), errors) != expected:
+    raise ValueError((a, b, c, errors))`;
+  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
 test.each([
   [
     'a strict decoding error',

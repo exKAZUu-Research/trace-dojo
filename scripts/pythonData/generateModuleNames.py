@@ -1,13 +1,15 @@
 # Prints, as JSON, the names CPython (3.14.10) has in each module this grader implements and in the values of
 # VALUE_EXPRESSIONS, which scripts/checkPythonNames.ts looks up in this grader:
-#   ~/Documents/tokyo-online-university/step-interpreter/scripts/ref python scripts/pythonData/generateModuleNames.py \
-#     > .tmp/pythonNames.json
+#   mise exec -- python scripts/pythonData/generateModuleNames.py > .tmp/pythonNames.json
 # Run it from the repository root, since it reads the module list from src/python/moduleNames.ts.
 import importlib
 import json
 import re
 import subprocess
 import sys
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 # The values whose `dir()` is compared, as expressions a program of the grader evaluates after `import`ing MODULES.
 VALUE_EXPRESSIONS = [

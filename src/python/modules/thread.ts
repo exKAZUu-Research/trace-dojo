@@ -1,4 +1,4 @@
-// `_thread`: the locks and threads that `threading` builds on, run by the deterministic scheduler of threads.ts.
+import { monotonicNanoseconds, nanosecondsToSeconds } from '../clock';
 import { addressOf } from '../conversions';
 import { builtin, method } from '../define';
 import { registerModule, registerSharedAttributes, setBuiltinFunctionModule } from '../modules';
@@ -262,8 +262,12 @@ registerModule('_thread', () => {
         { keywords: ['name'] }
       ),
     ],
-    // time.monotonic on the threads' clock, which threading and queue take as CPython's take time.monotonic.
-    ['_monotonic', timeFunction(builtin('monotonic', 'none', 0, 0, () => Number(schedulerOf().now()) / 1e9))],
+    [
+      '_monotonic',
+      timeFunction(
+        builtin('monotonic', 'none', 0, 0, () => nanosecondsToSeconds(monotonicNanoseconds(currentRuntime())))
+      ),
+    ],
   ]);
 });
 

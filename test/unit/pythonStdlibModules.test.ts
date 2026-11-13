@@ -43,15 +43,39 @@ jst = dt.timezone(dt.timedelta(hours=9), 'JST')`,
   );
 });
 
-test('time.sleep advances the clocks of the run at once', () => {
-  const program = `import time
-start, tick = time.time(), time.monotonic()
+test('clocks are deterministic across runs, advance monotonically, and exclude sleep from CPU time', () => {
+  const program = `import datetime, io, time, zipfile
+t0_ns, t1_ns = time.time_ns(), time.time_ns()
+m0, m1 = time.monotonic(), time.monotonic()
+p0, cpu0 = time.perf_counter_ns(), time.process_time_ns()
+for _ in range(200):
+    pass
+cpu1 = time.process_time_ns()
 time.sleep(30)
-if not 30 <= time.time() - start < 31 or not 30 <= time.monotonic() - tick < 31:
-    raise ValueError('the clocks did not advance')`;
+cpu2 = time.process_time_ns()
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, 'w') as zf:
+    zf.writestr('note.txt', 'ok')
+if not (t0_ns < t1_ns and m0 < m1 and cpu0 < cpu1 and cpu2 - cpu1 < 1_000_000_000):
+    raise ValueError((t0_ns, t1_ns, m0, m1, cpu0, cpu1, cpu2))
+if not (30 <= (time.time_ns() - t1_ns) / 1e9 < 31 and 30 <= time.monotonic() - m1 < 31):
+    raise ValueError('the clocks did not advance')
+print(
+    t0_ns, m0, p0, cpu0,
+    time.clock_gettime_ns(time.CLOCK_REALTIME),
+    time.clock_gettime_ns(time.CLOCK_MONOTONIC),
+    time.clock_gettime_ns(time.CLOCK_PROCESS_CPUTIME_ID),
+    time.thread_time_ns(),
+    datetime.datetime.now().isoformat(),
+    datetime.date.today().isoformat(),
+    buf.getvalue().hex(),
+)`;
   const started = performance.now();
-  expect(executeProgram('python', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  const first = executeProgram('python', program);
+  const second = executeProgram('python', program);
   expect(performance.now() - started).toBeLessThan(5000);
+  expect(first).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(second).toEqual(first);
 });
 
 test('pprint, textwrap, calendar, and string.Template lay out text as CPython does', () => {

@@ -1,5 +1,9 @@
-# Prints src/python/data/japaneseCodecs.ts: the JIS tables of CPython's Japanese codecs, read back from the codecs.
-# Run with CPython 3.14: python generateJapaneseCodecs.py > src/python/data/japaneseCodecs.ts
+# Prints src/python/data/japaneseCodecs.ts: the JIS tables of CPython's Japanese codecs, read back from the codecs:
+#   mise exec -- python scripts/pythonData/generateJapaneseCodecs.py > src/python/data/japaneseCodecs.ts
+import sys
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 
 def kuten_row(decode, row):

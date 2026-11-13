@@ -1,8 +1,12 @@
 # Prints src/python/modules/randomSource.ts: CPython's random.py, which this grader runs over its native `_random`, with
-# the imports it cannot make deferred to their use and without its test program, fork support, and command line.
-# Run with CPython 3.14: python generateRandomSource.py > src/python/modules/randomSource.ts
+# the imports it cannot make deferred to their use and without its test program, fork support, and command line:
+#   mise exec -- python scripts/pythonData/generateRandomSource.py > src/python/modules/randomSource.ts
 import os
+import sys
 import sysconfig
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 with open(os.path.join(sysconfig.get_paths()['stdlib'], 'random.py'), encoding='utf-8') as file:
     source = file.read()

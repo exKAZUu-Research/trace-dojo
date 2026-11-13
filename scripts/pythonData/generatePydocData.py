@@ -1,11 +1,14 @@
 # Prints src/python/data/pydocData.ts: the dictionaries of CPython's pydoc_data package, the topic and keyword pages
-# `help('for')` shows and the documentation page of each module, as JSON read on first use. Run with CPython 3.14:
-#   ~/Documents/tokyo-online-university/step-interpreter/scripts/ref python scripts/pythonData/generatePydocData.py \
-#     > src/python/data/pydocData.ts
+# `help('for')` shows and the documentation page of each module, as JSON read on first use. Run with CPython 3.14.10:
+#   mise exec -- python scripts/pythonData/generatePydocData.py > src/python/data/pydocData.ts
 import json
+import sys
 
 from pydoc_data.module_docs import module_docs
 from pydoc_data.topics import topics
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 
 def constant(name, doc, value):

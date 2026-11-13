@@ -1,8 +1,13 @@
 # Prints src/python/data/charmapCodecs.ts: the decoding tables of CPython's single-byte charmap codecs, such as cp1252,
-# read from their encodings modules. Run with CPython 3.14: python generateCharmapCodecs.py > src/python/data/charmapCodecs.ts
+# read from their encodings modules.
+#   mise exec -- python scripts/pythonData/generateCharmapCodecs.py > src/python/data/charmapCodecs.ts
 import encodings
 import importlib
 import pkgutil
+import sys
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 LINE = 100
 IDENTITY = ''.join(map(chr, range(128)))

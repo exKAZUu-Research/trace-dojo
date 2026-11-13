@@ -1,7 +1,10 @@
 # Prints src/python/modules/re/unicodeTables.ts from the Unicode database of the CPython that runs it (3.14.10):
-#   ~/Documents/tokyo-online-university/step-interpreter/scripts/ref python scripts/generateReUnicodeTables.py \
-#     > src/python/modules/re/unicodeTables.ts
+#   mise exec -- python scripts/generateReUnicodeTables.py > src/python/modules/re/unicodeTables.ts
 import _sre
+import sys
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 LIMIT = 0x110000
 DIGITS = '0123456789abcdefghijklmnopqrstuvwxyz'

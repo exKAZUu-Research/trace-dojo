@@ -1,10 +1,14 @@
 # Prints src/python/data/jisX0213.ts: the two planes of JIS X 0213:2004, as CPython's shift_jis_2004 codec decodes
-# and encodes them. Run with CPython 3.14: python generateJisX0213.py > src/python/data/jisX0213.ts
+# and encodes them:
+#   mise exec -- python scripts/pythonData/generateJisX0213.py > src/python/data/jisX0213.ts
 #
 # Each plane is a string of 94 rows of 94 cells, U+FFFF standing for a cell that decodes to nothing. The cells that
 # decode to two characters and the characters that do not encode to the last cell that decodes to them are listed
 # apart.
 import sys
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 UNASSIGNED = '￿'
 

@@ -1,4 +1,4 @@
-// The native parts of `asyncio`: what CPython's loop gets from its selector, its clock, and `inspect`.
+import { monotonicNanoseconds, nanosecondsToSeconds } from '../clock';
 import { pyStr } from '../conversions';
 import {
   isAwaitable,
@@ -15,33 +15,12 @@ import { toFloat } from '../typeNumbers';
 import { generatorClass, moduleClass, newList, None } from '../types';
 import { PyGenerator, PyModule, type PyValue } from '../values';
 
-interface LoopClock {
-  /** How many times the loop read its clock, which advances it by a nanosecond each time. */
-  reads: bigint;
-  /** The loops a thread woke with `call_soon_threadsafe` since they last waited. */
-  readonly woken: WeakSet<object>;
-}
-
-const clocks = new WeakMap<Runtime, LoopClock>();
-
-function clockOf(runtime: Runtime): LoopClock {
-  let clock = clocks.get(runtime);
-  if (!clock) {
-    clock = { reads: 0n, woken: new WeakSet() };
-    clocks.set(runtime, clock);
-  }
-  return clock;
-}
+const wokenLoops = new WeakMap<Runtime, WeakSet<object>>();
 
 // code-gauge-allow functionCognitiveComplexity 18 -- One small builtin per native part of the event loop.
-// code-gauge-allow functionNcss 40 -- One small builtin per native part of the event loop.
-/**
- * The namespace `_core` of the asyncio module's source. Its clock is the virtual one of the run, which only sleeping
- * advances, plus a nanosecond for each reading, since CPython's monotonic clock always advances between two readings
- * and so orders timers set for the same delay in the order they were set.
- */
+// code-gauge-allow functionNcss 39 -- One small builtin per native part of the event loop.
 export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
-  const clock = clockOf(runtime);
+  const woken = wokenOf(runtime);
   const core = new PyModule(moduleClass, '_asyncio_core', new Map());
   const define = (name: string, value: PyValue): void => {
     core.dict.set(name, value);
@@ -72,10 +51,7 @@ export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
   );
   define(
     'loop_time',
-    builtin('loop_time', 'none', 0, 0, () => {
-      clock.reads++;
-      return Number(schedulerOf(runtime).now() + clock.reads) / 1e9;
-    })
+    builtin('loop_time', 'none', 0, 0, () => nanosecondsToSeconds(monotonicNanoseconds(runtime)))
   );
   define(
     'select',
@@ -83,21 +59,21 @@ export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
       const scheduler = schedulerOf(runtime);
       const seconds = timeout === None ? undefined : toFloat(timeout as PyValue);
       if (seconds !== undefined && seconds <= 0) {
-        clock.woken.delete(loop as object);
+        woken.delete(loop as object);
         return None;
       }
       const deadline = seconds === undefined ? undefined : scheduler.now() + BigInt(Math.ceil(seconds * 1e9));
-      while (!clock.woken.has(loop as object) && (deadline === undefined || scheduler.now() < deadline)) {
-        yield new WaitRequest(() => clock.woken.has(loop as object), deadline);
+      while (!woken.has(loop as object) && (deadline === undefined || scheduler.now() < deadline)) {
+        yield new WaitRequest(() => woken.has(loop as object), deadline);
       }
-      clock.woken.delete(loop as object);
+      woken.delete(loop as object);
       return None;
     })
   );
   define(
     'wakeup',
     builtin('wakeup', 'one', 1, 1, ([loop]) => {
-      clock.woken.add(loop as object);
+      woken.add(loop as object);
       return None;
     })
   );
@@ -127,6 +103,15 @@ export function asyncioNatives(runtime: Runtime): Map<string, PyValue> {
     })
   );
   return new Map([['_core', core]]);
+}
+
+function wokenOf(runtime: Runtime): WeakSet<object> {
+  let woken = wokenLoops.get(runtime);
+  if (!woken) {
+    woken = new WeakSet();
+    wokenLoops.set(runtime, woken);
+  }
+  return woken;
 }
 
 function threadName(runtime: Runtime): string {

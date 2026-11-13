@@ -1,4 +1,9 @@
-import codecs, encodings, encodings.aliases, pkgutil
+# Prints src/python/data/codecNames.ts:
+#   mise exec -- python scripts/pythonData/generateCodecNames.py > src/python/data/codecNames.ts
+import codecs, encodings, encodings.aliases, pkgutil, sys
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 mods = sorted(m.name for m in pkgutil.iter_modules(encodings.__path__) if m.name not in ('aliases', '_win_cp_codecs', 'mbcs', 'oem'))
 aliases = encodings.aliases.aliases
 nontext = []

@@ -1,22 +1,14 @@
-// The methods by which a bytearray changes in place.
 import { bytearrayClass, bytesLikeData, newByteArray, type PyBytes } from './bytesValues';
 import { method } from './define';
-import { sliceIndices } from './items';
+import { adjustSlice, sliceIndices, unpackSlice } from './items';
 import { toIndex } from './numbers';
-import { iterate, lookupSpecial } from './objects';
+import { iterateOr, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { byteValue, repeatData } from './typeBytes';
 import { None, pyError, typeError, typeName, unbox, valueError } from './types';
 import { DONE, PySlice, type PyValue } from './values';
 
 const asArray = (self: PyValue): PyBytes => self as PyBytes;
-
-function indexIn(self: PyBytes, key: PyValue): number {
-  const index = toIndex(key, (value) => `bytearray indices must be integers or slices, not ${typeName(value)}`);
-  const resolved = index < 0n ? index + BigInt(self.length) : index;
-  if (resolved < 0n || resolved >= BigInt(self.length)) throw pyError('IndexError', 'bytearray index out of range');
-  return Number(resolved);
-}
 
 method(bytearrayClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => {
   const array = asArray(self);
@@ -29,8 +21,9 @@ method(bytearrayClass, '__setitem__', 'expected', 2, 2, (self, [key, value]) => 
 });
 
 function assignSlice(array: PyBytes, slice: PySlice, value: PyValue): void {
+  const unpacked = unpackSlice(slice);
   const items = assignedBytes(value);
-  const { start, stop, step, count } = sliceIndices(slice, array.length);
+  const { start, stop, step, count } = adjustSlice(unpacked, array.length);
   if (step === 1) {
     array.splice(start, Math.max(start, stop), items);
     return;
@@ -44,25 +37,17 @@ function assignSlice(array: PyBytes, slice: PySlice, value: PyValue): void {
 function assignedBytes(value: PyValue): Uint8Array {
   const data = bytesLikeData(value);
   if (data !== undefined) return new Uint8Array(data);
+  const raw = unbox(value);
   if (
-    typeof unbox(value) === 'string' ||
-    typeof value === 'bigint' ||
-    typeof value === 'boolean' ||
-    lookupSpecial(value, '__iter__') === undefined
+    typeof raw === 'string' ||
+    typeof raw === 'number' ||
+    typeof raw === 'bigint' ||
+    typeof raw === 'boolean' ||
+    lookupSpecial(value, '__index__') !== undefined
   ) {
     throw typeError('can assign only bytes, buffers, or iterables of ints in range(0, 256)');
   }
-  return collectInts(value);
-}
-
-function collectInts(iterable: PyValue): Uint8Array {
-  const next = iterate(iterable);
-  const result: number[] = [];
-  for (let item = next(); item !== DONE; item = next()) {
-    currentRuntime().spend();
-    result.push(byteValue(item));
-  }
-  return Uint8Array.from(result);
+  return collectInts(value, `cannot convert '${typeName(value)}' object to bytearray`);
 }
 
 method(bytearrayClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
@@ -84,6 +69,13 @@ method(bytearrayClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
   return None;
 });
 
+function indexIn(self: PyBytes, key: PyValue): number {
+  const index = toIndex(key, (value) => `bytearray indices must be integers or slices, not ${typeName(value)}`);
+  const resolved = index < 0n ? index + BigInt(self.length) : index;
+  if (resolved < 0n || resolved >= BigInt(self.length)) throw pyError('IndexError', 'bytearray index out of range');
+  return Number(resolved);
+}
+
 method(bytearrayClass, 'append', 'one', 1, 1, (self, [item]) => {
   const array = asArray(self);
   const byte = byteValue(item);
@@ -93,19 +85,26 @@ method(bytearrayClass, 'append', 'one', 1, 1, (self, [item]) => {
 
 method(bytearrayClass, 'extend', 'one', 1, 1, (self, [iterable]) => {
   const array = asArray(self);
-  let data = bytesLikeData(iterable);
-  if (data === undefined) {
-    if (typeof unbox(iterable) === 'string') throw typeError("expected iterable of integers; got: 'str'");
-    if (lookupSpecial(iterable, '__iter__') === undefined && lookupSpecial(iterable, '__getitem__') === undefined) {
-      throw typeError(`can't extend bytearray with ${typeName(iterable)}`);
-    }
-    data = collectInts(iterable);
-  } else {
-    data = new Uint8Array(data);
-  }
+  const raw = bytesLikeData(iterable);
+  const data = raw === undefined ? extendedBytes(iterable) : new Uint8Array(raw);
   array.splice(array.length, array.length, data);
   return None;
 });
+
+function extendedBytes(iterable: PyValue): Uint8Array {
+  if (typeof unbox(iterable) === 'string') throw typeError("expected iterable of integers; got: 'str'");
+  return collectInts(iterable, `can't extend bytearray with ${typeName(iterable)}`);
+}
+
+function collectInts(iterable: PyValue, notIterable: string): Uint8Array {
+  const next = iterateOr(iterable, notIterable);
+  const result: number[] = [];
+  for (let item = next(); item !== DONE; item = next()) {
+    currentRuntime().spend();
+    result.push(byteValue(item));
+  }
+  return Uint8Array.from(result);
+}
 
 method(bytearrayClass, 'insert', 'expected', 2, 2, (self, [indexValue, item]) => {
   const array = asArray(self);

@@ -145,6 +145,12 @@ async def main():
     loop.call_soon(log.append, "soon")
     loop.call_later(0.1, log.append, "later 0.1")
     await asyncio.sleep(0.3)
+    import time as _t
+    loop.call_at(_t.monotonic() + 0.05, log.append, "at 0.05")
+    loop.call_at(_t.monotonic() + 0.15, log.append, "at 0.15")
+    await asyncio.sleep(0.1)
+    log.append("between at")
+    await asyncio.sleep(0.1)
     async for v in agen():
         if v == 1:
             break
@@ -162,7 +168,7 @@ try:
     asyncio.run(boom(0))
 except ValueError as e:
     log.append(repr(e))
-expected = ['d', 'b', 'c', 'a', ['a', 'b', 'c', 'd'], ('w1', 1), ('w0', 3), ('w1', 2), ('w1', 4), ('w0', 5), ['CancelledError', 'CancelledError'], 'slow cancelled', 'timed out', 'slow cancelled', ['boom0.1'], 'y', 'y', 'x', 'x', 'soon', 'later 0.1', 'later 0.2', 'after break', 'agen cleanup', ('in', 0), ('in', 1), ('in', 2), 'main done', "ValueError('boom0')"]
+expected = ['d', 'b', 'c', 'a', ['a', 'b', 'c', 'd'], ('w1', 1), ('w0', 3), ('w1', 2), ('w1', 4), ('w0', 5), ['CancelledError', 'CancelledError'], 'slow cancelled', 'timed out', 'slow cancelled', ['boom0.1'], 'y', 'y', 'x', 'x', 'soon', 'later 0.1', 'later 0.2', 'at 0.05', 'between at', 'at 0.15', 'after break', 'agen cleanup', ('in', 0), ('in', 1), ('in', 2), 'main done', "ValueError('boom0')"]
 if log != expected:
     raise ValueError(log)`);
 });

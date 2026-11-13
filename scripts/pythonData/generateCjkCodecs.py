@@ -1,11 +1,15 @@
 # Prints src/python/data/cjkCodecs.ts: the double-byte tables of CPython's Chinese and Korean codecs, read back from the
-# codecs themselves. Run with CPython 3.14: python generateCjkCodecs.py > src/python/data/cjkCodecs.ts
+# codecs themselves:
+#   mise exec -- python scripts/pythonData/generateCjkCodecs.py > src/python/data/cjkCodecs.ts
 #
 # A table lists the characters of the cells from its first lead and trail byte to its last, row by row. Markers that
 # no codec decodes to stand for runs of cells: SKIP for cells that decode to nothing, NEXT for cells that continue
 # the code points of the cell before, and BASE for cells that decode as in the codec the table is based on. The
 # character after a marker counts the cells.
 import sys
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 SKIP, NEXT, BASE = '￰', '￱', '￲'
 MAX_COUNT = 0xD7FF

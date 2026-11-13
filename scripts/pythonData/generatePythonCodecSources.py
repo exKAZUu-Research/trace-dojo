@@ -1,7 +1,12 @@
 # Prints src/python/modules/pythonCodecSources.ts: the sources of CPython's codecs written in Python, which this grader
-# runs as they are. Run with CPython 3.14: python generatePythonCodecSources.py > src/python/modules/pythonCodecSources.ts
+# runs as they are:
+#   mise exec -- python scripts/pythonData/generatePythonCodecSources.py > src/python/modules/pythonCodecSources.ts
 import os
+import sys
 import sysconfig
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 LIB = sysconfig.get_paths()['stdlib']
 SOURCES = [

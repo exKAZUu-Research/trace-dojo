@@ -1,11 +1,14 @@
 # Prints src/python/modules/moduleLayouts.ts from the modules of the CPython that runs it (3.14.10):
-#   ~/Documents/tokyo-online-university/step-interpreter/scripts/ref python scripts/pythonData/generateModuleLayouts.py \
+#   mise exec -- python scripts/pythonData/generateModuleLayouts.py \
 #     > src/python/modules/moduleLayouts.ts && bun fmt src/python/modules/moduleLayouts.ts
 # Run it from the repository root, since it reads the module list from src/python/moduleNames.ts.
 import json
 import re
 import subprocess
 import sys
+
+if sys.version_info[:3] != (3, 14, 10):
+    raise SystemExit(f'Expected CPython 3.14.10, got {sys.version.split()[0]}')
 
 DESCRIBE = """
 import importlib, json, sys, types

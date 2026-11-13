@@ -1,4 +1,4 @@
-import { monotonicNanoseconds, processNanoseconds, wallClockNanoseconds } from '../clock';
+import { monotonicNanoseconds, nanosecondsToSeconds, processNanoseconds, wallClockNanoseconds } from '../clock';
 import { builtin } from '../define';
 import { toIndex } from '../numbers';
 import { callValue } from '../objects';
@@ -49,20 +49,13 @@ export function timeClocks(runtime: Runtime): [string, PyValue][] {
   const read = (id: PyValue): bigint => {
     const clock = clockId(id, (value) => `clk_id should be integer, not ${typeName(value)}`);
     if (clock === 0n) return wallClockNanoseconds(runtime);
-    if (clock === 12n || clock === 16n) return processNanoseconds();
+    if (clock === 12n || clock === 16n) return processNanoseconds(runtime);
     return monotonicNanoseconds(runtime);
   };
   return [
     ...CLOCK_IDS,
     ['_STRUCT_TM_ITEMS', 11n],
-    [
-      'clock_gettime',
-      builtin('clock_gettime', 'one', 1, 1, ([id]) => {
-        const nanoseconds = read(id);
-        // CPython adds the nanoseconds of the timespec to its seconds.
-        return Number(nanoseconds / 1_000_000_000n) + Number(nanoseconds % 1_000_000_000n) * 1e-9;
-      }),
-    ],
+    ['clock_gettime', builtin('clock_gettime', 'one', 1, 1, ([id]) => nanosecondsToSeconds(read(id)))],
     ['clock_gettime_ns', builtin('clock_gettime_ns', 'one', 1, 1, ([id]) => read(id))],
     ['clock_getres', builtin('clock_getres', 'one', 1, 1, ([id]) => RESOLUTIONS.get(clockId(id)) as number)],
     ['clock_settime', builtin('clock_settime', 'expected', 2, 2, ([id]) => setTime(id))],

@@ -18,7 +18,7 @@ import { defineNew } from './instances';
 import { sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { bindValue, callValue, isTruthy, iterate, iterateByIndex, lookupSpecial } from './objects';
+import { bindValue, callValue, isTruthy, iterate, iterateByIndex, iterateOr, lookupSpecial } from './objects';
 import { currentRuntime } from './runtimeContext';
 import { readInteger, writeInteger } from './structCodes';
 import {
@@ -86,7 +86,6 @@ function constructBytes(name: 'bytes' | 'bytearray', args: PyValue[], kwargs: Kw
   return bytesFromObject(name, source);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows bytes_new for each kind of source.
 function bytesFromObject(name: 'bytes' | 'bytearray', source: PyValue): Uint8Array {
   // bytes() asks `__bytes__` first, which a subclass of bytes may override.
   const special = name === 'bytes' ? lookupSpecial(source, '__bytes__') : undefined;
@@ -108,21 +107,22 @@ function bytesFromObject(name: 'bytes' | 'bytearray', source: PyValue): Uint8Arr
     currentRuntime().buildString(Number(count));
     return new Uint8Array(Number(count));
   }
-  if (
-    typeof source === 'number' ||
-    (lookupSpecial(source, '__iter__') === undefined && lookupSpecial(source, '__getitem__') === undefined)
-  ) {
-    throw typeError(`cannot convert '${typeName(source)}' object to ${name}`);
-  }
+  const notConvertible = `cannot convert '${typeName(source)}' object to ${name}`;
+  if (typeof source === 'number') throw typeError(notConvertible);
   return bytesFromIterable(
     source,
-    name === 'bytes' ? 'bytes must be in range(0, 256)' : 'byte must be in range(0, 256)'
+    name === 'bytes' ? 'bytes must be in range(0, 256)' : 'byte must be in range(0, 256)',
+    notConvertible
   );
 }
 
 /** The bytes of an iterable of ints, as `bytes(iterable)` collects them. */
-export function bytesFromIterable(iterable: PyValue, rangeMessage = 'bytes must be in range(0, 256)'): Uint8Array {
-  const next = iterate(iterable);
+export function bytesFromIterable(
+  iterable: PyValue,
+  rangeMessage = 'bytes must be in range(0, 256)',
+  notIterable?: string
+): Uint8Array {
+  const next = notIterable === undefined ? iterate(iterable) : iterateOr(iterable, notIterable);
   const result: number[] = [];
   const runtime = currentRuntime();
   for (let item = next(); item !== DONE; item = next()) {
