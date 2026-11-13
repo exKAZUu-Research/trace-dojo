@@ -827,6 +827,11 @@ for (const f of [() => Object.create(1), () => Object.create(null, null), () => 
 }`,
   ],
   [
+    'microtasks that clear and schedule timers between timers',
+    `let b; setTimeout(() => { console.log('a'); Promise.resolve().then(() => { clearTimeout(b); setTimeout(() => console.log('d'), 0); }); }, 0);
+b = setTimeout(() => console.log('b'), 0); setTimeout(() => console.log('c'), 0);`,
+  ],
+  [
     'async generators and for await',
     `const sleep = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms));
 async function* countdown(n) { try { while (n > 0) { await sleep(10); yield n--; } return 'liftoff'; } finally { console.log('cleanup'); } }

@@ -137,9 +137,6 @@ export class EventLoop {
 
   /** Runs the queued jobs until none is left, ending with the first exception a job throws or leaves unhandled. */
   run(): void {
-    // Node.js reaches its first timer phase at least a millisecond after the program's statements end, so a zero-delay
-    // timer scheduled last is due there, as it typically is on Node.js.
-    this.now += 1;
     for (;;) {
       this.drainMicrotasks();
       const first = this.firstList();
@@ -155,25 +152,26 @@ export class EventLoop {
 
   /** Node.js's processTimers: runs the lists due by `now`, the clock as the timer phase began. */
   private processTimers(now: number): void {
-    let ranList = false;
-    for (let list = this.firstList(); list && list.expiry <= now; list = this.firstList()) {
+    // Microtasks run between lists and between timers, and may clear or schedule timers, so each step looks again.
+    for (let ranList = false; ; ranList = true) {
       if (ranList) this.drainMicrotasks();
-      ranList = true;
+      const list = this.firstList();
+      if (!list || list.expiry > now) return;
       this.listOnTimeout(list, now);
     }
   }
 
   /** Node.js's listOnTimeout: runs a list's due timers in order, and reschedules the list for the first one not due. */
   private listOnTimeout(list: TimerList, now: number): void {
-    let ranTimer = false;
-    for (let timer = list.timers.at(0); timer; timer = list.timers.at(0)) {
+    for (let ranTimer = false; ; ranTimer = true) {
+      if (ranTimer) this.drainMicrotasks();
+      const timer = list.timers.at(0);
+      if (!timer) break;
       if (now - timer.start < list.delay) {
         list.expiry = Math.max(timer.start + list.delay, now + 1);
         list.order = this.nextListOrder++;
         return;
       }
-      if (ranTimer) this.drainMicrotasks();
-      ranTimer = true;
       list.timers.shift();
       this.timerLists.delete(timer.id);
       this.runningTimer = timer;
