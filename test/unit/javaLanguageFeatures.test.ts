@@ -1699,6 +1699,21 @@ test.each([
     'static java.util.stream.Stream<Integer> make() { Turtle t = new Turtle(); return java.util.stream.Stream.of(1).map(v -> { t.前に進む(); return v; }); }',
   ],
   [
+    'a predicate of Predicate.isEqual',
+    'java.util.function.Predicate<Turtle> p = java.util.function.Predicate.isEqual(new Turtle()); int done = 1;',
+    '',
+  ],
+  [
+    'a negated primitive predicate',
+    'java.util.function.IntPredicate p = make().negate(); int done = 1;',
+    'static java.util.function.IntPredicate make() { Turtle t = new Turtle(); return x -> { t.前に進む(); return x > 0; }; }',
+  ],
+  [
+    'a combined comparator',
+    'Comparator<Integer> c = make().thenComparing(Comparator.naturalOrder()); int done = 1;',
+    'static Comparator<Integer> make() { Turtle t = new Turtle(); return (x, y) -> { t.前に進む(); return 0; }; }',
+  ],
+  [
     'a collector',
     'java.util.stream.Collector<Integer, ?, LongSummaryStatistics> c = make(); int done = 1;',
     'static java.util.stream.Collector<Integer, ?, LongSummaryStatistics> make() { Turtle t = new Turtle(); return java.util.stream.Collectors.summarizingLong(x -> { t.前に進む(); return x; }); }',
