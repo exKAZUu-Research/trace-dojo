@@ -156,8 +156,16 @@ function defineCharSequence(registry: Registry, implementations: ClassInfo[]): v
 function defineSequenceReaders(charSequence: ClassInfo, [stringClass, ...builders]: ClassInfo[]): void {
   addMethod(stringClass, 'contentEquals', [charSequence.type], BOOLEAN, false, (frame, receiver, [other]) => {
     if (other === undefined) return throwBuiltin(frame, 'NullPointerException');
-    const length = sequenceLength(frame, charSequence, other);
-    return length === text(receiver).length && charactersOf(frame, charSequence, other, 0, length) === text(receiver);
+    const own = text(receiver);
+    if (sequenceLength(frame, charSequence, other) !== own.length) return false;
+    const builtin = textOfBuiltinSequence(other);
+    if (builtin !== undefined) return builtin === own;
+    // As the JDK's, it reads a program's sequence only up to the first char that differs.
+    for (let index = 0; index < own.length; index++) {
+      const code = frame.runtime.invokeVirtual(frame, charSequence, 'charAt', other, [index]) as number;
+      if (code !== charCodeOf(own, index)) return false;
+    }
+    return true;
   });
   for (const builder of builders) {
     addMethod(builder, 'insert', [INT, charSequence.type], builder.type, false, (frame, receiver, [offset, value]) => {

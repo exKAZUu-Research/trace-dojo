@@ -2031,3 +2031,18 @@ public class Main { static void t(String n, Supplier<Object> s) { try { System.o
       'uset true\numap v true false v\nulistOf java.lang.NullPointerException\nulist 1\nusetOf java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\numapOf java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nsubUlistOf java.lang.NullPointerException\nalsub 1\ntoListU false\ntree false\n',
   });
 });
+
+test("Java's map views look null up as their map does", () => {
+  const program = `import java.util.*; import java.util.function.*;
+public class Main { static void t(String n, Supplier<Object> s) { try { System.out.println(n + " " + s.get()); } catch (RuntimeException e) { System.out.println(n + " " + e); } }
+ public static void main(String[] a) { Map<Integer,String> m3 = Map.of(1,"a",2,"b",3,"c"); Map<Integer,String> m1 = Map.of(1, "a");
+  t("ks", () -> m3.keySet().contains(null)); t("vs", () -> m3.values().contains(null)); t("ksAll", () -> m3.keySet().containsAll(Arrays.asList(1, null))); t("uks", () -> Collections.unmodifiableMap(m3).keySet().contains(null));
+  t("es", () -> m3.entrySet().contains(null)); t("m1vs", () -> m1.values().contains(null)); t("m1ks", () -> m1.keySet().contains(null));
+  Map<Integer, String> h = new HashMap<>(); h.put(null, null); t("hks", () -> h.keySet().contains(null) + " " + h.values().contains(null)); t("uhks", () -> Collections.unmodifiableMap(h).keySet().contains(null));
+  t("tm", () -> new TreeMap<Integer, String>(Map.of(1, "x")).values().contains(null)); } }`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'ks java.lang.NullPointerException\nvs java.lang.NullPointerException\nksAll java.lang.NullPointerException\nuks java.lang.NullPointerException\nes false\nm1vs java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nm1ks java.lang.NullPointerException: Cannot invoke "Object.equals(Object)" because "o" is null\nhks true true\nuhks true\ntm false\n',
+  });
+});

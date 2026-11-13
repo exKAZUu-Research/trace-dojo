@@ -151,6 +151,8 @@ export interface MapViewSource {
   elementOf: (entry: HashStore['entries'][number]) => Value;
   /** Whether the view is a key set, which a sorted map's is a `SortedSet` with the map's comparator. */
   isKeySet?: boolean;
+  /** The map's lookup that the view's `contains` makes, as `AbstractMap`'s key set and values make one. */
+  lookup?: 'containsKey' | 'containsValue';
   remove: (frame: Frame, entry: HashStore['entries'][number]) => void;
 }
 
@@ -308,14 +310,17 @@ export function countsEmptyClear(list: Value): boolean {
 /** The lists of `Stream.toList`, which are of `List.of`'s class but may hold and look up null. */
 export const nullTolerantLists = new WeakSet<JavaObject>();
 
-/** The classes of `ImmutableCollections`, whose lookups reject a null argument. */
-const nullRejectingClasses = new WeakSet<ClassInfo>();
+/**
+ * The classes of `ImmutableCollections`, whose lookups reject a null argument, with the message their JDK
+ * implementation class of a collection's size gives.
+ */
+const nullRejectingClasses = new WeakMap<ClassInfo, (collection: JavaObject, name: string) => string | undefined>();
 
 /**
  * Makes the lookups `names` of `cls` throw `NullPointerException` for a null argument when the collection they read
  * rejects null, as those of `ImmutableCollections` do but for the lists `Stream.toList` returns: the collection itself
- * when `rejects`, or the one an unmodifiable wrapper or a sublist reads, whose class may be shared by both. `messageOf`
- * gives the message the JDK's implementation class of a collection's size gives.
+ * when `rejects`, or the one an unmodifiable wrapper, a sublist, or a map's key set or values reads, whose class may be
+ * shared by both. `messageOf` gives the message of a rejecting class.
  */
 export function rejectNullLookups(
   cls: ClassInfo,
@@ -323,26 +328,37 @@ export function rejectNullLookups(
   rejects: boolean,
   messageOf: (receiver: JavaObject, name: string) => string | undefined = () => {}
 ): void {
-  if (rejects) nullRejectingClasses.add(cls);
+  if (rejects) nullRejectingClasses.set(cls, messageOf);
   for (const method of cls.methods) {
     const { native, name } = method;
     if (!native || !names.includes(name) || method.parameterTypes[0]?.kind === 'int') continue;
     method.native = (frame, receiver, args) => {
-      const source = readSourceOf(receiver as JavaObject);
-      if (args[0] === undefined && nullRejectingClasses.has(source.cls) && !nullTolerantLists.has(source)) {
-        throwBuiltin(frame, 'NullPointerException', messageOf(source, name));
+      if (args[0] === undefined) {
+        const [source, lookup] = readSourceOf(receiver as JavaObject, name);
+        const messageOfSource = nullRejectingClasses.get(source.cls);
+        if (messageOfSource && !nullTolerantLists.has(source)) {
+          throwBuiltin(frame, 'NullPointerException', messageOfSource(source, lookup));
+        }
       }
       return native(frame, receiver, args);
     };
   }
 }
 
-/** The collection a collection's reads reach through any nesting of unmodifiable wrappers and sublists. */
-function readSourceOf(collection: JavaObject): JavaObject {
-  let source = collection;
+/**
+ * The collection a lookup `name` reaches through any nesting of unmodifiable wrappers, sublists, and a map's key set
+ * or values, which look up through the map, and the lookup it makes there.
+ */
+function readSourceOf(collection: JavaObject, name: string): [JavaObject, string] {
+  let [source, lookup] = [collection, name];
   for (;;) {
+    const view = mapViewSources.get(source);
+    if (view?.lookup) {
+      [source, lookup] = [view.map, view.lookup];
+      continue;
+    }
     const next = unmodifiableWrappers.has(source) || subListChecks.has(source) ? source.retained?.[0] : undefined;
-    if (!(next instanceof JavaObject)) return source;
+    if (!(next instanceof JavaObject)) return [source, lookup];
     source = next;
   }
 }

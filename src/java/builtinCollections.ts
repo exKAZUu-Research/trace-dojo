@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 476 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
+// code-gauge-allow-file fileNcss 478 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
 import { checkCopiedElement } from './arrayCopy';
 import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
@@ -152,6 +152,8 @@ export function defineCollections(
   defineSetEquality(snapshotSet, context, setClass);
   linkOverrides(snapshotSet);
   const snapshotCollection = defineSnapshot(context, 'Collection', collectionClass, itrClass);
+  // A map's key set and values look a value up as the map does.
+  for (const cls of [snapshotSet, snapshotCollection]) rejectNullLookups(cls, ['contains'], false);
   const unmodifiableViewSet = defineUnmodifiableViewSet(context, setClass, itrClass);
   const sets = defineSets(context, setClass, collectionClass, itrClass);
   const { mapClass, ...maps } = defineHashMap(context, {

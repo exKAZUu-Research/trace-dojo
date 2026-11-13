@@ -1,10 +1,10 @@
 // code-gauge-allow-file fileNcss 435 -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
-import type { Context } from './builtinCollectionSupport';
 import {
   checkModifiable,
   classType,
   compareNatural,
+  type Context,
   createIterator,
   defaultRemoveClasses,
   defineSetEquality,
@@ -14,6 +14,7 @@ import {
   javaEquals,
   javaHash,
   linkOverrides,
+  type MapViewSource,
   mapViewSources,
   rejectNullLookups,
   singletonClasses,
@@ -246,7 +247,8 @@ function mapView(
   map: Value,
   viewClass: ClassInfo,
   elementOf: (entry: HashStore['entries'][number]) => Value,
-  isKeySet = false
+  isKeySet = false,
+  lookup?: MapViewSource['lookup']
 ): JavaObject {
   const view = frame.runtime.allocateObject(frame, viewClass);
   // A view reads the map's entries whenever it is used, so that it follows every later change to the map.
@@ -266,6 +268,7 @@ function mapView(
     entries: () => storeOf(map).ordered(),
     elementOf,
     isKeySet,
+    lookup,
     remove: (removeFrame, entry) => {
       checkModifiable(removeFrame, map, true);
       removeEntry(removeFrame, map, entry.key);
@@ -685,10 +688,14 @@ export function defineMapMethods(
     touch(receiver);
   });
   addMethod(cls, 'keySet', [], classType(views.setClass, key), false, (frame, receiver) =>
-    cachedView(receiver, 'keySet', () => mapView(frame, receiver, views.snapshotSet, (entry) => entry.key, true))
+    cachedView(receiver, 'keySet', () =>
+      mapView(frame, receiver, views.snapshotSet, (entry) => entry.key, true, 'containsKey')
+    )
   );
   addMethod(cls, 'values', [], classType(views.collectionClass, value), false, (frame, receiver) =>
-    cachedView(receiver, 'values', () => mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value))
+    cachedView(receiver, 'values', () =>
+      mapView(frame, receiver, views.snapshotCollection, (entry) => entry.value, false, 'containsValue')
+    )
   );
   addMethod(
     cls,
