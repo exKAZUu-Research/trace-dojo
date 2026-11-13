@@ -796,6 +796,8 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
   } else if (frame.kind === 'class') {
     owner = frame.self as RClass;
     visibility = frame.defaultVisibility;
+  } else if (frame.extra.definee) {
+    owner = frame.extra.definee;
   } else if (frame.home.kind === 'main') {
     owner = runtime.c.Object;
     visibility = frame.kind === 'main' ? 'private' : 'public';
@@ -996,7 +998,7 @@ export function* callMethod(
 ): Gen {
   rt().spend();
   const method = classOf(recv).findMethod(name);
-  if (!method) methodMissing(recv, name, options);
+  if (!method) return yield* callMethodMissing(recv, name, args, keywords, block, options);
   if (method.visibility !== 'public' && !options.fcall) {
     if (method.visibility === 'private' && !name.endsWith('=')) {
       throw noMethodError(`private method '${name}' called for ${receiverDescription(recv)}`, recv, name);
@@ -1008,7 +1010,23 @@ export function* callMethod(
   return yield* invoke(method, recv, args, keywords, block, options.used ?? true);
 }
 
-function methodMissing(recv: Value, name: string, options: CallOptions): never {
+/** Calls the program's `method_missing` for a method no class defines, or raises Ruby's error for it. */
+function* callMethodMissing(
+  recv: Value,
+  name: string,
+  args: Value[],
+  keywords: RHash | undefined,
+  block: RProc | undefined,
+  options: CallOptions
+): Gen {
+  const handler = classOf(recv).findMethod('method_missing');
+  if (handler && handler.body.kind !== 'native') {
+    return yield* invoke(handler, recv, [RSymbol.of(name), ...args], keywords, block, options.used ?? true);
+  }
+  methodMissing(recv, name, options);
+}
+
+export function methodMissing(recv: Value, name: string, options: CallOptions): never {
   if (options.vcall) {
     throw nameError(`undefined local variable or method '${name}' for ${receiverDescription(recv)}`, recv, name);
   }
@@ -1059,6 +1077,9 @@ export function* invoke(
     }
     case 'user': {
       return yield* invokeUser(method, body.def, body.cref, recv, args, keywords, block, used);
+    }
+    case 'proc': {
+      return yield* callProc(body.proc, args, { keywords, block, self: recv, used, method, lambdaArgs: true });
     }
     case 'undefined': {
       throw noMethodError(`undefined method '${method.name}' for ${receiverDescription(recv)}`, recv, method.name);
@@ -1217,6 +1238,12 @@ export interface ProcCallOptions {
   /** The row of the `yield` or `call` that runs the block; undefined when library code runs it. */
   callRow?: number;
   self?: Value;
+  /** The module where `def` in the block defines methods, for `class_eval` and `instance_eval`. */
+  definee?: RClass;
+  /** The method a proc is the body of (`define_method`), which `super` in it continues. */
+  method?: RMethod;
+  /** Whether the arguments bind strictly, as a method's do, for a proc that is a method's body. */
+  lambdaArgs?: boolean;
 }
 
 /** Calls a block or proc with arguments, binding them as a block (or a lambda) does. */
@@ -1248,10 +1275,11 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       outer,
       proc,
       blockDef: def,
-      isLambda: proc.isLambda,
+      isLambda: proc.isLambda || options.lambdaArgs,
       block: options.block ?? outer.home.extra.block,
-      method: outer.home.extra.method,
+      method: options.method ?? outer.home.extra.method,
       def: outer.home.extra.def,
+      definee: options.definee,
     }
   );
   if (options.block) frame.extra.block = options.block;
@@ -1262,7 +1290,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
       throw argumentCountError(args.length + (options.keywords ? 1 : 0), 0, 0);
     }
     if (def.params) {
-      yield* bindParams(def.params, frame, args, options.keywords, proc.isLambda ? 'lambda' : 'proc');
+      yield* bindParams(def.params, frame, args, options.keywords, proc.isLambda || options.lambdaArgs ? 'lambda' : 'proc');
       if (hasParams(def.params)) {
         runtime.currentRow = def.row;
         runtime.steps.stepBinding(def.row, storesAnswers(def.params, frame));

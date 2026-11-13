@@ -900,9 +900,6 @@ export class Converter {
   private methodDef(node: Node): MethodDef {
     const nameNode = required(node.childForFieldName('name'));
     const name = nameNode.text;
-    if (name === 'method_missing' || name === 'respond_to_missing?') {
-      this.unsupported(nameNode, `${name} の定義`);
-    }
     const row = node.startPosition.row;
     const outer = this.ctx;
     const scope = new LocalScope('method');

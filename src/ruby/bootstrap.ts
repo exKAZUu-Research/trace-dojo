@@ -136,6 +136,10 @@ export function bootstrap(runtime: Runtime): void {
   enumerator.includes.push(c.Enumerable);
   defineClass('Yielder', object, enumerator);
   defineClass('IO', object);
+  defineClass('Method', object);
+  defineClass('UnboundMethod', object);
+  defineClass('Struct', object).includes.push(c.Enumerable);
+  defineClass('Data', object);
   const set = defineClass('Set', object);
   set.includes.push(c.Enumerable);
 

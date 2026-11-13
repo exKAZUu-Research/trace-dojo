@@ -206,9 +206,7 @@ def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args) {
   return makeEnumerator(self, method.name, rest);
 });
 
-def('Kernel', 'instance_variables', 0, () => {
-  throw new UnsupportedFeatureError('instance_variables');
-});
+
 
 // Kernel functions ----------------------------------------------------------------------------------------------------
 
@@ -457,25 +455,12 @@ for (const [name, feature] of [
   );
 }
 for (const [name, feature] of [
-  ['send', 'send（名前によるメソッドの呼び出し）'],
-  ['__send__', '__send__（名前によるメソッドの呼び出し）'],
-  ['public_send', 'public_send（名前によるメソッドの呼び出し）'],
-  ['respond_to?', 'respond_to?'],
-  ['method', 'method（Method オブジェクト）'],
-  ['public_method', 'public_method'],
   ['singleton_method', 'singleton_method'],
   ['methods', 'methods'],
   ['public_methods', 'public_methods'],
   ['private_methods', 'private_methods'],
   ['protected_methods', 'protected_methods'],
   ['singleton_methods', 'singleton_methods'],
-  ['instance_variable_get', 'instance_variable_get'],
-  ['instance_variable_set', 'instance_variable_set'],
-  ['instance_variable_defined?', 'instance_variable_defined?'],
-  ['remove_instance_variable', 'remove_instance_variable'],
-  ['instance_eval', 'instance_eval'],
-  ['instance_exec', 'instance_exec'],
-  ['define_singleton_method', 'define_singleton_method'],
 ] as const) {
   def('Kernel', name, [0, -1], () => {
     throw new UnsupportedFeatureError(feature);
@@ -532,36 +517,11 @@ def('Module', 'include', [1, -1], function* (self: RClass, modules) {
   }
   return self;
 });
-def('Module', 'prepend', [1, -1], () => {
-  throw new UnsupportedFeatureError('prepend');
-});
+
 for (const name of [
-  'define_method',
-  'alias_method',
-  'remove_method',
-  'undef_method',
-  'instance_method',
-  'public_instance_method',
-  'method_defined?',
-  'public_method_defined?',
-  'private_method_defined?',
-  'protected_method_defined?',
   'instance_methods',
   'public_instance_methods',
   'private_instance_methods',
-  'class_eval',
-  'module_eval',
-  'class_exec',
-  'module_exec',
-  'const_get',
-  'const_set',
-  'const_defined?',
-  'constants',
-  'class_variable_get',
-  'class_variable_set',
-  'class_variables',
-  'class_variable_defined?',
-  'remove_const',
   'refine',
   'using',
 ]) {

@@ -151,6 +151,7 @@ export type MethodBody =
   | { kind: 'native'; fn: NativeFn; min: number; max: number; takesKeywords: boolean }
   | { kind: 'reader'; ivar: string }
   | { kind: 'writer'; ivar: string }
+  | { kind: 'proc'; proc: RProc }
   | { kind: 'undefined' };
 
 export interface RMethod {

@@ -57,8 +57,13 @@ export function* hashKeyOf(value: Value): Gen<string> {
     const hash = yield* callMethod(value, 'hash', []);
     return `u${typeof hash === 'bigint' ? hash : yield* hashKeyOf(hash)}`;
   }
-  const custom = value instanceof RObject ? (value.data as { hashKey?: () => string } | undefined) : undefined;
+  const custom = value instanceof RObject ? (value.data as { hashKey?: () => string; hashParts?: () => Value[] } | undefined) : undefined;
   if (custom?.hashKey) return custom.hashKey();
+  if (custom?.hashParts) {
+    const parts: string[] = [];
+    for (const part of custom.hashParts()) parts.push(yield* hashKeyOf(part));
+    return `c${(value as RObject).cls.id}[${parts.join(',')}]`;
+  }
   return `o${(value as RBasic).id}`;
 }
 

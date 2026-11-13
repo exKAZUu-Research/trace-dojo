@@ -79,6 +79,8 @@ export interface FrameExtra {
   blockDef?: BlockDef;
   /** For a lambda's frame, where `return` returns from the lambda itself. */
   isLambda?: boolean;
+  /** The module where `def` defines methods, for a block that `class_eval` or `instance_eval` runs. */
+  definee?: RClass;
   /** Whether this frame's method has returned, after which a `return` in a block it made cannot reach it. */
   finished?: boolean;
 }
