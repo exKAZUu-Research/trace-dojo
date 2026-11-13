@@ -205,7 +205,7 @@ export abstract class CallCompiler extends CompositeCompiler {
   protected sliceArgument(syntax: Expression, operand: Operand, summary: CalleeSummary, index: number): Operand {
     const tracking = this.sliceUseOf(syntax)?.tracking;
     if (!tracking) return operand;
-    const transition = this.sliceTransition(syntax, operand, summary.inlinable);
+    const transition = this.sliceTransition(syntax, operand, () => summary.inlinable());
     this.understandSlice(syntax, () => summary.inlinable() || !summary.params?.[index]?.escapes);
     tracking.capReads.push(() => !summary.inlinable());
     return transition;
@@ -258,6 +258,7 @@ export abstract class CallCompiler extends CompositeCompiler {
       mode: 'value',
       type,
       span: call.span,
+      callResult: true,
       eval: () => results[index],
     }));
     const read = call.eval;

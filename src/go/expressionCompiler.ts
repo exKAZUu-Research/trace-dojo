@@ -181,7 +181,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
           return iface;
         }
       : (frame) => box(read(frame));
-    if (value.mode === 'variable' || !boxesByAddress(value.type)) return boxed;
+    if (value.mode === 'variable' || value.callResult || !boxesByAddress(value.type)) return boxed;
     return this.hoist(boxed, value.firstPass);
   }
 

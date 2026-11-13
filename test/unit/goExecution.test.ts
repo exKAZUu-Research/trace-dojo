@@ -1758,3 +1758,39 @@ test.each([
 ])('a turtle stays reachable through %s', (_name, body, finalTurtles) => {
   expect(executeProgram('go', `package main\n${body}`)).toMatchObject({ kind: 'executed', finalTurtles });
 });
+
+// Go 1.27.3 prints these: the results of a multi-value call keep their values when they are converted to interfaces,
+// as arguments, assignments, and range values.
+test('the results of a multi-value call keep their values when converted to interfaces', () => {
+  const program = `package main
+
+import (
+	"fmt"
+	"regexp"
+)
+
+type P struct{ x, y int }
+
+func vals() (bool, int) { return true, 7 }
+func pair() (P, int)    { return P{1, 2}, 3 }
+
+func main() {
+	fmt.Println(regexp.MatchString("a+", "baa"))
+	fmt.Println(vals())
+	fmt.Println(pair())
+	var a, b any = pair()
+	fmt.Println(a, b)
+	m := map[string]any{}
+	m["x"], m["y"] = vals()
+	fmt.Println(m)
+	for _, a = range []P{{4, 5}} {
+		fmt.Println(a)
+	}
+}
+`;
+  expect(executeProgram('go', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'true <nil>\ntrue 7\n{1 2} 3\n{1 2} 3\nmap[x:true y:7]\n{4 5}\n',
+  });
+});

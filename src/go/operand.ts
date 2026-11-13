@@ -95,6 +95,8 @@ export interface Operand extends Storage {
   ssaConstant?: SsaConstant;
   /** How many values the statement's first pass evaluates before this expression's place (`hoistingCalls`). */
   firstPass?: number;
+  /** A value that exists only once the code producing it ran (a result of a multi-value call, a range value). */
+  callResult?: boolean;
   /** The variable whose definitions reach this use, and which an assignment to it defines. */
   ssaVariable?: VarEntity;
   /** Which definition of the variable reaches this use. */

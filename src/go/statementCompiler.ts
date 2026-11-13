@@ -962,7 +962,7 @@ export abstract class StatementCompiler extends CallCompiler {
       if (!operand || this.isInvalid(operand)) return undefined;
       const localTarget = stripParens(target).kind === 'name' ? operand.variable?.entity : undefined;
       const convert = this.assign(
-        { mode: 'value', type, span: target, eval: (frame) => frame.temporaries.at(-1) as Value },
+        { mode: 'value', type, span: target, callResult: true, eval: (frame) => frame.temporaries.at(-1) as Value },
         operand.type,
         '変数',
         localTarget
@@ -1710,7 +1710,7 @@ function spreadResults(call: Operand, convert: Convert): Eval[] {
   const read = call.eval;
   const types = (call.type as { types: Type[] }).types;
   const converts = types.map((type, index) =>
-    convert({ mode: 'value', type, span: call.span, eval: () => results[index] }, index)
+    convert({ mode: 'value', type, span: call.span, callResult: true, eval: () => results[index] }, index)
   );
   return converts.map((value, index): Eval =>
     index === 0
