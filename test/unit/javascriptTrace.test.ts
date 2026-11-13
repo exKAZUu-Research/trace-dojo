@@ -809,7 +809,8 @@ test('a trace shows the contents of Maps and Sets and the text of Dates and regu
 const n = new Map([[2, 'b']]);
 const s = new Set([1, 'b']);
 const d = new Date(0);
-const r = /a+/g;`;
+const r = /a+/g;
+const k = new Map([[new Date(0), 1]]);`;
   const trace = traceProgram('javascript', program, program);
   expect(trace.traceItems.at(-1)?.referenceVars).toEqual({
     m: { kind: 'object', entries: { a: value(1) } },
@@ -817,5 +818,17 @@ const r = /a+/g;`;
     s: { kind: 'array', entries: { 0: value(1), 1: value('b') } },
     d: { kind: 'value', value: '1970-01-01T00:00:00.000Z', verbatim: true },
     r: { kind: 'value', value: '/a+/g', verbatim: true },
+    k: {
+      kind: 'array',
+      entries: {
+        0: {
+          kind: 'array',
+          entries: { 0: { kind: 'value', value: '1970-01-01T00:00:00.000Z', verbatim: true }, 1: value(1) },
+        },
+      },
+    },
+  });
+  expect(traceProgram('javascript', 'const x = new Number(3);', 'const x = new Number(3);').finalVars).toEqual({
+    x: 3,
   });
 });

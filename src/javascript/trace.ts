@@ -106,6 +106,7 @@ type Scalar = TraceItemVariable[string];
 function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR {
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'bigint' || typeof value === 'symbol') return displayedPrimitive(value);
+  if (value instanceof JsObject && value.primitive !== undefined) return scalarOf(value.primitive, seen);
   if (!(value instanceof JsArray) || seen.has(value)) return NOT_SCALAR;
   seen.add(value);
   const items: Scalar[] = [];
@@ -175,7 +176,11 @@ function builtinNodeOf(object: JsObject, seen: Set<JsObject>): DisplayNode | und
     result = { kind: 'array', entries: Object.fromEntries(items.map((entry, index) => [index, node(entry.key)])) };
   } else {
     const keys = items.map((entry) => node(entry.key));
-    const texts = keys.map((key) => (key.kind === 'value' ? String(key.value) : undefined));
+    // An object key, even one shown as a value (a Date or a box), keeps its pair so it is not taken for text.
+    const texts = items.map((entry, index) => {
+      const key = keys[index];
+      return key.kind === 'value' && !(entry.key instanceof JsObject) ? String(key.value) : undefined;
+    });
     // Integer-like keys would be listed first in an object, out of the Map's order.
     result =
       texts.every((text) => text !== undefined && !/^(?:0|[1-9]\d*)$/.test(text)) &&

@@ -66,7 +66,7 @@ export function jsonStringify(
     callRow,
     replacer: isCallable(replacerValue) ? replacerValue : undefined,
     propertyList: replacerValue instanceof JsArray ? propertyListOf(runtime, replacerValue) : undefined,
-    gap: gapOf(space),
+    gap: gapOf(runtime, space),
     indent: '',
     stack: [],
   };
@@ -81,11 +81,20 @@ function propertyListOf(runtime: Runtime, replacer: JsArray): string[] {
   runtime.scan(replacer.elements.length);
   for (const element of replacer.elements) {
     if (typeof element === 'string' || typeof element === 'number') keys.add(String(element));
+    else if (
+      element instanceof JsObject &&
+      (typeof element.primitive === 'string' || typeof element.primitive === 'number')
+    )
+      keys.add(runtime.toString(element));
   }
   return [...keys];
 }
 
-function gapOf(space: Value): string {
+function gapOf(runtime: Runtime, given: Value): string {
+  // A Number or String object counts as its primitive, as JSON.stringify converts it.
+  let space = given;
+  if (space instanceof JsObject && typeof space.primitive === 'number') space = runtime.toNumber(space);
+  else if (space instanceof JsObject && typeof space.primitive === 'string') space = runtime.toString(space);
   if (typeof space === 'number') return ' '.repeat(Math.max(0, Math.min(10, Math.trunc(space) || 0)));
   if (typeof space === 'string') return space.slice(0, 10);
   return '';

@@ -790,6 +790,8 @@ h().then(() => { const it = g(); it.next(); it.next('a'); });`,
     `const n = new Number(1), s = new String('ab'), b = new Boolean(false);
 console.log(typeof n, typeof s, n, s, b, n + 1, s + 'c', b ? 'truthy' : 'falsy', s.length, n instanceof Number, new Number(), new String());
 class N extends Number { twice() { return this * 2; } } const x = new N(4); console.log(x, x.twice(), x instanceof N);
+console.log(JSON.stringify({ a: 1, b: 2 }, [new String('a'), new Number(1)]), JSON.stringify({ a: 1 }, null, new Number(2)));
+Object.defineProperty(s, '0', { value: 'a' }); Object.defineProperty(s, 'length', { value: 2 }); console.log(Object.keys(s), Object.getOwnPropertyNames(s));
 for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0), () => new Symbol()]) {
   try { console.log(f()); } catch (e) { console.log(e.name, e.message); }
 }`,

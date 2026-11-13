@@ -309,6 +309,9 @@ export class Runtime {
   }
 
   defineProperty(object: JsObject, key: Key, property: Property): void {
+    // A String object's indices and length are read-only and never stored, so a definition validated as compatible
+    // with them changes nothing.
+    if (typeof object.primitive === 'string' && ownElement(object.primitive, key) !== MISSING) return;
     if (object instanceof JsArray && (arrayIndexOf(key) !== undefined || key === 'length')) {
       if (isAccessor(property)) this.throwError('TypeError', 'Accessors on array elements are not supported');
       this.set(object, key, property.value);
