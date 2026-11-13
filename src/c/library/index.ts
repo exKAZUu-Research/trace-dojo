@@ -4,7 +4,7 @@ import { FILE_NAME } from '../preprocessor';
 import type { NativeFunction } from '../runtime';
 import { classificationCall, constantCall, CTYPE_FUNCTIONS, MATH_FUNCTIONS } from './mathFunctions';
 import { PLATFORM_HEADER_FUNCTIONS } from './platformHeaderFunctions';
-import { PLATFORM_UNMODELED } from './platformHeaders';
+import { PLATFORM_DEFINED_FUNCTIONS, PLATFORM_UNMODELED } from './platformHeaders';
 import { STDIO_FUNCTIONS } from './stdioFunctions';
 import { STDLIB_FUNCTIONS } from './stdlibFunctions';
 import { comparisonCall, STRING_FUNCTIONS } from './stringFunctions';
@@ -124,17 +124,27 @@ const SPECIAL_CALLS = {
 export function libraryEntry(name: string): LibraryEntry | undefined {
   if (name.startsWith('__trace_platform_'))
     return { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name.slice('__trace_platform_'.length)}）` };
+  const canDefine = EXTENSIONS.has(name) && !UNMODELED.has(name) && !PLATFORM_DEFINED_FUNCTIONS.has(name);
   const feature = UNSUPPORTED[name];
-  if (feature) return { kind: 'unsupported', feature, canDefine: EXTENSIONS.has(name) && !UNMODELED.has(name) };
+  if (feature)
+    return {
+      kind: 'unsupported',
+      feature,
+      canDefine,
+    };
   const run = NATIVES[name];
   if (!run)
     return PLATFORM_FUNCTIONS.has(name)
-      ? { kind: 'unsupported', feature: `標準 C ライブラリ以外の関数（${name}）`, canDefine: !UNMODELED.has(name) }
+      ? {
+          kind: 'unsupported',
+          feature: `標準 C ライブラリ以外の関数（${name}）`,
+          canDefine,
+        }
       : undefined;
   return {
     kind: 'native',
     run,
-    canDefine: EXTENSIONS.has(name) && !UNMODELED.has(name),
+    canDefine,
     ...(name in SPECIAL_CALLS ? { special: SPECIAL_CALLS[name as keyof typeof SPECIAL_CALLS] } : {}),
   };
 }

@@ -980,3 +980,19 @@ int main(void){char a[300001];memset(a,57,300000);a[300000]=0;char*end;errno=0;l
     uncaughtException: undefined,
   });
 });
+
+test.each(['isascii', 'toascii', 'digittoint', 'isnumber', 'ishexnumber', 'isrune'])(
+  'SDK inline definitions cannot be replaced: %s',
+  (name) => {
+    expect(executeProgram('c', `#include <ctype.h>\nint ${name}(int c){return 1;}int main(void){}`).kind).toBe(
+      'compileError'
+    );
+  }
+);
+
+test.each([
+  'int main(void){int h(void);return h();}static int h(void){return 0;}',
+  'void f(void){int h(void);}static int h(void){return 0;}int main(void){return h();}',
+])('block declarations and file declarations share function linkage checks: %s', (source) => {
+  expect(executeProgram('c', source).kind).toBe('compileError');
+});

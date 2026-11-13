@@ -173,7 +173,9 @@ export class Compiler extends StatementCompiler {
     // The turtle's functions are visible without an #include, so a program may still declare its own of their names.
     const isTurtleBuiltin =
       looked?.kind === 'function' && looked.fn.header === TURTLE_HEADER_NAME && header !== TURTLE_HEADER_NAME;
-    const existing = isTurtleBuiltin ? undefined : looked;
+    const local = this.scope.ordinary.get(name);
+    if (local && local.kind !== 'function') this.error(row, `「${name}」が2回宣言されています。`);
+    const existing = isTurtleBuiltin ? undefined : looked?.kind === 'function' ? looked : this.linkage.get(name);
     const entry = header === undefined ? undefined : this.library(name);
     if (existing?.kind === 'function' && isStatic && !existing.fn.isStatic && header === undefined)
       this.error(row, `関数「${name}」は外部リンケージで宣言されているので static にできません。`);
@@ -186,14 +188,7 @@ export class Compiler extends StatementCompiler {
       if (this.scope.ordinary.get(name) !== existing) this.scope.ordinary.set(name, existing);
       return existing.fn;
     }
-    if (existing && this.scope.ordinary.get(name) === existing) this.error(row, `「${name}」が2回宣言されています。`);
-    const global = isTurtleBuiltin ? undefined : this.findFileScope(name);
-    if (global && global.kind === 'function') {
-      if (!compatible(global.type, type))
-        this.error(row, `関数「${name}」の型が、前の宣言（${typeName(global.type)}）と合いません。`);
-      this.scope.ordinary.set(name, global);
-      return global.fn;
-    }
+    if (existing) this.error(row, `「${name}」が2回宣言されています。`);
     const info: FunctionInfo = {
       name,
       type,
@@ -219,10 +214,6 @@ export class Compiler extends StatementCompiler {
     let scope = this.scope;
     while (scope.parent) scope = scope.parent;
     return scope;
-  }
-
-  private findFileScope(name: string): ReturnType<typeof this.scope.lookup> {
-    return this.linkage.get(name);
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- C's rules for tentative definitions and redeclarations.
