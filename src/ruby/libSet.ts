@@ -233,12 +233,19 @@ def('Set', ['map!', 'collect!'], 0, function* (self: RObject, _args, block) {
   if (!block) return makeEnumerator(self, 'map!', []);
   yield* modify(self);
   const mapped: Value[] = [];
-  yield* eachEntry(membersOf(self), function* (entry) {
-    mapped.push(yield* callBlock(block, [entry.key]));
-  });
-  membersOf(self).map.clear();
-  for (const value of mapped) yield* hashSet(membersOf(self), value, true);
-  return self;
+  rt().heldArrays.push(mapped);
+  try {
+    yield* eachEntry(membersOf(self), function* (entry) {
+      mapped.push(yield* callBlock(block, [entry.key]));
+    });
+    const replacement = yield* newSet(mapped);
+    const members = membersOf(replacement);
+    members.frozen = self.frozen;
+    self.data = new SetData(members);
+    return self;
+  } finally {
+    rt().heldArrays.pop();
+  }
 });
 def('Set', 'flatten', 0, function* (self: RObject) {
   return yield* newSet(yield* flattenMembers(self, new Set()));

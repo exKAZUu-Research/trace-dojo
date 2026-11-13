@@ -31,7 +31,8 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
     }
     if (array) {
       if (seen.has(array)) {
-        yield* write(target, '[...]\n');
+        yield* write(target, '[...]');
+        yield* write(target, '\n');
         return;
       }
       seen.add(array);

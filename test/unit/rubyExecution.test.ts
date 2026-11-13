@@ -1589,3 +1589,17 @@ test('Set hash callbacks reject insertion during iteration', () => {
     stdout: 'RuntimeError\n"can\'t add a new item into set during iteration"\n1\n',
   });
 });
+
+test('Set mapping completes when its callback freezes the receiver', () => {
+  expect(run('s=Set[1,2]; s.map! { |x| s.freeze; x+1 }; p s, s.frozen?')).toMatchObject({
+    stdout: 'Set[2, 3]\ntrue\n',
+  });
+});
+
+test('puts sends recursive array markers and newlines in separate writes', () => {
+  expect(
+    run('class W; def write(x); $v << x; end; end; $v=[]; $stdout=W.new; a=[]; a<<a; puts a; $stdout=STDOUT; p $v')
+  ).toMatchObject({
+    stdout: '["[...]", "\\n"]\n',
+  });
+});
