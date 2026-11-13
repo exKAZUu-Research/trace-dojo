@@ -265,7 +265,7 @@ function defineIntermediateOperations(kind: StreamKind): void {
   });
   op(cls, 'distinct', [], self, (frame, receiver) =>
     derive(impl, receiver, frame, (items) =>
-      primitive ? distinctPrimitives(items) : distinct(items, (a, b) => javaEquals(frame, a, b))
+      primitive ? distinctPrimitives(items, primitive === 'Double') : distinct(items, (a, b) => javaEquals(frame, a, b))
     )
   );
   const natural = (frame: Frame) => (a: Value, b: Value) =>
@@ -336,12 +336,13 @@ function* limited(items: Iterator<Value>, count: bigint): Generator<Value> {
 
 /**
  * The first of each equal value of a primitive stream. A DoubleStream compares as `Double.equals` does, which tells
- * -0.0 from 0.0 and finds NaN equal to NaN, whereas a `Set` finds the zeros equal, so -0.0 has a key of its own.
+ * -0.0 from 0.0 and finds NaN equal to NaN, whereas a `Set` finds the zeros equal, so its -0.0 has a key of its own;
+ * an int's zero is one value, however the host represents it.
  */
-function* distinctPrimitives(items: Iterator<Value>): Generator<Value> {
+function* distinctPrimitives(items: Iterator<Value>, isDouble: boolean): Generator<Value> {
   const seen = new Set<unknown>();
   for (const value of iterate(items)) {
-    const key = Object.is(value, -0) ? '-0' : value;
+    const key = isDouble && Object.is(value, -0) ? '-0' : value;
     if (seen.has(key)) continue;
     seen.add(key);
     yield value;
