@@ -1,3 +1,6 @@
+import { executeCProgram } from '../c/execute';
+import { findCTraceAnnotations } from '../c/parse';
+import { traceCProgram } from '../c/trace';
 import { executeGoProgram } from '../go/execute';
 import { findGoTraceAnnotations } from '../go/parse';
 import { traceGoProgram } from '../go/trace';
@@ -65,6 +68,7 @@ const interpreters = {
     record: tracePythonProgram,
     execute: executePythonProgram,
   },
+  c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
 } satisfies Record<string, Interpreter>;
 
 /**

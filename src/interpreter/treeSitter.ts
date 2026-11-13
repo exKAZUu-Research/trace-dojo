@@ -31,7 +31,8 @@ export function parseSource<T>(
   parser: Parser,
   source: string,
   missingTokenNames: Record<string, string>,
-  convert: (root: Node) => T
+  convert: (root: Node) => T,
+  locateErrors: (root: Node, errors: SourceDiagnostic[]) => SourceDiagnostic[] = (_root, errors) => errors
 ): T {
   const tree = parser.parse(source);
   if (!tree) throw new Error('The parser returned no tree');
@@ -40,7 +41,7 @@ export function parseSource<T>(
     if (tooDeep) {
       throw new CompileError([{ row: tooDeep.startPosition.row, message: '括弧やブロックなどの入れ子が深すぎます。' }]);
     }
-    const syntaxErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, false);
+    const syntaxErrors = locateErrors(tree.rootNode, collectSyntaxErrors(tree.rootNode, missingTokenNames, false));
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     const converted = convert(tree.rootNode);
     // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.
