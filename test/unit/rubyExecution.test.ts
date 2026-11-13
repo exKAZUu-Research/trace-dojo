@@ -19,6 +19,12 @@ test('shared module ancestry stays bounded', () => {
   expect(run(`${program}p A26.ancestors.size`)).toMatchObject({ kind: 'executed', stdout: '53\n' });
 });
 
+test('imaginary unit remains unsupported', () => {
+  expect(run('p 1.i')).toMatchObject({
+    uncaughtException: 'Numeric#i（複素数）は、この採点環境では使えません。',
+  });
+});
+
 test.each([
   ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],
@@ -97,6 +103,11 @@ test.each([
     '1\n10\n3\n10\nfalse\ntrue\n',
   ],
   [
+    'ArithmeticSequence last and structural hash',
+    'e=1.step(10,3); p e.last, e.last(2), e.last(0); p [e,e].uniq.size; h={e=>1}; p h[1.step(10,3)]; p (0.1..0.3).step(0.1).last, 1.0.step(0.0,-0.1).last, 1.step(10**400,2).last == 10**400-1',
+    '10\n[7, 10]\n[]\n1\n1\n0.2\n0.0\ntrue\n',
+  ],
+  [
     'Integer iteration near Float precision boundary',
     'a=2**53; p a.upto(a.to_f).to_a, (a+1).upto(a.to_f).to_a, (a+1).downto(a.to_f).to_a',
     '[9007199254740992]\n[]\n[9007199254740993, 9007199254740992]\n',
@@ -123,6 +134,8 @@ test.each([
   ],
   ['underscores in Float exponents', 'p "1e2_1".to_f, "1e2__1".to_f', '1.0e+21\n100.0\n'],
   ['Cherokee full case folding', 'p "Ꭱ".casecmp?("ꭱ")', 'true\n'],
+  ['negative binary formatting work is bounded', 'p format("%b", -(1<<200000)).bytesize', '200003\n'],
+  ['empty repetitions return promptly', 'p("" * 300000000, [] * 300000000)', '""\n[]\n'],
   [
     'String sum long bound',
     'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',

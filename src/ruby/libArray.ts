@@ -521,6 +521,7 @@ def('Array', '*', 1, function* (self: RArray, [count]) {
   if (count instanceof RString) return yield* join(self, count.s);
   const times = yield* toIndex(count);
   if (times < 0) throw argumentError('negative argument');
+  if (self.items.length === 0) return arr([]);
   grow(self.items.length * times);
   const items: Value[] = [];
   for (let index = 0; index < times; index++) for (const item of self.items) items.push(item);

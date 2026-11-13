@@ -352,10 +352,13 @@ function formatInteger(value: bigint, base: number, spec: Spec, prefix: string):
 
 /** Ruby's notation for a negative number in base 2, 8, or 16 without a sign: `..f01` for -255. */
 function twosComplement(value: bigint, base: number): string {
-  const bitsPerDigit = base === 2 ? 1n : base === 8 ? 3n : 4n;
-  let digits = 1n;
-  while (-value > (1n << (digits * bitsPerDigit)) / 2n) digits++;
-  let text = ((1n << ((digits + 1n) * bitsPerDigit)) + value).toString(base);
+  const bitsPerDigit = base === 2 ? 1 : base === 8 ? 3 : 4;
+  const magnitude = -value;
+  const bits = magnitude === 1n ? 0 : (magnitude - 1n).toString(2).length;
+  const digits = Math.max(1, Math.ceil((bits + 1) / bitsPerDigit));
+  rt().checkStringLength(digits + 2);
+  rt().spend(Math.ceil(digits / 256));
+  let text = ((1n << BigInt((digits + 1) * bitsPerDigit)) + value).toString(base);
   const fill = base === 2 ? '1' : base === 8 ? '7' : 'f';
   while (text.length > 1 && text[0] === fill && text[1] === fill) text = text.slice(1);
   return `..${text}`;

@@ -274,6 +274,7 @@ def('String', '*', 1, function* (self: RString, [count]) {
   const times = yield* toIndex(count);
   if (times < 0) throw argumentError('negative argument');
   const source = stringBytes(self);
+  if (source.length === 0) return stringFromBytes(source, self.binary);
   if (source.length * times > 1_000_000) throw argumentError('argument too big');
   rt().spend(Math.floor((source.length * times) / 256));
   const repeated = new Uint8Array(source.length * times);

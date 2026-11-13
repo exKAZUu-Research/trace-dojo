@@ -294,7 +294,10 @@ for (const owner of ['Integer', 'Float']) {
 for (const owner of ['Integer', 'Float']) {
   def(owner, 'real?', 0, () => true);
   def(owner, 'real', 0, (self: Num) => self);
-  def(owner, ['imag', 'imaginary', 'i'], 0, () => 0n);
+  def(owner, ['imag', 'imaginary'], 0, () => 0n);
+  def(owner, 'i', 0, () => {
+    throw new UnsupportedFeatureError('Numeric#i（複素数）');
+  });
   def(owner, 'abs2', 0, (self: Num) => numericAbs2(self));
   def(owner, ['conj', 'conjugate'], 0, (self: Num) => self);
   def(owner, ['arg', 'angle', 'phase'], 0, (self: Num) => numericArg(self));
