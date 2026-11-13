@@ -1,8 +1,9 @@
-import { bytesLikeData, latin1Bytes, latin1Text, newBytes } from '../../bytesValues';
+import { bytesLikeData, latin1Bytes, latin1Text, newBytes, PyMemoryView } from '../../bytesValues';
+import { isCContiguous, viewOf } from '../../memoryview';
 import { currentRuntime } from '../../runtimeContext';
 import { hasSurrogates } from '../../strings';
-import { typeError, typeName, unbox } from '../../types';
-import type { PyValue } from '../../values';
+import { builtinClass, exceptionClassNamed, newException, typeError, typeName, unbox } from '../../types';
+import { PyError, PyOpaque, type PyValue } from '../../values';
 
 /**
  * A string or bytes-like object that a pattern matches against, with its code points or bytes, since positions in
@@ -10,7 +11,9 @@ import type { PyValue } from '../../values';
  */
 export interface Subject {
   text: string;
-  codes: number[];
+  codes: readonly number[] | Uint8Array;
+  view?: PyMemoryView;
+  lease?: PyOpaque;
   /** Whether every code point is one UTF-16 code unit, so that code point positions index `text` directly. */
   plain: boolean;
   isBytes: boolean;
@@ -28,11 +31,51 @@ export function toSubject(value: PyValue, isBytes: boolean | undefined): Subject
     if (isBytes === true) throw typeError('cannot use a bytes pattern on a string-like object');
     return { ...codePoints(text), isBytes: false, original: value };
   }
-  const data = bytesLikeData(value);
-  if (data === undefined) throw typeError(`expected string or bytes-like object, got '${typeName(value)}'`);
-  if (isBytes === false) throw typeError('cannot use a string pattern on a bytes-like object');
-  currentRuntime().scan(data.length);
-  return { text: latin1Text(data), codes: [...data], plain: true, isBytes: true, original: value };
+  const view = byteView(value);
+  if (isBytes === false) {
+    if (view !== value) view.release();
+    throw typeError('cannot use a string pattern on a bytes-like object');
+  }
+  const lease = new PyOpaque(bufferLeaseClass, '', [view]);
+  view.exports.add(lease);
+  return {
+    text: '',
+    codes: view.source.data.subarray(view.offset, view.offset + view.nbytes),
+    plain: true,
+    isBytes: true,
+    original: value,
+    view,
+    lease,
+  };
+}
+
+const bufferLeaseClass = builtinClass('_re_buffer_lease');
+
+function byteView(value: PyValue): PyMemoryView {
+  let view: PyMemoryView;
+  try {
+    view = value instanceof PyMemoryView ? value : viewOf(value, '');
+    view.checkReleased();
+  } catch (error) {
+    if (error instanceof PyError && ['TypeError', 'ValueError'].includes(error.exception.cls.name))
+      throw typeError(`expected string or bytes-like object, got '${typeName(value)}'`);
+    throw error;
+  }
+  if (!isCContiguous(view)) {
+    if (view !== value) view.release();
+    throw new PyError(
+      newException(exceptionClassNamed('BufferError'), ['memoryview: underlying buffer is not C-contiguous'])
+    );
+  }
+  return view;
+}
+
+export function releaseSubject(subject: Subject): void {
+  const { view, lease } = subject;
+  if (!view || !lease) return;
+  view.exports.delete(lease);
+  if (view !== subject.original) view.release();
+  subject.lease = undefined;
 }
 
 export function codePoints(text: string): Omit<Subject, 'isBytes' | 'original'> {
@@ -55,8 +98,16 @@ export function substring(subject: Subject, start: number, end: number): string 
 
 /** A slice of the subject as Python gives it: a str, or bytes for any bytes-like subject. */
 export function sliceOf(subject: Subject, start: number, end: number): PyValue {
-  const text = substring(subject, start, end);
-  return subject.isBytes ? newBytes(latin1Bytes(text)) : text;
+  if (!subject.isBytes) return substring(subject, start, end);
+  const view = byteView(subject.original);
+  try {
+    currentRuntime().scan(Math.max(0, Math.min(end, view.nbytes) - Math.min(start, view.nbytes)));
+    return newBytes(
+      view.source.data.slice(view.offset + Math.min(start, view.nbytes), view.offset + Math.min(end, view.nbytes))
+    );
+  } finally {
+    if (view !== subject.original) view.release();
+  }
 }
 
 /** Joins pieces as str or bytes, raising CPython's TypeError for a piece of the other type. */

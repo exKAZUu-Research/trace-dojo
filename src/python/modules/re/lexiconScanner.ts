@@ -97,21 +97,25 @@ defineMethod(lexiconScannerClass, 'scan', (self, args, kwargs) => {
   const pattern = instance.dict.get('scanner') as PatternObject;
   const search = startSearch(pattern, string);
   const scanner = new ScannerObject(pattern, search);
-  const result: PyValue[] = [];
-  let position = 0;
-  for (;;) {
-    const match = scanner.next('match');
-    if (match === None) break;
-    const { spans, lastindex } = match as ReturnType<typeof newMatch>;
-    if (spans[1] === position) break;
-    let action = getItem(getItem(instance.dict.get('lexicon') as PyValue, BigInt(lastindex - 1)), 1n);
-    if (isCallable(action)) {
-      instance.dict.set('match', match);
-      action = callValue(action, [instance, (match as ReturnType<typeof newMatch>).group(0)]);
+  try {
+    const result: PyValue[] = [];
+    let position = 0;
+    for (;;) {
+      const match = scanner.next('match');
+      if (match === None) break;
+      const { spans, lastindex } = match as ReturnType<typeof newMatch>;
+      if (spans[1] === position) break;
+      let action = getItem(getItem(instance.dict.get('lexicon') as PyValue, BigInt(lastindex - 1)), 1n);
+      if (isCallable(action)) {
+        instance.dict.set('match', match);
+        action = callValue(action, [instance, (match as ReturnType<typeof newMatch>).group(0)]);
+      }
+      if (action !== None) result.push(action);
+      position = spans[1];
     }
-    if (action !== None) result.push(action);
-    position = spans[1];
+    const rest = getItem(string, new PySlice(sliceClass, BigInt(position), None, None));
+    return newTuple([currentRuntime().listOf(result), rest]);
+  } finally {
+    scanner.release();
   }
-  const rest = getItem(string, new PySlice(sliceClass, BigInt(position), None, None));
-  return newTuple([currentRuntime().listOf(result), rest]);
 });

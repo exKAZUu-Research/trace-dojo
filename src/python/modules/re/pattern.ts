@@ -1,6 +1,7 @@
 // `re.Pattern`, `re.PatternError`, and the scanner behind `finditer`, as CPython's `_sre` module defines them.
 import { bytesLikeData, latin1Text, PyBytes } from '../../bytesValues';
 import { pyRepr, pyStr } from '../../conversions';
+import { fieldsOf } from '../../cTypes';
 import { keyError } from '../../items';
 import { toIndex } from '../../numbers';
 import { callValue, isCallable } from '../../objects';
@@ -33,7 +34,7 @@ import { disassemble, dumpPattern, printText } from './debugDump';
 import { compileTemplate, expandTemplate, MatchObject, newMatch, truncate } from './match';
 import { type Budget, Matcher, MatchState } from './matcher';
 import { parse, type SubPattern } from './parser';
-import { joinPieces, sliceOf, type Subject, toSubject } from './subject';
+import { joinPieces, releaseSubject, sliceOf, type Subject, toSubject } from './subject';
 import { PatternSyntaxError, Tokenizer } from './tokenizer';
 
 export const patternErrorClass = builtinClassWithBase('PatternError', exceptionClassNamed('Exception'), 're');
@@ -137,6 +138,7 @@ export class PatternObject extends PyObject {
     readonly isBytes: boolean | undefined
   ) {
     super(patternClass);
+    fieldsOf(this).push(sourceValue);
     for (const [name, index] of groupindex) this.indexgroup[index] = name;
   }
 }
@@ -216,9 +218,26 @@ interface SearchArgs {
 }
 
 export function startSearch(pattern: PatternObject, string: PyValue, pos?: PyValue, endpos?: PyValue): SearchArgs {
+  const start = toSize(pos, 0);
+  const end = toSize(endpos, Number.MAX_SAFE_INTEGER);
   const subject = toSubject(string, pattern.isBytes);
-  const state = new MatchState(subject.codes, toSize(pos, 0), toSize(endpos, Number.MAX_SAFE_INTEGER));
+  const state = new MatchState(subject.codes, start, end);
   return { subject, state, matcher: new Matcher(pattern.program, state, runtimeBudget()) };
+}
+
+function usingSearch<T>(
+  pattern: PatternObject,
+  string: PyValue,
+  pos: PyValue | undefined,
+  endpos: PyValue | undefined,
+  run: (search: SearchArgs) => T
+): T {
+  const search = startSearch(pattern, string, pos, endpos);
+  try {
+    return run(search);
+  } finally {
+    releaseSubject(search.subject);
+  }
 }
 
 function method(
@@ -236,25 +255,27 @@ const SEARCH_PARAMS = ['string', 'pos', 'endpos'] as const;
 
 for (const kind of ['match', 'fullmatch', 'search'] as const) {
   method(kind, SEARCH_PARAMS, 1, (pattern, [string, pos, endpos]) => {
-    const { subject, state, matcher } = startSearch(pattern, string as PyValue, pos, endpos);
-    state.matchAll = kind === 'fullmatch';
-    const found = kind === 'search' ? matcher.search() : matcher.match();
-    return found ? newMatch(pattern, subject, state) : None;
+    return usingSearch(pattern, string as PyValue, pos, endpos, ({ subject, state, matcher }) => {
+      state.matchAll = kind === 'fullmatch';
+      const found = kind === 'search' ? matcher.search() : matcher.match();
+      return found ? newMatch(pattern, subject, state) : None;
+    });
   });
 }
 
 method('findall', SEARCH_PARAMS, 1, (pattern, [string, pos, endpos]) => {
-  const { subject, state, matcher } = startSearch(pattern, string as PyValue, pos, endpos);
-  const items: PyValue[] = [];
-  while (state.start <= state.end) {
-    state.reset();
-    state.ptr = state.start;
-    if (!matcher.search()) break;
-    items.push(findallItem(pattern, subject, state));
-    state.mustAdvance = state.ptr === state.start;
-    state.start = state.ptr;
-  }
-  return currentRuntime().listOf(items);
+  return usingSearch(pattern, string as PyValue, pos, endpos, ({ subject, state, matcher }) => {
+    const items: PyValue[] = [];
+    while (state.start <= state.end) {
+      state.reset();
+      state.ptr = state.start;
+      if (!matcher.search()) break;
+      items.push(findallItem(pattern, subject, state));
+      state.mustAdvance = state.ptr === state.start;
+      state.start = state.ptr;
+    }
+    return currentRuntime().listOf(items);
+  });
 });
 
 function findallItem(pattern: PatternObject, subject: Subject, state: MatchState): PyValue {
@@ -276,6 +297,12 @@ export class ScannerObject extends PyObject {
     private readonly search: SearchArgs
   ) {
     super(scannerClass);
+    fieldsOf(this).push(pattern, search.subject.original, ...(search.subject.lease ? [search.subject.lease] : []));
+  }
+
+  release(): void {
+    releaseSubject(this.search.subject);
+    fieldsOf(this).length = 0;
   }
 
   next(kind: 'match' | 'search'): PyValue {
@@ -308,37 +335,43 @@ readOnlyAttribute(scannerClass, 'pattern', 'member', (self) => (self as ScannerO
 method('finditer', SEARCH_PARAMS, 1, (pattern, [string, pos, endpos]) => {
   const scanner = new ScannerObject(pattern, startSearch(pattern, string as PyValue, pos, endpos));
   let finished = false;
-  return new PyIterator(iteratorClass('callable_iterator'), () => {
-    if (finished) return DONE;
-    const match = scanner.next('search');
-    if (match === None) {
-      finished = true;
-      return DONE;
-    }
-    return match;
-  });
+  return new PyIterator(
+    iteratorClass('callable_iterator'),
+    () => {
+      if (finished) return DONE;
+      const match = scanner.next('search');
+      if (match === None) {
+        finished = true;
+        scanner.release();
+        return DONE;
+      }
+      return match;
+    },
+    () => (finished ? [] : [scanner])
+  );
 });
 
 method('split', ['string', 'maxsplit'], 1, (pattern, [string, maxsplitValue]) => {
-  const { subject, state, matcher } = startSearch(pattern, string as PyValue);
-  const maxsplit = toSize(maxsplitValue, 0);
-  const items: PyValue[] = [];
-  let last = state.start;
-  for (let count = 0; maxsplit === 0 || count < maxsplit; count++) {
-    state.reset();
-    state.ptr = state.start;
-    if (!matcher.search()) break;
-    items.push(sliceOf(subject, last, state.start));
-    for (let group = 1; group <= pattern.groups; group++) {
-      const [start, end] = state.groupSpan(group);
-      items.push(start < 0 ? None : sliceOf(subject, start, end));
+  return usingSearch(pattern, string as PyValue, undefined, undefined, ({ subject, state, matcher }) => {
+    const maxsplit = toSize(maxsplitValue, 0);
+    const items: PyValue[] = [];
+    let last = state.start;
+    for (let count = 0; maxsplit === 0 || count < maxsplit; count++) {
+      state.reset();
+      state.ptr = state.start;
+      if (!matcher.search()) break;
+      items.push(sliceOf(subject, last, state.start));
+      for (let group = 1; group <= pattern.groups; group++) {
+        const [start, end] = state.groupSpan(group);
+        items.push(start < 0 ? None : sliceOf(subject, start, end));
+      }
+      state.mustAdvance = state.ptr === state.start;
+      last = state.ptr;
+      state.start = state.ptr;
     }
-    state.mustAdvance = state.ptr === state.start;
-    last = state.ptr;
-    state.start = state.ptr;
-  }
-  items.push(sliceOf(subject, last, state.endpos));
-  return currentRuntime().listOf(items);
+    items.push(sliceOf(subject, last, state.endpos));
+    return currentRuntime().listOf(items);
+  });
 });
 
 for (const kind of ['sub', 'subn'] as const) {
@@ -349,6 +382,7 @@ for (const kind of ['sub', 'subn'] as const) {
 }
 
 /** `pattern_subx`: replaces up to `count` matches, returning the new string and the number of replacements. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the substitution loop within one scope that releases its buffer on every exit.
 function substitute(
   pattern: PatternObject,
   repl: PyValue,
@@ -356,26 +390,27 @@ function substitute(
   countValue: PyValue | undefined
 ): [PyValue, number] {
   const template = isCallable(repl) ? undefined : compileTemplate(pattern, repl);
-  const { subject, state, matcher } = startSearch(pattern, string);
-  const limit = toSize(countValue, 0);
-  const pieces: PyValue[] = [];
-  let last = 0;
-  let replaced = 0;
-  while (limit === 0 || replaced < limit) {
-    state.ptr = state.start;
-    if (!matcher.search()) break;
-    if (last < state.start) pieces.push(sliceOf(subject, last, state.start));
-    const match = newMatch(pattern, subject, state);
-    const item = template ? expandTemplate(template, match, true) : callValue(repl, [match]);
-    if (item !== None) pieces.push(item);
-    last = state.ptr;
-    replaced++;
-    state.mustAdvance = state.ptr === state.start;
-    state.start = state.ptr;
-    state.reset();
-  }
-  if (last < state.endpos) pieces.push(sliceOf(subject, last, state.endpos));
-  return [joinPieces(subject.isBytes, pieces), replaced];
+  return usingSearch<[PyValue, number]>(pattern, string, undefined, undefined, ({ subject, state, matcher }) => {
+    const limit = toSize(countValue, 0);
+    const pieces: PyValue[] = [];
+    let last = 0;
+    let replaced = 0;
+    while (limit === 0 || replaced < limit) {
+      state.ptr = state.start;
+      if (!matcher.search()) break;
+      if (last < state.start) pieces.push(sliceOf(subject, last, state.start));
+      const match = newMatch(pattern, subject, state);
+      const item = template ? expandTemplate(template, match, true) : callValue(repl, [match]);
+      if (item !== None) pieces.push(item);
+      last = state.ptr;
+      replaced++;
+      state.mustAdvance = state.ptr === state.start;
+      state.start = state.ptr;
+      state.reset();
+    }
+    if (last < state.endpos) pieces.push(sliceOf(subject, last, state.endpos));
+    return [joinPieces(subject.isBytes, pieces), replaced];
+  });
 }
 
 function property(name: string, get: (pattern: PatternObject) => PyValue): void {

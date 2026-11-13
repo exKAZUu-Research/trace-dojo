@@ -75,7 +75,7 @@ export class MatchState {
   readonly endpos: number;
 
   constructor(
-    readonly text: number[],
+    readonly text: readonly number[] | Uint8Array,
     pos: number,
     endpos: number
   ) {

@@ -1,6 +1,7 @@
 // `re.Match` and the expansion of replacement templates, which `Match.expand` and `Pattern.sub` share.
 import { bytesLikeData, latin1Bytes, latin1Text, newBytes } from '../../bytesValues';
 import { pyRepr } from '../../conversions';
+import { fieldsOf } from '../../cTypes';
 import { pyHash } from '../../hashing';
 import { checkArgs } from '../../nativeArgs';
 import { toIndex } from '../../numbers';
@@ -33,6 +34,7 @@ export class MatchObject extends PyObject {
     readonly lastindex: number
   ) {
     super(matchClass);
+    fieldsOf(this).push(pattern, subject.original);
   }
 
   group(index: number): PyValue {
