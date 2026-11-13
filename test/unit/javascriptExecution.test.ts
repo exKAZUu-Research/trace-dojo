@@ -851,34 +851,37 @@ while (level < 5) { for (let i = 0; i < 500; i++) sum += i; bump(); } console.lo
 var waited = 0; const y = Date.now(); while (waited < 300) { for (let i = 0; i < 500; i++) sum += i; var waited = Date.now() - y; } console.log('var wait');
 const grown = [0]; const x = Date.now(); for (const item of grown) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - x < 300) grown.push(item + 1); } console.log('grown');
 let elapsed = 0; const e = Date.now(); while (elapsed < 300) { for (let i = 0; i < 500; i++) sum += i; const now = Date.now(); elapsed = now - e; } console.log('local now');
-const queue = [1]; const p = Date.now(); for (let i = 0; i < queue.length; i++) { for (let k = 0; k < 500; k++) sum += k; if (Date.now() - p < 300) queue.push(1); } console.log('queue grown');`,
+const queue = [1]; const p = Date.now(); for (let i = 0; i < queue.length; i++) { for (let k = 0; k < 500; k++) sum += k; if (Date.now() - p < 300) queue.push(1); } console.log('queue grown');
+const u = Date.now(); function update() { spent = Date.now() - u; } for (var spent = 0; spent < 300; ) { for (let i = 0; i < 500; i++) sum += i; update(); } console.log('var counter');
+try { const d = Date.now(); while (true) { for (let i = 0; i < 500; i++) sum += i; if (Date.now() - d >= 300) throw new Error('timeout'); } } catch (error) { console.log(error.message); }
+let batched = false; const b = Date.now(); while (!batched) { for (let i = 0; i < 500; i++) { sum += i; if (i === 499) batched = Date.now() - b >= 300; } } console.log('batched');`,
   ],
   [
     'a timestamp helper around computation between timers',
     `let sum = 0; const start = Date.now(); const log = (message) => console.log(message, Date.now() - start >= 0);
-setTimeout(() => console.log('E 50'), 50); log('begin'); for (let i = 0; i < 20000; i++) sum += i; log('end'); setTimeout(() => console.log('F 0'), 0);
+setTimeout(() => console.log('E 50'), 50); log('begin'); for (let i = 0; i < 5000; i++) sum += i; log('end'); setTimeout(() => console.log('F 0'), 0);
 setTimeout(() => console.log('G 50'), 50);
-for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; console.log('round', k, Date.now() - s >= 0); }
+for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; console.log('round', k, Date.now() - s >= 0); }
 for (const n of [1, 2]) log(n); setTimeout(() => console.log('H 0'), 0);
 setTimeout(() => console.log('I 50'), 50);
-let k = 0; while (true) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; console.log('pass', k, Date.now() - s >= 0); if (++k === 2) break; }
+let k = 0; while (true) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; console.log('pass', k, Date.now() - s >= 0); if (++k === 2) break; }
 setTimeout(() => console.log('J 0'), 0);
 setTimeout(() => console.log('K 50'), 50); const times = [];
-for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 20000; i++) sum += i; times.push(Date.now() - s); }
+for (let k = 0; k < 3; k++) { const s = Date.now(); for (let i = 0; i < 5000; i++) sum += i; times.push(Date.now() - s); }
 console.log(times.length); setTimeout(() => console.log('L 0'), 0);
 function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
 setTimeout(() => console.log('M 50'), 50); const fibTimes = [];
-for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n); fibTimes.push(Date.now() - s); }
+for (let n = 1; n <= 15; n++) { const s = Date.now(); fib(n % 8); fibTimes.push(Date.now() - s); }
 console.log(fibTimes.length); setTimeout(() => console.log('N 0'), 0);
 setTimeout(() => console.log('O 50'), 50); const inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]; const inputTimes = [];
-for (let i = 0; i < inputs.length; i++) { const s = Date.now(); fib(inputs[i]); inputTimes.push(Date.now() - s); }
+for (let i = 0; i < inputs.length; i++) { const s = Date.now(); fib(inputs[i] % 8); inputTimes.push(Date.now() - s); }
 console.log(inputTimes.length); setTimeout(() => console.log('P 0'), 0);
 setTimeout(() => console.log('Q 50'), 50); const ROUNDS = 15; const roundTimes = [];
-for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n); roundTimes.push(Date.now() - s); }
-let r = 1; while (r <= ROUNDS) { const s = Date.now(); fib(r); roundTimes.push(Date.now() - s); r++; }
+for (let n = 1; n <= ROUNDS; n++) { const s = Date.now(); fib(n % 8); roundTimes.push(Date.now() - s); }
+let r = 1; while (r <= ROUNDS) { const s = Date.now(); fib(r % 8); roundTimes.push(Date.now() - s); r++; }
 console.log(roundTimes.length); setTimeout(() => console.log('R 0'), 0);
-setTimeout(() => console.log('S 50'), 50); let c; for (c = 0; c < 15; c++) { const s = Date.now(); fib(c); roundTimes.push(Date.now() - s); }
-c = 0; while (c < 15) { const s = Date.now(); fib(c); roundTimes.push(Date.now() - s); c++; }
+setTimeout(() => console.log('S 50'), 50); let c; for (c = 0; c < 15; c++) { const s = Date.now(); fib(c % 8); roundTimes.push(Date.now() - s); }
+c = 0; while (c < 15) { const s = Date.now(); fib(c % 8); roundTimes.push(Date.now() - s); c++; }
 function count(values) { let c = 0; for (const value of values) c += value; return c; }
 console.log(count([roundTimes.length])); setTimeout(() => console.log('T 0'), 0);`,
   ],

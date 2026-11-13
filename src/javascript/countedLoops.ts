@@ -32,12 +32,13 @@ interface Collected {
 
 /**
  * Marks the loops of a program whose end cannot depend on the clock, which then never poll it however many of their
- * iterations read it: a `for...in` loop that neither breaks nor returns, or a `for`, `while`, or `do...while` loop that
- * neither breaks nor returns and whose test and update only combine literals, variables, and the `length` of arrays and
- * strings no code changes, where nothing can write those variables while it runs except its init, its update, and plain
- * statements directly in its body that read only such variables. Writes to another binding of a name, and those the
- * loop's own function makes outside the loop, run before or after it. A `for...of` loop may grow the array it walks or
- * walk a generator until a deadline. Any busy wait ends through something else, which a clock read can change.
+ * iterations read it: a `for...in` loop that neither breaks, returns, nor throws, or a `for`, `while`, or `do...while`
+ * loop that neither breaks, returns, nor throws and whose test and update only combine literals, variables, and the
+ * `length` of arrays and strings no code changes, where nothing can write those variables while it runs except its
+ * `let` or `const` init, its update, and plain statements directly in its body that read only such variables. Writes
+ * to another binding of a name, and those the loop's own function makes outside the loop, run before or after it. A
+ * `for...of` loop may grow the array it walks or walk a generator until a deadline. Any busy wait ends through
+ * something else, which a clock read can change.
  */
 export function markCountedLoops(program: Program): void {
   const collected: Collected = { writes: [], loops: [], uses: [], handled: new Set(), writtenThrough: new Set() };
@@ -84,7 +85,9 @@ class CountedProof {
       }
     }
     collectWriteNodes([loop.test, this.update, loop.body], this.inLoop);
-    this.ownNames = new Set(init?.kind === 'declaration' ? namesIn(init.declarators.map(({ target }) => target)) : []);
+    // A `var` in the init binds in the enclosing function, where other code can write it.
+    const declaresOwn = init?.kind === 'declaration' && init.declarationKind !== 'var';
+    this.ownNames = new Set(declaresOwn ? namesIn(init.declarators.map(({ target }) => target)) : []);
   }
 
   holds(): boolean {
@@ -319,14 +322,14 @@ function collectWriteNodes(node: unknown, nodes: Set<object>, nested = true): vo
   for (const value of Object.values(node)) collectWriteNodes(value, nodes);
 }
 
-/** Whether a statement contains a `break` or `return`, outside any function it defines. */
+/** Whether a statement contains a `break`, `return`, or `throw`, outside any function it defines. */
 function leaves(node: unknown): boolean {
   if (typeof node !== 'object' || node === null) return false;
   if (Array.isArray(node)) return node.some(leaves);
   const { kind } = node as { kind?: unknown };
   if (kind === 'functionExpression' || kind === 'classExpression' || kind === 'function' || kind === 'class')
     return false;
-  if (kind === 'break' || kind === 'return') return true;
+  if (kind === 'break' || kind === 'return' || kind === 'throw') return true;
   return Object.values(node).some(leaves);
 }
 

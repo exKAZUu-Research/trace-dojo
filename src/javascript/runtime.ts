@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 590 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 592 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -598,20 +598,26 @@ export class Runtime {
 
   /**
    * Notes a read of the clock, returning whether it polls, as a busy wait does: whether the innermost running loop, in
-   * this frame or a caller of it, has read the clock in more than POLLING_ITERATIONS of its iterations. A loop timing a
-   * few rounds of work reads it in a handful, while a busy wait reads it again and again, whatever decides its end.
+   * this frame or a caller of it, that is not counted (its end may depend on the clock) has read the clock in more than
+   * POLLING_ITERATIONS of its iterations. A loop timing a few rounds of work reads it in a handful, while a busy wait
+   * reads it again and again, whatever decides its end.
    */
   pollsClock(): boolean {
+    // Every running loop the read happens in counts it, and the innermost loop the clock may end decides: a counted
+    // loop inside it, such as a batch of work, may be where the clock is read for the loop around it.
+    let decides: LoopState | undefined;
     for (let index = this.frames.length - 1; index >= 0; index--) {
-      const loop = this.frames[index].loops.at(-1);
-      if (!loop) continue;
-      if (loop.lastClockRead !== loop.iteration) {
-        loop.lastClockRead = loop.iteration;
-        loop.clockReadIterations++;
+      const { loops } = this.frames[index];
+      for (let at = loops.length - 1; at >= 0; at--) {
+        const loop = loops[at];
+        if (loop.lastClockRead !== loop.iteration) {
+          loop.lastClockRead = loop.iteration;
+          loop.clockReadIterations++;
+        }
+        if (!decides && !loop.counted) decides = loop;
       }
-      return !loop.counted && loop.clockReadIterations > POLLING_ITERATIONS;
     }
-    return false;
+    return decides !== undefined && decides.clockReadIterations > POLLING_ITERATIONS;
   }
 
   pushFrame(scope: Scope, callRow: number | undefined, isAtomic: boolean): Frame {
