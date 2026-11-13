@@ -21,10 +21,6 @@ export function field(node: Node, name: string): Node {
   return child;
 }
 
-export function fieldNodes(node: Node, name: string): Node[] {
-  return node.childrenForFieldName(name);
-}
-
 const CLAUSE_TYPES = new Set(['elif_clause', 'else_clause', 'except_clause', 'finally_clause']);
 
 /**
