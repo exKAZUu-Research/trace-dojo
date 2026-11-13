@@ -1,6 +1,6 @@
 import { nativeReferences } from './garbageCollection';
 import { currentRuntime } from './runtimeContext';
-import { PyError, type PyInstance, type PyValue } from './values';
+import { PyError, type PyInstance, PyObject, type PyValue } from './values';
 
 export class TemporaryScope {
   readonly length: number;
@@ -18,6 +18,7 @@ export class TemporaryScope {
 
   keep<T>(value: T): T {
     this.result = value;
+    for (const reference of nativeReferences(value)) if (reference instanceof PyObject) this.values.push(reference);
     this.exception = undefined;
     this.failed = false;
     this.aborted = false;

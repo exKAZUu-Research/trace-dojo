@@ -14,6 +14,7 @@ import itertools
 import math
 import types
 import warnings
+import weakref
 
 _PENDING = 'PENDING'
 _CANCELLED = 'CANCELLED'
@@ -1456,6 +1457,7 @@ class Task(_PyFuture):
                 assert curtask is self
             finally:
                 if self.done():
+                    _py_unregister_task(self)
                     self._coro = None
                     self = None  # Needed to break cycles when an exception occurs.
                 else:
@@ -1474,6 +1476,8 @@ class Task(_PyFuture):
             self.__step_run_and_handle_result(exc)
         finally:
             _py_leave_task(self._loop, self)
+            if self.done():
+                _py_unregister_task(self)
             self = None  # Needed to break cycles when an exception occurs.
     def __step_run_and_handle_result(self, exc):
         coro = self._coro
@@ -1884,7 +1888,8 @@ def create_eager_task_factory(custom_task_constructor):
             coro, loop=loop, eager_start=eager_start, **kwargs)
     return factory
 eager_task_factory = create_eager_task_factory(Task)
-_scheduled_tasks = set()
+_scheduled_tasks = weakref.WeakSet()
+del weakref
 _eager_tasks = set()
 _current_tasks = {}
 def _register_task(task):

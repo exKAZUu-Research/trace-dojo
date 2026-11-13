@@ -656,12 +656,12 @@ export class ExpressionEvaluator {
         kwargs,
         expression.row
       );
+      this.afterCall(callee, args, kwargs, result);
     } catch (error) {
       throw temporaryScope4.capture(error);
     } finally {
       temporaryScope4.release();
     }
-    this.afterCall(callee, args, kwargs, result);
     return result;
   }
 

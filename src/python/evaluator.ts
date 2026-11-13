@@ -965,17 +965,15 @@ export class Evaluator extends AsyncEvaluator {
   }
 
   private *runHandler(handler: ExceptHandler, exception: PyInstance, frame: Frame): Execution {
+    const temporaryScope = new TemporaryScope(frame.temporaries);
+    frame.temporaries.push(exception);
     if (handler.name) this.storeName(handler.name, exception, frame);
     this.handling.push(exception);
-    let escaping: PyInstance | undefined;
     try {
-      return yield* this.block(handler.body, frame);
+      return temporaryScope.keep(yield* this.block(handler.body, frame));
     } catch (error) {
-      if (error instanceof PyError) {
-        this.chainTo(error.exception, exception);
-        escaping = error.exception;
-      }
-      throw error;
+      if (error instanceof PyError) this.chainTo(error.exception, exception);
+      throw temporaryScope.capture(error);
     } finally {
       this.handling.pop();
       // Python deletes the name after the handler, so that the exception does not stay reachable.
@@ -988,9 +986,7 @@ export class Evaluator extends AsyncEvaluator {
           if (!(error instanceof PyError)) throw error;
         }
       }
-      // The handled exception dies with the handler, and with it the frames its traceback kept.
-      const { finalizer } = this.runtime;
-      if (finalizer.pending.size > 0) finalizer.release([exception], [escaping]);
+      temporaryScope.release();
     }
   }
 

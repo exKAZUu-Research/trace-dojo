@@ -409,12 +409,12 @@ export abstract class SuspendingEvaluator extends ExpressionEvaluator {
       kwargs = collected.kwargs;
       const owner = this.beforeCall(calleeValue, frame, temporaryScope7.length);
       result = yield* this.invokeSuspending(owner, calleeValue, passed, kwargs, row);
+      this.afterCall(calleeValue, passed, kwargs, result);
     } catch (error) {
       throw temporaryScope7.capture(error);
     } finally {
       temporaryScope7.release();
     }
-    this.afterCall(calleeValue, passed, kwargs, result);
     return result;
   }
 
