@@ -57,6 +57,11 @@ test.each([
     '"\\xFF"\n[255]\n',
   ],
   ['both Float zeros as one Hash key', 'h={}; h[-0.0]=1; h[0.0]=2; p h.size; p h[-0.0]', '1\n2\n'],
+  [
+    'Array subclass Hash overrides',
+    'class A < Array; def hash; 0; end; def eql?(other); true; end; end; a=A.new([1]); b=A.new([2]); h={}; h[a]=1; h[b]=2; p h.size; p h[a]',
+    '1\n2\n',
+  ],
   ['index receiver before index locals', '(a = [0])[a.size - 1] = 7; p a', '[7]\n'],
   [
     'mixed UTF-8 text and escaped bytes',
@@ -98,6 +103,7 @@ test.each([
   ['nil String line and chomp separators', 'p "x".lines(nil); p "x".chomp(nil)', '["x"]\n"x"\n'],
   ['Array fill beyond the end', 'a=[1,2]; p a.fill(0,5); p a.fill(0,5..7)', '[1, 2]\n[1, 2, nil, nil, nil, 0, 0, 0]\n'],
   ['Array values_at beyond the end', 'p [1,2].values_at(5..7)', '[nil, nil, nil]\n'],
+  ['array clearing during deletion', 'a=[1,2,3]; a.delete_if { |x| a.clear if x==2; x==1 }; p a', '[2]\n'],
   [
     'array state during deletion',
     'a=[1,2,3]; a.delete_if { |x| p a; x == 1 }; p a',

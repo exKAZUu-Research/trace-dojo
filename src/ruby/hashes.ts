@@ -1,18 +1,7 @@
 import { inspect } from './conversions';
 import { frozenError, runtimeError } from './errors';
 import { callMethod, callProc, type Gen, runToEnd } from './interp';
-import {
-  type HashEntry,
-  NIL,
-  RArray,
-  type RBasic,
-  RHash,
-  RObject,
-  RRange,
-  RString,
-  RSymbol,
-  type Value,
-} from './objects';
+import { type HashEntry, NIL, RArray, RBasic, RHash, RObject, RRange, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, snapshot, str, truthy } from './values';
 
@@ -24,6 +13,20 @@ import { classOf, snapshot, str, truthy } from './values';
 // code-gauge-allow functionNcss 34 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
 export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { found: boolean }): Gen<string> {
   cycle ??= { found: false };
+  if (value instanceof RBasic && ancestors.includes(value)) {
+    cycle.found = true;
+    return 'recursive';
+  }
+  const method = classOf(value).findMethod('hash');
+  if (method && method.body.kind === 'user') {
+    if (value instanceof RBasic) ancestors.push(value);
+    try {
+      const hash = yield* callMethod(value, 'hash', []);
+      return `u${digest(typeof hash === 'bigint' ? String(hash) : yield* hashKeyOf(hash, ancestors, cycle))}`;
+    } finally {
+      if (value instanceof RBasic) ancestors.pop();
+    }
+  }
   switch (typeof value) {
     case 'bigint': {
       return `i${digest(String(value))}`;
@@ -39,11 +42,6 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
   if (value instanceof RSymbol) return `y${digest(value.name)}`;
   if (value instanceof RString) return `s${digest(value.s)}`;
   if (value instanceof RArray || value instanceof RRange || value instanceof RHash) {
-    const cycleIndex = ancestors.indexOf(value);
-    if (cycleIndex !== -1) {
-      cycle.found = true;
-      return `c${cycleIndex}`;
-    }
     const root = ancestors.length === 0;
     ancestors.push(value);
     try {
@@ -73,11 +71,6 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
     } finally {
       ancestors.pop();
     }
-  }
-  const method = classOf(value).findMethod('hash');
-  if (method && method.body.kind === 'user') {
-    const hash = yield* callMethod(value, 'hash', []);
-    return `u${digest(typeof hash === 'bigint' ? String(hash) : yield* hashKeyOf(hash, ancestors, cycle))}`;
   }
   const custom = value instanceof RObject ? (value.data as { hashKey?: () => string } | undefined) : undefined;
   if (custom?.hashKey) return custom.hashKey();

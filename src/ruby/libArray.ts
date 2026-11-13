@@ -343,15 +343,14 @@ function* filterInPlace(self: RArray, block: RProc, keep: (result: boolean) => b
   let changed = false;
   let read = 0;
   let write = 0;
-  const items = self.items;
   try {
-    for (; read < items.length; read++) {
-      const item = items[read];
-      if (keep(truthy(yield* call(block, item)))) items[write++] = item;
+    for (; read < self.items.length; read++) {
+      const item = self.items[read];
+      if (keep(truthy(yield* call(block, item)))) self.items[write++] = item;
       else changed = true;
     }
   } finally {
-    if (write < read) self.items = [...items.slice(0, write), ...items.slice(read)];
+    if (write < read) self.items = [...self.items.slice(0, write), ...self.items.slice(read)];
   }
   return changed;
 }
