@@ -906,6 +906,9 @@ function parseHexFloat(match: RegExpExecArray): number {
   const sign = match[1] === '-' ? -1n : 1n;
   if (coefficient === 0n) return sign < 0n ? -0 : 0;
   const exponent = Number((match[4] ?? '0').replaceAll('_', '')) - fraction.length * 4;
+  const leading = exponent + coefficient.toString(2).length - 1;
+  if (leading < -1075) return sign < 0n ? -0 : 0;
+  if (leading > 1023) return sign < 0n ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
   return roundedDouble(sign * coefficient, exponent);
 }
 

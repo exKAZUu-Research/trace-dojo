@@ -2266,6 +2266,9 @@ test('Float conversion accepts Ruby decimal and hexadecimal text', () => {
     stdout: '3.0\n0.25\n1.0\n',
   });
   expect(run('p "1.e2".to_f,"-2.e3".to_f')).toMatchObject({ stdout: '100.0\n-2000.0\n' });
+  expect(run('p Float("0x1p-"+"9"*309),Float("-0x1p-"+"9"*309)')).toMatchObject({
+    stdout: '0.0\n-0.0\n',
+  });
 });
 
 test('Float powers handle unit and Complex nonfinite boundaries', () => {
