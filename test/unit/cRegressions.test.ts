@@ -1589,19 +1589,27 @@ test('parameter annotation calls are rejected instead of discarded', () => {
   });
 });
 
-test.each(['(b^k)^k', 'k^(k^b)', 'k+(b-k)', '(b+k)-k', '((b^k)+19-19)^k', '((b+k)^91^91)-k'])(
-  'equal pointer representations retain the source byte origin: %s',
-  (expression) => {
-    for (const end of [false, true]) {
-      const source = `#include <stdio.h>\n#include <string.h>\nunsigned char pass(unsigned char n){unsigned char copy;memcpy(&copy,&n,1);return copy;}\nint main(void){int a[2][2]={{1,2},{3,4}};int*p=${end ? 'a[0]+2' : 'a[1]'},*m=${end ? 'a[1]' : 'a[0]+2'},*q;for(int i=0;i<8;i++){unsigned char b=((unsigned char*)&p)[i],k=((unsigned char*)&m)[i];((unsigned char*)&q)[i]=pass(${expression});}printf("%d",*q);}`;
-      expect(executeProgram('c', source)).toMatchObject({
-        kind: 'executed',
-        stdout: end ? '' : '3',
-        uncaughtException: end ? expect.any(String) : undefined,
-      });
-    }
+test.each([
+  '(b^k)^k',
+  'k^(k^b)',
+  'k+(b-k)',
+  '(b+k)-k',
+  '((b^k)+19-19)^k',
+  '((b+k)^91^91)-k',
+  '(b|k)+(b&k)-k',
+  '(b^k)+2*(b&k)-k',
+  '2*(b|k)-(b^k)-k',
+  '((b|k)^(b&k))^k',
+])('equal pointer representations retain the source byte origin: %s', (expression) => {
+  for (const end of [false, true]) {
+    const source = `#include <stdio.h>\n#include <string.h>\nunsigned char pass(unsigned char n){unsigned char copy;memcpy(&copy,&n,1);return copy;}\nint main(void){int a[2][2]={{1,2},{3,4}};int*p=${end ? 'a[0]+2' : 'a[1]'},*m=${end ? 'a[1]' : 'a[0]+2'},*q;for(int i=0;i<8;i++){unsigned char b=((unsigned char*)&p)[i],k=((unsigned char*)&m)[i];((unsigned char*)&q)[i]=pass(${expression});}printf("%d",*q);}`;
+    expect(executeProgram('c', source)).toMatchObject({
+      kind: 'executed',
+      stdout: end ? '' : '3',
+      uncaughtException: end ? expect.any(String) : undefined,
+    });
   }
-);
+});
 
 test.each(['(p^m)^m', 'm^(m^p)', 'm+(p-m)', '(p+m)-m', '~~((p^m)^m)'])(
   'equal pointer representations retain integer origins through copies: %s',
@@ -1616,3 +1624,23 @@ test.each(['(p^m)^m', 'm^(m^p)', 'm+(p-m)', '(p+m)-m', '~~((p^m)^m)'])(
     }
   }
 );
+
+test.each([
+  '(p|m)+(p&m)-m',
+  '(p^m)+2*(p&m)-m',
+  '2*(p|m)-(p^m)-m',
+  '((p|m)^(p&m))^m',
+  '(p|m)-m+(p&m)',
+  '(p^m)+(p&m)+(m&p)-m',
+])('linear Boolean reconstruction preserves pointer bounds: %s', (expression) => {
+  for (const end of [false, true])
+    for (const aux of ['a[0]', 'a[1]', 'a[0]+2'])
+      for (const copy of [false, true]) {
+        const source = `#include <stdio.h>\n#include <stdint.h>\n#include <string.h>\nint main(void){int a[2][2]={{1,2},{3,4}};uintptr_t p=(uintptr_t)(${end ? 'a[0]+2' : 'a[1]'}),m=(uintptr_t)(${aux});int*q;${copy ? `uintptr_t n=${expression};memcpy(&q,&n,8);` : `q=(int*)(${expression});`}printf("%d",*q);}`;
+        expect(executeProgram('c', source)).toMatchObject({
+          kind: 'executed',
+          stdout: end ? '' : '3',
+          uncaughtException: end ? expect.any(String) : undefined,
+        });
+      }
+});

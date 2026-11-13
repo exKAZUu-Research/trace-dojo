@@ -178,7 +178,20 @@ export function rangeOfBytes(
   const proven = origins.find((origin) => origin.proof?.source?.origin?.range)?.proof?.source?.origin?.range;
   if (proven) return proven;
   const expression = origins.find((origin) => origin.expression)?.expression;
-  if (expression) return rangeOfTerms(expression);
+  if (expression) {
+    const range = rangeOfTerms(expression);
+    const proof = origins.find((origin) => origin.expression === expression)?.proof;
+    return (
+      range ??
+      (proof
+        ? rangeOfProofSources(
+            proof,
+            new DataView(representation.buffer, representation.byteOffset).getBigUint64(offset, true),
+            budget
+          )
+        : undefined)
+    );
+  }
   let range: PointerRange | undefined;
   for (const origin of origins) {
     if (!origin.range) continue;
@@ -265,7 +278,7 @@ export function arithmeticResult(
   }
   return {
     value,
-    range: isAddress ? rangeOfTerms(expression) : undefined,
+    range: isAddress ? (rangeOfTerms(expression) ?? rangeOfProofSources(proof, value, budget)) : undefined,
     bytes: expressionBytes(bytes, value, expression, budget, proof),
   };
 }

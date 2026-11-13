@@ -26,6 +26,16 @@ interface Input {
   value: Scalar;
 }
 
+interface BooleanTerm {
+  factors: ProvenanceExpression[];
+  weight: bigint;
+}
+type BooleanPolynomial = ReadonlyMap<string, BooleanTerm>;
+interface LinearParts {
+  constant: bigint;
+  terms: ReadonlyMap<ProvenanceExpression, bigint>;
+}
+
 const algebras = new WeakMap<ExecutionBudget, ProvenanceAlgebra>();
 
 export function provenanceAlgebra(budget: ExecutionBudget): ProvenanceAlgebra {
@@ -39,6 +49,9 @@ export function provenanceAlgebra(budget: ExecutionBudget): ProvenanceAlgebra {
 
 export class ProvenanceAlgebra {
   private readonly expressions = new Map<string, ProvenanceExpression>();
+  private readonly booleanForms = new Map<number, BooleanPolynomial>();
+  private readonly booleanNodes = new Set<number>();
+  private readonly linearAliases = new Map<string, ProvenanceExpression>();
 
   constructor(private readonly budget: ExecutionBudget) {}
 
@@ -69,17 +82,22 @@ export class ProvenanceAlgebra {
       expression: input.expression.width === width ? input.expression : this.opaque(input.value, [input], width),
     }));
     let result: ProvenanceExpression | undefined;
-    if (operator === '+' || operator === '-' || operator === '^')
+    if (operator === '^' && inputs.some((input) => this.booleanNodes.has(input.expression.id)))
+      result = this.booleanExpression('^', inputs, width);
+    else if (operator === '+' || operator === '-' || operator === '^')
       result = this.normalize(operator === '^' ? 'xor' : 'add', inputs, width, operator === '-');
     else if (operator === '~')
       result = this.normalize('xor', [...inputs, { expression: this.constant(-1, width), value: -1 }], width, false);
-    else result = this.identity(operator, inputs, width);
+    else {
+      result = this.identity(operator, inputs, width);
+      if (!result && (operator === '&' || operator === '|')) result = this.booleanExpression(operator, inputs, width);
+    }
     return result?.value === BigInt.asUintN(width, BigInt(value))
       ? result
       : this.opaque(value, inputs, width, operator);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Neutral and absorbing identities must respect signed division and C shift values in one dispatch.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Neutral and absorbing identities must respect signed division and C shift values in one dispatch.
   private identity(
     operator: BinaryOperator | undefined,
     inputs: Input[],
@@ -100,28 +118,30 @@ export class ProvenanceAlgebra {
         return this.constant(0, width);
       if (operator === '/' && BigInt(right.value) === 1n) return a;
       if ((operator === '<<' || operator === '>>') && BigInt(right.value) === 0n) return a;
+      if (operator === '*') return this.normalize('add', [left], width, false, [b.value]);
     }
     if ((operator === '&' || operator === '|') && a.id === b.id) return a;
     return undefined;
   }
 
   // code-gauge-allow functionCognitiveComplexity 27 -- Canonical terms, coefficients and constants must use the same modular domain.
-  // code-gauge-allow functionNcss 31 -- One normalization pass creates the interned expression and its remaining sources.
-  private normalize(mode: 'add' | 'xor', inputs: Input[], width: 8 | 64, subtract: boolean): ProvenanceExpression {
+  // code-gauge-allow functionNcss 32 -- One normalization pass creates the interned expression and its remaining sources.
+  private normalize(
+    mode: 'add' | 'xor',
+    inputs: Input[],
+    width: 8 | 64,
+    subtract: boolean,
+    scales?: readonly bigint[]
+  ): ProvenanceExpression {
     const terms = new Map<ProvenanceExpression, bigint>();
     const combine = mode === 'xor' ? (a: bigint, b: bigint): bigint => a ^ b : (a: bigint, b: bigint): bigint => a + b;
     const coefficientWidth = mode === 'xor' ? 1 : width;
     let constant = 0n;
     for (const [index, { expression }] of inputs.entries()) {
-      const factor = subtract && index > 0 ? -1n : 1n;
-      const component = expression.mode === mode || !expression.mode ? (expression.constant ?? 0n) : 0n;
-      constant = combine(constant, component * factor);
-      const source =
-        expression.mode === mode
-          ? expression.terms!
-          : expression.constant !== undefined && !expression.mode
-            ? []
-            : [[expression, 1n] as const];
+      const factor = (scales?.[index] ?? 1n) * (subtract && index > 0 ? -1n : 1n);
+      const parts = mode === 'add' ? this.linearParts(expression) : this.xorParts(expression);
+      constant = combine(constant, parts.constant * factor);
+      const source = parts.terms;
       for (const [term, weight] of source) {
         this.budget.spend();
         const next = BigInt.asUintN(coefficientWidth, (terms.get(term) ?? 0n) + weight * factor);
@@ -135,9 +155,9 @@ export class ProvenanceAlgebra {
       const [term, weight] = terms.entries().next().value!;
       if (weight === 1n) return term;
     }
-    this.budget.spend(terms.size * Math.max(1, Math.ceil(Math.log2(terms.size))));
-    const sorted = [...terms].toSorted((a, b) => a[0].id - b[0].id);
-    const key = `${mode}:${width}/${constant}/` + sorted.map(([term, weight]) => `${term.id}:${weight}`).join(',');
+    const key = this.formKey(mode, width, constant, terms);
+    const alias = mode === 'add' ? this.linearAliases.get(key) : undefined;
+    if (alias) return alias;
     let value = constant;
     for (const [term, weight] of terms) value = combine(value, term.value * weight);
     return this.intern(key, {
@@ -148,6 +168,133 @@ export class ProvenanceAlgebra {
       terms,
       sources: this.sources([...terms.keys()]),
     });
+  }
+
+  private xorParts(expression: ProvenanceExpression): LinearParts {
+    if (expression.mode === 'xor') return { constant: expression.constant!, terms: expression.terms! };
+    if (!expression.mode && expression.constant !== undefined)
+      return { constant: expression.constant, terms: new Map() };
+    return { constant: 0n, terms: new Map([[expression, 1n]]) };
+  }
+
+  private linearParts(expression: ProvenanceExpression): LinearParts {
+    if (expression.mode === 'add') return { constant: expression.constant!, terms: expression.terms! };
+    if (expression.mode !== 'xor' && !this.booleanNodes.has(expression.id)) return this.xorParts(expression);
+    const terms = new Map<ProvenanceExpression, bigint>();
+    let constant = 0n;
+    for (const [key, term] of this.booleanParts(expression)) {
+      const monomial = this.fromBoolean(new Map([[key, { ...term, weight: 1n }]]), expression.width);
+      if (monomial.constant !== undefined && !monomial.mode) constant += monomial.value * term.weight;
+      else terms.set(monomial, BigInt.asUintN(expression.width, (terms.get(monomial) ?? 0n) + term.weight));
+    }
+    for (const [term, weight] of terms) if (weight === 0n) terms.delete(term);
+    constant = BigInt.asUintN(expression.width, constant);
+    const key = this.formKey('add', expression.width, constant, terms);
+    if (!this.linearAliases.has(key)) this.linearAliases.set(key, expression);
+    return { constant, terms };
+  }
+
+  private booleanExpression(operator: '&' | '|' | '^', inputs: Input[], width: 8 | 64): ProvenanceExpression {
+    const [a, b] = inputs.map((input) => this.booleanParts(input.expression));
+    return this.fromBoolean(this.booleanOperation(operator, a, b, width), width);
+  }
+
+  private booleanParts(expression: ProvenanceExpression): BooleanPolynomial {
+    const previous = this.booleanForms.get(expression.id);
+    if (previous) return previous;
+    const width = expression.width;
+    let terms: BooleanPolynomial;
+    if (expression.mode === 'xor') {
+      terms = this.booleanParts(this.constant(expression.constant!, width));
+      for (const term of expression.terms!.keys())
+        terms = this.booleanOperation('^', terms, this.booleanParts(term), width);
+    } else if (expression.sources.size === 0 && expression.value === 0n) terms = new Map();
+    else if (expression.sources.size === 0 && expression.value === (1n << BigInt(width)) - 1n)
+      terms = new Map([['', { factors: [], weight: 1n }]]);
+    else terms = new Map([[String(expression.id), { factors: [expression], weight: 1n }]]);
+    this.booleanForms.set(expression.id, terms);
+    return terms;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 17 -- Boolean products and sums must share canonical monomial keys and modular coefficients.
+  private booleanOperation(
+    operator: '&' | '|' | '^',
+    a: BooleanPolynomial,
+    b: BooleanPolynomial,
+    width: 8 | 64
+  ): BooleanPolynomial {
+    const product = new Map<string, BooleanTerm>();
+    for (const x of a.values())
+      for (const y of b.values()) {
+        this.budget.spend(x.factors.length + y.factors.length + 1);
+        const factors = [
+          ...new Map([...x.factors, ...y.factors].map((factor) => [factor.id, factor])).values(),
+        ].toSorted((left, right) => left.id - right.id);
+        const key = factors.map((factor) => factor.id).join('&');
+        const weight = BigInt.asUintN(width, (product.get(key)?.weight ?? 0n) + x.weight * y.weight);
+        if (weight === 0n) product.delete(key);
+        else product.set(key, { factors, weight });
+      }
+    if (operator === '&') return product;
+    const result = new Map<string, BooleanTerm>();
+    for (const [polynomial, factor] of [
+      [a, 1n],
+      [b, 1n],
+      [product, operator === '^' ? -2n : -1n],
+    ] as const) {
+      this.budget.spend(polynomial.size);
+      for (const [key, term] of polynomial) {
+        const weight = BigInt.asUintN(width, (result.get(key)?.weight ?? 0n) + term.weight * factor);
+        if (weight === 0n) result.delete(key);
+        else result.set(key, { factors: term.factors, weight });
+      }
+    }
+    return result;
+  }
+
+  private fromBoolean(terms: BooleanPolynomial, width: 8 | 64): ProvenanceExpression {
+    if (terms.size === 0) return this.constant(0, width);
+    if (terms.size === 1) {
+      const [term] = terms.values();
+      if (term.weight === 1n && term.factors.length === 0) return this.constant(-1, width);
+      if (term.weight === 1n && term.factors.length === 1) return term.factors[0];
+    }
+    this.budget.spend(terms.size * Math.max(1, Math.ceil(Math.log2(terms.size))));
+    const key =
+      `bool:${width}/` +
+      [...terms]
+        .toSorted(([a], [b]) => a.localeCompare(b))
+        .map(([at, term]) => `${at}:${term.weight}`)
+        .join(',');
+    let value = 0n;
+    for (const term of terms.values()) {
+      this.budget.spend(term.factors.length);
+      value += term.weight * term.factors.reduce((bits, factor) => bits & factor.value, (1n << BigInt(width)) - 1n);
+    }
+    const expression = this.intern(key, {
+      width,
+      value: BigInt.asUintN(width, value),
+      sources: this.sources([...terms.values()].flatMap((term) => term.factors)),
+    });
+    this.booleanForms.set(expression.id, terms);
+    this.booleanNodes.add(expression.id);
+    return expression;
+  }
+
+  private formKey(
+    mode: 'add' | 'xor',
+    width: 8 | 64,
+    constant: bigint,
+    terms: ReadonlyMap<ProvenanceExpression, bigint>
+  ): string {
+    this.budget.spend(terms.size * Math.max(1, Math.ceil(Math.log2(terms.size))));
+    return (
+      `${mode}:${width}/${constant}/` +
+      [...terms]
+        .toSorted((a, b) => a[0].id - b[0].id)
+        .map(([term, weight]) => `${term.id}:${weight}`)
+        .join(',')
+    );
   }
 
   private opaque(value: Scalar, inputs: Input[], width: 8 | 64, operator?: BinaryOperator | '~'): ProvenanceExpression {
