@@ -13,7 +13,7 @@ import { def } from './define';
 import { argumentCountError, argumentError, typeError } from './errors';
 import { eachEntry, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
-import { customEnumerator, iterateEnumerator, makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { customEnumerator, iterateEnumerator, makeEnumerator, receiverSize, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
@@ -917,9 +917,7 @@ def('Enumerable', 'to_set', 0, function* (self) {
 
 /** The size of a collection when it can tell without iterating, for an enumerator's `size`. */
 export function sizeOf(collection: Value): Value {
-  if (collection instanceof RArray) return BigInt(collection.items.length);
-  if (collection instanceof RHash) return BigInt(collection.map.size);
-  return NIL;
+  return receiverSize(collection);
 }
 
 export { callProc, respondsTo, spaceship };

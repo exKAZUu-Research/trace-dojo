@@ -1,6 +1,7 @@
-import { addressOf, inspect, toInt } from './conversions';
+import { addressOf, inspect, numericCompare, toInt } from './conversions';
 import { def, sdef } from './define';
-import { argumentCountError } from './errors';
+import { argumentCountError, floatDomainError, rangeError } from './errors';
+import { fusedMultiplyAdd } from './floatMath';
 import { callMethod, callProc, type Gen, nativeProc } from './interp';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
@@ -52,6 +53,13 @@ function enumeratorSize(recv: Value, method: string, args: Value[], keywords?: R
     if (method === 'times') return recv > 0n ? recv : 0n;
     if (typeof limit === 'bigint' && method === 'upto') return limit >= recv ? limit - recv + 1n : 0n;
     if (typeof limit === 'bigint' && method === 'downto') return limit <= recv ? recv - limit + 1n : 0n;
+    if (typeof limit === 'number' && (method === 'upto' || method === 'downto')) {
+      if (Number.isNaN(limit)) throw floatDomainError('NaN');
+      if (!Number.isFinite(limit)) return (method === 'upto') === limit > 0 ? Number.POSITIVE_INFINITY : 0n;
+      const end = BigInt(method === 'upto' ? Math.floor(limit) : Math.ceil(limit));
+      const distance = method === 'upto' ? end - recv : recv - end;
+      return distance < 0n ? 0n : distance + 1n;
+    }
   }
   const base = receiverSize(recv);
   if (method === 'each_slice' && typeof args[0] === 'bigint' && typeof base === 'bigint')
@@ -62,12 +70,13 @@ function enumeratorSize(recv: Value, method: string, args: Value[], keywords?: R
     if (base === 0n || (typeof args[0] === 'bigint' && args[0] <= 0n)) return 0n;
     return typeof args[0] === 'bigint' ? base * args[0] : Number.POSITIVE_INFINITY;
   }
+  if (method === 'loop') return Number.POSITIVE_INFINITY;
   if (NIL_SIZE_METHODS.has(method)) return NIL;
   if (FIXED_SIZE_METHODS.has(method)) return base;
   return NIL;
 }
 
-function receiverSize(recv: Value): Value {
+export function receiverSize(recv: Value): Value {
   if (recv instanceof RArray) return BigInt(recv.items.length);
   if (recv instanceof RHash) return BigInt(recv.map.size);
   if (recv instanceof RString) return BigInt(stringCharacters(recv).length);
@@ -110,22 +119,7 @@ function arraySelectionSize(length: number, method: string, requested: Value | u
 }
 
 function stepSize(recv: Value, args: Value[], keywords?: RHash): Value {
-  let start: Value = recv;
-  let end: Value = args[0] ?? NIL;
-  let step: Value = args[1] ?? 1n;
-  let exclusive = false;
-  if (recv instanceof RRange) {
-    start = recv.begin;
-    end = recv.end;
-    step = args[0] ?? 1n;
-    exclusive = recv.exclusive;
-  }
-  if (keywords) {
-    for (const entry of keywords.map.values()) {
-      if (entry.key instanceof RSymbol && entry.key.name === 'to') end = entry.value;
-      if (entry.key instanceof RSymbol && entry.key.name === 'by') step = entry.value;
-    }
-  }
+  const { start, end, step, exclusive } = arithmeticSpec(recv, args, keywords);
   if (
     (typeof start !== 'bigint' && typeof start !== 'number') ||
     (typeof end !== 'bigint' && typeof end !== 'number' && end !== NIL) ||
@@ -142,6 +136,35 @@ function stepSize(recv: Value, args: Value[], keywords?: RHash): Value {
   if (!Number.isFinite(distance)) return distance > 0 ? Number.POSITIVE_INFINITY : 0n;
   const count = exclusive ? Math.ceil(distance - 1e-12) : Math.floor(distance + 1e-12) + 1;
   return BigInt(Math.max(0, count));
+}
+
+function arithmeticSpec(
+  recv: Value,
+  args: Value[],
+  keywords?: RHash
+): {
+  start: Value;
+  end: Value;
+  step: Value;
+  exclusive: boolean;
+} {
+  let start: Value = recv;
+  let end: Value = args[0] ?? NIL;
+  let step: Value = args[1] ?? 1n;
+  let exclusive = false;
+  if (recv instanceof RRange) {
+    start = recv.begin;
+    end = recv.end;
+    step = args[0] ?? 1n;
+    exclusive = recv.exclusive;
+  }
+  if (keywords) {
+    for (const entry of keywords.map.values()) {
+      if (entry.key instanceof RSymbol && entry.key.name === 'to') end = entry.value;
+      if (entry.key instanceof RSymbol && entry.key.name === 'by') step = entry.value;
+    }
+  }
+  return { start, end, step, exclusive };
 }
 
 const FIXED_SIZE_METHODS = new Set([
@@ -177,7 +200,7 @@ const FIXED_SIZE_METHODS = new Set([
   'each_char',
   'each_byte',
 ]);
-const NIL_SIZE_METHODS = new Set(['find', 'find_index', 'take_while', 'drop_while', 'bsearch', 'each_line', 'loop']);
+const NIL_SIZE_METHODS = new Set(['find', 'find_index', 'take_while', 'drop_while', 'bsearch', 'each_line']);
 const ARRAY_SELECTION_METHODS = new Set(['combination', 'permutation', 'repeated_combination', 'repeated_permutation']);
 
 export function sizedEnumerator(recv: Value, method: string, args: Value[], size: () => Value): RObject {
@@ -247,6 +270,51 @@ def('Enumerator', 'size', 0, (self: RObject) => {
   const source = sourceOf(self);
   return source.size === undefined ? NIL : source.size();
 });
+for (const name of ['begin', 'end', 'step'] as const)
+  def('Enumerator::ArithmeticSequence', name, 0, (self: RObject) => {
+    const source = sourceOf(self);
+    const spec = arithmeticSpec(source.recv, source.args, source.keywords);
+    return name === 'begin' ? spec.start : name === 'end' ? spec.end : spec.step;
+  });
+def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
+  const source = sourceOf(self);
+  return arithmeticSpec(source.recv, source.args, source.keywords).exclusive;
+});
+def('Enumerator::ArithmeticSequence', 'last', 0, (self: RObject) => {
+  const source = sourceOf(self);
+  const size = source.size?.() ?? NIL;
+  if (size === Number.POSITIVE_INFINITY) throw rangeError('cannot get the last element of endless arithmetic sequence');
+  const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
+  if (size === NIL) return NIL;
+  if (
+    size === 0n &&
+    !(
+      source.recv instanceof RRange &&
+      exclusive &&
+      numericCompare(start as bigint | number, end as bigint | number) === 0
+    )
+  )
+    return NIL;
+  if (typeof start === 'bigint' && typeof step === 'bigint' && typeof size === 'bigint')
+    return start + (size - 1n) * step;
+  return fusedMultiplyAdd(Number(size) - 1, Number(step), Number(start));
+});
+for (const name of ['==', '===', 'eql?'])
+  def('Enumerator::ArithmeticSequence', name, 1, (self: RObject, [other]) => {
+    if (!(other instanceof RObject) || other.cls !== rt().c['Enumerator::ArithmeticSequence']) return false;
+    const left = sourceOf(self);
+    const right = sourceOf(other);
+    const a = arithmeticSpec(left.recv, left.args, left.keywords);
+    const b = arithmeticSpec(right.recv, right.args, right.keywords);
+    return (
+      a.exclusive === b.exclusive &&
+      numericCompare(a.start as bigint | number, b.start as bigint | number) === 0 &&
+      (a.end === NIL
+        ? b.end === NIL
+        : b.end !== NIL && numericCompare(a.end as bigint | number, b.end as bigint | number) === 0) &&
+      numericCompare(a.step as bigint | number, b.step as bigint | number) === 0
+    );
+  });
 def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const source = sourceOf(self);
   if (source.iterate) return str(`#<Enumerator: #<Enumerator::Generator:${addressOf(self)}>:each>`);

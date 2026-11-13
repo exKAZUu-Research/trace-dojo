@@ -80,6 +80,21 @@ test.each([
     '2\n3\n6\n6\n9\n',
   ],
   [
+    'Enumerable sizes over Range and Set',
+    'p (1..3).map.size, Set[1,2].sort_by.size, [1,2].each.map.size, loop.size, 1.upto(2.5).size, 3.downto(1.5).size',
+    '3\n2\n2\nInfinity\n2\n2\n',
+  ],
+  [
+    'ArithmeticSequence accessors and equality',
+    'e=1.step(10,3); p e.begin,e.end,e.step,e.last,e.exclude_end?,e == (1..10).step(3)',
+    '1\n10\n3\n10\nfalse\ntrue\n',
+  ],
+  [
+    'Integer iteration near Float precision boundary',
+    'a=2**53; p a.upto(a.to_f).to_a, (a+1).upto(a.to_f).to_a, (a+1).downto(a.to_f).to_a',
+    '[9007199254740992]\n[]\n[9007199254740993, 9007199254740992]\n',
+  ],
+  [
     'String sum long bound',
     'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',
     "bignum too big to convert into 'long'\n38\n",
