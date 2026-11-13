@@ -12,6 +12,13 @@ afterEach(() => {
 
 const run = (program: string): ProgramExecution => executeProgram('ruby', program);
 
+test('shared module ancestry stays bounded', () => {
+  let program = 'module A0;end\nmodule B0;end\n';
+  for (let index = 1; index <= 26; index++)
+    program += `module A${index};include A${index - 1},B${index - 1};end\nmodule B${index};include A${index - 1},B${index - 1};end\n`;
+  expect(run(`${program}p A26.ancestors.size`)).toMatchObject({ kind: 'executed', stdout: '53\n' });
+});
+
 test.each([
   ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],
@@ -114,6 +121,8 @@ test.each([
     'p 5.numerator,5.denominator,5.real?,5.real,5.imag,5.abs2,5.conj,5.polar,5.rect,5.arg; p 0.1.numerator,0.1.denominator,-0.0.arg',
     '5\n1\ntrue\n5\n0\n25\n5\n[5, 0]\n[5, 0]\n0\n3602879701896397\n36028797018963968\n3.141592653589793\n',
   ],
+  ['underscores in Float exponents', 'p "1e2_1".to_f, "1e2__1".to_f', '1.0e+21\n100.0\n'],
+  ['Cherokee full case folding', 'p "Ꭱ".casecmp?("ꭱ")', 'true\n'],
   [
     'String sum long bound',
     'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',

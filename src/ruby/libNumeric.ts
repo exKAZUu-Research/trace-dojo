@@ -873,7 +873,7 @@ export function parseIntegerLenient(text: string, base = 10): bigint {
 }
 
 export function parseFloatLenient(text: string): number {
-  const match = /^[\t\n\v\f\r ]*([+-]?(?:\d+(?:_\d+)*)?(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+)?)/.exec(text);
+  const match = /^[\t\n\v\f\r ]*([+-]?(?:\d+(?:_\d+)*)?(?:\.\d+(?:_\d+)*)?(?:[eE][+-]?\d+(?:_\d+)*)?)/.exec(text);
   const body = match?.[1].replaceAll('_', '') ?? '';
   if (!/\d/.test(body)) {
     const leading = /^[\t\n\v\f\r ]*([+-]?\d+(?:_\d+)*)/.exec(text);

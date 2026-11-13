@@ -1,4 +1,6 @@
 // Generated from Ruby 4.0.9 String#downcase(:fold) for code points where JavaScript lowercase differs.
+const CHEROKEE_FOLD_IDENTITY_START = 0x13_a0;
+const CHEROKEE_FOLD_IDENTITY_END = 0x13_f5;
 const overrides = new Map<number, string>([
   [181, 'μ'],
   [223, 'ss'],
@@ -215,6 +217,12 @@ const overrides = new Map<number, string>([
 
 export function foldCase(text: string): string {
   let folded = '';
-  for (const char of text) folded += overrides.get(char.codePointAt(0) as number) ?? char.toLowerCase();
+  for (const char of text) {
+    const point = char.codePointAt(0) as number;
+    folded +=
+      point >= CHEROKEE_FOLD_IDENTITY_START && point <= CHEROKEE_FOLD_IDENTITY_END
+        ? char
+        : (overrides.get(point) ?? char.toLowerCase());
+  }
   return folded;
 }

@@ -240,11 +240,11 @@ export class RClass extends RBasic {
     const superAncestors = this.superclass ? this.superclass.ancestors() : [];
     const inSuper = new Set(superAncestors);
     const addModule = (module: RClass): void => {
+      if (seen.has(module) || inSuper.has(module)) return;
+      seen.add(module);
+      rt().spend();
       for (const prepended of module.prepends) addModule(prepended);
-      if (!seen.has(module) && !inSuper.has(module)) {
-        seen.add(module);
-        list.push(module);
-      }
+      list.push(module);
       for (const included of module.includes) addModule(included);
     };
     addModule(this);
