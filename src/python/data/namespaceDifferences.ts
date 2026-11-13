@@ -34,6 +34,8 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__repr__ __init__ close detach seekable writable fileno isatty _dealloc_warn write truncate flush seek tell __sizeof__ __getstate__ raw _finalizing closed name mode __doc__ __module__',
   '_io.BytesIO':
     '__new__ __iter__ __next__ __init__ readable seekable writable close flush isatty tell write writelines read1 readinto readline readlines read getbuffer getvalue seek truncate __getstate__ __setstate__ __sizeof__ closed __doc__ __module__',
+  '_io.FileIO':
+    '__new__ __repr__ __init__ read readall readinto write seek tell truncate close seekable readable writable fileno isatty _isatty_open_only _dealloc_warn __getstate__ _finalizing closed closefd mode _blksize __doc__ __module__',
   '_io.IncrementalNewlineDecoder': '__init__ decode getstate setstate reset newlines __doc__ __module__',
   '_io.StringIO':
     '__new__ __next__ __init__ close getvalue read readline tell truncate seek write seekable readable writable __getstate__ __setstate__ closed newlines line_buffering __doc__ __module__',
@@ -747,6 +749,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     array: [
       [],
       [
+        '_type_name',
         '_iter_array',
         '_convert',
         '_view',
@@ -1098,6 +1101,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     '_csv.reader': [[], ['__firstlineno__', '__slots__', '__static_attributes__', '_input', '_dialect', '_line_num']],
     '_csv.writer': [[], ['__firstlineno__', '__slots__', '__static_attributes__', '_write', '_dialect']],
     '_io.BytesIO': [['__init__', '__getstate__', '__sizeof__'], []],
+    '_io.FileIO': [['readall', '_isatty_open_only', '_dealloc_warn', '__getstate__', '__module__'], []],
     '_io.StringIO': [['__init__', '__getstate__'], []],
     '_io._BufferedIOBase': [[], ['_readinto']],
     '_io._IOBase': [[], ['_unsupported', '_IOBase__closed', '__weakref__']],

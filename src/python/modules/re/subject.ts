@@ -2,7 +2,7 @@ import { bytesLikeData, latin1Bytes, latin1Text, newBytes, PyMemoryView } from '
 import { isCContiguous, viewOf } from '../../memoryview';
 import { currentRuntime } from '../../runtimeContext';
 import { hasSurrogates } from '../../strings';
-import { builtinClass, exceptionClassNamed, newException, typeError, typeName, unbox } from '../../types';
+import { builtinClass, typeError, typeName, unbox } from '../../types';
 import { PyError, PyOpaque, type PyValue } from '../../values';
 
 /**
@@ -63,9 +63,7 @@ function byteView(value: PyValue): PyMemoryView {
   }
   if (!isCContiguous(view)) {
     if (view !== value) view.release();
-    throw new PyError(
-      newException(exceptionClassNamed('BufferError'), ['memoryview: underlying buffer is not C-contiguous'])
-    );
+    throw typeError(`expected string or bytes-like object, got '${typeName(value)}'`);
   }
   return view;
 }

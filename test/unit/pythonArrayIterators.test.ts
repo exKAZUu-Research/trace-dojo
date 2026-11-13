@@ -69,7 +69,11 @@ print('generated')`;
 
 test('array subclasses retain their type name in all representations', () => {
   const program = `import array
-class A(array.array): pass
+class Meta(type):
+    def __getattribute__(cls, name):
+        if name == '__name__': raise AssertionError('metaclass hook ran')
+        return super().__getattribute__(name)
+class A(array.array, metaclass=Meta): pass
 for code, values in [('i', []), ('i', [1, 2]), ('u', 'ab')]:
     plain = array.array(code, values)
     custom = A(code, values)

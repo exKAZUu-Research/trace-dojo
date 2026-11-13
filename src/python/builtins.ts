@@ -9,6 +9,7 @@ import { builtin } from './define';
 import { compile, COMPILE_KEYWORDS, evaluate, execute } from './dynamicCode';
 import { enumMembersOf } from './enums';
 import { pyHash } from './hashing';
+import { input } from './inputStream';
 import { defineConstructingNew } from './instances';
 import { reduction, withState } from './iteratorStates';
 import { dunderImport } from './modules/importlib';
@@ -743,7 +744,7 @@ function builtinNamespace(): Map<string, PyValue> {
     ['hash', one('hash', ([value]) => pyHash(value))],
     ['hex', one('hex', radix('0x', 16))],
     ['id', one('id', ([value]) => currentRuntime().idOf(value))],
-    ['input', unsupportedFunction('input', '標準入力（input()）')],
+    ['input', builtin('input', 'expected', 0, 1, ([prompt]) => input(prompt))],
     ['isinstance', builtin('isinstance', 'expected', 2, 2, ([value, classInfo]) => isInstance(value, classInfo))],
     ['issubclass', builtin('issubclass', 'expected', 2, 2, ([cls, classInfo]) => isSubclass(cls, classInfo))],
     ['iter', builtin('iter', 'expected', 1, 2, iter)],

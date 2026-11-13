@@ -2031,6 +2031,8 @@ class TextIOWrapper(_TextIOBase):
 
 
 
+FileIO = _file_class(RawIOBase.__bases__[0])
+RawIOBase.register(FileIO)
 StringIO, BytesIO = _stream_classes(_TextIOBase, _BufferedIOBase)
 for klass in (BytesIO, BufferedReader, BufferedWriter, BufferedRandom, BufferedRWPair):
     BufferedIOBase.register(klass)
@@ -2094,5 +2096,5 @@ for _cls in (BufferedRWPair, BufferedRandom, BufferedReader, BufferedWriter, Inc
 del _cls
 
 del _IOBase, _RawIOBase, _BufferedIOBase, _TextIOBase
-del _c_type_name, _c_type, _allocate, _handled_exception, _standard_stderr, _stream_classes
+del _c_type_name, _c_type, _allocate, _handled_exception, _standard_stderr, _stream_classes, _file_class
 `;

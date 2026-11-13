@@ -56,6 +56,8 @@ registerModule(
     ]);
     for (const [key, value] of entries) namespace.set(key, value);
     namespace.set('modules', sysModules(runtime));
+    const module = runtime.importModule('sys');
+    for (const name of ['stdin', '__stdin__']) module.imports.set(name, () => runtime.standardStream('stdin'));
     return new Map();
   },
   UNSUPPORTED_SYS_ATTRIBUTES

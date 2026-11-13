@@ -139,12 +139,12 @@ test('a grader stop bypasses context exit and temporary finalization', () => {
     def __del__(self): print('del')
 with R():
     print('before')
-    input()
+    open('file')
 print('after')`;
   expect(executeProgram('python', program)).toMatchObject({
     kind: 'executed',
     stdout: 'before\n',
-    uncaughtException: '標準入力（input()）は、この採点環境では使えません。',
+    uncaughtException: 'ファイルの読み書き（open()）は、この採点環境では使えません。',
   });
 });
 

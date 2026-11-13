@@ -2,6 +2,26 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test('regex APIs reject strided buffers without retaining their exports', () => {
+  const program = `import re
+for original in [b'abc', bytearray(b'abc')]:
+    view = memoryview(original)[::2]
+    for operation in [lambda: re.search(b'.', view), lambda: re.findall(b'.', view),
+                      lambda: list(re.finditer(b'.', view)), lambda: re.sub(b'.', b'x', view),
+                      lambda: re.compile(b'.').scanner(view)]:
+        try: operation()
+        except TypeError as error: assert str(error) == "expected string or bytes-like object, got 'memoryview'"
+        else: raise AssertionError('accepted strided buffer')
+    view.release()
+    if isinstance(original, bytearray): original.append(100)
+print('rejected')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'rejected\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('regex iterators read live bytes and release their exports at exhaustion', () => {
   const program = `import re, array
 for data in [bytearray(b'abc'), array.array('B', b'abc')]:

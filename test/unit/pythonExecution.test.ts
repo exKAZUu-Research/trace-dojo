@@ -81,7 +81,7 @@ test.each([
   ['a turtle leaving the board', 't = Turtle(0, 6)\nt.前に進む()', 'RuntimeError: Out of bounds: (0, 7)'],
   ['an invalid color', "Turtle(0, 0, 'Z')", 'RuntimeError: Invalid color: Z'],
   ['unbounded recursion', 'def f(n):\n    return f(n + 1)\nf(0)', 'RecursionError: maximum recursion depth exceeded'],
-  ['standard input', 'input()', '標準入力（input()）は、この採点環境では使えません。'],
+  ['standard input at EOF', 'input()', 'EOFError: EOF when reading a line'],
   [
     'random bytes from the operating system',
     'import random\ntry:\n    random.SystemRandom().randbytes(4)\nexcept BaseException:\n    pass',

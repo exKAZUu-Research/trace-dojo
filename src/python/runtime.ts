@@ -19,6 +19,7 @@ import { resumeGenerator } from './generators';
 import { pyHash } from './hashing';
 import { hostRoots } from './hostRoots';
 import { deepNestingError, isHostStackOverflow } from './hostStack';
+import { createInputStream } from './inputStream';
 import { instantiate } from './instances';
 import { keyError } from './items';
 import { viewOf } from './memoryview';
@@ -120,7 +121,6 @@ export class Runtime {
   private slots = 0;
   private reprDepth = 0;
 
-  /** The standard streams and files of the run; Python writes standard output only. */
   readonly io: ProgramIO;
 
   constructor(input?: ProgramInput) {
@@ -634,11 +634,10 @@ export class Runtime {
     return boundSuper(superClass, cls, self);
   }
 
-  /** The object `print` writes to for `sys.stdout` or `sys.stderr`. */
-  standardStream(name: 'stdout' | 'stderr'): PyValue {
+  standardStream(name: 'stdin' | 'stdout' | 'stderr'): PyValue {
     let stream = this.streams.get(name);
     if (!stream) {
-      stream = createStream(this, name);
+      stream = name === 'stdin' ? createInputStream(this) : createStream(this, name);
       this.streams.set(name, stream);
     }
     return stream;

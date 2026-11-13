@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 556 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 558 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -291,19 +291,19 @@ function moduleTypeAttribute(module: PyModule, name: string): PyValue | undefine
   return attribute instanceof PyBuiltinFunction ? bindValue(attribute, module, module.cls) : undefined;
 }
 
-/**
- * The module CPython's module holds under `name` because its code imported it, which is the same object here too, or
- * the object another module defines that this module shares, named `module:attribute`.
- */
 export function importedModule(module: PyModule, name: string): PyValue | undefined {
   const target = module.imports.get(name);
   if (target === undefined) return undefined;
-  const [moduleName, attribute] = target.split(':');
-  const imported = currentRuntime().importModule(moduleName);
-  const value = attribute === undefined ? imported : getAttribute(imported, attribute);
+  const value = typeof target === 'string' ? importTarget(target) : target();
   module.imports.delete(name);
   module.dict.set(name, value);
   return value;
+}
+
+function importTarget(target: string): PyValue {
+  const [moduleName, attribute] = target.split(':');
+  const imported = currentRuntime().importModule(moduleName);
+  return attribute === undefined ? imported : getAttribute(imported, attribute);
 }
 
 export { deleteAttribute, setAttribute } from './attributes';

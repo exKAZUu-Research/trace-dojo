@@ -7,7 +7,7 @@ import { callValue } from '../objects';
 import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { strLength } from '../strings';
-import { iteratorClass, newTuple, None, objectClass, pyError, typeError, typeName } from '../types';
+import { classOf, iteratorClass, newTuple, None, objectClass, pyError, typeError, typeName } from '../types';
 import { DONE, type PyClass, PyIterator, type PyValue } from '../values';
 import { realArgument } from './math';
 
@@ -125,11 +125,12 @@ class array:
 
     def __repr__(self):
         items = self._items()
+        name = _type_name(self)
         if not items:
-            return f"{type(self).__name__}('{self._typecode}')"
+            return f"{name}('{self._typecode}')"
         if self._typecode in 'uw':
-            return f"{type(self).__name__}('{self._typecode}', {''.join(items)!r})"
-        return f"{type(self).__name__}('{self._typecode}', {items!r})"
+            return f"{name}('{self._typecode}', {''.join(items)!r})"
+        return f"{name}('{self._typecode}', {items!r})"
 
     def __len__(self):
         return len(self._data) // _ITEMSIZE[self._typecode]
@@ -484,6 +485,7 @@ registerSourceModule(
   SOURCE,
   () =>
     new Map<string, PyValue>([
+      ['_type_name', builtin('_type_name', 'one', 1, 1, ([value]) => classOf(value).name)],
       ['_iter_array', builtin('_iter_array', 'one', 1, 1, ([owner]) => arrayIterator(owner))],
       [
         '_convert',

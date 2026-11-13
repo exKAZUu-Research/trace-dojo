@@ -4,8 +4,6 @@ const INTERNAL = 'CPython の内部の関数';
 export const UNSUPPORTED_SYS_ATTRIBUTES: Record<string, string> = {
   argv: 'コマンドライン引数（sys.argv）',
   orig_argv: 'コマンドライン引数（sys.orig_argv）',
-  stdin: '標準入力（sys.stdin）',
-  __stdin__: '標準入力（sys.__stdin__）',
   path: 'モジュールの検索パス（sys.path）',
   meta_path: 'ファイルからモジュールを探す import の仕組み（sys.meta_path）',
   path_hooks: 'ファイルからモジュールを探す import の仕組み（sys.path_hooks）',

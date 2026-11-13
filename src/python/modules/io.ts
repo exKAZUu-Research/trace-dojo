@@ -1,8 +1,8 @@
-// The in-memory streams of io; streams over files stay unsupported.
 import { bytesLikeData, newByteArray, newBytes, PyBytes } from '../bytesValues';
 import { addressOf, pyRepr } from '../conversions';
 import { method } from '../define';
 import { builtinClassesWithDict } from '../descriptors';
+import { createFileIOClass } from '../inputStream';
 import { viewOf } from '../memoryview';
 import { argument, checkArgs } from '../nativeArgs';
 import { toIndex } from '../numbers';
@@ -431,11 +431,10 @@ registerSourceModule(
       ['SEEK_CUR', 1n],
       ['SEEK_END', 2n],
       ['DEFAULT_BUFFER_SIZE', 131_072n],
+      ['_file_class', nativeFunction('_file_class', ([base]) => createFileIOClass(currentRuntime(), base as PyClass))],
       ...ioCodecNatives(),
     ]),
   {
-    unsupported: Object.fromEntries(
-      ['open', 'open_code', 'FileIO'].map((name) => [name, `io.${name}（${FILE_FEATURE}）`])
-    ),
+    unsupported: Object.fromEntries(['open', 'open_code'].map((name) => [name, `io.${name}（${FILE_FEATURE}）`])),
   }
 );

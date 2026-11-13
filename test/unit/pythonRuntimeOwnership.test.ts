@@ -135,7 +135,7 @@ p.Parse('<!DOCTYPE r [' + ''.join(entities) + '%e8;]><r/>', True)`;
 });
 
 test.each([
-  ['unsupported input', 'input()', '標準入力（input()）は、この採点環境では使えません。'],
+  ['unsupported file access', "open('file')", 'ファイルの読み書き（open()）は、この採点環境では使えません。'],
   [
     'deadlock',
     'lock=threading.Lock(); lock.acquire(); lock.acquire()',
