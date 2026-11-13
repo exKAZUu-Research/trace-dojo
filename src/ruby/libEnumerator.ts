@@ -388,6 +388,11 @@ for (const name of ['==', '===', 'eql?'])
   });
 def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const source = sourceOf(self);
+  if (self.cls === rt().c['Enumerator::Chain']) {
+    const elements: string[] = [];
+    for (const value of [source.recv, ...source.held().slice(1)]) elements.push(yield* inspect(value));
+    return str(`#<Enumerator::Chain: [${elements.join(', ')}]>`);
+  }
   if (source.iterate) {
     const argumentsText: string[] = [];
     for (const arg of source.args) argumentsText.push(yield* inspect(arg));

@@ -1,12 +1,12 @@
 import { inspect, rEquals } from './conversions';
 import { def, sdef } from './define';
-import { frozenError, typeError } from './errors';
-import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashSet } from './hashes';
-import { callBlock, type Gen } from './interp';
+import { argumentError, frozenError, typeError } from './errors';
+import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashSet, rehash } from './hashes';
+import { callBlock, callMethod, type Gen } from './interp';
 import { iterate, toArray } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
 import { NIL, type RHash, RObject, type Value } from './objects';
-import { rt } from './runtime';
+import { rt, whileHeld } from './runtime';
 import { arr, newHash, str, truthy } from './values';
 
 /** A Set keeps its members as the keys of a Hash, which gives it the Hash's insertion order and equality. */
@@ -199,6 +199,79 @@ def('Set', ['merge'], [0, -1], function* (self: RObject, values) {
   for (const value of values) for (const item of yield* other(value)) yield* hashSet(membersOf(self), item, true);
   return self;
 });
+def('Set', 'subtract', 1, function* (self: RObject, [value]) {
+  yield* modify(self);
+  for (const item of yield* other(value)) yield* hashDelete(membersOf(self), item);
+  return self;
+});
+def('Set', 'replace', 1, function* (self: RObject, [value]) {
+  yield* modify(self);
+  const items = yield* other(value);
+  membersOf(self).map.clear();
+  for (const item of items) yield* hashSet(membersOf(self), item, true);
+  return self;
+});
+def('Set', 'reset', 0, function* (self: RObject) {
+  yield* modify(self);
+  rehash(membersOf(self));
+  return self;
+});
+def('Set', 'join', [0, 1], function* (self: RObject, args) {
+  const values = arr([...membersOf(self).map.values()].map((entry) => entry.key));
+  return yield* callMethod(values, 'join', args);
+});
+def('Set', ['map!', 'collect!'], 0, function* (self: RObject, _args, block) {
+  if (!block) return makeEnumerator(self, 'map!', []);
+  yield* modify(self);
+  const mapped: Value[] = [];
+  for (const entry of membersOf(self).map.values()) mapped.push(yield* callBlock(block, [entry.key]));
+  membersOf(self).map.clear();
+  for (const value of mapped) yield* hashSet(membersOf(self), value, true);
+  return self;
+});
+def('Set', 'flatten', 0, function* (self: RObject) {
+  return yield* newSet(yield* flattenMembers(self, new Set()));
+});
+def('Set', 'flatten!', 0, function* (self: RObject) {
+  yield* modify(self);
+  if (
+    ![...membersOf(self).map.values()].some(
+      (entry) => entry.key instanceof RObject && entry.key.data instanceof SetData
+    )
+  )
+    return NIL;
+  const values = yield* flattenMembers(self, new Set());
+  membersOf(self).map.clear();
+  for (const value of values) yield* hashSet(membersOf(self), value, true);
+  return self;
+});
+def('Set', 'classify', 0, function* (self: RObject, _args, block) {
+  if (!block) return makeEnumerator(self, 'classify', []);
+  const groups = newHash();
+  return yield* whileHeld(groups, function* () {
+    for (const entry of membersOf(self).map.values()) {
+      const key = yield* callBlock(block, [entry.key]);
+      const group = yield* hashGet(groups, key);
+      const values = group ? (group.value as RObject) : yield* newSet([]);
+      yield* hashSet(membersOf(values), entry.key, true);
+      if (!group) yield* hashSet(groups, key, values);
+    }
+    return groups;
+  });
+});
+
+function* flattenMembers(self: RObject, seen: Set<RObject>): Gen<Value[]> {
+  if (seen.has(self)) throw argumentError('tried to flatten recursive set');
+  seen.add(self);
+  const values: Value[] = [];
+  for (const entry of membersOf(self).map.values()) {
+    if (entry.key instanceof RObject && entry.key.data instanceof SetData)
+      values.push(...(yield* flattenMembers(entry.key, seen)));
+    else values.push(entry.key);
+  }
+  seen.delete(self);
+  return values;
+}
 for (const [name, keep] of [
   ['select!', true],
   ['filter!', true],

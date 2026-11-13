@@ -1,6 +1,7 @@
 import {
   combinedStringEncoding,
   compareValues,
+  inspect,
   inspectRange,
   numericCompare,
   rangeCovers,
@@ -19,7 +20,7 @@ import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { succ } from './libString';
 import { NIL, type RProc, RRange, RString, type Value } from './objects';
-import { rt } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 type Visit = (value: Value) => Gen<unknown>;
@@ -300,6 +301,122 @@ def('Range', 'to_s', 0, function* (self: RRange) {
   }
   return stringFromBytes(result, binary);
 });
+def('Range', 'bsearch', 0, function* (self: RRange, _args, block) {
+  if (!block) return makeEnumerator(self, 'bsearch', []);
+  if (
+    (self.begin !== NIL && typeof self.begin !== 'bigint' && typeof self.begin !== 'number') ||
+    (self.end !== NIL && typeof self.end !== 'bigint' && typeof self.end !== 'number')
+  )
+    throw typeError(`can't do binary search for ${realClassOf(self.begin).name}`);
+  if (typeof self.begin === 'number' || typeof self.end === 'number') {
+    if (self.begin === NIL || self.end === NIL) throw new UnsupportedFeatureError('無限の浮動小数点範囲の二分探索');
+    return yield* bsearchFloat(Number(self.begin), Number(self.end), self.exclusive, block);
+  }
+  return yield* bsearchInteger(self.begin, self.end, self.exclusive, block);
+});
+def('Range', 'overlap?', 1, function* (self: RRange, [other]) {
+  if (!(other instanceof RRange)) throw typeError(`wrong argument type ${realClassOf(other).name} (expected Range)`);
+  if ((yield* rangeIsEmpty(self)) || (yield* rangeIsEmpty(other))) return false;
+  if (self.end !== NIL && other.begin !== NIL) {
+    const order = yield* compareValues(self.end, other.begin);
+    if (order < 0 || (order === 0 && self.exclusive)) return false;
+  }
+  if (other.end !== NIL && self.begin !== NIL) {
+    const order = yield* compareValues(other.end, self.begin);
+    if (order < 0 || (order === 0 && other.exclusive)) return false;
+  }
+  return true;
+});
+
+function* rangeIsEmpty(value: RRange): Gen<boolean> {
+  if (value.begin === NIL || value.end === NIL) return false;
+  const order = yield* compareValues(value.begin, value.end);
+  return order > 0 || (order === 0 && value.exclusive);
+}
+
+function* bsearchInteger(begin: bigint | typeof NIL, end: bigint | typeof NIL, exclusive: boolean, block: RProc): Gen {
+  let low: bigint;
+  let high: bigint;
+  if (begin === NIL) {
+    high = (end as bigint) - BigInt(exclusive);
+    const last = yield* bsearchDecision(block, high);
+    if (last === 'found') return high;
+    if (last === 'right') return NIL;
+    let distance = 1n;
+    for (;;) {
+      const decision = yield* bsearchDecision(block, high - distance);
+      if (decision === 'found') return high - distance;
+      if (decision === 'right') {
+        low = high - distance + 1n;
+        break;
+      }
+      distance *= 2n;
+    }
+  } else {
+    low = begin as bigint;
+    if (end === NIL) {
+      const first = yield* bsearchDecision(block, low);
+      if (first !== 'right') return first === 'found' || first === 'left' ? low : NIL;
+      let distance = 1n;
+      for (;;) {
+        high = low + distance;
+        const decision = yield* bsearchDecision(block, high);
+        if (decision === 'found') return high;
+        if (decision === 'left') break;
+        distance *= 2n;
+      }
+    } else high = (end as bigint) - BigInt(exclusive);
+  }
+  let found: Value = NIL;
+  while (low <= high) {
+    const middle = low + (high - low) / 2n;
+    const decision = yield* bsearchDecision(block, middle);
+    if (decision === 'found') return middle;
+    if (decision === 'left') {
+      found = middle;
+      high = middle - 1n;
+    } else low = middle + 1n;
+  }
+  return found;
+}
+
+function* bsearchFloat(begin: number, end: number, exclusive: boolean, block: RProc): Gen {
+  const view = new DataView(new ArrayBuffer(8));
+  const sign = 1n << 63n;
+  const mask = (1n << 64n) - 1n;
+  const ordered = (value: number): bigint => {
+    view.setFloat64(0, value);
+    const bits = view.getBigUint64(0);
+    return bits & sign ? ~bits & mask : bits | sign;
+  };
+  const number = (bits: bigint): number => {
+    view.setBigUint64(0, bits & sign ? bits & ~sign : ~bits & mask);
+    return view.getFloat64(0);
+  };
+  let low = ordered(begin);
+  let high = ordered(end) - BigInt(exclusive);
+  let found: Value = NIL;
+  while (low <= high) {
+    const middle = low + (high - low) / 2n;
+    const candidate = number(middle);
+    const decision = yield* bsearchDecision(block, candidate);
+    if (decision === 'found') return candidate;
+    if (decision === 'left') {
+      found = candidate;
+      high = middle - 1n;
+    } else low = middle + 1n;
+  }
+  return found;
+}
+
+function* bsearchDecision(block: RProc, value: Value): Gen<'left' | 'right' | 'found'> {
+  const result = yield* callBlock(block, [value]);
+  if (result === true) return 'left';
+  if (result === false || result === NIL) return 'right';
+  if (typeof result === 'bigint' || typeof result === 'number')
+    return Number(result) === 0 ? 'found' : Number(result) < 0 ? 'left' : 'right';
+  throw typeError(`wrong argument type ${yield* inspect(result)} (must be numeric, true, false or nil)`);
+}
 def('Range', '==', 1, (self: RRange, [other]) => rEquals(self, other));
 def('Range', 'eql?', 1, function* (self: RRange, [other]) {
   return (

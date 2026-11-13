@@ -626,6 +626,18 @@ def('Array', 'rassoc', 1, function* (self: RArray, [value]) {
   }
   return NIL;
 });
+def('Array', 'deconstruct', 0, (self: RArray) => self);
+def('Array', 'fetch_values', [0, -1], function* (self: RArray, indexes, block) {
+  const values: Value[] = [];
+  for (const index of indexes) values.push(yield* callMethod(self, 'fetch', [index], undefined, block));
+  return arr(values);
+});
+def('Array', 'rfind', [0, 1], function* (self: RArray, args, block) {
+  if (!block) return makeEnumerator(self, 'rfind', args);
+  for (let index = self.items.length - 1; index >= 0; index--)
+    if (truthy(yield* call(block, self.items[index]))) return self.items[index];
+  return args.length > 0 && args[0] !== NIL ? yield* callMethod(args[0], 'call', []) : NIL;
+});
 def('Array', 'transpose', 0, function* (self: RArray) {
   const rows: Value[][] = [];
   for (const item of self.items) rows.push((yield* toAry(item)).items);
@@ -882,27 +894,35 @@ def('Array', 'cycle', [0, 1], function* (self: RArray, args, block) {
 // code-gauge-allow functionCognitiveComplexity 16 -- bsearch handles Boolean search and numeric search modes with their distinct return rules.
 def('Array', 'bsearch', 0, function* (self: RArray, _args, block) {
   if (!block) return makeEnumerator(self, 'bsearch', []);
+  return yield* arrayBsearch(self, block, false);
+});
+def('Array', 'bsearch_index', 0, function* (self: RArray, _args, block) {
+  if (!block) return makeEnumerator(self, 'bsearch_index', []);
+  return yield* arrayBsearch(self, block, true);
+});
+
+function* arrayBsearch(self: RArray, block: RProc, indexOnly: boolean): Gen {
   let low = 0;
   let high = self.items.length;
-  let found: Value = NIL;
+  let found: number | undefined;
   while (low < high) {
     const middle = low + Math.floor((high - low) / 2);
     const result = yield* call(block, self.items[middle]);
     if (result === true) {
-      found = self.items[middle];
+      found = middle;
       high = middle;
     } else if (result === false || result === NIL) {
       low = middle + 1;
     } else if (typeof result === 'bigint' || typeof result === 'number') {
-      if (Number(result) === 0) return self.items[middle];
+      if (Number(result) === 0) return indexOnly ? BigInt(middle) : self.items[middle];
       if (Number(result) < 0) high = middle;
       else low = middle + 1;
     } else {
       throw typeError(`wrong argument type ${yield* inspect(result)} (must be numeric, true, false or nil)`);
     }
   }
-  return found;
-});
+  return found === undefined ? NIL : indexOnly ? BigInt(found) : self.items[found];
+}
 def('Array', 'to_h', 0, function* (self: RArray, _args, block) {
   const hash = newHash();
   return yield* whileHeld(hash, function* () {

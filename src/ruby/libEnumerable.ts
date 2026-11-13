@@ -12,9 +12,16 @@ import {
 import { def } from './define';
 import { argumentCountError, argumentError, typeError } from './errors';
 import { eachEntry, hashGet, hashSet } from './hashes';
-import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
+import { callBlock, callMethod, callProc, flattenGenerator, type Gen, nativeProc, respondsTo } from './interp';
 import { tryAry } from './libArray';
-import { customEnumerator, iterateEnumerator, makeEnumerator, receiverSize, sizedEnumerator } from './libEnumerator';
+import {
+  customEnumerator,
+  type EnumeratorSource,
+  iterateEnumerator,
+  makeEnumerator,
+  receiverSize,
+  sizedEnumerator,
+} from './libEnumerator';
 import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
@@ -147,6 +154,17 @@ def('Enumerable', ['select', 'filter', 'find_all'], 0, function* (self, _args, b
   });
   return arr(results);
 });
+for (const [name, inverted] of [
+  ['grep', false],
+  ['grep_v', true],
+] as const)
+  def('Enumerable', name, 1, function* (self, [pattern], block) {
+    const matches: Value[] = [];
+    yield* collectInto(self, [matches], function* (value) {
+      if ((yield* caseEquals(pattern, value)) !== inverted) matches.push(block ? yield* call(block, value) : value);
+    });
+    return arr(matches);
+  });
 def('Enumerable', 'filter_map', 0, function* (self, _args, block) {
   if (!block) return makeEnumerator(self, 'filter_map', []);
   const results: Value[] = [];
@@ -744,6 +762,52 @@ def('Enumerable', 'slice_when', 0, function* (self, _args, block) {
   return chunkEnumerator(self, block, true);
 });
 
+for (const [name, before] of [
+  ['slice_before', true],
+  ['slice_after', false],
+] as const)
+  def('Enumerable', name, [0, 1], function* (self, args, predicate) {
+    if (args.length + Number(!!predicate) !== 1)
+      throw argumentCountError(args.length, predicate ? 0 : 1, predicate ? 0 : 1);
+    const pattern = args[0];
+    return customEnumerator(self, name, predicate ? [predicate] : [pattern], (consumer) =>
+      sliceAt(self, pattern, predicate, before, consumer)
+    );
+  });
+
+function* sliceAt(
+  self: Value,
+  pattern: Value | undefined,
+  predicate: RProc | undefined,
+  before: boolean,
+  consumer: RProc
+): Gen {
+  let current: Value[] = [];
+  const arrays = rt().heldArrays;
+  const mark = arrays.length;
+  arrays.push(current);
+  try {
+    yield* iterate(self, function* (value) {
+      const boundary = predicate ? truthy(yield* call(predicate, value)) : yield* caseEquals(pattern as Value, value);
+      if (before && boundary && current.length > 0) {
+        yield* callBlock(consumer, [arr(current)], false);
+        current = [];
+        arrays[mark] = current;
+      }
+      current.push(value);
+      if (!before && boundary) {
+        yield* callBlock(consumer, [arr(current)], false);
+        current = [];
+        arrays[mark] = current;
+      }
+    });
+    if (current.length > 0) yield* callBlock(consumer, [arr(current)], false);
+    return self;
+  } finally {
+    arrays.length = mark;
+  }
+}
+
 function chunkEnumerator(self: Value, predicate: RProc, splitWhenTrue: boolean): RObject {
   return customEnumerator(self, splitWhenTrue ? 'slice_when' : 'chunk_while', [predicate], function* (block) {
     const held = rt().heldArrays;
@@ -917,11 +981,13 @@ export function* zipCollections(self: Value, others: Value[], block: RProc | und
   const iterators = others.map((other) =>
     other instanceof RArray
       ? undefined
-      : (function* (): Gen<void> {
-          yield* iterate(other, function* (value) {
-            yield value;
-          });
-        })()
+      : flattenGenerator(
+          (function* (): Gen<void> {
+            yield* iterate(other, function* (value) {
+              yield value;
+            });
+          })()
+        )
   );
   const results: Value[] = [];
   const held = rt().held;
@@ -967,6 +1033,29 @@ def('Enumerable', 'cycle', [0, 1], function* (self, args, block) {
     for (const item of items) yield* callBlock(block, [item], false);
   }
   return NIL;
+});
+def('Enumerable', 'chain', [0, -1], (self, others) => {
+  const sources = [self, ...others];
+  const enumerator = customEnumerator(self, 'chain', others, function* (block) {
+    for (const source of sources)
+      yield* iterate(source, function* (value) {
+        yield* callBlock(block, [value], false);
+      });
+    return enumerator;
+  });
+  enumerator.cls = rt().c['Enumerator::Chain'];
+  (enumerator.data as EnumeratorSource).size = () => {
+    let total: bigint | number = 0n;
+    for (const source of sources) {
+      const size = receiverSize(source);
+      if (size === NIL) return NIL;
+      if (size === Number.POSITIVE_INFINITY) return size;
+      total =
+        typeof size === 'number' || typeof total === 'number' ? Number(total) + Number(size) : total + (size as bigint);
+    }
+    return total;
+  };
+  return enumerator;
 });
 def('Enumerable', 'compact', 0, function* (self) {
   return arr((yield* toArray(self)).filter((value) => value !== NIL));

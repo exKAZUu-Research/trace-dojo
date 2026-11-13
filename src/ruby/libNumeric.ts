@@ -296,6 +296,10 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, 'clone', [0, 1], (self) => self);
   def(owner, 'dup', 0, (self) => self);
 }
+def('Integer', 'ceildiv', 1, function* (self: bigint, [other]) {
+  const quotient = yield* callMethod(-self, 'div', [other]);
+  return typeof quotient === 'bigint' ? -quotient : -Number(quotient);
+});
 
 for (const owner of ['Integer', 'Float']) {
   def(owner, 'real?', 0, () => true);

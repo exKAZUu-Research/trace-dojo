@@ -82,9 +82,45 @@ export function isGenerator(value: unknown): value is Gen {
 
 /** Runs a generator that must not suspend, such as a program's body outside any enumerator. */
 export function runToEnd<T>(generator: Generator<unknown, T, unknown>): T {
-  const result = generator.next();
-  if (!result.done) throw new Error('A Ruby evaluation suspended outside an enumerator');
+  const flattened = flattenGenerator(generator);
+  const result = flattened.next();
+  if (!result.done) {
+    flattened.return(undefined as T);
+    throw new Error('A Ruby evaluation suspended outside an enumerator');
+  }
   return result.value;
+}
+
+export function* flattenGenerator<T>(generator: Generator<unknown, T, unknown>): Generator<unknown, T, unknown> {
+  const stack: Generator<unknown, unknown, unknown>[] = [generator];
+  let input: unknown;
+  let pendingError: unknown;
+  let failed = false;
+  try {
+    while (stack.length > 0) {
+      let result: IteratorResult<unknown, unknown>;
+      try {
+        result = failed ? stack.at(-1)!.throw(pendingError) : stack.at(-1)!.next(input);
+        failed = false;
+        input = undefined;
+      } catch (error) {
+        stack.pop();
+        if (stack.length === 0) throw error;
+        pendingError = error;
+        failed = true;
+        continue;
+      }
+      if (result.done) {
+        stack.pop();
+        if (stack.length === 0) return result.value as T;
+        input = result.value;
+      } else if (isGenerator(result.value)) stack.push(result.value);
+      else input = yield result.value;
+    }
+    throw new Error('A Ruby generator ended without a result');
+  } finally {
+    for (let index = stack.length - 1; index >= 0; index--) stack[index].return(undefined);
+  }
 }
 
 // Statements ----------------------------------------------------------------------------------------------------------
@@ -1362,7 +1398,7 @@ function* invokeUser(
   const savedRow = runtime.currentRow;
   try {
     yield* bindParams(def.params, frame, args, keywords, 'method');
-    return yield* evalBody(def.body, frame);
+    return (yield evalBody(def.body, frame)) as Value;
   } catch (error) {
     if (error instanceof ReturnSignal && error.target === frame) return error.value;
     throw hostStackOverflow(error, runtime.frames.length);
@@ -1555,7 +1591,7 @@ export function* callProc(proc: RProc, args: Value[], options: ProcCallOptions =
         runtime.steps.stepBinding(def.row, storesAnswers(def.params, frame));
       }
     }
-    return yield* evalBody(def.body, frame);
+    return (yield evalBody(def.body, frame)) as Value;
   } catch (error) {
     if (error instanceof NextSignal) return error.value;
     if (proc.isLambda) {

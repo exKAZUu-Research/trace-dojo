@@ -25,6 +25,12 @@ test('imaginary unit remains unsupported', () => {
   });
 });
 
+test('unimplemented core methods use the dedicated unsupported error', () => {
+  expect(run('p "abc".byteindex("b")')).toMatchObject({
+    uncaughtException: 'String#byteindex は、この採点環境では使えません。',
+  });
+});
+
 test('pretty-printing a flat large Array stays within the execution budget', () => {
   vi.restoreAllMocks();
   const result = run('pp [1] * 15000');
@@ -52,6 +58,17 @@ test('wide character-set ranges charge the execution budget before expansion', (
   expect(run(String.raw`p "a".count("\u0000-\u{10FFFF}")`)).toMatchObject({
     kind: 'limitExceeded',
     limit: 'operations',
+  });
+});
+
+test('Ruby recursion reaches the shared call-depth limit under Node', () => {
+  expect(run('def f(n); n==0 ? 0 : 1+f(n-1); end; p f(450)')).toMatchObject({
+    kind: 'executed',
+    stdout: '450\n',
+  });
+  expect(run('def f(n); n==0 ? 0 : [1].map { f(n-1) }[0]+1; end; p f(250)')).toMatchObject({
+    kind: 'executed',
+    stdout: '250\n',
   });
 });
 
@@ -164,6 +181,52 @@ test.each([
     'zip consumes only the receiver length from endless inputs',
     'p [1,2].zip((1..).each),(1..2).zip((1..).each)',
     '[[1, 1], [2, 2]]\n[[1, 1], [2, 2]]\n',
+  ],
+  [
+    'zip pulls values from a learner-defined each method',
+    'class E;include Enumerable;def each;yield 1;yield 2;end;end;p [3,4].zip(E.new)',
+    '[[3, 1], [4, 2]]\n',
+  ],
+  [
+    'Enumerable grep uses case equality and maps matching values',
+    'p [1,5,"a",9].grep(Integer),[1,5,"a",9].grep_v(Integer);p (1..10).grep(3..5){|x|x*2}',
+    '[1, 5, 9]\n["a"]\n[6, 8, 10]\n',
+  ],
+  [
+    'Enumerable slice boundaries defer callbacks and yield groups',
+    'p [1,2,6,7].slice_before{|x|x>5}.to_a,[1,2,6,7].slice_after{|x|x>5}.to_a;p [1,2,1].slice_before(1).to_a',
+    '[[1, 2], [6], [7]]\n[[1, 2, 6], [7]]\n[[1, 2], [1]]\n',
+  ],
+  ['Array bsearch_index returns the selected index', 'p [1,3,5].bsearch_index{|x|x>=3}', '1\n'],
+  [
+    'Hash association, flattening, and conversion to Proc',
+    'h={a:[1,2],b:3};p h.assoc(:a),h.rassoc(3),h.flatten,h.flatten(2),h.to_proc.call(:b)',
+    '[:a, [1, 2]]\n[:b, 3]\n[:a, [1, 2], :b, 3]\n[:a, 1, 2, :b, 3]\n3\n',
+  ],
+  [
+    'Range bsearch handles finite and open numeric bounds',
+    'p (1..10).bsearch{|x|x>=4},(1...10).bsearch{|x|x>=10},(1..).bsearch{|x|x>=5},(..5).bsearch{|x|x>=3},(1.0..2.0).bsearch{|x|x>=1.5}',
+    '4\nnil\n5\n3\n1.5\n',
+  ],
+  [
+    'Enumerable chain retains its class, size, and source order',
+    'e=[1,2].chain([3]);p e.class,e.size,e.to_a,e.inspect,e.each{}.equal?(e)',
+    'Enumerator::Chain\n3\n[1, 2, 3]\n"#<Enumerator::Chain: [[1, 2], [3]]>"\ntrue\n',
+  ],
+  [
+    'remaining core numeric and Range methods',
+    'p 5.ceildiv(2),(-5).ceildiv(2),(1..4).overlap?(4..6),(1...4).overlap?(4..6)',
+    '3\n-2\ntrue\nfalse\n',
+  ],
+  [
+    'Array deconstruction, fetch_values, and reverse find',
+    'p [1,2].deconstruct,[1,2].fetch_values(0,9){|i|i*2},[1,2,3].rfind{|x|x.even?}',
+    '[1, 2]\n[1, 18]\n2\n',
+  ],
+  [
+    'Set collection operations',
+    's=Set[1,2,3];p s.classify{|x|x%2};p Set[Set[1,2],3].flatten;s.subtract([2]);p s;s.map!{|x|x*2};p s,s.join(",")',
+    '{1 => Set[1, 3], 0 => Set[2]}\nSet[1, 2, 3]\nSet[1, 3]\nSet[2, 6]\n"2,6"\n',
   ],
   ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],

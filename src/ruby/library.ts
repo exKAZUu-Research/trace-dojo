@@ -10,3 +10,4 @@ import './libRange';
 import './libRandom';
 import './libTurtle';
 import './libSet';
+import './libUnsupported';

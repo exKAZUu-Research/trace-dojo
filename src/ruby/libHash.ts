@@ -2,7 +2,7 @@ import { inspect, inspectHash, rEql, rEquals } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, rubyError, typeError } from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash, structuralHashValue } from './hashes';
-import { callBlock, callMethod, callProc, type Gen, respondsTo } from './interp';
+import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
@@ -277,6 +277,22 @@ def('Hash', 'shift', 0, function* (self: RHash) {
   self.map.delete(first.value[0]);
   return arr([first.value[1].key, first.value[1].value]);
 });
+def('Hash', 'assoc', 1, function* (self: RHash, [key]) {
+  for (const entry of snapshot(self.map.values()))
+    if (yield* rEquals(entry.key, key)) return arr([entry.key, entry.value]);
+  return NIL;
+});
+def('Hash', 'rassoc', 1, function* (self: RHash, [value]) {
+  for (const entry of snapshot(self.map.values()))
+    if (yield* rEquals(entry.value, value)) return arr([entry.key, entry.value]);
+  return NIL;
+});
+def('Hash', 'flatten', [0, 1], function* (self: RHash, args) {
+  const pairs = arr(snapshot(self.map.values()).map((entry) => arr([entry.key, entry.value])));
+  const depth = args.length > 0 ? args[0] : 1n;
+  return yield* callMethod(pairs, 'flatten', [depth]);
+});
+def('Hash', 'to_proc', 0, (self: RHash) => nativeProc(1, ([key]) => callMethod(self, '[]', [key]), true));
 
 function* merge(target: RHash, others: Value[], block: RProc | undefined): Gen<RHash> {
   for (const other of others) {
