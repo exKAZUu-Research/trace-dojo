@@ -58,6 +58,7 @@ export interface ExceptionState {
 export class RString extends RBasic {
   /** Whether the string holds bytes rather than text (ASCII-8BIT), as `Integer#chr` makes for 128 to 255. */
   binary = false;
+  rawBytes?: Uint8Array;
 
   constructor(
     cls: RClass,

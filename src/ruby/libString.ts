@@ -43,6 +43,7 @@ function setText(self: RString, text: string): void {
   if (text.length > 1_000_000) throw rangeError('string size too big');
   rt().spend(Math.floor(text.length / 256));
   self.s = text;
+  self.rawBytes = undefined;
 }
 
 function* stringArg(value: Value): Gen<string> {
@@ -113,9 +114,15 @@ sdef(
   { keywords: true }
 );
 def('String', ['to_s', 'to_str'], 0, (self: RString) => (self.cls === rt().c.String ? self : str(self.s)));
-def('String', 'inspect', 0, (self: RString) => str(self.binary ? binaryInspect(self.s) : strInspect(self.s)));
+def('String', 'inspect', 0, (self: RString) =>
+  str(self.rawBytes ? inspectRawBytes(self.rawBytes) : self.binary ? binaryInspect(self.s) : strInspect(self.s))
+);
 def('String', 'dump', 0, (self: RString) => {
-  const quoted = self.binary ? binaryInspect(self.s) : strInspect(self.s);
+  const quoted = self.rawBytes
+    ? inspectRawBytes(self.rawBytes)
+    : self.binary
+      ? binaryInspect(self.s)
+      : strInspect(self.s);
   return str(
     quoted.replaceAll(/[\u0080-\u{10FFFF}]/gu, (char) => {
       const point = char.codePointAt(0) as number;
@@ -124,6 +131,30 @@ def('String', 'dump', 0, (self: RString) => {
     })
   );
 });
+
+function inspectRawBytes(bytes: Uint8Array): string {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let text = '';
+  let result = '"';
+  const flush = (): void => {
+    if (text) result += strInspect(text).slice(1, -1);
+    text = '';
+  };
+  for (let index = 0; index < bytes.length;) {
+    const first = bytes[index];
+    const width = first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+    try {
+      text += decoder.decode(bytes.slice(index, index + width));
+      index += width;
+    } catch {
+      flush();
+      result += `\\x${first.toString(16).toUpperCase().padStart(2, '0')}`;
+      index++;
+    }
+  }
+  flush();
+  return `${result}"`;
+}
 
 /** A binary string's inspect, which shows the bytes from 128 on as `\xFF`. */
 function binaryInspect(text: string): string {
@@ -148,17 +179,20 @@ def('String', 'to_r', 0, () => {
 def('String', 'hex', 0, (self: RString) => parseIntegerLenient(self.s, 16));
 def('String', 'oct', 0, (self: RString) => parseIntegerLenient(self.s, 8));
 def('String', ['length', 'size'], 0, (self: RString) => BigInt(charLength(self.s)));
-def('String', 'bytesize', 0, (self: RString) =>
-  BigInt(self.binary ? self.s.length : new TextEncoder().encode(self.s).length)
-);
+def('String', 'bytesize', 0, (self: RString) => BigInt(bytesOf(self).length));
 def('String', 'empty?', 0, (self: RString) => self.s.length === 0);
 def('String', 'hash', 0, (self: RString) => {
   let hash = 7n;
-  for (const char of self.s) hash = (hash * 31n + BigInt(char.codePointAt(0) as number)) % 2_305_843_009_213_693_951n;
+  for (const byte of bytesOf(self)) hash = (hash * 31n + BigInt(byte)) % 2_305_843_009_213_693_951n;
   return hash;
 });
 def('String', ['==', '===', 'eql?'], 1, function* (self: RString, [other]) {
-  if (other instanceof RString) return self.s === other.s;
+  if (other instanceof RString) {
+    if (!self.rawBytes && !other.rawBytes) return self.s === other.s;
+    const left = bytesOf(self);
+    const right = bytesOf(other);
+    return left.length === right.length && left.every((byte, index) => byte === right[index]);
+  }
   return false;
 });
 def('String', '<=>', 1, (self: RString, [other]) => {
@@ -312,6 +346,7 @@ def('String', 'codepoints', 0, (self: RString) =>
   arr(charsOf(self.s).map((char) => BigInt(char.codePointAt(0) as number)))
 );
 function bytesOf(self: RString): Uint8Array {
+  if (self.rawBytes) return self.rawBytes;
   return self.binary
     ? Uint8Array.from([...self.s].map((char) => char.codePointAt(0) as number))
     : new TextEncoder().encode(self.s);

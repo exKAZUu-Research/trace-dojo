@@ -430,9 +430,10 @@ export class Converter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of syntax node.
-  private stringParts(node: Node): { parts: StrPart[]; binary: boolean } {
+  private stringParts(node: Node): { parts: StrPart[]; binary: boolean; bytes?: number[] } {
     const parts: StrPart[] = [];
     let binary = false;
+    let bytes: number[] | undefined;
     let literal = '';
     for (const child of namedChildren(node)) {
       if (child.type === 'string_content') {
@@ -444,6 +445,7 @@ export class Converter {
           const decoded = this.decode(node, literal);
           parts.push(decoded.text);
           binary ||= decoded.binary;
+          bytes = undefined;
         }
         literal = '';
         const statements = this.body(namedChildren(child), 1);
@@ -462,11 +464,12 @@ export class Converter {
       const decoded = this.decode(node, literal);
       parts.push(decoded.text);
       binary ||= decoded.binary;
+      if (parts.length === 1) bytes = decoded.bytes;
     }
-    return { parts, binary };
+    return { parts, binary, bytes };
   }
 
-  private decode(node: Node, text: string): { text: string; binary: boolean } {
+  private decode(node: Node, text: string): { text: string; binary: boolean; bytes?: number[] } {
     const decoded = decodeDoubleQuoted(text);
     if (decoded === undefined) this.fail(node, '文字列のエスケープの書き方に誤りがあります。');
     return decoded;

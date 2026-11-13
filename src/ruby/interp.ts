@@ -123,6 +123,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
     case 'str': {
       const value = str(yield* interpolate(e.parts, frame));
       value.binary = e.binary ?? false;
+      if (e.bytes) value.rawBytes = Uint8Array.from(e.bytes);
       return value;
     }
     case 'sym': {

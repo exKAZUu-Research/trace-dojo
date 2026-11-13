@@ -374,7 +374,7 @@ export function* rEquals(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = n
   }
   if (typeof a !== 'object' || a === NIL || a instanceof RSymbol) return false;
   if (isOverridden(a, '==')) return truthy(yield* callMethod(a, '==', [b]));
-  if (a instanceof RString) return b instanceof RString && a.s === b.s;
+  if (a instanceof RString) return b instanceof RString && truthy(yield* callMethod(a, '==', [b]));
   if (a instanceof RArray) {
     if (!(b instanceof RArray) || a.items.length !== b.items.length) return false;
     return yield* eqlContainer(a, b, pairs, function* () {
@@ -425,7 +425,7 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
 export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   if (typeof a !== typeof b) return false;
   if (typeof a === 'number') return a === b;
-  if (a instanceof RString) return b instanceof RString && a.s === b.s;
+  if (a instanceof RString) return b instanceof RString && truthy(yield* callMethod(a, 'eql?', [b]));
   if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
   if (a instanceof RArray) return b instanceof RArray && (yield* eqlArray(a, b, pairs));
   if (a instanceof RHash) return b instanceof RHash && (yield* eqlHash(a, b, pairs));

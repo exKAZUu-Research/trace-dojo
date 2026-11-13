@@ -97,7 +97,7 @@ export type Expr =
   | { k: 'self' }
   | { k: 'int'; v: bigint }
   | { k: 'float'; v: number }
-  | { k: 'str'; parts: StrPart[]; binary?: boolean }
+  | { k: 'str'; parts: StrPart[]; binary?: boolean; bytes?: number[] }
   | { k: 'sym'; name: string }
   | { k: 'dsym'; parts: StrPart[] }
   | { k: 'array'; items: Expr[] }

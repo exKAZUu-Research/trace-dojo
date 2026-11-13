@@ -51,6 +51,11 @@ test.each([
   ],
   ['meta escaped byte', String.raw`p "\M-a".bytesize; p "\M-a".bytes`, '1\n[225]\n'],
   [
+    'mixed UTF-8 text and escaped bytes',
+    String.raw`p "é\xFF", "\xFFé"; p "\xFFé".bytes; p "\xFFé".bytesize`,
+    '"é\\xFF"\n"\\xFFé"\n[255, 195, 169]\n3\n',
+  ],
+  [
     'Array set operations with colliding hashes',
     'class Key; def hash; 1; end; end; a=Key.new; b=Key.new; p [a,b].uniq.size; p ([a]-[b]).size; p ([a]&[b]).size',
     '2\n1\n0\n',
