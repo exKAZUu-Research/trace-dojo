@@ -1,7 +1,7 @@
-import { addressOf, inspect, numericCompare, toInt } from './conversions';
+import { addressOf, comparisonFailed, inspect, numericCompare, toIndex, toInt } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError } from './errors';
-import { floatStepCount, fusedMultiplyAdd } from './floatMath';
+import { floatStepCount } from './floatMath';
 import { callMethod, callProc, type Gen, nativeProc } from './interp';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
@@ -287,6 +287,32 @@ def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
   const source = sourceOf(self);
   return arithmeticSpec(source.recv, source.args, source.keywords).exclusive;
 });
+def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject, args) {
+  const source = sourceOf(self);
+  const { start, end, step } = arithmeticSpec(source.recv, source.args, source.keywords);
+  if (args.length === 0) {
+    if (typeof step === 'number' && Number.isNaN(step)) throw comparisonFailed(step, 0n);
+    const order = end === NIL ? undefined : numericCompare(start as bigint | number, end as bigint | number);
+    return order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0)) ? NIL : start;
+  }
+  const count = yield* toIndex(args[0]);
+  if (count < 0) throw argumentError('attempt to take negative size');
+  if (typeof step === 'number' && Number.isNaN(step)) {
+    rt().chargeSlots(count);
+    rt().spend(count);
+    return arr(Array.from({ length: count }, () => Number.NaN));
+  }
+  if (typeof step === 'number' && !Number.isFinite(step)) return arr(count === 0 ? [] : [start]);
+  if (typeof end === 'number' && Number.isNaN(end)) {
+    const values: Value[] = [];
+    for (let index = 0; index < count; index++) {
+      rt().spend();
+      values.push(arithmeticValue(start as bigint | number, step as bigint | number, BigInt(index)));
+    }
+    return arr(values);
+  }
+  return yield* callMethod(self, 'take', [BigInt(count)]);
+});
 def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
   const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
@@ -317,9 +343,7 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
       )
     )
       return NIL;
-    return exclusive && (typeof start === 'number' || typeof step === 'number')
-      ? fusedMultiplyAdd(Number(index), Number(step), Number(start))
-      : arithmeticValue(start as bigint | number, step as bigint | number, index);
+    return arithmeticValue(start as bigint | number, step as bigint | number, index);
   }
   const requested = yield* toInt(args[0]);
   if (requested < 0n) throw argumentError('negative array size');
@@ -364,8 +388,9 @@ function arithmeticLastIndex(
     if (exclusive && start + index * step === end) index--;
     return index;
   }
-  if (exclusive) return BigInt(floatStepCount(Number(start), Number(end), Number(step), true) - 1);
-  return BigInt(Math.floor((Number(end) - Number(start)) / Number(step)));
+  let index = Math.floor((Number(end) - Number(start)) / Number(step));
+  if (exclusive && Number(start) + Number(step) * index === Number(end)) index--;
+  return BigInt(index);
 }
 
 function arithmeticValue(start: bigint | number, step: bigint | number, index: bigint): Value {

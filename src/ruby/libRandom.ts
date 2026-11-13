@@ -1,10 +1,10 @@
 import { inspectRange, toFloat, toInt } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, rubyError } from './errors';
-import { callMethod, type Gen } from './interp';
+import { callMethod, type Gen, invoke } from './interp';
 import { NIL, RObject, RRange, type Value } from './objects';
 import { rt } from './runtime';
-import { realClassOf } from './values';
+import { classOf, realClassOf } from './values';
 
 /** Ruby's Mersenne Twister (MT19937), seeded and drawn from as `random.c` does. */
 export class MersenneTwister {
@@ -251,11 +251,22 @@ def(
   },
   { visibility: 'private' }
 );
-sdef('Random', 'new', [0, 1], function* (self, args) {
+def(
+  'Random',
+  'initialize',
+  [0, 1],
+  function* (self: RObject, args) {
+    self.data = new MersenneTwister(
+      args.length > 0 ? yield* toInt(args[0]) : BigInt(Math.floor(Math.random() * 2 ** 52))
+    );
+    return NIL;
+  },
+  { visibility: 'private' }
+);
+sdef('Random', 'new', [0, -1], function* (self, args, block) {
   const random = new RObject(self);
-  random.data = new MersenneTwister(
-    args.length > 0 ? yield* toInt(args[0]) : BigInt(Math.floor(Math.random() * 2 ** 52))
-  );
+  const initialize = classOf(random).findMethod('initialize');
+  if (initialize) yield* invoke(initialize, random, args, undefined, block, false);
   return random;
 });
 sdef('Random', 'rand', [0, 1], (_self, args) => randomValue(defaultGenerator(), args));

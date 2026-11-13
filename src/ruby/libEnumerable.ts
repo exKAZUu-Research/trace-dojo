@@ -961,9 +961,10 @@ def('Enumerable', 'to_h', [0, -1], function* (self, _args, block) {
   const hash = newHash();
   return yield* whileHeld(hash, function* () {
     yield* iterate(self, function* (value) {
-      const pair = block ? yield* call(block, value) : value;
-      if (!(pair instanceof RArray)) {
-        throw typeError(`wrong element type ${className(pair)} (expected array)`);
+      const item = block ? yield* call(block, value) : value;
+      const pair = yield* tryAry(item);
+      if (!pair) {
+        throw typeError(`wrong element type ${className(item)} (expected array)`);
       }
       if (pair.items.length !== 2) {
         throw argumentError(`element has wrong array length (expected 2, was ${pair.items.length})`);

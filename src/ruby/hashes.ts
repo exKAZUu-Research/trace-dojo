@@ -196,7 +196,16 @@ export function* eachEntry(hash: RHash, visit: (entry: HashEntry, slot: string) 
 /** Rebuilds the slots after keys may have changed, as `rehash` does. */
 export function rehash(hash: RHash): void {
   if (hash.frozen) throw frozenError(hash, runToEnd(inspect(hash)));
-  const entries = [...hash.map.values()];
-  hash.map.clear();
-  for (const entry of entries) runToEnd(hashSet(hash, entry.key, entry.value));
+  if (hash.iterating > 0) throw runtimeError('rehash during iteration');
+  const replacement = new RHash(hash.cls);
+  const held = rt().held.length;
+  rt().held.push(replacement);
+  try {
+    for (const entry of hash.map.values()) runToEnd(hashSet(replacement, entry.key, entry.value));
+  } finally {
+    rt().held.length = held;
+  }
+  hash.map = replacement.map;
+  hash.buckets = replacement.buckets;
+  hash.bucketVersion = replacement.bucketVersion;
 }

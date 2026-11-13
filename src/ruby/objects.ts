@@ -131,6 +131,7 @@ export class RRange extends RBasic {
 /** A block, proc, or lambda: the code of a block with the variables and `self` it closes over. */
 export class RProc extends RBasic {
   isLambda = false;
+  captured?: Value[];
   /** The call that received this block as its block literal, which a `break` in it leaves. */
   breakTag?: object;
 

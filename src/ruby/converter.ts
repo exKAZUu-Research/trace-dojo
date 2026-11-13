@@ -583,6 +583,10 @@ export class Converter {
     if (value.k === 'return' || value.k === 'break' || value.k === 'next' || value.k === 'retry') {
       this.fail(node, `${value.k} は値として使えません。`);
     }
+    if (value.k === 'seq' || value.k === 'begin') {
+      const last = value.body.at(-1);
+      if (last) this.checkValue(node, last.e);
+    }
   }
 
   private value(node: Node): Expr {

@@ -53,12 +53,14 @@ export function successorBytes(source: Uint8Array): Uint8Array {
     point: character.rawBytes ? undefined : character.s.codePointAt(0),
   }));
   const candidate = (part: (typeof parts)[number]): boolean =>
-    part.point !== undefined && (part.bytes.length > 1 || isAsciiAlnum(part.bytes[0]));
+    part.point !== undefined &&
+    (isAsciiAlnum(part.bytes[0]) ||
+      (part.bytes.length > 1 && /[\p{L}\p{Nd}\p{Nl}]/u.test(String.fromCodePoint(part.point))));
   let index = parts.findLastIndex(candidate);
   if (index < 0) {
-    const last = parts.at(-1) as (typeof parts)[number];
-    if (last.point === undefined) return Uint8Array.from([1, ...source]);
-    last.bytes = stringBytes(str(String.fromCodePoint(last.point + 1)));
+    const last = parts.findLast((part) => part.point !== undefined);
+    if (!last) return Uint8Array.from([1, ...source]);
+    last.bytes = stringBytes(str(String.fromCodePoint((last.point as number) + 1)));
     return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
   }
   let carry = 1;

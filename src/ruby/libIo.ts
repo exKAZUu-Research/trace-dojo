@@ -49,6 +49,16 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
   for (const arg of args) yield* visit(arg, new Set());
 }
 
+function* writePrint(target: Value, args: Value[]): Gen<void> {
+  const field = rt().globals.get('$,') ?? NIL;
+  for (const [index, arg] of args.entries()) {
+    if (index > 0 && field !== NIL) yield* write(target, yield* toSValue(field));
+    yield* write(target, yield* toSValue(arg));
+  }
+  const record = rt().globals.get('$\\') ?? NIL;
+  if (record !== NIL) yield* write(target, yield* toSValue(record));
+}
+
 function* write(target: Value, value: string | RString): Gen<void> {
   const text = value instanceof RString ? value : str(value);
   if (target instanceof RObject && (target.data === 'stdout' || target.data === 'stderr')) {
@@ -81,7 +91,7 @@ def(
   'print',
   [0, -1],
   function* (_self, args) {
-    for (const arg of args) yield* write(stdout(), yield* toSValue(arg));
+    yield* writePrint(stdout(), args);
     return NIL;
   },
   PRIVATE
@@ -175,7 +185,7 @@ def('IO', 'puts', [0, -1], function* (self: RObject, args) {
   return NIL;
 });
 def('IO', 'print', [0, -1], function* (self: RObject, args) {
-  for (const arg of args) yield* write(self, yield* toSValue(arg));
+  yield* writePrint(self, args);
   return NIL;
 });
 def('IO', 'write', [0, -1], function* (self: RObject, args) {

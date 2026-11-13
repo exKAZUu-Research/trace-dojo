@@ -53,9 +53,7 @@ function pushReferences(value: RBasic, pending: Value[]): void {
   } else if (value instanceof RRange) {
     pending.push(value.begin, value.end);
   } else if (value instanceof RProc) {
-    pending.push(value.self);
-    const outer = value.outer as unknown as Frame | undefined;
-    if (outer) pushFrame(outer, pending);
+    pushProcReferences(value, pending);
   } else if (value instanceof RClass) {
     for (const item of value.constants.values()) pending.push(item);
     for (const item of value.classVariables.values()) pending.push(item);
@@ -63,6 +61,13 @@ function pushReferences(value: RBasic, pending: Value[]): void {
     for (const item of value.prepends) pending.push(item);
     if (value.superclass) pending.push(value.superclass);
   }
+}
+
+function pushProcReferences(value: RProc, pending: Value[]): void {
+  pending.push(value.self);
+  if (value.captured) pending.push(...value.captured);
+  const outer = value.outer as unknown as Frame | undefined;
+  if (outer) pushFrame(outer, pending);
 }
 
 /** Visits the values that a library object's native state holds, such as an enumerator's receiver. */

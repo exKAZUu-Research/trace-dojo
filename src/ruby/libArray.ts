@@ -928,10 +928,11 @@ def('Array', 'to_h', 0, function* (self: RArray, _args, block) {
   const hash = newHash();
   return yield* whileHeld(hash, function* () {
     for (const [index, item] of self.items.entries()) {
-      const pair = block ? yield* call(block, item) : item;
-      if (!(pair instanceof RArray)) {
+      const value = block ? yield* call(block, item) : item;
+      const pair = yield* tryAry(value);
+      if (!pair) {
         throw typeError(
-          `wrong element type ${pair === NIL ? 'nil' : yield* className(pair)} at ${index} (expected array)`
+          `wrong element type ${value === NIL ? 'nil' : realClassOf(value).name} at ${index} (expected array)`
         );
       }
       if (pair.items.length !== 2) {
@@ -942,12 +943,6 @@ def('Array', 'to_h', 0, function* (self: RArray, _args, block) {
     return hash;
   });
 });
-
-function* className(value: Value): Gen<string> {
-  return (yield* callMethod(yield* callMethod(value, 'class', []), 'name', [])) instanceof RString
-    ? ((yield* callMethod(yield* callMethod(value, 'class', []), 'name', [])) as RString).s
-    : '';
-}
 
 def(
   'Array',

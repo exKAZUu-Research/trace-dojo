@@ -1,6 +1,7 @@
 import { toS } from './conversions';
 import { callMethod, runToEnd } from './interp';
 import type { RObject } from './objects';
+import { RubyError } from './runtime';
 import { realClassOf } from './values';
 
 /**
@@ -9,7 +10,13 @@ import { realClassOf } from './values';
  */
 export function describeException(exception: RObject): string {
   const name = realClassOf(exception).name ?? '';
-  const message = runToEnd(toS(runToEnd(callMethod(exception, 'message', []))));
+  let message: string;
+  try {
+    message = runToEnd(toS(runToEnd(callMethod(exception, 'message', []))));
+  } catch (error) {
+    if (error instanceof RubyError) return name;
+    throw error;
+  }
   if (message === '') return name;
   const [first, ...rest] = message.split('\n');
   return [`${first} (${name})`, ...rest].join('\n');

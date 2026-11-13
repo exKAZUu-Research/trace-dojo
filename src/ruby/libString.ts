@@ -1167,7 +1167,7 @@ def('String', 'upto', [1, 2], function* (self: RString, args, block) {
   }
   let current = stringFromBytes(stringBytes(self), self.binary);
   const limit = stringBytes(end);
-  if (compareBytes(stringBytes(current), limit) > 0 && stringBytes(current).length >= limit.length) return self;
+  if (compareBytes(stringBytes(current), limit) > 0) return self;
   const afterEnd = successorBytes(limit);
   for (;;) {
     const bytes = stringBytes(current);

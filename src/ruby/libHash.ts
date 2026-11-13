@@ -3,6 +3,7 @@ import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, rubyError, typeError } from './errors';
 import { eachEntry, hashDefault, hashDelete, hashFetch, hashGet, hashSet, rehash, structuralHashValue } from './hashes';
 import { callBlock, callMethod, callProc, type Gen, nativeProc, respondsTo } from './interp';
+import { tryAry } from './libArray';
 import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
@@ -59,10 +60,11 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
   }
   if (source instanceof RArray) {
     for (const item of source.items) {
-      if (!(item instanceof RArray) || item.items.length === 0 || item.items.length > 2) {
-        throw argumentError(`invalid number of elements (${item instanceof RArray ? item.items.length : 1} for 1..2)`);
+      const pair = yield* tryAry(item);
+      if (!pair || pair.items.length === 0 || pair.items.length > 2) {
+        throw argumentError(`invalid number of elements (${pair ? pair.items.length : 1} for 1..2)`);
       }
-      yield* hashSet(hash, item.items[0], item.items[1] ?? NIL);
+      yield* hashSet(hash, pair.items[0], pair.items[1] ?? NIL);
     }
     return hash;
   }
@@ -142,12 +144,11 @@ def('Hash', 'to_h', 0, function* (self: RHash, _args, block) {
   const hash = newHash();
   yield* eachEntry(self, function* (entry) {
     const result = yield* pair(block, entry.key, entry.value);
-    if (!(result instanceof RArray) || result.items.length !== 2) {
-      throw argumentError(
-        `element has wrong array length (expected 2, was ${result instanceof RArray ? result.items.length : 1})`
-      );
+    const converted = yield* tryAry(result);
+    if (!converted || converted.items.length !== 2) {
+      throw argumentError(`element has wrong array length (expected 2, was ${converted ? converted.items.length : 1})`);
     }
-    yield* hashSet(hash, result.items[0], result.items[1]);
+    yield* hashSet(hash, converted.items[0], converted.items[1]);
   });
   return hash;
 });
@@ -176,6 +177,8 @@ def('Hash', 'default_proc', 0, (self: RHash) => self.defaultProc ?? NIL);
 
 function* copy(self: RHash): Gen<RHash> {
   const hash = newHash();
+  hash.defaultValue = self.defaultValue;
+  hash.defaultProc = self.defaultProc;
   for (const entry of self.map.values()) yield* hashSet(hash, entry.key, entry.value);
   return hash;
 }
@@ -292,7 +295,18 @@ def('Hash', 'flatten', [0, 1], function* (self: RHash, args) {
   const depth = args.length > 0 ? args[0] : 1n;
   return yield* callMethod(pairs, 'flatten', [depth]);
 });
-def('Hash', 'to_proc', 0, (self: RHash) => nativeProc(1, ([key]) => callMethod(self, '[]', [key]), true));
+def('Hash', 'to_proc', 0, (self: RHash) => {
+  const proc = nativeProc(
+    1,
+    function* ([key]) {
+      const entry = yield* hashGet(self, key);
+      return entry ? entry.value : yield* hashDefault(self, key);
+    },
+    true
+  );
+  proc.captured = [self];
+  return proc;
+});
 
 function* merge(target: RHash, others: Value[], block: RProc | undefined): Gen<RHash> {
   for (const other of others) {
@@ -388,7 +402,9 @@ def('Hash', 'filter_map', 0, function* (self: RHash, _args, block) {
   return arr(results);
 });
 def('Hash', 'compact', 0, function* (self: RHash) {
-  const hash = newHash();
+  const hash = new RHash(self.cls);
+  hash.defaultValue = self.defaultValue;
+  hash.defaultProc = self.defaultProc;
   for (const entry of self.map.values()) if (entry.value !== NIL) yield* hashSet(hash, entry.key, entry.value);
   return hash;
 });

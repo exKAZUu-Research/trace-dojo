@@ -26,6 +26,11 @@ test('pending expression values remain visible in Turtle traces', () => {
   expect(programs.map((program) => traceProgram('ruby', program, program).finalTurtles.length)).toEqual([1, 2, 1]);
 });
 
+test('a Hash captured by to_proc remains reachable in Turtle traces', () => {
+  const program = 'h={Turtle.new=>1};f=h.to_proc;h=nil;x=1';
+  expect(traceProgram('ruby', program, program).finalTurtles).toHaveLength(1);
+});
+
 test('byte-bearing class literals record the same steps as text literals', () => {
   const ordinary = rubyTrace('class C\n X="a"\nend').map(({ line }) => line);
   const escaped = rubyTrace(String.raw`class C

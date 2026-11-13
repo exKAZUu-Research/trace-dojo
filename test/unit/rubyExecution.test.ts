@@ -29,6 +29,17 @@ test('unimplemented core methods use the dedicated unsupported error', () => {
   expect(run('p "abc".byteindex("b")')).toMatchObject({
     uncaughtException: 'String#byteindex は、この採点環境では使えません。',
   });
+  expect(run('proc{}.binding')).toMatchObject({ uncaughtException: 'Proc#binding は、この採点環境では使えません。' });
+  expect(run('String.autoload(:X,"x")')).toMatchObject({
+    uncaughtException: 'Module#autoload は、この採点環境では使えません。',
+  });
+});
+
+test('an exception whose message fails still returns an execution result', () => {
+  expect(run('class E<StandardError;def message;raise "oops";end;end;raise E')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'E',
+  });
 });
 
 test('pretty-printing a flat large Array stays within the execution budget', () => {
@@ -81,6 +92,8 @@ test('void expressions in value positions fail before execution', () => {
     'def f;for x in (return 1);end;end;p f',
     'def f;(return 1)::X;end;p f',
     'def f;(return 1)[0];end;p f',
+    'def f;x=(1;return 2);end;p f',
+    'def f;p(begin;return 1;end);end;p f',
   ])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
 });
@@ -232,6 +245,46 @@ test.each([
     '3\n-2\ntrue\nfalse\n',
   ],
   [
+    'ArithmeticSequence first handles NaN and infinite bounds directly',
+    'p 0.0.step(Float::NAN,1.0).first,0.0.step(Float::NAN,1.0).first(2),0.0.step(1.0,Float::INFINITY).first;begin;0.0.step(1.0,Float::NAN).first;rescue=>e;p e.class;end',
+    '0.0\n[0.0, 1.0]\n0.0\nArgumentError\n',
+  ],
+  [
+    'Random subclass initializer receives its own arguments',
+    'class R<Random;attr_reader :n;def initialize(x,y);super(x);@n=y;end;end;p R.new(1,7).n',
+    '7\n',
+  ],
+  [
+    'array-like Hash pairs convert through to_ary',
+    'class A;def to_ary;[:a,1];end;end;p Hash[[A.new]],[A.new].to_h,(1..1).to_h{A.new},{x:2}.to_h{A.new}',
+    '{a: 1}\n{a: 1}\n{a: 1}\n{a: 1}\n',
+  ],
+  [
+    'Hash defaults survive conversion and compaction',
+    'class H<Hash;end;h=H.new{|h,k|k};p h.to_h[:foo],h.compact[:bar],h.compact.class',
+    ':foo\n:bar\nH\n',
+  ],
+  [
+    'Hash to_proc uses native lookup despite subclass overrides',
+    'class H<Hash;def [](k);puts :override;4;end;end;h=H.new;p [:x].map(&h)',
+    '[nil]\n',
+  ],
+  [
+    'rehash during iteration preserves Hash entries',
+    'h={x:1};begin;h.each{|k,v|h.rehash};rescue=>e;p e.message,h;end',
+    '"rehash during iteration"\n{x: 1}\n',
+  ],
+  [
+    'rehash callback failure preserves Hash entries',
+    'class K;def hash;raise "oops" if $fail;0;end;end;k=K.new;h={k=>1};$fail=true;begin;h.rehash;rescue=>e;p e.message,h.size;end',
+    '"oops"\n1\n',
+  ],
+  [
+    'Array to_h errors use the runtime class',
+    'class B;def class;raise "bad";end;end;begin;[B.new].to_h;rescue=>e;p e.class,e.message;end',
+    'TypeError\n"wrong element type B at 0 (expected array)"\n',
+  ],
+  [
     'Array deconstruction, fetch_values, and reverse find',
     'p [1,2].deconstruct,[1,2].fetch_values(0,9){|i|i*2},[1,2,3].rfind{|x|x.even?}',
     '[1, 2]\n[1, 18]\n2\n',
@@ -270,12 +323,18 @@ test.each([
   [
     'exclusive Float steps retain a value below a nearby endpoint',
     'e=(0.1...1.5000000000000002).step(0.1);p e.size,e.to_a.size,e.last',
-    '15\n15\n1.5\n',
+    '15\n15\n1.4000000000000001\n',
   ],
   [
     'Unicode and invalid-byte String upto share successor rules',
     String.raw`p "aé".upto("aê").to_a,"a日".upto("a旦").to_a,"ab".upto("a\xFF").to_a.size,"a\xFF".upto("b").to_a.map(&:bytes)`,
     '["aé", "aê"]\n["a日", "a旦"]\n675\n[[97, 255]]\n',
+  ],
+  ['String upto compares initial values regardless of length', 'p "b".upto("ab").to_a,"z".upto("aa").to_a', '[]\n[]\n'],
+  [
+    'String successor carries through letters but skips symbols',
+    'p "😀9".succ,"a😀".succ,"€9".succ,"日9".succ',
+    '"😀10"\n"b😀"\n"€10"\n"旦0"\n',
   ],
   [
     'empty String translations skip invalid patterns',
@@ -331,6 +390,11 @@ test.each([
     'Kernel output preserves replacement-stream callbacks',
     'class W;attr_reader :calls;def initialize;@calls=[];end;def write(x);@calls<<[:write,x];end;def putc(x);@calls<<[:putc,x];end;end;w=W.new;old=$stdout;$stdout=w;putc 65;p 1,2;printf(w,"%s","x");$stdout=old;p w.calls',
     '[[:putc, 65], [:write, "1"], [:write, "\\n"], [:write, "2"], [:write, "\\n"], [:write, "x"]]\n',
+  ],
+  [
+    'print uses output field and record separators',
+    String.raw`$,=":";$\="!";print 1,2;STDOUT.print 3,4;print`,
+    '1:2!3:4!!',
   ],
   ['record separator assignment copies a mutable String', 's="x";$/=s;s<<"y";p $/', '"x"\n'],
   [

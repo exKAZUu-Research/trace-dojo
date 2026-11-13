@@ -21,8 +21,9 @@ for (const [owner, methods] of Object.entries({
   Set: ['compare_by_identity', 'compare_by_identity?', 'divide'],
   Symbol: ['encoding', 'match', 'match?'],
   NilClass: ['rationalize', 'to_c', 'to_r'],
-  Proc: ['ruby2_keywords', 'source_location'],
+  Proc: ['binding', 'ruby2_keywords', 'source_location'],
   Module: [
+    'autoload',
     'autoload?',
     'const_missing',
     'const_source_location',
