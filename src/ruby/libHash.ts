@@ -341,6 +341,7 @@ def('Hash', 'transform_keys!', [0, 1], function* (self: RHash, args, block) {
   yield* modify(self);
   const result = yield* transformKeys(self, args, block);
   self.map = result.map;
+  self.bucketVersion = -1;
   return self;
 });
 def('Hash', 'invert', 0, function* (self: RHash) {

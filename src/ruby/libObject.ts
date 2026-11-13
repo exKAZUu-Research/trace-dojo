@@ -75,7 +75,9 @@ def(
   { visibility: 'private', keywords: true }
 );
 def('BasicObject', '==', 1, (self, [other]) => self === other || (typeof self === 'number' && self === other));
-def('BasicObject', 'equal?', 1, (self, [other]) => self === other);
+def('BasicObject', 'equal?', 1, (self, [other]) =>
+  typeof self === 'number' && typeof other === 'number' ? Object.is(self, other) : self === other
+);
 def('BasicObject', '!', 0, (self) => !truthy(self));
 def('BasicObject', '!=', 1, function* (self, [other]) {
   return !truthy(yield* callMethod(self, '==', [other]));
@@ -83,8 +85,15 @@ def('BasicObject', '!=', 1, function* (self, [other]) {
 def('BasicObject', '__id__', 0, (self) => objectId(self));
 def('Kernel', 'object_id', 0, (self) => objectId(self));
 
+const floatBits = new DataView(new ArrayBuffer(8));
+
 function objectId(value: Value): bigint {
   if (typeof value === 'bigint') return 2n * value + 1n;
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) return (0x7f_f8_00_00_00_00_00_00n << 3n) | 6n;
+    floatBits.setFloat64(0, value);
+    return (floatBits.getBigUint64(0) << 3n) | 6n;
+  }
   if (value === NIL) return 8n;
   if (value === true) return 20n;
   if (value === false) return 0n;

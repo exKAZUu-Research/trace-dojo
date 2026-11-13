@@ -167,7 +167,12 @@ function containerNodeOf(value: RBasic, seen: Set<object>): DisplayNode {
     const ordered = [...value.map.values()];
     const labels = keyLabels(ordered.map((entry) => entry.key));
     for (const [index, entry] of ordered.entries()) {
-      entries[labels[index]] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
+      Object.defineProperty(entries, labels[index], {
+        value: displayNodeOf(entry.value, seen) ?? NULL_NODE,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
   } else {
     for (const [key, item] of value.ivars ?? []) {

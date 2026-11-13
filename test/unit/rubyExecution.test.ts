@@ -244,6 +244,23 @@ test.each([
     'class H; def to_hash; {a:1}; end; end; class A; def to_ary; [[:b,2]]; end; end; p Hash[H.new], Hash[A.new]',
     '{a: 1}\n{b: 2}\n',
   ],
+  ['Hash buckets follow transformed keys', 'h={a:1}; h.transform_keys!({a: :b}); p h.delete(:b), h', '1\n{}\n'],
+  ['indexes within Ruby long range can be out of bounds', 'p "a"[2**53], [1][2**53]', 'nil\nnil\n'],
+  [
+    'split with limit one preserves invalid bytes',
+    String.raw`p "a\xFF".split(",",1).map(&:bytes), "a\xFF".split(nil,1).map(&:bytes), "".split(",",1)`,
+    '[[97, 255]]\n[[97, 255]]\n[]\n',
+  ],
+  [
+    'replacement stdout receives original bytes and puts calls',
+    String.raw`class W; attr_reader :chunks; def initialize; @chunks=[]; end; def write(x); @chunks << x.bytes; end; end; w=W.new; old=$stdout; $stdout=w; print "\xFF"; puts 12; puts "\xFF"; $stdout=old; p w.chunks`,
+    '[[255], [49, 50], [10], [255], [10]]\n',
+  ],
+  [
+    'Float identities distinguish values and signed zero',
+    'p 1.5.object_id==3.5.object_id, 1.5.object_id==1.5.object_id, 0.0.object_id==(-0.0).object_id, 0.0.object_id==Float::NAN.object_id, 0.0.equal?(-0.0), Float::NAN.equal?(Float::NAN)',
+    'false\ntrue\nfalse\nfalse\nfalse\ntrue\n',
+  ],
   [
     'String sum long bound',
     'begin; "abc".sum(2**63); rescue RangeError => e; puts e.message; end; p "abc".sum(8)',

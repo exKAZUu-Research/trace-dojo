@@ -195,7 +195,13 @@ for (const owner of ['Integer', 'Float']) {
     return truthy(yield* callMethod(other, '==', [self]));
   });
   def(owner, 'eql?', 1, (self: Num, [other]) => typeof self === typeof other && numericEquals(self, other as Num));
-  def(owner, 'equal?', 1, (self: Num, [other]) => typeof self === typeof other && numericEquals(self, other as Num));
+  def(
+    owner,
+    'equal?',
+    1,
+    (self: Num, [other]) =>
+      typeof self === typeof other && (typeof self === 'number' ? Object.is(self, other) : self === other)
+  );
   def(owner, '<=>', 1, function* (self: Num, [other]) {
     if (isNum(other)) {
       const order = numericCompare(self, other);

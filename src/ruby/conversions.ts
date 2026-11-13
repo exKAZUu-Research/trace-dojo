@@ -54,10 +54,9 @@ export function* toInt(value: Value): Gen<bigint> {
   throw implicitConversionError(value, 'Integer');
 }
 
-/** {@link toInt} for an index or count that must fit a JavaScript number. */
 export function* toIndex(value: Value): Gen<number> {
   const integer = yield* toInt(value);
-  if (integer > BigInt(Number.MAX_SAFE_INTEGER) || integer < -BigInt(Number.MAX_SAFE_INTEGER)) {
+  if (integer > 9_223_372_036_854_775_807n || integer < -9_223_372_036_854_775_808n) {
     throw rangeError(`bignum too big to convert into 'long'`);
   }
   return Number(integer);

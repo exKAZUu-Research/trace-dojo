@@ -1182,10 +1182,19 @@ def('String', 'center', [1, 2], (self: RString, args) => justify(self, args, 'ce
 // Splitting -----------------------------------------------------------------------------------------------------------
 
 def('String', 'split', [0, 2], function* (self: RString, args, block) {
-  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const [pattern = NIL, limitValue] = args;
-  regexpUnsupported(pattern);
   const limit = limitValue === undefined ? 0 : yield* toIndex(limitValue);
+  if (limit === 1) {
+    if (self.s.length === 0) return block ? self : arr([]);
+    const value = stringFromBytes(stringBytes(self), self.binary);
+    if (block) {
+      yield* callBlock(block, [value], false);
+      return self;
+    }
+    return arr([value]);
+  }
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+  regexpUnsupported(pattern);
   const text = self.s;
   let parts: string[];
   if (isNil(pattern) || (pattern instanceof RString && pattern.s === ' ')) {

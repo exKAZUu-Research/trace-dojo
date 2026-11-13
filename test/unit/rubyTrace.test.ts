@@ -35,6 +35,14 @@ test('a recursive Array Hash key remains traceable', () => {
   expect(traceProgram('ruby', program, program).stdout).toBe('1\n');
 });
 
+test('Hash trace retains a __proto__ key', () => {
+  const program = 'h={__proto__:1,x:2}; p h';
+  const item = traceProgram('ruby', program, program).traceItems.find((trace) => 'h' in trace.referenceVars);
+  const node = item?.referenceVars.h;
+  expect(node?.kind).toBe('object');
+  if (node?.kind === 'object') expect(Object.hasOwn(node.entries, '__proto__')).toBe(true);
+});
+
 test('Turtles accumulated by map stay visible through later block steps', () => {
   const program = `ts = [1, 3].map do |x|
   t = Turtle.new(x, 0)

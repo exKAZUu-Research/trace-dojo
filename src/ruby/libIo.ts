@@ -1,8 +1,8 @@
 import type { OutputChannel } from '../interpreter/programIo';
-import { inspect, toInt, toS, toSValue } from './conversions';
+import { inspect, toInt, toSValue } from './conversions';
 import { def } from './define';
 import { typeError } from './errors';
-import { format, formatString } from './format';
+import { formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { prettyInspect } from './prettyPrint';
@@ -42,18 +42,20 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
       }
       return;
     }
-    const line = value instanceof RString ? value.s : yield* toS(value);
-    yield* write(target, line.endsWith('\n') ? line : `${line}\n`);
+    const line = value instanceof RString ? value : yield* toSValue(value);
+    if (line.s.length > 0) yield* write(target, line);
+    if (!line.s.endsWith('\n')) yield* write(target, '\n');
   };
   for (const arg of args) yield* visit(arg, new Set());
 }
 
-function* write(target: Value, text: string): Gen<void> {
+function* write(target: Value, value: string | RString): Gen<void> {
+  const text = value instanceof RString ? value : str(value);
   if (target instanceof RObject && (target.data === 'stdout' || target.data === 'stderr')) {
-    channel(target.data).write(text);
+    channel(target.data).write(text.s);
     return;
   }
-  yield* callMethod(target, 'write', [str(text)]);
+  yield* callMethod(target, 'write', [text]);
 }
 
 function channel(stream: 'stdout' | 'stderr'): OutputChannel {
@@ -79,7 +81,7 @@ def(
   'print',
   [0, -1],
   function* (_self, args) {
-    for (const arg of args) yield* write(stdout(), yield* toS(arg));
+    for (const arg of args) yield* write(stdout(), yield* toSValue(arg));
     return NIL;
   },
   PRIVATE
@@ -112,7 +114,7 @@ def(
   [0, -1],
   function* (_self, args) {
     if (args.length === 0) return NIL;
-    yield* write(stdout(), yield* format(args[0], args.slice(1)));
+    yield* write(stdout(), yield* formatString(args[0], args.slice(1)));
     return NIL;
   },
   PRIVATE
@@ -161,7 +163,7 @@ def('IO', 'puts', [0, -1], function* (self: RObject, args) {
   return NIL;
 });
 def('IO', 'print', [0, -1], function* (self: RObject, args) {
-  for (const arg of args) yield* write(self, yield* toS(arg));
+  for (const arg of args) yield* write(self, yield* toSValue(arg));
   return NIL;
 });
 def('IO', 'write', [0, -1], function* (self: RObject, args) {
@@ -174,11 +176,11 @@ def('IO', 'write', [0, -1], function* (self: RObject, args) {
   return bytes;
 });
 def('IO', '<<', 1, function* (self: RObject, [value]) {
-  yield* write(self, yield* toS(value));
+  yield* write(self, yield* toSValue(value));
   return self;
 });
 def('IO', 'printf', [1, -1], function* (self: RObject, args) {
-  yield* write(self, yield* format(args[0], args.slice(1)));
+  yield* write(self, yield* formatString(args[0], args.slice(1)));
   return NIL;
 });
 def('IO', 'p', [0, -1], function* (self: RObject, args) {
