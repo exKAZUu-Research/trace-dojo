@@ -1598,8 +1598,10 @@ test.each([
   '((b+k)^91^91)-k',
   '(b|k)+(b&k)-k',
   '(b^k)+2*(b&k)-k',
+  '(b^k)+((b&k)<<1)-k',
   '2*(b|k)-(b^k)-k',
   '((b|k)^(b&k))^k',
+  '~(k+~b)+k',
 ])('equal pointer representations retain the source byte origin: %s', (expression) => {
   for (const end of [false, true]) {
     const source = `#include <stdio.h>\n#include <string.h>\nunsigned char pass(unsigned char n){unsigned char copy;memcpy(&copy,&n,1);return copy;}\nint main(void){int a[2][2]={{1,2},{3,4}};int*p=${end ? 'a[0]+2' : 'a[1]'},*m=${end ? 'a[1]' : 'a[0]+2'},*q;for(int i=0;i<8;i++){unsigned char b=((unsigned char*)&p)[i],k=((unsigned char*)&m)[i];((unsigned char*)&q)[i]=pass(${expression});}printf("%d",*q);}`;
@@ -1628,10 +1630,13 @@ test.each(['(p^m)^m', 'm^(m^p)', 'm+(p-m)', '(p+m)-m', '~~((p^m)^m)'])(
 test.each([
   '(p|m)+(p&m)-m',
   '(p^m)+2*(p&m)-m',
+  '(p^m)+((p&m)<<1)-m',
   '2*(p|m)-(p^m)-m',
   '((p|m)^(p&m))^m',
   '(p|m)-m+(p&m)',
   '(p^m)+(p&m)+(m&p)-m',
+  '~(m+~p)+m',
+  '((p+m)|m)+((p+m)&m)-m-m',
 ])('linear Boolean reconstruction preserves pointer bounds: %s', (expression) => {
   for (const end of [false, true])
     for (const aux of ['a[0]', 'a[1]', 'a[0]+2'])
@@ -1643,4 +1648,23 @@ test.each([
           uncaughtException: end ? expect.any(String) : undefined,
         });
       }
+});
+
+test.each([
+  'unsigned char c=(b*256)/256;q[i]=c+0;',
+  'q[i]=(b<<8)>>8;',
+  'int c=b*256+k-k;q[i]=c/256;',
+  'unsigned char c=b+k;q[i]=c-k;',
+  'unsigned char e=b+k;int c=(e-k)*256;q[i]=c/256;',
+  'unsigned char e=b+k;e-=k;q[i]=(e<<8)>>8;',
+  'int c=b*256;int d;memcpy(&d,&c,sizeof d);q[i]=d/256;',
+])('promoted byte arithmetic preserves pointer origins through character storage: %s', (body) => {
+  for (const end of [false, true]) {
+    const source = `#include <stdio.h>\n#include <string.h>\nint main(void){int a[2][2]={{1,2},{3,4}};int*p=${end ? 'a[0]+2' : 'a[1]'},*m=${end ? 'a[1]' : 'a[0]+2'},*v;unsigned char*q=(unsigned char*)&v;for(int i=0;i<8;i++){unsigned char b=((unsigned char*)&p)[i],k=((unsigned char*)&m)[i];${body}}printf("%d",*v);}`;
+    expect(executeProgram('c', source)).toMatchObject({
+      kind: 'executed',
+      stdout: end ? '' : '3',
+      uncaughtException: end ? expect.any(String) : undefined,
+    });
+  }
 });

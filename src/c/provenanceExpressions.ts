@@ -52,6 +52,8 @@ export class ProvenanceAlgebra {
   private readonly booleanForms = new Map<number, BooleanPolynomial>();
   private readonly booleanNodes = new Set<number>();
   private readonly linearAliases = new Map<string, ProvenanceExpression>();
+  private readonly byteViews = new Map<number, ProvenanceExpression>();
+  private readonly inverses = new Map<string, ProvenanceExpression>();
 
   constructor(private readonly budget: ExecutionBudget) {}
 
@@ -70,6 +72,18 @@ export class ProvenanceAlgebra {
     });
   }
 
+  byteView(expression: ProvenanceExpression): ProvenanceExpression | undefined {
+    return this.byteViews.get(expression.id);
+  }
+
+  registerByteView(expression: ProvenanceExpression, byte: ProvenanceExpression): void {
+    if (!this.byteViews.has(expression.id)) {
+      this.budget.spend();
+      this.byteViews.set(expression.id, byte);
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 18 -- One dispatch applies canonical identities and validates them against the evaluated scalar.
   combine(operation: {
     operator?: BinaryOperator | '~';
     value: Scalar;
@@ -81,29 +95,56 @@ export class ProvenanceAlgebra {
       ...input,
       expression: input.expression.width === width ? input.expression : this.opaque(input.value, [input], width),
     }));
-    let result: ProvenanceExpression | undefined;
+    const inverseKey = `${operator}/${inputs[0]?.expression.id}/${inputs[1]?.expression.id}`;
+    let result = width === 64 ? this.inverses.get(inverseKey) : undefined;
     if (operator === '^' && inputs.some((input) => this.booleanNodes.has(input.expression.id)))
       result = this.booleanExpression('^', inputs, width);
-    else if (operator === '+' || operator === '-' || operator === '^')
-      result = this.normalize(operator === '^' ? 'xor' : 'add', inputs, width, operator === '-');
-    else if (operator === '~')
-      result = this.normalize('xor', [...inputs, { expression: this.constant(-1, width), value: -1 }], width, false);
-    else {
+    else if (!result && (operator === '+' || operator === '-' || operator === '^'))
+      result = this.normalize(operator === '^' ? 'xor' : 'add', inputs, width, {
+        subtract: operator === '-',
+      });
+    else if (!result && operator === '~')
+      result = this.normalize('xor', [...inputs, { expression: this.constant(-1, width), value: -1 }], width);
+    else if (!result) {
       result = this.identity(operator, inputs, width);
       if (!result && (operator === '&' || operator === '|')) result = this.booleanExpression(operator, inputs, width);
     }
-    return result?.value === BigInt.asUintN(width, BigInt(value))
-      ? result
-      : this.opaque(value, inputs, width, operator);
+    const resolved =
+      result?.value === BigInt.asUintN(width, BigInt(value)) ? result : this.opaque(value, inputs, width, operator);
+    this.registerInverses(operator, value, inputs, resolved);
+    return resolved;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Neutral and absorbing identities must respect signed division and C shift values in one dispatch.
+  private registerInverses(
+    operator: BinaryOperator | '~' | undefined,
+    value: Scalar,
+    inputs: Input[],
+    resolved: ProvenanceExpression
+  ): void {
+    if (resolved.width !== 64 || inputs.length !== 2) return;
+    const [a, b] = inputs;
+    if (operator === '*' && BigInt(a.value) * BigInt(b.value) === BigInt(value)) {
+      if (BigInt(b.value) !== 0n && [...a.expression.sources.keys()].every((key) => resolved.sources.has(key)))
+        this.recordInverse(`//${resolved.id}/${b.expression.id}`, a.expression);
+      if (BigInt(a.value) !== 0n && [...b.expression.sources.keys()].every((key) => resolved.sources.has(key)))
+        this.recordInverse(`//${resolved.id}/${a.expression.id}`, b.expression);
+    }
+    if (operator === '<<' && BigInt(a.value) << BigInt(b.value) === BigInt(value))
+      this.recordInverse(`>>/${resolved.id}/${b.expression.id}`, a.expression);
+  }
+
+  private recordInverse(key: string, target: ProvenanceExpression): void {
+    this.budget.spend(key.length + 1);
+    this.inverses.set(key, target);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 27 -- Neutral and absorbing identities must respect signed division and C shift values in one dispatch.
   private identity(
-    operator: BinaryOperator | undefined,
+    operator: BinaryOperator | '~' | undefined,
     inputs: Input[],
     width: 8 | 64
   ): ProvenanceExpression | undefined {
-    if (!operator || inputs.length !== 2) return;
+    if (!operator || operator === '~' || inputs.length !== 2) return;
     let [left, right] = inputs;
     if (['*', '&', '|'].includes(operator) && left.expression.sources.size === 0) [left, right] = [right, left];
     const a = left.expression,
@@ -118,7 +159,8 @@ export class ProvenanceAlgebra {
         return this.constant(0, width);
       if (operator === '/' && BigInt(right.value) === 1n) return a;
       if ((operator === '<<' || operator === '>>') && BigInt(right.value) === 0n) return a;
-      if (operator === '*') return this.normalize('add', [left], width, false, [b.value]);
+      if (operator === '<<') return this.normalize('add', [left], width, { scales: [1n << BigInt(right.value)] });
+      if (operator === '*') return this.normalize('add', [left], width, { scales: [b.value] });
     }
     if ((operator === '&' || operator === '|') && a.id === b.id) return a;
     return undefined;
@@ -130,24 +172,18 @@ export class ProvenanceAlgebra {
     mode: 'add' | 'xor',
     inputs: Input[],
     width: 8 | 64,
-    subtract: boolean,
-    scales?: readonly bigint[]
+    options?: { subtract?: boolean; scales?: readonly bigint[] }
   ): ProvenanceExpression {
     const terms = new Map<ProvenanceExpression, bigint>();
     const combine = mode === 'xor' ? (a: bigint, b: bigint): bigint => a ^ b : (a: bigint, b: bigint): bigint => a + b;
     const coefficientWidth = mode === 'xor' ? 1 : width;
     let constant = 0n;
     for (const [index, { expression }] of inputs.entries()) {
-      const factor = (scales?.[index] ?? 1n) * (subtract && index > 0 ? -1n : 1n);
-      const parts = mode === 'add' ? this.linearParts(expression) : this.xorParts(expression);
+      const factor = (options?.scales?.[index] ?? 1n) * (options?.subtract && index > 0 ? -1n : 1n);
+      const parts = mode === 'add' ? this.linearParts(expression) : this.partsOf(expression, mode);
       constant = combine(constant, parts.constant * factor);
       const source = parts.terms;
-      for (const [term, weight] of source) {
-        this.budget.spend();
-        const next = BigInt.asUintN(coefficientWidth, (terms.get(term) ?? 0n) + weight * factor);
-        if (next === 0n) terms.delete(term);
-        else terms.set(term, next);
-      }
+      this.accumulateTerms(terms, source, factor, coefficientWidth);
     }
     constant = BigInt.asUintN(width, constant);
     if (terms.size === 0) return this.constant(constant, width);
@@ -170,28 +206,42 @@ export class ProvenanceAlgebra {
     });
   }
 
-  private xorParts(expression: ProvenanceExpression): LinearParts {
-    if (expression.mode === 'xor') return { constant: expression.constant!, terms: expression.terms! };
+  private partsOf(expression: ProvenanceExpression, mode: 'add' | 'xor'): LinearParts {
+    if (expression.mode === mode) return { constant: expression.constant!, terms: expression.terms! };
     if (!expression.mode && expression.constant !== undefined)
       return { constant: expression.constant, terms: new Map() };
     return { constant: 0n, terms: new Map([[expression, 1n]]) };
   }
 
   private linearParts(expression: ProvenanceExpression): LinearParts {
-    if (expression.mode === 'add') return { constant: expression.constant!, terms: expression.terms! };
-    if (expression.mode !== 'xor' && !this.booleanNodes.has(expression.id)) return this.xorParts(expression);
+    if (expression.mode !== 'xor' && !this.booleanNodes.has(expression.id)) return this.partsOf(expression, 'add');
     const terms = new Map<ProvenanceExpression, bigint>();
     let constant = 0n;
     for (const [key, term] of this.booleanParts(expression)) {
       const monomial = this.fromBoolean(new Map([[key, { ...term, weight: 1n }]]), expression.width);
-      if (monomial.constant !== undefined && !monomial.mode) constant += monomial.value * term.weight;
-      else terms.set(monomial, BigInt.asUintN(expression.width, (terms.get(monomial) ?? 0n) + term.weight));
+      const parts = this.partsOf(monomial, 'add');
+      constant += parts.constant * term.weight;
+      this.accumulateTerms(terms, parts.terms, term.weight, expression.width);
     }
     for (const [term, weight] of terms) if (weight === 0n) terms.delete(term);
     constant = BigInt.asUintN(expression.width, constant);
     const key = this.formKey('add', expression.width, constant, terms);
     if (!this.linearAliases.has(key)) this.linearAliases.set(key, expression);
     return { constant, terms };
+  }
+
+  private accumulateTerms(
+    terms: Map<ProvenanceExpression, bigint>,
+    source: ReadonlyMap<ProvenanceExpression, bigint>,
+    factor: bigint,
+    width: number
+  ): void {
+    for (const [term, weight] of source) {
+      this.budget.spend();
+      const next = BigInt.asUintN(width, (terms.get(term) ?? 0n) + weight * factor);
+      if (next === 0n) terms.delete(term);
+      else terms.set(term, next);
+    }
   }
 
   private booleanExpression(operator: '&' | '|' | '^', inputs: Input[], width: 8 | 64): ProvenanceExpression {

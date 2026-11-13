@@ -26,6 +26,7 @@ import {
   type Evaluator,
   evaluatorOf,
   type MetadataReader,
+  narrowByteProvenance,
   pointerAt,
   pointerEvaluator,
   rangeOfBytes,
@@ -336,7 +337,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
       read: Object.assign(
         (frame: Frame) => {
           const location = resolve(frame);
-          return { value: location.load(), range: location.range?.(), bytes: location.bytes?.() };
+          const value = location.load();
+          const bytes = location.bytes?.();
+          return {
+            value,
+            range: location.range?.(),
+            bytes:
+              type.kind === 'int' && sizeOf(type) === 1
+                ? narrowByteProvenance(bytes, value as Scalar, frame.runtime.budget)
+                : bytes,
+          };
         },
         { always: true }
       ),
@@ -1085,7 +1095,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Conversions -----------------------------------------------------------------------------------------------------
 
   /** Converts an rvalue to a type, which the caller has checked it may be converted to. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Scalar conversion, the plain-value fast path, and metadata propagation must describe the same type conversion.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Scalar conversion, the plain-value fast path, and metadata propagation must describe the same type conversion.
   converted(operand: Operand, type: CType): Evaluator {
     const from = operand.type;
     const original = evaluatorOf(operand);
@@ -1100,7 +1110,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (from.kind === 'float' || type.kind === 'float' || (type.kind === 'int' && type.name === 'bool'))
         return { value };
       const size = sizeOf(type);
-      return { value, range: size >= 8 ? result.range : undefined, bytes: slicePointerBytes(result.bytes, 0, size) };
+      const bytes = slicePointerBytes(result.bytes, 0, size);
+      return {
+        value,
+        range: size >= 8 ? result.range : undefined,
+        bytes: size === 1 ? narrowByteProvenance(bytes, value, frame.runtime.budget) : bytes,
+      };
     };
     const same =
       from.kind === type.kind &&

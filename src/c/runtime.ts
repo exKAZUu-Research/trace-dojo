@@ -9,6 +9,7 @@ import { ByteStream } from './library/support';
 import { type Allocation, Memory } from './memory';
 import {
   type Evaluated,
+  narrowByteProvenance,
   type PointerBytes,
   pointerBytesOf,
   type PointerRange,
@@ -118,7 +119,9 @@ export class Frame implements TracedFrame {
         ? type.kind === 'pointer'
           ? pointerBytesOf(result.range, result.value as Scalar)
           : storedPointerBytes(result.range, result.value as Scalar, result.bytes, this.runtime.budget)
-        : result?.bytes;
+        : type?.kind === 'int' && sizeOf(type) === 1 && result
+          ? narrowByteProvenance(result.bytes, result.value as Scalar, this.runtime.budget)
+          : result?.bytes;
     if (bytes) this.scalarBytes.set(index, bytes);
     else this.scalarBytes.delete(index);
   }
@@ -368,7 +371,9 @@ export function storeValue(
       ? type.kind === 'pointer'
         ? pointerBytesOf(range, value)
         : storedPointerBytes(range, value, bytes, runtime.budget)
-      : bytes;
+      : type.kind === 'int' && sizeOf(type) === 1
+        ? narrowByteProvenance(bytes, value, runtime.budget)
+        : bytes;
   if (metadata) {
     if (type.kind === 'int') runtime.hasIntegerProvenance = true;
     const size = sizeOf(type);

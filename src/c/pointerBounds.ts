@@ -23,6 +23,8 @@ export interface PointerOrigin {
   range?: PointerRange;
   expression?: AddressTerms;
   proof?: ProvenanceExpression;
+  fragment?: true;
+  narrowed?: true;
 }
 type AddressTerms = ReadonlyMap<string, { range: PointerRange; weight: bigint }>;
 export interface PointerByte {
@@ -251,6 +253,7 @@ export function arithmeticResult(
     ? 8
     : 64;
   const algebra = provenanceAlgebra(budget);
+  if (width === 8) return byteArithmeticResult(value, operands, sources, algebra, budget, operator);
   const proof = algebra.combine({
     operator,
     value,
@@ -260,7 +263,6 @@ export function arithmeticResult(
       expression: operandProof(operand, sources[index], width, algebra, budget),
     })),
   });
-  if (width === 8) return { value, bytes: bytesOfProof(proof, budget) };
   const terms = operands.map((operand) => termsOf(operand, budget));
   if (!terms.some((item) => item !== undefined))
     return { value, bytes: expressionBytes(bytes, value, new Map(), budget, proof) };
@@ -283,6 +285,35 @@ export function arithmeticResult(
   };
 }
 
+function byteArithmeticResult(
+  value: Scalar,
+  operands: Evaluated[],
+  sources: (PointerBytes | undefined)[],
+  algebra: ProvenanceAlgebra,
+  budget: ExecutionBudget,
+  operator?: BinaryOperator | '~'
+): Evaluated {
+  const inputs = operands.map((operand, index) => ({
+    value: operand.value as Scalar,
+    expression: operandProof(operand, sources[index], 8, algebra, budget),
+  }));
+  const wide = algebra.combine({
+    operator,
+    value,
+    width: 64,
+    inputs: operands.map((operand, index) => ({
+      value: operand.value as Scalar,
+      expression: scalarByteProof(operand.value as Scalar, sources[index], algebra, budget),
+    })),
+  });
+  const proof =
+    operator !== undefined && !['/', '%', '>>'].includes(operator)
+      ? algebra.combine({ operator, value, width: 8, inputs })
+      : (algebra.byteView(wide) ?? algebra.combine({ value, width: 8, inputs: [{ value, expression: wide }] }));
+  algebra.registerByteView(wide, proof);
+  return { value, bytes: bytesOfProof(proof, wide, value, budget) };
+}
+
 function operandProof(
   operand: Evaluated,
   bytes: PointerBytes | undefined,
@@ -293,6 +324,8 @@ function operandProof(
   const value = operand.value as Scalar;
   if (!bytes?.size) return algebra.constant(value, width);
   if (width === 8) return byteOperandProof(value, bytes, algebra, budget);
+  if ([...(bytes.get(0)?.values() ?? [])].some((byte) => byte.origin.fragment))
+    return scalarByteProof(value, bytes, algebra, budget);
   const matching = matchingOrigins(bytes, 0, representationOf(value), budget);
   const previous = matching.find((origin) => origin.proof)?.proof;
   if (previous) return previous;
@@ -316,6 +349,67 @@ function operandProof(
     }
   }
   return algebra.combine({ value, inputs, width });
+}
+
+function scalarByteProof(
+  value: Scalar,
+  bytes: PointerBytes | undefined,
+  algebra: ProvenanceAlgebra,
+  budget: ExecutionBudget
+): ProvenanceExpression {
+  if (!bytes?.size) return algebra.constant(value, 64);
+  budget.spend(bytes.get(0)?.size ?? 0);
+  const previous = [...(bytes.get(0)?.values() ?? [])].find((byte) => byte.origin.fragment)?.origin.proof;
+  if (previous?.value === BigInt.asUintN(64, BigInt(value))) return previous;
+  const expression = previous ?? byteOperandProof(value, bytes, algebra, budget);
+  const result = algebra.combine({ value, width: 64, inputs: [{ value, expression }] });
+  algebra.registerByteView(result, byteOperandProof(value, bytes, algebra, budget));
+  return result;
+}
+
+export function narrowByteProvenance(
+  bytes: PointerBytes | undefined,
+  value: Scalar,
+  budget: ExecutionBudget
+): PointerBytes | undefined {
+  const fragment = [...(bytes?.get(0)?.values() ?? [])].find((byte) => byte.origin.fragment);
+  if (
+    !fragment?.proof ||
+    (fragment.origin.narrowed && fragment.origin.representation === BigInt.asUintN(64, BigInt(value)))
+  )
+    return bytes;
+  const algebra = provenanceAlgebra(budget);
+  const scalar = algebra.combine({
+    value,
+    width: 64,
+    inputs: [{ value, expression: fragment.proof }],
+  });
+  algebra.registerByteView(scalar, fragment.proof);
+  return bytesOfProof(fragment.proof, scalar, value, budget, true);
+}
+
+function bytesOfProof(
+  proof: ProvenanceExpression,
+  scalar: ProvenanceExpression,
+  value: Scalar,
+  budget: ExecutionBudget,
+  narrowed = false
+): PointerBytes | undefined {
+  if (proof.sources.size === 0 && scalar.sources.size === 0) return;
+  const candidates = new Map<string, PointerByte>();
+  budget.spend(proof.sources.size);
+  for (const source of proof.sources.values()) {
+    if (source.byte) candidates.set(`${source.byte.origin.key}/${source.byte.index}`, { ...source.byte, proof });
+  }
+  const origin: PointerOrigin = {
+    key: `f:${scalar.id}/${proof.id}`,
+    representation: BigInt.asUintN(64, BigInt(value)),
+    proof: scalar,
+    fragment: true,
+    narrowed: narrowed ? true : undefined,
+  };
+  candidates.set(`${origin.key}/0`, { origin, index: 0, proof });
+  return new Map([[0, candidates]]);
 }
 
 function byteOperandProof(
@@ -342,15 +436,6 @@ function byteOperandProof(
     ),
   }));
   return inputs.length === 1 ? inputs[0].expression : algebra.combine({ value, inputs, width: 8 });
-}
-
-function bytesOfProof(proof: ProvenanceExpression, budget: ExecutionBudget): PointerBytes | undefined {
-  const candidates = new Map<string, PointerByte>();
-  budget.spend(proof.sources.size);
-  for (const source of proof.sources.values()) {
-    if (source.byte) candidates.set(`${source.byte.origin.key}/${source.byte.index}`, { ...source.byte, proof });
-  }
-  return candidates.size > 0 ? new Map([[0, candidates]]) : undefined;
 }
 
 function rangeOfProofSources(
@@ -443,7 +528,7 @@ function expressionBytes(
       offset,
       new Map(
         [...candidates]
-          .filter(([, byte]) => !byte.origin.expression)
+          .filter(([, byte]) => !byte.origin.expression && !byte.origin.fragment)
           .map(([at, byte]) => [at, { origin: byte.origin, index: byte.index }])
       )
     );
