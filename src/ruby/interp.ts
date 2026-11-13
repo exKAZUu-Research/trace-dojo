@@ -13,7 +13,7 @@ import type {
   StrPart,
   Target,
 } from './ast';
-import { caseEquals, inspect, toS } from './conversions';
+import { caseEquals, inspect, toS, toSValue } from './conversions';
 import {
   argumentCountError,
   argumentError,
@@ -309,7 +309,7 @@ function* interpolateString(parts: StrPart[], frame: Frame): Gen<RString> {
     else if ('text' in part) bytes = Uint8Array.from(part.bytes);
     else {
       const value = yield* ev(part, frame);
-      bytes = value instanceof RString ? stringBytes(value) : new TextEncoder().encode(yield* toS(value));
+      bytes = stringBytes(yield* toSValue(value));
     }
     length += bytes.length;
     rt().checkStringLength(length);

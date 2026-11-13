@@ -10,6 +10,7 @@ import {
   toRubyLong,
   toS,
   toStr,
+  toStrValue,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
@@ -20,7 +21,17 @@ import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { NIL, RArray, RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, isNil, str, stringBytes, stringFromBytes, sym, truthy } from './values';
+import {
+  arr,
+  isNil,
+  joinStringCharacters,
+  str,
+  stringBytes,
+  stringCharacters,
+  stringFromBytes,
+  sym,
+  truthy,
+} from './values';
 
 // Characters ----------------------------------------------------------------------------------------------------------
 
@@ -47,9 +58,23 @@ function setText(self: RString, text: string): void {
   self.rawBytes = undefined;
 }
 
+function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void {
+  modify(self);
+  rt().checkStringLength(bytes.length);
+  const result = stringFromBytes(bytes, binary);
+  self.s = result.s;
+  self.binary = result.binary;
+  self.rawBytes = result.rawBytes;
+}
+
 function* stringArg(value: Value): Gen<string> {
   if (value instanceof RSymbol) throw implicitConversionError(value, 'String');
   return yield* toStr(value);
+}
+
+function* stringArgValue(value: Value): Gen<RString> {
+  if (value instanceof RSymbol) throw implicitConversionError(value, 'String');
+  return yield* toStrValue(value);
 }
 
 function regexpUnsupported(value: Value): void {
@@ -98,7 +123,10 @@ def(
   'initialize',
   [0, 1],
   function* (self: RString, args) {
-    if (args.length > 0) setText(self, yield* toStr(args[0]));
+    if (args.length > 0) {
+      const source = yield* toStrValue(args[0]);
+      setBytes(self, stringBytes(source), source.binary);
+    }
     return NIL;
   },
   { visibility: 'private' }
@@ -109,12 +137,17 @@ sdef(
   [0, 1],
   function* (self, args, _block, keywords) {
     void keywords;
-    const value = new RString(self, args.length > 0 ? yield* toStr(args[0]) : '');
+    const source = args.length > 0 ? yield* toStrValue(args[0]) : str('');
+    const value = new RString(self, source.s);
+    value.binary = source.binary;
+    value.rawBytes = source.rawBytes ? Uint8Array.from(source.rawBytes) : undefined;
     return value;
   },
   { keywords: true }
 );
-def('String', ['to_s', 'to_str'], 0, (self: RString) => (self.cls === rt().c.String ? self : str(self.s)));
+def('String', ['to_s', 'to_str'], 0, (self: RString) =>
+  self.cls === rt().c.String ? self : stringFromBytes(stringBytes(self), self.binary)
+);
 def('String', 'inspect', 0, (self: RString) =>
   str(self.rawBytes ? inspectRawBytes(self.rawBytes) : self.binary ? binaryInspect(self.s) : strInspect(self.s))
 );
@@ -179,7 +212,7 @@ def('String', 'to_r', 0, () => {
 });
 def('String', 'hex', 0, (self: RString) => parseIntegerLenient(self.s, 16));
 def('String', 'oct', 0, (self: RString) => parseIntegerLenient(self.s, 8));
-def('String', ['length', 'size'], 0, (self: RString) => BigInt(charLength(self.s)));
+def('String', ['length', 'size'], 0, (self: RString) => BigInt(stringCharacters(self).length));
 def('String', 'bytesize', 0, (self: RString) => BigInt(stringBytes(self).length));
 def('String', 'empty?', 0, (self: RString) => self.s.length === 0);
 def('String', 'hash', 0, (self: RString) => {
@@ -220,13 +253,13 @@ function foldAscii(text: string): string {
 }
 
 def('String', '+', 1, function* (self: RString, [other]) {
-  const right = other instanceof RString ? stringBytes(other) : new TextEncoder().encode(yield* stringArg(other));
+  const right = stringBytes(yield* stringArgValue(other));
   const left = stringBytes(self);
   rt().checkStringLength(left.length + right.length);
   const joined = new Uint8Array(left.length + right.length);
   joined.set(left);
   joined.set(right, left.length);
-  return stringFromBytes(joined);
+  return stringFromBytes(joined, self.binary);
 });
 def('String', '*', 1, function* (self: RString, [count]) {
   const times = yield* toIndex(count);
@@ -236,18 +269,18 @@ def('String', '*', 1, function* (self: RString, [count]) {
   rt().spend(Math.floor((source.length * times) / 256));
   const repeated = new Uint8Array(source.length * times);
   for (let index = 0; index < times; index++) repeated.set(source, index * source.length);
-  return stringFromBytes(repeated);
+  return stringFromBytes(repeated, self.binary);
 });
 def('String', '%', 1, function* (self: RString, [value]) {
   return str(yield* format(self, value instanceof RArray ? value.items : [value]));
 });
 def('String', '-@', 0, (self: RString) => {
   if (self.frozen) return self;
-  const copy = str(self.s);
+  const copy = stringFromBytes(stringBytes(self), self.binary);
   copy.frozen = true;
   return copy;
 });
-def('String', '+@', 0, (self: RString) => (self.frozen ? str(self.s) : self));
+def('String', '+@', 0, (self: RString) => (self.frozen ? stringFromBytes(stringBytes(self), self.binary) : self));
 def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
   modify(self);
   const chunks: Uint8Array[] = [stringBytes(self)];
@@ -260,9 +293,12 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
       if (arg > 0x10_ff_ffn) throw rangeError(`${arg} out of char range`);
       if (arg >= 0xd8_00n && arg <= 0xdf_ffn)
         throw rangeError(`invalid codepoint 0x${arg.toString(16).toUpperCase()} in UTF-8`);
-      chunk = arg <= 255n ? Uint8Array.of(Number(arg)) : new TextEncoder().encode(String.fromCodePoint(Number(arg)));
+      chunk =
+        self.binary && arg <= 255n
+          ? Uint8Array.of(Number(arg))
+          : new TextEncoder().encode(String.fromCodePoint(Number(arg)));
     } else {
-      chunk = arg instanceof RString ? stringBytes(arg) : new TextEncoder().encode(yield* stringArg(arg));
+      chunk = stringBytes(yield* stringArgValue(arg));
     }
     length += chunk.length;
     rt().checkStringLength(length);
@@ -274,7 +310,7 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
     bytes.set(chunk, offset);
     offset += chunk.length;
   }
-  const result = stringFromBytes(bytes);
+  const result = stringFromBytes(bytes, self.binary);
   self.s = result.s;
   self.binary = result.binary;
   self.rawBytes = result.rawBytes;
@@ -282,11 +318,8 @@ def('String', ['<<', 'concat'], [0, -1], function* (self: RString, args) {
 });
 def('String', 'replace', 1, function* (self: RString, [other]) {
   modify(self);
-  const source = other instanceof RString ? other : str(yield* stringArg(other));
-  const result = stringFromBytes(stringBytes(source));
-  self.s = result.s;
-  self.binary = result.binary;
-  self.rawBytes = result.rawBytes;
+  const source = yield* stringArgValue(other);
+  setBytes(self, stringBytes(source), source.binary);
   return self;
 });
 def('String', 'clear', 0, (self: RString) => {
@@ -316,11 +349,11 @@ function* substring(self: RString, args: Value[]): Gen {
   const [first] = args;
   if (args.length === 1 && first instanceof RString) return self.s.includes(first.s) ? str(first.s) : NIL;
   regexpUnsupported(first);
-  const chars = charsOf(self.s);
+  const chars = stringCharacters(self);
   const range = yield* substringRange(chars.length, args);
   if (!range) return NIL;
-  if (args.length === 1 && !(first instanceof RRange) && range.count === 1) return str(chars[range.start]);
-  return str(chars.slice(range.start, range.start + range.count).join(''));
+  if (args.length === 1 && !(first instanceof RRange) && range.count === 1) return chars[range.start];
+  return joinStringCharacters(chars.slice(range.start, range.start + range.count), self.binary);
 }
 
 def('String', ['[]', 'slice'], [1, 2], (self: RString, args) => substring(self, args));
@@ -369,10 +402,11 @@ def('String', '[]=', [2, 3], function* (self: RString, args) {
   setText(self, chars.join(''));
   return args.at(-1) as Value;
 });
-def('String', 'chars', 0, (self: RString) => arr(charsOf(self.s).map((char) => str(char))));
-def('String', 'codepoints', 0, (self: RString) =>
-  arr(charsOf(self.s).map((char) => BigInt(char.codePointAt(0) as number)))
-);
+def('String', 'chars', 0, (self: RString) => arr(stringCharacters(self)));
+def('String', 'codepoints', 0, (self: RString) => {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+  return arr(stringCharacters(self).map((char) => BigInt(char.s.codePointAt(0) as number)));
+});
 def('String', 'bytes', 0, (self: RString) => arr([...stringBytes(self)].map(BigInt)));
 def('String', 'getbyte', 1, function* (self: RString, [index]) {
   const bytes = stringBytes(self);
@@ -382,7 +416,7 @@ def('String', 'getbyte', 1, function* (self: RString, [index]) {
 });
 def('String', 'each_char', 0, function* (self: RString, _args, block) {
   if (!block) return makeEnumerator(self, 'each_char', []);
-  for (const char of charsOf(self.s)) yield* callBlock(block, [str(char)], false);
+  for (const char of stringCharacters(self)) yield* callBlock(block, [char], false);
   return self;
 });
 def('String', 'each_byte', 0, function* (self: RString, _args, block) {
@@ -392,9 +426,11 @@ def('String', 'each_byte', 0, function* (self: RString, _args, block) {
 });
 def('String', 'ord', 0, (self: RString) => {
   if (self.s.length === 0) throw argumentError('empty string');
-  return BigInt(self.s.codePointAt(0) as number);
+  const first = stringCharacters(self)[0];
+  if (first.rawBytes && !first.binary) throw argumentError('invalid byte sequence in UTF-8');
+  return BigInt(first.s.codePointAt(0) as number);
 });
-def('String', 'chr', 0, (self: RString) => str(charsOf(self.s)[0] ?? ''));
+def('String', 'chr', 0, (self: RString) => stringCharacters(self)[0] ?? str(''));
 def('String', 'sum', [0, 1], function* (self: RString, args) {
   let total = 0n;
   for (const byte of stringBytes(self)) total += BigInt(byte);
@@ -514,12 +550,14 @@ def('String', 'rindex', [1, 2], function* (self: RString, args) {
   return found === -1 ? NIL : BigInt(charPosition(self.s, found));
 });
 def('String', 'count', [1, -1], function* (self: RString, args) {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* stringArg(arg));
   const matches = characterSetMatcher(sets);
   return BigInt(charsOf(self.s).filter((char) => matches(char)).length);
 });
 def('String', 'delete', [1, -1], function* (self: RString, args) {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const sets: string[] = [];
   for (const arg of args) sets.push(yield* stringArg(arg));
   const matches = characterSetMatcher(sets);
@@ -530,6 +568,7 @@ def('String', 'delete', [1, -1], function* (self: RString, args) {
   );
 });
 def('String', 'delete!', [1, -1], function* (self: RString, args) {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   if (self.s.length === 0) return NIL;
   modify(self);
   const sets: string[] = [];
@@ -832,7 +871,6 @@ const TRANSFORMS: [string, (text: string, args: string[]) => string, number][] =
   ['downcase', (text) => text.toLowerCase(), 0],
   ['capitalize', capitalize, 0],
   ['swapcase', swapcase, 0],
-  ['reverse', (text) => charsOf(text).toReversed().join(''), 0],
   ['strip', (text) => lstrip(rstrip(text)), 0],
   ['lstrip', lstrip, 0],
   ['rstrip', rstrip, 0],
@@ -844,12 +882,20 @@ const TRANSFORMS: [string, (text: string, args: string[]) => string, number][] =
 
 for (const [name, transform, maxArgs] of TRANSFORMS) {
   def('String', name, [0, maxArgs], function* (self: RString, args) {
+    if (self.rawBytes && !self.binary) {
+      if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) throw argumentError('input string invalid');
+      if (['strip', 'lstrip', 'rstrip'].includes(name)) throw argumentError('invalid byte sequence in UTF-8');
+    }
     if (name === 'chomp' && args[0] === NIL) return str(self.s);
     const strings: string[] = [];
     for (const arg of args) strings.push(yield* stringArg(arg));
     return str(transform(self.s, strings));
   });
   def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
+    if (self.rawBytes && !self.binary) {
+      if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) throw argumentError('input string invalid');
+      if (['strip', 'lstrip', 'rstrip'].includes(name)) throw argumentError('invalid byte sequence in UTF-8');
+    }
     if (name === 'chomp' && args[0] === NIL) {
       modify(self);
       return NIL;
@@ -869,6 +915,13 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
     return self;
   });
 }
+
+def('String', 'reverse', 0, (self: RString) => joinStringCharacters(stringCharacters(self).toReversed(), self.binary));
+def('String', 'reverse!', 0, (self: RString) => {
+  const reversed = joinStringCharacters(stringCharacters(self).toReversed(), self.binary);
+  setBytes(self, stringBytes(reversed), reversed.binary);
+  return self;
+});
 
 /** The successor of a string: its rightmost alphanumeric character incremented, carrying leftward. */
 const isAlnum = (char: string): boolean => /^[A-Za-z0-9]$/.test(char);
@@ -942,22 +995,20 @@ def('String', 'upto', [1, 2], function* (self: RString, args, block) {
 
 function* justify(self: RString, args: Value[], kind: 'left' | 'right' | 'center'): Gen {
   const width = yield* toIndex(args[0]);
-  const padding = args.length > 1 ? yield* stringArg(args[1]) : ' ';
-  if (padding.length === 0) throw argumentError('zero width padding');
-  const length = charLength(self.s);
-  if (width <= length) return str(self.s);
+  const padding = args.length > 1 ? yield* stringArgValue(args[1]) : str(' ');
+  const paddingChars = stringCharacters(padding);
+  if (paddingChars.length === 0) throw argumentError('zero width padding');
+  const chars = stringCharacters(self);
+  const length = chars.length;
+  if (width <= length) return stringFromBytes(stringBytes(self), self.binary);
   rt().checkStringLength(width);
   const total = width - length;
-  const fill = (count: number): string => {
-    const chars = charsOf(padding);
-    let text = '';
-    for (let index = 0; index < count; index++) text += chars[index % chars.length];
-    return text;
-  };
-  if (kind === 'left') return str(self.s + fill(total));
-  if (kind === 'right') return str(fill(total) + self.s);
+  const fill = (count: number): RString[] =>
+    Array.from({ length: count }, (_, index) => paddingChars[index % paddingChars.length]);
+  if (kind === 'left') return joinStringCharacters([...chars, ...fill(total)], self.binary);
+  if (kind === 'right') return joinStringCharacters([...fill(total), ...chars], self.binary);
   const left = Math.floor(total / 2);
-  return str(fill(left) + self.s + fill(total - left));
+  return joinStringCharacters([...fill(left), ...chars, ...fill(total - left)], self.binary);
 }
 
 def('String', 'ljust', [1, 2], (self: RString, args) => justify(self, args, 'left'));
@@ -967,6 +1018,7 @@ def('String', 'center', [1, 2], (self: RString, args) => justify(self, args, 'ce
 // Splitting -----------------------------------------------------------------------------------------------------------
 
 def('String', 'split', [0, 2], function* (self: RString, args, block) {
+  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   const [pattern = NIL, limitValue] = args;
   regexpUnsupported(pattern);
   const limit = limitValue === undefined ? 0 : yield* toIndex(limitValue);

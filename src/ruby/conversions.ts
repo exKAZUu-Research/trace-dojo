@@ -76,10 +76,14 @@ export function toIndexSync(value: Value): number {
 
 /** The String an argument stands for, by Ruby's implicit `to_str` conversion. */
 export function* toStr(value: Value): Gen<string> {
-  if (value instanceof RString) return value.s;
+  return (yield* toStrValue(value)).s;
+}
+
+export function* toStrValue(value: Value): Gen<RString> {
+  if (value instanceof RString) return value;
   if (value instanceof RBasic && classOf(value).findMethod('to_str')) {
     const converted = yield* callMethod(value, 'to_str', []);
-    if (converted instanceof RString) return converted.s;
+    if (converted instanceof RString) return converted;
   }
   throw implicitConversionError(value, 'String');
 }
@@ -108,12 +112,16 @@ export function* toFloat(value: Value): Gen<number> {
 
 /** The text of a value as `to_s` makes it, which string interpolation and `puts` show. */
 export function* toS(value: Value): Gen<string> {
-  if (value instanceof RString) return value.s;
+  return (yield* toSValue(value)).s;
+}
+
+export function* toSValue(value: Value): Gen<RString> {
+  if (value instanceof RString) return value;
   const fast = fastToS(value);
-  if (fast !== undefined && !isOverridden(value, 'to_s')) return fast;
+  if (fast !== undefined && !isOverridden(value, 'to_s')) return str(fast);
   const converted = yield* callMethod(value, 'to_s', []);
-  if (converted instanceof RString) return converted.s;
-  return anyToS(value);
+  if (converted instanceof RString) return converted;
+  return str(anyToS(value));
 }
 
 function fastToS(value: Value): string | undefined {
@@ -170,7 +178,7 @@ export function* inspect(value: Value): Gen<string> {
 
 function fastInspect(value: Value): string | undefined {
   if (value === NIL) return 'nil';
-  if (value instanceof RString && !value.binary) return strInspect(value.s);
+  if (value instanceof RString && !value.binary && !value.rawBytes) return strInspect(value.s);
   if (value instanceof RSymbol) return symInspect(value.name);
   if (typeof value === 'object') return undefined;
   return fastToS(value);

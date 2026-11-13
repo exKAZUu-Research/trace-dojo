@@ -26,7 +26,15 @@ export function stringBytes(value: RString): Uint8Array {
     : new TextEncoder().encode(value.s);
 }
 
-export function stringFromBytes(bytes: Uint8Array): RString {
+export function stringFromBytes(bytes: Uint8Array, binary = false): RString {
+  if (binary) {
+    let text = '';
+    for (const byte of bytes) text += String.fromCodePoint(byte);
+    const value = str(text);
+    value.binary = true;
+    value.rawBytes = Uint8Array.from(bytes);
+    return value;
+  }
   let invalid = false;
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -35,10 +43,51 @@ export function stringFromBytes(bytes: Uint8Array): RString {
   }
   const value = str(new TextDecoder().decode(bytes));
   if (invalid) {
-    value.binary = true;
     value.rawBytes = Uint8Array.from(bytes);
   }
   return value;
+}
+
+export function stringCharacters(value: RString): RString[] {
+  if (!value.rawBytes) return [...value.s].map((char) => str(char));
+  const bytes = stringBytes(value);
+  const characters: RString[] = [];
+  for (let index = 0; index < bytes.length;) {
+    rt().spend();
+    const first = bytes[index];
+    const width = value.binary ? 1 : first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+    const segment = bytes.slice(index, Math.min(bytes.length, index + width));
+    let valid = value.binary || first < 0x80;
+    if (!valid && segment.length === width) {
+      try {
+        new TextDecoder('utf-8', { fatal: true }).decode(segment);
+        valid = true;
+      } catch {
+        valid = false;
+      }
+    }
+    if (valid) {
+      characters.push(stringFromBytes(segment, value.binary));
+      index += segment.length;
+    } else {
+      characters.push(stringFromBytes(bytes.slice(index, index + 1)));
+      index++;
+    }
+  }
+  return characters;
+}
+
+export function joinStringCharacters(characters: RString[], binary = false): RString {
+  const chunks = characters.map(stringBytes);
+  const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  rt().checkStringLength(length);
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return stringFromBytes(bytes, binary);
 }
 
 export function arr(items: Value[]): RArray {

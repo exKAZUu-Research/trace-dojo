@@ -1,5 +1,5 @@
 import type { OutputChannel } from '../interpreter/programIo';
-import { inspect, toInt, toS } from './conversions';
+import { inspect, toInt, toS, toSValue } from './conversions';
 import { def } from './define';
 import { typeError } from './errors';
 import { format } from './format';
@@ -7,7 +7,7 @@ import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { prettyInspect } from './prettyPrint';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, realClassOf, str } from './values';
+import { arr, realClassOf, str, stringBytes } from './values';
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
@@ -167,9 +167,9 @@ def('IO', 'print', [0, -1], function* (self: RObject, args) {
 def('IO', 'write', [0, -1], function* (self: RObject, args) {
   let bytes = 0n;
   for (const arg of args) {
-    const text = yield* toS(arg);
-    channel(self.data as 'stdout' | 'stderr').write(text);
-    bytes += BigInt(new TextEncoder().encode(text).length);
+    const value = yield* toSValue(arg);
+    channel(self.data as 'stdout' | 'stderr').write(value.s);
+    bytes += BigInt(stringBytes(value).length);
   }
   return bytes;
 });

@@ -422,6 +422,27 @@ test.each([
   ['wide Integer sizes', 'p (2**64).size, (2**100).size', '9\n13\n'],
   ['Numeric subclass Math conversion', 'class A < Numeric; def to_f = 9.0; end; p Math.sqrt(A.new)', '3.0\n'],
   ['escaped control and meta operands', String.raw`p "\C-\?".bytes, "\M-\z".bytes`, '[31]\n[250]\n'],
+  ['String byte copies', String.raw`p (-"\xFF").bytes, (+"\xFF".freeze).bytes`, '[255]\n[255]\n'],
+  [
+    'String conversion in concatenation',
+    String.raw`class A; def to_str; "\xFF"; end; end; p ("x" + A.new).bytes`,
+    '[120, 255]\n',
+  ],
+  [
+    'String conversion in interpolation',
+    String.raw`class A; def to_s; "\xFF"; end; end; p "#{A.new}".bytes`,
+    '[255]\n',
+  ],
+  ['UTF-8 Integer concatenation', 's = ""; s << 233; p s.bytes, s', '[195, 169]\n"é"\n'],
+  ['Integer concatenation after an invalid byte', String.raw`p "\xFF".concat(233).bytes`, '[255, 195, 169]\n'],
+  ['raw byte counts from IO', String.raw`p $stderr.write("\xFF")`, '1\n'],
+  ['invalid UTF-8 character slicing', String.raw`p "\xFF".chars, "\xFF"[0].bytes`, '["\\xFF"]\n[255]\n'],
+  ['invalid UTF-8 character lengths', String.raw`p "a\xFF".chars.map(&:bytesize)`, '[1, 1]\n'],
+  [
+    'invalid UTF-8 reversal and padding',
+    String.raw`p "\xFF".reverse.bytes, "\xFF".ljust(2).bytes`,
+    '[255]\n[255, 32]\n',
+  ],
 ])('%s matches Ruby output', (_name, program, stdout) => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -462,6 +483,15 @@ test('numeric conversions reject a wrong type returned by a conversion method', 
   });
   expect(run('class A; def to_f = "x"; end; p Float(A.new)')).toMatchObject({
     uncaughtException: "can't convert A to Float (A#to_f gives String) (TypeError)",
+  });
+});
+
+test('invalid UTF-8 raises Ruby character-operation errors', () => {
+  for (const program of [String.raw`p "\xFF".ord`, String.raw`p "\xFF".split("")`, String.raw`p "\xFF".count("a")`]) {
+    expect(run(program)).toMatchObject({ uncaughtException: 'invalid byte sequence in UTF-8 (ArgumentError)' });
+  }
+  expect(run(String.raw`p "\xFF".upcase`)).toMatchObject({
+    uncaughtException: 'input string invalid (ArgumentError)',
   });
 });
 
