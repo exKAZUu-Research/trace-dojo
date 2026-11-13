@@ -576,8 +576,7 @@ function elementsOf(frame: Frame, value: Value): Value[] {
 
 /**
  * `Collections.rotate`, which moves each element `distance` places on, cyclically, writing only when it moves any,
- * `Collections.fill`, which sets each element in order, and `Collections.disjoint`, which asks the second collection
- * whether it contains each element of the first.
+ * `Collections.fill`, which sets each element in order, and `Collections.disjoint`.
  */
 function defineListUtilities(cls: ClassInfo, collections: Collections): void {
   const t: TypeVariable = { name: 'T', bounds: [collections.collectionClass.typeParameters[0].bounds[0] as JavaType] };
@@ -614,12 +613,25 @@ function defineListUtilities(cls: ClassInfo, collections: Collections): void {
     [anyOf(collections.collectionClass), anyOf(collections.collectionClass)],
     BOOLEAN,
     true,
-    (frame, _, [first, second]) => {
-      if (first === undefined || second === undefined) throwBuiltin(frame, 'NullPointerException');
-      return elementsOf(frame, first).every(
-        (value) => frame.runtime.invokeVirtual(frame, collections.collectionClass, 'contains', second, [value]) !== true
-      );
-    }
+    (frame, _, [first, second]) => disjoint(frame, collections, first, second)
+  );
+}
+
+/** `Collections.disjoint`, which, as the JDK's, looks up in a set or else in the larger collection and iterates the other. */
+function disjoint(frame: Frame, collections: Collections, first: Value, second: Value): boolean {
+  if (first === undefined || second === undefined) throwBuiltin(frame, 'NullPointerException');
+  const { collectionClass, setClass } = collections;
+  const sizeOf = (collection: Value): number =>
+    frame.runtime.invokeVirtual(frame, collectionClass, 'size', collection, []) as number;
+  let [iterated, searched] = [first, second];
+  if (frame.runtime.isInstance(first, setClass)) [iterated, searched] = [second, first];
+  else if (!frame.runtime.isInstance(second, setClass)) {
+    const [firstSize, secondSize] = [sizeOf(first), sizeOf(second)];
+    if (firstSize === 0 || secondSize === 0) return true;
+    if (firstSize > secondSize) [iterated, searched] = [second, first];
+  }
+  return elementsOf(frame, iterated).every(
+    (value) => frame.runtime.invokeVirtual(frame, collectionClass, 'contains', searched, [value]) !== true
   );
 }
 
