@@ -2,9 +2,11 @@ import { removeAllOf, removeMatching } from './builtinBulkRemoval';
 import { type Collections, compareNatural, itemsOf, javaEquals, putEntry } from './builtinCollections';
 import {
   checkModifiable,
-  countsSortAsChange,
+  countsNoOpChanges,
   forEachLiveEntry,
   mapViewSources,
+  rejectEagerly,
+  singletonClasses,
   sortedValues,
   touch,
 } from './builtinCollectionSupport';
@@ -565,7 +567,8 @@ export function sortValues(
   values: Value[],
   comparator: Value,
   comparatorClass: ClassInfo,
-  owner?: JavaObject
+  owner?: JavaObject,
+  beforeWrite?: () => void
 ): void {
   frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
   const expectedModCount = owner?.modCount;
@@ -575,6 +578,7 @@ export function sortValues(
       : (callFunction(frame, comparatorClass, comparator, [a, b]) as number)
   );
   if (owner && owner.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+  beforeWrite?.();
   values.splice(0, values.length, ...sorted);
 }
 
@@ -602,7 +606,6 @@ type DefaultFunctions = Parameters<typeof defineCollectionDefaults>[2];
 /** `Iterable.forEach` and `Collection.removeIf`, which every builtin collection inherits. */
 function defineIterableDefaults(collections: Collections, functions: DefaultFunctions): void {
   const { iterableClass, collectionClass } = collections;
-  const removesOnlyMatches = new Set([collections.emptyList, collections.copiesList, collections.emptySet]);
   const [iterableT] = iterableClass.typeParameters.map((variable): JavaType => ({ kind: 'typeVar', variable }));
   addMethod(
     iterableClass,
@@ -640,9 +643,9 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
     BOOLEAN,
     false,
     (frame, receiver, [filter]) => {
-      // Collections' empty lists and sets and nCopies reject only a removal, as Collection.removeIf's default does;
-      // the other unmodifiable collections reject every call before looking at the predicate.
-      if (!removesOnlyMatches.has((receiver as JavaObject).cls)) checkModifiable(frame, receiver, false);
+      // The singletons override removeIf to throw at once; the default rejects only a removal.
+      rejectEagerly(frame, receiver);
+      if (singletonClasses.has((receiver as JavaObject).cls)) throwBuiltin(frame, 'UnsupportedOperationException');
       if (filter === undefined) throwBuiltin(frame, 'NullPointerException');
       return removeMatching(
         frame,
@@ -657,15 +660,6 @@ function defineIterableDefaults(collections: Collections, functions: DefaultFunc
 /** `containsAll`, `removeAll`, and `retainAll`, which ask the other collection whether it contains each element. */
 function defineBulkOperations(collections: Collections): void {
   const { collectionClass } = collections;
-  // Collections' empty and singleton collections and nCopies reject a bulk removal only when it removes anything, as
-  // AbstractCollection's removeAll and retainAll do.
-  const removesOnlyChanges = new Set([
-    collections.emptyList,
-    collections.singletonList,
-    collections.copiesList,
-    collections.emptySet,
-    collections.singletonSet,
-  ]);
   const otherType = classType(collectionClass, { kind: 'wildcard', bound: undefined, isSuper: false });
   const contains = (frame: Frame, collection: Value, item: Value): boolean => {
     if (collection === undefined) return throwBuiltin(frame, 'NullPointerException');
@@ -679,11 +673,9 @@ function defineBulkOperations(collections: Collections): void {
     ['retainAll', true],
   ] as const) {
     addMethod(collectionClass, name, [otherType], BOOLEAN, false, (frame, receiver, [other]) => {
-      const checksFirst = !removesOnlyChanges.has((receiver as JavaObject).cls);
-      if (checksFirst) checkModifiable(frame, receiver, false);
+      rejectEagerly(frame, receiver);
       if (other === undefined) throwBuiltin(frame, 'NullPointerException');
       const removed = [...itemsOf(frame, receiver)].filter((item) => contains(frame, other, item) !== keepsContained);
-      if (!checksFirst && removed.length > 0) checkModifiable(frame, receiver, false);
       return removeAllOf(frame, receiver, removed);
     });
   }
@@ -700,9 +692,14 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     VOID,
     false,
     (frame, receiver, [comparator]) => {
-      checkModifiable(frame, receiver, false);
-      sortValues(frame, itemsOf(frame, receiver), comparator, functions.comparator, receiver as JavaObject);
-      if (countsSortAsChange(receiver)) touch(receiver);
+      rejectEagerly(frame, receiver);
+      // SingletonList overrides sort to do nothing; the default sets each element, which a read-only list rejects.
+      if (singletonClasses.has((receiver as JavaObject).cls)) return;
+      const values = itemsOf(frame, receiver);
+      sortValues(frame, values, comparator, functions.comparator, receiver as JavaObject, () => {
+        if (values.length > 0) checkModifiable(frame, receiver, false);
+      });
+      if (countsNoOpChanges(receiver)) touch(receiver);
     }
   );
   addMethod(
@@ -712,20 +709,29 @@ function defineListDefaults(collections: Collections, functions: DefaultFunction
     VOID,
     false,
     (frame, receiver, [operator]) => {
-      checkModifiable(frame, receiver, false);
-      const values = itemsOf(frame, receiver);
-      const list = receiver as JavaObject;
-      const expectedModCount = list.modCount;
-      // As ArrayList's does, the operator runs over the elements there were, and a change it makes ends the loop;
-      // the value it returns then lands in the array the change replaced, so the list does not show it.
-      const size = values.length;
-      for (let index = 0; index < size && list.modCount === expectedModCount; index++) {
-        const replaced = callFunction(frame, functions.unary, operator, [values[index]]);
-        if (list.modCount === expectedModCount) values[index] = replaced;
-      }
-      if (list.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+      rejectEagerly(frame, receiver);
+      if (singletonClasses.has((receiver as JavaObject).cls)) throwBuiltin(frame, 'UnsupportedOperationException');
+      replaceEach(frame, receiver as JavaObject, (value) => callFunction(frame, functions.unary, operator, [value]));
     }
   );
+}
+
+/**
+ * Replaces each element of `list` by what `replace` returns for it. As ArrayList's does, it runs over the elements
+ * there were, and a change `replace` makes ends the loop; the value it returns then lands in the array the change
+ * replaced, so the list does not show it.
+ */
+function replaceEach(frame: Frame, list: JavaObject, replace: (value: Value) => Value): void {
+  const values = itemsOf(frame, list);
+  const expectedModCount = list.modCount;
+  const size = values.length;
+  for (let index = 0; index < size && list.modCount === expectedModCount; index++) {
+    const replaced = replace(values[index]);
+    if (list.modCount !== expectedModCount) break;
+    checkModifiable(frame, list, false);
+    values[index] = replaced;
+  }
+  if (list.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
 }
 
 /** Visits the entries of a map that keeps no store of its own, through the entries its `entrySet` gives. */
@@ -822,11 +828,8 @@ function defineComparatorSorts(context: Context, collections: Collections, funct
     [classType(listClass, listT), comparatorOf(listT)],
     VOID,
     true,
-    (frame, _, [list, comparator]) => {
-      checkModifiable(frame, list, false);
-      sortValues(frame, itemsOf(frame, list), comparator, functions.comparator, list as JavaObject);
-      if (countsSortAsChange(list)) touch(list);
-    }
+    // As the JDK's, it sorts through the list's own sort, which a class may override.
+    (frame, _, [list, comparator]) => frame.runtime.invokeVirtual(frame, listClass, 'sort', list, [comparator])
   );
   sortList.typeParameters = [listVariable];
   const arraysClass = context.registry.classes.get('Arrays') as ClassInfo;

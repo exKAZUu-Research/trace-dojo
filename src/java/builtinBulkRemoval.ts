@@ -2,7 +2,7 @@ import { removeEntry } from './builtinCollections';
 import {
   batchRemovalClasses,
   checkModifiable,
-  defaultRemoveClasses,
+  checkRemovable,
   elementsOf,
   itemsOf,
   type MapViewSource,
@@ -94,8 +94,7 @@ function removeThroughListIterator(
       continue;
     }
     if (collection.modCount !== expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
-    if (defaultRemoveClasses.has(collection.cls)) throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
-    checkModifiable(frame, collection, true);
+    checkRemovable(frame, collection);
     const position = index;
     removeElements(frame, collection, (_, candidate) => candidate === position);
     expectedModCount = collection.modCount;
@@ -128,7 +127,7 @@ function removeFromView(
 /** Removes the items in `removed` from a list, a set, or a view of a map, returning whether there were any. */
 export function removeAllOf(frame: Frame, receiver: Value, removed: Value[]): boolean {
   if (removed.length === 0) return false;
-  checkModifiable(frame, receiver, true);
+  checkRemovable(frame, receiver);
   const object = receiver as JavaObject;
   if (object.elements) return removeElements(frame, receiver, (item) => removed.includes(item));
   for (const item of removed) removeEntry(frame, receiver, item);

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 423 -- The set and map classes, which share one hash and tree store and its views.
 import { classObjectOf } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
@@ -8,11 +9,13 @@ import {
   defaultRemoveClasses,
   defineSetEquality,
   describe,
+  eagerlyRejectingClasses,
   itemsOf,
   javaEquals,
   javaHash,
   linkOverrides,
   mapViewSources,
+  singletonClasses,
   touch,
   uncountedMapClasses,
   unmodifiableClasses,
@@ -64,6 +67,8 @@ export function defineSets(
       name,
       true
     );
+  const singletonSet = collectionsSet('SingletonSet');
+  singletonClasses.add(singletonSet);
   return {
     immutableSet: restrictToImmutable(
       context.registry,
@@ -71,7 +76,7 @@ export function defineSets(
       'SetN'
     ),
     emptySet: collectionsSet('EmptySet'),
-    singletonSet: collectionsSet('SingletonSet'),
+    singletonSet,
   };
 }
 
@@ -448,8 +453,12 @@ export function restrictToImmutable(
 ): ClassInfo {
   registry.classes.delete(cls.name);
   unmodifiableClasses.add(cls);
-  // The iterators of Collections' sets inherit no remove, so they reject it as their sets do, without a message.
-  if (!changesOnlyOnUse) defaultRemoveClasses.add(cls);
+  // ImmutableCollections' sets and maps reject every call at once, and their iterators keep Iterator.remove's
+  // default; Collections' reject only a change, and their iterators reject removal without a message.
+  if (!changesOnlyOnUse) {
+    defaultRemoveClasses.add(cls);
+    eagerlyRejectingClasses.add(cls);
+  }
   cls.name = name;
   cls.constructors = [];
   for (const method of cls.methods) {

@@ -1,10 +1,10 @@
 import {
   checkListPosition,
-  checkModifiable,
   classType,
   type Context,
   elementsOf,
   linkOverrides,
+  rejectEagerly,
 } from './builtinCollectionSupport';
 import { addAbstractMethod, addInterface, addMethod, addTypeParameters, defineInterface } from './builtinSupport';
 import { type Frame, throwBuiltin } from './runtime';
@@ -134,8 +134,9 @@ function stateOf(receiver: Value): ListIteratorState {
 /** The iterator's state, after checking that its list has not changed structurally behind it. */
 function checkedState(frame: Frame, receiver: Value, isEdit = false): ListIteratorState {
   const state = stateOf(receiver);
-  // An unmodifiable list's iterator rejects every edit before checking anything else.
-  if (isEdit) checkModifiable(frame, state.list, false);
+  // The iterator of an ImmutableCollections list or of a wrapper rejects every edit before checking anything else;
+  // AbstractList's leaves the edit to the list's own method, which rejects what the list rejects.
+  if (isEdit) rejectEagerly(frame, state.list);
   if (state.list.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
   return state;
 }

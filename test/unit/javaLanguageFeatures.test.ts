@@ -1869,3 +1869,36 @@ List<String> nulls = new ArrayList<>(Arrays.asList("b", null, "a")); nulls.sort(
     sorted: '[null, a, b]',
   });
 });
+
+test("Java's restricted lists reject a change only where their JDK classes do, and give the JDK's sublist classes", () => {
+  const program = `import java.util.*;
+import java.util.function.*;
+public class Main {
+  static void t(String label, Supplier<Object> s) { try { System.out.println(label + " " + s.get()); } catch (RuntimeException e) { System.out.println(label + " " + e); } }
+  static void ops(String name, Supplier<List<Integer>> f) {
+    t(name, () -> f.get().getClass().getName() + " " + f.get().subList(0, f.get().size()).getClass().getName());
+    t(name + " remove", () -> f.get().remove((Object) 42) + " " + f.get().addAll(List.of()) + " " + f.get().removeIf(x -> x == 42) + " " + f.get().removeAll(List.of(42)));
+    t(name + " removeFound", () -> f.get().remove((Object) 1));
+    t(name + " clear", () -> { f.get().clear(); return "ok"; });
+    t(name + " sort", () -> { Collections.sort(f.get()); return "ok"; });
+    t(name + " swap", () -> { Collections.swap(f.get(), 0, 0); return "ok"; });
+    t(name + " subSet", () -> f.get().subList(0, f.get().size()).set(5, 1));
+    t(name + " subAdd", () -> { f.get().subList(0, f.get().size()).add(5, 1); return "ok"; });
+    t(name + " subRemove", () -> f.get().subList(0, f.get().size()).remove((Object) 1));
+  }
+  public static void main(String[] args) {
+    ops("asList", () -> Arrays.asList(1, 2));
+    ops("empty", () -> Collections.emptyList());
+    ops("single", () -> Collections.singletonList(1));
+    ops("copies", () -> Collections.nCopies(2, 1));
+    ops("of", () -> List.of(1, 2));
+    ops("unmod", () -> Collections.unmodifiableList(new ArrayList<>(List.of(1, 2))));
+    t("stackLi", () -> { Stack<Integer> s = new Stack<>(); s.push(1); return s.listIterator(5); });
+  }
+}`;
+  expect(executeProgram('java', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'asList java.util.Arrays$ArrayList java.util.AbstractList$RandomAccessSubList\nasList remove false false false false\nasList removeFound java.lang.UnsupportedOperationException: remove\nasList clear java.lang.UnsupportedOperationException\nasList sort ok\nasList swap ok\nasList subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 2\nasList subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 2\nasList subRemove java.lang.UnsupportedOperationException\nempty java.util.Collections$EmptyList java.util.AbstractList$RandomAccessSubList\nempty remove false false false false\nempty removeFound false\nempty clear ok\nempty sort ok\nempty swap java.lang.IndexOutOfBoundsException: Index: 0\nempty subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 0\nempty subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 0\nempty subRemove false\nsingle java.util.Collections$SingletonList java.util.AbstractList$RandomAccessSubList\nsingle remove java.lang.UnsupportedOperationException\nsingle removeFound java.lang.UnsupportedOperationException\nsingle clear java.lang.UnsupportedOperationException\nsingle sort ok\nsingle swap java.lang.UnsupportedOperationException\nsingle subSet java.lang.IndexOutOfBoundsException: Index 5 out of bounds for length 1\nsingle subAdd java.lang.IndexOutOfBoundsException: Index: 5, Size: 1\nsingle subRemove java.lang.UnsupportedOperationException\ncopies java.util.Collections$CopiesList java.util.Collections$CopiesList\ncopies remove false false false false\ncopies removeFound java.lang.UnsupportedOperationException\ncopies clear java.lang.UnsupportedOperationException\ncopies sort java.lang.UnsupportedOperationException\ncopies swap java.lang.UnsupportedOperationException\ncopies subSet java.lang.UnsupportedOperationException\ncopies subAdd java.lang.UnsupportedOperationException\ncopies subRemove java.lang.UnsupportedOperationException\nof java.util.ImmutableCollections$List12 java.util.ImmutableCollections$SubList\nof remove java.lang.UnsupportedOperationException\nof removeFound java.lang.UnsupportedOperationException\nof clear java.lang.UnsupportedOperationException\nof sort java.lang.UnsupportedOperationException\nof swap java.lang.UnsupportedOperationException\nof subSet java.lang.UnsupportedOperationException\nof subAdd java.lang.UnsupportedOperationException\nof subRemove java.lang.UnsupportedOperationException\nunmod java.util.Collections$UnmodifiableRandomAccessList java.util.Collections$UnmodifiableRandomAccessList\nunmod remove java.lang.UnsupportedOperationException\nunmod removeFound java.lang.UnsupportedOperationException\nunmod clear java.lang.UnsupportedOperationException\nunmod sort java.lang.UnsupportedOperationException\nunmod swap java.lang.UnsupportedOperationException\nunmod subSet java.lang.UnsupportedOperationException\nunmod subAdd java.lang.UnsupportedOperationException\nunmod subRemove java.lang.UnsupportedOperationException\nstackLi java.lang.IndexOutOfBoundsException: Index: 5\n',
+  });
+});

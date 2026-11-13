@@ -11,7 +11,6 @@ import {
 } from './builtinCollections';
 import {
   checkModifiable,
-  countsSortAsChange,
   mapViewSources,
   sortedValues,
   subListChecks,
@@ -564,11 +563,6 @@ function elementsOf(frame: Frame, value: Value): Value[] {
   return value.elements ?? itemsOf(frame, value);
 }
 
-function touch(value: Value): void {
-  const object = value as JavaObject;
-  object.modCount = (object.modCount ?? 0) + 1;
-}
-
 /**
  * `Collections.rotate`, which moves each element `distance` places on, cyclically, writing only when it moves any,
  * `Collections.fill`, which sets each element in order, and `Collections.disjoint`, which asks the second collection
@@ -681,14 +675,8 @@ function defineCollectionsClass(
     ['T'],
     objectType,
     (element) => ({ parameterTypes: [listOf(element)], returnType: VOID }),
-    (frame, _, [list]) => {
-      checkModifiable(frame, list, false);
-      const values = elementsOf(frame, list);
-      frame.runtime.spend(Math.ceil((values.length * Math.log2(values.length + 1)) / 16));
-      const sorted = sortedValues(values, (a, b) => compareNatural(frame, a, b));
-      values.splice(0, values.length, ...sorted);
-      if (countsSortAsChange(list)) touch(list);
-    }
+    // As the JDK's, it sorts through the list's own sort, which a class may override.
+    (frame, _, [list]) => frame.runtime.invokeVirtual(frame, collections.listClass, 'sort', list, [undefined])
   );
   comparableBound((sort.typeParameters as TypeVariable[])[0]);
   for (const [name, sign] of [
@@ -770,15 +758,12 @@ function defineCollectionsClass(
     ['T'],
     objectType,
     (element) => ({ parameterTypes: [listOf(element), INT, INT], returnType: VOID }),
+    // As the JDK's l.set(i, l.set(j, l.get(i))), through the list's own methods, which check the indexes and changes.
     (frame, _, [list, i, j]) => {
-      checkModifiable(frame, list, false);
-      const values = elementsOf(frame, list);
-      for (const index of [i, j] as number[]) {
-        if (index < 0 || index >= values.length) {
-          throwBuiltin(frame, 'IndexOutOfBoundsException', `Index ${index} out of bounds for length ${values.length}`);
-        }
-      }
-      [values[i as number], values[j as number]] = [values[j as number], values[i as number]];
+      const { listClass } = collections;
+      const value = frame.runtime.invokeVirtual(frame, listClass, 'get', list, [i]);
+      const replaced = frame.runtime.invokeVirtual(frame, listClass, 'set', list, [j, value]);
+      frame.runtime.invokeVirtual(frame, listClass, 'set', list, [i, replaced]);
     }
   );
   addGenericStatic(

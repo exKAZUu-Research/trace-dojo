@@ -54,19 +54,21 @@ export function defineIteratorClass(context: Context, iteratorClass: ClassInfo):
 /** `Iterator.remove`, which removes the element the last `next()` returned, as the JDK's iterators check it. */
 function removeThroughIterator(frame: Frame, receiver: Value): Value {
   const state = iteratorState(receiver);
-  // An unmodifiable or fixed-size collection's iterator rejects every removal, before checking its own state.
   // A read-only wrapper rejects removal without a message, before its backing iterator's own rule.
   if (unmodifiableWrappers.has(state.source)) throwBuiltin(frame, 'UnsupportedOperationException');
   const owner = mapViewSources.get(state.source)?.map ?? state.source;
+  // The iterators of ImmutableCollections and of the singletons reject every removal before checking their state;
+  // those AbstractList and AbstractSet give check it first, and then reach the removal their collection rejects.
   if (defaultRemoveClasses.has(owner.cls) && !unmodifiableWrappers.has(owner)) {
     throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
   }
-  // A sublist's iterator is its list's ListItr, which checks its own state before the list rejects the removal.
-  if (subListChecks.has(owner) && state.removed) throwBuiltin(frame, 'IllegalStateException');
-  checkModifiable(frame, owner, true);
+  if (eagerlyRejectingClasses.has(owner.cls) || singletonClasses.has(owner.cls)) {
+    throwBuiltin(frame, 'UnsupportedOperationException');
+  }
   // Only the element the last next() returned may be removed, once.
   if (state.removed) throwBuiltin(frame, 'IllegalStateException');
   if (state.source.modCount !== state.expectedModCount) throwBuiltin(frame, 'ConcurrentModificationException');
+  checkModifiable(frame, owner, true);
   // A list's later elements move back over the removed one, which a fixed sequence of elements keeps.
   if (state.isFixed) state.remove(frame, state.index - 1);
   else state.remove(frame, --state.index);
@@ -201,8 +203,26 @@ function mapViewIterator(frame: Frame, itrClass: ClassInfo, view: JavaObject, so
   );
 }
 
-/** The classes of the collections that reject every change: `List.of`, `Set.of`, `Map.of`, and unmodifiable views. */
+/**
+ * The classes of the collections that reject every change: those of `List.of`, `Set.of`, `Map.of`, the unmodifiable
+ * views, and `Collections`' empty, singleton, and `nCopies` collections.
+ */
 export const unmodifiableClasses = new WeakSet<ClassInfo>();
+
+/**
+ * The classes among `unmodifiableClasses` whose every mutator, inherited defaults included, throws before it reads its
+ * arguments, as `ImmutableCollections` and the `Collections.unmodifiable` wrappers override each one. The other
+ * restricted classes extend `AbstractList`, `AbstractSet`, or `AbstractMap`, whose methods reject a call only when it
+ * reaches the change it would make, so that a call that changes nothing succeeds.
+ */
+export const eagerlyRejectingClasses = new WeakSet<ClassInfo>();
+
+/**
+ * `Collections.singletonList` and `singleton`, which override `removeIf` and `replaceAll` to throw at once and whose
+ * iterators reject removal before checking their state, unlike the defaults their `AbstractList` and `AbstractSet`
+ * would give.
+ */
+export const singletonClasses = new WeakSet<ClassInfo>();
 
 /** The classes of the lists that may change elements but not their size, as `Arrays.asList` returns. */
 export const fixedSizeClasses = new WeakSet<ClassInfo>();
@@ -250,10 +270,35 @@ export function wrapUnmodifiable(view: JavaObject, source: JavaObject): JavaObje
  * @param changesSize Whether the change adds or removes elements, which a fixed-size list rejects too.
  */
 export function checkModifiable(frame: Frame, collection: Value, changesSize: boolean): void {
-  const cls = (collection as JavaObject).cls;
+  // A sublist changes its list, which rejects the change as it rejects its own.
+  const { cls } = rootListOf(collection as JavaObject);
   if (unmodifiableClasses.has(cls) || (changesSize && fixedSizeClasses.has(cls))) {
     throwBuiltin(frame, 'UnsupportedOperationException');
   }
+}
+
+/** Throws at the start of a mutator of a collection whose class rejects every call, before its arguments are read. */
+export function rejectEagerly(frame: Frame, collection: Value): void {
+  if (eagerlyRejectingClasses.has((collection as JavaObject).cls)) throwBuiltin(frame, 'UnsupportedOperationException');
+}
+
+/**
+ * Checks a removal that `AbstractCollection` makes through the collection's iterator, which rejects it with the message
+ * of `Iterator.remove`'s default for the classes whose iterators keep it.
+ */
+export function checkRemovable(frame: Frame, collection: Value): void {
+  const owner = mapViewSources.get(collection as JavaObject)?.map ?? (collection as JavaObject);
+  if (defaultRemoveClasses.has(owner.cls) && !unmodifiableWrappers.has(owner)) {
+    throwBuiltin(frame, 'UnsupportedOperationException', 'remove');
+  }
+  checkModifiable(frame, collection, true);
+}
+
+/** The list a sublist views, through any nesting of sublists, or the collection itself when it is not a sublist. */
+function rootListOf(collection: JavaObject): JavaObject {
+  let list = collection;
+  while (subListChecks.has(list) && !unmodifiableWrappers.has(list)) list = list.retained?.[0] as JavaObject;
+  return list;
 }
 
 export function elementsOf(receiver: Value): Value[] {
@@ -453,7 +498,10 @@ export function checkListIndex(frame: Frame, list: Value, index: number, length:
 /** Checks the position `listIterator` starts at, which may be the size of the list. */
 export function checkListPosition(frame: Frame, list: Value, index: number, length: number): void {
   if (index >= 0 && index <= length) return;
-  const separator = immutableCollectionsLists.has(checkingClassOf(list)) ? '' : ',';
+  const cls = checkingClassOf(list);
+  // Vector.listIterator names only the index.
+  if (cls.name === 'Stack') throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}`);
+  const separator = immutableCollectionsLists.has(cls) ? '' : ',';
   throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}${separator} Size: ${length}`);
 }
 
@@ -469,10 +517,10 @@ function checkingClassOf(list: Value): ClassInfo {
 }
 
 /**
- * Whether sorting `list` counts as a structural change, as `ArrayList.sort` and `Vector.sort` count it, unlike
- * `List.sort`'s default, which sublists, `LinkedList`, and `Arrays.asList` use.
+ * Whether a sort, or an `addAll` of nothing, counts as a structural change of `list`, as `ArrayList` and `Vector` count
+ * them, unlike sublists, `LinkedList`, and the `AbstractList` classes of `Arrays.asList` and `Collections`.
  */
-export function countsSortAsChange(list: Value): boolean {
+export function countsNoOpChanges(list: Value): boolean {
   if (subListChecks.has(list as JavaObject)) return false;
   const cls = checkingClassOf(list);
   return (cls.name === 'ArrayList' && !fixedSizeClasses.has(cls)) || cls.name === 'Stack';
