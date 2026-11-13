@@ -22,7 +22,7 @@ import { classOf, snapshot, str, truthy } from './values';
  */
 // code-gauge-allow functionCognitiveComplexity 23 -- Each language wires its own parser and runtime into the shared modules alike.
 // code-gauge-allow functionNcss 34 -- Each language wires its own parser and runtime into the shared modules alike.
-export function* hashKeyOf(value: Value): Gen<string> {
+export function* hashKeyOf(value: Value, ancestors: RBasic[] = []): Gen<string> {
   switch (typeof value) {
     case 'bigint': {
       return `i${value}`;
@@ -37,37 +37,47 @@ export function* hashKeyOf(value: Value): Gen<string> {
   if (value === NIL) return 'N';
   if (value instanceof RSymbol) return `y${value.name}`;
   if (value instanceof RString) return `s${value.s}`;
-  if (value instanceof RArray) {
-    const parts: string[] = [];
-    for (const item of value.items) parts.push(yield* hashKeyOf(item));
-    return `a[${parts.join(',')}]`;
-  }
-  if (value instanceof RRange) {
-    return `r${yield* hashKeyOf(value.begin)}${value.exclusive ? '...' : '..'}${yield* hashKeyOf(value.end)}`;
-  }
-  if (value instanceof RHash) {
-    const parts: string[] = [];
-    for (const entry of value.map.values()) {
-      parts.push(`${yield* hashKeyOf(entry.key)}=>${yield* hashKeyOf(entry.value)}`);
+  if (value instanceof RArray || value instanceof RRange || value instanceof RHash) {
+    const cycle = ancestors.indexOf(value);
+    if (cycle !== -1) return `c${cycle}`;
+    ancestors.push(value);
+    try {
+      if (value instanceof RArray) {
+        const parts: string[] = [];
+        for (const item of value.items) parts.push(yield* hashKeyOf(item, ancestors));
+        return `a${JSON.stringify(parts)}`;
+      }
+      if (value instanceof RRange) {
+        return `r${JSON.stringify([
+          yield* hashKeyOf(value.begin, ancestors),
+          value.exclusive,
+          yield* hashKeyOf(value.end, ancestors),
+        ])}`;
+      }
+      const parts: string[] = [];
+      for (const entry of value.map.values()) {
+        parts.push(JSON.stringify([yield* hashKeyOf(entry.key, ancestors), yield* hashKeyOf(entry.value, ancestors)]));
+      }
+      return `h${JSON.stringify(parts.toSorted())}`;
+    } finally {
+      ancestors.pop();
     }
-    return `h{${parts.toSorted().join(',')}}`;
   }
   const method = classOf(value).findMethod('hash');
   if (method && method.body.kind === 'user') {
     const hash = yield* callMethod(value, 'hash', []);
-    return `u${typeof hash === 'bigint' ? hash : yield* hashKeyOf(hash)}`;
+    return `u${typeof hash === 'bigint' ? hash : yield* hashKeyOf(hash, ancestors)}`;
   }
   const custom = value instanceof RObject ? (value.data as { hashKey?: () => string } | undefined) : undefined;
   if (custom?.hashKey) return custom.hashKey();
   return `o${(value as RBasic).id}`;
 }
 
-/** Finds the entry for `key`, comparing keys whose objects define `hash` with their `eql?`. */
+/** Finds the entry for `key`, checking equality even when distinct keys have the same hash. */
 function* findEntry(hash: RHash, key: Value): Gen<{ slot: string; entry: HashEntry | undefined }> {
   const base = yield* hashKeyOf(key);
-  if (!base.startsWith('u')) return { slot: base, entry: hash.map.get(base) };
   for (let index = 0; ; index++) {
-    const slot = index === 0 ? base : `${base}#${index}`;
+    const slot = JSON.stringify([base, index]);
     const entry = hash.map.get(slot);
     if (!entry) return { slot, entry: undefined };
     if (entry.key === key || truthy(yield* callMethod(key, 'eql?', [entry.key]))) return { slot, entry };

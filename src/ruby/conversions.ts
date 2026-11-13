@@ -416,21 +416,54 @@ export function numericEquals(a: bigint | number, b: bigint | number): boolean {
 }
 
 /** `a.eql?(b)`: equal values of the same type, as Hash keys compare. */
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of value Ruby converts or compares.
-export function* rEql(a: Value, b: Value): Gen<boolean> {
+export function* rEql(a: Value, b: Value, pairs: Map<RBasic, Set<RBasic>> = new Map()): Gen<boolean> {
   if (typeof a !== typeof b) return false;
   if (typeof a === 'number') return a === b || (Number.isNaN(a) && Number.isNaN(b as number) && false);
   if (a instanceof RString) return b instanceof RString && a.s === b.s;
-  if (a instanceof RArray) {
-    if (!(b instanceof RArray) || a.items.length !== b.items.length) return false;
-    for (let index = 0; index < a.items.length; index++) {
-      if (!(yield* rEql(a.items[index], b.items[index]))) return false;
+  if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
+  if (a instanceof RArray) return b instanceof RArray && (yield* eqlArray(a, b, pairs));
+  if (a instanceof RHash) return b instanceof RHash && (yield* eqlHash(a, b, pairs));
+  if (a instanceof RRange) return b instanceof RRange && (yield* eqlRange(a, b, pairs));
+  return a === b;
+}
+
+function* eqlArray(a: RArray, b: RArray, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
+  return yield* eqlContainer(a, b, pairs, function* () {
+    if (a.items.length !== b.items.length) return false;
+    for (let index = 0; index < a.items.length; index++)
+      if (!(yield* rEql(a.items[index], b.items[index], pairs))) return false;
+    return true;
+  });
+}
+
+function* eqlHash(a: RHash, b: RHash, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
+  return yield* eqlContainer(a, b, pairs, function* () {
+    if (a.map.size !== b.map.size) return false;
+    for (const entry of a.map.values()) {
+      const other = yield* hashGet(b, entry.key);
+      if (!other || !(yield* rEql(entry.value, other.value, pairs))) return false;
     }
     return true;
-  }
-  if (a instanceof RBasic && isOverridden(a, 'eql?')) return truthy(yield* callMethod(a, 'eql?', [b]));
-  if (a instanceof RHash || a instanceof RRange) return yield* rEquals(a, b);
-  return a === b;
+  });
+}
+
+function* eqlRange(a: RRange, b: RRange, pairs: Map<RBasic, Set<RBasic>>): Gen<boolean> {
+  return yield* eqlContainer(a, b, pairs, function* () {
+    return a.exclusive === b.exclusive && (yield* rEql(a.begin, b.begin, pairs)) && (yield* rEql(a.end, b.end, pairs));
+  });
+}
+
+function* eqlContainer(
+  a: RBasic,
+  b: RBasic,
+  pairs: Map<RBasic, Set<RBasic>>,
+  compare: () => Gen<boolean>
+): Gen<boolean> {
+  if (pairs.get(a)?.has(b)) return true;
+  const matches = pairs.get(a) ?? new Set<RBasic>();
+  matches.add(b);
+  pairs.set(a, matches);
+  return yield* compare();
 }
 
 /** The order of two values by `<=>`, raising "comparison of X with Y failed" when they do not compare. */

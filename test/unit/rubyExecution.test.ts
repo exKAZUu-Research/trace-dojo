@@ -12,6 +12,19 @@ afterEach(() => {
 
 const run = (program: string): ProgramExecution => executeProgram('ruby', program);
 
+test.each([
+  [
+    'distinct array keys',
+    'h = {}\nh[["a,sb"]] = 1\nh[["a", "b"]] = 2\np h.size\np h[["a,sb"]]\np h[["a", "b"]]',
+    '2\n1\n2\n',
+  ],
+  ['a recursive array key', 'a = []\na << a\nh = {}\nh[a] = 1\np h[a]', '1\n'],
+  ['equivalent recursive array keys', 'a = []\na << a\nb = []\nb << b\nh = {}\nh[a] = 1\np h[b]', '1\n'],
+  ['a hash containing itself as a value', 'a = {}\na[:self] = a\nh = {}\nh[a] = 1\np h[a]', '1\n'],
+])('%s retains its Hash entry', (_name, program, stdout) => {
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
 // Ruby 4.0.9 rejects each of these before running.
 test.each([
   ['break outside a loop', 'puts 1\nbreak'],
