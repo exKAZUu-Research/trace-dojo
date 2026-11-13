@@ -197,8 +197,12 @@ export class GeneratorFinalizer {
       return;
     }
     const replaced = this.heldValue(object, key, isAttribute);
+    this.replacingReference(replaced, store);
+  }
+
+  replacingReference(previous: unknown, store: () => void, inFlight: unknown[] = []): void {
     store();
-    if (this.pending.size > 0) this.release([replaced]);
+    this.release([previous], inFlight);
   }
 
   /** The value an attribute or an item of a builtin container holds, read without running the program's code. */

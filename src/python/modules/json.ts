@@ -398,14 +398,14 @@ const PRIVATE_NAMES = new Set(['INFINITY', 'NaN', 'NegInf', 'PosInf', 'encode_ba
 registerModule('json', (runtime, moduleNamespace) => {
   // The Python part runs in globals of its own, of which the module shows all but the private names.
   const namespace = new Map<string, PyValue>([['__name__', 'json']]);
-  const encodeAscii = builtin('encode_basestring_ascii', 'one', 1, 1, ([text]) => quoteAlone(text as string, true));
-  const encodeText = builtin('encode_basestring', 'one', 1, 1, ([text]) => quoteAlone(text as string, false));
+  const encodeAscii = jsonStringEncoder(true);
+  const encodeText = jsonStringEncoder(false);
   for (const [name, value] of [
     ['encode_basestring_ascii', encodeAscii],
     ['encode_basestring', encodeText],
     [
       '_skip_whitespace',
-      builtin('_skip_whitespace', 'expected', 2, 2, ([text, index]) => skipWhitespace(text as string, index)),
+      builtin('_skip_whitespace', 'expected', 2, 2, ([text, index]) => skipWhitespace(textArgument(text), index)),
     ],
     ['_make_scanner', builtin('_make_scanner', 'one', 1, 1, ([decoder]) => makeScanner(decoder, namespace))],
     ['_c_make_encoder', builtin('_c_make_encoder', 'expected', 9, 9, (args) => makeEncoder(args, encodeAscii))],
@@ -433,6 +433,12 @@ registerModule('json', (runtime, moduleNamespace) => {
   return new Map();
 });
 
+export function jsonStringEncoder(ensureAscii: boolean): PyValue {
+  return builtin(ensureAscii ? 'encode_basestring_ascii' : 'encode_basestring', 'one', 1, 1, ([text]) =>
+    quoteAlone(textArgument(text), ensureAscii)
+  );
+}
+
 function quoteAlone(text: string, ensureAscii: boolean): string {
   currentRuntime().buildString(text.length);
   const quoted = quote(text, ensureAscii);
@@ -450,9 +456,9 @@ function skipWhitespace(text: string, indexValue: PyValue): bigint {
 function makeEncoder(args: PyValue[], encodeAscii: PyValue): PyValue {
   const [markers, defaultFn, encoder, indent, keySeparator, itemSeparator, sortKeys, skipKeys, allowNan] = args;
   const options: DumpOptions = {
-    indent: indent === None ? undefined : (indent as string),
-    keySeparator: keySeparator as string,
-    itemSeparator: itemSeparator as string,
+    indent: indent === None ? undefined : (unbox(indent) as string),
+    keySeparator: unbox(keySeparator) as string,
+    itemSeparator: unbox(itemSeparator) as string,
     sortKeys: isTruthy(sortKeys),
     skipKeys: isTruthy(skipKeys),
     allowNan: isTruthy(allowNan),
@@ -472,7 +478,7 @@ function makeEncoder(args: PyValue[], encodeAscii: PyValue): PyValue {
 /** `scanner.make_scanner(decoder)`: decodes one value at an index, raising StopIteration where none starts. */
 function makeScanner(decoder: PyValue, namespace: Map<string, PyValue>): PyValue {
   return builtin('scan_once', 'expected', 2, 2, ([text, index]) => {
-    if (typeof text !== 'string') throw typeError(`first argument must be a string, not ${typeName(text)}`);
+    const source = textArgument(text);
     const hooks: DecodeHooks = {
       objectHook: getAttribute(decoder, 'object_hook'),
       objectPairsHook: getAttribute(decoder, 'object_pairs_hook'),
@@ -482,10 +488,16 @@ function makeScanner(decoder: PyValue, namespace: Map<string, PyValue>): PyValue
       strict: isTruthy(getAttribute(decoder, 'strict')),
       error: namespace.get('JSONDecodeError') as PyValue,
     };
-    const scanner = new Decoder(text, hooks, Number(toIndex(index)));
+    const scanner = new Decoder(source, hooks, Number(toIndex(index)));
     const value = scanner.scanOnce();
     return newTuple([value, BigInt(scanner.position)]);
   });
+}
+
+function textArgument(value: PyValue): string {
+  const text = unbox(value);
+  if (typeof text !== 'string') throw typeError(`first argument must be a string, not ${typeName(value)}`);
+  return text;
 }
 
 export { pyRepr };

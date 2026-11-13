@@ -44,3 +44,21 @@ print('converted')`;
     uncaughtException: undefined,
   });
 });
+
+test('path protocols reject mutable buffers both directly and as fspath results', () => {
+  const program = `import os, os.path
+class Path:
+    def __fspath__(self): return bytearray(b'a')
+class Buffer(bytearray): pass
+for value in [bytearray(b'a'), Buffer(b'a'), Path()]:
+    for use in [os.fspath, os.fsencode, os.fsdecode, lambda x: os.path.join(x, b'b'), os.path.split]:
+        try: use(value)
+        except TypeError: pass
+        else: raise AssertionError('accepted')
+print('paths')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'paths\n',
+    uncaughtException: undefined,
+  });
+});

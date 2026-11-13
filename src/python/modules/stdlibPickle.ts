@@ -1,10 +1,24 @@
 // The reductions of the standard library types this interpreter writes natively, as CPython's reduce them for pickle.
+import { setInstanceAttribute } from '../attributes';
 import { pyStr } from '../conversions';
 import { method } from '../define';
+import { ownDict } from '../descriptors';
 import { enumClass } from '../enums';
-import { callValue, getAttribute, getIterator, isCallable, setAttribute } from '../objects';
+import { namespaceDict } from '../namespaces';
+import { callValue, getAttribute, getIterator, isCallable } from '../objects';
 import { objectState } from '../reduction';
-import { classOf, dictClass, ellipsisClass, newDict, newTuple, None, notImplementedClass, typeError } from '../types';
+import { currentRuntime } from '../runtimeContext';
+import {
+  classOf,
+  dictClass,
+  ellipsisClass,
+  newDict,
+  newTuple,
+  None,
+  notImplementedClass,
+  tupleClass,
+  typeError,
+} from '../types';
 import { type PyDeque, PyDict, type PyOpaque, PyTuple, type PyValue } from '../values';
 import { counterClass, defaultdictClass, dequeClass, orderedDictClass } from './collections';
 import { decimalClass } from './decimal';
@@ -61,11 +75,34 @@ method(partialClass, '__setstate__', 'one', 1, 1, (self, [state]) => {
   ) {
     throw typeError('invalid partial state');
   }
-  setAttribute(self, '__dict__', attributes === None ? newDict() : attributes);
-  const partial = partialOf(self);
-  partial.fn = fn;
-  partial.args = newTuple(args.items);
-  partial.keywords =
-    kwargs instanceof PyDict ? newDict(kwargs.store.ordered().map((entry) => [entry.key, entry.value])) : newDict();
+  const restoredArgs = args.cls === tupleClass ? args : newTuple(args.items);
+  const restoredKeywords =
+    kwargs instanceof PyDict
+      ? kwargs.cls === dictClass
+        ? kwargs
+        : newDict(kwargs.store.ordered().map((entry) => [entry.key, entry.value]))
+      : newDict();
+  const restoredAttributes = attributes === None ? newDict() : attributes;
+  const { finalizer } = currentRuntime();
+  replacePartialField(self, 'fn', fn);
+  replacePartialField(self, 'args', restoredArgs);
+  replacePartialField(self, 'keywords', restoredKeywords);
+  const previousAttributes = ownDict(self);
+  finalizer.replacingReference(
+    previousAttributes ? namespaceDict(previousAttributes) : undefined,
+    () => setInstanceAttribute(self as PyOpaque, '__dict__', restoredAttributes),
+    [self]
+  );
   return None;
 });
+
+function replacePartialField<Key extends keyof Partial>(self: PyValue, key: Key, value: Partial[Key]): void {
+  const partial = partialOf(self);
+  currentRuntime().finalizer.replacingReference(
+    partial[key],
+    () => {
+      partial[key] = value;
+    },
+    [self]
+  );
+}

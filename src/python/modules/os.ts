@@ -151,7 +151,7 @@ function fspath(value: PyValue): PyValue {
 }
 
 function isPath(value: PyValue): boolean {
-  return typeof unbox(value) === 'string' || value instanceof PyBytes;
+  return typeof unbox(value) === 'string' || (value instanceof PyBytes && !value.isMutable);
 }
 
 /** `os.fsencode`: a path as bytes in the file system encoding of macOS, UTF-8 with surrogateescape. */

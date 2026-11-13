@@ -1,7 +1,5 @@
 import { registerSourceModule } from '../sourceModules';
-
-// CPython's `json/scanner.py`, `json/decoder.py`, and `json/encoder.py`, whose decoder and encoder classes are the
-// json module's, and without the accelerators of the C module `_json`.
+import { jsonStringEncoder } from './json';
 
 const ACCELERATOR = 'C で書かれた json の高速化関数';
 
@@ -365,7 +363,7 @@ def py_encode_basestring(s):
     return '"' + ESCAPE.sub(replace, s) + '"'
 
 
-encode_basestring = (c_encode_basestring or py_encode_basestring)
+encode_basestring = _native_encode_basestring
 
 
 def py_encode_basestring_ascii(s):
@@ -390,8 +388,7 @@ def py_encode_basestring_ascii(s):
     return '"' + ESCAPE_ASCII.sub(replace, s) + '"'
 
 
-encode_basestring_ascii = (
-    c_encode_basestring_ascii or py_encode_basestring_ascii)
+encode_basestring_ascii = _native_encode_basestring_ascii
 
 from json import JSONEncoder
 
@@ -594,8 +591,13 @@ def _make_iterencode(markers, _default, _encoder, _indent, _floatstr,
     return _iterencode
 
 del c_encode_basestring_ascii, c_encode_basestring, c_make_encoder
+del _native_encode_basestring, _native_encode_basestring_ascii
 `,
-  undefined,
+  () =>
+    new Map([
+      ['_native_encode_basestring', jsonStringEncoder(false)],
+      ['_native_encode_basestring_ascii', jsonStringEncoder(true)],
+    ]),
   {
     unsupported: {
       c_encode_basestring: `${ACCELERATOR}（json.encoder.c_encode_basestring）`,
