@@ -11,7 +11,7 @@ import {
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
-import { fusedMultiplyAdd } from './floatMath';
+import { floatStepCount, fusedMultiplyAdd } from './floatMath';
 import { structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
@@ -330,8 +330,9 @@ function* stepIntegerRange(self: RRange, begin: bigint, step: bigint, block: RPr
 
 function* stepNumericRange(self: RRange, start: number, by: number, block: RProc): Gen {
   const { end, exclusive } = self;
-  const n = end === NIL ? Number.POSITIVE_INFINITY : Math.floor((Number(end) - start) / by + 1e-9);
-  for (let index = 0; index <= n; index++) {
+  const count = end === NIL ? Number.POSITIVE_INFINITY : floatStepCount(start, Number(end), by, exclusive);
+  if (Number.isNaN(count)) throw rangeError('NaN');
+  for (let index = 0; index < count; index++) {
     rt().spend();
     let value = fusedMultiplyAdd(index, by, start);
     if (end !== NIL) {

@@ -28,6 +28,28 @@ export function floatFraction(value: number): { numerator: bigint | number; deno
   return { numerator, denominator };
 }
 
+export function floatStepCount(begin: number, end: number, step: number, exclusive = false): number {
+  if (step === 0) return Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(step)) return step > 0 ? Number(begin <= end) : Number(begin >= end);
+  let count = (end - begin) / step;
+  const error = Math.min(
+    0.5,
+    ((Math.abs(begin) + Math.abs(end) + Math.abs(end - begin)) / Math.abs(step)) * Number.EPSILON
+  );
+  if (exclusive) {
+    if (count <= 0) return 0;
+    count = count < 1 ? 0 : Math.floor(count - error);
+    const next = (count + 1) * step + begin;
+    if ((begin < end && next < end) || (begin > end && next > end)) count++;
+  } else {
+    if (count < 0) return 0;
+    count = Math.floor(count + error);
+    const next = (count + 1) * step + begin;
+    if ((begin < end && next <= end) || (begin > end && next >= end)) count++;
+  }
+  return count + 1;
+}
+
 function dyadic(value: number): { mantissa: bigint; exponent: number } {
   bits.setFloat64(0, value);
   const raw = bits.getBigUint64(0);

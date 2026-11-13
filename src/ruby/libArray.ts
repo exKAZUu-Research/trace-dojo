@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 879 -- The libArray module keeps one concern's cases together.
 import {
+  combinedStringEncoding,
   compareValues,
   inspect,
   inspectArray,
@@ -8,8 +9,8 @@ import {
   spaceship,
   toIndex,
   toInt,
-  toS,
-  toStr,
+  toStrValue,
+  toSValue,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, implicitConversionError, indexError, rangeError, typeError } from './errors';
@@ -32,7 +33,7 @@ import { randomIndex } from './libRandom';
 import { rangeBounds } from './libString';
 import { NIL, RArray, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { arr, newHash, snapshot, str, truthy } from './values';
+import { arr, newHash, realClassOf, str, stringBytes, stringFromBytes, truthy } from './values';
 
 function* modify(self: RArray): Gen<void> {
   if (self.frozen) throw frozenError(self, yield* inspectArray(self));
@@ -45,12 +46,22 @@ function grow(length: number, self?: RArray): void {
 }
 
 function* toAry(value: Value): Gen<RArray> {
+  const array = yield* tryAry(value);
+  if (array) return array;
+  throw implicitConversionError(value, 'Array');
+}
+
+function* tryAry(value: Value): Gen<RArray | undefined> {
   if (value instanceof RArray) return value;
   if (respondsTo(value, 'to_ary')) {
     const converted = yield* callMethod(value, 'to_ary', []);
     if (converted instanceof RArray) return converted;
+    if (converted !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
+      );
   }
-  throw implicitConversionError(value, 'Array');
+  return undefined;
 }
 
 function call(block: RProc, value: Value, used = true): Gen {
@@ -69,10 +80,13 @@ def(
       self.items = [];
       return NIL;
     }
-    if (args.length === 1 && args[0] instanceof RArray) {
-      grow(args[0].items.length, self);
-      self.items = [...args[0].items];
-      return NIL;
+    if (args.length === 1) {
+      const source = yield* tryAry(args[0]);
+      if (source) {
+        grow(source.items.length, self);
+        self.items = [...source.items];
+        return NIL;
+      }
     }
     const size = yield* toIndex(args[0]);
     if (size < 0) throw argumentError('negative array size');
@@ -101,19 +115,29 @@ function* elementAt(self: RArray, indexValue: Value): Gen {
 }
 
 function* slice(self: RArray, args: Value[]): Gen {
+  return (yield* resolvedSlice(self, args)).value;
+}
+
+function* resolvedSlice(self: RArray, args: Value[]): Gen<{ value: Value; start?: number; count?: number }> {
   const [first, second] = args;
-  if (second === undefined && !(first instanceof RRange)) return yield* elementAt(self, first);
   const length = self.items.length;
+  if (second === undefined && !(first instanceof RRange)) {
+    let index = yield* toIndex(first);
+    if (index < 0) index += length;
+    return index < 0 || index >= length ? { value: NIL } : { value: self.items[index], start: index, count: 1 };
+  }
   if (second !== undefined) {
     let start = yield* toIndex(first);
     const count = yield* toIndex(second);
     if (start < 0) start += length;
-    if (start < 0 || start > length || count < 0) return NIL;
-    return arr(self.items.slice(start, start + count));
+    if (start < 0 || start > length || count < 0) return { value: NIL };
+    const selected = self.items.slice(start, start + count);
+    return { value: arr(selected), start, count: selected.length };
   }
   const bounds = yield* rangeBounds(first as RRange, length);
-  if (!bounds) return NIL;
-  return arr(self.items.slice(bounds.start, bounds.start + bounds.count));
+  if (!bounds) return { value: NIL };
+  const selected = self.items.slice(bounds.start, bounds.start + bounds.count);
+  return { value: arr(selected), start: bounds.start, count: selected.length };
 }
 
 def('Array', ['[]', 'slice'], [1, 2], (self: RArray, args) => slice(self, args));
@@ -155,7 +179,8 @@ def('Array', '[]=', [2, 3], function* (self: RArray, args) {
     if (!range.exclusive && range.end !== NIL) end++;
     count = Math.max(0, end - start);
   }
-  const replacement = value instanceof RArray ? [...value.items] : [value];
+  const converted = yield* tryAry(value);
+  const replacement = converted ? [...converted.items] : [value];
   const filled = Math.max(self.items.length, start);
   const removed = Math.min(count, Math.max(0, filled - start));
   grow(filled - removed + replacement.length, self);
@@ -326,24 +351,9 @@ def('Array', 'delete_at', 1, function* (self: RArray, [indexValue]) {
 });
 def('Array', 'slice!', [1, 2], function* (self: RArray, args) {
   yield* modify(self);
-  const result = yield* slice(self, args);
-  const length = self.items.length;
-  if (args.length === 1 && !(args[0] instanceof RRange)) {
-    let index = yield* toIndex(args[0]);
-    if (index < 0) index += length;
-    if (index >= 0 && index < length) self.items.splice(index, 1);
-    return result;
-  }
-  if (result === NIL) return NIL;
-  let start: number;
-  if (args.length === 2) {
-    start = yield* toIndex(args[0]);
-    if (start < 0) start += length;
-  } else {
-    start = (yield* rangeBounds(args[0] as RRange, length))?.start ?? 0;
-  }
-  self.items.splice(start, (result as RArray).items.length);
-  return result;
+  const { value, start, count } = yield* resolvedSlice(self, args);
+  if (start !== undefined) self.items.splice(start, count ?? 0);
+  return value;
 });
 
 function* filterInPlace(self: RArray, block: RProc, keep: (result: boolean) => boolean): Gen<boolean> {
@@ -518,7 +528,7 @@ def('Array', ['-', 'difference'], [0, -1], function* (self: RArray, others) {
   return arr(result);
 });
 def('Array', '*', 1, function* (self: RArray, [count]) {
-  if (count instanceof RString) return yield* join(self, count.s);
+  if (count instanceof RString) return yield* join(self, count);
   const times = yield* toIndex(count);
   if (times < 0) throw argumentError('negative argument');
   if (self.items.length === 0) return arr([]);
@@ -550,29 +560,59 @@ def('Array', 'intersect?', 1, function* (self: RArray, [other]) {
   return false;
 });
 
-/** `join`: elements' text with a separator, nested arrays joined recursively. */
-function* join(self: RArray, separator: string, seen = new Set<RArray>()): Gen {
+/** `join`: elements' bytes with a separator, nested arrays joined recursively. */
+function* join(self: RArray, separator: RString, seen = new Set<RArray>()): Gen<RString> {
   if (seen.has(self)) throw argumentError('recursive array join');
   seen.add(self);
-  const parts: string[] = [];
+  const chunks: Uint8Array[] = [];
   let length = 0;
-  for (const item of self.items) {
-    let part: string;
-    if (item instanceof RArray) part = ((yield* join(item, separator, seen)) as RString).s;
-    else if (item instanceof RString) part = item.s;
-    else part = yield* toS(item);
-    length += part.length + separator.length;
-    if (length > 1_000_000) throw argumentError('string size too big');
-    parts.push(part);
+  let binary = false;
+  let ascii = true;
+  try {
+    for (const [index, item] of self.items.entries()) {
+      if (index > 0) append(separator);
+      append(yield* joinValue(item, separator, seen));
+    }
+  } finally {
+    seen.delete(self);
   }
-  seen.delete(self);
-  return str(parts.join(separator));
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return stringFromBytes(bytes, binary);
+
+  function append(part: RString): void {
+    binary = combinedStringEncoding(binary, ascii, part);
+    const bytes = stringBytes(part);
+    length += bytes.length;
+    if (length > 1_000_000) throw argumentError('string size too big');
+    chunks.push(bytes);
+    ascii &&= bytes.every((byte) => byte < 0x80);
+  }
 }
 
 def('Array', 'join', [0, 1], function* (self: RArray, args) {
-  const separator = args.length > 0 && args[0] !== NIL ? yield* toStr(args[0]) : '';
+  const separator = args.length > 0 && args[0] !== NIL ? yield* toStrValue(args[0]) : str('');
   return yield* join(self, separator);
 });
+
+function* joinValue(value: Value, separator: RString, seen: Set<RArray>): Gen<RString> {
+  if (value instanceof RString) return value;
+  if (value instanceof RArray) return yield* join(value, separator, seen);
+  if (respondsTo(value, 'to_str')) {
+    const converted = yield* callMethod(value, 'to_str', []);
+    if (converted instanceof RString) return converted;
+    if (converted !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`
+      );
+  }
+  const converted = yield* tryAry(value);
+  return converted ? yield* join(converted, separator, seen) : yield* toSValue(value);
+}
 def('Array', 'assoc', 1, function* (self: RArray, [key]) {
   for (const item of self.items) {
     if (item instanceof RArray && item.items.length > 0 && (yield* rEquals(item.items[0], key))) return item;
@@ -769,7 +809,9 @@ def('Array', 'include?', 1, function* (self: RArray, [target]) {
 def('Array', 'count', [0, 1], function* (self: RArray, args, block) {
   if (args.length === 0 && !block) return BigInt(self.items.length);
   let count = 0n;
-  for (const item of snapshot(self.items)) {
+  for (let index = 0; index < self.items.length; index++) {
+    rt().spend();
+    const item = self.items[index];
     if (args.length > 0 ? yield* rEquals(item, args[0]) : truthy(yield* call(block as RProc, item))) count++;
   }
   return count;

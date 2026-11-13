@@ -52,12 +52,13 @@ def(
 // code-gauge-allow functionCognitiveComplexity 18 -- Hash.[] accepts alternating key/value arguments or one pair collection and validates both forms.
 sdef('Hash', '[]', [0, -1], function* (self, args) {
   const hash = new RHash(self);
-  if (args.length === 1 && args[0] instanceof RHash) {
-    for (const entry of args[0].map.values()) yield* hashSet(hash, entry.key, entry.value);
+  const source = args.length === 1 ? yield* hashLiteralSource(args[0]) : undefined;
+  if (source instanceof RHash) {
+    for (const entry of source.map.values()) yield* hashSet(hash, entry.key, entry.value);
     return hash;
   }
-  if (args.length === 1 && args[0] instanceof RArray) {
-    for (const item of args[0].items) {
+  if (source instanceof RArray) {
+    for (const item of source.items) {
       if (!(item instanceof RArray) || item.items.length === 0 || item.items.length > 2) {
         throw argumentError(`invalid number of elements (${item instanceof RArray ? item.items.length : 1} for 1..2)`);
       }
@@ -69,6 +70,27 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
   for (let index = 0; index < args.length; index += 2) yield* hashSet(hash, args[index], args[index + 1]);
   return hash;
 });
+
+function* hashLiteralSource(value: Value): Gen<RHash | RArray | undefined> {
+  if (value instanceof RHash || value instanceof RArray) return value;
+  if (respondsTo(value, 'to_hash')) {
+    const converted = yield* callMethod(value, 'to_hash', []);
+    if (converted instanceof RHash) return converted;
+    if (converted !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Hash (${realClassOf(value).name}#to_hash gives ${realClassOf(converted).name})`
+      );
+  }
+  if (respondsTo(value, 'to_ary')) {
+    const converted = yield* callMethod(value, 'to_ary', []);
+    if (converted instanceof RArray) return converted;
+    if (converted !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
+      );
+  }
+  return undefined;
+}
 
 def('Hash', '[]', 1, (self: RHash, [key]) => hashFetch(self, key));
 def('Hash', ['[]=', 'store'], 2, function* (self: RHash, [key, value]) {

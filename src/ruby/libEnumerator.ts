@@ -1,6 +1,7 @@
 import { addressOf, inspect, numericCompare, toInt } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, floatDomainError, rangeError } from './errors';
+import { floatStepCount } from './floatMath';
 import { callMethod, callProc, type Gen, nativeProc } from './interp';
 import { rangeSize } from './libRange';
 import { setSize } from './libSet';
@@ -132,11 +133,9 @@ function stepSize(recv: Value, args: Value[], keywords?: RHash): Value {
     const adjusted = distance - (exclusive ? 1n : 0n);
     return adjusted < 0n ? 0n : adjusted / (step > 0n ? step : -step) + 1n;
   }
-  const distance = (Number(end) - Number(start)) / Number(step);
-  if (Number.isNaN(distance)) throw floatDomainError('NaN');
-  if (!Number.isFinite(distance)) return distance > 0 ? Number.POSITIVE_INFINITY : 0n;
-  const count = exclusive ? Math.ceil(distance - 1e-12) : Math.floor(distance + 1e-12) + 1;
-  return BigInt(Math.max(0, count));
+  const count = floatStepCount(Number(start), Number(end), Number(step), exclusive);
+  if (Number.isNaN(count)) throw floatDomainError('NaN');
+  return Number.isFinite(count) ? BigInt(count) : Number.POSITIVE_INFINITY;
 }
 
 function arithmeticSpec(

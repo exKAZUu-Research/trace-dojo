@@ -127,7 +127,7 @@ export function* hashDefault(hash: RHash, key: Value): Gen {
   return hash.defaultValue;
 }
 
-export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
+export function* hashSet(hash: RHash, key: Value, value: Value): Gen<boolean> {
   const held = rt().held.length;
   rt().held.push(hash, key, value);
   try {
@@ -135,7 +135,7 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
     const { base, slot, entry } = yield* findEntry(hash, key);
     if (entry) {
       entry.value = value;
-      return;
+      return true;
     }
     if (hash.iterating > 0) throw runtimeError(hash.iterationError ?? "can't add a new key into hash during iteration");
     rt().chargeSlots(1);
@@ -146,6 +146,7 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
     bucket.push(slot);
     hash.buckets.set(base, bucket);
     hash.bucketVersion = hash.map.version;
+    return false;
   } finally {
     rt().held.length = held;
   }

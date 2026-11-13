@@ -172,6 +172,11 @@ test.each([
     '[9007199254740993, 9007199254740994]\n[9007199254740993]\n',
   ],
   [
+    'Float step stops before a computed short limit',
+    'x=0.0; 52.times { x+=0.1 }; p (0.0..x).step(0.1).to_a.size, (0.0..x).step(0.1).to_a.last(2), 0.0.step(x,0.1).to_a.size',
+    '52\n[5.0, 5.1000000000000005]\n52\n',
+  ],
+  [
     'numeric conversion and argument boundaries',
     'class X; def coerce(a); [2.0,4]; end; end; p 1.quo(X.new); begin; 1.quo(nil); rescue => e; p e.message; end; begin; 1.5.round(10**30); rescue => e; p e.class; end; begin; 1.to_s(10**30); rescue => e; p e.class; end; begin; 1.step(5,2,by:3); rescue => e; p e.message; end',
     '0.5\n"nil can\'t be coerced into Rational"\nRangeError\nRangeError\n"step is given twice"\n',
@@ -212,6 +217,32 @@ test.each([
     'byte-preserving prefix and suffix mutation',
     String.raw`s="\xFFa"; p s.delete_prefix("\xFF").bytes, s.delete_suffix("a").bytes; p s.delete_prefix!("\xFF").bytes, s.bytes`,
     '[97]\n[255]\n[97]\n[97]\n',
+  ],
+  [
+    'Set symmetric difference hash callbacks',
+    'class K; def hash; puts :hash; 0; end; end; a=K.new; b=K.new; s=Set[a]; t=Set[b]; puts :start; p (s^t).size; puts :again; p (s^s).size',
+    'hash\nhash\nstart\nhash\n2\nagain\nhash\nhash\n0\n',
+  ],
+  [
+    'Array construction and slice assignment use to_ary',
+    'class A; def to_ary; [4,5]; end; end; a=[1,2,3]; a[1,1]=A.new; p a, Array.new(A.new)',
+    '[1, 4, 5, 3]\n[4, 5]\n',
+  ],
+  [
+    'Array slice mutation converts index once',
+    'class I; def initialize; @i=-1; end; def to_int; @i+=1; end; end; a=[10,20]; p a.slice!(I.new),a',
+    '10\n[20]\n',
+  ],
+  ['Array count follows receiver mutation', 'a=[1]; p a.count { |x| a<<2 if x==1; true }', '2\n'],
+  [
+    'Array join preserves bytes and conversion order',
+    String.raw`class A; def to_ary; [1,2]; end; end; p ["a","b"].join("\xFF").bytes, ["\xFF","z"].join.bytes, [A.new].join(",")`,
+    '[97, 255, 98]\n[255, 122]\n"1,2"\n',
+  ],
+  [
+    'Hash bracket constructor uses implicit collection conversions',
+    'class H; def to_hash; {a:1}; end; end; class A; def to_ary; [[:b,2]]; end; end; p Hash[H.new], Hash[A.new]',
+    '{a: 1}\n{b: 2}\n',
   ],
   [
     'String sum long bound',

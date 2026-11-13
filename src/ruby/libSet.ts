@@ -143,20 +143,13 @@ def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
   return yield* newSet(kept);
 });
 def('Set', '^', 1, function* (self: RObject, [value]) {
-  const right = yield* newSet(yield* other(value));
-  const union = [
-    ...[...membersOf(self).map.values()].map((e) => e.key),
-    ...[...membersOf(right).map.values()].map((e) => e.key),
-  ];
-  const kept: Value[] = [];
-  for (const item of (yield* newSet(union)) === undefined
-    ? []
-    : [...membersOf(yield* newSet(union)).map.values()].map((e) => e.key)) {
-    const inLeft = (yield* hashGet(membersOf(self), item)) !== undefined;
-    const inRight = (yield* hashGet(membersOf(right), item)) !== undefined;
-    if (inLeft !== inRight) kept.push(item);
+  const result = new RObject(self.cls);
+  result.data = (self.data as SetData).copy();
+  const right = value instanceof RObject && value.data instanceof SetData ? value : yield* newSet(yield* other(value));
+  for (const entry of membersOf(right).map.values()) {
+    if (yield* hashSet(membersOf(result), entry.key, true)) yield* hashDelete(membersOf(result), entry.key);
   }
-  return yield* newSet(kept);
+  return result;
 });
 
 function* subset(small: RObject, large: RObject): Gen<boolean> {
