@@ -943,38 +943,31 @@ function* substitute(
   const sourceLength = stringBytes(self).length;
   let result = '';
   let position = 0;
+  let positionByte = 0;
   let matched = false;
   for (;;) {
     const found = text.indexOf(target, position);
     if (found === -1) break;
+    const raw = self.binary || self.rawBytes !== undefined;
+    const foundByte = positionByte + textByteLength(text.slice(position, found), raw);
     matched = true;
-    let piece: string;
-    if (replacement instanceof RHash) {
-      const key = str(target);
-      piece = yield* whileHeld(key, function* () {
-        const entry = yield* hashGet(replacement, key);
-        return yield* toS(entry ? entry.value : yield* hashDefault(replacement, key));
-      });
-    } else if (replacement !== undefined) {
-      piece = expandReplacement(
-        yield* stringArg(replacement),
-        target,
-        text.slice(0, found),
-        text.slice(found + target.length)
-      );
-    } else {
-      piece = yield* toS(yield* callBlock(block as RProc, [str(target)]));
-    }
+    const piece = yield* substitutionPiece(target, replacement, block, text, found);
     if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
+    const modified = self.s !== text;
     text = self.s;
-    result += text.slice(position, found) + piece;
-    position = found + target.length;
+    result +=
+      (modified
+        ? text.slice(textIndexAtByte(text, positionByte, raw), textIndexAtByte(text, foundByte, raw))
+        : text.slice(position, found)) + piece;
+    positionByte = foundByte + textByteLength(target, raw);
+    position = modified ? textIndexAtByte(text, positionByte, raw) : found + target.length;
     if (target.length === 0) {
-      if (found < text.length) {
-        const char = String.fromCodePoint(text.codePointAt(found) as number);
+      if (position < text.length) {
+        const char = String.fromCodePoint(text.codePointAt(position) as number);
         result += char;
-        position = found + char.length;
-      } else position = found + 1;
+        position += char.length;
+      } else position++;
+      positionByte = textByteLength(text.slice(0, position), raw);
       if (position > text.length) break;
     }
     if (!global) break;
@@ -982,6 +975,30 @@ function* substitute(
   }
   if (position <= text.length) result += text.slice(position);
   return { text: result, matched };
+}
+
+function* substitutionPiece(
+  target: string,
+  replacement: Value | undefined,
+  block: RProc | undefined,
+  text: string,
+  found: number
+): Gen<string> {
+  if (replacement instanceof RHash) {
+    const key = str(target);
+    return yield* whileHeld(key, function* () {
+      const entry = yield* hashGet(replacement, key);
+      return yield* toS(entry ? entry.value : yield* hashDefault(replacement, key));
+    });
+  }
+  if (replacement !== undefined)
+    return expandReplacement(
+      yield* stringArg(replacement),
+      target,
+      text.slice(0, found),
+      text.slice(found + target.length)
+    );
+  return yield* toS(yield* callBlock(block as RProc, [str(target)]));
 }
 
 def('String', 'sub', [1, 2], function* (self: RString, args, block) {
@@ -1012,25 +1029,53 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   let text = self.s;
   const sourceLength = stringBytes(self).length;
   let position = 0;
+  let positionByte = 0;
   for (;;) {
     const index = text.indexOf(target, position);
     if (index === -1) break;
+    const raw = self.binary || self.rawBytes !== undefined;
+    const foundByte = positionByte + textByteLength(text.slice(position, index), raw);
     const match = str(target);
+    let modified = false;
     if (block) {
       yield* callBlock(block, [match], false);
       if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
+      modified = self.s !== text;
       text = self.s;
     } else found.push(match);
-    position =
-      index +
-      (target.length === 0 && index < text.length
-        ? String.fromCodePoint(text.codePointAt(index) as number).length
-        : Math.max(target.length, 1));
+    const nextByte = foundByte + textByteLength(target, raw);
+    if (modified && target.length > 0) position = textIndexAtByte(text, nextByte, raw);
+    else {
+      const start = modified ? textIndexAtByte(text, foundByte, raw) : index;
+      position =
+        start +
+        (target.length === 0 && start < text.length
+          ? String.fromCodePoint(text.codePointAt(start) as number).length
+          : Math.max(target.length, 1));
+    }
+    positionByte = target.length === 0 ? textByteLength(text.slice(0, position), raw) : nextByte;
     if (position > text.length) break;
   }
   if (!block) return arr(found);
   return self;
 });
+
+function textByteLength(text: string, raw: boolean): number {
+  return raw ? text.length : new TextEncoder().encode(text).length;
+}
+
+function textIndexAtByte(text: string, offset: number, raw: boolean): number {
+  if (raw) return Math.min(offset, text.length);
+  let bytes = 0;
+  for (let index = 0; index < text.length;) {
+    if (bytes >= offset) return index;
+    const point = text.codePointAt(index) as number;
+    bytes += textByteLength(String.fromCodePoint(point), false);
+    index += point > 0xff_ff ? 2 : 1;
+    if (index % 256 === 0) rt().spend(256);
+  }
+  return text.length;
+}
 for (const name of ['match', 'match?', '=~']) {
   def('String', name, [1, 2], () => {
     throw new UnsupportedFeatureError('正規表現');

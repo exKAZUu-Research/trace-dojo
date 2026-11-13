@@ -1009,13 +1009,19 @@ def('Enumerable', 'tally', [0, 1], function* (self, args) {
   else if (args[0] instanceof RHash) counts = args[0];
   else if (respondsTo(args[0], 'to_hash', true)) {
     const converted = yield* callMethod(args[0], 'to_hash', [], undefined, undefined, { fcall: true });
-    if (!(converted instanceof RHash)) throw typeError('to_hash must return Hash');
+    if (!(converted instanceof RHash)) {
+      const name = realClassOf(args[0]).name;
+      throw typeError(`can't convert ${name} to Hash (${name}#to_hash gives ${realClassOf(converted).name})`);
+    }
     counts = converted;
   } else throw typeError(`no implicit conversion of ${realClassOf(args[0]).name} into Hash`);
   return yield* whileHeld(counts, function* () {
     yield* iterate(self, function* (value) {
       const entry = yield* hashGet(counts, value);
-      yield* hashSet(counts, value, entry ? yield* callMethod(entry.value, '+', [1n]) : 1n);
+      const previous = entry?.value;
+      if (previous !== undefined && typeof previous !== 'bigint')
+        throw typeError(`wrong argument type ${realClassOf(previous).name} (expected Integer)`);
+      yield* hashSet(counts, value, previous === undefined ? 1n : previous + 1n);
     });
     return counts;
   });

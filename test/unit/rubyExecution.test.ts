@@ -1990,3 +1990,38 @@ test('empty Array zip converts inputs without requiring fallback each', () => {
     stdout: 'converted\n[]\n',
   });
 });
+
+test('String callbacks resume at byte offsets after equal-byte-length edits', () => {
+  expect(run('s="éaa"; p s.gsub("a") { s[0]="bb" if s[0]=="é"; "x" }')).toMatchObject({
+    stdout: '"bbxx"\n',
+  });
+  expect(run('s="éaa"; s.scan("a") { s[0]="bb" if s[0]=="é"; puts :hit }')).toMatchObject({
+    stdout: 'hit\nhit\n',
+  });
+});
+
+test('Enumerable tally reports invalid Hash conversion results', () => {
+  expect(
+    run('class A; def to_hash; nil; end; end; begin; [1].tally(A.new); rescue => e; p e.message; end')
+  ).toMatchObject({
+    stdout: '"can\'t convert A to Hash (A#to_hash gives NilClass)"\n',
+  });
+  expect(
+    run('class A; def to_hash; 1; end; end; begin; [1].tally(A.new); rescue => e; p e.message; end')
+  ).toMatchObject({
+    stdout: '"can\'t convert A to Hash (A#to_hash gives Integer)"\n',
+  });
+});
+
+test('Enumerable tally rejects non-Integer existing counts without callbacks', () => {
+  expect(
+    run('class A; def to_hash; {1=>1.5}; end; end; begin; [1].tally(A.new); rescue => e; p e.message; end')
+  ).toMatchObject({
+    stdout: '"wrong argument type Float (expected Integer)"\n',
+  });
+  expect(
+    run('class B; def +(x); puts :called; 3; end; end; h={1=>B.new}; begin; [1].tally(h); rescue => e; p e.class; end')
+  ).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
