@@ -258,7 +258,7 @@ export class Converter {
       case 'conditional': {
         return {
           k: 'if',
-          cond: this.expr(required(node.childForFieldName('condition'))),
+          cond: this.value(required(node.childForFieldName('condition'))),
           consequent: [this.statement(required(node.childForFieldName('consequence')), use)],
           alternative: [this.statement(required(node.childForFieldName('alternative')), use)],
         };
@@ -271,21 +271,21 @@ export class Converter {
       case 'if_modifier':
       case 'unless_modifier': {
         const body = [this.statement(required(node.childForFieldName('body')), use)];
-        const cond = this.expr(required(node.childForFieldName('condition')));
+        const cond = this.value(required(node.childForFieldName('condition')));
         return node.type === 'if_modifier'
           ? { k: 'if', cond, consequent: body }
           : { k: 'if', cond, consequent: [], alternative: body };
       }
       case 'while':
       case 'until': {
-        const cond = this.expr(required(node.childForFieldName('condition')));
+        const cond = this.value(required(node.childForFieldName('condition')));
         const body = this.loopBody(() => this.bodyOf(node.childForFieldName('body'), 0));
         return { k: 'while', cond, body, until: node.type === 'until', doWhile: false };
       }
       case 'while_modifier':
       case 'until_modifier': {
         const bodyNode = required(node.childForFieldName('body'));
-        const cond = this.expr(required(node.childForFieldName('condition')));
+        const cond = this.value(required(node.childForFieldName('condition')));
         const doWhile = bodyNode.type === 'begin' && !namedChildren(bodyNode).some((c) => RESCUE_CLAUSES.has(c.type));
         const body = this.loopBody(() =>
           doWhile ? this.body(namedChildren(bodyNode), 0) : [this.statement(bodyNode, 0)]
@@ -347,7 +347,7 @@ export class Converter {
         return { k: 'lambda', block: this.block(node, true) };
       }
       case 'splat_argument': {
-        return { k: 'splat', e: this.expr(onlyNamedChild(node)) };
+        return { k: 'splat', e: this.value(onlyNamedChild(node)) };
       }
       default: {
         return this.unsupportedNode(node);
@@ -388,7 +388,7 @@ export class Converter {
     if (name.type !== 'constant') {
       return {
         k: 'call',
-        recv: scope ? this.expr(scope) : undefined,
+        recv: scope ? this.value(scope) : undefined,
         name: name.text,
         args: [],
         safe: false,
@@ -399,7 +399,7 @@ export class Converter {
       };
     }
     return scope
-      ? { k: 'const', scope: this.expr(scope), name: name.text, row: node.startPosition.row }
+      ? { k: 'const', scope: this.value(scope), name: name.text, row: node.startPosition.row }
       : { k: 'const', top: true, name: name.text, row: node.startPosition.row };
   }
 
@@ -640,12 +640,12 @@ export class Converter {
         const scope = node.childForFieldName('scope');
         const name = required(node.childForFieldName('name')).text;
         return scope
-          ? { k: 'const', scope: this.expr(scope), name, row: node.startPosition.row }
+          ? { k: 'const', scope: this.value(scope), name, row: node.startPosition.row }
           : { k: 'const', top: true, name, row: node.startPosition.row };
       }
       case 'element_reference': {
         const object = required(node.childForFieldName('object'));
-        const recv = this.expr(object);
+        const recv = this.value(object);
         const args = namedChildren(node)
           .filter((child) => child.id !== object.id && child.type !== 'comment')
           .map((child) => this.argument(child));
@@ -658,7 +658,7 @@ export class Converter {
         const operator = node.childForFieldName('operator')?.text;
         return {
           k: 'attr',
-          recv: this.expr(receiver),
+          recv: this.value(receiver),
           name: method.text,
           safe: operator === '&.',
           row: node.startPosition.row,
@@ -691,7 +691,7 @@ export class Converter {
     const argumentsNode = node.childForFieldName('arguments');
     const blockNode = node.childForFieldName('block');
     const operator = node.childForFieldName('operator')?.text;
-    const recv = receiverNode ? this.expr(receiverNode) : undefined;
+    const recv = receiverNode ? this.value(receiverNode) : undefined;
     const { args, blockArg } = argumentsNode ? this.argumentList(argumentsNode) : { args: [], blockArg: undefined };
     if (methodNode?.type === 'super') {
       const block = blockNode ? this.block(blockNode, false) : undefined;
@@ -720,7 +720,7 @@ export class Converter {
   private elementReference(node: Node, use: Use): Expr {
     const object = required(node.childForFieldName('object'));
     const rest = namedChildren(node).filter((child) => child.id !== object.id && child.type !== 'comment');
-    const recv = this.expr(object);
+    const recv = this.value(object);
     const { args, blockArg } = this.argumentListFrom(rest);
     return {
       k: 'call',
@@ -827,7 +827,7 @@ export class Converter {
   // Control structures ------------------------------------------------------------------------------------------------
 
   private ifNode(node: Node, use: Use): Expr {
-    const cond = this.expr(required(node.childForFieldName('condition')));
+    const cond = this.value(required(node.childForFieldName('condition')));
     const consequence = this.bodyOf(node.childForFieldName('consequence'), use);
     const alternativeNode = node.childForFieldName('alternative');
     let alternative: Body | undefined;
@@ -858,14 +858,14 @@ export class Converter {
     const patternNode = required(node.childForFieldName('pattern'));
     const target = this.target(patternNode);
     const inNode = required(node.childForFieldName('value'));
-    const iter = this.expr(onlyNamedChild(inNode));
+    const iter = this.value(onlyNamedChild(inNode));
     const body = this.loopBody(() => this.bodyOf(node.childForFieldName('body'), 0));
     return { k: 'for', target, iter, body, row: node.startPosition.row };
   }
 
   private caseNode(node: Node, use: Use): Expr {
     const valueNode = node.childForFieldName('value');
-    const subject = valueNode ? this.expr(valueNode) : undefined;
+    const subject = valueNode ? this.value(valueNode) : undefined;
     const whens: { conds: Expr[]; body: Body; row: number }[] = [];
     let elseBody: Body | undefined;
     for (const child of namedChildren(node)) {
@@ -911,7 +911,7 @@ export class Converter {
     if (objectNode.type !== 'self' && objectNode.type !== 'constant') {
       this.unsupported(objectNode, 'オブジェクトの特異メソッドの定義（def obj.m）');
     }
-    return { k: 'def', def: this.methodDef(node), singleton: this.expr(objectNode) };
+    return { k: 'def', def: this.methodDef(node), singleton: this.value(objectNode) };
   }
 
   private methodDef(node: Node): MethodDef {
@@ -1095,7 +1095,7 @@ export class Converter {
     const nameNode = required(node.childForFieldName('name'));
     const path = this.constantPath(nameNode);
     const superclassNode = node.childForFieldName('superclass');
-    const superclass = superclassNode ? this.expr(onlyNamedChild(superclassNode)) : undefined;
+    const superclass = superclassNode ? this.value(onlyNamedChild(superclassNode)) : undefined;
     const body = this.classBody(node);
     return { k: 'class', ...path, superclass, body, row: node.startPosition.row };
   }
@@ -1111,7 +1111,7 @@ export class Converter {
     if (node.type !== 'scope_resolution') this.fail(node, 'クラス・モジュールの名前は大文字で始めてください。');
     const scope = node.childForFieldName('scope');
     const name = required(node.childForFieldName('name')).text;
-    return scope ? { scope: this.expr(scope), name } : { top: true, name };
+    return scope ? { scope: this.value(scope), name } : { top: true, name };
   }
 
   private classBody(node: Node): Body {

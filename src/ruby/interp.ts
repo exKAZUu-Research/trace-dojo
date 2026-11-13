@@ -535,7 +535,10 @@ function globalSet(name: string, value: Value): void {
     throw typeError(`${name} must have write method, ${realClassOf(value).name} given`);
   }
   if (name === '$/' && value !== NIL && !(value instanceof RString)) throw typeError('value of $/ must be String');
-  rt().globals.set(name, value);
+  rt().globals.set(
+    name,
+    name === '$/' && value instanceof RString ? stringFromBytes(stringBytes(value), value.binary) : value
+  );
 }
 
 /** The class whose class variables a frame sees: the innermost module of its lexical scope. */

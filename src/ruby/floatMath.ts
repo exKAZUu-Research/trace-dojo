@@ -21,7 +21,7 @@ export function floatFraction(value: number): { numerator: bigint | number; deno
   if (mantissa === 0n) return { numerator: 0n, denominator: 1n };
   let numerator = mantissa;
   let denominator = 1n << BigInt(-exponent);
-  while (numerator % 2n === 0n) {
+  while (denominator > 1n && numerator % 2n === 0n) {
     numerator /= 2n;
     denominator /= 2n;
   }

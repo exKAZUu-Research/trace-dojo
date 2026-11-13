@@ -263,7 +263,9 @@ sdef('Random', 'new_seed', 0, () => BigInt(Math.floor(Math.random() * 2 ** 52)))
 sdef('Random', 'srand', [0, 1], function* (self, args) {
   return yield* callMethod(rt().mainObject, 'srand', args, undefined, undefined, { fcall: true });
 });
-def('Random', 'rand', [0, 1], (self: RObject, args) => randomValue(self.data as MersenneTwister, args));
+def('Random', ['rand', 'random_number'], [0, 1], (self: RObject, args) =>
+  randomValue(self.data as MersenneTwister, args)
+);
 def('Random', 'seed', 0, (self: RObject) => (self.data as MersenneTwister).seed);
 def('Random', 'bytes', 1, () => {
   throw rubyError(rt().c.NotImplementedError, 'Random#bytes');

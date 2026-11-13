@@ -749,6 +749,7 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
       if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
       throw argumentError('base specified for non string value');
     }
+    if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
     if (respondsTo(value, 'to_i')) {
       const converted = yield* callMethod(value, 'to_i', []);
       if (typeof converted === 'bigint') return converted;
@@ -756,7 +757,6 @@ export function* kernelInteger(args: Value[], keywords: RHash | undefined): Gen 
         `can't convert ${realClassOf(value).name} to Integer (${realClassOf(value).name}#to_i gives ${realClassOf(converted).name})`
       );
     }
-    if (convertedString !== NIL) throw integerStringConversionError(value, convertedString);
     throw typeError(`can't convert ${realClassOf(value).name} into Integer`);
   } catch (error) {
     if (!raise && !(parsedString && invalidBase) && error instanceof RubyError) return NIL;
@@ -920,6 +920,8 @@ const MATH_FUNCTIONS: [string, number, (...args: number[]) => number, ((...args:
   ['acosh', 1, Math.acosh, (x) => x >= 1 || Number.isNaN(x)],
   ['atanh', 1, Math.atanh, (x) => (x >= -1 && x <= 1) || Number.isNaN(x)],
   ['exp', 1, Math.exp],
+  ['expm1', 1, Math.expm1],
+  ['log1p', 1, Math.log1p, (x) => x >= -1 || Number.isNaN(x)],
   ['log2', 1, Math.log2, (x) => x >= 0 || Number.isNaN(x)],
   ['log10', 1, Math.log10, (x) => x >= 0 || Number.isNaN(x)],
   ['hypot', 2, Math.hypot],
@@ -943,6 +945,51 @@ sdef('Math', 'log', [1, 2], function* (_self, args) {
   domainCheck('log', base >= 0 || Number.isNaN(base));
   return mathLog(args[0], x) / Math.log(base);
 });
+sdef('Math', 'frexp', 1, function* (_self, [value]) {
+  const number = yield* toFloat(value);
+  if (number === 0 || !Number.isFinite(number)) return arr([number, 0n]);
+  const exponent = Math.floor(Math.log2(Math.abs(number))) + 1;
+  return arr([number / 2 ** exponent, BigInt(exponent)]);
+});
+sdef('Math', 'ldexp', 2, function* (_self, [value, exponent]) {
+  return (yield* toFloat(value)) * 2 ** Number(yield* toInt(exponent));
+});
+sdef('Math', 'gamma', 1, function* (_self, [value]) {
+  const number = yield* toFloat(value);
+  if (number < 0 && Number.isInteger(number)) domainCheck('gamma', false);
+  if (number === 0) return Number.POSITIVE_INFINITY;
+  if (Number.isInteger(number) && number > 0 && number <= 171) {
+    let factorial = 1;
+    for (let index = 2; index < number; index++) factorial *= index;
+    return factorial;
+  }
+  const [logarithm, sign] = logGamma(number);
+  return sign * Math.exp(logarithm);
+});
+sdef('Math', 'lgamma', 1, function* (_self, [value]) {
+  const [logarithm, sign] = logGamma(yield* toFloat(value));
+  return arr([logarithm, BigInt(sign)]);
+});
+
+function logGamma(value: number): [number, number] {
+  if (Number.isNaN(value)) return [Number.NaN, 1];
+  if (value === Number.POSITIVE_INFINITY) return [Number.POSITIVE_INFINITY, 1];
+  if (Number.isInteger(value) && value <= 0) return [Number.POSITIVE_INFINITY, value < 0 ? -1 : 1];
+  if (value < 0.5) {
+    const sine = Math.sin(Math.PI * value);
+    const [reflected] = logGamma(1 - value);
+    return [Math.log(Math.PI) - Math.log(Math.abs(sine)) - reflected, Math.sign(sine)];
+  }
+  const coefficients = [
+    0.9999999999998099, 676.5203681218851, -1259.1392167224028, 771.3234287776531, -176.6150291621406,
+    12.507343278686905, -0.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7,
+  ];
+  const shifted = value - 1;
+  let sum = coefficients[0];
+  for (let index = 1; index < coefficients.length; index++) sum += coefficients[index] / (shifted + index);
+  const term = shifted + 7.5;
+  return [0.5 * Math.log(2 * Math.PI) + (shifted + 0.5) * Math.log(term) - term + Math.log(sum), 1];
+}
 
 /** The natural logarithm, exact for big Integers whose Float conversion would overflow. */
 function mathLog(value: Value, x: number): number {

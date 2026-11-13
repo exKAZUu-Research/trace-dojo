@@ -19,6 +19,23 @@ for (const [owner, methods] of Object.entries({
   Integer: ['singleton_method_added'],
   Float: ['singleton_method_added'],
   Set: ['compare_by_identity', 'compare_by_identity?', 'divide'],
+  Symbol: ['encoding', 'match', 'match?'],
+  NilClass: ['rationalize', 'to_c', 'to_r'],
+  Proc: ['ruby2_keywords', 'source_location'],
+  Module: [
+    'autoload?',
+    'const_missing',
+    'const_source_location',
+    'deprecate_constant',
+    'protected_instance_methods',
+    'public_constant',
+    'refinements',
+    'remove_class_variable',
+    'set_temporary_name',
+    'singleton_class?',
+    'undefined_instance_methods',
+  ],
+  Class: ['attached_object', 'subclasses'],
 }))
   for (const name of methods)
     def(owner, name, [0, -1], () => {

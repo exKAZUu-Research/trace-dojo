@@ -73,7 +73,15 @@ test('Ruby recursion reaches the shared call-depth limit under Node', () => {
 });
 
 test('void expressions in value positions fail before execution', () => {
-  for (const source of ['def f;x ||= return 1;end;puts f', 'def f;p(return 1);end;puts f'])
+  for (const source of [
+    'def f;x ||= return 1;end;puts f',
+    'def f;p(return 1);end;puts f',
+    'def f;if (return 1);2;end;end;p f',
+    'def f;case (return 1);when 1;2;end;end;p f',
+    'def f;for x in (return 1);end;end;p f',
+    'def f;(return 1)::X;end;p f',
+    'def f;(return 1)[0];end;p f',
+  ])
     expect(run(source)).toMatchObject({ kind: 'compileError' });
 });
 
@@ -288,6 +296,27 @@ test.each([
     'empty custom Range step stops after preflight',
     'class A;attr_reader :n;def initialize(n);@n=n;end;def <=>(o);puts :cmp;n<=>o.n;end;def +(v);puts :plus;A.new(n+v);end;end;(A.new(3)..A.new(1)).step(1){|x|p x.n}',
     'cmp\ncmp\nplus\ncmp\n',
+  ],
+  [
+    'Float fraction methods retain whole-number numerators',
+    'p 6.0.numerator,6.0.denominator,2.0.numerator,0.75.denominator',
+    '6\n1\n2\n4\n',
+  ],
+  [
+    'Math and Symbol core methods resolve',
+    'p Math.gamma(5),Math.frexp(8.0),Math.ldexp(0.5,3),Math.log1p(0.5),Math.expm1(0.5);p :a.casecmp(:A),:b.casecmp?(:B),:a.intern',
+    '24.0\n[0.5, 4]\n4.0\n0.4054651081081644\n0.6487212707001282\n0\ntrue\n:a\n',
+  ],
+  ['record separator assignment copies a mutable String', 's="x";$/=s;s<<"y";p $/', '"x"\n'],
+  [
+    'paragraph line splitting consumes extra newlines',
+    String.raw`s="a\n\n\nb";$/="";p s.lines,"\n\na\n\nb".lines,"a\n\n\n".lines`,
+    '["a\\n\\n", "b"]\n["\\n\\n", "a\\n\\n", "b"]\n["a\\n\\n"]\n',
+  ],
+  [
+    'Integer validates to_str before trying to_i',
+    'class A;def to_str;false;end;def to_i;7;end;end;begin;p Integer(A.new);rescue=>e;p e.class;end',
+    'TypeError\n',
   ],
   ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],

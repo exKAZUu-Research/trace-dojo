@@ -570,8 +570,15 @@ function linesOf(text: string, separator: string | undefined, chomp: boolean): s
   const lines: string[] = [];
   let start = 0;
   if (separator === '') {
-    const parts = text.split(/(?<=\n\n)(?=[^\n])/);
-    return chomp ? parts.map((part) => part.replace(/\n+$/, '')) : parts;
+    for (;;) {
+      const boundary = text.indexOf('\n\n', start);
+      if (boundary === -1) break;
+      lines.push(text.slice(start, boundary + 2));
+      start = boundary + 2;
+      while (text[start] === '\n') start++;
+    }
+    if (start < text.length) lines.push(text.slice(start));
+    return chomp ? lines.map((part) => part.replace(/\n+$/, '')) : lines;
   }
   for (;;) {
     const index = text.indexOf(separator, start);
@@ -1314,6 +1321,20 @@ def('String', 'between?', 2, function* (self: RString, [min, max]) {
 
 def('Symbol', ['to_s', 'id2name', 'name'], 0, (self: RSymbol) => str(self.name));
 def('Symbol', 'to_sym', 0, (self) => self);
+def('Symbol', 'intern', 0, (self) => self);
+def('Symbol', 'casecmp', 1, (self: RSymbol, [other]) =>
+  other instanceof RSymbol
+    ? BigInt(
+        compareStrings(
+          self.name.replaceAll(/[A-Z]/g, (char) => char.toLowerCase()),
+          other.name.replaceAll(/[A-Z]/g, (char) => char.toLowerCase())
+        )
+      )
+    : NIL
+);
+def('Symbol', 'casecmp?', 1, (self: RSymbol, [other]) =>
+  other instanceof RSymbol ? foldCase(self.name) === foldCase(other.name) : NIL
+);
 def('Symbol', 'inspect', 0, (self: RSymbol) => str(symInspect(self.name)));
 def('Symbol', ['length', 'size'], 0, (self: RSymbol) => BigInt(charLength(self.name)));
 def('Symbol', 'empty?', 0, (self: RSymbol) => self.name.length === 0);
