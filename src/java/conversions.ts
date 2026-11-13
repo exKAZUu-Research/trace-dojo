@@ -1,6 +1,6 @@
-import { functionalMethodOf } from './builtinFunctions';
 import type { Builtins } from './builtins';
 import { boxedTypeOf } from './builtinWrappers';
+import { functionalMethodOf } from './functionalInterfaces';
 import { conditionalType } from './operators';
 import {
   asSuper,

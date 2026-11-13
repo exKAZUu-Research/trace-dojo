@@ -17,7 +17,7 @@ export function unsupported(node: Node, feature: string): never {
 }
 
 export function namedChildren(node: Node): Node[] {
-  return node.namedChildren.filter((child): child is Node => !!child && !isComment(child));
+  return node.namedChildren.filter((child) => !isComment(child));
 }
 
 export function isComment(node: Node): boolean {
@@ -31,7 +31,7 @@ export function field(node: Node, name: string): Node {
 }
 
 export function modifiersOf(node: Node): Node | undefined {
-  return node.children.find((child) => child?.type === 'modifiers') ?? undefined;
+  return node.children.find((child) => child.type === 'modifiers');
 }
 
 export function convertModifiers(node: Node | null | undefined): Modifiers {
@@ -43,7 +43,7 @@ export function convertModifiers(node: Node | null | undefined): Modifiers {
     access: 'package',
   };
   for (const child of node?.children ?? []) {
-    if (child) applyModifier(modifiers, child);
+    applyModifier(modifiers, child);
   }
   return modifiers;
 }
@@ -108,7 +108,7 @@ export function isAnnotation(node: Node): boolean {
 export function countDimensions(node: Node): number {
   // The dimensions of a class literal's type, as in `int[].class`, come without child tokens, only their text.
   if (node.childCount === 0) return node.text.split('[').length - 1;
-  return node.children.filter((child) => child?.type === '[').length;
+  return node.children.filter((child) => child.type === '[').length;
 }
 
 export function wrapArray(type: TypeSyntax, dimensions: number, node: Node): TypeSyntax {
@@ -160,7 +160,7 @@ function convertTypeArgument(node: Node): TypeSyntax {
   return {
     kind: 'wildcard',
     bound: bound ? convertType(bound) : undefined,
-    isSuper: node.children.some((child) => child?.type === 'super'),
+    isSuper: node.children.some((child) => child.type === 'super'),
     ...span(node),
   };
 }

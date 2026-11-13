@@ -201,6 +201,22 @@ function defineOutputStreams(context: IOContext, outputStream: ClassInfo): void 
       sinkOf(frame, receiver)[name](frame);
     });
   }
+  // PrintStream implements Appendable, its append methods printing as print(String) does.
+  const print = printStream.methods.find(
+    (method) => method.name === 'print' && method.parameterTypes[0] === context.stringType
+  )?.native as NativeMethod;
+  defineAppends(
+    classOf(context, 'CharSequence'),
+    printStream.type,
+    (name, parameterTypes, returnType, native) => {
+      addMethod(printStream, name, parameterTypes, returnType, false, native);
+    },
+    (frame, receiver, text) => {
+      print(frame, receiver, [new JavaString(text)]);
+    }
+  );
+  addInterface(printStream, classType(classOf(context, 'Appendable')));
+  linkOverrides(printStream);
   const fileOutputStream = context.registry.define('FileOutputStream', outputStream, 'java.io');
   defineFileOpeners(
     context,

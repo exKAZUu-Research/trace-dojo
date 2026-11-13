@@ -1,24 +1,16 @@
 import type { RealmBuilder } from './realm';
-import { asRegExp, replaceWithRegExp } from './realmRegExp';
+import { asRegExp, replaceWithRegExp, splitWithRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
-import { isCallable, JsObject, type NativeCall, type Value } from './values';
+import { isCallable, JsObject, type NativeCall, type NativeFunction, unboxed, type Value } from './values';
 
 /** One fixed locale, so that sorting with localeCompare gives the same order on every server. */
 const collator = new Intl.Collator('en');
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Lists the String builtins, each a small closure of its own.
+// code-gauge-allow functionNcss 38 -- Lists the String builtins, each a small closure of its own.
 export function defineStringBuiltins(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
-  const stringConstructor = builder.defineClass(
-    'String',
-    1,
-    stringPrototype,
-    ({ runtime, args }) => {
-      if (args.length === 0) return '';
-      // Called as a function, String describes a symbol instead of rejecting it.
-      return typeof args[0] === 'symbol' ? args[0].toString() : runtime.toString(args[0]);
-    },
-    false
-  );
+  const stringConstructor = builder.defineClass('String', 1, stringPrototype, constructString);
   builder.method(stringConstructor, 'fromCharCode', 1, ({ runtime, args }) => {
     runtime.buildString(args.length);
     // oxlint-disable-next-line unicorn/prefer-code-point -- fromCharCode is the method the program called.
@@ -55,8 +47,8 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
       return run(call, text);
     });
   };
-  method('toString', 0, (_, text) => text);
-  method('valueOf', 0, (_, text) => text);
+  builder.method(stringPrototype, 'toString', 0, thisString('toString'));
+  builder.method(stringPrototype, 'valueOf', 0, thisString('valueOf'));
   defineSearches(method);
   defineExtractions(method);
   defineBuilders(method);
@@ -123,13 +115,28 @@ function defineExtractions(method: StringMethod): void {
   method('split', 2, ({ runtime, args }, text) => {
     const limit = args[1] === undefined ? 2 ** 32 - 1 : runtime.toNumber(args[1]) >>> 0;
     const regexp = asRegExp(args[0]);
-    const separator = regexp ? new RegExp(regexp.regexp.source, regexp.regexp.flags) : args[0];
-    const parts =
-      separator === undefined
-        ? [text]
-        : text.split(separator instanceof RegExp ? separator : runtime.toString(separator), limit);
-    return runtime.newArray(parts);
+    if (regexp) return splitWithRegExp(runtime, text, regexp, limit);
+    // The separator converts before a zero limit returns, as its conversion can throw.
+    const separator = args[0] === undefined ? undefined : runtime.toString(args[0]);
+    if (limit === 0) return runtime.newArray([]);
+    return runtime.newArray(separator === undefined ? [text] : text.split(separator, limit));
   });
+}
+
+function constructString({ runtime, args, newTarget }: NativeCall): Value {
+  if (args.length === 0) return runtime.primitiveOrBox('', newTarget);
+  // Called as a function, String describes a symbol instead of rejecting it.
+  if (!newTarget && typeof args[0] === 'symbol') return args[0].toString();
+  return runtime.primitiveOrBox(runtime.toString(args[0]), newTarget);
+}
+
+/** `String.prototype.toString` or `valueOf`, which give the string a primitive or a String object holds. */
+function thisString(name: string): NativeFunction {
+  return ({ runtime, thisValue }) => {
+    const primitive = unboxed(thisValue);
+    if (typeof primitive === 'string') return primitive;
+    return runtime.throwError('TypeError', `String.prototype.${name} requires that 'this' be a String`);
+  };
 }
 
 function defineBuilders(method: StringMethod): void {

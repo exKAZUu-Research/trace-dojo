@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 486 -- One executor of every statement kind and of functions and classes, which share its scopes.
 import type {
   Block,
   ClassMember,
@@ -68,7 +69,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
   }
 
   // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating where it grows.
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per statement kind, each delegating where it grows.
+  // code-gauge-allow functionCognitiveComplexity 22 -- One case per statement kind, each delegating where it grows.
   private statement(statement: Statement, labels: string[]): Completion {
     const { runtime } = this;
     runtime.spend();
@@ -139,7 +140,14 @@ export class Evaluator extends SuspendableStatementEvaluator {
 
   /** Runs `run` in a new scope with `declarations`, disposing of what its `using` declarations declared. */
   private scoped<T extends Outcome>(declarations: ScopeDeclarations, run: () => T): T {
-    return this.withScope(declarations, () => (declarations.disposes ? this.disposing(run) : run()));
+    // Enters the scope itself rather than through withScope: every host frame between nested calls costs recursion
+    // depth the program can reach.
+    const outer = this.enterScope(declarations);
+    try {
+      return declarations.disposes ? this.disposing(run) : run();
+    } finally {
+      if (outer) this.runtime.frame.scope = outer;
+    }
   }
 
   /** Runs the statements of a function body or the program, disposing of what their `using` declarations declared. */
@@ -212,6 +220,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     return completion.kind === 'continue' ? 'next' : undefined;
   }
 
+  // code-gauge-allow duplicateLines 27 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forStatement(statement: Extract<Statement, { kind: 'for' }>, labels: string[]): Completion {
     const { runtime } = this;
     return this.scoped(statement.scope, () => {
@@ -258,16 +267,23 @@ export class Evaluator extends SuspendableStatementEvaluator {
         : this.evaluate(statement.iterable);
     const iterator =
       statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
-    return runtime.hold(iterable, () => this.forEachIterations(statement, labels, iterator));
+    return this.forEachIterations(statement, labels, iterable, iterator);
   }
 
+  /** Runs the iterations of a `for...of` or `for...in` loop, holding the iterable meanwhile. */
+  // code-gauge-allow functionNcss 42 -- Inlines what a nested call in the loop body would otherwise pay host frames for.
+  // code-gauge-allow duplicateLines 17 -- Mirrors the generator version in suspendableStatements.ts, kept apart so that code without yield or await runs without generator frames.
   private forEachIterations(
     statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>,
     labels: string[],
+    iterable: Value,
     iterator: ValueIterator
   ): Completion {
     const { runtime } = this;
     const frame = runtime.frame;
+    // Held without runtime.hold, whose callback would add host frames to every nested call in the loop body.
+    const held = frame.temporaries.length;
+    frame.temporaries.push(iterable);
     let isExhausted = false;
     let completion: 'normal' | 'throw' = 'normal';
     let pending: Value;
@@ -281,13 +297,16 @@ export class Evaluator extends SuspendableStatementEvaluator {
             frame.scope = new Scope(outer);
             this.instantiate(frame.scope, statement.scope);
           }
-          const iteration = (): 'next' | Completion => {
-            if (declarationKind) this.bindDeclared(statement.target, value, declarationKind);
-            else this.bindPattern(statement.target, value, 'assign');
-            this.stepBinding(statement, value);
-            return this.loopBody(statement.body, labels);
-          };
-          const result = statement.scope.disposes ? this.disposing(iteration) : iteration();
+          let result: 'next' | Completion;
+          if (statement.scope.disposes) {
+            result = this.disposing(() => {
+              this.bindIteration(statement, value);
+              return this.loopBody(statement.body, labels);
+            });
+          } else {
+            this.bindIteration(statement, value);
+            result = this.loopBody(statement.body, labels);
+          }
           if (result !== 'next') {
             pending = pendingValue(result);
             return result;
@@ -307,8 +326,20 @@ export class Evaluator extends SuspendableStatementEvaluator {
     } finally {
       // Leaving the loop early closes the iterator, which runs a generator's `finally` blocks, while the value the loop
       // returns or throws stays reachable.
-      if (!isExhausted) runtime.hold(pending, () => iterator.close(completion));
+      try {
+        if (!isExhausted) runtime.hold(pending, () => iterator.close(completion));
+      } finally {
+        frame.temporaries.length = held;
+      }
     }
+  }
+
+  /** Binds the loop variable of one iteration and records its step. */
+  private bindIteration(statement: Extract<Statement, { kind: 'forOf' | 'forIn' }>, value: Value): void {
+    const { declarationKind } = statement;
+    if (declarationKind) this.bindDeclared(statement.target, value, declarationKind);
+    else this.bindPattern(statement.target, value, 'assign');
+    this.stepBinding(statement, value);
   }
 
   private switchStatement(statement: Extract<Statement, { kind: 'switch' }>): Completion {
@@ -438,7 +469,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
         const create = node.isAsync ? createAsyncGeneratorObject : createGeneratorObject;
         return create(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.bodySteps(node.body, node.scope));
       }
-      const completion = this.body(node.body, node.scope);
+      // Inlines `body`, whose frame would cost each call recursion depth.
+      const completion = node.scope.disposes
+        ? this.disposing(() => this.statements(node.body as Statement[]))
+        : this.statements(node.body);
       return completion?.kind === 'return' ? completion.value : undefined;
     } finally {
       runtime.popFrame();
@@ -473,6 +507,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
   evaluateClass(cls: ClassNode): JsFunction {
     const { runtime } = this;
     const { prototypeParent, constructorParent } = this.classParents(cls);
@@ -686,7 +721,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
       if (ctor) {
         this.bindParameters(ctor, args);
         this.instantiate(scope, ctor.scope);
-        const completion = this.body(ctor.body as Statement[], ctor.scope);
+        const completion = ctor.scope.disposes
+          ? this.disposing(() => this.statements(ctor.body as Statement[]))
+          : this.statements(ctor.body as Statement[]);
         if (completion?.kind === 'return') result = completion.value;
       } else if (behavior.isDerived) {
         this.superCall(args, undefined);

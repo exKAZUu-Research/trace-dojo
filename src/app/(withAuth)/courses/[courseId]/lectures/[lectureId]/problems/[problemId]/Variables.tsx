@@ -11,7 +11,7 @@ import {
   Thead,
   Tr,
 } from '../../../../../../../../infrastructures/useClient/chakra';
-import type { DisplayNode, TraceItemVariable, TraceScalar } from '../../../../../../../../problems/trace';
+import type { DisplayNode, TraceItemVariable } from '../../../../../../../../problems/trace';
 
 interface VariablesProps {
   traceItemVars: TraceItemVariable;
@@ -134,7 +134,7 @@ const appendReferenceRows = (
   expandedPaths: Record<string, boolean>
 ): void => {
   if (node.kind === 'value') {
-    rows.push({ kind: 'scalar', path, text: formatScalar(node.value), depth });
+    rows.push({ kind: 'scalar', path, text: formatScalar(node), depth });
     return;
   }
 
@@ -158,7 +158,7 @@ const childPath = (path: string, kind: 'object' | 'array', key: string): string 
   kind === 'array' ? `${path}[${key}]` : `${path}.${key}`;
 
 const formatSummary = (node: DisplayNode): string => {
-  if (node.kind === 'value') return formatScalar(node.value);
+  if (node.kind === 'value') return formatScalar(node);
   const entries = Object.entries(node.entries);
   if (entries.length === 0) return node.kind === 'array' ? '[]' : '{}';
   if (node.kind === 'array') return formatPreview(node);
@@ -166,7 +166,7 @@ const formatSummary = (node: DisplayNode): string => {
 };
 
 const formatPreview = (node: DisplayNode, depth = 0): string => {
-  if (node.kind === 'value') return formatScalar(node.value);
+  if (node.kind === 'value') return formatScalar(node);
   if (depth >= 2) return node.kind === 'array' ? '[…]' : '{…}';
   const entries = Object.entries(node.entries);
   const preview = entries
@@ -177,5 +177,5 @@ const formatPreview = (node: DisplayNode, depth = 0): string => {
   return node.kind === 'array' ? `[${preview}${suffix}]` : `{${preview}${suffix}}`;
 };
 
-const formatScalar = (value: TraceScalar): string =>
-  typeof value === 'string' ? JSON.stringify(value) : String(value);
+const formatScalar = ({ value, verbatim }: Extract<DisplayNode, { kind: 'value' }>): string =>
+  typeof value === 'string' && !verbatim ? JSON.stringify(value) : String(value);

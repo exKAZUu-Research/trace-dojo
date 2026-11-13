@@ -1,12 +1,17 @@
+// code-gauge-allow-file fileNcss 478 -- The list classes and their sublist and restricted variants, which share one definition of the list methods.
 import { checkCopiedElement } from './arrayCopy';
 import { checkStore } from './builtinClass';
 import type { Context } from './builtinCollectionSupport';
 import {
   batchRemovalClasses,
+  builtinClassOf,
+  checkInsertPosition,
   checkListIndex,
   checkModifiable,
-  checkPosition,
+  checkRemovable,
   classType,
+  countsEmptyClear,
+  countsNoOpChanges,
   createIterator,
   defaultRemoveClasses,
   defineIndexFailures,
@@ -14,6 +19,7 @@ import {
   defineReadMethods,
   defineSetEquality,
   defineSnapshot,
+  eagerlyRejectingClasses,
   elementsOf,
   fixedSizeClasses,
   immutableCollectionsLists,
@@ -22,10 +28,14 @@ import {
   javaEquals,
   javaHash,
   linkOverrides,
+  rejectNullLookups,
+  singletonClasses,
   subListChecks,
   touch,
   unmodifiableClasses,
   unmodifiableWrappers,
+  unwrapped,
+  vectorCapacities,
   wrapUnmodifiable,
 } from './builtinCollectionSupport';
 import { addListIterators, defineListIterator } from './builtinListIterator';
@@ -193,39 +203,35 @@ function defineRestrictedLists(
   | 'unmodifiableRandomAccessList'
   | 'fixedSizeList'
 > {
-  const immutableList = defineRestrictedList(context, 'ListN', lists, () => true);
-  const pairList = defineRestrictedList(context, 'List12', lists, () => true);
-  const emptyList = defineRestrictedList(context, 'EmptyList', lists, () => true, 'Collections$');
-  const singletonList = defineRestrictedList(context, 'SingletonList', lists, () => true, 'Collections$');
-  const copiesList = defineRestrictedList(context, 'CopiesList', lists, () => true, 'Collections$');
-  const unmodifiableList = defineRestrictedList(context, 'UnmodifiableList', lists, () => true, 'Collections$');
+  const immutableList = defineRestrictedList(context, 'ListN', lists, 'eager');
+  const pairList = defineRestrictedList(context, 'List12', lists, 'eager');
+  const emptyList = defineRestrictedList(context, 'EmptyList', lists, 'readOnly', 'Collections$');
+  const singletonList = defineRestrictedList(context, 'SingletonList', lists, 'readOnly', 'Collections$');
+  const copiesList = defineRestrictedList(context, 'CopiesList', lists, 'readOnly', 'Collections$');
+  const unmodifiableList = defineRestrictedList(context, 'UnmodifiableList', lists, 'eager', 'Collections$');
   const unmodifiableRandomAccessList = defineRestrictedList(
     context,
     'UnmodifiableRandomAccessList',
     lists,
-    () => true,
+    'eager',
     'Collections$'
   );
   immutableCollectionsLists.add(immutableList);
   immutableCollectionsLists.add(pairList);
-  for (const cls of [emptyList, singletonList, copiesList]) rejectOnlyChanges(cls);
-  for (const cls of [
+  for (const cls of [immutableList, pairList]) rejectNullLookups(cls);
+  singletonClasses.add(singletonList);
+  // Arrays.asList writes through to its array, so it may set elements but not change its size.
+  const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, 'fixedSize', 'Arrays$');
+  defaultRemoveClasses.add(fixedSizeList);
+  defineIndexFailures({ immutableList, pairList, emptyList, singletonList, fixedSizeList }, context.registry);
+  defineSubListClasses(context, lists, {
     immutableList,
     pairList,
     emptyList,
     singletonList,
     copiesList,
-    unmodifiableList,
-    unmodifiableRandomAccessList,
-  ]) {
-    unmodifiableClasses.add(cls);
-  }
-  // Arrays.asList writes through to its array, so it may set elements but not change its size.
-  const fixedSizeList = defineRestrictedList(context, 'ArrayList', lists, (method) => method.name !== 'set', 'Arrays$');
-  fixedSizeClasses.add(fixedSizeList);
-  defaultRemoveClasses.add(fixedSizeList);
-  defineIndexFailures({ immutableList, pairList, emptyList, singletonList, fixedSizeList }, context.registry);
-  defineSubListClasses(context, lists);
+    fixedSizeList,
+  });
   return {
     immutableList,
     pairList,
@@ -239,17 +245,26 @@ function defineRestrictedLists(
 }
 
 /** The classes of the views `subList` returns, which differ from their lists' classes as the JDK's do. */
-const subListClasses: Record<'arrayList' | 'other' | 'synchronized' | 'fixedSize' | 'immutable', ClassInfo> =
-  {} as never;
+const subListClasses: Record<'arrayList' | 'other' | 'synchronized', ClassInfo> = {} as never;
+
+/** The class of the view that `subList` returns for each builtin list class but those whose view is `other`. */
+const subListClassesOf = new Map<ClassInfo, ClassInfo>();
 
 /**
- * The sublist classes: `ArrayList$SubList`, which removes in batches as its list does, `AbstractList$SubList` for the
- * other modifiable lists, and the fixed-size and immutable views of `Arrays.asList` and `List.of`.
+ * The sublist classes: `ArrayList$SubList`, which removes in batches as its list does; `AbstractList$SubList` for the
+ * other modifiable lists; `AbstractList$RandomAccessSubList` for the lists of `Arrays.asList` and of `Collections`'
+ * empty and singleton lists, which changes its list through the list's own methods, so that the list rejects what it
+ * rejects; the immutable view of `List.of`; and `nCopies`, whose view is a list of copies too.
  */
 function defineSubListClasses(
   context: Context,
-  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo }
+  lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo },
+  restricted: Record<
+    'immutableList' | 'pairList' | 'emptyList' | 'singletonList' | 'copiesList' | 'fixedSizeList',
+    ClassInfo
+  >
 ): void {
+  const { registry } = context;
   subListClasses.arrayList = defineArrayList(context, 'SubList', lists, 'ArrayList$SubList');
   batchRemovalClasses.add(subListClasses.arrayList);
   subListClasses.other = defineArrayList(context, 'SubList', lists, 'AbstractList$SubList');
@@ -260,28 +275,24 @@ function defineSubListClasses(
     lists,
     'Collections$SynchronizedRandomAccessList'
   );
-  subListClasses.fixedSize = defineRestrictedList(
-    context,
-    'RandomAccessSubList',
-    lists,
-    (method) => method.name !== 'set',
-    'AbstractList$'
-  );
-  fixedSizeClasses.add(subListClasses.fixedSize);
-  subListClasses.immutable = defineRestrictedList(context, 'SubList', lists, () => true, 'ImmutableCollections$');
-  unmodifiableClasses.add(subListClasses.immutable);
-  immutableCollectionsLists.add(subListClasses.immutable);
+  const randomAccess = defineArrayList(context, 'RandomAccessSubList', lists, 'AbstractList$RandomAccessSubList');
+  const immutable = defineRestrictedList(context, 'SubList', lists, 'eager', 'ImmutableCollections$');
+  immutableCollectionsLists.add(immutable);
+  rejectNullLookups(immutable);
+  for (const [listClasses, view] of [
+    [[registry.classes.get('ArrayList') as ClassInfo, subListClasses.arrayList], subListClasses.arrayList],
+    [[registry.classes.get('Stack') as ClassInfo, subListClasses.synchronized], subListClasses.synchronized],
+    [[restricted.fixedSizeList, restricted.emptyList, restricted.singletonList, randomAccess], randomAccess],
+    [[restricted.immutableList, restricted.pairList, immutable], immutable],
+    [[restricted.copiesList], restricted.copiesList],
+  ] as const) {
+    for (const list of listClasses) subListClassesOf.set(list, view);
+  }
 }
 
-/** The class of a view of a list of `cls`, whose JDK class decides how the view checks indexes and removes. */
+/** The class of a view of a list of `cls`, whose JDK class decides how the view checks indexes and changes. */
 function subListClassOf(listClass: ClassInfo): ClassInfo {
-  let cls = listClass;
-  while (!cls.isBuiltin && cls.superclass) cls = cls.superclass;
-  if (unmodifiableClasses.has(cls)) return subListClasses.immutable;
-  if (fixedSizeClasses.has(cls)) return subListClasses.fixedSize;
-  if (cls.name === 'ArrayList' || cls === subListClasses.arrayList) return subListClasses.arrayList;
-  if (cls.name === 'Stack' || cls === subListClasses.synchronized) return subListClasses.synchronized;
-  return subListClasses.other;
+  return subListClassesOf.get(builtinClassOf(listClass)) ?? subListClasses.other;
 }
 
 /** A read-only set over another set's elements, which it reads afresh at each use. */
@@ -295,6 +306,7 @@ function defineUnmodifiableViewSet(context: Context, setClass: ClassInfo, itrCla
     }
   }
   unmodifiableClasses.add(cls);
+  eagerlyRejectingClasses.add(cls);
   return cls;
 }
 
@@ -364,6 +376,8 @@ function stackElements(frame: Frame, receiver: Value): Value[] {
 /** Inserts the elements of `source` at `index`, returning whether there were any. */
 function insertAll(frame: Frame, receiver: Value, index: number, source: Value): boolean {
   const items = [...itemsOf(frame, source)];
+  if (items.length === 0 && !countsNoOpChanges(receiver)) return false;
+  if (items.length > 0) checkModifiable(frame, receiver, true);
   frame.runtime.allocateArray(frame, items.length);
   elementsOf(receiver).splice(index, 0, ...items);
   touch(receiver);
@@ -373,6 +387,15 @@ function insertAll(frame: Frame, receiver: Value, index: number, source: Value):
 /** `Stack`, a list whose end is the top of the stack. */
 function defineStack(cls: ClassInfo): void {
   const element: JavaType = { kind: 'typeVar', variable: cls.typeParameters[0] };
+  for (const constructor of cls.constructors) {
+    const construct = constructor.native as NativeMethod;
+    constructor.native = (frame, receiver, args) => {
+      const result = construct(frame, receiver, args);
+      // A Vector starts with an array of 10, or one as long as the collection it copies.
+      vectorCapacities.set(receiver as JavaObject, Math.max(elementsOf(receiver).length, args.length > 0 ? 0 : 10));
+      return result;
+    };
+  }
   addMethod(cls, 'push', [element], element, false, (_, receiver, [value]) => {
     elementsOf(receiver).push(value);
     touch(receiver);
@@ -459,55 +482,37 @@ function addingEachLast(addLast: NativeMethod): NativeMethod {
   };
 }
 
-/** A list whose methods that `rejects` throw `UnsupportedOperationException`, as `List.of` and `Arrays.asList` give. */
+/**
+ * A list that rejects changes. An `eager` one, of `ImmutableCollections` or an unmodifiable wrapper, throws
+ * `UnsupportedOperationException` from every mutator at once. The others extend `AbstractList`, which throws at once
+ * only from the primitives it leaves unsupported, adding and removing at an index and, but for a `fixedSize` list,
+ * setting an element; its other mutators reach those primitives, and so throw, only when they would change the list.
+ */
 function defineRestrictedList(
   context: Context,
   name: string,
   lists: { listClass: ClassInfo; collectionClass: ClassInfo; itrClass: ClassInfo; listItrClass: ClassInfo },
-  rejects: (method: MethodInfo) => boolean,
+  kind: 'eager' | 'readOnly' | 'fixedSize',
   prefix = 'ImmutableCollections$'
 ): ClassInfo {
   const cls = defineArrayList(context, name, lists, `${prefix}${name}`);
+  const isPrimitive = (method: MethodInfo): boolean =>
+    method.name === 'add' ||
+    (method.name === 'remove' && method.parameterTypes[0] === INT) ||
+    (method.name === 'set' && kind === 'readOnly');
   for (const method of cls.methods) {
-    if (MUTATORS.has(method.name) && rejects(method)) {
+    if (kind === 'eager' ? MUTATORS.has(method.name) : isPrimitive(method)) {
       method.native = (frame) => throwBuiltin(frame, 'UnsupportedOperationException');
     }
   }
+  if (kind === 'fixedSize') fixedSizeClasses.add(cls);
+  else unmodifiableClasses.add(cls);
+  if (kind === 'eager') eagerlyRejectingClasses.add(cls);
   cls.constructors = [];
   return cls;
 }
 
 const MUTATORS = new Set(['add', 'addAll', 'set', 'remove', 'clear']);
-
-/**
- * Makes `remove(Object)`, `clear`, and `addAll` of a list of `Collections` reject only a call that would change it, as
- * `AbstractCollection`'s do; adding or removing at an index still always fails, as `AbstractList`'s does.
- */
-function rejectOnlyChanges(cls: ClassInfo): void {
-  for (const method of cls.methods) {
-    const removesValue = method.name === 'remove' && method.parameterTypes[0] !== INT;
-    if (method.name === 'addAll') {
-      method.native = (frame, receiver, args) => {
-        // As AbstractList.addAll(int, Collection) does, a position is checked before the elements are read.
-        const size = elementsOf(receiver).length;
-        const index = args.length > 1 ? (args[0] as number) : size;
-        if (index < 0 || index > size) {
-          throwBuiltin(frame, 'IndexOutOfBoundsException', `Index: ${index}, Size: ${size}`);
-        }
-        if (itemsOf(frame, args.at(-1)).length > 0) throwBuiltin(frame, 'UnsupportedOperationException');
-        return false;
-      };
-    }
-    if (method.name !== 'clear' && !removesValue) continue;
-    method.native = (frame, receiver, [value]) => {
-      const items = elementsOf(receiver);
-      if (removesValue ? indexOf(frame, items, value) !== -1 : items.length > 0) {
-        throwBuiltin(frame, 'UnsupportedOperationException');
-      }
-      return removesValue ? false : undefined;
-    };
-  }
-}
 
 function declareCollectionMethods(cls: ClassInfo, element: JavaType, context: Context): void {
   const { objectType } = context;
@@ -608,13 +613,15 @@ function defineListAdditions(
   { listClass, collectionClass }: { listClass: ClassInfo; collectionClass: ClassInfo }
 ): void {
   addMethod(cls, 'add', [element], BOOLEAN, false, (frame, receiver, [value]) => {
+    checkModifiable(frame, receiver, true);
     frame.runtime.allocateArray(frame, 1);
     elementsOf(receiver).push(value);
     touch(receiver);
     return true;
   });
   addMethod(cls, 'add', [INT, element], VOID, false, (frame, receiver, [index, value]) => {
-    checkPosition(frame, index as number, elementsOf(receiver).length);
+    checkInsertPosition(frame, receiver, index as number, elementsOf(receiver).length, false);
+    checkModifiable(frame, receiver, true);
     frame.runtime.allocateArray(frame, 1);
     elementsOf(receiver).splice(index as number, 0, value);
     touch(receiver);
@@ -624,7 +631,7 @@ function defineListAdditions(
     insertAll(frame, receiver, elementsOf(receiver).length, source)
   );
   addMethod(cls, 'addAll', [INT, sourceType], BOOLEAN, false, (frame, receiver, [index, source]) => {
-    checkPosition(frame, index as number, elementsOf(receiver).length);
+    checkInsertPosition(frame, receiver, index as number, elementsOf(receiver).length, true);
     return insertAll(frame, receiver, index as number, source);
   });
   addMethod(
@@ -698,26 +705,34 @@ function defineListUpdates(cls: ClassInfo, element: JavaType, context: Context):
   });
   addMethod(cls, 'set', [INT, element], element, false, (frame, receiver, [index, value]) => {
     checkListIndex(frame, receiver, index as number, elementsOf(receiver).length);
+    checkModifiable(frame, receiver, false);
     const previous = elementsOf(receiver)[index as number];
     elementsOf(receiver)[index as number] = value;
     return previous;
   });
   addMethod(cls, 'remove', [INT], element, false, (frame, receiver, [index]) => {
     checkListIndex(frame, receiver, index as number, elementsOf(receiver).length);
+    checkModifiable(frame, receiver, true);
     touch(receiver);
     return elementsOf(receiver).splice(index as number, 1)[0];
   });
   addMethod(cls, 'remove', [context.objectType], BOOLEAN, false, (frame, receiver, [value]) => {
     const index = indexOf(frame, elementsOf(receiver), value);
     if (index === -1) return false;
+    checkRemovable(frame, receiver);
     elementsOf(receiver).splice(index, 1);
     touch(receiver);
     return true;
   });
-  addMethod(cls, 'clear', [], VOID, false, (_, receiver) => {
-    elementsOf(receiver).length = 0;
-    touch(receiver);
-  });
+  addMethod(cls, 'clear', [], VOID, false, clearList);
+}
+
+function clearList(frame: Frame, receiver: Value): Value {
+  if (elementsOf(receiver).length > 0) checkModifiable(frame, receiver, true);
+  else if (!countsEmptyClear(receiver)) return undefined;
+  elementsOf(receiver).length = 0;
+  touch(receiver);
+  return undefined;
 }
 
 /** The methods that search a list and compare it with another. */
@@ -730,21 +745,26 @@ function defineListSearches(cls: ClassInfo, context: Context): void {
     for (let index = items.length - 1; index >= 0; index--) if (javaEquals(frame, value, items[index])) return index;
     return -1;
   });
-  addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, (frame, receiver, [other]) => {
-    if (other === receiver) return true;
-    if (!(other instanceof JavaObject) || !other.elements || !isList(other)) return false;
-    subListChecks.get(other)?.();
-    const items = elementsOf(receiver);
-    return (
-      items.length === other.elements.length &&
-      items.every((item, index) => javaEquals(frame, item, other.elements?.[index]))
-    );
-  });
+  addMethod(cls, 'equals', [context.objectType], BOOLEAN, false, listEquals);
   addMethod(cls, 'hashCode', [], INT, false, (frame, receiver) => {
     let hash = 1;
     for (const item of elementsOf(receiver)) hash = toInt32(Math.imul(hash, 31) + javaHash(frame, item));
     return hash;
   });
+}
+
+/** `List.equals`, which compares the elements in order with those of any list. */
+function listEquals(frame: Frame, receiver: Value, [other]: Value[]): boolean {
+  // An unmodifiable wrapper compares through the list it wraps, which is equal to itself before reading anything.
+  const list = unwrapped(receiver as JavaObject);
+  if (other === receiver || other === list) return true;
+  if (!(other instanceof JavaObject) || !other.elements || !isList(other)) return false;
+  subListChecks.get(other)?.();
+  const items = elementsOf(receiver);
+  return (
+    items.length === other.elements.length &&
+    items.every((item, index) => javaEquals(frame, item, other.elements?.[index]))
+  );
 }
 
 const LIST_CLASSES = new Set<ClassInfo>();
@@ -756,19 +776,7 @@ function isList(object: JavaObject): boolean {
 /** The queue and stack methods of `LinkedList`, which learners use for breadth-first searches and stacks. */
 // code-gauge-allow functionCognitiveComplexity 24 -- One registration per builtin method, each a small native.
 function defineDequeMethods(cls: ClassInfo, element: JavaType, itrClass: ClassInfo): void {
-  addMethod(cls, 'descendingIterator', [], classType(itrClass, element), false, (frame, receiver) =>
-    createIterator(
-      frame,
-      itrClass,
-      receiver as JavaObject,
-      () => elementsOf(receiver).toReversed(),
-      (_, index) => {
-        const items = elementsOf(receiver);
-        items.splice(items.length - 1 - index, 1);
-        touch(receiver);
-      }
-    )
-  );
+  defineDescendingIterator(cls, element, itrClass);
   for (const [name, atEnd] of [
     ['addFirst', false],
     ['addLast', true],
@@ -813,6 +821,35 @@ function defineDequeMethods(cls: ClassInfo, element: JavaType, itrClass: ClassIn
       return value;
     });
   }
+}
+
+/** `descendingIterator`, which walks a deque from its last element. */
+function defineDescendingIterator(cls: ClassInfo, element: JavaType, itrClass: ClassInfo): void {
+  addMethod(cls, 'descendingIterator', [], classType(itrClass, element), false, (frame, receiver) => {
+    // As the JDK's, it counts the elements it has yet to return, which only its own removals change, and reads each in
+    // place, its position counted from the end of the deque.
+    let length = elementsOf(receiver).length;
+    const reversed = new Proxy<Value[]>([], {
+      get: (target, property) => {
+        if (property === 'length') return length;
+        if (typeof property !== 'string' || !/^\d+$/.test(property)) return Reflect.get(target, property);
+        const items = elementsOf(receiver);
+        return items[items.length - 1 - Number(property)];
+      },
+    });
+    return createIterator(
+      frame,
+      itrClass,
+      receiver as JavaObject,
+      () => reversed,
+      (_, index) => {
+        const items = elementsOf(receiver);
+        items.splice(items.length - 1 - index, 1);
+        length--;
+        touch(receiver);
+      }
+    );
+  });
 }
 
 function createList(receiver: Value): Value {

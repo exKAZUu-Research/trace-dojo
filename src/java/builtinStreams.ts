@@ -1,6 +1,6 @@
 import { fitsElement, runtimeClassNameOf } from './builtinClass';
 import { type Collections, compareNatural, itemsOf, javaEquals } from './builtinCollections';
-import { sortedValues } from './builtinCollectionSupport';
+import { nullTolerantLists, sortedValues } from './builtinCollectionSupport';
 import { type CollectorFunctions, collectors, defineCollectors } from './builtinCollectors';
 import { callFunction, type Functions } from './builtinFunctions';
 import { createOptional, defineOptionals, type Optionals, stateOf as optionalState } from './builtinOptionals';
@@ -265,8 +265,7 @@ function defineIntermediateOperations(kind: StreamKind): void {
   });
   op(cls, 'distinct', [], self, (frame, receiver) =>
     derive(impl, receiver, frame, (items) =>
-      // A DoubleStream compares as Double.equals does, which tells -0.0 from 0.0 and finds NaN equal to NaN.
-      distinct(items, (a, b) => (primitive ? Object.is(a, b) : javaEquals(frame, a, b)))
+      primitive ? distinctPrimitives(items, primitive === 'Double') : distinct(items, (a, b) => javaEquals(frame, a, b))
     )
   );
   const natural = (frame: Frame) => (a: Value, b: Value) =>
@@ -332,6 +331,21 @@ function* limited(items: Iterator<Value>, count: bigint): Generator<Value> {
   for (const value of iterate(items)) {
     yield value;
     if (++taken >= count) return;
+  }
+}
+
+/**
+ * The first of each equal value of a primitive stream. A DoubleStream compares as `Double.equals` does, which tells
+ * -0.0 from 0.0 and finds NaN equal to NaN, whereas a `Set` finds the zeros equal, so its -0.0 has a key of its own;
+ * an int's zero is one value, however the host represents it.
+ */
+function* distinctPrimitives(items: Iterator<Value>, isDouble: boolean): Generator<Value> {
+  const seen = new Set<unknown>();
+  for (const value of iterate(items)) {
+    const key = isDouble && Object.is(value, -0) ? '-0' : value;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    yield value;
   }
 }
 
@@ -414,6 +428,7 @@ function better(frame: Frame, kind: StreamKind, order: Value, sign: number, valu
 }
 
 /** The operations only a `Stream` of objects has: mapping, sorting with a comparator, reducing, and collecting. */
+// code-gauge-allow functionNcss 31 -- One registration per Stream operation, each a small native.
 function defineReferenceOperations(context: Context, types: StreamTypes, tType: JavaType, collector: ClassInfo): void {
   const { objectType, collections, fn } = context;
   const { stream, streamImpl, intStream, intStreamImpl } = types;
@@ -456,6 +471,7 @@ function defineReferenceOperations(context: Context, types: StreamTypes, tType: 
     const list = frame.runtime.allocateObject(frame, collections.immutableList);
     list.elements = items;
     list.modCount = 0;
+    nullTolerantLists.add(list);
     return list;
   });
   const binary = fn('BinaryOperator');
@@ -717,10 +733,18 @@ function defineStringStreams(context: Context, streams: StreamTypes): void {
   });
   addMethod(stringClass, 'codePoints', [], streams.intStream.type, false, (frame, receiver) => {
     const text = (receiver as JavaString).value;
-    return createStream(frame, streams.intStreamImpl, function* () {
-      // Iterating a string yields its code points, and an unpaired surrogate as itself, as Java's does.
-      for (const character of text) yield character.codePointAt(0) as number;
-    });
+    // The JDK knows the size of a string it stores in Latin-1, as it does every string of chars up to U+00FF.
+    const isLatin1 = /^[\0-\u00FF]*$/.test(text);
+    return createStream(
+      frame,
+      streams.intStreamImpl,
+      function* () {
+        // Iterating a string yields its code points, and an unpaired surrogate as itself, as Java's does.
+        for (const character of text) yield character.codePointAt(0) as number;
+      },
+      [],
+      isLatin1 ? () => BigInt(text.length) : undefined
+    );
   });
   addMethod(stringClass, 'lines', [], classType(streams.stream, stringClass.type), false, (frame, receiver) => {
     const text = (receiver as JavaString).value;
