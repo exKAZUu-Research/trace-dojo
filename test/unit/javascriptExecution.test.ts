@@ -269,6 +269,13 @@ const result = Object.create(null, props);`,
     'false\n',
   ],
   [
+    'an eager iterator consumer keeps the next method it calls',
+    `const it = { __proto__: Iterator.prototype, get next() { const t = new Turtle(1, 1); let i = 0; return () => { t; return { value: i++, done: i > 1 }; }; } };
+it.forEach(() => console.log(observer.canMoveForward()));
+console.log(observer.canMoveForward());`,
+    'false\ntrue\n',
+  ],
+  [
     'a Set method keeps the methods it read from a set-like argument',
     `const other = { size: 1, get has() { const t = new Turtle(1, 1); return () => { t; return true; }; }, get keys() { console.log(observer.canMoveForward()); return () => [][Symbol.iterator](); } };
 new Set([1]).isSubsetOf(other);`,
