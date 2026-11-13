@@ -40,8 +40,14 @@ export const IO_READER_FROM = namedType('io', 'ReaderFrom', {
   methods: [{ name: 'ReadFrom', type: fn([IO_READER], [BASIC.int64, ERROR_TYPE]) }],
 });
 
+const IO_WRITER_TO = namedType('io', 'WriterTo', {
+  kind: 'interface',
+  methods: [{ name: 'WriteTo', type: fn([IO_WRITER], [BASIC.int64, ERROR_TYPE]) }],
+});
+
 const INTERFACES = [
   IO_RUNE_SCANNER,
+  IO_WRITER_TO,
   IO_STRING_WRITER,
   IO_READER_FROM,
   namedType('io', 'RuneReader', { kind: 'interface', methods: [{ name: 'ReadRune', type: RUNE_READ }] }),
@@ -77,11 +83,15 @@ export function sameError(a: Value, b: Value): boolean {
 
 /** `io.WriteString`: the writer's own WriteString when it has one, and Write otherwise. */
 export function writeString(writer: Value, text: string): [bigint, Value] {
-  const viaString = writer instanceof Iface && assignFailure(writer.type, IO_STRING_WRITER) === undefined;
+  const viaString = implementsInterface(writer, IO_STRING_WRITER);
   return callMethod(writer, viaString ? 'WriteString' : 'Write', [viaString ? text : byteSlice(text)]) as [
     bigint,
     Value,
   ];
+}
+
+function implementsInterface(value: Value, type: Type): boolean {
+  return value instanceof Iface && assignFailure(value.type, type) === undefined;
 }
 
 export function libraryVariable(name: string, type: Type, value: Value): Entity {
@@ -136,6 +146,8 @@ const members: Record<string, Entity> = {
   SeekCurrent: intConstant('SeekCurrent', 1),
   SeekEnd: intConstant('SeekEnd', 2),
   Copy: nativeFunction('Copy', fn([IO_WRITER, IO_READER], [BASIC.int64, ERROR_TYPE]), ([writer, reader]) => {
+    if (implementsInterface(reader, IO_WRITER_TO)) return callMethod(reader, 'WriteTo', [writer]);
+    if (implementsInterface(writer, IO_READER_FROM)) return callMethod(writer, 'ReadFrom', [reader]);
     const runtime = currentRuntime();
     const size = 32 * 1024;
     runtime.allocate(size);
@@ -187,7 +199,6 @@ export const IO_PACKAGE = definePackage(
     'CopyN',
     'CopyBuffer',
     'ReadCloser',
-    'WriterTo',
     'WriteCloser',
     'ReadWriter',
     'Closer',
