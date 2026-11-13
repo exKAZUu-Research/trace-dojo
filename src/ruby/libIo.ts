@@ -1,12 +1,13 @@
 import type { OutputChannel } from '../interpreter/programIo';
 import { inspect, toInt, toS } from './conversions';
 import { def } from './define';
+import { typeError } from './errors';
 import { format } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
 import { prettyInspect } from './prettyPrint';
 import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, str } from './values';
+import { arr, realClassOf, str } from './values';
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
@@ -18,16 +19,26 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
   }
   const visit = function* (value: Value, seen: Set<RArray>): Gen<void> {
     rt().spend();
-    if (value instanceof RArray) {
-      if (seen.has(value)) {
+    let array = value instanceof RArray ? value : undefined;
+    if (!array && respondsTo(value, 'to_ary')) {
+      const converted = yield* callMethod(value, 'to_ary', []);
+      if (converted instanceof RArray) array = converted;
+      else if (converted !== NIL) {
+        throw typeError(
+          `can't convert ${realClassOf(value).name} to Array (${realClassOf(value).name}#to_ary gives ${realClassOf(converted).name})`
+        );
+      }
+    }
+    if (array) {
+      if (seen.has(array)) {
         yield* write(target, '[...]\n');
         return;
       }
-      seen.add(value);
+      seen.add(array);
       try {
-        for (const item of value.items) yield* visit(item, seen);
+        for (const item of array.items) yield* visit(item, seen);
       } finally {
-        seen.delete(value);
+        seen.delete(array);
       }
       return;
     }
@@ -68,9 +79,7 @@ def(
   'print',
   [0, -1],
   function* (_self, args) {
-    let text = '';
-    for (const arg of args) text += yield* toS(arg);
-    yield* write(stdout(), text);
+    for (const arg of args) yield* write(stdout(), yield* toS(arg));
     return NIL;
   },
   PRIVATE
@@ -80,9 +89,7 @@ def(
   'p',
   [0, -1],
   function* (_self, args) {
-    let text = '';
-    for (const arg of args) text += `${yield* inspect(arg)}\n`;
-    yield* write(stdout(), text);
+    for (const arg of args) yield* write(stdout(), `${yield* inspect(arg)}\n`);
     if (args.length === 0) return NIL;
     return args.length === 1 ? args[0] : arr(args);
   },
@@ -93,9 +100,7 @@ def(
   'pp',
   [0, -1],
   function* (_self, args) {
-    let text = '';
-    for (const arg of args) text += yield* prettyInspect(arg);
-    yield* write(stdout(), text);
+    for (const arg of args) yield* write(stdout(), yield* prettyInspect(arg));
     if (args.length === 0) return NIL;
     return args.length === 1 ? args[0] : arr(args);
   },
@@ -156,9 +161,7 @@ def('IO', 'puts', [0, -1], function* (self: RObject, args) {
   return NIL;
 });
 def('IO', 'print', [0, -1], function* (self: RObject, args) {
-  let text = '';
-  for (const arg of args) text += yield* toS(arg);
-  yield* write(self, text);
+  for (const arg of args) yield* write(self, yield* toS(arg));
   return NIL;
 });
 def('IO', 'write', [0, -1], function* (self: RObject, args) {
@@ -176,9 +179,7 @@ def('IO', 'printf', [1, -1], function* (self: RObject, args) {
   return NIL;
 });
 def('IO', 'p', [0, -1], function* (self: RObject, args) {
-  let text = '';
-  for (const arg of args) text += `${yield* inspect(arg)}\n`;
-  yield* write(self, text);
+  for (const arg of args) yield* write(self, `${yield* inspect(arg)}\n`);
   return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
 });
 def('IO', 'putc', 1, function* (self: RObject, [value]) {

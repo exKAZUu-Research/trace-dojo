@@ -100,7 +100,6 @@ sdef('Enumerator', 'new', [0, -1], () => {
 
 /** A curried lambda: it collects arguments until it has `arity`, then calls `proc` with them. */
 export function curry(proc: RProc, arity: number, collected: Value[]): Value {
-  if (collected.length >= arity) return undefined as never;
   return nativeProc(
     -1,
     (args) => {

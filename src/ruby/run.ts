@@ -79,7 +79,7 @@ function describeUncaught(runtime: Runtime, error: unknown, frame: Frame): strin
   if (error instanceof UnsupportedFeatureError) return error.message;
   if (error === STACK_OVERFLOW) return 'stack level too deep (SystemStackError)';
   if (error instanceof ExitSignal) return undefined;
-  if (error instanceof ReturnSignal && (error.target === frame || error.target.kind === 'class')) return undefined;
+  if (error instanceof ReturnSignal && error.target === frame) return undefined;
   if (error instanceof RubyError) {
     if (isA(error.exception, runtime.c.SystemExit)) return undefined;
     return describeException(error.exception);

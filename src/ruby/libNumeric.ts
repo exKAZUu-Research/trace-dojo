@@ -64,6 +64,7 @@ export function floorMod(a: bigint, b: bigint): bigint {
 }
 
 function floatMod(x: number, y: number): number {
+  if (y === 0) throw zeroDivisionError();
   const remainder = x % y;
   if (y * remainder < 0) return remainder + y;
   return remainder;
@@ -293,10 +294,10 @@ function* modPow(self: Num, exponent: Value, modulus: Value): Gen {
   let base = floorMod(self, modulus);
   let power = exponent;
   while (power > 0n) {
+    rt().spend();
     if (power & 1n) result = floorMod(result * base, modulus);
     base = floorMod(base * base, modulus);
     power >>= 1n;
-    yield* [];
   }
   return floorMod(result, modulus);
 }

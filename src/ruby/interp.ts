@@ -838,6 +838,7 @@ function* evalCase(e: Extract<Expr, { k: 'case' }>, frame: Frame): Gen {
 function returnTarget(frame: Frame): Frame {
   let target = frame;
   while (target.kind === 'block' && !target.extra.isLambda) target = target.extra.outer as Frame;
+  if (target.kind === 'class') throw rubyError(rt().c.LocalJumpError, 'unexpected return');
   if (target.extra.finished) throw rubyError(rt().c.LocalJumpError, 'unexpected return');
   return target;
 }

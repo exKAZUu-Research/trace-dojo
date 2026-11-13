@@ -129,9 +129,20 @@ def('Range', 'last', [0, 1], function* (self: RRange, args) {
     return self.end;
   }
   if (self.end === NIL) throw rangeError('cannot get the last element of endless range');
-  const items = yield* toArray(self);
   const count = yield* toIndex(args[0]);
   if (count < 0) throw argumentError('negative array size');
+  if (count === 0) return arr([]);
+  if (typeof self.begin === 'bigint' && typeof self.end === 'bigint') {
+    const final = self.exclusive ? self.end - 1n : self.end;
+    const start = self.begin > final - BigInt(count) + 1n ? self.begin : final - BigInt(count) + 1n;
+    const items: Value[] = [];
+    for (let value = start; value <= final; value++) {
+      rt().spend();
+      items.push(value);
+    }
+    return arr(items);
+  }
+  const items = yield* toArray(self);
   return arr(count === 0 ? [] : items.slice(-count));
 });
 def('Range', 'min', [0, 1], function* (self: RRange, args, block) {
@@ -292,9 +303,10 @@ def('Range', ['step', '%'], [0, 1], function* (self: RRange, args, block) {
     }
     return self;
   }
+  if (typeof step !== 'bigint') throw typeError('no implicit conversion of Float into String');
   let index = 0n;
   yield* iterateRange(self, function* (value) {
-    if (index % BigInt(step) === 0n) yield* callBlock(block, [value], false);
+    if (index % step === 0n) yield* callBlock(block, [value], false);
     index++;
   });
   return self;

@@ -387,3 +387,26 @@ test('a run does not see the methods an earlier run added to library classes', (
     uncaughtException: "undefined method 'double' for an instance of Integer (NoMethodError)",
   });
 });
+
+test.each([
+  ['curried zero-arity lambda', 'p (-> { 42 }).curry.call', '42\n'],
+  [
+    'chunk labels and solo groups',
+    'p [1, 1.0].chunk { |x| x }.to_a; p [1, 2].chunk { :_alone }.to_a',
+    '[[1, [1, 1.0]]]\n[[:_alone, [1]], [:_alone, [2]]]\n',
+  ],
+  ['short tail of a large range', 'p (1..10000000).last(1)', '[10000000]\n'],
+  ['array conversion in puts', 'class A; def to_ary = [1, 2]; end; puts A.new', '1\n2\n'],
+  [
+    'printing before a later conversion fails',
+    'class A; def to_s = raise "bad"; end; begin; print "before", A.new; rescue; puts "after"; end',
+    'beforeafter\n',
+  ],
+  [
+    'removing a mutated Set member',
+    'a = [1]; s = Set[a]; s.delete_if { |x| x << 2; true }; p s.size, s.to_a',
+    '0\n[]\n',
+  ],
+])('%s matches Ruby output', (_name, program, stdout) => {
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});

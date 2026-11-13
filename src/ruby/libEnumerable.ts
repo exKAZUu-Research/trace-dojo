@@ -741,11 +741,18 @@ def('Enumerable', 'chunk', 0, function* (self, _args, block) {
       currentKey = undefined;
       return;
     }
+    if (key instanceof RSymbol && key.name === '_alone') {
+      if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));
+      result.push(arr([key, arr([value])]));
+      current = [];
+      currentKey = undefined;
+      return;
+    }
     if (currentKey !== undefined && !(yield* rEquals(currentKey, key))) {
       result.push(arr([currentKey, arr(current)]));
       current = [];
     }
-    currentKey = key;
+    if (current.length === 0) currentKey = key;
     current.push(value);
   });
   if (current.length > 0) result.push(arr([currentKey as Value, arr(current)]));

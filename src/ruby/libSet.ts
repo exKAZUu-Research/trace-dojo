@@ -1,7 +1,7 @@
 import { inspect, rEquals } from './conversions';
 import { def, sdef } from './define';
 import { frozenError, typeError } from './errors';
-import { eachEntry, hashDelete, hashGet, hashSet } from './hashes';
+import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashSet } from './hashes';
 import { callBlock, type Gen } from './interp';
 import { iterate, toArray } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
@@ -215,7 +215,7 @@ for (const [name, keep] of [
     let changed = false;
     yield* eachEntry(membersOf(self), function* (entry) {
       if (truthy(yield* callBlock(block, [entry.key])) !== keep) {
-        yield* hashDelete(membersOf(self), entry.key);
+        hashDeleteEntry(membersOf(self), entry);
         changed = true;
       }
     });
