@@ -1,6 +1,7 @@
 import { pyRepr } from '../conversions';
 import { SYS_BUILTIN_MODULE_NAMES, SYS_STDLIB_MODULE_NAMES } from '../data/sysModuleNames';
 import { builtin, method } from '../define';
+import { builtinClassesWithDict } from '../descriptors';
 import type { Frame } from '../frame';
 import { defineNew } from '../instances';
 import { SUPPORTED_MODULES } from '../moduleNames';
@@ -373,6 +374,7 @@ const FLAGS = structSeq(
 /** `sys.implementation`, a `types.SimpleNamespace`. */
 const simpleNamespaceClass = builtinClass('SimpleNamespace');
 simpleNamespaceClass.module = 'types';
+builtinClassesWithDict.add(simpleNamespaceClass);
 method(simpleNamespaceClass, '__repr__', 'none', 0, 0, (self) => {
   const entries = [...(self as PyInstance).dict].map(([key, value]) => `${key}=${pyRepr(value)}`);
   return `namespace(${entries.join(', ')})`;

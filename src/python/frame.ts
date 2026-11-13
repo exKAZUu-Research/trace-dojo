@@ -50,7 +50,17 @@ export class Frame implements TracedFrame {
   }
 
   localValues(): (PyValue | undefined)[] {
-    return [...this.locals.values(), ...[...this.cells.values()].map((cell) => cell.value), ...this.temporaries];
+    const values: (PyValue | undefined)[] = [
+      ...this.temporaries.toReversed(),
+      ...[...this.cells.values()].map((cell) => cell.value),
+    ];
+    const listed = new Set(this.scope.locals);
+    for (const [name, value] of this.locals) if (!listed.has(name)) values.push(value);
+    for (let index = this.scope.locals.length - 1; index >= 0; index--) {
+      const value = this.locals.get(this.scope.locals[index] as string);
+      if (value !== undefined) values.push(value);
+    }
+    return values;
   }
 
   /** The name of the module whose code runs here: `__main__` for the program. */

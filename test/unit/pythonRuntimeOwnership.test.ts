@@ -309,3 +309,73 @@ print('generator end')`;
     uncaughtException: undefined,
   });
 });
+
+test('abandoning a generator releases its original children even when close clears the frame', () => {
+  const program = `class A:
+    def __del__(self): print('del')
+class Context:
+    def __enter__(self): return self
+    def __exit__(self, *args): print('exit')
+def gen():
+    a = A()
+    with Context():
+        yield 1
+def use():
+    for value in gen(): break
+    print('left use')
+use()
+print('after use')
+items = [None] * 100
+print('done')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'exit\ndel\nleft use\nafter use\ndone\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('generator deallocation preserves children rescued by its finally block', () => {
+  const program = `class A:
+    def __init__(self, n): self.n = n
+    def __del__(self): print('del', self.n)
+saved = []
+def gen():
+    a = A(1)
+    b = A(2)
+    try: yield 1
+    finally: saved.append(a)
+g = gen()
+next(g)
+del g
+print('after del')
+saved.clear()
+print('end')`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'del 2\nafter del\ndel 1\nend\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['next(g)', 'g.close()', 'g.throw(ValueError())'])(
+  'generator locals are released in slot order after %s',
+  (finish) => {
+    const program = `class A:
+    def __init__(self, n): self.n = n
+    def __del__(self): print('del', self.n)
+def gen():
+    first = A(1)
+    second = A(2)
+    yield 1
+g = gen()
+next(g)
+try: ${finish}
+except Exception: pass
+print('end')`;
+    expect(executeProgram('python', program)).toMatchObject({
+      kind: 'executed',
+      stdout: 'del 2\ndel 1\nend\n',
+      uncaughtException: undefined,
+    });
+  }
+);

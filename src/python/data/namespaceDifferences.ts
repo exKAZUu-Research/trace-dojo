@@ -275,11 +275,8 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__repr__ __hash__ __call__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __reduce__ __module__ __doc__ __name__ __qualname__ __self__ __text_signature__',
   'builtins.bytearray':
     '__new__ __repr__ __str__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __buffer__ __release_buffer__ __mod__ __rmod__ __len__ __getitem__ __setitem__ __delitem__ __add__ __mul__ __rmul__ __contains__ __iadd__ __imul__ __alloc__ __reduce__ __reduce_ex__ __sizeof__ append capitalize center clear copy count decode endswith expandtabs extend find fromhex hex index insert isalnum isalpha isascii isdigit islower isspace istitle isupper join ljust lower lstrip maketrans partition pop remove replace removeprefix removesuffix resize reverse rfind rindex rjust rpartition rsplit rstrip split splitlines startswith strip swapcase title translate upper zfill __doc__ __hash__',
-  'builtins.bytearray_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.bytes':
     '__new__ __repr__ __hash__ __str__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __buffer__ __mod__ __rmod__ __len__ __getitem__ __add__ __mul__ __rmul__ __contains__ __getnewargs__ __bytes__ capitalize center count decode endswith expandtabs find fromhex hex index isalnum isalpha isascii isdigit islower isspace istitle isupper join ljust lower lstrip maketrans partition replace removeprefix removesuffix rfind rindex rjust rpartition rsplit rstrip split splitlines startswith strip swapcase title translate upper zfill __doc__',
-  'builtins.bytes_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
-  'builtins.callable_iterator': '__iter__ __next__ __reduce__ __doc__',
   'builtins.cell': '__new__ __repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ cell_contents __doc__ __hash__',
   'builtins.classmethod':
     '__new__ __repr__ __get__ __init__ __class_getitem__ __func__ __wrapped__ __isabstractmethod__ __dict__ __annotations__ __annotate__ __doc__',
@@ -293,16 +290,10 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__repr__ __del__ __await__ send throw close __sizeof__ __class_getitem__ cr_origin __name__ __qualname__ cr_await cr_running cr_frame cr_code cr_suspended __doc__',
   'builtins.dict':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __or__ __ror__ __ior__ __len__ __getitem__ __setitem__ __delitem__ __contains__ __sizeof__ get setdefault pop popitem keys items values update fromkeys clear copy __reversed__ __class_getitem__ __doc__',
-  'builtins.dict_itemiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
   'builtins.dict_items':
     '__repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __sub__ __rsub__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __len__ __contains__ isdisjoint __reversed__ mapping __doc__ __hash__',
-  'builtins.dict_keyiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
   'builtins.dict_keys':
     '__repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __sub__ __rsub__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __len__ __contains__ isdisjoint __reversed__ mapping __doc__ __hash__',
-  'builtins.dict_reverseitemiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
-  'builtins.dict_reversekeyiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
-  'builtins.dict_reversevalueiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
-  'builtins.dict_valueiterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
   'builtins.dict_values': '__repr__ __iter__ __len__ __reversed__ mapping __doc__',
   'builtins.ellipsis': '__new__ __repr__ __reduce__ __doc__',
   'builtins.enumerate': '__new__ __iter__ __next__ __reduce__ __class_getitem__ __doc__',
@@ -322,15 +313,11 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __add__ __radd__ __sub__ __rsub__ __mul__ __rmul__ __mod__ __rmod__ __divmod__ __rdivmod__ __pow__ __rpow__ __neg__ __pos__ __abs__ __bool__ __invert__ __lshift__ __rlshift__ __rshift__ __rrshift__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __int__ __float__ __floordiv__ __rfloordiv__ __truediv__ __rtruediv__ __index__ conjugate bit_length bit_count to_bytes from_bytes as_integer_ratio __trunc__ __floor__ __ceil__ __round__ __getnewargs__ __format__ __sizeof__ is_integer real imag numerator denominator __doc__',
   'builtins.list':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __len__ __getitem__ __setitem__ __delitem__ __add__ __mul__ __rmul__ __contains__ __iadd__ __imul__ __reversed__ __sizeof__ clear copy append insert extend pop remove index count reverse sort __class_getitem__ __doc__',
-  'builtins.list_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
-  'builtins.list_reverseiterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
-  'builtins.longrange_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.map': '__new__ __iter__ __next__ __reduce__ __setstate__ __doc__',
   'builtins.mappingproxy':
     '__new__ __repr__ __hash__ __str__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __or__ __ror__ __ior__ __len__ __getitem__ __contains__ get keys values items copy __class_getitem__ __reversed__ __doc__',
   'builtins.member_descriptor':
     '__repr__ __get__ __set__ __delete__ __reduce__ __objclass__ __name__ __doc__ __qualname__',
-  'builtins.memory_iterator': '__iter__ __next__ __doc__',
   'builtins.memoryview':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __buffer__ __release_buffer__ __len__ __getitem__ __setitem__ __delitem__ release tobytes hex tolist cast toreadonly _from_flags count index __enter__ __exit__ __class_getitem__ obj nbytes readonly itemsize format ndim shape strides suboffsets c_contiguous f_contiguous contiguous __doc__',
   'builtins.method':
@@ -346,23 +333,19 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__new__ __get__ __set__ __delete__ __init__ getter setter deleter __set_name__ fget fset fdel __doc__ __name__ __isabstractmethod__',
   'builtins.range':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __bool__ __len__ __getitem__ __contains__ __reversed__ __reduce__ count index start stop step __doc__',
-  'builtins.range_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.reversed': '__new__ __iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.set':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __sub__ __rsub__ __and__ __rand__ __xor__ __rxor__ __or__ __ror__ __isub__ __iand__ __ixor__ __ior__ __len__ __contains__ add clear copy discard difference difference_update intersection intersection_update isdisjoint issubset issuperset pop __reduce__ remove __sizeof__ symmetric_difference symmetric_difference_update union update __class_getitem__ __doc__',
-  'builtins.set_iterator': '__iter__ __next__ __length_hint__ __reduce__ __doc__',
   'builtins.slice':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ indices __reduce__ start stop step __doc__',
   'builtins.staticmethod':
     '__new__ __repr__ __call__ __get__ __init__ __class_getitem__ __func__ __wrapped__ __isabstractmethod__ __dict__ __annotations__ __annotate__ __doc__',
   'builtins.str':
     '__new__ __repr__ __hash__ __str__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __mod__ __rmod__ __len__ __getitem__ __add__ __mul__ __rmul__ __contains__ encode replace split rsplit join capitalize casefold title center count expandtabs find partition index ljust lower lstrip rfind rindex rjust rstrip rpartition splitlines strip swapcase translate upper startswith endswith removeprefix removesuffix isascii islower isupper istitle isspace isdecimal isdigit isnumeric isalpha isalnum isidentifier isprintable zfill format format_map __format__ maketrans __sizeof__ __getnewargs__ __doc__',
-  'builtins.str_ascii_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.super': '__new__ __repr__ __getattribute__ __get__ __init__ __thisclass__ __self__ __self_class__ __doc__',
   'builtins.traceback': '__new__ __dir__ tb_frame tb_lasti tb_next tb_lineno __doc__',
   'builtins.tuple':
     '__new__ __repr__ __hash__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __len__ __getitem__ __add__ __mul__ __rmul__ __contains__ __getnewargs__ index count __class_getitem__ __doc__',
-  'builtins.tuple_iterator': '__iter__ __next__ __length_hint__ __reduce__ __setstate__ __doc__',
   'builtins.type':
     '__new__ __repr__ __call__ __getattribute__ __setattr__ __delattr__ __init__ __or__ __ror__ mro __subclasses__ __prepare__ __instancecheck__ __subclasscheck__ __dir__ __sizeof__ __basicsize__ __itemsize__ __flags__ __weakrefoffset__ __base__ __dictoffset__ __name__ __qualname__ __bases__ __mro__ __module__ __abstractmethods__ __dict__ __doc__ __text_signature__ __annotations__ __annotate__ __type_params__',
   'builtins.wrapper_descriptor':
@@ -376,6 +359,10 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__module__ __firstlineno__ __doc__ __init__ __missing__ total most_common elements fromkeys update subtract copy __reduce__ __delitem__ __repr__ __eq__ __ne__ __le__ __lt__ __ge__ __gt__ __add__ __sub__ __or__ __and__ __pos__ __neg__ _keep_positive __iadd__ __isub__ __ior__ __iand__ __static_attributes__ __dict__ __weakref__ __hash__',
   'collections.OrderedDict':
     '__repr__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __init__ __or__ __ror__ __ior__ __setitem__ __delitem__ fromkeys __sizeof__ __reduce__ setdefault pop popitem keys values items update clear copy __reversed__ move_to_end __dict__ __doc__ __hash__',
+  'collections._deque_iterator':
+    '__new__ __getattribute__ __iter__ __next__ __length_hint__ __reduce__ __doc__ __module__',
+  'collections._deque_reverse_iterator':
+    '__new__ __getattribute__ __iter__ __next__ __length_hint__ __reduce__ __doc__ __module__',
   'collections.defaultdict':
     '__repr__ __getattribute__ __init__ __or__ __ror__ __missing__ copy __copy__ __reduce__ __class_getitem__ default_factory __doc__ __module__',
   'collections.deque':
@@ -766,6 +753,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_struct',
         '_index',
         '_ITEMSIZE',
+        '_subscript',
         '_code',
         '_encode',
         '_decode',
@@ -1281,6 +1269,9 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
         '_items',
         '_store',
         '_check_resize',
+        '_count',
+        '_item',
+        '_delete',
         '_position',
         '_same_kind',
         '__static_attributes__',
@@ -1368,11 +1359,6 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     ],
     'binascii.Error': [['__module__'], []],
     'binascii.Incomplete': [['__module__'], []],
-    'builtins.callable_iterator': [[], []],
-    'builtins.dict_reverseitemiterator': [[], []],
-    'builtins.dict_reversekeyiterator': [[], []],
-    'builtins.dict_reversevalueiterator': [[], []],
-    'builtins.memory_iterator': [[], []],
     'calendar.Day': [
       [
         '_generate_next_value_',
@@ -1412,6 +1398,8 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
       ['__iter__', '__ior__', '__setitem__', '__delitem__', 'fromkeys', '__sizeof__', '__hash__'],
       [],
     ],
+    'collections._deque_iterator': [['__getattribute__', '__reduce__', '__module__'], []],
+    'collections._deque_reverse_iterator': [['__getattribute__', '__reduce__', '__module__'], []],
     'collections.abc.ByteString': [['_removal_version'], []],
     'collections.abc.Collection': [['__annotate_func__', '__annotations_cache__'], []],
     'collections.abc.Container': [['__annotate_func__', '__annotations_cache__'], []],

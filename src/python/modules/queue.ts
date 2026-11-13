@@ -163,7 +163,6 @@ class _PySimpleQueue:
         return len(self._queue)
 class SimpleQueue(_PySimpleQueue):
     __module__ = '_queue'
-_c_type_name(SimpleQueue, '_queue.SimpleQueue')
 `;
 
 registerSourceModule('queue', SOURCE, undefined, { blocks: true });

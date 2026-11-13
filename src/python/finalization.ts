@@ -343,10 +343,17 @@ export class GeneratorFinalizer {
     const count = (counts.get(node) ?? 0) - 1;
     counts.set(node, count);
     if (count !== 0) return;
+    const generatorChildren = node instanceof PyGenerator ? referencesOf(node, true) : undefined;
     // The object stays among the garbage being freed, alive to callbacks, until its finalizer and callbacks ran.
     const resurrected = node instanceof PyObject && this.pending.has(node) && !this.finalize(node, garbage);
     if (!resurrected && node instanceof PyObject) runCallbacksOf(node);
     garbage.delete(node);
+    if (generatorChildren) {
+      const rescued = findReachableObjects(this.roots([], garbage));
+      for (const object of rescued) garbage.delete(object);
+      for (const child of generatorChildren) this.decrement(child, garbage, counts);
+      return;
+    }
     if (resurrected) return;
     for (const child of referencesOf(node, true)) this.decrement(child, garbage, counts);
   }

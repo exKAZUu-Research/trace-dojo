@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 import { z } from 'zod';
 
+import { iteratorSamples } from '../src/python/iteratorTypes';
 import type { Runtime as RuntimeType } from '../src/python/runtime';
 import type { PyClass as PyClassType, PyValue } from '../src/python/values';
 
@@ -20,16 +21,13 @@ const { UnsupportedFeatureError } = await import('../src/python/unsupported');
 const { PyBuiltinFunction, PyClass, PyDescriptor } = await import('../src/python/values');
 
 /** Values of builtin types that no module names, such as iterators, whose types the data needs. */
-const SAMPLES =
-  'iter([]), iter(()), iter(""), iter({}), iter(set()), iter(range(1)), reversed([]), {}.keys(), {}.values(), ' +
-  '{}.items(), iter({}.keys()), iter({}.values()), iter({}.items()), iter(b""), iter(bytearray()), ' +
-  '(x for x in []), len, [].append, type.__dict__, sys.flags, (lambda: 0), (lambda: 0).__get__(1), (lambda: 0).__code__, ' +
-  'reversed({}), reversed({}.values()), reversed({}.items()), iter(lambda: 0, 0), iter(memoryview(b"")), ' +
-  'iter(range(2 ** 70)), awaited, awaited.__await__(), generated, generated.asend(None), ' +
-  'generated.athrow(ValueError), cell(), sys._getframe(), (1).__add__, int.__add__, int.__dict__["real"], ' +
-  'dict.__dict__["fromkeys"], sys.float_info, sys.int_info, sys.hash_info, sys.thread_info, sys.version_info';
+const SAMPLES = `${iteratorSamples.join(', ')}, {}.keys(), {}.values(), {}.items(),
+(x for x in []), len, [].append, type.__dict__, sys.flags, (lambda: 0), (lambda: 0).__get__(1), (lambda: 0).__code__,
+awaited, awaited.__await__(), generated, generated.asend(None), generated.athrow(ValueError), cell(), sys._getframe(),
+(1).__add__, int.__add__, int.__dict__["real"], dict.__dict__["fromkeys"], sys.float_info, sys.int_info, sys.hash_info,
+sys.thread_info, sys.version_info`;
 /** The functions and objects that SAMPLES names. */
-const SAMPLE_SETUP = `import sys
+const SAMPLE_SETUP = `import sys, collections
 async def coroutine(): pass
 async def async_generator(): yield
 def cell():

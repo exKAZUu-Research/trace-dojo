@@ -105,3 +105,32 @@ test('an uncaught AttributeError on an object whose namespace differs suggests a
     uncaughtException: "AttributeError: 'collections.deque' object has no attribute 'pp'. Did you mean: 'pop'?",
   });
 });
+
+test('lazy iterator namespaces expose complete matching classes and stop on unmatched classes', () => {
+  const program = `values = [iter('é'), reversed({}), iter(lambda: 0, 0), iter(memoryview(b''))]
+for iterator in values:
+    namespace = type(iterator).__dict__
+    print(list(namespace), namespace['__doc__'])`;
+  expect(executeProgram('python', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "['__iter__', '__next__', '__length_hint__', '__reduce__', '__setstate__', '__doc__'] None\n" +
+      "['__iter__', '__next__', '__length_hint__', '__reduce__', '__doc__'] None\n" +
+      "['__iter__', '__next__', '__reduce__', '__doc__'] None\n" +
+      "['__iter__', '__next__', '__doc__'] None\n",
+    uncaughtException: undefined,
+  });
+  for (const factory of ['iter', 'reversed']) {
+    const unmatched = `import collections
+try:
+    print(list(type(${factory}(collections.deque())).__dict__))
+except BaseException:
+    print('caught')
+print('after')`;
+    expect(executeProgram('python', unmatched)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: expect.stringContaining('この採点環境では使えません'),
+    });
+  }
+});

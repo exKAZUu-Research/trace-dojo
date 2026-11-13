@@ -73,13 +73,23 @@ export function getInternalContextVar(variable: PyOpaque): PyValue | undefined {
 }
 
 export function setInternalContextVar(variable: PyOpaque, value: PyValue): void {
-  currentContext().data.values.set(variable, value);
+  setContextValue(currentContext().data.values, variable, value);
+}
+
+function copyContext(context: Context): ContextObject {
+  currentRuntime().allocate(context.values.size * 2);
+  return newContext(new Map(context.values));
 }
 
 function newContext(values: Map<PyOpaque, PyValue>): ContextObject {
   return new PyOpaque(contextClass, 'Context', {
     values,
   } satisfies Context) as ContextObject;
+}
+
+function setContextValue(values: Context['values'], variable: PyOpaque, value: PyValue): void {
+  if (!values.has(variable)) currentRuntime().allocate(2);
+  values.set(variable, value);
 }
 
 const contextOf = (value: PyValue): Context => (value as ContextObject).data;
@@ -133,7 +143,7 @@ registerSuspendingVariant(contextClass.dict.get('run') as PyBuiltinFunction, fun
     exitContext(context, previous);
   }
 });
-method(contextClass, 'copy', 'none', 0, 0, (self) => newContext(new Map(contextOf(self).values)));
+method(contextClass, 'copy', 'none', 0, 0, (self) => copyContext(contextOf(self)));
 method(contextClass, '__getitem__', 'one', 1, 1, (self, [key]) => {
   const value = contextOf(self).values.get(checkedVariable(key));
   if (value === undefined) throw keyError(key);
@@ -204,7 +214,7 @@ method(contextVarClass, 'set', 'one', 1, 1, (self, [value]) => {
   const context = currentContext();
   const variable = self as PyOpaque;
   const old = context.data.values.get(variable) ?? MISSING;
-  context.data.values.set(variable, value);
+  setContextValue(context.data.values, variable, value);
   return new PyOpaque(tokenClass, 'Token', {
     context,
     variable,
@@ -228,9 +238,9 @@ function resetToken(variable: PyOpaque, token: PyOpaque): void {
   }
   const context = currentContext();
   if (data.context !== context) throw pyError('ValueError', `${pyRepr(token)} was created in a different Context`);
-  data.used = true;
   if (data.old === MISSING) context.data.values.delete(variable);
-  else context.data.values.set(variable, data.old);
+  else setContextValue(context.data.values, variable, data.old);
+  data.used = true;
 }
 
 // Token -------------------------------------------------------------------------------------------------------------
@@ -255,7 +265,7 @@ registerModule('_contextvars', () => {
     ['Context', contextClass],
     ['ContextVar', contextVarClass],
     ['Token', tokenClass],
-    ['copy_context', builtin('copy_context', 'none', 0, 0, () => newContext(new Map(currentContext().data.values)))],
+    ['copy_context', builtin('copy_context', 'none', 0, 0, () => copyContext(currentContext().data))],
   ]);
 });
 

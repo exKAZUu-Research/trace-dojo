@@ -388,7 +388,7 @@ export class Runtime {
     // The function's variables die with its frame, which closes a generator only they held.
     const { finalizer } = this;
     if (finalizer.pending.size > 0 && result !== undefined) {
-      finalizer.release(frameVariables(frame, frame.scope.locals), [result]);
+      finalizer.release(frame.localValues(), [result]);
     }
   }
 
@@ -801,21 +801,6 @@ function objectAttributeNames(value: PyValue): Set<string> {
   }
   if (value instanceof PyInstance && value.enumValue !== undefined) add(['name', 'value']);
   return names;
-}
-
-/**
- * The values of a returning function's variables, in the order CPython's frame drops them: from the last variable of
- * its code to its first, its cells last.
- */
-function frameVariables(frame: Frame, names: readonly string[]): PyValue[] {
-  const values: PyValue[] = [...frame.cells.values()].map((cell) => cell.value).filter((value) => value !== undefined);
-  const listed = new Set(names);
-  for (const [name, value] of frame.locals) if (!listed.has(name)) values.push(value);
-  for (let index = names.length - 1; index >= 0; index--) {
-    const value = frame.locals.get(names[index] as string);
-    if (value !== undefined) values.push(value);
-  }
-  return values;
 }
 
 /** The value of a function frame's first parameter, which a zero-argument `super()` takes as its object. */

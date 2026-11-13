@@ -1,0 +1,102 @@
+{
+  "bytearray_iterator": {
+    "sample": "iter(bytearray())",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "bytes_iterator": {
+    "sample": "iter(b'')",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "callable_iterator": {
+    "sample": "iter(lambda: 0, 0)",
+    "features": ["reduced"]
+  },
+  "collections._deque_iterator": {
+    "sample": "iter(collections.deque())",
+    "features": ["hinted"]
+  },
+  "collections._deque_reverse_iterator": {
+    "sample": "reversed(collections.deque())",
+    "features": ["hinted"]
+  },
+  "dict_itemiterator": {
+    "sample": "iter({}.items())",
+    "features": ["reduced", "hinted"]
+  },
+  "dict_keyiterator": {
+    "sample": "iter({})",
+    "features": ["reduced", "hinted"]
+  },
+  "dict_reverseitemiterator": {
+    "sample": "reversed({}.items())",
+    "features": ["reduced", "hinted"]
+  },
+  "dict_reversekeyiterator": {
+    "sample": "reversed({})",
+    "features": ["reduced", "hinted"]
+  },
+  "dict_reversevalueiterator": {
+    "sample": "reversed({}.values())",
+    "features": ["reduced", "hinted"]
+  },
+  "dict_valueiterator": {
+    "sample": "iter({}.values())",
+    "features": ["reduced", "hinted"]
+  },
+  "enumerate": {
+    "sample": "enumerate(())",
+    "features": ["reduced"]
+  },
+  "filter": {
+    "sample": "filter(None, ())",
+    "features": ["reduced"]
+  },
+  "list_iterator": {
+    "sample": "iter([])",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "list_reverseiterator": {
+    "sample": "reversed([])",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "longrange_iterator": {
+    "sample": "iter(range(2**70))",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "map": {
+    "sample": "map(abs, ())",
+    "features": ["moved", "reduced"]
+  },
+  "memory_iterator": {
+    "sample": "iter(memoryview(b''))",
+    "features": []
+  },
+  "range_iterator": {
+    "sample": "iter(range(1))",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "reversed": {
+    "sample": "reversed(range(1))",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "set_iterator": {
+    "sample": "iter(set())",
+    "features": ["reduced", "hinted"]
+  },
+  "str_ascii_iterator": {
+    "sample": "iter('')",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "str_iterator": {
+    "sample": "iter('é')",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "tuple_iterator": {
+    "sample": "iter(())",
+    "features": ["moved", "reduced", "hinted"]
+  },
+  "zip": {
+    "sample": "zip()",
+    "features": ["moved", "reduced"]
+  }
+}

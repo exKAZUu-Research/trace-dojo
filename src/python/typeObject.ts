@@ -17,6 +17,7 @@ import { generatorNext } from './generators';
 import { identityHash, pyHash } from './hashing';
 import { defineNew, objectInitImplementation, objectNewImplementation, typeCall } from './instances';
 import { stateIndex, stateOf } from './iteratorStates';
+import { iteratorNamesFor } from './iteratorTypes';
 import { createModule, initializeModule, moduleDir, moduleRepr } from './modules/moduleLayout';
 import { argument, checkArgs } from './nativeArgs';
 import {
@@ -438,7 +439,10 @@ export function nextValue(iterator: PyValue): PyValue {
   return callValue(bindValue(next, iterator), []);
 }
 
-/** Gives every native iterator class the iterator protocol and a repr. */
+const MOVED_ITERATORS = iteratorNamesFor('moved');
+const REDUCED_ITERATORS = iteratorNamesFor('reduced');
+const HINTED_ITERATORS = iteratorNamesFor('hinted');
+
 export function defineIteratorClass(cls: PyClass): void {
   method(cls, '__iter__', 'none', 0, 0, (self) => self);
   method(cls, '__next__', 'none', 0, 0, (self) => {
@@ -463,62 +467,6 @@ export function defineIteratorClass(cls: PyClass): void {
     });
   }
 }
-
-/** The native iterators that have `__setstate__`, which moves them to the index they are given or sets their strictness. */
-const MOVED_ITERATORS = new Set([
-  'list_iterator',
-  'list_reverseiterator',
-  'tuple_iterator',
-  'range_iterator',
-  'longrange_iterator',
-  'str_ascii_iterator',
-  'str_iterator',
-  'bytes_iterator',
-  'bytearray_iterator',
-  'reversed',
-  'zip',
-  'map',
-]);
-
-/** The native iterators that reduce to where they are, for pickle and copy. */
-const REDUCED_ITERATORS = new Set([
-  ...MOVED_ITERATORS,
-  'dict_reversekeyiterator',
-  'dict_reversevalueiterator',
-  'dict_reverseitemiterator',
-  'callable_iterator',
-  'dict_keyiterator',
-  'dict_valueiterator',
-  'dict_itemiterator',
-  'set_iterator',
-  'enumerate',
-  'zip',
-  'map',
-  'filter',
-]);
-
-/** The native iterators that know how many items they have left, as their `__length_hint__` tells. */
-const HINTED_ITERATORS = new Set([
-  'list_iterator',
-  'bytes_iterator',
-  'bytearray_iterator',
-  'dict_reversekeyiterator',
-  'dict_reversevalueiterator',
-  'dict_reverseitemiterator',
-  'list_reverseiterator',
-  'tuple_iterator',
-  'range_iterator',
-  'longrange_iterator',
-  'str_ascii_iterator',
-  'str_iterator',
-  'dict_keyiterator',
-  'dict_valueiterator',
-  'dict_itemiterator',
-  'set_iterator',
-  'reversed',
-  'collections._deque_iterator',
-  'collections._deque_reverse_iterator',
-]);
 
 for (const cls of iteratorClasses.values()) defineIteratorClass(cls);
 iteratorClassSetup.push((cls) => {

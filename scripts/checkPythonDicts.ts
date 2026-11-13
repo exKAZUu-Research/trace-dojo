@@ -15,6 +15,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
+import { iteratorSamples } from '../src/python/iteratorTypes';
 import type { parsePython as ParsePython } from '../src/python/parse';
 import type { runModule as RunModule } from '../src/python/run';
 import type { Runtime as RuntimeType } from '../src/python/runtime';
@@ -34,21 +35,17 @@ class _Slots:
     __slots__ = ('a',)
 _coro = _coroutine()
 _agen = _async_generator()
-SAMPLES = [iter([]), iter(()), iter(''), iter({}), iter(set()), iter(range(1)), iter(range(2 ** 70)), reversed([]),
-           reversed(range(1)), reversed({}), reversed({}.keys()), {}.keys(), {}.values(), {}.items(), iter({}.keys()),
-           iter({}.values()), iter({}.items()), reversed({}.values()), reversed({}.items()), iter(b''),
-           iter(bytearray()), iter(lambda: 0, 0), iter(memoryview(b'')), _generator(), _coro, _agen, _agen.asend(None),
+SAMPLES = [${iteratorSamples.join(', ')}, {}.keys(), {}.values(), {}.items(), _generator(), _coro, _agen, _agen.asend(None),
            _agen.athrow(ValueError), _coro.__await__(), _cell(), _function.__code__, sys._getframe(), len, [].append,
            list.append, int.__add__, (1).__add__, int.__dict__['real'], int.__dict__['from_bytes'],
            _Slots.__dict__['a'], type.__dict__, types.SimpleNamespace(), list[int], int | str, _function.__get__(1),
            sys.flags, sys.float_info, sys.int_info, sys.version_info, sys.hash_info, sys.thread_info,
            property(), staticmethod(len), classmethod(len), super(int, 1), NotImplemented, Ellipsis, None,
-           types.TracebackType, types.ModuleType('m'), memoryview(b''), slice(1), range(1), object(), enumerate([]),
-           zip(), map(len, []), filter(None, []), _Slots, BaseExceptionGroup('m', [ValueError()])]
+           types.TracebackType, types.ModuleType('m'), memoryview(b''), slice(1), range(1), object(), _Slots, BaseExceptionGroup('m', [ValueError()])]
 _coro.close()
 `;
 
-const PROGRAM = (modules: readonly string[], types: boolean): string => `import sys, types, builtins
+const PROGRAM = (modules: readonly string[], types: boolean): string => `import sys, types, builtins, collections
 MODULES = ${JSON.stringify(modules)}
 ${SAMPLES}
 
