@@ -330,7 +330,6 @@ function dollarExpansion(
   return undefined;
 }
 
-/** The regular expression object a value is, if it is one. */
 // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 // code-gauge-allow functionNcss 33 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 /**
@@ -377,6 +376,7 @@ function advanceIndex(text: string, index: number, unicode: boolean): number {
   return index + ((text.codePointAt(index) ?? 0) > 0xff_ff ? 2 : 1);
 }
 
+/** The regular expression object a value is, if it is one. */
 export function asRegExp(value: Value): RegExpObject | undefined {
   return value instanceof JsObject && value.regexp ? (value as RegExpObject) : undefined;
 }

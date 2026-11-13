@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 562 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 564 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -725,7 +725,11 @@ export class Runtime {
     }
     return this.tracked(
       {
-        next: () => stepHostIterator(hostIterator),
+        // What a generator yields to a builtin is returned to it as a call's result is.
+        next: () => {
+          const value = stepHostIterator(hostIterator);
+          return value === DONE ? value : this.returnedToBuiltin(this.frame, value);
+        },
         close: () => {
           const close = this.get(iterator, 'return');
           if (close instanceof JsFunction && this.realm.hostIteratorMethods.has(close)) hostIterator.close?.();
