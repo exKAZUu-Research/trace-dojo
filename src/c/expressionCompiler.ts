@@ -18,6 +18,7 @@ import { decodeCharLiteral, decodeStringLiteral, parseNumber } from './literals'
 import {
   type Address,
   addressOf as pointerAddress,
+  arithmeticResult,
   boundPointer,
   checkAddress,
   evaluate,
@@ -397,16 +398,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
     );
     const a = this.converted(left, operation.left);
     const b = this.converted(right, operation.right);
+    const read = (frame: Frame): Evaluated => {
+      const av = evaluate(a, frame),
+        bv = evaluate(b, frame);
+      const value = operation.run(av.value as Scalar, bv.value as Scalar);
+      return operation.type.kind === 'int' && !['==', '!=', '<', '<=', '>', '>='].includes(operator)
+        ? arithmeticResult(value, [av, bv])
+        : { value };
+    };
     return foldBinary(
       operation.type,
-      (frame) => operation.run(a(frame) as Scalar, b(frame) as Scalar),
+      (frame) => read(frame).value,
       left,
       right,
       () =>
         operation.run(
           convertScalar(left.constant!, left.type, operation.left),
           convertScalar(right.constant!, right.type, operation.right)
-        )
+        ),
+      read
     );
   }
 
@@ -551,19 +561,35 @@ export abstract class ExpressionCompiler extends CompilerBase {
         promoted,
         (frame) => operation(value(frame) as Scalar),
         operand,
-        () => operation(convertScalar(operand.constant!, type, promoted))
+        () => operation(convertScalar(operand.constant!, type, promoted)),
+        (frame) => {
+          const previous = evaluate(value, frame);
+          return arithmeticResult(operation(previous.value as Scalar), [previous]);
+        }
       );
     }
     if (!isArithmetic(type)) this.error(row, `「${operator}」は数にしか使えません（${typeName(type)}）。`);
     const promoted = type.kind === 'int' ? promote(type) : unqualified(type);
     const value = this.converted(operand, promoted);
-    if (operator === '+') return fold(promoted, value, operand, () => convertScalar(operand.constant!, type, promoted));
+    if (operator === '+')
+      return fold(
+        promoted,
+        value,
+        operand,
+        () => convertScalar(operand.constant!, type, promoted),
+        (frame) => evaluate(value, frame)
+      );
     const operation = negate(promoted);
     return fold(
       promoted,
       (frame) => operation(value(frame) as Scalar),
       operand,
-      () => operation(convertScalar(operand.constant!, type, promoted))
+      () => operation(convertScalar(operand.constant!, type, promoted)),
+      (frame) => {
+        const previous = evaluate(value, frame);
+        const result = operation(previous.value as Scalar);
+        return promoted.kind === 'int' ? arithmeticResult(result, [previous]) : { value: result };
+      }
     );
   }
 
@@ -623,12 +649,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
       const location = lvalue.resolve(frame);
       const previous = location.load() as Scalar;
       const range = location.range?.();
+      const previousBytes = location.bytes?.();
       const next = step(previous, frame);
       if (type.kind === 'pointer' && range) checkAddress({ address: next as number, ...range }, 0);
-      location.store(next, range);
+      const metadata = arithmeticResult(next, [{ value: previous, range, bytes: previousBytes }]);
+      location.store(next, metadata.range, metadata.bytes);
       if (lvalue.local) frame.live[lvalue.local.index] = true;
       const value = expression.prefix ? (lvalue.isBitField ? location.load() : next) : previous;
-      return { value, range };
+      return { value, range, bytes: expression.prefix ? metadata.bytes : previousBytes };
     };
     return resultOperand(type, execute, expression.prefix ? operand.bitWidth : undefined);
   }
@@ -668,20 +696,22 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const calculate = operator ? this.compoundOperation(operator, rvalueType(target), source, row) : undefined;
     const value = calculate ? undefined : this.convertForAssignment(source, type, 'assignment', row);
     const execute = (frame: Frame): Evaluated => {
-      const evaluated = calculate
-        ? { value: calculate.right(frame), range: undefined }
-        : evaluate(value as Evaluator, frame);
+      const evaluated = calculate ? evaluate(calculate.right, frame) : evaluate(value as Evaluator, frame);
       const location = lvalue.resolve(frame);
+      const previous = calculate
+        ? { value: location.load(), range: location.range?.(), bytes: location.bytes?.() }
+        : undefined;
       const result = calculate
         ? convertScalar(
-            calculate.apply(frame, location.load() as Scalar, evaluated.value as Scalar),
+            calculate.apply(frame, previous!.value as Scalar, evaluated.value as Scalar),
             calculate.type,
             type
           )
         : evaluated.value;
-      const range = calculate && type.kind === 'pointer' ? location.range?.() : evaluated.range;
+      const metadata = calculate ? arithmeticResult(result as Scalar, [previous!, evaluated]) : evaluated;
+      const range = metadata.range;
       if (type.kind === 'pointer' && range) checkAddress({ address: result as number, ...range }, 0);
-      const bytes = calculate ? undefined : evaluated.bytes;
+      const bytes = metadata.bytes;
       location.store(result, range, bytes);
       if (lvalue.local) frame.live[lvalue.local.index] = true;
       return { value: lvalue.isBitField ? location.load() : result, range, bytes };
@@ -694,7 +724,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     type: CType,
     right: Operand,
     row: number
-  ): { type: CType; right: (frame: Frame) => Value; apply: (frame: Frame, previous: Scalar, other: Scalar) => Scalar } {
+  ): { type: CType; right: Evaluator; apply: (frame: Frame, previous: Scalar, other: Scalar) => Scalar } {
     if (type.kind === 'pointer' && (operator === '+' || operator === '-') && isInteger(right.type)) {
       const size = this.pointerElementSize(type, row) * (operator === '+' ? 1 : -1);
       return {
@@ -1167,8 +1197,14 @@ export function constantOperand(type: CType, value: Scalar): Operand {
   return { type, value: () => value, constant: value };
 }
 
-function fold(type: CType, value: (frame: Frame) => Value, operand: Operand, compute: () => Scalar): Operand {
-  if (operand.constant === undefined) return { type, value };
+function fold(
+  type: CType,
+  value: (frame: Frame) => Value,
+  operand: Operand,
+  compute: () => Scalar,
+  read?: (frame: Frame) => Evaluated
+): Operand {
+  if (operand.constant === undefined) return { type, value, read };
   try {
     const constant = compute();
     return { type, value: () => constant, constant };
@@ -1183,9 +1219,10 @@ function foldBinary(
   value: (frame: Frame) => Value,
   left: Operand,
   right: Operand,
-  compute: () => Scalar
+  compute: () => Scalar,
+  read?: (frame: Frame) => Evaluated
 ): Operand {
-  if (left.constant === undefined || right.constant === undefined) return { type, value };
+  if (left.constant === undefined || right.constant === undefined) return { type, value, read };
   try {
     const constant = compute();
     return { type, value: () => constant, constant };

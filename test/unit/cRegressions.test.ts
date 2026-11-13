@@ -996,3 +996,35 @@ test.each([
 ])('block declarations and file declarations share function linkage checks: %s', (source) => {
   expect(executeProgram('c', source).kind).toBe('compileError');
 });
+
+test.each([
+  'n+0',
+  '0+n',
+  'n-0',
+  'n*1',
+  'n/1',
+  'n|0',
+  'n^0',
+  'n&~(uintptr_t)0',
+  'n<<0',
+  'n>>0',
+  '+n',
+  '-(-n)',
+  '~~n',
+  '(n+=0)',
+  '(n|=0)',
+])('integer pointer operations retain origins: %s', (expression) => {
+  const source = `#include <stdio.h>
+#include <stdint.h>
+int main(void){int a[2][2]={{1,2},{3,4}};uintptr_t n=(uintptr_t)(a[0]+2);int*q=(int*)(${expression});printf("%d\\n",*q);}`;
+  const result = executeProgram('c', source);
+  expect(result).toMatchObject({ kind: 'executed', stdout: '' });
+  expect(result.kind === 'executed' && result.uncaughtException).toBeDefined();
+});
+
+test('integer pointer arithmetic preserves valid offsets and character representation copies', () => {
+  const source = `#include <stdio.h>
+#include <stdint.h>
+int main(void){int a[2][2]={{1,2},{3,4}};uintptr_t n=(uintptr_t)(a[0]+2);n-=sizeof(int);int*q=(int*)n;int*r;for(int i=0;i<8;i++)((unsigned char*)&r)[i]=((unsigned char*)&q)[i]+0;printf("%d\\n",*r);}`;
+  expect(executeProgram('c', source)).toMatchObject({ kind: 'executed', stdout: '2\n', uncaughtException: undefined });
+});

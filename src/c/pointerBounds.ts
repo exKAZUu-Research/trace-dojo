@@ -1,4 +1,4 @@
-import type { Value } from './arith';
+import type { Scalar, Value } from './arith';
 import type { Operand } from './compilerBase';
 import { CRuntimeError } from './errors';
 import type { Frame } from './runtime';
@@ -152,4 +152,15 @@ export function rangeOfBytes(bytes: PointerBytes | undefined, offset = 0): Point
     if (byte?.origin !== first.origin || byte.index !== i) return;
   }
   return first.origin.range;
+}
+
+export function arithmeticResult(value: Scalar, operands: Evaluated[]): Evaluated {
+  const ranges = operands.flatMap((operand) => (operand.range ? [operand.range] : []));
+  const first = ranges[0];
+  const range =
+    first && ranges.every((candidate) => candidate.start === first.start && candidate.end === first.end)
+      ? first
+      : undefined;
+  const unchanged = operands.find((operand) => operand.value === value && operand.bytes?.size);
+  return { value, range, bytes: unchanged?.bytes };
 }
