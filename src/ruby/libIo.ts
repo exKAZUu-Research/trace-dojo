@@ -45,8 +45,9 @@ function* writePuts(target: Value, args: Value[]): Gen<void> {
       });
     }
     const line = value instanceof RString ? value : yield* toSValue(value);
+    const needsNewline = !line.s.endsWith('\n');
     if (line.s.length > 0) yield* write(target, line);
-    if (!line.s.endsWith('\n')) yield* write(target, '\n');
+    if (needsNewline) yield* write(target, '\n');
   };
   for (const arg of args) yield* visit(arg, new Set());
 }
@@ -106,8 +107,9 @@ def(
   function* (_self, args) {
     for (const arg of args) {
       const inspected = yield* inspectValue(arg);
-      yield* write(stdout(), inspected.binary ? exportBinaryInspect(inspected) : inspected);
-      yield* write(stdout(), '\n');
+      const target = stdout();
+      yield* write(target, inspected.binary ? exportBinaryInspect(inspected) : inspected);
+      yield* write(target, '\n');
     }
     if (args.length === 0) return NIL;
     return args.length === 1 ? args[0] : arr(args);

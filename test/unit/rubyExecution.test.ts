@@ -2196,6 +2196,26 @@ test('print reads the current field separator after writer callbacks', () => {
   });
 });
 
+test('p keeps each value and newline on one selected stream', () => {
+  expect(
+    run(
+      'class W;def initialize(n);@n=n;end;def write(x);$v<<[@n,x];$stdout=$b if @n==1;end;end;$v=[];$b=W.new(2);$stdout=W.new(1);p 1,2;$stdout=STDOUT;p $v'
+    )
+  ).toMatchObject({
+    stdout: '[[1, "1"], [1, "\\n"], [2, "2"], [2, "\\n"]]\n',
+  });
+});
+
+test('puts decides newline before writer mutates the String', () => {
+  expect(
+    run(
+      String.raw`class W;def write(s);$v<<s.dup;s<<"\n" if s=="x";end;end;$v=[];$stdout=W.new;puts "x";$stdout=STDOUT;p $v`
+    )
+  ).toMatchObject({
+    stdout: '["x", "\\n"]\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',
