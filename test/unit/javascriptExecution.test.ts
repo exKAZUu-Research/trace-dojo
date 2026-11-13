@@ -33,6 +33,18 @@ test.each([
   ['a let that redeclares a var in its block', '{\n  var a = 1;\n  let a = 2;\n}', 2, 'a はすでに宣言されています。'],
   ['a var that redeclares a let', 'let a = 1;\n{ var a = 2; }', 1, 'a はすでに宣言されています。'],
   [
+    'an identifier escape beyond U+10FFFF',
+    String.raw`let \u{110000} = 1;`,
+    0,
+    String.raw`\u{110000} は、この位置の名前に使える文字を表していません。`,
+  ],
+  [
+    'a #name escape of a digit first',
+    String.raw`class C { #\u0030a = 1; }`,
+    0,
+    String.raw`\u0030 は、この位置の名前に使える文字を表していません。`,
+  ],
+  [
     'a static method named prototype',
     'class A {\n  static prototype() {}\n}',
     1,

@@ -80,8 +80,17 @@ const reservedWords = new Set(
 export function nameOf(node: Node): string {
   const { text } = node;
   if (!text.includes('\\')) return text;
-  const name = text.replaceAll(/\\u(?:\{([\dA-Fa-f]+)\}|([\dA-Fa-f]{4}))/g, (_, braced?: string, fixed?: string) =>
-    String.fromCodePoint(Number.parseInt(braced ?? fixed ?? '', 16))
+  const start = text.startsWith('#') ? 1 : 0;
+  const name = text.replaceAll(
+    /\\u(?:\{([\dA-Fa-f]+)\}|([\dA-Fa-f]{4}))/g,
+    (escape: string, braced: string | undefined, fixed: string | undefined, offset: number) => {
+      const codePoint = Number.parseInt(braced ?? fixed ?? '', 16);
+      const character = codePoint <= 0x10_ff_ff ? String.fromCodePoint(codePoint) : '';
+      // An escape must spell a character the name may hold where it stands, as one written plainly would be.
+      const allowed = offset === start ? /^[\p{ID_Start}$_]$/u : /^[\p{ID_Continue}$‌‍]$/u;
+      if (!allowed.test(character)) fail(node, `${escape} は、この位置の名前に使える文字を表していません。`);
+      return character;
+    }
   );
   const isReference = node.type === 'identifier' || node.type.startsWith('shorthand_property_identifier');
   if (isReference && reservedWords.has(name)) fail(node, `予約語 ${name} は、エスケープを含めて書けません。`);
