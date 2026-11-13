@@ -14,6 +14,7 @@ import {
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
+import { fusedMultiplyAdd } from './floatMath';
 import { exactFloatPower } from './floatPower';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
@@ -342,9 +343,12 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
   const end = limit === NIL ? (by > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY) : Number(limit);
   const count = Math.floor((end - begin) / by + 1e-9 * Math.abs((end - begin) / by) + 1e-15);
   if (!Number.isFinite(count)) {
-    for (let index = 0; ; index++) yield* callBlock(block, [begin + index * by], false);
+    for (let index = 0; ; index++) yield* callBlock(block, [fusedMultiplyAdd(index, by, begin)], false);
   }
-  for (let index = 0; index <= count; index++) yield* callBlock(block, [begin + index * by], false);
+  for (let index = 0; index <= count; index++) {
+    const value = fusedMultiplyAdd(index, by, begin);
+    yield* callBlock(block, [by > 0 ? Math.min(value, end) : Math.max(value, end)], false);
+  }
   return self;
 }
 

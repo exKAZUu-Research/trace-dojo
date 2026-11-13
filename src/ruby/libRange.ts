@@ -1,6 +1,7 @@
 import { compareValues, inspectRange, rangeCovers, rEql, rEquals, spaceship, toIndex, toS } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
+import { fusedMultiplyAdd } from './floatMath';
 import { structuralHashValue } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
@@ -318,8 +319,11 @@ function* stepNumericRange(self: RRange, start: number, by: number, block: RProc
   const n = end === NIL ? Number.POSITIVE_INFINITY : Math.floor((Number(end) - start) / by + 1e-9);
   for (let index = 0; index <= n; index++) {
     rt().spend();
-    const value = start + index * by;
-    if (end !== NIL && exclusive && value >= Number(end)) break;
+    let value = fusedMultiplyAdd(index, by, start);
+    if (end !== NIL) {
+      if (exclusive && value >= Number(end)) break;
+      if (value > Number(end)) value = Number(end);
+    }
     yield* callBlock(block, [value], false);
   }
   return self;

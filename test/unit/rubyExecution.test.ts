@@ -589,6 +589,16 @@ test.each([
   ],
   ['adjacent surrogate format bytes', 'p format("%c%c", 55296, 56320).bytes', '[237, 160, 128, 237, 176, 128]\n'],
   [
+    'Float Range steps at decimal boundaries',
+    'p (0.0..0.6).step(0.2).to_a, (0.0..1.2).step(0.2).to_a, (0.3..0.9).step(0.1).to_a',
+    '[0.0, 0.2, 0.4, 0.6]\n[0.0, 0.2, 0.4, 0.6000000000000001, 0.8, 1.0, 1.2]\n[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]\n',
+  ],
+  [
+    'Float Numeric steps at decimal boundaries',
+    'p 0.3.step(0.9, 0.1).to_a, 0.0.step(0.6, 0.2).to_a',
+    '[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]\n[0.0, 0.2, 0.4, 0.6]\n',
+  ],
+  [
     'Float steps for custom arithmetic ranges',
     'class A; attr_reader :n; def initialize(n); @n=n; end; def <=>(o); n <=> o.n; end; def succ; A.new(n+1); end; def +(v); A.new(n+v); end; end; (A.new(0)..A.new(3)).step(1.5) { |x| p x.n }',
     '0\n1.5\n3.0\n',
