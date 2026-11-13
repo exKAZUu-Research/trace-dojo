@@ -28,6 +28,21 @@ export function floatFraction(value: number): { numerator: bigint | number; deno
   return { numerator, denominator };
 }
 
+export function frexpDouble(value: number): [number, number] {
+  if (value === 0 || !Number.isFinite(value)) return [value, 0];
+  const { mantissa, exponent } = dyadic(value);
+  const width = (mantissa < 0n ? -mantissa : mantissa).toString(2).length;
+  return [Number(mantissa) / 2 ** width, exponent + width];
+}
+
+export function ldexpDouble(value: number, exponent: number): number {
+  if (value === 0 || !Number.isFinite(value)) return value;
+  if (exponent > 2000) return value < 0 ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+  if (exponent < -2000) return value < 0 ? -0 : 0;
+  const dyad = dyadic(value);
+  return roundedDouble(dyad.mantissa, dyad.exponent + exponent);
+}
+
 export function floatStepCount(begin: number, end: number, step: number, exclusive = false): number {
   if (Number.isNaN(begin) || Number.isNaN(end) || Number.isNaN(step)) return Number.NaN;
   if (step === 0) return Number.POSITIVE_INFINITY;

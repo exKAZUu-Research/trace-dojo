@@ -1,7 +1,7 @@
 import type { OutputChannel } from '../interpreter/programIo';
 import { inspect, toInt, toSValue } from './conversions';
 import { def } from './define';
-import { typeError } from './errors';
+import { argumentError, typeError } from './errors';
 import { formatString } from './format';
 import { callMethod, type Gen, respondsTo } from './interp';
 import { NIL, RArray, RObject, RString, type Value, type Visibility } from './objects';
@@ -91,7 +91,10 @@ def(
   'p',
   [0, -1],
   function* (_self, args) {
-    for (const arg of args) yield* write(stdout(), `${yield* inspect(arg)}\n`);
+    for (const arg of args) {
+      yield* write(stdout(), yield* inspect(arg));
+      yield* write(stdout(), '\n');
+    }
     if (args.length === 0) return NIL;
     return args.length === 1 ? args[0] : arr(args);
   },
@@ -114,7 +117,12 @@ def(
   [0, -1],
   function* (_self, args) {
     if (args.length === 0) return NIL;
-    yield* write(stdout(), yield* formatString(args[0], args.slice(1)));
+    const explicit = !(args[0] instanceof RString);
+    if (explicit && args.length < 2) throw argumentError('too few arguments');
+    yield* write(
+      explicit ? args[0] : stdout(),
+      yield* formatString(args[Number(explicit)], args.slice(explicit ? 2 : 1))
+    );
     return NIL;
   },
   PRIVATE
@@ -133,7 +141,11 @@ def(
   'putc',
   1,
   function* (_self, [value]) {
-    yield* write(stdout(), yield* charOf(value));
+    const target = stdout();
+    const action = respondsTo(target, 'putc')
+      ? callMethod(target, 'putc', [value])
+      : write(target, yield* charOf(value));
+    yield* action;
     return value;
   },
   PRIVATE
@@ -184,7 +196,10 @@ def('IO', 'printf', [1, -1], function* (self: RObject, args) {
   return NIL;
 });
 def('IO', 'p', [0, -1], function* (self: RObject, args) {
-  for (const arg of args) yield* write(self, `${yield* inspect(arg)}\n`);
+  for (const arg of args) {
+    yield* write(self, yield* inspect(arg));
+    yield* write(self, '\n');
+  }
   return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
 });
 def('IO', 'putc', 1, function* (self: RObject, [value]) {

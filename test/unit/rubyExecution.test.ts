@@ -312,6 +312,26 @@ test.each([
     'p Math.gamma(5),Math.frexp(8.0),Math.ldexp(0.5,3),Math.log1p(0.5),Math.expm1(0.5);p :a.casecmp(:A),:b.casecmp?(:B),:a.intern',
     '24.0\n[0.5, 4]\n4.0\n0.4054651081081644\n0.6487212707001282\n0\ntrue\n:a\n',
   ],
+  [
+    'Math exponent helpers preserve extreme finite values',
+    'p Math.frexp(Float::MAX),Math.frexp(2.0**53-1),Math.ldexp(3,-1076),Math.ldexp(0.5,1024)',
+    '[0.9999999999999999, 1024]\n[0.9999999999999999, 53]\n5.0e-324\n8.98846567431158e+307\n',
+  ],
+  [
+    'Math gamma handles signed zero and infinite domain',
+    'p Math.gamma(-0.0),Math.gamma(0.0),Math.lgamma(-0.0),Math.lgamma(-1.0),Math.lgamma(1.0);begin;p Math.lgamma(-Float::INFINITY);rescue=>e;p e.class;end',
+    '-Infinity\nInfinity\n[Infinity, -1]\n[Infinity, 1]\n[0.0, 1]\nMath::DomainError\n',
+  ],
+  [
+    'Math gamma and lgamma match reference small arguments',
+    'p Math.gamma(-0.5),Math.gamma(0.5),Math.gamma(2.5),Math.lgamma(3),Math.lgamma(5)',
+    '-3.5449077018110318\n1.772453850905516\n1.329340388179137\n[0.6931471805599454, 1]\n[3.1780538303479453, 1]\n',
+  ],
+  [
+    'Kernel output preserves replacement-stream callbacks',
+    'class W;attr_reader :calls;def initialize;@calls=[];end;def write(x);@calls<<[:write,x];end;def putc(x);@calls<<[:putc,x];end;end;w=W.new;old=$stdout;$stdout=w;putc 65;p 1,2;printf(w,"%s","x");$stdout=old;p w.calls',
+    '[[:putc, 65], [:write, "1"], [:write, "\\n"], [:write, "2"], [:write, "\\n"], [:write, "x"]]\n',
+  ],
   ['record separator assignment copies a mutable String', 's="x";$/=s;s<<"y";p $/', '"x"\n'],
   [
     'paragraph line splitting consumes extra newlines',

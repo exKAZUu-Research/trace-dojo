@@ -14,8 +14,9 @@ import {
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
-import { floatFraction, floatStepCount, fusedMultiplyAdd } from './floatMath';
+import { floatFraction, floatStepCount, frexpDouble, fusedMultiplyAdd, ldexpDouble } from './floatMath';
 import { exactFloatPower } from './floatPower';
+import { gammaApprox, logGammaApprox } from './gammaMath';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { NIL, RArray, type RHash, type RProc, RString, RSymbol, type Value } from './objects';
@@ -947,49 +948,31 @@ sdef('Math', 'log', [1, 2], function* (_self, args) {
 });
 sdef('Math', 'frexp', 1, function* (_self, [value]) {
   const number = yield* toFloat(value);
-  if (number === 0 || !Number.isFinite(number)) return arr([number, 0n]);
-  const exponent = Math.floor(Math.log2(Math.abs(number))) + 1;
-  return arr([number / 2 ** exponent, BigInt(exponent)]);
+  const [fraction, exponent] = frexpDouble(number);
+  return arr([fraction, BigInt(exponent)]);
 });
 sdef('Math', 'ldexp', 2, function* (_self, [value, exponent]) {
-  return (yield* toFloat(value)) * 2 ** Number(yield* toInt(exponent));
+  return ldexpDouble(yield* toFloat(value), yield* toRubyInt(exponent));
 });
 sdef('Math', 'gamma', 1, function* (_self, [value]) {
   const number = yield* toFloat(value);
+  if (number === Number.NEGATIVE_INFINITY) domainCheck('gamma', false);
   if (number < 0 && Number.isInteger(number)) domainCheck('gamma', false);
-  if (number === 0) return Number.POSITIVE_INFINITY;
-  if (Number.isInteger(number) && number > 0 && number <= 171) {
-    let factorial = 1;
-    for (let index = 2; index < number; index++) factorial *= index;
-    return factorial;
+  if (number === 0) return Object.is(number, -0) ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+  if (Number.isInteger(number) && number > 0 && number <= 23) {
+    let factorial = 1n;
+    for (let index = 2; index < number; index++) factorial *= BigInt(index);
+    return Number(factorial);
   }
-  const [logarithm, sign] = logGamma(number);
-  return sign * Math.exp(logarithm);
+  return gammaApprox(number);
 });
 sdef('Math', 'lgamma', 1, function* (_self, [value]) {
-  const [logarithm, sign] = logGamma(yield* toFloat(value));
+  const number = yield* toFloat(value);
+  if (number === Number.NEGATIVE_INFINITY) domainCheck('lgamma', false);
+  if (number === 0) return arr([Number.POSITIVE_INFINITY, Object.is(number, -0) ? -1n : 1n]);
+  const [logarithm, sign] = logGammaApprox(number);
   return arr([logarithm, BigInt(sign)]);
 });
-
-function logGamma(value: number): [number, number] {
-  if (Number.isNaN(value)) return [Number.NaN, 1];
-  if (value === Number.POSITIVE_INFINITY) return [Number.POSITIVE_INFINITY, 1];
-  if (Number.isInteger(value) && value <= 0) return [Number.POSITIVE_INFINITY, value < 0 ? -1 : 1];
-  if (value < 0.5) {
-    const sine = Math.sin(Math.PI * value);
-    const [reflected] = logGamma(1 - value);
-    return [Math.log(Math.PI) - Math.log(Math.abs(sine)) - reflected, Math.sign(sine)];
-  }
-  const coefficients = [
-    0.9999999999998099, 676.5203681218851, -1259.1392167224028, 771.3234287776531, -176.6150291621406,
-    12.507343278686905, -0.13857109526572012, 9.984369578019572e-6, 1.5056327351493116e-7,
-  ];
-  const shifted = value - 1;
-  let sum = coefficients[0];
-  for (let index = 1; index < coefficients.length; index++) sum += coefficients[index] / (shifted + index);
-  const term = shifted + 7.5;
-  return [0.5 * Math.log(2 * Math.PI) + (shifted + 0.5) * Math.log(term) - term + Math.log(sum), 1];
-}
 
 /** The natural logarithm, exact for big Integers whose Float conversion would overflow. */
 function mathLog(value: Value, x: number): number {
