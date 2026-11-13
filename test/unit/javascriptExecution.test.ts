@@ -254,8 +254,9 @@ console.log(observer.canMoveForward());`,
   [
     'Object.create keeps the descriptors it has read',
     `const props = { get a() { return { value: new Turtle(1, 1) }; }, get b() { console.log(observer.canMoveForward()); return { value: 2 }; } };
-const result = Object.create(null, props);`,
-    'false\n',
+const result = Object.create(null, props);
+const other = Object.defineProperty({}, 'c', { get value() { return new Turtle(1, 1); }, get writable() { console.log(observer.canMoveForward()); return true; } });`,
+    'false\nfalse\n',
   ],
   [
     'flatMap releases an exhausted inner iterator',
@@ -737,6 +738,8 @@ h().then(() => { const it = g(); it.next(); it.next('a'); });`,
   [
     'busy-waiting on the clock',
     `const start = Date.now(); while (Date.now() - start < 50); console.log('waited');
+function sleep(ms) { const end = Date.now() + ms; while (Date.now() < end); } sleep(1000); console.log('slept');
+const s = new Date(); while (new Date() - s < 500); console.log('waited again');
 const t = Date.now(); setTimeout(() => console.log(Date.now() - t >= 30), 30); setTimeout(() => console.log('first'), 0);`,
   ],
   [

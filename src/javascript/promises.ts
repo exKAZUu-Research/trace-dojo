@@ -1,3 +1,4 @@
+import { LIMITS } from '../interpreter/limits';
 import { Awaiting, type BodyResult, type Resume, type Steps, type Suspension } from './generators';
 import { DONE, type ValueIterator } from './iteration';
 import type { RealmBuilder } from './realm';
@@ -35,8 +36,11 @@ interface Timer extends Job {
   interval?: number;
 }
 
-/** How many operations make a millisecond pass on the simulated clock, about the interpreter's speed. */
-const OPERATIONS_PER_MILLISECOND = 1000;
+/**
+ * How many operations make a millisecond pass on the simulated clock: a busy wait as long as a run's time limit then
+ * spends a fifth of the operation budget, so a wait the limits allow ends instead of running out of operations.
+ */
+const OPERATIONS_PER_MILLISECOND = LIMITS.maxOperations / (LIMITS.maxMilliseconds * 5);
 
 /**
  * The event loop of one run: the microtasks promises queue and the timers `setTimeout` schedules, which run after the

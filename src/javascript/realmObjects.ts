@@ -113,7 +113,10 @@ function defineReflection(method: ObjectMethod): void {
   method('defineProperty', 3, (runtime, args) => {
     const [object, key, attributes] = args;
     if (!isObject(object)) return runtime.throwError('TypeError', 'Object.defineProperty called on non-object');
-    definePropertyOrThrow(runtime, object, runtime.toPropertyKey(key), toPropertyDescriptor(runtime, attributes));
+    const propertyKey = runtime.toPropertyKey(key);
+    holdingTemporaries(runtime, () =>
+      definePropertyOrThrow(runtime, object, propertyKey, toPropertyDescriptor(runtime, attributes))
+    );
     return object;
   });
   method('defineProperties', 2, (runtime, args) => {
@@ -181,21 +184,25 @@ function changePrototype(runtime: Runtime, object: JsObject, proto: JsObject | n
 function defineProperties(runtime: Runtime, object: JsObject, properties: Value): JsObject {
   const source = runtime.toObject(properties);
   const descriptors: [Key, Descriptor][] = [];
-  // The values read so far stay reachable while later descriptors' getters run the program's code.
+  holdingTemporaries(runtime, () => {
+    for (const key of [...runtime.ownKeys(source), ...runtime.ownSymbols(source)]) {
+      if (!runtime.getOwnProperty(source, key)?.enumerable) continue;
+      descriptors.push([key, toPropertyDescriptor(runtime, runtime.get(source, key))]);
+    }
+    for (const [key, descriptor] of descriptors) definePropertyOrThrow(runtime, object, key, descriptor);
+  });
+  return object;
+}
+
+/** Runs `run`, then releases what it left in the frame's temporaries, as toPropertyDescriptor leaves what it read. */
+function holdingTemporaries(runtime: Runtime, run: () => void): void {
   const { temporaries } = runtime.frame;
   const held = temporaries.length;
   try {
-    for (const key of [...runtime.ownKeys(source), ...runtime.ownSymbols(source)]) {
-      if (!runtime.getOwnProperty(source, key)?.enumerable) continue;
-      const descriptor = toPropertyDescriptor(runtime, runtime.get(source, key));
-      temporaries.push(descriptor.value, descriptor.get, descriptor.set);
-      descriptors.push([key, descriptor]);
-    }
-    for (const [key, descriptor] of descriptors) definePropertyOrThrow(runtime, object, key, descriptor);
+    run();
   } finally {
     temporaries.length = held;
   }
-  return object;
 }
 
 function primitiveText(value: Exclude<Value, JsObject>): string {
@@ -234,8 +241,11 @@ interface Descriptor {
   configurable?: boolean;
 }
 
-/** The spec's ToPropertyDescriptor. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+/**
+ * The spec's ToPropertyDescriptor. Each value and accessor stays in the frame's temporaries from when it is read, since
+ * later fields' getters run the program's code; the caller releases them once the descriptor is applied.
+ */
+// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function toPropertyDescriptor(runtime: Runtime, value: Value): Descriptor {
   if (!isObject(value))
     return runtime.throwError('TypeError', `Property description must be an object: ${runtime.describe(value)}`);
@@ -243,11 +253,15 @@ function toPropertyDescriptor(runtime: Runtime, value: Value): Descriptor {
   for (const field of ['enumerable', 'configurable'] as const) {
     if (runtime.hasProperty(value, field)) descriptor[field] = toBoolean(runtime.get(value, field));
   }
-  if (runtime.hasProperty(value, 'value')) descriptor.value = runtime.get(value, 'value');
+  if (runtime.hasProperty(value, 'value')) {
+    descriptor.value = runtime.get(value, 'value');
+    runtime.frame.temporaries.push(descriptor.value);
+  }
   if (runtime.hasProperty(value, 'writable')) descriptor.writable = toBoolean(runtime.get(value, 'writable'));
   for (const field of ['get', 'set'] as const) {
     if (!runtime.hasProperty(value, field)) continue;
     const accessor = runtime.get(value, field);
+    runtime.frame.temporaries.push(accessor);
     if (accessor !== undefined && !isCallable(accessor)) {
       runtime.throwError(
         'TypeError',
