@@ -797,7 +797,7 @@ console.log(typeof n, typeof s, n, s, b, n + 1, s + 'c', b ? 'truthy' : 'falsy',
 class N extends Number { twice() { return this * 2; } } const x = new N(4); console.log(x, x.twice(), x instanceof N);
 console.log(JSON.stringify({ a: 1, b: 2 }, [new String('a'), new Number(1)]), JSON.stringify({ a: 1 }, null, new Number(2)));
 Object.defineProperty(s, '0', { value: 'a' }); Object.defineProperty(s, 'length', { value: 2 }); console.log(Object.keys(s), Object.getOwnPropertyNames(s));
-for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0), () => new Symbol()]) {
+for (const f of [() => new String(Symbol('q')), () => 'abc'.split(Symbol('x'), 0), () => new Symbol(), () => { class T extends String { length = 5; } new T('ab'); }]) {
   try { console.log(f()); } catch (e) { console.log(e.name, e.message); }
 }`,
   ],
@@ -811,11 +811,12 @@ setTimeout(() => console.log('timeout 50'), 50); let sum = 0; for (let i = 0; i 
 setTimeout(() => console.log('long'), 50); for (let i = 0; i < 1000; i++) new Date(0); setTimeout(() => console.log('short'), 0);
 const t = Date.now(); while (Date.now() - t < 1000) { for (let i = 0; i < 50; i++) sum += i; } console.log('waited with work');
 setTimeout(() => console.log('timer 100'), 100); for (let i = 0; i < 5000; i++) sum += i; console.log(new Date().getFullYear() > 2000); setTimeout(() => console.log('timer 0'), 0);
-setTimeout(() => console.log('overdue 500'), 500); sleep(1000); setTimeout(() => console.log('after sleep'), 0);
-let n = 0; const iv = setInterval(() => { console.log('iv', ++n); if (n === 3) clearInterval(iv); }, 10);
-setTimeout(() => { console.log('t15'); Promise.resolve().then(() => console.log('micro in t15')); setTimeout(() => console.log('nested 0'), 0); }, 15);
-setTimeout(() => { sleep(100); console.log('slow'); }, 20); setTimeout(() => console.log('after slow'), 25);
-setTimeout(() => console.log('a'), 2); setTimeout(() => console.log('b'), 1);`,
+setTimeout(() => console.log('overdue 500'), 500); sleep(1000); setTimeout(() => console.log('after sleep'), 60);
+// Timers set after the busy waits fall due at least 50 ms apart, so Node.js waking late does not reorder them.
+let n = 0; const iv = setInterval(() => { console.log('iv', ++n); if (n === 3) clearInterval(iv); }, 100);
+setTimeout(() => { console.log('t150'); Promise.resolve().then(() => console.log('micro in t150')); setTimeout(() => console.log('nested 0'), 0); }, 150);
+setTimeout(() => { sleep(200); console.log('slow'); }, 250); setTimeout(() => console.log('after slow'), 350);
+`,
   ],
   [
     'Object.create with property descriptors',

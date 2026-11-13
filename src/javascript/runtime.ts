@@ -309,9 +309,21 @@ export class Runtime {
   }
 
   defineProperty(object: JsObject, key: Key, property: Property): void {
-    // A String object's indices and length are read-only and never stored, so a definition validated as compatible
-    // with them changes nothing.
-    if (typeof object.primitive === 'string' && ownElement(object.primitive, key) !== MISSING) return;
+    // A String object's indices and length are read-only and never stored: a definition compatible with them changes
+    // nothing, and any other, such as a class field of that name, throws.
+    if (typeof object.primitive === 'string') {
+      const current = ownElement(object.primitive, key);
+      if (current !== MISSING) {
+        const compatible =
+          !isAccessor(property) &&
+          Object.is(property.value, current) &&
+          !property.writable &&
+          !property.configurable &&
+          property.enumerable === (key !== 'length');
+        if (!compatible) this.throwError('TypeError', `Cannot redefine property: ${String(key)}`);
+        return;
+      }
+    }
     if (object instanceof JsArray && (arrayIndexOf(key) !== undefined || key === 'length')) {
       if (isAccessor(property)) this.throwError('TypeError', 'Accessors on array elements are not supported');
       this.set(object, key, property.value);
