@@ -77,6 +77,12 @@ test.each([
   ],
   ['empty-pattern substitution around emoji', 'p "😀".gsub("", ".")', '".😀."\n'],
   [
+    'sort_by with a redefined numeric comparator',
+    'class Integer; def <=>(other); other - self; end; end; p [1,2,3].sort_by { |x| x }',
+    '[3, 2, 1]\n',
+  ],
+  ['String dump escapes Unicode', 'p "あ".dump; p "😀".dump', '"\\"\\\\u3042\\""\n"\\"\\\\u{1F600}\\""\n'],
+  [
     'Float neighbors at infinity',
     'p Float::INFINITY.next_float; p (-Float::INFINITY).prev_float',
     'Infinity\n-Infinity\n',

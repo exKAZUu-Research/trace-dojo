@@ -1,6 +1,7 @@
 import { numericCompare } from './conversions';
 import type { Gen } from './interp';
 import type { Value } from './objects';
+import { classOf } from './values';
 
 /**
  * Sorts in place as Ruby's `ruby_qsort` does on the reference platform, which calls the C library's BSD `qsort_r`
@@ -94,8 +95,11 @@ export function* platformSort<T>(items: T[], compare: (a: T, b: T) => Gen<number
 
 /** A key of `sort_by` that Ruby compares directly: a fixnum-sized Integer or a Float. */
 export function isUniformKey(value: Value): boolean {
-  if (typeof value === 'number') return true;
-  return typeof value === 'bigint' && value >= -(2n ** 62n) && value < 2n ** 62n;
+  if (typeof value === 'number' && Number.isNaN(value)) return false;
+  if (typeof value === 'bigint' && (value < -(2n ** 62n) || value >= 2n ** 62n)) return false;
+  return (
+    (typeof value === 'number' || typeof value === 'bigint') && classOf(value).findMethod('<=>')?.body.kind === 'native'
+  );
 }
 
 function less(a: Value, b: Value): boolean {
