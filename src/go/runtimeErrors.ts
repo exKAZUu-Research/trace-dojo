@@ -1,10 +1,10 @@
 import { addMethod, fn, namedType } from './native';
 import { GoPanic } from './runtime';
-import { BASIC, type NamedType, pointerTo, type Type } from './types';
+import { BASIC, type NamedType, pointerTo } from './types';
 import { Cell, GoStruct, Iface, Pointer, type Value } from './values';
 
-function errorType(name: string, prefix: string, pointer = false): NamedType {
-  const type = namedType('runtime', name, { kind: 'struct', fields: [] });
+function errorType(name: string, prefix: string, pointer = false, pkg = 'runtime'): NamedType {
+  const type = namedType(pkg, name, { kind: 'struct', fields: [] });
   const message = (receiver: Value): string => {
     if (pointer && !(receiver instanceof Pointer)) nilPointerPanic();
     const struct = (receiver instanceof Pointer ? receiver.load() : receiver) as GoStruct | undefined;
@@ -20,8 +20,9 @@ function errorType(name: string, prefix: string, pointer = false): NamedType {
 const BOUNDS_ERROR = errorType('boundsError', 'runtime error: ');
 const ERROR_STRING = errorType('errorString', 'runtime error: ');
 const PLAIN_ERROR = errorType('plainError', '');
-const TYPE_ASSERTION_ERROR = errorType('TypeAssertionError', '', true);
-const PANIC_NIL_ERROR = errorType('PanicNilError', 'runtime error: ', true);
+export const TYPE_ASSERTION_ERROR = errorType('TypeAssertionError', '', true);
+export const PANIC_NIL_ERROR = errorType('PanicNilError', 'runtime error: ', true);
+const UNHASHABLE_TYPE_ERROR = errorType('unhashableTypeError', 'hash of unhashable type: ', false, 'maps');
 
 function errorValue(type: NamedType, message: string, pointer = false): Iface {
   const struct = new GoStruct([], { message });
@@ -58,12 +59,12 @@ export function typeAssertionPanic(message: string): never {
   throw new GoPanic(errorValue(TYPE_ASSERTION_ERROR, `interface conversion: ${message}`, true));
 }
 
+/** The panic of a lookup or delete in a nil or empty map whose key holds a value of an unhashable type. */
+export function unhashableKeyPanic(typeName: string): never {
+  throw new GoPanic(errorValue(UNHASHABLE_TYPE_ERROR, typeName));
+}
+
 /** The value `panic(nil)` panics with since Go 1.21. */
 export function panicNilValue(): Value {
   return errorValue(PANIC_NIL_ERROR, 'panic called with nil argument', true);
-}
-
-export function isRuntimeErrorType(type: Type): boolean {
-  const named = type.kind === 'pointer' ? type.element : type;
-  return [BOUNDS_ERROR, ERROR_STRING, TYPE_ASSERTION_ERROR, PANIC_NIL_ERROR].includes(named as NamedType);
 }

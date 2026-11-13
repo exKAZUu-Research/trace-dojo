@@ -1,9 +1,9 @@
 import type { Entity } from '../entities';
-import { addMethod, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
 import { nilPointerPanic } from '../runtimeErrors';
 import { ANY, BASIC, type NamedType, pointerTo } from '../types';
 import { Cell, GoStruct, Pointer, type Value } from '../values';
-import { BOOL, callMethod, INT } from './support';
+import { BOOL, callMethod, INT, spendFor } from './support';
 
 // container/heap: transcribed from Go's heap.go ---------------------------------------------------------------------
 
@@ -110,6 +110,7 @@ const NEXT = 0;
 const PREV = 1;
 const OWNER = 2;
 const VALUE = 3;
+const ELEMENT_FIELD_COUNT = 4;
 
 function element(pointer: Value): GoStruct {
   if (!(pointer instanceof Pointer)) nilPointerPanic();
@@ -157,6 +158,9 @@ function insert(list: Pointer, item: Pointer, at: Pointer): Pointer {
 }
 
 function insertValue(list: Pointer, value: Value, at: Pointer): Pointer {
+  const runtime = currentRuntime();
+  runtime.spend();
+  runtime.allocate(ELEMENT_FIELD_COUNT);
   return insert(list, new Pointer(new Cell(new GoStruct([undefined, undefined, undefined, value])), 'v'), at);
 }
 
@@ -272,6 +276,7 @@ listMethod('PushFrontList', [LIST_POINTER], [], (list, [other]) => {
 /** The values of a list, read before inserting them, since a list may be inserted into itself. */
 function listValues(list: Value): Value[] {
   if (!(list instanceof Pointer)) nilPointerPanic();
+  spendFor(Number(lengthOf(list)));
   const values: Value[] = [];
   let item = lengthOf(list) === 0n ? undefined : element(rootOf(list)).fields[NEXT];
   for (let count = lengthOf(list); count > 0n; count--) {
@@ -282,6 +287,7 @@ function listValues(list: Value): Value[] {
 }
 
 function newList(): Pointer {
+  currentRuntime().allocate(ELEMENT_FIELD_COUNT + 2);
   const root = new GoStruct([undefined, undefined, undefined, undefined]);
   return init(new Pointer(new Cell(new GoStruct([root, 0n])), 'v'));
 }

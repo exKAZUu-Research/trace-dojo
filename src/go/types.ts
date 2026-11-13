@@ -97,6 +97,9 @@ export interface InterfaceType {
   typeSet?: TypeSet;
 }
 
+/** The named types that declare interfaces used as type constraints, which diagnostics name as Go does. */
+export const CONSTRAINT_NAMES = new WeakMap<InterfaceType, NamedType>();
+
 export interface TupleType {
   kind: 'tuple';
   types: Type[];

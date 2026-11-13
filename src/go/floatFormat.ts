@@ -1,3 +1,5 @@
+import { currentRuntime } from './native';
+
 /** A finite non-negative number as significant decimal digits and the position of the decimal point. */
 interface Decimal {
   /** Digits without leading or trailing zeros, or '' for zero. */
@@ -11,6 +13,12 @@ export function formatFloat(value: number, format: string, precision: number, bi
   if (Number.isNaN(value)) return 'NaN';
   if (value === Infinity) return '+Inf';
   if (value === -Infinity) return '-Inf';
+  // 'e', 'f', and 'x' write `precision` digits, whereas 'g' writes no more digits than the value has.
+  if (precision > 0 && format !== 'g' && format !== 'G' && format !== 'b') {
+    const runtime = currentRuntime();
+    runtime.checkStringLength(precision);
+    runtime.spend(1 + Math.floor(precision / 16));
+  }
   const negative = value < 0 || Object.is(value, -0);
   const magnitude = Math.abs(value);
   if (format === 'b') return (negative ? '-' : '') + binaryExponent(magnitude, bitSize);
@@ -107,9 +115,11 @@ function fixedForm({ digits, point }: Decimal, precision: number): string {
 function shortestDecimal(value: number, bitSize: 32 | 64): Decimal {
   if (value === 0) return { digits: '', point: 0 };
   if (bitSize === 32) {
+    // Rounding the exact value halves to even, as Go's Ryū does on a tie that toPrecision would round up.
+    const exact = exactDecimal(value);
     for (let precision = 1; precision <= 9; precision++) {
-      const text = value.toPrecision(precision);
-      if (Math.fround(Number(text)) === value) return parseDecimal(Number(text).toExponential(precision - 1));
+      const candidate = roundDecimal(exact, precision);
+      if (Math.fround(Number(`0.${candidate.digits}e${candidate.point}`)) === value) return candidate;
     }
   }
   return parseDecimal(value.toExponential());
@@ -185,46 +195,57 @@ function binaryExponent(value: number, bitSize: 32 | 64): string {
   return `${mantissa}p${exponent >= 0 ? '+' : ''}${exponent}`;
 }
 
+/** `strconv.fmtX`: the %x form of a non-negative float, with the leading 1 at bit 60 while it rounds. */
 function hexFloat(value: number, precision: number, bitSize: 32 | 64, upper: boolean): string {
-  let mantissa: bigint;
-  let exponent: number;
+  const mantissaBits = bitSize === 32 ? 23 : 52;
   const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, bitSize === 32 ? Math.fround(value) : value);
-  const bits = view.getBigUint64(0);
-  const biased = Number(bits >> 52n) & 0x7_ff;
-  mantissa = bits & ((1n << 52n) - 1n);
-  if (value === 0) {
-    mantissa = 0n;
-    exponent = 0;
-  } else if (biased === 0) {
-    exponent = -1022;
-    while (mantissa < 1n << 52n) {
-      mantissa <<= 1n;
-      exponent--;
-    }
-    mantissa &= (1n << 52n) - 1n;
+  let bits: bigint;
+  let biased: number;
+  if (bitSize === 32) {
+    view.setFloat32(0, value);
+    bits = BigInt(view.getUint32(0));
+    biased = Number(bits >> 23n) & 0xff;
   } else {
-    exponent = biased - 1023;
+    view.setFloat64(0, value);
+    bits = view.getBigUint64(0);
+    biased = Number(bits >> 52n) & 0x7_ff;
   }
-  // 52 fraction bits are 13 hex digits; round to the precision, halves to even.
-  let fraction = mantissa;
-  let digits = 13;
-  if (precision >= 0 && precision < 13) {
-    const drop = BigInt((13 - precision) * 4);
-    const remainder = fraction & ((1n << drop) - 1n);
-    const half = 1n << (drop - 1n);
-    fraction >>= drop;
-    if (remainder > half || (remainder === half && (fraction & 1n) === 1n)) fraction++;
-    digits = precision;
-    if (fraction >> BigInt(digits * 4) !== 0n) {
-      fraction &= (1n << BigInt(digits * 4)) - 1n;
-      exponent++;
+  let mant = bits & ((1n << BigInt(mantissaBits)) - 1n);
+  let exp = biased;
+  if (exp === 0) exp++;
+  else mant |= 1n << BigInt(mantissaBits);
+  exp -= bitSize === 32 ? 127 : 1023;
+  if (mant === 0n) exp = 0;
+  mant <<= BigInt(60 - mantissaBits);
+  while (mant !== 0n && (mant & (1n << 60n)) === 0n) {
+    mant <<= 1n;
+    exp--;
+  }
+  if (precision >= 0 && precision < 15) {
+    const shift = BigInt(precision * 4);
+    const extra = BigInt.asUintN(64, mant << shift) & ((1n << 60n) - 1n);
+    mant >>= 60n - shift;
+    if ((extra | (mant & 1n)) > 1n << 59n) mant++;
+    mant <<= 60n - shift;
+    if ((mant & (1n << 61n)) !== 0n) {
+      mant >>= 1n;
+      exp++;
     }
   }
-  let hex = digits > 0 ? fraction.toString(16).padStart(digits, '0') : '';
-  if (precision < 0) hex = hex.replace(/0+$/, '');
-  else if (precision > 13) hex = hex.padEnd(precision, '0');
-  const lead = value === 0 ? '0' : '1';
-  const text = `0x${lead}${hex === '' ? '' : `.${hex}`}p${exponent >= 0 ? '+' : '-'}${String(Math.abs(exponent)).padStart(2, '0')}`;
+  const lead = String((mant >> 60n) & 1n);
+  mant = BigInt.asUintN(64, mant << 4n);
+  let fraction = '';
+  const nextDigit = (): string => {
+    const digit = ((mant >> 60n) & 15n).toString(16);
+    mant = BigInt.asUintN(64, mant << 4n);
+    return digit;
+  };
+  if (precision < 0) {
+    while (mant !== 0n) fraction += nextDigit();
+  } else {
+    for (let index = 0; index < precision; index++) fraction += nextDigit();
+  }
+  const magnitude = Math.abs(exp);
+  const text = `0x${lead}${fraction === '' ? '' : `.${fraction}`}p${exp < 0 ? '-' : '+'}${String(magnitude).padStart(2, '0')}`;
   return upper ? text.toUpperCase() : text;
 }

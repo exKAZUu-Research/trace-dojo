@@ -37,10 +37,10 @@ export class Converter {
     let packageSpan: Span = { row: 0, column: 0 };
     const imports: ImportSpec[] = [];
     const declarations: TopLevelDeclaration[] = [];
-    for (const child of root.namedChildren) {
+    for (const child of named(root)) {
       switch (child.type) {
         case 'package_clause': {
-          const name = child.namedChildren[0];
+          const name = named(child)[0];
           packageName = name.text;
           packageSpan = spanOf(name);
           break;
@@ -58,9 +58,6 @@ export class Converter {
         case 'const_declaration':
         case 'type_declaration': {
           declarations.push(this.convertDeclaration(child));
-          break;
-        }
-        case 'comment': {
           break;
         }
         default: {
@@ -104,7 +101,7 @@ export class Converter {
   }
 
   private convertReceiver(node: Node): Receiver {
-    const parameters = node.namedChildren.filter((child) => child.type !== 'comment');
+    const parameters = named(node);
     if (parameters.length !== 1) throw syntaxError(node, 'メソッドのレシーバは1つだけ書けます。');
     const parameter = parameters[0];
     if (parameter.type === 'variadic_parameter_declaration')
@@ -112,18 +109,18 @@ export class Converter {
     const names = parameter.childrenForFieldName('name');
     if (names.length > 1) throw syntaxError(parameter, 'メソッドのレシーバは1つだけ書けます。');
     let typeNode = required(parameter.childForFieldName('type'));
-    while (typeNode.type === 'parenthesized_type') typeNode = typeNode.namedChildren[0];
+    while (typeNode.type === 'parenthesized_type') typeNode = named(typeNode)[0];
     let pointer = false;
     if (typeNode.type === 'pointer_type') {
       pointer = true;
-      typeNode = typeNode.namedChildren[0];
-      while (typeNode.type === 'parenthesized_type') typeNode = typeNode.namedChildren[0];
+      typeNode = named(typeNode)[0];
+      while (typeNode.type === 'parenthesized_type') typeNode = named(typeNode)[0];
     }
     let typeArguments: string[] = [];
     if (typeNode.type === 'generic_type') {
       const argumentsNode = required(typeNode.childForFieldName('type_arguments'));
-      typeArguments = argumentsNode.namedChildren.map((argument) => {
-        const inner = argument.type === 'type_elem' ? argument.namedChildren : [argument];
+      typeArguments = named(argumentsNode).map((argument) => {
+        const inner = argument.type === 'type_elem' ? named(argument) : [argument];
         if (inner.length !== 1 || inner[0].type !== 'type_identifier') {
           throw syntaxError(argument, 'レシーバの型引数には名前だけを書いてください。');
         }
@@ -138,8 +135,7 @@ export class Converter {
   }
 
   private convertTypeParameters(node: Node): TypeParameter[] {
-    return node.namedChildren.flatMap((declaration) => {
-      if (declaration.type === 'comment') return [];
+    return named(node).flatMap((declaration) => {
       const constraintNode = required(declaration.childForFieldName('type'));
       const constraint = this.convertConstraint(constraintNode);
       return declaration.childrenForFieldName('name').map((name) => ({ ...spanOf(name), name: name.text, constraint }));
@@ -147,7 +143,7 @@ export class Converter {
   }
 
   private convertConstraint(node: Node): TypeExpression {
-    const parts = node.namedChildren;
+    const parts = named(node);
     if (parts.length !== 1) unsupported(node, '型の集合（~ や | を使った制約）');
     const part = parts[0];
     if (part.type === 'negated_type') unsupported(part, '型の集合（~ や | を使った制約）');
@@ -169,7 +165,7 @@ export class Converter {
   }
 
   private convertParameters(node: Node): Parameter[] {
-    const declarations = node.namedChildren.filter((child) => child.type !== 'comment');
+    const declarations = named(node);
     const result: Parameter[] = [];
     for (const declaration of declarations) {
       if (declaration.type === 'variadic_parameter_declaration') {
@@ -192,9 +188,7 @@ export class Converter {
   private convertDeclaration(node: Node): DeclarationStatement {
     switch (node.type) {
       case 'var_declaration': {
-        const specs = node.namedChildren.flatMap((child) =>
-          child.type === 'var_spec_list' ? child.namedChildren : [child]
-        );
+        const specs = named(node).flatMap((child) => (child.type === 'var_spec_list' ? named(child) : [child]));
         return {
           kind: 'var',
           ...spanOf(node),
@@ -206,7 +200,7 @@ export class Converter {
       }
       case 'type_declaration': {
         const specs: TypeSpec[] = [];
-        for (const child of node.namedChildren) {
+        for (const child of named(node)) {
           if (child.type === 'type_alias') unsupported(child, '型の別名（type A = B）');
           if (child.type === 'type_spec') specs.push(this.convertTypeSpec(child));
         }
@@ -231,7 +225,7 @@ export class Converter {
 
   private convertConstSpecs(node: Node): ConstSpec[] {
     const specs: ConstSpec[] = [];
-    for (const child of node.namedChildren) {
+    for (const child of named(node)) {
       if (child.type !== 'const_spec') continue;
       const typeNode = child.childForFieldName('type');
       const valueNode = child.childForFieldName('value');
@@ -290,7 +284,7 @@ export class Converter {
         return { ...base, ...span, typeArguments: this.convertTypeArguments(argumentsNode) };
       }
       case 'pointer_type': {
-        return { kind: 'pointer', ...span, element: this.convertType(node.namedChildren[0]) };
+        return { kind: 'pointer', ...span, element: this.convertType(named(node)[0]) };
       }
       case 'slice_type': {
         return { kind: 'slice', ...span, element: this.convertType(required(node.childForFieldName('element'))) };
@@ -318,7 +312,7 @@ export class Converter {
         return { kind: 'func', ...span, signature: this.convertSignature(node) };
       }
       case 'struct_type': {
-        return { kind: 'struct', ...span, fields: this.convertFields(node.namedChildren[0]) };
+        return { kind: 'struct', ...span, fields: this.convertFields(named(node)[0]) };
       }
       case 'interface_type': {
         return { kind: 'interface', ...span, methods: this.convertMethods(node) };
@@ -340,9 +334,9 @@ export class Converter {
   }
 
   private convertTypeArguments(node: Node): TypeExpression[] {
-    return node.namedChildren.map((argument) => {
+    return named(node).map((argument) => {
       if (argument.type !== 'type_elem') return this.convertType(argument);
-      const parts = argument.namedChildren;
+      const parts = named(argument);
       if (parts.length !== 1 || parts[0].type === 'negated_type') {
         unsupported(argument, '型の集合（~ や | を使った制約）');
       }
@@ -353,7 +347,7 @@ export class Converter {
   private convertFields(list: Node | undefined): FieldSyntax[] {
     if (!list) return [];
     const fields: FieldSyntax[] = [];
-    for (const declaration of list.namedChildren) {
+    for (const declaration of named(list)) {
       if (declaration.type !== 'field_declaration') continue;
       const tag = declaration.childForFieldName('tag');
       if (tag) unsupported(tag, '構造体のタグ');
@@ -377,8 +371,7 @@ export class Converter {
 
   private convertMethods(node: Node): MethodSyntax[] {
     const methods: MethodSyntax[] = [];
-    for (const child of node.namedChildren) {
-      if (child.type === 'comment') continue;
+    for (const child of named(node)) {
       if (child.type !== 'method_elem') unsupported(child, 'インターフェースの埋め込みや型の集合');
       methods.push({
         ...spanOf(child),
@@ -392,7 +385,7 @@ export class Converter {
   // Statements --------------------------------------------------------------------------------------------------------
 
   convertBlock(node: Node): Block {
-    const list = node.namedChildren.find((child) => child.type === 'statement_list');
+    const list = named(node).find((child) => child.type === 'statement_list');
     return {
       ...spanOf(node),
       statements: list ? this.convertStatements(list) : [],
@@ -401,7 +394,7 @@ export class Converter {
   }
 
   private convertStatements(list: Node): Statement[] {
-    return list.namedChildren.flatMap((child) => (child.type === 'comment' ? [] : [this.convertStatement(child)]));
+    return named(list).map((child) => this.convertStatement(child));
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per statement kind.
@@ -437,12 +430,12 @@ export class Converter {
         return this.convertTypeSwitch(node);
       }
       case 'return_statement': {
-        const list = node.namedChildren.find((child) => child.type === 'expression_list');
+        const list = named(node).find((child) => child.type === 'expression_list');
         return { kind: 'return', ...span, results: list ? this.convertExpressionList(list) : [] };
       }
       case 'break_statement':
       case 'continue_statement': {
-        const label = node.namedChildren.find((child) => child.type === 'label_name');
+        const label = named(node).find((child) => child.type === 'label_name');
         if (label) unsupported(label, 'ラベル');
         return { kind: node.type === 'break_statement' ? 'break' : 'continue', ...span };
       }
@@ -450,7 +443,7 @@ export class Converter {
         return { kind: 'fallthrough', ...span };
       }
       case 'defer_statement': {
-        const call = node.namedChildren.find((child) => child.type !== 'comment');
+        const call = named(node)[0];
         return { kind: 'defer', ...span, call: this.convertExpression(required(call)) };
       }
       case 'labeled_statement': {
@@ -478,7 +471,7 @@ export class Converter {
     const span = spanOf(node);
     switch (node.type) {
       case 'expression_statement': {
-        return { kind: 'expression', ...span, expression: this.convertExpression(node.namedChildren[0]) };
+        return { kind: 'expression', ...span, expression: this.convertExpression(named(node)[0]) };
       }
       case 'assignment_statement': {
         return {
@@ -503,7 +496,7 @@ export class Converter {
           kind: 'incDec',
           ...span,
           operator: node.type === 'inc_statement' ? '++' : '--',
-          operand: this.convertExpression(node.namedChildren[0]),
+          operand: this.convertExpression(named(node)[0]),
         };
       }
       case 'empty_statement': {
@@ -538,7 +531,7 @@ export class Converter {
   private convertFor(node: Node): Statement {
     const span = spanOf(node);
     const body = this.convertBlock(required(node.childForFieldName('body')));
-    const header = node.namedChildren.find((child) => child.type !== 'block' && child.type !== 'comment');
+    const header = named(node).find((child) => child.type !== 'block');
     if (!header) return { kind: 'for', ...span, body };
     if (header.type === 'range_clause') {
       const left = header.childForFieldName('left');
@@ -576,7 +569,7 @@ export class Converter {
     const init = node.childForFieldName('initializer');
     const value = node.childForFieldName('value');
     const cases: SwitchCase[] = [];
-    for (const child of node.namedChildren) {
+    for (const child of named(node)) {
       if (child.type !== 'expression_case' && child.type !== 'default_case') continue;
       const valueList = child.childForFieldName('value');
       cases.push({
@@ -596,17 +589,17 @@ export class Converter {
   }
 
   private caseBody(node: Node): Statement[] {
-    const list = node.namedChildren.find((child) => child.type === 'statement_list');
+    const list = named(node).find((child) => child.type === 'statement_list');
     return list ? this.convertStatements(list) : [];
   }
 
   private convertTypeSwitch(node: Node): Statement {
     const init = node.childForFieldName('initializer');
     const alias = node.childForFieldName('alias');
-    const aliases = alias ? alias.namedChildren : [];
+    const aliases = alias ? named(alias) : [];
     if (aliases.length > 1) throw syntaxError(alias as Node, '型の switch で受け取れる名前は1つだけです。');
     const cases: TypeSwitchCase[] = [];
-    for (const child of node.namedChildren) {
+    for (const child of named(node)) {
       if (child.type !== 'type_case' && child.type !== 'default_case') continue;
       const types =
         child.type === 'default_case'
@@ -633,7 +626,7 @@ export class Converter {
 
   private convertExpressionList(node: Node): Expression[] {
     if (node.type !== 'expression_list') return [this.convertExpression(node)];
-    return node.namedChildren.flatMap((child) => (child.type === 'comment' ? [] : [this.convertExpression(child)]));
+    return named(node).map((child) => this.convertExpression(child));
   }
 
   // code-gauge-allow functionCognitiveComplexity 40 -- One case per expression kind.
@@ -694,7 +687,7 @@ export class Converter {
         };
       }
       case 'parenthesized_expression': {
-        return { kind: 'paren', ...span, expression: this.convertExpression(node.namedChildren[0]) };
+        return { kind: 'paren', ...span, expression: this.convertExpression(named(node)[0]) };
       }
       case 'selector_expression': {
         const field = required(node.childForFieldName('field'));
@@ -795,15 +788,14 @@ export class Converter {
     const argumentsNode = required(node.childForFieldName('arguments'));
     const typeArgumentsNode = node.childForFieldName('type_arguments');
     const args: Expression[] = [];
-    for (const argument of argumentsNode.namedChildren) {
-      if (argument.type === 'comment') continue;
+    for (const argument of named(argumentsNode)) {
       if (argument.type === 'variadic_argument') unsupported(argument, '可変個の引数に ... で渡す書き方');
       args.push(this.convertExpression(argument));
     }
     let callee = this.convertExpression(required(node.childForFieldName('function')));
     // The grammar reads `m[k](x)` as a call with type arguments; whether `k` is a type the checker decides.
     if (typeArgumentsNode) {
-      const indices = typeArgumentsNode.namedChildren.map((argument) => this.typeArgumentExpression(argument));
+      const indices = named(typeArgumentsNode).map((argument) => this.typeArgumentExpression(argument));
       callee = { kind: 'index', ...spanOf(node), operand: callee, indices };
     }
     return { kind: 'call', ...spanOf(node), callee, typeArguments: [], args };
@@ -811,7 +803,7 @@ export class Converter {
 
   /** A type argument of a call, as the index expression it may also be. */
   private typeArgumentExpression(argument: Node): Expression {
-    const parts = argument.type === 'type_elem' ? argument.namedChildren : [argument];
+    const parts = argument.type === 'type_elem' ? named(argument) : [argument];
     if (parts.length !== 1 || parts[0].type === 'negated_type')
       return unsupported(argument, '型の集合（~ や | を使った制約）');
     const part = parts[0];
@@ -834,8 +826,7 @@ export class Converter {
   private convertComposite(node: Node, type: TypeExpression | undefined): CompositeLiteral {
     const body = required(node.type === 'literal_value' ? node : node.childForFieldName('body'));
     const elements: LiteralElement[] = [];
-    for (const child of body.namedChildren) {
-      if (child.type === 'comment') continue;
+    for (const child of named(body)) {
       if (child.type === 'keyed_element') {
         const key = required(child.childForFieldName('key'));
         const value = required(child.childForFieldName('value'));
@@ -849,7 +840,7 @@ export class Converter {
 
   /** Converts a literal element, which may be a composite literal with its type elided. */
   private convertElement(node: Node): Expression {
-    const inner = node.type === 'literal_element' ? node.namedChildren[0] : node;
+    const inner = node.type === 'literal_element' ? named(node)[0] : node;
     if (inner.type === 'literal_value') return this.convertComposite(inner, undefined);
     return this.convertExpression(inner);
   }
@@ -870,4 +861,9 @@ function syntaxError(node: Node, message: string): CompileError {
 
 function unsupported(node: Node, what: string): never {
   throw new CompileError([{ row: node.startPosition.row, message: `${what}は、この採点環境では使えません。` }]);
+}
+
+/** The named children of a node without comments, which tree-sitter places among them wherever they appear. */
+function named(node: Node): Node[] {
+  return node.namedChildren.filter((child) => child.type !== 'comment');
 }

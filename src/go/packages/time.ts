@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/prefer-code-point -- Go strings hold UTF-8 bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import type { Entity } from '../entities';
 import { newError } from '../errorValues';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, typeEntity } from '../native';
+import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, perRun, typeEntity } from '../native';
 import type { Runtime } from '../runtime';
 import { nilPointerPanic } from '../runtimeErrors';
 import { BASIC, pointerTo, type Type } from '../types';
@@ -26,7 +26,7 @@ const INT64 = BASIC.int64;
 
 const LOCATION = namedType('time', 'Location', { kind: 'struct', fields: [] });
 const LOCATION_POINTER = pointerTo(LOCATION);
-const TIME = namedType('time', 'Time', {
+export const TIME = namedType('time', 'Time', {
   kind: 'struct',
   fields: [
     { name: 'wall', type: BASIC.uint64, embedded: false },
@@ -34,25 +34,22 @@ const TIME = namedType('time', 'Time', {
     { name: 'loc', type: LOCATION_POINTER, embedded: false },
   ],
 });
-const DURATION = namedType('time', 'Duration', INT64);
+export const DURATION = namedType('time', 'Duration', INT64);
 const MONTH = namedType('time', 'Month', INT);
 const WEEKDAY = namedType('time', 'Weekday', INT);
 
 // Locations -------------------------------------------------------------------------------------------------------
 
-const locationPointers = new WeakMap<goTime.Location, Pointer>();
+const locationPointers = perRun(() => new WeakMap<goTime.Location, Pointer>());
 
 function pointerOf(location: goTime.Location): Pointer {
-  let pointer = locationPointers.get(location);
+  let pointer = locationPointers().get(location);
   if (!pointer) {
     pointer = new Pointer(new Cell(new GoStruct([], { location })), 'v');
-    locationPointers.set(location, pointer);
+    locationPointers().set(location, pointer);
   }
   return pointer;
 }
-
-const UTC_POINTER = pointerOf(goTime.UTC_LOCATION);
-const LOCAL_POINTER = pointerOf(goTime.LOCAL_LOCATION);
 
 /** The location a `*time.Location` points to; a program's own zero Location reads as UTC with an empty name. */
 function locationOf(pointer: Value): goTime.Location {
@@ -60,7 +57,7 @@ function locationOf(pointer: Value): goTime.Location {
   const struct = pointer.load() as GoStruct;
   struct.native ??= { location: { name: '' } };
   const location = struct.native.location as goTime.Location;
-  if (!locationPointers.has(location)) locationPointers.set(location, pointer);
+  if (!locationPointers().has(location)) locationPointers().set(location, pointer);
   return location;
 }
 
@@ -68,12 +65,12 @@ addMethod(LOCATION, 'String', fn([], [STRING]), (receiver) => locationOf(receive
 
 // Time values -----------------------------------------------------------------------------------------------------
 
-function timeOf(value: Value): goTime.Time {
+export function timeOf(value: Value): goTime.Time {
   const [wall, ext, loc] = (value as GoStruct).fields;
   return { wall: wall as bigint, ext: ext as bigint, loc: loc === undefined ? undefined : locationOf(loc) };
 }
 
-function timeValue(t: goTime.Time): GoStruct {
+export function timeValue(t: goTime.Time): GoStruct {
   return new GoStruct([t.wall, t.ext, t.loc ? pointerOf(t.loc) : undefined]);
 }
 
@@ -366,10 +363,12 @@ function monotonic(clock: Clock): bigint {
   return BigInt(Math.round((performance.now() - clock.startMilliseconds) * 1e6)) + clock.slept + 1n;
 }
 
-function now(): goTime.Time {
+export function now(): goTime.Time {
   const clock = clockOf(currentRuntime());
   const mono = monotonic(clock);
-  return goTime.now(clock.startUnixNanos + mono - 1n, mono);
+  // The wall clock of darwin, where Go reads it through the C library, counts microseconds.
+  const wall = clock.startUnixNanos + mono - 1n;
+  return goTime.now(wall - (wall % 1000n), mono);
 }
 
 // Package members -------------------------------------------------------------------------------------------------
@@ -385,7 +384,7 @@ function constant(name: string, type: Type, value: bigint | string): Entity {
   };
 }
 
-function locationVariable(name: string, pointer: Pointer): Entity {
+function locationVariable(name: string, location: goTime.Location): Entity {
   return {
     kind: 'var',
     name,
@@ -395,7 +394,7 @@ function locationVariable(name: string, pointer: Pointer): Entity {
     boxed: false,
     owner: undefined,
     slot: -1,
-    library: () => pointer,
+    library: () => pointerOf(location),
   };
 }
 
@@ -415,8 +414,8 @@ const members: Record<string, Entity> = {
   Weekday: typeEntity(WEEKDAY),
   Location: typeEntity(LOCATION),
   ParseError: typeEntity(PARSE_ERROR),
-  UTC: locationVariable('UTC', UTC_POINTER),
-  Local: locationVariable('Local', LOCAL_POINTER),
+  UTC: locationVariable('UTC', goTime.UTC_LOCATION),
+  Local: locationVariable('Local', goTime.LOCAL_LOCATION),
   ...Object.fromEntries(DURATION_UNITS.map(([name, value]) => [name, constant(name, DURATION, value)])),
   ...Object.fromEntries(goTime.LONG_DAY_NAMES.map((name, index) => [name, constant(name, WEEKDAY, BigInt(index))])),
   ...Object.fromEntries(goTime.LONG_MONTH_NAMES.map((name, index) => [name, constant(name, MONTH, BigInt(index + 1))])),

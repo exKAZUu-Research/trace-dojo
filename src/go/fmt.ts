@@ -3,6 +3,7 @@ import { formatFloat } from './floatFormat';
 import { decodeRune, encodeRune, RUNE_ERROR, runesOf } from './literals';
 import { compareMapKeys } from './mapOrder';
 import { dynamicMethod } from './methods';
+import { perRun } from './native';
 import { canBackquote, isPrint, quote, quoteRune } from './quote';
 import { GoPanic } from './runtime';
 import { ERROR_TYPE, isExported, missingMethod, type Type, typeString, underlying } from './types';
@@ -29,15 +30,15 @@ const LOWER_DIGITS = '0123456789abcdefx';
 const UPPER_DIGITS = '0123456789ABCDEFX';
 
 /** The address `%p` and `%v` print for a pointer-like value, stable for each object while the program runs. */
-const addresses = new WeakMap<object, number>();
-let nextAddress = 0xc0_00_01_00_00;
+const addressState = perRun(() => ({ addresses: new WeakMap<object, number>(), next: 0xc0_00_01_00_00 }));
 
 export function addressOf(object: object): string {
-  let address = addresses.get(object);
+  const state = addressState();
+  let address = state.addresses.get(object);
   if (address === undefined) {
-    address = nextAddress;
-    nextAddress += 0x10;
-    addresses.set(object, address);
+    address = state.next;
+    state.next += 0x10;
+    state.addresses.set(object, address);
   }
   return `0x${address.toString(16)}`;
 }
@@ -81,6 +82,8 @@ function noFlags(): Flags {
 
 /** Formats values as Go's fmt package does; the output holds UTF-8 bytes. */
 export class Printer {
+  /** Calls the Format method of a value that implements fmt.Formatter, with this printer as its fmt.State. */
+  static formatter: ((printer: Printer, iface: Iface, verb: string) => boolean) | undefined;
   /** The errors that %w verbs referred to, which only Errorf, constructed with `wrapErrors`, accepts. */
   readonly wrapped: Value[] = [];
   private buffer = '';
@@ -323,8 +326,43 @@ export class Printer {
     this.printValue(iface.value, iface.type, verb, 0);
   }
 
-  /** Prints with the value's Error or String method, for the verbs that use them. */
+  // fmt.State ----------------------------------------------------------------------------------------------------
+
+  write(bytes: string): void {
+    this.buffer += bytes;
+  }
+
+  flag(char: number): boolean {
+    const flags = this.flags;
+    const set: Record<number, boolean> = {
+      0x2d: flags.minus,
+      0x2b: flags.plus || flags.plusV,
+      0x23: flags.sharp || flags.sharpV,
+      0x20: flags.space,
+      0x30: flags.zero,
+    };
+    return set[char] ?? false;
+  }
+
+  width(): number | undefined {
+    return this.flags.width;
+  }
+
+  precision(): number | undefined {
+    return this.flags.precision;
+  }
+
+  /** Prints with the value's Format, Error, or String method, for the verbs that use them. */
   private handleMethods(iface: Iface, verb: string): boolean {
+    if (Printer.formatter) {
+      try {
+        if (Printer.formatter(this, iface, verb)) return true;
+      } catch (error) {
+        if (!(error instanceof GoPanic)) throw error;
+        this.catchPanic(iface, verb, 'Format', error);
+        return true;
+      }
+    }
     let method: string | undefined;
     if (this.flags.sharpV) {
       method = missingMethod(iface.type, GO_STRINGER as never) ? undefined : 'GoString';
@@ -920,8 +958,9 @@ function parseNumber(text: string, start: number): [number | undefined, number] 
 function intFromArg(args: Value[], argNum: number): [number | undefined, boolean, number] {
   if (argNum >= args.length) return [undefined, false, argNum];
   const arg = args[argNum];
-  if (arg instanceof Iface && arg.type.kind === 'basic' && /^u?int/.test(arg.type.basic)) {
-    const value = Number(arg.value as bigint);
+  const under = arg instanceof Iface ? underlying(arg.type) : undefined;
+  if (under?.kind === 'basic' && /^u?int/.test(under.basic) && ((arg as Iface).value as bigint) < 1n << 63n) {
+    const value = Number((arg as Iface).value as bigint);
     if (value > 1e6 || value < -1e6) return [undefined, false, argNum + 1];
     return [value, true, argNum + 1];
   }
@@ -945,36 +984,30 @@ function runeOf(value: bigint): number {
 }
 
 /** Go's handling of the # flag for floats: keep the decimal point and, for %g, the trailing zeros. */
-function sharpFloat(num: string, format: string, precision: number): string {
+/** The # flag of fmtFloat: a decimal point always, and trailing zeros up to the precision for %g and %x. */
+function sharpFloat(text: string, format: string, precision: number): string {
+  let num = text;
   let digits = 0;
-  if (format === 'g' || format === 'G' || format === 'v') {
-    digits = precision < 0 ? 6 : precision;
-    if (digits === 0) digits = 1;
-  }
+  if (format === 'v' || format === 'g' || format === 'G' || format === 'x') digits = precision === -1 ? 6 : precision;
   let tail = '';
-  const exponentIndex = num.search(/[eEpP]/);
-  let body = num;
-  if (exponentIndex >= 0) {
-    tail = num.slice(exponentIndex);
-    body = num.slice(0, exponentIndex);
+  let hasDecimalPoint = false;
+  let sawNonzeroDigit = false;
+  for (let index = 1; index < num.length; index++) {
+    const char = num[index];
+    if (char === '.') {
+      hasDecimalPoint = true;
+    } else if (char === 'p' || char === 'P' || ((char === 'e' || char === 'E') && format !== 'x' && format !== 'X')) {
+      tail = num.slice(index);
+      num = num.slice(0, index);
+    } else {
+      if (char !== '0') sawNonzeroDigit = true;
+      if (sawNonzeroDigit) digits--;
+    }
   }
-  let sawDot = body.includes('.');
-  let sawNonzero = false;
-  for (const char of body.slice(1)) {
-    if (char === '.') continue;
-    if (char !== '0') sawNonzero = true;
-    if (sawNonzero || char !== '0') digits--;
-    else if (char === '0' && sawNonzero) digits--;
+  if (!hasDecimalPoint) {
+    if (num.length === 2 && num[1] === '0') digits--;
+    num += '.';
   }
-  if (!sawDot) {
-    body += '.';
-    sawDot = true;
-  }
-  if (format === 'g' || format === 'G') {
-    // Count the significant digits already present to know how many zeros to add.
-    const significant = body.slice(1).replace('.', '').replace(/^0+/, '').length;
-    const wanted = (precision < 0 ? 6 : precision === 0 ? 1 : precision) - (significant === 0 ? 1 : significant);
-    if (wanted > 0) body += '0'.repeat(wanted);
-  }
-  return body + tail;
+  if (digits > 0) num += '0'.repeat(digits);
+  return num + tail;
 }

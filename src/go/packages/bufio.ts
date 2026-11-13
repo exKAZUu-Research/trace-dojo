@@ -1031,7 +1031,22 @@ const members: Record<string, Entity> = {
   ),
 };
 
-export const BUFIO_PACKAGE = definePackage('bufio', members, ['ReadWriter', 'NewReadWriter']);
+/** `bufio.ReadWriter`, whose embedded Reader and Writer supply its methods. */
+const READ_WRITER = namedType('bufio', 'ReadWriter', {
+  kind: 'struct',
+  fields: [
+    { name: 'Reader', type: READER_POINTER, embedded: true },
+    { name: 'Writer', type: WRITER_POINTER, embedded: true },
+  ],
+});
+members.ReadWriter = typeEntity(READ_WRITER);
+members.NewReadWriter = nativeFunction(
+  'NewReadWriter',
+  fn([READER_POINTER, WRITER_POINTER], [pointerTo(READ_WRITER)]),
+  ([reader, writer]) => new Pointer(new Cell(new GoStruct([reader, writer])), 'v')
+);
+
+export const BUFIO_PACKAGE = definePackage('bufio', members);
 
 // Byte slices ---------------------------------------------------------------------------------------------------------
 

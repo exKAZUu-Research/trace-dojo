@@ -3,11 +3,13 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { type CompiledProgram, compileProgram } from './compiler';
+import { utf8Decode } from './literals';
 import { withRuntime } from './native';
 import { describePanic } from './panicText';
 import { parseGo } from './parse';
 import { type Frame, GoFatal, GoPanic, ProgramExit, Runtime } from './runtime';
-import { Cell } from './values';
+import { BASIC, typeString } from './types';
+import { Cell, Iface } from './values';
 
 export function executeGoProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
@@ -57,10 +59,23 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
 function describeUncaught(error: unknown): string | undefined {
   // os.Exit ends the program as Java's System.exit does, which the trace and the grader do not count as a failure.
   if (error instanceof ProgramExit) return undefined;
-  if (error instanceof GoPanic) return describePanic(error);
+  if (error instanceof GoPanic) return describePanicSafely(error);
   if (error instanceof GoFatal) return error.description;
   if (error instanceof RangeError && /call stack/i.test(error.message)) {
     return 'runtime: goroutine stack exceeds 1000000000-byte limit\nfatal error: stack overflow';
   }
   throw error;
+}
+
+/** Describes a panic, ending as Go's runtime does when an Error or String method panics while it is printed. */
+function describePanicSafely(panic: GoPanic): string {
+  try {
+    return describePanic(panic);
+  } catch (error) {
+    if (!(error instanceof GoPanic)) throw error;
+    const { value } = error;
+    if (!(value instanceof Iface)) throw error;
+    const reason = value.type === BASIC.string ? (value.value as string) : `type ${typeString(value.type)}`;
+    return `fatal error: panic while printing panic value: ${utf8Decode(reason)}`;
+  }
 }

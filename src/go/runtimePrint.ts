@@ -17,7 +17,9 @@ export function runtimePrint(value: Value, type: Type): string {
     case 'interface': {
       if (value === undefined) return '(0x0,0x0)';
       const iface = value as Iface;
-      return `(${addressOf(iface.type as object)},${address(iface.value)})`;
+      // A value that is not an object stands for the copy Go's runtime allocated when converting it.
+      const data = typeof iface.value === 'object' ? iface.value : iface;
+      return `(${addressOf(iface.type as object)},${addressOf(data)})`;
     }
     case 'slice': {
       const slice = value as Slice | undefined;

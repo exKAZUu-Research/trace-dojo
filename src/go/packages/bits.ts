@@ -59,7 +59,7 @@ for (const [suffix, type, bits] of SIZES) {
     reverse(x as bigint, bits)
   );
   members[`RotateLeft${suffix}`] = nativeFunction(`RotateLeft${suffix}`, fn([type, INT], [type]), ([x, k]) => {
-    const shift = ((Number(k as bigint) % bits) + bits) % bits;
+    const shift = Number((k as bigint) & BigInt(bits - 1));
     const value = x as bigint;
     return ((value << BigInt(shift)) | (value >> BigInt(bits - shift))) & mask;
   });
@@ -91,6 +91,12 @@ for (const [suffix, type, bits] of SIZES.filter(([size]) => size === '' || size 
     const dividend = ((hi as bigint) << BigInt(bits)) | (lo as bigint);
     return [dividend / divisor, dividend % divisor];
   });
+  // Rem reduces hi first, so unlike Div it does not overflow.
+  members[`Rem${suffix}`] = nativeFunction(`Rem${suffix}`, fn([type, type, type], [type]), ([hi, lo, y]) => {
+    const divisor = y as bigint;
+    if (divisor === 0n) divideByZeroPanic();
+    return (((hi as bigint) << BigInt(bits)) | (lo as bigint)) % divisor;
+  });
 }
 
-export const BITS_PACKAGE = definePackage('math/bits', members, ['Rem', 'Rem32', 'Rem64']);
+export const BITS_PACKAGE = definePackage('math/bits', members);
