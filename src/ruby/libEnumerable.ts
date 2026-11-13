@@ -627,16 +627,44 @@ def('Enumerable', 'max_by', [0, 1], function* (self, args, block) {
 def('Enumerable', 'minmax', 0, function* (self, _args, block) {
   let min: Value | undefined;
   let max: Value | undefined;
-  yield* iterate(self, function* (value) {
-    if (min === undefined || max === undefined) {
-      min = value;
-      max = value;
-      return;
+  let pending: Value | undefined;
+  const held = rt().held;
+  const mark = held.length;
+  held.push(NIL, NIL, NIL);
+  try {
+    yield* iterate(self, function* (value) {
+      if (pending === undefined) {
+        pending = value;
+        held[mark + 2] = value;
+        return;
+      }
+      const first = pending;
+      pending = undefined;
+      const order = yield* orderOf(block, first, value);
+      const smaller = order <= 0 ? first : value;
+      const larger = order >= 0 ? first : value;
+      if (min === undefined || max === undefined) {
+        min = smaller;
+        max = larger;
+      } else {
+        if ((yield* orderOf(block, smaller, min)) < 0) min = smaller;
+        if ((yield* orderOf(block, larger, max)) > 0) max = larger;
+      }
+      held[mark] = min;
+      held[mark + 1] = max;
+      held[mark + 2] = NIL;
+    });
+    if (pending !== undefined) {
+      if (min === undefined || max === undefined) min = max = pending;
+      else {
+        if ((yield* orderOf(block, pending, min)) < 0) min = pending;
+        if ((yield* orderOf(block, pending, max)) > 0) max = pending;
+      }
     }
-    if ((yield* orderOf(block, value, min)) < 0) min = value;
-    if ((yield* orderOf(block, value, max)) > 0) max = value;
-  });
-  return arr([min ?? NIL, max ?? NIL]);
+    return arr([min ?? NIL, max ?? NIL]);
+  } finally {
+    held.length = mark;
+  }
 });
 function orderOf(block: RProc | undefined, a: Value, b: Value): Gen<number> {
   return block ? blockCompare(block, a, b) : compareValues(a, b);
