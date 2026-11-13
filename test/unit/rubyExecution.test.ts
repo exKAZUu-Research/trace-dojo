@@ -50,6 +50,14 @@ test.each([
     '1\n255\n[255]\n',
   ],
   ['meta escaped byte', String.raw`p "\M-a".bytesize; p "\M-a".bytes`, '1\n[225]\n'],
+  ['nested meta and control escapes', String.raw`p "\M-\C-a".bytes; p "\c\M-a".bytes`, '[129]\n[129]\n'],
+  [
+    'escaped byte in a frozen Hash key',
+    String.raw`h={}; h["\xFF"]=1; p h.keys[0]; p h.keys[0].bytes`,
+    '"\\xFF"\n[255]\n',
+  ],
+  ['both Float zeros as one Hash key', 'h={}; h[-0.0]=1; h[0.0]=2; p h.size; p h[-0.0]', '1\n2\n'],
+  ['index receiver before index locals', '(a = [0])[a.size - 1] = 7; p a', '[7]\n'],
   [
     'mixed UTF-8 text and escaped bytes',
     String.raw`p "é\xFF", "\xFFé"; p "\xFFé".bytes; p "\xFFé".bytesize`,
@@ -152,6 +160,19 @@ test('Hash default_proc rejects non-Procs at assignment', () => {
 test('Hash mutation during in-place filtering raises an error', () => {
   expect(run('h = {a: 1}; h.delete_if { |k,v| h[:b] = 2; false }')).toMatchObject({
     uncaughtException: "can't add a new key into hash during iteration (RuntimeError)",
+  });
+});
+
+test('Hash mutation during transform_values! raises an error', () => {
+  expect(run('h={a:1}; h.transform_values! { |v| h[:b]=2; v }')).toMatchObject({
+    uncaughtException: "can't add a new key into hash during iteration (RuntimeError)",
+  });
+});
+
+test('group_by charges retained array slots', () => {
+  expect(run('big=Array.new(999000); small=Array.new(600,1); small.group_by { |x| 0 }')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'storage',
   });
 });
 

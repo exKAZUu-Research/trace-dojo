@@ -665,8 +665,10 @@ def('Enumerable', 'group_by', 0, function* (self, _args, block) {
   yield* iterate(self, function* (value) {
     const key = yield* call(block, value);
     const entry = yield* hashGet(groups, key);
-    if (entry) (entry.value as RArray).items.push(value);
-    else yield* hashSet(groups, key, arr([value]));
+    if (entry) {
+      rt().chargeSlots(1);
+      (entry.value as RArray).items.push(value);
+    } else yield* hashSet(groups, key, arr([value]));
   });
   return groups;
 });

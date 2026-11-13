@@ -645,10 +645,11 @@ export class Converter {
       }
       case 'element_reference': {
         const object = required(node.childForFieldName('object'));
+        const recv = this.expr(object);
         const args = namedChildren(node)
           .filter((child) => child.id !== object.id && child.type !== 'comment')
           .map((child) => this.argument(child));
-        return { k: 'index', recv: this.expr(object), args, row: node.startPosition.row };
+        return { k: 'index', recv, args, row: node.startPosition.row };
       }
       case 'call': {
         const receiver = node.childForFieldName('receiver');

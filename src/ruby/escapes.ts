@@ -16,6 +16,22 @@ const SIMPLE_ESCAPES: Record<string, string> = {
   '\n': '',
 };
 
+function modifiedByte(text: string, index: number): { byte: number; end: number } | undefined {
+  if (index >= text.length) return undefined;
+  if (text[index] !== '\\') {
+    const byte = text.codePointAt(index) as number;
+    return byte <= 0xff ? { byte, end: index } : undefined;
+  }
+  const kind = text[index + 1];
+  const operand = kind === 'c' ? index + 2 : text[index + 2] === '-' ? index + 3 : -1;
+  if (operand < 0 || (kind !== 'c' && kind !== 'C' && kind !== 'M')) return undefined;
+  const nested = modifiedByte(text, operand);
+  if (!nested) return undefined;
+  const byte =
+    kind === 'M' ? nested.byte | 0x80 : text[operand] === '?' ? 0x7f : (nested.byte & 0x1f) | (nested.byte & 0x80);
+  return { byte, end: nested.end };
+}
+
 /** Decodes a double-quoted literal's text as Ruby does, or `undefined` for an escape Ruby rejects. */
 export function decodeDoubleQuoted(text: string): { text: string; binary: boolean; bytes?: number[] } | undefined {
   let result = '';
@@ -64,27 +80,16 @@ export function decodeDoubleQuoted(text: string): { text: string; binary: boolea
       index += octal.length - 1;
       continue;
     }
-    if (next === 'M' && text[index + 1] === '-') {
-      const meta = text[index + 2];
-      if (meta === undefined || meta === '\\') return undefined;
-      const byte = meta.codePointAt(0)! | 0x80;
-      bytes.push(byte);
-      allBytes.push(byte);
-      index += 2;
+    if (next === 'M' || next === 'C' || next === 'c') {
+      const modified = modifiedByte(text, index - 1);
+      if (!modified) return undefined;
+      bytes.push(modified.byte);
+      allBytes.push(modified.byte);
+      index = modified.end;
       continue;
     }
     flushBytes();
-    if (next === 'C' && text[index + 1] === '-') {
-      const control = text[index + 2];
-      if (control === undefined) return undefined;
-      appendText(String.fromCodePoint(control === '?' ? 0x7f : control.codePointAt(0)! & 0x1f));
-      index += 2;
-    } else if (next === 'c') {
-      const control = text[index + 1];
-      if (control === undefined) return undefined;
-      appendText(String.fromCodePoint(control === '?' ? 0x7f : control.codePointAt(0)! & 0x1f));
-      index++;
-    } else if (next in SIMPLE_ESCAPES) {
+    if (next in SIMPLE_ESCAPES) {
       appendText(SIMPLE_ESCAPES[next]);
     } else if (next === 'u') {
       if (text[index + 1] === '{') {

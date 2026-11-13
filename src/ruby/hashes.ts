@@ -29,7 +29,7 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], cycle?: { fou
       return `i${digest(String(value))}`;
     }
     case 'number': {
-      return Object.is(value, -0) ? 'f0' : `f${digest(String(value))}`;
+      return value === 0 ? 'f0' : `f${digest(String(value))}`;
     }
     case 'boolean': {
       return value ? 'T' : 'F';
@@ -153,6 +153,8 @@ export function* hashSet(hash: RHash, key: Value, value: Value): Gen<void> {
 
 function frozenCopy(key: RString): RString {
   const copy = str(key.s);
+  copy.binary = key.binary;
+  copy.rawBytes = key.rawBytes ? Uint8Array.from(key.rawBytes) : undefined;
   copy.frozen = true;
   return copy;
 }

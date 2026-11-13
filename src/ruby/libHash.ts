@@ -290,21 +290,22 @@ def('Hash', 'transform_values', 0, function* (self: RHash, _args, block) {
 def('Hash', 'transform_values!', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'transform_values!', []);
   yield* modify(self);
-  for (const entry of snapshot(self.map.values())) entry.value = yield* callBlock(block, [entry.value]);
+  yield* eachEntry(self, function* (entry) {
+    entry.value = yield* callBlock(block, [entry.value]);
+  });
   return self;
 });
 
 function* transformKeys(self: RHash, args: Value[], block: RProc | undefined): Gen<RHash> {
   const mapping = args.length > 0 ? yield* toHash(args[0]) : undefined;
   const hash = newHash();
-  for (const entry of snapshot(self.map.values())) {
-    let key: Value;
-    const mapped = mapping ? yield* hashGet(mapping, entry.key) : undefined;
-    if (mapped) key = mapped.value;
-    else if (block) key = yield* callBlock(block, [entry.key]);
-    else key = entry.key;
-    yield* hashSet(hash, key, entry.value);
-  }
+  yield* whileHeld(hash, () =>
+    eachEntry(self, function* (entry) {
+      const mapped = mapping ? yield* hashGet(mapping, entry.key) : undefined;
+      const key = mapped ? mapped.value : block ? yield* callBlock(block, [entry.key]) : entry.key;
+      yield* hashSet(hash, key, entry.value);
+    })
+  );
   return hash;
 }
 
@@ -368,23 +369,26 @@ def('Hash', 'dig', [1, -1], function* (self: RHash, args) {
   return yield* callMethod(value, 'dig', args.slice(1));
 });
 def('Hash', 'any?', [0, 1], function* (self: RHash, args, block) {
+  let found = false;
   if (args.length > 0) {
-    for (const entry of self.map.values()) {
-      if (truthy(yield* callMethod(args[0], '===', [arr([entry.key, entry.value])]))) return true;
-    }
-    return false;
+    yield* eachEntry(self, function* (entry) {
+      if (!found && truthy(yield* callMethod(args[0], '===', [arr([entry.key, entry.value])]))) found = true;
+    });
+    return found;
   }
   if (!block) return self.map.size > 0;
-  for (const entry of snapshot(self.map.values())) if (truthy(yield* pair(block, entry.key, entry.value))) return true;
-  return false;
+  yield* eachEntry(self, function* (entry) {
+    if (!found && truthy(yield* pair(block, entry.key, entry.value))) found = true;
+  });
+  return found;
 });
 def('Hash', 'count', [0, 1], function* (self: RHash, args, block) {
   if (args.length === 0 && !block) return BigInt(self.map.size);
   let count = 0n;
-  for (const entry of snapshot(self.map.values())) {
+  yield* eachEntry(self, function* (entry) {
     const item = arr([entry.key, entry.value]);
     if (args.length > 0 ? yield* rEquals(item, args[0]) : truthy(yield* callBlock(block as RProc, [item]))) count++;
-  }
+  });
   return count;
 });
 def('Hash', 'sum', [0, 1], function* (self: RHash, args, block) {
@@ -427,13 +431,17 @@ def('Hash', 'default_proc=', 1, function* (self: RHash, [proc]) {
 def('Hash', 'group_by', 0, function* (self: RHash, _args, block) {
   if (!block) return makeEnumerator(self, 'group_by', []);
   const groups = newHash();
-  for (const entry of snapshot(self.map.values())) {
-    const item = arr([entry.key, entry.value]);
-    const key = yield* callBlock(block, [item]);
-    const existing = yield* hashGet(groups, key);
-    if (existing) (existing.value as RArray).items.push(item);
-    else yield* hashSet(groups, key, arr([item]));
-  }
+  yield* whileHeld(groups, () =>
+    eachEntry(self, function* (entry) {
+      const item = arr([entry.key, entry.value]);
+      const key = yield* callBlock(block, [item]);
+      const existing = yield* hashGet(groups, key);
+      if (existing) {
+        rt().chargeSlots(1);
+        (existing.value as RArray).items.push(item);
+      } else yield* hashSet(groups, key, arr([item]));
+    })
+  );
   return groups;
 });
 

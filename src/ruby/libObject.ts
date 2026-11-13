@@ -165,8 +165,12 @@ def(
 function* copyObject(self: Value, clone: boolean, keepFrozen: boolean): Gen {
   if (!(self instanceof RBasic) || self instanceof RClass) return self;
   let copy: RBasic;
-  if (self instanceof RString) copy = new RString(self.cls, self.s);
-  else if (self instanceof RArray) copy = new RArray(self.cls, [...self.items]);
+  if (self instanceof RString) {
+    const string = new RString(self.cls, self.s);
+    string.binary = self.binary;
+    string.rawBytes = self.rawBytes ? Uint8Array.from(self.rawBytes) : undefined;
+    copy = string;
+  } else if (self instanceof RArray) copy = new RArray(self.cls, [...self.items]);
   else if (self instanceof RHash) {
     const hash = new RHash(self.cls);
     for (const [key, entry] of self.map) hash.map.set(key, { ...entry });
