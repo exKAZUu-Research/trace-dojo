@@ -47,7 +47,7 @@ function floatDomain(message: string): unknown {
 export function* toInt(value: Value): Gen<bigint> {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return floatToInt(value);
-  if (value instanceof RBasic && classOf(value).findMethod('to_int')) {
+  if (value !== NIL && classOf(value).findMethod('to_int')) {
     const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
     if (typeof converted === 'bigint') return converted;
     const name = realClassOf(value).name;
@@ -89,7 +89,7 @@ export function* toStr(value: Value): Gen<string> {
 
 export function* toStrValue(value: Value): Gen<RString> {
   if (value instanceof RString) return value;
-  if (value instanceof RBasic && classOf(value).findMethod('to_str')) {
+  if (classOf(value).findMethod('to_str')) {
     const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
     if (converted instanceof RString) return converted;
     const name = realClassOf(value).name;

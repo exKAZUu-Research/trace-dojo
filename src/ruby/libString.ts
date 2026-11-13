@@ -85,12 +85,10 @@ function setBytes(self: RString, bytes: Uint8Array, binary = self.binary): void 
 }
 
 function* stringArg(value: Value): Gen<string> {
-  if (value instanceof RSymbol) throw implicitConversionError(value, 'String');
   return yield* toStr(value);
 }
 
 function* stringArgValue(value: Value): Gen<RString> {
-  if (value instanceof RSymbol) throw implicitConversionError(value, 'String');
   return yield* toStrValue(value);
 }
 

@@ -2132,6 +2132,14 @@ test('Ruby Strings retain UTF-8 BOM characters from literals and escapes', () =>
   });
 });
 
+test('implicit conversions use methods on reopened immediate classes', () => {
+  expect(run('class TrueClass;def to_int;1;end;end;p [9,8][true]')).toMatchObject({ stdout: '8\n' });
+  expect(run('class Symbol;def to_str;"!";end;end;p "a"+:x')).toMatchObject({ stdout: '"a!"\n' });
+  expect(run('class NilClass;def to_int;1;end;end;begin;p [9,8][nil];rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'TypeError\n',
+  });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',
