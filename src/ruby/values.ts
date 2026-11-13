@@ -85,7 +85,7 @@ function encodeInvalidText(text: string): Uint8Array {
   const encoder = new TextEncoder();
   let valid = '';
   const flush = (): void => {
-    if (valid) bytes.push(...encoder.encode(valid));
+    if (valid) for (const byte of encoder.encode(valid)) bytes.push(byte);
     valid = '';
   };
   for (const char of text) {

@@ -65,7 +65,7 @@ function pushReferences(value: RBasic, pending: Value[]): void {
 
 function pushProcReferences(value: RProc, pending: Value[]): void {
   pending.push(value.self);
-  if (value.captured) pending.push(...value.captured);
+  if (value.captured) for (const item of value.captured) pending.push(item);
   const outer = value.outer as unknown as Frame | undefined;
   if (outer) pushFrame(outer, pending);
 }

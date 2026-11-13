@@ -48,6 +48,7 @@ import {
   NextSignal,
   RetrySignal,
   ReturnSignal,
+  rootValues,
   rt,
   RubyError,
   Scope,
@@ -229,7 +230,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const prepared = yield* prepareAssignment(e.target, frame);
       if (prepared.skip) return NIL;
       const mark = frame.temporaries.length;
-      frame.temporaries.push(...prepared.roots);
+      rootValues(frame, prepared.roots);
       try {
         const value = yield* ev(e.value, frame);
         frame.temporaries.push(value);
@@ -707,7 +708,7 @@ function* prepareAssignment(target: Target, frame: Frame): Gen<PreparedAssignmen
       for (const item of target.items) {
         const prepared = yield* prepareAssignment(item, frame);
         targets.push(prepared);
-        frame.temporaries.push(...prepared.roots);
+        rootValues(frame, prepared.roots);
       }
     } finally {
       frame.temporaries.length = mark;
@@ -873,7 +874,7 @@ function* operatorAssignInner(e: Extract<Expr, { k: 'opasgn' }>, frame: Frame): 
       const recv = yield* ev(target.recv, frame);
       frame.temporaries.push(recv);
       const { args } = yield* evalArgs(target.args, frame);
-      frame.temporaries.push(...args);
+      rootValues(frame, args);
       const fcall = target.recv.k === 'self';
       read = () => atCallRow(target.row, () => callMethod(recv, '[]', args, undefined, undefined, { fcall }));
       write = function* (value) {
@@ -1525,7 +1526,7 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
     ({ args, keywords } = implicitSuperArgs(home));
   }
   const mark = frame.temporaries.length;
-  frame.temporaries.push(...args);
+  rootValues(frame, args);
   if (keywords) frame.temporaries.push(keywords);
   try {
     let block: RProc | undefined = home.extra.block;

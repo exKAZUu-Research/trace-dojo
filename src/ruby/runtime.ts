@@ -71,6 +71,10 @@ export class Frame implements TracedFrame {
   }
 }
 
+export function rootValues(frame: Frame, values: readonly Value[]): void {
+  for (const value of values) frame.temporaries.push(value);
+}
+
 export interface FrameExtra {
   /** The running method. */
   method?: RMethod;

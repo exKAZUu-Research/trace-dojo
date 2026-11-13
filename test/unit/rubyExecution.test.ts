@@ -2401,6 +2401,11 @@ test('Array structural hash stops after callback removes later elements', () => 
   });
 });
 
+test('large splats bind without exhausting host call arguments', () => {
+  expect(run('def f(*x);p x.size;end;f(*Array.new(300000,1))')).toMatchObject({ stdout: '300000\n' });
+  expect(run('p proc{|*x|x.size}.call(*Array.new(300000,1))')).toMatchObject({ stdout: '300000\n' });
+});
+
 test('explicit self can call private operators and index methods', () => {
   expect(run('class A; def f; self+1; end; private; def +(x); 42; end; end; p A.new.f')).toMatchObject({
     stdout: '42\n',

@@ -4,7 +4,7 @@ import { argumentError, expectedArity, typeError } from './errors';
 import { hashSet } from './hashes';
 import { callMethod, destructure, ev, type Gen, respondsTo } from './interp';
 import { NIL, RArray, type RHash, RSymbol, type Value } from './objects';
-import type { Frame } from './runtime';
+import { type Frame, rootValues } from './runtime';
 import { arr, newHash, realClassOf } from './values';
 
 type BindMode = 'method' | 'lambda' | 'proc';
@@ -51,7 +51,7 @@ export function* bindParams(
     throw argumentError(`${message})`);
   }
   const mark = frame.temporaries.length;
-  frame.temporaries.push(...args);
+  rootValues(frame, args);
   if (keywords) frame.temporaries.push(keywords);
   try {
     let index = 0;

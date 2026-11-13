@@ -284,7 +284,7 @@ function* flattenMembers(self: RObject, seen: Set<RObject>): Gen<Value[]> {
   const values: Value[] = [];
   for (const entry of membersOf(self).map.values()) {
     if (entry.key instanceof RObject && entry.key.data instanceof SetData)
-      values.push(...(yield* flattenMembers(entry.key, seen)));
+      for (const item of yield* flattenMembers(entry.key, seen)) values.push(item);
     else values.push(entry.key);
   }
   seen.delete(self);
