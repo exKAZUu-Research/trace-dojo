@@ -13,9 +13,10 @@ import {
   toInt,
   toS,
   toStr,
+  toStrValue,
 } from './conversions';
 import { def, sdef } from './define';
-import { argumentError, frozenError, implicitConversionError, nameError, rubyError, typeError } from './errors';
+import { argumentError, frozenError, nameError, rubyError, typeError } from './errors';
 import { hashSet } from './hashes';
 import {
   addMethod,
@@ -235,24 +236,30 @@ function copyData(data: unknown): unknown {
 
 def('Kernel', 'extend', [1, -1], (self, modules) => {
   if (!(self instanceof RBasic)) throw typeError("can't define singleton");
-  const singleton = singletonClassOf(self);
-  for (const module of modules.toReversed()) {
+  for (const module of modules) {
     if (!(module instanceof RClass) || !module.isModule) {
       throw typeError(`wrong argument type ${realClassOf(module).name} (expected Module)`);
     }
+  }
+  if (self.frozen) throw frozenError(self, self instanceof RClass ? (self.name ?? '') : (realClassOf(self).name ?? ''));
+  const singleton = singletonClassOf(self);
+  for (const module of modules.toReversed() as RClass[]) {
     if (!singleton.includes.includes(module)) singleton.includes.unshift(module);
   }
   invalidateMethodCaches();
   return self;
 });
-def('Kernel', 'display', 0, function* (self) {
-  rt().io.stdout.write(yield* toS(self));
+def('Kernel', 'display', [0, 1], function* (self, args) {
+  const stream = args.length > 0 ? args[0] : (rt().globals.get('$stdout') as Value);
+  yield* callMethod(stream, 'write', [self]);
   return NIL;
 });
 def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args) {
   const [method = sym('each'), ...rest] = args;
-  if (!(method instanceof RSymbol)) throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
-  return makeEnumerator(self, method.name, rest);
+  if (method instanceof RSymbol) return makeEnumerator(self, method.name, rest);
+  if (method instanceof RString || respondsTo(method, 'to_str'))
+    return makeEnumerator(self, (yield* toStrValue(method)).s, rest);
+  throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
 });
 
 def('Kernel', 'instance_variables', 0, () => {
@@ -449,7 +456,19 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RString) return value;
-    return str(yield* toS(value));
+    if (respondsTo(value, 'to_str')) {
+      const converted = yield* callMethod(value, 'to_str', []);
+      if (converted instanceof RString) return converted;
+      if (converted !== NIL)
+        throw typeError(
+          `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`
+        );
+    }
+    const converted = yield* callMethod(value, 'to_s', []);
+    if (converted instanceof RString) return converted;
+    throw typeError(
+      `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_s gives ${realClassOf(converted).name})`
+    );
   },
   PRIVATE
 );
@@ -460,8 +479,16 @@ def(
   function* (_self, [value]) {
     if (value instanceof RArray) return value;
     if (value === NIL) return arr([]);
-    if (respondsTo(value, 'to_ary')) return yield* callMethod(value, 'to_ary', []);
-    if (respondsTo(value, 'to_a')) return yield* callMethod(value, 'to_a', []);
+    if (respondsTo(value, 'to_ary')) {
+      const converted = yield* callMethod(value, 'to_ary', []);
+      if (converted instanceof RArray) return converted;
+      if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_ary');
+    }
+    if (respondsTo(value, 'to_a')) {
+      const converted = yield* callMethod(value, 'to_a', []);
+      if (converted instanceof RArray) return converted;
+      if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_a');
+    }
     return arr([value]);
   },
   PRIVATE
@@ -473,11 +500,20 @@ def(
   function* (_self, [value]) {
     if (value instanceof RHash) return value;
     if (value === NIL || (value instanceof RArray && value.items.length === 0)) return newHash();
-    if (respondsTo(value, 'to_hash')) return yield* callMethod(value, 'to_hash', []);
-    throw implicitConversionError(value, 'Hash');
+    if (respondsTo(value, 'to_hash')) {
+      const converted = yield* callMethod(value, 'to_hash', []);
+      if (converted instanceof RHash) return converted;
+      if (converted !== NIL) throw collectionConversionError(value, converted, 'Hash', 'to_hash');
+    }
+    throw typeError(`can't convert ${realClassOf(value).name} into Hash`);
   },
   PRIVATE
 );
+
+function collectionConversionError(value: Value, converted: Value, target: string, method: string): RubyError {
+  const name = realClassOf(value).name;
+  return typeError(`can't convert ${name} to ${target} (${name}#${method} gives ${realClassOf(converted).name})`);
+}
 
 for (const [name, feature] of [
   ['require', 'require（ライブラリ・別のファイルの読み込み）'],
@@ -582,6 +618,7 @@ def('Module', 'include', [1, -1], function* (self: RClass, modules) {
       throw typeError(`wrong argument type ${realClassOf(module).name} (expected Module)`);
     }
   }
+  if (self.frozen) throw frozenError(self, self.name ?? '');
   for (const module of modules.toReversed() as RClass[]) {
     if (module.ancestors().includes(self)) throw argumentError('cyclic include detected');
     if (self.ancestors().includes(module)) continue;
@@ -680,6 +717,7 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
     }
     return NIL;
   }
+  if (self.frozen) throw frozenError(self, self.name ?? '');
   for (const name of yield* symbolNames(args)) {
     const method = self.findMethod(name);
     if (!method) {

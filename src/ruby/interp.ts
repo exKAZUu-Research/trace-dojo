@@ -496,10 +496,12 @@ function classVariableSet(frame: Frame, name: string, value: Value): void {
   if (holder === rt().c.Object) throw rubyError(rt().c.RuntimeError, 'class variable access from toplevel');
   for (const module of holder.ancestors()) {
     if (module.classVariables.has(name)) {
+      assertMutableClass(module);
       module.classVariables.set(name, value);
       return;
     }
   }
+  assertMutableClass(holder);
   holder.classVariables.set(name, value);
 }
 
@@ -547,6 +549,7 @@ function missingConstant(module: RClass, name: string, scoped = false): never {
 }
 
 function constSet(module: RClass, name: string, value: Value): void {
+  assertMutableClass(module);
   if (module.constants.has(name)) {
     rt().io.stderr.write(`warning: already initialized constant ${name}\n`);
   }
@@ -1009,8 +1012,14 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
 const PRIVATE_METHOD_NAMES = new Set(['initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup']);
 
 export function addMethod(owner: RClass, method: RMethod): void {
+  assertMutableClass(owner);
   owner.methods.set(method.name, method);
   invalidateMethodCaches();
+}
+
+function assertMutableClass(owner: RClass): void {
+  const target = owner.attached instanceof RClass ? owner.attached : owner;
+  if (target.frozen) throw frozenError(target, target.name ?? '');
 }
 
 function* moduleContainer(e: { scope?: Expr; top?: boolean }, frame: Frame): Gen<RClass> {
@@ -1045,6 +1054,7 @@ function* defineClass(e: Extract<Expr, { k: 'class' }>, frame: Frame): Gen {
     cls = new RClass(runtime.c.Class, e.name, parent, false);
     cls.isUserDefined = true;
     if (container !== runtime.c.Object) cls.lexicalParent = container;
+    assertMutableClass(container);
     container.constants.set(e.name, cls);
     invalidateMethodCaches();
     yield* callHook(parent, 'inherited', [cls]);
@@ -1078,6 +1088,7 @@ function* defineModule(e: Extract<Expr, { k: 'module' }>, frame: Frame): Gen {
     module = new RClass(runtime.c.Module, e.name, undefined, true);
     module.isUserDefined = true;
     if (container !== runtime.c.Object) module.lexicalParent = container;
+    assertMutableClass(container);
     container.constants.set(e.name, module);
   }
   return yield* runModuleBody(module, e.body, frame);

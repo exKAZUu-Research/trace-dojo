@@ -39,6 +39,31 @@ test.each([
   ],
   ['blockless then Enumerator', 'p 1.then.size, 1.yield_self.each { |x| x+1 }', '1\n2\n'],
   [
+    'String names for to_enum',
+    'class M; def to_str; "each"; end; end; p [1,2].to_enum("each").to_a, [1,2].enum_for(M.new).to_a',
+    '[1, 2]\n[1, 2]\n',
+  ],
+  [
+    'Kernel String conversion priority',
+    'class X; def to_str; "yes"; end; def to_s; "no"; end; end; p String(X.new)',
+    '"yes"\n',
+  ],
+  [
+    'Kernel collection conversion results',
+    'class A; def to_ary; nil; end; def to_a; [1]; end; end; class H; def to_hash; 1; end; end; p Array(A.new); begin; Hash(H.new); rescue => e; p e.message; end',
+    '[1]\n"can\'t convert H to Hash (H#to_hash gives Integer)"\n',
+  ],
+  [
+    'display passes receiver to selected stream',
+    'class W; def write(x); p [x.class, x]; end; end; 1.display(W.new)',
+    '[Integer, 1]\n',
+  ],
+  [
+    'frozen class rejects method and ancestor changes',
+    'class C; end; module M; end; C.freeze; begin; class C; def x; end; end; rescue => e; p e.class; end; begin; C.include(M); rescue => e; p e.class; end',
+    'FrozenError\nFrozenError\n',
+  ],
+  [
     'formatted binary String encoding',
     's=255.chr; p format("%s", s).bytes; p format("%sé", s).bytes; begin; format("é%s", s); rescue Encoding::CompatibilityError; puts :incompatible; end',
     '[255]\n[255, 195, 169]\nincompatible\n',
