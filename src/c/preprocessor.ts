@@ -395,21 +395,12 @@ class Preprocessor {
     let index = 0;
     while (index < queue.length) {
       const token = queue[index++];
+      const next = this.expandBuiltin(queue, index, token, output);
+      if (next !== undefined) {
+        index = next;
+        continue;
+      }
       const macro = token.kind === 'identifier' ? this.macros.get(token.text) : undefined;
-      const builtin = token.kind === 'identifier' ? this.builtinMacro(token) : undefined;
-      if (builtin) {
-        output.push(builtin);
-        continue;
-      }
-      if (token.kind === 'identifier' && token.text === '_Pragma' && queue[index]?.text === '(') {
-        // _Pragma("...") is a #pragma written in an expression, which the interpreter ignores alike.
-        const close = queue.findIndex((item, position) => position > index && item.text === ')');
-        if (close === -1 || queue[index + 1]?.kind !== 'string') {
-          throw new CompileError([{ row: token.row, message: '_Pragma の後には ( と文字列と ) を書いてください。' }]);
-        }
-        index = close + 1;
-        continue;
-      }
       if (!macro || token.hide?.has(macro.name)) {
         output.push(token);
         continue;
@@ -432,6 +423,18 @@ class Preprocessor {
       index--;
     }
     return output;
+  }
+
+  /**
+   * Expands what no #define makes, `__LINE__` and the like, and drops `_Pragma(...)` and `__attribute__((...))`,
+   * returning the index of the token after it; undefined for any other token.
+   */
+  private expandBuiltin(queue: PPToken[], next: number, token: PPToken, output: PPToken[]): number | undefined {
+    if (token.kind !== 'identifier') return undefined;
+    const builtin = this.builtinMacro(token);
+    if (!builtin) return skipIgnored(queue, next, token);
+    output.push(builtin);
+    return next;
   }
 
   private collectArguments(
@@ -538,6 +541,49 @@ function appendCopies(
 }
 
 /** A variadic macro's body with each `__VA_OPT__(...)` replaced by its content, or removed when no extra arguments. */
+const GNU_ATTRIBUTE_KEYWORDS = new Set(['__attribute__', '__attribute']);
+
+/**
+ * The index after `_Pragma(...)` or `__attribute__((...))`, which the interpreter drops, when `token` starts one before
+ * `next`; undefined when it starts neither.
+ */
+function skipIgnored(queue: PPToken[], next: number, token: PPToken): number | undefined {
+  if (token.kind !== 'identifier' || queue[next]?.text !== '(') return undefined;
+  if (token.text === '_Pragma') {
+    // _Pragma("...") is a #pragma written in an expression, which the interpreter ignores alike.
+    const close = queue.findIndex((item, position) => position > next && item.text === ')');
+    if (close === -1 || queue[next + 1]?.kind !== 'string') {
+      throw new CompileError([{ row: token.row, message: '_Pragma の後には ( と文字列と ) を書いてください。' }]);
+    }
+    return close + 1;
+  }
+  return GNU_ATTRIBUTE_KEYWORDS.has(token.text) ? skipGnuAttribute(queue, next, token.row) : undefined;
+}
+
+/** The GNU attributes that change a type's layout, which the interpreter leaves out; the others only change warnings. */
+export const LAYOUT_ATTRIBUTES = /\b(?:packed|aligned|__packed__|__aligned__|vector_size|mode|transparent_union)\b/;
+
+/**
+ * Skips `__attribute__((...))`, whose parentheses start at `open`, and returns the index after them. The attributes are
+ * dropped before parsing, since clang accepts them in places tree-sitter's C grammar does not, such as between a
+ * declarator and its initializer; one that changes a layout is rejected wherever it is written.
+ */
+function skipGnuAttribute(queue: PPToken[], open: number, row: number): number {
+  let depth = 0;
+  let index = open;
+  const words: string[] = [];
+  for (; index < queue.length; index++) {
+    const text = queue[index].text;
+    if (text === '(') depth++;
+    else if (text === ')' && --depth === 0) break;
+    words.push(text);
+  }
+  if (depth > 0) throw new CompileError([{ row, message: '__attribute__ の ( と ) の数が合いません。' }]);
+  const layout = LAYOUT_ATTRIBUTES.exec(words.join(' '))?.[0];
+  if (layout) unsupported(row, `配置や型を変える属性（${layout}）`);
+  return index + 1;
+}
+
 function withVaOpt(body: PPToken[], hasExtra: boolean, row: number): PPToken[] {
   const result: PPToken[] = [];
   for (let index = 0; index < body.length; index++) {

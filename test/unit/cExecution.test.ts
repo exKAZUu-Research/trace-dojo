@@ -70,6 +70,34 @@ int main(void) {
   });
 });
 
+// clang prints this output: the attributes only change warnings, and __extension__ only silences them.
+test('attributes, __extension__, stdalign.h, and stdnoreturn.h give the output of clang', () => {
+  const program = `#include <stdio.h>
+#include <stdlib.h>
+#include <stdalign.h>
+#include <stdnoreturn.h>
+__extension__ long long big = 1LL << 33;
+static int helper(void) __attribute__((unused));
+noreturn void finish(void) {
+  exit(0);
+}
+struct rec {
+  char tag;
+  alignas(8) int value;
+};
+int main(void) {
+  int x __attribute__((unused)) = 1;
+  __extension__ long long local = big + x;
+  printf("%lld %zu %zu %d\\n", local, alignof(struct rec), sizeof(struct rec), __alignas_is_defined);
+  finish();
+}`;
+  expect(executeProgram('c', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: '8589934593 8 16 1\n',
+  });
+});
+
 test("va_arg of a type other than the argument's stops the program", () => {
   const program = `#include <stdarg.h>
 double first(int n, ...) {
@@ -170,6 +198,18 @@ test.each([
   [
     'int main(void) {\n  int x = 1;\n  return _Generic(x, int: 1, default: 0);\n}',
     '_Genericは、この採点環境では使えません。',
+  ],
+  [
+    '#include <stdio.h>\nstruct __attribute__((packed)) rec { char tag; int value; };\nint main(void) {\n  printf("%zu\\n", sizeof(struct rec));\n}',
+    '配置や型を変える属性（packed）は、この採点環境では使えません。',
+  ],
+  [
+    'struct rec { char tag; } __attribute__((aligned(16)));\nint main(void) { return sizeof(struct rec); }',
+    '配置や型を変える属性（aligned）は、この採点環境では使えません。',
+  ],
+  [
+    'int main(void) {\n  int x __attribute__((aligned(16))) = 1;\n  return x;\n}',
+    '配置や型を変える属性（aligned）は、この採点環境では使えません。',
   ],
 ])('features left out of the interpreter are rejected before running: %s', (program, message) => {
   const execution = executeProgram('c', program);

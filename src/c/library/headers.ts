@@ -363,6 +363,17 @@ const STDBOOL = `
 #define __bool_true_false_are_defined 1
 `;
 
+const STDALIGN = `
+#define alignas _Alignas
+#define alignof _Alignof
+#define __alignas_is_defined 1
+#define __alignof_is_defined 1
+`;
+
+const STDNORETURN = `
+#define noreturn _Noreturn
+`;
+
 const STDDEF = `
 ${SIZE_T}
 ${NULL}
@@ -610,6 +621,8 @@ const HEADERS: Record<string, string> = {
   'ctype.h': CTYPE,
   'math.h': MATH,
   'stdbool.h': STDBOOL,
+  'stdalign.h': STDALIGN,
+  'stdnoreturn.h': STDNORETURN,
   'stddef.h': STDDEF,
   'limits.h': LIMITS,
   'float.h': FLOAT,
@@ -634,8 +647,6 @@ const UNSUPPORTED_HEADERS: Record<string, string> = {
   'complex.h': '複素数（complex.h）',
   'tgmath.h': '型総称の数学関数（tgmath.h）',
   'fenv.h': '浮動小数点数の環境（fenv.h）',
-  'stdalign.h': 'stdalign.h',
-  'stdnoreturn.h': 'stdnoreturn.h',
   'stdbit.h': 'stdbit.h',
   'stdckdint.h': 'stdckdint.h',
 };

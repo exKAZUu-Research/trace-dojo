@@ -21,6 +21,7 @@ import {
   type TypeName,
   type TypeSpecifier,
 } from './ast';
+import { LAYOUT_ATTRIBUTES } from './preprocessor';
 import { unsupported } from './unsupported';
 
 /** What learners call the syntax that the converter leaves out, by tree-sitter's node type. */
@@ -373,6 +374,8 @@ export class Converter {
         '_Nonnull',
         '_Nullable',
         '_Null_unspecified',
+        // __extension__ before a declaration only silences clang's warnings about GNU extensions in it.
+        '__extension__',
       ].includes(word)
     )
       return undefined;
@@ -386,13 +389,9 @@ export class Converter {
    * which the interpreter leaves out.
    */
   private attributes(node: Node): void {
-    const text = node.text;
-    if (/\b(?:packed|aligned|__packed__|__aligned__|vector_size|mode|transparent_union)\b/.test(text)) {
-      unsupported(
-        node.startPosition.row,
-        `配置や型を変える属性（${/\b(?:packed|aligned|__packed__|__aligned__|vector_size|mode|transparent_union)\b/.exec(text)?.[0]}）`
-      );
-    }
+    // GNU's __attribute__ never reaches here: the preprocessor drops it, or rejects it when it changes a layout.
+    const layout = LAYOUT_ATTRIBUTES.exec(node.text)?.[0];
+    if (layout) unsupported(node.startPosition.row, `配置や型を変える属性（${layout}）`);
   }
 
   private typeSpecifier(node: Node): TypeSpecifier {
