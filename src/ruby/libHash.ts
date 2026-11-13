@@ -59,11 +59,11 @@ sdef('Hash', '[]', [0, -1], function* (self, args) {
     return hash;
   }
   if (source instanceof RArray) {
-    for (const item of source.items) {
+    for (const [index, item] of source.items.entries()) {
       const pair = yield* tryAry(item);
-      if (!pair || pair.items.length === 0 || pair.items.length > 2) {
-        throw argumentError(`invalid number of elements (${pair ? pair.items.length : 1} for 1..2)`);
-      }
+      if (!pair) throw argumentError(`wrong element type ${realClassOf(item).name} at ${index} (expected array)`);
+      if (pair.items.length === 0 || pair.items.length > 2)
+        throw argumentError(`invalid number of elements (${pair.items.length} for 1..2)`);
       yield* hashSet(hash, pair.items[0], pair.items[1] ?? NIL);
     }
     return hash;

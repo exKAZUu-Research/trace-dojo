@@ -2025,3 +2025,13 @@ test('Enumerable tally rejects non-Integer existing counts without callbacks', (
     stdout: 'TypeError\n',
   });
 });
+
+test('Hash pair collections identify non-array elements', () => {
+  expect(
+    run(
+      'class P; def to_ary; nil; end; end; class A; def to_ary; [P.new]; end; end; begin; Hash[A.new]; rescue => e; p e.class,e.message; end'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n"wrong element type P at 0 (expected array)"\n',
+  });
+});
