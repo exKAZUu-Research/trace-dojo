@@ -408,8 +408,10 @@ function constantsOf(frame: Frame, type: Value): Value[] {
 function entrySetView(frame: Frame, map: Value, viewClass: ClassInfo, nodeClass: ClassInfo): JavaObject {
   const nodes = new WeakMap<HashStore['entries'][number], JavaObject>();
   const entryClass = nodeClass.interfaces[0] as ClassInfo;
-  // As HashMap's and TreeMap's entry sets do, contains looks the entry's key up in the map and compares its value.
-  const containsEntry = (lookupFrame: Frame, value: Value): boolean => {
+  // As HashMap's and TreeMap's entry sets do, contains looks the entry's key up in the map and compares its value; the
+  // restricted maps' entry sets compare the entries one by one, which `undefined` leaves to the view.
+  const containsEntry = (lookupFrame: Frame, value: Value): boolean | undefined => {
+    if (unmodifiableClasses.has(unwrapped(map as JavaObject).cls)) return undefined;
     if (!(value instanceof JavaObject) || !lookupFrame.runtime.isInstance(value, entryClass)) return false;
     const { runtime } = lookupFrame;
     const key = runtime.invokeVirtual(lookupFrame, entryClass, 'getKey', value, []);

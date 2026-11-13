@@ -155,8 +155,8 @@ export interface MapViewSource {
   isKeySet?: boolean;
   /** The map's lookup that the view's `contains` makes, as `AbstractMap`'s key set and values make one. */
   lookup?: 'containsKey' | 'containsValue';
-  /** An entry set's `contains`, which looks the entry's key up in the map. */
-  containsEntry?: (frame: Frame, value: Value) => boolean;
+  /** An entry set's `contains`, which looks the entry's key up in the map, or `undefined` to compare each entry. */
+  containsEntry?: (frame: Frame, value: Value) => boolean | undefined;
   remove: (frame: Frame, entry: HashStore['entries'][number]) => void;
 }
 
