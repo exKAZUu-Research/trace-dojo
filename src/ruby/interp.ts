@@ -1085,7 +1085,7 @@ function* invokeUser(
     return yield* evalBody(def.body, frame);
   } catch (error) {
     if (error instanceof ReturnSignal && error.target === frame) return error.value;
-    throw error;
+    throw hostStackOverflow(error, runtime.frames.length);
   } finally {
     frame.extra.finished = true;
     runtime.popFrame();
@@ -1093,6 +1093,23 @@ function* invokeUser(
     if (def.isAtomic) runtime.steps.completeAtomicCall();
   }
 }
+
+/**
+ * The host's stack may run out before the call depth reaches its limit, which Ruby reports as SystemStackError. The
+ * error becomes one only after unwinding some calls, since building it needs stack.
+ */
+function hostStackOverflow(error: unknown, depth: number): unknown {
+  const isOverflow = error === STACK_OVERFLOW || (error instanceof RangeError && error.message.startsWith('Maximum call stack'));
+  if (!isOverflow) return error;
+  overflowDepth ??= depth;
+  if (depth > overflowDepth - 32) return STACK_OVERFLOW;
+  overflowDepth = undefined;
+  return rubyError(rt().c.SystemStackError, 'stack level too deep');
+}
+
+/** Stands for the host's stack overflow while the calls nearest to it unwind. */
+export const STACK_OVERFLOW = { stackOverflow: true };
+let overflowDepth: number | undefined;
 
 function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
   const home = frame.home;

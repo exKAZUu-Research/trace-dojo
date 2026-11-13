@@ -5,7 +5,7 @@ import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
 import { bootstrap } from './bootstrap';
 import { describeException } from './describe';
-import { evalBody, runToEnd } from './interp';
+import { evalBody, runToEnd, STACK_OVERFLOW } from './interp';
 import { parseRuby } from './parse';
 import {
   BreakSignal,
@@ -75,6 +75,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
 
 function describeUncaught(runtime: Runtime, error: unknown, frame: Frame): string | undefined {
   if (error instanceof UnsupportedFeatureError) return error.message;
+  if (error === STACK_OVERFLOW) return 'stack level too deep (SystemStackError)';
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof ReturnSignal && error.target === frame) return undefined;
   if (error instanceof RubyError) {
