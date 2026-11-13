@@ -301,7 +301,7 @@ function defineNumber(builder: RealmBuilder): void {
     const value = thisNumber(runtime, thisValue);
     const radix = args[0] === undefined ? 10 : runtime.toNumber(args[0]);
     if (!Number.isInteger(radix) || radix < 2 || radix > 36)
-      runtime.throwError('RangeError', 'toString() radix must be between 2 and 36');
+      runtime.throwError('RangeError', 'toString() radix argument must be between 2 and 36');
     return value.toString(radix);
   });
   builder.method(numberPrototype, 'toFixed', 1, ({ runtime, thisValue, args }) => {

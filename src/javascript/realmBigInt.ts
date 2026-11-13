@@ -29,7 +29,8 @@ export function defineBigIntBuiltins(builder: RealmBuilder): void {
   }
   builder.method(bigintPrototype, 'toString', 0, ({ runtime, thisValue, args }) => {
     const radix = args[0] === undefined ? 10 : Math.trunc(runtime.toNumber(args[0]));
-    if (!(radix >= 2 && radix <= 36)) runtime.throwError('RangeError', 'toString() radix must be between 2 and 36');
+    if (!(radix >= 2 && radix <= 36))
+      runtime.throwError('RangeError', 'toString() radix argument must be between 2 and 36');
     return thisBigInt(runtime, thisValue, 'toString').toString(radix);
   });
   builder.method(bigintPrototype, 'toLocaleString', 0, ({ runtime, thisValue, args }) => {
