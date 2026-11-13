@@ -949,6 +949,7 @@ export class Converter {
           break;
         }
         case 'splat_parameter': {
+          if (params.rest !== undefined) this.fail(child, '* の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
           params.rest = nameNode ? declare(child, nameNode.text) : '';
           break;

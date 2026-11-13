@@ -80,10 +80,11 @@ export class MersenneTwister {
 
   /** A Float in [0, 1) from two draws (53 bits), or [0, 1] when not `exclusive`. */
   real(exclusive = true): number {
-    const a = this.int32() >>> 5;
-    const b = this.int32() >>> 6;
-    if (exclusive) return (a * 67_108_864 + b) / 9_007_199_254_740_992;
-    return (a * 67_108_864 + b) / 9_007_199_254_740_991;
+    const a = this.int32();
+    const b = this.int32();
+    if (exclusive) return ((a >>> 5) * 67_108_864 + (b >>> 6)) / 9_007_199_254_740_992;
+    const x = (BigInt(a) << 32n) | BigInt(b);
+    return Number((x * ((1n << 53n) | 1n)) >> 64n) / 9_007_199_254_740_992;
   }
 
   /** A uniform integer in [0, limit], drawing 32 bits at a time and retrying above the limit. */
