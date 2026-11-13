@@ -113,6 +113,7 @@ export abstract class ExpressionCompiler extends ReferenceCompiler {
   }
 
   // code-gauge-allow functionNcss 46 -- One case per expression kind, each delegating to its own compiler.
+  // code-gauge-allow duplicateLines 19 -- A switch over expression kinds, which the JavaScript evaluator's resembles by coincidence.
   protected compileExpressionBody(context: MethodContext, expression: Expression): Compiled {
     switch (expression.kind) {
       case 'literal': {

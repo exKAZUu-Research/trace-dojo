@@ -429,8 +429,11 @@ export class ProgramConverter extends ExpressionConverter {
     let ctor: FunctionNode | undefined;
     const outerDerived = this.derivedConstructor;
     this.derivedConstructor = superClass !== undefined;
+    const body = namedChildren(field(node, 'body'));
+    // Members may use a #name declared after them, so the whole body's names are known before any is converted.
+    this.privateNames.push(declaredPrivateNames(body));
     try {
-      for (const member of namedChildren(field(node, 'body'))) {
+      for (const member of body) {
         if (!isConstructorDefinition(member)) {
           members.push(this.classMember(member));
           continue;
@@ -441,6 +444,7 @@ export class ProgramConverter extends ExpressionConverter {
       }
     } finally {
       this.derivedConstructor = outerDerived;
+      this.privateNames.pop();
     }
     return { name, superClass, ctor, members, source: this.sourceOf(node), row: rowOf(node) };
   }
@@ -503,6 +507,36 @@ function recordsHeaderStep(
   if (update) return true;
   if (!init) return false;
   return init.kind !== 'declaration' || init.declarators.some((declarator) => declarator.init);
+}
+
+/**
+ * The `#name`s a class body declares, which it may declare once each, or twice as a getter and a setter that are both
+ * static or both not.
+ */
+function declaredPrivateNames(members: Node[]): Set<string> {
+  // What each name declares so far: `static getter`, `instance pair`, and so on.
+  const declared = new Map<string, string>();
+  for (const member of members) {
+    const nameNode = privateNameNode(member);
+    if (nameNode) declared.set(nameNode.text, privateDeclaration(member, nameNode, declared.get(nameNode.text)));
+  }
+  return new Set(declared.keys());
+}
+
+function privateNameNode(member: Node): Node | undefined {
+  const nameNode = member.type === 'method_definition' ? field(member, 'name') : member.childForFieldName('property');
+  return nameNode?.type === 'private_property_identifier' ? nameNode : undefined;
+}
+
+/** What a `#name` declares once `member` declares it again after `previous`, rejecting what JavaScript rejects. */
+function privateDeclaration(member: Node, nameNode: Node, previous: string | undefined): string {
+  const { text: name } = nameNode;
+  if (name === '#constructor') fail(nameNode, '#constructor という名前は使えません。');
+  const placement = hasChild(member, 'static') ? 'static' : 'instance';
+  const accessor = member.type === 'method_definition' ? accessorOf(member) : undefined;
+  const pairs = accessor !== undefined && previous === `${placement} ${accessor === 'getter' ? 'setter' : 'getter'}`;
+  if (previous !== undefined && !pairs) fail(nameNode, `${name} は、このクラスの中ですでに宣言されています。`);
+  return pairs ? `${placement} pair` : `${placement} ${accessor ?? 'member'}`;
 }
 
 /** Rejects the class member names JavaScript reserves: a static `prototype`, and a field named `constructor`. */

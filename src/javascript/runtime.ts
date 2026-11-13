@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 513 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 523 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -146,6 +146,12 @@ export class Runtime {
   }
 
   getOwnProperty(object: JsObject, key: Key): Property | undefined {
+    if (typeof object.primitive === 'string') {
+      const element = ownElement(object.primitive, key);
+      if (element !== MISSING) {
+        return { value: element, writable: false, enumerable: key !== 'length', configurable: false };
+      }
+    }
     if (object instanceof JsArray) {
       if (key === 'length')
         return {
@@ -351,11 +357,7 @@ export class Runtime {
 
   /** Own string keys in property order: array indices and integer keys ascending, then the rest as added. */
   ownKeys(object: JsObject): string[] {
-    const keys: string[] = [];
-    if (object instanceof JsArray) {
-      this.scan(object.elements.length);
-      for (const [index, element] of object.elements.entries()) if (element !== HOLE) keys.push(String(index));
-    }
+    const keys = this.elementKeys(object);
     const integers: number[] = [];
     const others: string[] = [];
     for (const key of object.properties.keys()) {
@@ -368,6 +370,19 @@ export class Runtime {
     integers.sort((a, b) => a - b);
     for (const index of integers) keys.push(String(index));
     return [...keys, ...others];
+  }
+
+  /** The indices of a String object's code units or of an array's elements, which its other keys follow. */
+  private elementKeys(object: JsObject): string[] {
+    const keys: string[] = [];
+    if (typeof object.primitive === 'string') {
+      this.scan(object.primitive.length);
+      for (let index = 0; index < object.primitive.length; index++) keys.push(String(index));
+    } else if (object instanceof JsArray) {
+      this.scan(object.elements.length);
+      for (const [index, element] of object.elements.entries()) if (element !== HOLE) keys.push(String(index));
+    }
+    return keys;
   }
 
   ownEnumerableKeys(object: JsObject): string[] {
@@ -585,8 +600,6 @@ export class Runtime {
     if (isObject(value)) return value;
     if (value === undefined || value === null)
       this.throwError('TypeError', 'Cannot convert undefined or null to object');
-    // A string's properties are its UTF-16 code units.
-    if (typeof value === 'string') return this.newArray(value.split(''));
     const box = this.newObject(this.objectFor(value, ''));
     box.primitive = value;
     return box;
@@ -739,7 +752,7 @@ function ownElement(value: Value, key: Key): Value | typeof MISSING {
   if (typeof value === 'string') {
     if (key === 'length') return value.length;
     const index = arrayIndexOf(key);
-    if (index !== undefined) return value[index];
+    if (index !== undefined && index < value.length) return value[index];
   } else if (value instanceof JsArray) {
     if (key === 'length') return value.elements.length;
     const index = arrayIndexOf(key);

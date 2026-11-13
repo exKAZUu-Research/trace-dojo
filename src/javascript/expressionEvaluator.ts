@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 464 -- One evaluator of every expression kind, whose cases share its references and calls.
 import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
@@ -47,6 +48,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   // code-gauge-allow functionNcss 60 -- One case per expression kind, each delegating where it grows.
+  // code-gauge-allow duplicateLines 19 -- A switch over expression kinds, which the Java compiler's resembles by coincidence.
   private evaluateKind(expression: Expression): ChainValue {
     const { runtime } = this;
     switch (expression.kind) {
@@ -132,8 +134,12 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
   }
   private update(expression: Extract<Expression, { kind: 'update' }>): Value {
+    return this.updateReference(this.reference(expression.target), expression);
+  }
+
+  /** Increments or decrements what a reference holds, giving the value before or after as `x++` or `++x` does. */
+  protected updateReference(reference: Reference, expression: Extract<Expression, { kind: 'update' }>): Value {
     const { runtime } = this;
-    const reference = this.reference(expression.target);
     const oldValue = runtime.toNumeric(this.getReference(reference));
     const newValue = arithmetic(
       runtime,
@@ -202,6 +208,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   /** Evaluates elements in order, holding the values so far for garbage collection; an elision leaves a hole. */
+  // code-gauge-allow duplicateLines 25 -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
   private evaluateElements(args: (Argument | undefined)[]): Element[] {
     const { runtime } = this;
     const values: Element[] = [];
@@ -372,6 +379,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     }
   }
 
+  // code-gauge-allow duplicateLines 18 -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
   private assign(expression: Extract<Expression, { kind: 'assign' }>): Value {
     const { runtime } = this;
     const { operator, target } = expression;
@@ -583,6 +591,7 @@ function arithmetic(
 }
 
 // code-gauge-allow functionNcss 40 -- One case per operator, as for numbers.
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per operator, as for numbers.
 function bigintArithmetic(runtime: Runtime, operator: string, left: bigint, right: bigint): bigint {
   switch (operator) {
     case '+': {

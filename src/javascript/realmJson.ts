@@ -128,7 +128,8 @@ function valueToSerialize(serializer: Serializer, key: string, holder: JsObject)
   if (serializer.replacer) value = runtime.call(serializer.replacer, holder, [key, value], callRow);
   if (!(value instanceof JsObject) || value.primitive === undefined || typeof value.primitive === 'symbol')
     return value;
-  return typeof value.primitive === 'number' ? runtime.toNumber(value) : value.primitive;
+  if (typeof value.primitive === 'number') return runtime.toNumber(value);
+  return typeof value.primitive === 'string' ? runtime.toString(value) : value.primitive;
 }
 
 function quoteJson(runtime: Runtime, text: string): string {

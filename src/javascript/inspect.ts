@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 406 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 410 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -179,7 +179,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
   const keys = enumerableKeys(runtime, value);
-  const frame = frameOf(runtime, value, constructor, keys.length > 0 || value.promise !== undefined);
+  const frame = frameOf(ctx, value, constructor, keys.length > 0 || value.promise !== undefined);
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
     const name = prefixOf(constructor, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
@@ -208,8 +208,9 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
 // code-gauge-allow functionCognitiveComplexity 22 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 34 -- Ports Node.js's util.inspect, so the two stay comparable.
-function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
+// code-gauge-allow functionNcss 35 -- Ports Node.js's util.inspect, so the two stay comparable.
+function frameOf(ctx: Context, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
+  const { runtime } = ctx;
   if (value instanceof JsArray) {
     const prefix = constructor === 'Array' ? '' : prefixOf(constructor, 'Array', `(${value.elements.length})`);
     return value.elements.length === 0 && !hasKeys ? `${prefix}[]` : { base: '', braces: [`${prefix}[`, ']'] };
@@ -224,7 +225,7 @@ function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefi
   else if (value.regexp) base = String(value.regexp);
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
   else if (value.isError && constructor !== 'Object') base = errorText(value);
-  else if (value.primitive !== undefined) base = boxedBase(value.primitive, constructor, toStringTagOf(value));
+  else if (value.primitive !== undefined) base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value));
   else {
     const tag = toStringTagOf(value);
     if (tag && tag !== constructor) open = `${prefixOf(constructor, 'Object')}[${tag}] {`;
@@ -236,19 +237,26 @@ function frameOf(runtime: Runtime, value: JsObject, constructor: string | undefi
 
 /** Node.js's getBoxedBase, such as `[Number: 3]`, `[BigInt (Big): 1n]`, or `[Symbol: Symbol(a)]`. */
 function boxedBase(
-  primitive: number | boolean | bigint | symbol,
+  ctx: Context,
+  primitive: string | number | boolean | bigint | symbol,
   constructor: string | undefined,
   tag: string | undefined
 ): string {
   const type = BOXED_TYPES[typeof primitive as keyof typeof BOXED_TYPES];
   let base = `[${type}`;
   if (type !== constructor) base += constructor === undefined ? ' (null prototype)' : ` (${constructor})`;
-  base += `: ${typeof primitive === 'number' ? formatNumber(primitive) : typeof primitive === 'bigint' ? `${primitive}n` : String(primitive)}]`;
+  base += `: ${typeof primitive === 'string' ? formatString(ctx, primitive) : formatValue(ctx, primitive, 0)}]`;
   if (tag && tag !== constructor) base += ` [${tag}]`;
   return base;
 }
 
-const BOXED_TYPES = { number: 'Number', boolean: 'Boolean', bigint: 'BigInt', symbol: 'Symbol' } as const;
+const BOXED_TYPES = {
+  string: 'String',
+  number: 'Number',
+  boolean: 'Boolean',
+  bigint: 'BigInt',
+  symbol: 'Symbol',
+} as const;
 
 /**
  * The `Symbol.toStringTag` an object inherits as a data property, such as a generator's `Generator`, which Node.js
@@ -289,10 +297,12 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
 /** The keys an object lists, its strings and then its symbols, as `Object.keys` and then its symbols order them. */
 function enumerableKeys(runtime: Runtime, object: JsObject): Key[] {
   // An array keeps its elements apart from its other properties.
-  const strings =
+  const own =
     object instanceof JsArray
       ? [...object.properties.keys()].filter((key) => typeof key === 'string')
       : runtime.ownKeys(object);
+  // A String object's indices, which come first, show as its text instead.
+  const strings = typeof object.primitive === 'string' ? own.slice(object.primitive.length) : own;
   const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
   const listed = keys.filter((key) => {
     if (object.isError && (key === 'message' || key === 'name' || key === 'stack')) return false;

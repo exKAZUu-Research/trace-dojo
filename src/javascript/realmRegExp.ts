@@ -2,7 +2,7 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineHostIteratorPrototype, newHostIterator } from './realmIterators';
 import type { Runtime } from './runtime';
-import { isCallable, JsObject, type NativeCall, throwingHostErrors, type Value } from './values';
+import { isCallable, type JsArray, JsObject, type NativeCall, throwingHostErrors, type Value } from './values';
 
 const FLAG_GETTERS = [
   ['hasIndices', 'd'],
@@ -154,6 +154,7 @@ function groupsObject(runtime: Runtime, groups: Record<string, Value> | undefine
 
 // String methods --------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionNcss 31 -- Lists the String methods that take a regular expression, each a small closure of its own.
 function defineStringMethods(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
   const method = (name: string, run: (call: NativeCall, text: string) => Value): void => {
@@ -220,15 +221,7 @@ export function replaceWithRegExp(
   }
   const template = isCallable(replacement) ? undefined : runtime.toString(replacement);
   runtime.scan(text.length);
-  const matches = withHostRegExp(runtime, object, (regexp): RegExpExecArray[] => {
-    if (!regexp.global) {
-      const match = regexp.exec(text);
-      return match ? [match] : [];
-    }
-    regexp.lastIndex = 0;
-    // The host's matchAll steps over empty matches as JavaScript's replace does, and leaves lastIndex at 0.
-    return [...text.matchAll(regexp)];
-  });
+  const matches = withHostRegExp(runtime, object, (regexp) => matchesToReplace(runtime, regexp, text));
   let result = '';
   let position = 0;
   for (const match of matches) {
@@ -256,7 +249,24 @@ export function replaceWithRegExp(
   return result + suffix;
 }
 
+function matchesToReplace(runtime: Runtime, regexp: RegExp, text: string): RegExpExecArray[] {
+  if (!regexp.global) {
+    const match = regexp.exec(text);
+    return match ? [match] : [];
+  }
+  regexp.lastIndex = 0;
+  // The host's matchAll steps over empty matches as JavaScript's replace does, and leaves lastIndex at 0.
+  const matches: RegExpExecArray[] = [];
+  for (const match of text.matchAll(regexp)) {
+    // Charged as the match arrays JavaScript keeps until the replacements run, captures included.
+    runtime.allocate(match.length + 1);
+    matches.push(match);
+  }
+  return matches;
+}
+
 /** Expands a replacement template for one match as the spec's GetSubstitution does: `$&`, `$1`, `$<name>`, and so on. */
+// code-gauge-allow functionParameterCount 7 -- Takes each input of the spec's GetSubstitution, which a template may refer to.
 function substitution(
   runtime: Runtime,
   template: string,
@@ -288,6 +298,7 @@ function substitution(
   return result;
 }
 
+// code-gauge-allow functionParameterCount 7 -- Takes each input of the spec's GetSubstitution, which a template may refer to.
 function dollarExpansion(
   template: string,
   index: number,
@@ -320,6 +331,52 @@ function dollarExpansion(
 }
 
 /** The regular expression object a value is, if it is one. */
+// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss 33 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+/**
+ * The spec's RegExp.prototype[Symbol.split], which matches at each position with a sticky copy of the expression and
+ * charges each part before it is kept.
+ */
+export function splitWithRegExp(runtime: Runtime, text: string, object: RegExpObject, limit: number): JsArray {
+  const { flags } = object.regexp;
+  const splitter = new RegExp(object.regexp.source, flags.includes('y') ? flags : `${flags}y`);
+  const array = runtime.newArray([]);
+  const push = (part: string | undefined): boolean => {
+    runtime.allocate(1);
+    array.elements.push(part);
+    return array.elements.length >= limit;
+  };
+  if (limit === 0) return array;
+  if (text.length === 0) {
+    if (!splitter.test(text)) push(text);
+    return array;
+  }
+  let start = 0;
+  let position = 0;
+  while (position < text.length) {
+    runtime.spend();
+    splitter.lastIndex = position;
+    const match = splitter.exec(text);
+    const end = match ? Math.min(splitter.lastIndex, text.length) : start;
+    if (!match || end === start) {
+      position = advanceIndex(text, position, splitter.unicode || splitter.unicodeSets);
+      continue;
+    }
+    if (push(text.slice(start, position))) return array;
+    for (const capture of match.slice(1)) if (push(capture)) return array;
+    start = end;
+    position = end;
+  }
+  push(text.slice(start));
+  return array;
+}
+
+/** The spec's AdvanceStringIndex, which steps over a whole surrogate pair in a Unicode-aware expression. */
+function advanceIndex(text: string, index: number, unicode: boolean): number {
+  if (!unicode) return index + 1;
+  return index + ((text.codePointAt(index) ?? 0) > 0xff_ff ? 2 : 1);
+}
+
 export function asRegExp(value: Value): RegExpObject | undefined {
   return value instanceof JsObject && value.regexp ? (value as RegExpObject) : undefined;
 }

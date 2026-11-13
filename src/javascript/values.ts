@@ -65,8 +65,8 @@ export class JsObject {
   promise?: PromiseState;
   /** Set on a Map, Set, WeakMap, or WeakSet. */
   collection?: CollectionState;
-  /** Set on a number, boolean, BigInt, or symbol boxed by `Object(value)`, whose prototype methods read it. */
-  primitive?: number | boolean | bigint | symbol;
+  /** Set on a primitive boxed by `Object(value)`, whose prototype methods read it; a string's are its own indices. */
+  primitive?: string | number | boolean | bigint | symbol;
 
   constructor(public proto: JsObject | null) {}
 }

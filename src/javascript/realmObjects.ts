@@ -181,10 +181,10 @@ function primitiveText(value: Exclude<Value, JsObject>): string {
   return typeof value === 'symbol' ? value.toString() : String(value);
 }
 
-/** Own string keys, enumerable or not, with an array's `length` after its indices as V8 orders them. */
+/** Own string keys, enumerable or not, with an array's or String object's `length` after its indices as V8 orders them. */
 function ownPropertyNames(runtime: Runtime, object: JsObject): string[] {
   const keys = runtime.ownKeys(object);
-  if (!(object instanceof JsArray)) return keys;
+  if (!(object instanceof JsArray) && typeof object.primitive !== 'string') return keys;
   const indexCount = keys.findIndex((key) => !/^(?:0|[1-9]\d*)$/.test(key));
   keys.splice(indexCount === -1 ? keys.length : indexCount, 0, 'length');
   return keys;

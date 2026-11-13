@@ -23,6 +23,9 @@ type ExpressionConverterFunction = (node: Node) => Expression;
 const assignableTypes = new Set(['identifier', 'member_expression', 'subscript_expression']);
 
 export abstract class ExpressionConverter extends ConverterBase {
+  /** The `#name`s each enclosing class body declares, innermost last, which every `#name` use must find. */
+  protected readonly privateNames: Set<string>[] = [];
+
   private readonly expressionConverters: Record<string, ExpressionConverterFunction> = {
     number: (node) => ({ kind: 'literal', value: this.number(node), row: rowOf(node) }),
     string: (node) => ({
@@ -104,6 +107,11 @@ export abstract class ExpressionConverter extends ConverterBase {
       if (!canSuspendIn(expression)) unsupported(node, 'この位置の yield や await ');
     }
     return expression;
+  }
+
+  private checkPrivateName(node: Node): void {
+    if (!this.privateNames.some((names) => names.has(node.text)))
+      fail(node, `${node.text} は、それを宣言したクラスの中でしか使えません。`);
   }
 
   private awaitExpression(node: Node): Expression {
@@ -230,8 +238,12 @@ export abstract class ExpressionConverter extends ConverterBase {
   private unary(node: Node): Expression {
     const operator = field(node, 'operator').text;
     const argument = field(node, 'argument');
-    if (operator === 'delete' && unwrapParentheses(argument).type === 'identifier')
-      fail(node, '変数は delete できません。');
+    if (operator === 'delete') {
+      const target = unwrapParentheses(argument);
+      if (target.type === 'identifier') fail(node, '変数は delete できません。');
+      if (target.type === 'member_expression' && field(target, 'property').type === 'private_property_identifier')
+        fail(node, '# で始まる名前のフィールドは delete できません。');
+    }
     return { kind: 'unary', operator, argument: this.expression(argument), row: rowOf(node) };
   }
 
@@ -240,6 +252,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     const leftNode = field(node, 'left');
     if (leftNode.type === 'private_property_identifier') {
       if (operator !== 'in') fail(leftNode, '# で始まる名前は、in の左か「.」の後ろにしか書けません。');
+      this.checkPrivateName(leftNode);
       return {
         kind: 'privateIn',
         name: leftNode.text,
@@ -313,6 +326,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     let property: PropertyName;
     if (node.type === 'member_expression') {
       const propertyNode = field(node, 'property');
+      if (propertyNode.type === 'private_property_identifier') this.checkPrivateName(propertyNode);
       property =
         propertyNode.type === 'private_property_identifier'
           ? { kind: 'private', name: propertyNode.text }
@@ -535,6 +549,9 @@ function canSuspendIn(expression: Expression): boolean {
     case 'assign': {
       // A member target evaluates its parts step by step, but a destructuring target binds in one go.
       return expression.target.kind === 'member' || !patternSuspends(expression.target);
+    }
+    case 'update': {
+      return expression.target.kind === 'member';
     }
     case 'call': {
       return expression.callee.kind !== 'super';

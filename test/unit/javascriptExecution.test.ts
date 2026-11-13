@@ -134,6 +134,19 @@ test.each([
   ['a stray comma in an object pattern', 'const { a,, b } = { a: 1, b: 2 };', 0, '書き方に誤りがあります。'],
   ['a function statement without a name', 'function () {}', 0, '書き方に誤りがあります。'],
   ['a class statement without a name', 'class {}', 0, '書き方に誤りがあります。'],
+  [
+    'an undeclared #name',
+    'class A {\n  m(o) {\n    return #z in o;\n  }\n}',
+    2,
+    '#z は、それを宣言したクラスの中でしか使えません。',
+  ],
+  ['a #name declared twice', 'class A {\n  #a;\n  #a() {}\n}', 2, '#a は、このクラスの中ですでに宣言されています。'],
+  [
+    'a deleted #name',
+    'class A {\n  #a;\n  m() {\n    delete this.#a;\n  }\n}',
+    3,
+    '# で始まる名前のフィールドは delete できません。',
+  ],
 ])('%s is a compile error', (_, source, row, message) => {
   expect(executeProgram('javascript', source)).toEqual({ kind: 'compileError', diagnostics: [{ row, message }] });
 });
@@ -284,6 +297,16 @@ test.each([
     'concatenating an array with itself many times',
     'const a = new Array(100000).fill(0);\na.concat(...new Array(100000).fill(a));',
     { kind: 'executed', uncaughtException: 'RangeError: Out of memory' },
+  ],
+  [
+    'replacing with many captures per match',
+    'const s = "a".repeat(1000000).replace(new RegExp("a" + "()".repeat(1000), "g"), "");',
+    { kind: 'executed', uncaughtException: 'RangeError: Out of memory' },
+  ],
+  [
+    'splitting with many captures per match',
+    'const s = "a".repeat(1000000).split(new RegExp("a" + "()".repeat(1000)));',
+    { kind: 'limitExceeded' },
   ],
   [
     'flatMap to a large array',
@@ -681,7 +704,29 @@ console.log(BigInt.prototype.toString.call(b), b.valueOf(), typeof b, b + 2n, b 
 console.log(b, Object(-0), Object(true), Object(Symbol('a')), [Object(3)], Object.assign(Object(5), { extra: 1 }));
 console.log(Object.prototype.toString.call(Object(1)), Object.prototype.toString.call(Object(1n)), JSON.stringify([Object(1), Object(false)]));
 console.log(Object.getPrototypeOf(1) === Number.prototype, Object(1n) instanceof BigInt, structuredClone([Object(2n), Object(1)]));
-try { structuredClone(Object(Symbol('a'))); } catch (e) { console.log(e.name, e.message); }`,
+try { structuredClone(Object(Symbol('a'))); } catch (e) { console.log(e.name, e.message); }
+const s = Object('ab'); s[5] = 'z';
+console.log(s, Object.getOwnPropertyNames(s), Object.getOwnPropertyDescriptor(s, '0'), String(s), JSON.stringify([s]), s instanceof String, Array.isArray(s), [...s], { ...s });
+console.log(Object.prototype.toString.call(s), structuredClone(Object('q')), Object.getPrototypeOf('a') === String.prototype, Object.entries('ab'));
+const sym = Symbol('x'); console.log({ [Object(sym)]: 3 }[sym], Object.getOwnPropertyDescriptor(Symbol.prototype, Symbol.toPrimitive));
+for (const f of [() => String(Object(sym)), () => Symbol.prototype.toString.call(1), () => String.prototype.valueOf.call({})]) {
+  try { f(); } catch (e) { console.log(e.name, e.message); }
+}`,
+  ],
+  [
+    'splitting with regular expressions',
+    `for (const [s, r] of [['abc', /(?:)/], ['a1b2c3', /(\\d)/], ['', /x/], ['', /(?:)/], ['😀a😀', /(?:)/u], ['😀a😀', /(?:)/], ['aaa', /a*?/], ['ab', /$/], ['abc', /(b)|(z)/]]) {
+  console.log(JSON.stringify(s.split(r)), JSON.stringify(s.split(r, 2)), JSON.stringify(s.split(r, 0)));
+}`,
+  ],
+  [
+    'updating members whose key awaits or yields',
+    `async function h() {
+  const o = { k: 1, n: 5n }; ++o[await 'k'];
+  console.log(o.k, o[await 'k']++, o.k, --o[await Promise.resolve('n')], (await Promise.resolve(o)).k--, o.k);
+}
+function* g() { const o = { a: 1 }; o[yield 'key']++; console.log(o.a); }
+h().then(() => { const it = g(); it.next(); it.next('a'); });`,
   ],
   [
     'async generators and for await',
