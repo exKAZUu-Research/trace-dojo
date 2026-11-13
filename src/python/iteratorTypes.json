@@ -7,6 +7,10 @@
     "sample": "tokenize._tokenize.TokenizerIter(lambda: b'', extra_tokens=True)",
     "features": []
   },
+  "array.arrayiterator": {
+    "sample": "iter(array.array('b'))",
+    "features": ["moved", "reduced"]
+  },
   "bytearray_iterator": {
     "sample": "iter(bytearray())",
     "features": ["moved", "reduced", "hinted"]
@@ -65,10 +69,6 @@
   },
   "formatteriterator": {
     "sample": "string.Formatter().parse('')",
-    "features": []
-  },
-  "generator": {
-    "sample": "iter(re.RegexFlag(0))",
     "features": []
   },
   "iterator": {

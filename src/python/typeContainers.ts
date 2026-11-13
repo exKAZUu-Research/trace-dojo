@@ -326,7 +326,7 @@ method(tupleClass, '__contains__', 'one', 1, 1, (self, [item]) =>
   tupleOf(self).items.some((element) => equals(element, item))
 );
 method(tupleClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(newTuple(tupleOf(self).items), key));
-method(tupleClass, '__iter__', 'none', 0, 0, (self) => getIterator(newTuple(tupleOf(self).items)));
+method(tupleClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(tupleOf(self)));
 method(tupleClass, 'index', 'expected', 1, 3, (self, [item, start, stop]) => {
   const index = sequenceIndex(tupleOf(self).items, item, start, stop);
   if (index === -1) throw valueError('tuple.index(x): x not in tuple');
@@ -354,7 +354,7 @@ method(rangeClass, '__repr__', 'none', 0, 0, (self) => {
 method(rangeClass, '__len__', 'none', 0, 0, (self) => rangeOf(self).length);
 method(rangeClass, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
 method(rangeClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
-method(rangeClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+method(rangeClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
 method(rangeClass, '__reversed__', 'none', 0, 0, (self) => {
   const { start, step, length } = rangeOf(self);
   return getIterator(new PyRange(rangeClass, start + (length - 1n) * step, start - step, -step));
@@ -462,7 +462,7 @@ method(dictClass, '__delitem__', 'one', 1, 1, (self, [key]) => {
   if (!dictOf(self).store.delete(key)) throw keyError(key);
   return None;
 });
-method(dictClass, '__iter__', 'none', 0, 0, (self) => getIterator(new PyDictView(dictKeysClass, dictOf(self), 'keys')));
+method(dictClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(dictOf(self)));
 method(dictClass, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator(dictOf(self), 'keys'));
 method(dictClass, 'keys', 'none', 0, 0, (self) => new PyDictView(dictKeysClass, dictOf(self), 'keys'));
 method(dictClass, 'values', 'none', 0, 0, (self) => new PyDictView(dictValuesClass, dictOf(self), 'values'));
@@ -527,7 +527,7 @@ for (const [cls, view] of [
     containerRepr(self as PyObject, '...', () => `${(self as PyObject).cls.name}([${joinReprs(toArray(self))}])`)
   );
   method(cls, '__len__', 'none', 0, 0, (self) => BigInt((self as PyDictView).dict.store.size));
-  method(cls, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+  method(cls, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
   method(cls, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
   method(cls, '__reversed__', 'none', 0, 0, (self) => reversedDictIterator((self as PyDictView).dict, view));
   if (view !== 'values') {

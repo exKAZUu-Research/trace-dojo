@@ -5,7 +5,7 @@ import { pyHash } from './hashing';
 import { sliceIndices } from './items';
 import { argument, checkArgs } from './nativeArgs';
 import { toIndex } from './numbers';
-import { getItem, getIterator, iterate, toArray } from './objects';
+import { builtinIterator, getItem, iterate, toArray } from './objects';
 import { contains } from './operators';
 import { formatPercent } from './percentFormat';
 import { currentRuntime } from './runtimeContext';
@@ -110,7 +110,7 @@ method(strClass, '__str__', 'none', 0, 0, (self) => self);
 method(strClass, '__hash__', 'none', 0, 0, (self) => pyHash(self));
 method(strClass, '__len__', 'none', 0, 0, (self) => BigInt(strLength(asStr(self))));
 method(strClass, '__getitem__', 'one', 1, 1, (self, [key]) => getItem(self, key));
-method(strClass, '__iter__', 'none', 0, 0, (self) => getIterator(self));
+method(strClass, '__iter__', 'none', 0, 0, (self) => builtinIterator(self));
 method(strClass, '__contains__', 'one', 1, 1, (self, [item]) => contains(self, item));
 method(strClass, '__mod__', 'one', 1, 1, (self, [value]) => formatPercent(asStr(self), value));
 method(strClass, '__format__', 'one', 1, 1, (self, [spec]) =>

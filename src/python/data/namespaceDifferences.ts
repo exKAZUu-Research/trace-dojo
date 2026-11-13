@@ -70,6 +70,7 @@ export const CLASS_ORDERS: Readonly<Record<string, string>> = {
     '__module__ __firstlineno__ __doc__ __slots__ __init__ __init_subclass__ evaluate _evaluate __forward_arg__ __resolved_str__ __forward_code__ __eq__ __hash__ __or__ __ror__ __repr__ __static_attributes__ __arg__ __ast_node__ __cell__ __code__ __extra_names__ __forward_is_argument__ __forward_is_class__ __forward_module__ __globals__ __owner__ __resolved_str_cache__ __stringifier_dict__ __weakref__',
   'array.array':
     '__new__ __repr__ __getattribute__ __lt__ __le__ __eq__ __ne__ __gt__ __ge__ __iter__ __buffer__ __release_buffer__ __len__ __getitem__ __setitem__ __delitem__ __add__ __mul__ __rmul__ __contains__ __iadd__ __imul__ append buffer_info byteswap clear __copy__ count __deepcopy__ extend fromfile fromlist frombytes fromunicode index insert pop __reduce_ex__ remove reverse tofile tolist tobytes tounicode __sizeof__ __class_getitem__ typecode itemsize __doc__ __hash__ __module__',
+  'array.arrayiterator': '__getattribute__ __iter__ __next__ __reduce__ __setstate__ __doc__ __module__',
   'ast.AST':
     '__new__ __repr__ __getattribute__ __setattr__ __delattr__ __init__ __reduce__ __replace__ __dict__ __doc__ __module__ _fields __match_args__ _attributes',
   'ast.Add': '_fields __match_args__ __module__ __doc__ _field_types __annotations_cache__',
@@ -748,6 +749,7 @@ export const NAMESPACE_DIFFERENCES: NamespaceDifferences = {
     array: [
       [],
       [
+        '_iter_array',
         '_convert',
         '_view',
         '_exported',

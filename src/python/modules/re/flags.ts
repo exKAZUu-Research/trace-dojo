@@ -5,17 +5,8 @@ import { hashInt } from '../../hashing';
 import { attributeError, getAttributeOrUndefined } from '../../objects';
 import { binaryOp } from '../../operators';
 import { defineValueHash } from '../../slotWrappers';
-import {
-  classOf,
-  defineMethod,
-  iteratorClass,
-  None,
-  NotImplemented,
-  typeClass,
-  typeError,
-  typeName,
-} from '../../types';
-import { DONE, PyClass, PyInstance, PyIterator, PyObject, type PyValue } from '../../values';
+import { classOf, defineMethod, None, NotImplemented, typeClass, typeError, typeName } from '../../types';
+import { PyClass, PyInstance, PyObject, type PyValue } from '../../values';
 import { defineSlot } from '../numberSupport';
 
 // A metaclass of its own shows the class as CPython shows a Flag class.
@@ -114,11 +105,6 @@ defineSlot(
 );
 defineMethod(regexFlagClass, '__invert__', (self) => flagOf(-flagValue(self) - 1n));
 defineMethod(regexFlagClass, '__len__', (self) => BigInt(membersOf(self).length));
-defineMethod(regexFlagClass, '__iter__', (self) => {
-  const members = membersOf(self);
-  let index = 0;
-  return new PyIterator(iteratorClass('generator'), () => (index < members.length ? members[index++] : DONE));
-});
 defineMethod(regexFlagClass, '__contains__', (self, [other]) => {
   if (!isFlag(other)) {
     throw typeError(`unsupported operand type(s) for 'in': '${typeName(other)}' and 'RegexFlag'`);

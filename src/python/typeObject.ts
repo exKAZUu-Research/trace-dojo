@@ -453,14 +453,14 @@ export function defineIteratorClass(cls: PyClass): void {
   if (HINTED_ITERATORS.has(cls.typeName ?? cls.name)) {
     method(cls, '__length_hint__', 'none', 0, 0, (self) => BigInt(remainingOf((self as PyIterator).next) ?? 0));
   }
-  if (REDUCED_ITERATORS.has(cls.name)) {
+  if (REDUCED_ITERATORS.has(cls.typeName ?? cls.name)) {
     method(cls, '__reduce__', 'none', 0, 0, (self) => {
       const state = stateOf((self as PyIterator).next);
       if (!state) throw new UnsupportedFeatureError('イテレータの pickle');
       return state.reduce();
     });
   }
-  if (MOVED_ITERATORS.has(cls.name)) {
+  if (MOVED_ITERATORS.has(cls.typeName ?? cls.name)) {
     method(cls, '__setstate__', 'one', 1, 1, (self, [state]) => {
       stateOf((self as PyIterator).next)?.setState?.(stateIndex(state));
       return None;

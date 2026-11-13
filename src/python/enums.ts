@@ -787,7 +787,10 @@ function enumMemberGeneratorFromList(members: PyInstance[], ownerQualified: stri
     generatorClass,
     '<genexpr>',
     `${ownerQualified}.<locals>.<genexpr>`,
-    () => (index < members.length ? { done: false, value: members[index++] } : { done: true, value: None }),
+    (input) => {
+      if (input.error) throw input.error;
+      return index < members.length ? { done: false, value: members[index++] } : { done: true, value: None };
+    },
     () => members
   );
 }

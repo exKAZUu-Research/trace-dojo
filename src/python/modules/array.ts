@@ -1,10 +1,14 @@
 import { type PyBytes, PyMemoryView } from '../bytesValues';
-import { builtin } from '../define';
+import { orderClassNamespace } from '../classOrders';
+import { builtin, method } from '../define';
+import { clamp, reduction, stateIndex, stateOf, withState } from '../iteratorStates';
 import { toIndex } from '../numbers';
+import { callValue } from '../objects';
+import { currentRuntime } from '../runtimeContext';
 import { registerSourceModule } from '../sourceModules';
 import { strLength } from '../strings';
-import { pyError, typeError, typeName } from '../types';
-import type { PyValue } from '../values';
+import { iteratorClass, newTuple, None, objectClass, pyError, typeError, typeName } from '../types';
+import { DONE, type PyClass, PyIterator, type PyValue } from '../values';
 import { realArgument } from './math';
 
 // `array.array`, which CPython writes in C, written in Python over a bytearray holding its items in the machine's native
@@ -131,10 +135,7 @@ class array:
         return len(self._data) // _ITEMSIZE[self._typecode]
 
     def __iter__(self):
-        index = 0
-        while index < array.__len__(self):
-            yield array.__getitem__(self, index)
-            index += 1
+        return _iter_array(self)
 
     def __contains__(self, value):
         return value in self._items()
@@ -438,11 +439,52 @@ function convertInteger(typecode: string, integer: bigint): bigint {
   return integer;
 }
 
+const arrayIteratorClass = iteratorClass('array.arrayiterator');
+arrayIteratorClass.dict.set('__module__', 'array');
+method(arrayIteratorClass, '__getattribute__', 'one', 1, 1, (self, args) =>
+  callValue(objectClass.dict.get('__getattribute__') as PyValue, [self, ...args])
+);
+method(arrayIteratorClass, '__setstate__', 'one', 1, 1, (self, [value]) => {
+  const index = stateIndex(value);
+  if (index < LONG_MIN || index > LONG_MAX) throw overflow('Python int too large to convert to C ssize_t');
+  stateOf((self as PyIterator).next)?.setState?.(index);
+  return None;
+});
+orderClassNamespace(arrayIteratorClass);
+
+function arrayIterator(owner: PyValue): PyIterator {
+  const cls = currentRuntime().importModule('array').dict.get('array') as PyClass;
+  const length = cls.dict.get('__len__') as PyValue;
+  const item = cls.dict.get('__getitem__') as PyValue;
+  let source: PyValue | undefined = owner;
+  let index = 0;
+  const count = (): number => (source === undefined ? 0 : Number(callValue(length, [source])));
+  const next = withState(
+    () => {
+      if (source === undefined) return DONE;
+      if (index < count()) return callValue(item, [source, BigInt(index++)]);
+      const released = source;
+      source = undefined;
+      currentRuntime().finalizer.release([released]);
+      return DONE;
+    },
+    {
+      reduce: () =>
+        source === undefined ? reduction('iter', [newTuple([])]) : reduction('iter', [source], BigInt(index)),
+      setState: (position) => {
+        if (source !== undefined) index = clamp(position, 0, count());
+      },
+    }
+  );
+  return new PyIterator(arrayIteratorClass, next, () => (source === undefined ? [] : [source]));
+}
+
 registerSourceModule(
   'array',
   SOURCE,
   () =>
     new Map<string, PyValue>([
+      ['_iter_array', builtin('_iter_array', 'one', 1, 1, ([owner]) => arrayIterator(owner))],
       [
         '_convert',
         builtin('_convert', 'expected', 2, 2, ([typecode, value]) => convertItem(typecode as string, value)),

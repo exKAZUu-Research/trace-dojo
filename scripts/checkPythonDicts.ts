@@ -48,7 +48,7 @@ _coro.close()
 const PROGRAM = (
   modules: readonly string[],
   types: boolean
-): string => `import sys, types, builtins, collections, struct, string, tokenize, re
+): string => `import sys, types, builtins, collections, struct, string, tokenize, re, array
 MODULES = ${JSON.stringify(modules)}
 ${SAMPLES}
 

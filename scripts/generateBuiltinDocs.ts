@@ -27,7 +27,7 @@ awaited, awaited.__await__(), generated, generated.asend(None), generated.athrow
 (1).__add__, int.__add__, int.__dict__["real"], dict.__dict__["fromkeys"], sys.float_info, sys.int_info, sys.hash_info,
 sys.thread_info, sys.version_info`;
 /** The functions and objects that SAMPLES names. */
-const SAMPLE_SETUP = `import sys, collections, struct, string, tokenize, re
+const SAMPLE_SETUP = `import sys, collections, struct, string, tokenize, re, array
 async def coroutine(): pass
 async def async_generator(): yield
 def cell():

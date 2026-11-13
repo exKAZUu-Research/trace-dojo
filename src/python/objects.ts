@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 533 -- The attribute lookup and the protocols every kind of object follows belong together.
+// code-gauge-allow-file fileNcss 536 -- The attribute lookup and the protocols every kind of object follows belong together.
 import { moduleAnnotations } from './annotations';
 import { PyAttribute } from './attributeDescriptors';
 import { classAttribute, specialAttribute } from './attributes';
@@ -727,7 +727,7 @@ export function getIterator(value: PyValue): PyValue {
   const iter = lookupSpecial(value, '__iter__');
   // A program's subclass of a builtin iterator, as of zip, iterates natively unless it defines __iter__.
   if (value instanceof PyIterator && (iter === undefined || iter instanceof PyBuiltinFunction)) return value;
-  if (iter !== undefined && iter !== None && (!(iter instanceof PyBuiltinFunction) || value instanceof PyClass)) {
+  if (iter !== undefined && iter !== None) {
     const iterator = callValue(bindValue(iter, value), []);
     if (lookupSpecial(iterator, '__next__') === undefined) {
       throw typeError(`iter() returned non-iterator of type '${typeName(iterator)}'`);
@@ -774,7 +774,10 @@ export function enumMemberGenerator(cls: PyClass, isReversed: boolean): PyGenera
     generatorClass,
     '<genexpr>',
     `EnumType.${isReversed ? '__reversed__' : '__iter__'}.<locals>.<genexpr>`,
-    () => (index < members.length ? { done: false, value: members[index++] } : { done: true, value: None }),
+    (input) => {
+      if (input.error) throw input.error;
+      return index < members.length ? { done: false, value: members[index++] } : { done: true, value: None };
+    },
     () => members
   );
 }

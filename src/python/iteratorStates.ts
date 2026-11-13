@@ -1,6 +1,6 @@
 // The positions of CPython's builtin iterators, which `__reduce__` gives for pickle and copy, and `__setstate__` moves.
 import { currentRuntime } from './runtimeContext';
-import { newTuple, typeError } from './types';
+import { newTuple, typeError, unbox } from './types';
 import type { DONE, PyValue } from './values';
 
 type NextFunction = () => PyValue | typeof DONE;
@@ -31,8 +31,9 @@ export function reduction(name: 'iter' | 'reversed', args: PyValue[], state?: Py
 
 /** The index a `__setstate__` argument gives, which must be an int. */
 export function stateIndex(value: PyValue): bigint {
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'boolean') return value ? 1n : 0n;
+  const primitive = unbox(value);
+  if (typeof primitive === 'bigint') return primitive;
+  if (typeof primitive === 'boolean') return primitive ? 1n : 0n;
   throw typeError('an integer is required');
 }
 
