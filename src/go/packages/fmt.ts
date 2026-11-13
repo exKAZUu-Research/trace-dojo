@@ -6,7 +6,8 @@ import { ERROR_TYPE, pointerTo, sliceOf, type Type } from '../types';
 import { Cell, GoStruct, Iface, Pointer, Slice, type Value } from '../values';
 import { fscan, fscanf, sscan, sscanf } from './fmtScan';
 import { IO_READER, IO_WRITER } from './io';
-import { ANY_SLICE, byteSlice, callMethod, INT, receiverStruct, sliceValues, STRING, writeStdout } from './support';
+import { currentStdout, writeFile } from './os';
+import { ANY_SLICE, byteSlice, callMethod, INT, receiverStruct, sliceValues, STRING } from './support';
 
 const ERROR_RESULTS: Type[] = [INT, ERROR_TYPE];
 
@@ -61,8 +62,7 @@ export function writeTo(writer: Value, bytes: string): Value[] {
 }
 
 function printTo(bytes: string): Value[] {
-  writeStdout(bytes);
-  return [BigInt(bytes.length), undefined];
+  return writeFile(currentStdout(), bytes);
 }
 
 const members: Record<string, Entity> = {

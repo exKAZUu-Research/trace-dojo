@@ -30,7 +30,7 @@ import {
 import { checkKeyHashable, equalityOf, mapKeyOf } from './equality';
 import { fma } from './fma';
 import { utf8Decode } from './literals';
-import { currentRuntime } from './native';
+import { currentRuntime, libraryCell } from './native';
 import type { Operand, Storage } from './operand';
 import { arithmetic, bitwiseNot, negate, ordering, shift } from './operators';
 import { type Eval, type Frame, type FunctionInfo, readLocal, UNASSIGNED, writeLocal } from './runtime';
@@ -419,8 +419,24 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const markUsed = (): void => {
       entity.used = true;
     };
-    const { library } = entity;
-    if (library) return { mode: 'value', type: entity.type, span, eval: () => library() };
+    if (entity.library) {
+      const prepareLibraryStore = (): ((value: Value) => void) => {
+        const cell = libraryCell(entity);
+        return (value) => {
+          cell.v = writeInPlace(cell.v, value);
+        };
+      };
+      return {
+        mode: 'variable',
+        type: entity.type,
+        span,
+        variable: { markUsed },
+        eval: () => libraryCell(entity).v,
+        prepareStore: prepareLibraryStore,
+        store: (_frame, value) => prepareLibraryStore()(value),
+        addressOf: () => () => new Pointer(libraryCell(entity), 'v'),
+      };
+    }
     if (!entity.owner) {
       const prepareStore = (frame: Frame): ((value: Value) => void) => {
         const cell = frame.runtime.globals[slot];

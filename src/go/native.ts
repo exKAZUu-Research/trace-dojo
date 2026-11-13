@@ -1,4 +1,4 @@
-import type { Entity, FuncEntity, GoPackage } from './entities';
+import type { Entity, FuncEntity, GoPackage, VarEntity } from './entities';
 import type { Runtime } from './runtime';
 import {
   CONSTRAINT_NAMES,
@@ -10,7 +10,7 @@ import {
   type Type,
   type TypeParamType,
 } from './types';
-import { GoFunc, type Value } from './values';
+import { Cell, GoFunc, type Value } from './values';
 
 let running: Runtime | undefined;
 
@@ -35,6 +35,24 @@ export function perRun<T>(create: () => T): () => T {
     if (!values.has(key)) values.set(key, create());
     return values.get(key) as T;
   };
+}
+
+const libraryCells = new WeakMap<Runtime, Map<VarEntity, Cell>>();
+
+/** The storage of a library variable in the running program, which assignments to the variable change. */
+export function libraryCell(entity: VarEntity): Cell {
+  const runtime = currentRuntime();
+  let cells = libraryCells.get(runtime);
+  if (!cells) {
+    cells = new Map();
+    libraryCells.set(runtime, cells);
+  }
+  let cell = cells.get(entity);
+  if (!cell) {
+    cell = new Cell((entity.library as () => Value)());
+    cells.set(entity, cell);
+  }
+  return cell;
 }
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {

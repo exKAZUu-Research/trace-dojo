@@ -1,6 +1,15 @@
-import type { Entity } from '../entities';
+import type { Entity, VarEntity } from '../entities';
 import { newError } from '../errorValues';
-import { addMethod, currentRuntime, definePackage, fn, namedType, nativeFunction, perRun } from '../native';
+import {
+  addMethod,
+  currentRuntime,
+  definePackage,
+  fn,
+  libraryCell,
+  namedType,
+  nativeFunction,
+  perRun,
+} from '../native';
 import { ProgramExit } from '../runtime';
 import { BASIC, ERROR_TYPE, pointerTo, sliceOf } from '../types';
 import { Cell, GoStruct, Pointer, Slice, type Value } from '../values';
@@ -11,7 +20,8 @@ import { bytesOf, callMethod, writeStderr, writeStdout } from './support';
 const FILE = namedType('os', 'File', { kind: 'struct', fields: [] });
 const ERR_INVALID = newError('invalid argument');
 
-function write(receiver: Value, bytes: string): Value[] {
+/** `(*os.File).Write`, which writes to standard output or standard error. */
+export function writeFile(receiver: Value, bytes: string): Value[] {
   if (!(receiver instanceof Pointer)) return [0n, ERR_INVALID];
   const descriptor = (receiver.load() as GoStruct).native?.descriptor;
   if (descriptor === 1) writeStdout(bytes);
@@ -24,14 +34,14 @@ addMethod(
   FILE,
   'Write',
   fn([sliceOf(BASIC.uint8)], [BASIC.int, ERROR_TYPE]),
-  (receiver, [bytes]) => write(receiver, bytesOf(bytes)),
+  (receiver, [bytes]) => writeFile(receiver, bytesOf(bytes)),
   true
 );
 addMethod(
   FILE,
   'WriteString',
   fn([BASIC.string], [BASIC.int, ERROR_TYPE]),
-  (receiver, [text]) => write(receiver, text as string),
+  (receiver, [text]) => writeFile(receiver, text as string),
   true
 );
 
@@ -54,7 +64,7 @@ addMethod(
       currentRuntime().spend();
       const [count, readError] = callMethod(reader, 'Read', [buffer]) as [bigint, Value];
       if (count > 0n) {
-        const [written, writeError] = write(receiver, bytesOf(buffer).slice(0, Number(count))) as [bigint, Value];
+        const [written, writeError] = writeFile(receiver, bytesOf(buffer).slice(0, Number(count))) as [bigint, Value];
         total += written;
         if (writeError !== undefined) return [total, writeError];
       }
@@ -64,7 +74,7 @@ addMethod(
   true
 );
 
-function fileVariable(name: string, descriptor: number): Entity {
+function fileVariable(name: string, descriptor: number): VarEntity {
   return {
     kind: 'var',
     name,
@@ -78,8 +88,15 @@ function fileVariable(name: string, descriptor: number): Entity {
   };
 }
 
+const STDOUT = fileVariable('Stdout', 1);
+
+/** The current value of `os.Stdout`, which fmt's Print functions write to, as a program may assign it. */
+export function currentStdout(): Value {
+  return libraryCell(STDOUT).v;
+}
+
 const members: Record<string, Entity> = {
-  Stdout: fileVariable('Stdout', 1),
+  Stdout: STDOUT,
   Stderr: fileVariable('Stderr', 2),
   Exit: nativeFunction('Exit', fn([BASIC.int], []), ([code]) => {
     throw new ProgramExit(Number(code as bigint));
