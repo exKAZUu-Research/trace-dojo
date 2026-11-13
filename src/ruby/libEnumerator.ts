@@ -16,6 +16,7 @@ export interface EnumeratorSource {
   keywords?: RHash;
   size?: () => Value;
   arithmetic?: boolean;
+  generatorAddress?: string;
   iterate?: (block: RProc) => Gen;
   held: () => Value[];
 }
@@ -213,6 +214,7 @@ export function customEnumerator(recv: Value, method: string, held: Value[], ite
   const source = enumerator.data as EnumeratorSource;
   source.iterate = iterate;
   source.held = () => [recv, ...held];
+  source.generatorAddress = addressOf(enumerator);
   return enumerator;
 }
 
@@ -237,6 +239,11 @@ def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
   if (source.arithmetic && args.length > 0) throw argumentCountError(args.length, 0, 0);
   if (!block) {
     if (args.length === 0) return self;
+    if (source.iterate) {
+      const enumerator = new RObject(rt().c.Enumerator);
+      enumerator.data = { ...source, args: [...source.args, ...args], size: () => NIL } satisfies EnumeratorSource;
+      return enumerator;
+    }
     const enumerator = makeEnumerator(source.recv, source.method, [...source.args, ...args], source.keywords);
     sourceOf(enumerator).size = () => NIL;
     return enumerator;
@@ -373,7 +380,13 @@ for (const name of ['==', '===', 'eql?'])
   });
 def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
   const source = sourceOf(self);
-  if (source.iterate) return str(`#<Enumerator: #<Enumerator::Generator:${addressOf(self)}>:each>`);
+  if (source.iterate) {
+    const argumentsText: string[] = [];
+    for (const arg of source.args) argumentsText.push(yield* inspect(arg));
+    return str(
+      `#<Enumerator: #<Enumerator::Generator:${source.generatorAddress ?? addressOf(self)}>:each${argumentsText.length > 0 ? `(${argumentsText.join(', ')})` : ''}>`
+    );
+  }
   if (source.arithmetic) {
     const receiver = yield* inspect(source.recv);
     const argumentsText: string[] = [];

@@ -25,7 +25,7 @@ interface FormatPart {
 
 /** Formats as `format`/`sprintf` and `String#%` do. */
 export function* format(formatValue: Value, args: Value[]): Gen<string> {
-  return (yield* formatParts(formatValue, args)).text;
+  return (yield* formatString(formatValue, args)).s;
 }
 
 export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
@@ -50,7 +50,7 @@ export function* formatString(formatValue: Value, args: Value[]): Gen<RString> {
   return stringFromBytes(bytes, binary);
 }
 
-function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; parts: FormatPart[]; source: RString }> {
+function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: FormatPart[]; source: RString }> {
   const source = yield* toStrValue(formatValue);
   const templateBytes = stringBytes(source);
   const template = new TextDecoder('latin1').decode(templateBytes);
@@ -184,7 +184,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ text: string; pa
     append(yield* directive(type, spec, arg));
   }
   flush();
-  return { text: result, parts, source };
+  return { parts, source };
 }
 
 function encodeCodePoints(text: string): Uint8Array {

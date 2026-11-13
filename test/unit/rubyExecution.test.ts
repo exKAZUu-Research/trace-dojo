@@ -25,6 +25,12 @@ test('imaginary unit remains unsupported', () => {
   });
 });
 
+test('pretty-printing a flat large Array stays within the execution budget', () => {
+  const result = run('pp [1] * 15000');
+  expect(result).toMatchObject({ kind: 'executed' });
+  if (result.kind === 'executed') expect(result.stdout).toHaveLength(60_000);
+});
+
 test.each([
   ['empty arrays in puts', 'puts []; puts "after"', 'after\n'],
   ['symbol keys in Hash inspection', 'p({:+ => 1, :a= => 2, :@x => 3})', '{"+": 1, "a=": 2, "@x": 3}\n'],
@@ -49,6 +55,11 @@ test.each([
     'Enumerator each arguments',
     'e=[1,2,3].each_slice(1); p e.each.equal?(e); a=e.each(2); p a.size; begin; a.to_a; rescue => x; p x.class; end',
     'true\nnil\nArgumentError\n',
+  ],
+  [
+    'custom Enumerator each arguments retain iteration',
+    'e=[1,2,3].chunk_while{|a,b|a<b}; x=e.each(1); p x.to_a, x.size',
+    '[[1, 2, 3]]\nnil\n',
   ],
   ['blockless then Enumerator', 'p 1.then.size, 1.yield_self.each { |x| x+1 }', '1\n2\n'],
   [
@@ -80,6 +91,11 @@ test.each([
     'formatted binary String encoding',
     's=255.chr; p format("%s", s).bytes; p format("%sé", s).bytes; begin; format("é%s", s); rescue Encoding::CompatibilityError; puts :incompatible; end',
     '[255]\n[255, 195, 169]\nincompatible\n',
+  ],
+  [
+    'printf validates formatted String encoding',
+    'begin; printf("é%s",255.chr); rescue Encoding::CompatibilityError; puts :incompatible; end',
+    'incompatible\n',
   ],
   ['Float remainder by Integer zero', 'begin; 1.0.remainder(0); rescue ZeroDivisionError; puts :zero; end', 'zero\n'],
   [

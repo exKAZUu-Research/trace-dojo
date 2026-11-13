@@ -129,7 +129,8 @@ function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget)
 function layout(doc: Doc): string {
   let output = '';
   let column = 0;
-  const visit = (node: Doc, indent: number, flat: boolean, rest: Doc[]): void => {
+  const widths = new WeakMap<Doc, number>();
+  const visit = (node: Doc, indent: number, flat: boolean, rest?: Rest): void => {
     rt().spend();
     switch (node.kind) {
       case 'text': {
@@ -148,37 +149,50 @@ function layout(doc: Doc): string {
         return;
       }
       case 'group': {
-        const fits = flat || column + flatWidth(node) + trailingWidth(rest) <= WIDTH;
+        const fits = flat || column + flatWidth(node, widths) + trailingWidth(rest, widths) <= WIDTH;
         const inner = indent + node.indent;
         for (const [index, part] of node.parts.entries()) {
-          visit(part, inner, fits, [...node.parts.slice(index + 1), ...rest]);
+          visit(part, inner, fits, { parts: node.parts, index: index + 1, next: rest });
         }
       }
     }
   };
-  visit(doc, 0, false, []);
+  visit(doc, 0, false);
   return output;
 }
 
-function flatWidth(doc: Doc): number {
+interface Rest {
+  parts: Doc[];
+  index: number;
+  next?: Rest;
+}
+
+function flatWidth(doc: Doc, cache: WeakMap<Doc, number>): number {
+  const cached = cache.get(doc);
+  if (cached !== undefined) return cached;
   rt().spend();
   if (doc.kind !== 'group') return doc.text.length;
-  return doc.parts.reduce((sum, part) => sum + flatWidth(part), 0);
+  const width = doc.parts.reduce((sum, part) => sum + flatWidth(part, cache), 0);
+  cache.set(doc, width);
+  return width;
 }
 
 /** The width of the text that follows a group up to the next place a line can break. */
-function trailingWidth(rest: Doc[]): number {
+function trailingWidth(rest: Rest | undefined, cache: WeakMap<Doc, number>): number {
   let width = 0;
-  for (const doc of rest) {
-    rt().spend();
-    if (doc.kind === 'break') return width;
-    if (doc.kind === 'text') {
-      width += doc.text.length;
-      continue;
+  for (let frame = rest; frame; frame = frame.next) {
+    for (let index = frame.index; index < frame.parts.length; index++) {
+      const doc = frame.parts[index];
+      rt().spend();
+      if (doc.kind === 'break') return width;
+      if (doc.kind === 'text') {
+        width += doc.text.length;
+        continue;
+      }
+      const firstBreak = doc.parts.findIndex((part) => part.kind === 'break' || part.kind === 'group');
+      if (firstBreak === -1) width += flatWidth(doc, cache);
+      else return width + trailingWidth({ parts: doc.parts, index: 0 }, cache);
     }
-    const firstBreak = doc.parts.findIndex((part) => part.kind === 'break' || part.kind === 'group');
-    if (firstBreak === -1) width += flatWidth(doc);
-    else return width + trailingWidth(doc.parts);
   }
   return width;
 }
