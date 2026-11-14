@@ -2740,6 +2740,21 @@ test('Integer iteration compares numeric-like custom limits', () => {
   });
 });
 
+test('rounding accepts mixed-case implicit String modes', () => {
+  expect(run('p 2.5.round(half:"UP"),2.5.round(half:"EvEn")')).toMatchObject({ stdout: '3\n2\n' });
+  expect(run('class A;private;def to_str;"EvEn";end;end;p 2.5.round(half:A.new)')).toMatchObject({
+    stdout: '2\n',
+  });
+});
+
+test('Numeric step validates custom zero increments', () => {
+  expect(
+    run(
+      'class N;def coerce(x);[x,0];end;def >(x);false;end;def ==(x);true;end;end;begin;1.step(3,N.new).first(3);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({ stdout: 'ArgumentError\n' });
+});
+
 test('pp follows Array mutations during element inspection', () => {
   expect(run('class A;def inspect;$a.clear;"x";end;end;$a=[A.new,2,3];pp $a')).toMatchObject({ stdout: '[x]\n' });
   expect(

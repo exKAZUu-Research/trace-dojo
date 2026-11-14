@@ -12,6 +12,7 @@ import {
   toRubyInt,
   toStepFloat,
   toStr,
+  toStrValue,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
@@ -380,10 +381,8 @@ function* numericStep(self: Num, args: Value[], block: RProc | undefined, keywor
   }
   if (!isNum(step) && !respondsTo(step, 'coerce', true))
     throw typeError(`no implicit conversion of ${realClassOf(step).name} into Integer`);
-  if (step === 0n || step === 0) {
-    if (!block) throw argumentError("step can't be 0");
+  if (step === 0n || step === 0 || (!isNum(step) && truthy(yield* callMethod(step, '==', [0n]))))
     throw argumentError("step can't be 0");
-  }
   if (!block) return makeEnumerator(self, 'step', args, keywords);
   if (!isNum(step)) return yield* stepCustomNumeric(self, limit, step, block);
   const useFloat = typeof self === 'number' || typeof limit === 'number' || typeof step === 'number';
@@ -617,14 +616,21 @@ function* roundingMode(keywords: RHash | undefined): Gen<'up' | 'even' | 'down'>
     }
     const mode = entry.value;
     if (mode === NIL) return 'up';
-    const name = mode instanceof RSymbol ? mode.name : mode instanceof RString ? mode.s : undefined;
-    if (name === 'up' || name === 'even' || name === 'down') return name;
+    const name = yield* roundingName(mode);
+    const normalized = name?.toLowerCase();
+    if (normalized === 'up' || normalized === 'even' || normalized === 'down') return normalized;
     throw argumentError(`invalid rounding mode: ${name ?? (yield* inspect(mode))}`);
   }
   return 'up';
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Integer rounding applies floor, ceil, truncate, and three half-tie policies to signed values.
+function* roundingName(mode: Value): Gen<string | undefined> {
+  if (mode instanceof RSymbol) return mode.name;
+  if (mode instanceof RString) return mode.s;
+  return respondsTo(mode, 'to_str', true) ? (yield* toStrValue(mode)).s : undefined;
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Integer rounding applies floor, ceil, truncate, and three half-tie policies to signed values.
 function roundInteger(
   value: bigint,
   digits: bigint,
