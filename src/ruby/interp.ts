@@ -139,7 +139,10 @@ function* evalStmt(statement: Stmt, frame: Frame): Gen {
   const runtime = rt();
   runtime.currentRow = statement.row;
   runtime.spend();
-  const { step, e } = statement;
+  const { e } = statement;
+  let { step } = statement;
+  if (step === 'none' && e.k === 'call' && e.fcall && classOf(frame.self).findMethod(e.name)?.body.kind === 'user')
+    step = 'call';
   if (step === 'none' || step === 'constant') return yield* ev(e, frame);
   const used = statement.use === 1 || (statement.use === 2 && frame.resultUsed);
   if (used && step !== 'assign') return yield* ev(e, frame);
@@ -539,6 +542,8 @@ function globalGet(name: string): Value {
 
 function unsupportedGlobal(name: string): string | undefined {
   if (/^\$(?:[&`'+~]|[1-9]\d*)$/.test(name)) return `正規表現のマッチの結果（${name}）`;
+  if (name === '$$') return 'プロセス ID（$$）';
+  if (/^\$-[a-zA-Z]$/.test(name)) return `起動オプション（${name}）`;
   return UNSUPPORTED_GLOBALS[name];
 }
 

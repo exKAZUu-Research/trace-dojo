@@ -17,6 +17,14 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const rubyTrace = (program: string): TraceItem[] => traceProgram('ruby', program, program).traceItems;
 
+test('user methods sharing declaration names keep atomic call steps', () => {
+  for (const name of ['private', 'include']) {
+    const program = `class A\n def ${name} # atomic\n  $x=1\n end\n def go\n  ${name}\n end\nend\nA.new.go`;
+    const trace = rubyTrace(program);
+    expect(trace.some((item) => item.line === 6 && item.vars.$x === 1)).toBe(true);
+  }
+});
+
 test('allocated Float values remain visible in traces', () => {
   const program = 'a=Float::MAX;b=[Float::INFINITY]';
   const trace = traceProgram('ruby', program, program);

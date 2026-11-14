@@ -2370,6 +2370,14 @@ test('active exception global rejects learner assignment', () => {
   });
 });
 
+test('process and option globals report unsupported runtime state', () => {
+  for (const name of ['$$', '$-p', '$-l', '$-a']) {
+    expect(run(`p ${name}`)).toMatchObject({
+      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    });
+  }
+});
+
 test('raise appends unknown keyword Hash once', () => {
   expect(run('begin;raise "x",foo:1,bar:2;rescue=>e;p e.class,e.message;end')).toMatchObject({
     stdout: 'TypeError\n"exception class/object expected"\n',
