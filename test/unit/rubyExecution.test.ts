@@ -5385,8 +5385,12 @@ test('rebound dynamic Methods dispatch subclass method_missing', () => {
 });
 
 test('Time localtime validates offset before frozen state', () => {
-  expect(run('t=Time.utc(2024).freeze;begin;t.localtime("bad");rescue=>e;p e.class;end')).toMatchObject({
-    stdout: 'ArgumentError\n',
+  expect(
+    run(
+      't=Time.utc(2024).freeze;["bad","+24:00","+01:60",0,3600,Rational(1,2),nil].each{|offset|begin;t.localtime(offset);rescue=>e;p e.class;end}'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\nArgumentError\nArgumentError\nFrozenError\nFrozenError\nFrozenError\nFrozenError\n',
   });
 });
 
@@ -5397,6 +5401,14 @@ test('Rational Numeric methods and fdiv follow Ruby results', () => {
     )
   ).toMatchObject({
     stdout: '(7/3)\n(49/9)\n(7/3)\n(7/3)\nnil\ntrue\n(7/3)\n0\nInfinity\n3.3333333333333335\n',
+  });
+});
+
+test('large Rational operands convert to finite Floats', () => {
+  expect(
+    run('h=(1..1000).sum{|k|Rational(1,k)};p h.to_f,h.fdiv(1),h>7.0,Rational(10**400+1,10**400).to_f')
+  ).toMatchObject({
+    stdout: '7.485470860550345\n7.485470860550345\ntrue\n1.0\n',
   });
 });
 

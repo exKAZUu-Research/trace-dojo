@@ -2,6 +2,7 @@ import { compareValues, toFloat, toInt, toStr } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, typeError } from './errors';
 import type { Gen } from './interp';
+import { floatToRational, isRational } from './libRational';
 import { NIL, RObject, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, str } from './values';
@@ -80,11 +81,20 @@ function* secondsValue(arg: Value): Gen<number> {
 }
 
 function* parseOffset(value: Value): Gen<number> {
+  if (value === NIL) return LOCAL_OFFSET;
+  if (typeof value === 'bigint' || typeof value === 'number' || isRational(value)) {
+    const offset = yield* toFloat(value);
+    if (Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
+    return offset;
+  }
   const text = yield* toStr(value);
   if (text === 'UTC' || text === 'Z') return 0;
   const match = /^([+-])(\d{2}):?(\d{2})$/.exec(text);
-  if (!match) throw argumentError(`"+HH:MM", "-HH:MM", "UTC" or "A".."I","K".."Z" expected for utc_offset: ${text}`);
-  return (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 3600 + Number(match[3]) * 60);
+  if (!match || Number(match[3]) > 59)
+    throw argumentError(`"+HH:MM", "-HH:MM", "UTC" or "A".."I","K".."Z" expected for utc_offset: ${text}`);
+  const offset = (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 3600 + Number(match[3]) * 60);
+  if (Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
+  return offset;
 }
 
 function* buildTime(args: Value[], offset: number, zone: TimeData['zone'], microseconds?: Value): Gen {
@@ -437,19 +447,22 @@ def(
   (self: RObject) => ((dataOf(self).nanoseconds % 1_000_000_000n) + 1_000_000_000n) % 1_000_000_000n
 );
 def('Time', 'zone', 0, (self: RObject) => zoneName(dataOf(self)));
-def('Time', ['utc_offset', 'gmt_offset', 'gmtoff'], 0, (self: RObject) => BigInt(dataOf(self).offset));
+def('Time', ['utc_offset', 'gmt_offset', 'gmtoff'], 0, (self: RObject) => {
+  const offset = dataOf(self).offset;
+  return Number.isInteger(offset) ? BigInt(offset) : floatToRational(offset);
+});
 def('Time', ['utc?', 'gmt?'], 0, (self: RObject) => dataOf(self).zone === 'utc');
 def('Time', 'to_i', 0, (self: RObject) => floorDivide(dataOf(self).nanoseconds, 1_000_000_000n));
 def('Time', 'to_f', 0, (self: RObject) => Number(dataOf(self).nanoseconds) / 1e9);
 def('Time', ['getutc', 'getgm'], 0, (self: RObject) => makeTime(dataOf(self).nanoseconds, 0, 'utc'));
 def('Time', ['utc', 'gmtime'], 0, (self: RObject) => changeZone(self, 0, 'utc'));
 def('Time', 'getlocal', [0, 1], function* (self: RObject, args) {
-  return args.length > 0
+  return args.length > 0 && args[0] !== NIL
     ? makeTime(dataOf(self).nanoseconds, yield* parseOffset(args[0]), 'fixed')
     : makeTime(dataOf(self).nanoseconds);
 });
 def('Time', 'localtime', [0, 1], function* (self: RObject, args) {
-  if (args.length === 0) return changeZone(self, LOCAL_OFFSET, 'local');
+  if (args.length === 0 || args[0] === NIL) return changeZone(self, LOCAL_OFFSET, 'local');
   const offset = yield* parseOffset(args[0]);
   if (self.frozen) throw frozenError(self, timeText(dataOf(self), true));
   return changeZone(self, offset, 'fixed');
