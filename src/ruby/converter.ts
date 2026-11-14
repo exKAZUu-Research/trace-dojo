@@ -694,7 +694,7 @@ export class Converter {
         if (!(error instanceof UnsupportedFeatureError)) this.fail(node, '正規表現の書き方に誤りがあります。');
       }
     }
-    return { k: 'regex', parts, flags };
+    return { k: 'regex', parts, flags, slashDelimited: node.text.startsWith('/') };
   }
 
   // code-gauge-allow duplicateLines 18 -- The similar lines handle different Ruby methods or values.
@@ -1762,8 +1762,8 @@ function dedent(pieces: (string | Node)[]): void {
   const source = pieces.map((piece) => (typeof piece === 'string' ? piece : '\uFFFC')).join('');
   let indent = Number.POSITIVE_INFINITY;
   for (const line of source.split('\n')) {
-    const blanks = /^[ \t]*/.exec(line)?.[0].length ?? 0;
-    if (blanks < line.length) indent = Math.min(indent, blanks);
+    const blanks = /^[ \t]*/.exec(line)?.[0] ?? '';
+    if (blanks.length < line.length) indent = Math.min(indent, indentationColumns(blanks));
   }
   if (!Number.isFinite(indent) || indent === 0) return;
   let atLineStart = true;
@@ -1774,10 +1774,29 @@ function dedent(pieces: (string | Node)[]): void {
     }
     pieces[position] = piece
       .split('\n')
-      .map((line, index) => (index > 0 || atLineStart ? line.replace(new RegExp(`^[ \\t]{0,${indent}}`), '') : line))
+      .map((line, index) => (index > 0 || atLineStart ? stripIndent(line, indent) : line))
       .join('\n');
     atLineStart = piece.endsWith('\n');
   }
+}
+
+function indentationColumns(blanks: string): number {
+  let columns = 0;
+  for (const char of blanks) columns = char === '\t' ? columns + 8 - (columns % 8) : columns + 1;
+  return columns;
+}
+
+function stripIndent(line: string, indent: number): string {
+  let columns = 0;
+  let length = 0;
+  for (const char of line) {
+    if (char !== ' ' && char !== '\t') break;
+    const next = char === '\t' ? columns + 8 - (columns % 8) : columns + 1;
+    if (next > indent) break;
+    columns = next;
+    length++;
+  }
+  return line.slice(length);
 }
 
 /** How a statement records its step, from what it does. */

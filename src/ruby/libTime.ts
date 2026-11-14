@@ -703,7 +703,9 @@ def('Time', 'to_a', 0, (self: RObject) => {
   ]);
 });
 def('Time', 'round', [0, 1], function* (self: RObject, args) {
-  const digits = args.length > 0 ? Number(yield* toInt(args[0])) : 0;
+  const precision = args.length > 0 ? yield* toInt(args[0]) : 0n;
+  if (precision < 0n) throw argumentError('negative ndigits given');
+  const digits = Number(precision);
   const data = dataOf(self);
   if (digits > 9) {
     chargePrecision(digits);

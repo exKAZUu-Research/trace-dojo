@@ -5,7 +5,7 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { inspect, rEquals, strInspect, toIndex, toS, toStr, tryImplicitConversion } from './conversions';
 import { def, extend, sdef } from './define';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
-import { hashGet, hashSet } from './hashes';
+import { digest, hashGet, hashSet } from './hashes';
 import { callBlock, callMethod, type Gen } from './interp';
 import { makeEnumerator } from './libEnumerator';
 import { setText } from './libString';
@@ -406,7 +406,10 @@ export function makeRegexp(
   source: string,
   options: { ignoreCase?: boolean; multiline?: boolean; extended?: boolean; literal?: boolean }
 ): RObject {
-  if (options.literal) source = source.replaceAll(/(?<!\\)\\\//g, '/');
+  if (options.literal)
+    source = source.replaceAll(/(\\+)\//g, (_match, slashes: string) =>
+      slashes.length % 2 === 1 ? `${slashes.slice(0, -1)}/` : `${slashes}/`
+    );
   if (regexpCaptureNames(source, options.extended).length > 0 && regexpHasNumberedBackref(source, options.extended))
     throw rubyError(rt().c.RegexpError, `numbered backref/call is not allowed. (use name): /${source}/`);
   const regexp = new RObject(rt().c.Regexp);
@@ -500,7 +503,7 @@ export function execAt(regexp: RObject, text: string, start: number): MatchState
   rt().spend(Math.ceil(text.length / 64));
   js.lastIndex = unitIndex(text, start);
   let result: RegExpExecArray | null;
-  if (data.safeNative) result = js.exec(text);
+  if (data.safeNative || (text.length <= 8 && data.source.length <= 16)) result = js.exec(text);
   else {
     const remaining = rt().budget.remainingMilliseconds;
     if (remaining === 0) throw new ExecutionLimitError('time');
@@ -642,6 +645,7 @@ sdef('Regexp', ['escape', 'quote'], 1, function* (_self, [value]) {
 });
 sdef('Regexp', 'union', [0, -1], function* (_self, args) {
   const items = args.length === 1 && args[0] instanceof RArray ? args[0].items : args;
+  if (items.length === 1 && isRegexp(items[0])) return items[0];
   const parts: string[] = [];
   for (const item of items) {
     if (isRegexp(item)) parts.push(regexpToS(item));
@@ -685,13 +689,19 @@ function regexpToS(regexp: RObject): string {
   const data = dataOf(regexp);
   const on = `${data.multiline ? 'm' : ''}${data.ignoreCase ? 'i' : ''}${data.extended ? 'x' : ''}`;
   const off = `${data.multiline ? '' : 'm'}${data.ignoreCase ? '' : 'i'}${data.extended ? '' : 'x'}`;
-  return `(?${on}${off ? `-${off}` : ''}:${data.source})`;
+  return `(?${on}${off ? `-${off}` : ''}:${escapedRegexpSource(data.source)})`;
 }
 
 function regexpInspect(regexp: RObject): string {
   const data = dataOf(regexp);
-  const source = data.source.replaceAll(/(?<!\\)\//g, String.raw`\/`);
+  const source = escapedRegexpSource(data.source);
   return `/${source}/${data.multiline ? 'm' : ''}${data.ignoreCase ? 'i' : ''}${data.extended ? 'x' : ''}`;
+}
+
+function escapedRegexpSource(source: string): string {
+  return source.replaceAll(/(\\*)\//g, (_match, slashes: string) =>
+    slashes.length % 2 === 0 ? `${slashes}\\/` : `${slashes}/`
+  );
 }
 
 export function regexpValueDisplayOf(value: RObject): string | undefined {
@@ -815,6 +825,13 @@ def('MatchData', ['==', 'eql?'], 1, (self: RObject, [other]) => {
         ? right.groups[index] === undefined
         : range[0] === right.groups[index]?.[0] && range[1] === right.groups[index]?.[1]
     )
+  );
+});
+def('MatchData', 'hash', 0, (self: RObject) => {
+  const state = stateOf(self);
+  const regexp = dataOf(state.regexp);
+  return BigInt(
+    `0x${digest(JSON.stringify([state.text, regexp.source, regexp.ignoreCase, regexp.multiline, regexp.extended, state.groups]))}`
   );
 });
 def('MatchData', 'named_captures', 0, function* (self: RObject) {
@@ -1190,7 +1207,7 @@ def('String', '=~', 1, function* (self: RString, [pattern]) {
   setLastMatch(state);
   return state ? BigInt(charIndex(self.s, (state.groups[0] as readonly [number, number])[0])) : NIL;
 });
-def('NilClass', '=~', 1, () => setLastMatch(undefined));
+def('NilClass', '=~', 1, () => NIL);
 def('Symbol', '=~', 1, function* (self: RSymbol, [pattern]) {
   return yield* callMethod(str(self.name), '=~', [pattern]);
 });

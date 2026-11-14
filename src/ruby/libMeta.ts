@@ -16,6 +16,7 @@ import {
   methodMissing,
   nativeProc,
   requireBlock,
+  setClassVariable,
 } from './interp';
 import { procArity } from './libObject';
 import {
@@ -82,9 +83,13 @@ export function* respondsToName(self: Value, name: string, includeAll: boolean):
   return false;
 }
 
-def('Kernel', 'respond_to?', [1, 2], function* (self, args) {
-  return yield* respondsToName(self, yield* nameOf(args[0]), args.length > 1 && truthy(args[1]));
-});
+const builtinRespondTo = Object.assign(
+  function* (self: Value, args: Value[]): Gen<boolean> {
+    return yield* respondsToName(self, yield* nameOf(args[0]), args.length > 1 && truthy(args[1]));
+  },
+  { builtinResponder: true }
+);
+def('Kernel', 'respond_to?', [1, 2], builtinRespondTo);
 def('Kernel', 'respond_to_missing?', 2, () => false, { visibility: 'private' });
 
 // Method objects -------------------------------------------------------------------------------------------------------
@@ -547,9 +552,23 @@ def('Module', 'const_set', 2, function* (self: RClass, [name, value]) {
   return value;
 });
 def('Module', 'const_defined?', [1, 2], function* (self: RClass, args) {
-  const constant = yield* constantName(args[0]);
-  if (args.length > 1 && !truthy(args[1])) return self.constants.has(constant);
-  return self.ancestors().some((module) => module.constants.has(constant)) || rt().c.Object.constants.has(constant);
+  const requested = yield* nameOf(args[0]);
+  const inherit = args.length < 2 || truthy(args[1]);
+  const absolute = requested.startsWith('::');
+  const parts = (absolute ? requested.slice(2) : requested).split('::');
+  if (parts.some((part) => part.length === 0)) throw nameError(`wrong constant name ${requested}`, NIL, requested);
+  let module: Value | undefined = absolute ? rt().c.Object : self;
+  for (const part of parts) {
+    if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
+    const constant = yield* constantName(str(part));
+    const holders: RClass[] = inherit ? module.ancestors() : [module];
+    const value: Value | undefined = holders
+      .map((holder: RClass) => holder.constants.get(constant))
+      .find((candidate: Value | undefined) => candidate !== undefined);
+    module = value ?? (inherit ? rt().c.Object.constants.get(constant) : undefined);
+    if (module === undefined) return false;
+  }
+  return true;
 });
 def('Module', 'constants', [0, 1], () => {
   throw new UnsupportedFeatureError('Module#constants（定数の並び順）');
@@ -563,8 +582,7 @@ def('Module', 'class_variable_get', 1, function* (self: RClass, [name]) {
   throw nameError(`uninitialized class variable ${variable} in ${className(self)}`, self, variable);
 });
 def('Module', 'class_variable_set', 2, function* (self: RClass, [name, value]) {
-  assertMutableClass(self);
-  self.classVariables.set(yield* nameOf(name), value);
+  setClassVariable(self, yield* nameOf(name), value);
   return value;
 });
 def('Module', 'class_variable_defined?', 1, function* (self: RClass, [name]) {

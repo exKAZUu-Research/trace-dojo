@@ -83,11 +83,14 @@ export function* toInt(value: Value): Gen<bigint> {
 
 function* respondsToConversion(value: Value, name: string, resolved: boolean): Gen<boolean> {
   const responder = classOf(value).findMethod('respond_to?');
-  if (!responder) return resolved;
+  if (!responder) {
+    const missing = classOf(value).findMethod('method_missing');
+    return resolved || (missing !== undefined && missing.body.kind !== 'native');
+  }
   const advertised = truthy(
     yield* callMethod(value, 'respond_to?', [RSymbol.of(name), true], undefined, undefined, { fcall: true })
   );
-  if (responder.owner !== rt().c.Kernel || responder.body.kind !== 'native') return advertised;
+  if (responder.body.kind !== 'native' || !('builtinResponder' in responder.body.fn)) return advertised;
   if (advertised) return true;
   const missing = classOf(value).findMethod('method_missing');
   return missing !== undefined && missing.body.kind !== 'native';

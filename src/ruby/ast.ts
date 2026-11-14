@@ -135,7 +135,7 @@ export type Expr =
   | { k: 'module'; scope?: Expr; top?: boolean; name: string; body: Body; row: number }
   | { k: 'lambda'; block: BlockDef }
   | { k: 'rescueMod'; body: Expr; handler: Expr }
-  | { k: 'regex'; parts: StrPart[]; flags: string }
+  | { k: 'regex'; parts: StrPart[]; flags: string; slashDelimited: boolean }
   | { k: 'matchWrite'; match: Expr; names: LocalRef[] }
   | { k: 'sclass'; target: Expr; body: Body; row: number }
   | { k: 'alias'; newName: string; oldName: string }

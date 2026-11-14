@@ -445,7 +445,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
         }
       }
       const regexp = makeRegexp(source, {
-        literal: true,
+        literal: e.slashDelimited,
         ignoreCase: e.flags.includes('i'),
         multiline: e.flags.includes('m'),
         extended: e.flags.includes('x'),
@@ -723,6 +723,10 @@ function classVariableGet(frame: Frame, name: string): Value {
 function classVariableSet(frame: Frame, name: string, value: Value): void {
   const holder = classVariableHolder(frame);
   if (holder === rt().c.Object) throw rubyError(rt().c.RuntimeError, 'class variable access from toplevel');
+  setClassVariable(holder, name, value);
+}
+
+export function setClassVariable(holder: RClass, name: string, value: Value): void {
   for (const module of holder.ancestors()) {
     if (module.classVariables.has(name)) {
       assertMutableClass(module);
@@ -1479,14 +1483,22 @@ function* defineMethod(def: MethodDef, singleton: Expr | undefined, frame: Frame
 }
 
 const PRIVATE_METHOD_NAMES = new Set(['initialize', 'initialize_copy', 'initialize_clone', 'initialize_dup']);
+const CLASS_METHOD_HOOKS = new Set(['method_added', 'method_removed', 'method_undefined', 'const_added']);
+const SINGLETON_METHOD_HOOKS = new Set([
+  'singleton_method_added',
+  'singleton_method_removed',
+  'singleton_method_undefined',
+]);
 
 export function addMethod(owner: RClass, method: RMethod): void {
   assertMutableClass(owner);
   if (
-    (method.name === 'method_added' || method.name === 'singleton_method_added') &&
+    owner.isSingleton &&
+    ((owner.attached instanceof RClass && CLASS_METHOD_HOOKS.has(method.name)) ||
+      SINGLETON_METHOD_HOOKS.has(method.name)) &&
     (method.body.kind === 'user' || method.body.kind === 'proc')
   )
-    throw new UnsupportedFeatureError(`メソッド追加フック（${method.name}）`);
+    throw new UnsupportedFeatureError(`メソッド・定数フック（${method.name}）`);
   owner.methods.set(method.name, method);
   invalidateMethodCaches();
 }

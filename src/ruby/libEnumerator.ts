@@ -44,7 +44,7 @@ import {
   type Value,
 } from './objects';
 import { type Frame, rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, newHash, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
+import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
@@ -818,15 +818,15 @@ sdef('Enumerator', 'produce', [0, 1], function* (_self, args, block) {
   const runtime = rt();
   const generator = new RObject(runtime.c['Enumerator::Generator']);
   const producer = nativeProc(1, function* ([yielder]) {
-    let value = args.length > 0 ? args[0] : yield* callProc(step, []);
-    for (;;) {
-      yield* callMethod(yielder, '<<', [value]);
-      try {
+    try {
+      let value = args.length > 0 ? args[0] : yield* callProc(step, []);
+      for (;;) {
+        yield* callMethod(yielder, '<<', [value]);
         value = yield* callProc(step, [value]);
-      } catch (error) {
-        if (error instanceof RubyError && error.exception.cls === runtime.c.StopIteration) return NIL;
-        throw error;
       }
+    } catch (error) {
+      if (error instanceof RubyError && isA(error.exception, runtime.c.StopIteration)) return NIL;
+      throw error;
     }
   });
   generator.data = {

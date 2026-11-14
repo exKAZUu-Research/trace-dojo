@@ -6248,3 +6248,65 @@ test('source CRLF normalizes regexp comment continuation', () => {
   const source = `p(/(a)# ignored ${String.fromCodePoint(92)}\r\n(?<real>b)/x.match("ab").to_a)`;
   expect(run(source)).toMatchObject({ stdout: '["a", "a"]\n' });
 });
+
+test('regexp slash display, union and equal MatchData hashes match Ruby', () => {
+  const source = String.raw`r=/a\/b/
+p r.source, r.to_s, %r{a\/b}.source
+p Regexp.union(r).equal?(r)
+a=/(a)/.match("a"); p a.hash == /(a)/.match("a").hash
+"a" =~ /a/; nil =~ /a/; p $~
+`;
+  expect(run(source)).toMatchObject({
+    stdout: String.raw`"a/b"
+"(?-mix:a\\/b)"
+"a\\/b"
+true
+true
+#<MatchData "a">
+`,
+  });
+});
+
+test('short regexp matches avoid the expensive watchdog path', () => {
+  expect(run(String.raw`60000.times { "123".match?(/\A\d{1,3}\z/) }; p :ok`)).toMatchObject({
+    kind: 'executed',
+    stdout: ':ok\n',
+  });
+});
+
+test('method hooks fail explicitly only when they act as hooks', () => {
+  expect(run('class A; def self.method_removed(n); end; end')).toMatchObject({
+    uncaughtException: 'メソッド・定数フック（method_removed）は、この採点環境では使えません。',
+  });
+  expect(run('class A; def method_added(n); 1; end; end; p :ok')).toMatchObject({ stdout: ':ok\n' });
+});
+
+test('squiggly heredocs strip indentation at tab stops', () => {
+  expect(run('p <<~EOS\n\tfoo\n  bar\nEOS')).toMatchObject({ stdout: '"\\tfoo\\nbar\\n"\n' });
+});
+
+test('Enumerator.produce stops on StopIteration subclasses', () => {
+  expect(
+    run(
+      'p Enumerator.produce { raise StopIteration }.to_a; class Done < StopIteration; end; p Enumerator.produce(1) { raise Done }.to_a'
+    )
+  ).toMatchObject({
+    stdout: '[]\n[1]\n',
+  });
+});
+
+test('class variable and constant reflection traverse ancestry', () => {
+  expect(
+    run(
+      'class A; @@n=1; end; class B<A; end; B.class_variable_set(:@@n,2); p A.class_variable_get(:@@n), B.class_variable_get(:@@n); module M; module N; X=1; end; end; p Object.const_defined?("M::N::X")'
+    )
+  ).toMatchObject({
+    stdout: '2\n2\ntrue\n',
+  });
+});
+
+test('negative Time rounding precision raises before exponentiation', () => {
+  expect(run('Time.at(5).round(-10000000000)')).toMatchObject({
+    uncaughtException: 'negative ndigits given (ArgumentError)',
+  });
+});
