@@ -1074,3 +1074,43 @@ test('native big number zero checks retain payload and backing allocation state'
     uncaughtException: undefined,
   });
 });
+
+test('channel conversion calls preserve leading receive operators and parentheses', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";func main(){c:=make(chan int,3);c<-7;c<-8;c<-9;fmt.Println(<-chan int(c),1+<-chan int(c));r:=(<-chan int)(c);fmt.Println(<-r);inner:=make(chan int,1);inner<-10;outer:=make(chan chan int,1);outer<-inner;fmt.Println(<-(<-chan chan int(outer)));comments:=make(chan int,1);comments<-11;fmt.Println(<- /* r */ chan int(comments))}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '7 9\n9\n10\n11\n', uncaughtException: undefined });
+});
+
+test('generic channel inference preserves checked argument provenance in concrete instances', () => {
+  expect(
+    executeProgram(
+      'go',
+      String.raw`package main;import "fmt";func pair[T any](a,b T)T{return a};func F[C ~chan int](c C){d:=make(chan int);fmt.Printf("%T %T\n",pair(c,d),pair(d,c));type Local struct{C C};a:=Local{c};fmt.Println(any(pair(a,a)).(Local).C==c)};type B chan int;func main(){F(make(chan int));F(make(B))}`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'chan int chan int\ntrue\nmain.B chan int\ntrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('lazy timer reads retain expired timestamps and ticker phase', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"time");func main(){start:=time.Now();timer:=time.NewTimer(time.Millisecond);ticker:=time.NewTicker(time.Millisecond);defer ticker.Stop();time.Sleep(10*time.Millisecond);after:=time.Now();a:=<-timer.C;b:=<-ticker.C;c:=<-ticker.C;fmt.Println(a.Before(after),b.Before(after),c.After(after),c.Sub(b)>=time.Millisecond,start.Before(a));done:=make(chan int);time.AfterFunc(time.Millisecond,func(){done<-7});fmt.Println(<-done)}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'true true true true true\n7\n', uncaughtException: undefined });
+});
+
+test('generic channel inference preserves choices across receiver and method parameters', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main\nimport "fmt"\nfunc pair[T any](a,b T)T{return a}\ntype W[C ~chan int] struct{C C}\nfunc(w W[X])Run(){d:=make(chan int);fmt.Printf("%T %T\\n",pair(w.C,d),pair(d,w.C))}\ntype A int\nfunc(A)Run[C ~chan int](c C){d:=make(chan int);fmt.Printf("%T %T\\n",pair(c,d),pair(d,c))}\ntype B chan int\nfunc main(){W[B]{make(B)}.Run();A(0).Run(make(B))}\n'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'main.B chan int\nmain.B chan int\n', uncaughtException: undefined });
+});

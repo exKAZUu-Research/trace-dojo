@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
-test.each(['select {}', '<-make(chan int)'])('an unused live ticker cannot evade execution limits with %s', (wait) => {
+test.each(['select {}', '<-make(chan int)'])('an unobserved live ticker does not prevent deadlock with %s', (wait) => {
   expect(
     executeProgram(
       'go',
@@ -10,7 +10,7 @@ test.each(['select {}', '<-make(chan int)'])('an unused live ticker cannot evade
 import "time"
 func main() { ticker := time.NewTicker(time.Nanosecond); _ = ticker; ${wait} }`
     )
-  ).toMatchObject({ kind: 'limitExceeded' });
+  ).toMatchObject({ kind: 'executed', uncaughtException: 'fatal error: all goroutines are asleep - deadlock!' });
 });
 
 test('package initializers can send, receive, start goroutines, and await timers before init and main', () => {
@@ -466,4 +466,40 @@ func main(){ready:=make(chan func()(int,bool));go func(){next,_:=iter.Pull(func(
       uncaughtException: undefined,
     });
   }
+});
+
+test('observed ticker loops remain bounded by the execution budget', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "time";func main(){ticker:=time.NewTicker(time.Nanosecond);defer ticker.Stop();for range ticker.C{}}'
+    )
+  ).toMatchObject({ kind: 'limitExceeded' });
+});
+
+test('blocked sends retain their channels and buffered composite payloads', () => {
+  for (const composite of [false, true]) {
+    for (const selected of [false, true]) {
+      const type = composite ? '[]*Turtle' : '*Turtle';
+      const initial = composite ? '[]*Turtle{NewTurtle(0,1)}' : 'NewTurtle(0,1)';
+      const source = `package main
+import "fmt"
+func main(){c:=make(chan ${type},1);c<-${initial};go func(){c=nil;p:=NewTurtle(0,0);fmt.Println(p.CanMoveForward())}();${selected ? 'select{case c<-nil:}' : 'c<-nil'}}`;
+      expect(executeProgram('go', source)).toMatchObject({
+        kind: 'executed',
+        stdout: 'false\n',
+        uncaughtException: 'fatal error: all goroutines are asleep - deadlock!',
+      });
+    }
+  }
+});
+
+test('an unobserved ticker reports deadlock after its last receive', () => {
+  const source =
+    'package main;import("fmt";"time");func main(){ticker:=time.NewTicker(time.Millisecond);defer ticker.Stop();<-ticker.C;fmt.Println("start");var c chan int;for range c{}}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'start\n',
+    uncaughtException: 'fatal error: all goroutines are asleep - deadlock!',
+  });
 });

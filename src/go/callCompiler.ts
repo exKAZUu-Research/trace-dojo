@@ -105,7 +105,14 @@ export const VALUE_BUILTINS = new Set(['append', 'cap', 'complex', 'imag', 'len'
 /** Builtins whose call neither calls the runtime nor stores to memory. */
 const MEMORYLESS_BUILTINS = new Set(['cap', 'complex', 'imag', 'len', 'max', 'min', 'real']);
 
+interface InferenceOptions {
+  written: Type[];
+  spread: boolean;
+  choices?: (number | undefined)[];
+}
+
 export abstract class CallCompiler extends CompositeCompiler {
+  private readonly inferenceChoices = new WeakMap<Expression, (number | undefined)[]>();
   // code-gauge-allow functionNcss 34 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   protected compileCall(expression: Extract<Expression, { kind: 'call' }>): Operand {
     const callee = this.expression(expression.callee);
@@ -435,9 +442,21 @@ export abstract class CallCompiler extends CompositeCompiler {
     if (!expression.spread && operands.length === 1 && operands[0].type.kind === 'tuple') {
       ({ parts: operands, spread: expand } = this.spreadResults(operands[0]));
     }
-    const mapping = this.inferTypeArguments(expression, generic, operands, written, expression.spread === true);
+    const mapping = this.inferTypeArguments(expression, generic, operands, {
+      written,
+      spread: expression.spread === true,
+      choices: this.reporting ? undefined : this.inferenceChoices.get(expression.callee),
+    });
     if (!mapping) return undefined;
     const typeArgs = generic.typeParams.map((param) => mapping.get(param.id) as Type);
+    if (this.reporting)
+      this.inferenceChoices.set(
+        expression.callee,
+        typeArgs.map((type) => {
+          const index = operands.findIndex((operand) => operand.type === type && !isUntyped(type));
+          return index !== -1 ? index : undefined;
+        })
+      );
     if (!this.checkTypeArguments(generic.typeParams, typeArgs, expression)) return undefined;
     if (!this.recordGenericInstantiation(generic.typeParams, typeArgs)) return undefined;
     const signature = substitute(generic.type, mapping, (named, args) =>
@@ -493,13 +512,12 @@ export abstract class CallCompiler extends CompositeCompiler {
   }
 
   /** Infers the type arguments of a generic call from its arguments: typed ones first, then untyped defaults. */
-  // code-gauge-allow functionNcss 51 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
+  // code-gauge-allow functionNcss 54 -- Keeps argument conversion, source evaluation order and call metadata together for this Go operation.
   private inferTypeArguments(
     span: Span,
     generic: GenericFunc,
     operands: Operand[],
-    written: Type[],
-    spread: boolean
+    { written, spread, choices }: InferenceOptions
   ): Substitution | undefined {
     const { typeParams, type } = generic;
     if (written.length > typeParams.length) {
@@ -511,7 +529,10 @@ export abstract class CallCompiler extends CompositeCompiler {
       return undefined;
     }
     const mapping: Substitution = new Map(written.map((arg, index) => [typeParams[index].id, arg]));
-    const inferredParams = typeParams.slice(written.length);
+    for (const [index, source] of (choices ?? []).entries()) {
+      if (index >= written.length && source !== undefined) mapping.set(typeParams[index].id, operands[source].type);
+    }
+    const inferredParams = typeParams.filter((_, index) => index >= written.length && choices?.[index] === undefined);
     const params = type.params;
     if ((!type.variadic || spread) && operands.length !== params.length) {
       this.error(

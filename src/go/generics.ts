@@ -1,4 +1,5 @@
 import {
+  coreType,
   effectiveTerms,
   identical,
   type InterfaceType,
@@ -169,12 +170,13 @@ function bindTypeArgument(param: TypeParamType, arg: Type, mapping: Substitution
     return true;
   }
   if (identical(bound, arg)) return true;
-  const left = underlying(bound);
-  const right = underlying(arg);
-  if (left.kind === 'chan' && right.kind === 'chan' && identical(left.element, right.element)) {
+  const left = coreType(bound);
+  const right = coreType(arg);
+  if (left?.kind === 'chan' && right?.kind === 'chan' && identical(left.element, right.element)) {
     if (left.dir !== right.dir && left.dir !== 'both' && right.dir !== 'both') return false;
     if (bound.kind === 'named' && arg.kind === 'named') return false;
-    if (arg.kind === 'named' || (bound.kind !== 'named' && left.dir === 'both')) mapping.set(param.id, arg);
+    if (bound.kind !== 'named' && (arg.kind === 'named' || (underlying(arg).kind === 'chan' && right.dir !== 'both')))
+      mapping.set(param.id, arg);
     return true;
   }
   // A named type and its underlying type both match a parameter written as a type literal.

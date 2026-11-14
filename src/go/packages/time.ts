@@ -375,8 +375,12 @@ function monotonic(): bigint {
 }
 
 export function now(): goTime.Time {
+  return timeAt(currentRuntime().scheduler?.now ?? 0n);
+}
+
+function timeAt(elapsed: bigint): goTime.Time {
   const clock = clockOf(currentRuntime());
-  const mono = monotonic();
+  const mono = elapsed + 1n;
   // The wall clock of darwin, where Go reads it through the C library, counts microseconds.
   const wall = clock.startUnixNanos + mono - 1n;
   return goTime.now(wall - (wall % 1000n), mono);
@@ -399,19 +403,19 @@ interface TimerState {
 }
 
 /** Sends the time to a timer's channel unless a value waits there already, as a ticker drops ticks no one takes. */
-function deliver(channel: Channel): void {
+function deliver(channel: Channel, when: bigint): void {
   if (channel.buffer.length > 0) return;
   const receiver = channel.receivers.shift() as
     | { goroutine: Goroutine; select?: { done: boolean }; index: number }
     | undefined;
-  const value = timeValue(now());
+  const value = timeValue(timeAt(when));
   if (receiver && !(receiver.select && receiver.select.done)) {
     if (receiver.select) receiver.select.done = true;
     scheduler().ready(receiver.goroutine, { index: receiver.index, value, ok: true });
     return;
   }
   if (receiver) {
-    deliver(channel);
+    deliver(channel, when);
     return;
   }
   channel.buffer.push(value);
@@ -420,9 +424,10 @@ function deliver(channel: Channel): void {
 function arm(state: TimerState, delay: bigint): void {
   const running = scheduler();
   const { action } = state;
-  state.pending = running.addTimer(
+  const timer = running.addTimer(
     delay,
     () => {
+      const when = timer.when;
       state.pending = undefined;
       if (action.kind === 'callback') {
         const task = goroutineFunction(action.task);
@@ -434,12 +439,16 @@ function arm(state: TimerState, delay: bigint): void {
         );
         return;
       }
-      deliver(action.channel);
-      if (action.period !== undefined) arm(state, action.period);
+      deliver(action.channel, when);
+      if (action.period !== undefined) {
+        const next = when + ((running.now - when) / action.period + 1n) * action.period;
+        arm(state, next - running.now);
+      }
     },
     action.kind === 'channel' ? action.channel : undefined,
     action.kind === 'callback' ? [action.task] : []
   );
+  state.pending = timer;
 }
 
 function newTimer(delay: bigint, period?: bigint, callback?: { task: Value }): Pointer {

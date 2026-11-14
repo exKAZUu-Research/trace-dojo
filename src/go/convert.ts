@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 549 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+// code-gauge-allow-file fileNcss 554 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -376,13 +376,14 @@ export class Converter {
     }
   }
 
-  private convertChannelType(node: Node): TypeExpression {
+  private convertChannelType(node: Node, receive = false): TypeExpression {
     const tokens: Node[] = [];
     let tail = node;
     while (tail.type === 'channel_type') {
       tokens.push(...tail.children.filter((child): child is Node => child !== null && !child.isNamed));
       tail = required(tail.childForFieldName('value'));
     }
+    if (receive) tokens.shift();
     const heads: { dir: 'both' | 'receive' | 'send'; span: Span }[] = [];
     for (let index = 0; index < tokens.length;) {
       const first = tokens[index];
@@ -859,14 +860,17 @@ export class Converter {
         };
       }
       case 'type_conversion_expression': {
-        const type = this.convertType(required(node.childForFieldName('type')));
-        return {
+        const typeNode = required(node.childForFieldName('type'));
+        const receive = typeNode.type === 'channel_type' && typeNode.children[0]?.type === '<-';
+        const type = receive ? this.convertChannelType(typeNode, true) : this.convertType(typeNode);
+        const call: Expression = {
           kind: 'call',
           ...span,
           callee: { kind: 'type', ...spanOf(node), type },
           typeArguments: [],
           args: [this.convertExpression(required(node.childForFieldName('operand')))],
         };
+        return receive ? { kind: 'unary', ...span, operator: '<-', operand: call } : call;
       }
       case 'type_instantiation_expression': {
         const [operand, ...args] = named(node).filter((child) => child.type !== 'comment');

@@ -129,10 +129,13 @@ export class Scheduler {
 
   /** Advances the virtual time to the earliest timers and fires them, telling whether there were any. */
   private fireTimers(): boolean {
-    if (this.timers.length === 0) return false;
-    let when = this.timers[0].when;
-    for (const timer of this.timers) if (timer.when < when) when = timer.when;
-    const due = this.timers.filter((timer) => timer.when === when).toSorted((a, b) => a.seq - b.seq);
+    const eligible = this.timers.filter(
+      (timer) => !timer.channel || (timer.channel.receivers as Waiter[]).some((waiter) => !waiter.select?.done)
+    );
+    if (eligible.length === 0) return false;
+    let when = eligible[0].when;
+    for (const timer of eligible) if (timer.when < when) when = timer.when;
+    const due = eligible.filter((timer) => timer.when === when).toSorted((a, b) => a.seq - b.seq);
     for (const timer of due) this.timers.splice(this.timers.indexOf(timer), 1);
     this.now = when;
     for (const timer of due) {
@@ -280,7 +283,7 @@ export function* send(channel: Channel | undefined, value: Value): Suspending<vo
   if (trySend(channel, value)) return;
   const goroutine = running.current as Goroutine;
   channel.senders.push({ goroutine, value, index: 0 } satisfies Waiter);
-  const completed = (yield* running.park('chan send', [value])) as Completed;
+  const completed = (yield* running.park('chan send', [channel, value])) as Completed;
   if (completed.closed) plainPanic('send on closed channel');
 }
 
@@ -294,7 +297,7 @@ export function* receive(channel: Channel | undefined): Suspending<[Value, boole
   const received = tryReceive(channel);
   if (received) return received;
   channel.receivers.push({ goroutine: running.current as Goroutine, index: 0 } satisfies Waiter);
-  const completed = (yield* running.park('chan receive')) as Completed;
+  const completed = (yield* running.park('chan receive', [channel])) as Completed;
   return [completed.value, completed.ok];
 }
 
@@ -368,7 +371,7 @@ export function* select(
   try {
     completed = (yield* running.park(
       reason,
-      ops.map((op) => (op.kind === 'send' ? op.value : undefined))
+      ops.flatMap((op) => [op.channel, op.kind === 'send' ? op.value : undefined])
     )) as Completed;
   } finally {
     for (const op of ops) {
