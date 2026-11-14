@@ -227,6 +227,7 @@ def('Hash', 'to_h', 0, function* (self: RHash, _args, block) {
   });
 });
 def('Hash', 'to_hash', 0, (self) => self);
+def('Hash', 'deconstruct_keys', 1, (self) => self);
 def('Hash', 'to_a', 0, (self: RHash) => arr([...self.map.values()].map((entry) => arr([entry.key, entry.value]))));
 def('Hash', '==', 1, (self: RHash, [other]) => rEquals(self, other));
 def('Hash', 'eql?', 1, function* (self: RHash, [other]) {

@@ -2,7 +2,6 @@ import { def } from './define';
 import { UnsupportedFeatureError } from './runtime';
 
 for (const [owner, methods] of Object.entries({
-  Hash: ['deconstruct_keys'],
   String: [
     'append_as_bytes',
     'byteindex',

@@ -408,7 +408,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
     }
     case 'matchPattern': {
       const value = yield* ev(e.value, frame);
-      const matched = yield* matchPattern(e.pattern, value, frame);
+      const matched = yield* matchPattern(e.pattern, value, frame, { subject: value });
       if (e.raise && !matched) throw yield* noMatchingPattern(value, true);
       return e.raise ? NIL : matched;
     }

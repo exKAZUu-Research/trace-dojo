@@ -777,22 +777,23 @@ wrapFirst('slice!', function* (self, args) {
   setLastMatch(state);
   if (!state) return NIL;
   const range = args.length > 1 ? yield* sliceCaptureRange(state, args[1]) : state.groups[0];
+  if (range === 'unmatched') return str('');
   if (!range) return NIL;
   const [from, to] = range;
   const removed = str(self.s.slice(from, to));
   setText(self, self.s.slice(0, from) + self.s.slice(to));
   return removed;
 });
-function* sliceCaptureRange(state: MatchState, key: Value): Gen<readonly [number, number] | undefined> {
+function* sliceCaptureRange(state: MatchState, key: Value): Gen<readonly [number, number] | 'unmatched' | undefined> {
   if (key instanceof RString || key instanceof RSymbol) {
     const name = key instanceof RString ? key.s : key.name;
     const group = state.namedGroups[name];
     if (group === undefined) throw indexError(`undefined group name reference: ${name}`);
-    return state.groups[group];
+    return state.groups[group] ?? 'unmatched';
   }
   let group = yield* toIndex(key);
   if (group < 0) group += state.groups.length;
-  return state.groups[group];
+  return group >= 0 && group < state.groups.length ? (state.groups[group] ?? 'unmatched') : undefined;
 }
 wrapFirst(
   'start_with?',

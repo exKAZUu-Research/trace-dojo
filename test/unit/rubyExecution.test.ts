@@ -5496,7 +5496,7 @@ test('reflection errors identify the requested constant path and method class', 
 
 test('regexp slice removes only a participating requested capture', () => {
   expect(run('s="ab";p s.slice!(/(a)(b)/,2),s;s="ab";p s.slice!(/(z)?ab/,1),s')).toMatchObject({
-    stdout: '"b"\n"a"\nnil\n"ab"\n',
+    stdout: '"b"\n"a"\n""\n"ab"\n',
   });
 });
 
@@ -5527,6 +5527,55 @@ test('case-in cache applies only to the subject', () => {
     )
   ).toMatchObject({
     stdout: '1\n2\n:two\n',
+  });
+});
+
+test('nested alternatives call deconstruct for each option', () => {
+  expect(
+    run(
+      'class A;def initialize = @n=0;def deconstruct;@n+=1;p @n;[@n];end;end;case [A.new];in [[0]|[2]];p :yes;else;p :no;end'
+    )
+  ).toMatchObject({
+    stdout: '1\n2\n:yes\n',
+  });
+});
+
+test('case-in caches missing subject deconstruction', () => {
+  expect(
+    run(
+      'class A;def initialize = @n=0;def respond_to?(n,*);@n+=1;p @n;@n>1;end;def deconstruct = [1];end;case A.new;in [];p :empty;in [1];p :one;else;p :no;end'
+    )
+  ).toMatchObject({
+    stdout: '1\n:no\n',
+  });
+});
+
+test('missing-key matchee is the hash returned by deconstruct_keys', () => {
+  expect(
+    run(
+      'class A;def deconstruct_keys(keys) = {};end;begin;[A.new]=>[{a:}];rescue NoMatchingPatternKeyError=>e;p e.key,e.matchee.class;end'
+    )
+  ).toMatchObject({
+    stdout: ':a\nHash\n',
+  });
+});
+
+test('Hash deconstruct_keys is callable and aliases dispatch through patterns', () => {
+  expect(run('p({a:1,b:2}.deconstruct_keys([:a]))')).toMatchObject({ stdout: '{a: 1, b: 2}\n' });
+  expect(
+    run('class Hash;alias deconstruct_keys values_at;end;begin;p(({a:1} in {a:1}));rescue=>e;p e.class,e.message;end')
+  ).toMatchObject({
+    stdout: 'TypeError\n"deconstruct_keys must return Hash"\n',
+  });
+});
+
+test('const_get handles absolute paths and validates empty segments first', () => {
+  expect(
+    run(
+      'p Object.const_get("::Integer")==Integer;module K;A=1;end;begin;K.const_get("A::");rescue=>e;p e.class,e.message;end'
+    )
+  ).toMatchObject({
+    stdout: 'true\nNameError\n"wrong constant name A::"\n',
   });
 });
 

@@ -506,14 +506,21 @@ function* constantName(value: Value): Gen<string> {
 
 def('Module', 'const_get', [1, 2], function* (self: RClass, args) {
   const inherit = args.length < 2 || truthy(args[1]);
-  let module: Value = self;
   const requested = yield* nameOf(args[0]);
-  for (const part of requested.split('::')) {
+  const absolute = requested.startsWith('::');
+  const parts = (absolute ? requested.slice(2) : requested).split('::');
+  if (parts.some((part) => part.length === 0)) throw nameError(`wrong constant name ${requested}`, NIL, requested);
+  let module: Value = absolute ? rt().c.Object : self;
+  for (const part of parts) {
     if (!(module instanceof RClass)) throw typeError(`${requested} does not refer to class/module`);
     const constant = yield* constantName(str(part));
     const value: Value | undefined = inherit ? constInModule(module, constant) : module.constants.get(constant);
     if (value === undefined)
-      throw nameError(`uninitialized constant ${className(module)}::${constant}`, module, constant);
+      throw nameError(
+        `uninitialized constant ${module === rt().c.Object ? '' : `${className(module)}::`}${constant}`,
+        module,
+        constant
+      );
     module = value;
   }
   return module;

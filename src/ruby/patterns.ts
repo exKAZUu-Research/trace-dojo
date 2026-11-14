@@ -5,7 +5,7 @@ import { hashGet, hashSet } from './hashes';
 import { callMethod, ev, type Gen } from './interp';
 import { NIL, RArray, RHash, RSymbol, type Value } from './objects';
 import { type Frame, rt } from './runtime';
-import { arr, classOf, newHash, sym, truthy } from './values';
+import { arr, newHash, sym, truthy } from './values';
 
 /** Why the last pattern failed to match, which a `case`/`in` with one clause, or a `=>`, reports. */
 interface Failure {
@@ -16,6 +16,7 @@ interface Failure {
 
 interface DeconstructionCache {
   subject: Value;
+  attempted?: boolean;
   items?: Value[];
 }
 
@@ -43,7 +44,6 @@ export function guardFailed(): void {
 
 /** Whether a value matches a pattern, binding the pattern's variables in the frame as it goes, as Ruby does. */
 export function* matchPattern(pattern: Pattern, value: Value, frame: Frame, cache?: DeconstructionCache): Gen<boolean> {
-  cache ??= { subject: value };
   rt().spend();
   switch (pattern.k) {
     case 'value':
@@ -84,8 +84,15 @@ function* classMatches(cls: Expr | undefined, value: Value, frame: Frame): Gen<b
   return yield* checked(yield* ev(cls, frame), value);
 }
 
-function* deconstruct(value: Value, cache: DeconstructionCache): Gen<Value[] | undefined> {
-  if (value === cache.subject && cache.items !== undefined) return cache.items;
+function* deconstruct(value: Value, cache: DeconstructionCache | undefined): Gen<Value[] | undefined> {
+  if (cache?.subject === value && cache.attempted) {
+    if (cache.items !== undefined) return cache.items;
+    yield* fail(function* () {
+      return `${yield* inspect(value)} does not respond to #deconstruct`;
+    });
+    return undefined;
+  }
+  if (cache?.subject === value) cache.attempted = true;
   if (!truthy(yield* callMethod(value, 'respond_to?', [sym('deconstruct')]))) {
     yield* fail(function* () {
       return `${yield* inspect(value)} does not respond to #deconstruct`;
@@ -94,7 +101,7 @@ function* deconstruct(value: Value, cache: DeconstructionCache): Gen<Value[] | u
   }
   const result = yield* callMethod(value, 'deconstruct', []);
   if (!(result instanceof RArray)) throw typeError('deconstruct must return Array');
-  if (value === cache.subject) cache.items = result.items;
+  if (cache?.subject === value) cache.items = result.items;
   return result.items;
 }
 
@@ -102,7 +109,7 @@ function* matchArray(
   pattern: Extract<Pattern, { k: 'array' }>,
   value: Value,
   frame: Frame,
-  cache: DeconstructionCache
+  cache: DeconstructionCache | undefined
 ): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
   const items = yield* deconstruct(value, cache);
@@ -127,7 +134,7 @@ function* matchFind(
   pattern: Extract<Pattern, { k: 'find' }>,
   value: Value,
   frame: Frame,
-  cache: DeconstructionCache
+  cache: DeconstructionCache | undefined
 ): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
   const items = yield* deconstruct(value, cache);
@@ -155,19 +162,14 @@ function* matchFind(
 // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of pattern.
 function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, frame: Frame): Gen<boolean> {
   if (!(yield* classMatches(pattern.cls, value, frame))) return false;
-  let hash: RHash;
-  const protocol = classOf(value).findMethod('deconstruct_keys');
-  if (value instanceof RHash && protocol?.owner === rt().c.Hash && protocol.body.kind === 'native') hash = value;
-  else if (truthy(yield* callMethod(value, 'respond_to?', [sym('deconstruct_keys')]))) {
-    const keys = pattern.rest === undefined ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
-    const result = yield* callMethod(value, 'deconstruct_keys', [keys]);
-    if (!(result instanceof RHash)) throw typeError('deconstruct_keys must return Hash');
-    hash = result;
-  } else {
+  if (!truthy(yield* callMethod(value, 'respond_to?', [sym('deconstruct_keys')]))) {
     return yield* fail(function* () {
       return `${yield* inspect(value)} does not respond to #deconstruct_keys`;
     });
   }
+  const keys = pattern.rest === undefined ? arr(pattern.pairs.map((pair) => sym(pair.key))) : NIL;
+  const hash = yield* callMethod(value, 'deconstruct_keys', [keys]);
+  if (!(hash instanceof RHash)) throw typeError('deconstruct_keys must return Hash');
   for (const pair of pattern.pairs) {
     const entry = yield* hashGet(hash, sym(pair.key));
     if (!entry) {
@@ -177,7 +179,7 @@ function* matchHash(pattern: Extract<Pattern, { k: 'hash' }>, value: Value, fram
           return `key not found: ${yield* inspect(key)}`;
         },
         key,
-        value
+        hash
       );
     }
     if (pair.pattern) {
