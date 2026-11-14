@@ -153,6 +153,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly symbols = new Map<string, RSymbol>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
+  currentNumericReceiver?: Value;
   readonly heldArrays: Value[][] = [];
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];

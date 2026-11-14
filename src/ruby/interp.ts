@@ -1450,20 +1450,23 @@ export function* invoke(
         throw argumentCountError(actual.length, body.min, body.max);
       }
       const held = runtime.held.length;
+      const previousNumericReceiver = runtime.currentNumericReceiver;
       runtime.held.push(recv);
       for (const arg of actual) runtime.held.push(arg);
       if (block) runtime.held.push(block);
       try {
         const numericMethod =
           method.owner === runtime.c.Float || method.owner === runtime.c.Integer || method.owner === runtime.c.Numeric;
+        if (numericMethod) runtime.currentNumericReceiver = recv;
         const nativeRecv = numericMethod && recv instanceof RFloat ? recv.value : recv;
         const nativeArgs = numericMethod ? actual.map((arg) => (arg instanceof RFloat ? arg.value : arg)) : actual;
         const result = body.fn(nativeRecv, nativeArgs, block, body.takesKeywords ? keywords : undefined);
         const value = isGenerator(result) ? yield* result : result;
-        if (recv instanceof RFloat && value === recv.value && (method.name === 'to_f' || method.name === 'dup'))
+        if (recv instanceof RFloat && Object.is(value, recv.value) && (method.name === 'to_f' || method.name === 'dup'))
           return recv;
         return typeof value === 'number' ? boxFloat(value) : value;
       } finally {
+        runtime.currentNumericReceiver = previousNumericReceiver;
         runtime.held.length = held;
       }
     }

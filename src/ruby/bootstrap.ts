@@ -132,6 +132,8 @@ export function bootstrap(runtime: Runtime): void {
   defineClass('CompatibilityError', c.EncodingError, encoding);
   const math = defineModule('Math');
   defineClass('DomainError', c.ArgumentError, math);
+  const errno = defineModule('Errno');
+  defineClass('EDOM', c.SystemCallError, errno);
   defineClass('Random', object);
   defineClass('Turtle', object);
   const enumerator = defineClass('Enumerator', object);

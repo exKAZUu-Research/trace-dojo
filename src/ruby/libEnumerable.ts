@@ -22,7 +22,19 @@ import {
   receiverSize,
   sizedEnumerator,
 } from './libEnumerator';
-import { NIL, RArray, RHash, RObject, type RProc, RRange, RString, RSymbol, type Value } from './objects';
+import {
+  isRubyFloat,
+  isRubyNumber,
+  NIL,
+  RArray,
+  RHash,
+  RObject,
+  type RProc,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { isUniformKey, platformSort, uniformSort } from './sorting';
 import { arr, newHash, realClassOf, truthy } from './values';
@@ -298,7 +310,7 @@ def('Enumerable', ['inject', 'reduce'], [0, -1], (self, args, block) => inject(s
 /** `sum`, adding Integers exactly and Floats with Kahan-Babuska compensation as Ruby does. */
 export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen {
   let total: Value = args.length > 0 ? args[0] : 0n;
-  const initial = typeof total === 'number' ? total : undefined;
+  const initial = isRubyFloat(total) ? Number(total) : undefined;
   let exact = typeof total === 'bigint' ? total : 0n;
   let floating: number | undefined;
   let compensation = 0;
@@ -313,12 +325,12 @@ export function* sum(self: Value, args: Value[], block: RProc | undefined): Gen 
         total = exact;
         return;
       }
-      if (typeof item === 'number' || initial !== undefined) {
+      if (isRubyFloat(item) || initial !== undefined) {
         floating = initial === undefined ? Number(exact) : initial + Number(exact);
       }
     }
     if (floating !== undefined) {
-      if (typeof item === 'number' || typeof item === 'bigint') {
+      if (isRubyNumber(item)) {
         const x = Number(item);
         if (Number.isNaN(floating)) return;
         if (Number.isNaN(x)) floating = x;

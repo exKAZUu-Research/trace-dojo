@@ -39,6 +39,10 @@ function isNum(value: Value): value is Num {
   return typeof value === 'bigint' || typeof value === 'number';
 }
 
+function callbackReceiver(self: Num): Value {
+  return rt().currentNumericReceiver ?? self;
+}
+
 /** The error for an operand that is not a number: "String can't be coerced into Integer". */
 function coerceError(value: Value, into: string): unknown {
   const name = value === NIL ? 'nil' : value === true ? 'true' : value === false ? 'false' : realClassOf(value).name;
@@ -48,7 +52,7 @@ function coerceError(value: Value, into: string): unknown {
 /** Applies an operator to a number and a value that is not one, through the value's `coerce`. */
 function* coerceBinary(self: Num, other: Value, op: string, target?: string): Gen {
   if (respondsTo(other, 'coerce', true)) {
-    const pair = yield* callMethod(other, 'coerce', [self], undefined, undefined, { fcall: true });
+    const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
     if (!(pair instanceof RArray) || pair.items.length !== 2) throw typeError('coerce must return [x, y]');
     return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   }
@@ -57,7 +61,7 @@ function* coerceBinary(self: Num, other: Value, op: string, target?: string): Ge
 
 function* coerceCompare(self: Num, other: Value, op: string): Gen {
   if (respondsTo(other, 'coerce', true)) {
-    const pair = yield* callMethod(other, 'coerce', [self], undefined, undefined, { fcall: true });
+    const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
     if (pair instanceof RArray && pair.items.length === 2) return yield* callMethod(pair.items[0], op, [pair.items[1]]);
   }
   throw comparisonFailed(self, other);
@@ -202,10 +206,11 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, '+@', 0, (self: Num) => self);
   def(owner, ['==', '==='], 1, function* (self: Num, [other]) {
     if (isNum(other)) return numericEquals(self, other);
-    if (classOf(other).findMethod('==')?.body.kind === 'user') return truthy(yield* callMethod(other, '==', [self]));
+    if (classOf(other).findMethod('==')?.body.kind === 'user')
+      return truthy(yield* callMethod(other, '==', [callbackReceiver(self)]));
     if (other === NIL || typeof other === 'boolean' || other instanceof RString || other instanceof RSymbol)
       return false;
-    return truthy(yield* callMethod(other, '==', [self]));
+    return truthy(yield* callMethod(other, '==', [callbackReceiver(self)]));
   });
   def(owner, 'eql?', 1, (self: Num, [other]) => typeof self === typeof other && numericEquals(self, other as Num));
   def(owner, '<=>', 1, function* (self: Num, [other]) {
@@ -214,7 +219,7 @@ for (const owner of ['Integer', 'Float']) {
       return order === undefined ? NIL : BigInt(order);
     }
     if (respondsTo(other, 'coerce', true)) {
-      const pair = yield* callMethod(other, 'coerce', [self], undefined, undefined, { fcall: true });
+      const pair = yield* callMethod(other, 'coerce', [callbackReceiver(self)], undefined, undefined, { fcall: true });
       if (pair instanceof RArray && pair.items.length === 2)
         return yield* callMethod(pair.items[0], '<=>', pair.items.slice(1));
     }

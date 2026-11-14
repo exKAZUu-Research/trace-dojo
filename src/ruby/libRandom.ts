@@ -2,7 +2,7 @@ import { inspectRange, toFloat, toInt, toStepFloat } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, rangeError, rubyError } from './errors';
 import { callMethod, type Gen, invoke, respondsTo } from './interp';
-import { NIL, RFloat, RObject, RRange, type Value } from './objects';
+import { isRubyNumber, NIL, RFloat, RObject, RRange, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { classOf } from './values';
 
@@ -171,7 +171,7 @@ export function* randomIndex(randomizer: Value | undefined, count: number): Gen<
 }
 
 function domainError(): never {
-  throw rubyError(rt().c['Math::DomainError'], 'Numerical argument out of domain');
+  throw rubyError(rt().c['Errno::EDOM'], 'Numerical argument out of domain');
 }
 
 // code-gauge-allow functionNcss 34 -- Transcribed from Ruby's random.c, whose draws decide the numbers.
@@ -184,10 +184,7 @@ function* randomRange(generator: MersenneTwister, range: RRange): Gen<Value | un
     if (max < 0n) return NIL;
     return begin + generator.limited(max);
   }
-  if (
-    (typeof begin === 'number' || typeof begin === 'bigint') &&
-    (typeof end === 'number' || typeof end === 'bigint')
-  ) {
+  if (isRubyNumber(begin) && isRubyNumber(end)) {
     const low = Number(begin);
     let max = Number(end) - low;
     let scale = 1;

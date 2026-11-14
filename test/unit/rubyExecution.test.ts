@@ -2797,6 +2797,25 @@ test('allocated Floats preserve separate object identities', () => {
   expect(run('a=Float::MAX;b=Float::MAX*1;p a.equal?(b),a.object_id==b.object_id')).toMatchObject({
     stdout: 'false\nfalse\n',
   });
+  expect(run('a=Float::NAN;p a.to_f.equal?(a),a.dup.equal?(a)')).toMatchObject({ stdout: 'true\ntrue\n' });
+  expect(run('a=Float::MAX;b=a*1.0;p a.eql?(b),[a].eql?([b])')).toMatchObject({ stdout: 'true\ntrue\n' });
+});
+
+test('numeric callbacks receive the original allocated Float', () => {
+  expect(run('class A;def coerce(x);p x.equal?($f);[1,2];end;end;$f=Float::MAX;p($f+A.new)')).toMatchObject({
+    stdout: 'true\n3\n',
+  });
+});
+
+test('boxed Floats preserve numeric sorting, summation, and random ranges', () => {
+  expect(run('p (0..31).to_a.sort_by{|x|x%3==0 ? Float::MAX : 1.0}.first(4)')).toMatchObject({
+    stdout: '[31, 29, 28, 26]\n',
+  });
+  expect(run('p [Float::MAX,1.0,-Float::MAX].sum')).toMatchObject({ stdout: '1.0\n' });
+  expect(run('p Random.new(1).rand(0.0..Float::MAX)')).toMatchObject({ stdout: '7.496775840943564e+307\n' });
+  expect(run('begin;Random.new(1).rand(0.0..Float::INFINITY);rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'Errno::EDOM\n',
+  });
 });
 
 test('pp follows Array mutations during element inspection', () => {
