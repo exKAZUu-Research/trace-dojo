@@ -48,6 +48,7 @@ import {
   type Execution,
   FALLTHROUGH,
   type Frame,
+  GoFatal,
   GoPanic,
   readLocal,
   RETURN,
@@ -57,7 +58,7 @@ import {
   UNASSIGNED,
   withTemporary,
 } from './runtime';
-import { nilPointerPanic, panicNilValue, plainPanic, runtimeErrorPanic } from './runtimeErrors';
+import { nilPointerPanic, panicNilValue, runtimeErrorPanic } from './runtimeErrors';
 import { runtimePrint } from './runtimePrint';
 import { closeChannel, receive, scheduler, select, type SelectOp, send } from './scheduler';
 import { sizeOf } from './sliceOps';
@@ -1170,7 +1171,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** What a range loop walks: the collection, the types of its keys and values, and how to visit them. */
-  // code-gauge-allow functionNcss 33 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionNcss 36 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private rangeSource(
     statement: Extract<Statement, { kind: 'range' }>,
     range: Operand,
@@ -1217,7 +1218,15 @@ export abstract class StatementCompiler extends CallCompiler {
         !statement.define && statement.key
           ? this.part(() => this.hoistingCalls(() => this.assignmentTarget(statement.key as Expression))).value.result
           : undefined;
-      const keyType = isUntyped(range.type) ? (target?.type ?? BASIC.int) : range.type;
+      const keyType = isUntyped(range.type)
+        ? target && isInteger(target.type)
+          ? target.type
+          : defaultType(range.type)
+        : range.type;
+      if (!isInteger(keyType)) {
+        this.error(statement.range, '整数の range には整数の型の値を書いてください。');
+        return undefined;
+      }
       const count = isUntyped(range.type) ? this.assign(range, keyType, 'range の値') : read;
       if (statement.value) this.error(statement.value, '整数の range で受け取れる値は1つだけです。');
       return { read: count, keyType, valueType: BASIC.invalid, iterate: iterateInteger };
@@ -1681,6 +1690,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionNcss 53 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps statement scope, control completions and suspendable evaluation in one compiler operation.
   private launchedCall(statement: Extract<Statement, { kind: 'defer' | 'go' }>): Run {
     (this.fn as FunctionContext).notInlinable = true;
     const keyword = statement.kind;
@@ -1717,14 +1727,9 @@ export abstract class StatementCompiler extends CallCompiler {
           const argValues = args(frame);
           launch(
             frame,
-            () => void instance.call(argValues, row, keyword === 'defer' ? frame : undefined),
+            (deferredFor) => void instance.call(argValues, row, deferredFor),
             instance.resume &&
-              (() =>
-                (instance.resume as NonNullable<GoFunc['resume']>)(
-                  argValues,
-                  row,
-                  keyword === 'defer' ? frame : undefined
-                )),
+              ((deferredFor) => (instance.resume as NonNullable<GoFunc['resume']>)(argValues, row, deferredFor)),
             [instance, ...argValues]
           );
         };
@@ -1739,22 +1744,14 @@ export abstract class StatementCompiler extends CallCompiler {
       const fn = readFunction(frame);
       const argValues = withTemporary(frame, fn, () => args(frame));
       if (!(fn instanceof GoFunc)) {
-        launch(
-          frame,
-          () => {
-            if (keyword === 'go') plainPanic('go of nil func value');
-            else nilPointerPanic();
-          },
-          undefined,
-          []
-        );
+        if (keyword === 'go') throw new GoFatal('fatal error: go of nil func value');
+        launch(frame, () => nilPointerPanic(), undefined, []);
         return;
       }
       launch(
         frame,
-        () => void fn.call(argValues, row, frame),
-        fn.resume &&
-          (() => (fn.resume as NonNullable<GoFunc['resume']>)(argValues, row, keyword === 'defer' ? frame : undefined)),
+        (deferredFor) => void fn.call(argValues, row, deferredFor),
+        fn.resume && ((deferredFor) => (fn.resume as NonNullable<GoFunc['resume']>)(argValues, row, deferredFor)),
         [fn, ...argValues]
       );
     };
@@ -1778,8 +1775,9 @@ export abstract class StatementCompiler extends CallCompiler {
         const all = [value, ...argValues];
         launch(
           frame,
-          () => void instance.call(all, row, frame),
-          instance.resume && (() => (instance.resume as NonNullable<GoFunc['resume']>)(all, row, frame)),
+          (deferredFor) => void instance.call(all, row, deferredFor),
+          instance.resume &&
+            ((deferredFor) => (instance.resume as NonNullable<GoFunc['resume']>)(all, row, deferredFor)),
           all
         );
       };
@@ -1796,13 +1794,13 @@ export abstract class StatementCompiler extends CallCompiler {
         if (!iface) nilPointerPanic();
         launch(
           frame,
-          () => {
+          (deferredFor) => {
             const target = dynamicMethod(iface.type, name);
-            target?.(iface.value, argValues, row, frame);
+            target?.(iface.value, argValues, row, deferredFor);
           },
-          () => {
+          (deferredFor) => {
             if (!iface) nilPointerPanic();
-            return resumeDynamicMethod(iface.type, name, iface.value, argValues, row, frame);
+            return resumeDynamicMethod(iface.type, name, iface.value, argValues, row, deferredFor);
           },
           [iface, ...argValues]
         );
@@ -1820,8 +1818,8 @@ export abstract class StatementCompiler extends CallCompiler {
       const argValues = args(frame);
       launch(
         frame,
-        () => void invokeMethod(method, value, argValues, row, frame),
-        () => resumeMethod(method, value, argValues, row, frame),
+        (deferredFor) => void invokeMethod(method, value, argValues, row, deferredFor),
+        (deferredFor) => resumeMethod(method, value, argValues, row, deferredFor),
         [value, ...argValues]
       );
     };
@@ -2602,22 +2600,20 @@ type Run = (frame: Frame) => void;
 /** Defers a call or starts a goroutine for it: `run` calls it where it cannot block, `resume` where it can. */
 type Launch = (
   frame: Frame,
-  run: () => void,
-  resume: (() => Suspending<unknown>) | undefined,
+  run: (deferredFor?: Frame) => void,
+  resume: ((deferredFor?: Frame) => Suspending<unknown>) | undefined,
   values: unknown[]
 ) => void;
 
-const deferLaunch: Launch = (frame, run, resume, values) => frame.runtime.defer(frame, run, values, resume);
+const deferLaunch: Launch = (frame, run, resume, values) =>
+  frame.runtime.defer(frame, () => run(frame), values, resume && (() => resume(frame)));
 
 const goLaunch: Launch = (_frame, run, resume, values) => {
-  scheduler().spawn(
-    resume ??
-      function* () {
-        run();
-        return;
-      },
-    values
-  );
+  scheduler().spawn(function* () {
+    if (resume) return yield* resume();
+    run();
+    return;
+  }, values);
 };
 
 /** A simple statement's code and the step it records, if any. */

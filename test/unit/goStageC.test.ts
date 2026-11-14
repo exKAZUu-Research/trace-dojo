@@ -82,3 +82,17 @@ func main() { f := S.Get; fmt.Println(f(S{&T{7}})) }`;
     stdout: '7\n',
   });
 });
+
+test.each([
+  'var x interface{~int};_=x',
+  'var x []interface{~int};_=x',
+  'var x map[string]interface{int|string};_=x',
+  'var x struct{V interface{~int}};_=x',
+])('type sets are constraint-only in every type position: %s', (declaration) => {
+  const result = executeProgram('go', `package main\nfunc main(){${declaration}}`);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError')
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ row: 1, message: expect.stringContaining('型の制約にしか使えません') }),
+    ]);
+});

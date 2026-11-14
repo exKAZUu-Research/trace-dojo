@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 450 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow-file fileNcss 456 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
 import type { Span } from './ast';
 import type { CalleeSummary } from './entities';
 import type { StackBuffers } from './runtime';
@@ -564,8 +564,8 @@ function namedTypeId(type: NamedType): number {
  * The name `%T` and `%v` print, as reflection names types: `main.Vertex`, `[]int`, `map[string]int`,
  * `struct { X int }`.
  */
-// code-gauge-allow functionCognitiveComplexity 29 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
-// code-gauge-allow functionNcss 44 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow functionNcss 48 -- Visits the Go type shapes for canonical identity and diagnostic spelling.
+// code-gauge-allow functionCognitiveComplexity 23 -- Formats each Go type constructor while delegating interface and function signatures.
 export function typeString(type: Type, qualify = true): string {
   switch (type.kind) {
     case 'basic': {
@@ -607,10 +607,7 @@ export function typeString(type: Type, qualify = true): string {
       return `func${signatureString(type, qualify)}`;
     }
     case 'interface': {
-      if (type.typeSet?.comparable && type.methods.length === 0) return 'comparable';
-      if (type.methods.length === 0 && !type.typeSet) return 'interface {}';
-      const methods = type.methods.map((method) => `${method.name}${signatureString(method.type, qualify)}`);
-      return `interface { ${methods.join('; ')} }`;
+      return interfaceString(type, qualify);
     }
     case 'tuple': {
       return `(${type.types.map((element) => typeString(element, qualify)).join(', ')})`;
@@ -619,6 +616,18 @@ export function typeString(type: Type, qualify = true): string {
       return type.name;
     }
   }
+}
+
+function interfaceString(type: InterfaceType, qualify: boolean): string {
+  if (type.typeSet?.comparable && !type.typeSet.terms && type.methods.length === 0) return 'comparable';
+  if (type.methods.length === 0 && !type.typeSet) return 'interface {}';
+  const methods = type.methods.map((method) => `${method.name}${signatureString(method.type, qualify)}`);
+  if (type.typeSet?.comparable) methods.push('comparable');
+  if (type.typeSet?.terms)
+    methods.push(
+      type.typeSet.terms.map((term) => `${term.tilde ? '~' : ''}${typeString(term.type, qualify)}`).join(' | ')
+    );
+  return `interface { ${methods.join('; ')} }`;
 }
 
 export function signatureString(type: FuncType, qualify = true): string {

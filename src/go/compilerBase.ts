@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 511 -- Resolves each Go type form together with its scope and diagnostic context.
+// code-gauge-allow-file fileNcss 513 -- Resolves each Go type form together with its scope and diagnostic context.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeElementSyntax, TypeExpression, TypeParameter } from './ast';
 import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
@@ -292,20 +292,23 @@ export abstract class CompilerBase {
    * reference to that type makes it infinitely large. `constraint` tells whether the syntax stands where Go allows an
    * interface with a type set: as a type parameter's constraint, or as the whole type of a type declaration.
    */
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type syntax.
-  // code-gauge-allow functionNcss 40 -- Resolves each Go type form together with its scope and diagnostic context.
   resolveType(syntax: TypeExpression, direct = false, constraint = false): Type {
+    const type = this.resolveTypeSyntax(syntax, direct);
+    const under = underlying(type);
+    if (!constraint && !this.inConstraint && under.kind === 'interface' && under.typeSet) {
+      return this.error(
+        syntax,
+        `${describeType(type)} 型は、型の制約にしか使えません（型の集合を持つインターフェースです）。`
+      );
+    }
+    return type;
+  }
+
+  // code-gauge-allow functionNcss 36 -- Resolves each Go type form together with its scope and diagnostic context.
+  private resolveTypeSyntax(syntax: TypeExpression, direct: boolean): Type {
     switch (syntax.kind) {
       case 'name': {
-        const type = this.resolveNamedType(syntax, direct);
-        const under = underlying(type);
-        if (!constraint && !this.inConstraint && under.kind === 'interface' && under.typeSet) {
-          return this.error(
-            syntax,
-            `${describeType(type)} 型は、型の制約にしか使えません（型の集合を持つインターフェースです）。`
-          );
-        }
-        return type;
+        return this.resolveNamedType(syntax, direct);
       }
       case 'pointer': {
         return { kind: 'pointer', element: this.resolveType(syntax.element) };

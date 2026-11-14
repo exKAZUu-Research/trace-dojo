@@ -239,12 +239,28 @@ func main(){s:=[]int{};s=grow(s);fmt.Println(cap(s));runtime.Gosched();fmt.Print
   });
 });
 
-test('native arithmetic budgets admit factorial and Fibonacci exercises', () => {
-  const source =
-    'package main\nimport("fmt";"math/big")\nfunc main(){for _,n:=range []int64{4000,5000,20000}{f:=big.NewInt(1);for i:=int64(2);i<=n;i++{f.Mul(f,big.NewInt(i))};fmt.Println(len(f.String()))};a,b:=big.NewInt(0),big.NewInt(1);for i:=0;i<50000;i++{a.Add(a,b);a,b=b,a};fmt.Println(len(a.String()))}\n';
+test.each([
+  [4000, 12_674],
+  [5000, 16_326],
+  [20_000, 77_338],
+])('native arithmetic budgets admit factorial of %i', (n, digits) => {
+  const source = `package main
+import("fmt";"math/big")
+func main(){f:=big.NewInt(1);for i:=int64(2);i<=${n};i++{f.Mul(f,big.NewInt(i))};fmt.Println(len(f.String()))}`;
   expect(executeProgram('go', source)).toMatchObject({
     kind: 'executed',
-    stdout: '12674\n16326\n77338\n10450\n',
+    stdout: `${digits}\n`,
+    uncaughtException: undefined,
+  });
+});
+
+test('native arithmetic budgets admit Fibonacci with 50000 steps', () => {
+  const source = `package main
+import("fmt";"math/big")
+func main(){a,b:=big.NewInt(0),big.NewInt(1);for i:=0;i<50000;i++{a.Add(a,b);a,b=b,a};fmt.Println(len(a.String()))}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '10450\n',
     uncaughtException: undefined,
   });
 });
@@ -256,6 +272,36 @@ test('JSON string tag errors preserve typed field paths and inner parse errors',
     kind: 'executed',
     stdout:
       "json: cannot unmarshal number into Go struct field S.i of type int\njson: cannot unmarshal number x into Go struct field S.i of type int\njson: cannot unmarshal string into Go struct field S.s of type string: invalid character 'q' looking for beginning of object key string\njson: cannot unmarshal number true into Go struct field S.i of type int\njson: cannot unmarshal number 9999999999999999999999 into Go struct field S.i of type int\n",
+    uncaughtException: undefined,
+  });
+});
+
+test('integer ranges distinguish bound defaults from assignment destinations', () => {
+  const source = String.raw`package main;import "fmt";func main(){var i any;for i=range 3{fmt.Printf("%T ",i)};fmt.Println();a:=[]any{nil};for a[0]=range 3{fmt.Printf("%T:%v ",a[0],a[0])};fmt.Println();for i:=range 'c'{if i==0{fmt.Printf("%T\n",i)}};var n uint8;for n=range 3{fmt.Print(n)};fmt.Println()}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'int int int \nint:0 int:1 int:2 \nint32\n012\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('JSON string tags only dereference one pointer', () => {
+  const source =
+    'package main;import("fmt";"encoding/json");type P *int;func main(){n:=12;p:=&n;s:=struct{A *int `json:",string"`;B **int `json:",string"`;C P `json:",string"`}{p,&p,p};b,e:=json.Marshal(s);fmt.Println(string(b),e);var t struct{B **int `json:",string"`;C P `json:",string"`};e=json.Unmarshal([]byte(`{"B":12,"C":"13"}`),&t);fmt.Println(**t.B,*t.C,e)}';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '{"A":"12","B":12,"C":"12"} <nil>\n12 13 <nil>\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('JSON string tags require the complete quoted scalar', () => {
+  const source =
+    'package main\nimport("fmt";"encoding/json")\ntype S struct{I int `json:"i,string"`;S string `json:"s,string"`}\nfunc main(){for _,input:=range []string{`{"i":"12x"}`,`{"i":"12 34"}`,`{"s":"\\"x\\" \\"y\\""}`}{var s S;fmt.Println(s,json.Unmarshal([]byte(input),&s),s)}}\n';
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "{0 } json: cannot unmarshal number 12x into Go struct field S.i of type int {0 }\n{0 } json: cannot unmarshal number 12 34 into Go struct field S.i of type int {0 }\n{0 } json: cannot unmarshal string into Go struct field S.s of type string: invalid character ' ' after string value {0 }\n",
     uncaughtException: undefined,
   });
 });

@@ -212,3 +212,33 @@ func main(){var m sync.Map;m.Store("t",NewTurtle(0,1));probe:=NewTurtle(0,0);fmt
       uncaughtException: undefined,
     });
 });
+
+test('a nil goroutine launch is fatal before caller continuation or recovery', () => {
+  const source = `package main
+import "fmt"
+func main(){defer func(){fmt.Println("recovered",recover())}();var f func();go f();fmt.Println("continued")}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'fatal error: go of nil func value',
+  });
+});
+
+test.each([
+  ['func(B)Report(c chan int)', 'go B{}.Report(c)'],
+  ['func(B)Report[T ~int](c chan T)', 'go B{}.Report(c)'],
+  ['func(B)Report(c chan int)', 'var r interface{Report(chan int)}=B{};go r.Report(c)'],
+  ['func(B)Report(c chan int)', 'f:=B{}.Report;go f(c)'],
+])('goroutine recovery stays local for %s with %s', (signature, launch) => {
+  const source = `package main
+import "fmt"
+type B struct{}
+${signature}{fmt.Println("recover",recover());c<-1}
+func crash(c chan int){defer func(){<-c}();${launch};panic("boom")}
+func main(){crash(make(chan int));fmt.Println("continued")}`;
+  expect(executeProgram('go', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'recover <nil>\n',
+    uncaughtException: 'panic: boom',
+  });
+});

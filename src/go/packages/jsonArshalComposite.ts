@@ -641,8 +641,9 @@ const IS_ZERO = namedType('json', 'isZeroer', {
 });
 
 function stringTagType(type: Type): boolean {
-  const under = underlying(type);
-  if (under.kind === 'pointer') return stringTagType(under.element);
+  const declared = underlying(type);
+  const scalar = declared.kind === 'pointer' ? declared.element : type;
+  const under = underlying(scalar);
   return under.kind === 'basic' && !['complex64', 'complex128', 'unsafe.Pointer'].includes(under.name);
 }
 

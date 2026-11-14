@@ -18,6 +18,7 @@ const INT_TYPE = namedType('big', 'Int', { kind: 'struct', fields: [] });
 const RAT_TYPE = namedType('big', 'Rat', { kind: 'struct', fields: [] });
 const INT_POINTER = pointerTo(INT_TYPE);
 const RAT_POINTER = pointerTo(RAT_TYPE);
+const MAX_BIG_INT = 1n << BigInt(LIMITS.maxStringLength);
 const INT64 = BASIC.int64;
 const UINT64 = BASIC.uint64;
 
@@ -29,7 +30,7 @@ function structOf(pointer: Value): GoStruct {
 const intOf = (pointer: Value): bigint => (structOf(pointer).native?.int as bigint | undefined) ?? 0n;
 
 function setInt(pointer: Value, value: bigint): Value {
-  chargeBits(BigInt(bitLength(value)));
+  checkBigInt(value);
   const struct = structOf(pointer);
   struct.native ??= {};
   struct.native.int = value;
@@ -37,7 +38,7 @@ function setInt(pointer: Value, value: bigint): Value {
 }
 
 const newInt = (value: bigint): Pointer => {
-  chargeBits(BigInt(bitLength(value)));
+  checkBigInt(value);
   return new Pointer(new Cell(new GoStruct([], { int: value })), 'v');
 };
 
@@ -399,8 +400,7 @@ for (const [name, params, results, impl] of methods)
     name,
     fn(params, results),
     (receiver, args) => {
-      chargeValue(receiver);
-      for (const arg of args) chargeValue(arg);
+      currentRuntime().spend();
       return impl(receiver, args);
     },
     true
@@ -492,7 +492,8 @@ function normalize(num: bigint, den: bigint): Fraction {
 
 function setRat(pointer: Value, value: Fraction): Value {
   const struct = structOf(pointer);
-  chargeBits(BigInt(Math.max(bitLength(value.num), bitLength(value.den))));
+  checkBigInt(value.num);
+  checkBigInt(value.den);
   struct.native = { ...struct.native, rat: { num: value.num, den: value.den } };
   return pointer;
 }
@@ -623,8 +624,7 @@ for (const [name, params, results, impl] of ratMethods)
     name,
     fn(params, results),
     (receiver, args) => {
-      chargeValue(receiver);
-      for (const arg of args) chargeValue(arg);
+      currentRuntime().spend();
       return impl(receiver, args);
     },
     true
@@ -692,16 +692,9 @@ function component(receiver: Value, part: 'num' | 'den'): Pointer {
   return pointer;
 }
 
-function chargeValue(value: Value): void {
-  if (typeof value === 'string') {
-    currentRuntime().spend(value.length);
-    return;
-  }
-  if (!(value instanceof Pointer)) return;
-  const native = (value.load() as GoStruct | undefined)?.native;
-  if (typeof native?.int === 'bigint') chargeBits(BigInt(bitLength(native.int)));
-  const fraction = native?.rat as Fraction | undefined;
-  if (fraction) chargeBits(BigInt(Math.max(bitLength(fraction.num), bitLength(fraction.den))));
+function checkBigInt(value: bigint): void {
+  if (value >= MAX_BIG_INT || value <= -MAX_BIG_INT) throw new ExecutionLimitError('storage');
+  currentRuntime().spend();
 }
 
 function chargeBits(bits: bigint): void {
