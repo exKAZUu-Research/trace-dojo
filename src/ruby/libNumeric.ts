@@ -30,7 +30,7 @@ import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { boxFloat, NIL, RArray, RFloat, type RHash, type RProc, RRange, RString, RSymbol, type Value } from './objects';
 import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
-import { arr, classOf, realClassOf, str, truthy } from './values';
+import { arr, asciiString, classOf, realClassOf, str, truthy } from './values';
 
 type Num = bigint | number;
 
@@ -718,12 +718,6 @@ function isqrt(n: bigint): bigint {
 // Float ---------------------------------------------------------------------------------------------------------------
 
 def('Float', ['to_s', 'inspect'], 0, (self: number) => asciiString(formatFloat(self)));
-
-function asciiString(text: string): RString {
-  const value = str(text);
-  value.usAscii = true;
-  return value;
-}
 def('Float', 'hash', 0, (self: number) => {
   const bits = new DataView(new ArrayBuffer(8));
   bits.setFloat64(0, self === 0 ? 0 : self);

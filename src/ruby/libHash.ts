@@ -27,10 +27,10 @@ import { sum } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { type HashEntry, isRubyFloat, NIL, RArray, RHash, RProc, RSymbol, type Value } from './objects';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { arr, newHash, realClassOf, snapshot, str, truthy } from './values';
+import { arr, newHash, realClassOf, snapshot, truthy } from './values';
 
 function* modify(self: RHash): Gen<void> {
-  if (self.frozen) throw frozenError(self, yield* inspectHash(self));
+  if (self.frozen) throw frozenError(self, (yield* inspectHash(self)).s);
 }
 
 function* toHash(value: Value): Gen<RHash> {
@@ -206,7 +206,7 @@ def('Hash', 'fetch_values', [0, -1], function* (self: RHash, keys, block) {
 def('Hash', ['length', 'size'], 0, (self: RHash) => BigInt(self.map.size));
 def('Hash', 'empty?', 0, (self: RHash) => self.map.size === 0);
 def('Hash', ['to_s', 'inspect'], 0, function* (self: RHash) {
-  return str(yield* inspectHash(self));
+  return yield* inspectHash(self);
 });
 def('Hash', 'to_h', 0, function* (self: RHash, _args, block) {
   if (!block) return self.cls === rt().c.Hash ? self : copy(self);

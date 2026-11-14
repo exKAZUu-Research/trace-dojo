@@ -50,7 +50,19 @@ import {
   type Visibility,
 } from './objects';
 import { rt, RubyError, ThrowSignal, UnsupportedFeatureError } from './runtime';
-import { arr, classOf, isA, newHash, realClassOf, sameIdentity, singletonClassOf, str, sym, truthy } from './values';
+import {
+  arr,
+  asciiString,
+  classOf,
+  isA,
+  newHash,
+  realClassOf,
+  sameIdentity,
+  singletonClassOf,
+  str,
+  sym,
+  truthy,
+} from './values';
 
 // Object --------------------------------------------------------------------------------------------------------------
 
@@ -966,7 +978,7 @@ sdef('Module', 'new', 0, () => {
 
 // nil, true, false ----------------------------------------------------------------------------------------------------
 
-def('NilClass', 'to_s', 0, () => str(''));
+def('NilClass', 'to_s', 0, () => asciiString(''));
 def('NilClass', 'to_a', 0, () => arr([]));
 def('NilClass', 'to_h', 0, () => newHash());
 def('NilClass', 'to_i', 0, () => 0n);
@@ -975,12 +987,12 @@ def('NilClass', 'inspect', 0, () => str('nil'));
 def('NilClass', '&', 1, () => false);
 def('NilClass', '|', 1, (_self, [other]) => truthy(other));
 def('NilClass', 'nil?', 0, () => true);
-def('TrueClass', ['to_s', 'inspect'], 0, () => str('true'));
+def('TrueClass', ['to_s', 'inspect'], 0, () => asciiString('true'));
 def('TrueClass', '&', 1, (_self, [other]) => truthy(other));
 def('TrueClass', '|', 1, () => true);
 def('TrueClass', '^', 1, (_self, [other]) => !truthy(other));
 def('TrueClass', '!', 0, () => false);
-def('FalseClass', ['to_s', 'inspect'], 0, () => str('false'));
+def('FalseClass', ['to_s', 'inspect'], 0, () => asciiString('false'));
 def('FalseClass', '&', 1, () => false);
 def('FalseClass', '|', 1, (_self, [other]) => truthy(other));
 def('FalseClass', '^', 1, (_self, [other]) => truthy(other));

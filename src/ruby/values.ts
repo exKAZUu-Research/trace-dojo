@@ -28,6 +28,12 @@ export function str(s: string): RString {
   return value;
 }
 
+export function asciiString(s: string): RString {
+  const value = str(s);
+  value.usAscii = true;
+  return value;
+}
+
 export function stringBytes(value: RString): Uint8Array {
   if (value.rawBytes) return value.rawBytes;
   return value.binary

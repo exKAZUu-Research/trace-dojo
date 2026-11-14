@@ -40,6 +40,7 @@ import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { successorBytes, transformInvalid } from './stringTransforms';
 import {
   arr,
+  asciiString,
   classOf,
   isNil,
   joinStringCharacters,
@@ -1750,7 +1751,9 @@ def('String', 'between?', 2, function* (self: RString, [min, max]) {
 
 // Symbol --------------------------------------------------------------------------------------------------------------
 
-def('Symbol', ['to_s', 'id2name', 'name'], 0, (self: RSymbol) => str(self.name));
+def('Symbol', ['to_s', 'id2name', 'name'], 0, (self: RSymbol) =>
+  /^[\u0000-\u007F]*$/.test(self.name) ? asciiString(self.name) : str(self.name)
+);
 def('Symbol', 'to_sym', 0, (self) => self);
 def('Symbol', 'intern', 0, (self) => self);
 def('Symbol', 'casecmp', 1, (self: RSymbol, [other]) =>
@@ -1766,7 +1769,10 @@ def('Symbol', 'casecmp', 1, (self: RSymbol, [other]) =>
 def('Symbol', 'casecmp?', 1, (self: RSymbol, [other]) =>
   other instanceof RSymbol ? foldCase(self.name) === foldCase(other.name) : NIL
 );
-def('Symbol', 'inspect', 0, (self: RSymbol) => str(symInspect(self.name)));
+def('Symbol', 'inspect', 0, (self: RSymbol) => {
+  const text = symInspect(self.name);
+  return /^[\u0000-\u007F]*$/.test(text) ? asciiString(text) : str(text);
+});
 def('Symbol', ['length', 'size'], 0, (self: RSymbol) => BigInt(charLength(self.name)));
 def('Symbol', 'empty?', 0, (self: RSymbol) => self.name.length === 0);
 def('Symbol', ['==', '===', 'eql?', 'equal?'], 1, (self, [other]) => self === other);

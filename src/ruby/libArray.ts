@@ -47,7 +47,7 @@ import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
 import { arr, isA, newHash, realClassOf, str, stringBytes, stringFromBytes, truthy } from './values';
 
 function* modify(self: RArray): Gen<void> {
-  if (self.frozen) throw frozenError(self, yield* inspectArray(self));
+  if (self.frozen) throw frozenError(self, (yield* inspectArray(self)).s);
   self.version++;
   rt().containerVersion++;
 }
@@ -282,7 +282,7 @@ def('Array', 'empty?', 0, (self: RArray) => self.items.length === 0);
 def('Array', ['to_a', 'entries'], 0, (self: RArray) => (self.cls === rt().c.Array ? self : arr([...self.items])));
 def('Array', 'to_ary', 0, (self) => self);
 def('Array', ['inspect', 'to_s'], 0, function* (self: RArray) {
-  return str(yield* inspectArray(self));
+  return yield* inspectArray(self);
 });
 def('Array', 'hash', 0, function* (self: RArray) {
   return yield* structuralHashValue(self);
@@ -301,6 +301,7 @@ def('Array', '<=>', 1, function* (self: RArray, [other]) {
   const pairs = rt().arrayComparisonPairs;
   const active = pairs.get(self) ?? new Set<RArray>();
   if (active.has(compared)) return 0n;
+  if (pairs.size >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
   active.add(compared);
   pairs.set(self, active);
   try {
@@ -455,12 +456,12 @@ function* filterInPlace(self: RArray, block: RProc, keep: (result: boolean) => b
       const item = self.items[read];
       if (keep(truthy(yield* call(block, item)))) {
         if (write < read) {
-          if (self.frozen) throw frozenError(self, yield* inspectArray(self));
+          if (self.frozen) throw frozenError(self, (yield* inspectArray(self)).s);
           self.items[write] = item;
         }
         write++;
       } else {
-        if (self.frozen) throw frozenError(self, yield* inspectArray(self));
+        if (self.frozen) throw frozenError(self, (yield* inspectArray(self)).s);
         changed = true;
       }
     }

@@ -19,7 +19,7 @@ import {
   type Value,
 } from './objects';
 import { rt } from './runtime';
-import { classOf, isA, realClassOf, str, stringBytes, truthy } from './values';
+import { asciiString, classOf, isA, realClassOf, str, stringBytes, truthy } from './values';
 
 // Numbers -------------------------------------------------------------------------------------------------------------
 
@@ -61,6 +61,7 @@ function floatDomain(message: string): unknown {
 export function* toInt(value: Value): Gen<bigint> {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return floatToInt(value);
+  if (value instanceof RFloat) return floatToInt(value.value);
   if (value !== NIL && classOf(value).findMethod('to_int')) {
     const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
     if (typeof converted === 'bigint') return converted;
@@ -75,6 +76,10 @@ export function* toIndex(value: Value): Gen<number> {
 }
 
 export function* toIndexExact(value: Value): Gen<{ number: number; integer: bigint }> {
+  if (isRubyFloat(value) && !Number.isFinite(Number(value))) {
+    const number = Number(value);
+    throw rangeError(`float ${Number.isNaN(number) ? 'NaN' : number > 0 ? 'Inf' : '-Inf'} out of range of integer`);
+  }
   const integer = yield* toInt(value);
   if (integer > 9_223_372_036_854_775_807n || integer < -9_223_372_036_854_775_808n) {
     throw rangeError(`bignum too big to convert into 'long'`);
@@ -172,7 +177,8 @@ export function* toS(value: Value): Gen<string> {
 export function* toSValue(value: Value): Gen<RString> {
   if (value instanceof RString) return value;
   const fast = fastToS(value);
-  if (fast !== undefined && !isOverridden(value, 'to_s')) return str(fast);
+  if (fast !== undefined && !isOverridden(value, 'to_s'))
+    return /^[\u0000-\u007F]*$/.test(fast) ? asciiString(fast) : str(fast);
   const converted = yield* callMethod(value, 'to_s', [], undefined, undefined, { fcall: true });
   if (converted instanceof RString) return converted;
   return str(anyToS(value));
@@ -228,7 +234,8 @@ export function* inspect(value: Value): Gen<string> {
 
 export function* inspectValue(value: Value): Gen<RString> {
   const fast = fastInspect(value);
-  if (fast !== undefined && !isOverridden(value, 'inspect')) return str(fast);
+  if (fast !== undefined && !isOverridden(value, 'inspect'))
+    return !(value instanceof RString) && /^[\u0000-\u007F]*$/.test(fast) ? asciiString(fast) : str(fast);
   const converted = yield* callMethod(value, 'inspect', [], undefined, undefined, { fcall: true });
   return converted instanceof RString ? converted : yield* toSValue(converted);
 }
@@ -244,42 +251,51 @@ function fastInspect(value: Value): string | undefined {
 /** Inspects the objects a container holds, showing `[...]` for one that contains itself. */
 const inspecting = new Set<object>();
 
-export function* inspectArray(array: RArray): Gen<string> {
-  if (inspecting.has(array)) return '[...]';
+export function* inspectArray(array: RArray): Gen<RString> {
+  if (inspecting.has(array)) return asciiString('[...]');
   inspecting.add(array);
   try {
     const parts: string[] = [];
     let length = 2;
-    for (let index = 0; index < array.items.length; index++)
-      length = pushInspected(parts, (yield inspect(array.items[index])) as string, length, 2);
-    return `[${parts.join(', ')}]`;
+    let usAscii = true;
+    for (let index = 0; index < array.items.length; index++) {
+      const item = (yield inspectValue(array.items[index])) as RString;
+      usAscii &&= item.usAscii;
+      length = pushInspected(parts, item.s, length, 2);
+    }
+    const text = `[${parts.join(', ')}]`;
+    return usAscii ? asciiString(text) : str(text);
   } finally {
     inspecting.delete(array);
   }
 }
 
-export function* inspectHash(hash: RHash): Gen<string> {
-  if (hash.map.size === 0) return '{}';
-  if (inspecting.has(hash)) return '{...}';
+export function* inspectHash(hash: RHash): Gen<RString> {
+  if (hash.map.size === 0) return asciiString('{}');
+  if (inspecting.has(hash)) return asciiString('{...}');
   inspecting.add(hash);
   hash.iterating++;
   try {
     const parts: string[] = [];
     let length = 2;
+    let usAscii = true;
     for (const { key, value } of hash.map.values()) {
       if (key instanceof RSymbol) {
-        const name = isSimpleSymbol(key.name) ? key.name : ((yield inspect(str(key.name))) as string);
-        length = pushInspected(parts, `${name}: ${(yield inspect(value)) as string}`, length, 2);
+        const name = isSimpleSymbol(key.name) ? key.name : ((yield inspectValue(str(key.name))) as RString).s;
+        const shownValue = (yield inspectValue(value)) as RString;
+        usAscii &&= /^[\u0000-\u007F]*$/.test(name);
+        usAscii &&= shownValue.usAscii;
+        length = pushInspected(parts, `${name}: ${shownValue.s}`, length, 2);
       } else {
-        length = pushInspected(
-          parts,
-          `${(yield inspect(key)) as string} => ${(yield inspect(value)) as string}`,
-          length,
-          2
-        );
+        const shownKey = (yield inspectValue(key)) as RString;
+        const shownValue = (yield inspectValue(value)) as RString;
+        usAscii &&= shownKey.usAscii;
+        usAscii &&= shownValue.usAscii;
+        length = pushInspected(parts, `${shownKey.s} => ${shownValue.s}`, length, 2);
       }
     }
-    return `{${parts.join(', ')}}`;
+    const text = `{${parts.join(', ')}}`;
+    return usAscii ? asciiString(text) : str(text);
   } finally {
     hash.iterating--;
     inspecting.delete(hash);

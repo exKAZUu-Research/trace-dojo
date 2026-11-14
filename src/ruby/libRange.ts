@@ -299,16 +299,25 @@ def('Range', 'to_s', 0, function* (self: RRange) {
     str(self.exclusive ? '...' : '..'),
     self.end === NIL ? str('') : yield* toSValue(self.end),
   ];
-  let binary = false;
-  let ascii = true;
+  let binary = parts[0].binary;
+  let usAscii = parts[0].usAscii;
+  let ascii = stringBytes(parts[0]).every((byte) => byte < 0x80);
   const chunks: Uint8Array[] = [];
   let length = 0;
-  for (const part of parts) {
-    binary = combinedStringEncoding(binary, ascii, part);
+  for (const [index, part] of parts.entries()) {
     const bytes = stringBytes(part);
+    const rightAscii = bytes.every((byte) => byte < 0x80);
+    if (index > 0) {
+      if (usAscii) {
+        if (!rightAscii) {
+          binary = part.binary;
+          usAscii = part.usAscii;
+        }
+      } else if (!part.usAscii) binary = combinedStringEncoding(binary, ascii, part);
+    }
     chunks.push(bytes);
     length += bytes.length;
-    ascii &&= bytes.every((byte) => byte < 0x80);
+    ascii &&= rightAscii;
   }
   rt().checkStringLength(length);
   const result = new Uint8Array(length);
@@ -317,7 +326,7 @@ def('Range', 'to_s', 0, function* (self: RRange) {
     result.set(bytes, offset);
     offset += bytes.length;
   }
-  return stringFromBytes(result, binary);
+  return stringFromBytes(result, binary, usAscii);
 });
 def('Range', 'bsearch', 0, function* (self: RRange, _args, block) {
   if (!block) return makeEnumerator(self, 'bsearch', []);

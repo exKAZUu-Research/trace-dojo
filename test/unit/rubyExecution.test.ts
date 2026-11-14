@@ -2525,6 +2525,46 @@ test('recursive Arrays compare without host stack overflow', () => {
   });
 });
 
+test('deep acyclic Array comparisons stop at configured depth', () => {
+  expect(run('a=1;600.times{a=[a]};b=1;600.times{b=[b]};p a<=>b')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'output',
+  });
+});
+
+test('boxed Floats convert intrinsically for integer arguments', () => {
+  expect(run('class Float;def to_int;puts :called;1;end;end;p [10,20][-0.0],[10,20][0.0]')).toMatchObject({
+    stdout: '10\n10\n',
+  });
+  expect(run('class Float;def to_int;1;end;end;begin;[1][Float::INFINITY];rescue=>e;p e.class;end')).toMatchObject({
+    stdout: 'RangeError\n',
+  });
+});
+
+test('Range to_s retains endpoint encoding', () => {
+  expect(
+    run('s=(1..2).to_s;s<<128;p s.bytes;b=255.chr.clear;s=(b..b).to_s;begin;s<<256;rescue=>e;p e.class;end')
+  ).toMatchObject({
+    stdout: '[49, 46, 46, 50, 128]\nRangeError\n',
+  });
+});
+
+test('core implicit to_s keeps US-ASCII results', () => {
+  expect(run('[1,1.5,true,false,nil,:x].each{|v|s=[v].join;s<<128;p s.bytes}')).toMatchObject({
+    stdout:
+      '[49, 128]\n[49, 46, 53, 128]\n[116, 114, 117, 101, 128]\n[102, 97, 108, 115, 101, 128]\n[128]\n[120, 128]\n',
+  });
+});
+
+test('Array Hash and Symbol inspection retain Ruby encodings', () => {
+  expect(
+    run('[[1],{},{a:1},[:x],:x].each{|v|s=v.inspect;s<<128;p s.bytes};s=["a"].inspect;s<<128;p s.bytes')
+  ).toMatchObject({
+    stdout:
+      '[91, 49, 93, 128]\n[123, 125, 128]\n[123, 97, 58, 32, 49, 125, 128]\n[91, 58, 120, 93, 128]\n[58, 120, 128]\n[91, 34, 97, 34, 93, 194, 128]\n',
+  });
+});
+
 test('Hash any? stops at first match and guards callback insertion', () => {
   expect(run('h={a:1,b:2};n=0;p h.any?{|k,v|n+=1;true},n')).toMatchObject({ stdout: 'true\n1\n' });
   expect(run('h={a:1};begin;h.any?{|k,v|h[:b]=2;false};rescue=>e;p e.class;end;p h.keys')).toMatchObject({
