@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 521 -- Resolves each Go type form together with its scope and diagnostic context.
+// code-gauge-allow-file fileNcss 527 -- Resolves each Go type form together with its scope and diagnostic context.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, Span, TypeElementSyntax, TypeExpression, TypeParameter } from './ast';
 import type { Entity, FunctionContext, PackageEntity, TypeEntity, VarEntity } from './entities';
@@ -583,7 +583,7 @@ export abstract class CompilerBase {
   ): { embedded: InterfaceType } | { terms: TypeTerm[] } | undefined {
     const resolved = element.terms.map((term) => ({
       tilde: term.tilde,
-      type: this.resolveConstraint(term.type),
+      type: this.resolveConstraintTerm(term.type),
       syntax: term,
     }));
     if (resolved.some((term) => term.type === BASIC.invalid)) return undefined;
@@ -622,6 +622,13 @@ export abstract class CompilerBase {
     return unrestricted ? { embedded: EMPTY_INTERFACE } : { terms };
   }
 
+  private resolveConstraintTerm(syntax: TypeExpression): Type {
+    const type = this.resolveConstraint(syntax);
+    return type.kind === 'typeParam'
+      ? this.error(syntax, '型パラメータそのものは、型集合の要素には使えません。')
+      : type;
+  }
+
   protected resolveSignature(signature: {
     parameters: ({ name?: string; type: TypeExpression; variadic?: boolean } & Partial<Span>)[];
     results: { name?: string; type: TypeExpression }[];
@@ -653,6 +660,10 @@ export abstract class CompilerBase {
     }
     for (const [index, parameter] of parameters.entries()) {
       const constraint = this.resolveConstraint(parameter.constraint);
+      if (constraint.kind === 'typeParam') {
+        this.error(parameter.constraint, '型パラメータそのものは、型の制約に使えません。');
+        continue;
+      }
       const under = underlying(constraint);
       if (constraint === BASIC.invalid) continue;
       if (constraint.kind === 'named') declared[index].constraintName = constraint;

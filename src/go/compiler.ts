@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 835 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+// code-gauge-allow-file fileNcss 844 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
 // oxlint-disable require-yield -- Statements that never block are generators like the others, so that all run alike.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { assignFailure, represent } from './assignability';
@@ -285,14 +285,16 @@ export class ProgramCompiler extends StatementCompiler {
   private bindingAliases = false;
   private readonly unboundAliases = new Set<TypeEntity>();
   private readonly aliasCycles = new Set<TypeEntity>();
+  private readonly invalidAliases = new Set<TypeEntity>();
   private readonly pendingAliases: { entity: TypeEntity; state: { spec: TypeSpec; scope: Scope } }[] = [];
 
-  // code-gauge-allow functionNcss 38 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
+  // code-gauge-allow functionNcss 40 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   protected useType(entity: TypeEntity): void {
     const state = this.typeStates.get(entity);
     if (!state) return;
     if (this.unboundAliases.has(entity)) {
       this.aliasCycles.add(entity);
+      for (const dependent of this.unboundAliases) this.invalidAliases.add(dependent);
       return;
     }
     if (state.resolved) return;
@@ -328,6 +330,7 @@ export class ProgramCompiler extends StatementCompiler {
     }
   }
 
+  // code-gauge-allow functionNcss 35 -- Keeps declaration resolution and the code installed for that declaration in one compiler pass.
   private resolveAlias(entity: TypeEntity, state: { spec: TypeSpec; scope: Scope }): void {
     const outerBinding = this.bindingAliases;
     const outerReporting = this.reporting;
@@ -349,7 +352,11 @@ export class ProgramCompiler extends StatementCompiler {
     for (const cyclic of this.aliasCycles)
       this.error(cyclic.span as Span, `型の別名 ${cyclic.name} が循環しています。`);
     this.aliasCycles.clear();
+    const invalid = new Set(this.invalidAliases);
+    this.invalidAliases.clear();
+    for (const entity of invalid) entity.type = BASIC.invalid;
     for (const pending of this.pendingAliases.splice(0)) {
+      if (invalid.has(pending.entity)) continue;
       const initial = pending.entity.type;
       const resolved = this.withScopeOf(this.scopeOfType(pending.entity), () =>
         this.resolveType(pending.state.spec.type, false, true)

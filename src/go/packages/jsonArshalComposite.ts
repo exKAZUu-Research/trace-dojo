@@ -40,6 +40,7 @@ import {
   type UnmarshalOptions,
   visiting,
 } from './jsonArshalCore';
+import { parseJsonFieldTag } from './jsonFieldTags';
 import { type DecoderState, EncoderState, ERR_NON_STRING_NAME, SyntacticError } from './jsonText';
 import { type LibError, TextError, unquoteMayCopy } from './jsonWire';
 import {
@@ -251,8 +252,8 @@ function collectFields(entry: QueueEntry, queue: QueueEntry[], seen: Set<string>
   for (const [i, field] of struct.fields.entries()) {
     const tag = lookupStructTag(field.tag, 'json');
     if (tag === '-') continue;
-    const [tagName = '', ...options] = (tag ?? '').split(',');
-    const tagged = tagName.length > 0;
+    const { name: tagName, options } = parseJsonFieldTag(tag);
+    const tagged = tagName !== undefined;
     const fieldExported = isExported(field.name);
     if (!fieldExported && !field.embedded) continue;
     const index = [...entry.index, i];

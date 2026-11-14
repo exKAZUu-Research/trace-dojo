@@ -180,3 +180,51 @@ test('generic byte and channel operations retain element direction and assignmen
   ])
     expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
 });
+
+test('unparenthesized channel chains use Go leftmost arrow association at every depth', () => {
+  expect(
+    executeProgram(
+      'go',
+      String.raw`package main;import "fmt";func main(){h:=make(chan<- chan<- chan int,1);h<-make(chan<- chan int);fmt.Println(len(h));var x0 chan<- chan<- chan int;fmt.Printf("%T\n",x0);var x1 chan<- chan<- chan<- int;fmt.Printf("%T\n",x1);var x2 chan chan<- chan<- chan int;fmt.Printf("%T\n",x2);var x3 <-chan<-chan<-chan int;fmt.Printf("%T\n",x3);var x4 chan<- <-chan<-chan int;fmt.Printf("%T\n",x4);var x5 chan<- chan<- chan<- chan int;fmt.Printf("%T\n",x5);var x6 chan<- chan<- chan<- chan<- chan int;fmt.Printf("%T\n",x6);var x7 chan<- (chan<- chan int);fmt.Printf("%T\n",x7);var x8 chan (chan<- <-chan int);fmt.Printf("%T\n",x8);var x9 chan /*a*/ <- /*b*/ chan /*c*/ <- chan int;fmt.Printf("%T\n",x9);var x10 chan<- chan<- chan (<-chan int);fmt.Printf("%T\n",x10);var x11 <-chan (chan<- chan<- chan int);fmt.Printf("%T\n",x11);}`
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '1\nchan<- chan<- chan int\nchan<- chan<- chan<- int\nchan chan<- chan<- chan int\n<-chan <-chan <-chan int\nchan<- <-chan <-chan int\nchan<- chan<- chan<- chan int\nchan<- chan<- chan<- chan<- chan int\nchan<- chan<- chan int\nchan chan<- <-chan int\nchan<- chan<- chan int\nchan<- chan<- chan (<-chan int)\n<-chan chan<- chan<- chan int\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('alias-only cycles and their dependents are invalid before structural type walks', () => {
+  for (const body of [
+    'type A=[2]A;func main(){var a A;_=a}',
+    'type A=struct{x A};func main(){var a A;_=a}',
+    'type A=[1]B;type B=[1]A;func main(){var a A;_=a}',
+    'type A=struct{b B};type B=struct{a A};func main(){var a A;_=a}',
+    'type A=[2]A;func main(){_=len(A{})}',
+    'type A=[0]A;func main(){var a A;_=a}',
+    'type A=[]struct{X A};func main(){var a A;_=a}',
+    'type Z=struct{Good int;Bad *A};type A=[2]A;func main(){var z Z;_=z}',
+  ])
+    expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
+});
+
+test('alias completion preserves named generic interface and map recursion', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import "fmt";type A=*G[int];type G[T any]struct{Next A;N T};type I=J;type J interface{M(I)};type S=struct{N B};type B=int;type K=map[Key]int;type Key struct{Next *K};func main(){var g G[int];g.Next=&G[int]{N:7};var i I;var k K;fmt.Println(g.Next.N,i==nil,S{4}.N,k==nil)}'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '7 true 4 true\n', uncaughtException: undefined });
+});
+
+test('type parameters cannot be constraints or union terms even through aliases', () => {
+  for (const body of [
+    'func f[T any,U T](x U){};func main(){}',
+    'func f[T any,U interface{T|int}](x U){};func main(){}',
+    'func f[T any,U interface{T}](x U){};func main(){}',
+    'func f[T any,U interface{~T}](x U){};func main(){}',
+    'func f[T any](){type A=T;type C interface{A|int}};func main(){}',
+  ])
+    expect(executeProgram('go', 'package main;' + body)).toMatchObject({ kind: 'compileError' });
+});

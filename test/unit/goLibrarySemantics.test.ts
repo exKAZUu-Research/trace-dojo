@@ -810,3 +810,17 @@ test('big integer division families panic with strings and preserve exact invali
     uncaughtException: undefined,
   });
 });
+
+test('JSON field tag parsing shares name dominance lookup and scalar options', () => {
+  expect(
+    executeProgram(
+      'go',
+      'package main;import("fmt";"encoding/json");type S struct{F0 int "json:\\"a\\\\\\"b\\",string";F1 int "json:\\"with\\\\\\\\slash\\",string";F2 int "json:\\"single\'quote\\",string";F3 int "json:\\"tick`name\\",string";F4 int "json:\\"a-b\\\\\\"c\\",string";F5 int "json:\\"9\\\\\\"x\\",string";F6 int "json:\\"#x\\\\\\"q\\",string";F7 int "json:\\"<tag>&\\",string";F8 int "json:\\"日\\\\\\"語\\",string";F9 int "json:\\"δ_12\\\\\\"x\\",string";F10 int "json:\\"hello world\\\\\\"tail\\",string";F11 int "json:\\"emoji😀\\",string";F12 int "json:\\"line\\\\nname\\",string"};func main(){s:=S{1,2,3,4,5,6,7,8,9,10,11,12,13};b,e:=json.Marshal(s);fmt.Println(string(b),e);var v S;e=json.Unmarshal(b,&v);fmt.Println(v,e)}'
+    )
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '{"with":2,"single":3,"tick":4,"F5":6,"F6":7,"\\u003ctag\\u003e\\u0026":8,"日":9,"δ_12":10,"hello":11,"emoji😀":12,"line\\nname":13} <nil>\n{0 2 3 4 0 6 7 8 9 10 11 12 13} <nil>\n',
+    uncaughtException: undefined,
+  });
+});

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 532 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
+// code-gauge-allow-file fileNcss 544 -- Mirrors the grammar node cases while preserving each source span for diagnostics.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -357,18 +357,7 @@ export class Converter {
         return this.convertType(named(node)[0]);
       }
       case 'channel_type': {
-        // `chan<- T` has the arrow after `chan`, `<-chan T` before it.
-        const tokens = node.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type);
-        const arrow = tokens.indexOf('<-');
-        let dir: 'both' | 'receive' | 'send' =
-          arrow === -1 ? 'both' : arrow < tokens.indexOf('chan') ? 'receive' : 'send';
-        const child = required(node.childForFieldName('value'));
-        const element = this.convertType(child);
-        if (dir === 'both' && child.type === 'channel_type' && element.kind === 'chan' && element.dir === 'receive') {
-          dir = 'send';
-          element.dir = 'both';
-        }
-        return { kind: 'chan', ...span, dir, element };
+        return this.convertChannelType(node);
       }
       case 'negated_type':
       case 'type_elem': {
@@ -378,6 +367,30 @@ export class Converter {
         throw syntaxError(node, '型の書き方に誤りがあります。');
       }
     }
+  }
+
+  private convertChannelType(node: Node): TypeExpression {
+    const tokens: Node[] = [];
+    let tail = node;
+    while (tail.type === 'channel_type') {
+      tokens.push(...tail.children.filter((child): child is Node => child !== null && !child.isNamed));
+      tail = required(tail.childForFieldName('value'));
+    }
+    const heads: { dir: 'both' | 'receive' | 'send'; span: Span }[] = [];
+    for (let index = 0; index < tokens.length;) {
+      const first = tokens[index];
+      if (first.type === '<-') {
+        heads.push({ dir: 'receive', span: spanOf(first) });
+        index += 2;
+      } else {
+        const send = tokens[index + 1]?.type === '<-';
+        heads.push({ dir: send ? 'send' : 'both', span: spanOf(first) });
+        index += send ? 2 : 1;
+      }
+    }
+    let element = this.convertType(tail);
+    for (const head of heads.toReversed()) element = { kind: 'chan', ...head.span, dir: head.dir, element };
+    return element;
   }
 
   private convertTypeArguments(node: Node): TypeExpression[] {
