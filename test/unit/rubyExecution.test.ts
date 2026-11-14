@@ -2619,6 +2619,18 @@ test('format retains US-ASCII template encoding', () => {
   });
 });
 
+test('format rejects unmatched named selectors after width or precision', () => {
+  expect(
+    run('for f in ["%2<a","%.2<a","%12<ab"];begin;format(f,{a:1});rescue=>e;p e.class,e.message;end;end')
+  ).toMatchObject({
+    stdout: 'ArgumentError\n"malformed name - unmatched parenthesis"\n'.repeat(3),
+  });
+});
+
+test('format charges only newly appended directive text', () => {
+  expect(run('f="%s"*25000;p format(f,*Array.new(25000,"x")).size')).toMatchObject({ stdout: '25000\n' });
+});
+
 test('interpolation retains the first empty binary segment when another follows', () => {
   expect(
     run(

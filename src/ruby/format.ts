@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   combinedStringEncoding,
   floatToInt,
@@ -50,19 +51,24 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: RString[]
   const source = yield* toStrValue(formatValue);
   const templateBytes = stringBytes(source);
   const template = new TextDecoder('latin1').decode(templateBytes);
-  let result = '';
+  let length = 0;
   let literal: number[] = [];
   const parts: RString[] = [];
   let binary = source.binary;
   let usAscii = source.usAscii;
   let ascii = true;
+  const chargePart = (part: RString): void => {
+    const added = stringBytes(part).length;
+    length += added;
+    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    rt().spend(Math.ceil(added / 256));
+  };
   const flush = (): void => {
     if (literal.length > 0) {
       const value = stringFromBytes(Uint8Array.from(literal), source.binary, source.usAscii);
+      chargePart(value);
       parts.push(value);
       ascii &&= stringBytes(value).every((byte) => byte < 0x80);
-      result += value.s;
-      rt().checkStringLength(result.length);
     }
     literal = [];
   };
@@ -76,10 +82,9 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: RString[]
         usAscii = value.usAscii;
       }
     } else if (!value.usAscii) binary = combinedStringEncoding(binary, ascii, value);
+    chargePart(value);
     parts.push(value);
     ascii &&= rightAscii;
-    result += part instanceof RString ? part.s : part;
-    rt().checkStringLength(result.length);
   };
   let next = 0;
   let argumentMode: 'none' | 'numbered' | 'unnumbered' | 'named' = 'none';
@@ -184,6 +189,7 @@ function* formatParts(formatValue: Value, args: Value[]): Gen<{ parts: RString[]
     }
     if (template[index] === '<') {
       const close = template.indexOf('>', index);
+      if (close === -1) throw argumentError('malformed name - unmatched parenthesis');
       value = yield* namedArg(nameAt(index + 1, close));
       index = close + 1;
     }
