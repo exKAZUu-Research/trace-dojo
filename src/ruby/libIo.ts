@@ -182,20 +182,23 @@ def(
   { ...PRIVATE, keywords: true }
 );
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Warn checks every option name before converting values and skips uplevel for empty calls.
+// code-gauge-allow functionCognitiveComplexity 23 -- Warn validates names, categories, then bounded levels, skipping levels for empty calls.
 function* validateWarnKeywords(keywords: RHash | undefined, hasMessages: boolean): Gen<void> {
   if (!keywords) return;
-  for (const entry of keywords.map.values()) {
+  const entries = [...keywords.map.values()];
+  for (const entry of entries) {
     const name = entry.key instanceof RSymbol ? entry.key.name : '';
     if (name !== 'uplevel' && name !== 'category') throw argumentError(`unknown keyword: :${name}`);
   }
-  for (const entry of keywords.map.values()) {
+  for (const entry of entries)
+    if (entry.key instanceof RSymbol && entry.key.name === 'category') validateWarnCategory(entry.value);
+  for (const entry of entries) {
     const name = entry.key instanceof RSymbol ? entry.key.name : '';
     if (name === 'uplevel') {
       if (!hasMessages || entry.value === NIL) continue;
       const { integer: level } = yield* toIndexExact(entry.value);
       if (level < 0n) throw argumentError(`negative level (${level})`);
-    } else validateWarnCategory(entry.value);
+    }
   }
 }
 

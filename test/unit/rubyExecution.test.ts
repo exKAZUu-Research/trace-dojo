@@ -1798,6 +1798,29 @@ test('Set subclasses retain their result class', () => {
   });
 });
 
+test('Set union and difference duplicate subclasses while flatten initializes them', () => {
+  expect(
+    run('class S<Set;def initialize(x,y);super(x);end;end;s=S.new([1],2);p (s|Set[2]).to_a,(s-Set[]).to_a')
+  ).toMatchObject({
+    stdout: '[1, 2]\n[1]\n',
+  });
+  expect(
+    run('class S<Set;def initialize(x=nil);puts :init;super(x);end;end;s=S.new([1]);puts :start;p s.flatten.class')
+  ).toMatchObject({
+    stdout: 'init\nstart\ninit\nS\n',
+  });
+});
+
+test('Set operations hash members as an operand yields them', () => {
+  expect(
+    run(
+      'class K;def hash;puts :hash;0;end;end;class E;include Enumerable;def each;puts :before;yield K.new;puts :after;end;end;Set[]|E.new'
+    )
+  ).toMatchObject({
+    stdout: 'before\nhash\nafter\n',
+  });
+});
+
 test('Set operations use each added to immediate classes', () => {
   expect(run('class Integer;def each;yield 2;end;end;p Set[1]|3,Set[1]^3')).toMatchObject({
     stdout: 'Set[1, 2]\nSet[1, 2]\n',
@@ -1877,6 +1900,13 @@ test('warn validates keyword options before writing', () => {
     stdout: 'ArgumentError\n',
   });
   expect(run('begin;warn(uplevel:-1);puts :ok;rescue=>e;p e.class;end')).toMatchObject({ stdout: 'ok\n' });
+  expect(
+    run(
+      'class A;def to_int;puts :conv;0;end;end;begin;warn("x",uplevel:A.new,category: :wrong);rescue=>e;p e.class;end'
+    )
+  ).toMatchObject({
+    stdout: 'ArgumentError\n',
+  });
 });
 
 test('deep Ruby containers remain within the interpreter stack', () => {
@@ -1911,6 +1941,13 @@ test('binary String segments keep source bytes and encoding', () => {
   });
   expect(run('p (255.chr+13.chr+10.chr).grapheme_clusters.map{|x|x.bytes}')).toMatchObject({
     stdout: '[[255], [13], [10]]\n',
+  });
+  expect(
+    run(
+      's=255.chr+"a";p s.split("a")[0].bytes,s.partition("a")[0].bytes,s.rpartition("a")[0].bytes,255.chr.scan(255.chr)[0].bytes'
+    )
+  ).toMatchObject({
+    stdout: '[255]\n[255]\n[255]\n[255]\n',
   });
 });
 

@@ -1098,7 +1098,7 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
     if (index === -1) break;
     const raw = self.binary || self.rawBytes !== undefined;
     const foundByte = textByteLength(text.slice(0, index), raw);
-    const match = str(target);
+    const match = textResult(self, target);
     let modified = false;
     if (block) {
       yield* callBlock(block, [match], false);
@@ -1121,7 +1121,7 @@ function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
     const bytes = stringBytes(self);
     const first = bytes[offset];
     const width = self.binary || first < 0xc2 || first >= 0xf5 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
-    const match = str('');
+    const match = textResult(self, '');
     if (block) {
       yield* callBlock(block, [match], false);
       if (stringBytes(self).length !== sourceLength) throw runtimeError('string modified');
@@ -1413,7 +1413,7 @@ def('String', 'split', [0, 2], function* (self: RString, args, block) {
     parts = separator === '' ? splitChars(text, limit) : splitString(text, separator, limit);
   }
   if (limit === 0) while (parts.length > 0 && parts.at(-1) === '') parts.pop();
-  const values = parts.map((part) => str(part));
+  const values = parts.map((part) => textResult(self, part));
   if (!block) return arr(values);
   for (const value of values) yield* callBlock(block, [value], false);
   return self;
@@ -1461,20 +1461,30 @@ function splitString(text: string, separator: string, limit: number): string[] {
 def('String', 'partition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
   const needle = yield* stringArgValue(separator);
-  if (needle.rawBytes && !needle.binary) return arr([str(self.s), str(''), str('')]);
+  if (needle.rawBytes && !needle.binary)
+    return arr([textResult(self, self.s), textResult(self, ''), textResult(self, '')]);
   const text = needle.s;
   const index = self.s.indexOf(text);
-  if (index === -1) return arr([str(self.s), str(''), str('')]);
-  return arr([str(self.s.slice(0, index)), str(text), str(self.s.slice(index + text.length))]);
+  if (index === -1) return arr([textResult(self, self.s), textResult(self, ''), textResult(self, '')]);
+  return arr([
+    textResult(self, self.s.slice(0, index)),
+    textResult(self, text),
+    textResult(self, self.s.slice(index + text.length)),
+  ]);
 });
 def('String', 'rpartition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
   const needle = yield* stringArgValue(separator);
-  if (needle.rawBytes && !needle.binary) return arr([str(''), str(''), str(self.s)]);
+  if (needle.rawBytes && !needle.binary)
+    return arr([textResult(self, ''), textResult(self, ''), textResult(self, self.s)]);
   const text = needle.s;
   const index = self.s.lastIndexOf(text);
-  if (index === -1) return arr([str(''), str(''), str(self.s)]);
-  return arr([str(self.s.slice(0, index)), str(text), str(self.s.slice(index + text.length))]);
+  if (index === -1) return arr([textResult(self, ''), textResult(self, ''), textResult(self, self.s)]);
+  return arr([
+    textResult(self, self.s.slice(0, index)),
+    textResult(self, text),
+    textResult(self, self.s.slice(index + text.length)),
+  ]);
 });
 def('String', 'each_grapheme_cluster', 0, () => {
   throw new UnsupportedFeatureError('each_grapheme_cluster');

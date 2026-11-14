@@ -5,7 +5,7 @@ import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashKeyOf, hashSet, re
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { iterate, toArray } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
-import { NIL, type RClass, type RHash, RObject, type Value } from './objects';
+import { NIL, type RHash, RObject, type Value } from './objects';
 import { rt, whileHeld } from './runtime';
 import { arr, newHash, str, truthy } from './values';
 
@@ -35,9 +35,9 @@ export function setSize(set: RObject): bigint {
   return BigInt(membersOf(set).map.size);
 }
 
-export function newSet(values: Iterable<Value>, cls: RClass = rt().c.Set): Gen<RObject> {
+export function newSet(values: Iterable<Value>): Gen<RObject> {
   return (function* () {
-    const set = new RObject(cls);
+    const set = new RObject(rt().c.Set);
     set.data = new SetData(newHash());
     for (const value of values) yield* hashSet(membersOf(set), value, true);
     return set;
@@ -65,6 +65,15 @@ function* other(value: Value): Gen<Value[]> {
     return [...membersOf(value).map.values()].map((e) => e.key);
   if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
   return yield* toArray(value);
+}
+
+function* eachOther(value: Value, visit: (item: Value) => Gen<void>): Gen<void> {
+  if (value instanceof RObject && value.data instanceof SetData) {
+    for (const entry of membersOf(value).map.values()) yield* visit(entry.key);
+    return;
+  }
+  if (!respondsTo(value, 'each')) throw typeError('value must be enumerable');
+  yield* iterate(value, visit);
 }
 
 def(
@@ -132,9 +141,11 @@ def('Set', ['inspect', 'to_s'], 0, function* (self: RObject) {
   return str(yield* inspectSet(self));
 });
 def('Set', ['|', 'union', '+'], 1, function* (self: RObject, [value]) {
-  const result = (yield* callMethod(self.cls, 'new', [self])) as RObject;
+  const result = (yield* callMethod(self, 'dup', [])) as RObject;
   return yield* whileHeld(result, function* () {
-    for (const item of yield* other(value)) yield* hashSet(membersOf(result), item, true);
+    yield* eachOther(value, function* (item) {
+      yield* hashSet(membersOf(result), item, true);
+    });
     return result;
   });
 });
@@ -148,9 +159,11 @@ def('Set', ['&', 'intersection'], 1, function* (self: RObject, [value]) {
   });
 });
 def('Set', ['-', 'difference'], 1, function* (self: RObject, [value]) {
-  const result = (yield* callMethod(self.cls, 'new', [self])) as RObject;
+  const result = (yield* callMethod(self, 'dup', [])) as RObject;
   return yield* whileHeld(result, function* () {
-    for (const item of yield* other(value)) yield* hashDelete(membersOf(result), item);
+    yield* eachOther(value, function* (item) {
+      yield* hashDelete(membersOf(result), item);
+    });
     return result;
   });
 });
@@ -286,7 +299,11 @@ def('Set', ['map!', 'collect!'], 0, function* (self: RObject, _args, block) {
   }
 });
 def('Set', 'flatten', 0, function* (self: RObject) {
-  return yield* newSet(yield* flattenMembers(self, new Set()), self.cls);
+  const result = (yield* callMethod(self.cls, 'new', [])) as RObject;
+  return yield* whileHeld(result, function* () {
+    for (const item of yield* flattenMembers(self, new Set())) yield* hashSet(membersOf(result), item, true);
+    return result;
+  });
 });
 def('Set', 'flatten!', 0, function* (self: RObject) {
   yield* modify(self);
