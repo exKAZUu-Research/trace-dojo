@@ -640,13 +640,13 @@ function* lineOptions(
   keywords: RHash | undefined
 ): Gen<{ separator: string | undefined; chomp: boolean }> {
   const selected = args.length > 0 ? args[0] : (rt().globals.get('$/') ?? NIL);
-  const separator = selected === NIL ? undefined : yield* stringArg(selected);
   let chomp = false;
   if (keywords)
     for (const entry of keywords.map.values()) {
       if (entry.key instanceof RSymbol && entry.key.name === 'chomp') chomp = truthy(entry.value);
       else throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
+  const separator = selected === NIL ? undefined : yield* stringArg(selected);
   return { separator, chomp };
 }
 

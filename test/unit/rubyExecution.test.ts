@@ -2179,6 +2179,17 @@ test('numeric option methods validate keywords after recognized options', () => 
   ).toMatchObject({
     stdout: 'ArgumentError\n'.repeat(3),
   });
+  expect(run('begin;2.5.round(half: :bad,foo:1);rescue=>e;p e.message;end')).toMatchObject({
+    stdout: '"unknown keyword: :foo"\n',
+  });
+});
+
+test('unknown keywords precede rounding and line separator conversions', () => {
+  const source =
+    'class A;def to_str;puts :called;"up";end;end;begin;2.5.round(half:A.new,foo:1);rescue=>e;p e.class;end';
+  expect(run(source)).toMatchObject({ stdout: 'ArgumentError\n' });
+  const lines = 'class A;def to_str;puts :called;",";end;end;begin;"a".lines(A.new,foo:1);rescue=>e;p e.message;end';
+  expect(run(lines)).toMatchObject({ stdout: '"unknown keyword: :foo"\n' });
 });
 
 test('pretty printing deeply nested Arrays stays inside execution limits', () => {

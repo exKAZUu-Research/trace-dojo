@@ -608,22 +608,18 @@ def('Integer', ['nobits?'], 1, function* (self: bigint, [mask]) {
 
 function* roundingMode(keywords: RHash | undefined): Gen<'up' | 'even' | 'down'> {
   if (!keywords) return 'up';
-  let selected: 'up' | 'even' | 'down' = 'up';
+  let mode: Value | undefined;
   for (const entry of keywords.map.values()) {
     if (!(entry.key instanceof RSymbol) || entry.key.name !== 'half') {
       throw argumentError(`unknown keyword: ${yield* inspect(entry.key)}`);
     }
-    const mode = entry.value;
-    if (mode === NIL) continue;
-    const name = yield* roundingName(mode);
-    const normalized = name?.toLowerCase();
-    if (normalized === 'up' || normalized === 'even' || normalized === 'down') {
-      selected = normalized;
-      continue;
-    }
-    throw argumentError(`invalid rounding mode: ${name ?? (yield* inspect(mode))}`);
+    mode = entry.value;
   }
-  return selected;
+  if (mode === undefined || mode === NIL) return 'up';
+  const name = yield* roundingName(mode);
+  const normalized = name?.toLowerCase();
+  if (normalized === 'up' || normalized === 'even' || normalized === 'down') return normalized;
+  throw argumentError(`invalid rounding mode: ${name ?? (yield* inspect(mode))}`);
 }
 
 function* roundingName(mode: Value): Gen<string | undefined> {
