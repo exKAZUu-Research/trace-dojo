@@ -5400,6 +5400,62 @@ test('Rational Numeric methods and fdiv follow Ruby results', () => {
   });
 });
 
+test('Ruby syntax validation rejects invalid numeric, parameter and regexp forms before execution', () => {
+  for (const source of [
+    'puts :before;p 08',
+    'puts :before;p /(/',
+    'puts :before;p /a(?#x/',
+    'p proc{_1+it}.call(2)',
+    'def f(**nil,a:1);p a;end;f',
+  ])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('regexp o option rejects explicitly before it can change interpolation behavior', () => {
+  expect(run('a=1;p /#{a}/o')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('は、この採点環境では使えません。') })],
+  });
+});
+
+test('BEGIN hoists execution after source-order local and heredoc conversion', () => {
+  expect(run('x=1;BEGIN { p x };p x')).toMatchObject({ stdout: 'nil\n1\n' });
+  expect(run('s=<<A\nnormal\nA\nBEGIN { puts <<B\nbegin\nB\n}\np s')).toMatchObject({
+    stdout: 'begin\n"normal\\n"\n',
+  });
+});
+
+test('END blocks capture surrounding locals and accept next', () => {
+  expect(run('x=3;END { p x }')).toMatchObject({ stdout: '3\n' });
+  expect(run('END { next }; puts :ok')).toMatchObject({ stdout: 'ok\n' });
+});
+
+test('percent literals unescape words and their delimiters', () => {
+  expect(run(String.raw`p %w[a\ b c\]d],%q(a\)b)`)).toMatchObject({
+    stdout: '["a b", "c]d"]\n"a)b"\n',
+  });
+});
+
+test('pattern validation rejects duplicate captures, alternative binds and unknown pins', () => {
+  for (const source of [
+    'p case [1,1];in [a,a] then a;end',
+    'p case [1];in [a] | [b] then a;end',
+    'p case [1];in [^missing] then 1;end',
+  ])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('numbered block parameters reject nested, explicit and assigned misuse', () => {
+  for (const source of ['p [[1,2]].map{_1.map{_1*2}}', 'p [1].map{|x|_1}', '_1=5;p _1', 'def _1;end'])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('anonymous forwarding resolves only method parameters', () => {
+  for (const source of ['q=proc{|...|p :ok};q.call', 'l=->(*,&){b(*,&)};l.call(9){}'])
+    expect(run(source)).toMatchObject({ kind: 'compileError' });
+  expect(run('def m(*);[1].each{p(*)};end;m(3)')).toMatchObject({ stdout: '3\n' });
+});
+
 test('Rational and Time ranges use comparison for membership', () => {
   expect(run('r=Rational(1,2)..2;p r.include?(1),r.minmax')).toMatchObject({
     stdout: 'true\n[(1/2), 2]\n',

@@ -23,7 +23,9 @@ import type {
   Use,
 } from './ast';
 import { decodeDoubleQuoted, decodeSingleQuoted } from './escapes';
+import { translate } from './libRegexp';
 import { regexpCaptureNames } from './regexpCaptureNames';
+import { UnsupportedFeatureError } from './runtime';
 
 /** The local variables of one scope; a block's scope sees its parents' variables. */
 class LocalScope {
@@ -49,6 +51,19 @@ class LocalScope {
       scope = scope.kind === 'block' ? scope.parent : undefined
     ) {
       if (scope.set.has(name)) return depth;
+      depth++;
+    }
+    return -1;
+  }
+
+  forwardingDepth(name: string): number {
+    let depth = 0;
+    for (
+      let scope: LocalScope | undefined = this.self();
+      scope;
+      scope = scope.kind === 'block' ? scope.parent : undefined
+    ) {
+      if (scope.kind === 'method' && scope.set.has(name)) return depth;
       depth++;
     }
     return -1;
@@ -126,9 +141,14 @@ export class Converter {
     this.collectHeredocs(root);
     const children = namedChildren(root);
     const data = children.find((child) => child.type === 'uninterpreted');
-    const beginBlocks = children.filter((child) => child.type === 'begin_block');
-    const rest = children.filter((child) => child.type !== 'uninterpreted' && child.type !== 'begin_block');
-    const body = [...beginBlocks.flatMap((block) => this.body(namedChildren(block), 0)), ...this.body(rest, 0)];
+    const beginBody: Body = [];
+    const restBody: Body = [];
+    for (const child of children) {
+      if (child.type === 'uninterpreted') continue;
+      if (child.type === 'begin_block') beginBody.push(...this.body(namedChildren(child), 0));
+      else restBody.push(...this.body([child], 0));
+    }
+    const body = [...beginBody, ...restBody];
     return {
       body,
       locals: this.ctx.scope.names,
@@ -440,10 +460,13 @@ export class Converter {
       case 'string_array':
       case 'symbol_array': {
         const interpolates = /^%[WI]/.test(node.text);
+        const delimiter = node.text[2];
         const items = namedChildren(node)
           .filter((child) => child.type !== 'comment')
           .map((child): Expr => {
-            const parts: StrPart[] = interpolates ? this.stringParts(child) : [decodeSingleQuoted(child.text)];
+            const parts: StrPart[] = interpolates
+              ? this.stringParts(child)
+              : [decodePercentLiteral(child.text, delimiter, true)];
             return node.type === 'symbol_array' ? { k: 'dsym', parts } : { k: 'str', parts };
           });
         return { k: 'array', items };
@@ -470,14 +493,21 @@ export class Converter {
         return { k: 'encoding' };
       }
       case 'end_block': {
-        const block: BlockDef = {
-          params: undefined,
-          locals: [],
-          body: this.body(namedChildren(node), 0),
-          row: node.startPosition.row,
-          isLambdaLiteral: false,
-        };
-        return { k: 'atExit', block };
+        const outer = this.ctx;
+        const scope = new LocalScope('block', outer.scope);
+        this.ctx = { ...outer, scope, inBlock: true, inLoop: false, implicit: new Set() };
+        try {
+          const block: BlockDef = {
+            params: undefined,
+            locals: scope.names,
+            body: this.body(namedChildren(node), 0),
+            row: node.startPosition.row,
+            isLambdaLiteral: false,
+          };
+          return { k: 'atExit', block };
+        } finally {
+          this.ctx = outer;
+        }
       }
       default: {
         return this.unsupportedNode(node);
@@ -494,6 +524,12 @@ export class Converter {
   private identifier(node: Node, use: Use): Expr {
     const name = node.text;
     const depth = this.ctx.scope.depthOf(name);
+    if (/^_[1-9]$/.test(name) && this.ctx.inBlock) {
+      if (depth > 0 && this.ctx.scope.implicitDeclaration(name))
+        this.fail(node, '外側のブロックで番号付き引数が既に使われています。');
+      if (this.ctx.implicit === undefined && depth < 0)
+        this.fail(node, '明示的な引数と番号付き引数は一緒に使えません。');
+    }
     if (name === 'it' && depth > 0 && this.ctx.implicit && this.ctx.scope.implicitDeclaration(name)) {
       this.ctx.implicit.add(name);
       this.ctx.scope.declareOwn(name);
@@ -545,6 +581,7 @@ export class Converter {
 
   private integerValue(node: Node): bigint {
     const text = node.text.replaceAll('_', '').toLowerCase();
+    if (/^0[0-9]+$/.test(text) && /[89]/.test(text.slice(1))) this.fail(node, '8 または 9 は8進数には使えません。');
     if (/^0[0-7]+$/.test(text)) return BigInt(`0o${text.slice(1)}`);
     if (text.startsWith('0d')) return BigInt(text.slice(2));
     return BigInt(text);
@@ -560,10 +597,12 @@ export class Converter {
       return {
         k: 'str',
         parts: [
-          decodeSingleQuoted(
+          decodePercentLiteral(
             namedChildren(node)
               .map((child) => child.text)
-              .join('')
+              .join(''),
+            text[2],
+            false
           ),
         ],
       };
@@ -581,6 +620,7 @@ export class Converter {
     const text = node.text;
     const flags = /[a-z]*$/.exec(text)?.[0] ?? '';
     if (/[^imxo]/.test(flags)) this.unsupported(node, `正規表現のオプション（${flags}）`);
+    if (flags.includes('o')) this.unsupported(node, '正規表現の o オプション');
     const parts: StrPart[] = [];
     let literal = '';
     for (const child of namedChildren(node)) {
@@ -593,6 +633,13 @@ export class Converter {
       }
     }
     if (literal) parts.push(literal);
+    if (parts.every((part) => typeof part === 'string')) {
+      try {
+        new RegExp(translate(parts.join(''), flags.includes('x')), 'u');
+      } catch (error) {
+        if (!(error instanceof UnsupportedFeatureError)) this.fail(node, '正規表現の書き方に誤りがあります。');
+      }
+    }
     return { k: 'regex', parts, flags };
   }
 
@@ -704,7 +751,7 @@ export class Converter {
   private anonymousOr(node: Node, name: string): Expr {
     const value = namedChildren(node).find((child) => child.type !== 'comment');
     if (value) return this.valueExpr(value);
-    const depth = this.ctx.scope.depthOf(name);
+    const depth = this.ctx.scope.forwardingDepth(name);
     if (depth < 0) this.fail(node, `名前のない ${name} 引数を受け取っていないので、${name} だけでは渡せません。`);
     return { k: 'lvar', name, depth };
   }
@@ -781,6 +828,7 @@ export class Converter {
     switch (node.type) {
       case 'identifier': {
         const name = node.text;
+        if (/^_[1-9]$/.test(name)) this.fail(node, `${name} は番号付き引数のため予約されています。`);
         return { k: 'lvar', name, depth: this.ctx.scope.declare(name) };
       }
       case 'instance_variable': {
@@ -915,10 +963,10 @@ export class Converter {
           break;
         }
         case 'forward_argument': {
-          if (this.ctx.scope.depthOf(FORWARD_ALL) < 0)
+          if (this.ctx.scope.forwardingDepth(FORWARD_ALL) < 0)
             this.fail(child, '引数を転送する ... は、... を受け取るメソッドの中でしか使えません。');
           if (pairs.length > 0) this.fail(child, 'キーワード引数の後に位置引数は書けません。');
-          const reference = (name: string): Expr => ({ k: 'lvar', name, depth: this.ctx.scope.depthOf(name) });
+          const reference = (name: string): Expr => ({ k: 'lvar', name, depth: this.ctx.scope.forwardingDepth(name) });
           args.push({ k: 'splat', e: reference(FORWARD_REST) });
           pairs.push(child);
           blockArg = reference(FORWARD_BLOCK);
@@ -1117,6 +1165,7 @@ export class Converter {
   private methodDef(node: Node): MethodDef {
     const nameNode = required(node.childForFieldName('name'));
     const name = nameNode.text;
+    if (/^_[1-9]$/.test(name)) this.fail(nameNode, `${name} は番号付き引数のため予約されています。`);
     const row = node.startPosition.row;
     const outer = this.ctx;
     const scope = new LocalScope('method');
@@ -1192,6 +1241,7 @@ export class Converter {
         }
         case 'hash_splat_parameter': {
           advance(child, 5);
+          if (params.noKeywords) this.fail(child, '引数の並び順に誤りがあります。');
           if (params.keywordRest !== undefined) this.fail(child, '** の引数は1つしか書けません。');
           const nameNode = child.childForFieldName('name');
           params.keywordRest = declare(child, nameNode ? nameNode.text : FORWARD_KEYWORDS);
@@ -1218,6 +1268,7 @@ export class Converter {
           break;
         }
         case 'forward_parameter': {
+          if (this.ctx.inBlock) this.fail(child, 'ブロックの引数には ... を書けません。');
           params.rest = declare(child, FORWARD_REST);
           params.keywordRest = declare(child, FORWARD_KEYWORDS);
           params.block = declare(child, FORWARD_BLOCK);
@@ -1225,6 +1276,8 @@ export class Converter {
           break;
         }
         case 'hash_splat_nil': {
+          advance(child, 5);
+          if (params.keywordRest !== undefined) this.fail(child, '引数の並び順に誤りがあります。');
           params.noKeywords = true;
           break;
         }
@@ -1277,6 +1330,8 @@ export class Converter {
       }
       const body = this.rescueBody(bodyNode, 2);
       const implicit = this.ctx.implicit;
+      if (implicit?.has('it') && [...implicit].some((name) => /^_[1-9]$/.test(name)))
+        this.fail(node, 'it と番号付き引数は一緒に使えません。');
       if (implicit && implicit.size > 0) params = implicitParams(implicit);
       return { params, locals: scope.names, body, row: node.startPosition.row, isLambdaLiteral };
     } finally {
@@ -1381,10 +1436,25 @@ export class Converter {
       this.ctx.scope.declare(name);
       return undefined;
     }
+    if (!name.startsWith('_') && this.patternBindings.has(name))
+      this.fail(node, `パターンの変数「${name}」が重複しています。`);
+    this.patternBindings.add(name);
     return { k: 'lvar', name, depth: this.ctx.scope.declare(name) };
   }
 
+  private readonly patternBindings = new Set<string>();
+  private patternDepth = 0;
+
   private pattern(node: Node): Pattern {
+    if (this.patternDepth++ === 0) this.patternBindings.clear();
+    try {
+      return this.patternInner(node);
+    } finally {
+      this.patternDepth--;
+    }
+  }
+
+  private patternInner(node: Node): Pattern {
     switch (node.type) {
       case 'identifier': {
         return { k: 'bind', target: this.bindTarget(node) };
@@ -1395,6 +1465,8 @@ export class Converter {
         return target ? { k: 'as', pattern, target } : pattern;
       }
       case 'alternative_pattern': {
+        for (const binding of node.descendantsOfType('identifier'))
+          if (binding && !binding.text.startsWith('_')) this.fail(binding, '選択パターンでは変数を束縛できません。');
         return {
           k: 'alt',
           options: namedChildren(node)
@@ -1406,7 +1478,10 @@ export class Converter {
         return this.pattern(onlyNamedChild(node));
       }
       case 'variable_reference_pattern': {
-        return { k: 'pin', e: this.expr(required(node.childForFieldName('name'))) };
+        const name = required(node.childForFieldName('name'));
+        if (name.type === 'identifier' && this.ctx.scope.depthOf(name.text) < 0)
+          this.fail(name, `変数「${name.text}」は定義されていません。`);
+        return { k: 'pin', e: this.expr(name) };
       }
       case 'expression_reference_pattern': {
         return { k: 'pin', e: this.expr(required(node.childForFieldName('value'))) };
@@ -1486,7 +1561,7 @@ export class Converter {
       const key = keyNode.type === 'hash_key_symbol' ? keyNode.text : keyNode.text.replaceAll(/^["']|["']:?$/g, '');
       const valueNode = child.childForFieldName('value');
       if (valueNode) pairs.push({ key, pattern: this.pattern(valueNode) });
-      else pairs.push({ key, target: { k: 'lvar', name: key, depth: this.ctx.scope.declare(key) } });
+      else pairs.push({ key, target: this.bindTarget(keyNode) });
     }
     return { k: 'hash', cls, pairs, rest };
   }
@@ -1546,6 +1621,13 @@ export class Converter {
   private unsupported(node: Node, feature: string): never {
     this.fail(node, `${feature}${/[!-~]$/.test(feature) ? ' ' : ''}は、この採点環境では使えません。`);
   }
+}
+
+function decodePercentLiteral(value: string, opening: string, words: boolean): string {
+  const closing = ({ '(': ')', '[': ']', '{': '}', '<': '>' } as Record<string, string>)[opening] ?? opening;
+  return value.replaceAll(/\\(.)/gs, (whole, escaped: string) =>
+    escaped === opening || escaped === closing || escaped === '\\' || (words && /\s/.test(escaped)) ? escaped : whole
+  );
 }
 
 // Anonymous parameters (`*`, `**`, `&`, `...`) live under names no variable can take, so the trace leaves them out.
